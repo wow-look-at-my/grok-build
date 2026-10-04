@@ -1,7 +1,4 @@
 //! Owner of the stdin reader thread that `event_loop::run` spawns.
-//!
-//! Teardown joins it before the kitty pop fence reads stdin, so the fence is the only stdin reader. The join is bounded
-//! and never `join`s a thread that has not finished (it may be blocked in `read`); a straggler is detached and reported.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,12 +9,10 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::app::event_loop::TimedInputEvent;
 
-/// The reader notices a dropped `input_rx` within one [`POLL_TIMEOUT`]; ten of them cover a loaded machine.
+/// The reader notices a dropped `input_rx` within one [`POLL_TIMEOUT`]; some of them cover a loaded machine.
 pub(crate) const READER_JOIN_GRACE: Duration = Duration::from_millis(250);
 
-// Bounds how long a tty handoff (external editor / pager) waits for this thread to park
-// The pause flag is only observed between `poll()` calls, so the timeout is the handoff latency
-// A `poll()` timeout does NOT wake the main loop (only a successful `send` does), so the idle loop still parks (no metronome tick)
+// Bounds how long a tty handoff (external editor / pager) waits for this thread to park The pause flag is only observed between `poll()` calls.
 const POLL_TIMEOUT: Duration = Duration::from_millis(20);
 
 /// Outcome of [`ReaderThread::join_within`].
@@ -79,8 +74,6 @@ impl ReaderThread {
                         }
                     }
                     Err(e) => {
-                        // VTE terminals / SSH PTYs can emit garbage that crossterm's parser rejects
-                        // Skip transient errors rather than kill the TUI (ratatui#1275), bailing only if they never stop
                         consecutive_event_errors += 1;
                         if consecutive_event_errors >= 50 {
                             tracing::error!(

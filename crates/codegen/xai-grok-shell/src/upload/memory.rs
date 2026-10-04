@@ -1,8 +1,4 @@
 //! Per-turn `memory.tar.gz` build and upload.
-//!
-//! The workspace memory dir is tarred+gzipped on the blocking pool (seconds
-//! on large dirs), deduplicated per cwd across concurrent turn ends, and
-//! uploaded under every turn's own prefix so each restorable turn has a blob.
 
 use super::trace::{UploadFailure, record_upload_failure, upload_small_artifact};
 use super::turn::{PromptTraceContext, UploadWait};
@@ -33,9 +29,7 @@ fn record_memory_archive_failure(ctx: &PromptTraceContext, err_msg: &str) {
     );
 }
 
-/// Upper bound on the detached post-deadline memory-archive upload: this path
-/// bypasses the durable queue, so without it a stuck connection pins the
-/// archive bytes and the task forever.
+/// Upper bound on the detached post-deadline memory-archive upload: this path bypasses the durable queue.
 const DETACHED_MEMORY_UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A finished memory-archive build, shared by every turn end that joined it.
@@ -44,7 +38,7 @@ type MemoryArchiveResult = Result<std::sync::Arc<Vec<u8>>, String>;
 /// Receiver side of an in-flight build: `None` until the build publishes.
 type MemoryArchiveBuild = tokio::sync::watch::Receiver<Option<MemoryArchiveResult>>;
 
-/// In-flight memory-archive builds keyed by cwd. Same-cwd turn ends join the in-flight build instead of stacking duplicate tar+gzip work, and each joiner uploads the shared bytes under its own turn prefix — every restorable turn gets a `memory.tar.gz` blob. Keyed by cwd (known before the expensive workspace discovery); worktrees sharing a memory dir may build it concurrently, bounded by live sessions.
+/// In-flight memory-archive builds keyed by cwd.
 static MEMORY_ARCHIVE_BUILDS: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::HashMap<String, MemoryArchiveBuild>>,
 > = std::sync::LazyLock::new(Default::default);
@@ -110,9 +104,7 @@ pub(crate) async fn upload_memory_state(ctx: &PromptTraceContext, wait: UploadWa
         return;
     }
     if ctx.memory_mode == Some(crate::config::MemoryMode::V2) {
-        // The current replay archive contract understands the legacy layout
-        // only. Uploading a partial v2 snapshot (just its generated manifests)
-        // would silently produce an unrestorable memory state.
+        // The current replay archive contract understands the layout only.
         tracing::debug!("memory upload skipped: v2 archive format is not supported");
         super::manifest::skip_artifact(
             &ctx.artifact_tracker,
@@ -153,8 +145,7 @@ pub(crate) async fn upload_memory_state(ctx: &PromptTraceContext, wait: UploadWa
                     let ctx = ctx.clone();
                     super::turn::spawn_linked_upload_task(
                         "memory_archive_detached",
-                        // Telemetry-only span label; PromptTraceContext
-                        // carries no prompt id, so the turn stands in.
+                        // Telemetry-only span label; PromptTraceContext carries no prompt id, so the turn stands in.
                         format!("turn_{}", ctx.turn_number),
                         ctx.session_info.id.0.clone(),
                         async move {
@@ -200,9 +191,7 @@ async fn upload_built_memory_archive(
         }
     };
     if archive.len() < 30 {
-        // An empty tar.gz is ~29 bytes. Nothing to upload, but the manifest
-        // still needs a terminal record (and a Defer-timeout's provisional
-        // failure must not stand when the late build produced nothing).
+        // An empty tar.gz is many bytes.
         super::manifest::skip_artifact(&ctx.artifact_tracker, "memory.tar.gz", "empty_archive");
         return;
     }

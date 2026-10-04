@@ -6,7 +6,7 @@ use ratatui::widgets::Widget;
 
 use crate::theme::Theme;
 
-/// Respects layout: first 3 cols and last 2 cols are empty.
+/// Respects layout: first cols and last cols are empty.
 pub struct StatusBar<'a> {
     /// Left-aligned content (e.g., "Context: 5.2k tokens")
     pub left: &'a str,

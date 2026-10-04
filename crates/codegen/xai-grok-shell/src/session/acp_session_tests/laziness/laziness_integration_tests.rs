@@ -1,13 +1,4 @@
 //! End-to-end tests for `maybe_fire_laziness_check`.
-//! Each test drives the actor against a non-listening `http://localhost` base URL.
-//! The unified path's `prepare_chat_completion().conversation_collect()` call surfaces the connection failure as the `ClassifierError` abort.
-//! The tests observe state mutations and the per-test `events.jsonl`.
-//!
-//! Tests that depend on a *successful* classifier response are out of scope here.
-//! They would need a real `SamplerActor` responding with a stubbed verdict, which is heavyweight.
-//! The happy path from classifier verdict to nudge dispatch is covered by the unit tests on `evaluate_laziness` and `build_laziness_nudge`.
-//! The integration tests here pin the actor-level behaviour.
-//! They cover enabled/disabled gating, both generation-counter abort arms, idle re-check, the sampler-error abort, and reset on model switch.
 use super::support::*;
 use super::*;
 use crate::agent::config::{LazinessDetectorPerModelConfig, ModelInfo};
@@ -50,8 +41,7 @@ async fn make_laziness_actor(
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
     let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
     actor.events = crate::session::events::EventTracker::new(tmp.path());
-    // Install the test model into the catalog and point the current id at it
-    // `insert_test_entry` is gated on `#[cfg(test)]` so it does NOT leak into release builds
+    // Install the test model into the catalog and point the current id at it `insert_test_entry` is gated on `#[cfg(test)]` so it does NOT leak.
     let mut entry = detector_entry(false, 0, None);
     entry.info.laziness_detector = detector;
     actor
@@ -83,8 +73,8 @@ async fn disabled_detector_is_a_no_op() {
             SessionActor::maybe_fire_laziness_check(actor.clone()).await;
             drop(Arc::try_unwrap(actor).ok().unwrap()); // flush events.jsonl
             let log = events_log(&tmp);
-            // A single substring check catches `laziness_nudge_fired` and any other `laziness_*` event variant
-            // A predicate that enumerates specific event types silently misses new ones
+            // A single substring check catches `laziness_nudge_fired` and any
+            // other `laziness_*` event variant A predicate.
             assert!(
                 !log.contains("laziness_"),
                 "disabled detector must not emit any laziness_* events:\n{log}"
@@ -188,7 +178,7 @@ async fn turn_start_ms_chain_feeds_turn_elapsed_seconds_helper() {
                 "no turn_start_ms recorded ⇒ field is dropped",
             );
 
-            // Record a turn-start 5 seconds in the past, mirroring the `record_turn_start` call at the top of `process_conversation_turn`
+            // Record a turn-start a few seconds in the past, mirroring the `record_turn_start` call at the top of `process_conversation_turn`
             let started_ms = chrono::Utc::now().timestamp_millis() - 5_000;
             actor.chat_state_handle.record_turn_start(started_ms);
             // Drain the chat-state command queue so the actor has processed the `RecordTurnStart` mutation before we read back
@@ -218,8 +208,7 @@ async fn turn_start_ms_chain_feeds_turn_elapsed_seconds_helper() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn sampler_error_aborts_with_classifier_error() {
-    // After the idle wait expires, `prepare_chat_completion(false).await?.conversation_collect(...)` hits a non-listening `http://localhost`
-    // The connection failure surfaces as `SamplingError`, exercising the classifier-error abort arm of the unified path
+    // After the idle wait expires.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -238,8 +227,8 @@ async fn sampler_error_aborts_with_classifier_error() {
             };
             drop(Arc::try_unwrap(actor).ok().unwrap());
             assert_eq!(nudges, 0, "no nudge on sampler error");
-            // The classifier must NEVER push a synthetic InputItem into `pending_inputs`, regardless of outcome
-            // Regression guard against re-introducing the old `pending_inputs.push_back` call that fired a turn no user asked for
+            // The classifier must NEVER push a synthetic InputItem into
+            // `pending_inputs`.
             assert_eq!(
                 pending, 0,
                 "classifier must not enqueue any synthetic input",
@@ -260,9 +249,7 @@ async fn sampler_error_aborts_with_classifier_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn idle_recheck_after_sleep_short_circuits_silently() {
-    // The actor enters maybe_fire_laziness_check idle, but a pending input lands during the sleep
-    // The post-sleep idle re-check fails (pending_inputs is non-empty), so the function returns silently with no event and no state mutation
-    // This mirrors the real-world race the production code must handle
+    // The actor enters maybe_fire_laziness_check idle, but a pending input lands during the sleep The post-sleep idle re-check fails.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -312,8 +299,8 @@ async fn idle_recheck_after_sleep_short_circuits_silently() {
             drop(Arc::try_unwrap(actor).ok().unwrap());
             assert_eq!(nudges, 0, "no state mutation on idle re-check failure");
             let log = events_log(&tmp);
-            // The re-check failure is a silent return (the condition that we wanted to nudge no longer holds); no abort event is appropriate
-            // The classifier did not produce a verdict either way
+            // The re-check failure is a silent return (the condition that we
+            // wanted to nudge no longer holds).
             assert!(
                 !log.contains("laziness_nudge_fired"),
                 "must not push a nudge when idle re-check fails:\n{log}"
@@ -324,8 +311,7 @@ async fn idle_recheck_after_sleep_short_circuits_silently() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn laziness_abort_check_detects_bumps_between_snapshot_and_recheck() {
-    // After the idle wait expires, `prepare_chat_completion(false).await?.conversation_collect(...)` hits a non-listening `http://localhost`.
-    // The connection failure surfaces as `SamplingError`, exercising the classifier-error abort arm of the unified path.
+    // After the idle wait expires.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -353,8 +339,7 @@ async fn laziness_abort_check_detects_bumps_between_snapshot_and_recheck() {
             actor
                 .models_manager
                 .set_current_model_id(acp::ModelId::new("yet-another-model"));
-            // Invoke the helper UNDER the state lock, mirroring the production call site in `maybe_fire_laziness_check`'s final injection block
-            // This pins that the helper has no hidden state-lock dependency (otherwise this deadlocks)
+            // Invoke the helper UNDER the state lock, mirroring the production call site.
             let _state_guard = actor.state.lock().await;
             assert_eq!(
                 actor.laziness_abort_check(snap2),
@@ -366,9 +351,6 @@ async fn laziness_abort_check_detects_bumps_between_snapshot_and_recheck() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn model_switch_resets_nudges_used_this_session() {
-    // The per-session nudge counter resets to 0 on a real model switch
-    // The cap is per-(session, model), so switching is a deliberate user action that gives the new model a fresh budget
-    // The test calls the actor's main-loop hook directly (the production `select!` arm delegates to it)
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -395,8 +377,6 @@ async fn model_switch_resets_nudges_used_this_session() {
 #[tokio::test(flavor = "current_thread")]
 async fn emit_laziness_abort_writes_each_reason_with_the_correct_const() {
     // At the actor level, emitting each variant must produce a `LazinessClassifierAborted` event.
-    // Its `reason` field must be byte-identical to the corresponding `LAZINESS_ABORT_*` const.
-    // This covers `Timeout`, which is otherwise hard to exercise end-to-end (it would require a hanging sampler stub).
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -427,8 +407,6 @@ async fn emit_laziness_abort_writes_each_reason_with_the_correct_const() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn user_input_generation_bumped_only_on_real_prompts() {
-    // Sanity: the field starts at 0 and increments monotonically on each bump
-    // The production code bumps it in the `SessionCommand::Prompt` handler when `!origin.is_synthetic()`
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -462,8 +440,8 @@ async fn user_input_generation_bumped_only_on_real_prompts() {
         .await;
 }
 
-/// Attach a `laziness_debug_log` to an existing actor, bypassing `SessionActor::new` (production threads a `PathBuf` through it).
-/// Any invariant `SessionActor::new` adds around `laziness_debug_log` MUST be mirrored here or these tests silently diverge from prod.
+/// Attach a `laziness_debug_log` to an existing actor, bypassing
+/// `SessionActor::new` (production threads a `PathBuf` through it).
 fn arm_debug_log(actor: &mut SessionActor, path: std::path::PathBuf) {
     actor.laziness_debug_log = Some(std::sync::Arc::from(path.as_path()));
 }
@@ -493,7 +471,6 @@ async fn make_debug_actor(
     (Arc::new(actor), tmp, log_path)
 }
 
-/// Dev-flag contract gate 1: `cfg.enabled = false` MUST NOT short-circuit when `laziness_debug_log = Some(_)`.
 /// The classifier must reach the sampler, which fails in the test fixture against a non-listening `http://localhost`.
 /// The JSONL log must record exactly one line with `decision: aborted`.
 #[tokio::test(flavor = "current_thread")]
@@ -542,7 +519,6 @@ async fn debug_mode_fires_classifier_even_with_per_model_enable_false() {
         .await;
 }
 
-/// Dev-flag contract gate 2: the long idle threshold must be bypassed when `laziness_debug_log = Some(_)`.
 /// The test configures a 60-second threshold and asserts the call returns within 200ms, proving the `idle_threshold = ZERO` branch was taken.
 /// This prevents a future change that drops the `if debug_mode` guard around `Duration::ZERO`.
 #[tokio::test(flavor = "current_thread")]
@@ -562,9 +538,9 @@ async fn debug_mode_bypasses_idle_wait() {
             SessionActor::maybe_fire_laziness_check(actor.clone()).await;
             let elapsed = started.elapsed();
             drop(Arc::try_unwrap(actor).ok().unwrap());
-            // The bypass path still does a chat-state MPSC roundtrip, two tool-bridge reads, and `prepare_chat_completion` with a JWT refresh
-            // It then attempts a TCP connect against localhost and appends a JSONL line; all of that can run slowly on shared CI
-            // 2s is still 30_000 times faster than the configured 60_000ms idle threshold, so the bypass signal is unambiguous
+            // The bypass path still does a chat-state MPSC roundtrip,
+            // tool-bridge reads, and `prepare_chat_completion` with a JWT
+            // refresh.
             assert!(
                 elapsed < std::time::Duration::from_millis(2000),
                 "idle threshold must be bypassed in debug mode (took {elapsed:?})",
@@ -577,7 +553,6 @@ async fn debug_mode_bypasses_idle_wait() {
         .await;
 }
 
-/// Dev-flag contract gate 3, the sampler-error variant.
 /// When the classifier fails before producing a verdict, debug mode MUST still write exactly one JSONL line and MUST NOT touch `pending_inputs`.
 /// The "stalled verdict also fires a nudge" half of this property needs a successful sampler stub, which is heavyweight to set up here.
 #[tokio::test(flavor = "current_thread")]

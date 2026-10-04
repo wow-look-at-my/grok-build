@@ -248,9 +248,6 @@ fn accepts_max_elicit_fields() {
     assert_eq!(specs.len(), MAX_ELICIT_FIELDS);
 }
 
-/// Defaults are drafts: a string default longer than the description cap
-/// (512) but within the draft cap (4096) must parse, since the user could
-/// type the same value by hand.
 #[test]
 fn string_default_uses_the_draft_cap() {
     let default = "d".repeat(MAX_ELICIT_DESC_CHARS + 1);

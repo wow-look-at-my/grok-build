@@ -103,9 +103,7 @@ async fn web_search_uses_model_override_from_config_end_to_end() {
             base_url: web_search_sampling.base_url.clone(),
             model: web_search_sampling.model.clone(),
             extra_headers: web_search_sampling.extra_headers.clone(),
-            // `SamplerConfig` does not carry the optional extra access key
-            // The shell passes that key through `Credentials` when it spawns a session
-            // This test builds the config directly, so there is no key to pass
+            // `SamplerConfig` does not carry the optional extra access key The shell passes that key through `Credentials`.
             alpha_test_key: None,
             allowed_domains: None,
             excluded_domains: None,

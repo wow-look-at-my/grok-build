@@ -14,8 +14,7 @@ use tracing::Instrument;
 use xai_grok_login::{CachedTokenState, SilentRefresh};
 use crate::upload::trace::PromptMetadataParams;
 use crate::leader::protocol::InternalMethod;
-/// Which `x_search` sub-tools enforce the date cutoff, sent in `initialize`. `x_user_search` and
-/// `x_thread_fetch` are `false`: they don't honor it yet.
+/// Which `x_search` sub-tools enforce the date cutoff, sent in `initialize`.
 #[derive(serde::Serialize)]
 struct ToolOverridesCapability {
     x_keyword_search: bool,
@@ -321,10 +320,7 @@ impl acp::Agent for MvpAgent {
             );
         }
         {
-            // Every `[model_providers.<id>]` that autodetects answers with its
-            // own models. This runs off the startup path: a provider that
-            // answers slowly must not hold `initialize` open, and the catalog
-            // reaches the client on its own through the models-updated push.
+            // Every `[model_providers.<id>]` that autodetects answers with its own models.
             let cfg = self.cfg.borrow().clone();
             let models_manager = self.models_manager.clone();
             // Set before the spawn: a session that starts first waits for it.
@@ -339,11 +335,7 @@ impl acp::Agent for MvpAgent {
                 }
                 drop(discovery_guard);
                 // A local runtime loads a model on its first request and
-                // unloads it on an idle TTL, so residency painted once at
-                // startup is wrong within minutes. Only the residency is
-                // re-read: the window and the capabilities do not move while
-                // the runtime is up, and re-reading those costs one
-                // `/api/show` per model.
+                // unloads it on an idle TTL.
                 if !discovery::has_local_runtime(&cfg) {
                     return;
                 }
@@ -379,8 +371,7 @@ impl acp::Agent for MvpAgent {
         let preferred_method_early = self.cfg.borrow().grok_com_config.preferred_method;
         let xai_api_base_url = self.cfg.borrow().endpoints.xai_api_base_url.clone();
         // A declared provider counts even before its models are discovered:
-        // autodetection runs off this path, so the catalog is still without
-        // them here.
+        // autodetection runs off this path.
         let has_provider_credentials =
             crate::agent::config::any_provider_has_own_credentials(&self.cfg.borrow());
         let has_byok = has_provider_credentials
@@ -621,11 +612,9 @@ impl acp::Agent for MvpAgent {
                     "grokShell": true,
                     // Re-deriving this precedence client-side has regressed OIDC refresh, so clients consume the agent's choice from here
                     "defaultAuthMethodId": default_auth_method_id_wire,
-                    // The agent can drive in-process SDK MCP servers over the ACP reverse channel (`x.ai/mcp/sdk_call`)
-                    // The SDK reads this to enable transport="acp"
+                    // The agent can drive in-process SDK MCP servers over the ACP reverse channel (`x.ai/mcp/sdk_call`) The SDK reads this.
                     (xai_grok_mcp::wire::MCP_SDK): true,
-                    // `session/new` / `session/load` accept per-session plugin roots in `_meta.pluginDirs`
-                    // The SDKs gate `GrokOptions.plugins` on this
+                    // `session/new` / `session/load` accept per-session plugin roots in `_meta.pluginDirs` The SDKs gate `GrokOptions.plugins`.
                     (SESSION_PLUGIN_DIRS_CAPABILITY_KEY): true,
                     "currentWorkingDirectory": current_working_directory.to_string_lossy().to_string(),
                     "agentVersion": xai_grok_version::version(),
@@ -641,9 +630,7 @@ impl acp::Agent for MvpAgent {
                         .cfg
                         .borrow()
                         .is_feature_enabled(crate::agent::config::Feature::CancelRewind),
-                    // Resolved session-recap state (remote settings / config / env; default ON)
-                    // The client gates BOTH its automatic away-recap poll and the manual `/recap` on this
-                    // A disabled feature produces zero `x.ai/recap` traffic
+                    // Resolved session-recap state (remote settings / config / env; default ON) The client gates BOTH its automatic away-recap poll.
                     "sessionRecap": self.cfg.borrow().is_session_recap_enabled(),
                     "feedbackTraceOffer": self.feedback_trace_offer(),
                     "voiceMode": self.cfg.borrow().is_voice_mode_enabled(),

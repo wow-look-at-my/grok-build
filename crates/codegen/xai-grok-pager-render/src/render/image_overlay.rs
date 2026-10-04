@@ -1,14 +1,4 @@
 //! Image preview overlay for prompt image chips.
-//!
-//! Renders a bordered popup when the cursor is on (or right after) an image chip, or when the chip is hovered.
-//! Content follows a 2×2 matrix:
-//!
-//! |                    | Has filepath              | No filepath                |
-//! |--------------------|---------------------------|----------------------------|
-//! | **Pixels available** | Image + path footer       | Image only                 |
-//! | **Pixels unavailable** | Metadata + path         | Metadata only              |
-//!
-//! The prompt bar chip itself never shows the path (`[Image #N]`); paths appear only here.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

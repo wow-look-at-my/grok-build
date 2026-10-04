@@ -1,7 +1,4 @@
 //! Process manager utilities.
-//!
-//! The `ProcessManager` trait has been replaced by `TerminalBackend` in `computer/types.rs`.
-//! This module retains the `format_system_time_rfc3339` utility and re-exports from types.
 
 // Re-export types from computer::types (canonical location)
 pub use crate::computer::types::{KillOutcome, KillSource, TaskSnapshot};

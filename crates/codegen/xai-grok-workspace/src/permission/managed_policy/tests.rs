@@ -485,8 +485,8 @@ fn allow_url_matcher_semantics() {
 #[test]
 #[rustfmt::skip]
 fn deny_url_matcher_semantics() {
-    // Regression for a managed-gateway deny pattern: the four bypass
-    // spellings previously fell through the literal glob (fail-open).
+    // Regression for a managed-gateway deny pattern: the bypass
+    // spellings fell through the literal glob (fail-open).
     deny_rows("host-normalized, scheme/port-agnostic", &["https://mcp-gateway.example.net/*"], &[
         ("https://mcp-gateway.example.net:443/mcp", true, "explicit default port"),
         ("http://mcp-gateway.example.net/mcp", true, "scheme swap"),
@@ -518,8 +518,7 @@ fn deny_url_matcher_semantics() {
         ("https://corp.com/admin//../x", true, "`//../x` pops only the empty segment"),
         ("https://corp.com/%61dmin/x", true, "unreserved escape decodes (`%61` = `a`)"),
         ("https://corp.com/a%2Fdmin/x", false, "%2F is not a separator; stays encoded"),
-        // Servers routinely normalize `//admin` to `/admin`, so empty
-        // segments collapse before deny matching (runtime and pattern side).
+        // Servers routinely normalize `//admin` to `/admin`.
         ("https://corp.com//admin/x", true, "double-slash prefix can't dodge the path glob"),
         ("https://corp.com/admin///x", true, "interior empty segments collapse too"),
     ]);
@@ -576,8 +575,7 @@ fn deny_url_matcher_semantics() {
     deny_rows("IPv6 zone-id URL (deny side)", &["https://[fe80::1]/*"], &[
         ("https://[fe80::1%25eth0]/mcp", true, "unparseable — denied outright"),
     ]);
-    // A zone-id PATTERN is neither a valid address nor a compiling glob: it could
-    // never match a parseable URL, so the deny key fails closed (lockdown, no deny match).
+    // A zone-id PATTERN is neither a valid address nor a compiling glob: it could never match a parseable URL.
     let zone_id = deny_urls(&["https://[fe80::1%eth0]/*"]);
     assert!(has_lockdown_source(&zone_id));
     for url in ["https://[fe80::1]/mcp", "https://[fe80::1%25eth0]/mcp"] {
@@ -645,8 +643,7 @@ fn deny_url_matcher_semantics() {
         ("https://other.example/admin[x/y", false, "different host: entry does not apply"),
         ("https://host[x/y", true, "unparseable URL denied on the unparseable branch"),
     ]);
-    // A broken deny HOST glob matches no parseable host: the key fails closed
-    // (lockdown) instead of an entry that only "denies" unparseable URLs.
+    // A broken deny HOST glob matches no parseable host.
     let broken_host = deny_urls(&["https://host[x/*"]);
     assert!(has_lockdown_source(&broken_host));
     for url in ["https://host[x/y", "https://other.example/admin"] {
@@ -883,8 +880,6 @@ fn name_argv_and_lockdown_semantics() {
     ]);
 }
 
-/// ACP 0.10 cannot construct a fourth `McpServer` variant; `known = false`
-/// is the fail-closed branch `is_server_denied` takes for one.
 #[test]
 fn deny_only_fails_closed_on_unrecognized_transport() {
     let unlisted = h("https://other.com/mcp");
@@ -1076,8 +1071,7 @@ fn mcp_verdict_matrix() {
         "deny wins over not-granted",
     );
 
-    // A full lockdown is its own reason: "not in allowedMcpServers" would send
-    // the admin hunting for a key the file may not even contain.
+    // A full lockdown is its own reason.
     let lockdown_msg = format!("locked down by policy ({CLAUDE_PATH})");
     for (label, json) in [
         (
@@ -1257,8 +1251,7 @@ fn mcp_entry_parse_fail_directions() {
                 { "serverUrl": "http://127.1/*" },
                 { "serverUrl": "https://2001:db8::1/*" },
                 { "serverUrl": "https://bü*.example/*" },
-                // Working shapes the warn must NOT fire on: bracketed and
-                // canonical IPs, canonical-address-plus-port, trailing dot.
+                // Working shapes the warn must NOT fire on: bracketed and canonical IPs, canonical-address-plus-port.
                 { "serverUrl": "https://[2001:0db8::1]/*" },
                 { "serverUrl": "https://127.0.0.1/*" },
                 { "serverUrl": "https://2001:db8::1:443/*" },
@@ -1381,7 +1374,7 @@ fn mcp_entry_parse_fail_directions() {
         }
     }
 
-    // The serverName row must parse into a Name entry, not just survive.
+    // The serverName row must parse into a Name entry, not survive.
     let (entries, _) = parse_mcp_entries_capturing_logs(
         &serde_json::json!({ "deniedMcpServers": [ { "serverName": "internal-only" } ] }),
         Deny,
@@ -1851,8 +1844,7 @@ server_url = inf
             &[],
         ),
         vec![
-            // Foreign subjects (project files, imported editor configs,
-            // client injection): the vendor file binds.
+            // Foreign subjects (project files, imported editor configs, client injection): the vendor file binds.
             Expect::Allowed("denied", "https://denied.example.com/mcp", FOREIGN, false),
             Expect::Allowed(
                 "unlisted",
@@ -1860,14 +1852,12 @@ server_url = inf
                 FOREIGN,
                 false,
             ),
-            // grok-native subjects (user/system config.toml, plugins):
-            // advisory — the same servers still run.
+            // grok-native subjects (user/system config.toml, plugins): advisory — the same servers still run.
             Expect::Allowed("denied", "https://denied.example.com/mcp", NATIVE, true),
             Expect::Allowed("unlisted", "https://unlisted.example.com/mcp", NATIVE, true),
             Expect::MarketUrl("https://github.com/other/repo.git", FOREIGN, false),
             Expect::MarketUrl("https://github.com/other/repo.git", NATIVE, true),
-            // The add/install gate acquires NEW sources — not grok-native
-            // yet, so even an advisory strict list fail-closes it.
+            // The add/install gate acquires NEW sources.
             Expect::MarketAddBlocked("https://github.com/other/repo.git", true),
         ],
     );
@@ -1939,8 +1929,7 @@ server_url = "https://user.example.com/*"
         vec![
             Expect::ManagedOnly(FOREIGN, true),
             Expect::ProjectMcpPin(Some(CLAUDE_PATH)),
-            // github+repo strict entry participates in the allowlist
-            // (fail-closed fix: previously the allowlist came out empty).
+            // github+repo strict entry participates in the allowlist (fail-closed fix: the allowlist came out empty).
             Expect::MarketRestricted(true),
             Expect::MarketUrl(
                 "https://github.com/acme/approved-plugins.git",
@@ -2155,7 +2144,7 @@ fn auto_update_pin_warnings_name_the_source_and_consequence() {
     let git = serde_json::json!({ "source": "git", "url": "https://github.com/corp/approved.git" });
     let cases = [
         (
-            // Two defects: the wrong-typed value, then the opt-out it fails closed to.
+            // Defects: the wrong-typed value, then the opt-out it fails closed to.
             "wrong-typed extras autoUpdate (block on error)",
             serde_json::json!({
                 "extraKnownMarketplaces": { "corp": { "source": git.clone(), "autoUpdate": "false" } }
@@ -2214,7 +2203,7 @@ fn auto_update_pin_warnings_name_the_source_and_consequence() {
 
 // ── unique-setup tests (fixtures, disk layers, hand-built policies) ──
 
-/// The full GA fixture: all 43 allowedMcpServers entries parse — zero dropped.
+/// The full GA fixture: all allowedMcpServers entries parse — zero dropped.
 #[test]
 fn enterprise_ga_fixture_parses_all_entries() {
     let raw = include_str!("../../../tests/fixtures/enterprise-managed-settings-ga.json");
@@ -2269,14 +2258,12 @@ fn enterprise_ga_fixture_parses_all_entries() {
         "every serverCommand entry must parse to a StdioArgv entry"
     );
 
-    // The lockdown + project pins from the fixture, plus the extras-level
-    // autoUpdate:false opt-out mapping to the global pin.
+    // The lockdown + project pins from the fixture.
     assert!(ms.mcp_allowlist.managed_only(FOREIGN));
     assert!(ms.project_mcp.is_disabled());
     assert!(ms.plugin_auto_update.is_disabled());
 
-    // Spot-check enforcement: a listed argv runs, an unlisted one doesn't;
-    // a path-bearing URL entry grants its path, a path-less one grants any path.
+    // Spot-check enforcement: a listed argv runs.
     assert!(ms.mcp_allowlist.is_server_allowed(
         &sa(
             "ui-kit",
@@ -2694,8 +2681,7 @@ fn malformed_policy_keys_fail_closed() {
     assert!(has_lockdown_source(&ms.mcp_allowlist));
     assert!(!ms.mcp_allowlist.is_server_allowed(&any, FOREIGN));
 
-    // Non-array deniedMcpServers: intended denials unknowable, so the source
-    // locks down — classified as missing-allow, not as a deny match.
+    // Non-array deniedMcpServers: intended denials unknowable, so the source locks down — classified as missing-allow.
     let ms = parse_managed_settings_json(&serde_json::json!({ "deniedMcpServers": 7 }), path);
     assert!(has_lockdown_source(&ms.mcp_allowlist));
     assert!(!ms.mcp_allowlist.is_server_allowed(&any, FOREIGN));
@@ -2766,8 +2752,7 @@ server_url = "https://evil.example.com/*"
     );
     // Conflicting bool: the key's fail-closed value (lockdown ON) applies.
     assert!(ms.mcp_allowlist.managed_only(FOREIGN));
-    // Conflicting deny lists: the intended denials are unknowable — the
-    // source locks down, classified missing-allow (not a deny match).
+    // Conflicting deny lists: the intended denials are unknowable — the source locks down.
     let evil = hs("evil", "https://evil.example.com/mcp");
     assert!(has_lockdown_source(&ms.mcp_allowlist));
     assert!(!ms.mcp_allowlist.is_server_allowed(&evil, FOREIGN));

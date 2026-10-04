@@ -3,9 +3,7 @@
 
     #[test]
     fn goal_updated_ignores_unknown_json_fields_via_serde() {
-        // A payload can carry an extra JSON field absent on today's `SessionUpdate::GoalUpdated` (no `deny_unknown_fields` on the variant)
-        // It must still deserialize and drive a full `GoalDisplayState`
-        // That would silently break wire compatibility with older shells
+        // A payload can carry an extra JSON field absent on today's `SessionUpdate::GoalUpdated` (no `deny_unknown_fields` on the variant).
         let mut app = make_app_with_agent("sess-A");
 
         let raw_payload = serde_json::json!({
@@ -36,9 +34,7 @@
                 "last_event": "verify_started",
                 "last_event_detail": "round 2 of 3",
                 "last_event_timestamp": "2026-05-24T00:00:00Z",
-                // Field absent on today's `SessionUpdate::GoalUpdated`; simulates a future shell adding a new wire field
-                // With trailing `..` in the destructure and no `deny_unknown_fields` on the variant, this must parse
-                // The pager must still produce a GoalDisplayState mapped from the known subset
+                // Field absent on today's `SessionUpdate::GoalUpdated`; simulates a future shell adding a new wire field With trailing `..`.
                 "future_field_for_pr5": "ignored-by-todays-pager"
             }
         });
@@ -177,8 +173,7 @@
 
     #[test]
     fn goal_elapsed_is_monotonic_across_updates() {
-        // The displayed elapsed must never tick backward when a notification's authoritative base is below the already-extrapolated value
-        // `elapsed_floor_ms` clamps it.
+        // The displayed elapsed must never tick backward.
         let mut app = make_app_with_agent("sess-A");
         assert!(send_goal_update(&mut app, "g1", "active", 10_000));
         let a = app
@@ -207,8 +202,7 @@
 
     #[test]
     fn cleared_goal_is_not_resurrected_by_late_update() {
-        // After a goal is cleared, a late in-flight GoalUpdated for the same goal_id (queued before the clear) must be dropped
-        // The "Done" chip / modal stay cleared and don't resurrect
+        // After a goal is cleared, a late in-flight GoalUpdated for the same goal_id (queued before the clear).
         let mut app = make_app_with_agent("sess-A");
         send_goal_update(&mut app, "g1", "complete", 5_000);
         assert!(
@@ -321,9 +315,7 @@
 
     #[test]
     fn goal_updated_absent_optional_fields_deserialize_to_none() {
-        // Rust-level forward-compat half
-        // Every additive `Option<T>` field on `SessionUpdate::GoalUpdated` may be omitted from the wire payload
-        // Each must land as `None` in the destructured arm
+        // Rust-level forward-compat half Every additive `Option<T>` field on `SessionUpdate::GoalUpdated` may be omitted.
         let mut app = make_app_with_agent("sess-A");
 
         let raw_payload = serde_json::json!({
@@ -339,14 +331,11 @@
                 "elapsed_ms": 0,
                 "total_deliverables": 0,
                 "completed_deliverables": 0,
-                // current_deliverable_idx omitted: Option<u32> defaults to None
-                // current_deliverable_title omitted: Option<String> defaults to None
-                // current_subagent_role omitted: Option<String> defaults to None
+                // current_deliverable_idx omitted: Option<u32> defaults to None current_deliverable_title omitted.
                 "total_worker_rounds": 0,
                 "total_verify_rounds": 0,
                 "token_baseline": 0,
                 "finished_subagent_tokens": 0,
-                // live_subagent_tokens omitted: Option<u64> defaults to None live_context_pct omitted: Option<u8> defaults to None live_turn_count omitted: Option<u32> defaults to None live_tool_call_count omitted: Option<u32> defaults to None last_event omitted: Option<String> defaults to None last_event_detail omitted: Option<String> defaults to None last_event_timestamp omitted: Option<String> defaults to None pause_message omitted: Option<String> defaults to None
             }
         });
         let raw = serde_json::value::to_raw_value(&raw_payload).unwrap();
@@ -383,8 +372,7 @@
         assert_eq!(goal.token_baseline, 0);
         assert_eq!(goal.finished_subagent_tokens, 0);
 
-        // Every omitted Option<T> wire field must land as None
-        // This property keeps the destructure stable as the shell grows additive optional fields
+        // Every omitted Option<T> wire field must land as None This property keeps the destructure stable.
         assert_eq!(goal.token_budget, None, "token_budget");
         assert_eq!(goal.current_deliverable_id, None, "current_deliverable_id");
         assert_eq!(

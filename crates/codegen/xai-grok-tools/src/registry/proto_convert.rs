@@ -1,10 +1,4 @@
-//! Conversion from the gRPC wire config types (`xai-grok-tools-api`) to the
-//! runtime registry types ([`ToolConfig`] / [`ToolServerConfig`]).
-//!
-//! The `params_json` parse/validation contract lives in
-//! [`xai_grok_tools_api::config_validation`] so every consumer (this
-//! converter, save-time config validation, ...) shares one source of
-//! truth. The error types are re-exported here for back-compat.
+//! Conversion from the gRPC wire config types (`xai-grok-tools-api`) to the runtime registry types.
 
 use super::types::{ToolConfig, ToolServerConfig};
 

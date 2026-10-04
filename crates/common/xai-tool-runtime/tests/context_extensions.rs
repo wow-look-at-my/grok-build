@@ -88,8 +88,8 @@ fn remove_returns_value_then_none() {
 
 #[test]
 fn insert_arc_shares_allocation() {
-    // Inserting an existing Arc means the stored value and the original
-    // share strong-count.
+    // Inserting an existing Arc means the stored value and the share
+    // strong-count.
     let arc = Arc::new(Config {
         base_url: "shared".into(),
         timeout_ms: 9,
@@ -97,10 +97,7 @@ fn insert_arc_shares_allocation() {
     let mut ctx = ToolCallContext::default();
     ctx.extensions.insert_arc(arc.clone());
     let from_ctx = ctx.extensions.get::<Config>().unwrap();
-    // Strong-count on the original Arc should reflect at least:
-    // - the original `arc` binding
-    // - the value stored in the extension map
-    // - the clone returned from `get`
+    // Strong-count on the Arc should reflect at least: - the original `arc` binding - the value stored in the extension map - the clone returned.
     assert!(Arc::strong_count(&arc) >= 3);
     assert_eq!(*from_ctx, *arc);
 }
@@ -156,9 +153,7 @@ fn clone_preserves_call_id_and_extensions() {
     let from_orig = ctx.extensions.get::<AuthToken>().unwrap();
     let from_copy = copy.extensions.get::<AuthToken>().unwrap();
     assert_eq!(from_orig.0, from_copy.0);
-    // The Arc allocation is shared; mutating via one path is impossible
-    // (extensions are immutable through `get`), but strong-count rises
-    // because of the clone.
+    // The Arc allocation is shared; mutating via one path is impossible (extensions are immutable through `get`).
     assert!(Arc::strong_count(&from_orig) >= 3);
 }
 
@@ -179,18 +174,8 @@ fn clone_extension_map_is_independent_after_remove() {
 // ---------------------------------------------------------------------------
 // Per-concept client/SDK-side extensions.
 //
-// These exist as separate extensions (one per concept) rather than a
-// single bundle. The tests below pin three contracts:
-//
-//   1. Each extension round-trips through the typed-extension store
-//      independently of the others.
-//   2. A dispatcher with only some of the concepts can install them
-//      individually — installing `Cwd` MUST NOT make `BehaviorVersion`
-//      look "present" with a default value, and vice versa.
-//   3. Absence of every well-known extension is the legitimate "backend
-//      dispatcher" shape; tools that require one MUST treat absence as
-//      a hard error rather than fall back to a process-wide default.
-// ---------------------------------------------------------------------------
+// These exist as separate extensions (one per concept) rather than a single
+// bundle.
 
 #[test]
 fn each_well_known_extension_round_trips_independently() {
@@ -217,9 +202,7 @@ fn each_well_known_extension_round_trips_independently() {
 
 #[test]
 fn dispatcher_can_install_only_what_it_has() {
-    // A dispatcher that knows the cwd but not the trace context installs
-    // only `Cwd`. The other extensions stay absent (not "default"),
-    // which is the discriminator a tool can rely on.
+    // A dispatcher that knows the cwd but not the trace context installs only `Cwd`.
     let mut ctx = ToolCallContext::default();
     ctx.extensions
         .insert(Cwd(std::path::PathBuf::from("/work")));
@@ -229,8 +212,7 @@ fn dispatcher_can_install_only_what_it_has() {
     assert!(!ctx.extensions.contains::<TraceContext>());
     assert_eq!(ctx.extensions.len(), 1);
 
-    // Adding `TraceContext` later does not implicitly conjure a
-    // `BehaviorVersion` — extensions are independent.
+    // Adding `TraceContext` later does not implicitly conjure a `BehaviorVersion` — extensions are independent.
     ctx.extensions.insert(TraceContext("tp".into()));
     assert!(ctx.extensions.contains::<TraceContext>());
     assert!(!ctx.extensions.contains::<BehaviorVersion>());
@@ -240,8 +222,6 @@ fn dispatcher_can_install_only_what_it_has() {
 #[test]
 fn absence_signals_backend_or_other_mode() {
     // A backend dispatcher installs none of the client-side extensions.
-    // Tools that require any of them must treat absence as a hard error
-    // — this test pins the contract.
     let ctx = ToolCallContext::default();
     assert!(ctx.extensions.get::<Cwd>().is_none());
     assert!(ctx.extensions.get::<BehaviorVersion>().is_none());

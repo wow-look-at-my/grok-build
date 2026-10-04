@@ -1,7 +1,4 @@
 //! The interface between the index and whatever owns the sessions on disk.
-//!
-//! The index reads four fields per session plus the path of its transcript, and it reads that transcript through a caller-supplied extractor.
-//! That keeps the `updates.jsonl` wire format owned by the session store instead of duplicated here.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,7 +23,6 @@ pub trait SessionSource: Send + Sync {
     async fn list_sessions(&self) -> io::Result<Vec<IndexableSession>>;
 
     /// One session by identity.
-    /// `Ok(None)` means the session is gone and its index row should be dropped; an `Err` is a transient read failure and leaves the row alone.
     async fn load_session(
         &self,
         session_id: &str,
@@ -37,6 +33,5 @@ pub trait SessionSource: Send + Sync {
 /// Opens the session store rooted at one grok home.
 pub type SessionSourceFactory = fn(PathBuf) -> Box<dyn SessionSource>;
 
-/// Blocking extraction of a transcript's searchable text plus the bytes read.
-/// Always called from a blocking thread.
+/// Blocking extraction of a transcript's searchable text plus the bytes read. Always called from a blocking thread.
 pub type ContentExtractor = fn(&Path) -> io::Result<(String, u64)>;

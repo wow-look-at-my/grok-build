@@ -1,5 +1,4 @@
-//! `SessionActor::persist_tool_definitions_artifact` against a real session dir: an unchanged toolset never rewrites,
-//! and a failed write leaves the recorded hash alone so the next iteration retries.
+//! `SessionActor::persist_tool_definitions_artifact` against a real session dir: an unchanged toolset never rewrites.
 
 use std::path::Path;
 

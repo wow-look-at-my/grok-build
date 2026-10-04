@@ -304,9 +304,7 @@ fn resolve_command(command: &str) -> Option<String> {
         .ok()
         .filter(|o| o.status.success())
         .and_then(|o| {
-            // The locator prints the resolved path verbatim, and a path may
-            // hold bytes that are not valid UTF-8. The decode is lossy so a
-            // command that exists still reports as found.
+            // The locator prints the resolved path verbatim, and a path may hold bytes that are not valid UTF-8.
             Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
         })
 }
@@ -527,7 +525,6 @@ async fn check_server(
                     checks.push(check_tools_list(&name, &service).await);
                 }
             }
-            // Client drops here, killing the child process via kill_on_drop
         }
     }
 
@@ -588,8 +585,7 @@ fn policy_subjects(
                 sub,
                 McpEnabledFilter::Ignore,
             )
-            // Setup-required or invalid servers still get a verdict on the name and transport
-            // as configured; otherwise the enable gate and `mcp list` would treat them as allowed.
+            // Setup-required or invalid servers still get a verdict on the name and transport as configured; otherwise the enable gate.
             .or_else(|| {
                 let mut raw = config;
                 raw.enabled = true;
@@ -709,8 +705,7 @@ pub async fn run_doctor(cwd: &Path, name_filter: Option<&str>) -> DoctorReport {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        // A deny-only policy isn't an allowlist; a zero-entry managed-only
-        // lockdown reads as "server policy".
+        // A deny-only policy isn't an allowlist; a zero-entry managed-only lockdown reads as "server policy".
         let allow_entries: usize = allowlist.sources.iter().map(|s| s.entries().count()).sum();
         let deny_entries: usize = allowlist
             .sources
@@ -747,12 +742,9 @@ pub async fn run_doctor(cwd: &Path, name_filter: Option<&str>) -> DoctorReport {
 
     let disabled_names = crate::util::config::disabled_mcp_server_names(cwd);
 
-    // Folder-trust gate: `grok mcp doctor` actually STARTS each server (`check_server_start`) In an untrusted clone that would spawn the repo's project-scoped servers
-    // Resolve the doctor cwd once (no prompt), then skip (do not start) any project-scoped server when untrusted
-    // Uses the same name lookup (`project_scoped_mcp_names`) as the session/agent-pool gates `remote = None` is intentional: standalone `grok mcp doctor` has no loaded `RemoteSettings` A remote-only org opt-out (`folder_trust_enabled = false`) isn't seen here Gating conservatively (treating the feature as enabled) is the deliberate fail-secure choice
+    // Folder-trust gate: `grok mcp doctor` STARTS each server (`check_server_start`) In an untrusted clone.
     crate::agent::folder_trust::resolve_and_record(cwd, None, false);
-    // One project-config walk serves both the folder-trust skip set and the
-    // policy subject classification below.
+    // One project-config walk serves both the folder-trust skip set and the policy subject classification below.
     let project_names = crate::agent::folder_trust::project_scoped_mcp_names(cwd);
     let untrusted_project: std::collections::HashSet<String> =
         if crate::agent::folder_trust::project_scope_allowed(cwd) {
@@ -763,8 +755,7 @@ pub async fn run_doctor(cwd: &Path, name_filter: Option<&str>) -> DoctorReport {
 
     const PROBE_CONCURRENCY: usize = 8;
 
-    // Classify each server's origin the way the session merge does, so the
-    // doctor's verdicts match what actually loads.
+    // Classify each server's origin the way the session merge does, so the doctor's verdicts match what loads.
     let blocked = policy_blocked_reasons(&to_probe, &project_names, ms);
 
     use futures::StreamExt;
@@ -973,8 +964,7 @@ mod tests {
         );
     }
 
-    /// Resets the process-global Claude import marker cache on drop (mirrors the module-private
-    /// claude_import::tests::MarkerGuard).
+    /// Resets the process-global Claude import marker cache on drop.
     struct MarkerCacheReset;
     impl Drop for MarkerCacheReset {
         fn drop(&mut self) {
@@ -987,8 +977,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn policy_subjects_judge_each_definition_once() {
-        // A real `[claude_compat] imported` marker would cut off `.mcp.json`, so pin the cache to
-        // "not imported"; the TOML seed is project-scoped since grok_home() is a OnceLock.
+        // A real `[claude_compat] imported` marker would cut off `.mcp.json`, so pin the cache to "not imported".
         let _reset = MarkerCacheReset;
         crate::claude_import::refresh_marker_cache(false);
         let repo = tempfile::tempdir().unwrap();
@@ -1083,8 +1072,6 @@ mod tests {
             "{check:?}"
         );
 
-        // 31-char server + 37-char tool is 70 qualified chars: provider-64 rejects,
-        // session admission keeps it.
         let check = tools_list_admission_check(
             "sL_xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
             ["t0_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"],

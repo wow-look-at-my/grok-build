@@ -1,7 +1,4 @@
 //! Memory tools for cross-session knowledge retrieval.
-//!
-//! - `memory_search` — search indexed memory for relevant chunks
-//! - `memory_get` — read a specific memory file by path
 
 pub mod get_tool;
 pub mod search_tool;
@@ -10,8 +7,7 @@ pub mod types;
 pub use get_tool::MemoryGetImpl;
 pub use search_tool::MemorySearchImpl;
 
-/// Registered name of the `memory_search` tool. Single source of truth shared between the tool
-/// definition and any gating callers (e.g. shell-side slash-command availability checks).
+/// Registered name of the `memory_search` tool.
 pub const MEMORY_SEARCH_TOOL_NAME: &str = "memory_search";
 
 /// Registered name of the `memory_get` tool.

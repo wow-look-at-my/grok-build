@@ -1,35 +1,4 @@
 //! Per-`(url, principal)` WebSocket connection actor.
-//!
-//! # Why this exists
-//!
-//! Multiple [`crate::ToolServer`] instances in the same process MAY
-//! attach to the same server URL with the same credential. Opening one
-//! socket per server would multiply server-side connection cost, fan-out
-//! the per-tool ack chatter, and make per-frame envelope checks
-//! ambiguous (the server can't tell which of N sockets owns a session
-//! binding). The pool collapses every `(url, principal)` to one
-//! [`HubConnection`]; refcounted session bindings make the collapse
-//! safe.
-//!
-//! # The reconnect / replay state machine
-//!
-//! When the underlying socket drops, in-flight `tool_call_request`
-//! responses CANNOT be recovered (the server holds no replay log). The
-//! connection actor therefore:
-//!
-//! 1. Drains every parked response waiter with
-//!    [`crate::ClientError::NetworkError`] so callers can fast-fail
-//!    instead of deadlocking.
-//! 2. Reconnects with exponential backoff, full jitter, capped at the last slot.
-//! 3. Re-runs the `hello` handshake.
-//! 4. The ToolServer replays `serve{session_id, tools}` per active
-//!    session via the on_reconnect callback. The server auto-registers
-//!    sessions from `serve` so no separate wire call is needed. A harness
-//!    replays `session_open` and then every `session_bind_server` it last
-//!    succeeded with, so the hub forwards a fresh `session.bind` — stamped
-//!    with its current policy — to each tool server the session was bound
-//!    to (a hub roll drops both sockets and re-stamps nothing by itself).
-//! 5. Drains any outbound frames that buffered during step 1-4.
 use crate::auth::{AuthCredential, AuthProvider, PrincipalKey};
 use crate::demux::Demux;
 use crate::error::{ClientError, RefusalCode};
@@ -58,78 +27,43 @@ use xai_tool_protocol::{
     JsonRpcRequest, JsonRpcResponse, JsonRpcVersion, Method, PingFrame, PongFrame, ResponseOutcome,
     ServerId, SessionBindServerParams, SessionId,
 };
-/// Outbound mpsc bound. Picked to match the server's per-actor outbound
-/// buffer so a single-process roundtrip never dead-blocks on sender
-/// capacity.
+/// Outbound mpsc bound.
 const OUTBOUND_BUFFER: usize = 256;
-/// Writer control channel depth. Must fit a liveness `Close` + `Pause`
-/// while still leaving room for `Resume` if the writer is mid-`sink.send`.
+/// Writer control channel depth.
 const WRITER_CTL_CAPACITY: usize = 4;
-/// App-pong / priority outbound depth. Small and independent of the data
-/// outbound buffer so heartbeats are not shed by tool-call backpressure.
+/// App-pong / priority outbound depth.
 const PRIORITY_OUTBOUND_CAPACITY: usize = 16;
-/// Bound for the best-effort WS Close on a liveness kill. A silently dead
-/// peer with a full TCP send buffer must not block Pause/Resume forever.
+/// Bound for the best-effort WS Close on a liveness kill.
 const WRITER_CLOSE_SEND_TIMEOUT: Duration = Duration::from_secs(2);
-/// Backoff schedule (in ms) for reconnect attempts. The last value is
-/// reused for any further attempts and is the documented cap (`10s`).
-/// Each wait is `Uniform(0, min(cap, max(slot, SPREAD_FLOOR)))`.
+/// Backoff schedule (in ms) for reconnect attempts.
 const RECONNECT_BACKOFF_MS: &[u64] = &[100, 200, 500, 1_000, 2_000, 5_000, 10_000];
-/// Lower bound on the full-jitter window. ±25 % of the 100 ms first slot
-/// is only a 50 ms spread — phase-locked reconnects from a large client
-/// fleet can overwhelm a recovering server once handshake+replay exceeds
-/// that window (peak concurrent handshakes approaches N). Uniform over
-/// ≥1 s spreads the same herd across roughly one slot. Capped by the
-/// schedule's last slot so a short test/override table stays fast. Keep
-/// the floor well below typical client disconnect-grace timers so a
-/// delayed reconnect is not mistaken for a permanent drop.
 const RECONNECT_SPREAD_FLOOR: Duration = Duration::from_secs(1);
-/// Prior connection must have lived this long before a new outage resets
-/// `attempt`. Shorter flaps keep climbing so a crash-loop server or a
-/// drain followed immediately by another drop cannot pin the fleet on
-/// slot 1.
+/// Prior connection must have lived this long before a new outage resets `attempt`.
 const RECONNECT_ATTEMPT_RESET_AFTER: Duration = Duration::from_secs(10);
-/// Per-process counter mixed into each connection's jitter seed so two
-/// clients constructed in the same instant still de-phase on attempt 1.
+/// Per-process counter mixed into each connection's jitter seed so clients constructed in the same instant still de-phase.
 static NEXT_RECONNECT_JITTER_SEED: AtomicU64 = AtomicU64::new(1);
-/// Floor for the per-attempt reconnect budget: a small liveness override
-/// must not shrink it below what a WAN handshake + session replay needs,
-/// or the retry loop would livelock aborting every attempt at the bound.
+/// Floor for the per-attempt reconnect budget: a small liveness override must not shrink it below what a WAN handshake + session replay needs.
 const RECONNECT_ATTEMPT_MIN_BUDGET: Duration = Duration::from_secs(30);
 /// Per-attempt reconnect budget: the liveness deadline, floored so liveness
 /// tuning bounds detection, not connection establishment.
 fn reconnect_attempt_budget(liveness_deadline: Duration) -> Duration {
     liveness_deadline.max(RECONNECT_ATTEMPT_MIN_BUDGET)
 }
-/// Per-attempt budget for the initial connect (WebSocket upgrade +
-/// hello/hello_ack). Neither `connect_async` nor the hello_ack wait is
-/// otherwise bounded, so a peer that accepts the socket but never answers
-/// (e.g. a hub instance draining mid-roll) would hang the caller
-/// indefinitely, burning the embedder's own readiness budget on one dead
-/// attempt.
+/// Per-attempt budget for the initial connect (WebSocket upgrade + hello/hello_ack).
 const INITIAL_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Initial-connect attempts before the error surfaces to the caller. Waits
-/// between attempts come from the reconnect backoff schedule (jittered), so
-/// a fleet cold-starting into a degraded hub de-phases its retries.
+/// Initial-connect attempts before the error surfaces to the caller.
 const INITIAL_CONNECT_MAX_ATTEMPTS: u32 = 3;
-/// Default WebSocket keepalive ping cadence when a connection does not
-/// override [`ConnectionTuning::ws_ping_interval`].
+/// Default WebSocket keepalive ping cadence when a connection does not override [`ConnectionTuning::ws_ping_interval`].
 const DEFAULT_WS_PING_INTERVAL: Duration = Duration::from_secs(30);
 const SERVE_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);
 const SERVE_MAX_ATTEMPTS: u32 = 3;
-/// How often a token-bound tool server asks its provider for a fresher bearer
-/// to present in band ([`AuthRefreshDriver`]) unless
-/// [`ConnectionTuning::auth_refresh_poll`] says otherwise.
+/// How often a token-bound tool server asks its provider for a fresher bearer to present in band ([`AuthRefreshDriver`]).
 pub(crate) const AUTH_REFRESH_POLL: Duration = Duration::from_secs(30);
-/// Bound on one `auth.refresh` round-trip; the hub answers or refuses well
-/// within this, so a later reply is a stuck socket.
+/// Bound on one `auth.refresh` round-trip.
 const AUTH_REFRESH_TIMEOUT: Duration = Duration::from_secs(15);
-/// Unaccepted `auth.refresh` answers in a row on one phase at which the
-/// driver logs once at `warn!`: a refusal that persists means the hub will
-/// still close the socket at the bearer's `exp`.
+/// Unaccepted `auth.refresh` answers in a row on one phase at which the driver logs once at `warn!`
 const AUTH_REFRESH_WARN_AFTER: u32 = 3;
-/// The hub's `error.data.reason` for a bearer whose `exp` is not later than
-/// the one it already holds.
+/// The hub's `error.data.reason` for a bearer whose `exp` is not later than the one it already holds.
 const AUTH_REFRESH_NOT_LATER: &str = "not_later";
 /// The `data.reason` values the hub sends with a refused `auth.refresh`.
 const AUTH_REFRESH_KNOWN_REASONS: &[&str] = &[
@@ -156,13 +90,9 @@ struct HealthState {
 }
 struct HealthSnapshot {
     last_inbound: Instant,
-    /// Monotonic time elapsed since the last probe window rolled (the most
-    /// recent RTT proof — WS/app pong — or 5s clock probe) — NOT since
-    /// connection start. Healthy traffic keeps this small (<= ~5s); the
-    /// meaningful freeze signal in this snapshot is `clock_jump_ms`.
+    /// Monotonic time elapsed since the last probe window rolled (the most recent RTT proof — WS/app pong — or 5s clock probe) — NOT.
     since_last_probe_monotonic_ms: u64,
-    /// Wall-clock time elapsed over the same probe window as
-    /// `since_last_probe_monotonic_ms`.
+    /// Wall-clock time elapsed over the same probe window as `since_last_probe_monotonic_ms`.
     since_last_probe_wall_ms: u64,
     clock_jump_ms: u64,
 }
@@ -200,9 +130,7 @@ impl ConnHealth {
         state.mono_ref = Instant::now();
         state.wall_ref = SystemTime::now();
     }
-    /// Record RTT proof (WS/app pong). Hub→client pings/data must not call
-    /// this — they are one-way and would zero `detect_ms` / `silent_gap_ms`
-    /// during a mute that still expires the liveness deadline.
+    /// Record RTT proof (WS/app pong).
     fn record_inbound(&self) {
         let mut state = self.state.lock();
         Self::roll(&mut state);
@@ -245,8 +173,7 @@ enum DisconnectCause {
     ReadError(String),
     WriteError(String),
     Forced,
-    /// No RTT proof (WS/app pong or non-ping data) within the inbound-liveness
-    /// deadline — return path is silently dead.
+    /// No RTT proof (WS/app pong or non-ping data) within the inbound-liveness deadline.
     LivenessDeadline,
 }
 impl DisconnectCause {
@@ -272,9 +199,7 @@ impl DisconnectCause {
             _ => None,
         }
     }
-    /// Bounded classification of transport error detail for metrics. Collapses
-    /// free-form OS/tungstenite messages into a small allowlist so reconnect
-    /// storms can be attributed without high-cardinality labels.
+    /// Bounded classification of transport error detail for metrics.
     fn detail_class(&self) -> Option<&'static str> {
         let detail = self.detail()?;
         Some(classify_transport_detail(detail))
@@ -397,15 +322,12 @@ fn resolve_reconnect_backoff(configured: Option<Arc<[Duration]>>) -> Arc<[Durati
         _ => default_reconnect_backoff(),
     }
 }
-/// `None` → the 10 s production dwell. `Some`, including zero, is verbatim.
+/// `Some`, including zero, is verbatim.
 pub(crate) fn resolve_attempt_reset_after(configured: Option<Duration>) -> Duration {
     configured.unwrap_or(RECONNECT_ATTEMPT_RESET_AFTER)
 }
 /// Resolve the keepalive ping cadence, clamping an unset *or zero* value to
-/// [`DEFAULT_WS_PING_INTERVAL`]. `tokio::time::interval` panics on a zero
-/// period, so a configured `Duration::ZERO` (e.g. via
-/// `with_ws_ping_interval(0)` or a `StatusConfig.ws_ping` of 0) must never
-/// reach the writer task.
+/// [`DEFAULT_WS_PING_INTERVAL`].
 fn resolve_ws_ping_interval(configured: Option<Duration>) -> Duration {
     match configured {
         Some(interval) if !interval.is_zero() => interval,
@@ -413,31 +335,21 @@ fn resolve_ws_ping_interval(configured: Option<Duration>) -> Duration {
     }
 }
 /// Resolve the per-attempt initial-connect budget, clamping an unset *or
-/// zero* value to [`INITIAL_CONNECT_ATTEMPT_TIMEOUT`] — a zero budget would
-/// abort every attempt before the upgrade could complete.
+/// zero* value to [`INITIAL_CONNECT_ATTEMPT_TIMEOUT`].
 fn resolve_initial_connect_attempt_timeout(configured: Option<Duration>) -> Duration {
     match configured {
         Some(timeout) if !timeout.is_zero() => timeout,
         _ => INITIAL_CONNECT_ATTEMPT_TIMEOUT,
     }
 }
-/// Whether an initial-connect failure is worth another attempt. Transport
-/// failures (including the per-attempt timeout, which surfaces as
-/// `NetworkError`) and server closes are transient; auth, config, protocol,
-/// and insecure-scheme failures are deterministic and must surface
-/// immediately.
+/// Whether an initial-connect failure is worth another attempt.
 fn initial_connect_retryable(err: &ClientError) -> bool {
     matches!(err, ClientError::NetworkError(_) | ClientError::Closed(_))
 }
 /// Resolve the inbound-liveness deadline, clamping an unset *or zero* value
 /// to `min(4× ping, 120s)` — 120s at the default 30s ping, still under the
-/// hub's ~150s idle timeout.
-///
-/// After RTT-only re-arm, hub app/WS pings no longer keep the timer alive.
-/// 4× (capped) tolerates a few lost/coalesced pongs plus scheduling jitter
-/// without racing hub 4408. Explicit overrides are honored verbatim; keep
-/// them comfortably above the ping interval or a healthy-but-idle
-/// connection will be churned.
+/// hub's ~150s idle timeout. After RTT-only re-arm, hub app/WS pings no
+/// longer keep the timer alive.
 fn resolve_ws_liveness_deadline(configured: Option<Duration>, ping_interval: Duration) -> Duration {
     match configured {
         Some(deadline) if !deadline.is_zero() => deadline,
@@ -463,42 +375,21 @@ pub struct InitialConnectPolicy {
 /// knobs never churn every [`ConnectionConfig`] literal.
 #[derive(Clone, Default)]
 pub struct ConnectionTuning {
-    /// Override for the keepalive ping cadence. `None` (or zero) ⇒
-    /// [`DEFAULT_WS_PING_INTERVAL`].
+    /// Override for the keepalive ping cadence. `None` (or zero) ⇒ [`DEFAULT_WS_PING_INTERVAL`].
     pub ws_ping_interval: Option<Duration>,
-    /// Override for the inbound-liveness deadline: with no *round-trip*
-    /// proof (WS/app pong) for this long, the reader declares the socket
-    /// dead and reconnects. Hub app pings and one-way hub→client data do
-    /// not re-arm. `None` (or zero) ⇒ `min(4× ping, 120s)`
-    /// (see [`resolve_ws_liveness_deadline`]).
+    /// Override for the inbound-liveness deadline: with no *round-trip* proof (WS/app pong) for this long, the reader declares the socket dead.
     pub ws_liveness_deadline: Option<Duration>,
-    /// Override for the reconnect backoff schedule. `None` (or empty) ⇒
-    /// the built-in [`RECONNECT_BACKOFF_MS`] table. Each wait is
-    /// `Uniform(0, min(last_slot, max(slot, 1s)))` — not the literal slot.
-    /// Stored as `Arc<[Duration]>` so it is shared per reconnect.
+    /// Override for the reconnect backoff schedule. `None` (or empty) ⇒ the built-in [`RECONNECT_BACKOFF_MS`] table.
     pub reconnect_backoff: Option<Arc<[Duration]>>,
-    /// How long the previous connection must have stayed up before a new
-    /// outage resets the reconnect attempt counter. `None` ⇒ 10 s (one
-    /// default cap period). `Some`, including zero, is honored verbatim
-    /// (`Some(ZERO)` resets on every outage; tests use this).
+    /// How long the connection must have stayed up before a new outage resets the reconnect attempt counter.
     pub reconnect_attempt_reset_after: Option<Duration>,
-    /// Allowlist of 4100–4199 close codes that fire
-    /// [`ConnectionConfig::on_terminal_close`] then re-enter the reconnect
-    /// loop instead of permanently stopping the actor. Empty (default)
-    /// keeps the protocol contract: every terminal close is a one-way door.
-    /// Only codes for a still-restorable session (e.g.
-    /// [`CLOSE_CODE_SANDBOX_TERMINATED`]) belong here; one-way codes
-    /// (force eviction, session expiry, admin disconnect, supersession)
-    /// must not.
     pub reconnect_after_terminal_close_codes: Vec<u16>,
     /// Policy for the initial connection before reconnect handling begins.
     pub initial_connect: InitialConnectPolicy,
-    /// Override for how often a token-bound tool server asks its provider
-    /// for a fresher bearer to present in band (`auth.refresh`). `None` (or
-    /// zero) ⇒ 30 s.
+    /// Override for how often a token-bound tool server asks its provider for a fresher bearer to present in band.
     pub auth_refresh_poll: Option<Duration>,
 }
-/// Pool dedup key. Two connections are pooled together iff their
+/// Pool dedup key. Connections are pooled together iff their
 /// `(url, principal)` match.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ConnKey {
@@ -519,52 +410,24 @@ impl std::fmt::Debug for ConnKey {
 /// so consumers can record metrics or surface UI hints.
 #[derive(Debug, Clone)]
 pub struct ReconnectEvent {
-    /// Server-issued connection id of the FRESH connection (different
-    /// from the dropped one).
+    /// Server-issued connection id of the FRESH connection (different from the dropped one).
     pub connection_id: ConnectionId,
     /// Number of session bindings replayed.
     pub sessions_replayed: usize,
     /// Reconnect attempt index since the last *stable* connection (1-based).
-    /// Rapid flaps do not reset this, so a crash-loop climbs the ladder.
-    /// After the prior socket stayed up for
-    /// [`ConnectionTuning::reconnect_attempt_reset_after`] (default 10 s)
-    /// the next outage starts at 1 again.
     pub attempt: u32,
 }
 /// Boxed reconnect callback.
 pub type ReconnectCallback = Box<dyn Fn(ReconnectEvent) + Send + Sync + 'static>;
-/// Boxed disconnect callback, fired when the live socket drops (before a
-/// reconnect attempt) and on a terminal close.
+/// Boxed disconnect callback, fired when the live socket drops (before a reconnect attempt) and on a terminal close.
 pub type DisconnectCallback = Box<dyn Fn() + Send + Sync + 'static>;
-/// Boxed terminal-close callback, fired with the WebSocket close code when
-/// the server ends the connection in the 4100–4199 range. Default policy is
-/// no reconnect; [`ConnectionTuning::reconnect_after_terminal_close_codes`]
-/// opts the embedder into recovery after this callback. Always followed by
-/// [`DisconnectCallback`] so readiness still flips.
+/// Boxed terminal-close callback, fired with the WebSocket close code when the server ends the connection.
 pub type TerminalCloseCallback = Box<dyn Fn(u16) + Send + Sync + 'static>;
-/// Boxed callback fired when a *reconnect's* upgrade is answered `401`/`403`, with the status and
-/// the policy code a `403` body names. The actor stops afterwards: the same credential fails the
-/// same way. (The initial connect reports this as [`ClientError::HandshakeAuthFailed`] instead.)
+/// Boxed callback fired when a *reconnect's* upgrade is answered `401`/`403`.
 pub type HandshakeRefusedCallback = Box<dyn Fn(u16, Option<RefusalCode>) + Send + Sync + 'static>;
-/// Boxed connect callback, fired once on the initial successful connect
-/// after the writer keepalive loop has entered (so `/ready` cannot race
-/// the first ping) and before the reader actor task spawns. It therefore
-/// strictly happens-before any disconnect/reconnect callback, so a
-/// connect/disconnect pair can never be observed out of order (e.g. a
-/// readiness marker resurrected after the socket has already dropped).
+/// Boxed connect callback, fired once on the initial successful connect after the writer keepalive loop has entered.
 pub type ConnectCallback = Box<dyn Fn() + Send + Sync + 'static>;
 /// A live (or reconnecting) connection to the server.
-///
-/// Cheap to clone via the `Arc` returned from
-/// [`crate::HubConnectionPool::get_or_connect`]. Methods on the inner
-/// `HubConnection` are `&self` so multiple consumers can share the
-/// same instance without external locking.
-///
-/// Dropping the last `Arc<HubConnection>` runs [`Drop`], which sends
-/// a stop signal to the connection actor; the actor drains every
-/// in-flight response waiter with [`ClientError::NetworkError`] and
-/// exits asynchronously. [`Self::request_shutdown`] triggers the
-/// same stop-and-drain sequence without giving up the `Arc`.
 pub struct HubConnection {
     inner: Arc<HubConnectionInner>,
 }
@@ -589,53 +452,28 @@ pub struct ConnectionConfig {
     pub kind: ConnectionKind,
     /// Optional reconnect-event callback.
     pub on_reconnect: Option<Arc<ReconnectCallback>>,
-    /// Optional disconnect callback, fired when the live socket drops or the
-    /// server sends a terminal close.
+    /// Optional disconnect callback, fired when the live socket drops or the server sends a terminal close.
     pub on_disconnect: Option<Arc<DisconnectCallback>>,
-    /// Optional terminal-close callback, fired with the close code on a
-    /// 4100–4199 close, before [`Self::on_disconnect`]. The actor still
-    /// stops afterwards unless the code is in
-    /// [`ConnectionTuning::reconnect_after_terminal_close_codes`].
     pub on_terminal_close: Option<Arc<TerminalCloseCallback>>,
-    /// Optional callback for a reconnect refused at the upgrade with `401`/`403`; see
-    /// [`HandshakeRefusedCallback`].
+    /// Optional callback for a reconnect refused at the upgrade with `401`/`403`; see [`HandshakeRefusedCallback`].
     pub on_handshake_refused: Option<Arc<HandshakeRefusedCallback>>,
-    /// Optional connect callback, fired once on the initial successful connect
-    /// after the writer task enters its loop (happens-before reader start).
-    /// The first keepalive may still be in flight or one scheduler quanta away.
+    /// Optional connect callback, fired once on the initial successful connect after the writer task enters its loop.
     pub on_connect: Option<Arc<ConnectCallback>>,
-    /// Stable server identity sent in the hello frame. Only meaningful
-    /// for [`ConnectionKind::ToolServer`] connections.
+    /// Stable server identity sent in the hello frame. Only meaningful for [`ConnectionKind::ToolServer`] connections.
     pub server_id: Option<xai_tool_protocol::ServerId>,
     /// One-line server description for `servers.list`.
     pub server_description: Option<String>,
     /// Opaque metadata surfaced in `ServerInfo.metadata`.
     pub server_metadata: Option<serde_json::Value>,
-    /// Optional override for the outbound mpsc bound. `None` uses the
-    /// crate default (matched to the server's per-actor outbound
-    /// buffer). Tests use this to exercise the
-    /// bounded-wait fast-fail path without flooding production-sized
-    /// buffers.
+    /// Optional override for the outbound mpsc bound.
     pub outbound_buffer: Option<usize>,
-    /// Optional tuning knobs (ping cadence, liveness deadline, reconnect
-    /// backoff). `ConnectionTuning::default()` keeps every historical
-    /// default.
+    /// Optional tuning knobs (ping cadence, liveness deadline, reconnect backoff).
     pub tuning: ConnectionTuning,
-    /// When set, attached as an extra access header on every
-    /// (re)connect, unconditionally. Harmless when the peer ignores it.
+    /// When set, attached as an extra access header on every (re)connect, unconditionally.
     pub alpha_test_key: Option<String>,
     /// Allow a plaintext `ws://` connection to a non-loopback host.
-    /// Only enable when the transport is otherwise secured (e.g. a
-    /// private network or TLS-terminating proxy) — otherwise the bearer
-    /// credential crosses the network in cleartext.
     pub allow_insecure_ws: bool,
-    /// Optional weak handle to the owning pool, set by
-    /// [`crate::HubConnectionPool::get_or_connect`]. On a fatal
-    /// handshake-auth failure the reconnect driver evicts its own pool
-    /// entry through this so the next caller opens a fresh socket.
-    /// `None` for the unpooled [`HubConnection::connect`] path (tests /
-    /// one-shot) — nothing to evict. Weak so the pool↔connection edge
-    /// is not an ownership cycle.
+    /// Optional weak handle to the owning pool, set by [`crate::HubConnectionPool::get_or_connect`].
     pub on_fatal: Option<Weak<crate::pool::HubConnectionPool>>,
 }
 impl std::fmt::Debug for ConnectionConfig {
@@ -666,58 +504,33 @@ struct HubConnectionInner {
     allow_insecure_ws: bool,
     /// See [`ConnectionConfig::on_fatal`].
     on_fatal: Option<Weak<crate::pool::HubConnectionPool>>,
-    /// Resolved reconnect backoff schedule (configured override or the
-    /// built-in table). Resolved once at connect; shared per reconnect.
+    /// Resolved reconnect backoff schedule (configured override or the built-in table).
     reconnect_backoff: Arc<[Duration]>,
-    /// Per-connection seed for reconnect backoff jitter. Distinct across
-    /// clients in the same process so a simultaneous disconnect does not
-    /// lock-step the first (or any) attempt.
+    /// Per-connection seed for reconnect backoff jitter.
     reconnect_jitter_seed: u64,
     /// Resolved stability dwell before `attempt` resets on a new outage.
     attempt_reset_after: Duration,
-    /// Embedder opt-in: sorted allowlist of 4100–4199 close codes to
-    /// reconnect after instead of exiting. Empty ⇒ never reconnect.
     reconnect_after_terminal_close_codes: Vec<u16>,
     /// Cadence of the in-band bearer refresh ([`run_auth_refresh`]).
     auth_refresh_poll: Duration,
-    /// Incremented at the start of each reconnect episode so jitter
-    /// re-phases across outages of the same connection.
+    /// Incremented at the start of each reconnect episode so jitter re-phases across outages of the same connection.
     outage_seq: AtomicU32,
-    /// Outbound frames waiting to be written. Filled by `send_*`
-    /// helpers; drained by the writer half of the actor.
+    /// Outbound frames waiting to be written. Filled by `send_*` helpers; drained by the writer half of the actor.
     outbound_tx: mpsc::Sender<String>,
     /// Inbound demux state (response waiters + session inboxes).
     demux: Arc<Demux>,
-    /// Refcounted bound-session set. Used by the reconnect path to
-    /// re-issue `register_session` for every still-live session.
+    /// Refcounted bound-session set.
     bound_sessions: Arc<RefCountedSet<SessionId>>,
-    /// The last `session_bind_server` that succeeded per session and tool
-    /// server, replayed after `session_open` on reconnect. Kept here rather
-    /// than on the harness because the connection owns the replay and the
-    /// harness only learns of a reconnect after it.
+    /// The last `session_bind_server` that succeeded per session and tool server.
     last_binds: dashmap::DashMap<SessionId, Vec<SessionBindServerParams>>,
-    /// Serialises a session's refcount edge with the lifecycle frame that
-    /// edge emits. Without it a drop's "decrement to zero" and a concurrent
-    /// build's "increment from zero" can interleave so `session_detach` is
-    /// enqueued after the new borrower's `session_open`, and the hub unbinds
-    /// a session that has a live borrower.
+    /// Serialises a session's refcount edge with the lifecycle frame that edge emits.
     session_lifecycle: parking_lot::Mutex<()>,
-    /// Cached server-issued `connection_id`. Updated on every (re)connect.
     connection_id: Arc<Mutex<Option<ConnectionId>>>,
-    /// Optional capabilities the server advertised in the most recent
-    /// `hello_ack` (wire method strings). Refreshed on every (re)connect
-    /// handshake. Empty when the ack carried none — on the wire that is
-    /// indistinguishable from a server predating the field, so
-    /// [`HubConnection::supports`] reports unknown in that case.
+    /// `hello_ack` (wire method strings). Refreshed on every (re)connect handshake.
     hello_capabilities: parking_lot::RwLock<Vec<String>>,
-    /// Monotonically-increasing JSON-RPC request id counter.
     next_request_id: std::sync::atomic::AtomicU64,
-    /// Cancelled by the actor task once it has fully exited so
-    /// `await_shutdown` resolves promptly. `CancellationToken` has
-    /// persistent semantics so a wait that arrives AFTER the actor
-    /// has already cancelled the token still wakes immediately.
+    /// `await_shutdown` resolves promptly.
     shutdown: CancellationToken,
-    /// Stops the actor on `Drop`.
     stop_tx: mpsc::Sender<()>,
     reconnect_tx: mpsc::Sender<()>,
     early_notif_rx: parking_lot::Mutex<Option<broadcast::Receiver<Value>>>,
@@ -969,21 +782,12 @@ impl HubConnection {
         Arc::as_ptr(&self.inner) as *const () as usize
     }
     /// Server-issued connection id of the most recently established
-    /// (post-handshake) socket. During a reconnect gap this still names the
-    /// dropped connection until the next handshake + replay completes.
+    /// (post-handshake) socket.
     pub async fn connection_id(&self) -> Option<ConnectionId> {
         self.inner.connection_id.lock().await.clone()
     }
-    /// Whether the server advertised `capability` (a wire method string,
-    /// e.g. `"session_attach_server"`) in the CURRENT connection's
-    /// `hello_ack`.
-    ///
-    /// - `Some(true)`: advertised.
-    /// - `Some(false)`: the ack carried a non-empty capability list that
-    ///   does not include it.
-    /// - `None`: the ack advertised nothing — servers predating the
-    ///   `capabilities` field are indistinguishable from an empty list, so
-    ///   support is unknown and callers should probe per call.
+    /// Whether the server advertised `capability` (a wire method string, e.g.
+    /// `"session_attach_server"`).
     pub fn supports(&self, capability: &str) -> Option<bool> {
         self.inner.supports(capability)
     }
@@ -1002,28 +806,11 @@ impl HubConnection {
     pub async fn await_shutdown(&self) {
         self.inner.shutdown.cancelled().await;
     }
-    /// Signal the connection actor to begin shutdown. The actor
-    /// drains its in-flight waiters with `NetworkError` and exits;
-    /// the outbound channel closes shortly after, so subsequent
-    /// [`Self::send_outbound`] calls return
-    /// [`ClientError::NetworkError`]. [`Self::await_shutdown`]
-    /// resolves once the actor task has terminated.
-    ///
-    /// Idempotent: redundant calls are no-ops. Equivalent to
-    /// dropping the last `Arc<HubConnection>`, but lets a holder
-    /// trigger shutdown without giving up its reference.
+    /// Signal the connection actor to begin shutdown.
     pub fn request_shutdown(&self) {
         let _ = self.inner.stop_tx.try_send(());
     }
-    /// Increment the refcount on `session_id`. The session is tracked
-    /// locally for reconnect-replay; the server learns about it via
-    /// `serve` (auto-registration on the server side).
-    ///
-    /// Taken under `session_lifecycle` so the increment cannot land between
-    /// a concurrent [`Self::untrack_session_and_detach`]'s decrement and its
-    /// `session_detach` enqueue. The caller's `session_open` may follow
-    /// outside the lock: while it holds a count no detach for the session
-    /// can be enqueued.
+    /// Increment the refcount on `session_id`.
     pub fn track_session(&self, session_id: SessionId) {
         let _lifecycle = self.inner.session_lifecycle.lock();
         self.inner.bound_sessions.increment(session_id);
@@ -1068,13 +855,9 @@ impl HubConnection {
     /// that stays open for other borrowers: when this was the last borrower,
     /// enqueue a best-effort `session_detach` so the hub does not keep the
     /// session bound until the socket closes. Returns `true` when this was
-    /// the last borrower.
-    ///
-    /// Runs on drop paths, so the frame is try-enqueued like the
-    /// cancel-on-drop hook and nobody awaits the reply (an unmatched response
-    /// is a demux no-op). Skipped when the hub advertises capabilities but not
-    /// `session_detach`: such a hub would count each frame as
-    /// `invalid_request`.
+    /// the last borrower. Runs on drop paths, so the frame is try-enqueued
+    /// like the cancel-on-drop hook and nobody awaits the reply (an unmatched
+    /// response is a demux no-op).
     pub(crate) fn untrack_session_and_detach(&self, session_id: &SessionId) -> bool {
         let _lifecycle = self.inner.session_lifecycle.lock();
         if self.inner.bound_sessions.decrement(session_id) != Some(0) {
@@ -1146,9 +929,6 @@ impl HubConnection {
             .await
     }
     /// Send a fully-formed JSON text frame onto the outbound channel.
-    /// Used by the server-side handler when replying to a
-    /// `tool_call_request` (the response flows out without going
-    /// through a waiter).
     pub async fn send_outbound(&self, text: String) -> Result<(), ClientError> {
         self.inner.send_outbound(text).await
     }
@@ -1168,12 +948,6 @@ impl HubConnection {
         }
     }
     /// Allocate a fresh request id. Monotonic per-connection.
-    ///
-    /// Returns `Err` only if a future-added `RequestId` invariant
-    /// rejects the formatted `c{value}` string (today the only
-    /// failure path is the empty-string check, which `format!` cannot
-    /// produce). Callers in non-fallible contexts should propagate
-    /// the error rather than panic.
     pub fn try_alloc_request_id(&self) -> Result<xai_tool_protocol::RequestId, ClientError> {
         self.inner.try_alloc_request_id()
     }
@@ -1249,9 +1023,7 @@ pub(crate) fn host_is_loopback(url: &Url) -> bool {
         None => false,
     }
 }
-/// Hedges the transport only. The hub supersedes a same-`server_id`
-/// registration on a later hello (close 4104), so a connect must send exactly
-/// one hello, after this returns.
+/// Hedges the transport only.
 async fn hedged_open_socket(
     url: &Url,
     credential: &AuthCredential,
@@ -1403,11 +1175,9 @@ enum ConnectedExit {
     Stop,
     /// Socket closed / errored — actor enters reconnect.
     SocketClosed(DisconnectCause),
-    /// Server sent a close frame with a code that means "do not reconnect"
-    /// (e.g. force eviction, session expired, admin disconnect).
+    /// Server sent a close frame with a code that means "do not reconnect".
     TerminalClose(u16),
 }
-/// Current Unix time in milliseconds (saturating to 0 before the epoch).
 fn now_unix_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1445,31 +1215,17 @@ fn rearm_liveness(deadline: &mut std::pin::Pin<&mut tokio::time::Sleep>, livenes
         .unwrap_or_else(|| now + Duration::from_secs(86400 * 365 * 30));
     deadline.as_mut().reset(rearm);
 }
-/// Terminal close code for a hibernated-but-restorable sandbox the hub
-/// reaped; the only 4100–4199 code that is safe to reconnect after.
+/// Terminal close code for a hibernated-but-restorable sandbox the hub reaped.
 pub const CLOSE_CODE_SANDBOX_TERMINATED: u16 = 4103;
-/// Map a websocket close frame's code to the connected-phase exit. Close
-/// codes 4100-4199 are terminal by protocol contract (the server
-/// intentionally ended the connection: eviction, session expiry, admin
-/// disconnect, rate limit). The actor still stops on these unless the
-/// embedder allowlisted the specific code via
-/// [`ConnectionTuning::reconnect_after_terminal_close_codes`].
-/// The range is deliberately wide so new terminal codes added server-side
-/// are recognised without a client update.
+/// Map a websocket close frame's code to the connected-phase exit.
 fn exit_for_close_code(code: Option<u16>) -> ConnectedExit {
     match code {
         Some(code) if (4100..4200).contains(&code) => ConnectedExit::TerminalClose(code),
         _ => ConnectedExit::SocketClosed(DisconnectCause::CloseFrame(code)),
     }
 }
-/// Classify why the inbound stream ended, preferring a write error the
-/// writer task recorded over what the reader observed.
-///
-/// Best-effort: the writer task populates `writer_error` asynchronously
-/// after its send fails, so the reader can observe the resulting stream
-/// EOF/error and classify it here *before* the slot is set. In that
-/// (telemetry-only) race a genuine write-side failure is reported as
-/// `eof` / `transport_read_error` instead of `transport_write_error`.
+/// Classify why the inbound stream ended, preferring a write error the writer task recorded over what the reader observed. Best-effort: the writer task populates `writer_error` asynchronously after its send fails, so the reader can observe the resulting stream EOF/error and
+/// classify it here *before* the slot is set.
 fn classify_stream_end(inner: &HubConnectionInner, read_error: Option<String>) -> DisconnectCause {
     if let Some(detail) = inner.writer_error.lock().take() {
         return DisconnectCause::WriteError(detail);
@@ -1480,12 +1236,6 @@ fn classify_stream_end(inner: &HubConnectionInner, read_error: Option<String>) -
     }
 }
 /// Control messages handed to the dedicated writer task.
-///
-/// The reader is the sole reconnect driver; it `Pause`s the writer the
-/// instant the socket is known dead so no buffered frame is dequeued
-/// onto the corpse, then `Resume`s it with the fresh sink once the
-/// handshake completes. Carried on [`WRITER_CTL_CAPACITY`] so a liveness
-/// `Close`+`Pause` cannot crowd out `Resume`.
 enum WriterControl<S> {
     /// Socket is dead; stop draining `outbound_rx` (frames stay buffered).
     Pause,
@@ -1528,8 +1278,6 @@ where
 ///
 /// Data/ping writes are raced against ctl via [`send_or_preempt`] so a
 /// half-open socket cannot strand Pause/Close/Resume behind `sink.send`.
-/// Close is time-boxed against stop+timeout only — a queued Pause must
-/// not abandon Close 1001.
 async fn run_writer<S>(
     mut sink: S,
     mut outbound_rx: mpsc::Receiver<String>,
@@ -1784,17 +1532,11 @@ async fn run_writer<S>(
         }
     }
 }
-/// In-band bearer refresh for a token-bound tool server. The hub closes such
-/// a socket at its bearer's `exp`; presenting the provider's fresher bearer
-/// over the live socket moves that deadline instead. One driver per
-/// connected phase, aborted with it.
+/// In-band bearer refresh for a token-bound tool server.
 struct AuthRefreshDriver {
-    /// The bearer the hub currently holds for this socket: the one the
-    /// upgrade presented, then each refresh the hub accepted.
+    /// The bearer the hub holds for this socket: the one the upgrade presented, then each refresh the hub accepted.
     acknowledged: String,
-    /// Answers since the last acknowledgement that left `acknowledged` as it
-    /// was; the one that reaches [`AUTH_REFRESH_WARN_AFTER`] is logged at
-    /// `warn!`, the rest at `debug!`.
+    /// Answers since the last acknowledgement that left `acknowledged` as it was; the one that reaches [`AUTH_REFRESH_WARN_AFTER`] is logged.
     unaccepted_in_a_row: u32,
 }
 impl AuthRefreshDriver {
@@ -1930,12 +1672,7 @@ async fn run_auth_refresh(
         driver.settle(token, answer);
     }
 }
-/// Aborts the task on drop so a driver stops with the phase it was spawned
-/// for. Two things outlive the abort: a `current()` already running on the
-/// blocking pool finishes there and its result is dropped, and a frame
-/// already handed to the outbound queue may still be written on the next
-/// phase's socket, where the hub refuses it `not_later` or answers a waiter
-/// that no longer exists.
+/// Aborts the task on drop so a driver stops with the phase it was spawned for.
 struct PhaseTask(tokio::task::JoinHandle<()>);
 impl Drop for PhaseTask {
     fn drop(&mut self) {
@@ -2194,12 +1931,8 @@ fn drain_reconnect_signals(reconnect_rx: &mut mpsc::Receiver<()>) {
 /// half but never writes (app-level pongs route through `outbound_tx`; WS
 /// pings are auto-answered by tungstenite on poll).
 ///
-/// Enforces the inbound-liveness deadline: no *round-trip* proof (WS/app
-/// pong) for the deadline window (default 4× the ping
-/// cadence, see [`resolve_ws_liveness_deadline`]) means the return path is
-/// silently dead, so exit via [`ConnectedExit::SocketClosed`] onto the
-/// normal reconnect path. Hub app/WS pings alone do not re-arm. The
-/// deadline runs only in this phase and re-arms on every (re)entry.
+/// Hub app/WS pings alone do not re-arm. The deadline runs only in this
+/// phase and re-arms on every (re)entry.
 ///
 /// Generic over the stream for in-memory unit tests, mirroring
 /// [`run_writer`].
@@ -2227,8 +1960,7 @@ where
                 info!("forced reconnect requested; dropping current socket");
                 return ConnectedExit::SocketClosed(DisconnectCause::Forced);
             }
-            // Before the deadline arm so a frame that raced the expiry
-            // proves liveness and wins.
+            // Before the deadline arm so a frame that raced the expiry proves liveness and wins.
             msg = stream.next() => {
                 match msg {
                     Some(Ok(msg)) => {
@@ -2236,8 +1968,7 @@ where
                             Message::Text(text) => {
                                 match classify_inbound_text(inner, text.as_ref()) {
                                     InboundText::AppPing { pong } => {
-                                        // Hub→client ping is not RTT proof. Reply if we
-                                        // can; a dropped pong must not re-arm either.
+                                        // Hub→client ping is not RTT proof.
                                         if let Some(pong_text) = pong
                                             && pong_tx.try_send(pong_text).is_err()
                                         {
@@ -2249,13 +1980,11 @@ where
                                         rearm_liveness(&mut deadline, liveness_deadline);
                                     }
                                     InboundText::Data => {
-                                        // Hub→client data is one-way, not RTT proof.
                                     }
                                     InboundText::Unparseable => {}
                                 }
                             }
-                            // WS Pong is RTT proof of our Ping. Inbound WS Ping is
-                            // auto-answered by tungstenite and is hub→client only.
+                            // WS Pong is RTT proof of our Ping.
                             Message::Pong(_) => {
                                 inner.health.record_inbound();
                                 rearm_liveness(&mut deadline, liveness_deadline);
@@ -2504,8 +2233,7 @@ impl HubConnectionInner {
             )),
         }
     }
-    /// Whether the hub advertised `capability` in `hello_ack`; `None` when
-    /// the ack advertised nothing, which a hub predating capabilities also
+    /// Whether the hub advertised `capability` in `hello_ack`; `None` when the ack advertised nothing, which a hub predating capabilities also
     /// does, so support is unknown.
     fn supports(&self, capability: &str) -> Option<bool> {
         let caps = self.hello_capabilities.read();
@@ -2595,14 +2323,11 @@ fn new_reconnect_jitter_seed() -> u64 {
         .unwrap_or(0);
     derive_jitter_seed(n, pid, nanos)
 }
-/// `min(cap, max(base, RECONNECT_SPREAD_FLOOR))`. Production and tests
-/// share [`RECONNECT_SPREAD_FLOOR`]; tests also assert that value equals 1s.
+/// `min(cap, max(base, RECONNECT_SPREAD_FLOOR))`.
 fn backoff_window(base: Duration, cap: Duration) -> Duration {
     base.max(RECONNECT_SPREAD_FLOOR).min(cap)
 }
-/// Uniform in `[0, window)`. `window == 0` → zero. Never returns `window`
-/// itself, so the documented cap is a hard exclusive ceiling when
-/// `window == cap` — no Dirac pile-up at 10 s.
+/// Uniform in `[0, window)`. `window == 0` → zero.
 fn apply_reconnect_jitter(window: Duration, roll: u64) -> Duration {
     let window_ns = duration_nanos_u64(window);
     if window_ns == 0 {

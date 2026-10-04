@@ -1,11 +1,4 @@
 //! SearchReplace tool implementation.
-//!
-//! This tool performs exact string replacements in files with support for:
-//! - Exact string replacement (find/replace)
-//! - New file creation (when `old_string` is empty)
-//! - Replace all mode (`replace_all: true`)
-//! - Read-before-edit validation (non-concise mode)
-//! - External modification detection
 
 use crate::types::output::SearchReplaceEditDetail;
 
@@ -144,8 +137,7 @@ pub(crate) fn build_edit_details(
 }
 
 // ============================================================================
-// Normalized (confusable-aware) matching helpers
-// ============================================================================
+// Normalized (confusable-aware).
 
 /// A single match found via confusable-normalized comparison, expressed in
 /// the original text's byte coordinates.
@@ -153,9 +145,7 @@ pub(crate) fn build_edit_details(
 pub(crate) struct NormalizedMatch {
     /// Byte offset in the original text where the match starts.
     pub original_start: usize,
-    /// Length in bytes of the matched region in the original text.
-    /// May differ from the search pattern's byte length because confusable
-    /// characters have different UTF-8 widths than their ASCII equivalents.
+    /// Length in bytes of the matched region in the text.
     pub original_len: usize,
 }
 
@@ -167,9 +157,7 @@ pub(crate) enum NormalizedMatchResult {
     NoMatch,
     /// One or more valid, non-overlapping matches were found.
     Matches(Vec<NormalizedMatch>),
-    /// Normalized matching found candidates but they are ambiguous or unsafe (overlapping remapped
-    /// spans, or partial-expansion matches that don't roundtrip correctly). The caller should treat
-    /// this as an explicit ambiguity error, NOT as "string not found."
+    /// Normalized matching found candidates but they are ambiguous or unsafe.
     Ambiguous,
 }
 
@@ -186,8 +174,7 @@ pub(crate) fn find_normalized_match_positions(text: &str, pattern: &str) -> Norm
         return NormalizedMatchResult::NoMatch;
     }
 
-    // Collect all non-overlapping matches in normalized space and validate
-    // each candidate via roundtrip check.
+    // Collect all non-overlapping matches in normalized space and validate each candidate via roundtrip check.
     let mut validated = Vec::new();
     let mut had_rejected_candidates = false;
 
@@ -214,8 +201,7 @@ pub(crate) fn find_normalized_match_positions(text: &str, pattern: &str) -> Norm
         };
 
         // Roundtrip validation: the normalized original slice must exactly
-        // equal the normalized pattern.  This catches partial-expansion
-        // matches (e.g., pattern "-" matching inside "—" → "--").
+        // equal the normalized pattern.
         if normalize_confusables(orig_slice) != norm_pattern {
             had_rejected_candidates = true;
             continue;

@@ -1,8 +1,4 @@
 //! Marketplace plugin discovery.
-//!
-//! Sources:
-//! - `extraKnownMarketplaces` in `.claude/settings.json` (project-level)
-//! - `~/.claude/plugins/known_marketplaces.json` (user-level registry)
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -99,8 +95,7 @@ pub fn parse_enabled_disabled_plugins(json: &serde_json::Value) -> (Vec<String>,
     let Some(obj) = json.get("enabledPlugins").and_then(|v| v.as_object()) else {
         return (vec![], vec![]);
     };
-    // Deduplicate by plugin name: the same name may appear under different marketplace keys (e.g. "foo@market1": true, "foo@market2": false).
-    // If any entry for a name is `false`, the plugin is disabled (safe default).
+    // Deduplicate by plugin name: the same name may appear under different marketplace keys.
     let mut state: HashMap<String, bool> = HashMap::new();
     for (key, val) in obj {
         let name = key.split('@').next().unwrap_or(key).to_string();
@@ -150,9 +145,8 @@ struct KnownMarketplaceEntry {
     install_location: PathBuf,
 }
 
-/// Resolve user-level marketplaces from `known_marketplaces.json`, with their local `installLocation` paths.
-/// Plugin dirs are filtered to names listed in `~/.claude/settings{.local}.json` `enabledPlugins`, so never-installed catalog plugins are skipped.
-/// A `false` entry there is an installed-but-disabled plugin; it is still discovered so its state can be mirrored.
+/// Resolve user-level marketplaces from `known_marketplaces.json`, with their
+/// local `installLocation` paths.
 pub fn resolve_known_marketplaces() -> Vec<ResolvedMarketplace> {
     let Some(home) = xai_dirs::home_dir() else {
         return vec![];

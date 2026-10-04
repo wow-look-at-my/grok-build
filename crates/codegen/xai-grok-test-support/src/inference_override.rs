@@ -1,6 +1,4 @@
-//! What answers an inference request ahead of the fallback modes, tried in this order: a named
-//! expectation matching the request, the endpoint's compatibility FIFO, the required auth check,
-//! the request's conversation script, then the concurrency cap.
+//! What answers an inference request ahead of the fallback modes, tried in this order: a named expectation matching the request.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

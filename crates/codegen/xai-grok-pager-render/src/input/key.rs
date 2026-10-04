@@ -1,20 +1,4 @@
 //! Key shortcut types and the `key!()` macro.
-//!
-//! ```
-//! use xai_grok_pager::input::key::key;
-//!
-//! // Simple key
-//! let q = key!('q');
-//!
-//! // Key with modifier
-//! let ctrl_c = key!('c', CONTROL);
-//! let ctrl_shift_z = key!('z', CONTROL | SHIFT);
-//!
-//! // Match against a crossterm KeyEvent
-//! use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-//! let event = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-//! assert!(ctrl_c.matches(&event));
-//! ```
 
 use std::fmt;
 
@@ -252,8 +236,7 @@ pub fn is_paste_key(key: &KeyEvent) -> bool {
     if key!('v', CONTROL).matches(key) || key!('v', SUPER).matches(key) {
         return true;
     }
-    // WT's default Ctrl+V is text-only and drops image clipboards; Alt+V is unbound and reaches us.
-    // macOS Opt+V types `√`; Linux has no interceptor. AltGr is Ctrl+Alt, so exact modifier match is safe.
+    // WT's default Ctrl+V is text-only and drops image clipboards.
     #[cfg(target_os = "windows")]
     if key!('v', ALT).matches(key) {
         return true;
@@ -266,7 +249,6 @@ pub fn is_inline_paste_key(key: &KeyEvent) -> bool {
 }
 
 /// Ctrl+Z / Cmd+Z, the textarea's undo binding.
-/// Delegates to the owning crate's predicate so the chord can never fall out of sync with what the key does.
 pub fn is_undo_key(key: &KeyEvent) -> bool {
     xai_ratatui_textarea::is_undo_input(key)
 }
@@ -284,8 +266,8 @@ pub fn is_altgr(_modifiers: KeyModifiers) -> bool {
     false
 }
 
-/// Shift+Tab encodings: `BackTab` (most xterm-likes), `BackTab+SHIFT` (some terminals), `Tab+SHIFT` (kitty protocol, some Windows terminals).
-/// The `CycleMode` / `DashboardCycleMode` ActionDefs and [`is_shift_tab`] all read from this list.
+/// Shift+Tab encodings: `BackTab` (most xterm-likes), `BackTab+SHIFT` (some
+/// terminals), `Tab+SHIFT` (kitty protocol, some Windows terminals).
 pub fn shift_tab_keys() -> [KeyShortcut; 3] {
     [
         KeyShortcut::key(KeyCode::BackTab),
@@ -425,7 +407,7 @@ mod tests {
     #[test]
     fn shift_tab_all_encodings() {
         use crossterm::event::KeyEvent;
-        // The three encodings terminals use for Shift+Tab.
+        // The encodings terminals use for Shift+Tab.
         assert!(is_shift_tab(&KeyEvent::new(
             KeyCode::BackTab,
             KeyModifiers::NONE

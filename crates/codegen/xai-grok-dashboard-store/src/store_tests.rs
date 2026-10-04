@@ -1,12 +1,7 @@
 //! Tests run against the real store in temp directories only.
-//!
-//! Deliberately untested: the mapping from an exhausted busy budget to the typed busy error.
-//! Forcing it needs a peer connection holding the write lock past the journal crate's multi-second busy budget.
-//! That wait would dominate the suite's runtime, and the mapping is one shared helper on every operation's path.
 
 use std::time::Duration;
 
-// One contended write may consume SQLite's five-second busy timeout; this deadline detects a hung phase without racing that valid wait
 const TEST_PHASE_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn recv_phase(receiver: &std::sync::mpsc::Receiver<()>, phase: &str) {
@@ -147,8 +142,8 @@ fn open_creates_schema_and_roundtrips_snapshot() {
 #[test]
 fn eviction_at_capacity_is_lru_transactional_and_deterministic() {
     let (_tmp, mut store) = temp_store();
-    // Three members tie on last_change_unix_ms so both tie-break keys are exercised
-    // The kind key orders "build" before "conversation" within m000; the session_id key orders m000 before m001
+    // Members tie on last_change_unix_ms so both tie-break keys are exercised The kind key orders "build"
+    // before "conversation" within m000; the session_id key orders m000 before m001
     for tied in [
         new_member("m000", MemberKind::Build, MemberOrigin::Local, 1000),
         new_member("m000", MemberKind::Conversation, MemberOrigin::Local, 1000),
@@ -334,7 +329,7 @@ fn rekey_moves_row_and_ranks_atomically_and_merges_on_conflict() {
     moved.session_id = SessionId::new("a-new").unwrap();
     assert_eq!(store.snapshot().unwrap().members, vec![moved.clone()]);
 
-    // Merge arm: the target keeps origin/metadata and its own order_rank; its NULL pin_rank is filled from the old row; the old row is gone
+    // Merge arm: the target keeps origin/metadata and its own order_rank.
     let target = new_member("target", MemberKind::Conversation, MemberOrigin::Local, 200);
     store.insert_member(target.clone()).unwrap();
     store
@@ -369,8 +364,7 @@ fn rekey_moves_row_and_ranks_atomically_and_merges_on_conflict() {
     );
     assert_eq!(store.snapshot().unwrap().members, vec![moved, merged]);
 
-    // A missing old key errors with nothing changed, whatever the target: absent, self, or an existing member
-    // The last must not slip into the merge arm and report a merge that never happened
+    // A missing old key errors with nothing changed.
     let ghost = member_key("ghost", MemberKind::Build);
     let before = store.snapshot().unwrap();
     assert!(matches!(
@@ -842,7 +836,7 @@ fn two_connections_interleave_without_loss_and_data_version_fires_foreign_only()
     let db = default_db_path(tmp.path());
 
     let mut a = WorkspaceStore::open(&db).unwrap();
-    // The data_version inside the snapshot is the poll baseline: the two must agree when nothing happened in between
+    // The data_version inside the snapshot is the poll baseline: both must agree when nothing happened in between
     let base_a = a.snapshot().unwrap().data_version;
     let m1 = new_member("m1", MemberKind::Build, MemberOrigin::Local, 100);
     a.insert_member(m1.clone()).unwrap();
@@ -946,8 +940,8 @@ fn two_connections_interleave_without_loss_and_data_version_fires_foreign_only()
     a_events.send(()).unwrap();
     recv_phase(&b_events_rx, "connection B phase");
 
-    // Unsynchronized concurrent inserts from both connections
-    // When the scheduler produces contention the busy timeout absorbs it; no write may be lost either way
+    // Unsynchronized concurrent inserts from both connections When the
+    // scheduler produces contention the busy timeout absorbs it.
     for i in 0..10i64 {
         a.insert_member(new_member(
             &format!("a{i:02}"),

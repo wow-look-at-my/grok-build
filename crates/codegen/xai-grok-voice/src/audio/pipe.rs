@@ -1,5 +1,4 @@
 //! PCM-over-pipe code shared by the subprocess capture backends (Linux system recorder, macOS `__mic-capture` helper).
-//! This module holds the capture child's stop handle, a reader loop that forwards the child's stdout to the async STT sender, and a stderr drain.
 
 use std::io::Read;
 use std::process::Child;
@@ -41,9 +40,7 @@ impl ChildCaptureHandle {
 
 impl Drop for ChildCaptureHandle {
     fn drop(&mut self) {
-        // Always kill the child so the mic is released even when `stop()` was never called (e.g. the STT session ended on its
-        // own). Killing closes the child's stdout, so the reader thread's blocking `read` returns 0 and it exits `Drop` must
-        // never block (it may run on an async executor), so the reap happens on a detached thread.
+        // Always kill the child so the mic is released even when `stop()` was never called.
         self.stop.store(true, Ordering::Release);
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
@@ -57,8 +54,6 @@ impl Drop for ChildCaptureHandle {
     }
 }
 
-/// PCM read size from the child's stdout (bytes), ~64 ms at 16 kHz mono PCM16.
-/// Small enough to stream responsively, large enough to avoid syscall churn on the reader thread.
 pub(super) const READ_CHUNK: usize = 2048;
 
 /// Forward raw PCM from the child's stdout to the async STT sender until the child stops (EOF on kill), the consumer goes away, or `stop` is set.
@@ -79,9 +74,9 @@ pub(super) fn forward_pcm(
             // EOF: the child closed stdout (killed by teardown or exited).
             Ok(0) => break,
             Ok(n) => {
-                // Never park this thread on the channel: `stop()` joins it
-                // A send that waits on a stalled STT consumer would turn teardown into a hang. Shed load instead.
-                // (`read` itself is unblocked by the kill-on-stop path: killing the child closes stdout, so a waiting `read` returns 0.)
+                // Never park this thread on the channel: `stop()` joins it A
+                // send that waits on a stalled STT consumer would turn
+                // teardown into a hang. Shed load instead.
                 match pcm_tx.try_send(buf.get(..n).unwrap_or(&[]).to_vec()) {
                     Ok(()) => {}
                     Err(async_mpsc::error::TrySendError::Full(_)) => dropped += 1,
@@ -128,7 +123,7 @@ mod tests {
 
     #[test]
     fn forward_pcm_sheds_when_consumer_is_behind() {
-        // Two reads into a capacity-1 channel: first forwarded, second shed.
+        // Reads into a capacity-1 channel: first forwarded, second shed.
         let pcm = vec![7u8; 2 * READ_CHUNK];
         let (tx, mut rx) = async_mpsc::channel::<Vec<u8>>(1);
         forward_pcm(

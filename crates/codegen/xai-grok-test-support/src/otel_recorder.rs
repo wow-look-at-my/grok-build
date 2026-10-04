@@ -1,5 +1,4 @@
-//! The typed log behind the mock OTLP server, in arrival order. Public so a test with a transport of its
-//! own (gRPC, TLS) records into it and reads it through the same readers.
+//! The typed log behind the mock OTLP server, in arrival order.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -64,8 +63,7 @@ pub enum OtelRecorderError {
     Fault(OtelFault),
 }
 
-/// Caps sized for one long session; each log evicts oldest first past its cap. Faults are not
-/// capped: they are rare, and the first one must stay the first.
+/// Caps sized for one long session; each log evicts oldest first past its cap.
 const MAX_LOGGED_EVENTS: usize = 16_384;
 const MAX_LOGGED_EXPORTS: usize = 1_024;
 

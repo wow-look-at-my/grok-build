@@ -1,17 +1,4 @@
 //! Full-text search over scrollback text, scanned on a background thread.
-//!
-//! [`ScrollbackSearchIndex`] caches each entry's [`searchable_text`], keyed by the scrollback's `content_generation`.
-//! The searchable text is rendered plain text for markdown blocks and the stored source for the rest.
-//! It holds one owned `String` per entry (never a per-rendered-line `Vec`).
-//! Memory therefore tracks total searchable-text size rather than rendered-line count.
-//!
-//! The cache is shared as an `Arc<[IndexedEntry]>` so it can be handed to a background [`SearchDaemon`] without re-cloning the strings.
-//! The daemon runs the regex scan off the input thread.
-//! Query mutations only enqueue the latest corpus and query (O(1) on the UI thread).
-//! [`ScrollbackSearchState::poll`] picks up results once the scan completes.
-//! This keeps per-keystroke typing responsive on long sessions where a synchronous scan would stall the input thread.
-//!
-//! [`searchable_text`]: super::block::RenderBlock::searchable_text
 
 use std::ops::Range;
 use std::sync::{
@@ -38,8 +25,8 @@ pub struct ScrollbackMatch {
     pub byte_range: Range<usize>,
 }
 
-/// Per-entry cache of searchable source text plus a query scan over it. `sync` rebuilds the cache only when
-/// scrollback content changes. `find` scans the cache without touching the scrollback.
+/// Per-entry cache of searchable source text plus a query scan over it.
+/// `sync` rebuilds the cache only when scrollback content changes.
 #[derive(Debug, Default)]
 pub struct ScrollbackSearchIndex {
     entries: Arc<[IndexedEntry]>,
@@ -83,8 +70,8 @@ impl ScrollbackSearchIndex {
         self.entries.clone()
     }
 
-    /// All matches for `matcher`, in scrollback order. Call `sync` first so the cache reflects current content. An
-    /// empty query yields nothing (an empty pattern would otherwise match at every byte).
+    /// All matches for `matcher`, in scrollback order. Call `sync` first so
+    /// the cache reflects current content.
     pub fn find(&self, matcher: &TextMatcher) -> Vec<ScrollbackMatch> {
         scan_matches(&self.entries, matcher)
     }
@@ -123,21 +110,15 @@ fn scan_matches(entries: &[IndexedEntry], matcher: &TextMatcher) -> Vec<Scrollba
 }
 
 /// Latest scan results published by the daemon for the UI thread to pick up.
-///
-/// `request_generation` is assigned synchronously by the UI and identifies the exact query/corpus request that produced this snapshot.
 #[derive(Clone, Default, Debug)]
 struct SearchSnapshot {
     matches: Arc<[ScrollbackMatch]>,
     request_generation: u64,
     /// The query these matches were computed for.
-    /// `poll` compares it against the live editor and drops results for a query the user typed past while the scan was in flight.
-    /// The match count and cursor therefore never desync from the visible query.
     query: String,
 }
 
-/// Work sent from the UI thread to the daemon. Each keystroke is one atomic `Update` carrying the latest query
-/// plus, only when content changed, the new corpus. Bundling them means the daemon can never wake having seen a new
-/// corpus but not yet the matching query. A split like that would publish one stale result before correcting.
+/// Work sent from the UI thread to the daemon.
 enum SearchMsg {
     Update {
         /// New corpus to scan, or `None` to keep the corpus the daemon holds.
@@ -197,7 +178,6 @@ struct SearchDaemon {
     shared: Arc<Mutex<SearchSnapshot>>,
     tx: Sender<SearchMsg>,
     /// Deliberately detached, never joined: closing a search must not block the UI on an in-flight scan.
-    /// `Stop` and channel-disconnect both end the thread, and the worker owns its `Arc` clones, so dropping this is safe.
     _handle: JoinHandle<()>,
 }
 
@@ -205,8 +185,6 @@ impl SearchDaemon {
     fn new() -> Self {
         let shared = Arc::new(Mutex::new(SearchSnapshot::default()));
         // Unbounded so `update_query`'s send never blocks the input thread.
-        // A bounded channel could stall the 257th keystroke on a full buffer, and dropping on full (try_send) could lose the final query
-        // Messages are tiny (an Arc pointer and the query) and the daemon drains the whole queue on each wakeup, so it stays short in practice
         let (tx, rx) = channel::<SearchMsg>();
 
         let out = shared.clone();
@@ -229,7 +207,6 @@ impl SearchDaemon {
                 };
 
                 // Every non-`Stop` burst carries a query, so rescan once here.
-                // Compile and scan off the lock; the mutex only guards the quick snapshot swap below, never the scan itself
                 let matcher = TextMatcher::new(query.as_str(), QueryKind::Regex);
                 let matches: Arc<[ScrollbackMatch]> = if query.is_empty() || matcher.is_error() {
                     Arc::from([])
@@ -254,7 +231,7 @@ impl SearchDaemon {
 
 impl Drop for SearchDaemon {
     fn drop(&mut self) {
-        // Best-effort: a closed channel just means the thread already exited.
+        // Best-effort: a closed channel means the thread already exited.
         let _ = self.tx.send(SearchMsg::Stop);
     }
 }
@@ -266,7 +243,6 @@ pub struct ScrollbackSearchState {
     /// Canonical editable query and cursor.
     editor: LineEditor,
     /// Cached searchable text; re-synced lazily on content change, never per frame.
-    /// Lives on the UI thread and is handed to the daemon as an `Arc`.
     index: ScrollbackSearchIndex,
     /// Compiled query derived from `editor` for highlighting and error state.
     matcher: TextMatcher,
@@ -301,9 +277,8 @@ impl ScrollbackSearchState {
         }
     }
 
-    /// Replace the canonical query, recompile its derived matcher, and enqueue the latest corpus/query snapshot for the background scan.
-    /// The corpus is only re-synced and re-sent when scrollback content changed since the last send.
-    /// Steady-state keystrokes therefore just push a query string.
+    /// Replace the canonical query, recompile its derived matcher, and
+    /// enqueue the latest corpus/query snapshot for the background scan.
     pub fn update_query(&mut self, query: &str, state: &ScrollbackState) {
         self.editor.set_text(query);
         self.update_derived_query(state);
@@ -313,16 +288,14 @@ impl ScrollbackSearchState {
         let query = self.editor.text().to_owned();
         // Compile UI-side: the render layer highlights from this matcher, and it backs `query` / `has_error`, all of which must update immediately
         self.matcher = TextMatcher::new(query.as_str(), QueryKind::Regex);
-        // Keep the last settled result navigable while the next scan is in flight
-        // Empty and malformed queries are known synchronously to have no matches, so those can clear immediately
+        // Keep the last settled result navigable while the next scan is in
+        // flight Empty and malformed queries are known synchronously.
         if query.is_empty() || self.matcher.is_error() {
             self.matches = Arc::from([]);
             self.current = None;
         }
 
-        // Re-send the corpus only when `sync` actually rebuilt it (content changed)
-        // Otherwise `None` tells the daemon to keep the corpus it already holds
-        // The index itself guards the rebuild on `content_generation`, so no separate generation tracking is needed
+        // Re-send the corpus only when `sync` rebuilt it (content changed) Otherwise `None` tells the daemon.
         let corpus = self.index.sync(state).then(|| self.index.entries_arc());
         let Some(request_generation) = self.request_generation.checked_add(1) else {
             tracing::debug!("scrollback search request generation exhausted; dropping update");
@@ -334,7 +307,7 @@ impl ScrollbackSearchState {
             query,
             request_generation,
         }) {
-            // A failed send means the daemon thread is gone (panicked or already stopped); search has silently stopped working, so leave a trace
+            // A failed send means the daemon thread is gone (panicked or already stopped); search has silently
             tracing::debug!(%err, "scrollback search daemon unavailable; dropping query update");
         }
     }
@@ -372,16 +345,14 @@ impl ScrollbackSearchState {
     /// Returns `true` when the results changed (so the caller can redraw / reveal the new match).
     /// On a change the cursor parks on the first match, preserving the old "jump to the first match when the query changes" behavior.
     pub fn poll(&mut self) -> bool {
-        // Hold the lock only for the cheap compares (and, on a real change, an Arc-pointer clone)
-        // Never clone the whole snapshot: that would heap-allocate its `query: String` on every no-change tick at ~30 Hz
+        // Hold the lock only for the cheap compares (and, on a real change, an Arc-pointer clone) Never clone the whole snapshot.
         let guard = self.daemon.shared.lock().unwrap();
         if guard.request_generation == self.last_seen_generation {
             return false;
         }
         self.last_seen_generation = guard.request_generation;
-        // Drop a scan that finished for a superseded query
-        // While it was in flight the user kept typing, so the editor and derived matcher have already moved on
-        // Applying it would desync the match count and cursor from the visible query until the current query's scan lands
+        // Drop a scan that finished for a superseded query While it was in
+        // flight the user kept typing.
         if guard.request_generation != self.request_generation || guard.query != self.query() {
             return false;
         }
@@ -445,8 +416,8 @@ impl ScrollbackSearchState {
         self.editor.viewport(width)
     }
 
-    /// The compiled query regex for the highlight pass, or `None` when the query is empty or fails to compile (nothing to highlight).
-    /// Decoupled from the index; the render layer re-runs it per visible row.
+    /// The compiled query regex for the highlight pass, or `None` when the
+    /// query is empty or fails to compile (nothing to highlight).
     pub fn highlight_regex(&self) -> Option<regex::Regex> {
         (!self.query().is_empty() && !self.matcher.is_error())
             .then(|| self.matcher.compiled_regex().clone())
@@ -516,9 +487,7 @@ mod tests {
 
     #[test]
     fn find_matches_markdown_phrase_spanning_emphasis() {
-        // Regression for "highlighted but no matches": the index searches the rendered text
-        // A phrase that spans markdown emphasis is therefore found, matching what the on-screen highlight shows
-        // Over the raw source `this is **really** important` the phrase would be missed
+        // Regression for "highlighted but no matches".
         let mut state = ScrollbackState::new();
         let id = state.push_block(RenderBlock::agent_message("this is **really** important"));
 
@@ -907,8 +876,7 @@ mod tests {
 
     #[test]
     fn update_query_refinds_against_cached_corpus() {
-        // Changing the query without changing content re-scans the same corpus
-        // No new corpus is sent (`Update.corpus` is `None`), so the daemon reuses the corpus it holds
+        // Changing the query without changing content re-scans the same corpus No new corpus is sent (`Update.corpus` is `None`).
         let state = state_with(&["alpha beta", "beta gamma"]);
         let mut search = ScrollbackSearchState::open();
 
@@ -1009,8 +977,7 @@ mod tests {
 
     #[test]
     fn poll_rejects_same_query_and_aba_stale_snapshots() {
-        // The daemon parks on recv() until a message is sent
-        // This test never calls update_query, so the shared snapshot is uncontested and we can publish snapshots in a deterministic order
+        // The daemon parks on recv() until a message is sent This test never calls update_query.
         let mut search = ScrollbackSearchState::open();
         search.editor.set_text("A");
         search.matcher = TextMatcher::new("A", QueryKind::Regex);
@@ -1024,7 +991,6 @@ mod tests {
             byte_range: 0..1,
         };
 
-        // Generation 1 used the same visible query but an older corpus.
         *search.daemon.shared.lock().unwrap() = SearchSnapshot {
             matches: std::sync::Arc::from([a_match.clone()]),
             request_generation: 1,
@@ -1033,7 +999,6 @@ mod tests {
         assert!(!search.poll(), "same-query stale corpus result is dropped");
         assert_eq!(search.match_count(), 0);
 
-        // Generation 2 is the intermediate B in the A-B-A sequence
         *search.daemon.shared.lock().unwrap() = SearchSnapshot {
             matches: std::sync::Arc::from([a_match.clone()]),
             request_generation: 2,
@@ -1054,9 +1019,7 @@ mod tests {
 
     #[test]
     fn poll_without_new_generation_keeps_navigation_cursor() {
-        // This is the generation guard's load-bearing job
-        // Once results land and the user navigates, polls that observe no new daemon write must not snap the cursor back to the first match
-        // Deleting the guard would regress this without tripping any other test
+        // This is the generation guard's load-bearing job Once results land.
         let state = state_with(&["foo", "foo", "foo"]);
         let mut search = ScrollbackSearchState::open();
         update_and_wait(&mut search, "foo", &state);
@@ -1082,9 +1045,7 @@ mod tests {
 
     #[test]
     fn coalesced_burst_carries_corpus_forward_to_last_query() {
-        // Settle once so the daemon holds the corpus, then fire a burst of queries back-to-back. No polling happens
-        // between sends, so the messages coalesce in the channel. None of the burst updates carry a corpus (content is
-        // unchanged), so the daemon must reuse the corpus it holds and settle on the LAST query.
+        // Settle once so the daemon holds the corpus, then fire a burst of queries back-to-back.
         let state = state_with(&["alpha", "alpha beta", "beta gamma"]);
         let mut search = ScrollbackSearchState::open();
         update_and_wait(&mut search, "alpha", &state);
@@ -1094,8 +1055,7 @@ mod tests {
         search.update_query("alpha", &state);
         search.update_query("gamma", &state);
 
-        // poll() drops snapshots for the superseded earlier queries (the matcher already moved to "gamma")
-        // The first true poll is therefore the last query's result, proving the corpus survived the None-corpus burst
+        // poll() drops snapshots for the superseded earlier queries (the matcher already moved to "gamma").
         let mut settled = false;
         for _ in 0..1000 {
             if search.poll() {

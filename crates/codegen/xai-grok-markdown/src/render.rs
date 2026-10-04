@@ -1,6 +1,4 @@
 //! Markdown renderer: transforms parsed markdown buffers into styled output.
-//!
-//! After parsing with `MarkdownParser`, use `ParsedMarkdown` to render to either ratatui Lines or ANSI strings.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -294,9 +292,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                     slot.copy_from_slice(t.to.as_bytes());
                 }
             }
-            // Every byte in `bytes` came from `self.text` or from a transform's
-            // own `String`, so undecodable bytes here can only mean a broken
-            // splice. The panic names that; lossy would hide it in the output.
+            // Every byte in `bytes` came from `self.text` or from a transform's own `String`.
             #[allow(clippy::disallowed_methods)]
             let rendered = String::from_utf8(bytes).expect("force transforms preserve UTF-8");
             Some(rendered)
@@ -316,9 +312,6 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
         let mut current = (0..0, Style::new());
 
         /// Flush the pending styled run `crange` and start a new one at `range`.
-        ///
-        /// Both ranges are pulldown-cmark source ranges over `text`, so their
-        /// ends name char boundaries and the slice below cannot split a char.
         #[allow(clippy::string_slice)] // `crange` is a source range over `text`
         fn push(
             out: &mut String,
@@ -455,8 +448,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                             &mut source_map,
                             &mut rendered_offset,
                         );
-                        // Block lines must start at a line boundary; a display-math replacement can occur mid-paragraph
-                        // Styled chunks end with a reset sequence after the newline, so check both forms
+                        // Block lines must start at a line boundary.
                         let at_line_start =
                             out.is_empty() || out.ends_with('\n') || out.ends_with("\n\x1b[0m");
                         if !at_line_start {
@@ -582,7 +574,6 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
             let to = to.min(text.len());
             let from = from.min(to);
             // Use as_bytes() to avoid panicking on non-char-boundary offsets.
-            // This is safe because '\n' (0x0A) is a single-byte ASCII value that can never appear as a UTF-8 continuation byte (0x80..0xBF)
             text.as_bytes()
                 .get(from..to)
                 .map(|s| s.iter().filter(|&&b| b == b'\n').count())
@@ -595,8 +586,9 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                 && mermaid_replace.is_none()
                 && ev.pos > last_pos
             {
-                // Split text processing at the checkpoint boundary when last_pos < cp_byte <= ev.pos:
-                // process [last_pos..cp_byte], capture lines.len(), then process [cp_byte..ev.pos]
+                // Split text processing at the checkpoint boundary when
+                // last_pos < cp_byte <= ev.pos: process [last_pos..cp_byte],
+                // capture lines.len().
                 let split_at_checkpoint = checkpoint_output_lines.is_none()
                     && checkpoint_info
                         .map(|(_, cp_byte)| last_pos < cp_byte && cp_byte <= ev.pos)
@@ -604,9 +596,8 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
 
                 let cp_byte = checkpoint_info.map(|(_, cp)| cp).unwrap_or(0);
 
-                // Snap cp_byte to the nearest char boundary
-                // Checkpoint byte offsets come from pulldown-cmark event ranges, which should always be char-aligned
-                // Snapping forward is safe: it only affects where we split the text for line counting
+                // Snap cp_byte to the nearest char boundary Checkpoint byte
+                // offsets come from pulldown-cmark event ranges.
                 let cp_byte = {
                     let mut b = cp_byte;
                     while b < self.text.len() && !self.text.is_char_boundary(b) {
@@ -616,7 +607,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                 };
 
                 let ranges: &[(usize, usize)] = if split_at_checkpoint {
-                    // Process in two parts, capturing checkpoint between them
+                    // Process in parts, capturing checkpoint between them
                     &[(last_pos, cp_byte), (cp_byte, ev.pos)]
                 } else {
                     // Process as single range
@@ -659,8 +650,8 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                         let at_line_start = range_start == 0
                             || self.text.as_bytes().get(range_start - 1) == Some(&b'\n');
                         if at_line_start {
-                            // Check if this hidden block is a code fence (``` or ~~~).
-                            // Only code fences need separator handling; heading markers (#) are also hidden at line start but are unpaired
+                            // Check if this hidden block is a code fence (```
+                            // or ~~~).
                             let hidden_text = self
                                 .text
                                 .get(range_start..range_end)
@@ -707,8 +698,9 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                             let chunk_src_start = text_start;
                             let chunk_src_end = text_start + text.len();
 
-                            // Advance the cursor past links that ended before this chunk starts, then check if any remaining link overlaps it
-                            // When none does, skip all hyperlink bookkeeping so the common no-link chunk does no extra work
+                            // Advance the cursor past links that ended before
+                            // this chunk starts, then check if any remaining
+                            // link overlaps it When none does.
                             while self
                                 .buffers
                                 .link_targets
@@ -872,13 +864,12 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                         };
                         table_replace = Some(ev.index);
 
-                        // Tables always start at a line boundary, so for them this is a no-op
-                        // A display-math block replacement can occur mid-paragraph (`text $$x$$ more`)
-                        // Without the flush, the pending "text " spans would be emitted AFTER the block lines
+                        // Tables always start at a line boundary, so for them
+                        // this is a no-op A display-math block replacement
+                        // can occur mid-paragraph (`text $$x$$ more`).
                         if !self.buffers.current_spans.is_empty() {
                             line_source_map.push(current_source_line);
                             lines.push(Line::from(std::mem::take(&mut self.buffers.current_spans)));
-                            // cur_col_in_line is reset unconditionally after the block lines are emitted below
                         }
 
                         // Update source line to table start
@@ -919,7 +910,6 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                                 cells: trepl.cell_copies.clone(),
                             });
                         }
-                        // Table emits whole pre-rendered lines; reset col so any subsequent inline content starts at column 0
                         cur_col_in_line = 0;
 
                         last_pos = trepl.range.end;
@@ -987,8 +977,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
         // Handle remaining text
         let len = self.text.len();
         if last_pos < len {
-            // Apply force transforms only; non-force transforms have never been applied in this trailing path
-            // Force transforms preserve byte length, so source offsets below stay valid
+            // Apply force transforms only; non-force transforms have never been applied in this trailing path Force transforms preserve byte length.
             let raw = self.text.get(last_pos..len).unwrap_or("");
             let transformed = self.apply_transforms(raw, last_pos, false);
             debug_assert_eq!(transformed.len(), raw.len());
@@ -1100,12 +1089,11 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
         if checkpoint_output_lines.is_none()
             && let Some((_, cp_byte)) = checkpoint_info
         {
-            // The checkpoint is at the start of the NEXT block, so the frozen content must not include anything at or after cp_byte
-            // line_source_map[i] is the source line at which output line i was created; source_line_at_cp is the source line containing cp_byte
+            // The checkpoint is at the start of the NEXT block.
 
-            // Counted over bytes for the same reason as `count_newlines_in_range`:
-            // `cp_byte` is a checkpoint offset that can land mid-character, and
-            // '\n' (0x0A) never appears inside a multi-byte sequence.
+            // Counted over bytes for the same reason as
+            // `count_newlines_in_range`: `cp_byte` is a checkpoint offset
+            // that can land mid-character.
             let source_line_at_cp = self
                 .text
                 .as_bytes()
@@ -1115,8 +1103,9 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
                 .filter(|&&b| b == b'\n')
                 .count();
 
-            // When the checkpoint is at or past the end of the text, ALL output lines are frozen (the checkpointed block consumed the entire input)
-            // Otherwise, output lines created at source lines strictly before the checkpoint source line are frozen
+            // When the checkpoint is at or past the end of the text, ALL
+            // output lines are frozen (the checkpointed block consumed the
+            // entire input) Otherwise.
             let complete_lines = if cp_byte >= self.text.len() {
                 lines.len()
             } else {
@@ -1276,8 +1265,6 @@ mod tests {
 
     #[test]
     fn test_emoji_after_thematic_break_does_not_panic() {
-        // In "---\n\n## 📐 H\n\n", 📐 is at bytes 8..12 and the checkpoint offset lands at byte 10 (inside the emoji)
-        // That panics in count_newlines_in_range, which does text[from..to]
         let md = "---\n\n## 📐 H\n\n";
         let (_output, _cp) = render_markdown_ratatui_full(md, test_style::STYLE, true, None);
     }
@@ -1421,8 +1408,7 @@ mod tests {
         let text = lines_to_text(&output.lines);
         eprintln!("Wrapped table: {text:#?}");
 
-        // The header "Very Long Column Name" should be wrapped across multiple lines since it doesn't fit in the constrained column width
-        // All content should still be present (no truncation).
+        // The header "Very Long Column Name" should be wrapped across multiple lines since it doesn't fit.
         let all_text: String = text.join("");
         assert!(
             all_text.contains("Very") && all_text.contains("Long") && all_text.contains("Name"),
@@ -1454,8 +1440,6 @@ mod tests {
         // Single-char segments separated by hyphens
         assert_eq!(words("a-b-c"), vec!["[a-|]", "[b-|]", "[c|]"]);
 
-        // Unequal sides: punct attaches to shorter side to minimize max
-        // ABCD-EFG: left gives max(5,3)=5, right gives max(4,4)=4, so right wins
         assert_eq!(words("ABCD-EFG"), vec!["[ABCD|]", "[-EFG|]"]);
 
         // Comma and dot between digits stay together (number formatting)
@@ -1463,11 +1447,7 @@ mod tests {
         assert_eq!(words("3.14"), vec!["[3.14|]"]);
         assert_eq!(words("1.0.2"), vec!["[1.0.2|]"]);
 
-        // Hyphens between digits are breakable (phones, dates, IDs)
-        // Attachment is chosen to minimize max segment width.
-        // 2019-03-15: right gives max(4,3,3)=4, left gives max(5,3,2)=5, so right wins
         assert_eq!(words("2019-03-15"), vec!["[2019|]", "[-03|]", "[-15|]"]);
-        // 555-0101: right gives max(3,5)=5 vs left max(4,4)=4, so left wins
         assert_eq!(words("555-0101"), vec!["[555-|]", "[0101|]"]);
         // Verify a full phone number breaks correctly
         let phone = words("+44-20-7555-0118");
@@ -1553,7 +1533,7 @@ mod tests {
             Some(30), // narrow enough to force wrapping in column B
         );
 
-        // Find the lines that contain "abc"; they should have a styled span with the code style, not just plain text
+        // Find the lines that contain "abc"; they should have a styled span with the code style, not plain text
         let mut found_code_span = false;
         for line in &output.lines {
             for span in &line.spans {
@@ -1578,8 +1558,7 @@ mod tests {
     /// Cell wrapping can make `prev_len` (the sum of wrapped-line byte lengths) land inside a multi-byte character sequence.
     #[test]
     fn test_table_cell_with_multibyte_chars_does_not_panic() {
-        // Em-dash '—' is 3 bytes (0xE2 0x80 0x94)
-        // Force wrapping so the prev_len calculation for the second visual line can land mid-char
+        // Em-dash '—' is a few bytes (0xE2 0x80 0x94) Force wrapping so the prev_len calculation.
         let md = "| A |\n|---|\n| hello world — goodbye world |\n\n";
         let mut buffers = crate::MarkdownBuffers::new();
         let (output, _) = crate::render_markdown_ratatui_with_buffers_width(
@@ -1602,7 +1581,7 @@ mod tests {
     /// Same regression for CJK and emoji characters in table cells.
     #[test]
     fn test_table_cell_with_cjk_and_emoji_does_not_panic() {
-        // Mix CJK (3 bytes each), emoji (4 bytes), and ASCII to stress char boundaries.
+        // Mix CJK (a few bytes each), emoji (a few bytes), and ASCII to stress char boundaries.
         let md = "| Col |\n|-----|\n| \u{4F60}\u{597D}\u{4E16}\u{754C} hello \u{1F680}\u{1F30D} world |\n\n";
         let mut buffers = crate::MarkdownBuffers::new();
         let (output, _) = crate::render_markdown_ratatui_with_buffers_width(
@@ -1644,7 +1623,6 @@ mod tests {
         rows
     }
 
-    /// A six-column table of unbreakable tokens must reflow inside cells and grow taller.
     /// It must never exceed the width budget or lose the right border.
     #[test]
     fn test_table_six_col_unbreakable_tokens_fit_width_50_40_30() {
@@ -1859,7 +1837,6 @@ mod tests {
     /// Re-matching leaks link style and hyperlink ranges into the plain fragment.
     #[test]
     fn test_table_hard_split_adjacent_link_and_plain_spans_stay_separate() {
-        // Cell "x aaaaaa" wraps at content width 2 into fragments "x" / "aa" / "aa" / "aa": two linked, then one plain
         let md = "| A |\n|---|\n| x [aaaa](https://example.com)aa |\n\n";
 
         let mut buffers = crate::MarkdownBuffers::new();
@@ -1873,7 +1850,7 @@ mod tests {
         );
         let lines = lines_to_text(&output.lines);
 
-        // Each content line renders its fragment as exactly one span; a mis-projected fragment straddles two source spans and splits
+        // Each content line renders its fragment as exactly one span; a mis-projected fragment straddles source spans and splits
         let fragment_spans: Vec<Vec<&str>> = output
             .lines
             .iter()
@@ -1893,7 +1870,7 @@ mod tests {
             "fragments must not straddle span boundaries: {lines:#?}"
         );
 
-        // Only the two linked fragments carry hyperlinks, sharing one id and covering exactly the linked text on their lines
+        // Only both linked fragments carry hyperlinks, sharing one id and covering exactly the linked text on their lines
         let links: Vec<_> = output
             .hyperlinks
             .iter()
@@ -2017,11 +1994,10 @@ mod tests {
     /// Table source map: rendered line numbers must not exceed the table's actual source line count, and must map to the correct source lines.
     #[test]
     fn test_table_source_map_stays_within_bounds() {
-        // 4 source lines: header (0), separator (1), row1 (2), row2 (3)
         let md = "| A | B |\n|---|---|\n| x | y |\n| w | z |\n\n";
 
         let table_start_line = 0usize;
-        let table_source_lines = 4usize; // header + separator + 2 rows
+        let table_source_lines = 4usize;
 
         let (output, _) = render_markdown_ratatui_full(md, test_style::STYLE, true, None);
 
@@ -2088,7 +2064,7 @@ mod tests {
             Some(30),
         );
 
-        let table_source_lines = 3; // header + separator + 1 row
+        let table_source_lines = 3;
         for (i, &src_line) in output.line_source_map.iter().enumerate() {
             assert!(
                 src_line < table_source_lines,
@@ -2441,8 +2417,7 @@ mod tests {
 
     #[test]
     fn test_soft_break_in_bullet_list_item_preserves_lines() {
-        // Lazy continuation inside a list item is a soft break, but the continuation indent belongs to a new visual line
-        // Collapsing would leave stray indent whitespace mid-line
+        // Lazy continuation inside a list item is a soft break.
         let md = "- first line\n  second line\n";
         let (output, _) = render_markdown_ratatui_full(md, test_style::STYLE, true, None);
         let text = lines_to_text(&output.lines);
@@ -2491,8 +2466,7 @@ mod tests {
 
     #[test]
     fn test_soft_break_crlf_range_preserves_length() {
-        // pulldown emits SoftBreak with a 2-byte range for CRLF
-        // The transform must replace both bytes to keep the byte-length invariant force transforms rely on in render_ansi
+        // pulldown emits SoftBreak with a 2-byte range for CRLF The transform must replace both bytes.
         let md = "Foo bar\r\nbaz qux.";
         let (output, _) = render_markdown_ratatui_full(md, test_style::STYLE, false, None);
         let text = lines_to_text(&output.lines);
@@ -2597,7 +2571,7 @@ mod tests {
     }
 }
 
-/// Integration tests for LaTeX math rendering across all four delimiter forms (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`).
+/// Integration tests for LaTeX math rendering across all of them delimiter forms (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`).
 #[cfg(test)]
 mod math_tests {
     use crate::style::test_style;
@@ -2665,8 +2639,7 @@ mod math_tests {
 
     #[test]
     fn padded_paren_inline_math_renders_unicode() {
-        // Regression: whitespace just inside `\( … \)` made the normalized `$ … $` violate pulldown's dollar-math flanking rule
-        // It used to render as raw `$ … $`; the normalizer now trims that padding
+        // Regression: whitespace inside `\( … \)` made the normalized `$ … $` violate pulldown's dollar-math flanking.
         let lines = pretty_lines("Sum \\( x+y \\) end.\n\n");
         assert_eq!(
             first_str(&lines).unwrap_or(""),
@@ -2716,9 +2689,7 @@ mod math_tests {
 
     #[test]
     fn bracket_display_math_in_heading() {
-        // pulldown-cmark keeps heading content inside a `Heading` block with no wrapping paragraph
-        // So the `\[...\]` source scan must also run on heading end
-        // `$$...$$` in the same position already converts via `Event::DisplayMath`
+        // pulldown-cmark keeps heading content inside a `Heading` block with no wrapping paragraph So the `\[...\]` source scan must also run.
         let lines = pretty_lines("## Identity \\[x^2 + y^2 = z^2\\]\n\nAfter.\n\n");
         let joined = lines.join("\n");
         assert!(joined.contains("x² + y² = z²"), "got: {lines:#?}");
@@ -2790,8 +2761,7 @@ mod math_tests {
 
     #[test]
     fn display_math_bracket_in_raw_mode_shows_canonical_dollars() {
-        // The delimiter normalizer rewrites `\[…\]` to `$$…$$` before parsing, so raw mode shows the canonical `$$` form
-        // The math-to-Unicode conversion is still a pretty-only overlay, so the TeX body itself is preserved
+        // The delimiter normalizer rewrites `\[…\]` to `$$…$$` before parsing.
         let text = "\\[E = mc^2\\]\n\n";
         let (output, _) = render_markdown_ratatui_full(text, test_style::STYLE, false, None);
         let joined = lines_to_text(&output.lines).join("\n");
@@ -2801,8 +2771,6 @@ mod math_tests {
 
     #[test]
     fn display_math_with_lone_equals_line_renders_block() {
-        // Symptom 1: a lone `=` line inside a display span is a CommonMark setext underline
-        // Unjoined, the first line became an H1 and the math rendered as raw TeX
         let text = "The loss:\n\n\\[\n\\boxed{\n\\mathcal{L}_{\\text{MTP}}\n=\n\\sum_{i=0}^{2}\n\\gamma^{i}\\,\n\\mathbb{E}_{\\text{positions, mask}}\n\\Big[\n\\mathrm{KL}\\big(\n  \\mathrm{softmax}(z_{\\text{torso}}^{(s_i)})\n  \\;\\big\\|\\;\n  \\mathrm{softmax}(z_{\\text{draft}}^{(i)})\n\\big)\n\\Big]\n}\n\\]\n\nAfter.\n\n";
         let lines = pretty_lines(text);
         let joined = lines.join("\n");
@@ -2830,8 +2798,6 @@ mod math_tests {
 
     #[test]
     fn text_subscript_in_table_cell_renders_readable() {
-        // Symptom 2: `p_{\text{torso}}` in a table cell became the modifier-letter run `pₜₒᵣₛₒ`
-        // That run renders with visible gaps in fonts lacking those glyphs
         let text = "| Who | Soft-teacher |\n|-----|--------------|\n| **Torso** | \\(p_{\\text{torso}}(\\cdot \\mid T_0,\\ldots,T_i)\\) |\n\n";
         let lines = pretty_lines(text);
         let joined = lines.join("\n");
@@ -2869,9 +2835,7 @@ mod math_tests {
 
     #[test]
     fn paren_inline_math_in_table_cell_renders_unicode() {
-        // `\(…\)` inside a table cell must convert
-        // Previously the backslash-form scanner was disabled inside tables, leaving raw TeX
-        // Normalization rewrites `\(…\)` to `$…$` before parsing, so the existing in-cell `$` path converts it
+        // `\(…\)` inside a table cell must convert the backslash-form scanner was disabled inside tables.
         let text = "| Mode | Metric |\n|------|--------|\n| Rate | \\(\\alpha + \\beta\\) |\n\n";
         let lines = pretty_lines(text);
         let joined = lines.join("\n");
@@ -2937,8 +2901,7 @@ mod math_tests {
 
     #[test]
     fn bracket_math_inside_link_label_keeps_link_target() {
-        // The normalizer rewrites `\[x\]` to `$$x$$` outside code, so display math inside a link label now converts (like a literal `$$…$$`)
-        // That construct is degenerate and exceedingly rare in model output; the invariant we keep is that the link target survives
+        // The normalizer rewrites `\[x\]` to `$$x$$` outside code.
         let lines = pretty_lines("See [\\[x\\] notes](https://example.com) now.\n\n");
         let joined = lines.join("\n");
         assert!(
@@ -3058,7 +3021,6 @@ mod entity_tests {
 
     #[test]
     fn numeric_decimal_and_hex_entities() {
-        // &#60; = '<', &#x3e; = '>'
         let lines = pretty_lines("a &#60;b&#x3e; c\n\n");
         assert_eq!(
             first_str(&lines).unwrap_or(""),
@@ -3069,7 +3031,7 @@ mod entity_tests {
 
     #[test]
     fn full_html5_named_entities_decoded() {
-        // Beyond the XML core set: these must decode in prose just like they already do in table cells (via pulldown), keeping the two consistent
+        // Beyond the XML core set: these must decode in prose like they already do in table cells (via pulldown).
         let lines = pretty_lines("&mdash; &copy; &hellip; &rarr; &times;\n\n");
         assert_eq!(
             first_str(&lines).unwrap_or(""),
@@ -3124,8 +3086,7 @@ mod entity_tests {
 
     #[test]
     fn entity_inside_inline_math_does_not_corrupt() {
-        // The entity sits inside a `\(...\)` math span
-        // The math transform owns those bytes, so the entity scan must not add an overlapping transform
+        // The entity sits inside a `\(...\)` math span The math transform owns those bytes.
         let lines = pretty_lines("eq \\(a &lt; b\\) end\n\n");
         let joined = lines.join("\n");
         assert!(joined.contains("end"), "trailing text intact: {lines:#?}");
@@ -3201,8 +3162,7 @@ mod entity_tests {
             "&lt;&gt;&amp;",
             "&#xZZ;\n\n",
             "&CounterClockwiseContourIntegral;\n\n",
-            // Multi-byte UTF-8 mixed with `&` in various positions
-            // The inner loop only advances over ASCII bytes, so it must not slice through a multi-byte sequence
+            // Multi-byte UTF-8 mixed with `&` in various positions The inner loop only advances over ASCII bytes.
             "& é &lt; ñ\n\n",
             "café &lt; thé\n\n",
             "🦀 & 🦀\n\n",

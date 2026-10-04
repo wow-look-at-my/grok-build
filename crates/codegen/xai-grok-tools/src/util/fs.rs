@@ -1,10 +1,4 @@
 //! Filesystem helpers shared across tool implementations.
-//!
-//! Thin wrappers around `tokio::fs` that add per-call tracing spans and a hard
-//! timeout. The timeout guards against hung syscalls on slow or overlayfs-backed
-//! filesystems (e.g. Docker overlay mounts), where `canonicalize` or `stat` can
-//! block indefinitely. On timeout or error the helpers fall back to safe defaults
-//! rather than propagating errors, keeping tool execution unblocked.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -40,9 +34,7 @@ pub async fn canonicalize_with_timeout(path: PathBuf) -> PathBuf {
     }
 }
 
-/// Async symlink-resolved path, preserving the `io::Error` on failure. Error-preserving sibling of
-/// [`canonicalize_with_timeout`] for call sites whose control flow branches on the `io::ErrorKind` (e.g. NotFound
-/// driving a unicode-filename fallback or new-file creation), which the error-swallowing helpers cannot express.
+/// Async symlink-resolved path, preserving the `io::Error` on failure.
 pub(crate) async fn try_canonicalize(path: &Path) -> std::io::Result<PathBuf> {
     // dunce-simplified below — blessed wrapper
     #[allow(clippy::disallowed_methods)]
@@ -51,9 +43,8 @@ pub(crate) async fn try_canonicalize(path: &Path) -> std::io::Result<PathBuf> {
         .map(|p| dunce::simplified(&p).to_path_buf())
 }
 
-/// OS-specific special characters that appear in generated filenames but that models will never
-/// produce. Each entry maps a Unicode character to its ASCII equivalent. This map targets
-/// OS-generated filenames where the model can never produce the exact character.
+/// OS-specific special characters that appear in generated filenames but that
+/// models will never produce.
 const FILENAME_SPECIAL_CHARACTER_MAP: &[(char, char)] = &[
     ('\u{202F}', ' '), // narrow no-break space (macOS screenshot/recording filenames)
     ('\u{00A0}', ' '), // no-break space
@@ -247,7 +238,7 @@ mod tests {
     #[tokio::test]
     async fn unicode_fallback_returns_none_for_ambiguous() {
         let dir = tempfile::tempdir().unwrap();
-        // Two files that normalize to the same ASCII name
+        // Files that normalize to the same ASCII name
         let a = dir.path().join("file\u{202F}name.txt");
         let b = dir.path().join("file\u{00A0}name.txt");
         tokio::fs::write(&a, b"a").await.unwrap();

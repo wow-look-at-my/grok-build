@@ -1,16 +1,4 @@
 //! Scroll normalization for mouse wheel/trackpad input.
-//!
-//! Terminal scroll events vary widely in event counts per wheel tick, and inter-event timing overlaps heavily between wheel and trackpad input.
-//! We normalize by treating events as short streams separated by gaps, converting them into line deltas with a per-terminal events-per-tick factor.
-//! Redraw is coalesced to a fixed cadence.
-//!
-//! A mouse wheel "tick" (one notch) is expected to scroll by a fixed number of lines (default: 3) regardless of the terminal's raw event density.
-//! Trackpad scrolling should remain higher fidelity: small movements accumulate sub-line amounts that only scroll once whole lines are reached.
-//!
-//! Because terminal mouse scroll events do not encode magnitude (only direction), wheel-vs-trackpad detection is heuristic.
-//! We bias toward trackpad-like (avoids overshoot) and "promote" to wheel-like when the first tick-worth of events arrives quickly.
-//! A user can force wheel or trackpad behavior when the heuristic is wrong: `scroll_mode` (or `GROK_SCROLL_MODE`) pins [`ScrollInputMode`].
-//! `invert_scroll` / `scroll_lines` / `scroll_speed` tune direction and throughput; see [`ScrollConfigOverrides::from_settings_caches`].
 
 use crate::input::scroll_log::{
     ScrollLogConfigEcho, ScrollLogEvent, ScrollLogEvt, ScrollLogRecorder, ScrollLogTrigger,
@@ -59,14 +47,11 @@ const DEFAULT_WHEEL_LIKE_MAX_DURATION_MS: u64 = 200;
 const DEFAULT_TRACKPAD_ACCEL_MAX: u16 = 3;
 const DEFAULT_TRACKPAD_DETECT_MAX_INTERVAL_MS: f32 = 30.0;
 /// Floor for the per-flush delta cap (see [`ScrollConfig::flush_cap`]).
-/// Excess stays in the stream and arrives on subsequent cadence flushes.
 const MIN_DELTA_PER_FLUSH: i32 = 6;
 /// Interval-based acceleration: thresholds for band classification.
-/// Intervals are averaged over a rolling window of recent events.
 const ACCEL_INTERVAL_FAST_MS: f32 = 8.0;
 const ACCEL_INTERVAL_MEDIUM_MS: f32 = 20.0;
 /// Sub-6ms spacing is terminal batching (Ghostty double-reports a notch), not gesture speed.
-/// Events still accumulate lines but stay out of the accel/ept window, which would otherwise read them as max velocity.
 const ACCEL_MIN_INTERVAL_MS: f32 = 6.0;
 /// Multipliers for each speed band.
 const ACCEL_MULTIPLIER_BASE: f32 = 1.0;
@@ -76,9 +61,8 @@ const ACCEL_MULTIPLIER_FAST: f32 = 2.5;
 const ACCEL_HISTORY_SIZE: usize = 6;
 const MIN_LINES_PER_WHEEL_STREAM: i32 = 1;
 
-// xterm.js embeds (VS Code and similar editor webviews) emit scroll events more slowly than native terminals
-// They get wider accel/trackpad windows and a higher trackpad lines-per-tick
-// Zed is ept=1 but not this profile.
+// xterm.js embeds (VS Code and similar editor webviews) emit scroll events
+// more slowly.
 fn is_vscode_embed(name: TerminalName) -> bool {
     matches!(
         name,
@@ -102,15 +86,11 @@ fn default_accel_interval_medium_ms_for_terminal(name: TerminalName) -> f32 {
     }
 }
 
-/// Convert a scroll speed setting (1-100) to a multiplier.
-/// 50 is 1.0x (default), 1 is 0.1x (slowest), 100 is 6.0x (fastest).
 pub fn speed_to_multiplier(speed: u8) -> f32 {
     let s = speed.clamp(1, 100) as f32;
     if s <= 50.0 {
-        // 1 maps to 0.1 and 50 to 1.0 (linear)
         0.1 + (s - 1.0) * (0.9 / 49.0)
     } else {
-        // 50 maps to 1.0 and 100 to 6.0 (linear)
         1.0 + (s - 50.0) * (5.0 / 50.0)
     }
 }
@@ -198,10 +178,7 @@ pub struct ScrollConfig {
     accel_interval_medium_ms: f32,
     /// ept=1 trackpad detection: max avg interval (ms) to classify as trackpad.
     trackpad_detect_max_interval_ms: f32,
-    /// User-facing speed multiplier (derived from scroll_speed 1-100 setting).
     speed_multiplier: f32,
-    /// Viewport height (rows) of the scroll target; 0 means unknown.
-    /// Runtime state, not a terminal profile: it sizes the per-flush trackpad cap proportionally to the visible pane.
     viewport_height: u16,
 }
 
@@ -257,17 +234,17 @@ fn multiplexer_reencodes_mouse(multiplexer: MultiplexerKind) -> bool {
 }
 
 impl ScrollConfig {
-    /// Tests-only shorthand for [`Self::from_terminal_context`] with no multiplexer.
-    /// Production always knows the multiplexer (`terminal_context()` is a global).
-    /// Gating this off outside tests makes silently dropping multiplexer awareness a compile error.
+    /// Tests-only shorthand for [`Self::from_terminal_context`] with no
+    /// multiplexer. Production always knows the multiplexer
+    /// (`terminal_context()` is a global).
     #[cfg(test)]
     fn from_terminal(brand: TerminalName, overrides: ScrollConfigOverrides) -> Self {
         Self::from_terminal_context(brand, MultiplexerKind::Undetected, overrides)
     }
 
-    /// The production constructor: detected terminal context plus [`ScrollConfigOverrides::from_settings_caches`].
-    /// Brand and multiplexer both come from the `terminal_context()` global.
-    /// Every production rebuild site (startup, hot-reload, runtime setting change) uses this so the settings-to-config mapping cannot drift.
+    /// The production constructor: detected terminal context plus
+    /// [`ScrollConfigOverrides::from_settings_caches`]. Brand and multiplexer
+    /// both come from the `terminal_context()` global.
     pub fn from_settings() -> Self {
         let ctx = crate::terminal::terminal_context();
         Self::from_terminal_context(
@@ -315,8 +292,9 @@ impl ScrollConfig {
             events_per_tick = override_value.max(1);
         }
 
-        // Get one line per notch on ept=1 terminals; one line per event when a multiplexer re-chunks
-        // Whatever event count the multiplexer emits per notch, pricing each at one line never over-scrolls
+        // Get one line per notch on ept=1 terminals; one line per event when
+        // a multiplexer re-chunks Whatever event count the multiplexer emits
+        // per notch.
         let mut wheel_lines_per_tick = if remuxed {
             1
         } else {
@@ -397,7 +375,6 @@ impl ScrollConfig {
     }
 
     /// Stamp the scroll target's viewport height (rows) onto this config.
-    /// The config already travels per event, so the viewport rides along instead of adding a second parameter everywhere.
     pub fn with_viewport_height(mut self, rows: u16) -> Self {
         self.viewport_height = rows;
         self
@@ -424,8 +401,8 @@ impl ScrollConfig {
         self.trackpad_accel_max.max(1) as f32
     }
 
-    /// Half the viewport per flush, floored so tiny viewports still move. A fixed cap teleports or hard-ceilings flicks.
-    /// Legit wheel never reaches it; only misclassified floods or extreme speed do, and those are paced across slots.
+    /// Half the viewport per flush, floored so tiny viewports still move. A
+    /// fixed cap teleports or hard-ceilings flicks.
     fn flush_cap(self) -> i32 {
         (self.viewport_height as i32 / 2).max(MIN_DELTA_PER_FLUSH)
     }
@@ -489,7 +466,6 @@ pub struct ScrollDebugSnapshot {
     pub viewport_height: u16,
     /// Per-flush delta cap in effect ([`ScrollConfig::flush_cap`]).
     pub flush_cap: i32,
-    /// Effective scroll flush cadence in ms (`GROK_SCROLL_CADENCE_MS` / default 16).
     pub cadence_ms: u64,
 }
 
@@ -502,7 +478,7 @@ pub struct ScrollStreamDebug {
     pub promoted: bool,
     /// Events accumulated in the stream so far.
     pub events: usize,
-    /// Rolling average inter-event interval (ms); `None` until two events passed the 6ms batching filter.
+    /// Rolling average inter-event interval (ms); `None` until events passed the 6ms batching filter.
     pub avg_interval_ms: Option<f32>,
     /// Acceleration multiplier currently in effect.
     pub accel: f32,
@@ -535,10 +511,8 @@ pub struct MouseScrollState {
     carry_lines: f32,
     carry_direction: Option<ScrollDirection>,
     /// Diagnostic breadcrumb for the scroll-debug HUD: the most recently finalized stream.
-    /// Write-only for the state machine (never read back), so it cannot affect scroll behavior.
     last_finalized: Option<ScrollStreamSummary>,
     /// `GROK_SCROLL_LOG` flight recorder ([`crate::input::scroll_log`]).
-    /// Write-only like `last_finalized`: emission cannot affect scroll behavior; `None` (env unset) costs one branch per emission point.
     recorder: Option<ScrollLogRecorder>,
     /// Wheel/trackpad flush cadence (default 16ms; the event loop may override it from the environment).
     redraw_cadence: Duration,
@@ -587,7 +561,7 @@ impl MouseScrollState {
         if let Some(mut stream) = self.stream.take() {
             let gap = now.duration_since(stream.last);
             if gap > STREAM_GAP || stream.direction != direction {
-                // Flip: cancel the old stream's backlog; reversal must be instant, not preceded by a stale opposite-direction jump
+                // Flip: cancel the stream's backlog.
                 let cancel_backlog = stream.direction != direction;
                 lines += self.finalize_stream_at(now, &mut stream, cancel_backlog);
             } else {
@@ -693,8 +667,8 @@ impl MouseScrollState {
         }
     }
 
-    /// Whether there is an active scroll stream (events still being accumulated).
-    /// Used by the event loop to decide whether to schedule ticks for stream gap detection and pending line flushes.
+    /// Whether there is an active scroll stream (events still being
+    /// accumulated).
     pub fn has_active_stream(&self) -> bool {
         self.stream.is_some()
     }
@@ -705,8 +679,8 @@ impl MouseScrollState {
         self.carry_direction = None;
     }
 
-    /// Next flush/finalize, on redraw cadence or the 80ms gap, never animation fps.
-    /// `None` is clock off; `Some(ZERO)` is overdue. Unlike [`Self::next_tick_in`], whose `None` also means overdue.
+    /// Next flush/finalize, on redraw cadence or the 80ms gap, never
+    /// animation fps. `None` is clock off; `Some(ZERO)` is overdue.
     pub fn scroll_clock_deadline(&self, now: Instant) -> Option<Duration> {
         self.stream.as_ref()?;
         Some(self.next_tick_in(now).unwrap_or(Duration::ZERO))
@@ -780,14 +754,12 @@ impl MouseScrollState {
         let lines = if cancel_backlog {
             0
         } else {
-            // Any remaining catch-up is coast-shaped (no input since the last flush), so flush_lines_at tapers and budgets it
-            // The finalize cannot slam a full cap after the fingers stop
+            // Any remaining catch-up is coast-shaped (no input since the last flush).
             Self::flush_lines_at(&mut self.last_redraw_at, carry_at_flush, now, stream)
         };
 
         if stream.kind != ScrollStreamKind::Wheel && stream.config.mode != ScrollInputMode::Wheel {
-            // Only carry the sub-line fractional remainder, not the cap-induced integer backlog
-            // Carrying whole lines would pollute the next gesture with a burst it didn't earn
+            // Only carry the sub-line fractional remainder, not the cap-induced integer backlog Carrying whole lines would pollute the next gesture.
             let remainder = stream.desired_lines_f32(carry_at_flush) - stream.applied_lines as f32;
             self.carry_lines = remainder.fract();
         } else {
@@ -821,8 +793,7 @@ impl MouseScrollState {
         now: Instant,
         stream: &mut ScrollStream,
     ) -> i32 {
-        // A zero-delivery flush must not advance last_redraw_at, or the clock busy-spins. `flushable_now` is the shared predicate.
-        // Every kind shares the cap; excess drains later, and whatever the coast budget cannot honor is dropped at finalize.
+        // A zero-delivery flush must not advance last_redraw_at, or the clock busy-spins.
         let delta = stream.flushable_now(carry_lines);
         if delta == 0 {
             return 0;
@@ -884,7 +855,7 @@ impl MouseScrollState {
         let stream = self.stream.as_ref()?;
         let gap = now.duration_since(stream.last);
 
-        // Deadline only when a flush would apply lines. `desired != applied` includes no-ops that leave last_redraw_at stale and busy-spin the clock.
+        // Deadline only when a flush would apply lines.
         let flushable = stream.flushable_now(self.carry_lines) != 0;
         let since_redraw = now.duration_since(self.last_redraw_at);
         let until_redraw = self.redraw_cadence.saturating_sub(since_redraw);
@@ -905,8 +876,6 @@ impl MouseScrollState {
 impl Default for MouseScrollState {
     fn default() -> Self {
         // One clock zero for stream timing and the recorder's ts_ms.
-        // Cadence is always the 16ms default here (hermetic for AppView / dispatch fixtures)
-        // Production injects the env override via set_redraw_cadence
         let now = Instant::now();
         Self {
             stream: None,
@@ -934,15 +903,11 @@ struct ScrollStream {
     /// Rolling window of inter-event intervals (ms) for acceleration.
     interval_history: VecDeque<f32>,
     interval_sum: f32,
-    /// Sum of per-event accel-weighted contributions (each event's sign times the multiplier in effect when it arrived).
-    /// Monotone in magnitude within a stream; see [`Self::desired_lines_f32`].
-    /// Confirmed-trackpad demand is truncated at accumulation time ([`Self::clamp_trackpad_demand`]).
+    /// Sum of per-event accel-weighted contributions.
     accel_weighted_events: f32,
     /// Updates only on nonzero flushes, matching the recorder. A flush with no new events is a coast flush that [`Self::flushable_now`] tapers.
     events_at_flush: usize,
     /// Whole lines already delivered by coast flushes.
-    /// Budgeted at one [`ScrollConfig::flush_cap`] per stream: total motion after input stops is at most one cap, delivered tapered.
-    /// That is the I-SMOOTH-COAST bound, held by construction rather than by lucky flush timing.
     coast_spent: i32,
 }
 
@@ -967,9 +932,7 @@ impl ScrollStream {
     }
 
     fn push_event(&mut self, now: Instant, direction: ScrollDirection) {
-        // Record inter-event interval for acceleration (O(1) with running sum)
-        // Sub-6ms intervals are batching artifacts (see ACCEL_MIN_INTERVAL_MS)
-        // They count for line accumulation below but must not feed the interval window
+        // Record inter-event interval for acceleration (O(1) with running sum) Sub-6ms intervals are batching artifacts.
         let interval_ms = now.duration_since(self.last).as_secs_f32() * 1000.0;
         if self.event_count > 0 && interval_ms >= ACCEL_MIN_INTERVAL_MS {
             self.interval_history.push_back(interval_ms);
@@ -993,7 +956,6 @@ impl ScrollStream {
     }
 
     /// Final-line units one weighted trackpad event prices to.
-    /// These are the multipliers [`Self::desired_lines_f32`] applies around `accel_weighted_events` in its confirmed-trackpad branch.
     fn trackpad_line_rate(&self) -> f32 {
         (self.effective_lines_per_tick_f32() / self.config.trackpad_events_per_tick_f32())
             * self.config.speed_multiplier
@@ -1051,7 +1013,6 @@ impl ScrollStream {
 
         let events_per_tick = self.config.events_per_tick.max(1) as usize;
 
-        // ept=1 terminals: a wheel notch is 1 event at ~50-100ms intervals.
         // Trackpad events arrive more rapidly. Threshold is per-terminal.
         if events_per_tick <= 1
             && self.event_count > 2
@@ -1103,8 +1064,7 @@ impl ScrollStream {
             return;
         }
         if self.desired_lines_f32(carry_lines).abs() > desired_before.abs() {
-            // Solve the confirmed-trackpad pricing for the weighted count that lands desired exactly on its pre-flip value
-            // Carry rides outside the multipliers per the unit invariant
+            // Solve the confirmed-trackpad pricing for the weighted count that lands desired exactly.
             self.accel_weighted_events = (desired_before - carry_lines) / rate;
         }
     }
@@ -1150,7 +1110,6 @@ impl ScrollStream {
 
     fn desired_lines_f32(&self, carry_lines: f32) -> f32 {
         // Use the normalized ept=3 divisor only for confirmed trackpad.
-        // Unknown streams (not yet classified) use the terminal's real events_per_tick so wheel input on ept=1 terminals isn't penalized
         let events_per_tick = if self.is_confirmed_trackpad() {
             self.config.trackpad_events_per_tick_f32()
         } else {
@@ -1161,8 +1120,7 @@ impl ScrollStream {
         // No intermediate clamp: a fixed cap freezes a long trackpad once applied catches up. Per-flush clamp is in flush_lines_at.
         // Final line units. Carry is added after every multiplier so accel and speed do not re-amplify it.
         if self.is_confirmed_trackpad() {
-            // Accel is applied per event as it arrives (accel_weighted_events), not retroactively to the whole stream
-            // Multiplying the total by the CURRENT multiplier let a decaying fast-to-slow gesture pull desired below applied, stalling mid-stream
+            // Accel is applied per event as it arrives (accel_weighted_events).
             self.accel_weighted_events
                 * (lines_per_tick / events_per_tick)
                 * self.config.speed_multiplier
@@ -1174,8 +1132,8 @@ impl ScrollStream {
         }
     }
 
-    /// Whether a flush right now would be a COAST flush: no events arrived since the last line-delivering flush.
-    /// Any lines it moves are post-input catch-up (the recorder's `events_since_flush == 0`).
+    /// Whether a flush right now would be a COAST flush: no events arrived
+    /// since the last line-delivering flush.
     fn coasting(&self) -> bool {
         self.event_count == self.events_at_flush
     }

@@ -1,33 +1,16 @@
 //! The edits one server still owes us a verdict on.
-//!
-//! A URI is pending from the moment we tell the server about an edit until the
-//! server gives a verdict on that edit — diagnostics, or the news that there
-//! are none — or until it has waited long enough that we stop expecting one.
-//!
-//! Both of those are questions about *data*, not about bookkeeping: whether the
-//! store holds a verdict for the version we sent, and whether the wall clock
-//! has passed a deadline. Nothing here has to be told how a drain ended, so
-//! there is no path on which a drain can forget to tell it, and no counter that
-//! can drift.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use super::diagnostics::DiagnosticsStore;
 
-/// How long we hold on to a file waiting for a verdict. Bounds the pending set: a file nobody ever answers for is let
-/// go rather than carried for the rest of the session. Generous, because the cost of holding one is two integers and
-/// the cost of dropping one too early is a missed diagnostic.
+/// How long we hold on to a file waiting for a verdict.
 pub const VERDICT_TTL: Duration = Duration::from_secs(30);
 
-/// How long a server gets to say *something* before we stop blocking on it. Measured only while we are actually waiting on it — see
-/// [`PendingEdits::asking_since`] — so an idle stretch with nothing outstanding does not count against a server, and any answer starts it over.
-/// It measures *silence*, not "no problems found": a server reporting that a file is clean has answered.
+/// How long a server gets to say *something* before we stop blocking on it.
 pub const SERVER_PATIENCE: Duration = Duration::from_secs(10);
 
-/// The two durations, together, so a caller that wants to change one is choosing between two named things rather than editing a constant that
-/// also means something else. They answer different questions — how long we hold on to a file, and whether the server is worth blocking on —
-/// which is why they are separate. One number doing both jobs is how a server that answered three clean edits in a row came to be written off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PendingPolicy {
     pub verdict_ttl: Duration,
@@ -46,9 +29,7 @@ impl Default for PendingPolicy {
 /// One edit we are waiting on.
 #[derive(Debug, Clone, Copy)]
 struct PendingEdit {
-    /// The document version we want a verdict on. A verdict on this version or
-    /// a later one settles it; one on an earlier version — an answer that was
-    /// already being computed when this edit arrived — does not.
+    /// The document version we want a verdict on.
     version: i32,
     expires_at: Instant,
 }
@@ -59,9 +40,7 @@ pub struct PendingEdits {
     policy: PendingPolicy,
     lifecycle_id: u64,
     by_uri: BTreeMap<String, PendingEdit>,
-    /// When the current stretch of asking-without-an-answer began. Set while something is
-    /// outstanding, cleared by any answer. That is what makes it a measure of the server rather
-    /// than of the clock: a session spent reading code does not make a healthy server look dead.
+    /// When the current stretch of asking-without-an-answer began.
     asking_since: Option<Instant>,
 }
 
@@ -96,8 +75,8 @@ impl PendingEdits {
         );
     }
 
-    /// The server has spoken of its own accord — it has asked us to read its answers again — which
-    /// is proof of life whatever it was about, so any stretch of silence it was in is over.
+    /// The server has spoken of its own accord — it has asked us to read
+    /// its answers again — which is proof of life whatever it was about.
     pub fn note_server_spoke(&mut self) {
         self.asking_since = None;
     }
@@ -155,9 +134,8 @@ impl PendingEdits {
                 "no verdict on these files in time; no longer waiting"
             );
         }
-        // An answer about any file is proof the server is working, whatever it was about, so the stretch of silence is over. It does not restart for
-        // whatever is still outstanding: a server that answers for most files and never for one would then be judged silent on the strength of the
-        // one, and stop being waited on while it was plainly working. Only an answer does this.
+        // An answer about any file is proof the server is working, whatever
+        // it was about, so the stretch of silence is over.
         if !answered.is_empty() {
             self.asking_since = None;
         }

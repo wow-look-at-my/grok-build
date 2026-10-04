@@ -46,8 +46,7 @@ pub(in crate::app::dispatch) fn next_picker_list_generation(app: &mut AppView) -
 }
 
 pub(in crate::app::dispatch) fn dispatch_fetch_session_list(app: &mut AppView) -> Vec<Effect> {
-    // The wipe below destroys the welcome picker state that any still-pending result was issued for So the welcome generation reallocates on every call, even when the fetch belongs to an open modal, which gets its own fresh generation
-    // So the welcome generation reallocates on every call, even when the fetch belongs to an open modal, which gets its own fresh generation
+    // The wipe below destroys the welcome picker state that any still-pending result was issued for So the welcome generation reallocates.
     app.session_picker_generation = app.alloc_picker_generation();
     let modal_generation = matches!(
         get_active_agent(app).and_then(|agent| agent.active_modal.as_ref()),

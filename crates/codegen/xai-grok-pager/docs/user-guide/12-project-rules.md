@@ -1,6 +1,6 @@
 # Project Rules (AGENTS.md)
 
-Project rules let you configure Grok per project or directory. By placing an AGENTS.md file in your repository, you can set coding conventions, build instructions, style guides, and any other instructions that Grok should follow when working in that codebase. Startup loading requires folder trust (`--trust` or an interactive grant).
+Project rules let you configure Grok per project or directory. By placing an AGENTS.md file in your repository, you can set coding conventions, build instructions. Style guides, and any other instructions that Grok must follow when working in that codebase. Startup loading requires folder trust (`--trust` or an interactive grant).
 
 ---
 
@@ -23,11 +23,11 @@ Grok checks for these filenames (in this order) within each directory:
 - `AGENT.md`
 - `AGENTS.md`
 
-Grok loads every matching file in a directory, so a folder that contains both `AGENTS.md` and `CLAUDE.md` contributes both. On case-insensitive filesystems, names that resolve to the same file (such as `Agents.md` and `AGENTS.md`) are deduplicated and counted once. `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` are supported for compatibility with Claude Code workflows. When Claude compatibility is enabled (the default), Grok also scans your home-level `~/.claude/` directory for these filenames and, at each directory level, checks `.claude/CLAUDE.md` and `.claude/CLAUDE.local.md` -- the locations Claude Code uses for project memory. With Cursor compatibility enabled, the home-level `~/.cursor/` directory is scanned the same way.
+Grok loads every matching file in a directory, so a folder that contains both `AGENTS.md` and `CLAUDE.md` contributes both. On case-insensitive filesystems, names that resolve to the same file (such as `Agents.md` and `AGENTS.md`) are deduplicated and counted once. `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` are supported for compatibility with Claude Code workflows. When Claude compatibility is enabled (the default), Grok also scans your home-level `~/.claude/` directory for these filenames and, at each directory level. This is checks `.claude/CLAUDE.md` and `.claude/CLAUDE.local.md`. The locations Claude Code uses for project memory. With Cursor compatibility enabled, the home-level `~/.cursor/` directory is scanned the same way.
 
 ### Rules Directories
 
-In addition to AGENTS.md files, Grok scans for `*.md` files in rules directories at each level (`<dir>`) from the repo root to the current working directory:
+In addition to AGENTS.md files, Grok scans for `*.md` files in rules directories at each level (`<dir>`) from the repo root. This is to the current working directory:
 
 | Location | Notes |
 |----------|-------|
@@ -51,7 +51,7 @@ Home rules load first, in the table order, followed by project files from repo r
 extra_rule_dirs = ["~/team-rules", "/opt/company/grok-rules"]
 ```
 
-Every `*.md` directly inside a listed directory is loaded as a rule (subdirectories are not scanned), in every project and regardless of folder trust, the repository's `.gitignore`, or the compatibility cells; the model receives them as user rules and `grok inspect` lists them as `global`. Entries must be absolute or start with `~/`; a relative or missing entry loads nothing. `/import-claude` writes your existing `~/.claude/rules/` here so it keeps loading after the Claude compatibility scan is turned off. The vendor `rules` cells control both home and project rules independently of the corresponding `agents` cells. Claude's `agents` cell controls named files under `~/.claude/` and project `<dir>/.claude/CLAUDE*.md`; generic top-level names such as `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` remain recognized. See [Configuration](05-configuration.md#harness-compatibility).
+Every `*.md` directly inside a listed directory is loaded as a rule (subdirectories are not scanned), in every project and regardless of folder trust. This is the repository's `.gitignore`, or the compatibility cells. The model receives them as user rules and `grok inspect` lists them as `global`. Entries must be absolute or start with `~/`. A relative or missing entry loads nothing. `/import-claude` writes your existing `~/.claude/rules/` here so it keeps loading after the Claude compatibility scan is turned off. The vendor `rules` cells control both home and project rules independently of the corresponding `agents` cells. Claude's `agents` cell controls named files under `~/.claude/` and project `<dir>/.claude/CLAUDE*.md`. Generic top-level names such as `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` remain recognized. See [Configuration](05-configuration.md#harness-compatibility).
 
 ---
 
@@ -99,16 +99,16 @@ Given this project structure:
       AGENTS.md          # "Use CSS modules for styling."
 ```
 
-When Grok runs in `~/projects/my-app/src/components/`, it loads all three files. The instructions accumulate, so Grok sees all of them.
+When Grok runs in `~/projects/my-app/src/components/`, it loads all files. The instructions accumulate, so Grok sees all of them.
 
 ### Deeper Files Take Precedence
 
-Grok orders the files from the repo root to the current working directory, so files in deeper directories appear later in its context and take precedence when instructions conflict. In the example above, if the root says "Use styled-components" but `components/AGENTS.md` says "Use CSS modules", the CSS modules instruction wins because it appears later.
+Grok orders the files from the repo root to the current working directory. As a result, files in deeper directories appear later in its context and take precedence when instructions conflict. In the example above, if the root says "Use styled-components" but `components/AGENTS.md` says "Use CSS modules", the CSS modules instruction wins. This is because it appears later.
 
 ### Auto-Loading Behavior
 
 - Grok loads the files from the repo root to the current working directory automatically at session start.
-- When Grok reads, lists, or edits files in directories outside that initial set, it detects any project instruction files there, notes their paths, and reads them when they apply to the task.
+- When Grok reads, lists, or edits files in directories outside that initial set, it detects any project instruction files there, notes their paths. This is reads them when they apply to the task.
 
 ---
 
@@ -205,7 +205,7 @@ To replace the system prompt entirely, pass `--system-prompt-override` (alias `-
 
 ## File Size
 
-Grok loads each project instruction file in full; there is no character cap and no truncation. Even so, keep instructions concise and focused. Shorter, specific rules are easier for Grok to follow than long ones, and every file you load consumes context.
+Grok loads each project instruction file in full. There is no character cap and no truncation. Even so, keep instructions concise and focused. Shorter, specific rules are easier for Grok to follow than long ones, and every file you load consumes context.
 
 ---
 
@@ -263,6 +263,6 @@ This shows each project instruction file it finds, with its path and approximate
 
 5. **Version control your rules.** Commit AGENTS.md to the repository so the whole team benefits. User-specific overrides belong in `~/.grok/` (global rules).
 
-6. **Do not duplicate documentation.** AGENTS.md should contain actionable instructions, not a copy of your project's README. Link to external docs if needed.
+6. **Do not duplicate documentation.** AGENTS.md must contain actionable instructions, not a copy of your project's README. Link to external docs if needed.
 
 7. **Review periodically.** As your project evolves, update your rules to match current conventions.

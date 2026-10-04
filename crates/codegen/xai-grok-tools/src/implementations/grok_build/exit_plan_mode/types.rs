@@ -1,11 +1,7 @@
 //! Wire types for the `x.ai/exit_plan_mode` ACP ext_method.
-//!
-//! Shared between the shell (serializer) and the pager/desktop/VS Code
-//! (deserializer) so both sides stay in sync.
 
-/// ACP `ext_method` request payload (shell coordinator sends to client/pager).
-///
-/// Serialized as `camelCase` for the ACP JSON-RPC wire format.
+/// ACP `ext_method` request payload (shell coordinator sends to
+/// client/pager).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExitPlanModeExtRequest {

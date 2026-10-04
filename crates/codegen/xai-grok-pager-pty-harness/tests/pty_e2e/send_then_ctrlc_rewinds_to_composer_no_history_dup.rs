@@ -11,8 +11,7 @@ async fn send_then_ctrlc_rewinds_to_composer_no_history_dup() {
 
     let content = ContentController::start().await.expect("start content");
     content.set_response("REWIND_NEVER_STREAMS.");
-    // Delaying every SSE event far beyond the test window makes "before any server activity" deterministic
-    // No chunk can arrive and clear the stashed prompt before Ctrl+C lands, so the send stays rewindable
+    // Delaying every SSE event far beyond the test window makes "before any server activity" deterministic No chunk can arrive.
     content.set_chunk_delay(Some(Duration::from_secs(30)));
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -57,9 +56,9 @@ async fn send_then_ctrlc_rewinds_to_composer_no_history_dup() {
         harness.screen_contents()
     );
 
-    // On a slow runner the transport can retry the aborted turn when its stream stalls, putting the prompt on the wire in two separate requests
-    // Each of those requests carries one copy; that is the transport recovering, not the duplicate this test guards against
-    // The real guard is that no single request body carries the prompt twice, which is what a stale rewound copy paired with another send would do
+    // On a slow runner the transport can retry the aborted turn when its stream stalls, putting the prompt on the wire in separate requests Each
+    // of those requests carries one copy; that is the transport recovering, not the duplicate this test guards against The real guard is that no
+    // single request body carries the prompt twice, which is what a stale rewound copy paired with another send would do
     for body in content.request_bodies() {
         let items = body["messages"]
             .as_array()

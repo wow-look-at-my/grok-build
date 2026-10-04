@@ -17,17 +17,11 @@ fn canonical_effort_if_offered(
 }
 
 /// Why an effort token could not be applied to a model.
-/// Shared by `/effort`, the CLI deferred switch, and headless so they classify the same input identically and differ only in how they report the error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EffortTokenError {
-    /// The target model does not advertise `supportsReasoningEffort`. Carries
-    /// the evidence the gate acted on, because this is the refusal a user has to
-    /// argue with when the model does in fact take an effort.
+    /// The target model does not advertise `supportsReasoningEffort`.
     Unsupported(Box<UnsupportedEffortDiagnosis>),
-    /// The token is neither a menu id nor a canonical value offered by this
-    /// model's menu. `offered` is the model-specific list of option ids the
-    /// user can type (never a hardcoded global set — so we do not advertise
-    /// `none`/`minimal` when the model does not offer them).
+    /// The token is neither a menu id nor a canonical value offered by this model's menu.
     UnknownToken { token: String, offered: Vec<String> },
     /// No active model to resolve the effort against.
     NoActiveModel,
@@ -39,16 +33,13 @@ pub(crate) enum EffortTokenError {
 pub(crate) struct UnsupportedEffortDiagnosis {
     /// The catalog key the gate looked up — what `[model.<key>]` must be named.
     pub(crate) model_id: String,
-    /// False when the id is not in this session's catalog at all, which is a
-    /// different fault from a model that is there and unflagged.
+    /// False when the id is not in this session's catalog at all.
     pub(crate) in_catalog: bool,
-    /// How many models the session's catalog holds, so an empty catalog (the
-    /// pre-`session/new` window) is visible as such.
+    /// How many models the session's catalog holds.
     pub(crate) catalog_len: usize,
     /// What the gate read at `meta.supportsReasoningEffort`.
     pub(crate) meta_state: ReasoningEffortMetaState,
-    /// Whether the entry carries a `reasoningEfforts` menu. A menu with no gate
-    /// flag is a contradiction in the catalog entry, and it names the bug.
+    /// Whether the entry carries a `reasoningEfforts` menu.
     pub(crate) efforts_menu_len: Option<usize>,
 }
 
@@ -129,8 +120,6 @@ pub struct ModelState {
     pub current: Option<acp::ModelId>,
     pub reasoning_effort: Option<ReasoningEffort>,
     /// External override for the context window size (tokens).
-    /// When set, `get_context_window()` returns this instead of reading from the current model's metadata.
-    /// Used for subagent views where SubagentProgress reports the actual window size.
     context_window_override: Option<u64>,
 }
 
@@ -520,7 +509,6 @@ mod tests {
 
     #[test]
     fn reasoning_effort_options_falls_back_to_builtin_menu() {
-        // Supported but no server list falls back to today's four-row built-in menu
         let state = state_with_meta(Some(serde_json::json!({
             "supportsReasoningEffort": true,
         })));
@@ -575,7 +563,6 @@ mod tests {
             state.resolve_effort_token("high"),
             Some(ReasoningEffort::High)
         );
-        // Levels the model does not offer (none/minimal on 4.5-style menus) are rejected; better than a server-side 400
         assert!(state.resolve_effort_token("minimal").is_none());
         assert!(state.resolve_effort_token("none").is_none());
         assert!(state.resolve_effort_token("bogus").is_none());
@@ -635,8 +622,7 @@ mod tests {
                 offered: vec!["high".to_string(), "low".to_string()],
             }
         );
-        // The error copy must list only this model's options, never a hardcoded none/minimal/…
-        // The rejected token may still appear quoted in "unknown effort level '…'"
+        // The error copy must list only this model's options.
         let msg = err.message();
         assert!(msg.contains("use one of: high, low"), "msg={msg}");
         let offered_half = msg

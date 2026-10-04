@@ -21,8 +21,8 @@ use xai_grok_shell::session::helpers::session_compact::{
 const SESSION_RPC_FLOOR: std::time::Duration = std::time::Duration::from_secs(180);
 /// Headroom over the agent-side `.envrc` budget for the rest of session setup.
 const SESSION_RPC_SLACK: std::time::Duration = std::time::Duration::from_secs(50);
-/// Always covers the agent-side `.envrc` budget so the backstop cannot fire before the agent's own deadline.
-/// Reads `GROK_ENVRC_TIMEOUT_SECS` in this process; the agent inherits the same environment.
+/// Always covers the agent-side `.envrc` budget so the backstop cannot fire
+/// before the agent's own deadline.
 pub(super) fn session_rpc_timeout() -> std::time::Duration {
     SESSION_RPC_FLOOR.max(xai_grok_workspace::envrc::loader_budget() + SESSION_RPC_SLACK)
 }
@@ -116,7 +116,6 @@ pub(super) const CTA_MCP_RETRY_DELAY_MS: u64 = 1000;
 /// How long the CTA shows its "installed" confirmation before auto-dismissing.
 pub(super) const CTA_INSTALLED_DISMISS_MS: u64 = 4000;
 /// Upper bound on the off-thread clipboard-attachment probe.
-/// A wedged osascript read must not pin `paste_probe_in_flight` and silently stash every later send.
 pub(super) const CLIPBOARD_PROBE_TIMEOUT_SECS: u64 = 10;
 const _: () = assert!(
     CLIPBOARD_PROBE_TIMEOUT_SECS > crate::clipboard::OSASCRIPT_WAIT.as_secs()
@@ -295,9 +294,10 @@ pub(super) fn format_acp_error(err: &acp::Error, is_api_key_auth: bool) -> Strin
 fn error_data_detail(err: &acp::Error) -> Option<String> {
     err.data.as_ref().and_then(error_detail_from_data)
 }
-/// A typed `data.kind` means the shell already normalized the payload at its wire boundary (`compact_error_data`), so it passes through untouched.
-/// Re-sanitizing would re-truncate (our 200-char cap against the shell's 300 bytes).
-/// Cancel text survives verbatim for the dispatch match; empty data yields an empty message (terse render); Display is used only when data is absent.
+/// A typed `data.kind` means the shell already normalized the payload at its
+/// wire boundary (`compact_error_data`), so it passes through untouched.
+/// Re-sanitizing would re-truncate (our 200-char cap against the shell's
+/// bytes).
 pub(crate) fn compact_error_message(err: &acp::Error) -> String {
     if compact_error_kind(err).is_some() {
         return error_data_detail(err).unwrap_or_default();
@@ -403,9 +403,8 @@ pub(super) fn parse_session_load_restore_meta(
         .and_then(|v| serde_json::from_value(v).ok());
     (code_restored, restore_summary, restore_degree)
 }
-/// CANONICAL wire parser for `LoadSessionResponse._meta["x.ai/runningPromptId"]`.
-/// Returns the session's in-flight running prompt id when the session was loaded MID-turn (some other client is driving), otherwise `None`.
-/// The loader adopts this id so subsequent live `session/update` deltas pass the `current_prompt_id` gate (see `app/acp_handler.rs`).
+/// CANONICAL wire parser for
+/// `LoadSessionResponse._meta["x.ai/runningPromptId"]`.
 pub(crate) fn parse_session_load_running_prompt_id(
     resp_meta: Option<&acp::Meta>,
 ) -> Option<String> {
@@ -460,13 +459,6 @@ pub(crate) fn sanitize_user_error(raw: &str) -> String {
     result
 }
 /// Per-session gates that serialize mode-change requests.
-///
-/// Every mode change is its own spawned task, so two rapid Shift+Tab presses
-/// put two `session/set_mode` requests on the wire at once, and the shell is
-/// free to apply them in either order, which is how a burst can settle on the
-/// mode one press back. Holding the session's gate across a request's round
-/// trip keeps consecutive requests in press order: the next one goes out only
-/// after the previous one has been answered.
 static MODE_REQUEST_GATES: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
 > = std::sync::OnceLock::new();
@@ -486,30 +478,23 @@ pub(crate) struct SessionFlags {
     pub subagents: bool,
     pub ask_user: bool,
     /// Restore code state on resume (`--restore-code`).
-    /// Injected as `x.ai/restore_code` into `LoadSession` meta, or passed
-    /// as `restoreCode` in the `resume_session` ACP payload for worktrees.
     pub restore_code: Option<bool>,
     pub agent_override: Option<serde_json::Value>,
     pub defer_builtin_agent_profile: bool,
     /// Always-approve for this session (`_meta.yoloMode`).
     pub yolo_mode: bool,
-    /// Auto (classifier) permission mode (`_meta.autoMode`). Mutually exclusive
-    /// with `yolo_mode` on the agent; both may be set only if yolo wins at spawn.
+    /// Auto (classifier) permission mode (`_meta.autoMode`).
     pub auto_mode: bool,
     /// Gateway light-frontend (`kind: "chat"`); `--chat` / `/chat`.
-    /// Mutually exclusive with Build plan profiles: profiles are omitted and a warn is logged when plan flags are also set.
     pub chat_mode: bool,
     /// Local-workspace stamp for ACP `_meta` (scrub still strips envId / Direct hub).
     #[cfg(feature = "local-workspace")]
     pub local_workspace: Option<crate::app::session_startup::LocalWorkspaceConfig>,
     /// Effective screen mode label (`ScreenMode::meta_label`), stamped into every `PromptRequest._meta.screenMode`.
-    /// `None` (key omitted) only under `Default` in tests; real launches always know their mode.
     pub screen_mode_label: Option<&'static str>,
     /// Active auth is API key (not OAuth/session); drives rate-limit copy in `format_acp_error`.
-    /// Default `false` (OAuth copy) for tests.
     pub is_api_key_auth: bool,
     /// Startup resume target deferred to the worktree handler after missing local id/title resolution.
-    /// Worktree failure messages append the no-match hint only when the failing target equals this value.
     pub resume_local_miss: Option<String>,
 }
 impl SessionFlags {
@@ -568,8 +553,6 @@ impl SessionFlags {
     }
 }
 /// Workspace-bind `_meta` keys **always** forbidden on chat create/load.
-///
-/// `x.ai/cloud_existing_workspace` is intentionally omitted: scrub keeps it only when `x.ai/local_workspace.mode == "attach"`.
 #[allow(dead_code)]
 pub(super) const CHAT_FORBIDDEN_WORKSPACE_BIND_KEYS: &[&str] = &[
     "envId",
@@ -733,7 +716,6 @@ pub(crate) fn reject_non_fs_only_advertised_tools(
 #[derive(Default)]
 pub(crate) struct EffectMeta {
     /// Auth abort handle and its request sequence.
-    /// The event loop must install this into `AppView.auth_state` if the current auth state still matches the sequence.
     pub auth_abort_handle: Option<(u64, tokio::task::AbortHandle)>,
     /// Auth URL poll abort handle and request sequence (installed on `AppView.auth_url_poll_handle` when the seq still matches).
     pub auth_url_poll_handle: Option<(u64, tokio::task::AbortHandle)>,
@@ -1539,9 +1521,11 @@ pub(super) fn marketplace_outcome_succeeded(
 ) -> bool {
     outcome.status == xai_hooks_plugins_types::OutcomeStatus::Success
 }
-/// The agent serializes `ExtMethodResult<KillTaskResponse>`, so the outcome lives at `result.outcome` (`{"result":{"taskId":..,"outcome":"not_found"}}`).
-/// Deserializes through the same wire DTOs the agent serializes so the contract stays typed end-to-end.
-/// Probing the top level with untyped JSON here was why the tasks-pane ✗ never removed stale (`not_found`) rows after a session resume.
+/// The agent serializes `ExtMethodResult<KillTaskResponse>`, so the outcome
+/// lives at `result.outcome`
+/// (`{"result":{"taskId":..,"outcome":"not_found"}}`). Deserializes through
+/// the same wire DTOs the agent serializes so the contract stays typed
+/// end-to-end.
 pub(super) fn parse_kill_outcome(
     resp: &str,
 ) -> Option<xai_grok_tools::types::KillOutcome> {

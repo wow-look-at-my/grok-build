@@ -47,7 +47,6 @@ pub(crate) const TIMING_FIELDS: [&str; 5] = [
 ];
 
 /// Sampler cannot depend on `xai-grok-telemetry` (cycle); held, not entered.
-/// Never entered: safe across `.await`; close belongs to scope.
 #[must_use = "dropping a Region immediately closes its span as a zero-length frame"]
 pub(crate) struct Region(tracing::Span);
 

@@ -57,7 +57,7 @@ fn sampling_api_drifted_size_wordings_are_overflow() {
             "should be overflow: {msg}"
         );
     }
-    // A generic 400 stays plain Deterministic — no ladder.
+    // A generic stays plain Deterministic — no ladder.
     assert!(is_det(&classify_sampling_error(api_error(
         StatusCode::BAD_REQUEST,
         "invalid tool schema"
@@ -66,9 +66,6 @@ fn sampling_api_drifted_size_wordings_are_overflow() {
 
 #[test]
 fn sampling_tpm_429_with_retry_after_stays_transient() {
-    // A TPM 429 with Retry-After and size wording: the server is promising
-    // capacity later, so the compaction loop backs off instead of burning an
-    // input-ladder stage (see SamplingError::is_context_length_error).
     let size_text = "Request too large for model: Limit 30000, Requested 50000 tokens per min";
     let mut with_retry_after = api_error(StatusCode::TOO_MANY_REQUESTS, size_text);
     if let SamplingError::Api {
@@ -153,8 +150,7 @@ fn sampling_non_api_variants_classify_correctly() {
 
 #[test]
 fn response_event_invalid_request_error_marker_is_deterministic() {
-    // The documented schema-violation marker for the Anthropic Messages API
-    // Production `messages.X.content.Y: thinking blocks ...` errors take this branch
+    // The documented schema-violation marker for the Anthropic Messages API Production `messages.X.content.Y: thinking blocks ...` errors.
     assert!(is_det(&classify_response_event_error(
         Some("invalid_request_error"),
         "messages.27.content.1: ..."
@@ -244,8 +240,8 @@ fn sampling_api_500_with_context_length_message_is_overflow() {
 
 #[test]
 fn sampling_http_is_transient() {
-    // reqwest::Error has no public constructor; trigger one via a known-bad request
-    // reqwest's TCP connect needs a Tokio reactor; futures::executor is not enough (CI runs in a Bazel sandbox where the failure surfaces)
+    // reqwest::Error has no public constructor; trigger one via a known-bad
+    // request reqwest's TCP connect needs a Tokio reactor.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -317,7 +313,7 @@ fn stream_timing_boundaries() {
     assert_eq!(t.count, 1);
     assert!(t.ttft_ms().is_some());
     assert!(t.stream_ms().is_some());
-    assert_eq!(t.itl_max_ms(), None); // A gap needs at least 2 deltas
+    assert_eq!(t.itl_max_ms(), None);
     t.record_delta();
     assert_eq!(t.count, 2);
     assert!(t.itl_max_ms().is_some());

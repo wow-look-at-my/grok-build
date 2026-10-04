@@ -72,8 +72,7 @@ pub(super) fn find_dying_stores(
     surviving: Option<&gix::Repository>,
 ) -> Option<KeepReason> {
     for store in DyingStore::ALL {
-        // Both sides resolve from the same variant, so a store can never be
-        // compared against the survivor's other store.
+        // Both sides resolve from the same variant.
         let ours = store.path_in(repo);
         let theirs = surviving.map(|survivor| store.path_in(survivor));
         match find_missing_file(&ours, theirs.as_deref()) {

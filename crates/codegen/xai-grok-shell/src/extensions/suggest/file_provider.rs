@@ -1,11 +1,4 @@
 //! Filesystem completion for the shell token under the cursor.
-//! Any command's file arguments complete, plus path-like first tokens and redirection targets.
-//! Matching is fuzzy, and completions respect shell quoting, `~`, and `$VAR`.
-//!
-//! Token *syntax* (the minimal tokenizer and the re-quoting rules, with their documented limits) lives in [`super::shell_token`].
-//! This module owns the completion *policy*: which tokens complete, directory listing and ranking, and `~` and `$VAR` expansion.
-//! Expansion only picks the directory to LIST; quotes do not suppress it, so `'$HOME'/x` lists like `$HOME/x`.
-//! The inserted completion always preserves the user's typed prefix verbatim.
 
 use std::path::{Path, PathBuf};
 
@@ -15,15 +8,12 @@ use super::shell_token::{CurrentToken, build_insert_token, parse_current_token};
 use super::{RankedSuggestion, SuggestContext, SuggestionSource, splice_token_into_line};
 
 /// Ranked results returned per request.
-/// The dropdown renders 6 rows and scrolls; ranking happens BEFORE this cap so directories and the best fuzzy matches survive it.
 const MAX_RESULTS: usize = 50;
 
 /// Directory-scan cap guarding pathological directories (the same guard the `/export` path completer uses).
 const SCAN_CAP: usize = 1000;
 
 /// Max `stat` calls spent per scan classifying symlinks.
-/// A directory of up to [`SCAN_CAP`] symlinks would otherwise serialize that many `stat`s (hundreds of ms locally, worse on network filesystems).
-/// Past the budget a symlink classifies as a file; worst case a symlinked directory loses its trailing `/` and dirs-first ranking.
 const SYMLINK_STAT_BUDGET: usize = 64;
 
 /// Commands whose file arguments get a small ranking BOOST; the list is not a gate, since any command's arguments file-complete.
@@ -35,8 +25,6 @@ const FILE_COMMANDS: &[&str] = &[
 ];
 
 /// Priority bump for candidates when the segment's command is a known file consumer.
-/// The bump puts them above $PATH rows (priority 0) and above the history tail, but below mid and top history rows (base up to 10, +30 exact).
-/// History base decays to 1 by list position, so boosted file rows deliberately displace the weakest history matches. Every candidate in one response carries the SAME priority. Ordering within the response is provider-internal (tier, then score, then dirs-first, then name). It survives to the wire only because `aggregate`'s sort is STABLE (see `mod.rs`).
 const FILE_CMD_BOOST: i32 = 2;
 
 pub(crate) struct FilePathProvider;
@@ -91,7 +79,8 @@ impl FilePathProvider {
     }
 }
 
-/// Decide whether the token under the cursor file-completes: flag-looking tokens (`-x`, `--foo`) never do; any command's arguments (non-first tokens) and redirection targets do; a first token only when path-like (`./script.sh`, `/bin/…`, `~`); plain first words belong to the $PATH provider.
+/// Decide whether the token under the cursor file-completes: flag-looking
+/// tokens (`-x`, `--foo`) never do.
 fn extract_file_context(prefix: &str) -> Option<CurrentToken> {
     let tok = parse_current_token(prefix);
     if tok.value.starts_with('-') {
@@ -125,8 +114,8 @@ fn split_token<'a>(
     home: Option<&Path>,
     lookup: impl Fn(&str) -> Option<String>,
 ) -> SplitToken<'a> {
-    // Bare `~` completes as `~/…`: list the home directory With NO resolvable home, `~` stays literal, exactly what the shell's own failed tilde expansion does So list `cwd/~` (usually nothing) like the `~/x` arm below
-    // Falling back to listing the cwd itself would show files the accepted `~/…` insert can never name A quoted or escaped `~` is shell-literal; the general path matches it against cwd entries instead
+    // Bare `~` completes as `~/…`: list the home directory With NO
+    // resolvable home, `~` stays literal.
     if tok.value == "~" && tok.dir_value_len.is_none() && tok.plain_mask.first() == Some(&true) {
         return SplitToken {
             list_dir: home.map_or_else(|| Path::new(cwd).join("~"), Path::to_path_buf),
@@ -155,9 +144,11 @@ fn split_token<'a>(
     }
 }
 
-/// Expand `~/` and `$VAR` or `${VAR}` in the directory part, for LISTING only and only where the shell itself would.
-/// `plain` (byte-aligned with `dir_value`) marks chars typed unquoted and unescaped, so `'$HOME'/x`, `\$HOME/x`, and `"~/x` stay literal.
-/// Deliberately conservative: double-quoted `$VAR`, which bash would expand, stays literal too. Unset variables and `~user` forms stay literal (the listing just comes up empty); the inserted text never contains the expansion.
+/// Expand `~/` and `$VAR` or `${VAR}` in the directory part, for LISTING only
+/// and only where the shell itself would. `plain` (byte-aligned with
+/// `dir_value`) marks chars typed unquoted and unescaped, so `'$HOME'/x`,
+/// `\$HOME/x`, and `"~/x` stay literal. Deliberately conservative:
+/// double-quoted `$VAR`, which bash would expand, stays literal too.
 fn expand_for_listing(
     dir_value: &str,
     plain: &[bool],
@@ -234,7 +225,6 @@ fn expand_vars(s: &str, plain: &[bool], lookup: impl Fn(&str) -> Option<String>)
 struct ScoredEntry {
     name: String,
     is_dir: bool,
-    /// 0 is exact prefix, 1 is case-insensitive prefix, 2 is fuzzy.
     tier: u8,
     score: u32,
 }
@@ -352,8 +342,8 @@ fn file_command_boost(command: Option<&str>) -> i32 {
     }
 }
 
-/// Case-insensitive prefix test without a per-entry `to_lowercase` allocation (`prefix_lower` is lowered once per request).
-/// Char-fold equivalent of `name.to_lowercase().starts_with(prefix_lower)`.
+/// Case-insensitive prefix test without a per-entry `to_lowercase` allocation
+/// (`prefix_lower` is lowered once per request).
 fn ci_starts_with(name: &str, prefix_lower: &str) -> bool {
     let mut folded = name.chars().flat_map(char::to_lowercase);
     prefix_lower.chars().all(|p| folded.next() == Some(p))
@@ -896,7 +886,6 @@ mod tests {
         assert_eq!(r.replace_range, Some((4, text.len())));
     }
 
-    /// Unknown commands complete their args too, at priority 0 with no boost.
     #[tokio::test]
     async fn suggest_end_to_end_any_command() {
         let tmp = tempfile::TempDir::new().unwrap();

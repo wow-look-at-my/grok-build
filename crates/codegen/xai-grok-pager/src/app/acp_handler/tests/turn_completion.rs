@@ -3,9 +3,7 @@
 
     #[test]
     fn driver_prompt_complete_without_prompt_id_arms_reconcile_not_finish() {
-        // Driver still owns the turn via PromptResponse: prompt_complete must NOT finish immediately
-        // Missing wire promptId (legacy shells) arms lost-PR reconcile on current_prompt_id so grace teardown can run if the RPC never arrives
-        // Turn state stays TurnRunning
+        // Driver still owns the turn via PromptResponse.
         let mut app = make_app_with_agent("sess-drive");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -43,9 +41,7 @@
 
     #[test]
     fn driver_prompt_complete_with_matching_prompt_id_arms_reconcile() {
-        // Lost-response recovery: the driver receives the turn-end broadcast for the exact turn it is awaiting
-        // It must ARM the deferred reconcile without finishing the turn immediately
-        // The RPC response normally lands ms later and carries richer context; finishing here would double-finish every turn
+        // Lost-response recovery: the driver receives the turn-end broadcast.
         let mut app = make_app_with_agent("sess-drive");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -82,8 +78,7 @@
 
     #[test]
     fn driver_prompt_complete_with_mismatched_prompt_id_does_not_arm() {
-        // A broadcast for some OTHER prompt must not arm a reconcile against the turn this client is actually driving
-        // Other prompts here: a stale one, or a queued prompt that resolved server-side
+        // A broadcast for some OTHER prompt must not arm a reconcile against the turn this client is driving Other prompts here: a stale one.
         let mut app = make_app_with_agent("sess-drive");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -103,8 +98,7 @@
 
     #[test]
     fn driver_prompt_complete_without_prompt_id_arms_on_current() {
-        // Older shells omit `promptId`; arm reconcile on current_prompt_id when not mid-tool (see arm_driver_turn_end_reconcile)
-        // The turn is not finished here
+        // Older shells omit `promptId`; arm reconcile on current_prompt_id when not mid-tool (see arm_driver_turn_end_reconcile).
         let mut app = make_app_with_agent("sess-drive");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -149,9 +143,7 @@
 
     #[test]
     fn live_turn_completed_finalizes_viewer_turn_and_duplicate_is_noop() {
-        // The durable `TurnCompleted` is the viewer's non-interactive exit from TurnRunning on the replayed rail
-        // It parallels the fire-and-forget `prompt_complete`
-        // A viewer adopting the driver's live turn must drop back to Idle with a marker when it arrives
+        // The durable `TurnCompleted` is the viewer's non-interactive exit from TurnRunning.
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
         let _ = handle(
@@ -195,16 +187,10 @@
 
     #[test]
     fn turn_completed_reported_cost_attaches_to_agent_entry_and_session_total() {
-        // The durable `TurnCompleted` carries the per-turn `PromptUsage` cost
-        // (`cost_usd_ticks`) that the ACP text-chunk rail never delivers. This
-        // drives the SHIPPED runtime path end-to-end: stream an agent message,
-        // finalize the turn via the extension notification, and assert the
-        // reported cost lands on the agent-message entry AND the session-total
-        // indicator data (`session_total_cost_usd_ticks`) reflects it.
+        // The durable `TurnCompleted` carries the per-turn `PromptUsage` cost (`cost_usd_ticks`).
         let mut app = make_app_with_agent("sess-cost");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
 
-        // Turn 1: stream an agent message, then finalize with a reported cost.
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
             agent.session.start_turn(&mut agent.scrollback);
@@ -250,7 +236,6 @@
             "session-total indicator data must equal the reported turn cost"
         );
 
-        // Turn 2: a second reported cost accumulates into the running total.
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
             agent.session.start_turn(&mut agent.scrollback);
@@ -272,8 +257,6 @@
             "the session-total is the exact cumulative sum of reported costs (got {total:?})"
         );
 
-        // Turn 3: a TurnCompleted that reports NO cost (e.g. scrubbed/partial)
-        // must not fabricate a zero — it leaves the prior total unchanged.
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
             agent.session.start_turn(&mut agent.scrollback);
@@ -298,10 +281,7 @@
 
     #[test]
     fn every_response_in_a_tool_loop_prices_its_own_message() {
-        // One turn, two model calls (the shape of any turn that uses a tool).
-        // Each call closes with its own `ResponseCompleted`, so each rendered
-        // message must carry ITS call's cost — not one cost on the last message
-        // and nothing on the rest.
+        // One turn, model calls (the shape of any turn that uses a tool).
         let mut app = make_app_with_agent("sess-per-msg");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -310,7 +290,6 @@
             agent.turn_started_at = Some(std::time::Instant::now());
         }
 
-        // Call 1: streams a message, then closes at $0.10 (session total $0.10).
         let _ = handle(
             make_agent_chunk_for_response("sess-per-msg", "calling a tool", "pid-loop", 1_000),
             &mut app,
@@ -325,11 +304,6 @@
         );
         assert!(affected, "pricing a visible message must redraw");
 
-        // Call 2: a new `streamStartMs` opens the second message block; it
-        // closes at $0.20. The session total reported alongside it ($0.50) is
-        // deliberately MORE than the two messages sum to — a subagent's spend
-        // is real money with no message of its own, and the indicator must
-        // follow the agent's ledger rather than re-deriving from what it drew.
         let _ = handle(
             make_agent_chunk_for_response("sess-per-msg", "here is the answer", "pid-loop", 2_000),
             &mut app,
@@ -377,13 +351,7 @@
 
     #[test]
     fn reloaded_transcript_keeps_message_costs_without_resurrecting_an_old_total() {
-        // `ResponseCompleted` is persisted, so a reload replays it after its own
-        // message's chunks and the message keeps the cost it was priced at.
-        // The session total is a different question: the agent's ledger is
-        // in-memory and restarts at reload, so the replayed total must NOT be
-        // adopted — and neither may the scrollback sum stand in for it, or the
-        // indicator would show the old run's spend and then FALL to this run's
-        // at the first live call.
+        // `ResponseCompleted` is persisted, so a reload replays it after its own message's chunks.
         let mut app = make_app_with_agent("sess-reload");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -429,9 +397,7 @@
 
     #[test]
     fn turn_cost_still_lands_when_no_response_priced_the_turn() {
-        // An agent that prices only whole turns (no per-response cost) must keep
-        // the old behavior: the turn's cost lands on the message it rendered.
-        // The per-response path stands down only for prompts it actually priced.
+        // An agent that prices only whole turns (no per-response cost) must keep the behavior.
         let mut app = make_app_with_agent("sess-mixed");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -485,13 +451,7 @@
 
     #[test]
     fn driver_turn_completed_cost_lands_on_running_entry_before_prompt_finish() {
-        // DRIVER path (attached_as_viewer=false, the pager's own prompted turns
-        // — the primary interactive flow). On the driver the `PromptResponse`
-        // RPC owns the lifecycle, so `TurnCompleted` normally arrives BEFORE
-        // `finish_turn` runs (in `prompt.rs`). At that moment the agent message
-        // is still streaming (`current_agent_msg`), and the reported cost must
-        // be attributed to the running turn's live block — not dropped because
-        // no turn had been "finished" yet.
+        // DRIVER path (attached_as_viewer=false, the pager's own prompted turns — the primary interactive flow).
         let mut app = make_app_with_agent("sess-drive-cost");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -529,9 +489,7 @@
             );
         }
 
-        // Now the driver's actual finish arrives (PromptResponse → prompt.rs
-        // `finish_turn`). It must NOT drop or duplicate the already-attached
-        // cost, and the session total reflects exactly that one turn.
+        // Now the driver's actual finish arrives (PromptResponse → prompt.rs `finish_turn`).
         prompt_response(&mut app, "pid-d1");
         let (entry_cost, total, idle) = {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -556,10 +514,7 @@
 
     #[test]
     fn stale_turn_completed_cannot_corrupt_a_later_turn_cost() {
-        // A stale/misordered `TurnCompleted` for an ALREADY-FINISHED turn must
-        // be routed to that turn's own prompt-keyed entry, NOT to a newer turn
-        // that has begun streaming. Drives real finishes via `prompt.rs`
-        // (`PromptResponse`) so the prompt→entry map is populated by shipped code.
+        // A stale/misordered `TurnCompleted` for an ALREADY-FINISHED turn must be routed to that turn's own prompt-keyed entry.
         let mut app = make_app_with_agent("sess-stale-cost");
 
         // Turn P1: stream + finish via PromptResponse (no cost reported on the
@@ -588,7 +543,7 @@
             &mut app,
         );
 
-        // Late TurnCompleted for the OLD turn P1, carrying its cost, arrives
+        // Late TurnCompleted for the turn P1, carrying its cost, arrives
         // while P2 is streaming.
         let _ = handle_ext_notification(
             &xai_turn_completed_notif_with_cost("sess-stale-cost", "pid-p1", Some(3_000_000_000)),
@@ -622,9 +577,7 @@
 
     #[test]
     fn unknown_error_kind_from_wire_is_never_sniff_reclassified() {
-        // A NEWER shell's kind the pager doesn't know arrives through the real ingress
-        // The result quotes a truncation phrase and carries no status
-        // A present kind blocks the sniff reclassification, so it renders generic copy, not truncation
+        // A NEWER shell's kind the pager doesn't know arrives through the real ingress The result quotes a truncation phrase.
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
         let _ = handle(
@@ -685,9 +638,7 @@
 
     #[test]
     fn live_turn_completed_driver_arms_reconcile() {
-        // For the driver the `PromptResponse` RPC owns the lifecycle
-        // A live TurnCompleted for the turn it is driving arms the lost-RPC reconcile WITHOUT finishing the turn
-        // This mirrors the `prompt_complete` driver path
+        // For the driver the `PromptResponse` RPC owns the lifecycle A live TurnCompleted.
         let mut app = make_app_with_agent("sess-drive");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -819,8 +770,7 @@
 
     #[test]
     fn wake_turn_stop_affordance_offered_then_cleared_at_terminal() {
-        // The pane stays Idle around a wake turn, so the stop control is keyed on `running_wake_turn`
-        // That flag is set by the first live wake delta and cleared by the wake terminal
+        // The pane stays Idle around a wake turn, so the stop control is keyed on `running_wake_turn` That flag is set by the first live wake delta.
         let mut app = make_app_with_agent("sess-wake");
         let _ = handle(
             make_viewer_chunk_with_turn_start("sess-wake", "task-completed-bg1", 5_000),
@@ -982,8 +932,7 @@
 
     #[test]
     fn wake_turn_completed_in_replay_records_pid_and_visible_marker() {
-        // A visible wake still records its pid and also gets a marker
-        // The chunk must be isReplay: live output_epoch does not count
+        // A visible wake still records its pid and also gets a marker The chunk must be isReplay.
         let mut app = make_app_with_agent("sess-wake");
         begin_replay(&mut app);
         let _ = handle(
@@ -1132,8 +1081,7 @@
 
     #[test]
     fn rate_limited_wake_during_local_turn_keeps_rate_limit_copy() {
-        // The busy-wake piercing path must pass rate-limit copy through untouched like `finish_wake_turn` does
-        // The generic formatter would strip the upgrade URL and headline it "Request failed"
+        // The busy-wake piercing path must pass rate-limit copy through untouched like `finish_wake_turn` does The generic formatter would strip.
         let mut app = make_app_with_agent("sess-wake");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -1172,8 +1120,7 @@
 
     #[test]
     fn errored_wake_with_banner_on_screen_still_records_pid() {
-        // The retry-state rail already pushed the formatted RequestFailed banner for this failure
-        // The wake rail paints nothing either way; the pid still records so the other rail stays quiet
+        // The retry-state rail already pushed the formatted RequestFailed banner for this failure The wake rail paints nothing either way.
         let mut app = make_app_with_agent("sess-wake");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -1296,7 +1243,6 @@
     #[test]
     fn wake_terminal_during_command_snapshots_epoch_for_next_silent_wake() {
         // A client command (e.g. /compact) skips the wake finish but must not leave the epoch dirty.
-        // The next silent wake would claim the skipped wake's output
         use crate::app::agent::{AgentCommand, AgentState};
         use crate::app::agent_view::test_fixtures::count_turn_markers;
 
@@ -1374,7 +1320,7 @@
 
     #[test]
     fn chatty_send_now_cancelled_wake_is_markerless() {
-        // A wake with output cancelled by send-now must stay silent, the same suppression the other three turn-end rails already apply
+        // A wake with output cancelled by send-now must stay silent, the same suppression the others turn-end rails already apply
         use crate::app::agent_view::test_fixtures::count_turn_markers;
 
         let mut app = make_app_with_agent("sess-wake");
@@ -1663,8 +1609,7 @@
 
     #[test]
     fn child_session_completions_never_spam_root_status() {
-        // A background subagent's own task traffic routes to the CHILD view
-        // It never counts toward the root's watchers, so its completions must not push root status lines
+        // A background subagent's own task traffic routes to the CHILD view It never counts toward the root's watchers.
         let mut app = make_app_with_parent_and_child("sess-child-quiet", "child-1");
         let _ = handle_ext_notification(
             &make_task_backgrounded_notif("child-1", "tc-c1", "task-c1", "sleep 97"),
@@ -3631,7 +3576,6 @@
         assert_eq!(child.session.current_prompt_id.as_deref(), Some("pid-cmd"));
     }
 
-    // Nov 2023, so a follow-up after this start is still before wall-clock now.
     const CLOSED_TURN_START_MS: i64 = 1_700_000_000_000;
 
     fn close_nameless_child(

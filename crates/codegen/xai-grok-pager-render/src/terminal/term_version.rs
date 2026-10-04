@@ -1,13 +1,4 @@
 //! Terminal version capture from environment variables.
-//!
-//! **A version variable is trusted only when the environment corroborates the brand it belongs to.**
-//! These variables cross process, SSH and multiplexer boundaries.
-//! An uncorroborated version is as likely to describe another program as the terminal drawing our output.
-//! `WEZTERM_VERSION` and `VTE_VERSION` are themselves brand markers.
-//! For them, corroboration means no stronger marker outranked them in `detect_terminal_brand_from_env`.
-//!
-//! `ZELLIJ_VERSION` is never read: it would make an Alacritty pane inside Zellij report Zellij's number as its own.
-//! `KONSOLE_VERSION` is never read either: it has no `TerminalName::Konsole` to attach to.
 
 use std::collections::HashMap;
 
@@ -33,7 +24,6 @@ pub enum TermVersionSource {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TermVersion {
     /// Raw, exactly as the source reported it (trimmed).
-    /// Formats vary by terminal: `"3.5.6"`, `"20240203-110809-5046fc22"`, `"7402"`.
     pub version: String,
     pub source: TermVersionSource,
 }
@@ -81,8 +71,6 @@ pub(super) fn detect_env_term_version(
     env: &HashMap<String, String>,
     env_brand: TerminalName,
 ) -> Option<TermVersion> {
-    // tmux >= 3.2 exports TERM_PROGRAM=tmux and its own TERM_PROGRAM_VERSION
-    // Ungated, that version would land on whichever brand marker survived inside the tmux server environment
     let named_brand = env_trimmed(env, "TERM_PROGRAM").and_then(terminal_name_from_term_program);
     if let Some(version) = env_trimmed(env, "TERM_PROGRAM_VERSION")
         && named_brand.is_some_and(|named| corroborates(named, env_brand))
@@ -104,8 +92,8 @@ pub(super) fn detect_env_term_version(
         return Some(TermVersion::new(version, TermVersionSource::WezTerm));
     }
 
-    // Brand-only: `TerminalContext::is_vte_based()` also accepts a present `vte_version`, which is the candidate here
-    // Routing the gate through it would make it vacuous
+    // Brand-only: `TerminalContext::is_vte_based()` also accepts a present
+    // `vte_version`.
     if let Some(version) = env_trimmed(env, "VTE_VERSION")
         && env_brand.is_vte_based()
     {
@@ -280,8 +268,6 @@ mod tests {
 
     #[test]
     fn tmux_term_program_version_is_not_the_terminal_version() {
-        // tmux >= 3.2 exports TERM_PROGRAM=tmux plus its own version, and iTerm2's releases are also 3.5.x
-        // An ungated value would be indistinguishable from a real one
         let (version, source) = resolved(&[
             ("TMUX", "/tmp/tmux-501/default,12345,0"),
             ("TERM_PROGRAM", "tmux"),

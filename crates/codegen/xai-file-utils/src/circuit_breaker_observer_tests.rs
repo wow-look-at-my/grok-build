@@ -1,8 +1,4 @@
 //! Tests for [`crate::circuit_breaker_observer::TracingObserver`].
-//!
-//! Snapshot the exact `tracing::Event` field set for each transition
-//! so a future rename or field-set change can't break analytics queries
-//! silently.
 
 use super::*;
 use std::collections::{BTreeSet, HashMap};
@@ -18,11 +14,9 @@ struct CapturedEvent {
     target: String,
     message: String,
     breaker: Option<String>,
-    /// All non-message field names present on the event. Pins the
-    /// structured field set that analytics queries consume.
+    /// All non-message field names present on the event. Pins the structured field set that analytics queries consume.
     field_names: BTreeSet<String>,
-    /// All non-message field values rendered as strings. Lets a test
-    /// assert e.g. `reason=="trip"` without re-emitting the event.
+    /// All non-message field values rendered as strings.
     field_values: HashMap<String, String>,
 }
 

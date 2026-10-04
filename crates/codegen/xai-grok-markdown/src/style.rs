@@ -1,6 +1,4 @@
 //! Markdown styling types.
-//!
-//! This module provides the `MarkdownStyle` struct which defines colors and effects for all markdown elements.
 
 use anstyle::{Effects, Style};
 
@@ -148,10 +146,8 @@ pub struct MarkdownStyle {
     pub code_background: Style,
     pub table_outer: Style,
     /// Default foreground for plain body text (paragraphs with no formatting).
-    /// When set, the renderer applies this to text spans that would otherwise inherit the terminal's default foreground.
     pub text: Style,
-    /// Style for rendered LaTeX math (inline `$...$`/`\(...\)` content after Unicode conversion, and display math block lines).
-    /// In raw mode the style applies to the unconverted TeX source.
+    /// Style for rendered LaTeX math.
     pub math: Style,
 }
 
@@ -260,7 +256,7 @@ pub(crate) fn merge_styles(styles: impl IntoIterator<Item = Option<Style>>) -> S
     out.effects(out.get_effects().remove(Effects::HIDDEN))
 }
 
-// Simple default style for testing (no colors, just effects)
+// Simple default style for testing (no colors, effects)
 #[cfg(any(test, fuzzing))]
 pub mod test_style {
     use super::MarkdownStyle;

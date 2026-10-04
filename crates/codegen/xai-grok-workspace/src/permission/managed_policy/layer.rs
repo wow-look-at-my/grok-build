@@ -1,10 +1,9 @@
-//! Policy layer vocabulary: source tiers, authority, ownership, and
-//! tighten-only pins.
+//! Policy layer vocabulary: source tiers, authority, ownership, and tighten-only pins.
 
 use std::path::{Path, PathBuf};
 
-/// Trust tier of a policy layer; lower = higher authority (mdm > system > user,
-/// vendor last); derives authority + ownership; first-wins applies in tier order.
+/// Trust tier of a policy layer; lower = higher authority (mdm > system >
+/// user, vendor last); derives authority + ownership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum PolicyLayerTier {
     Mdm,
@@ -12,8 +11,7 @@ pub(super) enum PolicyLayerTier {
     SystemManaged,
     UserRequirements,
     UserManaged,
-    /// The Claude `managed-settings.json`; sorts (applies) after every grok
-    /// layer.
+    /// The Claude `managed-settings.json`; sorts (applies) after every grok layer.
     Vendor,
 }
 
@@ -39,17 +37,15 @@ impl PolicyLayerTier {
     }
 }
 
-/// One TOML policy layer. The vendor JSON layer ([`PolicyLayerTier::Vendor`])
-/// is applied separately: its value is already JSON and skips the TOML policy
-/// key filter.
+/// One TOML policy layer.
 pub(super) struct PolicyLayer {
     pub(super) tier: PolicyLayerTier,
     pub(super) path: PathBuf,
     pub(super) value: toml::Value,
 }
 
-/// Whether a source binds everything (grok's own TOML layers, `Native`) or only
-/// foreign-defined subjects (the vendor Claude managed-settings.json, `Advisory`).
+/// Whether a source binds everything (grok's own TOML layers, `Native`) or
+/// only foreign-defined subjects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PolicySourceAuthority {
     #[default]
@@ -65,8 +61,7 @@ pub enum PolicyPin {
     Unpinned,
     Disabled {
         source: PathBuf,
-        /// Who can write the pinning layer (see [`PolicyLayerOwnership`]);
-        /// carried in the pin so pin and grant rule can never desync.
+        /// Who can write the pinning layer (see [`PolicyLayerOwnership`]).
         ownership: PolicyLayerOwnership,
     },
 }
@@ -85,9 +80,8 @@ impl PolicyPin {
     }
 }
 
-/// Who can write the layer a policy value came from: `Admin` restrictions accept
-/// only admin-owned exception grants; `User` restrictions accept any. A user-writable
-/// grant that satisfied an admin lockdown would let the restricted user lift it themselves.
+/// Who can write the layer a policy value came from: `Admin` restrictions
+/// accept only admin-owned exception grants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyLayerOwnership {
     Admin,

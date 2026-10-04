@@ -1,8 +1,4 @@
 //! `grep` tool — OpenCode namespace.
-//!
-//! Shells out to the ripgrep (`rg`) binary, parses the output, sorts
-//! matches by file modification time (most recent first), caps at 100
-//! results, truncates long lines, and formats as grouped output.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -17,9 +13,7 @@ use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::resources::{Cwd, SharedResources};
 use crate::types::tool::{ToolKind, ToolNamespace};
 
-// ───────────────────────────────────────────────────────────────────────────
-// Constants
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────── Constants.
 
 const RESULT_LIMIT: usize = 100;
 const MAX_LINE_LENGTH: usize = 2000;
@@ -83,9 +77,7 @@ impl From<GrepInput> for crate::types::tool_io::ToolInput {
     }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Tool implementation
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────── Tool implementation.
 
 #[derive(Debug, Default)]
 pub struct GrepTool;
@@ -211,7 +203,6 @@ impl xai_tool_runtime::Tool for GrepTool {
         let status = child.wait().await.ok();
         let exit_code = status.and_then(|s| s.code()).unwrap_or(-1);
 
-        // Exit code 1 = no matches, exit code 2 with no output = errors only.
         let stdout_str = String::from_utf8_lossy(&stdout_buf);
         if exit_code == 1 || (exit_code == 2 && stdout_str.trim().is_empty()) {
             let formatted = "No files found".to_string();
@@ -239,7 +230,6 @@ impl xai_tool_runtime::Tool for GrepTool {
             if line.is_empty() {
                 continue;
             }
-            // Split on first two `|` separators.
             let mut parts = line.splitn(3, '|');
             let file_path = match parts.next() {
                 Some(p) => p,
@@ -497,7 +487,7 @@ mod tests {
     #[tokio::test]
     async fn multiple_files_grouped() {
         let tmp = TempDir::new().unwrap();
-        // Create two files, both containing the pattern.
+        // Create files, both containing the pattern.
         std::fs::write(
             tmp.path().join("first.txt"),
             "match_me line1\nmatch_me line2\n",
@@ -525,8 +515,7 @@ mod tests {
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(text.contains("Found 3 matches"), "header: {text}");
 
-        // Verify blank line separates the two file groups.
-        // Output format: header\n{path1}:\n  Line ...\n  Line ...\n\n{path2}:\n  Line ...
+        // Verify blank line separates both file groups.
         let lines: Vec<&str> = text.lines().collect();
         // Find the blank separator line between groups.
         let blank_positions: Vec<usize> = lines
@@ -674,7 +663,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Three lines contain "alpha".
+        // A few lines contain "alpha".
         assert_eq!(output.match_count, 3);
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(text.contains("Found 3 matches"), "header: {text}");
@@ -717,13 +706,11 @@ mod tests {
         );
         assert_eq!(fm.matches.len(), 2);
 
-        // First match: line 1.
         let Some(m0) = fm.matches.first() else {
             panic!("expected line matches: {:?}", fm.matches);
         };
         assert_eq!(m0.line_number, 1);
         assert!(m0.content.contains("target"));
-        // Second match: line 3.
         let Some(m1) = fm.matches.get(1) else {
             panic!("expected two line matches: {:?}", fm.matches);
         };
@@ -822,7 +809,6 @@ mod tests {
             text.contains("showing 100 of 150"),
             "expected truncation message: {text}"
         );
-        // Count "  Line " prefixes — exactly 100 displayed lines.
         let displayed = text.matches("  Line ").count();
         assert_eq!(
             displayed, 100,
@@ -854,7 +840,7 @@ mod tests {
         .unwrap();
 
         let text = String::from_utf8_lossy(&output.stdout);
-        // Find the formatted "  Line N: ..." output line.
+        // Find the formatted " Line N: ..." output line.
         let match_line = text
             .lines()
             .find(|l| l.trim_start().starts_with("Line "))
@@ -863,7 +849,6 @@ mod tests {
             match_line.ends_with("..."),
             "expected truncated line ending with '...': {match_line}"
         );
-        // The displayed content after "  Line N: " should be at most 2003 chars (2000 + "...").
         let content_start = match_line.find(": ").unwrap() + 2;
         let display_content = match_line.get(content_start..).unwrap_or("");
         assert!(
@@ -990,8 +975,7 @@ mod tests {
         )
         .await;
 
-        // Empty pattern may match everything or produce an error from rg.
-        // The key assertion: no panic, returns Ok.
+        // Empty pattern may match everything or produce an error from rg. The key assertion: no panic, returns Ok.
         assert!(result.is_ok(), "empty pattern should not panic: {result:?}");
     }
 
@@ -1000,9 +984,6 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn exit_code_2_with_output() {
-        // ripgrep returns exit code 2 when some paths are inaccessible
-        // but valid matches exist in other files.
-        // We trigger this by creating a broken symlink alongside a real file.
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("real.txt"), "findme\n").unwrap();
         // Create a broken symlink: link -> nonexistent_target
@@ -1033,15 +1014,8 @@ mod tests {
             text.contains("real.txt"),
             "expected real.txt match in output: {text}"
         );
-        // Note: ripgrep's --no-messages flag suppresses error messages so rg may not return exit code 2 for a broken symlink.
-        // If rg returns 0 instead, the "(Some paths were inaccessible)" message won't appear. We still verify the match was
-        // found; the exit-code-2 path is exercised only when rg actually reports partial errors.
         assert!(output.match_count >= 1, "should have at least 1 match");
     }
 
-    // ── exit_code_2_without_output ──────────────────────────────────
 
-    // Skipped: triggering ripgrep exit code 2 with zero stdout (errors only, no matches) is
-    // impractical in a unit test with real `rg`. The code path (line 189) returns "No files found"
-    // and is simple enough to verify by inspection. Documented as a known gap.
 }

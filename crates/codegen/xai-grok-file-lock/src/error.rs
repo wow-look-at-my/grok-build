@@ -10,10 +10,7 @@ pub enum LockError {
     /// `Wait::NoWait` only: another process holds the lock right now.
     #[error("lock {} is held by another process", .path.display())]
     Contended { path: PathBuf },
-    /// The machine-local acquire slot for `path` stayed held past the grace: another process
-    /// (`holder_pid`, `None` if it had not stamped the slot yet) is still inside its own
-    /// `open()`/`flock()` of this path, which almost always means a stalled network filesystem.
-    /// `path` was not touched.
+    /// The machine-local acquire slot for `path` stayed held past the grace.
     #[error(
         "another process ({}) is still acquiring {}; the grok home looks stalled (network \
          filesystem?). Retry later; if the holder is not stuck, point {} at a new private \

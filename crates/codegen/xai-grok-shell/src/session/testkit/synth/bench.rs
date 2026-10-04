@@ -1,6 +1,4 @@
 //! Adapter-driven session synthesis for benches.
-//! Appends realistic turns through the real `JsonlStorageAdapter` until `updates.jsonl` reaches a byte target.
-//! Fork and copy benchmarks thus measure production-shaped data.
 
 use std::path::Path;
 
@@ -11,7 +9,6 @@ use crate::session::storage::{JsonlStorageAdapter, SessionUpdate, StorageAdapter
 
 const AGENT_CHUNKS_PER_TURN: usize = 8;
 /// Stands in for a large tool result, the dominant byte source in real sessions.
-/// Emitted as an agent message chunk so the byte and line shape match production rather than the `ToolCall` kind.
 const BULKY_CHUNK_BYTES: usize = 4096;
 
 fn turn_updates(info: &Info, turn: usize) -> Vec<SessionUpdate> {
@@ -53,8 +50,8 @@ pub async fn make_session_with_size(root: &Path, target_bytes: u64) -> Info {
             adapter.append_update(&info, &update).await.expect("append");
         }
         turn += 1;
-        // Stat every 32 turns; sizes only grow
-        // A persistent stat failure panics here rather than spinning the append loop forever
+        // Stat every few turns; sizes only grow A persistent stat failure panics here rather
+        // than spinning the append loop forever
         if turn.is_multiple_of(32)
             && std::fs::metadata(&updates_path)
                 .expect("stat updates.jsonl")

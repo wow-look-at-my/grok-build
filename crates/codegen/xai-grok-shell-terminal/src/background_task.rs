@@ -1,6 +1,4 @@
 //! Per-session registry the model queries for the status and output of commands launched with `is_background: true`.
-//! `StreamingLocalTerminalRunner` does the spawning and streaming; this registry answers queries by task_id.
-//! The in-memory `output` is truncated past `output_byte_limit`; `output_file` holds the full output on disk.
 
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -161,8 +159,7 @@ impl BackgroundTaskRegistry {
             tasks.get(task_id)?.clone()
         };
 
-        // Register notification interest BEFORE checking completion
-        // If mark_completed fires between the check and the wait, notify_waiters() wakes zero futures and the notification is permanently lost
+        // Register notification interest BEFORE checking completion If mark_completed fires between the check and the wait, notify_waiters().
         let notified = entry.exit_notify.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();

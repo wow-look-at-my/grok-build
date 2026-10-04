@@ -1,5 +1,4 @@
-//! HTTPS transport for the mock inference server: a throwaway CA and a loopback leaf, served with
-//! no plaintext listener, so a request the mock logs implies a completed TLS handshake.
+//! HTTPS transport for the mock inference server: a throwaway CA and a loopback leaf, served with no plaintext listener.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -76,9 +75,8 @@ fn generate_tls_material() -> anyhow::Result<(rustls::ServerConfig, String)> {
         .signed_by(&leaf_key, &ca_cert, &ca_key)
         .context("leaf cert")?;
 
-    // Both rustls providers are linked, so pick explicitly. Mirror xai-grok-extra-ca:
-    // aws-lc-rs except Windows ARM64, where jitterentropy overflows the stack (GB-5593).
-    // A native harness must not crash in the mock before the child under test is spawned.
+    // Both rustls providers are linked, so pick explicitly. Mirror xai-grok-extra-ca: aws-lc-rs except Windows ARM64, where jitterentropy overflows
+    // the stack (GB-5593).
     let provider = if cfg!(all(windows, target_arch = "aarch64")) {
         rustls::crypto::ring::default_provider()
     } else {

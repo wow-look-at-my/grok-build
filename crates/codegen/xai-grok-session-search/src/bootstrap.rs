@@ -1,5 +1,4 @@
 //! Cross-process bootstrap gate for the session search index.
-//! A lease claim in the index's own `meta` table lets one process run [`reindex_all`] while waiters adopt its completed-bootstrap marker.
 
 use std::collections::HashSet;
 use std::io;
@@ -39,15 +38,12 @@ const TIMING: BootstrapTiming = BootstrapTiming {
     peer_wait: Duration::from_secs(60),
     poll: Duration::from_secs(1),
 };
-// The refresh must fire several times within a lease, and a waiter must poll at least once within the peer wait
-// (`try_bootstrap_with_lease` zeroes the peer wait on purpose: one claim attempt, no wait loop.)
+// The refresh must fire several times within a lease.
 const _: () = assert!(TIMING.refresh.as_millis() < TIMING.lease.as_millis());
 const _: () = assert!(TIMING.poll.as_millis() < TIMING.peer_wait.as_millis());
 
 #[derive(Default)]
 pub(crate) struct BootstrapProgress {
-    /// Bit 0 is the `bootstrapping` flag; the upper bits hold a generation bumped on every set.
-    /// They share one atomic so a single compare-exchange clears the flag only when nothing newer (a heal re-enqueue, a concurrent search) set it.
     state: AtomicU64,
     pub indexed: AtomicU64,
     pub total: AtomicU64,
@@ -91,7 +87,6 @@ impl BootstrapProgress {
 }
 
 /// Keeps the `bootstrapping` flag set for the duration of a bootstrap job.
-/// The drop clears it on every exit, including unwind, unless a newer `begin_bootstrapping` has taken ownership since.
 pub(crate) struct BootstrappingGuard {
     progress: Arc<BootstrapProgress>,
     generation: u64,
@@ -198,8 +193,7 @@ async fn bootstrap_with_lease_inner(
         }
 
         if claim_bootstrap_lease(&db_path, &token, timing.lease).await? {
-            // Only a launch's first claim ignores an existing marker (the launch owes pruning and skipped retries)
-            // Everyone else adopts any completed marker
+            // Only a launch's first claim ignores an existing marker (the launch owes pruning and skipped retries).
             let first_launch_claim = role != BootstrapRole::Recheck && !peer_seen;
             if !first_launch_claim && has_completed_bootstrap_marker(root_dir).await == Some(true) {
                 release_bootstrap_claim(&db_path, &token).await;
@@ -304,7 +298,7 @@ fn spawn_claim_refresher(db_path: PathBuf, token: ClaimToken, every: Duration) -
     let handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(every);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        // The first tick fires immediately; the claim was stamped just now.
+        // The first tick fires immediately; the claim was stamped now.
         interval.tick().await;
         loop {
             interval.tick().await;
@@ -401,8 +395,6 @@ fn clear_last_bootstrap_at(db_path: &Path) -> io::Result<()> {
 }
 
 /// One shared connection per reindex instead of an open per session.
-/// It re-opens when the cache epoch changes (a heal renames the DB file) and falls back to the healing open on unusable-DB errors.
-/// A peer's heal is invisible to the local epoch; the fenced marker write covers that case.
 struct SharedIndex(parking_lot::Mutex<Option<(u64, SessionSearchIndex)>>);
 
 impl SharedIndex {
@@ -497,8 +489,9 @@ async fn reindex_all(
                 .await
                 .expect("semaphore is never closed");
 
-            // A successor owns the index once the claim is lost
-            // These upserts are idempotent, not fenced, so stopping just avoids contending with it
+            // A successor owns the index once the claim is lost These upserts
+            // are idempotent, not fenced, so stopping avoids contending with
+            // it
             if claim_lost.load(Ordering::Acquire) {
                 return;
             }
@@ -600,8 +593,8 @@ async fn reindex_all(
 
     if claim_lost.load(Ordering::Acquire) {
         tracing::warn!("bootstrap claim lost; abandoning reindex without a completion marker");
-        // A local heal quarantines the claim row with the file, which the fenced refresh cannot tell from a takeover
-        // Only the takeover has a successor that finishes the job
+        // A local heal quarantines the claim row with the file, which the
+        // fenced refresh cannot tell from a takeover Only.
         return Ok(if epoch.changed() {
             BootstrapOutcome::RunAgain
         } else {
@@ -609,9 +602,7 @@ async fn reindex_all(
         });
     }
 
-    // Prune sessions deleted on disk
-    // Fenced: `expected_ids` is a startup snapshot, so a claimant that lost its lease must not delete rows a successor indexed since
-    // The refresh doubles as the ownership check
+    // Prune sessions deleted on disk Fenced: `expected_ids` is a startup snapshot.
     let db_path = search_db_path(root_dir);
     let token = claim_token.as_str().to_string();
     let shared = shared.clone();

@@ -905,7 +905,7 @@ fn merge_section_cli_only_updates_set_fields_preserves_unmodeled() {
 /// the file is re-read, and the session's own resolver answers with the
 /// model that was picked.
 ///
-/// The two halves are written independently — one match on the slot id in
+/// Both halves are written independently — one match on the slot id in
 /// `settings_writes`, another in `Config::harness_model_from_config` — so
 /// nothing else catches a pair that names different fields.
 #[test]
@@ -949,8 +949,7 @@ fn clearing_a_harness_model_slot_removes_its_key_from_the_file() {
         let mut root = TomlMap::new();
         merge_section(&mut root, "models", &models);
 
-        // The clear path: the field goes to `None` and the removal pass
-        // drops the key `set_harness_model` names.
+        // The clear path: the field goes to `None` and the removal pass drops the key `set_harness_model` names.
         super::super::settings_writes::apply_harness_model(&mut models, slot.id, None);
         merge_section(&mut root, "models", &models);
         if let Some(TomlValue::Table(section)) = root.get_mut("models") {
@@ -1200,8 +1199,8 @@ mod resolve_auto_compact {
         let info = model_info(gb_per_model);
         resolve_auto_compact_threshold_percent(cfg, TEST_MODEL, Some(&info))
     }
-    /// RAII guard that swaps the env var for the duration of a test and restores the previous value on drop.
-    /// Acquires `ENV_LOCK` so two env-var tests never run concurrently.
+    /// RAII guard that swaps the env var for the duration of a test and
+    /// restores the value on drop.
     struct EnvVarGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
         prev: Option<String>,
@@ -1648,7 +1647,6 @@ fn no_home_cwd_config_resolves_slot_not_follow() {
     assert_eq!("new\n", std::fs::read_to_string(&link).unwrap());
     assert_eq!("keep\n", std::fs::read_to_string(&outside).unwrap());
 }
-/// A 0600 referent must not be published via a 0644 temp (chmod-ignored).
 #[cfg(unix)]
 #[test]
 fn atomic_write_string_preserves_0600_referent_mode() {

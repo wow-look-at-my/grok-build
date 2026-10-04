@@ -1,24 +1,4 @@
 //! Tracing capture and display for the pager's tracing pane.
-//!
-//! This module provides:
-//!
-//! - [`TracingEntry`]: one log line, parsed from an ANSI-formatted string into a ratatui [`Text`] for rendering and a plain [`Arc<str>`] for search.
-//!   Implements [`ListItem`] so it can be displayed in a [`ListPane`].
-//!
-//! - [`TracingModel`]: a bounded, append-only ring buffer of [`TracingEntry`] items.
-//!   Uses `Vec` with batch eviction (not `VecDeque`) so that `as_slice()` returns a single contiguous `&[TracingEntry]` for the `ListPane` API.
-//!
-//! ## Architecture (Option A: ANSI pass-through)
-//!
-//! The current approach receives pre-formatted ANSI strings from `tracing-subscriber`'s `Full` formatter and parses them with `ansi-to-tui`.
-//! The resulting styled ratatui `Text` is rendered directly, the simplest path to a working tracing pane.
-//!
-//! ## Future: Option B, structured capture
-//!
-//! A future iteration could replace the ANSI pass-through with a custom `tracing_subscriber::Layer`.
-//! That layer would capture structured event data (level, target, spans, fields) into `TracingEntry` directly.
-//! The `ListItem` trait keeps `ListPane` out of this change; only this module would need updating.
-//! Swap `TracingEntry::new()`'s internals from "parse ANSI string" to "format structured fields" and nothing else changes.
 use crate::views::list_pane::ListItem;
 use ansi_to_tui::IntoText;
 use ratatui::text::{Line, Text};
@@ -26,9 +6,7 @@ use std::io;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing_subscriber::fmt::MakeWriter;
-/// A single tracing log entry, ready for display in a `ListPane`. Created from a pre-formatted ANSI string (as
-/// produced by `tracing_subscriber::fmt` with `with_ansi(true)`). The ANSI is parsed once at construction time
-/// into. Both are immutable after construction.
+/// A single tracing log entry, ready for display in a `ListPane`.
 #[derive(Debug, Clone)]
 pub struct TracingEntry {
     /// Monotonic sequence number. Used as `stable_id()` for `ListItem`.
@@ -41,8 +19,8 @@ pub struct TracingEntry {
     styled: Text<'static>,
 }
 impl TracingEntry {
-    /// Create a new entry from a pre-formatted ANSI string; `seq` is a monotonic ID assigned by the [`TracingModel`].
-    /// If ANSI parsing fails (malformed escapes), falls back to plain unstyled text; a log line is never dropped.
+    /// Create a new entry from a pre-formatted ANSI string; `seq` is a
+    /// monotonic ID assigned by the [`TracingModel`].
     pub fn new(seq: u64, ansi: &str) -> Self {
         let raw_ansi: Arc<str> = Arc::from(ansi);
         let styled = Self::parse_and_style(ansi);
@@ -130,8 +108,7 @@ impl ListItem for TracingEntry {
         &self.plain
     }
 }
-/// Bounded, append-only buffer of [`TracingEntry`] items. Uses `Vec` (not `VecDeque`) so that `as_slice()` returns
-/// a single contiguous `&[TracingEntry]`, required by `ListPane`'s API.
+/// Bounded, append-only buffer of [`TracingEntry`] items.
 #[derive(Debug)]
 pub struct TracingModel {
     entries: Vec<TracingEntry>,
@@ -145,7 +122,6 @@ pub struct TracingModel {
 /// Result of a [`TracingModel::push`] operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PushResult {
-    /// Number of entries evicted from the front (0 most of the time).
     pub evicted: usize,
 }
 impl TracingModel {
@@ -160,8 +136,6 @@ impl TracingModel {
         }
     }
     /// Append a log line (pre-formatted ANSI string).
-    ///
-    /// Returns the number of entries evicted from the front (0 unless the buffer exceeded `capacity + hysteresis`).
     pub fn push(&mut self, ansi: &str) -> PushResult {
         let entry = TracingEntry::new(self.next_seq, ansi);
         self.next_seq += 1;
@@ -190,9 +164,8 @@ impl TracingModel {
             0
         }
     }
-    /// Contiguous slice of all current entries.
-    ///
-    /// This is the slice you pass to `ListPaneState::prepare_layout()` and `ListPane::new()`.
+    /// Contiguous slice of all current entries. This is the slice you pass to
+    /// `ListPaneState::prepare_layout()` and `ListPane::new()`.
     pub fn as_slice(&self) -> &[TracingEntry] {
         &self.entries
     }
@@ -236,16 +209,11 @@ impl TracingModel {
         }
     }
 }
-/// Target for the full ACP update payload dump (plain JSON, no ANSI). Payload fields on this target must be wrapped
-/// in [`LazyJson`] so serialization only happens inside a recording subscriber.
+/// Target for the full ACP update payload dump (plain JSON, no ANSI).
 pub use xai_grok_telemetry::debug_log::ACP_UPDATE_PAYLOAD_TARGET;
 /// Target for the always-on compact ACP update summary line (kind, ids, status, payload sizes).
-/// Cheap to format at streaming rate.
-/// Defined in `xai-grok-telemetry` so the firehose directives and the pager filter share one constant (re-exported here for callsites).
 pub use xai_grok_telemetry::debug_log::ACP_UPDATE_TARGET;
-/// Use as a `%`-captured event field so `serde_json::to_string` runs only when a layer whose filter passed actually
-/// records the field. That globally enables the callsite; per-layer filters only gate recording, not argument
-/// evaluation.
+/// Use as a `%`-captured event field so `serde_json::to_string` runs only.
 pub struct LazyJson<'a, T>(pub &'a T);
 impl<T: serde::Serialize> std::fmt::Display for LazyJson<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -253,8 +221,6 @@ impl<T: serde::Serialize> std::fmt::Display for LazyJson<'_, T> {
     }
 }
 /// Capacity of the log channel between tracing-subscriber and the UI.
-/// Bounded so a starved consumer (the event loop drains it only on ticks, deprioritized below ACP traffic) caps retention at `capacity x line size`.
-/// On overflow the newest line is dropped and [`dropped_log_lines`] is incremented.
 const LOG_CHANNEL_CAPACITY: usize = 16 * 1024;
 /// Lines dropped due to a full log channel (process-wide).
 static DROPPED_LOG_LINES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -266,14 +232,10 @@ pub fn dropped_log_lines() -> u64 {
 pub type LogTx = mpsc::Sender<String>;
 pub type LogRx = mpsc::Receiver<String>;
 /// Factory that creates [`TracingChannelWriter`] instances for `tracing-subscriber`.
-/// Implements [`MakeWriter`] so it can be passed to `tracing_subscriber::fmt().with_writer(make_writer)`.
-/// Created via [`TracingChannelMakeWriter::new()`], which returns the writer factory and the receiving end of the channel.
 #[derive(Clone)]
 pub struct TracingChannelMakeWriter(LogTx);
 impl TracingChannelMakeWriter {
-    /// Create a new channel writer pair. Returns `(make_writer, receiver)`. Pass `make_writer` to
-    /// `tracing_subscriber::fmt().with_writer(.)`. Poll `receiver` in your event loop and feed each `String` to
-    /// [`TracingModel::push()`].
+    /// Create a new channel writer pair. Returns `(make_writer, receiver)`.
     pub fn new() -> (Self, LogRx) {
         let (tx, rx) = mpsc::channel(LOG_CHANNEL_CAPACITY);
         (Self(tx), rx)
@@ -285,8 +247,7 @@ impl<'a> MakeWriter<'a> for TracingChannelMakeWriter {
         TracingChannelWriter { tx: self.0.clone() }
     }
 }
-/// Writer that sends each formatted log line to a bounded mpsc channel. Logging must never OOM or back-pressure the
-/// runtime, so a full channel drops the line`).
+/// Writer that sends each formatted log line to a bounded mpsc channel.
 #[derive(Clone)]
 pub struct TracingChannelWriter {
     tx: LogTx,
@@ -311,9 +272,8 @@ impl io::Write for TracingChannelWriter {
         Ok(())
     }
 }
-/// Return value from [`init_tracing()`].
-/// Holds the receiving end of the log channel.
-/// The caller should poll `rx` in the event loop and feed each `String` to [`TracingModel::push()`].
+/// Return value from [`init_tracing()`]. Holds the receiving end of the log
+/// channel.
 pub struct TracingHandle {
     /// Receive log lines here. Each string is a pre-formatted ANSI line from `tracing-subscriber`'s `Full` formatter.
     pub rx: LogRx,
@@ -393,9 +353,7 @@ mod tests {
             s.serialize_str("probe-payload")
         }
     }
-    /// Filterless layer with all-default methods, mirroring the disabled telemetry `NoOpLayer`s in the production registry.
-    /// Its default `register_callsite` reports `Interest::always()`, keeping every callsite globally enabled.
-    /// This is the condition that defeats a bare (non-lazy) macro argument.
+    /// Filterless layer with all-default methods, mirroring the disabled telemetry `NoOpLayer`s.
     struct FilterlessNoOp;
     impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for FilterlessNoOp {}
     /// Emit the production-shaped payload event against a registry with the given payload-target directive; return (serialized?, line received?).

@@ -21,8 +21,6 @@ pub(crate) fn authorization_header(headers: &HeaderMap) -> Option<String> {
 
 #[derive(Debug, Clone)]
 pub struct LogEntry {
-    /// The request's place in arrival order over every route, counted from 1, which names the entry
-    /// for [`RequestLog::note_failure`] after older entries are evicted.
     sequence: u64,
     pub method: String,
     pub path: String,
@@ -34,8 +32,7 @@ pub struct LogEntry {
     pub at: std::time::SystemTime,
     /// Foreground inference requests only.
     pub conversation: Option<usize>,
-    /// What the mock decided to do to an inference request on its own; `None` for a plain answer or a
-    /// response the test enqueued. Noted before any hold so a stall still shows it.
+    /// What the mock decided to do to an inference request on its own.
     pub observed_failure: Option<ObservedFailure>,
 }
 

@@ -1,5 +1,4 @@
 //! Session initialization concern for `SessionActor`.
-//! Covers `initialize`, prefix readiness, skills reload and reminders, session info, and model-metadata refresh.
 use super::*;
 use xai_grok_tools::types::skill_discovery_tracker::SkillUpdateKind;
 impl SessionActor {
@@ -114,7 +113,6 @@ impl SessionActor {
             _ => DELIVERY_TOOLS_TEMPLATED_PREFIX_WAIT,
         }
     }
-    /// Await the background prefix and inject at conversation index 1.
     #[tracing::instrument(skip_all)]
     pub(super) async fn ensure_prefix_ready(&self) {
         let Some((mut handle, full_wait)) = self.deferred_prefix.take() else {
@@ -381,7 +379,6 @@ impl SessionActor {
         self.persist_announcement_state().await;
     }
     /// Idle threshold for proactive model metadata refresh on session resume.
-    /// A session idle longer than this fetches fresh model config from cli-chat-proxy before the next API request to catch context_window changes.
     pub(super) const IDLE_REFRESH_THRESHOLD_SECS: i64 = 600;
     pub(super) fn record_api_request_time(&self) {
         let now_ms = chrono::Utc::now().timestamp_millis();
@@ -421,8 +418,7 @@ impl SessionActor {
         // xAI proxy.
         if !crate::util::is_cli_chat_proxy_url(base_url) {
             if crate::util::is_xai_api_url(base_url) {
-                // xAI endpoints are served by the proxy listing; don't re-ask a
-                // bare api.x.ai for BYOK-style metadata here.
+                // xAI endpoints are served by the proxy listing.
                 return;
             }
             let own_key = self.chat_state_handle.get_credentials().await.api_key;
@@ -726,9 +722,9 @@ impl SessionActor {
             },
         }
     }
-    /// Build the `/context` usage rows for the skills listing, the workflow listing, the MCP server listing, and AGENTS.md.
-    /// Under templated sessions, the skills row estimates the mid-session envelope.
-    /// The baseline lives in the first-message preamble with the same rows, so the difference is a few dozen tokens of envelope text.
+    /// Build the `/context` usage rows for the skills listing, the workflow listing, the MCP server listing, and AGENTS.md. Under
+    /// templated sessions, the skills row estimates the mid-session envelope. The baseline lives in the first-message preamble with
+    /// the same rows, so the difference is a few tokens of envelope text.
     #[tracing::instrument(level = "debug", skip_all)]
     pub(super) async fn usage_categories(&self) -> Vec<TokenUsageCategory> {
         let bridge = self.tool_bridge_handle();

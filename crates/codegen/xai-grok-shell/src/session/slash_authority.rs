@@ -1,5 +1,4 @@
-//! Untrusted model input may resolve an explicitly eligible canonical built-in or proceed to the child session's focused skill resolver.
-//! Human-only command catalogs stay outside this boundary.
+//! Untrusted model input may resolve an explicitly eligible canonical built-in or proceed.
 
 use agent_client_protocol as acp;
 
@@ -55,8 +54,9 @@ pub(super) fn parse_slash_prefix(prompt_blocks: &[acp::ContentBlock]) -> Option<
     (!name.is_empty() && !name.contains('/') && !name.contains('\\')).then_some((name, args))
 }
 
-// Regression tests read these test-only counters around real `SessionActor::handle_turn_input` calls
-// An authority-gate reorder therefore cannot silently reintroduce host catalog I/O
+// Regression tests read these test-only counters around real
+// `SessionActor::handle_turn_input` calls An authority-gate reorder therefore
+// cannot silently.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct DynamicResolutionCalls {

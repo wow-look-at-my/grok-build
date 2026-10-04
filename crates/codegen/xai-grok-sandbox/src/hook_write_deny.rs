@@ -1,5 +1,4 @@
 //! Grok-owned hook write-deny: plan, identity revalidation, and post-reexec checks.
-//! Namespace lockdown is in [`crate::child_net`].
 
 #[cfg(any(target_os = "linux", all(unix, test), all(feature = "enforce", unix),))]
 use std::path::Path;

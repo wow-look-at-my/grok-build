@@ -6,31 +6,29 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::Rgb(r, g, b)
 }
 
-/// Deep backgrounds with OKLCH hue 265; accents are hand-picked purple to match that tint.
 #[allow(dead_code)]
 mod palette {
     use super::*;
 
-    // -- backgrounds (OKLCH hue 265 backgrounds, OKLCH hue 265) -------
-    pub const BASE: Color = rgb(3, 3, 4); // #030304  oklch(0.1 0.005 265)
-    pub const SURFACE: Color = rgb(4, 5, 7); // #040507  oklch(0.115 0.005 265)
-    pub const ELEVATED: Color = rgb(15, 18, 22); // #0F1216  oklch(0.18 0.01 265)
-    pub const CODE_BG: Color = rgb(38, 41, 47); // #26292F  oklch(0.28 0.012 265)
-    pub const PANEL: Color = rgb(4, 4, 6); // #040406  oklch(0.11 0.006 265)
+    pub const BASE: Color = rgb(3, 3, 4);
+    pub const SURFACE: Color = rgb(4, 5, 7);
+    pub const ELEVATED: Color = rgb(15, 18, 22);
+    pub const CODE_BG: Color = rgb(38, 41, 47);
+    pub const PANEL: Color = rgb(4, 4, 6);
 
     // -- text (neutral, no color cast) ----------------------------------------
-    pub const TEXT: Color = rgb(228, 228, 228); // #E4E4E4  oklch(0.92 0 0)
-    pub const TEXT_DIM: Color = rgb(190, 190, 190); // #BEBEBE  oklch(0.8 0 0)
+    pub const TEXT: Color = rgb(228, 228, 228);
+    pub const TEXT_DIM: Color = rgb(190, 190, 190);
 
     // -- muted text (slight blue-purple tint) ---------------------------------
-    pub const MUTED: Color = rgb(129, 134, 143); // #81868F  oklch(0.62 0.015 260)
-    pub const SUBTLE: Color = rgb(94, 100, 108); // #5E646C  oklch(0.5 0.015 260)
+    pub const MUTED: Color = rgb(129, 134, 143);
+    pub const SUBTLE: Color = rgb(94, 100, 108);
 
     // -- semantic colors (from desktop action tokens) -------------------------
-    pub const GOLD: Color = rgb(235, 217, 110); // #EBD96E  oklch(0.88 0.13 100)
-    pub const RED: Color = rgb(220, 90, 100); // #DC5A64  muted rose-red
-    pub const TEAL: Color = rgb(80, 180, 140); // #50B48C  softened teal
-    pub const AMBER: Color = rgb(241, 189, 0); // #F1BD00  oklch(0.82 0.18 90)
+    pub const GOLD: Color = rgb(235, 217, 110);
+    pub const RED: Color = rgb(220, 90, 100); // #DC5A64 muted rose-red
+    pub const TEAL: Color = rgb(80, 180, 140); // #50B48C softened teal
+    pub const AMBER: Color = rgb(241, 189, 0);
 
     // -- purple accent ramp (the "purple hints") ------------------------------
     pub const PURPLE: Color = rgb(155, 126, 206); // #9B7ECE, signature purple
@@ -42,8 +40,8 @@ mod palette {
 
     // -- highlight ramp (purple-tinted grays for UI chrome) -------------------
     pub const HIGHLIGHT_LOW: Color = rgb(18, 16, 28); // #12101C
-    pub const HIGHLIGHT_MED: Color = rgb(36, 32, 52); // #242034
-    pub const HIGHLIGHT_HIGH: Color = rgb(52, 48, 72); // #343048
+    pub const HIGHLIGHT_MED: Color = rgb(36, 32, 52);
+    pub const HIGHLIGHT_HIGH: Color = rgb(52, 48, 72);
 }
 use palette::*;
 
@@ -95,8 +93,6 @@ impl Theme {
 
             accent_model: CYAN,
 
-            // The thumb must sit clearly above the track, and follow mode blends the thumb 40% toward the track, shrinking the contrast
-            // `HIGHLIGHT_HIGH` matches the weight of the theme's visible chrome (selection border) and Rose Pine's thumb brightness
             scrollbar_bg: HIGHLIGHT_LOW,
             scrollbar_fg: HIGHLIGHT_HIGH,
 

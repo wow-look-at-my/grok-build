@@ -1,9 +1,4 @@
 //! [`ActiveModal`] wraps concrete modal instances for storage on `AgentView`.
-//! Picker variants (`CommandPalette`, `ArgPicker`, `SessionPicker`, `DocPicker`, `DocViewer`) use [`ModalWindow`](super::modal_window) for chrome.
-//! Their entries render through [`render_picker_content`](super::picker::render_picker_content).
-//! `EditConfirm` is a bar-style overlay (not a popup).
-//!
-//! `ModalConfirmation<R>` is a small dialog that blocks all input until the user presses one of the listed keys.
 use crate::docs::{DocEntry, default_howto_entries};
 use crate::theme::Theme;
 use crate::views::modal_window::ModalWindowState;
@@ -12,8 +7,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
-/// A blocking confirmation dialog with typed results. `R` is the result type; each dialog use-case
-/// defines its own enum. Key-matching is generic; labels are computed per-variant at render time.
+/// A blocking confirmation dialog with typed results. `R` is the result type;
+/// each dialog use-case defines its own enum.
 pub struct ModalConfirmation<R> {
     /// Available options, each mapping a key to a result. Labels are derived from `R` at render time.
     pub options: Vec<ModalOption<R>>,
@@ -57,8 +52,8 @@ impl EditConfirmResult {
     }
 }
 impl ModalConfirmation<EditConfirmResult> {
-    /// Create the edit confirmation modal. Always shows three options: save (y), discard (n), delete
-    /// (x). Labels are computed dynamically at render time based on `drain_blocked`.
+    /// Create the edit confirmation modal. Always shows options: save (y), discard (n), delete (x).
+    /// Labels are computed dynamically at render time based on `drain_blocked`.
     pub fn edit_confirm() -> Self {
         Self {
             options: vec![
@@ -96,7 +91,6 @@ impl ResetSettingsResult {
         }
     }
 }
-/// Shortcut IDs for the reset-confirm footer buttons (1-2, avoiding the extensions modal's 100+ range).
 pub const RESET_CONFIRM_YES_ID: usize = 1;
 pub const RESET_CONFIRM_NO_ID: usize = 2;
 impl ModalConfirmation<ResetSettingsResult> {
@@ -197,7 +191,6 @@ pub enum ActiveModal {
         /// Command name (e.g., "model", "theme").
         command: String,
         /// Args query passed to `suggest_args`; empty means the first phase.
-        /// For `/model`, a trailing-space query enters the reasoning-effort sub-menu.
         args_query: String,
         /// Filtered items (re-filtered from original_items on query change).
         items: Vec<crate::slash::command::ArgItem>,
@@ -231,17 +224,13 @@ pub enum ActiveModal {
         /// Monotonically increasing sequence number for deep search requests.
         deep_search_seq: u64,
         /// Incarnation identity for fetch routing.
-        /// Constructed as a 0 placeholder; `dispatch_fetch_session_list`, which runs before any fetch exists, allocates the real generation.
-        /// 0 therefore never appears on a production request.
         generation: u64,
         /// Invalidates the modal's in-flight card-detail reads when its rows or filters change.
         detail_seq: u64,
         /// The search query `entries` were server-fetched with (`None` means an unfiltered fetch).
-        /// See [`crate::views::session_picker::effective_filter_query`].
         entries_query: Option<String>,
         /// Source filter for the modal session picker.
         source_filter: crate::views::session_picker::SourceFilter,
-        /// Session armed for delete via `d` (see [`crate::views::session_picker::PendingDelete`]).
         pending_delete: Option<crate::views::session_picker::PendingDelete>,
     },
     /// How-to documentation list modal (wider picker style).
@@ -262,7 +251,6 @@ pub enum ActiveModal {
         /// Shared modal window chrome state.
         window: ModalWindowState,
         /// Cached pre-rendered markdown lines and the width they were rendered at.
-        /// Invalidated when the content area width changes (e.g. terminal resize) so lines are re-parsed at the new width.
         cached_lines: Option<(u16, Vec<ratatui::text::Line<'static>>)>,
         /// Palette snapshot carried from DocPicker, passed back on Esc so the DocPicker can still restore the palette.
         previous_palette: Option<PaletteSnapshot>,
@@ -281,7 +269,7 @@ pub enum ActiveModal {
         window: crate::views::modal_window::ModalWindowState,
         /// When true, dimmed (out-of-context) shortcuts are hidden.
         filter_active: bool,
-        /// Indices into CATEGORY_ORDER that are collapsed. Default: all except 0.
+        /// Indices into CATEGORY_ORDER that are collapsed.
         collapsed_sections: std::collections::HashSet<usize>,
         /// Rows whose inline help is expanded under the list.
         expanded_ids: std::collections::HashSet<crate::views::shortcuts_help::ExpandKey>,
@@ -296,14 +284,14 @@ pub enum ActiveModal {
     Settings {
         state: Box<crate::views::settings_modal::SettingsModalState>,
     },
-    /// Tabbed usage / session-info modal (`/usage`, `/session-info`, `/context`, context-bar click).
-    /// Boxed because it holds fetched snapshots.
+    /// Tabbed usage / session-info modal (`/usage`, `/session-info`,
+    /// `/context`, context-bar click).
     UsageInfo {
         state: Box<crate::views::usage_modal::UsageInfoModalState>,
     },
-    /// Reset-settings confirmation, stacked above Settings. The underlying `SettingsModalState` is
-    /// moved in/out so cancel preserves the user's filter/scroll position. The setting key lives only
-    /// here (single source of truth for dispatch).
+    /// Reset-settings confirmation, stacked above Settings. The underlying
+    /// `SettingsModalState` is moved in/out so cancel preserves the user's
+    /// filter/scroll position.
     ResetSettingsConfirm {
         modal: ModalConfirmation<ResetSettingsResult>,
         /// Setting key being reset.
@@ -323,7 +311,6 @@ pub enum ActiveModal {
         cwd: std::path::PathBuf,
         agent_id: crate::app::agent::AgentId,
         /// Monotonic nonce correlating async rewrite results with the modal that requested them.
-        /// It keeps stale results from populating a different note's review modal.
         rewrite_nonce: u64,
     },
 }
@@ -361,7 +348,6 @@ pub enum PaletteCommand {
     /// Open the memory browser modal.
     Memory,
     /// Open the Extensions modal on a specific tab.
-    /// Used by palette entries with no corresponding slash command (e.g. "Marketplace", "Skills") and to keep direct entries consistent.
     OpenExtensionsTab(crate::views::extensions_modal::ExtensionsTab),
     /// Open the settings modal.
     OpenSettings,
@@ -824,7 +810,7 @@ pub fn render_modal_overlay(
     }
     ModalRenderResult { buttons }
 }
-/// vpad(1) + title(1) + count(1) + gap(1) + 4 options + vpad(1) = 9
+/// vpad(1) + title(1) + count(1) + gap(1) + options + vpad(1) = 9
 const CANCEL_TURN_PANEL_HEIGHT: u16 = 9;
 pub fn cancel_turn_panel_height(screen_h: u16) -> u16 {
     let cap = (screen_h as u32 * 33 / 100)

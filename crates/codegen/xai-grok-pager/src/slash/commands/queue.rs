@@ -1,7 +1,4 @@
 //! `/queue` lists the queued prompts as a committed system block.
-//!
-//! The dispatcher (`dispatch_show_queue`) reads the merged server and local queue and commits a read-only list.
-//! Editing the queue is out of scope here (use the queue pane in the full TUI).
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

@@ -1,5 +1,4 @@
-//! Bottom padding, held for one turn, that makes the page-flip pose (the last user prompt at the top of the viewport) a real scroll bottom.
-//! Without the pad, clamping the scroll offset to the content height would jump the view to the tail.
+//! Bottom padding, held for one turn, that makes the page-flip pose (the last user prompt at the top of the viewport).
 
 use super::ScrollbackState;
 
@@ -148,9 +147,8 @@ impl ScrollbackState {
         self.pin_reserve_after_turn = false;
     }
 
-    /// Index of the prompt the pin targets.
-    /// Resolves the stable id captured at arm time so a mid-turn interjection cannot move it.
-    /// Falls back to the last user prompt only when no id is stored (e.g. when a resize re-derives the target).
+    /// Index of the prompt the pin targets. Resolves the stable id captured
+    /// at arm time so a mid-turn interjection cannot move it.
     pub(super) fn pin_reserve_prompt_index(&self) -> Option<usize> {
         match self.pin_reserve_prompt_id {
             Some(id) => self.entries.get_index_of(&id),
@@ -198,9 +196,7 @@ impl ScrollbackState {
         let base = *cache.virtual_y.get(range.start)?;
         let y = *cache.virtual_y.get(idx)?;
         let entry_y = y.saturating_sub(base);
-        // Same sticky-header fixed point as `scroll_to_entry_top`
-        // Raw `entry_y` would over-state the pad whenever an earlier prompt is still sticky
-        // That would make max_offset > scroll_offset and consume follow-preserve on the next frame
+        // Same sticky-header fixed point as `scroll_to_entry_top` Raw `entry_y` would over-state the pad whenever an earlier prompt is still.
         Some(self.sticky_adjusted_entry_top(cache, &range, entry_y))
     }
 

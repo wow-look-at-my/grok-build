@@ -1,7 +1,4 @@
 //! [`AuthProvider`] that refreshes OIDC tokens before they expire.
-//!
-//! `current()` checks token expiry and, if needed, performs OIDC
-//! discovery + token exchange before returning the credential.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -60,24 +57,14 @@ pub struct OidcAuthProvider {
     on_refresh: Option<OnRefreshCallback>,
 }
 
-/// How far before `expires_at` [`AuthProvider::current`] refreshes. This is
-/// the reactive fallback provider: it refreshes only when asked for a
-/// credential, so the margin has to cover a refresh first requested by the
-/// 30 s in-band `auth.refresh` poll and finished before the hub closes the
-/// socket 60 s after `exp`. The default daemon path uses
-/// `ProactiveOidcAuthProvider`, which has its own margin.
+/// How far before `expires_at` [`AuthProvider::current`] refreshes.
 const REFRESH_MARGIN: chrono::TimeDelta = chrono::TimeDelta::seconds(180);
 
-/// Floor between refresh attempts, success or failure, while the token is
-/// still valid, so a token whose whole lifetime is inside [`REFRESH_MARGIN`],
-/// or an issuer that keeps failing, is not hit on every `current()`. An
-/// expired token is exempt: dialing with it fails the handshake for good,
-/// so every call gets to try.
+/// Floor between refresh attempts, success or failure, while the token is still valid.
 const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Whether a token expiring at `expires_at` is due for refresh at `now`; a
-/// token with no expiry never is. Clock skew against the hub is unhandled:
-/// its deadline comes from its own clock.
+/// token with no expiry never is.
 fn due_for_refresh(expires_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
     expires_at.is_some_and(|exp| now + REFRESH_MARGIN >= exp)
 }
@@ -237,8 +224,7 @@ impl OidcAuthProvider {
     async fn do_refresh(&self) -> Result<(), Box<dyn std::error::Error>> {
         let refresh_token = self.state.lock().refresh_token.clone();
         let issuer = self.issuer.trim_end_matches('/');
-        // A common-layer crate cannot use the codegen TLS policy crate; build
-        // fallibly so a broken OS certificate store surfaces as Err, not a panic.
+        // A common-layer crate cannot use the codegen TLS policy crate.
         #[allow(clippy::disallowed_methods)]
         // common-layer crate; the grok TLS policy helper is out of reach
         let client = reqwest::Client::builder().build()?;
@@ -316,8 +302,6 @@ impl OidcAuthProvider {
 mod tests {
     use super::*;
 
-    /// The margin is wide enough to land a fresh token before the hub's
-    /// `exp` + 60 s close, with room for the 30 s in-band refresh poll.
     #[test]
     fn refresh_is_due_three_minutes_before_expiry() {
         let now = Utc::now();

@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::expect_used)]
 #![allow(
     unused_imports,
     unused_variables,
@@ -6,13 +6,7 @@
     unreachable_code,
     dead_code
 )]
-//! Typed client for hub-proxied `workspace.*` RPC methods, the single transport for the `workspace_rpc` channel.
-//! `WorkspaceOps` proxy mode and consumers that cannot depend on `xai-grok-workspace` both use it.
-//! Wire types live in `xai_grok_workspace_types::rpc`.
-//! This crate adds the connected-state latch, the generic [`WorkspaceClient::rpc`] core, and error mapping.
-//!
-//! No deadline is imposed by default ([`WorkspaceClient::with_deadline`] opts in).
-//! That preserves the `WorkspaceOps::rpc_raw` behaviour where callers own their timeouts.
+//! Typed client for hub-proxied `workspace.*` RPC methods, the transport for the `workspace_rpc` channel.
 #![deny(clippy::indexing_slicing)]
 use serde_json::Value;
 use std::sync::Arc;
@@ -102,8 +96,8 @@ pub async fn consume_stream_terminal(
         }
     }
 }
-/// True when the reported workspace-server version parses as semver and is `>= baseline`.
-/// Absent or unparseable versions return `false`, so a server with an unknown version is treated as lacking the gated feature.
+/// True when the reported workspace-server version parses as semver and is
+/// `>= baseline`.
 pub fn server_version_at_least(version: Option<&str>, baseline: &semver::Version) -> bool {
     version
         .and_then(|v| semver::Version::parse(v).ok())
@@ -138,7 +132,6 @@ fn is_non_retryable_workspace_unavailable(err: &xai_tool_runtime::ToolError) -> 
         .is_some_and(|d| d.code == xai_tool_protocol::WORKSPACE_UNAVAILABLE_SUBCODE && !d.retryable)
 }
 /// Typed client over a bound [`ToolHarness`] for `workspace.*` RPCs.
-/// Clones share the harness and the connected latch, which fast-fails after a fatal transport error; [`mark_connected`](Self::mark_connected) / [`with_connected_flag`](Self::with_connected_flag) reset it.
 #[derive(Clone)]
 pub struct WorkspaceClient {
     harness: ToolHarness,
@@ -177,8 +170,8 @@ impl WorkspaceClient {
     pub fn harness(&self) -> &ToolHarness {
         &self.harness
     }
-    /// Server binary version from the hub bind report, read without an RPC round-trip.
-    /// Returns `None` before the first bind, or against servers that predate the field.
+    /// Server binary version from the hub bind report, read without an RPC
+    /// round-trip.
     pub fn server_binary_version(&self) -> Option<String> {
         self.harness
             .last_bind_report()
@@ -262,7 +255,6 @@ impl WorkspaceClient {
             source: e,
         })
     }
-    /// `workspace.git_status` (JSON string value, ~1 KB server-side cap).
     pub async fn git_status(&self) -> Result<Value, WorkspaceClientError> {
         self.rpc(&GitStatusReq {}).await
     }

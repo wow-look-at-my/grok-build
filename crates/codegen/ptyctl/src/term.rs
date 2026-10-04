@@ -1,7 +1,4 @@
 //! Wrapper around `alacritty_terminal::Term` for headless terminal emulation.
-//!
-//! Provides a simplified interface for feeding PTY output into the terminal
-//! state machine and reading back screen content as text, styled JSON, or HTML.
 
 use std::ops::Range;
 
@@ -15,7 +12,6 @@ use alacritty_terminal::vte::ansi;
 use crate::styled::{self, StyledLine};
 
 /// Event listener that captures `PtyWrite` events for forwarding back to PTY.
-/// Device-status replies MUST be forwarded, otherwise vim/tmux hang waiting for a response.
 #[derive(Clone)]
 pub struct SessionListener {
     pty_write_tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
@@ -75,7 +71,6 @@ pub struct TerminalSize {
 pub struct TerminalModes {
     /// Alternate screen buffer is active (vim, less, htop, etc.).
     pub alt_screen: bool,
-    /// Bracketed paste mode — input pasted between ESC[200~ / ESC[201~.
     pub bracketed_paste: bool,
     /// Application cursor keys (arrow keys send SS3 instead of CSI).
     pub app_cursor: bool,
@@ -100,7 +95,6 @@ pub struct TerminalModes {
 /// A single line from scrollback history.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ScrollbackLine {
-    /// 1-indexed offset from the bottom of scrollback (1 = most recent).
     pub offset: usize,
     /// Text content of the line.
     pub text: String,
@@ -214,7 +208,6 @@ impl Terminal {
         let num_cols = grid.columns();
 
         let mut lines = Vec::with_capacity(n);
-        // history lines are at negative indices: Line(-1) is most recent
         for offset in (1..=n).rev() {
             let row = &grid[Line(-(offset as i32))];
             let mut text = String::new();
@@ -374,8 +367,8 @@ impl Terminal {
             out.push_str(text.trim_end());
 
             let last = &row[Column(num_cols - 1)];
-            // `WIDE_CHAR_SPACER` is occupancy (CJK/emoji occupying the last column). Only
-            // `WRAPLINE` or `LEADING_WIDE_CHAR_SPACER` (wide glyph that wrapped) is a soft wrap.
+            // `WIDE_CHAR_SPACER` is occupancy (CJK/emoji occupying the last
+            // column).
             let wraps = last.flags.contains(Flags::WRAPLINE)
                 || last.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER);
             if !wraps {
@@ -436,8 +429,6 @@ mod tests {
     fn native_copy_wide_glyph_hard_break_does_not_join() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let mut term = Terminal::new(4, 3, SessionListener::new(tx));
-        // Each CJK cell is two columns; two of them fill width 4. The last cell is
-        // WIDE_CHAR_SPACER without WRAPLINE when the line hard-breaks.
         term.feed("中中\r\nxy".as_bytes());
         let copy = term.native_copy_text();
         assert!(

@@ -17,8 +17,8 @@ use xai_grok_tools::implementations::grok_build::task::model_policy::{
 use xai_grok_tools::notification::ToolNotificationHandle;
 use xai_grok_tools::registry::types::SessionContext;
 use xai_grok_tools::types::tool::ToolKind;
-/// The Grok [`ToolKind`] a vendor-compat `tools:` allowlist entry resolves to, so a plugin's upstream allowlist still binds.
-/// Backed by the shared vendor-to-Grok tool registry in `xai-grok-tools` (also used by the hook matcher).
+/// The Grok [`ToolKind`] a vendor-compat `tools:` allowlist entry resolves
+/// to, so a plugin's upstream allowlist still binds.
 fn claude_tool_kind(name: &str) -> Option<ToolKind> {
     xai_grok_tools::types::kind_for(name)
 }
@@ -26,8 +26,7 @@ fn claude_tool_kind(name: &str) -> Option<ToolKind> {
 #[derive(Clone)]
 pub struct AgentBuilder {
     working_directory: PathBuf,
-    /// Forked sessions: the real `working_directory` is an overlay/worktree path that must stay hidden from the model,
-    /// so the system prompt shows this instead; tool execution keeps the real path.
+    /// Forked sessions: the real `working_directory` is an overlay/worktree path that must stay hidden from the model.
     prompt_working_directory: Option<String>,
     terminal_backend: Arc<dyn TerminalBackend>,
     fs_backend: Arc<dyn AsyncFileSystem>,
@@ -75,9 +74,7 @@ pub struct AgentBuilder {
     write_file_enabled: bool,
     active_agent_messages_enabled: bool,
     subagents_enabled: bool,
-    /// How strongly system-prompt/tool wording nudges the model toward
-    /// spawning subagents via the `task` tool. Independent of
-    /// `subagents_enabled`, which gates the tool's presence entirely.
+    /// How strongly system-prompt/tool wording nudges the model toward spawning subagents via the `task` tool.
     subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     background_workflows_enabled: bool,
     ask_user_question_enabled: bool,
@@ -95,13 +92,11 @@ pub struct AgentBuilder {
     context_window_tokens: Option<u64>,
     api_key_provider: Option<xai_grok_tools::types::SharedApiKeyProvider>,
     attribution_callback: Option<xai_grok_tools::SharedAttributionCallback>,
-    /// Seeded into the toolset's `TruncationCfg` after finalize; the MCP truncation path consults it before the process-global
-    /// cap. Set only when the repo-level `[mcp] max_output_bytes` tier wins (see `resolve_max_mcp_output_bytes_for_cwd`).
+    /// Seeded into the toolset's `TruncationCfg` after finalize.
     mcp_max_output_bytes: Option<usize>,
     /// IDE-compat agent_type uses `"system_reminder"` instead of the default `"system-reminder"`.
     system_reminder_tag: &'static str,
-    /// Restored into the SkillManager before `seed()`, which then skips the `BaselineChange` pending, so a resumed
-    /// session does not re-inject a duplicate system-reminder.
+    /// Restored into the SkillManager before `seed()`, which then skips the `BaselineChange` pending.
     persisted_announced_skill_names: Option<std::collections::HashSet<String>>,
     /// Parent-inherited skills; `build()` uses them instead of running `list_skills_with_plugins()`.
     preloaded_skills: Option<Vec<xai_grok_tools::implementations::skills::types::SkillInfo>>,
@@ -433,8 +428,8 @@ impl AgentBuilder {
         self.memory_v2_access = access;
         self
     }
-    /// Suppresses prompt sections that assume a human at the TUI prompt, and stamps the ask_user_question params so an
-    /// unanswered questionnaire returns no-operator text instead of "user declined".
+    /// Suppresses prompt sections that assume a human at the TUI prompt, and
+    /// stamps the ask_user_question params.
     pub fn with_is_non_interactive(mut self, value: bool) -> Self {
         self.is_non_interactive = value;
         self
@@ -546,8 +541,6 @@ impl AgentBuilder {
         self.api_key_provider = Some(provider);
         self
     }
-    /// A 401 from `image_gen` / `video_gen` / `web_search` emits `auth_401_attribution` with a per-consumer tag. Pass the
-    /// same `ShellAttribution` wired into the sampler so all 401s share one `AuthManager` and land in the same dataset.
     pub fn with_attribution_callback(
         mut self,
         callback: xai_grok_tools::SharedAttributionCallback,
@@ -575,9 +568,7 @@ impl AgentBuilder {
         self
     }
     /// Set how strongly system-prompt/tool wording nudges the model toward
-    /// spawning subagents via the `task` tool (default: `AgentUsageFrequency::Default`,
-    /// i.e. no added nudge). Purely a wording knob — it never changes whether
-    /// the tool itself is available; see `with_subagents_enabled` for that.
+    /// spawning subagents via the `task` tool.
     pub fn with_subagent_usage_frequency(
         mut self,
         frequency: xai_tool_types::AgentUsageFrequency,
@@ -599,8 +590,8 @@ impl AgentBuilder {
         self.task_model_selection = selection;
         self
     }
-    /// Subagents never receive the tool; when disabled it is stripped after the `ensure_plan_mode_tools` injection.
-    /// Gated by the shell-resolved feature (remote/config/env kill-switch) and the pager's `--no-ask-user`.
+    /// Subagents never receive the tool; when disabled it is stripped after
+    /// the `ensure_plan_mode_tools` injection.
     pub fn with_ask_user_question_enabled(mut self, enabled: bool) -> Self {
         self.ask_user_question_enabled = enabled;
         self
@@ -814,7 +805,6 @@ impl AgentBuilder {
                 .iter()
                 .any(|tc| tc.id.ends_with(":write") || tc.id.ends_with(":Write"));
             // A read-only agent's prompt says it has no file editing tools.
-            // A `write` tool here contradicts that prompt.
             let read_only = definition.permission_mode == PermissionMode::Plan;
             let known_kinds = tool_bridge_builder.known_tool_kinds();
             let has_edit_tool = tool_config.tools.iter().any(|tc| {
@@ -1455,8 +1445,7 @@ pub(crate) fn task_tool_description(
     description
 }
 /// A sub-agent shares the session's permission actor (rules, approvals and
-/// denials). Without this line a model that was refused a command spends
-/// attempts on a sub-agent to find out whether the refusal carries over.
+/// denials).
 const TASK_PERMISSION_NOTE: &str = "\n\nA sub-agent runs under this session's permission \
      rules, approvals and denials. A command denied to you is denied to it too, so do not \
      delegate a denied action.";

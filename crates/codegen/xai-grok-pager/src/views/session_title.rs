@@ -1,11 +1,4 @@
 //! Session display-title helpers shared by the dashboard and other views.
-//!
-//! Title derivation order ([`entry_title`]):
-//! 1. `AgentView::display_name` if set (post-rename),
-//! 2. else `AgentView::generated_session_title` (LLM title or from disk on resume),
-//! 3. else the trimmed first ~60 chars of the first user-prompt block in scrollback,
-//! 4. else `"session abc12345"` (or `"loading..."` when no session id
-//!    is established yet).
 
 use std::borrow::Cow;
 use std::time::Duration;
@@ -32,8 +25,8 @@ pub fn entry_title(agent: &AgentView) -> String {
     }
 }
 
-/// The first three tiers of [`entry_title`] — a title the user or model actually gave the session — or `None` for a session that
-/// has only its id. Surfaces that should show nothing rather than `session abc12345` (the header row) read this.
+/// The first tiers of [`entry_title`] — a title the user or model actually gave the session — or `None` for a session that has
+/// only its id. Surfaces that should show nothing rather than `session abc12345` (the header row) read this.
 pub fn named_title(agent: &AgentView) -> Option<String> {
     // Only model- and prompt-derived text may be a skill invocation to unwrap; a user-chosen name is not
     agent
@@ -65,8 +58,7 @@ fn clean_title(raw: &str, unwrap_skill: bool) -> Option<String> {
     )))
 }
 
-/// Real session title for rename prefill / `/rename` ghost-prefill. Deliberately not
-/// [`entry_title`]: that chain falls back to the first prompt and `"session <id8>"`.
+/// Real session title for rename prefill / `/rename` ghost-prefill.
 pub fn rename_source_title(agent: &AgentView) -> Option<String> {
     rename_source_title_raw(agent).map(|s| sanitize_display_text(s).into_owned())
 }
@@ -140,7 +132,7 @@ pub(crate) fn last_agent_message_line(agent: &AgentView) -> Option<String> {
                 }
                 return None;
             }
-            // The user's latest prompt marks the turn boundary; no reply yet
+            // The user's latest prompt marks the turn boundary.
             RenderBlock::UserPrompt(_) => return None,
             _ => {}
         }
@@ -334,9 +326,7 @@ mod tests {
 
     #[test]
     fn truncate_title_handles_multibyte_codepoints_safely() {
-        // Each "é" (U+00E9) is one char (two bytes); ensure char-based truncation does not split a multibyte codepoint mid-byte
-        // This does NOT exercise grapheme-cluster handling
-        // A decomposed sequence (e + U+0301) would split at the codepoint boundary today; that's a separate concern
+        // Each "é" (U+00E9) is one char (a couple of bytes).
         let s: String = std::iter::repeat_n('é', MAX_TITLE_CHARS + 2).collect();
         let out = truncate_title(&s);
         assert!(out.ends_with("..."));

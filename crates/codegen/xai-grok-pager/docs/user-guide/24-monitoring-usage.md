@@ -4,10 +4,7 @@
 > additive changes may occur without notice, renames/removals will bump the
 > version and be called out in the changelog.
 
-Grok CLI can export usage **metrics** and **events** to your organization's
-own OpenTelemetry collector, so platform teams can monitor adoption, token
-consumption, tool-permission decisions, and errors across the fleet — without
-any data flowing through SpaceXAI.
+Grok CLI can export usage **metrics** and **events** to your organization's own OpenTelemetry collector. As a result, platform teams can monitor adoption, token consumption, tool-permission decisions, and errors across the fleet — without any data flowing through SpaceXAI.
 
 ## Related settings
 
@@ -20,43 +17,28 @@ These knobs are independent of each other (and of this guide's external OTEL str
 | Trace upload | `[telemetry] trace_upload` / `GROK_TELEMETRY_TRACE_UPLOAD` |
 | External OpenTelemetry | `GROK_EXTERNAL_OTEL` / `[telemetry] otel_*` (this guide) |
 
-See also [Authentication](02-authentication.md#related-settings) and
-[Configuration](05-configuration.md#telemetry).
+See also [Authentication](02-authentication.md#related-settings) and [Configuration](05-configuration.md#telemetry).
 
 ## External OTEL stream
 
 The external stream is:
 
-- **Off by default**, and requires a *double opt-in* (a master switch **and**
-  an explicit exporter selection).
-- **Content-free by default**: no prompts, no assistant prose, no code, no file
-  paths (extension only), no tool arguments, no bash commands, and MCP/skill/plugin
-  names collapsed to categories. Optional content gates re-enable some of these.
-- **Structurally separate** from SpaceXAI-internal telemetry: its exporters carry
-  only the headers you configure, never SpaceXAI credentials.
-- **Independent of SpaceXAI data-retention opt-outs**: it works even when
-  `telemetry` is disabled and for ZDR (zero-data-retention) teams. Those
-  settings govern SpaceXAI-side retention; the external stream is governed solely
-  by your own OTEL configuration.
+- **Off by default**, and requires a *double opt-in* (a master switch **and** an explicit exporter selection).
+- **Content-free by default**: no prompts, no assistant prose, no code, no file paths (extension only), no tool arguments, no bash commands. MCP/skill/plugin names collapsed to categories. Optional content gates re-enable some of these.
+- **Structurally separate** from SpaceXAI-internal telemetry: its exporters carry only the headers you configure, not SpaceXAI credentials.
+- **Independent of SpaceXAI data-retention opt-outs**: it works even when `telemetry` is disabled and for ZDR (zero-data-retention) teams. Those settings govern SpaceXAI-side retention. The external stream is governed solely by your own OTEL configuration.
 
 ### ZDR and this stream
 
-`/privacy` and Zero Data Retention do **not** disable this stream. ZDR turns
-off SpaceXAI-side retention (product analytics, session-trace upload,
-coding-data sharing). It does not mute `GROK_EXTERNAL_OTEL`.
+`/privacy` and Zero Data Retention do **not** disable this stream. ZDR turns off SpaceXAI-side retention (product analytics, session-trace upload, coding-data sharing). It does not mute `GROK_EXTERNAL_OTEL`.
 
 When the stream is on:
 
 - `user.id`, `session.id`, and org/team ids always export.
-- `user.email` attaches on logs **and** metrics whenever OAuth/gateway auth
-  has a non-empty address. It is identity, not a content gate, and is not
-  pinnable except by turning the stream off.
-- Prompt text, assistant `response`, and tool bodies export only when their
-  gates are on. First-party product analytics never receive those bodies.
+- `user.email` attaches on logs **and** metrics whenever OAuth/gateway auth has a non-empty address. It is identity, not a content gate, and is not pinnable except by turning the stream off.
+- Prompt text, assistant `response`, and tool bodies export only when their gates are on. First-party product analytics never receive those bodies.
 
-To keep ZDR machines collector-silent, pin `otel_enabled = false` (or do not
-enable the stream). For a metrics-only SIEM, pin all four `otel_log_*` keys
-`false`.
+To keep ZDR machines collector-silent, pin `otel_enabled = false` (or do not enable the stream). For a metrics-only SIEM, pin all `otel_log_*` keys `false`.
 
 ## Quick start
 
@@ -70,9 +52,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer <collector-token>"
 grok
 ```
 
-`GROK_EXTERNAL_OTEL=1` alone enables **nothing** — you must also select at
-least one exporter. Conversely, the `OTEL_*` vars alone enable nothing
-without the master switch.
+`GROK_EXTERNAL_OTEL=1` alone enables **nothing** — you must also select at least one exporter. Conversely, the `OTEL_*` vars alone enable nothing without the master switch.
 
 ## Environment variables
 
@@ -101,12 +81,7 @@ without the master switch.
 
 ### Recommended fleet gates
 
-Enterprise default is **DETAILS on, CONTENT off**: metadata (paths, 4 KB
-`tool_parameters`, verbatim MCP/skill/plugin names) without Read, bash, or
-MCP result bodies. Turn CONTENT on only when the collector must store those
-bodies. CONTENT does **not** imply DETAILS — CONTENT-only yields 60 KB
-`tool_output` with `tool_name` / `mcp_tool.name` still collapsed to
-`mcp_tool`.
+Enterprise default is **DETAILS on, CONTENT off**: metadata (paths, 4 KB `tool_parameters`, verbatim MCP/skill/plugin names) without Read, bash, or MCP result bodies. Turn CONTENT on only when the collector must store those bodies. CONTENT does **not** imply DETAILS — CONTENT-only yields 60 KB `tool_output` with `tool_name` / `mcp_tool.name` still collapsed to `mcp_tool`.
 
 ```toml
 [telemetry]
@@ -116,8 +91,7 @@ otel_log_tool_details = true           # metadata for SIEM join
 otel_log_tool_content = false          # bodies; independent of details
 ```
 
-`OTEL_RESOURCE_ATTRIBUTES` is deliberately ignored: the resource is built
-from a fixed, audited attribute set.
+`OTEL_RESOURCE_ATTRIBUTES` is deliberately ignored: the resource is built from a fixed, audited attribute set.
 
 > **Migration note:** older releases could share `OTEL_EXPORTER_OTLP_*` with
 > the product's own analytics pipeline. That behavior is deprecated: when
@@ -128,9 +102,7 @@ from a fixed, audited attribute set.
 
 ## Config file
 
-Org defaults live under the existing `[telemetry]` table in `config.toml`
-(env vars win). The keys are `otel_`-prefixed peers of the other
-`[telemetry]` settings:
+Org defaults live under the existing `[telemetry]` table in `config.toml` (env vars win). The keys are `otel_`-prefixed peers of the other `[telemetry]` settings:
 
 ```toml
 [telemetry]
@@ -149,60 +121,28 @@ otel_log_tool_details = false   # code default; SIEM fleets usually true — see
 otel_log_tool_content = false
 ```
 
-The config keys are `otel_*` under `[telemetry]`; the **env vars keep their
-standard OTEL names** (`GROK_EXTERNAL_OTEL`, `OTEL_*`) for ecosystem
-interop, so the two layers use deliberately different namespaces. The
-`otel_protocol` config key maps to `OTEL_EXPORTER_OTLP_PROTOCOL`. Env vars
-win over config file paths for CA and client identity.
+The config keys are `otel_*` under `[telemetry]`. The **env vars keep their standard OTEL names** (`GROK_EXTERNAL_OTEL`, `OTEL_*`) for ecosystem interop, so the layers use deliberately different namespaces. The `otel_protocol` config key maps to `OTEL_EXPORTER_OTLP_PROTOCOL`. Env vars win over config file paths for CA and client identity.
 
-There is deliberately no `headers` key: supply collector auth via
-`OTEL_EXPORTER_OTLP_HEADERS` so tokens are never stored on disk. Certificate
-and key config keys are **paths only** — never embed private key material
-in TOML.
+There is deliberately no `headers` key: supply collector auth via `OTEL_EXPORTER_OTLP_HEADERS` so tokens are never stored on disk. Certificate and key config keys are **paths only** — never embed private key material in TOML.
 
-Every **present** `[telemetry] otel_*` key in signed `requirements.toml` is a
-**pin** (env cannot override it). `managed_config.toml` is not a lock — env
-still wins there. Pinning `otel_endpoint` strips developer generic and
-per-signal endpoint env **and unlisted user/managed file siblings** except
-endpoints you also list. Pinning client
-cert/key also strips developer endpoints and unlisted file siblings. Pinning CA (`otel_certificate`)
-does **not** strip endpoints. If requirements lists any of
-`otel_log_user_prompts` / `otel_log_tool_details` /
-`otel_log_assistant_responses` / `otel_log_tool_content` and omits a sibling, the omitted gate
-defaults **off** (do not rely on the prompts→responses fallback across that
-boundary).
+Every **present** `[telemetry] otel_*` key in signed `requirements.toml` is a **pin** (env cannot override it). `managed_config.toml` is not a lock — env still wins there. Pinning `otel_endpoint` strips developer generic and per-signal endpoint env **and unlisted user/managed file siblings** except endpoints you also list. Pinning client cert/key also strips developer endpoints and unlisted file siblings. Pinning CA (`otel_certificate`) does **not** strip endpoints. If requirements lists any of `otel_log_user_prompts` / `otel_log_tool_details` / `otel_log_assistant_responses` / `otel_log_tool_content` and omits a sibling, the omitted gate defaults **off** (do not rely on the prompts→responses fallback across that boundary).
 
-The external stream exports **logs and metrics only** (no customer-facing
-traces exporter).
+The external stream exports **logs and metrics only** (no customer-facing traces exporter).
 
-Fleet enablement is one signed `requirements.toml` (destination, exporters,
-and content gates together). `user.email` is not a pin key — it follows
-OAuth/gateway identity. Headers stay in the process environment from the
-launcher after strip, never in this TOML.
+Fleet enablement is one signed `requirements.toml` (destination, exporters, and content gates together). `user.email` is not a pin key — it follows OAuth/gateway identity. Headers stay in the process environment from the launcher after strip, not in this TOML.
 
 ## Startup suppression (why nothing arrives for the first few seconds)
 
-Because xAI can force-disable this stream fleet-wide, the CLI holds emission
-closed at startup until it knows whether that switch is set — it fetches the
-fleet policy from `/v1/settings` and only then starts exporting. In a healthy
-setup that is well under a second and invisible.
+Because xAI can force-disable this stream fleet-wide, the CLI holds emission closed at startup until it knows whether that switch is set. It fetches the fleet policy from `/v1/settings` and only then starts exporting. In a healthy setup that is well under a second and invisible.
 
 **The wait is bounded**, so a deployment that cannot reach xAI still exports:
 
-- If no fleet policy can apply at all — `[features] remote_fetch = false`, or
-  `[endpoints] cli_chat_proxy_base_url` points somewhere other than xAI — the
-  stream starts immediately, governed by your local configuration.
-- If the policy fetch fails or never completes (firewalled host, offline
-  laptop), emission starts anyway once the attempt is exhausted, and in all
-  cases no later than 30 seconds after startup.
+- If no fleet policy can apply at all — `[features] remote_fetch = false`, or `[endpoints] cli_chat_proxy_base_url` points somewhere other than xAI — the stream starts immediately, governed by your local configuration.
+- If the policy fetch fails or never completes (firewalled host, offline laptop), emission starts anyway once the attempt is exhausted. This is in all cases no later than many seconds after startup.
 
-A fleet policy that arrives afterwards still applies; it can only ever
-*tighten* (disable the stream or force the content gates off), never enable
-something your local configuration did not.
+A fleet policy that arrives afterwards still applies. It can only ever *tighten* (disable the stream or force the content gates off), not enable something your local configuration did not.
 
-If your collector receives nothing at all, check the debug log
-(`grok --debug`) for `external otel:` lines — they record whether the stream
-resolved its configuration, and whether it is exporting or suppressed.
+If your collector receives nothing at all, check the debug log (`grok --debug`) for `external otel:` lines — they record whether the stream resolved its configuration. This is whether it is exporting or suppressed.
 
 ## Resource attributes
 
@@ -214,12 +154,7 @@ resolved its configuration, and whether it is exporting or suppressed.
 | `terminal.type` | terminal emulator brand |
 | `grok_code.schema.version` | `v1` |
 
-Identity attributes (`user.id`, and `organization.id` / `team.id` when known)
-are attached per metric data point and per event once authentication completes.
-`user.email` is attached on logs **and** metrics whenever the session is signed
-in with OAuth or a gateway account that has a non-empty address — it is
-identity, not a content gate, and is never taken from git or an API key. `prompt.id` (per-prompt UUID) appears on
-events only, never metrics.
+Identity attributes (`user.id`, and `organization.id` / `team.id` when known) are attached per metric data point and per event once authentication completes. `user.email` is attached on logs **and** metrics whenever the session is signed in with OAuth or a gateway account that has a non-empty address. It is identity, not a content gate, and is never taken from git or an API key. `prompt.id` (per-prompt UUID) appears on events only, not metrics.
 
 ## Metrics (meter scope `ai.xai.grok_code`)
 
@@ -238,48 +173,17 @@ events only, never metrics.
 | `grok_code.startup.phase_duration` | `ms` | `phase`, `outcome`, `auth_mode` |
 | `grok_code.startup.timeout` | `{timeout}` | `stuck_in`, `auth_mode` |
 
-`startup.total` measures process start to a usable session, recorded once per
-process; `outcome` = `timeout` or `error` means startup ended without one.
-`startup.interactive` records process start to the first frame the live loop
-confirmed written, once per process.
-`phase_duration` breaks the connect attempt down by step (`config_load`,
-`managed_policy`, `bootstrap`, `model_catalog`, `worker_spawn`,
-`leader_connect`, `acp_initialize`, `eager_auth`); filter on its `outcome`
-(`ok` | `timeout` | `cancelled` | `error`) so truncated samples do not skew
-`ok` percentiles. The later `app_init`
-and `session_create` phases appear in the log timeline and the summary
-strings, not in this metric. `stuck_in` on a timeout names the step that had
-not finished. That is often not the step that took the longest, because a step
-that runs without pausing finishes before the timeout is recorded. The error
-message Grok prints names the longest step instead, so the two can name
-different steps for the same timeout. Use `phase_duration` to compare them.
-`auth_mode` is `personal`, `team`, or `unknown`:
-startup cost differs by kind, so split by it before comparing.
+`startup.total` measures process start to a usable session, recorded once per process. `outcome` = `timeout` or `error` means startup ended without one. `startup.interactive` records process start to the first frame the live loop confirmed written, once per process. `phase_duration` breaks the connect attempt down by step (`config_load`, `managed_policy`, `bootstrap`, `model_catalog`, `worker_spawn`, `leader_connect`, `acp_initialize`, `eager_auth`). Filter on its `outcome` (`ok` | `timeout` | `cancelled` | `error`) so truncated samples do not skew `ok` percentiles. The later `app_init` and `session_create` phases appear in the log timeline and the summary strings, not in this metric. `stuck_in` on a timeout names the step that had not finished. That is often not the step that took the longest, because a step that runs without pausing finishes before the timeout is recorded. The error message Grok prints names the longest step instead. As a result, the two can name different steps for the same timeout. Use `phase_duration` to compare them. `auth_mode` is `personal`, `team`, or `unknown`: startup cost differs by kind, so split by it before comparing.
 
-`turn.ttft` is the time from turn start to the first token of any channel
-(reasoning, text, or a tool call) and `turn.ttfm` the time from turn start to the
-first assistant text message (reasoning and tool calls excluded), one sample per
-turn on the same clock, so `ttft` never exceeds `ttfm`. A turn that produced no
-model output records no `ttft`; a reasoning-only or tool-only turn records `ttft`
-but no `ttfm`.
+`turn.ttft` is the time from turn start to the first token of any channel (reasoning, text, or a tool call) and `turn.ttfm` the time from turn start. This is to the first assistant text message (reasoning and tool calls excluded), one sample per turn on the same clock, so `ttft` never exceeds `ttfm`. A turn that produced no model output records no `ttft`. A reasoning-only or tool-only turn records `ttft` but no `ttfm`.
 
-There is no `cost.usage` metric: join `grok_code.token.usage` with your own
-price sheet. `lines_of_code.count` and `active_time.total` are planned for a
-later phase.
+There is no `cost.usage` metric: join `grok_code.token.usage` with your own price sheet. `lines_of_code.count` and `active_time.total` are planned for a later phase.
 
-`tool_name` values: built-in tool names pass verbatim; MCP tools collapse to
-`mcp_tool` and other non-built-in tools to `custom_tool` unless
-`OTEL_LOG_TOOL_DETAILS=1`.
+`tool_name` values: built-in tool names pass verbatim. MCP tools collapse to `mcp_tool` and other non-built-in tools to `custom_tool` unless `OTEL_LOG_TOOL_DETAILS=1`.
 
 ## Events (OTLP log records)
 
-Every event carries `event.sequence`, `session.id`, `turn_number` (in-turn),
-`prompt.id`, plus the identity attributes. Gate legend: **details** =
-requires `OTEL_LOG_TOOL_DETAILS`, **prompts** = requires
-`OTEL_LOG_USER_PROMPTS`, **responses** = requires `OTEL_LOG_ASSISTANT_RESPONSES`
-(unset follows the prompts gate), **content** = requires `OTEL_LOG_TOOL_CONTENT`
-(independent of details; default off); everything else always exports while the
-stream is active.
+Every event carries `event.sequence`, `session.id`, `turn_number` (in-turn), `prompt.id`, plus the identity attributes. Gate legend: **details** = requires `OTEL_LOG_TOOL_DETAILS`, **prompts** = requires `OTEL_LOG_USER_PROMPTS`, **responses** = requires `OTEL_LOG_ASSISTANT_RESPONSES` (unset follows the prompts gate), **content** = requires `OTEL_LOG_TOOL_CONTENT` (independent of details. Default off). Everything else always exports while the stream is active.
 
 | `event.name` | Attributes |
 |---|---|
@@ -304,27 +208,13 @@ stream is active.
 
 ## Privacy model
 
-Three independent fail-closed mechanisms guard the wire format:
+Independent fail-closed mechanisms guard the wire format:
 
-1. A **typed schema**: attribute keys are a closed enum; nothing outside it
-   can be attached.
-2. **Emit-time redaction**: every string passes a secret-shape scrub and a
-   home-directory scrub, with truncation (512→128 chars per nested tool-arg
-   string, 4 KB DETAILS `tool_parameters` preview / CONTENT `error_message`,
-   60 KB for `prompt` / `response` / `tool_input` / `tool_output` /
-   `full_command`).
-3. **Export-time validators**: any record carrying a non-schema key, a
-   closed-gate key, or an unscrubbed secret shape is dropped before leaving
-   the process; metric exports with out-of-schema attribute keys are dropped
-   entirely.
+1. A **typed schema**: attribute keys are a closed enum. Nothing outside it can be attached.
+2. **Emit-time redaction**: every string passes a secret-shape scrub and a home-directory scrub, with truncation (512→chars per nested tool-arg string, 4 KB DETAILS `tool_parameters` preview / CONTENT `error_message`, 60 KB for `prompt` / `response` / `tool_input` / `tool_output` / `full_command`).
+3. **Export-time validators**: any record carrying a non-schema key, a closed-gate key, or an unscrubbed secret shape is dropped before leaving the process. Metric exports with out-of-schema attribute keys are dropped entirely.
 
-Never exported: thinking/reasoning text, raw API request bodies, `api_key.id`,
-machine fingerprints, subscription tier. Prompt text, assistant `response`,
-file paths, tool-arg previews, and CONTENT bodies (`tool_input`, `tool_output`,
-`full_command`, `error_message`) export only when their gate is on; first-party
-product analytics never receive those bodies.
-`user.email` exports whenever OAuth/gateway auth has an address (not a content
-gate).
+Never exported: thinking/reasoning text, raw API request bodies, `api_key.id`, machine fingerprints, subscription tier. Prompt text, assistant `response`, file paths, tool-arg previews, and CONTENT bodies (`tool_input`, `tool_output`, `full_command`, `error_message`) export only when their gate is on. First-party product analytics never receive those bodies. `user.email` exports whenever OAuth/gateway auth has an address (not a content gate).
 
 ## Example collector config
 
@@ -372,7 +262,4 @@ sum(rate(grok_code_tool_decision_total{decision="deny"}[1h]))
 
 ## Debugging
 
-Set `OTEL_LOGS_EXPORTER=console` / `OTEL_METRICS_EXPORTER=console` to print
-redacted records to **stderr** (suppressed in `agent`/`headless` entrypoints
-to keep captured logs clean). Export errors never surface in the TUI; check
-the debug log.
+Set `OTEL_LOGS_EXPORTER=console` / `OTEL_METRICS_EXPORTER=console` to print redacted records to **stderr** (suppressed in `agent`/`headless` entrypoints to keep captured logs clean). Export errors never surface in the TUI. Check the debug log.

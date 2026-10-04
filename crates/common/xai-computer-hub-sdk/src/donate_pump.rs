@@ -1,7 +1,4 @@
-//! Shared donation transport: a bounded retry buffer + in-order drain
-//! barrier, parameterized over a `donate` closure. Traces, logs, and
-//! metrics all pump through this; failed sends are retained briefly,
-//! overflow drops payloads — telemetry, never correctness.
+//! Shared donation transport: a bounded retry buffer + in-order drain barrier, parameterized over a `donate` closure.
 
 use std::collections::VecDeque;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,13 +13,7 @@ pub(crate) const PENDING_FLUSHES: usize = 8;
 pub(crate) const RETRY_CAP: usize = 8;
 
 // ---------------------------------------------------------------------------
-// Shared OTLP encoding helpers
-//
-// Reused by the log and metric donation clients so the AnyValue/KeyValue/
-// Resource construction lives in one place instead of being copy-pasted per
-// client. (`trace_donate` builds its payload via `opentelemetry_sdk`'s own
-// conversion and does not use these.)
-// ---------------------------------------------------------------------------
+// Shared OTLP encoding helpers Reused by the log.
 
 /// Current wall-clock time as Unix-epoch nanoseconds (OTLP `time_unix_nano`).
 pub(crate) fn now_unix_nanos() -> u64 {

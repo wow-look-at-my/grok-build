@@ -9,15 +9,12 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 use crate::util::mcp_structured_content::render_structured_content;
 use crate::util::mcp_truncate::{McpTruncateContext, truncate_tool_output};
 
-/// Wire name of the MCP dispatch tool. UIs special-case it: while its
-/// arguments stream, the target tool's name is still inside them, so the
-/// raw name is all a renderer has.
+/// Wire name of the MCP dispatch tool.
 pub const USE_TOOL_NAME: &str = "use_tool";
 pub(crate) const FILE_INPUT_SUPPORTED: &str = "file_input_supported";
 
-/// Configuration for [`UseTool`]. Controls whether the native-tool corrective error is active. When
-/// `native_tool_correction` is `true` (default), `use_tool` detects native tool names via
-/// [`EnabledNativeToolNames`] and returns a targeted corrective error ("call it directly").
+/// Configuration for [`UseTool`]. Controls whether the native-tool corrective
+/// error is active.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UseToolParams {
     /// Enable the native-tool corrective error. Default: `true`.
@@ -49,9 +46,7 @@ impl Default for UseToolParams {
 
 crate::register_resource!("grok_build", "UseTool", UseToolParams);
 
-/// Meta tool that dispatches calls to MCP tools discovered via `search_tool`. This bypasses the outer `ToolBridge` mutex and avoids deadlock.
-/// `call_raw()` skips reminders/persistence so post-processing runs exactly once (via the outer `call("use_tool")`). If `InnerDispatch` is
-/// absent, dispatch fails with a clear error (should never happen in production — `FinalizedToolset::call()` always sets it).
+/// Meta tool that dispatches calls to MCP tools discovered via `search_tool`.
 #[derive(Debug, Default)]
 pub struct UseTool;
 
@@ -206,9 +201,11 @@ pub async fn dispatch_mcp_tool(
     }
 
     if let Some(source) = gateway_source {
-        // A gateway-catalog name can collide with a local `server__tool` MCP tool. Local wins on a name clash: probe local dispatch first and only
-        // fall through to the gateway when the local side reports the tool as not found, or rejects the catalog-derived name as an invalid local
-        // ToolId. A real error from a local tool that actually dispatched propagates instead of silently retrying against the gateway.
+        // A gateway-catalog name can collide with a local `server__tool` MCP
+        // tool. Local wins on a name clash: probe local dispatch first and
+        // only fall through to the gateway when the local side reports the
+        // tool as not found, or rejects the catalog-derived name as an
+        // invalid local ToolId.
         if tool_name.contains("__")
             && let Some(dispatch) = dispatch.clone()
         {

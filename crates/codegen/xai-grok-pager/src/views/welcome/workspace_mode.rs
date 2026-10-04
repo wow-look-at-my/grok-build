@@ -471,9 +471,9 @@ pub fn mode_from_active_stamp(
     }
 }
 
-/// Whether keyboard/mouse should mutate the welcome selection. Same gate as the ACK and render
-/// paths: chat mode, access, auth Done, not ZDR, not CLI-startup-locked, and history picker closed.
-/// With the history picker open, Ctrl+E/click would mutate the selection with no on-screen control.
+/// Whether keyboard/mouse should mutate the welcome selection. Same gate as
+/// the ACK and render paths: chat mode, access, auth Done, not ZDR, not
+/// CLI-startup-locked, and history picker closed.
 pub fn picker_interactive(
     chat_mode: bool,
     has_access: bool,
@@ -665,8 +665,8 @@ mod tests {
             indicator_for_opening_session(false, true, false, false),
             (WelcomeWorkspaceMode::LocalWorkspace, false)
         );
-        // Conversation / chat_kind without this-session local intent resolves to Sandbox
-        // That holds even when the process has a CLI lock (LoadSession strips the stamp)
+        // Conversation / chat_kind without this-session local intent resolves
+        // to Sandbox That holds even when the process has a CLI lock.
         assert_eq!(
             indicator_for_opening_session(true, false, true, false),
             (WelcomeWorkspaceMode::Sandbox, false)

@@ -3,8 +3,7 @@
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
-/// Bare `/feedback` opens the feedback modal; `/feedback <text>` sends immediately,
-/// without a model turn and without waiting on the prompt queue.
+/// Bare `/feedback` opens the feedback modal.
 pub struct FeedbackCommand;
 
 impl SlashCommand for FeedbackCommand {
@@ -25,8 +24,7 @@ impl SlashCommand for FeedbackCommand {
     }
 
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
-        // Prompt dispatch removes live image elements before passing these arguments and
-        // attaches the composer images to the action it gets back.
+        // Prompt dispatch removes live image elements before passing these arguments and attaches the composer images.
         let user_text = args.trim();
         let (action, result) = if user_text.is_empty() {
             ("open_empty", Action::OpenFeedbackModal(Default::default()))

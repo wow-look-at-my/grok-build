@@ -1,5 +1,4 @@
-//! The session header row: `branch worktree path` on the left, `◆ N │ 421K / 1.0M │ ‹ i/n › │ [Dashboard]` on the right.
-//! Inside the dashboard overlay the agent's title leads the row (`title │ branch …`); there is no separate title band.
+//! The session header row: `branch worktree path` on the left.
 use super::{AgentView, AppRenderParams, BannerSlotParams, OverlayHeader, test_fixtures};
 use crate::actions::ActionRegistry;
 use crate::app::actions::Action;
@@ -9,8 +8,8 @@ use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventK
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 const PATH: &str = "/grok-header-marker";
-/// `/dashboard` is pinned visible so the plain-session `[Dashboard]` gate does not read `GROK_AGENT_DASHBOARD` or the
-/// developer's config. `draw` re-measures the terminal from its area, so the width lives only in `last_terminal_size`.
+/// `/dashboard` is pinned visible so the plain-session `[Dashboard]` gate
+/// does not read `GROK_AGENT_DASHBOARD` or the developer's config.
 fn agent_at(width: u16) -> AgentView {
     let mut agent = test_fixtures::make_agent();
     agent.last_terminal_size = (width, 30);
@@ -102,7 +101,7 @@ fn worktree_session_header_keeps_badge_and_omits_main_repo_suffix() {
         "no leftover main-repo suffix, row = {row:?}"
     );
 }
-/// Deep cwds are always middle-shortened (last two components stay full), not only when the row is tight.
+/// Deep cwds are always middle-shortened (last components stay full), not only when the row is tight.
 #[test]
 fn session_header_always_shortens_deep_cwd() {
     let _theme = crate::theme::cache::pin_theme();
@@ -120,7 +119,6 @@ fn session_header_always_shortens_deep_cwd() {
         "middle components must not stay full, row = {row:?}"
     );
 }
-/// Frame 5: a plain session shows `path … [Dashboard]` on one row with no title and no switcher, the path in `text_secondary`.
 /// `[Dashboard]` opens the dashboard on click.
 #[test]
 fn plain_session_header_has_path_and_dashboard_button_only() {
@@ -167,8 +165,7 @@ fn dashboard_button_follows_the_feature_gate_outside_the_overlay() {
         "the overlay always offers the way back"
     );
 }
-/// Frame 7: inside the dashboard overlay the title leads (`title │ …`), the path steps back to the dim tier, and the switcher
-/// `‹ i/n ›` sits before `[Dashboard]`. Its chevrons are the prev/next click targets and `[Dashboard]` returns to the dashboard.
+/// Its chevrons are the prev/next click targets and `[Dashboard]` returns to the dashboard.
 #[test]
 fn overlay_header_leads_with_title_and_paints_switcher() {
     let _theme = crate::theme::cache::pin_theme();

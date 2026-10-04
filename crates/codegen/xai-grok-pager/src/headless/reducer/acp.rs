@@ -1,5 +1,4 @@
 //! The `streaming-json` reducer: native ACP session updates, one JSON object per line.
-//! It defines its own line shapes: [`AcpLine`], [`AcpUsageLine`], [`AcpEndLine`].
 
 use serde::Serialize;
 use serde_json::Value;

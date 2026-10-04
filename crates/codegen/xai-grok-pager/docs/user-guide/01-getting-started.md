@@ -2,7 +2,7 @@
 
 Grok Build is a terminal-based AI coding assistant from SpaceXAI. It runs as a TUI (Terminal User Interface) that understands your codebase, executes shell commands, edits files, searches the web, and manages tasks.
 
-You can use it interactively as a full-screen TUI, run it headlessly for scripting and CI/CD, or integrate it into editors via the Agent Client Protocol (ACP).
+You can use it interactively as a full-screen TUI, run it headlessly for scripting and CI/CD, or integrate it into editors. This is via the Agent Client Protocol (ACP).
 
 ---
 
@@ -42,30 +42,21 @@ grok --version
 
 To update, run the installer again. Grok does not update itself.
 
-If you installed Grok Build with WinGet, update it with WinGet instead. Quit
-Grok first, then run:
+If you installed Grok Build with WinGet, update it with WinGet instead. Quit Grok first, then run:
 
 ```powershell
 winget upgrade --id xAI.GrokBuild -e
 ```
 
-The WinGet package tracks the stable channel, and new releases can take a few
-days to reach it.
+The WinGet package tracks the stable channel, and new releases can take a few days to reach it.
 
-To fetch a repository through Grove (NFS on macOS, FUSE on Linux), enable
-`grok clone` with `[clone] enabled = true` in Grove config, `GROK_CLONE=1`,
-or the enable-both convenience `GROK_GROVE=1` / `[cli] grove = true` in
-`~/.grok/config.toml`:
+To fetch a repository through Grove (NFS on macOS, FUSE on Linux), enable `grok clone` with `[clone] enabled = true` in Grove config, `GROK_CLONE=1`, or the enable-both convenience `GROK_GROVE=1` / `[cli] grove = true` in `~/.grok/config.toml`:
 
 ```bash
 grok clone <url> [dir]
 ```
 
-The default is a depth-1 checkout of the selected branch. Pass `--full-history`
-for a complete clone. Clone enablement is independent of session / `-w` Grove
-worktrees (the convenience above turns both on; the specific knobs still win).
-the grok.com sign-in below — see [grok clone](27-grok-clone.md#authentication)
-and [Configuration reference](26-config-reference.md).
+The default is a depth-1 checkout of the selected branch. Pass `--full-history` for a complete clone. Clone enablement is independent of session / `-w` Grove worktrees (the convenience above turns both on. The specific knobs still win). the grok.com sign-in below — see [grok clone](27-grok-clone.md#authentication) and [Configuration reference](26-config-reference.md).
 
 ---
 
@@ -92,14 +83,14 @@ See [Authentication](02-authentication.md) for the full set of auth options incl
 
 ## Basic Interaction
 
-Once authenticated, Grok presents a full-screen TUI with two main areas:
+Once authenticated, Grok presents a full-screen TUI with multiple main areas:
 
 - **Scrollback** -- the conversation history showing your prompts, Grok's responses, tool calls, file edits, and more.
 - **Prompt** -- the input area at the bottom where you type messages.
 
 Type a message and press `Enter` to send it. Grok reads files, runs commands, and edits code as needed. Each tool run streams into the scrollback in real time.
 
-Press `Tab` to move focus between the prompt and the scrollback. While a turn is running, `Ctrl+C` cancels it once the composer is empty — with a draft, the first press only clears it. `Esc` never cancels a turn; mid-turn it shows a reminder to use `Ctrl+C`. Idle, press `Esc` twice within 800ms to clear a non-empty prompt, or (with an empty prompt and conversation messages) to open rewind — see [Keyboard Shortcuts](03-keyboard-shortcuts.md#escape). With the scrollback focused, use the arrow keys to select entries and to collapse or expand them. To navigate with `j`/`k` and fold with `h`/`l` instead, enable Vim mode.
+Press `Tab` to move focus between the prompt and the scrollback. While a turn is running, `Ctrl+C` cancels it once the composer is empty — with a draft, the first press only clears it. `Esc` never cancels a turn. Mid-turn it shows a reminder to use `Ctrl+C`. Idle, press `Esc` twice within 800ms to clear a non-empty prompt, or (with an empty prompt and conversation messages) to open rewind — see [Keyboard Shortcuts](03-keyboard-shortcuts.md#escape). With the scrollback focused, use the arrow keys to select entries and to collapse or expand them. To navigate with `j`/`k` and fold with `h`/`l` instead, enable Vim mode.
 
 ### File References
 

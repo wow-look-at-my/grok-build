@@ -570,8 +570,7 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
                 "a half-written path still names the call, on what has arrived"
             );
             // A second call opens while the first is unfinished. Each is read
-            // on its own arguments. This is the two-row case: both rows sat on
-            // their wire names until the whole turn had parsed.
+            // on its own arguments.
             deliver_tool_delta(
                 &actor,
                 &req,
@@ -586,15 +585,12 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
                 Some("Read `src/ma`"),
                 "the second call does not disturb the first one's name"
             );
-            // The tail of a call is a couple of characters, and it is what
-            // completes the argument the title is read from.
+            // The tail of a call is a couple of characters.
             deliver_tool_delta(&actor, &req, 0, None, Some("in.rs\"}")).await;
             assert_eq!(
                 streaming_title(&actor, 0).as_deref(),
                 Some("Read `src/main.rs`")
             );
-            // A new stream reuses index 0, so the abandoned attempt's arguments
-            // have to be gone by the time it opens.
             let retry = RequestId::random();
             own_request(&actor, &retry);
             actor

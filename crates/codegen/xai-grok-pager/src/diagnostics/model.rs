@@ -93,7 +93,6 @@ pub struct DiagnosticFacts {
     pub newline: Option<NewlineFact>,
     pub clipboard: ClipboardFacts,
     /// Passive mic enumeration when voice capture is available.
-    /// `None` omits the Voice section (no-audio builds, or TUI when voice mode is off).
     pub voice: Option<VoiceFacts>,
 }
 
@@ -116,15 +115,13 @@ pub struct TmuxFacts {
 }
 
 /// Whether the attached tmux client forwards 24-bit color to the terminal.
-/// tmux resolves a client's features once, at attach time, so this describes the live client and not the config on disk.
-/// A config change applies only after that client reattaches.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TmuxColorPassthrough {
     /// The client advertises `RGB`, so truecolor SGR reaches the terminal.
     Forwarded,
     /// tmux reduces 24-bit color to the client terminfo's palette, which is what makes themes look washed out even when Grok emits truecolor.
     Reduced,
-    /// No usable evidence: tmux predates `terminal-features` (3.2), no client is attached, or the query failed. Never treated as a problem.
+    /// Never treated as a problem.
     Unknown,
 }
 

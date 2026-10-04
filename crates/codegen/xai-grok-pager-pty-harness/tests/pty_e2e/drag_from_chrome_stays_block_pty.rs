@@ -73,8 +73,7 @@ async fn drag_from_chrome_stays_block_pty() {
         "setup: the in-block row must be blank at the drag columns; line: {chrome_line:?}"
     );
 
-    // PRESS on the blank in-block row, drag sideways along it, then release
-    // The pointer never enters selectable text, so the gesture stays a block drag
+    // PRESS on the blank in-block row, drag sideways along it, then release The pointer never enters selectable text.
     let mut drag = String::new();
     drag.push_str(&sgr_mouse(0, chrome_row, col_top, 'M'));
     drag.push_str(&sgr_mouse(32, chrome_row, col_top + 3, 'M'));

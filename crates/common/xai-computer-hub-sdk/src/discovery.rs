@@ -1,7 +1,4 @@
-//! One-shot harness-side server discovery: resolve the hub URL and run the
-//! hub's `servers.list` with a caller-supplied credential. A single shared
-//! helper so env parsing, `ws`/`wss` gating, the throwaway harness session,
-//! and pool reuse live in one place for every caller.
+//! One-shot harness-side server discovery: resolve the hub URL and run the hub's `servers.list`.
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -1,10 +1,4 @@
 //! Mock language servers used by the LSP tests.
-//!
-//! Each is a small Python script speaking LSP over stdio, written to a temp dir
-//! and spawned like a real server. They exist so the client can be tested
-//! against the *shapes* real servers come in — full versus incremental sync,
-//! push versus pull diagnostics, save with or without text — without needing
-//! any of those servers installed.
 
 use std::path::PathBuf;
 
@@ -586,8 +580,7 @@ serve({
 /// The file [`write_slow_pull_server`] touches once its first pull is in flight.
 pub(super) const FIRST_PULL_MARKER: &str = "first-pull-started";
 
-/// The file [`write_stale_clean_pull_server`] touches once its second pull is
-/// in flight.
+/// The file [`write_stale_clean_pull_server`] touches once its second pull is in flight.
 pub(super) const SECOND_PULL_MARKER: &str = "second-pull-started";
 
 /// A pull server whose "the file is clean now" answer arrives late, and which then stands by it when asked again with its own result id. The
@@ -859,7 +852,7 @@ serve({"textDocumentSync": {"openClose": True, "change": 1}}, handle)
 }
 
 /// Reports a real problem once, then answers "clean" twice, then stops answering at all. Enough rope to hang a client that lets a clean answer
-/// about replaced text erase what it holds: the two clean answers belong to a revision that has been superseded by the time the second arrives,
+/// about replaced text erase what it holds: both clean answers belong to a revision that has been superseded by the time the second arrives,
 /// and the silence afterwards means nothing can quietly put the error back.
 pub(super) fn write_clean_then_silent_server() -> (tempfile::TempDir, PathBuf) {
     write_python_server(

@@ -56,8 +56,7 @@ pub(crate) fn build_effort_arg_items(
             let active = mark_active && current_effort == Some(option.value);
             let active_suffix = if active { " (active)" } else { "" };
             let insert_text = insert_text_for(option);
-            // Sort-key prefix: 'a' for top row, 'b' for next, etc
-            // Only affects matcher tiebreak ordering, never rendered
+            // Sort-key prefix: 'a' for top row, 'b' for next, etc Only affects matcher tiebreak ordering.
             let sort_prefix = char::from(b'a' + idx as u8);
             ArgItem {
                 display: format!("{}{active_suffix}", option.label),

@@ -656,7 +656,7 @@ fn dispatch_fork_no_flag_always_opens_question_modal() {
         }
         other => panic!("expected Fork, got {other:?}"),
     }
-    // The modal must offer four options: Yes / No / Always / Never.
+    // The modal must offer options: Yes / No / Always / Never.
     let Some(question) = qv.questions.first() else {
         panic!("expected a question: {:?}", qv.questions);
     };
@@ -993,7 +993,8 @@ fn dispatch_fork_inherits_appearance_sharing_and_plugin_visibility() {
     app.sharing_enabled = false;
     app.usage_visible = false;
     app.appearance.disable_plugins = true;
-    // Cached billing state must be inherited so the credits warning is correct from the first frame (not just after a billing fetch)
+    // Cached billing state must be inherited so the credits warning is
+    // correct from the first frame (not after a billing fetch)
     app.credit_balance = Some(crate::views::credit_bar::CreditBalance {
         prepaid_balance_cents: Some(1500),
         ..test_bal(50.0)
@@ -1535,7 +1536,6 @@ fn translate_local_submit_yes_returns_worktree_true_action() {
         directive: Some("d".into()),
         include_agents: false,
     });
-    // Set selection to option 0 ("Yes" in production).
     let Some(slot) = state.selections.get_mut(0) else {
         panic!("expected a selection slot: {:?}", state.selections);
     };
@@ -1585,7 +1585,6 @@ fn translate_local_submit_no_returns_worktree_false_action() {
         directive: None,
         include_agents: false,
     });
-    // Option 1 is "No", so worktree=false
     let Some(slot) = state.selections.get_mut(0) else {
         panic!("expected a selection slot: {:?}", state.selections);
     };

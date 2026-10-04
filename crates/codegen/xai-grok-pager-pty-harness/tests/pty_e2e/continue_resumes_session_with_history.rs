@@ -34,7 +34,7 @@ async fn continue_resumes_session_with_history() {
     first
         .wait_for_text(&turn_sentinel(1), Duration::from_secs(30))
         .expect("turn 1 rendered");
-    // Quit via Ctrl+Q double-press: focus is in the prompt, so 'q' would just type.
+    // Quit via Ctrl+Q double-press: focus is in the prompt, so 'q' would type.
     first.update(Duration::from_millis(500));
     first.inject_keys(b"\x11").expect("ctrl-q once");
     first.update(Duration::from_millis(200));

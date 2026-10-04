@@ -1,17 +1,4 @@
 //! Background task and subagent completion reminder.
-//!
-//! On each tool call, [`TaskCompletionReminder`] queries the
-//! [`TerminalBackend`] (already on `SharedResources`) via `list_tasks()`
-//! and reports any newly-completed background tasks as plain reminder
-//! text. It also queries the subagent coordinator via
-//! [`SubagentEventSender`] for newly-completed subagents.
-//!
-//! The tool pipeline wraps each string in `<system-reminder>` tags
-//! inside the tool result so the model learns about completions without
-//! polling `get_task_output`.
-//!
-//! A [`ReportedTaskCompletions`] state set tracks which task/subagent IDs
-//! have already been surfaced, preventing duplicate reminders.
 use crate::bridge::ToolBridge;
 use crate::implementations::grok_build::task::types::{
     SubagentCompletionSummary, SubagentCompletionsRequest, SubagentEvent, SubagentEventSender,
@@ -39,13 +26,11 @@ fn user_killed_notice(task: &TaskSnapshot) -> &'static str {
         ""
     }
 }
-/// Inline preview cap applied ONLY to bash completion reminders that ship
-/// with a disk-pointer footer.
+/// Inline preview cap applied ONLY to bash completion reminders that ship with a disk-pointer footer.
 const MAX_INLINE_COMPLETION_BYTES: usize = 4_000;
 /// Byte cap for the child's final text inlined next to a polling tool; the rest is one poll away.
 pub const INLINE_SUBAGENT_OUTPUT_BYTES: usize = 16_000;
-/// Tags model-authored text could use to close the reminder wrapper; `<\/tag` matches the shell's
-/// own escape, so its later pass is a no-op.
+/// Tags model-authored text can use to close the reminder wrapper.
 const NEUTRALIZED_TAGS: [&str; 2] = ["system-reminder", "system_reminder"];
 /// Refcounted bash task ids whose wake prompt is queued or in flight; subagent wakes dedupe through [`ReportedTaskCompletions`] instead.
 #[derive(Clone, Debug, Default)]
@@ -90,8 +75,7 @@ impl TaskWakeSuppressed {
 }
 crate::register_resource!("grok_build", "TaskWakeSuppressed", TaskWakeSuppressed);
 /// Set of task IDs whose completion has already been surfaced as a
-/// `<system-reminder>`.  Persisted via `State<T>` so it survives across
-/// tool calls within a session.
+/// `<system-reminder>`.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ReportedTaskCompletions {
     reported: HashSet<String>,
@@ -322,27 +306,23 @@ pub fn format_monitor_events(
         }
     }
 }
-/// Whether a background task should be surfaced to the session whose owner id is `my_owner`. A task is in scope only
-/// when it has no recorded owner (legacy / non-grok-build backends) or its owner matches the current session;
-/// cross-session tasks are filtered out so their completions surface in the owning session, not here.
+/// Whether a background task should be surfaced to the session whose owner id
+/// is `my_owner`.
 pub(crate) fn task_owned_by_session(task: &TaskSnapshot, my_owner: Option<&str>) -> bool {
     match (my_owner, task.owner_session_id.as_deref()) {
         (Some(me), Some(owner)) => me == owner,
         _ => true,
     }
 }
-/// Append the completion-output delivery section for a bash task.
-///
-/// - `Some(name)` writes `Use {name}("{task_id}") to see the full output.`
+/// Append the completion-output delivery section for a bash task. -
+/// `Some(name)` writes `Use {name}("{task_id}") to see the full output.`
 ///   (polling tool available; the model can pull the full output via that
 ///   tool on demand).
-/// - `None` writes `response:\n{output}`. When `disk_pointer_footer` is
+/// - `None` writes `response:\n{output}`.
 ///   `Some(line)`, the output is capped at [`MAX_INLINE_COMPLETION_BYTES`]
 ///   and the footer line is appended so the model can recover the full log
 ///   from disk. When `disk_pointer_footer` is `None`, the full output is
 ///   inlined verbatim (no disk-backed file to point at).
-///
-/// Callers control any leading indentation or newlines around the section.
 pub fn render_completion_output_delivery(
     buf: &mut String,
     task_id: &str,
@@ -372,16 +352,11 @@ pub fn render_completion_output_delivery(
     }
 }
 /// Resolve the active toolset's `BackgroundTaskAction` tool name (e.g.
-/// `"get_command_or_subagent_output"`), or `None` when no such tool is registered.
-///
-/// Centralises the structural "is a polling tool available?" check so all
-/// callers route the same answer into [`render_completion_output_delivery`]
-/// and [`format_subagent_completion`].
+/// `"get_command_or_subagent_output"`).
 pub async fn resolve_task_output_tool_name(bridge: &ToolBridge) -> Option<String> {
     bridge.tool_for_kind(ToolKind::BackgroundTaskAction).await
 }
-/// Resolve the active toolset's `Read` tool name, used for the bash
-/// completion disk-pointer footer in [`render_completion_output_delivery`].
+/// Resolve the active toolset's `Read` tool name.
 pub async fn resolve_read_tool_name(bridge: &ToolBridge) -> Option<String> {
     bridge.tool_for_kind(ToolKind::Read).await
 }
@@ -604,9 +579,8 @@ pub fn format_between_turn_bash_completions(
     }
     buf
 }
-/// Extract task / subagent IDs whose completion the model already learned about from this tool result. Centralising this here means the two
-/// consumer surfaces cannot drift: both call the same function, and the exhaustive `match` below forces every new `ToolOutput` variant to opt
-/// in or out at compile time. Returns borrowed `&str` slices (no allocation) — the strings live in `output` for the duration of the call.
+/// Extract task / subagent IDs whose completion the model already learned
+/// about from this tool result.
 fn task_text_agent_id(text: &str) -> Option<&str> {
     if !text.starts_with("This is the output of the subagent:") {
         return None;
@@ -682,9 +656,7 @@ pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
     }
     ids
 }
-/// Cross-cutting reminder that queries the terminal backend for completed background tasks and the subagent coordinator for completed
-/// subagents, surfacing newly-completed ones as `<system-reminder>` text inside the next tool result. Registered on `FinalizedToolset` as a
-/// cross-cutting reminder. Returns plain strings; the tool pipeline wraps each one in `<system-reminder>` tags automatically.
+/// Cross-cutting reminder that queries the terminal backend for completed background tasks and the subagent coordinator.
 pub struct TaskCompletionReminder;
 #[async_trait::async_trait]
 impl Reminder for TaskCompletionReminder {
@@ -730,14 +702,10 @@ impl Reminder for TaskCompletionReminder {
                 .into_iter()
                 .filter(|t| task_owned_by_session(t, my_owner.as_deref()))
                 .collect();
-            // Background bash/monitor completions surface at the NEXT TOOL-CALL
-            // BOUNDARY even while a goal loop drives the turn: the reminder
-            // rides a tool result the loop already receives, so it interrupts
-            // nothing. The goal-loop gate that used to sit here is what
-            // deferred completions to the session going idle (the auto-wake
-            // path is goal-gated too, and that one DOES interrupt — it stays
-            // gated in the notification bridge). Subagent completions keep the
-            // suppression: the goal loop consumes those results itself.
+            // Background bash/monitor completions surface at the NEXT
+            // TOOL-CALL BOUNDARY even while a goal loop drives the turn: the
+            // reminder rides a tool result the loop already receives, so it
+            // interrupts nothing.
             let surface_reminders = res
                 .get::<crate::types::resources::Params<
                     crate::implementations::grok_build::bash::BashParams,
@@ -1982,10 +1950,7 @@ mod tests {
         let shared = res.into_shared();
         let reminder = TaskCompletionReminder;
         let output = ToolOutput::Dynamic(serde_json::Value::Null.into());
-        // First post-completion tool round, goal loop STILL ACTIVE: the bash
-        // completion surfaces (it rides a tool result — it interrupts nothing),
-        // while the subagent completion stays suppressed (the goal loop
-        // consumes its own subagent results).
+        // First post-completion tool round, goal loop STILL ACTIVE: the bash completion surfaces (it rides a tool result — it interrupts nothing).
         let first = reminder.collect_reminders(shared.clone(), &output).await;
         assert_eq!(
             first.len(),
@@ -2063,8 +2028,7 @@ mod tests {
             "expected a completed task: {snapshot:?}"
         );
 
-        // Resources as a live goal-loop session would hold them: the loop is
-        // active while the task completes, and the next tool call arrives.
+        // Resources as a live goal-loop session would hold them: the loop is active while the task completes.
         let mut res = Resources::new();
         res.insert(Terminal(backend));
         res.register_state::<ReportedTaskCompletions>();
@@ -2074,8 +2038,7 @@ mod tests {
 
         let reminder = TaskCompletionReminder;
         let output = ToolOutput::Dynamic(serde_json::Value::Null.into());
-        // FIRST post-completion tool round, work still active: the reminder
-        // must be here — not deferred to idle.
+        // FIRST post-completion tool round, work still active: the reminder must be here — not deferred to idle.
         let first = reminder.collect_reminders(shared.clone(), &output).await;
         assert_eq!(
             first.len(),

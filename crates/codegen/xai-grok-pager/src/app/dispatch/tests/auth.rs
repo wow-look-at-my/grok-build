@@ -300,7 +300,6 @@ fn login_from_welcome_does_not_stash_return_view() {
     assert_eq!(app.auth_return_view, None);
 }
 
-/// Compact-auth recovery: the prompt is held across an auto-compact 401, stashed on PromptResponse, and resubmitted on a mid-session AuthComplete.
 #[test]
 fn e2e_compact_auth_failure_holds_prompt_and_resubmits_after_login() {
     use crate::app::acp_handler::apply_session_event_for_test;
@@ -614,7 +613,7 @@ fn test_runtime() -> tokio::runtime::Runtime {
 }
 
 /// A second `/login` while already authenticating must abort the prior auth task and bump the seq.
-/// Single-flight: never two device-code requests running at once.
+/// Single-flight: never device-code requests running at once.
 #[test]
 fn login_while_authenticating_aborts_prior_task() {
     let rt = test_runtime();

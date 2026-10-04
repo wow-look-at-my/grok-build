@@ -1,16 +1,4 @@
 //! Streaming response chunk types.
-//!
-//! Each transport call returns a stream of chunks.
-//! The chunk type is domain-specific:
-//!
-//! - [`ToolChunk`]: streaming output / progress / final result for a tool invocation (or the response to [`crate::ToolRequest::Definitions`]).
-//!   Tools that need user approval or input also yield `NeedPermission` or `NeedUserAnswer` chunks.
-//!   The sampler answers them by sending [`ToolResponse`] values back on the paired bidi response sender.
-//! - [`OpsChunk`]: one or more chunks for a workspace ops call (most are unary; ripgrep / fuzzy_search are streaming).
-//! - [`SessionChunk`]: one or more chunks for a session lifecycle call.
-//!
-//! Every chunk variant maps to a static [`ChunkKind`] discriminator.
-//! The typed-trait layer uses it to produce a [`crate::WorkspaceError::ProtocolMismatch`] when an unexpected chunk arrives on the wrong stream.
 
 pub mod ops;
 pub mod session;
@@ -81,11 +69,8 @@ pub enum ChunkKind {
     Plugin,
     /// `OpsChunk::Ack`
     Ack,
-    /// `OpsChunk::FuzzyMatch`
     FuzzyMatch,
-    /// `OpsChunk::RipgrepHit`
     RipgrepHit,
-    /// `OpsChunk::RipgrepDone`
     RipgrepDone,
 
     /// `SessionChunk::SessionId`

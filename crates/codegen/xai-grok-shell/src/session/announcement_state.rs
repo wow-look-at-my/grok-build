@@ -1,33 +1,26 @@
-//! Announcement tracking for MCP servers and skills: which of them were already announced via `<system-reminder>` messages.
-//! The tracking keeps injections and resumed sessions from duplicating listings.
+//! Announcement tracking for MCP servers and skills.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use xai_grok_tools::implementations::search_tool::ServerFingerprint;
 
-/// Persisted announcement tracking state.
-/// It is restored on session resume so the fresh actor "remembers" what was already announced.
-/// The existing delta/fingerprint comparison logic then handles changes (new/removed/updated servers or skills) without creating duplicates.
+/// Persisted announcement tracking state. It is restored on session resume so
+/// the fresh actor "remembers" what was already announced.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AnnouncementState {
-    /// Maps server_name to `McpServerFingerprint`.
-    /// The hash values use FNV-1a (deterministic, portable).
-    /// Persisted fingerprints therefore remain valid across Rust versions, build profiles, and CPU architectures.
+    /// Maps server_name to `McpServerFingerprint`. The hash values use FNV-1a (deterministic, portable).
     pub mcp_server_fingerprints: HashMap<String, McpServerFingerprint>,
 
     /// An entry is the skill's `dedup_key()`, which is the skill name.
     pub announced_skill_names: HashSet<String>,
 
     /// Persisted form of [`McpAnnounced::failed`]: only the reason class is stored.
-    /// The config identity hash is deliberately NOT persisted.
-    /// Restored episodes thus adopt the current config on first sighting instead of spuriously re-announcing after a resume.
     pub announced_failed_servers: HashMap<String, AnnouncedFailure>,
 }
 
-/// Reason class a failure episode was announced with.
-/// Persisted; keep the variants add-only.
-/// Unknown values deserialize as [`Self::Transport`] so newer state files still load in older binaries.
+/// Reason class a failure episode was announced with. Persisted; keep the
+/// variants add-only.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnnouncedFailure {
@@ -44,14 +37,12 @@ pub enum AnnouncedFailure {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AnnouncedEpisode {
     pub(crate) class: AnnouncedFailure,
-    /// Identity hash of the server config the episode was announced under (transport, url/command/args, header and env names, never values).
-    /// An in-place config edit (same name) starts a new episode.
-    /// `None` after a restore: the episode adopts the current config on first sighting instead of spuriously re-announcing.
+    /// Identity hash of the server config the episode was announced.
     pub(crate) config_identity: Option<u64>,
 }
 
-/// One currently-failed server as gathered from `McpState`, input to [`McpAnnounced::note_failures`].
-/// It carries failure facts only; the model-facing reason line is rendered (and sanitized) at the injection site.
+/// One currently-failed server as gathered from `McpState`, input to
+/// [`McpAnnounced::note_failures`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FailedServer {
     pub(crate) name: String,
@@ -64,15 +55,13 @@ pub(crate) struct FailedServer {
     pub(crate) config_identity: u64,
 }
 
-/// In-memory MCP announcement tracking, the live counterpart of the MCP half of [`AnnouncementState`].
-/// It is one value so connected fingerprints and failure episodes restore and persist together.
+/// In-memory MCP announcement tracking, the live counterpart of the MCP half
+/// of [`AnnouncementState`].
 #[derive(Debug, Clone, Default)]
 pub(crate) struct McpAnnounced {
-    /// Connected servers already announced, keyed by name; the fingerprint detects tool/description changes that warrant a delta announcement.
+    /// Connected servers already announced, keyed by name.
     pub(crate) fingerprints: HashMap<String, ServerFingerprint>,
     /// The entry is removed, allowing a new announcement, only when the server connects or leaves the config.
-    /// Background retries (and their reason flip-flops) therefore don't re-announce.
-    /// One is escalation to [`AnnouncedFailure::AuthRequired`]: it needs user action and invalidates the announced "retries automatically" hint.
     pub(crate) failed: HashMap<String, AnnouncedEpisode>,
 }
 

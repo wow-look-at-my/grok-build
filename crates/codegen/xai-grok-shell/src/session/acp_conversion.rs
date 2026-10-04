@@ -1,12 +1,4 @@
 //! ACP conversion functions for `xai-grok-tools`'s `ToolOutput`.
-//!
-//! These standalone functions convert `xai_grok_tools::types::output::ToolOutput`
-//! into ACP protocol types (`acp::ToolCallUpdate`, `acp::Plan`).
-//!
-//! `raw_output` is serialized directly from ToolOutput via serde, with no manual JSON
-//! construction. The TUI deserializes it back into the same ToolOutput type, so
-//! field names must match exactly. Path relativization for display happens on the
-//! TUI side (which already has `base_path` for this purpose).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,8 +11,6 @@ use xai_grok_tools::types::output::{
 use xai_tool_types::{KillTaskOutput, TaskOutputOutput};
 
 /// Rewrites real worktree paths to display paths in serialized output.
-/// In forked sessions, tools produce output containing the worktree directory.
-/// The client UI should instead see the original project path (the `display_cwd`).
 #[derive(Clone, Debug)]
 pub(crate) struct PathRewriter {
     /// The real worktree path (what tools actually see).
@@ -48,8 +38,7 @@ impl PathRewriter {
     /// Handles both plain paths and URL-encoded paths that appear in session directory structures and `output_file` references.
     pub(crate) fn rewrite(&self, text: &str) -> String {
         let plain = text.replace(&self.real_cwd, &self.display_cwd);
-        // Also replace the URL-encoded form: session directory paths use urlencoding::encode(&cwd) as a path component,
-        // so background task output_file paths and similar references embed the encoded real cwd
+        // Also replace the URL-encoded form: session directory paths use urlencoding::encode(&cwd) as a path component.
         let encoded_real = urlencoding::encode(&self.real_cwd);
         if plain.contains(encoded_real.as_ref()) {
             let encoded_display = urlencoding::encode(&self.display_cwd);
@@ -462,8 +451,9 @@ pub(crate) fn acp_tool_update(
                 .raw_output(raw_output_json(output, rewriter)),
         )),
         ToolOutput::SubagentCompleted(sub) => {
-            // The text includes the resume handle so users can find it, plus meta for the TUI
-            // Shared with the chat-bidi server via `to_model_text` so both clients present a completed subagent identically
+            // The text includes the resume handle so users can find it, plus
+            // meta for the TUI Shared with the chat-bidi server via
+            // `to_model_text`.
             let content = Some(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
                 acp::TextContent::new(sub.to_model_text()),
             ))]);
@@ -580,8 +570,8 @@ pub(crate) fn acp_tool_update(
                     .raw_output(raw_output_json(output, rewriter)),
             ))
         }
-        // Internal tools (open_page, browse_page, etc.) are not used in the shell; they are server-only
-        // This arm covers variants that appear when Cargo unifies the optional web-tools feature across the workspace
+        // Internal tools (open_page, browse_page, etc.) are not used in the
+        // shell.
         #[allow(unreachable_patterns)]
         _ => None,
     }
@@ -705,8 +695,7 @@ mod tests {
         });
         let update = acp_tool_update(&output, "call-ci", None, None)
             .expect("a CI output must produce an update, not be dropped");
-        // A red branch is a completed query: the tool ran, and it is the branch
-        // that is failing.
+        // A red branch is a completed query: the tool ran, and it is the branch that is failing.
         assert_eq!(update.fields.status, Some(acp::ToolCallStatus::Completed));
         let content = update.fields.content.expect("the result must be shown");
         let rendered = format!("{content:?}");
@@ -902,8 +891,7 @@ mod tests {
             other => panic!("expected Text content, got {other:?}"),
         }
 
-        // ToolOutput::Text wraps TextOutput { text: String }, which serde can serialize with internal tagging
-        // raw_output carries the JSON
+        // ToolOutput::Text wraps TextOutput { text: String }.
         assert!(update.fields.raw_output.is_some());
     }
 

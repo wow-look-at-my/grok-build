@@ -1,5 +1,4 @@
-//! Snapshot of live work written before session teardown, consumed once on
-//! the first prompt after a cold resume so the model gets a status update.
+//! Snapshot of live work written before session teardown, consumed once on the first prompt after a cold resume.
 
 use std::path::Path;
 use std::time::Duration;

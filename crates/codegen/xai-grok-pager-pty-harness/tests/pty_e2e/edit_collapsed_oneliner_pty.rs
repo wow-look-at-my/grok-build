@@ -5,7 +5,6 @@ use super::common::*;
 const DONE_SENTINEL: &str = "EDIT_COLLAPSED_DONE";
 
 /// Comment planted in the replacement text, visible only when the diff body renders.
-/// It separates the collapsed one-liner from the expanded view.
 const BODY_MARKER: &str = "EXPANDED_BODY_MARKER";
 
 /// PTY: with the `collapsed_edit_blocks` flag enabled, an Edit tool call lands as a collapsed
@@ -25,7 +24,6 @@ async fn edit_collapsed_oneliner_pty() {
     .expect("write fixture");
     let abs = dunce::canonicalize(&target).unwrap_or(target.clone());
 
-    // One deleted line, two inserted lines give a `+2/-1` diffstat
     let _tool_turn = expect_tool_turn(
         &content,
         "call_collapsed",

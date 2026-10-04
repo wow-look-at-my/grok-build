@@ -1,6 +1,4 @@
 //! Location type for query results.
-//!
-//! Location uses 1-indexed line and column numbers for LSP compatibility.
 
 use std::path::PathBuf;
 
@@ -9,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use super::Range;
 
 /// A location in the codebase, used for query results. LSP conventions.
-/// `line`/`column` are 1-indexed; `range` is 0-indexed internally.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct Location {

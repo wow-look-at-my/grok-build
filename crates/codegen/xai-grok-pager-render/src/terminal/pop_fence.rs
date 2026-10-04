@@ -1,11 +1,4 @@
 //! Teardown fence after the kitty keyboard pop: a DA1 query whose reply proves the terminal has applied the pop.
-//!
-//! A terminal handles its output in order, so every key report it emitted before applying `CSI < u` is already in stdin
-//! when the `CSI ? … c` reply arrives; draining up to the reply consumes release events that would otherwise reach the
-//! user's shell as keystrokes (fish reads `ESC [ 100 ; 5 : 3 u` as Ctrl-D and exits). Reads use the raw fd because
-//! crossterm filters DA1 replies out of its event stream.
-//!
-//! Caller-enforced preconditions: raw mode on, no other stdin reader alive, flags pushed on this screen. The fence never pops.
 
 use std::time::Duration;
 

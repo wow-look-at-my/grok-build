@@ -2,8 +2,8 @@
 
 use serde::Serialize;
 
-/// Emitted when a user's turn fails due to rate limiting (all retries exhausted).
-/// Key conversion-funnel signal: rate limit, then upsell, then subscribe.
+/// Emitted when a user's turn fails due to rate limiting (all retries
+/// exhausted).
 #[derive(Serialize)]
 pub struct RateLimitHit {
     pub model_id: String,

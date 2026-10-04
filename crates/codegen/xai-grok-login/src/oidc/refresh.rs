@@ -10,9 +10,7 @@ pub enum OidcRefreshResult {
     Success(Box<GrokAuth>),
     /// Terminal error from the IdP, already classified into a reason.
     TerminalError { reason: RefreshTokenFailedReason },
-    /// Non-terminal failure (discovery failed, network error, etc.) `network_unreachable` is `true` when the failure never reached the IdP (DNS resolution, TCP connect, request timeout).
-    /// That is the canonical shape of the first seconds after wake-from-sleep.
-    /// Such failures prove nothing about the credential, so `OidcRefresher`'s transient-to-permanent escalation budget must not count them.
+    /// Non-terminal failure (discovery failed, network error, etc.)
     Failed { network_unreachable: bool },
 }
 
@@ -27,12 +25,9 @@ pub(super) fn classify_terminal(error_code: &str) -> Option<RefreshTokenFailedRe
 }
 
 /// Conservative client-side bound (ms) on how long an IdP may still accept a refresh token it has already rotated.
-/// A clock divergence past this bound means the exchange straddled a suspend too long.
-/// A lost response then can no longer be recovered by re-presenting the old RT.
 const ROTATION_GRACE_MS: u64 = 60_000;
 
-/// Dual-clock suspend probe around an IdP exchange. The monotonic clock pauses during suspend and the wall clock does not, so their divergence measures time suspended since [`Self::start`].
-/// Feeds `suspended_ms` telemetry and stops in-call retries once a straddle exceeds the rotation grace. Re-sending the RT then trips the IdP's reuse detection and revokes a successor a sibling may hold.
+/// Dual-clock suspend probe around an IdP exchange.
 pub(super) struct SuspendProbe {
     mono: std::time::Instant,
     wall: chrono::DateTime<chrono::Utc>,
@@ -122,8 +117,7 @@ pub async fn oidc_token_exchange(auth: &GrokAuth) -> OidcRefreshResult {
         Some(serde_json::json!({ "issuer": issuer, "client_id": client_id })),
     );
 
-    // A large mono/wall divergence around the IdP call means the process was suspended mid-refresh
-    // That is the condition that can revoke the refresh token (response lost across sleep). See [`SuspendProbe`].
+    // A large mono/wall divergence around the IdP call means the process was suspended mid-refresh That is the condition.
     let probe = SuspendProbe::start();
     let timing = || {
         let (mono_ms, wall_ms) = probe.elapsed_ms();

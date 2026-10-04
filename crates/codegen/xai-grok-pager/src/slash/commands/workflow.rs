@@ -1,12 +1,4 @@
 //! `/workflow`: the pager-side wrapper over the shell's workflow command.
-//!
-//! Registered as a builtin so it shadows the ACP-advertised `/workflow` (`apply_acp_commands` drops colliding names).
-//! The exact `runs` form can then open the TUI run dashboard.
-//! Every other form passes through to the shell unchanged (launch, manage ops, bare-call text overview).
-//!
-//! Argument suggestions list advertised workflow names (from the ACP catalog) then the manage ops.
-//! Selecting a launch name fills `/workflow <name> ` without launching.
-//! Selecting pause/resume/stop/save lists this session's run handles so a bare verb cannot pick a run.
 
 use crate::app::actions::Action;
 use crate::slash::command::{
@@ -378,8 +370,7 @@ impl SlashCommand for WorkflowCommand {
         // First token is still being typed (`/workflow de`)
         // Leave the name and op list up so the matcher can rank saved names
         let Some((first, rest)) = trimmed.split_once(char::is_whitespace) else {
-            // An exact verb (`/workflow resume`) lists this session's runs, not saved launch names
-            // A prefix of a verb stays in the first phase (the name and op list)
+            // An exact verb (`/workflow resume`) lists this session's runs.
             if is_manage_op(trimmed) {
                 return Some(manage_run_items(ctx, trimmed));
             }

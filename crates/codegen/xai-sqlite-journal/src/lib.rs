@@ -1,29 +1,15 @@
-#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+#![allow(clippy::cast_sign_loss)]
 
 //! Filesystem-aware SQLite journal-mode selection.
-//!
-//! WAL keeps its wal-index in an mmap'd `-shm` file and relies on coherent
-//! shared memory plus reliable POSIX locks — guarantees network filesystems
-//! do not provide. When `$HOME` (and thus `~/.grok`) is NFS-mounted on
-//! several machines at once, a peer host truncating/rebuilding the `-shm`
-//! during WAL recovery or close rips the backing out from under our mapping
-//! and the next wal-index read dies with SIGBUS. On such mounts we use a
-//! rollback journal instead (SQLite's documented "WAL does not work over a
-//! network filesystem" limitation), and each host opens its own per-host DB
-//! file (see [`JournalMode::effective_db_path`]) so no peer — including
-//! pre-fix binaries that would flip a shared DB back to WAL — ever shares
-//! the file.
 
 #![deny(clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
 
-/// Wait for peers' locks instead of failing instantly; matches what every
-/// consumer historically set.
+/// Wait for peers' locks instead of failing instantly; matches what every consumer historically set.
 const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(5000);
 
-/// One budget for riding out `SQLITE_BUSY`. Inner retries share the caller's
-/// deadline, so two timers cannot stack into twice the advertised wait.
+/// One budget for riding out `SQLITE_BUSY`.
 pub const BUSY_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Journal mode chosen for a SQLite database based on where it lives.
@@ -32,8 +18,7 @@ pub enum JournalMode {
     /// Write-ahead logging — the historical default, local filesystems only.
     #[strum(serialize = "WAL")]
     Wal,
-    /// Rollback journal truncated (not unlinked) at commit — safe on network filesystems, and cheaper there than DELETE mode:
-    /// no per-commit create/unlink namespace round-trips and no NFS `.nfsXXXX` silly-rename litter.
+    /// Rollback journal truncated (not unlinked) at commit.
     #[strum(serialize = "TRUNCATE")]
     Truncate,
 }
@@ -121,9 +106,7 @@ impl JournalMode {
         Ok(conn)
     }
 
-    /// Errors if the database file does not exist (never creates it). `Truncate` (network): reading a legacy WAL-stamped DB
-    /// read-only would mmap its `-shm` (the SIGBUS), and the read-only escape hatch does not exist: EXCLUSIVE locking's heap
-    /// wal-index takes an exclusive file lock, and POSIX forbids write-locking an O_RDONLY fd (`SQLITE_IOERR_LOCK`).
+    /// Errors if the database file does not exist (never creates it).
     pub fn open_readonly(self, db_path: &Path) -> rusqlite::Result<rusqlite::Connection> {
         self.open_readonly_until(db_path, std::time::Instant::now() + BUSY_RETRY_BUDGET)
     }
@@ -140,13 +123,11 @@ impl JournalMode {
             Self::Truncate => OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         };
         let conn = rusqlite::Connection::open_with_flags(self.effective_db_path(db_path), flags)?;
-        // Readers can hit SQLITE_BUSY too (peer recovery, a rollback writer's
-        // exclusive window), and the conversion below requires a busy handler.
+        // Readers can hit SQLITE_BUSY too (peer recovery, a rollback writer's exclusive window).
         conn.busy_timeout(BUSY_TIMEOUT)?;
         if let Self::Truncate = self {
             self.apply_with_retry_until(&conn, deadline)?;
-            // Make the name true: reject SQL writes (statement-level) while
-            // the fd stays writable for lock/rollback purposes.
+            // Make the name true: reject SQL writes (statement-level) while the fd stays writable.
             conn.pragma_update(None, "query_only", true)?;
         }
         Ok(conn)
@@ -158,13 +139,10 @@ impl JournalMode {
         match self {
             Self::Wal => conn.pragma_update(None, "journal_mode", "WAL"),
             Self::Truncate => {
-                // EXCLUSIVE locking keeps the wal-index in heap memory, so
-                // converting an already-WAL-stamped DB never mmaps a `-shm`
-                // that a peer NFS client may be rebuilding (SIGBUS).
+                // EXCLUSIVE locking keeps the wal-index in heap memory, so converting an already-WAL-stamped DB never mmaps a `-shm`.
                 conn.pragma_update(None, "locking_mode", "EXCLUSIVE")?;
                 conn.pragma_update(None, "journal_mode", "TRUNCATE")?;
-                // Legal only after leaving WAL; the exclusive lock is released
-                // by the caller's next database access (e.g. schema init).
+                // Legal only after leaving WAL; the exclusive lock is released by the caller's next database access.
                 conn.pragma_update(None, "locking_mode", "NORMAL")
             }
         }
@@ -247,8 +225,8 @@ fn mode_from_env(value: Option<&str>) -> EnvOverride {
 }
 
 /// Short per-host discriminator for per-host DB filenames (lowercased alphanumeric hostname, other bytes mapped to `-`,
-/// capped at 24 chars). `None` when no hostname is available. Sanitization collisions across hosts only degrade to plain
-/// shared-TRUNCATE behavior, never to WAL.
+/// capped at multiple chars). `None` when no hostname is available. Sanitization collisions across hosts only degrade to
+/// plain shared-TRUNCATE behavior, never to WAL.
 fn host_discriminator() -> Option<String> {
     let raw = hostname_raw()?;
     let mut s: String = raw
@@ -274,16 +252,12 @@ fn host_discriminator() -> Option<String> {
 #[cfg(unix)]
 fn hostname_raw() -> Option<String> {
     let mut buf = [0u8; 256];
-    // SAFETY: buf is a valid out-buffer of the given length; gethostname
-    // NUL-terminates on success (position() guards the not-terminated case).
+    // SAFETY: buf is a valid out-buffer of the given length.
     if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
         return None;
     }
     let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    // Lossy on purpose: `host_discriminator` maps every undecodable byte to `-`,
-    // so a partly-undecodable name still separates two hosts on a shared volume.
-    // A strict decode would answer `None` and drop the discriminator entirely,
-    // which is the collision this field exists to prevent.
+    // Lossy on purpose: `host_discriminator` maps every undecodable byte to `-`.
     Some(String::from_utf8_lossy(buf.get(..len)?).into_owned())
 }
 
@@ -297,15 +271,14 @@ fn hostname_raw() -> Option<String> {
     None
 }
 
-/// Best-effort: whether `path` lives on a network/remote filesystem. Any detection failure returns `false` (treat as
-/// local) so unclassifiable filesystems keep the historical WAL behavior.
+/// Best-effort: whether `path` lives on a network/remote filesystem.
 pub fn is_network_fs(path: &Path) -> bool {
     imp::is_network_fs(path)
 }
 
 /// Classify a Linux `statfs(2)` `f_type` as a network/remote filesystem. Magic values from `include/uapi/linux/magic.h`
-/// (Lustre's from its module sources). Only the low 32 bits are compared: `f_type` is a signed word whose width varies by
-/// architecture, so 32-bit kernels sign-extend magics with the high bit set (e.g. CIFS 0xFF534D42).
+/// (Lustre's from its module sources). Only the low many bits are compared: `f_type` is a signed word whose width varies
+/// by architecture, so 32-bit kernels sign-extend magics with the high bit set (e.g. CIFS 0xFF534D42).
 #[cfg(any(target_os = "linux", test))]
 fn is_network_fs_magic(f_type: u64) -> bool {
     const NFS_SUPER_MAGIC: u64 = 0x6969;
@@ -322,12 +295,8 @@ fn is_network_fs_magic(f_type: u64) -> bool {
     const GPFS_SUPER_MAGIC: u64 = 0x4750_4653; // "GPFS" (Spectrum Scale)
     const OCFS2_SUPER_MAGIC: u64 = 0x7461_636F;
     // Parallel network filesystem sometimes used for mounted home directories. Its magic is not in linux/magic.h.
-    // Confirmed empirically from `statfs` on those mounts (`findmnt` reports the type; `stat -f` still prints UNKNOWN).
-    // Like NFS it offers no coherent cross-host shared memory, so WAL's mmap'd `-shm` is unsafe.
     const WEKAFS_SUPER_MAGIC: u64 = 0x1803_1977;
-    // FUSE is deliberately treated as network: sshfs/s3fs/gluster and other
-    // FUSE-backed homes cannot guarantee coherent mmap across writers, and
-    // rollback journaling costs little there.
+    // FUSE is deliberately treated as network: sshfs/s3fs/gluster.
     const FUSE_SUPER_MAGIC: u64 = 0x6573_5546;
 
     matches!(
@@ -350,14 +319,11 @@ fn is_network_fs_magic(f_type: u64) -> bool {
     )
 }
 
-/// Mirrors macOS `libc::MNT_LOCAL` so the pure classifier is testable on
-/// non-mac hosts; pinned to libc by a macOS-only test.
+/// Mirrors macOS `libc::MNT_LOCAL` so the pure classifier is testable on non-mac hosts.
 #[cfg(any(target_os = "macos", test))]
 const MNT_LOCAL: u32 = 0x0000_1000;
 
-/// Classify a macOS `statfs(2)` result as a network/remote filesystem. Absence of `MNT_LOCAL` in `f_flags` is the
-/// authoritative remote signal (covers unknown/future remote fs types). The `f_fstypename` allowlist is kept as a
-/// conservative extra trigger for remote-backed mounts that still set MNT_LOCAL (e.g. FUSE bridges).
+/// Classify a macOS `statfs(2)` result as a network/remote filesystem.
 #[cfg(any(target_os = "macos", test))]
 fn is_network_fs_mac(f_flags: u32, fstype: &str) -> bool {
     (f_flags & MNT_LOCAL) == 0 || is_network_fs_name(fstype)
@@ -366,8 +332,7 @@ fn is_network_fs_mac(f_flags: u32, fstype: &str) -> bool {
 /// Classify a macOS `statfs(2)` `f_fstypename` as a network/remote filesystem.
 #[cfg(any(target_os = "macos", test))]
 fn is_network_fs_name(fstype: &str) -> bool {
-    // macfuse/osxfuse mirror Linux's FUSE-is-network stance (sshfs etc.);
-    // fuse-t needs no entry — its mounts already surface as "nfs".
+    // macfuse/osxfuse mirror Linux's FUSE-is-network stance (sshfs etc.).
     fstype.eq_ignore_ascii_case("nfs")
         || fstype.eq_ignore_ascii_case("smbfs")
         || fstype.eq_ignore_ascii_case("cifs")
@@ -386,14 +351,12 @@ mod imp {
         let Ok(cpath) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
             return false;
         };
-        // SAFETY: statfs is zero-initializable POD; cpath is NUL-terminated
-        // and st is a valid out-pointer for the duration of the call.
+        // SAFETY: statfs is zero-initializable POD; cpath is NUL-terminated and st is a valid out-pointer for the duration.
         let mut st: libc::statfs = unsafe { std::mem::zeroed() };
         if unsafe { libc::statfs(cpath.as_ptr(), &mut st) } != 0 {
             return false;
         }
-        // Cast through u64: f_type is i64 on 64-bit targets, i32 on some
-        // 32-bit ones; the classifier masks to the meaningful low 32 bits.
+        // Cast through u64: f_type is i64 on 64-bit targets, i32 on some 32-bit ones.
         super::is_network_fs_magic(st.f_type as u64)
     }
 }
@@ -407,14 +370,12 @@ mod imp {
         let Ok(cpath) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
             return false;
         };
-        // SAFETY: statfs is zero-initializable POD; cpath is NUL-terminated
-        // and st is a valid out-pointer for the duration of the call.
+        // SAFETY: statfs is zero-initializable POD; cpath is NUL-terminated and st is a valid out-pointer for the duration.
         let mut st: libc::statfs = unsafe { std::mem::zeroed() };
         if unsafe { libc::statfs(cpath.as_ptr(), &mut st) } != 0 {
             return false;
         }
-        // Stack-copy the fixed array to u8 (c_char is i8 here), no heap;
-        // take up to the first NUL.
+        // Stack-copy the fixed array to u8 (c_char is i8 here), no heap; take up to the first NUL.
         let bytes = st.f_fstypename.map(|c| c as u8);
         let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
         let name = bytes
@@ -452,8 +413,7 @@ mod imp {
         if super::is_windows_unc(&path.to_string_lossy()) {
             return true;
         }
-        // Mapped drives (e.g. Z: on SMB): resolve the volume root and ask
-        // for its drive type; any failure → local (historical behavior).
+        // Mapped drives (e.g. Z: on SMB): resolve the volume root and ask for its drive type.
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
         let mut root = [0u16; 261];
         // SAFETY: wide is NUL-terminated; root is a valid out-buffer whose
@@ -634,9 +594,7 @@ mod tests {
 
     #[test]
     fn network_mode_survives_legacy_wal_flip_back() {
-        // Journal mode is database-wide: a live old binary can flip a SHARED
-        // DB back to WAL underneath us. The per-host file makes that
-        // impossible by construction — old binaries never open it.
+        // Journal mode is database-wide: a live old binary can flip a SHARED DB back to WAL underneath us.
         let tmp = TempDir::new().unwrap();
         let legacy = tmp.path().join("db.sqlite");
 
@@ -645,14 +603,13 @@ mod tests {
             .unwrap();
         assert_eq!(journal_mode(&a), "truncate");
 
-        // Simulated old binary: opens the legacy path, stamps WAL, writes.
+        // Simulated old binary: opens the path, stamps WAL, writes.
         let b = rusqlite::Connection::open(&legacy).unwrap();
         b.pragma_update(None, "journal_mode", "WAL").unwrap();
         b.execute_batch("CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('old');")
             .unwrap();
 
-        // A is unaffected: still truncate, reads and writes fine, and its
-        // own file never grows WAL sidecars.
+        // A is unaffected: still truncate, reads and writes fine, and its own file never grows WAL sidecars.
         assert_eq!(journal_mode(&a), "truncate");
         a.execute("INSERT INTO t VALUES ('more')", []).unwrap();
         let n: i64 = a
@@ -665,8 +622,7 @@ mod tests {
         let eff_base = eff.display().to_string();
         assert!(!std::fs::exists(format!("{eff_base}-wal")).unwrap());
         assert!(!std::fs::exists(format!("{eff_base}-shm")).unwrap());
-        // The legacy file really is in WAL with live sidecars — the two
-        // connections diverged onto different files.
+        // The file is in WAL with live sidecars — both connections diverged onto different files.
         let legacy_base = legacy.display().to_string();
         assert!(std::fs::exists(format!("{legacy_base}-wal")).unwrap());
         drop(b);
@@ -702,8 +658,7 @@ mod tests {
         assert_eq!(journal_mode(&conn), "truncate");
         let v: String = conn.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
         assert_eq!(v, "keep");
-        // Exercise the locking-mode downgrade: the next write transaction
-        // must acquire and release locks normally.
+        // Exercise the locking-mode downgrade: the next write transaction must acquire and release locks normally.
         conn.execute("INSERT INTO t VALUES ('more')", []).unwrap();
         drop(conn);
 
@@ -733,8 +688,7 @@ mod tests {
         let path = tmp.path().join("missing.sqlite");
         assert!(JournalMode::Wal.open_readonly(&path).is_err());
         assert!(JournalMode::Truncate.open_readonly(&path).is_err());
-        // The Truncate arm opens read-write but must never create a file —
-        // neither the given path nor its per-host sibling.
+        // The Truncate arm opens read-write but must never create a file.
         assert!(!std::fs::exists(&path).unwrap());
         assert!(!std::fs::exists(JournalMode::Truncate.effective_db_path(&path)).unwrap());
     }
@@ -757,8 +711,7 @@ mod tests {
 
     #[test]
     fn open_readonly_truncate_rejects_writes() {
-        // The network arm's fd is read-write (conversion needs it), but
-        // query_only must make the connection honor the name.
+        // The network arm's fd is read-write (conversion needs it).
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("db.sqlite");
         {
@@ -776,9 +729,7 @@ mod tests {
 
     #[test]
     fn open_readonly_truncate_never_opens_legacy_file() {
-        // A legacy (possibly WAL-poisoned) file at the shared path must not
-        // be touched: network-mode opens resolve to the per-host sibling,
-        // which doesn't exist yet → error → callers use their defaults.
+        // A legacy (possibly WAL-poisoned) file at the shared path must not be touched: network-mode opens resolve to the per-host sibling.
         let tmp = TempDir::new().unwrap();
         let legacy = tmp.path().join("db.sqlite");
         {
@@ -789,7 +740,7 @@ mod tests {
         }
 
         assert!(JournalMode::Truncate.open_readonly(&legacy).is_err());
-        // The legacy file stays WAL-stamped and unconverted.
+        // The file stays WAL-stamped and unconverted.
         let conn = rusqlite::Connection::open(&legacy).unwrap();
         assert_eq!(journal_mode(&conn), "wal");
     }

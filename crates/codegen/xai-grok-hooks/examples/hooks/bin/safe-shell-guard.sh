@@ -1,16 +1,9 @@
 #!/bin/sh
-# safe-shell-guard.sh — block obviously destructive shell commands
-#
-# This hook reads the PreToolUse envelope from stdin, extracts the
-# command field from toolInput, and checks it against a blocklist.
-#
-# Returns {"decision":"deny","reason":"..."} + exit 2 for matches,
-# {"decision":"allow"} + exit 0 otherwise.
+# safe-shell-guard.sh — block destructive shell commands This hook reads the PreToolUse envelope from stdin.
 
 INPUT=$(cat)
 
-# Extract the command from the toolInput JSON.
-# Uses basic grep/sed since jq may not be available everywhere.
+# Extract the command from the toolInput JSON. Uses basic grep/sed since jq may not be available everywhere.
 COMMAND=$(echo "$INPUT" | grep -o '"command":"[^"]*"' | head -1 | sed 's/"command":"//;s/"$//')
 
 if [ -z "$COMMAND" ]; then

@@ -1,7 +1,4 @@
 //! Session-start carry-over of legacy curated `MEMORY.md` files into the v2 scopes.
-//!
-//! Runs before the first turn so the injected index already lists the carried
-//! topics. A failure is logged and never disables memory.
 
 use std::path::Path;
 use std::sync::Arc;

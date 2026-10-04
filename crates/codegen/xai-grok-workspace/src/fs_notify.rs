@@ -1,8 +1,4 @@
-//! Bridges [`xai_fsnotify`] into the workspace: the [`WorkspaceEvent::FsChanged`] producer for an
-//! exposed root, and the codebase-graph refresh that follows a git HEAD change.
-//!
-//! The producer shares the OS watcher per canonical root ([`xai_fsnotify::shared`]) and never
-//! calls `shutdown()` on it; the watcher lives exactly as long as the producer task holds its `Arc`.
+//! Bridges [`xai_fsnotify`] into the workspace: the [`WorkspaceEvent::FsChanged`] producer for an exposed root.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,10 +13,7 @@ use xai_grok_workspace_types::WorkspaceEvent;
 #[path = "fs_notify_tests.rs"]
 mod tests;
 
-/// Most paths one `FsChanged` carries. A watcher batch is unbounded (a tarball extracted into the
-/// root); the hub closes a socket on any inbound frame over 8 MiB, and at ~100 bytes a path this
-/// keeps a frame two orders of magnitude under that. A `Renamed` batch is at most a `[from, to]`
-/// pair and is never split.
+/// Most paths one `FsChanged` carries.
 const FS_CHANGED_PATHS_PER_FRAME: usize = 1024;
 
 /// Identity mapping onto the wire type; unknown future variants of the `#[non_exhaustive]` source
@@ -46,9 +39,7 @@ pub(crate) fn spawn_fs_change_producer(
     events_tx: broadcast::Sender<WorkspaceEvent>,
 ) -> AbortOnDropHandle<()> {
     AbortOnDropHandle::new(tokio::spawn(async move {
-        // OS-watcher init walks the tree and blocks until every watch is armed. The watcher
-        // reports paths under the canonical root (`shared` canonicalizes what it watches), so
-        // that, not `root` as given, is what the paths are made relative to.
+        // OS-watcher init walks the tree and blocks until every watch is armed.
         let init_root = root.clone();
         let init = tokio::task::spawn_blocking(move || {
             let source = xai_fsnotify::shared(init_root.clone(), FsConfig::default())?;

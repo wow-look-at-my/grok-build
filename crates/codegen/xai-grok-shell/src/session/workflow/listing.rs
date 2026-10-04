@@ -1,10 +1,9 @@
-//! Rendered under the skill catalog in the baseline `<system-reminder>` so the model can launch a saved workflow by name the same way it sees skills.
+//! Rendered under the skill catalog in the baseline `<system-reminder>` so the model can launch a saved workflow.
 
 use super::registry::WorkflowListing;
 use xai_grok_tools::util::truncate_str_with_marker;
 
 /// Per-entry cap on description and when_to_use combined.
-/// The script body is loaded on launch, so the listing stays terse.
 const MAX_LISTING_COMBINED_BYTES: usize = 400;
 const MIN_FIELD_BYTES: usize = 20;
 

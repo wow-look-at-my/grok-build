@@ -1,7 +1,5 @@
-//! ACP [session setup]: the four methods that create, attach to, and free a session.
-//! Split from `acp_agent.rs`, whose trait impl delegates all four.
-//!
-//! [session setup]: https://agentclientprotocol.com/protocol/v1/session-setup
+//! ACP [session setup]: the methods that create, attach to, and free a
+//! session.
 use super::reasoning_effort::{
     NewSessionEffort, resolve_new_session_effort_hint, split_new_session_effort,
 };
@@ -128,8 +126,7 @@ impl AttachOperation {
         }
     }
 }
-/// What the two attach methods do differently, decided in one exhaustive match so a branch further down cannot quietly skip [`AttachOperation`].
-/// It is not carried in the request's `_meta`, where resume used to write it: that lets a client spoof it.
+/// What both attach methods do differently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct AttachPolicy {
     /// Skip the transcript replay before responding.
@@ -158,8 +155,8 @@ impl AttachPolicy {
         }
     }
 }
-/// Client-supplied routing an attach's replay must echo: the `x.ai/persist` blob, the leader unicast target, and the reconnect cursor.
-/// All ride the load request's `_meta`.
+/// Client-supplied routing an attach's replay must echo: the `x.ai/persist`
+/// blob, the leader unicast target, and the reconnect cursor.
 struct ReplayRouting<'a> {
     persist_data: Option<&'a serde_json::Value>,
     target_client_id: Option<&'a serde_json::Value>,
@@ -331,8 +328,7 @@ struct SessionSetupContext {
     session_id: Option<String>,
 }
 tokio::task_local! {
-    /// Present only while `new_session_inner` runs, so `report_setup_phase` stays silent on the
-    /// load/resume paths. Task-local, not thread-local: each request is its own `spawn_local` task.
+    /// Present only while `new_session_inner` runs, so `report_setup_phase` stays silent on the load/resume paths.
     static SESSION_SETUP_CONTEXT: std::cell::RefCell<SessionSetupContext>;
 }
 impl MvpAgent {
@@ -398,8 +394,7 @@ impl MvpAgent {
         self.report_setup_phase(SessionSetupPhase::Auth);
         self.seed_client_config_auth_if_available();
         self.spawn_settings_reapply();
-        // The session copies its model's URL now. A model not yet listed would
-        // fall back to another model and keep that model's URL.
+        // The session copies its model's URL now.
         self.models_manager.wait_for_provider_discovery().await;
         self.report_setup_phase(SessionSetupPhase::ResolveWorkspace);
         let SessionWorkspace {

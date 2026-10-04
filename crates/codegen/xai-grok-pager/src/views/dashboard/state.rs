@@ -25,9 +25,8 @@ const PROMPT_MULTI_CLICK_MS: u128 = 300;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DashboardRowId {
     TopLevel(AgentId),
-    /// A leader-roster-only row: a session hosted by the leader (or a remote host) that this client is NOT locally attached to.
-    /// Keyed by the roster `session_id`.
-    /// Not locally controllable.
+    /// A leader-roster-only row: a session hosted by the leader (or a remote
+    /// host) that this client is NOT locally attached to.
     Roster {
         session_id: String,
     },
@@ -83,17 +82,15 @@ pub(crate) struct DeferredDispatchSend {
     pub(crate) attach: bool,
 }
 
-/// A peek-reply send (reply to an existing agent) stashed while a clipboard attachment probe is off-thread.
-/// `row` pins the reply's target so a peek that closed or moved to another row drops the stash instead of replying to the wrong agent.
+/// A peek-reply send (reply to an existing agent) stashed while a clipboard
+/// attachment probe is off-thread.
 #[derive(Debug)]
 pub(crate) struct DeferredPeekSend {
     pub(crate) row: DashboardRowId,
     pub(crate) attach: bool,
 }
 
-/// Persistent identity for a pinned/reordered row. Rows whose underlying session has not yet been
-/// created (and thus have no `session_id`) cannot be persisted; they survive only in-memory across
-/// the current process lifetime.
+/// Persistent identity for a pinned/reordered row.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PersistedRowId {
     TopLevel { session_id: String },
@@ -107,9 +104,9 @@ impl PersistedRowId {
         }
     }
 
-    /// Parse a persisted key back.
-    /// Returns `None` for malformed input. A `sub:` key is a pinned or reordered subagent row from
-    /// before those rows were removed; dropping it keeps the rest of the dashboard config loadable.
+    /// Parse a persisted key back. Returns `None` for malformed input. A
+    /// `sub:` key is a pinned or reordered subagent row from before those
+    /// rows.
     pub fn from_key(s: &str) -> Option<Self> {
         let sid = s.strip_prefix("top:")?;
         if sid.is_empty() {
@@ -122,11 +119,9 @@ impl PersistedRowId {
 }
 
 /// Window within which a second confirming gesture (`Ctrl+X`, a `[✗]` click, or `y`) deletes the armed row.
-/// Also reused by the dashboard-overlay stop for its double-press close confirm.
 pub const CONFIRM_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How long after a send an empty Enter still counts as an echo of that send.
-/// One second covers the default key auto-repeat delay on macOS (375 ms), Windows (500 ms), and GNOME (500 ms).
 const SEND_ECHO_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub(crate) fn send_echo_window_open(since_send: std::time::Duration) -> bool {
@@ -145,9 +140,7 @@ pub enum RowState {
     Working,
     /// Alive, idle.
     Idle,
-    /// A roster-only session: idle / dormant in another pager process and never loaded in this one.
-    /// Local agents never classify as `Inactive` (see `classify_top_level`); only `roster_activity_to_state` produces it, so the "Idle" section
-    /// stays focused on sessions you're actively cycling between.
+    /// A roster-only session: idle / dormant in another pager process and never loaded in this.
     Inactive,
     /// Finished, with status == "completed".
     Completed,
@@ -171,8 +164,7 @@ impl RowState {
             Self::NeedsInput => 6,
             Self::Working => 5,
             Self::Idle => 3,
-            // Below Idle (these aren't loaded here, so they're less immediately
-            // actionable) but above Done/Failed (they're still live, resumable sessions)
+            // Below Idle (these aren't loaded here, so they're less immediately actionable) but above Done/Failed.
             Self::Inactive => 2,
             Self::Completed => 1,
             Self::Failed => 0,
@@ -182,8 +174,7 @@ impl RowState {
     /// Human-readable group header.
     pub fn group_label(self) -> &'static str {
         match self {
-            // Shorter, punchier labels
-            // "Done" reads cleaner as a group header than the past-tense "Completed" did
+            // Shorter, punchier labels "Done" reads cleaner as a group header than the past-tense "Completed" did
             Self::NeedsInput => "Awaiting",
             Self::Working => "Working",
             Self::Idle => "Idle",
@@ -220,8 +211,6 @@ impl DashboardStopAction {
 }
 
 /// Stable identity for a collapsible/selectable dashboard section header.
-/// Sections only exist in [`Grouping::State`] mode: the cross-cutting "Pinned" block plus one section per [`RowState`] group.
-/// Keyed by the stable group identity (not a positional index) so collapse / selection survive re-sorting and row churn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SectionKey {
     /// The "Pinned" block header.
@@ -233,16 +222,13 @@ pub enum SectionKey {
 pub use crate::views::dashboard::actions_focus::ActionsFocus;
 pub(crate) use crate::views::dashboard::actions_focus::Step;
 
-/// A keyboard-navigable cursor target in the dashboard list: a collapsible section header or a row.
-/// Built in display order (see `render::focusables`) so Up/Down navigation and the section/row cursor stay in lockstep with what the renderer paints.
-/// A collapsed section contributes only its header (its rows are absent), so nav skips hidden rows.
+/// A keyboard-navigable cursor target in the dashboard list: a collapsible
+/// section header or a row.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Focusable {
     Section(SectionKey),
     Row(DashboardRowId),
     /// The Idle group's "N more" toggle row.
-    /// Present only when the Idle group is capped (more than `MAX_VISIBLE_IDLE` agents, the overflow older than the freshness window).
-    /// Activating it (Enter / click) flips [`DashboardState::idle_show_all`].
     IdleOverflow,
 }
 
@@ -274,15 +260,14 @@ impl From<crate::app::workspace_layout::WorkspaceGrouping> for Grouping {
     }
 }
 
-/// A filter for the visible rows. Parsed from the dispatch input; see [`parse_filter`]. The
-/// dispatcher applies it in [`super::row::apply_filter`].
+/// A filter for the visible rows. Parsed from the dispatch input; see
+/// [`parse_filter`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Filter {
     /// Show everything.
     #[default]
     None,
-    /// Match by agent label (`a:<name>`).
-    /// Case-insensitive substring.
+    /// Match by agent label (`a:<name>`). Case-insensitive substring.
     Agent(String),
     /// Match by row state (`s:<state>`).
     State(RowState),
@@ -320,7 +305,6 @@ impl Filter {
 }
 
 /// Transport type for the [`Action::DashboardSetFilter`] action.
-/// Kept separate from [`Filter`] so the action stays `Debug + Clone` without requiring `Filter` to be `Hash`.
 #[derive(Debug, Clone)]
 pub enum FilterValue {
     None,
@@ -355,31 +339,21 @@ impl PersistedDashboard {
 /// `DashboardRowId` so a rename / reorder / completion does not invalidate the cursor as long as
 /// the row's id is stable.
 pub struct DashboardState {
-    /// Currently selected row id.
-    /// May be `None` when no rows are visible.
+    /// Selected row id. May be `None` when no rows are visible.
     pub selected: Option<DashboardRowId>,
     /// Hover target for visual feedback.
     pub hovered_row: Option<DashboardRowId>,
     /// Section-header cursor target.
-    /// When `Some`, a collapsible section title (e.g. "Working") holds the cursor instead of a row or the `+ New Agent` button.
-    /// Mutually exclusive with [`Self::selected`] and [`Self::actions_focus`].
     pub selected_section: Option<SectionKey>,
     /// Hovered section header (mouse-move driven); the renderer brightens its text.
-    /// Independent of [`Self::hovered_row`].
     pub hovered_section: Option<SectionKey>,
     /// Sections the user has collapsed (their rows are hidden).
-    /// In-memory for the dashboard's lifetime; keyed by stable [`SectionKey`].
     pub collapsed_sections: std::collections::HashSet<SectionKey>,
     /// Cursor sits on the Idle group's "N more" overflow toggle row.
-    /// The fourth cursor target; mutually exclusive with [`Self::selected`], [`Self::selected_section`], and [`Self::actions_focus`]
-    /// (enforced via the `focus_*` helpers).
     pub selected_idle_overflow: bool,
     /// Mouse is hovering the Idle overflow toggle row; the renderer brightens its text.
-    /// Independent of [`Self::hovered_row`].
     pub hovered_idle_overflow: bool,
-    /// When `true`, the Idle group shows every agent; when `false` (default) it caps to the `MAX_VISIBLE_IDLE` most-recent agents plus anything still
-    /// inside the freshness window, folding the rest behind the overflow row.
-    /// In-memory only (resets on pager restart), like section collapse.
+    /// When `true`, the Idle group shows every agent.
     pub idle_show_all: bool,
     /// V1-only config layout; dashboard v2 derives these fields from `WorkspaceView`.
     pub pinned: BTreeSet<DashboardRowId>,
@@ -388,48 +362,35 @@ pub struct DashboardState {
     /// Last v2 grouping observed by the renderer; transition detection only.
     workspace_grouping: Option<Grouping>,
     pub filter: Filter,
-    /// Search mode (toggled by `Ctrl+/`). While active the [`Self::dispatch`] buffer is interpreted as
-    /// a live filter query rather than a prompt: every keystroke reparses into.
+    /// Search mode (toggled by `Ctrl+/`).
     pub search_mode: bool,
     /// Dispatch / filter input widget.
     pub dispatch: PromptWidget,
     /// Effects queued by dashboard input (e.g. slash MRU persist after Tab accept).
     pub(crate) pending_effects: Vec<crate::app::actions::Effect>,
     /// In-flight deferred clipboard attachment probes for this dashboard.
-    /// A send while `> 0` is stashed per surface so a paste-then-immediate-send never builds content blocks before the image attaches.
     pub(crate) paste_probe_in_flight: usize,
-    /// A dispatch-input send deferred until the in-flight paste probe(s) complete; re-issued (with the now-updated widget text) on completion.
+    /// A dispatch-input send deferred until the in-flight paste probe(s) complete.
     pub(crate) deferred_dispatch_send: Option<DeferredDispatchSend>,
     /// A peek-reply send deferred the same way; per-surface slots so stashing one surface can never overwrite the other's pending send.
     pub(crate) deferred_peek_send: Option<DeferredPeekSend>,
-    /// When the dispatch input last sent its text.
-    /// `AppView` clears it on any key other than Enter.
+    /// When the dispatch input last sent its text. `AppView` clears it on any key other than Enter.
     pub(crate) last_send_at: Option<Instant>,
     /// Peek panel state (Space toggles).
     pub peek: Option<PeekPanelState>,
     /// Session-scoped guest viewport for the live-tail peek (capture once on select; sticky while the same row is peeked; restore on leave).
     pub(crate) peek_viewport: Option<PeekViewportLease>,
-    /// Owned here (NOT inside [`PeekPanelState`]) because a widget carries a fuzzy-file-matcher daemon
-    /// thread and the panel struct is rebuilt whenever the selection cursor lands on a row.
+    /// Owned here (NOT inside [`PeekPanelState`]) because a widget carries a fuzzy-file-matcher daemon thread.
     pub peek_reply: PromptWidget,
-    /// Last frame's screen rect of the peek reply input (the `❯ reply` row, or the reject-feedback slot in question mode).
-    /// Mirrors [`Self::dispatch_rect`]: consumed by mouse handling for click-to-focus and drag text selection.
-    /// `None` while the peek is closed.
+    /// Last frame's screen rect of the peek reply input.
     pub peek_reply_rect: Option<Rect>,
-    /// Directory the reply's `@` file-search daemon is currently rooted at. Tracked so
-    /// [`Self::ensure_peek_reply_cwd`] can skip a `retarget` (which drops the daemon so the next @-use
-    /// rebuilds it) when the peeked agent's cwd hasn't actually changed.
+    /// Directory the reply's `@` file-search daemon is rooted at.
     peek_reply_cwd: Option<PathBuf>,
     /// Cwd of the currently-peeked agent, recorded by the render pass (which has the agents map).
     peek_reply_target_cwd: Option<PathBuf>,
     /// Inline-rename state for `Ctrl+R`: `Some` when the cursor is on a row and the user is mid-edit.
     pub rename: Option<RenameDraft>,
-    /// Pending dispatch feedback toast (e.g. "✗ Session no longer exists").
-    /// Rendered verbatim by `paint_dispatch_feedback_badge`; error messages are built via [`Self::set_error_toast`].
     pub error_toast: Option<String>,
-    /// Row armed for delete, and when.
-    /// A second gesture on the same row within [`CONFIRM_WINDOW`] deletes it (see [`Self::armed_delete_row`]); otherwise it lapses.
-    /// Cleared on any focus change.
     pub delete_confirm: Option<(DashboardRowId, Instant)>,
     pub workspace_membership_mode: bool,
     /// Ctrl+X meaning for the selected v2 row in the current frame.
@@ -437,33 +398,24 @@ pub struct DashboardState {
     pub spinner_tick: u64,
     pub(crate) painted_animations: PaintedAnimations,
     /// Last frame's row layout: hit areas keyed by row id.
-    /// Used by mouse handling to map (col, row) to a row id without scanning the row list a second time.
     pub row_rects: Vec<(DashboardRowId, Rect)>,
     /// Per-row `[✗]` hit areas, rebuilt each render; maps a click onto the delete gesture instead of a row select.
     pub row_delete_rects: Vec<(DashboardRowId, Rect)>,
     /// Row whose `[✗]` the mouse is over, so the renderer can tint it.
     pub hovered_delete: Option<DashboardRowId>,
-    /// Roster session ids whose origin is a chat `conversation`; those can't be deleted from the dashboard yet, so they get no `[✗]` and don't arm.
-    /// Rebuilt each render from the roster.
+    /// Roster session ids whose origin is a chat `conversation`.
     pub conversation_row_ids: std::collections::HashSet<String>,
     /// Last frame's section-header hit areas keyed by [`SectionKey`].
-    /// Used by mouse handling to map (col, row) to a section for click-to-toggle and hover.
-    /// Rebuilt every render.
     pub section_rects: Vec<(SectionKey, Rect)>,
     /// Last frame's hit area for the Idle "N more" overflow toggle row, when painted.
-    /// Consumed by mouse handling for click-to-toggle and hover.
-    /// `None` when the Idle group isn't capped.
     pub idle_overflow_rect: Option<Rect>,
     /// Last frame's content-area rect for resize-aware peek toggling.
     pub last_area: Rect,
     /// When `Some(id)`, an agent conversation is attached as a popup overlay on top of the dashboard.
     pub attached_agent: Option<AgentId>,
     /// Hit rect for the popup's `[✗]` close affordance.
-    /// Populated by the renderer when the popup chrome is painted; consumed by `handle_mouse` to dispatch a popup close on click.
-    /// `None` when no popup is open or the popup is too small for the affordance.
     pub popup_close_rect: Option<Rect>,
-    /// Outer rect of the popup overlay (border included). Populated by the renderer; consumed by
-    /// `handle_mouse` to.
+    /// Outer rect of the popup overlay (border included). Populated by the renderer; consumed by `handle_mouse` to.
     pub popup_outer_rect: Option<Rect>,
     /// Hit area for the actions row's `+ New Agent` button.
     pub new_agent_button_hit: crate::app::agent_view::HitArea,
@@ -472,106 +424,60 @@ pub struct DashboardState {
     /// Hit area for the actions row's `Worktree Ctrl+w` hint; a click toggles worktree mode like the chord does.
     pub worktree_toggle_hit: crate::app::agent_view::HitArea,
     /// Items-area rect of the open slash-completion dropdown (set by `render_slash_dropdown`).
-    /// Lets the mouse handler route a wheel / click inside the dropdown to the completion list rather than the row list.
-    /// `None` when the dropdown is closed.
     pub slash_dropdown_items_area: Option<Rect>,
-    /// Slash dropdown hit-test state from the renderer (see [`crate::views::slash_dropdown::RenderedDropdown`]).
     pub slash_dropdown_hit: crate::views::slash_dropdown::RenderedDropdown,
-    /// Mirror of [`Self::slash_dropdown_items_area`] for the session-less `@` file-context picker dropdown (set by `render_file_search_dropdown`).
     pub file_search_dropdown_items_area: Option<Rect>,
-    /// Two-focus model: `false` means the dispatch input bar is focused (typing); `true` means the
     /// overview list is focused (navigating).
     pub list_focused: bool,
-    /// Last mouse position (col, row).
     /// Used by hover and double-click detection.
     pub last_mouse_pos: Option<(u16, u16)>,
-    /// Last mouse-down on a row, with timestamp, used to detect a double-click as the "attach" gesture.
     pub last_click: Option<(DashboardRowId, Instant)>,
-    /// Last mouse-down on dispatch / peek-reply (paste-chip double-click).
     pub last_prompt_click: Option<Instant>,
-    /// Rect that closes the peek when clicked (`[×]`).
     pub peek_close_rect: Option<Rect>,
-    /// Outer rect of the dispatch input box (set by `render_dashboard` when the box is painted).
-    /// Consumed by the mouse handler so a click anywhere on the box focuses the input (i.e. clears `list_focused`) regardless of vim mode.
-    /// `None` while peek mode or an attached-agent overlay replaces the input.
+    /// Consumed by the mouse handler so a click anywhere on the box focuses the input (i.e. clears `list_focused`) regardless.
     pub dispatch_rect: Option<Rect>,
-    /// Top of the visible row window.
-    /// Clamped so the selected row stays visible.
-    /// Wheel and PgUp/PgDn adjust this.
+    /// Clamped so the selected row stays visible. Wheel and PgUp/PgDn adjust this.
     pub viewport_offset: usize,
-    /// True while the user is browsing the row list via the mouse wheel (or any pure-viewport scroll affordance).
-    /// When set, [`Self::clamp_viewport`] skips its snap-to-selection pull-back so the viewport can travel past the selected row.
-    /// Cleared on any selection-driven nav (arrow keys, click, filter rebuild, attach) so the viewport re-engages the selection follow.
+    /// When set, [`Self::clamp_viewport`] skips its snap-to-selection pull-back.
     pub manual_scroll_active: bool,
-    /// `Ctrl+.` opens a searchable cheatsheet of every action bound for the dashboard, mirroring the agent view's `ShortcutsHelp` modal.
-    /// `Some` while the modal is open; input is routed to it before the dashboard's own handlers, and the renderer paints it on top of the row list.
-    /// Cleared on close (Esc, `[✗]`, or the chrome's CloseRequested).
+    /// `Some` while the modal is open; input is routed to it before the dashboard's own handlers.
     pub shortcuts_modal: Option<Box<ShortcutsModalState>>,
-    /// Which actions-row item holds the keyboard cursor, if any.
-    /// `Some(NewAgent)` is the default target when no row is selected; Up-arrow from the first row, Esc deselect, and
-    /// dashboard-open-without-prior-agent all land there.
-    /// Mutually exclusive with every row/section cursor: at most one of `selected`, `selected_section`, `selected_idle_overflow`,
-    /// and this is set (row churn can leave all four clear). Write it through the `focus_*` helpers so that invariant holds.
+    /// `Some(NewAgent)` is the default target when no row is selected.
     pub actions_focus: Option<ActionsFocus>,
-    /// Model chosen for the next agent spawned from the dispatch input, set by `/model <name> [effort]`
-    /// (intercepted in `dispatch_dashboard_dispatch_slash`). `None` spawns on the default model. Sticky
-    /// across dispatches; reset to `None` on every dashboard-open (alongside `pending_mode`).
+    /// (intercepted in `dispatch_dashboard_dispatch_slash`). `None` spawns on the default model.
     pub pending_model: Option<PendingDispatchModel>,
-    /// Mode the next spawned agent starts in.
     /// Cycled with Shift+Tab and set by `/plan`.
-    /// Sticky across dispatches; re-seeded from `app.default_yolo` on every dashboard-open (alongside `pending_model`).
     pub pending_mode: DashboardDispatchMode,
-    /// Snapshot of the app-wide model catalog, seeded at dashboard-open so the session-less slash dropdown can suggest real model names for `/model`.
     /// Without this the dropdown would fall back to an empty `ModelState` and offer no completions.
     pub models: crate::acp::model_state::ModelState,
-    /// Location picker modal: `Some` while open.
     pub location_picker: Option<LocationPickerState>,
-    /// Hit area for the header's clickable location label.
     /// Painted by `render_header` and consumed by the mouse handler to open the location picker.
-    /// `None` when the header is too narrow to paint it.
     pub location_hit: crate::app::agent_view::HitArea,
-    /// Hit area for the header's promo upgrade CTA `[label]` button (a click dispatches `AnnouncementsOpenCta(Dashboard)`).
     /// `None` when no CTA is shown.
     pub upgrade_cta_hit: crate::app::agent_view::HitArea,
-    /// A pinned (non-dismissible) promo CTA is live this frame (cached by `render_dashboard`); `Ctrl+O` opens it instead of falling through.
     pub pinned_upgrade_cta_live: bool,
-    /// When `true`, agents dispatched from the dashboard are created in a fresh git worktree (rooted at
-    /// the current cwd) instead of in the cwd directly: creating an agent first opens
-    /// [`Self::worktree_dialog`] to collect a label.
+    /// the current.
     pub dispatch_worktree: bool,
-    /// Whether the current working directory is inside a git repo. Worktrees require a git repo, so
-    /// this gates the `Ctrl+W` worktree toggle and forces [`Self::dispatch_worktree`] off outside a
-    /// repo (the dashboard is never in worktree mode in a non-git directory).
+    /// this gates the `Ctrl+W` worktree toggle and forces [`Self::dispatch_worktree`] off outside a repo.
     pub cwd_has_git_ancestor: bool,
-    /// Working directory new sessions dispatch from: a snapshot of `AppView::cwd`, synced on dashboard-open and on every location change.
     /// The header renders from this (not the process cwd) so it tracks a `/cd` even before `Effect::SetWorkingDir` lands, or if it fails.
     pub cwd: PathBuf,
-    /// Worktree-label dialog: `Some` while the user is naming a worktree for a dashboard-dispatched agent.
-    /// Reuses the welcome screen's [`NewWorktreeDialogState`](crate::app::app_view::NewWorktreeDialogState) widget; input is
-    /// routed here and the renderer overlays it.
+    /// Reuses the welcome screen's [`NewWorktreeDialogState`](crate::app::app_view::NewWorktreeDialogState) widget.
     pub worktree_dialog: Option<crate::app::app_view::NewWorktreeDialogState>,
-    /// Prompt state stashed while [`Self::worktree_dialog`] is open.
     pub pending_worktree_prompt: Option<crate::views::prompt_widget::StashedPrompt>,
-    /// Whether confirming the in-flight [`Self::worktree_dialog`] should open the new agent's detail
-    /// view (`true`; the `[+ New Agent]` button and `Ctrl+S` "send and open") or stay on the dashboard
-    /// (`false`; a plain `Enter` prompt-send).
+    /// view (`true`; the `[+ New Agent]` button and `Ctrl+S` "send and open") or stay on the dashboard.
     pub pending_worktree_attach: bool,
-    /// Mirror of `AppView::voice_listening`, synced each frame so the dispatch box can show a record badge and stream the interim transcript while
     /// voice dictation targets the dashboard's new-agent input.
     pub voice_listening: bool,
-    /// Mirror of `AppView::voice_interim`: the live partial transcript.
     pub voice_interim: Option<String>,
-    /// Surface-local compose mode for dispatch and peek (not persisted; not shared with agent sessions).
     /// `/multiline` or Ctrl+M.
     pub multiline_mode: bool,
     pub(crate) preview_enabled: bool,
     /// `/usage` modal, hosted here because the dashboard has no agent to hang it on (session-less: no session id).
-    /// Owns input while open; cleared on dashboard-open and on every overlay exit back to the list.
     pub usage_modal: Option<Box<crate::views::usage_modal::UsageInfoModalState>>,
 }
 
 /// Mode staged for the next agent the dashboard spawns.
-/// Mirrors the agent view's Shift+Tab cycle (Normal → Plan → Auto → Always-Approve → Normal when Auto is enabled).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DashboardDispatchMode {
     #[default]
@@ -593,8 +499,8 @@ impl DashboardDispatchMode {
     }
 }
 
-/// A model (and optional reasoning effort) staged for the next agent the dashboard spawns.
-/// `display` is the human-readable model name, stored so the renderer can show the indicator without a live `ModelState`.
+/// A model (and optional reasoning effort) staged for the next agent the
+/// dashboard spawns.
 #[derive(Debug, Clone)]
 pub struct PendingDispatchModel {
     pub id: agent_client_protocol::ModelId,
@@ -685,29 +591,20 @@ pub struct LocationPickerState {
     /// Base directory for resolving relative typed paths (the pager cwd at open time).
     pub base_cwd: PathBuf,
     /// Index from worktree root path to label, built once at open.
-    /// Used to tag recents and directory suggestions that are managed worktrees.
     worktrees: std::collections::HashMap<PathBuf, String>,
     /// Cached subdirectories of the current path-mode parent.
     dir_listing: Vec<LocationCandidate>,
     /// The parent directory [`Self::dir_listing`] was read from.
-    /// Used to skip the `readdir` when only the final (partial) segment changes.
     dir_listing_parent: Option<PathBuf>,
-    /// Content-row hit areas from the last render, for mouse click / hover.
-    /// `None` until the modal renders once.
+    /// Content-row hit areas from the last render, for mouse click / hover. `None` until the modal renders once.
     pub content_hits: Option<crate::views::picker::PickerContentHitAreas>,
     /// Inline error (e.g. "Not a directory") shown under the title when a chosen path fails to resolve.
-    /// Cleared when the modal re-opens.
     pub error: Option<String>,
-    /// When `true`, applying the chosen location also arms worktree mode on the dashboard (`DashboardState::dispatch_worktree`), so the next
-    /// dispatched agent spawns in a fresh worktree.
-    /// Toggled by the path-row "worktree" button; seeded from the dashboard flag on open.
+    /// When `true`, applying the chosen location also arms worktree mode on the dashboard (`DashboardState::dispatch_worktree`).
     pub worktree_mode: bool,
     /// Hit area (rect and hover) of the path-row "worktree" toggle button.
-    /// The rect is set during render (cleared when the button is hidden; modal too narrow, or the target isn't a repo); `hovered` is driven by the
-    /// modal mouse handler so the button can brighten on hover.
     pub worktree_hit: crate::app::agent_view::HitArea,
     /// Memoized git-repo check for the worktree toggle: `(dir, is_repo)`.
-    /// Avoids re-`stat`ing on every render frame while the selection / query (and thus the target directory) is unchanged.
     worktree_repo_cache: Option<(PathBuf, bool)>,
 }
 
@@ -755,8 +652,7 @@ impl LocationPickerState {
         q.starts_with('/')
             || q.starts_with('~')
             || q.contains('/')
-            // Windows: native absolute paths (`C:\…`) and backslash separators
-            // Gated so a literal backslash in a Unix filename never forces path mode on non-Windows hosts
+            // Windows: native absolute paths (`C:\…`) and backslash separators Gated so a literal backslash in a Unix filename never forces path mode.
             || (cfg!(windows) && (q.contains('\\') || has_windows_drive_prefix(q)))
     }
 
@@ -858,7 +754,6 @@ impl LocationPickerState {
 }
 
 /// `true` when `s` starts with a Windows drive prefix like `C:`.
-/// Used only under `cfg!(windows)` to route native absolute paths into path mode.
 fn has_windows_drive_prefix(s: &str) -> bool {
     let b = s.as_bytes();
     matches!(b, [drive, b':', ..] if drive.is_ascii_alphabetic())
@@ -965,9 +860,7 @@ fn location_picker_config<'a>() -> crate::views::picker::PickerConfig<'a> {
     }
 }
 
-/// Resolve session ids to live `DashboardRowId`s and back. Pin/reorder persistence keys are stable
-/// session ids (not per-process `AgentId`), so a restart resolves them against the new process's
-/// agents instead of attaching to whatever happens to have the same `AgentId(usize)`.
+/// Resolve session ids to live `DashboardRowId`s and back.
 pub struct SessionIdResolver {
     /// Maps session_id to AgentId (top-level).
     top: std::collections::HashMap<String, crate::app::agent::AgentId>,
@@ -1075,12 +968,10 @@ impl DashboardState {
     /// Construct an empty dashboard state.
     /// Persistence is applied via [`Self::apply_persisted`] right after `new()` at the open site.
     pub fn new() -> Self {
-        // The dashboard is session-less: its dispatch input offers only pager-global slash commands (hide session-scoped ones such as /compact,
-        // /fork, /rewind; they make no sense with no session)
+        // The dashboard is session-less.
         let mut dispatch = PromptWidget::new();
         dispatch.hide_session_scoped_commands();
-        // The peek reply is a quick single-row input; compact mode lowers the `[Pasted: N lines]` chip threshold to 2 lines so multi-line pastes
-        // fold instead of overflowing the row
+        // The peek reply is a quick single-row input.
         let mut peek_reply = PromptWidget::new();
         peek_reply.set_compact(true);
         Self {
@@ -1088,9 +979,7 @@ impl DashboardState {
             hovered_row: None,
             selected_section: None,
             hovered_section: None,
-            // The "Inactive" section (roster-only idle/dormant sessions owned by OTHER pager processes; see
-            // `RowState::Inactive`) is background noise relative to the sessions you're actively cycling
-            // between.
+            // The "Inactive" section (roster-only idle/dormant sessions owned by OTHER pager processes; see `RowState::Inactive`).
             collapsed_sections: std::iter::once(SectionKey::State(RowState::Inactive)).collect(),
             selected_idle_overflow: false,
             hovered_idle_overflow: false,
@@ -1164,8 +1053,7 @@ impl DashboardState {
             preview_enabled: xai_grok_shell::agent::config::UiConfig::default()
                 .dashboard_preview_enabled(),
             usage_modal: None,
-            // Fresh dashboard with no rows seeded, so the `+ New Agent` button is the default cursor target
-            // Open sites that want a specific row seeded call `focus_row` after construction, which clears this atomically
+            // Fresh dashboard with no rows seeded, so the `+ New Agent` button is the default cursor target Open sites.
             actions_focus: Some(ActionsFocus::NewAgent),
         }
     }
@@ -1245,9 +1133,9 @@ impl DashboardState {
         self.actions_focus == Some(ActionsFocus::Worktree)
     }
 
-    /// Move the cursor onto an actions-row item.
-    /// Clears any row/section selection so the "actions row focused means no row selected" invariant stays honoured.
-    /// Idempotent; safe to call when the item is already focused.
+    /// Move the cursor onto an actions-row item. Clears any row/section
+    /// selection so the "actions row focused means no row selected" invariant
+    /// stays honoured.
     pub fn focus_action(&mut self, item: ActionsFocus) {
         self.actions_focus = Some(item);
         self.selected = None;
@@ -1265,8 +1153,8 @@ impl DashboardState {
         self.focus_action(ActionsFocus::OpenPrevious);
     }
 
-    /// The painted actions-row item one step left or right of the focused one; `None` at either end (no wrap) or when the actions
-    /// row has no focus. See [`ActionsFocus::neighbour`].
+    /// The painted actions-row item one step left or right of the focused one; `None` at either end (no wrap) or when
+    /// the actions row has no focus.
     fn actions_neighbour(&self, step: Step) -> Option<ActionsFocus> {
         self.actions_focus?.neighbour(self, step)
     }
@@ -1303,8 +1191,8 @@ impl DashboardState {
         self.list_focused || (self.dispatch.text().is_empty() && !self.search_mode)
     }
 
-    /// Whether the next dispatch goes into a fresh git worktree: the mode is on and the cwd is a git repo, so it can take effect.
-    /// The actions row's labels and the footer's Enter hint both read this so they cannot drift apart.
+    /// Whether the next dispatch goes into a fresh git worktree: the mode is
+    /// on and the cwd is a git repo, so it can take effect.
     pub(crate) fn worktree_armed(&self) -> bool {
         self.dispatch_worktree && self.cwd_has_git_ancestor
     }
@@ -1347,7 +1235,7 @@ impl DashboardState {
     }
 
     /// Focus the Idle group's "N more" overflow toggle; the fourth cursor target.
-    /// Clears the other three so exactly one cursor is active.
+    /// Clears the others so exactly one cursor is active.
     pub fn focus_idle_overflow(&mut self) {
         self.selected_idle_overflow = true;
         self.selected = None;
@@ -1395,8 +1283,6 @@ impl DashboardState {
     }
 
     /// Enforce the invariant that a delete arm belongs to the selected row.
-    /// Selection changes routed through the focus helpers already disarm, but `reanchor_selection` / `gc_stale_refs` can drop or move `selected`
-    /// directly; without this a stale arm would let a later `y` delete a row that is no longer selected.
     fn sync_delete_confirm_to_selection(&mut self) {
         if let Some((armed, _)) = self.delete_confirm.as_ref()
             && self.selected.as_ref() != Some(armed)
@@ -1405,9 +1291,8 @@ impl DashboardState {
         }
     }
 
-    /// Toggle whether the Idle group shows every agent (`true`) or caps to the recent ones with the rest folded behind the overflow row (`false`).
-    /// In-memory only; resets to capped on the next pager start.
-    /// Mirrors the in-memory lifetime of section collapse.
+    /// Toggle whether the Idle group shows every agent (`true`) or caps to
+    /// the recent ones with the rest folded behind the overflow row.
     pub fn toggle_idle_show_all(&mut self) {
         self.idle_show_all = !self.idle_show_all;
     }
@@ -1435,8 +1320,8 @@ impl DashboardState {
         }
     }
 
-    /// Construct from persisted state, resolving session-id keys to live `DashboardRowId`s via the given resolver.
-    /// Unresolvable ids (sessions that have closed, or never existed) are dropped.
+    /// Construct from persisted state, resolving session-id keys to live
+    /// `DashboardRowId`s via the given resolver.
     pub fn from_persisted(p: &PersistedDashboard, resolver: &SessionIdResolver) -> Self {
         let mut s = Self::new();
         s.apply_persisted(p, resolver);
@@ -1690,14 +1575,11 @@ impl DashboardState {
         {
             self.last_click = None;
         }
-        // `attached_agent` is keyed by `AgentId`, not `DashboardRowId`, so we
-        // build the equivalent `DashboardRowId::TopLevel` and probe `alive`
-        // Clears the popup gracefully when the underlying session was closed outside the dashboard (e.g. via another surface).
+        // `attached_agent` is keyed by `AgentId`, not `DashboardRowId`.
         if let Some(agent_id) = self.attached_agent
             && !alive(&DashboardRowId::TopLevel(agent_id))
         {
-            // close_popup() also clears `popup_close_rect` / `popup_outer_rect` so the invariant
-            // (a `None` attached_agent means `None` hit rects) holds at every close site, not just here
+            // close_popup() also clears `popup_close_rect` / `popup_outer_rect` so the invariant (a `None` attached_agent means `None` hit rects).
             self.close_popup();
         }
         self.sync_delete_confirm_to_selection();
@@ -1733,8 +1615,7 @@ impl DashboardState {
         if self.selected_section.is_some() && !matches!(grouping, Grouping::State) {
             self.focus_new_agent_button();
         }
-        // Re-engage selection follow; a grouping switch reshuffles the visible row order, so the user's prior manual-scroll position no longer
-        // points at the same content
+        // Re-engage selection follow; a grouping switch reshuffles the visible row order.
         self.clear_manual_scroll();
     }
 
@@ -1762,9 +1643,7 @@ impl DashboardState {
         }
     }
 
-    /// Re-engage selection-driven viewport tracking. Called by any path that owns selection (arrow
-    /// keys, dispatcher-side `DashboardSelect*`, row click, filter / grouping change) so the next
-    /// render snaps the viewport back to the selected row. No-op when the flag is already clear.
+    /// Re-engage selection-driven viewport tracking.
     pub fn clear_manual_scroll(&mut self) {
         self.manual_scroll_active = false;
     }
@@ -1894,8 +1773,8 @@ impl DashboardState {
         self.last_prompt_click = None;
     }
 
-    /// Record the peeked agent's working directory so the reply's `@` picker can later resolve `@paths` against it.
-    /// Called by the render pass (the only place with the agents map); the actual `retarget` is deferred to [`Self::ensure_peek_reply_cwd`].
+    /// Record the peeked agent's working directory so the reply's `@` picker
+    /// can later resolve `@paths` against it.
     pub(crate) fn set_peek_reply_target_cwd(&mut self, cwd: Option<PathBuf>) {
         self.peek_reply_target_cwd = cwd;
     }
@@ -1912,9 +1791,8 @@ impl DashboardState {
         }
     }
 
-    /// The file-search state backing the `@` dropdown that is actually on screen: the peek reply's while the panel is on screen (the dropdown is drawn
-    /// from `peek_reply` then; see `render_dashboard`), otherwise the dispatch box's.
-    /// Used to route mouse-wheel scrolling to the SAME picker the user is looking at, so wheel navigation matches the rendered list.
+    /// The file-search state backing the `@` dropdown that is on screen: the peek reply's while the panel is on screen (the dropdown is drawn from `peek_reply` then; see
+    /// `render_dashboard`), otherwise the dispatch box's.
     pub(crate) fn dropdown_file_search_mut(
         &mut self,
     ) -> &mut crate::views::file_search::FileSearchState {
@@ -1925,9 +1803,8 @@ impl DashboardState {
         }
     }
 
-    /// Feed a key to the reply widget after ensuring its `@` picker is rooted at the peeked agent's cwd.
-    /// All reply-composing paths route through here so the lazy retarget lands before a
-    /// freshly typed `@` kicks off the directory walk on a stale root.
+    /// Feed a key to the reply widget after ensuring its `@` picker is rooted
+    /// at the peeked agent's cwd.
     fn peek_reply_handle_key(&mut self, key: &KeyEvent) -> PromptEvent {
         self.ensure_peek_reply_cwd();
         self.peek_reply.handle_key(key)
@@ -1937,9 +1814,7 @@ impl DashboardState {
         self.set_peek(None);
     }
 
-    /// Atomically clear all popup state when the overlay closes. Centralising the clear here keeps the
-    /// invariant honest at every close site (Esc / Ctrl+\\ key handlers, `[✗]` mouse click,
-    /// `dispatch_exit_dashboard`, `dispatch_open_dashboard`'s toggle branch).
+    /// Atomically clear all popup state when the overlay closes.
     pub fn close_popup(&mut self) {
         self.attached_agent = None;
         self.popup_close_rect = None;
@@ -1967,9 +1842,7 @@ impl DashboardState {
                 || paste_provenance == crate::app::app_view::PasteProvenance::Terminal,
             "non-paste dashboard events cannot carry paste provenance"
         );
-        // Cheatsheet modal owns the keyboard / mouse when open; its own search input, picker scroll, and chrome buttons would all be inconsistent if
-        // the dashboard's row nav got a parallel say
-        // Mirrors how `agent_view` short-circuits any `active_modal` before the per-pane handlers run
+        // Cheatsheet modal owns the keyboard / mouse when open.
         if self.shortcuts_modal.is_some() {
             return self.handle_shortcuts_modal_input(ev);
         }
@@ -1978,8 +1851,7 @@ impl DashboardState {
             return self.handle_usage_modal_input(ev);
         }
 
-        // The location picker owns input while open; its query field, row nav, and chrome buttons would all be inconsistent if the dashboard's own
-        // handlers got a parallel say
+        // The location picker owns input while open.
         if self.location_picker.is_some() {
             return self.handle_location_picker_input(ev);
         }
@@ -2051,9 +1923,7 @@ impl DashboardState {
             let Some(p) = self.peek.as_ref() else {
                 return InputOutcome::Unchanged;
             };
-            // In question mode the `❯ reply` line is hidden; the reply widget only backs the `RejectOnce` / "Other" free-text option
-            // Accepting a paste when that option isn't selected would silently fill an
-            // invisible buffer that resurfaces if the user later highlights it.
+            // In question mode the `❯ reply` line is hidden.
             let in_question = p.question.is_some();
             if in_question {
                 let on_reject = p.selected_option.is_some() && p.reject_option == p.selected_option;
@@ -2097,9 +1967,7 @@ impl DashboardState {
             }
         }
 
-        // Defer the clipboard image / file-url probe (osascript) off the event loop; the image wins over
-        // the caption, so the caption is NOT inserted now; it lands on completion only if the probe finds
-        // no image.
+        // Defer the clipboard image / file-url probe (osascript) off the event loop; the image wins over the caption.
         let should_probe = text.len() < 4096 && !text.contains('\n');
         if probe_clipboard_attachments
             && should_probe
@@ -2344,15 +2212,14 @@ impl DashboardState {
         };
         let peek = peek_row.is_some();
         self.paste_probe_in_flight = self.paste_probe_in_flight.saturating_sub(1);
-        // Drop a peek completion if the panel closed OR moved to another row between enqueue and now, so the attachment can't land in the hidden
-        // reply buffer or a different agent's reply (mirrors the agent's agent-id-gone guard in dispatch)
+        // Drop a peek completion if the panel closed OR moved to another row
+        // between enqueue and now, so the attachment cannot land.
         if let Some(row) = &peek_row
             && self.peek.as_ref().is_none_or(|p| p.row != *row)
         {
             return ClipboardPasteCompletion::Dropped;
         }
-        // A question that arrived on the peeked row mid-probe makes the reply text-only on the wire: attachments are discarded LOUDLY below (the
-        // attach helper's silent question no-op would drop them with zero feedback), and the caption/wrap paths stay suppressed
+        // A question that arrived on the peeked row mid-probe makes the reply text-only on the wire.
         let peek_in_question = peek && self.peek.as_ref().is_some_and(|p| p.question.is_some());
         let text_on_miss = (!peek_in_question)
             .then(|| ctx.source.text_to_insert_on_miss(&image))
@@ -2452,8 +2319,7 @@ impl DashboardState {
                 // Never reply to a row the user is no longer peeking.
                 self.set_error_toast("Reply canceled: peek panel changed");
             } else {
-                // A question now owns the panel (Enter answers it there, and the reply dispatch would silently queue a prompt and wipe the draft
-                // behind the dialog); drop the stash; the draft stays put
+                // A question now owns the panel.
                 self.set_error_toast("Reply canceled: answer the question first");
             }
         }
@@ -2485,9 +2351,7 @@ impl DashboardState {
     ) -> Option<InputOutcome> {
         let dashboard_owned = from_registry.is_some();
 
-        // Ctrl+C / Ctrl+D must reach the app-global quit handler (the double-press-to-quit fallback fires only when the view returns `Unchanged`)
-        // Returning `Unchanged` here bubbles them up cleanly instead of letting them leak into (and be swallowed by) the reply widget (whose Ctrl+C
-        // would clear the draft instead)
+        // Ctrl+C / Ctrl+D must reach the app-global quit handler (the double-press-to-quit fallback fires only when the view returns `Unchanged`).
         if key!('c', CONTROL).matches(key) || key!('d', CONTROL).matches(key) {
             return Some(InputOutcome::Unchanged);
         }
@@ -2512,9 +2376,8 @@ impl DashboardState {
             return Some(InputOutcome::Action(Action::DashboardOpenShortcutsHelp));
         }
 
-        // Dashboard-owned chords fall through so the registry actions (Ctrl+X stop, Ctrl+T pin, Shift+↑/↓
-        // reorder, Shift+Tab mode, …) and the hardcoded. CtrlCtrl+/ search toggle keep working with the panel
-        // open.
+        // Dashboard-owned chords fall through so the registry actions (Ctrl+X
+        // stop, Ctrl+T pin, Shift+↑/↓ reorder, Shift+Tab mode, …).
         let is_typing_char = matches!(key.code, KeyCode::Char(_))
             && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT);
         let peek_owned = is_typing_char
@@ -2542,9 +2405,6 @@ impl DashboardState {
             }));
         }
 
-        // Number keys 1–9 SELECT (toggle) the matching option when a question is showing; they no longer answer directly
-        // Selecting focuses the panel so it becomes an answer surface (`Enter` then
-        // answers); pressing the selected option's key again deselects it (back to navigation)
         if let KeyCode::Char(c) = key.code
             && let Some(d) = c.to_digit(10)
             && (1..=9).contains(&d)
@@ -2580,8 +2440,6 @@ impl DashboardState {
             return Some(InputOutcome::Changed);
         }
 
-        // Tab toggles focus between the reply input and the row list, mirroring the dispatch box's two-focus model
-        // Unfocusing dims the panel border and hides the caret (see `render_peek_panel`)
         if matches!(key.code, KeyCode::Tab) && key.modifiers.is_empty() {
             if let Some(p) = self.peek.as_mut() {
                 p.focused = !p.focused;
@@ -2692,8 +2550,8 @@ impl DashboardState {
                 }
                 _ => {}
             }
-            // Free-text feedback editing; only when the reject option is the selected one
-            // Delegated to the reply widget so the feedback field gets the same editing surface (selection, word ops, chips) as the main reply line
+            // Free-text feedback editing; only when the reject option is the
+            // selected one Delegated to the reply widget.
             if on_reject && matches!(self.peek_reply_handle_key(key), PromptEvent::Edited) {
                 return Some(InputOutcome::Changed);
             }
@@ -2774,11 +2632,12 @@ impl DashboardState {
             )));
         }
 
-        // Space is just text now (the peek is tied to selection, so there is no Space-to-close; use Esc to unselect)
-        // It falls through to the reply editor below
+        // Space is text now (the peek is tied to selection, so there is no
+        // Space-to-close; use Esc to unselect) It falls through to the reply
+        // editor below
         if focused {
-            // Keys the widget ignores are still CONSUMED (`Unchanged`) so they can't leak into the hidden
-            // dispatch input below; app-global shortcuts still fire off the `Unchanged` bubble-up.
+            // Keys the widget ignores are still CONSUMED (`Unchanged`) so
+            // they cannot leak into the hidden dispatch input below.
             return Some(match self.peek_reply_handle_key(key) {
                 PromptEvent::Edited => InputOutcome::Changed,
                 PromptEvent::Ignored => InputOutcome::Unchanged,
@@ -2830,8 +2689,8 @@ impl DashboardState {
             if let Some(id) = self.selected.clone() {
                 return InputOutcome::Action(Action::DashboardAttach(id));
             }
-            // An empty Enter acts on the focused actions-row item, whichever pane has focus, so a click on `Worktree` or
-            // `Open Previous` never leaves Enter dead while the footer promises an action
+            // An empty Enter acts on the focused actions-row item, whichever
+            // pane has focus.
             return self
                 .focused_action_click()
                 .map_or(InputOutcome::Unchanged, InputOutcome::Action);
@@ -2907,8 +2766,7 @@ impl DashboardState {
     ) -> Option<InputOutcome> {
         let mod_enter = crate::input::is_mod_enter(key);
         if self.search_mode {
-            // Enter confirms the filter
-            // The cleared query puts the dispatch input back on the ❯ prompt
+            // Enter confirms the filter The cleared query puts the dispatch input back on the ❯ prompt
             self.search_mode = false;
             self.dispatch.set_text("");
             return Some(InputOutcome::Changed);
@@ -2939,9 +2797,7 @@ impl DashboardState {
     }
 
     fn handle_key(&mut self, key: &KeyEvent, registry: &ActionRegistry) -> InputOutcome {
-        // Resolve the registry binding up-front; the toast / delete-confirm clear below needs to know
-        // whether this key IS the stop key, and it must run before the peek intercept (the lookup itself
-        // is a pure read; the action is honoured further down). Arrows / Ctrl combos always resolve.
+        // Resolve the registry binding up-front; the toast / delete-confirm clear below needs to know whether this key IS the stop key.
         let vim_mode = crate::appearance::cache::load_vim_mode();
         let from_registry =
             registry.lookup_with_mode(key, crate::actions::When::DashboardFocused, vim_mode);
@@ -2952,9 +2808,8 @@ impl DashboardState {
             self.error_toast = None;
         }
 
-        // Disarm delete-confirm on any non-confirming key
-        // Two gestures are preserved: `Ctrl+X` (its second press is the confirm, read
-        // by the dispatcher) and a list-focused bare `y`/`n` (handled just below)
+        // Disarm delete-confirm on any non-confirming key Gestures are
+        // preserved.
         let confirm_via_yn = self.list_focused
             && self.armed_delete_row().is_some()
             && key.modifiers.is_empty()
@@ -2967,9 +2822,8 @@ impl DashboardState {
             return outcome;
         }
 
-        // Free-tier override: Ctrl+O opens the pinned upgrade CTA (when one is live) instead of falling
-        // through to the dispatch input. Matched on the chord directly; `ToggleYolo` is
-        // `When::AgentScreen`-scoped and never resolves here.
+        // Free-tier override: Ctrl+O opens the pinned upgrade CTA (when one
+        // is live) instead of falling through to the dispatch input.
         if self.pinned_upgrade_cta_live && key!('o', CONTROL).matches(key) {
             return InputOutcome::Action(Action::AnnouncementsOpenCta(
                 xai_grok_telemetry::events::AnnouncementCtaSurface::Keyboard,
@@ -2994,9 +2848,7 @@ impl DashboardState {
             return InputOutcome::Action(Action::DashboardPeekCycleMode);
         }
 
-        // Keys the panel doesn't own (registry-bound dashboard chords like. CtrlCtrl+X stop or Shift+↑/↓
-        // reorder) return `None` and fall through so the dashboard's registry actions and global shortcuts
-        // still fire.
+        // Keys the panel doesn't own (registry-bound dashboard chords like.
         if self.peek_owns_input()
             && let Some(outcome) = self.handle_peek_key(key, from_registry)
         {
@@ -3026,7 +2878,6 @@ impl DashboardState {
                     return InputOutcome::Changed;
                 }
                 PromptEvent::Ignored => {
-                    // Not a picker key; fall through to normal handling
                 }
             }
         }
@@ -3089,9 +2940,7 @@ impl DashboardState {
             return InputOutcome::Action(Action::DashboardAttach(id));
         }
 
-        // Never in search mode (there the buffer is a filter query, not a command). `slash_accepted_send`:
-        // Enter accepted a terminal (no-arg) row and must fall through to dispatch; bypasses the multiline
-        // Enter-as-newline swap.
+        // Never in search mode (there the buffer is a filter query, not a command).
         let mut slash_accepted_send = false;
         if self.dispatch.slash_open() && !self.search_mode {
             match key.code {
@@ -3121,8 +2970,7 @@ impl DashboardState {
                     return InputOutcome::Changed;
                 }
                 KeyCode::Enter if key.modifiers.is_empty() => {
-                    // Accept the selected completion; if its insert text ends with a space the row "chains" (more input expected, e.g. `/model `),
-                    // otherwise close the dropdown and fall through to the Enter handler which dispatches the slash command
+                    // Accept the selected completion; if its insert text ends with a space the row "chains" (more input expected, e.g. `/model `).
                     let snap = self.dispatch.slash_snapshot();
                     let chains = snap
                         .selection()
@@ -3162,30 +3010,26 @@ impl DashboardState {
                 self.set_peek(None);
                 return InputOutcome::Changed;
             }
-            // An active filter clears next; the empty-state message promises "press Esc to clear the filter", so this stays ahead of the focus/exit
-            // tiers regardless of which pane holds focus
+            // An active filter clears next; the empty-state message promises
+            // "press Esc to clear the filter".
             if self.filter.is_active() {
                 self.filter = Filter::None;
                 return InputOutcome::Changed;
             }
-            // The typed draft is deliberately left intact; Esc never clears it (use. CtrlCtrl+U / Ctrl+C for that),
-            // and it is retained if you close and reopen the dashboard within the same app process.
+            // The typed draft is deliberately left intact; Esc never clears
+            // it (use.
             if !self.list_focused {
                 self.list_focused = true;
                 // Re-engage selection-follow so the viewport tracks the cursor once the list takes focus (mirrors Tab)
                 self.clear_manual_scroll();
                 return InputOutcome::Changed;
             }
-            // List focused: graduated back-out, then exit
-            // The deselect tier keeps the "reply vs new session" contract; a selected row makes the dispatch input reply to it, and deselecting
-            // flips it back to "new session" mode without leaving the dashboard
+            // List focused: graduated back-out, then exit The deselect tier
+            // keeps the "reply vs new session" contract.
             if self.selected.is_some() {
-                // Deselecting focuses the `+ New Agent` button so the cursor lands on a stable target instead of floating in `None`
-                // The Enter-with-empty-prompt path keys off this to create-and-open, and the actions row paints the focused button in `accent_success` so the
-                // user can see where the cursor went
+                // Deselecting focuses the `+ New Agent` button so the cursor lands on a stable target instead of floating.
                 self.focus_new_agent_button();
-                // Pure-viewport scroll state is bound to the cursor; once the cursor goes away, the next render frame should re-anchor without
-                // snapping to a stale offset
+                // Pure-viewport scroll state is bound to the cursor.
                 self.manual_scroll_active = false;
                 return InputOutcome::Changed;
             }
@@ -3226,9 +3070,7 @@ impl DashboardState {
                 }
                 _ => true,
             };
-            // Never let an auto-repeat (held key) drive the destructive. CtrlCtrl+X arm-then-confirm: holding the
-            // key would arm and immediately confirm a delete. Require discrete presses, like the picker's `y`
-            // confirm. Non-destructive actions may still repeat.
+            // Never let an auto-repeat (held key) drive the destructive.
             if id == crate::actions::ActionId::DashboardStop && key.kind == KeyEventKind::Repeat {
                 return InputOutcome::Unchanged;
             }
@@ -3237,13 +3079,11 @@ impl DashboardState {
             }
         }
 
-        // `/` is no longer special; it types a literal `/` into the prompt (handled by the widget fall-through below)
-        // Filtering lives behind the explicit `Ctrl+/` search mode instead, so a dispatched prompt can start with `/`, `s:`, `a:`, or `#` without
-        // being silently swallowed as a filter
+        // `/` is no longer special; it types a literal `/` into the prompt
+        // (handled by the widget fall-through below).
 
-        // Ctrl+S is "send and open": dispatch the prompt (or open the selected row / create from the button) AND walk straight into the detail view
-        // This is the chord that replaced Shift+Enter (now freed, with Alt+Enter, for newline insertion)
-        // No-op in search mode, where the buffer is a filter query, not a prompt
+        // Ctrl+S is "send and open": dispatch the prompt (or open the
+        // selected row / create from the button) AND walk straight.
         if key!('s', CONTROL).matches(key) && !self.search_mode {
             return self.dispatch_send_action(true);
         }
@@ -3262,11 +3102,11 @@ impl DashboardState {
             }
         }
 
-        // Shift+Tab (DashboardCycleMode) is resolved through the registry `from_registry` path above; its `ActionDef` carries the three terminal
-        // encodings (`BackTab`, `BackTab`+SHIFT, `Tab`+SHIFT) as default/alt keys, so no hardcoded intercept is needed here
+        // Shift+Tab (DashboardCycleMode) is resolved through the registry
+        // `from_registry` path above.
 
-        // Tab toggles focus between the dispatch input and the overview list (the vim-style way to reach j/k navigation)
-        // When the slash / `@` dropdowns are open the intercepts above already consumed Tab (accept completion), so this only fires otherwise
+        // Tab toggles focus between the dispatch input and the overview list
+        // (the vim-style way to reach j/k navigation).
         if matches!(key.code, KeyCode::Tab) && key.modifiers.is_empty() {
             self.set_list_focused(!self.list_focused);
             // Re-engage selection-follow so the viewport tracks the cursor once the list takes focus
@@ -3287,7 +3127,6 @@ impl DashboardState {
                     return InputOutcome::Unchanged;
                 }
                 self.set_list_focused(false);
-                // fall through to the widget so the char is typed.
             } else {
                 // Non-printable (Backspace/Home/…) while the overview is focused must NOT leak into the inactive input
                 return InputOutcome::Unchanged;
@@ -3303,14 +3142,11 @@ impl DashboardState {
         let dropped_highlight = had_highlight && self.dispatch.textarea.selection_range().is_none();
         let new = self.dispatch.text().to_string();
         if old != new {
-            // Live-update the filter as the user types ONLY in search mode; the dispatch buffer is then the search query
-            // Outside search mode the buffer is a dispatch prompt and never touches the filter (so `s:`/`a:`/`#`/`/` prefixes dispatch verbatim)
-            // `parse_filter` still honours the `a:`/`s:`/`#` prefixes WITHIN search mode for power users; plain text is a substring match
+            // Live-update the filter as the user types ONLY in search mode.
             if self.search_mode {
                 self.sync_search_filter_from_dispatch();
             } else {
-                // Outside search mode the buffer is a dispatch prompt; refresh the slash snapshot so the `/command` dropdown opens / updates (and `@`
-                // context) as the user types
+                // Outside search mode the buffer is a dispatch prompt.
                 self.dispatch.refresh_slash(&self.models);
             }
             InputOutcome::Changed
@@ -3594,9 +3430,9 @@ impl DashboardState {
                 return InputOutcome::Changed;
             }
 
-            // Click on the `+ New Agent` button: same outcome as Enter-with-empty-prompt while the button is focused
-            // Routed through the dispatcher so the create-session and view-switch sequence stays in one place
-            // The hit test runs BEFORE the row-click check so the button can sit inside the actions row without competing for clicks
+            // Click on the `+ New Agent` button: same outcome as
+            // Enter-with-empty-prompt while the button is focused Routed
+            // through the dispatcher so the create-session.
             if self.new_agent_button_hit.contains(mouse.column, mouse.row) {
                 self.focus_new_agent_button();
                 self.manual_scroll_active = false;
@@ -3626,7 +3462,7 @@ impl DashboardState {
             }
 
             // A click on the header location label opens the location picker
-            // Checked after the actions-row buttons; the label lives on the header row above them
+            // Checked after the actions-row buttons.
             if self.location_hit.contains(mouse.column, mouse.row) {
                 return InputOutcome::Action(Action::DashboardOpenLocationPicker);
             }
@@ -3676,19 +3512,19 @@ impl DashboardState {
                 })
                 .map(|(id, _)| id.clone())
             {
-                // Clicking a row is selection-driven, so re-engage the clamp's snap-to-selection by clearing the manual-scroll flag
-                // Without this, a click after a wheel-scroll would jump the viewport on the next frame (the bias-up pull-back kicks in)
+                // Clicking a row is selection-driven, so re-engage the clamp's snap-to-selection by clearing the manual-scroll flag Without this.
                 self.manual_scroll_active = false;
-                // `focus_row` also clears `actions_focus` so the two cursor states stay mutually exclusive (clicking a row while the
-                // button was focused hands the cursor over to the row)
+                // `focus_row` also clears `actions_focus` so both cursor states stay mutually exclusive.
                 self.focus_row(id.clone());
                 self.last_click = Some((id.clone(), Instant::now()));
                 return InputOutcome::Action(Action::DashboardAttach(id));
             }
 
-            // Click anywhere on the dispatch input box focuses it; i.e. clears `list_focused`. This must work
-            // whether or not vim mode is on: in vim mode the overview steals the keyboard (j/k nav), so
-            // without this a mouse user clicking the box would be stranded with no caret.
+            // Click anywhere on the dispatch input box focuses it; i.e.
+            // clears `list_focused`. This must work whether vim mode is on:
+            // in vim mode the overview steals the keyboard (j/k nav), so
+            // without this a mouse user clicking the box would be stranded
+            // with no caret.
             if let Some(rect) = self.dispatch_rect
                 && mouse.column >= rect.x
                 && mouse.column < rect.x + rect.width
@@ -3769,8 +3605,8 @@ impl DashboardState {
         let config = location_picker_config();
         let outcome =
             crate::views::picker::handle_picker_input(ev, &mut lp.picker, entry_count, &config);
-        // When the user edits the path, drop the stale validation error so a corrected (possibly valid) path isn't shown next to a red "Not a
-        // directory" left over from the previous failed attempt
+        // When the user edits the path, drop the stale validation error so a
+        // corrected (possibly valid) path is not shown next.
         if matches!(&outcome, crate::views::picker::PickerOutcome::QueryChanged) {
             lp.error = None;
             // Re-list only when the edited path changes; cursor motion is redraw-only.
@@ -3876,8 +3712,7 @@ impl DashboardState {
             }
             NewWorktreeDialogOutcome::Cancelled => {
                 self.worktree_dialog = None;
-                // Don't silently discard the user's typed prompt; restore the stashed prompt (from the prompt-send
-                // path) to the dispatch input so they can resend it instead of losing it.
+                // Do not silently discard the user's typed prompt.
                 if let Some(prompt) = self.pending_worktree_prompt.take() {
                     self.dispatch.restore(prompt);
                 }
@@ -3990,9 +3825,8 @@ impl DashboardState {
     /// A deliberately-cleared selection (`None`) is PRESERVED: `None` is a valid steady state.
     /// The contract: no row selected means dispatch creates a new session; a selected row means dispatch replies to that agent.
     pub fn reanchor_selection(&mut self, rows: &[DashboardRow]) {
-        // Section-cursor validation: a selected section header can go stale without any grouping toggle: a
-        // `s:state` filter suppresses all state headers, and row churn (the last Working agent going idle)
-        // removes the header outright.
+        // Section-cursor validation: a selected section header can go stale
+        // without any grouping toggle.
         let focusables = super::render::focusables(
             rows,
             self.grouping,
@@ -4009,9 +3843,8 @@ impl DashboardState {
                 self.focus_new_agent_button();
             }
         }
-        // Idle-overflow cursor validation: the "N more" toggle row disappears when the Idle group shrinks below the cap (or the user expands it,
-        // which removes the fold)
-        // A stranded cursor there would leave Enter/footer hints acting on nothing, so fall back to the `+ New Agent` button
+        // Idle-overflow cursor validation: the "N more" toggle row disappears
+        // when the Idle group shrinks below the cap.
         if self.selected_idle_overflow
             && !focusables
                 .iter()
@@ -4041,17 +3874,15 @@ impl DashboardState {
         if let Some(sel) = self.selected.as_ref()
             && !rows.iter().any(|r| r.id == *sel)
         {
-            // The previously selected row was filtered out or closed.
-            // Drop the cursor; re-selecting is the user's job
+            // The selected row was filtered out or closed. Drop the cursor; re-selecting is the user's job
             self.selected = None;
         }
         self.sync_delete_confirm_to_selection();
     }
 }
 
-/// Strict Enter swap for compose surfaces (agent prompt parity).
-/// Multiline off: Shift/Alt (or rescued) Enter inserts a newline.
-/// Multiline on: bare Enter inserts a newline; Shift/Alt sends/creates/opens.
+/// Strict Enter swap for compose surfaces (agent prompt parity). Multiline
+/// off: Shift/Alt (or rescued) Enter inserts a newline.
 fn compose_enter_is_newline(multiline: bool, mod_enter: bool) -> bool {
     multiline != mod_enter
 }
@@ -4086,14 +3917,12 @@ fn dashboard_action_for_id(
         ActionId::DashboardReorderUp => Some(InputOutcome::Action(Action::DashboardReorderUp)),
         ActionId::DashboardReorderDown => Some(InputOutcome::Action(Action::DashboardReorderDown)),
         ActionId::DashboardShortcutsHelp => {
-            // Opens the cheatsheet modal (mirroring the agent view's `ActiveModal::ShortcutsHelp`) via the action dispatcher so the build-entries
-            // side-effect lives next to the other dashboard dispatchers in `app::dispatch`
+            // Opens the cheatsheet modal (mirroring the agent view's `ActiveModal::ShortcutsHelp`) via the action dispatcher.
             let _ = error_toast;
             Some(InputOutcome::Action(Action::DashboardOpenShortcutsHelp))
         }
         ActionId::DashboardExit => {
-            // Esc is handled in the cascade above
-            // A user-rebind of exit (e.g. F1) lands here.
+            // Esc is handled in the cascade above A user-rebind of exit (e.g. F1) lands here.
             Some(InputOutcome::Action(Action::ExitDashboard))
         }
         // Non-dashboard ActionIds: fall through to the widget
@@ -4223,13 +4052,11 @@ pub fn parse_filter(text: &str) -> FilterValue {
         } else if let Some(rs) = parse_row_state_token(rest) {
             FilterValue::State(rs)
         } else {
-            // Unknown state token falls back to substring on the full `s:foobar` so the user sees feedback (their typed text is matched against
-            // labels) AND realises the state path didn't take effect
+            // Unknown state token falls back to substring on the full `s:foobar` so the user sees feedback (their typed text is matched against labels).
             FilterValue::Substring(rest.to_string())
         }
     } else if let Some(rest) = trimmed.strip_prefix('#') {
-        // `#<n>` keeps the `#` in the substring needle so it never matches arbitrary digits in labels
-        // PR filtering is reserved for a future revision
+        // `#<n>` keeps the `#` in the substring needle so it never matches arbitrary digits in labels PR filtering is reserved.
         FilterValue::Substring(format!("#{rest}"))
     } else {
         FilterValue::Substring(trimmed.to_string())
@@ -4272,8 +4099,7 @@ pub fn load_persisted_enabled() -> Option<bool> {
         .and_then(|v| v.as_bool())
 }
 
-/// Load the full persisted dashboard from `~/.grok/config.toml`. Returns `None` only when the file
-/// is missing or completely unreadable. Malformed individual fields fall back to defaults silently.
+/// Load the full persisted dashboard from `~/.grok/config.toml`.
 pub fn load_persisted() -> Option<PersistedDashboard> {
     let path = config_path()?;
     load_persisted_from_path(&path)
@@ -4314,9 +4140,8 @@ pub fn load_persisted_from_path(path: &std::path::Path) -> Option<PersistedDashb
     })
 }
 
-/// Synchronous, blocking write of the persisted dashboard config. That helper returns `None` only
-/// when the file is non-empty AND unparseable, meaning we. MUST NOT overwrite it (the file may
-/// contain user data we cannot interpret).
+/// Synchronous, blocking write of the persisted dashboard config. That helper returns `None` only when the file is non-empty AND unparseable, meaning we. MUST NOT overwrite it (the file may contain
+/// user data we cannot interpret).
 pub fn write_persisted(p: &PersistedDashboard) -> std::io::Result<()> {
     let path = config_path()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no grok home"))?;
@@ -4381,7 +4206,6 @@ fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
         // Ensure the bytes are physically on disk before the rename.
-        // Without this, the rename can complete and the file system can later observe the renamed inode pointing at zeroed data
         f.sync_all()?;
     }
     std::fs::rename(&tmp, path)?;
@@ -4389,8 +4213,7 @@ fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent()
         && let Ok(dir) = std::fs::File::open(parent)
     {
-        // sync_all on a directory is allowed on Unix and is a no-op on platforms that don't support it
-        // Swallow errors: the rename succeeded, and the durability question is moot if the OS won't fsync the directory
+        // sync_all on a directory is allowed on Unix.
         let _ = dir.sync_all();
     }
     Ok(())
@@ -4438,9 +4261,9 @@ fn parse_persist_key_list(item: &toml_edit::Item) -> Vec<PersistedRowId> {
         .collect()
 }
 
-/// Compact a `Path` for display against `$HOME`, returning a `String`. Used by the row renderer and
-/// the filter substring search to keep cwd matching consistent. When `cwd == home`, `strip_prefix`
-/// returns an empty `Path`; the empty-rest branch collapses to the bare `"~"` rather than `"~/"`.
+/// Compact a `Path` for display against `$HOME`, returning a `String`. Used
+/// by the row renderer and the filter substring search to keep cwd matching
+/// consistent.
 pub fn compact_cwd(cwd: &Path, home: Option<&str>) -> String {
     if let Some(h) = home
         && let Ok(rest) = cwd.strip_prefix(h)

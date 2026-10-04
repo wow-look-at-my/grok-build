@@ -1,7 +1,4 @@
 //! Credit balance indicator for the agent status bar.
-//!
-//! Shows the user's coding credit usage as a compact status bar item.
-//! Fetches real data from the `x.ai/billing` agent extension.
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -11,7 +8,6 @@ use crate::theme::Theme;
 /// Credit balance state from the billing API.
 #[derive(Debug, Clone)]
 pub struct CreditBalance {
-    /// Usage as a percentage of the allowance (0.0 to 100.0).
     pub usage_pct: f64,
     /// Usage as a percentage of total budget (free and on-demand when enabled).
     pub effective_usage_pct: f64,
@@ -19,17 +15,14 @@ pub struct CreditBalance {
     pub period_end_display: Option<String>,
     /// Whether pay-as-you-go (on-demand) billing is enabled.
     pub pay_as_you_go: bool,
-    /// On-demand spending cap in USD cents (e.g. 500 is $5.00).
     pub on_demand_cap_cents: Option<i64>,
     /// On-demand usage this period in USD cents.
     pub on_demand_used_cents: Option<i64>,
     /// Remaining prepaid ("bought") credit balance in USD cents.
     pub prepaid_balance_cents: Option<i64>,
     /// Usage period type from the billing response (the proto enum name, e.g. `USAGE_PERIOD_TYPE_WEEKLY`).
-    /// Drives the "Weekly/Monthly limit" label.
     pub period_type: Option<String>,
     /// From credits config `is_unified_billing_user` (`None` if absent).
-    /// `Some(true)` means the unified pool and buy-credits UX; `Some(false)` means the legacy on-demand (PAYG) UX.
     pub is_unified_billing_user: Option<bool>,
 }
 
@@ -70,10 +63,8 @@ impl AutoTopupInfo {
 #[derive(Debug, Clone)]
 pub enum AutoTopupFetch {
     /// A definitive rule state (a real rule, or [`AutoTopupInfo::disabled`] when the backend reports none).
-    /// Stored as the *known* auto top-up state.
     Resolved(AutoTopupInfo),
-    /// Fetch failed; keep the cached value.
-    /// A stored `None` therefore means "not yet known", not "no auto top-up".
+    /// Fetch failed; keep the cached value. A stored `None` therefore means "not yet known", not "no auto top-up".
     Unchanged,
     /// The rule is not applicable (no prepaid credits); reset the cache to "unknown" so a later credits period doesn't read a stale rule.
     Cleared,
@@ -93,7 +84,6 @@ fn fmt_dollars(cents: i64) -> String {
 /// next reset time. The credits block is rendered only when the user has a positive prepaid
 /// balance.
 pub fn format_usage_summary(balance: &CreditBalance, autotopup: Option<&AutoTopupInfo>) -> String {
-    // Floor to match the backend SpendingLimiter's `as u8` truncation (99.994% renders as 99%, never 100% until truly exhausted)
     let mut lines = vec![format!(
         "{}: {}%",
         balance.usage_label(),
@@ -141,9 +131,9 @@ pub fn format_usage_summary(balance: &CreditBalance, autotopup: Option<&AutoTopu
 const LOW_BALANCE_CENTS: i64 = 1000;
 const PAY_AS_YOU_GO_CRITICAL_CENTS: i64 = 500;
 
-/// The prompt's usage/credits warning as `(text, critical)`, or `None`. `critical` renders yellow,
-/// else grey; team users with `usage_visible = false` never warn. Gateway light-frontend (`kind:
-/// "chat"`) sessions must not show Build coding-credit warnings.
+/// The prompt's usage/credits warning as `(text, critical)`, or `None`.
+/// `critical` renders yellow, else grey; team users with `usage_visible =
+/// false` never warn.
 pub fn usage_warning(
     balance: &CreditBalance,
     autotopup: Option<&AutoTopupInfo>,
@@ -186,7 +176,6 @@ pub fn usage_warning_for_session(
 
         let pct = balance.effective_usage_pct;
         if pct > 90.0 {
-            // "Left" is the complement of floored usage, so it agrees with the floored summary: 99.994% shows "1% left", not "0%"
             let remaining = (100 - pct.floor() as i64).max(0);
             let label = balance.usage_label();
             return Some((format!("{label} left: {remaining}%"), pct > 95.0));
@@ -194,7 +183,6 @@ pub fn usage_warning_for_session(
         return None;
     };
 
-    // Credits are only drawn down at 100% usage; don't warn before then.
     if balance.usage_pct < 100.0 {
         return None;
     }
@@ -219,9 +207,8 @@ pub fn usage_warning_for_session(
     }
 }
 
-/// Gateway light-frontend (`kind: "chat"`) sessions must not show Build coding credits. Remote
-/// settings or a managed opt-in for chat entry can share the same gate later; for now it only
-/// suppresses misleading local telemetry.
+/// Gateway light-frontend (`kind: "chat"`) sessions must not show Build coding credits. Remote settings or a managed opt-in for chat entry can share the same gate later; it only suppresses
+/// misleading local telemetry.
 pub fn credit_bar_line(balance: &CreditBalance, hovered: bool, theme: &Theme) -> Line<'static> {
     credit_bar_line_for_session(balance, hovered, theme, false)
         .expect("non-chat credit_bar_line always renders")
@@ -431,23 +418,19 @@ mod tests {
 
     #[test]
     fn summary_floors_usage_percent() {
-        // Match the backend SpendingLimiter (`as u8` truncation): 99.994% must render as 99%, not round up to 100%
         let almost = bal_period(99.994, "USAGE_PERIOD_TYPE_WEEKLY");
         assert_eq!(format_usage_summary(&almost, None), "Weekly limit: 99%");
-        // A true 100% still shows 100%.
         let full = bal_period(100.0, "USAGE_PERIOD_TYPE_WEEKLY");
         assert_eq!(format_usage_summary(&full, None), "Weekly limit: 100%");
     }
 
     #[test]
     fn warning_percent_left_is_floor_complement() {
-        // 99.994% used floors to 99%, so it shows "1% left" (not "0% left"), and the warning and the floored summary always sum to 100
         let almost = bal_period(99.994, "USAGE_PERIOD_TYPE_WEEKLY");
         assert_eq!(
             usage_warning(&almost, None, true),
             Some(("Weekly limit left: 1%".to_string(), true))
         );
-        // A true 100% (no credits) shows "0% left"
         let full = bal_period(100.0, "USAGE_PERIOD_TYPE_WEEKLY");
         assert_eq!(
             usage_warning(&full, None, true),
@@ -480,7 +463,6 @@ mod tests {
 
     #[test]
     fn warning_credits_unknown_topup_is_suppressed() {
-        // At 100% usage with prepaid credits but the rule not yet known (None), never warn; it resolves on the next billing fetch
         let b = CreditBalance {
             prepaid_balance_cents: Some(100),
             ..bal(100.0)
@@ -490,7 +472,7 @@ mod tests {
 
     #[test]
     fn warning_credits_suppressed_below_full_usage() {
-        // Low credits and no auto top-up, but the included allowance still has room (usage < 100%), so no warning; credits aren't being spent yet
+        // Low credits and no auto top-up, but the included allowance still has room (usage < 100%), so no warning.
         let disabled = topup(false, None, None);
         let low = CreditBalance {
             prepaid_balance_cents: Some(453),
@@ -588,8 +570,6 @@ mod tests {
 
     #[test]
     fn warning_credits_take_precedence_over_usage() {
-        // A credits user below 100% usage gets no warning: no usage-% warning, and credits aren't being spent yet
-        // A non-credits user would see "Usage left: 1%" at 99%
         let b = CreditBalance {
             prepaid_balance_cents: Some(5000),
             ..bal(99.0)
@@ -721,14 +701,12 @@ mod tests {
     #[test]
     fn test_boundary_at_80_percent() {
         let theme = Theme::default();
-        // Exactly 80% renders yellow (warning)
         let at_80 = credit_bar_line(&bal(80.0), false, &theme);
         assert_eq!(
             at_80.spans.first().and_then(|s| s.style.fg),
             Some(theme.warning)
         );
 
-        // Just below 80% renders green (success)
         let below_80 = credit_bar_line(&bal(79.9), false, &theme);
         assert_eq!(
             below_80.spans.first().and_then(|s| s.style.fg),
@@ -739,14 +717,12 @@ mod tests {
     #[test]
     fn test_boundary_at_100_percent() {
         let theme = Theme::default();
-        // Exactly 100% renders red (error)
         let at_100 = credit_bar_line(&bal(100.0), false, &theme);
         assert_eq!(
             at_100.spans.first().and_then(|s| s.style.fg),
             Some(theme.accent_error)
         );
 
-        // Just below 100% renders yellow (warning)
         let below_100 = credit_bar_line(&bal(99.9), false, &theme);
         assert_eq!(
             below_100.spans.first().and_then(|s| s.style.fg),

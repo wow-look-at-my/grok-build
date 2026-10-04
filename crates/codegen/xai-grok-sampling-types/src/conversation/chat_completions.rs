@@ -65,14 +65,9 @@ impl From<ChatRequestMessage> for ConversationItem {
     }
 }
 
-/// Convert a single non-`Reasoning` [`ConversationItem`].
-/// The wire format carries `reasoning_content` on the *following* assistant message, which a single item cannot see.
-/// Use [`conversation_to_chat_messages`] instead when reasoning must survive.
-///
-/// Permissive profile: both `model_id` and `reasoning_content` are emitted,
-/// which is what this crate sent before profiles existed. Use
-/// [`conversation_item_to_chat_message_with_profile`] to target a
-/// strict-schema provider.
+/// Convert a single non-`Reasoning` [`ConversationItem`]. The wire format
+/// carries `reasoning_content` on the *following* assistant message, which a
+/// single item cannot see.
 pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestMessage {
     conversation_item_to_chat_message_with_profile(item, ChatMessageProfile::PERMISSIVE)
 }
@@ -210,10 +205,8 @@ pub fn conversation_item_to_chat_message_with_profile(
     }
 }
 
-/// The canonical conversion: each run of `Reasoning` siblings folds into the `reasoning_content` of the following `Assistant`.
-/// A `BackendToolCall` in between does not break the fold, any other item clears it, and reasoning with no following assistant is dropped.
-///
-/// Permissive profile — see [`conversation_to_chat_messages_with_profile`].
+/// The canonical conversion: each run of `Reasoning` siblings folds into the
+/// `reasoning_content` of the following `Assistant`.
 pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRequestMessage> {
     conversation_to_chat_messages_with_profile(items, ChatMessageProfile::PERMISSIVE)
 }

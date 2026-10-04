@@ -1,6 +1,5 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 //! This module takes [`Effect`] values produced by [`super::dispatch`] and spawns them as async tasks on a [`JoinSet`].
-//! When tasks complete, the event loop converts their output into [`TaskResult`] and feeds it back through dispatch.
 mod helpers;
 mod session_list;
 use super::actions;
@@ -1775,8 +1774,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     {
-                        // Ordering covers the mode request only: the prompt below
-                        // runs a whole turn and must not hold the gate.
+                        // Ordering covers the mode request only: the prompt below runs a whole turn.
                         let _ordered = gate.lock().await;
                         let mode_req = acp::SetSessionModeRequest::new(
                             session_id.clone(),

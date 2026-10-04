@@ -8,8 +8,6 @@ const AUTO_MODE_CLASSIFY_TIMEOUT_DEFAULT_MS: u64 = 30_000;
 const AUTO_MODE_CLASSIFY_TIMEOUT_MAX_MS: u64 = 120_000;
 
 /// Crate-wide serialization lock for tests that mutate `GROK_AUTO_PERMISSION_MODE`.
-/// Every test reading the gate locks this so a concurrent setter can't make them flaky.
-/// That includes the tests in `permissions.rs`, which compile into the same test binary.
 #[cfg(test)]
 pub(crate) static AUTO_PERMISSION_MODE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -73,8 +71,8 @@ pub fn resolve_auto_permission_mode_enabled(
     )
 }
 
-/// Single source of truth for the remote settings `auto_mode` config at free-function call sites that don't hold a live `RemoteSettings`.
-/// Those sites are the gate launch decision, the pager kill-switch, and the classifier wiring.
+/// Single source of truth for the remote settings `auto_mode` config at
+/// free-function call sites that don't hold a live `RemoteSettings`.
 static REMOTE_AUTO_MODE_CONFIG: std::sync::RwLock<Option<crate::agent::config::AutoModeConfig>> =
     std::sync::RwLock::new(None);
 
@@ -209,9 +207,8 @@ pub(crate) fn auto_mode_classify_timeout(
     std::time::Duration::from_millis(bounded)
 }
 
-/// An unset `prompt_type` defaults to `full`: transcript context cuts the residual block rate ~1/3.
-/// It also lets explicit user authorization satisfy the prompt's confirmation clause.
-/// An unset `reasoning_effort` defaults to `low` only on models that support it; `None` keeps the provider default.
+/// It also lets explicit user authorization satisfy the prompt's confirmation clause. An unset `reasoning_effort`
+/// defaults to `low` only on models that support it; `None` keeps the provider default.
 pub(crate) fn auto_mode_classifier_defaults(
     cfg: &crate::agent::config::AutoModeConfig,
     effective_supports_reasoning_effort: bool,
@@ -291,7 +288,6 @@ mod auto_permission_mode_gate_tests {
         let r = resolve_auto_permission_mode_enabled(None, None, None, Some(&remote(Some(false))));
         assert!(!r.value);
         assert_eq!(r.source, ConfigSource::Remote);
-        // An absent remote field falls through to Default ON
         let r = resolve_auto_permission_mode_enabled(None, None, None, Some(&remote(None)));
         assert!(r.value);
         assert_eq!(r.source, ConfigSource::Default);
@@ -312,7 +308,6 @@ mod auto_permission_mode_gate_tests {
         let r = resolve_auto_permission_mode_enabled(None, None, None, Some(&remote));
         assert!(r.value);
         assert_eq!(r.source, ConfigSource::Remote);
-        // A non-object / malformed payload coerces to None and falls through to Default ON
         let bad = RemoteSettings {
             auto_mode: Some(serde_json::json!("not-an-object")),
             ..RemoteSettings::default()
@@ -325,7 +320,7 @@ mod auto_permission_mode_gate_tests {
     #[test]
     fn remote_gate_malformed_field_falls_through_to_default() {
         let _g = guard();
-        // A malformed field (bad `prompt_type` enum) drops the WHOLE object, which falls through to Default ON
+        // A malformed field (bad `prompt_type` enum) drops the WHOLE object.
         let bad = RemoteSettings {
             auto_mode: Some(serde_json::json!({ "enabled": true, "prompt_type": "typo" })),
             ..RemoteSettings::default()
@@ -394,7 +389,7 @@ mod auto_permission_mode_gate_tests {
     #[test]
     fn remote_cache_round_trips_and_disk_reader_honors_env() {
         let _g = guard();
-        // Gate `enabled` round-trips through the single RwLock store.
+        // Gate `enabled` round-trips through the RwLock store.
         cache_remote_auto_permission_mode_enabled(Some(true));
         assert_eq!(cached_remote_auto_permission_mode_enabled(), Some(true));
         cache_remote_auto_permission_mode_enabled(Some(false));

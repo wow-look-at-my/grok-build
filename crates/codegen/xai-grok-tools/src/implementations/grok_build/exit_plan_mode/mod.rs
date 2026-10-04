@@ -1,23 +1,4 @@
 //! `ExitPlanMode` tool — new architecture (`Tool` trait).
-//!
-//! Signals that the agent has finished planning and is ready for the user to
-//! review and approve the plan. The tool reads the plan file from disk (it does
-//! NOT accept plan content as input) and surfaces it via:
-//!
-//! 1. A `PlanModeExited` **notification** sent to the gateway/client, carrying
-//!    the plan content so the client can present it for user approval.
-//! 2. A structured **`ExitPlanModeOutput`** returned to the model, containing
-//!    the plan content (or an empty-plan message).
-//!
-//! The actual approval flow (yes/no with feedback, context clear, mode
-//! transition) happens on the client side — this tool just says "I'm done,
-//! here's the plan."
-//!
-//! ## Plan File
-//!
-//! The plan file path defaults to `.grok/plan.md` relative to the session
-//! `Cwd`. The tool reads it via the `FileSystem` resource (the same async FS
-//! abstraction used by `ReadFile` and `SearchReplace`).
 
 pub mod types;
 
@@ -29,15 +10,11 @@ use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::resources::{FileSystem, NotificationHandle, require_plan_file_path};
 use crate::types::tool::{ToolKind, ToolNamespace};
 
-/// Input for the `ExitPlanMode` tool. Empty object — the plan is read from the plan file on disk,
-/// NOT passed as a parameter. This ensures the user sees exactly what was written to disk,
-/// preventing divergence between the model's in-context plan and the actual file content.
+/// Input for the `ExitPlanMode` tool.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExitPlanModeInput {}
 
-/// `ExitPlanMode` tool. Reads the plan file from disk and signals to the orchestration layer that the agent is done
-/// planning. The client receives a `PlanModeExited` notification with the plan content and is responsible for
-/// presenting the approval UI. Params: `()` — no per-tool configuration.
+/// `ExitPlanMode` tool.
 #[derive(Debug, Default)]
 pub struct ExitPlanModeTool;
 
@@ -61,8 +38,7 @@ Use this after you have finished writing your plan to the plan file in plan mode
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
-        // ExitPlanMode can only exist if EnterPlanMode is also registered —
-        // exiting plan mode without the ability to enter would be nonsensical.
+        // ExitPlanMode can only exist if EnterPlanMode is also registered — exiting plan mode without the ability.
         use crate::implementations::grok_build::enter_plan_mode::EnterPlanModeTool;
         Expr::Value(ToolRequirement::Tool {
             namespace: crate::types::tool_metadata::ToolMetadata::tool_namespace(

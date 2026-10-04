@@ -1,6 +1,4 @@
 //! Corruption self-heal for the session-search SQLite cache.
-//! An unusable file is classified, then quarantined under a lock so a fresh empty database can be recreated.
-//! The index layer drives the retry.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -19,7 +17,7 @@ pub(crate) fn current_epoch() -> u64 {
     CACHE_EPOCH.load(Ordering::Acquire)
 }
 
-/// A snapshot of the [`CACHE_EPOCH`], used to detect whether the cache was quarantined and recreated between two points in this process.
+/// A snapshot of the [`CACHE_EPOCH`], used to detect whether the cache was quarantined and recreated between points in this process.
 pub(crate) struct CacheEpoch(u64);
 
 impl CacheEpoch {

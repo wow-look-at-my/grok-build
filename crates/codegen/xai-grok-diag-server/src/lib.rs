@@ -1,8 +1,4 @@
 //! In-guest diagnostics HTTP server (`/ready`, `/statusz`, `/logs`) for the standalone workspace-server.
-//!
-//! Any process inside the user's own sandbox can reach it (loopback-only TCP, or a 0600 Unix socket).
-//! It is never exposed through the sandbox port mapping.
-//! `/logs` returns the raw daemon log: treat its output as sensitive and keep the log stream free of secrets.
 
 #![deny(clippy::indexing_slicing)]
 
@@ -92,8 +88,6 @@ struct StatuszBody {
     ready: ReadyBody,
     os: &'static str,
     /// Advisory image capability tokens, sorted, as published by the owning server.
-    /// Never an authorization input: the guest can forge the markers.
-    /// Copied out of the shared snapshot because serde only serializes `Arc<[T]>` under its `rc` feature.
     image_capabilities: Vec<String>,
     /// `false` means the declaration was absent, unreadable, or lacking its own token (UNKNOWN); that is not the same as "declares nothing".
     image_capabilities_declared: bool,
@@ -160,7 +154,6 @@ impl DiagHandle {
     }
 
     /// The server socket dropped. No-op after [`Self::set_failed`].
-    /// Does not clear `last_close_code`: the SDK fires this after a terminal close, and the sandbox gate still needs the code.
     pub fn set_disconnected(&self) {
         let mut inner = self.lock();
         if inner.is_failed() {
@@ -170,9 +163,9 @@ impl DiagHandle {
         inner.state_changed_at = now_ms();
     }
 
-    /// Hub sent a terminal close (4100 to 4199). Latches disconnected and records the code on `/ready`.
-    /// [`Self::set_disconnected`] must not clear it; the SDK also fires `on_disconnect` after this callback.
-    /// A later [`Self::set_connected`] is a no-op while the latch is set; only [`Self::clear_terminal_close`] (deliberate revival) clears it.
+    /// Latches disconnected and records the code on `/ready`.
+    /// [`Self::set_disconnected`] must not clear it; the SDK also fires
+    /// `on_disconnect` after this callback.
     pub fn set_terminal_close(&self, code: u16) {
         let mut inner = self.lock();
         if inner.is_failed() {
@@ -183,9 +176,8 @@ impl DiagHandle {
         inner.state_changed_at = now_ms();
     }
 
-    /// Drop a latched terminal close so a deliberate revival (SDK reconnect after embedder opt-in, or remint/reexec) can publish connected again.
-    /// No-op after [`Self::set_failed`] or [`Self::set_shutting_down`]: those states stay terminal.
-    /// Does not change `state`; callers follow with [`Self::set_connected`] once the new hub hello settles.
+    /// Drop a latched terminal close so a deliberate revival (SDK reconnect
+    /// after embedder opt-in, or remint/reexec) can publish connected again.
     pub fn clear_terminal_close(&self) {
         let mut inner = self.lock();
         if inner.is_failed() || inner.shutting_down {
@@ -214,7 +206,6 @@ impl DiagHandle {
 
     /// Latch disconnected for process shutdown; later `set_connected` no-ops.
     /// No-op after [`Self::set_failed`].
-    /// Leaves `last_close_code` so a drain after hub CLEANUP still reports 4103 to the reconnect gate.
     pub fn set_shutting_down(&self) {
         let mut inner = self.lock();
         if inner.is_failed() {
@@ -244,8 +235,7 @@ impl DiagHandle {
         inner.image_capabilities_declared = declared;
     }
 
-    /// The state `/ready` reports right now, for owners that supervise their own hub connections
-    /// (a multi-folder daemon has no external poller to notice a connection that died for good).
+    /// The state `/ready` reports right now.
     pub fn state(&self) -> DiagState {
         self.lock().state
     }
@@ -316,8 +306,8 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Where the diagnostics server listens: a Unix socket on Linux, loopback TCP on Windows.
-/// Both variants compile everywhere so the TCP path is testable on Linux.
+/// Where the diagnostics server listens: a Unix socket on Linux, loopback TCP
+/// on Windows.
 #[derive(Debug, Clone)]
 pub enum DiagListener {
     #[cfg(unix)]
@@ -326,7 +316,6 @@ pub enum DiagListener {
 }
 
 /// Shared request state: the [`DiagHandle`] plus the daemon log path.
-/// The path is `None` when logs go to a terminal instead of a file; `/logs` is then 404.
 #[derive(Debug, Clone)]
 struct DiagContext {
     handle: DiagHandle,
@@ -400,9 +389,8 @@ fn router(ctx: DiagContext) -> Router {
         .with_state(ctx)
 }
 
-/// Bind the listener and spawn the server task.
-/// Binding happens before this returns, so a bind failure surfaces synchronously.
-/// `log_file` is the daemon log served by `/logs` (`None` means `/logs` is 404).
+/// Bind the listener and spawn the server task. Binding happens before this
+/// returns, so a bind failure surfaces synchronously.
 pub async fn serve(
     listener: DiagListener,
     handle: DiagHandle,
@@ -633,7 +621,6 @@ mod tests {
         let port = bound.port.expect("tcp port");
 
         handle.set_connected();
-        // on_terminal_close, then a settle that still held the pre-close epoch, then on_disconnect: `/ready` must keep 4103
         handle.set_terminal_close(4103);
         handle.set_connected();
         handle.set_disconnected();

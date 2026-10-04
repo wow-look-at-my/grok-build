@@ -1,4 +1,4 @@
-//! Transient user feedback: toasts, ephemeral tips, mode-switch banners, terminal-size notes, clipboard-copy feedback, and their tick timers.
+//! Transient user feedback: toasts, ephemeral tips, mode-switch banners.
 
 use super::{
     ActivePane, AgentView, CLIPBOARD_TOAST_DEBOUNCE_MS, MODE_BANNER_TOTAL_TICKS, PromptInputMode,
@@ -9,22 +9,22 @@ use crate::app::actions::Action;
 use std::time::Instant;
 
 impl AgentView {
-    /// How long after the last resize event the iTerm2 prompt image preview stays hidden. Longer than `RESIZE_DEBOUNCE` (16ms) so mid-drag stutters don't flash pixels back in, short enough that the preview returns as soon as the drag visibly ends.
+    /// How long after the last resize event the iTerm2 prompt image preview stays hidden.
     const ITERM2_RESIZE_PREVIEW_QUIET: std::time::Duration = std::time::Duration::from_millis(300);
 
-    /// Extra tick margin past the quiet window, so the draw that repaints the preview runs *after* [`Self::resize_hides_prompt_preview`] flips — ticking exactly to the boundary would leave the preview hidden until some unrelated event triggered a draw.
+    /// Extra tick margin past the quiet window, so the draw.
     const ITERM2_RESIZE_TICK_MARGIN: std::time::Duration = std::time::Duration::from_millis(100);
 
-    /// Show a brief toast message (e.g., "Copied!").
-    /// Displayed for ~3 seconds (90 ticks at 30fps).
-    /// A previous transient toast is replaced; [`Self::sticky_toast`] is preserved and returns after this expires or is dismissed.
+    /// Show a brief toast message (e.g., "Copied!"). Displayed for a few
+    /// seconds (ticks at 30fps).
     pub fn show_toast(&mut self, msg: &str) {
         self.toast = Some((crate::glyphs::sanitize_toast_message(msg).into_owned(), 90));
     }
 
-    /// Show an ephemeral tip in the banner row above the prompt, gated by the app-level per-session `seen_counts` map (`AppView::tip_seen_counts`).
-    /// Returns true when the tip was newly shown (and the per-session count incremented in place, never persisted to disk).
-    /// No-op while the row cannot paint (a [`Self::ephemeral_tip_renderable`] refusal), so counts, TTL, and telemetry never burn on an invisible tip.
+    /// Show an ephemeral tip in the banner row above the prompt, gated by the
+    /// app-level per-session `seen_counts` map (`AppView::tip_seen_counts`).
+    /// Returns true when the tip was newly shown (and the per-session count
+    /// incremented in place, never persisted to disk).
     pub fn show_ephemeral_tip(
         &mut self,
         tip: crate::tips::EphemeralTip,
@@ -53,9 +53,8 @@ impl AgentView {
     /// The one-shot undo-tip signal from the last `PromptWidget::handle_key`, routed as an action so dispatch can reach `app.tip_seen_counts`.
     /// Fires only on a qualifying wipe (set exclusively on `PromptEvent::Edited`).
     pub(super) fn take_prompt_tip_signal(&mut self) -> Option<Action> {
-        // Undo (wipe-to-empty) takes precedence
-        // The wipe and the typed-keyword nudge are mutually exclusive on a single keypress, so one `Option<Action>` suffices
-        // The plan nudge is suppressed in plan mode (a pending switch counts), while the turn is busy, or in a special prompt input mode
+        // Undo (wipe-to-empty) takes precedence The wipe and the
+        // typed-keyword nudge are mutually exclusive on a single keypress.
         if self.prompt.take_undo_tip_fire() {
             return Some(Action::ShowUndoTip);
         }
@@ -70,9 +69,9 @@ impl AgentView {
         None
     }
 
-    /// Whether the ephemeral tip needs tick / animation this frame.
-    /// False when the session announcement banner occludes the tip slot, so a session-long freeze cannot keep the metronome hot.
-    /// Their TTL burns only while the row can paint, so an occluder pauses them rather than expiring them off-screen.
+    /// Whether the ephemeral tip needs tick / animation this frame. False
+    /// when the session announcement banner occludes the tip slot, so a
+    /// session-long freeze cannot keep the metronome hot.
     pub(crate) fn ephemeral_tip_needs_tick(&self) -> bool {
         self.ephemeral_tip.is_active()
             && !self.session_banner_active
@@ -112,22 +111,17 @@ impl AgentView {
             || self.privacy_banner.active
             // Subagent fullscreen takeover: draw early-returns into draw_subagent_fullscreen and never paints the parent banner
             || self.active_subagent.is_some()
-            // Fullscreen viewers render after the banner paints: image/video/block dim the whole region down to the shortcuts row (banner included)
-            // line_viewer's overlay stops at turn_status.y when a turn status shows, so it does NOT always cover the banner
-            // Kept anyway as a safe over-refusal: the gate cannot know layout heights, and a tip during viewer reading is unwanted regardless
+            // Fullscreen viewers render after the banner paints.
             || self.line_viewer.is_some()
             || self.image_viewer.is_some()
             || self.video_viewer.is_some()
             || self.block_viewer.is_some()
             // /gboom dims the same down-to-shortcuts region as the video viewer.
             || self.gboom.is_some()
-            // Extensions/agents modals are centered popups (render_modal_window) that capture all input and early-return out of draw
-            // They are distinct from active_modal, and persona_detail only renders atop the agents modal
-            // A tip could at most peek beside the modal, so refuse
+            // Extensions/agents modals are centered popups (render_modal_window) that capture all input and early-return out.
             || self.extensions_modal.is_some()
             || self.agents_modal.is_some()
-            // Goal-detail is a vertically-centered overlay painted after the tip; its box only reaches the banner row for tall/content-rich goals
-            // Kept unconditional as a safe over-refusal (like the modals and line_viewer): a tip during goal reading is unwanted regardless
+            // Goal-detail is a vertically-centered overlay painted after the tip.
             || (self.show_goal_detail && self.goal_state.is_some())
             || self.show_workflows
             // Prompt dropdowns (@/slash/completion/history) render in the row directly above the prompt (the banner row), clearing it
@@ -136,9 +130,10 @@ impl AgentView {
         !self.terminal_size_stale && crate::tips::tip_row_renderable(occluded, screen_height)
     }
 
-    /// Draw-path re-measure: record the size of the rect this view painted into and mark the measurement fresh again.
-    /// Only draw calls this: the rect can be smaller than the terminal (dashboard overlay header band/popup, dev tracing split).
-    /// A resize event must NOT write an extrapolated size here; it flags staleness via `note_terminal_resize` and the next draw re-measures.
+    /// Draw-path re-measure: record the size of the rect this view painted
+    /// into and mark the measurement fresh again. Only draw calls this: the
+    /// rect can be smaller than the terminal (dashboard overlay header
+    /// band/popup, dev tracing split).
     pub(crate) fn note_terminal_size(&mut self, size: (u16, u16)) {
         if self.last_terminal_size != (0, 0) && self.last_terminal_size != size {
             self.inline_media_ids.clear();
@@ -149,21 +144,20 @@ impl AgentView {
         self.terminal_size_stale = false;
     }
 
-    /// Event-path resize note: the terminal changed size, so the height in `last_terminal_size` no longer describes what this view can paint.
-    /// Overlays (dashboard overlay header/popup, dev tracing split) mean the view's rect is not derivable from the event's full-terminal size.
-    /// Resize draws are debounced (`RESIZE_DEBOUNCE`), so that window is a frame's worth of events, and a refusal burns nothing.
+    /// Event-path resize note: the terminal changed size, so the height in
+    /// `last_terminal_size` no longer describes what this view can paint.
     pub(crate) fn note_terminal_resize(&mut self) {
         self.terminal_size_stale = true;
         self.last_resize_at = Some(std::time::Instant::now());
     }
 
-    /// iTerm2 only: it rescales committed pixels with the grid during a drag (no clear primitive); hiding the preview repaints its cells — the erase on iTerm2 — until the size has been stable for [`Self::ITERM2_RESIZE_PREVIEW_QUIET`]. Kitty terminals drop and re-place images cleanly on resize, so they skip the quiet window.
+    /// iTerm2 only: it rescales committed pixels with the grid during a drag
+    /// (no clear primitive).
     pub(crate) fn resize_hides_prompt_preview(&self) -> bool {
         self.within_resize_quiet(std::time::Duration::ZERO)
     }
 
     /// Keep fast ticks alive [`Self::ITERM2_RESIZE_TICK_MARGIN`] past the quiet window so the preview repaints without an unrelated event.
-    /// quiet window so the preview repaints without an unrelated event.
     pub(crate) fn resize_preview_needs_tick(&self) -> bool {
         self.within_resize_quiet(Self::ITERM2_RESIZE_TICK_MARGIN)
     }
@@ -182,7 +176,6 @@ impl AgentView {
     }
 
     /// Release the hook-block queue hold (see `hook_block_hold`).
-    /// Also drops the blocked-prompt context: with the hold gone there is no card left to reopen.
     pub(in crate::app) fn release_hook_block_hold(&mut self) {
         self.session.hook_block_hold = false;
         self.session.blocked_prompt = None;
@@ -210,9 +203,8 @@ impl AgentView {
             return Some(msg.as_str());
         }
         let sticky = self.sticky_toast.as_deref()?;
-        // The mouse-off banner advertises how to re-enable
-        // `Ctrl+R` only works from scrollback, so show `/toggle-mouse-reporting` when the prompt is focused (it toggles from any pane)
-        // Storage keeps the scrollback form; swap the displayed text here.
+        // The mouse-off banner advertises how to re-enable `Ctrl+R` only
+        // works from scrollback.
         if sticky == crate::app::MOUSE_OFF_HINT_SCROLLBACK && self.active_pane == ActivePane::Prompt
         {
             return Some(crate::app::MOUSE_OFF_HINT_PROMPT);
@@ -222,7 +214,6 @@ impl AgentView {
 
     /// Show a transient "Switched to mode: ..." banner above the prompt.
     /// Triggered on Shift+Tab mode cycles.
-    /// Renders at full visibility for 2 s, then fades out over the final 0.3 s.
     pub fn show_mode_switch_banner(&mut self, mode_name: &str) {
         let msg = format!("Switched to mode: {}", mode_name);
         self.mode_switch_banner = Some((msg, MODE_BANNER_TOTAL_TICKS));
@@ -242,9 +233,8 @@ impl AgentView {
         false
     }
 
-    /// Copy text to clipboard (a backup file is always written too; see `copy_text_or_file`) and show the result toast.
-    /// When every trusted clipboard backend fails (common on Apple Terminal over SSH), the toast points at the backup file
-    /// (`~/.grok/last-copy.txt`, or `GROK_COPY_FILE`) instead. The returned
+    /// Copy text to clipboard (a backup file is always written too; see
+    /// `copy_text_or_file`) and show the result toast.
     pub fn copy_to_clipboard(&mut self, text: &str) -> crate::clipboard::CopyDelivery {
         let delivery = crate::clipboard::copy_text_or_file(text);
         self.show_toast_ticks(delivery.toast_message().as_ref(), delivery.toast_ticks());
@@ -258,7 +248,7 @@ impl AgentView {
             .last_clipboard_toast_at
             .is_some_and(|t| now.duration_since(t).as_millis() < CLIPBOARD_TOAST_DEBOUNCE_MS);
         if too_soon {
-            // Still deliver (clipboard or file fallback), just skip the toast.
+            // Still deliver (clipboard or file fallback), skip the toast.
             let _ = crate::clipboard::copy_text_or_file(text);
             return;
         }
@@ -320,8 +310,8 @@ impl AgentView {
     }
 
     /// When the opener cannot run (headless Linux VM, missing `xdg-open`, etc.), push a system message with the full URL so the user can copy it.
-    /// Also best-effort copy to the clipboard, since OSC 52 works over SSH even without a local display.
-    /// Unsafe schemes are rejected silently (same as [`open_url_if_safe`]).
+    /// Also best-effort copy to the clipboard, since OSC multiple works over SSH even without a local display. Unsafe schemes are rejected
+    /// silently (same as [`open_url_if_safe`]).
     pub(crate) fn open_url_or_show(&mut self, url: &str) {
         use crate::app::link_opener::{OpenUrlResult, browser_unavailable_message, try_open_url};
         use crate::scrollback::block::RenderBlock;

@@ -1,8 +1,4 @@
 //! Isolated on-disk foundation for the v2 memory pipeline.
-//!
-//! V2 never reads from or writes to the legacy `memory/` tree. Each global or
-//! workspace scope owns its topics, immutable observation inbox, archive,
-//! generated manifest, durable state database, and lexical index.
 
 use std::collections::BTreeSet;
 use std::io::{Read as _, Write as _};
@@ -20,9 +16,6 @@ const MAX_MANIFEST_ENTRIES: usize = 512;
 const MAX_DESCRIPTION_BYTES: usize = 512;
 const MAX_SOURCE_BYTES: u64 = 64 * 1024;
 /// Maximum size accepted for a user-authored remember observation.
-///
-/// This matches the per-source read budget so one manually saved observation
-/// cannot persist more content than v2 will inspect while building a manifest.
 pub const MAX_MANUAL_OBSERVATION_BYTES: usize = MAX_SOURCE_BYTES as usize;
 const MAX_HASH_VERIFIED_MANIFEST_FILES: usize = 4_096;
 /// Committed observation files not yet archived by Dream. The `REPLACE` join must
@@ -108,13 +101,9 @@ pub struct V2Manifest {
     pub is_truncated: bool,
 }
 
-/// Create one v2 scope without consulting any legacy path.
-///
-/// # Errors
-///
-/// Returns [`V2StorageError::Io`] when directories or the initial manifest
-/// cannot be created, and [`V2StorageError::Database`] when either SQLite
-/// database cannot be initialized.
+/// Create one v2 scope without consulting any legacy path. # Errors Returns
+/// [`V2StorageError::Io`] when directories or the initial manifest cannot be
+/// created.
 pub fn ensure_scope_initialized(
     storage_root: &Path,
     scope_dir: &Path,

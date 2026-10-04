@@ -51,9 +51,8 @@ pub(super) fn record_mode_change_requests(app: &mut AppView, effects: &[Effect])
         }
     }
 }
-/// Show the current plan: if a plan file exists, open it in the preview overlay popover.
-/// If no plan has been written yet, show a toast.
-/// Delegates to `AgentView::show_plan_preview()`, which reads the session's `plan.md` from its session artifacts directory.
+/// Show the current plan: if a plan file exists, open it in the preview
+/// overlay popover. If no plan has been written yet, show a toast.
 pub(super) fn dispatch_show_plan(app: &mut AppView) -> Vec<Effect> {
     with_active_agent(app, |agent| {
         if agent.plan_approval_view.is_some() {
@@ -98,19 +97,14 @@ pub(super) fn dispatch_enter_plan_mode(
     let mode_id = acp::SessionModeId::new("plan");
 
     let effects = if let Some(desc) = description {
-        // Enqueue and drain: maybe_drain_queue does all synchronous turn setup (scrollback, start_turn, prompt_id) and returns a SendPrompt
-        // We combine it with the mode switch into a single sequential effect so the mode switch completes before the prompt is sent
-        // The description is a plain prompt: capture composer-recognized tokens like the normal submit path
+        // Enqueue and drain: maybe_drain_queue does all synchronous turn
+        // setup (scrollback, start_turn, prompt_id).
         let skill_token_ranges = agent
             .prompt
             .slash_controller
             .recognized_token_ranges(&desc, &agent.session.models);
         // Own-turn: when a turn is already running the drain below is blocked
-        // and this row waits for the NEXT turn — which is exactly what was
-        // asked for, since the plan mode this submit switched on applies to
-        // that turn. Marking it keeps every mid-turn delivery path (queue
-        // migration, interrupt-with-queue) from folding the description into
-        // the running turn as steering text.
+        // and this row waits for the NEXT turn.
         agent
             .session
             .enqueue_own_turn_prompt(desc, skill_token_ranges);
@@ -172,7 +166,7 @@ pub(super) fn set_plan_mode(
     };
 
     // Same gate as ExecutePlan and post-turn revise: toast and keep the
-    // review mounted. Do not commit or send session/set_mode on a dead channel.
+    // review mounted.
     if app.reconnect_pending {
         agent.show_toast(super::prompt::RECONNECTING_NOTICE);
         return vec![];
@@ -190,8 +184,7 @@ pub(super) fn set_plan_mode(
         return vec![];
     }
 
-    // Effective state: prefer optimistic pending over confirmed active
-    // Mirrors `dispatch_cycle_mode`'s `in_plan` read so rapid toggles don't double-send
+    // Effective state: prefer optimistic pending over confirmed active Mirrors `dispatch_cycle_mode`'s `in_plan` read.
     let prev = agent.plan_mode_pending.unwrap_or(agent.plan_mode_active);
     let new = kind.to_bool();
 
@@ -202,8 +195,6 @@ pub(super) fn set_plan_mode(
     }
 
     // Stage pending before the effect. CurrentModeUpdate confirms the Off.
-    // Commit abandon only after accept — earlier commit made Off look idempotent.
-    // Leave-Plan before EndTurn drops the keep so EndTurn cannot reopen review.
     agent.stage_plan_mode(new);
     refresh_open_settings_modals(app);
     app.show_toast(&plan_mode_toast(kind));
@@ -216,8 +207,6 @@ pub(super) fn set_plan_mode(
     );
 
     // OFF targets `SessionMode::Default`, not the user's prior mode.
-    // If the user was in `Ask` (shell-injection only), that preference is silently dropped
-    // See `PLAN_MODE_CHOICES` in `settings/defs.rs`
     let mode_id = acp::SessionModeId::new(if new {
         xai_grok_tools::types::SessionMode::Plan.as_id()
     } else {
@@ -232,15 +221,14 @@ pub(super) fn set_plan_mode(
     effects
 }
 
-/// Format the `Plan mode` toast.
-/// Non-destructive in both directions (unlike YOLO), so both ON and OFF use the uniform ✓ glyph.
-/// Uses lowercase "on"/"off" via `save_success_toast`.
+/// Format the `Plan mode` toast. Non-destructive in both directions (unlike
+/// YOLO), so both ON and OFF use the uniform ✓ glyph.
 fn plan_mode_toast(kind: crate::app::actions::PlanModeKind) -> String {
     save_success_toast("Plan mode", kind.to_bool())
 }
 
-/// The single gate for client paths that ENABLE always-approve: `Some(reason)` iff `enabling` and the pin (`app.yolo_policy_block`) is set.
-/// Every enabling path routes through here (or [`refuse_if_yolo_locked`]) so new paths stay gated by default; callers must NOT persist on a refusal.
+/// The gate for client paths that ENABLE always-approve: `Some(reason)` iff
+/// `enabling` and the pin (`app.yolo_policy_block`) is set.
 pub(super) fn yolo_enable_blocked(app: &AppView, enabling: bool) -> Option<&'static str> {
     if enabling {
         app.yolo_policy_block
@@ -257,8 +245,6 @@ fn refuse_if_yolo_locked(app: &mut AppView, enabling: bool) -> Option<Vec<Effect
 }
 
 /// Canonical "auto wins only when yolo is off" precedence.
-/// The single source of truth for the yolo-over-auto rule, applied at every reconnect, session-seed, and auth-meta call site.
-/// Callers pass the already-resolved auto signal (a per-session flag or a `permission_mode == Some("auto")` test).
 pub(crate) fn effective_auto(yolo: bool, auto: bool) -> bool {
     !yolo && auto
 }
@@ -283,9 +269,8 @@ pub(crate) fn downgrade_displayed_auto_if_gated(app: &mut AppView) {
     }
 }
 
-/// Whether a newly created session should start with the Auto display flag set: the gate is on, the current UI mode is Auto, and yolo is not winning.
-/// Mirrors the canonical `auto && !yolo` precedence used on the wire (`ClientCapabilities` / `SessionFlags`).
-/// The `auto_mode_gate` check is defense-in-depth so a stale `current_ui == "auto"` can never seed a new session into Auto when gated off.
+/// Whether a newly created session should start with the Auto display flag
+/// set: the gate is on, the current UI mode is Auto, and yolo is not winning.
 pub(super) fn inherit_auto_mode(app: &AppView) -> bool {
     app.auto_mode_gate
         && effective_auto(
@@ -294,9 +279,8 @@ pub(super) fn inherit_auto_mode(app: &AppView) -> bool {
         )
 }
 
-/// Keep the active session's `auto_mode` display flag in lockstep with the applied canonical permission mode.
-/// The canonical (`app.current_ui.permission_mode`) is the single value every mode-change path finalizes.
-/// The cycle, the settings setter, and the rollback all write it.
+/// Keep the active session's `auto_mode` display flag in lockstep with the applied canonical permission mode. The canonical (`app.current_ui.permission_mode`) is the value every
+/// mode-change path finalizes.
 fn permission_mode_agent_id(app: &AppView) -> Option<crate::app::agent::AgentId> {
     match app.active_view {
         ActiveView::Agent(id) => Some(id),
@@ -322,8 +306,7 @@ pub(super) fn set_yolo_mode_inner(app: &mut AppView, new: bool) {
         tracing::warn!("always-approve enable blocked by managed policy");
         return;
     }
-    // Global mirrors update unconditionally (even if the user navigated away from the agent mid-rollback)
-    // Per-agent state is gated below
+    // Global mirrors update unconditionally (even if the user navigated away from the agent mid-rollback).
     app.default_yolo = new;
     app.permission_mode_from_soft_default = false;
     // Write-only mirror; see fn doc-comment
@@ -351,14 +334,11 @@ pub(super) fn set_yolo_mode_inner(app: &mut AppView, new: bool) {
             Some(crate::app::actions::PermissionModeKind::Ask.as_canonical());
     }
 
-    // Drain ordering invariant: flag flip BEFORE the drain (see fn doc-comment)
-    // Do NOT reorder these without re-reading the contract
+    // Drain ordering invariant: flag flip BEFORE the drain (see fn doc-comment).
     agent.session.yolo_mode = new;
 
     if new {
-        // YOLO ON: auto-approve all queued permissions
-        // Drain runs even on idempotent re-dispatch
-        // Prefers `AllowOnce`; falls back to `Cancelled` (never `AllowAlways`)
+        // YOLO ON: auto-approve all queued permissions Drain runs even on idempotent re-dispatch Prefers `AllowOnce`.
         agent.last_permission_click = None;
         for perm in agent.permission_queue.drain(..) {
             if let Some(allow) = perm
@@ -449,17 +429,14 @@ pub(super) fn set_yolo_mode(app: &mut AppView, new: bool) -> Vec<Effect> {
     // Toggling yolo always lands on ask/always-approve (never auto); keep the per-session auto display flag in sync (clears it)
     sync_active_auto_flag(app);
 
-    // Toast on every save
-    // YOLO ON gets a weightier visual; under an active plan mode, say the plan edit gate stays binding
-    // "All tool actions auto-run" would overpromise while the shell rejects non-plan-file edits
+    // Toast on every save YOLO ON gets a weightier visual.
     if new && effective_plan {
         app.show_toast(YOLO_ON_UNDER_PLAN_TOAST);
     } else {
         app.show_toast(&yolo_toast(new));
     }
 
-    // Forward write is always "ask" or "always-approve" (bool entry point)
-    // Rollback uses `prev_canonical` with LIVE precedence
+    // Forward write is always "ask" or "always-approve" (bool entry point) Rollback uses `prev_canonical`.
     let canonical: &'static str = if new { "always-approve" } else { "ask" };
     vec![Effect::PersistPermissionMode {
         canonical,
@@ -475,9 +452,8 @@ pub(super) fn set_permission_mode(
     app: &mut AppView,
     kind: crate::app::actions::PermissionModeKind,
 ) -> Vec<Effect> {
-    // Feature gate: a commit to Auto is inert when the auto permission-mode feature is disabled
-    // Reading `app.auto_mode_gate` here (the same source the Shift+Tab cycle uses) keeps the settings modal and the cycle in lockstep
-    // Both degrade Auto to Ask when the gate is off
+    // Feature gate: a commit to Auto is inert when the auto permission-mode feature is disabled Reading `app.auto_mode_gate` here (the same source
+    // the Shift+Tab cycle uses).
     let kind =
         if matches!(kind, crate::app::actions::PermissionModeKind::Auto) && !app.auto_mode_gate {
             crate::app::actions::PermissionModeKind::Ask
@@ -506,12 +482,10 @@ pub(super) fn set_permission_mode(
         .unwrap_or((false, None, false));
     let prev_canonical = capture_prev_permission_canonical(app, prev_yolo);
 
-    // We overwrite the canonical below for the Default case
-    // Inner clears the soft-default latch
+    // We overwrite the canonical below for the Default case Inner clears the soft-default latch
     set_yolo_mode_inner(app, kind.is_always_approve());
 
-    // Restore the "default" distinction that collapses when the inner reduces the mode to a bool
-    // No-op for `AlwaysApprove` and `Ask`
+    // Restore the "default" distinction that collapses when the inner reduces the mode to a bool No-op for `AlwaysApprove`.
     app.current_ui.permission_mode = Some(kind.as_canonical().to_string());
 
     // The inner only speaks for always-approve, so a typed pick stages its own word
@@ -523,8 +497,7 @@ pub(super) fn set_permission_mode(
 
     // Refresh modal so its snapshot reflects the overridden canonical.
     refresh_open_settings_modals(app);
-    // Keep the per-session auto display flag in sync with the applied canonical
-    // `kind` was already degraded to Ask when the gate is off, so a remaining Auto here means the gate passed
+    // Keep the per-session auto display flag in sync with the applied canonical `kind` was already degraded to Ask when the gate is off.
     sync_active_auto_flag(app);
 
     // Toast on every save (plan-aware for AlwaysApprove, mirroring `set_yolo_mode`; the plan edit gate stays binding under yolo)
@@ -555,8 +528,6 @@ pub(super) fn permission_mode_toast(kind: crate::app::actions::PermissionModeKin
 }
 
 /// YOLO-ON toast when plan mode is active.
-/// Always-approve turns on the permission fast path, but the shell's plan-mode gate still rejects non-plan-file edits.
-/// The standard "all tool actions auto-run" copy would overpromise.
 pub(super) const YOLO_ON_UNDER_PLAN_TOAST: &str =
     "\u{26A0} Always-approve ON: plan mode still blocks file edits until you exit plan mode";
 
@@ -588,8 +559,7 @@ pub(super) fn dispatch_toggle_yolo(app: &mut AppView) -> Vec<Effect> {
 /// The dashboard peek calls [`dispatch_cycle_mode_and_sync`] instead.
 /// A peeked agent (whose prompt the user is not looking at) never attributes an accept and never collapses Auto/Always-Approve for the nudge jump.
 pub(super) fn dispatch_cycle_mode(app: &mut AppView) -> Vec<Effect> {
-    // Capture the pre-cycle nudge visibility and plan state so only a transition into Plan while the nudge is on screen attributes as an acceptance
-    // A disabled/absent nudge never emits
+    // Capture the pre-cycle nudge visibility and plan state so only a transition into Plan while the nudge is on screen attributes.
     let (nudge_showing, in_plan_before) = active_agent_plan_nudge_state(app);
     // Both nudge shortcuts mutate before the shared body runs its guards, so refuse here on the same terms
     if cycle_refuses(app) {
@@ -597,7 +567,7 @@ pub(super) fn dispatch_cycle_mode(app: &mut AppView) -> Vec<Effect> {
     }
     // Tip copy promises Plan in one Shift+Tab; collapse Auto/Always-Approve to ask first so the ring's Normal-to-Plan arm is the sole Plan entry
     let mut effects = collapse_to_ask_for_nudge_jump(app).unwrap_or_default();
-    // An agent that publishes its own modes puts Ask before Plan, so the cycle would take two presses
+    // An agent that publishes its own modes puts Ask before Plan, so the cycle would take presses
     match jump_to_published_plan_for_nudge(app) {
         Some(jump) => {
             record_mode_change_requests(app, &jump);
@@ -619,8 +589,8 @@ pub(super) fn dispatch_cycle_mode(app: &mut AppView) -> Vec<Effect> {
             tip: xai_grok_telemetry::events::ContextualTipKind::PlanMode,
             action: xai_grok_telemetry::events::ContextualTipAction::Accepted,
         });
-        // Retire the now-stale nudge so one impression maps to at most one acceptance
-        // A full mode loop back to Plan within the ~3s TTL would otherwise re-emit; the undo and image tips clear on accept the same way
+        // Retire the now-stale nudge so one impression maps to at most one
+        // acceptance A full mode loop back to Plan within.
         agent
             .ephemeral_tip
             .clear(crate::tips::plan_nudge::PLAN_NUDGE_KEY);
@@ -713,8 +683,8 @@ fn collapse_to_ask_for_nudge_jump(app: &mut AppView) -> Option<Vec<Effect>> {
 }
 
 /// The Shift+Tab cycle body shared by the agent view and the dashboard peek.
-/// That covers every arm (including the pre-session and policy-pin early returns) without per-arm edits.
-/// Deliberately telemetry-free: the dashboard peek reuses it so it can't attribute a plan-nudge acceptance for an agent the user isn't viewing.
+/// That covers every arm (including the pre-session and policy-pin early
+/// returns) without per-arm edits.
 pub(super) fn dispatch_cycle_mode_and_sync(app: &mut AppView) -> Vec<Effect> {
     app.permission_mode_from_soft_default = false;
     let effects = dispatch_cycle_mode_inner(app);
@@ -745,8 +715,7 @@ fn shift_tab_agent_label(variant: xai_grok_agent::config::BuiltinAgentName) -> &
     match variant {
         BuiltinAgentName::GrokBuildOrchestrator => "Orchestrator",
         BuiltinAgentName::Explore => "Explore",
-        // Every current `shift_tab_variants()` entry is matched above; this
-        // covers any future addition without a second edit site.
+        // Every current `shift_tab_variants()` entry is matched above.
         other => other.into(),
     }
 }
@@ -760,13 +729,9 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
-    // Capture the pin before borrowing `agent`: the arms that enter Always-Approve enable yolo
-    // A `yolo_enable_blocked(app, _)` call would conflict with the live `&mut agent`
-    // This is the same predicate (enabling = true here)
+    // Capture the pin before borrowing `agent`: the arms.
     let yolo_locked = app.yolo_policy_block;
-    // Feature gate (default ON): when the auto permission mode is disabled, the Shift+Tab cycle skips Auto entirely
-    // The cycle is then the legacy Normal, Plan, Always-Approve ring, so Auto is never reachable from it
-    // Resolved once at startup into `app.auto_mode_gate`
+    // Feature gate (default ON): when the auto permission mode is disabled, the Shift+Tab cycle skips Auto entirely The cycle is then the Normal.
     let auto_gate = app.auto_mode_gate;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
@@ -783,12 +748,10 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
         agent.show_toast(super::prompt::BUILD_IN_FLIGHT_ABANDON_NOTICE);
         return vec![];
     }
-    // Per-session (symmetric with the `in_yolo` reads below), not the global UI mirror, so the cycle and the prompt "auto" indicator agree per agent
+    // Per-session (symmetric with the `in_yolo` reads below), not the global UI mirror.
     let in_auto = agent.session.is_auto();
     let Some(session_id) = agent.session.session_id.clone() else {
-        // No session yet (Shift+Tab forwarded from the welcome screen or a fresh tab)
-        // Cycle the mode locally and stash the ACP push in `deferred_session_mode`
-        // Cycle: Normal, Plan, Auto, Always-Approve, back to Normal (Auto skipped when always-approve is the only remaining arm under a yolo pin)
+        // No session yet (Shift+Tab forwarded from the welcome screen or a fresh tab) Cycle the mode locally and stash the ACP push.
         let in_plan = agent.plan_mode_pending.unwrap_or(agent.plan_mode_active);
         let in_yolo = agent.session.is_yolo();
         let persist_canonical: Option<&'static str> = match (in_plan, in_auto, in_yolo) {
@@ -800,13 +763,13 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
                 tracing::info!("Mode cycle (pre-session): Normal → Plan");
                 None
             }
-            // Plan to Auto (or Plan to Always-Approve when the auto feature is gated off, matching the legacy Normal, Plan, Always-Approve cycle)
+            // Plan to Auto (or Plan to Always-Approve when the auto feature
+            // is gated off, matching the Normal, Plan, Always-Approve cycle)
             (true, false, false) => {
                 agent.plan_mode_pending = Some(false);
                 agent.deferred_session_mode = None;
                 if auto_gate {
-                    // Clear any launch-seeded yolo so the created session isn't started in yolo while the UI shows Auto
-                    // SessionFlags reads default_yolo at CreateSession
+                    // Clear any launch-seeded yolo so the created session isn't started in yolo while the UI shows Auto SessionFlags reads default_yolo.
                     agent.session.yolo_mode = false;
                     app.default_yolo = false;
                     app.current_ui.permission_mode = Some("auto".into());
@@ -894,16 +857,15 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
                 Some("ask")
             }
         };
-        // ACP notify needs a session id, so stash the canonical before the `app` reborrow below. SessionCreated replays it against the bound id.
-        // `app` reborrow below. SessionCreated replays it against the bound id.
+        // ACP notify needs a session id, so stash the canonical before the
+        // `app` reborrow below. SessionCreated replays it against the bound
+        // id.
         if let Some(canonical) = persist_canonical {
             agent.deferred_permission_mode = Some(canonical);
         }
         refresh_open_settings_modals(app);
         let mut effects = Vec::new();
-        // Persist the displayed mode for the next launch. A not-yet-executed CreateSession snapshots
-        // this mutation; a revealed home session (session/new already sent at startup) gets it via
-        // the `deferred_permission_mode` replay in SessionCreated.
+        // Persist the displayed mode for the next launch.
         if let Some(canonical) = persist_canonical {
             effects.push(Effect::PersistPermissionMode {
                 canonical,
@@ -932,20 +894,14 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
             }];
         }
         // Past the last agent-identity stop: restore the base agent and
-        // re-enter Plan, closing the ring. Two ACP mode-set calls that MUST
-        // land in order, so this is `SetModeThenMode`, not two
-        // `SetSessionMode` effects (those race — each is its own spawned
-        // task on the pager side).
+        // re-enter Plan, closing the ring.
         let base_agent = agent
             .shift_tab_base_agent
             .take()
             .unwrap_or_else(|| "grok-build".to_string());
         agent.shift_tab_ring_agent_index = None;
         agent.stage_session_mode(SessionMode::Plan);
-        // The agent-identity stops carried the permission mode through
-        // untouched, so always-approve can still be on here. Leaving it set
-        // would make the next press keep Always-Approve instead of moving to
-        // Auto. Clearing it also keeps "a full ring lands on plain Plan".
+        // The agent-identity stops carried the permission mode through untouched.
         let leaving_yolo = agent.session.is_yolo();
         agent.show_mode_switch_banner("Plan");
         if leaving_yolo {
@@ -1095,7 +1051,6 @@ fn next_choice<'a>(
     mode: &SessionMode,
     yolo_locked: Option<&'static str>,
 ) -> (Option<&'a (ModeChoice, String)>, Option<&'static str>) {
-    // Shift+Tab exits the session mode and keeps the permission already on
     let stays = permission.is_some() && *mode != SessionMode::Default;
     let current = permission.unwrap_or(ModeChoice::Session(mode.clone()));
     let mut next_index = choices

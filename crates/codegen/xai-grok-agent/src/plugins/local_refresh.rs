@@ -1,6 +1,4 @@
 //! A local install is a full directory copy under `installed-plugins/`, not a live symlink.
-//! Agents/skills added to the live source after install do not show up until the snapshot is re-copied.
-//! This module re-copies refreshable local installs (under-home or trusted) at session spawn and `/plugins reload`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -23,15 +21,14 @@ pub(crate) struct RefreshSummary {
     pub errors: usize,
 }
 
-/// Load the install registry, refresh local installs, and persist if a snapshot changed.
-/// `force=false` at session spawn (skip-unchanged); `force=true` on explicit reload (always re-copy).
-/// Trust granted at install re-applies at every spawn. Failures are non-fatal.
+/// Load the install registry, refresh local installs, and persist if a
+/// snapshot changed. `force=false` at session spawn (skip-unchanged);
+/// `force=true` on explicit reload (always re-copy).
 pub(crate) fn refresh_local_installs_from_disk(trust: &TrustStore, force: bool) -> RefreshSummary {
     refresh_local_installs_in(&InstallRegistry::resolve_install_dir(), trust, force)
 }
 
-/// Short registry-lock wait: contention means a plugin install/update is in
-/// flight, and the refresh reruns at the next spawn / `/plugins reload`.
+/// Short registry-lock wait: contention means a plugin install/update is in flight.
 const REFRESH_REGISTRY_LOCK_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// [`refresh_local_installs_from_disk`] at an explicit install dir (tests
@@ -61,8 +58,8 @@ fn refresh_local_installs_in(
     summary
 }
 
-/// A local install snapshotted out of the registry so the refresh loop can mutate the registry while iterating.
-/// `expected` is the recorded plugin set used to guard against scope-changing rediscovery.
+/// A local install snapshotted out of the registry so the refresh loop can
+/// mutate the registry while iterating.
 struct RefreshTarget {
     key: String,
     source_path: PathBuf,
@@ -144,9 +141,9 @@ fn refresh_local_installs(
     summary
 }
 
-/// The set of `(relative_path, file_len)` for every non-symlink file under a tree.
-/// Symlinks are skipped, matching [`copy_dir_recursive`].
-/// Comparing two of these detects add/remove/rename/size-change with no stored fingerprint and no mtime compare (a copy does not preserve mtimes).
+/// The set of `(relative_path, file_len)` for every non-symlink file under a tree. Symlinks are skipped, matching [`copy_dir_recursive`].
+/// Comparing some of these detects add/remove/rename/size-change with no stored fingerprint and no mtime compare (a copy does not preserve
+/// mtimes).
 fn tree_file_set(root: &Path) -> Option<BTreeMap<PathBuf, u64>> {
     fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<PathBuf, u64>) -> std::io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
@@ -197,7 +194,6 @@ fn recopy_local_install(
         .unwrap_or("plugin");
     // Reclaim orphaned tmp/backup dirs left by a crash in a prior run.
     sweep_stale(parent, file_name);
-    // PID alone collides when two in-process session creates refresh the same install.
     let tmp = unique_tmp_path(parent, file_name, "refresh");
     let backup = unique_tmp_path(parent, file_name, "backup");
 
@@ -343,8 +339,8 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
-    /// RAII guard: sets an env var, restores the prior value (or unsets) on drop.
-    /// A test must never leave the process-global env pointing at a dropped tempdir.
+    /// RAII guard: sets an env var, restores the prior value (or unsets) on
+    /// drop.
     struct EnvVarGuard {
         key: &'static str,
         prev: Option<std::ffi::OsString>,
@@ -657,8 +653,7 @@ mod tests {
     #[serial(home_env)]
     fn refresh_keeps_stale_when_legacy_subdir_scope_lost() {
         let (_home_tmp, home, _home_guard) = home_tempdir();
-        // Legacy multi-package source: the real plugin is at plugins/foo
-        // other-dir is unrelated root-level content that root-scope discovery would pick up
+        // Legacy multi-package source: the real plugin is at plugins/foo other-dir is unrelated root-level content.
         let workspace = home.join("workspace");
         write_plugin_json(&workspace.join("plugins/foo"), "foo");
         write_agent_md(&workspace.join("other-dir"), "noise");

@@ -1,34 +1,4 @@
-//! `x.ai/session/updates`: returns a session's updates in a single response, with the dead branches left by rewinds filtered out.
-//! Supports optional pagination (`offset`, `limit`) for large sessions.
-//!
-//! ## Usage
-//!
-//! ```json
-//! // Full session (default)
-//! { "sessionId": "...", "cwd": "/path" }
-//! → { "updates": [...], "totalCount": 3000, "hasMore": false }
-//!
-//! // Paginated
-//! { "sessionId": "...", "cwd": "/path", "offset": 0, "limit": 500 }
-//! → { "updates": [...], "totalCount": 3000, "hasMore": true }
-//!
-//! // Tail (most recent N updates)
-//! { "sessionId": "...", "cwd": "/path", "offset": -100 }
-//! → { "updates": [...], "totalCount": 3000, "hasMore": false }
-//!
-//! // Tail by user-message turns
-//! { "sessionId": "...", "cwd": "/path", "turnIndex": 2 }
-//! → { "updates": [...], "totalCount": 3000, "hasMore": true, "promptStarts": [...] }
-//! ```
-//!
-//! Negative `offset` counts from the end: `-100` means "last 100 updates".
-//! `turnIndex` slices by user-message turn boundaries instead of raw count.
-//!
-//! Each element in the `updates` array is the full JSONL storage envelope (`timestamp`, `method`, `params`), not just the inner notification params.
-//! Clients parse the `method` field to tell the update type (`"session/update"` for ACP, `"_x.ai/session/update"` for xAI extensions).
-//! The notification payload is in `params`.
-//!
-//! Metadata columns and cross-host import live in [`crate::extensions::session_state`].
+//! `x.ai/session/updates`: returns a session's updates in a single response.
 
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
@@ -43,7 +13,6 @@ use crate::session::wire_tags::{REWIND_MARKER, USER_MESSAGE_CHUNK_PREFIX};
 struct Request {
     session_id: String,
     cwd: String,
-    /// Negative offset counts from the end (`-100` means the last 100).
     #[serde(default)]
     offset: Option<i64>,
     #[serde(default)]
@@ -51,7 +20,7 @@ struct Request {
     /// Deliver updates as chunked notifications instead of a JSON array.
     #[serde(default)]
     stream: bool,
-    /// Updates per chunk notification (default 64). Only used with `stream`.
+    /// Only used with `stream`.
     #[serde(default)]
     chunk_size: Option<usize>,
     /// Tail by user-message-turn count instead of raw update count.
@@ -91,8 +60,8 @@ fn page_bounds(request: &Request, total_count: usize) -> PageBounds {
     PageBounds { start, end }
 }
 
-/// Check if a raw JSONL line is a `user_message_chunk` ACP update, by substring match rather than a full deserialization.
-/// Serde emits `"sessionUpdate":"user_message_chunk"` deterministically, and it cannot appear unescaped in user content, so a match is never false.
+/// Check if a raw JSONL line is a `user_message_chunk` ACP update, by
+/// substring match rather than a full deserialization.
 fn is_user_message_chunk(line: &str) -> bool {
     line.contains(&*USER_MESSAGE_CHUNK_PREFIX)
 }
@@ -875,7 +844,7 @@ mod tests {
         let cwd = cwd_tmp.path().to_string_lossy().to_string();
         let session_id = "tail-prompts-basic";
 
-        // 3 turns, each one user chunk then one agent chunk
+        // Turns, each user chunk then one agent chunk
         let lines = vec![
             user_chunk("p1"),
             agent_chunk("r1"),
@@ -900,7 +869,7 @@ mod tests {
         let Some(updates) = json.get("updates").and_then(|v| v.as_array()) else {
             panic!("expected updates array: {json}");
         };
-        // The last 2 turns hold 4 updates (p2, r2, p3, r3)
+        // The last turns hold updates (p2, r2, p3, r3)
         assert_eq!(updates.len(), 4);
         let rendered = serde_json::to_string(updates).unwrap();
         assert!(rendered.contains("p2"));
@@ -952,7 +921,6 @@ mod tests {
         let cwd = cwd_tmp.path().to_string_lossy().to_string();
         let session_id = "tail-prompts-rewind";
 
-        // Turn 1, Turn 2 (dead), rewind, Turn 2 (replacement), Turn 3
         let lines = vec![
             user_chunk("p1"),
             agent_chunk("r1"),
@@ -981,7 +949,7 @@ mod tests {
         let Some(updates) = json.get("updates").and_then(|v| v.as_array()) else {
             panic!("expected updates array: {json}");
         };
-        // Last 2 turns: p2-new, r2-new, p3, r3
+        // Last turns: p2-new, r2-new, p3, r3
         assert_eq!(updates.len(), 4);
         let rendered = serde_json::to_string(updates).unwrap();
         assert!(!rendered.contains("dead"));
@@ -1021,7 +989,6 @@ mod tests {
         let json = parse_response(response);
 
         assert_eq!(json.get("totalCount"), Some(&serde_json::json!(6)));
-        // offset -2 selects the last 2 updates
         let Some(updates) = json.get("updates").and_then(|v| v.as_array()) else {
             panic!("expected updates array: {json}");
         };

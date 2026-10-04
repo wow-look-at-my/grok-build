@@ -8,8 +8,6 @@ description: >
 terminal:
   rows: 40
   cols: 160
-# Native OSC 8 brand so the pager actually emits hyperlink sequences in the
-# PTY stream (default harness brand is Unknown and skips OSC 8).
 environment:
   env:
     - key: TERM_PROGRAM

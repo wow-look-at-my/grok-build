@@ -2,16 +2,14 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Folder-trust Case 2, cwd IS `$HOME` (a git repo): no prompt, no re-prompt loop. `$HOME` (and its
-/// default `~/.grok`) can never be recorded by the trust store, so `decide` resolves Trusted rather
-/// than prompting on a key that could never persist.
+/// `$HOME` (and its default `~/.grok`) can never be recorded by the trust store, so `decide`
+/// resolves Trusted rather than prompting on a key that could never persist.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn folder_trust_cwd_is_home_git_repo_no_prompt() {
     let content = ContentController::start().await.expect("start content");
 
-    // $HOME is a git repo with a home-level repo-local marker, and cwd IS $HOME
-    // There is genuinely "something to gate", yet the key is unrecordable
+    // $HOME is a git repo with a home-level repo-local marker, and cwd IS $HOME There is genuinely "something to gate".
     git2::Repository::init(content.home()).expect("git init $HOME");
     std::fs::write(content.home().join(".mcp.json"), "{}").expect("write $HOME/.mcp.json");
 
@@ -29,7 +27,8 @@ async fn folder_trust_cwd_is_home_git_repo_no_prompt() {
     )
     .expect("spawn pager");
 
-    // Normal welcome boots; the trust question never appears (an unrecordable key resolves Trusted), so the session can proceed and never re-prompts
+    // Normal welcome boots; the trust question never appears (an unrecordable
+    // key resolves Trusted).
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("normal welcome renders");

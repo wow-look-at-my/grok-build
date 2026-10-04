@@ -2,9 +2,9 @@ use super::types::{SchedulerError, interval_duration};
 
 const MINIMUM_INTERVAL_SECS: u64 = 60;
 
-/// Parse an interval string like "5m", "2h", "30s", "1d" into seconds.
-/// Minimum interval is 60 seconds; values below are clamped. An interval with
-/// no duration to add to a timestamp is refused here, where it arrives as text.
+/// Parse an interval string like "5m", "2h", "30s", "1d" into seconds. Minimum
+/// interval is many seconds; values below are clamped. An interval with no
+/// duration to add to a timestamp is refused here, where it arrives as text.
 pub fn parse_interval(s: &str) -> Result<u64, SchedulerError> {
     let s = s.trim();
     if s.is_empty() {
@@ -52,7 +52,6 @@ pub fn parse_interval(s: &str) -> Result<u64, SchedulerError> {
 }
 
 /// Convert seconds to a human-readable interval string.
-/// e.g. 300 -> "every 5 minutes", 3600 -> "every 1 hour"
 pub fn interval_to_human(secs: u64) -> String {
     if secs.is_multiple_of(86400) {
         let n = secs / 86400;
@@ -133,8 +132,7 @@ mod tests {
 
     #[test]
     fn parse_overflow_returns_error() {
-        // Digits parse as u64 but the unit multiplication overflows — must
-        // surface an error rather than panicking (debug) or wrapping (release).
+        // Digits parse as u64 but the unit multiplication overflows — must surface an error rather than panicking (debug) or wrapping.
         assert!(parse_interval("1000000000000000000d").is_err());
         assert!(parse_interval(&format!("{}s", u64::MAX)).is_err());
         assert!(parse_interval(&format!("{}d", u64::MAX)).is_err());

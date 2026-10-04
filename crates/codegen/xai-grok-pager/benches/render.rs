@@ -1,8 +1,4 @@
 //! Criterion benchmarks for the xai-grok-pager rendering pipeline.
-//!
-//! Measures the per-frame cost of rendering a rich markdown document into a ratatui `Buffer`.
-//! This isolates the render hot path (entry rendering, scratch buffer copies, layout computation).
-//! One-time setup (markdown parsing, syntax highlighting, word wrapping) is not measured.
 
 use std::time::Duration;
 
@@ -29,7 +25,6 @@ const VIEWPORT_HEIGHT: u16 = 50;
 const SCROLL_STEP: u16 = 10;
 
 /// Entry count for the reveal benchmarks.
-/// Approximates the ~3,200-entry scrollback of a long real session (~5 MB of searchable text).
 const REVEAL_ENTRIES: usize = 3000;
 
 /// Build the entries used by every benchmark iteration.
@@ -74,7 +69,6 @@ fn compute_layouts(
 
 // ─── Benchmarks ────────────────────────────────────────────────────
 
-/// Render a single frame at scroll offset 0 (top of document).
 ///
 /// The per-frame baseline with no top clipping (only bottom-clipped).
 fn bench_single_frame(c: &mut Criterion) {
@@ -262,7 +256,6 @@ fn bench_windowed_scroll(c: &mut Criterion) {
 
 // ─── Reveal (scrollback-search n/N navigation) ─────────────────────
 
-/// One paragraph of lorem-style body per entry (~1.7 KB).
 /// The `REVEAL_ENTRIES`-entry corpus is then on the order of the motivating session's searchable text (a few MB; the exact size is logged).
 fn reveal_body(i: usize) -> String {
     let lorem = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do \
@@ -293,9 +286,6 @@ fn build_reveal_state() -> (ScrollbackState, EntryId) {
             state.push_block(RenderBlock::user_prompt(body));
         }
     }
-    // ~1-2 KB prompts are foldable, so they default to Collapsed
-    // Expand them so a reveal over an already-visible match doesn't change display state, the steady n/N case the skip path optimizes
-    // (Setup only; not measured.)
     state.expand_all();
     // Settle the layout cache and clear dirty heights so the measured reveals start from a clean cache
     state.prepare_layout(VIEWPORT_WIDTH, VIEWPORT_HEIGHT);

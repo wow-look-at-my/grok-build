@@ -1,7 +1,4 @@
 //! MCP tool-name qualification and session admission.
-//!
-//! Provider function-name limits (64 chars) apply to `search_tool` / `use_tool`, not to
-//! catalog keys. A qualified `server__tool` is a routing id for those meta-tools.
 
 use xai_grok_workspace_types::MCP_TOOL_NAME_DELIMITER;
 

@@ -72,10 +72,6 @@ async fn shift_tab_in_session_cycles_mode() {
 }
 
 /// Whether the prompt's flag row carries `flag`.
-///
-/// The row renders each flag behind a middle-dot separator, and matching on
-/// that separator keeps the probe off the word where it appears anywhere else
-/// on screen.
 fn mode_flag(harness: &PtyHarness, flag: &str) -> bool {
     let needle = format!("\u{B7} {flag}");
     harness
@@ -85,7 +81,7 @@ fn mode_flag(harness: &PtyHarness, flag: &str) -> bool {
         .any(|line| line.contains(&needle))
 }
 
-/// 15b. **Two rapid Shift+Tab presses land on the LAST stop and stay there.**
+/// 15b. **Rapid Shift+Tab presses land on the LAST stop and stay there.**
 ///
 /// Both presses go out before the shell has confirmed the first one, so the
 /// confirmation for the first stop (Plan) arrives after the ring already

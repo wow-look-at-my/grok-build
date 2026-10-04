@@ -1,11 +1,4 @@
-//! Linux system sleep/wake via systemd-logind's `PrepareForSleep` D-Bus
-//! signal, with a `delay` inhibitor lock so we get a short window to react
-//! before the system actually sleeps.
-//!
-//! Uses the `zbus` blocking API on a dedicated thread so we don't require the
-//! caller to run any particular async runtime. If the system bus or logind is
-//! unavailable (non-systemd distro, container, permission error), `start`
-//! returns `None` and the caller degrades gracefully.
+//! Linux system sleep/wake via systemd-logind's `PrepareForSleep` D-Bus signal, with a `delay` inhibitor lock so we get a short window.
 
 use std::thread;
 
@@ -15,15 +8,12 @@ const DEST: &str = "org.freedesktop.login1";
 const PATH: &str = "/org/freedesktop/login1";
 const IFACE: &str = "org.freedesktop.login1.Manager";
 
-/// There is intentionally no clean stop: the worker thread parks on a blocking logind signal iterator, which cannot be
-/// interrupted without a signal arriving, so dropping this neither joins nor cancels it. (macOS can `CFRunLoopStop` from
-/// `Drop` and so joins; Linux cannot — hence the asymmetry, and why there is no `Drop` impl here.)
+/// There is intentionally no clean stop.
 pub(crate) struct Listener;
 
 impl Listener {
     pub(crate) fn start(callback: PowerCallback) -> Option<Self> {
-        // Probe synchronously so registration failures return `None` to the
-        // caller rather than dying silently on the worker thread.
+        // Probe synchronously so registration failures return `None` to the caller rather than dying silently.
         let conn = zbus::blocking::Connection::system().ok()?;
         let proxy = zbus::blocking::Proxy::new(&conn, DEST, PATH, IFACE).ok()?;
         let signals = proxy.receive_signal("PrepareForSleep").ok()?;
@@ -61,9 +51,7 @@ fn run_thread(
             continue;
         };
         if about_to_sleep {
-            // The callback may block (bounded) waiting for an in-flight token refresh to finish; the `delay` inhibitor is still held
-            // across it, so that wait holds off the suspend (up to logind's `InhibitDelayMaxSec`, default 5 s). Release it only once
-            // the callback returns so the system can then proceed to sleep.
+            // The callback may block (bounded) waiting for an in-flight token refresh to finish; the `delay` inhibitor is still held across it.
             callback(PowerEvent::WillSleep);
             inhibitor = None;
         } else {
@@ -77,15 +65,11 @@ fn run_thread(
 }
 
 pub(crate) fn current_power_state() -> crate::PowerState {
-    // Linux has no "dark wake" equivalent to query (the system is either
-    // suspended or fully awake); report Unknown so callers fall back to the
-    // logind `PrepareForSleep` path.
+    // Linux has no "dark wake" equivalent to query (the system is either suspended or fully awake).
     crate::PowerState::Unknown
 }
 
-/// No power-assertion support on this platform: callers carry on unprotected, which is the same behaviour as before
-/// assertions existed. Never constructed here (`hold_awake` always returns `None`); it exists so the cross-platform
-/// `SleepAssertion` has a field type on every target.
+/// No power-assertion support on this platform: callers carry on unprotected.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct Assertion;

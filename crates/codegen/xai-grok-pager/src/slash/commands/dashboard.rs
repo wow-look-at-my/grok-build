@@ -1,12 +1,4 @@
 //! `/dashboard`: open the Agent Dashboard view.
-//!
-//! The dashboard shows every running session, top-level and subagents, with peek, attach, and dispatch from one screen.
-//! Attaching to a subagent reuses the existing fullscreen takeover, so attaching never bypasses `active_subagent`.
-//!
-//! Like other session-less commands it runs through `Action` only and takes no args.
-//! The command is hidden in the registry until `dashboard_enabled()` reveals it via [`crate::app::agent_view::AgentView::set_dashboard_visible`].
-//! With `[dashboard].enabled = false` or `GROK_AGENT_DASHBOARD=0` the dispatcher shows a toast and refuses to open.
-//! The dashboard is independent of leader mode.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
@@ -16,9 +8,7 @@ pub struct DashboardCommand;
 impl SlashCommand for DashboardCommand {
     slash_meta! {
         name: "dashboard",
-        // `/sessions` stays as an alias after the sessions picker modal was removed, so old muscle memory redirects here
-        // The dashboard replaced that modal for switching, renaming, and closing active sessions.
-        // The aliases inherit the feature gate (`set_dashboard_visible` hides by canonical name)
+        // `/sessions` stays as an alias after the sessions picker modal.
         aliases: ["agents-dashboard", "sessions"],
         description: "Open the Agent Dashboard",
         usage: "/dashboard",

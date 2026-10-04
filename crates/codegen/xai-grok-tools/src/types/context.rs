@@ -10,21 +10,11 @@ pub struct TruncationConfig {
     pub default_max_output_bytes: Option<usize>,
     /// Per-tool overrides keyed by canonical tool name.
     pub per_tool_max_output_bytes: HashMap<String, usize>,
-    /// Max lines to read (read_file). Default: 1000.
+    /// Max lines to read (read_file).
     pub max_lines_read: Option<usize>,
-    /// Inline cap for MCP tool results only (bytes). Consulted by the MCP truncation path (`mcp_max_output_bytes_for`) between the per-tool map and
-    /// `default_max_output_bytes`. Deliberately separate from `default_max_output_bytes` so an MCP-specific override (e.g. a repo's `[mcp]
-    /// max_output_bytes`) never changes non-MCP readers like the opencode bash cap.
+    /// Inline cap for MCP tool results only (bytes).
     pub mcp_max_output_bytes: Option<usize>,
-    /// Live ceiling derived from the model's remaining context-window budget
-    /// (see `SessionActor::reseed_context_budget_output_cap` in xai-grok-shell),
-    /// re-resolved before each tool-dispatch step. `None` when the host never
-    /// wires session budget in (e.g. tests, or a caller with no chat state).
-    ///
-    /// Every resolved cap — static config, per-tool override, MCP override —
-    /// is clamped to this so a single tool call can never by itself hand the
-    /// model a prompt bigger than what's actually left of its context window,
-    /// regardless of how a static byte limit was configured.
+    /// Live ceiling derived from the model's remaining context-window budget.
     pub context_budget_max_output_bytes: Option<usize>,
     pub whole_read: WholeReadPolicy,
 }
@@ -73,9 +63,9 @@ impl TruncationConfig {
         }
     }
 
-    /// Resolve the max output bytes for an **MCP** payload. Precedence: per-tool override > MCP-specific override (`mcp_max_output_bytes`) >
-    /// default override > built-in fallback. Only the MCP truncation path (`util::mcp_truncate`) should call this; non-MCP tools keep using
-    /// [`Self::max_output_bytes_for`] so that an MCP-specific override never bleeds into their caps.
+    /// Resolve the max output bytes for an **MCP** payload. Precedence:
+    /// per-tool override > MCP-specific override (`mcp_max_output_bytes`) >
+    /// default override > built-in fallback.
     pub fn mcp_max_output_bytes_for(&self, tool_name: &str, builtin_default: usize) -> usize {
         let resolved = if let Some(&per_tool) = self.per_tool_max_output_bytes.get(tool_name) {
             per_tool
@@ -87,9 +77,7 @@ impl TruncationConfig {
         self.clamp_to_context_budget(resolved)
     }
 
-    /// Replace template placeholders in a tool description with current config values. `{max_lines_read}` — from `max_lines_read` (default 1000)
-    /// `{max_chars_per_line}` — fixed display value for opencode-compat descriptions only; the opencode `read` tool clips at its own hardcoded
-    /// `MAX_LINE_LENGTH` (2000), independent of this config. grok_build `read_file` never clips lines.
+    /// Replace template placeholders in a tool description with current config values. grok_build `read_file` never clips lines.
     pub fn interpolate_description(
         &self,
         description: &str,
@@ -218,8 +206,7 @@ mod tests {
 
     #[test]
     fn apply_to_schema_tracks_a_raised_ceiling_and_a_renamed_property() {
-        // A 900s actor must not be handed the 300s default, and the marker —
-        // not the property name — is what identifies the wait.
+        // A 900s actor must not be handed the 300s default.
         let cfg = TruncationConfig::default();
         let cap = 900_000;
         let mut schema = serde_json::json!({
@@ -354,9 +341,8 @@ mod tests {
 
     #[test]
     fn mcp_override_does_not_bleed_into_non_mcp_lookup() {
-        // Regression: the MCP-specific cap must not change what non-MCP
-        // readers (e.g. opencode bash via `max_output_bytes_for("bash", ..)`)
-        // resolve.
+        // Regression: the MCP-specific cap must not change what non-MCP readers (e.g. opencode bash via
+        // `max_output_bytes_for("bash", ..)`).
         let cfg = TruncationConfig {
             mcp_max_output_bytes: Some(123),
             ..Default::default()

@@ -441,7 +441,6 @@ fn small_screen_trigger_waits_for_stable_agent_measure_then_fires_once() {
     app.maybe_trigger_small_screen_tip();
     assert!(!app.small_screen_tip_evaluated);
 
-    // Agent view, but never drawn (size (0,0)): still deferred.
     app.active_view = ActiveView::Agent(id);
     app.maybe_trigger_small_screen_tip();
     assert!(!app.small_screen_tip_evaluated);
@@ -618,7 +617,6 @@ fn small_screen_tip_lifecycle_shows_once_across_submit_and_occlusion() {
         "expires after visible TTL"
     );
 
-    // Expiry does not resurrect anything: one-shot spent, count capped at 1.
     app.maybe_trigger_small_screen_tip();
     assert!(!agent_ref(&app, id).ephemeral_tip.is_active());
     assert_eq!(app.tip_seen_counts.get(SMALL_SCREEN_TIP_SEEN_KEY), Some(&1));
@@ -700,7 +698,6 @@ fn ssh_wrap_trigger_waits_for_stable_agent_measure_then_fires_once() {
     app.maybe_trigger_ssh_wrap_tip_inner(true);
     assert!(!app.ssh_wrap_tip_evaluated);
 
-    // Agent view, but never drawn (size (0,0)): still deferred.
     app.active_view = ActiveView::Agent(id);
     app.maybe_trigger_ssh_wrap_tip_inner(true);
     assert!(!app.ssh_wrap_tip_evaluated);
@@ -753,7 +750,7 @@ fn ssh_wrap_trigger_env_not_recommending_consumes_without_showing() {
 fn ssh_wrap_trigger_defers_while_tip_slot_busy() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
-    // In the small-screen band so the other session-load tip takes the slot first (mirrors the real draw order: the small-screen trigger runs first)
+    // In the small-screen band so the other session-load tip takes the slot first.
     app.agents.get_mut(&id).unwrap().last_terminal_size = (100, 24);
     app.maybe_trigger_small_screen_tip();
     assert!(agent_ref(&app, id).ephemeral_tip.is_active());
@@ -994,7 +991,7 @@ fn follow_up_chip_preserves_prompt_draft() {
 
 #[test]
 fn send_prompt_clears_follow_up_chips() {
-    // Production turn-start path: the local queue drain clears the previous response's chips
+    // Production turn-start path: the local queue drain clears the response's chips
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents
@@ -1010,9 +1007,7 @@ fn send_prompt_clears_follow_up_chips() {
 
 #[test]
 fn chip_submit_while_enqueued_clears_follow_up_chips() {
-    // A chip click submitted while a turn is RUNNING *and* the local queue is non-empty takes the ENQUEUE path, not immediate-server-send
-    // `immediate_server_send_eligible` is false whenever `pending_prompts` is non-empty
-    // Clearing only on the immediate-send branch would leave this path with chips on screen after the user had already acted on one
+    // A chip click submitted while a turn is RUNNING *and* the local queue is non-empty takes the ENQUEUE path.
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     {
@@ -1052,8 +1047,7 @@ fn send_prompt_while_running_queues_without_drain() {
 
     let effects = dispatch(Action::SendPrompt("queued".into()), &mut app);
 
-    // A plain prompt typed while a turn is running is sent IMMEDIATELY (server-authoritative) rather than held in the local drip-feed queue
-    // It does NOT start a concurrent turn
+    // A plain prompt typed while a turn is running is sent IMMEDIATELY (server-authoritative) rather than held.
     assert_eq!(effects.len(), 1);
     let pid = match effects.first() {
         Some(Effect::SendPrompt {
@@ -1246,8 +1240,7 @@ fn send_while_running_with_pending_local_prompt_preserves_fifo() {
     let id = AgentId(0);
     {
         let agent = app.agents.get_mut(&id).unwrap();
-        // A turn is running (prompt "1" already drained from the startup queue)
-        // An older prompt ("2") is still stranded in the local drip-feed queue because it was enqueued before the turn began
+        // A turn is running (prompt "1" already drained from the startup queue) An older prompt ("2") is still stranded in the local drip-feed queue.
         agent.session.state = AgentState::TurnRunning;
         agent.session.enqueue_prompt("two".into());
         assert_eq!(agent.session.pending_prompts.len(), 1);
@@ -1292,9 +1285,7 @@ fn send_while_running_with_pending_local_prompt_preserves_fifo() {
 
 #[test]
 fn turn_end_drains_next_queued_prompt() {
-    // A plain prompt typed while running is sent server-authoritatively and drained by the leader, not by the local queue
-    // The leader's `running_prompt_id` broadcast is modeled here by a stashed adoption that arrived before the previous turn's PromptResponse
-    // The PromptResponse handler adopts it after `finish_turn`, rendering its user block
+    // A plain prompt typed while running is sent server-authoritatively and drained by the leader.
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -1403,8 +1394,7 @@ fn prompt_response_fifo_handoff_paints_multi_bubble_combined() {
 
 #[test]
 fn turn_end_with_empty_queue_stays_idle() {
-    // Pin prompt suggestions OFF so the effect list below is deterministic regardless of the dev machine's `[ui].prompt_suggestions` config
-    // Thread-local cache; see `turn_end_fetches_prompt_suggestion_when_enabled`
+    // Pin prompt suggestions OFF so the effect list below is deterministic regardless.
     crate::appearance::cache::set_prompt_suggestions(false);
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -1441,7 +1431,7 @@ fn multiple_queued_prompts_drain_one_per_turn() {
 
     // Send first (immediate drain).
     dispatch(Action::SendPrompt("a".into()), &mut app);
-    // Queue two more while running (local queue path).
+    // Queue more while running (local queue path).
     enqueue_local(&mut app, id, "b");
     enqueue_local(&mut app, id, "c");
     assert_eq!(agent_ref(&app, id).session.queue_len(), 2);
@@ -1509,8 +1499,8 @@ fn prompt_response_resets_turn_state() {
     ));
     assert!(agent_ref(&app, id).session.state.is_idle());
     assert!(agent_ref(&app, id).turn_started_at.is_none());
-    // mark_turn_finished must stamp the activity anchor used by the dashboard relative-time label
-    // If this regresses, rows will show "now" forever instead of advancing
+    // mark_turn_finished must stamp the activity anchor used by the dashboard
+    // relative-time label If this regresses.
     assert!(
         agent_ref(&app, id).last_active_at.is_some(),
         "mark_turn_finished must update last_active_at"
@@ -1551,8 +1541,7 @@ fn turn_end_fetches_prompt_suggestion_when_enabled() {
     };
     assert_eq!(*agent_id, id);
     assert!(session_id.is_some());
-    // No `grok-4.6` in the test catalog and no env override, so `None` on the wire; the shell then uses its own `grok-4.6` default
-    // Suggestion calls never use the session model
+    // No `grok-4.6` in the test catalog and no env override, so `None` on the wire.
     assert_eq!(*model, None);
 
     // The loaded suggestion lands in the right agent's controller.
@@ -1878,9 +1867,7 @@ fn prompt_response_context_overflow_suppresses_turn_failed_and_toast() {
         (has_turn_failed, app.deferred_notification.is_some())
     }
 
-    // Control: with no ContextTooLarge block, PromptResponse still ends the turn with TurnFailed and a toast
-    // Overflow copy in the error string must not change that Only a prior ContextTooLarge banner (from RetryState `error_type=context_length`) suppresses the marker
-    // Only a prior ContextTooLarge banner (from RetryState `error_type=context_length`) suppresses the marker
+    // Control: with no ContextTooLarge block, PromptResponse still ends the turn with TurnFailed and a toast Overflow copy.
     let (failed_block, toast) = run_failed_turn(false);
     assert!(failed_block, "baseline: a failed turn pushes TurnFailed");
     assert!(toast, "baseline: a failed turn emits an error toast");
@@ -1948,7 +1935,6 @@ fn prompt_response_request_failed_banner_suppresses_turn_failed_and_toast() {
     );
 }
 
-/// The 401/402 race fallbacks must fire on the banner-formatted error text PromptResponse carries.
 /// The RetryState notification may lose the race, so no ReAuthRequired block exists yet.
 #[test]
 fn prompt_response_formatted_401_suppresses_turn_failed_and_stashes_prompt() {
@@ -2143,8 +2129,8 @@ fn prompt_response_routes_idle_title_through_frame_pipeline() {
         &mut app,
     );
 
-    // The stale busy-title escapes must be replaced with idle-title escapes, not left holding the old busy title
-    // The replacement goes through the frame pipeline (writer thread) in the correct order
+    // The stale busy-title escapes must be replaced with idle-title escapes,
+    // not left holding the busy title The replacement goes.
     assert!(
         app.pending_notification_escapes
             .as_ref()
@@ -2152,8 +2138,8 @@ fn prompt_response_routes_idle_title_through_frame_pipeline() {
         "stale notification escapes must be replaced on turn completion",
     );
 
-    // The notification must be deferred (not fired immediately) so the terminal has at least one render frame to apply the idle title
-    // The notification then reads the tab title for its subtitle
+    // The notification must be deferred (not fired immediately) so the
+    // terminal has at least one render frame to apply the idle title.
     assert!(
         app.deferred_notification.is_some(),
         "turn-complete notification must be deferred",
@@ -2246,9 +2232,8 @@ fn cancel_hands_queue_to_agent_without_reordering() {
     let id = AgentId(0);
     let sid = "test-session".to_string();
 
-    // Running turn (`p-run`) plus three prompts typed while running
-    // They exist as optimistic echoes (no confirming broadcast yet) and are mirrored into `agent.shared_queue`
-    // That is exactly how the immediate-send path leaves things
+    // Running turn (`p-run`) plus prompts typed while running They exist as
+    // optimistic echoes (no confirming broadcast yet) and are mirrored.
     {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.session.state = AgentState::TurnRunning;
@@ -3547,9 +3532,7 @@ fn slash_compact_enqueues_command() {
 
 #[test]
 fn palette_dispatch_preserves_prompt_draft() {
-    // Regression for the bug where picking a SlashCommand entry from the Ctrl-P palette wiped whatever the user had typed
-    // The palette routes through Action::SendSlashCommandPreservingDraft instead of Action::SendPrompt
-    // That arm calls dispatch_send_prompt_inner with clear_prompt=false
+    // Regression for the bug where picking a SlashCommand entry.
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     // User has a draft typed in the prompt.
@@ -3624,9 +3607,7 @@ fn non_slash_prompt_still_works() {
 
 #[test]
 fn submit_question_answers_cancel_clears_local_modal_and_restores_prompt() {
-    // Full-stack contract test: cancel through the public `submit_question_answers` entry point must
-    // (b) restore the stashed prompt text and cursor
-    // (c) return InputOutcome::Changed (no Action) and silently drop the directive carried by LocalQuestionKind::Fork.
+    // Full-stack contract test: cancel through the public `submit_question_answers` entry point must (b) restore the stashed prompt text.
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
     use xai_grok_tools::implementations::grok_build::ask_user_question::{
         Question, QuestionOption,
@@ -3964,8 +3945,7 @@ fn agent_paste_completion_after_switch_does_not_send_to_other_agent() {
         })
         .expect("Cmd+V of an image must defer a probe");
     crate::clipboard::clear_clipboard_probe_hook();
-    // Model the event loop: `AppView::handle_input` drains the view's pending effects after the key event, before the completion arrives
-    // The completion arm hands back anything still queued
+    // Model the event loop: `AppView::handle_input` drains the view's pending effects after the key event.
     app.agents.get_mut(&a).unwrap().pending_effects.clear();
 
     // Enter (still on A): the send is stashed
@@ -3991,18 +3971,14 @@ fn agent_paste_completion_after_switch_does_not_send_to_other_agent() {
         &mut app,
     );
 
-    // (1) The image attaches to the ORIGINAL target A.
     assert_eq!(agent_ref(&app, a).prompt.images.len(), 1);
     assert!(agent_ref(&app, a).prompt.text().contains("[Image #1]"));
     let Some(image) = agent_ref(&app, a).prompt.images.first() else {
         panic!("expected the image attached to agent A");
     };
     let preview_identity = image.preview.identity();
-    // (2) A's stash is cleared so it can't leak.
     assert!(agent_ref(&app, a).deferred_send.is_none());
     assert_eq!(agent_ref(&app, a).paste_probe_in_flight, 0);
-    // (3) No send is re-issued to the now-active B
-    // The only returned effect prepares the image that was attached to A
     match effects.as_slice() {
         [Effect::PreparePromptImagePreview { preparation }] => assert_eq!(
             preparation.preview().identity(),
@@ -4754,7 +4730,7 @@ fn goal_send_now_painted_block_survives_queue_changed_removal() {
         panic!("expected painted send-now block {painted_pid}");
     };
     // Model the row as CONFIRMED shell-side (optimistic echo already cleared)
-    // The race: a confirmed row disappears from a later broadcast when the Send Now is merged as an interjection
+    // The race: a confirmed row disappears from a later broadcast.
     app.agents
         .get_mut(&id)
         .unwrap()
@@ -5053,8 +5029,7 @@ fn local_drain_holds_while_server_row_queued() {
         "the local row must stay queued"
     );
 
-    // The running server row does NOT hold the drain (it is the in-flight turn, not a queued one)
-    // Once it's marked running and the turn ends, the local row drains normally
+    // The running server row does NOT hold the drain (it is the in-flight turn, not a queued one) Once it's marked running and the turn ends.
     agent.session.current_prompt_id = Some("srv-1".into());
     let effects = maybe_drain_queue(agent, &mut app.pending_image_notices).effects;
     assert!(
@@ -5135,9 +5110,8 @@ fn send_now_cancel_after_park_leaves_no_markers() {
     );
 }
 
-/// Shell-suggestion async gate 1: a debounce expiring after the user left bash mode fetches nothing.
-/// A stale timer must not fire a suggest request for chat text.
-/// Positive control: still in bash mode, the fetch fires.
+/// A stale timer must not fire a suggest request for chat text. Positive control: still in bash
+/// mode, the fetch fires.
 #[test]
 fn suggestion_debounce_after_bash_exit_fetches_nothing() {
     let mut app = test_app_with_agent();
@@ -5187,7 +5161,6 @@ fn suggestion_debounce_after_bash_exit_fetches_nothing() {
     );
 }
 
-/// Shell-suggestion async gate 2: a response landing after the user left bash mode is dropped wholesale.
 /// No ghost, no dropdown items over the normal-mode chat draft.
 #[test]
 fn suggestions_landing_after_bash_exit_are_dropped() {

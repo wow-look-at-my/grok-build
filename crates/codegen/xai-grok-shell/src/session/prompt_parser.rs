@@ -6,18 +6,15 @@ use std::path::PathBuf;
 use xai_grok_workspace::file_system::{
     FileReference, render_embedded_resource, render_file_reference,
 };
-/// Some templates put `<user_query>` last (context first); Grok puts it first.
-/// Keeping them separate lets the caller truncate context without searching for the query boundary in a flat string.
+/// Some templates put `<user_query>` last (context first); Grok puts it
+/// first.
 #[derive(Debug, Clone)]
 pub struct ParsedPrompt {
     /// Context blocks: `<attached_files>` payloads and resource-link sections.
-    /// Grok mode may include editor open/focus metadata; the compat mode does not.
-    /// Empty string when there is no context.
     pub context: String,
     /// The user's query, already wrapped in `<user_query>` tags (or raw when verbatim).
     pub query: String,
     /// Skill information block: `<skill_information>` envelope with expanded skill content.
-    /// Empty string when no skills were invoked.
     pub skill_information: String,
     pub images: Vec<ImageContent>,
     /// Whether the prompt was parsed in query-last mode.
@@ -33,8 +30,8 @@ impl ParsedPrompt {
         )
     }
     /// Grok mode: `<user_query>`, then `<skill_information>`, then context.
-    /// Query-last mode: context, then `<user_query>`, then `<skill_information>`.
-    /// The `<skill_information>` block always follows `<user_query>` immediately.
+    /// Query-last mode: context, then `<user_query>`, then
+    /// `<skill_information>`.
     pub fn assemble_parts_with_skills(
         context: &str,
         query: &str,
@@ -208,8 +205,8 @@ pub(crate) async fn parse_prompt_with_skills(
         is_cursor,
     })
 }
-/// Returns `(context, query)`, the two halves of the prompt kept separate.
-/// The caller can truncate context without searching for the query boundary.
+/// Returns `(context, query)`, both halves of the prompt kept separate. The
+/// caller can truncate context without searching for the query boundary.
 fn render_message(
     message: String,
     embedded_contents: Vec<String>,

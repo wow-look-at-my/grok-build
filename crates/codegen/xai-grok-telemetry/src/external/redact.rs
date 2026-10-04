@@ -1,11 +1,4 @@
 //! Export-time fail-closed validators for the external stream.
-//!
-//! The primary redaction (typed-key schema, gating, secret scrub, truncation) happens at **emit time** in [`super::emit`].
-//! It happens there because `opentelemetry_sdk` 0.30 log records and metric data are not mutable from an exporter wrapper.
-//! These wrappers are the **authoritative chokepoint** anyway.
-//! They verify, per record/data point, that nothing reaches the wire that the emit path shouldn't have produced.
-//! On any violation they *drop* (a record for logs, the whole export for metrics) rather than scrub in place.
-//! Dropping telemetry on a schema bug is acceptable; leaking is not.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,7 +16,6 @@ use super::config::ContentGates;
 use super::schema::{external_allowed_keys, gate_for_key};
 
 /// Shared, tighten-only view of the content gates.
-/// The remote kill switch may force gates off mid-run; the exporters re-read on every export.
 pub(crate) type SharedGates = Arc<parking_lot::RwLock<ContentGates>>;
 
 /// Export-health counters (read by the internal `export_health` meta-event).
@@ -188,9 +180,6 @@ fn metrics_are_clean(metrics: &ResourceMetrics) -> bool {
     })
 }
 
-/// `opentelemetry_sdk` 0.30's `ResourceMetrics` read path is iterator-based and cannot be mutated. On any attribute-key
-/// violation the wrapper therefore drops the entire export rather than scrubbing in place. It returns `Ok`, logs an
-/// internal warning, and increments the export-health counter. This is coarse, but genuinely fail-closed.
 #[derive(Debug)]
 pub(crate) struct ValidatingMetricExporter<E> {
     inner: E,

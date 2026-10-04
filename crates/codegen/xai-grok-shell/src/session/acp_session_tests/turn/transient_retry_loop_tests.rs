@@ -1,5 +1,5 @@
-//! Coverage of the turn loop's transient-retry arm: resubmit until success, exhaustion, the kill switch.
-//! Elapsed time on the paused clock pins the backoff.
+//! Coverage of the turn loop's transient-retry arm: resubmit until success,
+//! exhaustion, the kill switch.
 
 use super::rate_limit_backoff_tests::{
     CapturedRetries, SessionKind, actor_under_test, pump_local_tasks,
@@ -8,7 +8,6 @@ use super::*;
 use std::time::Duration;
 use xai_grok_test_support::{MockInferenceServer, MockModelEntry, ScriptedResponse};
 
-/// The turn future needs a session-sized stack (spawn.rs: 8 MiB); default test stacks overflow.
 pub(super) fn on_session_stack(test: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
         .stack_size(8 * 1024 * 1024)
@@ -30,7 +29,6 @@ pub(super) fn run_paused<F: std::future::Future>(fut: impl FnOnce() -> F) {
     }));
 }
 
-/// No sampler-internal retries: request counts map 1:1 to submissions.
 pub(super) fn sampler_surfaces_5xx() -> xai_grok_sampler::RetryPolicy {
     xai_grok_sampler::RetryPolicy {
         max_retries: 0,
@@ -130,7 +128,6 @@ fn transient_5xx_resubmits_until_success() {
             );
             assert_eq!(submissions, 3, "original + two resubmits");
             assert!(
-                // Jitter floor: (2+10)*0.8 = 9.6s.
                 elapsed >= Duration::from_millis(9_600),
                 "the 2s + 10s backoff must actually be slept (virtual): {elapsed:?}"
             );
@@ -165,7 +162,6 @@ fn transient_5xx_exhausts_to_the_original_terminal() {
                 "a 5xx past the retry budget must surface the original terminal"
             );
             assert_eq!(submissions, 4, "original + full 3-resubmit budget");
-            // Jitter floor: each rung sleeps at least 80% of its base, (2+10+30)*0.8 = 33.6s
             assert!(
                 elapsed >= Duration::from_millis(33_600),
                 "the whole jittered 2s/10s/30s ladder must be slept before terminal: {elapsed:?}"
@@ -175,7 +171,7 @@ fn transient_5xx_exhausts_to_the_original_terminal() {
                 3,
                 "exactly one Retrying per resubmit, none for the terminal attempt"
             );
-            // The terminal must be the legacy internal error, not a new error shape
+            // The terminal must be the internal error, not a new error shape
             if let Err(err) = outcome {
                 assert_eq!(
                     err.code,
@@ -287,9 +283,7 @@ fn headless_exhausts_to_the_original_terminal() {
 // The sampler's stall detection is I/O-time based, so it cannot fire under the paused clock
 // Eligibility for the kind is pinned at the handler level instead
 
-/// The cumulative budget is prompt-scoped: turn-loop re-entries must share one 10-resubmit budget, not get a fresh 3 per entry.
 /// Auto-recovery re-enters this way, calling `process_conversation_turn_with_recovery` repeatedly without a new prompt.
-/// Entries submit 4+4+4+2+1 = 15 times; a counter that reset per loop entry would make it 20.
 #[test]
 fn prompt_budget_spans_turn_loop_reentries() {
     on_session_stack(|| {

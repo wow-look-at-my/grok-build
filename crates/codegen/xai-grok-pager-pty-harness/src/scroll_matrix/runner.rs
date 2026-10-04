@@ -1,20 +1,4 @@
-//! The per-cell executor: spawn the primed pager, replay the gesture, synchronize on the recorder, judge the invariants, classify the verdict.
-//!
-//! ## Blocking model
-//!
-//! A cell's body ([`run_cell_inner`]) is host-paced end to end: PTY drains, `thread::sleep` gesture gaps, finalize polling.
-//! [`run_cell`] therefore runs it on `spawn_blocking` and applies the per-cell hard cap with `tokio::time::timeout` on the join handle.
-//! The blocking task drives the async session spawns via `Handle::block_on`, which requires a **multi-thread** runtime.
-//! That also converts setup panics (the session preambles assert with the screen contents) into a `Fail` report instead of killing the whole sweep.
-//! A capped cell's blocking task cannot be aborted mid-syscall.
-//! It is left to unwind on its own bounded waits (its `Drop`s kill the pager child and mock server) while the sweep moves on.
-//!
-//! ## Harness-side invariants
-//!
-//! The log alone cannot see the viewport or repaints, so [`InvariantId::Screen`] and [`InvariantId::Quiet`] are checked here.
-//! `invariants.rs` panics on them by contract.
-//! I-QUIET counts frames in a post-finalize watermark window.
-//! I-SCREEN replays the per-stream `applied_total`s through a bottom-clamped travel simulation and compares the topmost marker to the baseline.
+//! The per-cell executor: spawn the primed pager, replay the gesture, synchronize on the recorder, judge the invariants.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -30,29 +14,24 @@ use super::session::{
 };
 
 /// Transcript height for every cell: comfortably taller than the 50-row PTY (the preamble's scrollable-baseline guard).
-/// The headroom keeps the small gestures judged by I-SCREEN from clamping at the transcript top.
-/// Deliberate travel clamping (floods can deliver hundreds of rows) is fine: no log-side invariant reads the viewport.
 const MARKER_COUNT: usize = 400;
 
-/// Recorder-synchronization budget: every gesture table spans under 1.5s and a stream finalizes 80ms after its last event.
-/// 5s only trips on a real wedge (or a stall so long the cell is unusable anyway).
+/// Recorder-synchronization budget: every gesture table spans under 1.5s and a stream finalizes 80ms.
 const FINALIZE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Post-finalize settle: consume the gesture-era PTY backlog so the quiet window below counts only NEW frames.
-/// The harness parses chunks lazily in `update`, not at arrival.
 const PIPELINE_DRAIN: Duration = Duration::from_millis(300);
 
 /// I-QUIET observation window after the drain and watermark reset.
 const QUIET_WINDOW: Duration = Duration::from_millis(500);
 
-/// I-QUIET allowance: a straggler cadence/finalize paint mid-pipeline may land after the watermark; repaint CHURN (the A2 symptom) paints dozens.
+/// I-QUIET allowance: a straggler cadence/finalize paint mid-pipeline may land after the watermark.
 const QUIET_MAX_FRAMES: u64 = 2;
 
 /// Streaming-session teardown budget: the paced tail is ~7s at spawn time, so the released turn completes well inside this.
 const COMPLETION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Per-cell hard cap (spawn to verdict).
-/// The slowest legitimate cell (the streaming preamble plus its post-gesture tail drain) finishes in ~20s.
 const CELL_HARD_CAP: Duration = Duration::from_secs(60);
 
 /// `tier` label for [`CellReport`].
@@ -63,8 +42,6 @@ fn tier_label(tier: Tier) -> &'static str {
     }
 }
 
-/// One SGR (DECSET 1006) wheel press report at the shared in-scrollback position.
-/// 0-based [`WHEEL_ROW`]/[`WHEEL_COL`] encode 1-based on the wire (same bytes as the pager e2e `sgr_mouse` helper).
 fn sgr_wheel_report(button: u16) -> String {
     format!("\x1b[<{button};{};{}M", WHEEL_COL + 1, WHEEL_ROW + 1)
 }
@@ -136,8 +113,7 @@ struct CellRun {
 }
 
 async fn run_cell_inner(cell: MatrixCell, binary: &Path, log_path: &Path) -> Result<CellRun> {
-    // Stale-capture guard: the recorder opens its file lazily on the first record
-    // A leftover capture from a previous run would satisfy the finalize wait with the OLD gesture's records
+    // Stale-capture guard: the recorder opens its file lazily on the first record A leftover capture from a previous run would satisfy the finalize wait.
     if log_path.exists() {
         std::fs::remove_file(log_path)
             .with_context(|| format!("setup: remove stale capture {}", log_path.display()))?;
@@ -165,8 +141,7 @@ async fn run_cell_inner(cell: MatrixCell, binary: &Path, log_path: &Path) -> Res
     wait_for_finalize_count(log_path, cell.gesture.expected_streams(), FINALIZE_TIMEOUT)
         .context("gesture: finalize wait")?;
 
-    // Drain the gesture-era backlog, then reset the watermark so the quiet window counts only post-finalize frames
-    // The marker read afterwards sees the fully painted final viewport (I-SCREEN's input)
+    // Drain the gesture-era backlog.
     harness.update(PIPELINE_DRAIN);
     harness.reset_timing();
     harness.update(QUIET_WINDOW);
@@ -230,8 +205,8 @@ fn check_quiet(quiet_frames: u64) -> InvariantResult {
     InvariantResult::Pass
 }
 
-/// Net signed lines a stream delivered: its last flush-bearing record's cumulative `applied_total`.
-/// That is the finalize when present, else the last flush of a trailing in-flight stream.
+/// Net signed lines a stream delivered: its last flush-bearing record's
+/// cumulative `applied_total`.
 fn stream_applied(group: &StreamGroup<'_>) -> i64 {
     group
         .flush_bearing()
@@ -239,8 +214,8 @@ fn stream_applied(group: &StreamGroup<'_>) -> i64 {
         .map_or(0, |record| record.applied_total)
 }
 
-/// Replay per-stream deliveries through the viewport's clamps: `0` is the bottom pin, where down-deliveries don't move (G7's point).
-/// The return is clamped to `-baseline` because travel above marker 0 pins the topmost visible marker at 0.
+/// Replay per-stream deliveries through the viewport's clamps: `0` is the
+/// bottom pin, where down-deliveries don't move (G7's point).
 fn simulate_clamped_travel(baseline: usize, applied: impl IntoIterator<Item = i64>) -> i64 {
     let mut pos: i64 = 0;
     for delta in applied {
@@ -357,7 +332,6 @@ mod tests {
         assert_eq!(simulate_clamped_travel(300, [10]), 0);
         // Down past the pin then up: the overshoot must not bank as credit.
         assert_eq!(simulate_clamped_travel(300, [25, -4]), -4);
-        // Travel beyond the transcript top pins the topmost marker at 0.
         assert_eq!(simulate_clamped_travel(30, [-500]), -30);
     }
 

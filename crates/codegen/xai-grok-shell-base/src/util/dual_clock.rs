@@ -1,10 +1,9 @@
-//! One instant captured on two clocks, so elapsed time stays honest across a system suspend without trusting the wall clock alone.
+//! One instant captured on clocks, so elapsed time stays honest across a system suspend without trusting the wall clock alone.
 
 use std::time::{Duration, Instant, SystemTime};
 
-/// `Instant` pauses while the machine sleeps (macOS `mach_absolute_time`, Linux `CLOCK_MONOTONIC`).
-/// `SystemTime` keeps advancing through sleep but jumps with NTP steps and manual changes.
-/// The difference between the two elapsed spans bounds the suspended time.
+/// `Instant` pauses while the machine sleeps (macOS `mach_absolute_time`,
+/// Linux `CLOCK_MONOTONIC`).
 #[derive(Clone, Copy)]
 pub struct DualClock {
     /// Monotonic; pauses during sleep. Bounds elapsed *awake* time.

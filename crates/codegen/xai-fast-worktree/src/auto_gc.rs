@@ -88,7 +88,6 @@ pub struct ResolvedWorktreeAutoGc {
     pub include_orphan_snapshots: bool,
     pub max_age_by_kind: BTreeMap<WorktreeKind, Option<i64>>,
     /// When true, rebuild the DB from disk and prune stale git registrations.
-    /// Off by default until rebuild cost is measured.
     pub include_rebuild: bool,
     pub rebuild_min_interval_secs: i64,
 }
@@ -393,9 +392,8 @@ pub fn maybe_auto_gc(db: &WorktreeDb, auto_opts: &ResolvedWorktreeAutoGc) -> Res
         }
     }
 
-    // Rebuild before prune (new sources stay in the snapshot) and before dead-GC
-    // (sole-dead repos survive unregister). Caller stamps meta only after GC
-    // succeeds so a failure leaves rebuild unthrottled.
+    // Rebuild before prune (new sources stay in the snapshot) and before
+    // dead-GC (sole-dead repos survive unregister).
     let (rebuild, rebuild_due_to_stamp) = maybe_run_rebuild(
         db,
         include_rebuild,
@@ -1060,8 +1058,7 @@ mod tests {
 
     #[test]
     fn env_dry_run_forces_dry_run_on_raw_opts() {
-        // Raw ResolvedWorktreeAutoGc dry_run=false must still dry-run (no
-        // deletion) when the env forces it inside maybe_auto_gc.
+        // Raw ResolvedWorktreeAutoGc dry_run=false must still dry-run (no deletion).
         let _g = env_guard();
         clear_auto_gc_env();
         unsafe { std::env::set_var(ENV_AUTO_GC_DRY_RUN, "1") };
@@ -1488,7 +1485,6 @@ mod tests {
         let rebuild_stamp = db.get_meta(META_LAST_AUTO_REBUILD_AT).unwrap();
         assert!(rebuild_stamp.is_some());
 
-        // Second GC pass still runs (min_interval 0) but rebuild is throttled.
         let second = maybe_auto_gc(&db, &opts).unwrap();
         assert_eq!(second.outcome, AutoGcOutcome::Ran);
         assert!(
@@ -1509,8 +1505,7 @@ mod tests {
 
     #[test]
     fn rebuild_failure_does_not_block_dead_record_gc() {
-        // INSERT-aborting trigger makes rebuild register fail; SELECT/DELETE for
-        // dead-path GC still work so reclaim continues after rebuild Err.
+        // INSERT-aborting trigger makes rebuild register fail.
         let _g = env_guard();
         clear_auto_gc_env();
         let fx = crate::db::GrokHomeFixture::new();
@@ -1607,7 +1602,6 @@ mod tests {
     #[test]
     fn rebuild_not_stamped_when_gc_fails_after_rebuild() {
         // Rebuild succeeds (registers untracked), then GC fails on sweep UPDATE.
-        // Rebuild meta must stay unset so the next pass can re-discover.
         let _g = env_guard();
         clear_auto_gc_env();
         let fx = crate::db::GrokHomeFixture::new();

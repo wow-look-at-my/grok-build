@@ -1,20 +1,4 @@
 //! @-context detection: parses `@query` tokens from prompt text and cursor position.
-//!
-//! Given the prompt text and cursor position, determines whether the cursor is
-//! inside an `@`-token and extracts the query string for fuzzy matching.
-//!
-//! ## Rules
-//!
-//! - The `@` must NOT be preceded by an alphanumeric character or underscore
-//!   (avoids triggering on email addresses like `user@example.com`).
-//! - The token extends from `@` to the first whitespace, comma, or semicolon.
-//! - The cursor must be within the token range.
-//! - The query is the text between `@` (exclusive) and the cursor.
-//!
-//! ## Special modes
-//!
-//! - **Dir mode**: a query ending with `/` restricts matches to directories only.
-//! - **Hidden mode**: a query starting with `!` shows hidden/gitignored files.
 
 use std::ops::Range;
 
@@ -52,9 +36,7 @@ impl AtContext {
     }
 }
 
-/// Detect an @-completion context from prompt text and cursor position. Returns `None` if the
-/// cursor is not inside an @-token, or if the `@` is preceded by an alphanumeric/underscore
-/// character (e.g., `email@`).
+/// Detect an @-completion context from prompt text and cursor position.
 pub fn detect(text: &str, cursor: usize) -> Option<AtContext> {
     detect_with_drill(text, cursor, None)
 }
@@ -338,7 +320,7 @@ mod tests {
 
     #[test]
     fn drill_prefix_allows_multibyte_dir_name() {
-        // `é` is two bytes; guards the `after_bang + prefix.len()` byte math.
+        // `é` is a couple of bytes; guards the `after_bang + prefix.len()` byte math.
         let ctx = detect_with_drill("@café dir", 10, Some("café dir")).unwrap();
         assert_eq!(ctx.range, 0..10);
         assert_eq!(ctx.query, "café dir");

@@ -1,35 +1,6 @@
 //! Cross-platform system clipboard access.
-//!
-//! On macOS, delegates to `pbcopy`/`pbpaste` subprocesses instead of linking AppKit.
-//! The `arboard` crate pulls in `objc2-app-kit`, which makes `dyld` load `AppKit.framework` at process startup.
-//! AppKit unconditionally initialises the Metal/IOAccelerator GPU subsystem, costing ~2 GB of GPU memory even in headless processes like the leader.
-//!
-//! The fast pasteboard probe ([`clipboard_image_snapshot`]) keeps that rule.
-//! It reaches `NSPasteboard` via objc2 runtime messaging against a lazily `dlopen`ed AppKit, so no binary links AppKit.
-//! A process that never probes never loads it.
-//! The focus/tick probes message only metadata selectors (`changeCount` / `types`), never content reads.
-//! That keeps them sub-millisecond and out of macOS 15.4+ pasteboard privacy alerts.
-//!
-//! Paste-time image reads ([`get_image`] / [`get_attachments`]) use the same lazily loaded AppKit to read raster bytes in-process (`dataForType:`).
-//! That covers the unambiguous hot path (raster advertised, no file-URL type alongside), skipping the ~0.5-0.9 s `osascript` round trip.
-//! Content is only read at an explicit user paste, the same user-intent boundary where the `osascript`/`pbpaste` subprocesses read the pasteboard.
-//! Every other pasteboard shape (file URLs, text-to-furl coercions, AppKit unavailable, read failure) falls back to the subprocess path.
-//! `GROK_CLIPBOARD_NO_NATIVE_READ=1` disables the in-process read entirely (kill switch if a future macOS gates `dataForType:` behind a prompt).
-//!
-//! On Linux and Windows, `arboard` is used directly (it does not link AppKit on those platforms).
-//!
-//! ## OSC 52 (remote clipboard)
-//!
-//! Over SSH or inside tmux/screen on a remote host, the native system clipboard (`pbcopy`, `arboard`) writes to the *remote* machine's clipboard.
-//! The user never sees that clipboard.
-//! OSC 52 is an escape sequence that tells the user's *local* terminal emulator to set its clipboard, tunnelling through SSH and multiplexers.
-//!
-//! [`set_text_osc52`] writes an OSC 52 sequence to stderr (the TUI output stream).
-//! [`is_remote_session`] detects SSH/tmux/screen environments where OSC 52 should be preferred.
 
 /// Encoded image data read from the system clipboard.
-///
-/// `data` is encoded bytes, not raw RGBA pixels, so it can be persisted or base64-encoded directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageData {
     /// Encoded image bytes (PNG, JPEG, TIFF, etc.).
@@ -45,8 +16,8 @@ pub fn get_text() -> anyhow::Result<Option<String>> {
     platform::get_text()
 }
 
-/// Read UTF-8 text from the X11 PRIMARY selection. Requires a non-empty `DISPLAY`. Pure X11 may fall back to arboard;
-/// XWayland requires xclip or xsel so arboard cannot return Wayland PRIMARY by mistake.
+/// Read UTF-8 text from the X11 PRIMARY selection. Requires a non-empty
+/// `DISPLAY`.
 #[cfg(target_os = "linux")]
 pub fn get_primary_text() -> anyhow::Result<Option<String>> {
     platform::get_primary_text()
@@ -79,16 +50,13 @@ pub fn get_image() -> anyhow::Result<ClipboardImageRead> {
     platform::get_image()
 }
 
-/// Read file references the file manager places on the clipboard when a file is selected but no plain text accompanies it.
-/// Backed by `«class furl»` (osascript) on macOS, `arboard::Get::file_list` (CF_HDROP / `text/uri-list`) elsewhere.
-/// Returns newline-joined absolute paths in the format the drop-path parser accepts.
+/// Read file references the file manager places on the clipboard when a file
+/// is selected but no plain text accompanies it.
 pub fn get_file_urls() -> anyhow::Result<Option<String>> {
     platform::get_file_urls()
 }
 
-/// File URLs and/or image data from the system clipboard in one probe. On macOS one `osascript` tries `«class furl»`
-/// first and coerces PNGf, TIFF, then JPEG only when no file URLs are present. On other platforms this composes
-/// [`get_file_urls`] and [`get_image`].
+/// File URLs and/or image data from the system clipboard in one probe.
 #[derive(Debug, Clone)]
 pub struct ClipboardAttachments {
     /// Newline-joined POSIX paths (same format as [`get_file_urls`]).
@@ -98,21 +66,19 @@ pub struct ClipboardAttachments {
     pub read_path: ClipboardReadPath,
 }
 
-/// Probe file URLs then image (macOS: one `osascript`; elsewhere: two reads).
+/// Probe file URLs then image (macOS: one `osascript`; elsewhere: reads).
 pub fn get_attachments() -> anyhow::Result<ClipboardAttachments> {
     platform::get_attachments()
 }
 
-/// A copy landing mid-probe can't mix a changeCount from one state with a classification from another. `change_count` is
-/// the monotonic `NSPasteboard.changeCount` (`None` off-macOS or when AppKit can't load). Native and sub-millisecond on
-/// macOS: it inspects metadata only, with no data read and no subprocess.
+/// A copy landing mid-probe can't mix a changeCount from one state with a
+/// classification from another.
 pub fn clipboard_image_snapshot() -> (Option<u64>, bool) {
     platform::clipboard_image_snapshot()
 }
 
-/// Cheap pasteboard `changeCount` read: a SINGLE native message, no type scan and no data read. Each throttled poll of
-/// the focus-driven clipboard-image tip calls only this. It pays for the heavier [`clipboard_image_snapshot`]
-/// classification ONLY when the count changed since the last look. `None` off-macOS or when AppKit can't load.
+/// Cheap pasteboard `changeCount` read: a SINGLE native message, no type scan
+/// and no data read.
 pub fn clipboard_change_count() -> Option<u64> {
     platform::clipboard_change_count()
 }
@@ -123,16 +89,16 @@ pub fn clipboard_image_probe_supported() -> bool {
     cfg!(target_os = "macos")
 }
 
-/// Trigger the one-time lazy AppKit `dlopen` (the framework load and its GPU init) WITHOUT reading the pasteboard. A
-/// later synchronous [`clipboard_image_snapshot`] is then just the cheap metadata read. The load is memoised, and since
-/// this touches no pasteboard it is sound to call from a background thread. No-op off-macOS.
+/// Trigger the one-time lazy AppKit `dlopen` (the framework load and its GPU
+/// init) WITHOUT reading the pasteboard.
 pub fn clipboard_prewarm() {
     platform::clipboard_prewarm();
 }
 
-/// [`get_attachments`]'s probe tries `«class furl»` first and reads image data only when no file URLs are present. So any
-/// file-URL advertisement (`public.file-url`, or its pre-UTI spelling `NSFilenamesPboardType`) means the raster is NOT
-/// what ctrl+v inserts. It stays platform-independent so the routing rule is unit-tested on every platform.
+/// [`get_attachments`]'s probe tries `«class furl»` first and reads image
+/// data only when no file URLs are present. So any file-URL advertisement
+/// (`public.file-url`, or its pre-UTI spelling `NSFilenamesPboardType`) means
+/// the raster is NOT what ctrl+v inserts.
 #[cfg(any(target_os = "macos", test))]
 fn image_pasteable_from_types<'a>(types: impl IntoIterator<Item = &'a [u8]>) -> bool {
     let mut has_image = false;
@@ -147,9 +113,7 @@ fn image_pasteable_from_types<'a>(types: impl IntoIterator<Item = &'a [u8]>) -> 
     has_image
 }
 
-/// Raster pasteboard UTIs in read-priority order with their MIME types. The order mirrors the `osascript` probes'
-/// coercions: `PNGf`, then `TIFF`, then `JPEG`. The native in-process read therefore picks the same class the subprocess
-/// path would.
+/// Raster pasteboard UTIs in read-priority order with their MIME types.
 #[cfg(any(target_os = "macos", test))]
 const NATIVE_IMAGE_TYPES: &[(&[u8], &str)] = &[
     (b"public.png", "image/png"),
@@ -218,15 +182,11 @@ pub fn mime_from_bytes(data: &[u8]) -> &'static str {
 #[derive(Debug, Clone, Default)]
 pub struct NativeWriteOutcome {
     pub cli_tools_tried: Vec<&'static str>,
-    /// Subset of `cli_tools_tried` that succeeded (order preserved). On Wayland, wl-copy is read-back-verified only when
-    /// data-control is absent. When `data_control && arboard_ok`, its exit-0 is credited unverified (the arboard write is
-    /// authoritative).
+    /// Subset of `cli_tools_tried` that succeeded (order preserved).
     pub cli_ok_tools: Vec<&'static str>,
     pub cli_ok: bool,
     pub arboard_ok: bool,
-    /// The Wayland data-control protocol was available for this write (the environment probe, [`wayland_data_control_supported`]).
-    /// This is NOT proof the arboard write landed; a focus-free authoritative write additionally requires `arboard_ok`.
-    /// Always false on macOS/Windows/X11.
+    /// The Wayland data-control protocol was available for this write.
     pub data_control: bool,
     /// True when at least one leg succeeded.
     pub any_ok: bool,
@@ -246,9 +206,8 @@ pub fn set_text(text: &str) -> anyhow::Result<()> {
     }
 }
 
-/// On macOS, uses `osascript` to set the pasteboard from a file path.
-/// On Linux, uses `wl-copy` or `xclip` if available.
-/// On Windows, returns an error (not yet supported).
+/// On macOS, uses `osascript` to set the pasteboard from a file path. On
+/// Linux, uses `wl-copy` or `xclip` if available.
 pub fn set_image_file(path: &std::path::Path) -> anyhow::Result<()> {
     platform::set_image_file(path)
 }
@@ -283,15 +242,12 @@ pub enum WaylandDataControlProbe {
 }
 
 /// Run one explicit, bounded Wayland data-control capability probe.
-///
-/// Unlike [`wayland_data_control_supported`], this preserves inconclusive outcomes for diagnostics instead of mapping them to `false`.
 pub fn probe_wayland_data_control() -> WaylandDataControlProbe {
     platform::probe_wayland_data_control()
 }
 
-/// Native copies then survive the terminal losing focus mid-copy. Memoized per process. An unanswered probe (timeout,
-/// connection failure) fails closed: `false` for the current call, retried on a later call up to a small cap. Otherwise
-/// arboard's own backend selection would still speak data-control to the compositor regardless of this probe's answer.
+/// Native copies then survive the terminal losing focus mid-copy. Memoized
+/// per process.
 pub fn wayland_data_control_supported() -> bool {
     platform::wayland_data_control_supported()
 }
@@ -325,9 +281,7 @@ pub fn wait_with_deadline(
     }
 }
 
-/// A pipe write from the UI thread blocks once the payload exceeds the ~64 KiB pipe buffer. A regular file is fully
-/// written before spawn and needs no writer afterwards. The temp file is mode 0600 and unlinked before this returns; the
-/// returned fd (and the child's dup of it) stays readable.
+/// A regular file is fully written before spawn and needs no writer afterwards.
 pub fn spool_for_stdin(data: &[u8]) -> anyhow::Result<std::fs::File> {
     use anyhow::Context;
     use std::io::Write;
@@ -337,9 +291,7 @@ pub fn spool_for_stdin(data: &[u8]) -> anyhow::Result<std::fs::File> {
     tmp.reopen().context("spool clipboard payload to temp file")
 }
 
-/// Build the OSC 52 clipboard-set byte sequence.
 /// When `tmux_passthrough` is true, wrap it in the tmux DCS passthrough envelope; that is only correct when tmux is the IMMEDIATE terminal.
-/// Otherwise emit a plain OSC 52.
 fn osc52_sequence(text: &str, tmux_passthrough: bool) -> Vec<u8> {
     use base64::Engine as _;
     let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
@@ -350,9 +302,9 @@ fn osc52_sequence(text: &str, tmux_passthrough: bool) -> Vec<u8> {
     }
 }
 
-/// Writes `\x1b]52;c;<base64>\x07` to stderr (the pager's terminal output stream). The caller decides `tmux_passthrough`:
-/// the tmux DCS passthrough envelope is only correct when tmux is the IMMEDIATE terminal. Inside an editor `:terminal`
-/// (Neovim/Vim/Emacs) the immediate emulator is the editor's libvterm, not tmux.
+/// Writes `\x1b]52;c;<base64>\x07` to stderr (the pager's terminal output
+/// stream). The caller decides `tmux_passthrough`: the tmux DCS passthrough
+/// envelope is only correct when tmux is the IMMEDIATE terminal.
 pub fn set_text_osc52(text: &str, tmux_passthrough: bool) -> anyhow::Result<()> {
     use std::io::Write;
 
@@ -364,9 +316,8 @@ pub fn set_text_osc52(text: &str, tmux_passthrough: bool) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Returns `true` when the process appears to be running inside a remote SSH session (with or without a multiplexer like tmux/screen).
-///
-/// Checks for `SSH_CONNECTION`, `SSH_TTY`, or `SSH_CLIENT` environment variables set by the OpenSSH server on the remote side.
+/// Returns `true` when the process appears to be running inside a remote SSH
+/// session (with or without a multiplexer like tmux/screen).
 pub fn is_remote_session() -> bool {
     std::env::var_os("SSH_CONNECTION").is_some()
         || std::env::var_os("SSH_TTY").is_some()
@@ -375,7 +326,7 @@ pub fn is_remote_session() -> bool {
 
 /// Returns `true` when the process appears to be running inside a container (Docker, Podman, Kubernetes, etc.) without a
 /// display server. In this environment the native system clipboard (`arboard`) will fail because there is no X11/Wayland
-/// compositor. OSC 52 terminal escapes are the only viable clipboard path. Windows Terminal, iTerm2).
+/// compositor. Windows Terminal, iTerm2).
 pub fn is_containerized_without_display() -> bool {
     // If a display server is available, native clipboard should work.
     if std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some() {
@@ -446,7 +397,6 @@ mod attachments_protocol {
         }
     }
 
-    /// Private 0700 scratch dir for one `osascript` raster hand-off, removed on drop; a path shared by every grok process let a concurrent probe swap the file between write and read.
     pub struct ProbeTemps(tempfile::TempDir);
 
     impl ProbeTemps {
@@ -549,9 +499,7 @@ mod attachments_protocol {
         )
     }
 
-    /// Parse the stdout payload of the `get_file_urls` AppleScript. The script returns one of: one or more POSIX paths
-    /// separated by `\n` (success), or; the literal string `"none"` (no file URLs present), or; empty / whitespace-only
-    /// (degenerate cases that map to `None`).
+    /// Parse the stdout payload of the `get_file_urls` AppleScript.
     pub fn parse_osascript_furl_output(raw: &str) -> Option<String> {
         let trimmed = raw.trim();
         if trimmed.is_empty() || trimmed == "none" {
@@ -654,9 +602,10 @@ mod platform {
     };
     use super::{ClipboardAttachments, ClipboardImageRead, ClipboardReadPath, OSASCRIPT_WAIT};
 
-    // These probes deliberately do NOT use `objc2-app-kit`: that crate emits a `#[link]` against AppKit, which this module
-    // exists to avoid. Instead AppKit is `dlopen`ed lazily at the FIRST probe and NSPasteboard is reached via objc2 runtime
-    // messaging (libobjc only). Headless processes that never probe never load AppKit at all
+    // These probes deliberately do NOT use `objc2-app-kit`: that crate emits
+    // a `#[link]` against AppKit, which this module exists to avoid. Instead
+    // AppKit is `dlopen`ed lazily at the FIRST probe and NSPasteboard is
+    // reached via objc2 runtime messaging (libobjc only).
 
     /// Load AppKit once so `objc_getClass("NSPasteboard")` can resolve.
     /// Returns false (probes unavailable) if the load fails.
@@ -664,8 +613,7 @@ mod platform {
         static LOADED: OnceLock<bool> = OnceLock::new();
         *LOADED.get_or_init(|| {
             let path = c"/System/Library/Frameworks/AppKit.framework/AppKit";
-            // SAFETY: dlopen with a constant NUL-terminated path; the handle
-            // is intentionally leaked (AppKit stays loaded for the process).
+            // SAFETY: dlopen with a constant NUL-terminated path.
             let handle = unsafe { libc::dlopen(path.as_ptr(), libc::RTLD_LAZY) };
             !handle.is_null()
         })
@@ -685,21 +633,18 @@ mod platform {
         super::WaylandDataControlProbe::Available(false)
     }
 
-    /// The focus/tick metadata probes run on the UI thread, but [`native_image_read`] runs on a blocking-pool thread and can
-    /// overlap them. AppKit reached via a bare `dlopen` (no NSApplication) is NOT safe against concurrent pasteboard
-    /// messaging. Every native pasteboard entry point therefore takes this mutex for the duration of its autoreleasepool.
+    /// The focus/tick metadata probes run on the UI thread.
     static PASTEBOARD_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
-    /// The general pasteboard as a runtime-messaged object, or `None` when AppKit is unavailable. Thread-safety basis:
-    /// objc2-app-kit does NOT classify NSPasteboard as MainThreadOnly. There is no MainThreadMarker on `generalPasteboard`,
-    /// unlike NSView/NSWindow. Callers hold [`PASTEBOARD_LOCK`] so there is no concurrent in-process pasteboard access.
+    /// The general pasteboard as a runtime-messaged object, or `None` when
+    /// AppKit is unavailable. Thread-safety basis: objc2-app-kit does NOT
+    /// classify NSPasteboard as MainThreadOnly.
     fn general_pasteboard() -> Option<objc2::rc::Retained<objc2::runtime::AnyObject>> {
         if !appkit_loaded() {
             return None;
         }
         let cls = objc2::runtime::AnyClass::get(c"NSPasteboard")?;
-        // SAFETY: +[NSPasteboard generalPasteboard] takes no arguments and
-        // returns the shared pasteboard instance (nullable-safe via Option).
+        // SAFETY: +[NSPasteboard generalPasteboard] takes no arguments and returns the shared pasteboard instance.
         unsafe { objc2::msg_send![cls, generalPasteboard] }
     }
 
@@ -709,11 +654,11 @@ mod platform {
             let Some(pb) = general_pasteboard() else {
                 return (None, false);
             };
-            // SAFETY: -[NSPasteboard changeCount] returns NSInteger; it is
-            // monotonic and non-negative, so the cast to u64 is lossless.
+            // SAFETY: -[NSPasteboard changeCount] returns NSInteger.
             let count: isize = unsafe { objc2::msg_send![&*pb, changeCount] };
-            // Collect the advertised identifiers, then classify with the shared rule (`image_pasteable_from_types`)
-            // A raster type only counts when no file-URL type is advertised alongside, matching the paste-path priority (file URLs win)
+            // Collect the advertised identifiers, then classify with the
+            // shared rule (`image_pasteable_from_types`) A raster type only
+            // counts.
             let has_image = advertised_types(&pb).is_some_and(|advertised| {
                 super::image_pasteable_from_types(advertised.iter().map(|t| t.as_slice()))
             });
@@ -725,9 +670,7 @@ mod platform {
         let _guard = PASTEBOARD_LOCK.lock();
         objc2::rc::autoreleasepool(|_| {
             let pb = general_pasteboard()?;
-            // SAFETY: -[NSPasteboard changeCount] returns a monotonic, non-negative NSInteger; the cast to u64 is lossless. This
-            // messages ONLY changeCount — no `types` scan, no data read — so it is the cheapest possible pasteboard touch for the
-            // throttled poll.
+            // SAFETY: -[NSPasteboard changeCount] returns a monotonic, non-negative NSInteger.
             let count: isize = unsafe { objc2::msg_send![&*pb, changeCount] };
             Some(count as u64)
         })
@@ -738,8 +681,7 @@ mod platform {
     /// `image_pasteable_from_types`.
     fn advertised_types(pb: &objc2::runtime::AnyObject) -> Option<Vec<Vec<u8>>> {
         // SAFETY: -[NSPasteboard types] returns a nullable
-        // NSArray<NSPasteboardType>; only count/objectAtIndex/UTF8String
-        // are messaged on it, all data-free.
+        // NSArray<NSPasteboardType>.
         let types: Option<objc2::rc::Retained<objc2::runtime::AnyObject>> =
             unsafe { objc2::msg_send![pb, types] };
         let types = types?;
@@ -753,8 +695,7 @@ mod platform {
             if utf8.is_null() {
                 continue;
             }
-            // SAFETY: UTF8String is NUL-terminated and outlives this
-            // iteration (the owning NSString is retained above).
+            // SAFETY: UTF8String is NUL-terminated and outlives this iteration (the owning NSString is retained above).
             let bytes = unsafe { std::ffi::CStr::from_ptr(utf8) }.to_bytes();
             advertised.push(bytes.to_vec());
         }
@@ -775,15 +716,13 @@ mod platform {
             let (uti, mime) = super::native_image_type_from_types(&advertised)?;
             let uti_cstring = std::ffi::CString::new(uti).ok()?;
             let cls = objc2::runtime::AnyClass::get(c"NSString")?;
-            // SAFETY: +[NSString stringWithUTF8String:] takes a NUL-terminated
-            // C string (valid for the duration of the call) and returns a
-            // nullable autoreleased NSString.
+            // SAFETY: +[NSString stringWithUTF8String:] takes a
+            // NUL-terminated C string (valid for the duration of the call).
             let ns_type: Option<objc2::rc::Retained<objc2::runtime::AnyObject>> =
                 unsafe { objc2::msg_send![cls, stringWithUTF8String: uti_cstring.as_ptr()] };
             let ns_type = ns_type?;
             // SAFETY: -[NSPasteboard dataForType:] takes an NSPasteboardType
-            // (NSString) and returns a nullable NSData; only requested for a
-            // type the pasteboard itself advertised.
+            // (NSString) and returns a nullable NSData.
             let data: Option<objc2::rc::Retained<objc2::runtime::AnyObject>> =
                 unsafe { objc2::msg_send![&*pb, dataForType: &*ns_type] };
             let data = data?;
@@ -792,17 +731,14 @@ mod platform {
             if len == 0 {
                 return None;
             }
-            // SAFETY: -[NSData bytes] returns a pointer valid for `len` bytes
-            // while `data` is retained (it is, until the end of this scope);
-            // the bytes are copied out immediately.
+            // SAFETY: -[NSData bytes] returns a pointer valid for `len` bytes while `data` is retained (it is, until the end of this scope).
             let bytes_ptr: *const std::os::raw::c_void = unsafe { objc2::msg_send![&*data, bytes] };
             if bytes_ptr.is_null() {
                 return None;
             }
             let mut buf = vec![0u8; len];
             // SAFETY: source is valid for `len` reads (NSData contract),
-            // destination is a fresh Vec of exactly `len` bytes, and the
-            // regions cannot overlap.
+            // destination is a fresh Vec of exactly `len` bytes.
             unsafe {
                 std::ptr::copy_nonoverlapping(bytes_ptr as *const u8, buf.as_mut_ptr(), len);
             }
@@ -972,9 +908,8 @@ mod platform {
         Ok(ClipboardImageRead { image, read_path })
     }
 
-    /// On several macOS versions `the clipboard as «class furl»` on a multi-file selection returns only the first file's URL
-    /// instead of erroring. Inside the list iteration each item is coerced via `as «class furl»`. Non-furl items (text-only
-    /// clipboards that still coerce to a single-item list) are skipped rather than passed through as bogus "paths".
+    /// On several macOS versions `the clipboard as «class furl»` on a
+    /// multi-file selection returns only the first file's URL instead.
     pub fn get_file_urls() -> anyhow::Result<Option<String>> {
         Ok(get_attachments()?.file_urls)
     }
@@ -1066,9 +1001,8 @@ mod platform {
         *SET.get_or_init(|| std::env::var_os("GROK_CLIPBOARD_NO_DATA_CONTROL").is_some())
     }
 
-    /// True when the arboard leg must be skipped entirely, so copies and pastes ride the CLI tools instead.
-    /// On Wayland the `GROK_CLIPBOARD_NO_DATA_CONTROL` kill switch has to stop arboard from speaking data-control at all.
-    /// There is no way to force arboard off that backend: it picks data-control on its own whenever `WAYLAND_DISPLAY` is set.
+    /// True when the arboard leg must be skipped entirely, so copies and
+    /// pastes ride the CLI tools instead.
     fn arboard_wayland_bypassed() -> bool {
         #[cfg(target_os = "linux")]
         {
@@ -1080,8 +1014,7 @@ mod platform {
         }
     }
 
-    /// Deadline for opening an in-process display connection, shared by the data-control probe and arboard `Clipboard::new()` (the same connect).
-    /// With separate budgets the probe could time out while the init succeeds, recording `data_control = false` for writes that use data-control.
+    /// Deadline for opening an in-process display connection, shared by the data-control probe and arboard `Clipboard::new()`.
     const DISPLAY_CONN_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
     /// Failure, timeout, or the Wayland kill switch (env vars don't change at runtime) is cached as `None`. The mutex is only
@@ -1116,9 +1049,7 @@ mod platform {
             .ok_or_else(|| anyhow::anyhow!("arboard unavailable"))
     }
 
-    /// The Wayland data-control read has no internal timeout and blocks forever on a hung selection owner; the X11 path has a
-    /// 4 s budget. Reads therefore run on a worker thread that is abandoned on expiry. The worker's `Clipboard` instance
-    /// leaks with it; harmless while the lease keeps the shared backend alive.
+    /// The Wayland data-control read has no internal timeout and blocks forever on a hung selection owner.
     const ARBOARD_READ_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
     fn arboard_read_with_deadline<T: Send + 'static>(
@@ -1194,9 +1125,10 @@ mod platform {
         })
     }
 
-    // arboard is built with `wayland-data-control` On compositors exposing the data-control protocol (probe:
-    // `wayland_data_control_supported`) it sets the Wayland selection focus-free. That arboard write is authoritative. Reads
-    // shell out when arboard fails, or when its "empty" answer is not authoritative on Wayland (see `wayland_tool_selected`)
+    // arboard is built with `wayland-data-control` On compositors exposing
+    // the data-control protocol (probe: `wayland_data_control_supported`) it
+    // sets the Wayland selection focus-free. That arboard write is
+    // authoritative.
 
     /// Argv specs for each Linux clipboard tool.
     /// All CLI dispatch goes through `run_pipe_in` / `run_capture_out` with these specs.
@@ -1216,8 +1148,7 @@ mod platform {
     const WL_SPEC: ToolSpec = ToolSpec {
         name: "wl-copy",
         reads_wayland_selection: true,
-        // `-t text`: exit non-zero on non-text clipboards instead of dumping raw bytes of an arbitrary MIME type
-        // `--no-newline` makes wl-paste return the selection verbatim, which `wayland_readback_matches` compares exactly
+        // `-t text`: exit non-zero on non-text clipboards instead of dumping raw bytes.
         read_text: &["wl-paste", "--no-newline", "-t", "text"],
         write_text: &["wl-copy"],
         read_primary: None,
@@ -1254,15 +1185,14 @@ mod platform {
         *SPEC.get_or_init(probe_tool_spec)
     }
 
-    /// On Wayland-only sessions (no focused X11/XWayland client) the X11 CLIPBOARD has no owner, so arboard's `Ok(None)` is
-    /// not authoritative. `wl-paste` must be consulted; `xclip`/`xsel` re-read the same X11 selection, so they don't qualify.
+    /// On Wayland-only sessions (no focused X11/XWayland client) the X11
+    /// CLIPBOARD has no owner.
     #[cfg(target_os = "linux")]
     fn wayland_tool_selected(spec: Option<&ToolSpec>) -> bool {
         spec.is_some_and(|spec| spec.reads_wayland_selection)
     }
 
     /// Indefinite probe outcomes tolerated before deciding `false` permanently.
-    /// The cap stops a wedged compositor taxing every copy with a bounded probe forever; the lease treats its timeout the same way.
     #[cfg(target_os = "linux")]
     const PROBE_INDEFINITE_MAX: u32 = 3;
 
@@ -1318,9 +1248,7 @@ mod platform {
         if let Some(decided) = cache.decided {
             return decided;
         }
-        // Probing while holding the lock serializes concurrent callers (UI copy vs. the spawn_blocking telemetry snapshot).
-        // The second caller waits for the first's answer, bounded by the probe's own DISPLAY_CONN_WAIT deadline
-        // Without that, callers could double-probe, race the cap count past PROBE_INDEFINITE_MAX, or drop a concurrent definitive answer
+        // Probing while holding the lock serializes concurrent callers.
         let outcome = probe();
         apply_probe_outcome(&mut cache, &outcome)
     }
@@ -1443,7 +1371,6 @@ mod platform {
     const CLI_PROBE_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 
     /// Deadline for CLI content reads (wl-paste/xclip text and image fallbacks).
-    /// It matches the in-process `ARBOARD_READ_WAIT` so a paste gets equal time on either backend.
     #[cfg(target_os = "linux")]
     const CLI_READ_WAIT: std::time::Duration = ARBOARD_READ_WAIT;
 
@@ -1565,8 +1492,7 @@ mod platform {
     fn run_pipe_in(argv: &[&str], data: &[u8]) -> anyhow::Result<()> {
         let (bin, args) = argv.split_first().expect("argv non-empty");
 
-        // Spooled stdin (`spool_for_stdin`), not a pipe: clipboard tools (wl-copy/xclip) daemonize and read the payload after forking
-        // That read races a pipe write and can leave the selection empty; the daemon keeps its fd to the unlinked temp file
+        // Spooled stdin (`spool_for_stdin`), not a pipe: clipboard tools (wl-copy/xclip) daemonize and read the payload after forking.
         let stdin = super::spool_for_stdin(data)?;
 
         let mut cmd = Command::new(bin);
@@ -1603,8 +1529,7 @@ mod platform {
         let mut child = cmd
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to run {bin}: {e}"))?;
-        // Drain stdout on a worker so the deadline wait can kill a hung tool without deadlocking on a full pipe
-        // The kill EOFs the pipe and the reader exits on its own
+        // Drain stdout on a worker so the deadline wait can kill a hung tool without deadlocking on a full pipe The kill EOFs the pipe and the reader exits.
         let mut stdout = child.stdout.take().expect("stdout piped");
         let reader = std::thread::spawn(move || {
             use std::io::Read;
@@ -1617,9 +1542,8 @@ mod platform {
         Ok((status, stdout))
     }
 
-    /// Capture CLI stdout; a non-zero exit yields empty bytes (typed MIME absent), not Err.
-    /// Spawn/timeout failures still return Err.
-    /// Prefer this over [`run_capture_out_checked`] for content reads where a missing type is normal, such as a text probe of an image-only board.
+    /// Capture CLI stdout; a non-zero exit yields empty bytes (typed MIME
+    /// absent), not Err. Spawn/timeout failures still return Err.
     #[cfg(target_os = "linux")]
     fn run_capture_out(argv: &[&str], deadline: std::time::Duration) -> anyhow::Result<Vec<u8>> {
         let (status, stdout) = run_capture_out_with_status(argv, deadline)?;
@@ -1685,7 +1609,6 @@ mod platform {
     }
 
     /// True if a Wayland read-back exactly matches what we wrote.
-    /// `wl-paste --no-newline` returns the selection verbatim (no appended newline), so an exact byte comparison is correct.
     #[cfg(target_os = "linux")]
     fn wayland_readback_matches(readback: &[u8], text: &str) -> bool {
         readback == text.as_bytes()
@@ -1739,9 +1662,8 @@ mod platform {
         false
     }
 
-    /// Whether a successful Wayland CLI write still needs the wl-paste read-back to count as verified. With data-control the
-    /// arboard write is authoritative and already succeeded. wl-copy then fires purely for post-exit persistence and its
-    /// result no longer gates success. It stays pure so unit tests can drive it.
+    /// Whether a successful Wayland CLI write still needs the wl-paste
+    /// read-back to count as verified.
     #[cfg(target_os = "linux")]
     fn wayland_readback_required(
         reads_wayland_selection: bool,
@@ -1807,9 +1729,8 @@ mod platform {
     }
 
     pub fn set_text_with_outcome(text: &str) -> super::NativeWriteOutcome {
-        // Fire every viable native backend: arboard first, then the CLI tools (`wl-copy`/`xclip`/`xsel`) that match what users
-        // verify manually. On X11 arboard can return Ok(()) while GNOME/VTE/KDE paste still reads Wayland wl-copy runs after
-        // arboard so its daemonized process ends up owning the Wayland selection and post-exit paste keeps working.
+        // Fire every viable native backend: arboard first, then the CLI tools
+        // (`wl-copy`/`xclip`/`xsel`) that match what users verify manually.
         let mut outcome = super::NativeWriteOutcome {
             data_control: wayland_data_control_supported(),
             ..Default::default()
@@ -1825,9 +1746,8 @@ mod platform {
             outcome.cli_tools_tried.push(spec.name);
             match run_pipe_in(spec.write_text, text.as_bytes()) {
                 Ok(()) => {
-                    // Even then it runs only while the read-back still gates success (see `wayland_readback_required`). The bounded retry
-                    // covers the race against wl-copy's daemonized claim of the selection. The skip leaves one rare hole: wl-copy re-claims
-                    // the selection after the good arboard write.
+                    // Even then it runs only while the read-back still gates
+                    // success (see `wayland_readback_required`).
                     let needs_readback = wayland_readback_required(
                         spec.reads_wayland_selection,
                         outcome.data_control,
@@ -2554,9 +2474,7 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // wait_with_deadline (real child processes; unix `sleep`)
-    // -----------------------------------------------------------------------
+    // ----------------------------------------------------------------------- wait_with_deadline.
 
     #[cfg(unix)]
     #[allow(clippy::disallowed_methods)] // test fixture; the test kills it
@@ -2590,7 +2508,6 @@ mod tests {
             err.downcast_ref::<WaitTimeout>().is_some(),
             "timeout must be distinguishable, got: {err}"
         );
-        // Killed and reaped, not waited for the full 30 s.
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
         assert!(child.try_wait().expect("child reaped").is_some());
     }
@@ -2600,7 +2517,6 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// The returned fd must stay readable after the temp file is unlinked on return.
-    /// A payload well past the ~64 KiB pipe buffer (the reason the spool exists) must round-trip intact.
     #[test]
     fn spool_for_stdin_round_trips_large_payload_after_unlink() {
         use std::io::Read;
@@ -2611,9 +2527,6 @@ mod tests {
         assert_eq!(read_back, payload);
     }
 
-    // -----------------------------------------------------------------------
-    // OSC 52 sequence construction (pure; base64("hi") == "aGk=")
-    // -----------------------------------------------------------------------
 
     #[test]
     fn osc52_sequence_plain() {
@@ -2629,8 +2542,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // MIME detection from magic bytes
-    // -----------------------------------------------------------------------
+    // MIME detection.
 
     #[test]
     fn mime_from_bytes_png() {
@@ -2727,7 +2639,6 @@ mod tests {
 
         #[test]
         fn encode_buffer_too_short() {
-            // A 2x2 image needs 16 bytes; this provides only 8
             let rgba = [0u8; 8];
             let result = encode_rgba_to_png(&rgba, 2, 2);
             assert!(result.is_err());
@@ -2754,8 +2665,7 @@ mod tests {
         }
 
         // -----------------------------------------------------------
-        // parse_osascript_furl_output: deterministic parsing surface
-        // -----------------------------------------------------------
+        // parse_osascript_furl_output.
 
         #[test]
         fn parse_furl_empty_inputs_are_none() {
@@ -2787,8 +2697,9 @@ mod tests {
 
         #[test]
         fn parse_furl_multi_path_trailing_newline() {
-            // The AppleScript list path appends `\n` after every entry, so multi-file output ends with a trailing newline that `trim` strips
-            // Internal newlines are preserved verbatim; the drop-path parser splits on them
+            // The AppleScript list path appends `\n` after every entry, so
+            // multi-file output ends with a trailing newline that `trim`
+            // strips.
             assert_eq!(
                 parse_osascript_furl_output("/a\n/b\n"),
                 Some("/a\n/b".to_owned()),
@@ -2804,8 +2715,7 @@ mod tests {
         }
 
         // -----------------------------------------------------------
-        // parse_attachments_output: unified osascript stdout protocol
-        // -----------------------------------------------------------
+        // parse_attachments_output.
 
         #[test]
         fn parse_attachments_none_none() {
@@ -3052,7 +2962,7 @@ mod tests {
             assert!(started.elapsed() < std::time::Duration::from_secs(5));
         }
 
-        /// Two live probes never share a file; the dir is owner-only and gone on drop.
+        /// Live probes never share a file; the dir is owner-only and gone on drop.
         #[test]
         fn each_probe_gets_a_private_dir_removed_on_drop() {
             let a = ProbeTemps::new().expect("probe temps");
@@ -3079,8 +2989,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Fast-probe type-list classification (clipboard_image_snapshot)
-    // -----------------------------------------------------------------------
+    // Fast-probe type-list classification.
 
     fn types<'a>(list: &'a [&'static [u8]]) -> impl Iterator<Item = &'static [u8]> + 'a {
         list.iter().copied()

@@ -1,8 +1,4 @@
 //! Backtrace symbolication for crash reports.
-//!
-//! Runs at normal startup (not in a signal handler), so full Rust APIs
-//! are available. Resolves raw instruction pointer addresses from the
-//! crash blob into function names and file locations.
 
 use crate::format::CrashBlob;
 
@@ -57,7 +53,6 @@ pub fn format_report(blob: &CrashBlob, frames: &[ResolvedFrame]) -> String {
     out.push_str(&format!("PID:     {}\n", blob.pid));
     out.push_str(&format!("Version: {}\n", blob.app_version));
 
-    // Format timestamp as ISO 8601 (best-effort without chrono dependency).
     out.push_str(&format!("Time:    {} (unix)\n", blob.timestamp));
 
     out.push_str(&format!("\nBacktrace ({} frames):\n", frames.len()));
@@ -76,10 +71,8 @@ pub fn format_report(blob: &CrashBlob, frames: &[ResolvedFrame]) -> String {
 pub fn signal_name(sig: u8) -> &'static str {
     match sig as i32 {
         4 => "SIGILL (Illegal instruction)",
-        // SIGABRT is 6 on both macOS and Linux.
         // With panic = "abort", every Rust panic terminates via SIGABRT.
         6 => "SIGABRT (Abort)",
-        // SIGBUS is 10 on macOS, 7 on Linux
         7 | 10 => "SIGBUS (Bus error)",
         11 => "SIGSEGV (Segmentation fault)",
         _ => "Unknown signal",
@@ -87,8 +80,7 @@ pub fn signal_name(sig: u8) -> &'static str {
 }
 
 fn si_code_name(sig: u8, code: i32) -> &'static str {
-    // SIGABRT carries no fault-specific si_code (abort(3) raises it directly;
-    // the kernel reports SI_USER/SI_TKILL-style origins instead).
+    // SIGABRT carries no fault-specific si_code (abort(3) raises it directly.
     if sig == 6 {
         return "abort() - raised by the process (e.g. Rust panic with panic=abort)";
     }

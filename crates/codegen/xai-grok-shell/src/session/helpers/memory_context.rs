@@ -1,8 +1,4 @@
 //! Format memory search results as `<system-reminder>` content.
-//!
-//! Used for:
-//! - Session start: inject relevant past context on the first turn
-//! - Post-compaction: recover relevant memory after context is lost
 
 use xai_chat_state::{MEMORY_CONTEXT_CLOSE_TAG, MEMORY_CONTEXT_OPEN_TAG};
 use xai_grok_sampling_types::ConversationItem;
@@ -10,9 +6,9 @@ use xai_grok_tools::types::memory_backend::{MemorySearchResult, format_staleness
 
 const SNIPPET_MAX_CHARS: usize = 500;
 
-/// Returns `true` if a memory-context block is already persisted in the leading system message.
-/// Callers reuse a persisted block verbatim instead of re-searching.
-/// A re-scored block would mutate the system-prompt prefix and bust the KV cache for the whole downstream conversation.
+/// Returns `true` if a memory-context block is already persisted in the
+/// leading system message. Callers reuse a persisted block verbatim instead
+/// of re-searching.
 pub fn conversation_has_memory_context(items: &[ConversationItem]) -> bool {
     matches!(
         items.first(),
@@ -239,7 +235,7 @@ mod tests {
             created_at: None,
         }];
         let output = format_memory_reminder(&results).unwrap();
-        // The snippet is truncated to SNIPPET_MAX_CHARS (500) with a "..." suffix
+        // suffix
         assert!(!output.contains(&"x".repeat(501)));
         assert!(output.contains(&format!("{}...", "x".repeat(500))));
     }

@@ -57,8 +57,8 @@ pub async fn drain_pending_uploads_at_exit() {
     drain_pending_uploads(drain_budget).await;
 }
 
-/// Floor for the exit drain: the longest a turn-end upload can defer its start
-/// (`PARSED_PROMPT_WAIT`) plus one bounded attempt to reach the bucket.
+/// Floor for the exit drain: the longest a turn-end upload can defer its
+/// start (`PARSED_PROMPT_WAIT`) plus one bounded attempt.
 fn exit_drain_min() -> std::time::Duration {
     crate::session::commands::PARSED_PROMPT_WAIT + super::trace::BLOCKING_ATTEMPT_CAP
 }

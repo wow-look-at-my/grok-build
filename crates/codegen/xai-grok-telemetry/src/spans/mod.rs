@@ -1,5 +1,4 @@
-//! Span-oriented telemetry: startup phases, tracing regions, span profiling,
-//! instrumentation mode, and turn/prompt timing.
+//! Span-oriented telemetry: startup phases, tracing regions, span profiling, instrumentation mode.
 
 pub mod instrumentation;
 pub mod prompt_timing;

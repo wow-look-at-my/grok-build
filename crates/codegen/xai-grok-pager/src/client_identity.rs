@@ -7,9 +7,8 @@ pub fn pager_client_version() -> &'static str {
     xai_grok_version::version()
 }
 
-/// `User-Agent` for the pager's own HTTP clients that call `api.x.ai` directly (voice STT).
-///
-/// Matches the sampler's `grok-shell/<version> (os; arch)` shape so server-side dashboards bucket voice traffic alongside chat / imagine requests.
+/// `User-Agent` for the pager's own HTTP clients that call `api.x.ai`
+/// directly (voice STT).
 pub fn client_user_agent() -> String {
     format!(
         "{}/{} ({}; {})",
@@ -26,8 +25,7 @@ mod tests {
 
     #[test]
     fn client_user_agent_has_expected_shape() {
-        // e.g. "grok-shell/1.2.3 (macos; aarch64)".
-        // Servers parse this UA string, so pin the exact shape
+        // e.g. "grok-shell/1.2.3 (macos; aarch64)". Servers parse this UA string, so pin the exact shape
         let ua = client_user_agent();
         assert_eq!(
             ua,

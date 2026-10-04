@@ -1,8 +1,4 @@
 //! SKILL.md filesystem discovery and parsing.
-//!
-//! Provides `discover_skills_for_paths()` for dynamic mid-session discovery
-//! and the shared parsing primitives (`parse_skill_files`, `find_skill_paths`,
-//! frontmatter parsing) used by both startup and dynamic discovery.
 
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
@@ -20,15 +16,12 @@ pub const MAX_FRONTMATTER_BYTES: usize = 4096;
 pub const MAX_BODY_PEEK_BYTES: usize = 2048;
 pub const MAX_SKILL_WALK_DEPTH: usize = 5;
 
-/// Subdirectory names that contain skill definitions. `skills` is the standard layout
-/// (`.grok/skills/`, `.claude/skills/`, `.cursor/skills/`). The product-specific `skills-cursor/`
-/// layout is no longer scanned — it pulled vendor default skills into Grok Build sessions.
+/// Subdirectory names that contain skill definitions.
 pub const SKILL_SUBDIRS: &[&str] = &["skills"];
 pub const COMMAND_SUBDIR: &str = "commands";
 
-/// Cursor ships these default skills in `~/.cursor/skills-cursor/` (per its `.cursor-managed-skills-manifest.json` /
-/// `.sync-manifest.json`). They are vendor builtins, not user content, so we drop any skill with one of these names
-/// discovered under a `/.cursor/` path segment. The denylist is orthogonal to the per-vendor toggle and always applied.
+/// Cursor ships these default skills in `~/.cursor/skills-cursor/` (per its
+/// `.cursor-managed-skills-manifest.json` / `.sync-manifest.json`).
 const CURSOR_DEFAULT_SKILLS: &[&str] = &[
     "babysit",
     "canvas",
@@ -46,14 +39,11 @@ const CURSOR_DEFAULT_SKILLS: &[&str] = &[
     "update-cursor-settings",
 ];
 
-/// Vendor ships these default skills in-binary (the on-disk `~/.claude/skills`
-/// dir is typically empty, so this is best-effort). Any skill with one of these
-/// names discovered under a `/.claude/` path segment is dropped.
+/// Vendor ships these default skills in-binary.
 const CLAUDE_DEFAULT_SKILLS: &[&str] = &["pdf", "docx", "xlsx", "pptx", "skill-creator"];
 
-/// Return true if `name` is a vendor-shipped default skill discovered under the matching vendor's config dir (`/.cursor/` or `/.claude/`). The
-/// path check ensures a user's own skill that merely shares a denylisted name (e.g. `~/.grok/skills/shell`) is NOT dropped — only skills
-/// physically located under the vendor dir are treated as vendor builtins.
+/// Return true if `name` is a vendor-shipped default skill discovered under
+/// the matching vendor's config dir (`/.cursor/` or `/.claude/`).
 fn is_vendor_default_skill(path: &str, name: &str) -> bool {
     let in_cursor = path.contains("/.cursor/") || path.contains("\\.cursor\\");
     let in_claude = path.contains("/.claude/") || path.contains("\\.claude\\");
@@ -97,9 +87,10 @@ pub fn scan_md_files(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
-/// Discover all SKILL.md files for a skill directory: a `SKILL.md` at the dir's own root (the dir
-/// IS a skill — e.g. a plugin manifest `skills` entry or a config path pointing directly at a skill
-/// directory) plus the recursive walk of subdirectories.
+/// Discover all SKILL.md files for a skill directory: a `SKILL.md` at the
+/// dir's own root (the dir IS a skill — e.g. a plugin manifest `skills`
+/// entry or a config path pointing directly at a skill directory) plus the
+/// recursive walk.
 pub fn find_skill_md_paths(dir: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let self_skill_md = dir.join("SKILL.md");
@@ -253,8 +244,8 @@ fn normalize_skill_paths(patterns: Vec<String>) -> Option<Vec<String>> {
     }
 }
 
-/// Parse the `paths:` field into glob patterns: split (`coerce_path_list`) then
-/// normalize (`normalize_skill_paths`). `None` when absent or match-all.
+/// Parse the `paths:` field into glob patterns: split (`coerce_path_list`)
+/// then normalize (`normalize_skill_paths`).
 fn parse_skill_paths(value: Option<&serde_yaml::Value>) -> Option<Vec<String>> {
     coerce_path_list(value).and_then(normalize_skill_paths)
 }
@@ -406,9 +397,7 @@ fn quote_problematic_values(frontmatter: &str) -> String {
         .join("\n")
 }
 
-/// Frontmatter keys the line-based recovery will salvage. Restricted to the
-/// listing-relevant scalar fields so list/map fields (`allowed-tools`, `paths`,
-/// `metadata`, …) are never mangled into bogus strings on the recovery path.
+/// Frontmatter keys the line-based recovery will salvage.
 const RECOVERABLE_KEYS: &[&str] = &["name", "description", "when-to-use", "when_to_use"];
 
 /// Best-effort recovery of a few top-level scalar fields when YAML parsing fails entirely (e.g. a field mistakenly indented under
@@ -495,9 +484,7 @@ pub fn parse_skill_frontmatter(
         recovered
     });
 
-    // Prefer the frontmatter `name`, but fall back to the directory name when it
-    // is absent or normalizes to an invalid slug, so one bad `name:` field
-    // doesn't drop an otherwise-usable skill.
+    // Prefer the frontmatter `name`, but fall back to the directory name when it is absent or normalizes to an invalid slug.
     let fm_name = coerce_to_string(frontmatter.get("name"));
     if fm_name.is_none() && fallback_name.is_none() {
         return Err(SkillParseError::YamlError(
@@ -771,9 +758,8 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
                     } else {
                         &body
                     };
-                    // Prefer the first prose paragraph; a leading heading is usually
-                    // just the skill title (junk as a description). Fall back to a
-                    // heading only when there's no prose, then the name.
+                    // Prefer the first prose paragraph; a leading heading is
+                    // usually the skill title (junk as a description).
                     parsed.description = extract_first_paragraph(peek)
                         .or_else(|| extract_description_from_markdown(peek))
                         .unwrap_or_else(|| parsed.name.clone());
@@ -814,9 +800,7 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
         })
         .collect();
 
-    // Drop vendor-shipped default skills (vendor builtins) found under
-    // a `/.cursor/` or `/.claude/` path. Always applied, independent of the
-    // per-vendor toggle, so vendor builtins never leak into Grok Build.
+    // Drop vendor-shipped default skills (vendor builtins) found under a `/.cursor/` or `/.claude/` path.
     skills.retain(|s| !is_vendor_default_skill(&s.path, &s.name));
 
     skills
@@ -832,8 +816,7 @@ pub fn discover_skills_for_paths(
     already_checked: &mut HashSet<PathBuf>,
     compat: CompatConfig,
 ) -> Vec<SkillInfo> {
-    // `.grok` and `.agents` are always scanned; `.claude` is gated on the
-    // claude-vendor skills cell. (`.cursor` is excluded here by design — see fn docs.)
+    // `.grok` and `.agents` are always scanned; `.claude` is gated on the claude-vendor skills cell.
     let mut config_dir_names: Vec<&str> = vec![".grok", ".agents"];
     if compat.claude.skills {
         config_dir_names.push(".claude");
@@ -937,9 +920,7 @@ mod tests {
 
     #[test]
     fn fallback_prefers_prose_paragraph_over_heading() {
-        // A leading H1 is usually just the skill title (redundant with the name,
-        // no triggers) — junk as a description — so the first prose paragraph wins
-        // even when a heading precedes it.
+        // A leading H1 is usually the skill title (redundant with the name, no triggers) — junk as a description — so the first prose paragraph wins even.
         let skill = parse_one(
             "h",
             "---\nname: h\n---\n\n# Title\n\nDoes a real thing.\n\n## Section\n",
@@ -958,9 +939,9 @@ mod tests {
 
     #[test]
     fn recovers_frontmatter_description_when_a_field_is_accidentally_indented() {
-        // Real-world bug (cursorbench): a field accidentally indented under `description:` makes the whole frontmatter invalid
-        // YAML (a scanner error). The parser must still recover the frontmatter `description` rather than silently dropping
-        // the entire frontmatter and rendering a junk body-derived description in the skill listing.
+        // Real-world bug (cursorbench): a field accidentally indented under
+        // `description:` makes the whole frontmatter invalid YAML (a scanner
+        // error).
         let skill = parse_one(
             "cb",
             concat!(
@@ -984,9 +965,9 @@ mod tests {
 
     #[test]
     fn recovery_skips_bare_block_scalar_marker() {
-        // On the recovery path, a `description:` line that is
-        // only a block-scalar marker (`|` / `>`) must not become the description —
-        // otherwise it suppresses the body fallback and the listing shows "|".
+        // On the recovery path, a `description:` line that is only a
+        // block-scalar marker (`|` / `>`) must not become the description —
+        // otherwise.
         let skill = parse_one(
             "bs",
             concat!(
@@ -1254,7 +1235,7 @@ description: Create a git commit
 
     #[test]
     fn when_to_use_capped_multibyte() {
-        // 'é' is 2 bytes in UTF-8; cap is by char count, not byte count
+        // 'é' is a couple of bytes in UTF-8; cap is by char count, not byte count
         let long_value = "é".repeat(MAX_DESCRIPTION_LEN + 100);
         let content = format!(
             "---\nname: deploy\ndescription: Deploy\nwhen-to-use: {}\n---\n",
@@ -1355,8 +1336,7 @@ model: test-model
 
     #[test]
     fn invalid_frontmatter_name_falls_back_to_dir_name() {
-        // A bad `name:` (normalizes to empty) must not drop a skill whose
-        // directory name is a valid slug; the dir name is used, fields kept.
+        // A bad `name:` (normalizes to empty) must not drop a skill whose directory name is a valid slug; the dir name is used.
         let skill = parse_one("validdir", "---\nname: 日本語\ndescription: x\n---\n");
         assert_eq!(skill.name, "validdir");
         assert_eq!(skill.description, "x");
@@ -1364,8 +1344,7 @@ model: test-model
 
     #[test]
     fn dotted_dir_name_is_kept_not_dropped() {
-        // A directory name with a `.` normalizes to a valid slug and loads
-        // (slash-invocable), instead of being rejected as an invalid name.
+        // A directory name with a `.` normalizes to a valid slug and loads (slash-invocable).
         let skill = parse_one("tool-v1.2", "no frontmatter, just body\n");
         assert_eq!(skill.name, "tool-v1-2");
     }
@@ -1524,8 +1503,7 @@ model: test-model
         use crate::types::compat::CompatConfig;
 
         let tmp = tempfile::tempdir().unwrap();
-        // `discover_skills_for_paths` takes `git_root` explicitly and only uses
-        // it as a path boundary, so no real git repo is needed here.
+        // `discover_skills_for_paths` takes `git_root` explicitly and only uses it as a path boundary.
         let repo = dunce::canonicalize(tmp.path()).unwrap();
         let sub = repo.join("sub");
         std::fs::create_dir_all(&sub).unwrap();

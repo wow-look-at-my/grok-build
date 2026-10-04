@@ -15,7 +15,6 @@ const EDIT_THREE_MARK: &str = "EDIT_THREE_MARK";
 
 const FIXTURE: &str = "merge_fix.py";
 
-/// One line of the fixture per word, so each edit is a 1:1 line replacement (`+1/-1`) and line numbers stay stable across the scripted turn.
 fn fixture_text() -> String {
     let words = [
         "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
@@ -47,8 +46,8 @@ fn edit_header_rows(screen: &str) -> usize {
         .count()
 }
 
-/// PTY: with `collapsed_edit_blocks` enabled, three sequential same-file edits coalesce into ONE
-/// Edit row whose header sums the diffstat (`+3/-3`).
+/// PTY: with `collapsed_edit_blocks` enabled, sequential same-file edits coalesce into ONE Edit
+/// row whose header sums the diffstat (`+3/-3`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test pty_e2e -- --ignored"]
 async fn edit_merge_sequential_pty() {
@@ -59,7 +58,6 @@ async fn edit_merge_sequential_pty() {
     std::fs::write(&target, fixture_text()).expect("write fixture");
     let abs = dunce::canonicalize(&target).unwrap_or(target.clone());
 
-    // Three 1:1 replacements at widely separated, increasing lines so every merged-hunk gap is computable (~11 lines apart, 3 context lines)
     let _edit_turns: [AgentTurnExpectation; 3] = [
         expect_tool_turn(
             &content,
@@ -214,9 +212,7 @@ async fn edit_merge_sequential_pty() {
                 harness.screen_contents()
             )
         });
-    // The second submit page-flipped the viewport, so turn 1 legitimately sits above the fold
-    // (The new prompt pins to the pane top: dispatch/queue.rs `scroll_to_entry_top` and `enable_follow_with_preserve`.)
-    // Wheel back to the transcript top (the whole thing fits one screen) before counting rows across both turns
+    // The second submit page-flipped the viewport.
     send_wheel_burst(
         &mut harness,
         SGR_SCROLL_UP,

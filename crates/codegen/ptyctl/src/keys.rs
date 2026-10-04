@@ -1,7 +1,4 @@
 //! Vim-style key notation parser.
-//!
-//! Converts strings like `"hello<CR>"`, `"<C-c>"`, `"<Esc>:wq<CR>"` into
-//! raw terminal byte sequences using the `terminput` crate.
 
 use std::io;
 
@@ -20,7 +17,6 @@ pub fn parse_keys(input: &str) -> Result<Vec<u8>> {
         match ev.encode(&mut buf, Encoding::Xterm) {
             Ok(n) => bytes.extend_from_slice(&buf[..n]),
             Err(e) if e.kind() == io::ErrorKind::Unsupported => {
-                // Some keys may not be encodable; skip them.
             }
             Err(e) => return Err(e.into()),
         }
@@ -39,9 +35,8 @@ fn parse_to_events(input: &str) -> Result<Vec<KeyEvent>> {
             // Try to parse a special key notation.
             let start_pos: String = chars.clone().collect();
             if let Some(end) = start_pos.find('>') {
-                // The first character is the ASCII '<' this branch matched and
-                // `end` is the offset of an ASCII '>', so both bounds align.
-                #[allow(clippy::string_slice)] // between two matched ASCII delimiters
+                // The first character is the ASCII '<' this branch matched and `end` is the offset of an ASCII '>'.
+                #[allow(clippy::string_slice)]
                 let notation = &start_pos[1..end]; // between < and >
                 // Consume chars including the >.
                 for _ in 0..=end {

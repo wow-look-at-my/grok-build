@@ -1,5 +1,4 @@
-//! [`AcpTestClient`] drives `grok agent stdio` with verbatim JSON-RPC lines, backed by the same
-//! [`TestProcess`] as the typed `GrokStdioClient`.
+//! [`AcpTestClient`] drives `grok agent stdio` with verbatim JSON-RPC lines.
 
 use std::path::Path;
 use std::time::Duration;
@@ -15,9 +14,8 @@ use crate::scaled;
 
 const STDERR_TAIL_CHARS: usize = 1200;
 
-/// Writes one verbatim JSON-RPC line at a time and reads until the response carrying the same id, for wire
-/// shapes the typed client cannot produce, such as Xcode's Swift/Foundation `JSONEncoder` output: escaped-slash
-/// methods (`"session\/prompt"`) and string UUID request ids.
+/// Writes one verbatim JSON-RPC line at a time and reads until the response
+/// carrying the same id.
 pub struct AcpTestClient {
     stdin: tokio::process::ChildStdin,
     stdout: tokio::io::BufReader<TestProcessStdout>,
@@ -132,7 +130,6 @@ impl AcpTestClient {
     }
 }
 
-/// Only the last three skipped lines are kept, truncated, so a timeout panic stays readable.
 fn push_skipped_tail(skipped: &mut usize, tail: &mut Vec<String>, line: &str) {
     *skipped += 1;
     if tail.len() == 3 {

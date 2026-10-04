@@ -49,9 +49,8 @@ pub(crate) fn input_wait(
     handled_at.saturating_duration_since(arrived_at.max(loop_entry))
 }
 
-/// Keeps only the worst stall (and the activity snapshot captured at that worst moment) plus the count of events handled.
-/// The loop observes first and only then flushes ([`Self::take_if_elapsed`]).
-/// The window is never split, and an elapsed window always gets flushed.
+/// Keeps only the worst stall (and the activity snapshot captured at that
+/// worst moment) plus the count of events handled.
 pub(crate) struct StallRollup {
     window: Duration,
     // None until the first observe, so an idle loop opens no window and sets no flush wakeup

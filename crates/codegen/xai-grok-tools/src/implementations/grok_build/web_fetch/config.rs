@@ -16,29 +16,25 @@ pub const USER_AGENT_STRING: &str = "Mozilla/5.0 (compatible; grok-agent/1.0; +h
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebFetchParams {
-    /// Cache time-to-live in seconds. Default: 900 (15 minutes).
+    /// Cache time-to-live in seconds.
     pub cache_ttl_secs: Option<u64>,
-    /// Maximum number of cached pages. Default: 128.
+    /// Maximum number of cached pages.
     pub max_cache_entries: Option<usize>,
-    /// HTTP request timeout in seconds. Default: 60.
+    /// HTTP request timeout in seconds.
     pub timeout_secs: Option<u64>,
-    /// Maximum response body size in bytes. Default: 10 MB.
+    /// Maximum response body size in bytes.
     pub max_content_length: Option<usize>,
-    /// Maximum inline markdown output length in bytes. Default: 100,000.
+    /// Maximum inline markdown output length in bytes.
     pub max_markdown_length: Option<usize>,
-    /// Model context window size in tokens. Used to enforce 3% cap on web content.
+    /// Model context window size in tokens.
     pub context_window_tokens: Option<u64>,
     /// Domains the tool is allowed to fetch. All other domains are rejected before any network I/O.
-    /// Defaults to `DEFAULT_ALLOWED_DOMAINS` if no list given.
     #[serde(default)]
     pub allowed_domains: Option<Vec<String>>,
-    /// Optional egress proxy endpoint. When set, all HTTP requests are
-    /// routed through this URL.
+    /// Optional egress proxy endpoint. When set, all HTTP requests are routed through this URL.
     #[serde(default)]
     pub proxy_endpoint: Option<String>,
-    /// When true, allow fetches to **explicit** loopback hosts only (`localhost`, `127.0.0.0/8`,
-    /// `::1`). Private/metadata stay blocked. Default: `false` (fail closed). Set via
-    /// `[toolset.web_fetch] allow_local = true` or `GROK_WEB_FETCH_ALLOW_LOCAL=1`.
+    /// When true, allow fetches to **explicit** loopback hosts only (`localhost`, `127.0.0.0/8`, `::1`).
     #[serde(default)]
     pub allow_local: Option<bool>,
 }

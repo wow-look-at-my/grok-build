@@ -1,11 +1,4 @@
 //! Tool config resolution pipeline.
-//!
-//! Five-step resolution:
-//! 1. `effective_tool_config = config.tool_config.unwrap_or_else(|| parent.effective_tool_config.clone())`
-//! 2. `merged = merge_mcp_tools(effective_tool_config, shared.mcp_servers.snapshot())`
-//! 3. `merged = merge_hub_tools(merged, shared.hub_tools_snapshot())`
-//! 4. `filtered = config.capability_mode.filter(merged)`
-//! 5. `toolset = build_finalized_toolset(filtered, &session.cwd, &session.session_env, ...)`
 use crate::capability::{CapabilityMode, kind_allowed};
 use crate::config::SessionContextFactory;
 use crate::error::{WorkspaceError, WorkspaceResult};
@@ -186,8 +179,8 @@ fn backfill_tool_kinds(
         behavior_preset: config.behavior_preset.clone(),
     }
 }
-/// Steps 2-4 without finalize: append MCP then hub, skipping ID/name collisions. Baseline wins over MCP, MCP over hub.
-/// Capability filter drops disallowed kinds; external `kind: None` is kept only under `CapabilityMode::All`.
+/// Baseline wins over MCP, MCP over hub. Capability filter drops disallowed kinds; external `kind: None` is kept only
+/// under `CapabilityMode::All`.
 pub(crate) fn merge_and_filter(
     baseline: &ToolServerConfig,
     mcp_snapshot: &[ToolConfig],
@@ -278,8 +271,8 @@ pub(crate) fn merge_and_filter(
 }
 /// Alias for backward compatibility.
 pub type NoopSessionContextFactory = WorkspaceSessionContextFactory;
-/// Whether per-session `tool_state.json` persistence and per-turn upload are enabled.
-/// Only `GROK_WORKSPACE_TOOL_STATE_ENABLED=true` enables it; any other value keeps legacy behavior.
+/// Whether per-session `tool_state.json` persistence and per-turn upload are
+/// enabled.
 pub fn tool_state_enabled() -> bool {
     std::env::var("GROK_WORKSPACE_TOOL_STATE_ENABLED").as_deref() == Ok("true")
 }
@@ -316,21 +309,18 @@ fn ensure_session_dir(root: &std::path::Path, session_id: &str) -> (PathBuf, std
     (dir, created)
 }
 /// Serializes tests (across modules) that mutate the process-global `GROK_WORKSPACE_TOOL_STATE_ENABLED`.
-/// Aliased to the crate-wide [`crate::ENV_TEST_LOCK`] so ALL env-mutating tests share ONE lock.
-/// The hazard is the global `environ` array, not the variable's value.
 #[cfg(test)]
 pub(crate) use crate::ENV_TEST_LOCK as TOOL_STATE_ENV_LOCK;
 /// Every tool id this binary's registry knows. Built once: a `ToolRegistryBuilder` is not free and binds consult it.
 static REGISTRY_TOOL_IDS: std::sync::LazyLock<Arc<std::collections::HashSet<String>>> =
     std::sync::LazyLock::new(|| Arc::new(ToolRegistryBuilder::new().known_tool_ids()));
-/// Gen tools enable only with an [`AuthProvider`] and API base URL; otherwise they stay `Disabled`.
-/// `state_path` is `<home>/sessions/<session_id>/` only when set; `session_folder` is `/tmp/sessions/…`, not the project cwd.
-/// The persistent-shell backend is built once per session and reused on every context build.
+/// Gen tools enable only with an [`AuthProvider`] and API base URL; otherwise
+/// they stay `Disabled`. `state_path` is `<home>/sessions/<session_id>/` only
+/// when set; `session_folder` is `/tmp/sessions/…`, not the project cwd.
 pub struct WorkspaceSessionContextFactory {
     auth: Option<xai_computer_hub_sdk::SharedAuthProvider>,
     api_base_url: Option<String>,
     /// Resolved `$GROK_WORKSPACE_HOME` when tool-state persistence is enabled; `None` disables it.
-    /// Resolved once by the caller so the factory performs no per-build env reads.
     tool_state_home: Option<PathBuf>,
     /// The ids a pinned bind may name and this factory will serve.
     served_tool_ids: Arc<std::collections::HashSet<String>>,
@@ -373,8 +363,8 @@ impl WorkspaceSessionContextFactory {
             ..WorkspaceSessionContextFactory::new()
         }
     }
-    /// Enable session-keyed tool-state persistence rooted at `home` (`$GROK_WORKSPACE_HOME`).
-    /// Callers should only invoke this when [`tool_state_enabled`] is `true`.
+    /// Enable session-keyed tool-state persistence rooted at `home`
+    /// (`$GROK_WORKSPACE_HOME`).
     pub fn with_tool_state_home(mut self, home: PathBuf) -> Self {
         self.tool_state_home = Some(home);
         self

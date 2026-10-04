@@ -11,15 +11,15 @@ use xai_grok_tools::registry::types::{SessionContext, ToolRegistryBuilder, ToolS
 use xai_tool_runtime::ToolApprovalPolicy;
 /// Default capacity for the workspace event broadcast channel.
 pub const DEFAULT_EVENT_BUFFER_CAPACITY: usize = 64;
-/// A session-lifetime terminal backend (background-task registry and persistent shell) paired with its explicit shutdown hook.
-/// Teardown at `drop_session`/evict is an explicit act rather than a side effect of the last `Arc` drop.
+/// A session-lifetime terminal backend (background-task registry and
+/// persistent shell) paired with its explicit shutdown hook.
 #[derive(Clone)]
 pub struct SessionTerminalBackend {
     backend: Arc<dyn xai_grok_tools::computer::types::TerminalBackend>,
     shutdown: Arc<dyn Fn() + Send + Sync>,
 }
 impl SessionTerminalBackend {
-    /// Pair an already-erased `backend` with its shutdown hook. The fields are private, so [`SessionContextFactory`] implementors whose backend is not a `LocalTerminalBackend` must build one here.
+    /// Pair an already-erased `backend` with its shutdown hook.
     pub fn new(
         backend: Arc<dyn xai_grok_tools::computer::types::TerminalBackend>,
         shutdown: Arc<dyn Fn() + Send + Sync>,
@@ -53,9 +53,9 @@ impl std::fmt::Debug for SessionTerminalBackend {
 }
 /// Pluggable producer of a [`SessionContext`] and [`ToolRegistryBuilder`] for each session. The workspace can't construct the tool runtime (terminal backend, file system, persistence path, MCP client config, notification handle, ...).
 pub trait SessionContextFactory: Send + Sync {
-    /// Build a fresh [`SessionContext`] for the given session, around the given terminal `backend`.
-    /// The pipeline rebuilds toolsets around the session-owned backend, so the caller always supplies it.
-    /// Constructing a backend here would waste an actor per resolve.
+    /// Build a fresh [`SessionContext`] for the given session, around the
+    /// given terminal `backend`. The pipeline rebuilds toolsets around the
+    /// session-owned backend, so the caller always supplies it.
     fn build_session_context(
         &self,
         session_id: &str,
@@ -64,7 +64,6 @@ pub trait SessionContextFactory: Send + Sync {
         backend: Arc<dyn xai_grok_tools::computer::types::TerminalBackend>,
     ) -> SessionContext;
     /// Build the session-lifetime terminal backend for a new session.
-    /// Called once per session create/fork; toolset re-resolves reuse the session's stored backend instead of building another.
     fn build_terminal_backend(&self) -> SessionTerminalBackend;
     /// Build a fresh [`ToolRegistryBuilder`] with the workspace's full set of registered tools.
     fn registry_builder(&self) -> ToolRegistryBuilder;
@@ -91,8 +90,7 @@ pub struct WorkspaceBindConfig {
     pub viewer_ctx: Option<xai_tool_runtime::WorkspaceViewerContext>,
     /// Initial auto-approve (YOLO) state. `None` on legacy payloads fails closed (false).
     pub yolo_mode: Option<bool>,
-    /// The hub-set attended-execution ceiling; omitted → [`ToolApprovalPolicy::GrantsAllowed`],
-    /// present-but-unparseable → [`ToolApprovalPolicy::AlwaysPrompt`].
+    /// The hub-set attended-execution ceiling.
     pub tool_approval_policy: ToolApprovalPolicy,
     /// Plane-configured toolset in the gRPC wire shape. An empty list is treated as unset (proto3 repeated default).
     pub tools: Option<Vec<xai_grok_tools_api::ToolConfigEntry>>,
@@ -104,8 +102,8 @@ pub struct WorkspaceBindConfig {
     /// Real guest session root (`/workspace/<conversation_id>`). When set, the workspace virtualizes that tree as `/workspace`.
     pub session_root: Option<PathBuf>,
 }
-/// Outcome of resolving a [`WorkspaceBindConfig`]; lets callers fail closed instead of widening to the default toolset.
-/// Deliberately has **no preset arm** (see [`WorkspaceBindConfig::resolve`]).
+/// Outcome of resolving a [`WorkspaceBindConfig`]; lets callers fail closed
+/// instead of widening to the default toolset.
 #[derive(Debug)]
 pub enum ResolvedToolset {
     /// An explicit toolset (`tool_config` or `tools`).
@@ -121,8 +119,7 @@ pub enum ResolvedToolset {
 #[derive(Debug)]
 pub struct ResolvedTools {
     pub toolset: ToolServerConfig,
-    /// Pinned `tools` ids unknown to this binary's registry, sorted.
-    /// Always empty for `tool_config` resolutions.
+    /// Pinned `tools` ids unknown to this binary's registry, sorted. Always empty for `tool_config` resolutions.
     pub unserved_tool_ids: Vec<String>,
 }
 impl ResolvedTools {
@@ -792,19 +789,16 @@ mod bind_config_tests {
 pub struct BindMcpConfig {
     servers: Arc<[agent_client_protocol::McpServer]>,
     discovery_timeout: Duration,
-    /// Server names designated first-party app endpoints — see
-    /// [`Self::with_first_party_servers`].
+    /// Server names designated first-party app endpoints — see [`Self::with_first_party_servers`].
     first_party: std::sync::Arc<std::collections::HashSet<String>>,
 }
 impl BindMcpConfig {
     pub const DEFAULT_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
-    /// Cap on how long a `session.bind` *waits* for the session's MCP convergence. The bind never blocks on MCP discovery — tools flow through dynamic registration and a slow convergence simply finishes after the bind — but waiting a short grace lets fast discovery land in the bind's own install, so the first turn usually sees the tools.
-    /// The cap keeps the wait well under the hub's bind ack window ([`xai_tool_protocol::SESSION_BIND_ACK_TIMEOUT`], which the hub's ws router uses as its bind timeout; `bind_mcp_config_tests` pins the headroom), so one stalling MCP endpoint can never turn into a hub-visible bind failure.
+    /// Cap on how long a `session.bind` *waits* for the session's MCP convergence.
     pub const MAX_BIND_CONVERGE_GRACE: Duration = Duration::from_secs(8);
-    /// Headroom reserved out of the hub's bind-ack window for everything that is NOT the MCP converge wait: serializing the reply, the wire, and the hub's own handling.
-    /// The converge grace is budgeted as `SESSION_BIND_ACK_TIMEOUT − elapsed setup − this margin`, so the TOTAL bind stays under the ack window no matter how slow session create / remount / the bind-mount hook were.
+    /// Headroom reserved out of the hub's bind-ack window for everything that is NOT the MCP converge wait: serializing the reply, the wire.
     pub const BIND_ACK_SAFETY_MARGIN: Duration = Duration::from_secs(1);
-    /// Hard bound on configured servers. The config is externally influenced (a user-authored file on the desktop path), so its fan-out — child processes, connections, discovery work — carries an explicit cap; entries past it are dropped deterministically, in config order.
+    /// Hard bound on configured servers.
     pub const MAX_SERVERS: usize = 64;
     pub fn new(servers: impl IntoIterator<Item = agent_client_protocol::McpServer>) -> Self {
         let mut servers: Vec<_> = servers.into_iter().collect();
@@ -820,9 +814,8 @@ impl BindMcpConfig {
         self.discovery_timeout = timeout;
         self
     }
-    /// Mark servers (by configured name) as FIRST-PARTY app endpoints: local desktop processes addressed by agent id.
-    /// Only these receive the `X-Grok-Agent-ID` header (the bound session id) and the local-agent-endpoint transport posture (no OAuth probe, no proxy, no redirects).
-    /// Defaults OFF for every server — a user-configured third-party MCP server must never receive the session id or lose its OAuth/proxy path.
+    /// Mark servers (by configured name) as FIRST-PARTY app endpoints: local
+    /// desktop processes addressed by agent id.
     pub fn with_first_party_servers(mut self, names: impl IntoIterator<Item = String>) -> Self {
         self.first_party = std::sync::Arc::new(names.into_iter().collect());
         self
@@ -837,13 +830,15 @@ impl BindMcpConfig {
         self.discovery_timeout
     }
     /// How long a `session.bind` waits for the session's MCP convergence:
-    /// [`Self::discovery_timeout`], capped by
-    /// [`Self::MAX_BIND_CONVERGE_GRACE`].
+    /// [`Self::discovery_timeout`].
     pub fn bind_converge_grace(&self) -> Duration {
         self.discovery_timeout.min(Self::MAX_BIND_CONVERGE_GRACE)
     }
-    /// [`Self::bind_converge_grace`] as a DEADLINE from the start of bind handling rather than a duration started late: the grace only bounds the MCP wait, but the hub's ack window bounds the WHOLE bind — session create, path-virt remount, the bind-mount hook, and enrolment all spend from the same budget.
-    /// Clamped at zero: a bind whose setup already consumed the window skips the wait entirely and lets discovery ride `tools_changed`.
+    /// [`Self::bind_converge_grace`] as a DEADLINE from the start of bind
+    /// handling rather than a duration started late: the grace only bounds
+    /// the MCP wait, but the hub's ack window bounds the WHOLE bind —
+    /// session create, path-virt remount, the bind-mount hook, and enrolment
+    /// all spend from the same budget.
     pub fn bind_converge_grace_within(&self, elapsed_since_bind_start: Duration) -> Duration {
         let remaining = xai_tool_protocol::SESSION_BIND_ACK_TIMEOUT
             .saturating_sub(Self::BIND_ACK_SAFETY_MARGIN)
@@ -877,37 +872,23 @@ pub struct WorkspaceConfig {
     pub skills_config: crate::discovery::SkillsConfig,
     /// CLI plugin dirs, config paths, and disabled/enabled lists. Stored on `WorkspaceShared` for `discover_plugins` calls.
     pub plugin_discovery_config: crate::discovery::PluginDiscoveryConfig,
-    /// When `Some`, the workspace can connect to the server after construction via [`connect_hub`](crate::handle::WorkspaceHandle::connect_hub).
+    /// When `Some`, the workspace can connect to the server after construction.
     pub hub_config: Option<HubConfig>,
     /// Auth provider for xAI service calls made from workspace-scoped code.
-    /// `None` for workspaces that do not configure service auth.
     pub auth_provider: Option<xai_computer_hub_sdk::SharedAuthProvider>,
     /// Metadata attached to the tool server registration.
-    /// Propagated through the server to `ServerInfo.metadata` in `servers.list` responses.
-    /// Harness clients use it to identify the sandbox that started the tool server.
     pub server_metadata: Option<serde_json::Value>,
     /// Runtime-tunable timing/threshold config for the tool server.
     pub status_config: crate::status_config::StatusConfig,
-    /// Folder-trust verdict for repo-local (project-scoped) LSP servers from `<cwd>/.grok/lsp.json`.
-    /// `false` drops them at load, `true` keeps them.
-    /// The shell caller resolves the verdict and threads it in; callers without a folder-trust decision pass `true`.
     pub project_lsp_trusted: bool,
-    /// Fail `session.bind`s without an explicit toolset closed instead of widening to `default_tool_config`.
-    /// Set by sandbox-launched standalone servers; local/CLI embedders keep the default-catalog fallback.
     pub require_explicit_toolset: bool,
-    /// Confine `x.ai/fs/*` / `workspace.fs_*` resolution to the workspace root (reject `..`, absolute-outside-root, symlink escapes).
-    /// Default `false` (unconfined); set to `true` only by the workspace server on a remote sandbox, where the root is a real tenant boundary.
     pub confine_fs_to_workspace_root: bool,
-    /// MCP servers initialized for each admitted hub session bind.
     pub bind_mcp: Option<BindMcpConfig>,
-    /// Whether hub tool calls wait for the session owner; resolved per host by
     /// [`approval_gate_for`](crate::permission::approval_gate_for).
     pub tool_approval: ToolApprovalGate,
-    /// Which host runs this server; decides whether the root's `FsChanged` producer is lit.
     pub host_kind: crate::host_kind::WorkspaceHostKind,
 }
 /// Metadata a tool server announces so hub consumers can identify and route to it.
-/// Re-export of the protocol crate's single catalog of well-known registration-metadata keys; every field is optional and independently sourced.
 pub use xai_tool_protocol::ServerIdentityMetadata as WorkspaceServerMetadata;
 /// Merge an env-sourced logical session id into caller-supplied tool-server metadata (`None` on the restore/local path).
 /// Delegates to [`WorkspaceServerMetadata::merge_into`]: an explicit `session_id` already in `metadata` is never clobbered.
@@ -921,9 +902,8 @@ pub fn merge_session_metadata(
     }
     .merge_into(metadata)
 }
-/// Merge the host-identity keys a standalone server can determine for itself (`host_kind`, `platform`) into caller-supplied metadata.
-/// `host_kind` is one of the `xai_tool_protocol::HOST_KIND_*` values; the caller picks it because the same binary serves sandbox containers and headless user machines.
-/// Delegates to [`WorkspaceServerMetadata::merge_into`]: explicit caller keys are never clobbered, and a non-object value passes through unchanged.
+/// Merge the host-identity keys a standalone server can determine for itself (`host_kind`, `platform`) into caller-supplied metadata. `host_kind` is one of the `xai_tool_protocol::HOST_KIND_*` values; the caller picks it because the same binary serves sandbox
+/// containers and headless user machines.
 pub fn merge_host_identity_metadata(
     metadata: Option<serde_json::Value>,
     host_kind: &str,
@@ -1043,8 +1023,7 @@ pub enum IsolationMode {
 mod bind_mcp_config_tests {
     use super::BindMcpConfig;
     use std::time::Duration;
-    /// The hub fails a `session.bind` whose ack takes longer than its window — the shared protocol constant, which the hub's ws router uses as its bind timeout.
-    /// The grace a bind waits for the session's MCP convergence must stay under it with headroom, or one stalling MCP endpoint turns into a hub-visible bind failure.
+    /// The hub fails a `session.bind` whose ack takes longer than its window — the shared protocol constant.
     const HUB_BIND_ACK_TIMEOUT: Duration = xai_tool_protocol::SESSION_BIND_ACK_TIMEOUT;
     /// Duplicate names dedupe at the same chokepoint as the caps, LAST definition wins
     /// (JSON-object semantics): the session maps hold one slot per name, so without this,

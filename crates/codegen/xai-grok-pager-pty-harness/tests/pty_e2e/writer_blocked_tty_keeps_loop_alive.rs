@@ -1,5 +1,4 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
-// Unix only: the blocked-write mechanics (dup'd tty fd, FIONREAD) have no Windows analogue.
 #![cfg(unix)]
 #[allow(unused_imports)]
 use crate::common::*;
@@ -10,9 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Upper bound on waiting for the writer to park. Must stay well under the blocked-report
-/// deadline (`WRITER_BLOCKED_WARN_AFTER`, 5 s) so FocusGained is injected before the
-/// marker can fire; the pre-injection assertion below guards that ordering.
+/// Upper bound on waiting for the writer to park.
 const PARK_DEADLINE: Duration = Duration::from_secs(4);
 
 /// Wait until the writer thread is parked in its tty write.
@@ -34,9 +31,7 @@ fn wait_until_writer_parks(master_fd: RawFd) {
     panic!("pty output never backed up while streaming: the writer did not park");
 }
 
-/// All pty output captured so far plus the drain gate. While the gate is
-/// closed the reader thread parks WITHOUT reading, so pty output backs up
-/// exactly like a terminal that stopped consuming.
+/// All pty output captured so far plus the drain gate.
 struct PtyTap {
     output: Mutex<Vec<u8>>,
     draining: AtomicBool,
@@ -84,16 +79,13 @@ async fn writer_blocked_tty_keeps_loop_alive() {
     let binary = pager_binary().expect("resolve pager binary");
     let mut cmd = portable_pty::CommandBuilder::new(&binary);
     cmd.cwd(content.sandbox().home());
-    // Hermetic like every harness spawn: ambient vars (GROK_SCROLL_LOG, TMUX, ...) must not
-    // leak state outside the sandbox or shift which escape-emission path the test exercises.
+    // Hermetic like every harness spawn: ambient vars (GROK_SCROLL_LOG, TMUX, ...) must not leak state outside the sandbox or shift.
     cmd.env_clear();
     for (key, value) in content.sandbox().env() {
         cmd.env(key, value);
     }
     cmd.env("TERM", "xterm-256color");
-    // Direct spawn (not `PtyHarness`): its reader thread drains the pty eagerly,
-    // and this test needs the pty to back up. Enroll the child so it is reaped
-    // on any failure path, same as the harness's own spawn.
+    // Direct spawn (not `PtyHarness`): its reader thread drains the pty eagerly.
     #[allow(clippy::disallowed_methods)]
     let mut child = pair.slave.spawn_command(cmd).expect("spawn pager");
     let _process_tree = child
@@ -149,9 +141,7 @@ async fn writer_blocked_tty_keeps_loop_alive() {
     tap.draining.store(false, Ordering::Release);
     wait_until_writer_parks(master_fd);
 
-    // The report must not have fired yet (see PARK_DEADLINE): a pre-injection marker
-    // would make the loop-alive check below pass vacuously, green even under a binary
-    // where FocusGained wedges the loop.
+    // The report must not have fired yet (see PARK_DEADLINE).
     let log_path = unified_log_path(&content);
     let log_at_injection = std::fs::read_to_string(&log_path).unwrap_or_default();
     assert!(
@@ -164,8 +154,7 @@ async fn writer_blocked_tty_keeps_loop_alive() {
     writer.write_all(b"\x1b[I").expect("inject FocusGained");
     writer.flush().expect("flush FocusGained");
 
-    // Loop-alive proof: the blocked-writer report fires from the event loop's
-    // own select arm, after FocusGained was handled, while the pty stays unread.
+    // Loop-alive proof: the blocked-writer report fires from the event loop's own select arm, after FocusGained was handled.
     let report_deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let log = std::fs::read_to_string(&log_path).unwrap_or_default();

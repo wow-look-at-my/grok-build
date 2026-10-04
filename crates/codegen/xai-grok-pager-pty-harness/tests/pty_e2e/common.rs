@@ -1,6 +1,4 @@
 //! Shared constants and helpers for PTY e2e tests.
-//!
-//! Individual test modules import via `use super::common::*`.
 
 pub(crate) use serde_json::json;
 pub(crate) use std::path::{Path, PathBuf};
@@ -12,35 +10,27 @@ pub(crate) use xai_grok_pager_pty_harness::{
 };
 
 /// Default PTY size used by every e2e test.
-/// Large enough to render the welcome screen without wrapping, small enough to make `screen_contents()` scans cheap.
 pub(crate) const DEFAULT_ROWS: u16 = 50;
 
 pub(crate) const DEFAULT_COLS: u16 = 120;
 
 /// Default wait-for-welcome timeout.
-/// The pager spawns a child shell agent, which can take a few seconds on cold build directories.
 pub(crate) const WELCOME_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Wait budget for a `--continue` / resume to replay the prior transcript back into scrollback.
-/// Match [`WRAP_TIMEOUT`] (120s) for the same contention reason, not because resume is slow when
-/// run alone.
 pub(crate) const RESUME_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Substring we wait for on the welcome screen.
-/// Matches the menu label `"Quit"` (`render_welcome_done` / gate menus).
-/// Case-sensitive, so it does **not** match the lowercase `"quit"` hint line during `AuthState::Authenticating`.
+/// Substring we wait for on the welcome screen. Matches the menu label `"Quit"` (`render_welcome_done` / gate menus).
 pub(crate) const WELCOME_SCREEN_SENTINEL: &str = "Quit";
 
-/// Prompt sent to the agent in content-driven tests.
-/// Short so it submits quickly and doesn't wrap.
+/// Prompt sent to the agent in content-driven tests. Short so it submits quickly and doesn't wrap.
 pub(crate) const PROMPT: &str = "go";
 
 /// Response the mock server will stream back.
-/// Must contain a stable, unambiguous sentinel word that we can `wait_for_text` on.
 pub(crate) const MOCK_RESPONSE_SENTINEL: &str = "MOCKRESPONSE";
 
-/// The sandbox's unified log (shell-written; forwarded pager entries land here too).
-/// `"logs"` mirrors `xai_grok_telemetry::unified_log::LOG_DIR`; the harness does not link telemetry.
+/// The sandbox's unified log (shell-written; forwarded pager entries land
+/// here too).
 pub(crate) fn unified_log_path(content: &ContentController) -> PathBuf {
     content
         .sandbox()
@@ -51,16 +41,12 @@ pub(crate) fn unified_log_path(content: &ContentController) -> PathBuf {
 
 // ── Undo-tip e2e helpers ────────────────────────────────────────────────
 
-/// Suffix of the undo-tip banner, now "Input cleared · ctrl+z to undo" on all platforms (terminals don't forward Cmd+Z to a raw-mode TUI).
-/// Asserting only the suffix keeps the check independent of which chord the banner names.
+/// Suffix of the undo-tip banner, now "Input cleared · ctrl+z to undo" on all platforms.
 pub(crate) const UNDO_TIP_SENTINEL: &str = "to undo";
 
 /// Suffix of the mid-turn send-now tip: `Queued · Enter to interrupt & send` (or the interject chord in multiline).
-/// Chord-agnostic like [`UNDO_TIP_SENTINEL`].
 pub(crate) const SEND_NOW_TIP_SENTINEL: &str = "to interrupt & send";
 
-/// A draft of FIRE_PEAK_LEN (20) or more chars.
-/// The first keystroke (or Ctrl+N) leaves Welcome; the rest lands in the agent composer.
 pub(crate) const SUBSTANTIAL_DRAFT: &[u8] = b"aaaaaaaaaaaaaaaaaaaaaaaaa";
 
 /// Leave the optimistic home screen via Ctrl+N so the rest of the test runs
@@ -91,7 +77,7 @@ pub(crate) fn wipe_substantial_draft(harness: &mut PtyHarness) {
 /// Contextual-hints opt-in. The feature ships default-OFF.
 pub(crate) const CONTEXTUAL_HINTS_ENV: &[(&str, &str)] = &[("GROK_CONTEXTUAL_HINTS", "1")];
 
-/// Collect short OSC 8 payloads for assertion failure messages.
+/// Collect short OSC multiple payloads for assertion failure messages.
 pub(crate) fn osc8_snippets(raw: &str) -> String {
     let mut out = Vec::new();
     for part in raw.split("\x1b]8;") {
@@ -129,7 +115,7 @@ pub(crate) fn long_response(sentinel: &str, lines: usize) -> String {
 }
 
 /// A response that renders to at least `rows` terminal rows. Each `line N` becomes exactly one
-/// rendered row. A 60-line prose paragraph reflows to only ~30 rows at typical widths and fits on
+/// rendered row. A 60-line prose paragraph reflows to many rows at typical widths and fits on
 /// screen, so it would not overflow into scrollback.
 pub(crate) fn tall_response(sentinel: &str, rows: usize) -> String {
     let mut s = String::with_capacity(rows * 24);
@@ -143,12 +129,12 @@ pub(crate) fn tall_response(sentinel: &str, rows: usize) -> String {
     s
 }
 
-// ── Fake session-auth (OAuth) seeding ───────────────────────────────────
-// `seed_fake_oauth` / `oauth_credential_ops` live in `xai_grok_pager_pty_harness::flows` (re-exported above)
+// ── Fake session-auth (OAuth) seeding
+// ───────────────────────────────────
+// `seed_fake_oauth` / `oauth_credential_ops` live.
 
-/// The harness's default `XAI_API_KEY` (ApiKey/BYOK mode, no auth.json entry) would never fetch
-/// `/v1/settings`. Spawns WITHOUT `GROK_ANNOUNCEMENTS_OVERRIDE` (the env override beats pushed
-/// lists in the pager and would mask updates).
+/// The harness's default `XAI_API_KEY` (ApiKey/BYOK mode, no auth.json entry)
+/// would never fetch `/v1/settings`.
 pub(crate) fn spawn_polling_session(content: &ContentController, oauth_user: &str) -> PtyHarness {
     spawn_polling_session_with_env(content, oauth_user, &[])
 }
@@ -190,17 +176,10 @@ pub(crate) fn spawn_polling_session_with_env(
 
 // ── Agent type mismatch e2e tests ──────────────────────────────────────
 
-/// Start the mock server with two models that have different agent types,
-/// and return a `ContentController` configured for agent-type-mismatch
-/// testing. The default model is `"default-model"` (no agent type → uses
+/// Start the mock server with models that have different agent types, and
+/// return a `ContentController` configured for agent-type-mismatch testing.
+/// The default model is `"default-model"` (no agent type → uses
 /// `grok-build` harness).
-///
-/// The second model's agent type must be one `is_strict_harness_agent_type`
-/// recognizes, which means a name in `BuiltinAgentName`. An unknown name
-/// resolves to non-strict -- deliberately, so no harness is enforced that
-/// cannot be verified -- and non-strict against non-strict is COMPATIBLE, so a
-/// made-up type produces no mismatch and every one of these tests waits out its
-/// timeout on a modal that was never going to open.
 pub(crate) async fn start_dual_agent_type_content() -> ContentController {
     ContentController::start_with_models(vec![
         MockModel::new("default-model"),
@@ -210,8 +189,7 @@ pub(crate) async fn start_dual_agent_type_content() -> ContentController {
     .expect("start content with dual agent types")
 }
 
-/// A strict-harness agent type for mismatch tests -- see
-/// [`start_dual_agent_type_content`] for why it cannot be an arbitrary string.
+/// A strict-harness agent type for mismatch tests.
 pub(crate) const STRICT_HARNESS_AGENT_TYPE: &str = "grok-build-orchestrator";
 
 // ── Folder-trust welcome sub-state e2e ──────────────────────────────────
@@ -237,8 +215,7 @@ pub(crate) fn trust_env(feature_on: bool) -> [(&'static str, &'static str); 2] {
     ]
 }
 
-/// Filename of the folder-trust store under `$HOME/.grok`. Mirrors
-/// `xai_grok_workspace::trust::TRUST_FILE_NAME`; the harness does not link the workspace crate.
+/// Filename of the folder-trust store under `$HOME/.grok`.
 pub(crate) const TRUST_FILE_NAME: &str = "trusted_folders.toml";
 
 /// Whether the `trusted_folders.toml` at `store_path` records a grant covering `query`.
@@ -269,11 +246,10 @@ pub(crate) fn folder_is_trusted(content: &ContentController, repo: &Path) -> boo
     store_trusts(&content.home().join(".grok").join(TRUST_FILE_NAME), repo)
 }
 
-// Leader mode e2e. The leader cluster cases moved to the dedicated `tests/leader_pty_e2e` target.
-// Their LEADER_TIMEOUT/STREAM_TIMEOUT/submit_turn/inference_request_count helpers moved with them.
-// Only the helpers non-leader tests still use remain here.
+// Leader mode e2e. The leader cluster cases moved to the dedicated
+// `tests/leader_pty_e2e` target.
 
-/// Sentinel for turn `n`, short enough to never wrap at 120 cols (wrapping would break the exactly-once occurrence counts).
+/// Sentinel for turn `n`, short enough to never wrap at multiple cols (wrapping would break the exactly-once occurrence counts).
 pub(crate) fn turn_sentinel(n: u8) -> String {
     format!("{MOCK_RESPONSE_SENTINEL}_T{n}")
 }
@@ -365,7 +341,7 @@ pub(crate) const CTRL_ENTER: &[u8] = b"\x1b[13;5u";
 
 pub(crate) const CTRL_SEMICOLON: &[u8] = b"\x1b[59;5u";
 
-/// Ctrl+\ (OpenDashboard). crossterm maps the raw 0x1c byte to Ctrl+4, so the chord must be sent as kitty CSI-u: code 92 (`\`), modifier 5 (Ctrl).
+/// Ctrl+\ (OpenDashboard).
 pub(crate) const CTRL_BACKSLASH: &[u8] = b"\x1b[92;5u";
 
 /// Wire prefix the shell puts on interjected messages.
@@ -397,8 +373,8 @@ pub(crate) fn all_user_messages(content: &ContentController) -> Vec<String> {
         .collect()
 }
 
-/// Visible screen lines showing `text` INSIDE the bordered composer (the prompt-box row carries a `│` border; committed scrollback lines don't).
-/// Keep needles short enough not to wrap at [`DEFAULT_COLS`].
+/// Visible screen lines showing `text` INSIDE the bordered composer (the
+/// prompt-box row carries a `│` border; committed scrollback lines don't).
 pub(crate) fn composer_holds(harness: &PtyHarness, text: &str) -> bool {
     harness
         .screen_contents()
@@ -406,8 +382,8 @@ pub(crate) fn composer_holds(harness: &PtyHarness, text: &str) -> bool {
         .any(|l| l.contains('│') && l.contains(text))
 }
 
-/// Count of visible screen lines showing `text` OUTSIDE the bordered composer (committed scrollback copies).
-/// The cancel/rewind duplicate-render regression tests assert this count is exactly one.
+/// Count of visible screen lines showing `text` OUTSIDE the bordered composer
+/// (committed scrollback copies).
 pub(crate) fn block_lines_containing(harness: &PtyHarness, text: &str) -> usize {
     harness
         .screen_contents()
@@ -417,16 +393,13 @@ pub(crate) fn block_lines_containing(harness: &PtyHarness, text: &str) -> usize 
 }
 
 /// 19b. **VS Code family: Ctrl+L (form feed)** is the send-now chord, behaving like the default Ctrl+Enter binding.
-/// Harness strips `TERM_PROGRAM` then applies env; pass `vscode` so defaults bind the chord to Ctrl+L.
 pub(crate) const CTRL_L: &[u8] = b"\x0c";
 
-/// Ctrl+O (C0 0x0F).
-/// On Apple Terminal this is the InterjectPrompt / send-now chord.
+/// Ctrl+O (C0 0x0F). On Apple Terminal this is the InterjectPrompt / send-now chord.
 pub(crate) const CTRL_O: &[u8] = b"\x0f";
 
-// NOTE: There is no SessionStart hook exactly-once e2e test
-// Deduplication in load_hooks_from_sources is covered by unit tests in xai-grok-hooks::discovery::tests
-// A PTY e2e test would need careful environment variable setup to avoid static caching issues with GROK_HOME
+// NOTE: There is no SessionStart hook exactly-once e2e test Deduplication in
+// load_hooks_from_sources is covered by unit tests.
 
 // ── Mouse reporting toggle (opt-in scrollback Ctrl+R) ───────────────────
 
@@ -485,9 +458,8 @@ pub(crate) fn spawn_mouse_toggle_pager(content: &ContentController) -> PtyHarnes
     .expect("spawn pager")
 }
 
-/// Inject keys one byte at a time with a short drain between each so the pager event loop processes them as discrete key events.
-/// Bulk injects (especially post-turn, when no steady `tracing_rx` tick wakes non-dev builds) can arrive in a single `EventStream` batch.
-/// They then get paste-coalesced (`[Pasted: N lines]`), which never reaches slash submit.
+/// Inject keys one byte at a time with a short drain between each so the
+/// pager event loop processes them as discrete key events.
 pub(crate) fn inject_keys_paced(harness: &mut PtyHarness, keys: &[u8]) {
     for &b in keys {
         harness.inject_keys(&[b]).expect("inject paced key");
@@ -496,7 +468,6 @@ pub(crate) fn inject_keys_paced(harness: &mut PtyHarness, keys: &[u8]) {
 }
 
 /// Widens the pager's idle-Esc double-press window (bounded by `esc_double_press_ttl` in `app_view.rs`).
-/// On a loaded shard, the render round-trip between the two presses must not expire the pending first press.
 pub(crate) const ESC_DOUBLE_PRESS_ENV: &str = "GROK_ESC_DOUBLE_PRESS_MS";
 
 /// Spawn the pager with [`ESC_DOUBLE_PRESS_ENV`] set to the 60s cap
@@ -530,7 +501,6 @@ pub(crate) async fn drive_to_scrollback_with_turn(
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("turn rendered");
     // Leave the prompt so scrollback-only Ctrl+R can fire (unbound on the prompt).
-    // Tab is the leave-prompt / focus-scrollback key (Esc is reserved for the cancel / clear / rewind policy)
     harness.inject_keys(b"\t").expect("focus scrollback (tab)");
     harness.update(Duration::from_millis(500));
     // Footer shows "Space:prompt" when scrollback owns keys (prompt is not focused).
@@ -665,7 +635,6 @@ pub(crate) fn chat_completions_tool_call_events_with_id(
     ]
 }
 
-/// Poll the raw PTY stream until at least one OSC 52 clipboard payload is flushed (or `timeout` elapses), then return everything decoded so far.
 /// A copy lands asynchronously after the triggering input, so a fixed post-release sleep flakes under CI/host load.
 pub(crate) fn wait_for_osc52_payloads(harness: &mut PtyHarness, timeout: Duration) -> Vec<String> {
     let deadline = Instant::now() + timeout;
@@ -686,8 +655,8 @@ pub(crate) fn decode_osc52_payloads(bytes: &[u8]) -> Vec<String> {
         let Some((_, rest)) = segment.split_once(';') else {
             continue;
         };
-        // No BEL/ST terminator yet means a mid-flush tail
-        // Skip it so the poll in wait_for_osc52_payloads waits for the complete payload instead of decoding a truncated prefix that still parses as base64
+        // No BEL/ST terminator yet means a mid-flush tail Skip it so the poll
+        // in wait_for_osc52_payloads waits.
         let Some(end) = rest.find(['\x07', '\x1b']) else {
             continue;
         };
@@ -704,9 +673,6 @@ pub(crate) fn decode_osc52_payloads(bytes: &[u8]) -> Vec<String> {
     payloads
 }
 
-/// One SGR (DECSET 1006) mouse report for button `btn` at 0-based (row,col), emitted as the 1-based SGR wire encoding:
-/// `suffix` 'M' means press/motion and 'm' means release; `btn` carries the +32 motion bit and the +64 wheel bit.
-/// Encoding spec: https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking
 pub(crate) fn sgr_mouse(btn: u16, row: u16, col: u16, suffix: char) -> String {
     format!("\x1b[<{btn};{};{}{suffix}", col + 1, row + 1)
 }
@@ -831,7 +797,6 @@ pub(crate) fn responses_api_parallel_tool_call_events(
 }
 
 /// Chat Completions twin of [`responses_api_parallel_tool_call_events`].
-/// One chunk whose `delta.tool_calls` carries every call (index 0, 1, …), then a `finish_reason: "tool_calls"` chunk.
 pub(crate) fn chat_completions_parallel_tool_call_events(
     calls: &[(&str, &str, String)],
 ) -> Vec<SseEvent> {
@@ -918,7 +883,6 @@ pub(crate) fn seed_read_file_tool_call(
 }
 
 /// A plan body the `exit_plan_mode` tool will read off disk.
-/// Every step carries a unique `{tag}{NNN}` sentinel, because a truncated plan still contains its head and would pass a plain substring check.
 pub(crate) fn plan_body(tag: &str, lines: usize) -> String {
     let mut s = format!("# {tag} Plan\n\n");
     for i in 0..lines {
@@ -986,18 +950,15 @@ pub(crate) fn wait_for_exit_status(
 
 // ── grok wrap e2e ───────────────────────────────────────────────────────
 
-/// `grok wrap` run budget.
-/// Same contention math as the requirements-version test.
-/// The child's cold exec of the huge debug binary can land its first write well past 30s under the parallel pty_e2e suite.
+/// `grok wrap` run budget. Same contention math as the requirements-version test.
 #[cfg(unix)]
 pub(crate) const WRAP_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[cfg(unix)]
 const WRAP_DRAIN_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Run `grok wrap <wrap_args...>` to completion inside a PTY with an isolated `GROK_HOME`.
-/// Returns the exit code (`None` only while still running at [`WRAP_TIMEOUT`]) and everything the wrap PTY emitted.
-/// `extra_env` is where tests pin `SHELL`; wrap needs no mock content (it dispatches in `main` before auth/network/sandbox).
+/// Run `grok wrap <wrap_args...>` to completion inside a PTY with an isolated
+/// `GROK_HOME`.
 #[cfg(unix)]
 pub(crate) fn run_wrap(wrap_args: &[&str], extra_env: &[(&str, &str)]) -> (Option<u32>, String) {
     run_wrap_driving(wrap_args, extra_env, |_| {})
@@ -1124,7 +1085,6 @@ const KITTY_STARTUP_PROBE: &[u8] = b"\x1b[?u\x1b[c";
 /// kitty's answer, trailing `;` included.
 const KITTY_STARTUP_PROBE_REPLY: &[u8] = b"\x1b[?0u\x1b[?62;c";
 
-/// Disambiguate (1) + report event types (2).
 pub(crate) const KITTY_PUSH_FLAGS: &[u8] = b"\x1b[>3u";
 
 /// crossterm pops one stack entry explicitly, not the bare `CSI < u`.
@@ -1134,7 +1094,6 @@ pub(crate) const DA1_QUERY: &[u8] = b"\x1b[c";
 
 pub(crate) const DA1_REPLY: &[u8] = b"\x1b[?62;c";
 
-/// The probe blocks startup for at most 2 s, so the reply is scripted as soon as the probe appears, not after the welcome screen.
 pub(crate) fn answer_kitty_startup_probe(harness: &mut PtyHarness) {
     let probe_at = wait_for_raw_bytes_after(harness, 0, KITTY_STARTUP_PROBE, WELCOME_TIMEOUT)
         .expect("pager never probed for kitty keyboard support");
@@ -1148,9 +1107,8 @@ pub(crate) fn answer_kitty_startup_probe(harness: &mut PtyHarness) {
     );
 }
 
-/// Prints whatever the pager left in the tty input queue between two markers after it exits. `min 0 time 20` gives `cat`
-/// EOF after two quiet seconds, `-echo` stops the tty echoing the residue a second time, and `LEFTOVER-BEGIN` follows a
-/// successful `stty`, so its appearance means `cat` is about to read.
+/// Prints whatever the pager left in the tty input queue between markers
+/// after it exits.
 #[cfg(unix)]
 pub(crate) const LEFTOVER_CAPTURE_SCRIPT: &str = concat!(
     "command -v stty >/dev/null || exit 99; ",
@@ -1301,9 +1259,7 @@ pub(crate) fn all_user_message_blobs(content: &ContentController) -> Vec<String>
         .collect()
 }
 
-// The `paste_ctrl_v_*_{macos,windows}` tests drive the REAL host clipboard via the harness's shared `host_clipboard` helpers
-// They are OS-native and mutate the machine-global clipboard (pbcopy/osascript on macOS, PowerShell on Windows)
-// They hold `#[serial_test::serial(host_clipboard)]` so two clipboard tests never interleave within one test process
+// The `paste_ctrl_v_*_{macos,windows}` tests drive the REAL host clipboard.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use xai_grok_pager_pty_harness::host_clipboard::{
     HostClipboardTextGuard, pbcopy, set_clipboard_png, write_fixture_png,

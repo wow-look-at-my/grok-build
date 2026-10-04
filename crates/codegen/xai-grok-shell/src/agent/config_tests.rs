@@ -125,8 +125,8 @@ fn laziness_detector_block_round_trips_through_serde() {
     assert_eq!(cfg.min_confidence, Some(0.8));
     assert_eq!(cfg.include_reasoning, Some(false));
 }
-/// Pins all three states of the per-model `include_reasoning` override (`Some(true)`, `Some(false)`, and absent giving `None`).
-/// A future drift on the `#[serde(default)]` attribute or the field type fails the test rather than silently changing the resolved default.
+/// Pins all states of the per-model `include_reasoning` override (`Some(true)`, `Some(false)`, and absent giving `None`). A future drift on
+/// the `#[serde(default)]` attribute or the field type fails the test rather than silently changing the resolved default.
 #[test]
 fn laziness_detector_include_reasoning_serde_states() {
     let some_true: LazinessDetectorPerModelConfig =
@@ -1588,9 +1588,8 @@ fn enforce_disable_api_key_auth_blocks_first_party_only() {
     enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
 }
-/// Regression for the OVERRIDE_MODEL kill-switch bypass. A first-party model with its own api_key resolves to `ApiKey` (priority 1, beating the session).
-/// The kill switch, now applied inside `try_resolve_model_credentials`, swaps it for the session token. BYOK (non-x.ai) own keys are preserved.
-/// (`try_resolve_model_credentials` loads global config, so this exercises its resolve and enforce core.)
+/// Regression for the OVERRIDE_MODEL kill-switch bypass. The kill switch, now applied inside `try_resolve_model_credentials`, swaps it for the session
+/// token. BYOK (non-x.ai) own keys are preserved. (`try_resolve_model_credentials` loads global config, so this exercises its resolve and enforce core.)
 #[test]
 fn try_resolve_model_credentials_swaps_first_party_own_key_under_kill_switch() {
     use xai_chat_state::AuthType;
@@ -3982,9 +3981,7 @@ fn model_mtls_configuration_requires_one_explicit_https_destination() {
         );
     }
 }
-/// A field holding a registered key is read as of whenever it was written, and these three are built before the value's last writer runs.
-/// `auto_wake` shipped that way and lost every pin.
-/// Catches the spelling, not the class: a mirror under another name still gets through.
+/// `auto_wake` shipped that way and lost every pin. Catches the spelling, not the class: a mirror under another name still gets through.
 #[test]
 fn no_registered_feature_is_mirrored_by_a_config_field() {
     const SRC: &str = include_str!("config.rs");
@@ -4800,8 +4797,7 @@ fn resolve_trace_upload_disabled_when_telemetry_off_despite_remote_flag() {
 #[test]
 #[serial]
 fn resolve_trace_upload_explicit_config_cannot_reenable() {
-    // Trace upload is hard-disabled: neither explicit config nor a
-    // requirements pin may force it back on.
+    // Trace upload is hard-disabled: neither explicit config nor a requirements pin may force it back on.
     unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
     unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
     let mut cfg = Config::default();
@@ -4839,8 +4835,7 @@ fn trace_upload_decision_debug_reports_winning_source() {
     assert_eq!(d["telemetry_mode"], serde_json::json!("false"));
     assert_eq!(d["in_remote_trace_upload_enabled"], serde_json::json!(true));
     assert_eq!(d["has_remote_settings"], serde_json::json!(true));
-    // Hard-disable: even explicit config cannot flip the decision; the
-    // raw input is still reported for debugging.
+    // Hard-disable: even explicit config cannot flip the decision; the raw input is still reported for debugging.
     cfg.telemetry.trace_upload = Some(true);
     let d = cfg.trace_upload_decision_debug();
     assert_eq!(d["trace_upload"], serde_json::json!(false));
@@ -4850,8 +4845,7 @@ fn trace_upload_decision_debug_reports_winning_source() {
 #[test]
 #[serial]
 fn resolve_telemetry_mode_hard_disabled_despite_env_config_and_remote() {
-    // Telemetry is hard-disabled: env, explicit config, a requirements
-    // pin, and remote settings must all be ignored.
+    // Telemetry is hard-disabled: env, explicit config, a requirements pin, and remote settings must all be ignored.
     unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "true") };
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Enabled);
@@ -5845,8 +5839,7 @@ fn resolve_goal_skeptic_models_no_pool_inherits() {
     assert_eq!(r.source, ConfigSource::Default);
 }
 /// Every harness model slot parses from `[models]` and answers through
-/// [`Config::resolve_harness_model`]. This is what makes the slot table
-/// and the config schema one thing rather than two that drift.
+/// [`Config::resolve_harness_model`].
 #[test]
 fn every_harness_model_slot_parses_from_the_models_table() {
     let body: String = xai_grok_models::HARNESS_MODEL_SLOTS
@@ -7976,7 +7969,6 @@ default = "grok-4.5"
     assert_eq!(cfg.models.default.as_deref(), Some("grok-4.5"));
 }
 /// Reproduce the enterprise managed config bug: [model.grok-build] sets context_window=500k for model="grok-4.5". [models].default="grok-4.5" still resolves to the bare prefetched entry (256k).
-/// Layer 3 only overrides key "grok-build", not key "grok-4.5". After the Layer 4 slug propagation fix, both keys should have 500k.
 #[test]
 fn slug_propagation_enterprise_managed_config_key_mismatch() {
     let default_cw = DEFAULT_CONTEXT_WINDOW;
@@ -8078,8 +8070,6 @@ fn slug_propagation_does_not_overwrite_explicit_context_window() {
         "explicitly-set context_window must not be overwritten by slug propagation"
     );
 }
-/// Resolves a prefetched `custom-model` (default context window, ChatCompletions) against a same-slug `[model.alias]` donor at 500000 / `responses`, plus whatever `extra_toml` adds.
-/// The slug is absent from the built-in catalog so Layer 2 cannot pre-fill the prefetched entry and turn it into its own donor.
 fn resolve_custom_model_with_alias_donor(extra_toml: &str) -> ModelEntry {
     let raw: toml::Value = toml::from_str(&format!(
         r#"
@@ -8540,7 +8530,6 @@ fn prefetched_menu_donor() -> ModelEntry {
     entry
 }
 /// Resolves `config_toml` (rows pointing at `model = "grok-4.6-build"`) against `donor` prefetched under the wire id.
-/// A custom models endpoint keeps the built-in `grok-4.6` catalog row (which has its own menu) out of Layer 1.
 fn resolve_with_menu_donor(config_toml: &str, donor: ModelEntry) -> IndexMap<String, ModelEntry> {
     let raw: toml::Value = toml::from_str(config_toml).unwrap();
     let mut cfg = Config::new_from_toml_cfg(&raw).expect("config should parse");
@@ -8692,12 +8681,7 @@ fn resolve_model_list_inherits_context_window_from_default_when_prefetched_has_f
 }
 #[test]
 fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
-    // A `[model.*]` config entry that shares a routing slug with a
-    // `/v1/models` listing entry (Synthetic's `syn:large:text`, whose
-    // `context_length` is read as `context_window`) must adopt the
-    // listing's real window even though the config override did not set
-    // `context_window` — it lands at DEFAULT_CONTEXT_WINDOW and the slug
-    // backfill promotes it. Regression for the Synthetic provider.
+    // A `[model.*]` config entry that shares a routing slug with a `/v1/models` listing entry.
     let mut cfg = Config::default();
     cfg.config_models.insert(
         "synthetic".to_owned(),
@@ -8708,8 +8692,6 @@ fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
             ..Default::default()
         },
     );
-    // The prefetched `/v1/models` entry for the model carries the real
-    // context (524288 = `context_length`) under its own routing slug.
     let mut prefetched = IndexMap::new();
     prefetched.insert(
         "syn:large:text".to_owned(),

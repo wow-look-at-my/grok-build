@@ -31,8 +31,6 @@ enum HeadOutcome {
     ProbeFailed,
 }
 
-/// Some S3-compatible endpoints reject single PutObject chunks above 16 MiB.
-/// Use multipart upload with 8 MiB parts to stay within that limit.
 const MULTIPART_THRESHOLD: usize = 8 * 1024 * 1024;
 const MULTIPART_PART_SIZE: usize = 8 * 1024 * 1024;
 
@@ -234,9 +232,8 @@ pub async fn presign_get_url(
     Ok(presigned.uri().to_string())
 }
 
-/// Aborts a created multipart upload when its future is dropped before completion.
-/// Callers cancel by drop; a dropped future skips Complete and the error-path abort.
-/// That leaves orphaned billable parts in the (possibly customer-managed) bucket.
+/// Aborts a created multipart upload when its future is dropped before
+/// completion.
 struct AbortMultipartOnDrop {
     client: aws_sdk_s3::Client,
     bucket: String,
@@ -251,8 +248,8 @@ impl AbortMultipartOnDrop {
     }
 
     /// In-scope abort for the error path: awaited, unlike the drop hook.
-    /// Disarms only after the send completes, so cancelling this await still gets the drop-hook abort.
-    /// AbortMultipartUpload is idempotent server-side.
+    /// Disarms only after the send completes, so cancelling this await still
+    /// gets the drop-hook abort.
     async fn abort(mut self) {
         let _ = self
             .client
@@ -501,7 +498,6 @@ pub struct S3ExistsResponse {
 }
 
 /// S3-native storage client providing batch operations via concurrent SDK calls.
-/// Caches the AWS SDK `Client` for the lifetime of the struct.
 #[allow(dead_code)] // Used once the S3 storage backend is wired up.
 pub struct S3StorageClient {
     client: aws_sdk_s3::Client,
@@ -528,7 +524,6 @@ impl S3StorageClient {
     }
 
     /// Check existence of multiple S3 objects via concurrent HeadObject calls.
-    /// Aggregates worst-first: 401/403 → `Unauthorized`, non-404 transient → `ProbeFailed`, else found/not.
     pub async fn batch_check_exists<S: AsRef<str>>(
         &self,
         paths: &[S],
@@ -537,9 +532,8 @@ impl S3StorageClient {
         let client = &self.client;
         let bucket = &*self.bucket;
 
-        // Collect into owned strings up front: HeadObject requires owned keys
-        // and this keeps closures HRTB-clean for callers passing both
-        // `&[String]` and `&[&str]` from the same async fn.
+        // Collect into owned strings up front: HeadObject requires owned
+        // keys.
         let owned_paths: Vec<String> = paths
             .iter()
             .map(|p| <S as AsRef<str>>::as_ref(p).to_string())
@@ -588,8 +582,7 @@ impl S3StorageClient {
         } else if any_transient {
             ExistsResult::ProbeFailed
         } else if total > 0 && not_found_count == total {
-            // Symmetric with the proxy: all-404 batch surfaces as NotFound,
-            // not Found(empty_set).
+            // Symmetric with the proxy: all-404 batch surfaces as NotFound, not Found(empty_set).
             ExistsResult::NotFound
         } else {
             ExistsResult::Found(found)
@@ -1022,7 +1015,6 @@ mod tests {
 
     #[tokio::test]
     async fn batch_check_exists_transient_error_maps_to_probe_failed() {
-        // Spin up a server whose HEAD returns 500 for everything.
         use axum::http::StatusCode;
         use axum::routing::head as axum_head;
 
@@ -1223,7 +1215,6 @@ mod tests {
     async fn upload_stream_large_content() {
         let (endpoint, state) = start_mock_server().await;
 
-        // 100 KB — larger payload exercising multi-chunk ReaderStream reads
         let content: Vec<u8> = (0..100_000).map(|i| (i % 256) as u8).collect();
         let reader = std::io::Cursor::new(content.clone());
 
@@ -1334,7 +1325,6 @@ mod tests {
                     .post(post_handler)
                     .delete(delete_handler),
             )
-            // The 8 MiB part must reach the tarpit handler, not a 413.
             .layer(axum::extract::DefaultBodyLimit::max(
                 2 * MULTIPART_PART_SIZE,
             ));
@@ -1420,8 +1410,7 @@ mod tests {
                     if query.contains_key("uploadId") {
                         let n = state.abort_requests.fetch_add(1, Ordering::Relaxed) + 1;
                         if n == 1 {
-                            // Tarpit the first (awaited) abort so the caller's
-                            // deadline can drop the future mid-send.
+                            // Tarpit the first (awaited) abort so the caller's deadline can drop the future mid-send.
                             state.first_abort_started.notify_one();
                             std::future::pending::<()>().await;
                         } else {

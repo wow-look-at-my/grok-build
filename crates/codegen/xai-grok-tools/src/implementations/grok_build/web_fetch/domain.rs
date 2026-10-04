@@ -1,8 +1,4 @@
 //! Domain allowlist matching with precomputed host → path-prefix lookup.
-//!
-//! Entries are parsed once at construction into a `HashMap<host, HostEntry>`
-//! giving O(1) host lookup followed by a tiny linear scan over path prefixes
-//! for that host.
 
 use std::collections::HashMap;
 
@@ -11,8 +7,7 @@ use url::Url;
 use crate::types::output::WebFetchOutput;
 
 // ───────────────────────────────────────────────────────────────────────────
-// Domain normalization
-// ───────────────────────────────────────────────────────────────────────────
+// Domain normalization.
 
 /// Canonical form for domain comparison: trim whitespace, strip trailing
 /// slashes and dots, remove `www.` prefix, and lowercase.
@@ -23,8 +18,7 @@ pub fn normalize_domain(raw: &str) -> String {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Precomputed host entry
-// ───────────────────────────────────────────────────────────────────────────
+// Precomputed host entry.
 
 /// What a single host is allowed to serve.
 #[derive(Debug, Clone)]
@@ -32,16 +26,13 @@ enum HostEntry {
     /// Any path on this host is allowed (host-only entry).
     AnyPath,
     /// Only paths matching one of these prefixes are allowed.
-    /// Each prefix is normalized (leading `/`, no trailing `/`, lowercased).
     PathPrefixes(Vec<String>),
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// DomainMatcher
-// ───────────────────────────────────────────────────────────────────────────
+// DomainMatcher.
 
-/// Precomputed domain allowlist. Built once from the raw allowlist entries,
-/// provides O(1) host lookup + small linear scan over path prefixes.
+/// Precomputed domain allowlist.
 #[derive(Debug, Clone)]
 pub struct DomainMatcher {
     entries: HashMap<String, HostEntry>,
@@ -313,8 +304,7 @@ mod tests {
 
     #[test]
     fn host_only_overrides_path_prefixes() {
-        // If both "github.com" (host-only) and "github.com/docs" exist,
-        // host-only wins — any path is allowed.
+        // If both "github.com" (host-only) and "github.com/docs" exist, host-only wins — any path is allowed.
         let m = DomainMatcher::new(&["github.com/docs".into(), "github.com".into()]);
         assert!(m.check(&url("https://github.com/anything")).is_none());
     }

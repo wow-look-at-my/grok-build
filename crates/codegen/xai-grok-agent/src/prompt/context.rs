@@ -1,16 +1,10 @@
 //! `PromptContext` captures the agent-specific inputs to prompt rendering as a serializable struct.
-//! Users can dump it as JSON and inspect individual sections.
-//!
-//! Rendering is done by `ToolBridge::render_prompt()` which delegates to `TemplateRenderer` in `xai-grok-tools`.
-//! This struct does NOT own a render engine; it provides placeholders and discovered sections.
 use crate::config::PromptMode;
 use crate::prompt::agents_md::{self, AgentConfigFile};
 use crate::prompt::template::{base_template, subagent_template};
 use serde::de;
 use serde::{Deserialize, Serialize};
 /// Selects which base template to use for `Extend` mode rendering.
-///
-/// Built-in variants decrypt the template on demand and never store the plaintext persistently, ensuring it is zeroed after use.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TemplateOverride {
@@ -81,11 +75,9 @@ pub struct PromptContext {
     /// Which prompt mode produced this context.
     pub prompt_mode: PromptMode,
     /// Whether this is a primary (parent) or subagent (child) session.
-    /// Controls base template choice and catalog section rendering.
     #[serde(default)]
     pub audience: PromptAudience,
-    /// Custom body: appended after base template (Extend) or the entire prompt (Full).
-    /// `None` means base template only.
+    /// Custom body: appended after base template (Extend) or the entire prompt (Full). `None` means base template only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_body: Option<String>,
     /// Keeps the plan agent's browser-verification requirement when the prompt is rebuilt.
@@ -97,14 +89,11 @@ pub struct PromptContext {
     /// AGENTS.md files discovered during build, in precedence order (repo root to CWD; deeper files override).
     pub agents_md_files: Vec<AgentConfigFile>,
     /// Pre-rendered persona summaries for system prompt injection.
-    /// Each entry is a formatted string like:
-    /// `- **reviewer** [user]: Writes structured review notes...`
     #[serde(default)]
     pub persona_summaries: Vec<String>,
     /// ISO-8601 UTC timestamp captured at build time.
     pub build_timestamp_utc: String,
     /// Whether the memory system is enabled for this session.
-    /// When true, the system prompt includes a `<memory>` section telling the model it can use `memory_search` and `memory_get`.
     #[serde(default)]
     pub memory_enabled: bool,
     /// Whether isolated filesystem-based Memory is enabled.
@@ -135,13 +124,10 @@ pub struct PromptContext {
     /// Whether the agent is running in a non-interactive session (headless / SDK / stdio / generic-ACP).
     #[serde(default)]
     pub is_non_interactive: bool,
-    /// Identity in the primary grok-build system prompt (`You are <label>…`).
-    /// Not the UI picker name. Defaults to [`DEFAULT_SYSTEM_PROMPT_LABEL`].
+    /// Identity in the primary grok-build system prompt (`You are <label>…`). Not the UI picker name.
     #[serde(default = "default_system_prompt_label")]
     pub system_prompt_label: String,
-    /// How strongly the system prompt nudges the model toward spawning
-    /// subagents via the `task` tool. Rendered as the `<agent_usage>` block
-    /// (see `prompt.md`); `AgentUsageFrequency::Default` renders nothing.
+    /// How strongly the system prompt nudges the model toward spawning subagents via the `task` tool.
     #[serde(default)]
     pub agent_usage_frequency: xai_tool_types::AgentUsageFrequency,
 }
@@ -168,8 +154,8 @@ fn scratch_dir() -> String {
     }
 }
 impl PromptContext {
-    /// For `Subagent` audience, applies the same suppression as the render path: persona summaries are cleared.
-    /// AGENTS.md is delivered in full, identical to the primary agent.
+    /// For `Subagent` audience, applies the same suppression as the render
+    /// path: persona summaries are cleared.
     pub fn normalize_for_persistence(&mut self) {
         if self.audience != PromptAudience::Subagent {
             return;
@@ -212,9 +198,8 @@ impl PromptContext {
     pub fn format_agents_md_section(&self) -> Option<String> {
         agents_md::format_agents_md_section(&self.agents_md_files)
     }
-    /// AGENTS.md content for injection as a prepended user message.
-    ///
-    /// - Subagents and primary sessions both get the full block, so a child verifier sees the same project instructions as the main agent.
+    /// AGENTS.md content for injection as a prepended user message. -
+    /// Subagents and primary sessions both get the full block.
     pub fn agents_md_user_reminder(&self) -> Option<String> {
         if self.include_browser_verification {
             return None;
@@ -256,8 +241,8 @@ impl PromptContext {
             "scratch_dir": scratch_dir(),
         })
     }
-    /// Render the full system prompt via `ToolBridge`. Tool names are resolved inside the bridge.
-    /// Both the base template and `prompt_body` go through MiniJinja so `${{ tools.by_kind.* }}` resolves regardless of prompt mode.
+    /// Render the full system prompt via `ToolBridge`. Tool names are
+    /// resolved inside the bridge.
     pub async fn render(&self, tool_bridge: &ToolBridge) -> Option<String> {
         let renderer = tool_bridge.template_renderer_snapshot().await?;
         self.render_with_renderer(&renderer)

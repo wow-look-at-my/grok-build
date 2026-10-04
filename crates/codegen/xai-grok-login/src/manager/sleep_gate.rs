@@ -1,17 +1,4 @@
 //! Keeps an [`AuthManager`] token refresh from straddling a system sleep.
-//!
-//! A refresh that straddles a suspend can lose its rotated successor token, leaving a revoked refresh token on disk and forcing re-login.
-//! Two layers guard against that straddle:
-//!
-//! 1. The gate `refresh_chain` consults *defers* a refresh that has not started yet.
-//!    An in-flight refresh is never aborted: dropping it could discard a response carrying the rotated token, the very revocation we guard against.
-//!    See [`AuthManager::refresh_chain`].
-//! 2. When sleep becomes imminent while a refresh is in flight, [`AuthManager::set_system_sleep_imminent`] **holds the OS sleep acknowledgment**.
-//!    The hold lasts until the refresh drains or [`SLEEP_ACK_MAX_WAIT`] elapses, so the exchange finishes *before* the machine suspends.
-//!    macOS delays `IOAllowPowerChange` and Linux holds its `delay` inhibitor, both via the blocking power-listener callback.
-//!
-//! Split out of `manager.rs` so the manager stays scannable.
-//! It is self-contained: the [`SleepGate`] type, the [`InFlightGuard`], and a small `impl AuthManager` block driving them from OS power events.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -23,26 +10,19 @@ use super::AuthManager;
 use xai_grok_shell_base::util::dual_clock::DualClock;
 
 /// Max lifetime of the "system sleep imminent" gate.
-/// A wake event normally clears it; this is the safety bound so a *missed* wake event can never permanently block token refresh.
-/// The bound is generous compared to the OS pre-sleep window (macOS ~30 s, Linux ~5 s); it only needs to outlast the sleep transition.
 pub(super) const SLEEP_GATE_MAX: StdDuration = StdDuration::from_secs(120);
 
-/// Max time a token refresh may stay deferred for **dark wake** before one is forced through, mirroring [`SLEEP_GATE_MAX`]. A normal dark wake lasts seconds and recurs interspersed with full wakes, so this rarely fires.
-/// It rescues a machine that reports a *continuous* dark wake, e.g. an interactive Mac with no display, whose system video capability is never set.
-/// Such a machine would otherwise defer every refresh forever and reach the same logged-out state this guard prevents. Bounded on two clocks (see [`DualClock`]) so it also survives the machine sleeping between dark wakes.
+/// Max time a token refresh may stay deferred for **dark wake** before one is forced through.
 pub(super) const DARK_WAKE_DEFER_MAX: StdDuration = StdDuration::from_secs(120);
 
-/// Upper bound on how long a `WillSleep` transition holds the OS sleep acknowledgment while in-flight IdP refreshes drain. **macOS** allows ~30 s before `IOAllowPowerChange` is forced, so we use most of it.
-/// A straddled exchange can need ~15 s of awake time to complete (in-call retries included). Losing its response past the assumed ~60 s rotation grace revokes the token family, and every session then demands `/login`.
-/// **Linux** logind's `InhibitDelayMaxSec` defaults to 5 s, so we stay under it. The hold releases the moment the in-flight count drains; a healthy round-trip is ~1 s.
+/// Upper bound on how long a `WillSleep` transition holds the OS sleep acknowledgment.
 #[cfg(target_os = "macos")]
 pub(super) const SLEEP_ACK_MAX_WAIT: StdDuration = StdDuration::from_secs(20);
 #[cfg(not(target_os = "macos"))]
 pub(super) const SLEEP_ACK_MAX_WAIT: StdDuration = StdDuration::from_secs(3);
 
-/// A gate `refresh_chain` consults to avoid *starting* an IdP refresh just before sleep. It only *defers* a refresh that has not started; an in-flight one is left to finish (see [`AuthManager::refresh_chain`]).
-/// The raise timestamp is a [`DualClock`] so the [`SLEEP_GATE_MAX`] backstop survives the sleep itself.
-/// A gate raised just before a long sleep never auto-expires on the monotonic clock alone; that bug let an expired token reach the server and 401. The gate therefore expires once *either* clock passes the bound.
+/// A gate `refresh_chain` consults to avoid *starting* an IdP refresh before
+/// sleep.
 #[derive(Default)]
 pub(super) struct SleepGate {
     pub(super) raised_at: RwLock<Option<DualClock>>,
@@ -87,12 +67,10 @@ impl SleepGate {
         if mono < SLEEP_GATE_MAX && wall < SLEEP_GATE_MAX {
             return true;
         }
-        // The gate is stale (a missed or late wake) `sleep_straddle` means the monotonic clock is still under the bound but real (wall-clock) time is not In that case the machine slept through the gate without delivering a wake event
-        // This is the case the wall-clock check exists to catch, so it is logged explicitly rather than folded into the generic expiry
+        // The gate is stale (a missed or late wake) `sleep_straddle` means the monotonic clock is still under the bound but real (wall-clock).
         let sleep_straddle = mono < SLEEP_GATE_MAX;
         {
-            // Re-check under the write lock: a `WillSleep` can raise a *fresh* gate between the read above and here
-            // Clearing that fresh gate would start a refresh into the very suspend it announces
+            // Re-check under the write lock: a `WillSleep` can raise a *fresh* gate between the read above and here Clearing.
             let mut guard = self.raised_at.write();
             match *guard {
                 Some(current) if current.mono == raise.mono => *guard = None,
@@ -115,8 +93,6 @@ impl SleepGate {
 }
 
 /// RAII counter for in-flight IdP refreshes.
-/// Increments on construction and decrements on drop so the count stays balanced even if the refresh future is cancelled or panics.
-/// When the count returns to zero it wakes any sleep-imminent waiter parked in [`AuthManager::hold_sleep_ack_until_refresh_drains`].
 pub(super) struct InFlightGuard<'a>(&'a AuthManager);
 
 impl<'a> InFlightGuard<'a> {
@@ -136,8 +112,7 @@ impl AuthManager {
     /// Report a system power transition (`true` means sleep is imminent, `false` means the machine woke). Safe to call from any thread.
     pub fn set_system_sleep_imminent(&self, imminent: bool) {
         if imminent {
-            // Raise the gate first: a refresh that re-checks it right before its IdP call (see `refresh_chain`) then backs out
-            // Then hold the OS sleep acknowledgment until any refresh already in flight drains, so it finishes before the machine suspends
+            // Raise the gate first: a refresh that re-checks it right before its IdP call (see `refresh_chain`).
             self.sleep_gate.raise();
             self.hold_sleep_ack_until_refresh_drains(SLEEP_ACK_MAX_WAIT);
         } else {
@@ -152,14 +127,12 @@ impl AuthManager {
     }
 
     /// Mark an IdP refresh as starting.
-    /// Paired with [`Self::end_refresh_in_flight`] via [`InFlightGuard`]; see [`Self::hold_sleep_ack_until_refresh_drains`].
     fn begin_refresh_in_flight(&self) {
         self.refresh_in_flight.fetch_add(1, Ordering::SeqCst);
     }
 
-    /// Mark an IdP refresh as finished. When the count returns to zero, wake any sleep-ack waiter under the same lock it parks on.
-    /// A held OS sleep ack is then released the moment the exchange finishes rather than after the full timeout. `fetch_sub` returns the *previous* value, so `== 1` means the count just dropped to zero.
-    /// Notifying with no waiter parked is cheap and harmless.
+    /// Mark an IdP refresh as finished. When the count returns to zero, wake
+    /// any sleep-ack waiter under the same lock it parks on.
     fn end_refresh_in_flight(&self) {
         if self.refresh_in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
             let _drain = self.refresh_drain_lock.lock();
@@ -214,9 +187,11 @@ impl AuthManager {
         self.sleep_gate.is_gated()
     }
 
-    /// See [`xai_system_power::PowerState`] for what a dark wake is and why an IdP refresh must avoid one. `refresh_chain` gates on [`Self::should_defer_for_dark_wake`], which wraps this with a deferral bound.
-    /// If the OS power listener was never started (headless or server), we skip the query: dark wake is no concern there.
-    /// A screenless Mac can also read as a permanent dark wake (its video capability is never set), which would block refresh forever. It is read **before** the `power_listener_started` check. A headless run never starts the listener, and this ordering lets it drive the dark-wake paths against a real binary.
+    /// See [`xai_system_power::PowerState`] for what a dark wake is and why
+    /// an IdP refresh must avoid one. `refresh_chain` gates on
+    /// [`Self::should_defer_for_dark_wake`], which wraps this with a deferral
+    /// bound. If the OS power listener was never started (headless or
+    /// server), we skip the query: dark wake is no concern there.
     pub fn is_dark_wake(&self) -> bool {
         #[cfg(test)]
         if let Some(forced) = *self.dark_wake_override.lock() {
@@ -241,13 +216,16 @@ impl AuthManager {
         *self.dark_wake_defer_since.write() = None;
     }
 
-    /// Whether `refresh_chain` should defer this refresh because the system is in a dark wake, bounded so deferral can never be indefinite.
-    /// Tracks when the current unbroken run of dark-wake deferrals began (on two clocks; see [`DualClock`]). While inside the [`DARK_WAKE_DEFER_MAX`] budget it returns `true` (defer).
-    /// Once either clock passes the bound it forces one refresh through (`false`) and resets the clock. A machine stuck reporting a continuous dark wake thus refreshes periodically instead of deferring forever and logging the user out. A full wake clears the run (here, or eagerly in [`Self::set_system_sleep_imminent`]).
+    /// Whether `refresh_chain` should defer this refresh because the system
+    /// is in a dark wake, bounded so deferral can never be indefinite. Tracks
+    /// when the current unbroken run of dark-wake deferrals began (on clocks;
+    /// see [`DualClock`]). While inside the [`DARK_WAKE_DEFER_MAX`] budget it
+    /// returns `true` (defer). Once either clock passes the bound it forces
+    /// one refresh through (`false`) and resets the clock. A machine stuck
+    /// reporting a continuous dark wake thus refreshes periodically instead
+    /// of deferring forever and logging the user out.
     pub fn should_defer_for_dark_wake(&self) -> bool {
-        // Sample the power state before taking the lock; it's an FFI read with no ordering relationship to the budget
-        // Then hold one write guard for the whole decision
-        // A read-then-write would let two concurrent callers both start a run and restart the budget indefinitely
+        // Sample the power state before taking the lock.
         let dark = self.is_dark_wake();
         let mut run = self.dark_wake_defer_since.write();
         if !dark {
@@ -264,8 +242,7 @@ impl AuthManager {
         if mono < DARK_WAKE_DEFER_MAX && wall < DARK_WAKE_DEFER_MAX {
             return true;
         }
-        // Budget exhausted: force this refresh through and reset the clock
-        // A still-continuous dark wake then defers afresh, up to DARK_WAKE_DEFER_MAX, before the next forced refresh
+        // Budget exhausted: force this refresh through and reset the clock A still-continuous dark wake then defers afresh.
         *run = None;
         drop(run);
         xai_grok_telemetry::unified_log::warn(

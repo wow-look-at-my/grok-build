@@ -1,7 +1,6 @@
 use super::*;
 
-// `expire_now`/`expire_now_forced` live in `crate::test_support` so the
-// GC integration tests (`gc/integration_tests.rs`) can share them.
+// `expire_now`/`expire_now_forced` live in `crate::test_support` so the GC integration tests (`gc/integration_tests.rs`).
 use crate::test_support::{expire_now, expire_now_forced};
 
 #[test]

@@ -1,7 +1,4 @@
 //! Markdown-based memory file storage.
-//!
-//! Handles reading and writing memory files (`.md`) for both global and workspace-scoped memory.
-//! All workspace-scoped memory lives under `~/.grok/memory/{project-slug}-{hash8}/` to avoid polluting the user's repo.
 
 use std::path::{Path, PathBuf};
 
@@ -25,9 +22,8 @@ pub enum SaveRememberNoteError {
     V2(#[from] crate::v2::V2StorageError),
 }
 
-/// Handles file I/O for the memory storage layer.
-/// Memory files are human-readable/editable Markdown stored under `~/.grok/memory/`.
-/// Workspace-scoped files live under a directory named `{project-slug}-{hash8}`, e.g. `~/.grok/memory/xai-a3f7b2c9/`.
+/// Handles file I/O for the memory storage layer. Memory files are
+/// human-readable/editable Markdown stored under `~/.grok/memory/`.
 #[derive(Debug, Clone)]
 pub struct MemoryStorage {
     mode: MemoryMode,
@@ -43,8 +39,6 @@ pub struct MemoryStorage {
 
 impl MemoryStorage {
     /// Create a new `MemoryStorage` rooted at `~/.grok/memory/`.
-    /// The workspace directory name is `{slug}-{hash8}` where `slug` is the project directory name and `hash8` is 8 hex chars from blake3.
-    /// Directories are created lazily on first write, not here.
     pub fn new(cwd: &Path, root_override: Option<&Path>) -> Self {
         Self::new_inner(cwd, root_override, true)
     }
@@ -70,8 +64,8 @@ impl MemoryStorage {
         }
     }
 
-    /// Create a MemoryStorage with a flat root (no workspace hash subdirectory).
-    /// Used for project/local-scoped agent memory where the root is already project-specific.
+    /// Create a MemoryStorage with a flat root (no workspace hash
+    /// subdirectory).
     pub fn new_flat(cwd: &Path, root: &Path) -> Self {
         Self::new_inner(cwd, Some(root), false)
     }
@@ -133,7 +127,6 @@ impl MemoryStorage {
     }
 
     /// Count total indexed chunks via a read-only SQLite connection.
-    /// Returns 0 if the index doesn't exist or the query fails.
     pub fn total_chunk_count(&self) -> usize {
         let db_path = self.workspace_dir.join("index.sqlite");
         // Journal-mode-aware open: never mmap a legacy WAL -shm on network mounts (SIGBUS); see xai_sqlite_journal::JournalMode::open_readonly
@@ -184,9 +177,8 @@ impl MemoryStorage {
         self.workspace_dir.join("sessions")
     }
 
-    /// Write a daily session log file.
-    /// File path: `~/.grok/memory/{project}-{hash8}/sessions/YYYY-MM-DD-{slug}-{sid8}.md`
-    /// `date`: e.g. `"2026-02-23"`; `slug`: short slug derived from the first user message; `session_id`: full session ID (first 8 chars used as suffix); `append`: when `true`, appends a timestamped section instead of overwriting. Each section is separated by `---` and a timestamp header so the chunker treats them as distinct entries.
+    /// Write a daily session log file. File path: `~/.grok/memory/{project}-{hash8}/sessions/YYYY-MM-DD-{slug}-{sid8}.md` `date`: e.g. `"2026-02-23"`; `slug`: short slug derived from the first user message; `session_id`: full session ID (first chars used as suffix); `append`: when `true`, appends a timestamped section instead of
+    /// overwriting. Each section is separated by `---` and a timestamp header so the chunker treats them as distinct entries.
     pub fn write_daily_log(
         &self,
         date: &str,
@@ -558,8 +550,8 @@ impl MemoryStorage {
         }
     }
 
-    /// Remove orphaned workspace directories under the memory root.
-    /// `tmp*` dirs: remove empty ones unconditionally; remove non-empty ones older than 7 days; Other workspaces with no session files: remove if older than `max_age_days`; Non-empty non-tmp workspaces: never touched.
+    /// Remove orphaned workspace directories under the memory root. `tmp*` dirs: remove empty ones unconditionally; remove non-empty ones older than several days; Other workspaces with no session files: remove if
+    /// older than `max_age_days`; Non-empty non-tmp workspaces: never touched.
     pub fn gc(&self, max_age_days: u64) -> std::io::Result<usize> {
         if self.mode.is_v2() {
             return Ok(0);
@@ -658,8 +650,8 @@ fn is_older_than(dir: &Path, days: u64) -> bool {
     age > std::time::Duration::from_secs(days * 24 * 60 * 60)
 }
 
-/// Ensure content has proper Markdown heading structure for the memory chunker.
-/// Content that already starts with `#` is left as-is (user-provided structure); Single-line content becomes `## {content}` (the note IS the heading); Multi-line with a first line of 80 chars or fewer: the first line becomes `## {first_line}`, the rest becomes the body paragraph; Multi-line with a longer first line: the heading is a generic `## Note` and the entire content becomes the body.
+/// Ensure content has proper Markdown heading structure for the memory chunker. Content that already starts with `#` is left as-is (user-provided structure); Single-line content becomes `## {content}` (the note IS the heading); Multi-line with a first line of multiple chars or fewer: the first line becomes `## {first_line}`, the rest becomes the body paragraph; Multi-line with a longer
+/// first line: the heading is a generic `## Note` and the entire content becomes the body.
 pub fn normalize_memory_content(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -720,8 +712,10 @@ fn compute_workspace_hash(cwd: &Path) -> String {
             (slugify(slug_source, 40), repo_id.as_str().to_string())
         }
         None => {
-            // Windows-only, non-git cwds: dunce changes the hash input, so the old-form dir is orphaned until gc() reaps it after max_age_days
-            // That orphan is accepted over an unverifiable rename migration (Unix unchanged)
+            // Windows-only, non-git cwds: dunce changes the hash input, so
+            // the old-form dir is orphaned until gc() reaps it after
+            // max_age_days That orphan is accepted over an unverifiable
+            // rename migration.
             let canonical = dunce::canonicalize(cwd).unwrap_or_else(|_| {
                 tracing::warn!(
                     path = %cwd.display(),
@@ -748,9 +742,9 @@ fn compute_workspace_hash(cwd: &Path) -> String {
     format!("{slug}-{hash8}")
 }
 
-/// Extract a normalized `org/repo` identifier from the git remote URL.
-/// Uses `git2` to discover the repository from `cwd` and read the `origin` remote URL.
-/// Returns `None` if not a git repo, no `origin` remote, or the URL can't be normalized.
+/// Extract a normalized `org/repo` identifier from the git remote URL. Uses
+/// `git2` to discover the repository from `cwd` and read the `origin` remote
+/// URL.
 pub(crate) fn extract_repo_identity(cwd: &Path) -> Option<String> {
     let repo = git2::Repository::discover(cwd).ok()?;
     let remote = repo.find_remote("origin").ok()?;
@@ -864,7 +858,6 @@ mod tests {
             name.starts_with("xai-"),
             "should start with project name slug, got: {name}"
         );
-        // Format: {slug}-{8 hex chars}
         let parts: Vec<&str> = name.rsplitn(2, '-').collect();
         let Some(suffix) = parts.first() else {
             panic!("expected hash suffix: {name}");
@@ -889,7 +882,6 @@ mod tests {
 
     #[test]
     fn test_compute_workspace_hash_same_dirname_different_parent() {
-        // Two "app" dirs in different parents get different names (hash differs)
         let name1 = compute_workspace_hash(Path::new("/users/alice/app"));
         let name2 = compute_workspace_hash(Path::new("/users/bob/app"));
         assert!(name1.starts_with("app-"), "got: {name1}");
@@ -970,7 +962,6 @@ mod tests {
             .write_daily_log("2026-02-23", "test", "sess12345678", content, false)
             .unwrap();
 
-        // Read lines 1..3 (0-indexed)
         let partial = storage.read_file(&path, Some(1), Some(2)).unwrap();
         assert_eq!(partial, "line 1\nline 2");
     }
@@ -1139,8 +1130,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // normalize_memory_content tests
-    // -----------------------------------------------------------------------
+    // normalize_memory_content tests.
 
     #[test]
     fn test_normalize_single_line() {
@@ -1407,8 +1397,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // normalize_remote_url tests
-    // -----------------------------------------------------------------------
+    // normalize_remote_url tests.
 
     #[test]
     fn test_normalize_ssh_url() {
@@ -1512,7 +1501,7 @@ mod tests {
 
     #[test]
     fn test_compute_workspace_hash_uses_repo_identity() {
-        // Two different paths in the same repo should produce the same hash.
+        // Different paths in the same repo should produce the same hash.
         ensure_hermetic_git_on_path();
         let tmp = TempDir::new().unwrap();
         let repo = git2::Repository::init(tmp.path()).unwrap();
@@ -1545,8 +1534,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // is_ephemeral_cwd tests
-    // -----------------------------------------------------------------------
+    // is_ephemeral_cwd tests.
 
     #[test]
     fn test_ephemeral_linux_tmp() {
@@ -1732,7 +1720,7 @@ mod tests {
         let workspace_dir = global_dir.join("current-ws");
         let storage = MemoryStorage::with_paths(global_dir.clone(), workspace_dir);
 
-        // Create a non-empty tmp dir that is old (over 7 days)
+        // Create a non-empty tmp dir that is old (over several days)
         let tmp_ws = global_dir.join("tmp-ghi12345");
         let sessions = tmp_ws.join("sessions");
         std::fs::create_dir_all(&sessions).unwrap();
@@ -1830,16 +1818,13 @@ mod tests {
         let workspace_dir = global_dir.join("current-ws");
         let storage = MemoryStorage::with_paths(global_dir.clone(), workspace_dir);
 
-        // 2 empty tmp dirs (removed unconditionally)
         std::fs::create_dir_all(global_dir.join("tmp-one-12345678")).unwrap();
         std::fs::create_dir_all(global_dir.join("tmp-two-12345678")).unwrap();
 
-        // 1 empty old workspace (removed)
         let old = global_dir.join("old-ws-12345678");
         std::fs::create_dir_all(&old).unwrap();
         set_dir_mtime_days_ago(&old, 31);
 
-        // 1 non-empty workspace (kept)
         let active = global_dir.join("active-12345678");
         let sessions = active.join("sessions");
         std::fs::create_dir_all(&sessions).unwrap();
@@ -1896,8 +1881,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // is_empty_workspace / is_older_than unit tests
-    // -----------------------------------------------------------------------
+    // is_empty_workspace / is_older_than unit tests.
 
     #[test]
     fn test_is_empty_workspace_no_sessions_dir() {
@@ -1951,7 +1935,6 @@ mod tests {
             tmp.path().join("memory").join("test_ws"),
         );
 
-        // A missing index counts as 0, and the journal-safe open must never create it
         assert_eq!(storage.total_chunk_count(), 0);
         assert!(!storage.workspace_dir().join("index.sqlite").exists());
 

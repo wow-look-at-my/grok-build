@@ -1,18 +1,13 @@
 //! What a server told us it wants during `initialize`, and the document
 //! bookkeeping that follows from it.
-//!
-//! Grok used to log the initialize result and throw it away, which is how it
-//! ended up sending Roslyn a change event the protocol says must carry a range.
-//! Everything the handshake tells us that changes what we send lives here.
 
 use async_lsp::lsp_types::{
     DidSaveTextDocumentParams, Position, Range, ServerCapabilities, TextDocumentIdentifier,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncSaveOptions, Url,
 };
 
-/// What the server asked us to do on save. A server may want no `didSave` at all, or one without
-/// the document text. Sending the full text unconditionally violates the protocol and ships a copy
-/// of the file on every edit to a server that will discard it.
+/// What the server asked us to do on save. A server may want no `didSave` at
+/// all, or one without the document text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SavePolicy {
     /// The server did not ask to be told about saves.
@@ -26,13 +21,10 @@ pub enum SavePolicy {
 /// The parts of a server's advertised capabilities that change what we send it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServerPolicy {
-    /// The server declared incremental text sync. Such servers reject a change
-    /// event without a range — Roslyn dereferences it and tears its request
-    /// queue down — so a whole-document range has to be supplied instead.
+    /// The server declared incremental text sync.
     pub sync_incremental: bool,
     pub save: SavePolicy,
-    /// The server advertised a `textDocument/diagnostic` provider. Absence is
-    /// not proof of absence; see `pull::PullSupport`.
+    /// The server advertised a `textDocument/diagnostic` provider.
     pub advertises_pull: bool,
 }
 
@@ -46,9 +38,9 @@ impl ServerPolicy {
         }
     }
 
-    /// The range to attach to a change event that replaces the whole document, given where the previous revision ended. We always resend the whole
-    /// file. A server that asked for incremental sync still requires a range on every change event, so the full replacement is expressed as a range
-    /// covering the previous revision. Full-sync servers get the rangeless form they expect.
+    /// The range to attach to a change event that replaces the whole
+    /// document, given where the revision ended. We always resend the whole
+    /// file.
     pub fn full_replacement_range(&self, previous_end: Position) -> Option<Range> {
         self.sync_incremental.then_some(Range {
             start: Position {
@@ -89,9 +81,7 @@ fn wants_incremental_sync(cap: Option<&TextDocumentSyncCapability>) -> bool {
 /// What the server asked for on save, from its sync capability.
 fn save_policy(cap: Option<&TextDocumentSyncCapability>) -> SavePolicy {
     match cap {
-        // A bare sync kind says nothing about save. Notify without the text,
-        // which is what other clients do and is enough for servers that only
-        // recompute on save.
+        // A bare sync kind says nothing about save.
         Some(TextDocumentSyncCapability::Kind(_)) => SavePolicy::WithoutText,
         Some(TextDocumentSyncCapability::Options(opts)) => match opts.save.as_ref() {
             // Save omitted entirely (Roslyn) or explicitly declined.
@@ -106,8 +96,6 @@ fn save_policy(cap: Option<&TextDocumentSyncCapability>) -> SavePolicy {
             }
         },
         // The server declared no sync capability at all, so we cannot tell.
-        // Keep the historical behaviour rather than risk silencing a server
-        // that only reports diagnostics after a save.
         None => SavePolicy::WithText,
     }
 }
@@ -143,7 +131,6 @@ mod tests {
 
     #[test]
     fn roslyns_shape_is_incremental_with_no_save() {
-        // {"openClose": true, "change": 2} — no `save` key at all.
         let p = policy(ServerCapabilities {
             text_document_sync: Some(TextDocumentSyncCapability::Options(
                 async_lsp::lsp_types::TextDocumentSyncOptions {

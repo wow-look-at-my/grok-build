@@ -1,15 +1,4 @@
-//! Defers `SessionLoaded` / `SessionLoadFailed` until ACP replay already in the pager queue is applied, without blocking unrelated JoinSet tasks.
-//!
-//! This-session [`AcpLoadBacklog::LiveHead`] releases immediately: it means unicast replay has finished.
-//! Leader mode buffers live notifications for the loading client until after the `session/load` RESPONSE (`load_live_buffer` in the shell leader).
-//! Another client's live event therefore cannot land on this pager's socket mid-replay even though agent-side replay now awaits between lines.
-//! The client wire order is `[unicast replay] → [load response] → [buffered live]`.
-//! Overflow of that buffer forwards live mid-replay and is already warned at the leader; it is not the common path.
-//! Direct-spawn has no second client on the same socket.
-//!
-//! [`AcpLoadBacklog::Unrelated`] still times out after [`SESSION_LOADED_ACP_BARRIER`] of draining.
-//! A shared `acp_rx` can show another session's traffic forever, and waiting for `Empty` would stall resume.
-//! Remaining this-session `isReplay` behind that head is applied after dispatch via the post-load late-replay grace on `drop_unexpected_replay`.
+//! Defers `SessionLoaded` / `SessionLoadFailed` until ACP replay already in the pager queue is applied.
 
 use std::time::{Duration, Instant};
 
@@ -22,7 +11,6 @@ use super::agent::AgentId;
 use crate::acp::meta::NotificationMeta;
 
 /// How long an unrelated ACP head may keep deferring the load before it dispatches anyway.
-/// The clock does not accrue on this-session `ReplayHead` or while input-starved.
 pub(super) const SESSION_LOADED_ACP_BARRIER: Duration = Duration::from_secs(2);
 
 /// Head of the pager ACP queue, classified against one deferred load's session.

@@ -1,5 +1,4 @@
-//! Integration coverage for the planner trigger inside `setup_goal` and the session-load hook `maybe_reconcile_active_goal_without_plan`.
-//! Uses the same single-thread runtime and LocalSet pattern as the verification-stage e2e suite.
+//! Integration coverage for the planner trigger inside `setup_goal`.
 
 use super::support::*;
 use super::*;
@@ -12,8 +11,8 @@ use xai_grok_tools::implementations::grok_build::task::types::{
     SubagentCancelTarget, SubagentEvent, SubagentResult, SubagentSpawnRequest,
 };
 
-/// Pull the planner's plan-file path from the prompt by its backtick-quoted `.md` token.
-/// Rewording the surrounding sentence therefore can't silently break the fake, which would otherwise write nothing and fail far from the cause.
+/// Pull the planner's plan-file path from the prompt by its backtick-quoted
+/// `.md` token.
 fn plan_path_from_prompt(prompt: &str) -> Option<String> {
     // Backtick-delimited tokens sit at the odd indices of the split.
     prompt
@@ -28,9 +27,8 @@ fn plan_path_from_prompt(prompt: &str) -> Option<String> {
 enum SpawnBehaviour {
     /// Parse `{PLAN_FILE}` out of the prompt, write `body` there, then respond `Done`.
     WritePlanThenDone { body: &'static [u8] },
-    /// Like [`Self::WritePlanThenDone`], but the planner child also reports the
-    /// todo list it built for ITSELF with `todo_write` while planning — the
-    /// items a real child would have left on its own `State<TodoState>`.
+    /// Like [`Self::WritePlanThenDone`], but the planner child also reports
+    /// the todo list it built for ITSELF with `todo_write`.
     WritePlanThenDoneWithTodos {
         body: &'static [u8],
         todos: &'static [&'static str],
@@ -57,10 +55,7 @@ enum SpawnBehaviour {
     /// Reply with subagent runtime failure.
     Runtime { message: String, cancelled: bool },
     /// Mimic the real coordinator after a user Stop with `cancel_subagents`:
-    /// every Task spawn is rejected as cancelled — `"parent session is
-    /// stopped"` — until an `OpenSpawnAdmission` arrives, and accept=True
-    /// afterwards (writes `body` to the plan file). Records whether admission
-    /// was ever opened, so a test can prove the planner asked to reopen it.
+    /// every Task spawn is rejected as cancelled.
     AdmissionGatedThenWrite {
         opened: StdArc<std::sync::atomic::AtomicBool>,
         body: &'static [u8],
@@ -78,8 +73,7 @@ struct PlannerSpawnCapture {
     fork_context: StdArc<std::sync::Mutex<Vec<bool>>>,
     surface_completion: StdArc<std::sync::Mutex<Vec<bool>>>,
     model: StdArc<std::sync::Mutex<Vec<Option<String>>>>,
-    /// Every prompt the coordinator was asked to spawn a planner with, so a
-    /// test can assert what the planner's run was actually told to do.
+    /// Every prompt the coordinator was asked to spawn a planner with.
     prompt: StdArc<std::sync::Mutex<Vec<String>>>,
 }
 
@@ -155,8 +149,7 @@ fn spawn_planner_coordinator_capturing(
                     .push(req.runtime_overrides.model.clone());
                 let plan_path = plan_path_from_prompt(&req.prompt);
                 if let SpawnBehaviour::WaitForContextThenWrite { objectives, .. } = &behaviour {
-                    // Record what the planner was actually spawned with, so the
-                    // test can prove the objective carries no folded-in steering.
+                    // Record what the planner was spawned with.
                     objectives.lock().unwrap().push(req.prompt.clone());
                 }
                 if let SpawnBehaviour::WaitForContextThenWrite { notify, body, .. } = &behaviour {
@@ -448,7 +441,7 @@ async fn write_existing_todo(actor: &SessionActor, id: &str, content: &str) {
         .expect("an existing todo must be writable");
 }
 
-/// The three work items the scripted planner puts on its OWN todo list with
+/// The work items the scripted planner puts on its OWN todo list with
 /// `todo_write` while it plans — the source of the session's seeded list.
 const PLANNER_TODOS: &[&str] = &[
     "add the plan parser",
@@ -456,7 +449,7 @@ const PLANNER_TODOS: &[&str] = &[
     "cover it with an end-to-end test",
 ];
 
-/// A plan whose `## Task steps` names those same three steps, the way the
+/// A plan whose `## Task steps` names those same steps, the way the
 /// planner prompt asks a real planner to write it.
 const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-change\n\n\
 ## Task steps\n\
@@ -465,8 +458,7 @@ const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-
 3. cover it with an end-to-end test\n";
 
 /// The scripted planner the seeding tests drive: it writes [`CHECKLIST_PLAN`]
-/// and reports the same steps on ITS OWN list with `todo_write`, which is what
-/// the planner prompt asks a real planner to do.
+/// and reports the same steps on ITS OWN list with `todo_write`.
 fn scripted_planner_with_todos() -> SpawnBehaviour {
     SpawnBehaviour::WritePlanThenDoneWithTodos {
         body: CHECKLIST_PLAN,
@@ -676,9 +668,9 @@ async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
         .await;
 }
 
-/// The gate for the objective's first two criteria: one `setup_goal` call —
-/// with no model turn of its own — leaves the session's LIVE todo list carrying
-/// the planner's items, each a fresh pending harness-minted item.
+/// The gate for the objective's first criteria: one `setup_goal` call — with no
+/// model turn of its own — leaves the session's LIVE todo list carrying the
+/// planner's items, each a fresh pending harness-minted item.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
     let local = tokio::task::LocalSet::new();
@@ -864,9 +856,7 @@ async fn goal_seeding_is_append_only_and_idempotent() {
                  {seeded_ids:?}",
             );
 
-            // A resume/retry reaches the planner through this entry point. The
-            // plan is already published, so it is a no-op — and even a direct
-            // re-run of the seed must be too.
+            // A resume/retry reaches the planner through this entry point.
             actor.maybe_run_goal_planner("ship the exporter").await;
             let items: Vec<String> = PLANNER_TODOS.iter().map(|s| (*s).to_string()).collect();
             actor.apply_planner_todos("g-test", &items).await;
@@ -994,8 +984,7 @@ async fn send_now_queues_planner_context_without_restart() {
                 ));
             }
 
-            // Both Send Nows reach the planner while it is still running; it is
-            // released only after they have been delivered.
+            // Both Send Nows reach the planner while it is still running.
             let mut delivered = Vec::new();
             for _ in 0..2 {
                 delivered.push(
@@ -1037,8 +1026,7 @@ async fn send_now_queues_planner_context_without_restart() {
                 .collect::<Vec<_>>();
             assert_eq!(objectives, ["do X"]);
 
-            // Staged files (`plan-<uuid>.md`, `plan-baseline-<uuid>.md`) are `TempPath`s
-            // Interrupted attempts drop theirs and the winner renames onto `plan.md`, so nothing matching `plan-*.md` survives
+            // Staged files (`plan-<uuid>.md`, `plan-baseline-<uuid>.md`) are `TempPath`s Interrupted attempts drop theirs.
             let goal_dir = actor.goal_tracker.lock().plan_path();
             let goal_dir = goal_dir.parent().expect("plan path has a parent");
             let leaked: Vec<String> = std::fs::read_dir(goal_dir)
@@ -1239,8 +1227,6 @@ async fn planner_snapshots_plan_baseline_once_and_does_not_overwrite() {
 #[tokio::test(flavor = "current_thread")]
 async fn planner_records_own_harness_trace_turn_with_footer() {
     // The planner subagent is represented by its OWN trace turn.
-    // After `maybe_run_goal_planner`, the chat-state side buffer holds exactly one sealed harness trace turn.
-    // The result keeps the `<subagent_result>` footer (with the child session id) so the trace viewer can discover the planner subagent.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -1298,8 +1284,7 @@ async fn planner_disabled_records_no_harness_trace_turn() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn planner_success_sets_then_clears_planning_flag() {
-    // The transient "planning…" badge fires before the subagent runs (planning=Some(true))
-    // The success exit path clears it with a snapshot-derived GoalUpdated (planning=None)
+    // The transient "planning…" badge fires before the subagent runs (planning=Some(true)) The success exit path clears it.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -1328,9 +1313,7 @@ async fn planner_success_sets_then_clears_planning_flag() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn planner_clears_planning_latch_before_publishing_the_plan() {
-    // Regression: the "planning…" badge must be cleared at the moment the planner run is taken and we commit to publishing the produced plan.
-    // Clearing it only at the very end, after the plan/baseline I/O, is too late.
-    // Before the fix the latch stayed set through the publish window, so the pager advertised "planning" while steering could no longer replan.
+    // Regression: the "planning…" badge must be cleared at the moment the planner run is taken and we commit.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -1370,8 +1353,7 @@ async fn planner_clears_planning_latch_before_publishing_the_plan() {
                 "planning_in_flight must already be cleared by the time the plan is published \
                  (badge must not linger through the publish window)",
             );
-            // End state: plan published, latch cleared, and the emitted flag sequence is exactly the transient badge on then off
-            // There is no duplicate `planning=None` from the earlier clear plus the final catch-all
+            // End state: plan published, latch cleared.
             assert!(
                 actor
                     .goal_tracker
@@ -1425,8 +1407,7 @@ async fn planner_fail_closed_clears_planning_flag() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn planning_badge_survives_intervening_goal_update() {
-    // Regression: the subagent-spawn / token-accounting `GoalUpdated` that fires while the planner runs must NOT clear the "planning…" badge
-    // The latch keeps every snapshot-derived update carrying it
+    // Regression: the subagent-spawn / token-accounting `GoalUpdated` that fires.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -1527,7 +1508,7 @@ async fn planner_reopens_spawn_admission_blocked_by_prior_cancel() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn planner_runtime_cancelled_pauses_as_planner() {
-    // `cancelled: true` (max turns, rewind, dequeue) is a harness failure: the wire reason stays `aborted`, the pause is the planner's, not the user's
+    // `cancelled: true` (max turns, rewind, dequeue) is a harness failure: the wire reason stays `aborted`, the pause is the planner's.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -1721,8 +1702,7 @@ async fn reconcile_is_idempotent_via_atomic_flag() {
             actor.maybe_reconcile_active_goal_without_plan().await;
             assert!(actor.goal_tracker.lock().status().unwrap().is_paused());
 
-            // Re-activate the tracker directly and re-run
-            // The atomic short-circuit must skip the work; a regression that removed the swap would re-pause the goal
+            // Re-activate the tracker directly and re-run The atomic short-circuit must skip the work.
             actor.goal_tracker.lock().resume();
             assert_eq!(
                 actor.goal_tracker.lock().status(),
@@ -1779,7 +1759,6 @@ async fn planner_subagent_tokens_fold_into_goal_total() {
             actor.maybe_run_goal_planner("do X").await;
             assert_eq!(spawn_count.load(SeqOrd::SeqCst), 1);
 
-            // Simulate the SubagentSpawned notification handler after the planner reports 12,000 cumulative tokens.
             let child_attempt = xai_message_delivery_core::AttemptId::mint(0x11).to_string();
             let mut record = SubagentTokenRecord::new(0);
             assert_eq!(
@@ -1802,9 +1781,6 @@ async fn planner_subagent_tokens_fold_into_goal_total() {
                 tokens_used >= 12_000,
                 "goal chip tokens_used must include planner marginal (got {tokens_used})",
             );
-            // This mirrors the pager's live combine while the subagent runs
-            // The pager sums parent_delta (0 here), finished_subagent_tokens, and its own active-subagent sum
-            // That sum must never exceed the shell's total
             let active_subagent_tokens = 12_000i64;
             assert!(
                 finished_marginal.saturating_add(active_subagent_tokens) <= tokens_used,
@@ -2179,9 +2155,7 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
             else {
                 panic!("a published plan must flow through to inference");
             };
-            // Printed so `cargo test -- --nocapture` captures the exact reminder
-            // text for review: the assertions below are the gate, this is the
-            // artifact a reader (or the goal's verification) reads.
+            // Printed so `cargo test -- --nocapture` captures the exact reminder text for review: the assertions below are the gate.
             println!("=== plan-aware setup_goal reminder ===\n{reminder}\n=== end ===\n");
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();

@@ -1,8 +1,4 @@
 //! `GROK_SCROLL_LOG` JSONL parsing, per-stream grouping, and finalize synchronization.
-//!
-//! Wire schema source of truth: the pager's `ScrollLogRecord` in `xai-grok-pager/src/input/scroll_log.rs`.
-//! [`ScrollLogLine`] mirrors it field-for-field with every always-emitted field **required**.
-//! The module docs in [`super`] explain why the schema is duplicated.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -39,7 +35,6 @@ pub struct ScrollLogLine {
     pub desired: f32,
     /// Whole lines delivered for this stream so far (post-flush).
     pub applied_total: i64,
-    /// Lines this record's flush delivered (0 on stream_start).
     pub flushed: i64,
     /// Whole-line backlog remaining after this record's flush.
     pub backlog_after: i64,
@@ -48,15 +43,14 @@ pub struct ScrollLogLine {
     /// Per-flush delta cap in effect.
     pub cap: i64,
 
-    /// Rolling average inter-event interval (ms); absent until two accel-countable events arrived.
+    /// Rolling average inter-event interval (ms); absent until accel-countable events arrived.
     pub avg_interval_ms: Option<f64>,
-    /// Global, not per-stream: the first flush-bearing record measures from the previous stream. Use [`StreamGroup::intra_stream_flush_spacings_ms`] for cadence.
+    /// Global, not per-stream: the first flush-bearing record measures from the stream.
     pub ms_since_prev_flush: Option<f64>,
     /// Finalize only: whole lines discarded with the stream.
     pub dropped: Option<i64>,
 
     // Config echo, flattened onto stream_start records only.
-    /// Scroll input mode label in effect (`auto` | `wheel` | `trackpad`).
     pub mode: Option<String>,
     /// Events per tick.
     pub ept: Option<u16>,
@@ -190,7 +184,6 @@ pub fn group_streams(records: &[ScrollLogLine]) -> Result<Vec<StreamGroup<'_>>> 
 }
 
 /// Poll interval for [`wait_for_finalize_count`].
-/// Short enough that the wait adds at most ~10ms latency past the write, long enough not to spin.
 const FINALIZE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Finalize is force-flushed, so a landed line is complete. Substring count, not a parse, so a torn non-finalize tail cannot fail the wait.
@@ -292,7 +285,6 @@ mod tests {
 
     #[test]
     fn missing_required_field_fails_with_line_number() {
-        // Simulate a producer-side rename: `carry` disappears from line 2.
         let renamed = FLUSH_FIRST.replace("\"carry\":0.4,", "");
         let err = parse_jsonl_str(&jsonl(&[START, &renamed])).expect_err("drift must fail");
         let chain = format!("{err:#}");
@@ -302,8 +294,7 @@ mod tests {
 
     #[test]
     fn groups_flip_boundary_and_trailing_unfinalized_stream() {
-        // Direction flip: finalize and the next stream_start share ts_ms (both emitted from the same on_scroll_event call)
-        // The capture ends with stream 2 still in flight (no finalize)
+        // Direction flip: finalize and the next stream_start share ts_ms (both emitted from the same on_scroll_event call) The capture ends.
         let flip_finalize = FINALIZE.replace("\"ts_ms\":114.0", "\"ts_ms\":40.0");
         let flip_start = START.replace("\"ts_ms\":0.0", "\"ts_ms\":40.0");
         let records = parse_jsonl_str(&jsonl(&[
@@ -347,8 +338,6 @@ mod tests {
 
     #[test]
     fn per_stream_spacing_skips_the_global_first_flush_record() {
-        // Stream 2's first flush carries ms_since_prev_flush measured from stream 1's finalize (producer's last_flush_at is global)
-        // That 500ms of inter-gesture idle is NOT stream-2 cadence and must be skipped; the later flush (16ms) and finalize (82ms) are kept
         let s2_start = START.replace("\"ts_ms\":0.0", "\"ts_ms\":600.0");
         let s2_flush_global = FLUSH_SECOND
             .replace("\"ts_ms\":32.0", "\"ts_ms\":616.0")
@@ -376,7 +365,6 @@ mod tests {
             vec![16.0, 82.0],
             "the 500ms cross-stream value must be skipped"
         );
-        // Stream 1: first flush has no spacing at all (recorder start); only the finalize's intra-stream spacing remains
         assert_eq!(groups[0].intra_stream_flush_spacings_ms(), vec![82.0]);
     }
 
@@ -409,7 +397,6 @@ mod tests {
             .expect_err("only one finalize so far");
         assert!(format!("{err:#}").contains("found 1"), "err: {err:#}");
 
-        // Completing the torn record into a second finalize satisfies n=2.
         writeln!(file, ".0,\"evt\":\"finalize\"}}").expect("complete tail");
         file.flush().expect("flush");
         wait_for_finalize_count(&path, 2, Duration::from_secs(5)).expect("two finalizes");

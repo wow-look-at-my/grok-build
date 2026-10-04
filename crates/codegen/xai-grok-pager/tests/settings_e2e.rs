@@ -1,8 +1,4 @@
 //! End-to-end integration tests for the settings modal.
-//!
-//! Every new `SettingMeta` in `default_settings()` MUST add an entry to `ALL_SETTINGS_EXERCISED` and a test for its keyboard AND mouse paths.
-//!
-//! Drives the modal directly through `SettingsModalState` and the public key/mouse handlers (same dispatch path as runtime, without chrome).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind};
 use ratatui::layout::Rect;
@@ -79,7 +75,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "contextual_hints.word_select",
     "contextual_hints.export_copy",
     "contextual_hints.ssh_wrap",
-    // The "Slow output" group; its four Int children are listed above.
+    // The "Slow output" group; its Int children are listed above.
     "output_rate_floor",
 ];
 
@@ -88,12 +84,7 @@ fn every_registered_setting_is_exercised() {
     let reg = SettingsRegistry::defaults();
     let mut missing: Vec<&str> = Vec::new();
     for meta in reg.all() {
-        // Harness model slots are built from one table, so the keyboard and
-        // mouse tests below WALK that table and cover every slot rather than
-        // naming each key here. See
-        // `harness_model_slot_picker_commits_the_catalog_model_for_every_slot`,
-        // `harness_model_slot_picker_row_zero_clears_the_slot` and
-        // `mouse_click_on_a_harness_model_slot_row_opens_the_picker`.
+        // Harness model slots are built from one table, so the keyboard.
         if xai_grok_models::slot_for_setting_key(meta.key).is_some() {
             continue;
         }
@@ -127,8 +118,8 @@ fn make_state() -> SettingsModalState {
     SettingsModalState::new(
         Arc::new(SettingsRegistry::defaults()),
         UiConfig::default(),
-        // auto_mode_gate on so the permission_mode picker shows the full catalog (including Auto)
-        // The gate-off filtering is covered by a dedicated test
+        // auto_mode_gate on so the permission_mode picker shows the full
+        // catalog (including Auto) The gate-off filtering is covered.
         PagerLocalSnapshot {
             auto_mode_gate: true,
             ..PagerLocalSnapshot::default()
@@ -163,8 +154,8 @@ fn row_idx_for(state: &SettingsModalState, target: &str) -> usize {
         .unwrap_or_else(|| panic!("setting `{target}` not present in modal rows"))
 }
 
-/// Whether `key` is hidden inside a group sub-sheet (a `SettingKind::Group` child).
-/// `build_rows` skips such keys as top-level rows, so they can only be toggled inside the sub-sheet, never navigated to or `d`-reset directly.
+/// Whether `key` is hidden inside a group sub-sheet (a `SettingKind::Group`
+/// child).
 fn is_group_child(reg: &SettingsRegistry, key: &str) -> bool {
     reg.all().iter().any(|m| match &m.kind {
         SettingKind::Group { children } => children.contains(&key),
@@ -504,7 +495,6 @@ fn follow_up_behavior_picker_enter_dispatches_set_commit() {
     let mut s = make_state();
     navigate_to(&mut s, "follow_up_behavior");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // Default is queue (index 0); Down moves to steer
     let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
@@ -566,8 +556,8 @@ fn enter_on_bool_row_also_toggles() {
     assert_set_bool_action(outcome, "compact_mode", true);
 }
 
-/// The contextual-hints group: Enter opens the sub-sheet, j navigates the three child toggles, Space toggles the focused child (default ON) off.
-/// Esc returns to Browse. Exercises the group row and all three children.
+/// The contextual-hints group: Enter opens the sub-sheet, j navigates those child toggles, Space toggles the focused child (default ON) off. Esc
+/// returns to Browse. Exercises the group row and all of them children.
 #[test]
 fn enter_on_contextual_hints_group_opens_sub_sheet_and_toggles_children() {
     let mut s = make_state();
@@ -580,7 +570,6 @@ fn enter_on_contextual_hints_group_opens_sub_sheet_and_toggles_children() {
         SettingsModalMode::PickingGroup { child_idx: 0, .. }
     ));
 
-    // child 0: undo.
     let out = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
     assert!(
         matches!(
@@ -589,7 +578,6 @@ fn enter_on_contextual_hints_group_opens_sub_sheet_and_toggles_children() {
         ),
         "Space on undo must toggle it off, got {out:?}",
     );
-    // child 1: plan_mode.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Char('j')));
     let out = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
     assert!(
@@ -599,7 +587,6 @@ fn enter_on_contextual_hints_group_opens_sub_sheet_and_toggles_children() {
         ),
         "Space on plan_mode must toggle it off, got {out:?}",
     );
-    // child 2: image_input.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Char('j')));
     let out = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
     assert!(
@@ -1031,7 +1018,6 @@ fn mouse_click_at_row_edge_on_focused_row_toggles() {
 fn mouse_click_on_header_is_a_no_op() {
     let mut s = make_state();
     synth_rects(&mut s);
-    // The first header (Appearance) is at row index 0.
     let outcome = handle_settings_mouse(
         &mut s,
         MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -1061,9 +1047,8 @@ fn mouse_scroll_down_advances_selection() {
     // Click inside list_area; synth_rects sets height = rows.len()
     let outcome = handle_settings_mouse(&mut s, MouseEventKind::ScrollDown, 5, 1);
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
-    // Scroll-down emits 3 advances. From the initial selection (compact_mode), this lands 3 settings later.
-    // Later changes add more settings between compact_mode and the end, so we compute the expected landing row by inspecting the row list
-    // That keeps the test stable across such additions
+    // Scroll-down emits multiple advances. From the initial
+    // selection (compact_mode), this lands settings later.
     let setting_keys: Vec<&str> = s
         .rows
         .iter()
@@ -1078,7 +1063,7 @@ fn mouse_scroll_down_advances_selection() {
         .unwrap();
     let expected_key = setting_keys
         .get(compact_pos + 3)
-        // If there are fewer than 3 settings after compact_mode, the last setting absorbs all extra advances
+        // If there are a bounded number of settings after compact_mode, the last setting absorbs all extra advances
         .copied()
         .unwrap_or(*setting_keys.last().unwrap());
     match &s.rows[s.selected] {
@@ -1241,7 +1226,6 @@ fn filter_esc_clears_query_and_returns_to_browse() {
 #[test]
 fn filter_navigation_lands_on_filtered_subset_only() {
     let mut s = make_state();
-    // Sanity check: initial selection is compact_mode (row 1).
     let compact_idx = row_idx_for(&s, "compact_mode");
     let show_ts_idx = row_idx_for(&s, "show_timestamps");
     assert_eq!(s.selected, compact_idx);
@@ -1305,21 +1289,19 @@ fn filter_backspace_broadens_visible_set() {
         "expected narrowed filter (header + show_timestamps)"
     );
 
-    // Popping the trailing 'p' leaves "stam", which still matches only show_timestamps (substring of "timestamps"); same 2 visible rows
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace));
     assert_eq!(s.query(), "stam");
     assert_eq!(s.filtered_indices().len(), 2);
 
-    // Empty the query out; now everything is visible
-    // We pop one at a time and check at each step that the cache regenerates (rather than just shrinks)
+    // Empty the query out; now everything is visible We pop one at a time and check at each step that the cache regenerates.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace)); // query becomes "sta"
     assert_eq!(s.query(), "sta");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace)); // query becomes "st"
     assert_eq!(s.query(), "st");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace)); // query becomes "s"
     assert_eq!(s.query(), "s");
-    // "s" matches compact_mode ("messages" in its description), show_timestamps ("show"/"timestamps"), and simple_mode ("simple"/"ascii")
-    // So the filtered set MUST be larger than 2 here, proving each Backspace re-broadens
+    // "s" matches compact_mode ("messages" in its description),
+    // show_timestamps ("show"/"timestamps").
     let setting_count_at_s = s
         .filtered_indices()
         .iter()
@@ -1358,8 +1340,7 @@ fn programmatic_filter_query_is_single_line_and_cursor_ends() {
 fn filter_with_multiple_matches_navigates_between_settings() {
     let mut s = make_state();
     let _ = handle_settings_key(&mut s, &press(KeyCode::Char('/')));
-    // "compact" is a keyword on compact_mode; "simple" on simple_mode. We instead use two distinct keyword matches
-    // that aren't in the theme catalog.
+    // "compact" is a keyword on compact_mode; "simple" on simple_mode.
     for c in "ascii minimal".chars() {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Char(c)));
     }
@@ -1388,9 +1369,6 @@ fn filter_with_multiple_matches_navigates_between_settings() {
     assert!(matches!(outcome, SettingsKeyOutcome::Unchanged));
     assert_eq!(s.selected, simple_idx);
 
-    // Drop the second keyword (Backspace x8 to remove "minimal": 7 chars + 1 space)
-    // Now "ascii" alone still matches only simple_mode but we're back to a single-keyword filter that doesn't ambiguously broaden
-    // Asserts the "filter still narrows correctly when one keyword drops out" property
     for _ in 0..8 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace));
     }
@@ -1624,9 +1602,6 @@ fn filter_pageup_pagedown_navigates_in_filter_mode() {
         .expect("default registry must contain at least one setting");
     assert_eq!(s.selected, compact_idx);
 
-    // Compute how many PageDown presses are needed to reach the last row
-    // Each press advances by 10 selectable rows; round up so we definitely reach it
-    // A single press isn't enough once the registry exceeds ~10 settings
     let total_selectable = s
         .rows
         .iter()
@@ -1652,7 +1627,7 @@ fn filter_pageup_pagedown_navigates_in_filter_mode() {
 #[test]
 fn g_jumps_to_first_visible_setting() {
     let mut s = make_state();
-    // Move to the last row first so g actually has to navigate.
+    // Move to the last row first so g has to navigate.
     navigate_to(&mut s, "simple_mode");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char('g')));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
@@ -1694,8 +1669,7 @@ fn g_jumps_to_first_filtered_row_under_active_filter() {
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
     assert!(matches!(s.mode(), SettingsModalMode::Browse));
 
-    // Selection is already on show_timestamps (snapped by clamp_selected_to_visible)
-    // g should be a no-op (Unchanged) because the first visible setting IS the current selection
+    // Selection is already on show_timestamps (snapped by clamp_selected_to_visible) g should be a no-op (Unchanged).
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char('g')));
     let show_ts_idx = row_idx_for(&s, "show_timestamps");
     assert_eq!(s.selected, show_ts_idx);
@@ -1760,7 +1734,7 @@ fn filter_multi_word_with_one_unmatched_word_shows_zero_settings() {
     );
 }
 
-/// AND narrows strictly: adding an unmatched word yields 0 results.
+/// AND narrows strictly: adding an unmatched word yields results.
 #[test]
 fn filter_and_semantics_narrow_strictly() {
     let reg = SettingsRegistry::defaults();
@@ -1768,11 +1742,10 @@ fn filter_and_semantics_narrow_strictly() {
     let single = reg.search("ascii");
     assert_eq!(single.len(), 1);
     assert_eq!(single[0].key, "simple_mode");
-    // "ascii minimal": both simple_mode keywords. Still 1 match.
+    // "ascii minimal": both simple_mode keywords.
     let conjunction = reg.search("ascii minimal");
     assert_eq!(conjunction.len(), 1);
     assert_eq!(conjunction[0].key, "simple_mode");
-    // Adding an unmatched word must yield 0.
     let with_unmatched = reg.search("ascii xyzzy");
     assert!(
         with_unmatched.is_empty(),
@@ -1819,7 +1792,7 @@ fn mouse_click_on_visible_filtered_row_toggles() {
     // Commit so we can click without typing.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
     synth_rects_filtered(&mut s);
-    // show_timestamps is selected (snapped). Filtered layout: pos 0 = Appearance header, pos 1 = show_timestamps.
+    // show_timestamps is selected (snapped).
     let y_in_filter = 1u16;
     let outcome = handle_settings_mouse(
         &mut s,
@@ -1918,8 +1891,8 @@ fn render_no_matches_placeholder_includes_query() {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Char(c)));
     }
     assert!(s.filtered_indices().is_empty());
-    // Larger area than the modal-min so the chrome, search bar, and footer all fit
-    // The empty-state placeholder lands in the remaining content area
+    // Larger area than the modal-min so the chrome, search bar, and footer
+    // all fit The empty-state placeholder lands.
     let area = Rect {
         x: 0,
         y: 0,
@@ -2074,8 +2047,7 @@ fn registry_kind_membership_through_pr_14() {
         "String kind membership drift: {string_keys:?}",
     );
 
-    // Every harness model slot is a DynamicEnum too. They come from their own
-    // table rather than a literal list, so adding a slot cannot drift here.
+    // Every harness model slot is a DynamicEnum too.
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
     let mut expected_dynamic: Vec<&str> = vec!["default_model"];
     expected_dynamic.extend(
@@ -2165,7 +2137,6 @@ fn defaults_round_trip_through_registry() {
     let pager = PagerLocalSnapshot::default();
 
     // `current_value_for` for these keys reads process-wide caches, not `ui`.
-    // Reset to defaults so a sibling test on this worker thread can't leak in.
     xai_grok_pager::appearance::cache::set_keep_text_selection(
         xai_grok_pager::appearance::TextSelection::Flash,
     );
@@ -2181,7 +2152,6 @@ fn defaults_round_trip_through_registry() {
         xai_grok_pager::appearance::ScrollMode::Auto,
     );
     xai_grok_pager::appearance::cache::set_invert_scroll(false);
-    // 3 = the registry default shown while the profile is in charge.
     xai_grok_pager::appearance::cache::set_scroll_lines(3);
 
     // Hard-coded per-key expectations (independent of registry).
@@ -2436,14 +2406,14 @@ fn d_key_emits_open_reset_confirm_action_for_compact_mode() {
 fn d_key_emits_open_reset_confirm_for_every_setting() {
     let reg = SettingsRegistry::defaults();
     for meta in reg.all() {
-        // Group rows have no scalar value to reset (consistent with the registry reset-arm coverage test)
-        // Their children are hidden from the top-level list; neither is `d`-resettable directly
+        // Group rows have no scalar value to reset (consistent with the
+        // registry reset-arm coverage test) Their children are hidden.
         if matches!(meta.kind, SettingKind::Group { .. }) || is_group_child(&reg, meta.key) {
             continue;
         }
         let mut s = make_state();
-        // Some rows are terminal-gated (e.g. `voice_capture_mode` is hidden without key-release reporting, which tests run without).
-        // Skip settings with no visible row; their reset path is covered by the dispatch round-trip tests
+        // Some rows are terminal-gated (e.g. `voice_capture_mode` is hidden
+        // without key-release reporting, which tests run without).
         let has_row = s
             .rows
             .iter()
@@ -2604,8 +2574,6 @@ fn pr3_esc_in_picker_reverts_to_original() {
         _ => panic!("initial selection must be the synthetic Enum row"),
     }
 
-    // Step 1: Enter on the Enum row fires try_enter_picking_enum() and seeds choices_idx and original_value from the row's current value
-    // A None current value falls back to the first canonical
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     assert!(
         matches!(outcome, SettingsKeyOutcome::Changed),
@@ -2625,7 +2593,6 @@ fn pr3_esc_in_picker_reverts_to_original() {
         ref other => panic!("expected PickingEnum mode after Enter, got {other:?}"),
     }
 
-    // Step 2: Down preview-navigates to choice 1 (live preview dispatch via action_for_enum, which returns None here, so Changed)
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
     match s.mode() {
@@ -2633,8 +2600,7 @@ fn pr3_esc_in_picker_reverts_to_original() {
         ref other => panic!("expected PickingEnum mode after Down, got {other:?}"),
     }
 
-    // Step 3: Esc reverts. action_for_enum returns None (no Enum arms yet), so the outcome is Changed.
-    // A later change will tighten the assertion to `SettingsKeyOutcome::Action(Action::SetTheme("first"))` once the theme arm ships
+    // action_for_enum returns None (no Enum arms yet), so the outcome is Changed.
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Esc));
     assert!(
         matches!(outcome, SettingsKeyOutcome::Changed),
@@ -2738,8 +2704,7 @@ fn pr4_theme_preview_and_commit_e2e() {
     // Down again so commit lands on a non-default canonical.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
 
-    // Enter COMMITs, dispatching `Action::SetTheme(current_canonical)`, a typed Action variant carrying the current preview value
-    // The dispatcher's `set_theme` emits Effect::PersistSetting and a toast (exercised by the strangler-fig e2e test below)
+    // Enter COMMITs, dispatching `Action::SetTheme(current_canonical)`, a typed Action variant carrying the current preview value.
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
         SettingsKeyOutcome::Action(Action::SetTheme(name)) => {
@@ -2799,9 +2764,8 @@ fn pr4_theme_picker_esc_dispatches_revert_action() {
     );
 }
 
-/// `action_for_enum` (preview) and `action_for_enum_commit` map every theme-family key to the matching typed Action variant.
-/// The test is parameterised across keys AND derives the expected next-canonical from the registry (catalog-reorder-resilient).
-/// Also exercises EVERY choice (not just the first Down), so a refactor that routes correctly for choice 0 but breaks for choice N>0 gets caught.
+/// `action_for_enum` (preview) and `action_for_enum_commit` map every theme-family key to the matching typed Action variant. The test is
+/// parameterised across keys AND derives the expected next-canonical from the registry (catalog-reorder-resilient).
 #[test]
 fn pr4_picker_dispatches_each_theme_settings_action_variant() {
     // The picker hides the rollout-gated `terminal` choice; the walk below covers the full catalog, so seed the gate on.
@@ -2875,15 +2839,13 @@ fn pr4_picker_dispatches_each_theme_settings_action_variant() {
     }
 }
 
-/// Clicking on an Enum row in Browse mode selects it without firing any Action.
-/// Enum rows require an explicit Enter to open the picker (mouse picker-entry is deferred to a future change).
-/// The body click outside the indicator hit-rect (cols 0-4) is a select-only event.
+/// Clicking on an Enum row in Browse mode selects it without firing any Action. Enum rows require an explicit
+/// Enter to open the picker (mouse picker-entry is deferred to a future change).
 #[test]
 fn pr4_mouse_click_on_theme_row_selects_without_emitting_action() {
     let mut s = make_state();
     synth_rects(&mut s);
     let row_y = row_idx_for(&s, "theme") as u16;
-    // Body click (col 20 is well outside the 0-4 indicator hit-rect).
     let outcome = handle_settings_mouse(
         &mut s,
         MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -2951,9 +2913,8 @@ fn pr4_mouse_click_in_theme_picker_is_no_op() {
     assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 }
 
-// `multiline_mode` (first PAGER-owned setting). State lives on `AgentView.multiline_mode` and the modal reads from
-// `PagerLocalSnapshot`. The dispatcher's `set_multiline_mode` is the single mutation owner. No disk persist, no
-// `Effect`, no toast on the no-op fast path.
+// `multiline_mode` (first PAGER-owned setting). State lives on `AgentView.multiline_mode` and the modal reads from `PagerLocalSnapshot`. The dispatcher's `set_multiline_mode` is the mutation owner. No disk persist, no `Effect`, no
+// toast on the no-op fast path.
 
 /// Keyboard Space on the multiline row dispatches the typed setter with the inverted snapshot value (default false toggles to true).
 /// The modal builds the bool from `PagerLocalSnapshot.multiline_mode` via the `current_value_for` arm.
@@ -2975,7 +2936,6 @@ fn pr5_enter_on_multiline_mode_dispatches_typed_setter() {
     assert_set_bool_action(outcome, "multiline_mode", true);
 }
 
-/// Two-stage select-then-toggle for `multiline_mode` mouse path.
 #[test]
 fn pr5_mouse_click_on_multiline_mode_two_stage_toggles() {
     let mut s = make_state();
@@ -2983,7 +2943,6 @@ fn pr5_mouse_click_on_multiline_mode_two_stage_toggles() {
     let row_y = row_idx_for(&s, "multiline_mode") as u16;
 
     // First click: select-only (initial focus is on compact_mode).
-    // Click at column=10 (outside the indicator hit-rect 0..5).
     let outcome = handle_settings_mouse(
         &mut s,
         MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -3174,9 +3133,6 @@ fn pr6_enter_on_permission_mode_row_enters_picking_enum() {
 /// Nav in `permission_mode` picker must NOT dispatch preview Actions (would drain permission queue on every keystroke).
 #[test]
 fn pr6_permission_mode_picker_nav_does_not_dispatch_preview() {
-    // Two-key navigation: open the picker, then exercise both "advance" keys (Down, j) and both "retreat" keys (Up, k)
-    // We re-open the picker between key probes so each key starts at a known position
-    // The test must catch a hypothetical j/k path that bypasses set_picker_idx
     for nav_key in &[
         KeyCode::Down,
         KeyCode::Char('j'),
@@ -3188,8 +3144,7 @@ fn pr6_permission_mode_picker_nav_does_not_dispatch_preview() {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
         assert!(matches!(s.mode(), SettingsModalMode::PickingEnum { .. }));
 
-        // For "retreat" keys (Up/k) at choices_idx=0, the outcome is Unchanged (clamp at first)
-        // We pre-navigate down so retreat keys have something to retreat from
+        // For "retreat" keys (Up/k) at choices_idx=0, the outcome is Unchanged (clamp at first) We pre-navigate down so retreat keys have something.
         if matches!(nav_key, KeyCode::Up | KeyCode::Char('k')) {
             let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
         }
@@ -3725,8 +3680,7 @@ fn reset_overlay_dims_all_rows_except_target() {
     use ratatui::buffer::Buffer;
     use ratatui::style::Modifier;
     use xai_grok_pager::views::settings_modal::ResetConfirmOverlay;
-    // Set up a state with at least 3 rows visible AND navigate to a specific target (NOT the initially-selected row)
-    // That lets us assert dim-vs-full-intensity for both target and non-target rows
+    // Set up a state with a few rows visible AND navigate to a specific target (NOT the initially-selected row).
     let mut s = make_state();
     navigate_to(&mut s, "show_timestamps");
     let target_idx = s.selected;
@@ -3754,8 +3708,7 @@ fn reset_overlay_dims_all_rows_except_target() {
         Some(&overlay),
     );
 
-    // Locate the target row and a non-target row from the rendered row_rects
-    // Pick the row before the target so it's clearly on a different y-line
+    // Locate the target row and a non-target row from the rendered row_rects Pick the row before the target so it's.
     let target_rect = s.row_rects[target_idx];
     let non_target_idx = (0..target_idx)
         .rev()
@@ -3812,9 +3765,7 @@ fn reset_overlay_dims_all_rows_except_target() {
         target_dim_count, target_rect.width
     );
 
-    // Action-element invariant. The prompt row (rendered ABOVE the row list) and the y/n action footer shortcuts must
-    // stay at full intensity. Earlier revisions only asserted dim/no-dim inside `list_area`. So a refactor that
-    // widened the dim sweep to the prompt or the action footer would have silently regressed without test feedback.
+    // Action-element invariant.
     let prompt_y = area.y;
     let mut prompt_dim_count = 0usize;
     for dx in 0..area.width {
@@ -3993,8 +3944,7 @@ fn left_arrow_collapses_focused_row() {
 #[test]
 fn restart_pill_hidden_when_not_expanded_and_not_edited() {
     let mut s = make_state();
-    // `show_tips` is restart_required: true and its registered default is `true` (matches the snapshot's None-to-true fallback in current_value_for)
-    // Not expanded, so no pill
+    // `show_tips` is restart_required: true and its registered default is `true`.
     navigate_to(&mut s, "show_tips");
     assert!(!s.expanded_keys.contains("show_tips"));
 
@@ -4065,14 +4015,11 @@ fn restart_pill_hidden_when_edited_but_collapsed() {
 #[test]
 fn expanded_description_wraps_to_modal_width() {
     let mut s = make_state();
-    // `permission_mode`'s description is long enough to wrap at 80 cols. Expand and check that the entire description
-    // text is present in the buffer. Width. The `→ expand` shortcut was added to the Browse footer, which can push the
-    // footer onto an extra line at narrower widths. We render at 80 cols to keep the full wrapped description visible.
+    // `permission_mode`'s description is long enough to wrap at multiple cols.
     navigate_to(&mut s, "permission_mode");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Right));
 
-    // Height bump. That would squeeze the 3rd wrapped line off the bottom at height=30. Render at 34 lines so the
-    // existing assertion about "automatically" still holds.
+    // Height bump.
     let rendered = render_modal_to_string(&mut s, 80, 34);
     // Distinctive phrases from the description text:
     assert!(
@@ -4086,14 +4033,12 @@ fn expanded_description_wraps_to_modal_width() {
     );
 }
 
-/// Mouse click on the expand-triangle glyph (col 0 of a setting row) toggles expansion, keyboard and mouse parity for the new expand control.
 #[test]
 fn click_on_expand_glyph_toggles_expansion() {
     let mut s = make_state();
     synth_rects(&mut s);
     let row_y = row_idx_for(&s, "compact_mode") as u16;
 
-    // First click on col 0 (triangle): expand
     let outcome = handle_settings_mouse(
         &mut s,
         MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -4109,7 +4054,6 @@ fn click_on_expand_glyph_toggles_expansion() {
         "triangle click on collapsed row must expand it"
     );
 
-    // Second click on col 0: collapse
     let outcome = handle_settings_mouse(
         &mut s,
         MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -4251,13 +4195,11 @@ fn pr15_int_stepper_commit_dispatches_typed_setter() {
         "buffer must seed from default",
     );
 
-    // Stepper: Up = +5 to 125. Right = +10 to 135. Down x3 = -15 to 120. Up x16 = +80 to 200.
     for _ in 0..16 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
     }
     assert_eq!(s.editing_buffer(), Some("200"));
 
-    // Enter commits at 200.
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
         SettingsKeyOutcome::Action(Action::SetMaxThoughtsWidth(200)) => {}
@@ -4301,7 +4243,6 @@ fn pr14_default_model_picker_commits_resolved_model_id() {
         "Enter must transition to PickingEnum for default_model"
     );
 
-    // Walk down past row 0 ("(no override)") to row 1 ("Grok 4.5").
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
     assert!(
         matches!(outcome, SettingsKeyOutcome::Changed),
@@ -4343,8 +4284,6 @@ fn pr14_default_model_picker_row_zero_commits_clear_action() {
     );
     navigate_to(&mut s, "default_model");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // Picker opens with choices_idx at the snapshot's current model, OR at 0 when current_model_name is None
-    // The fixture above leaves current_model_name as None, so the picker opens on row 0
     match &s.mode() {
         SettingsModalMode::PickingEnum { choices_idx, .. } => {
             assert_eq!(
@@ -4354,7 +4293,7 @@ fn pr14_default_model_picker_row_zero_commits_clear_action() {
         }
         other => panic!("expected PickingEnum mode, got {other:?}"),
     }
-    // Enter on row 0 dispatches ClearDefaultModel
+    // Enter on row multiple dispatches ClearDefaultModel
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
         SettingsKeyOutcome::Action(Action::ClearDefaultModel) => {}
@@ -4461,29 +4400,23 @@ fn pr8_mouse_click_on_int_row_opens_editor() {
     );
 }
 
-/// Int stepper: Up/Down ±5, Left/Right ±10, clamped to [min, max].
 #[test]
 fn pr15_int_stepper_up_down_left_right_steps_and_clamps() {
     let mut s = make_state();
     navigate_to(&mut s, "max_thoughts_width");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // Default 120. Up: 120 + 5 = 125.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
     assert_eq!(s.editing_buffer(), Some("125"));
-    // Right: 125 + 10 = 135.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Right));
     assert_eq!(s.editing_buffer(), Some("135"));
-    // Down 20x: 135 - 100 = 35, clamps to min (40)
     for _ in 0..20 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
     }
     assert_eq!(s.editing_buffer(), Some("40"), "must clamp to min");
-    // Right 100x: 40 + 1000 = 1040, clamps to max (500)
     for _ in 0..100 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Right));
     }
     assert_eq!(s.editing_buffer(), Some("500"), "must clamp to max");
-    // Left 100x: 500 - 1000 = -500, clamps to min (40)
     for _ in 0..100 {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Left));
     }
@@ -4505,9 +4438,8 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         .to_owned();
     assert_eq!(initial_buffer, "120", "buffer seeds from default");
 
-    // Digits append to the in-place buffer (Changed); Backspace drops the last
-    // digit. These were previously rejected but are now accepted so a user can
-    // type a number directly.
+    // Digits append to the in-place buffer (Changed); Backspace drops the
+    // last digit.
     let accept_keys: &[(KeyCode, &str)] = &[
         (KeyCode::Char('5'), "1205"),
         // Backspace undoes the appended digit, restoring the seed.
@@ -4628,9 +4560,7 @@ fn pr8_default_model_and_max_thoughts_width_defaults_roundtrip() {
     let ui = UiConfig::default();
     let pager = PagerLocalSnapshot::default();
 
-    // default_model: registered default is the empty-string sentinel (no UiConfig mirror; cfg.models.default is resolved dynamically)
-    // `current_value_for` reads from `pager.current_model_name`, which is None by default, so `unwrap_or_default()` produces the empty string
-    // Both paths converge on `SettingValue::String("")`
+    // default_model: registered default is the empty-string sentinel (no UiConfig mirror; cfg.models.default is resolved dynamically).
     let dm_meta = reg.find("default_model").unwrap();
     assert_eq!(
         xai_grok_pager::settings::default_value_for(dm_meta),
@@ -4643,7 +4573,6 @@ fn pr8_default_model_and_max_thoughts_width_defaults_roundtrip() {
         "default_model current_value_for with empty pager snapshot must be empty",
     );
 
-    // max_thoughts_width: registered default is 120 (matches UiConfig::default()'s DEFAULT_MAX_THOUGHTS_WIDTH constant)
     let mt_meta = reg.find("max_thoughts_width").unwrap();
     assert_eq!(
         xai_grok_pager::settings::default_value_for(mt_meta),
@@ -4905,7 +4834,6 @@ fn pr9_picker_seeds_choices_idx_from_pager_snapshot_opt_out_true() {
     }
 }
 
-/// Exactly 2 canonical choices: {opt-in, opt-out}.
 #[test]
 fn pr9_coding_data_sharing_choices_use_canonical_strings() {
     let reg = SettingsRegistry::defaults();
@@ -4936,8 +4864,7 @@ fn pr9_coding_data_sharing_choices_use_canonical_strings() {
 fn pr9_search_privacy_matches_coding_data_sharing() {
     let reg = SettingsRegistry::defaults();
     let hits = reg.search("privacy");
-    // The category label "Privacy" appears as a header but is not part of `search()`'s haystack (search ignores categories)
-    // Matches come from the meta's keywords, label, and description
+    // The category label "Privacy" appears as a header.
     let hit_keys: Vec<&str> = hits.iter().map(|m| m.key).collect();
     assert_eq!(
         hits.len(),
@@ -5159,8 +5086,7 @@ fn default_selected_permission_picker_enter_dispatches_set_commit() {
         } => (*default, *choices),
         _ => panic!("default_selected_permission must be Enum"),
     };
-    // Picker seeds at the current value ("always_allow_all_sessions"); navigate one row down
-    // Resolve that choice's canonical from the registry rather than hardcoding it; robust against future catalog reordering
+    // Picker seeds at the current value ("always_allow_all_sessions").
     let seed_idx = choices
         .iter()
         .position(|c| c.canonical == default_canonical)
@@ -5561,7 +5487,7 @@ fn pr10_plan_mode_choices_use_canonical_strings() {
 }
 
 /// First mouse-click on a DIFFERENT (non-selected) `plan_mode` row only SELECTS the row (no picker entry, no Action).
-/// Mirrors the two-stage Bool-row select-then-toggle UX.
+/// Mirrors those-stage Bool-row select-then-toggle UX.
 #[test]
 fn pr10_mouse_click_on_unselected_plan_mode_row_only_selects() {
     let mut s = make_state();
@@ -5741,8 +5667,8 @@ fn render_mermaid_picker_nav_does_not_dispatch_preview() {
     }
 }
 
-/// Enter on the focused picker choice commits via `Action::SetRenderMermaid(RenderMermaid)`, the typed setter.
-/// Default seed is `auto` (index 0); one Down moves to `on` (index 1). Pins the canonical-to-RenderMermaid mapping.
+/// Enter on the focused picker choice commits via `Action::SetRenderMermaid(RenderMermaid)`, the typed setter. Pins
+/// the canonical-to-RenderMermaid mapping.
 #[test]
 fn render_mermaid_picker_enter_dispatches_set_commit() {
     use xai_grok_pager::appearance::RenderMermaid;
@@ -5944,7 +5870,6 @@ fn hunk_tracker_mode_picker_nav_does_not_dispatch_preview() {
 }
 
 /// Enter on the focused picker choice commits via `Action::SetHunkTrackerMode(String)` carrying the registry canonical.
-/// Seed is `off` (index 2); one Up moves to `all_dirty` (index 1).
 /// Pins the canonical-string payload that `action_for_enum_commit` forwards.
 #[test]
 fn hunk_tracker_mode_picker_enter_dispatches_set_commit() {
@@ -6038,7 +5963,6 @@ fn enter_on_voice_stt_language_row_enters_picking_enum() {
 }
 
 /// Enter on a picker choice commits via `Action::SetVoiceSttLanguage(String)` carrying the canonical code.
-/// Seed is `en` (index 0); one Down moves to `auto` (System).
 #[test]
 fn voice_stt_language_picker_enter_dispatches_set_commit() {
     let mut s = make_state();
@@ -6130,7 +6054,6 @@ fn pr13_mouse_click_on_show_tips_indicator_toggles_in_one_click() {
     assert_set_bool_action(outcome, "show_tips", false);
 }
 
-/// Two-stage select-then-toggle on `show_tips`.
 #[test]
 fn pr13_mouse_click_on_show_tips_two_stage_select_then_toggle() {
     let mut s = make_state();
@@ -6361,7 +6284,6 @@ fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
             s.mode()
         );
 
-        // Row 0 is "(no override)"; row 1 is the one catalog model.
         let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
         assert!(
             matches!(outcome, SettingsKeyOutcome::Changed),
@@ -6385,7 +6307,6 @@ fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
     }
 }
 
-/// Row 0 of the picker clears the slot back to inheriting the session model.
 #[test]
 fn harness_model_slot_picker_row_zero_clears_the_slot() {
     for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
@@ -6445,8 +6366,7 @@ fn mouse_click_on_a_harness_model_slot_row_opens_the_picker() {
 }
 
 // ---------------------------------------------------------------------------
-// vim_mode (scrollback navigation) — PAGER-owned, paired with simple_mode
-// ---------------------------------------------------------------------------
+// vim_mode (scrollback navigation) — PAGER-owned, paired.
 
 /// Keyboard Space on the vim_mode row dispatches the typed setter
 /// with the inverted snapshot value (default false → true). Same
@@ -6527,8 +6447,7 @@ fn vim_mode_renders_under_appearance_category_pager_owned() {
 
 #[test]
 fn simple_mode_label_distinguishes_input_from_scrollback() {
-    // The pair (`simple_mode`, `vim_mode`) controls vim behaviour in two different parts of the UI
-    // The labels name which part each row controls so neither is ambiguous when both are shown
+    // The pair (`simple_mode`, `vim_mode`) controls vim behaviour in different parts of the UI The labels name which part each row controls.
     let reg = SettingsRegistry::defaults();
     let simple = reg.find("simple_mode").expect("simple_mode registered");
     let vim = reg.find("vim_mode").expect("vim_mode registered");
@@ -6573,8 +6492,8 @@ fn keep_text_selection_does_not_support_preview() {
 
 #[test]
 fn enter_on_keep_text_selection_row_enters_picking_enum() {
-    // The picker's `original_value` is read from the process-wide cache
-    // Pin it to the default so a sibling test's `set_keep_text_selection` can't leak in
+    // The picker's `original_value` is read from the process-wide cache Pin
+    // it to the default.
     xai_grok_pager::appearance::cache::set_keep_text_selection(
         xai_grok_pager::appearance::TextSelection::Flash,
     );
@@ -6604,8 +6523,6 @@ fn enter_on_keep_text_selection_row_enters_picking_enum() {
 
 #[test]
 fn keep_text_selection_picker_nav_does_not_dispatch_preview() {
-    // Pin the cache-backed live value so the picker seeds at flash (idx 0) regardless of a sibling test that set hold/word_select on this thread
-    // (word_select is the last choice, so Down would clamp; flash gives room.)
     xai_grok_pager::appearance::cache::set_keep_text_selection(
         xai_grok_pager::appearance::TextSelection::Flash,
     );
@@ -6635,12 +6552,10 @@ fn keep_text_selection_picker_nav_does_not_dispatch_preview() {
 fn keep_text_selection_picker_enter_dispatches_set_commit() {
     use xai_grok_pager::appearance::TextSelection;
 
-    // Pin the cache-backed live value so the picker seeds at flash (idx 0) regardless of any sibling test that set hold/word_select on this thread
     xai_grok_pager::appearance::cache::set_keep_text_selection(TextSelection::Flash);
     let mut s = make_state();
     navigate_to(&mut s, "keep_text_selection");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    // flash (idx 0); Down moves to hold (idx 1), Enter commits
     let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
@@ -6771,7 +6686,7 @@ fn keep_text_selection_hold_snapshot_seeds_picker_at_hold() {
     }
 }
 
-/// Int stepper open/step/commit for scroll_speed. Defaults to 50; mid-range policy: Up/Down ±1, Left/Right ±5.
+/// Int stepper open/step/commit for scroll_speed.
 #[test]
 fn scroll_speed_int_stepper_commit_dispatches_typed_setter() {
     let mut s = make_state();
@@ -6787,7 +6702,6 @@ fn scroll_speed_int_stepper_commit_dispatches_typed_setter() {
         "buffer must seed from default 50",
     );
 
-    // Up = +1 to 51. Right = +5 to 56.
     let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
     let _ = handle_settings_key(&mut s, &press(KeyCode::Right));
     assert_eq!(s.editing_buffer(), Some("56"));
@@ -6878,7 +6792,6 @@ fn scroll_mode_renders_under_mouse_shell_owned_no_preview() {
 fn scroll_mode_picker_enter_dispatches_set_commit() {
     use xai_grok_pager::appearance::ScrollMode;
 
-    // Pin the cache-backed live value so the picker seeds at auto (idx 0) regardless of sibling tests on this thread
     xai_grok_pager::appearance::cache::set_scroll_mode(ScrollMode::Auto);
     let mut s = make_state();
     navigate_to(&mut s, "scroll_mode");
@@ -6898,7 +6811,6 @@ fn scroll_mode_picker_enter_dispatches_set_commit() {
         }
         other => panic!("expected PickingEnum mode, got {other:?}"),
     }
-    // auto (idx 0); Down moves to wheel (idx 1), Enter commits the typed setter
     let _ = handle_settings_key(&mut s, &press(KeyCode::Down));
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
@@ -6956,7 +6868,6 @@ fn scroll_lines_renders_under_mouse_shell_owned_bounds_1_to_10() {
 /// Int stepper open/step/commit for scroll_lines (the scroll_speed pattern).
 #[test]
 fn scroll_lines_int_stepper_commit_dispatches_typed_setter() {
-    // Pin the live cache so the buffer seeds at the default 3.
     xai_grok_pager::appearance::cache::set_scroll_lines(3);
     let mut s = make_state();
     navigate_to(&mut s, "scroll_lines");
@@ -6971,7 +6882,6 @@ fn scroll_lines_int_stepper_commit_dispatches_typed_setter() {
         "buffer must seed from default 3",
     );
 
-    // Narrow-range policy: Up = +1 to 4 (unit steps so every 1..=10 is reachable)
     let _ = handle_settings_key(&mut s, &press(KeyCode::Up));
     assert_eq!(s.editing_buffer(), Some("4"));
 
@@ -7226,8 +7136,7 @@ fn show_thinking_blocks_cache_on_dispatches_off() {
 
 #[test]
 fn thinking_summaries_space_dispatches_typed_setter() {
-    // The shipped modal key handler, driven on the row by key. `thinking_summaries`
-    // has no process cache, so the value the row reads is the `[ui]` mirror.
+    // The shipped modal key handler, driven on the row by key.
     let mut s = make_state();
     navigate_to(&mut s, "thinking_summaries");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
@@ -7259,10 +7168,7 @@ fn thinking_summaries_renders_under_appearance_category_shared_owned_restart_req
         SettingKind::Bool { default } => assert!(*default, "default must be true"),
         other => panic!("expected Bool kind for thinking_summaries, got {other:?}"),
     }
-    // Sits directly below collapsed_edit_blocks. The four rows above it are
-    // pinned into one adjacency chain by their own order asserts
-    // (show_thinking_blocks / respect_manual_folds / group_tool_verbs /
-    // collapsed_edit_blocks), so a new Appearance row cannot go between them.
+    // Sits directly below collapsed_edit_blocks.
     let keys: Vec<&str> = reg
         .all()
         .iter()

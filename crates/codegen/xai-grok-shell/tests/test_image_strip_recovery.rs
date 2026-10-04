@@ -1,5 +1,4 @@
 //! An image the client accepts but the server rejects is stripped within the failing turn.
-//! The strip persists so the next turn does not resend the image.
 
 mod acp_harness;
 
@@ -14,7 +13,7 @@ use xai_grok_test_support::ScriptedResponse;
 
 const SESSION_ID: &str = "poisoned-image-session";
 
-/// Valid PNG above the dimension floor, so only the server's 400 rejects it.
+/// Valid PNG above the dimension floor, so only the server's rejects it.
 fn poisoned_image_data_uri() -> String {
     let img: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
         image::ImageBuffer::from_fn(32, 32, |x, y| image::Rgb([x as u8, y as u8, 0]));
@@ -92,7 +91,7 @@ fn poisoned_image_session_recovers_within_the_failing_turn() {
         .expect("session/load timed out")
         .expect("session/load failed");
 
-        // The 400 fires once on the foreground turn; auxiliary calls must not
+        // The fires once on the foreground turn; auxiliary calls must not
         // consume it. The strip-retry falls through to the mock's default echo.
         let invalid_image = ScriptedResponse::json(
             400,

@@ -1,5 +1,4 @@
 //! Cell verdicts: the `report.json` artifact, the stdout summary table, and the exit-code policy.
-//! The curated CI tests and the `scroll-matrix` sweep binary share all three.
 
 use std::path::{Path, PathBuf};
 
@@ -17,7 +16,6 @@ pub enum InvariantStatus {
     /// Violated inside the xfail set (the declared known bug).
     XFail,
     /// Held despite being in the xfail set: the bug got fixed or the cell rotted.
-    /// Either way the cell must be promoted out of xfail, so this fails the run exactly like [`InvariantStatus::Fail`].
     XPass,
 }
 
@@ -65,7 +63,6 @@ pub struct CellReport {
 }
 
 /// Exit-code policy: nonzero iff any cell is **Fail** or **XPass**.
-/// Expected failures (XFail) are green, but a fixed-or-rotted xfail cell must break the run so it gets promoted instead of silently absorbed.
 pub fn exit_code(reports: &[CellReport]) -> u8 {
     let failed = reports
         .iter()

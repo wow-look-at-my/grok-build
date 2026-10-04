@@ -30,8 +30,7 @@ async fn esc_mid_turn_hints_ctrl_c_from_scrollback() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("stream started");
 
-    // Leave the prompt with a SINGLE Tab (Esc is reserved for the hint/clear/rewind policy), then wait for the footer to prove the scrollback owns keys
-    // Tab TOGGLES focus, so a second press could bounce back to the prompt; press once and poll the render, as `drive_to_scrollback_with_turn` does
+    // Leave the prompt with a SINGLE Tab (Esc is reserved for the hint/clear/rewind policy).
     harness.inject_keys(b"\t").expect("tab to scrollback");
     harness
         .wait_for_text("Space:prompt", Duration::from_secs(10))

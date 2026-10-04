@@ -1,37 +1,12 @@
-#![allow(clippy::cast_lossless)] // 5 hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 14 hits predate the gate
-#![allow(clippy::cast_sign_loss)] // 5 hits predate the gate
-#![allow(clippy::expect_used)] // 3 hits predate the gate
-#![allow(clippy::unwrap_used)] // 1 hit predates the gate
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
+#![allow(clippy::cast_sign_loss)] // Hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::unwrap_used)]
 
 //! Streaming markdown renderer for terminal UIs.
-//!
-//! This crate provides incremental/streaming markdown rendering optimized for displaying LLM responses in terminal UIs.
-//! Key features:
-//!
-//! - **Streaming rendering**: Efficiently render markdown as it arrives chunk by chunk
-//! - **Checkpoint-based freezing**: Only re-render the "tail" after stable boundaries
-//! - **Syntax highlighting**: Code blocks highlighted via syntect
-//! - **Terminal color adaptation**: Automatic downgrade for 256-color/16-color terminals
-//! - **LaTeX math rendering**: pretty mode approximates `$...$`, `$$...$$`, `\(...\)` and `\[...\]` math in Unicode (`$E=mc^2$` becomes `E=mc²`)
-//!
-//! # Example
-//!
-//! ```ignore
-//! use xai_grok_markdown::{StreamingMarkdownRenderer, MarkdownStyle, Syntect};
-//!
-//! let syntect = Syntect::new(include_bytes!("theme.tmTheme"));
-//! let style = MarkdownStyle::default();
-//! let mut renderer = StreamingMarkdownRenderer::new(style, true);
-//!
-//! for token in stream {
-//!     renderer.push_and_render(&token, Some(&syntect));
-//!     let view = renderer.view();
-//!     // display view.lines
-//! }
-//! ```
 
 #![deny(clippy::indexing_slicing)]
 
@@ -73,8 +48,9 @@ pub use syntax::Syntect;
 pub use syntax::test_syntect;
 
 /// Render markdown to ratatui Lines with full output including checkpoint.
-/// Runs the `url_scan` pass after parsing so the output's `hyperlinks` matches what `StreamingMarkdownRenderer::finish()` produces for the same input.
-/// The scan detects plain URLs: the pretty-mode `(url)` suffix and bare URLs in prose.
+/// Runs the `url_scan` pass after parsing so the output's `hyperlinks`
+/// matches what `StreamingMarkdownRenderer::finish()` produces for the same
+/// input.
 pub fn render_markdown_ratatui_full(
     text: &str,
     ms: MarkdownStyle,
@@ -105,16 +81,15 @@ pub fn render_markdown_ratatui_with_buffers_width(
     syntect: Option<&Syntect>,
     max_table_width: Option<usize>,
 ) -> (MarkdownRenderOutput, Option<Checkpoint>) {
-    // Normalize `\(…\)`/`\[…\]`/`\begin{equation}` to `$`/`$$` before parsing, so the math handlers see one form, table cells included
-    // All offsets are in normalized space; `StreamingMarkdownRenderer` normalizes as input arrives, so its stored source matches
-    // Streaming tail renders (`render_markdown_ratatui_with_link_id`) do not re-normalize; they receive already-normalized source
+    // Normalize `\(…\)`/`\[…\]`/`\begin{equation}` to `$`/`$$` before parsing, so the math handlers see one form.
     let normalized = latex_delimiters::normalize_latex_delimiters(text);
     let mut parsed = MarkdownParser::new(&normalized, ms, buffers, syntect)
         .max_table_width(max_table_width)
         .parse();
     let next_link_id = parsed.next_link_id;
     let (mut output, checkpoint) = parsed.render_ratatui(pretty);
-    // Mirror `StreamingMarkdownRenderer::finish()` so a one-shot render gets the same hyperlinks a `push_and_render` + `finish()` sequence would
+    // Mirror `StreamingMarkdownRenderer::finish()` so a one-shot render gets
+    // the same hyperlinks a `push_and_render` + `finish()`.
     let (extra_links, _post_scan_next_id) =
         url_scan::detect_plain_urls(&output.lines, &output.hyperlinks, next_link_id);
     output.hyperlinks.extend(extra_links);

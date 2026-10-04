@@ -8,9 +8,8 @@ use ratatui::text::Line;
 use crate::buffers::unicode_display_width;
 use crate::output::HyperlinkTarget;
 
-/// Scan `lines` for plain URLs and return new `HyperlinkTarget` entries that don't overlap any existing target in `existing`.
-///
-/// `next_id` is the first id to assign; the returned `u32` is the post-scan counter, suitable for stuffing back into `FrozenState::next_link_id`.
+/// Scan `lines` for plain URLs and return new `HyperlinkTarget` entries that
+/// don't overlap any existing target in `existing`.
 pub(crate) fn detect_plain_urls(
     lines: &[Line<'_>],
     existing: &[HyperlinkTarget],
@@ -33,8 +32,7 @@ pub(crate) fn detect_plain_urls_with_offset(
 
     for (i, line) in lines.iter().enumerate() {
         let line_index = line_index_offset + i;
-        // Scan the joined line so a URL split across style spans
-        // (pretty-mode link coloring) is one target, not a truncated prefix.
+        // Scan the joined line so a URL split across style spans (pretty-mode link coloring) is one target.
         let line_text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
 
         for_each_plain_link(&line_text, |range, url| {
@@ -163,9 +161,7 @@ mod tests {
         let text = "Visit [https://example.com](https://example.com).\n";
         let hyperlinks = finish_and_get_hyperlinks(text);
 
-        // Pretty mode renders `[url](url)` as `url (url)`, so the URL shows at two disjoint column ranges
-        // The parser's HyperlinkTarget covers the link text; the plain-URL scan adds a second target for the `(url)` suffix
-        // Dedup only prevents a third entry at the same column range as the parser's target
+        // Pretty mode renders `[url](url)` as `url (url)`.
         assert_eq!(
             hyperlinks.len(),
             2,
@@ -274,7 +270,6 @@ mod tests {
         };
         assert_eq!(h.url, "https://example.com");
 
-        // "日本語 " has 3 CJK chars (2 cells each) plus 1 space, 7 display cells
         let prefix = "日本語 ";
         let expected_start = unicode_display_width(prefix);
         assert_eq!(expected_start, 7, "prefix should be 7 display cells");
@@ -351,9 +346,8 @@ mod tests {
         );
     }
 
-    /// URL detection must run from `render()` too, not only `finish()`.
-    /// Otherwise a state reset like `set_max_table_width` drops the URL hyperlinks pretty mode adds for the `(url)` suffix of markdown links.
-    /// Also pins the OSC 8 grouping invariant: the link-text and URL hyperlinks must have distinct ids and disjoint column ranges.
+    /// URL detection must run from `render()` too, not only `finish()`. Otherwise a state reset like `set_max_table_width` drops the URL
+    /// hyperlinks pretty mode adds for the `(url)` suffix of markdown links.
     #[test]
     fn render_detects_pretty_mode_url_suffix() {
         let text = "[link](https://example.com/some/long/path)\n";
@@ -421,7 +415,6 @@ mod tests {
 
     /// Re-rendering after `finish()` must not drop the URL hyperlinks pretty mode adds for the `(url)` suffix.
     /// Snapshots the hyperlink list before and after the reset and asserts the URL-suffix entry keeps its column range.
-    /// The post-reset re-render may re-assign the OSC 8 id; the location must not move.
     #[test]
     fn url_hyperlinks_survive_re_render_after_finish() {
         let url = "https://example.com/some/long/path";

@@ -1,51 +1,27 @@
 //! Server-side doom-loop check: wire contract types and tolerant parsers.
-//!
-//! The inference API reports selected generation-loop detector families on streaming `/v1/responses` requests.
-//! `x-grok-doom-loop-check` selects legacy labels, while `x-grok-exact-repetition-check` selects exact-repetition labels.
-//! Reports use two places:
-//!
-//! * a non-standard mid-stream SSE event (`response.doom_loop_check`) emitted as new triggers appear, carrying the **cumulative** trigger set:
-//!   `{"type": "response.doom_loop_check", "doom_loop_check": {"triggers": ["…"]}}`
-//! * a `doom_loop_check: {"triggers": ["…"]}` field on the terminal response object (`response.completed` / `response.incomplete`).
-//!
-//! Triggers are opaque labels.
-//! The grammar is `tail_repetition:{threshold}@{channel}`, `exact_repetition:{tokens}x{copies}@{channel}`, or `low_logprob@{channel}`.
-//! Presence is itself the detection signal; the set is non-empty when present.
-//!
-//! This module is the single home for that wire shape: if the server contract changes, only this file (and its tests) should need to change.
-//! Everything here is best-effort by design: malformed payloads yield `Unknown` kinds or empty trigger sets, never an error.
-//! The feature can never fail a stream.
 
 use serde::{Deserialize, Serialize};
 
-/// Legacy detector reporting header.
-/// Its value is the tail/token-diversity detector window (decimal token count).
-/// Exact-repetition labels use the independent `x-grok-exact-repetition-check` sibling header.
+/// Legacy detector reporting header. Its value is the tail/token-diversity detector window (decimal token count).
 pub const DOOM_LOOP_CHECK_HEADER: &str = "x-grok-doom-loop-check";
-/// Exact-repetition reporting sibling header.
-/// The default client value is the production-safe minimum of 64 tokens.
+/// Exact-repetition reporting sibling header. The default client value is the production-safe minimum of multiple tokens.
 pub const EXACT_REPETITION_CHECK_HEADER: &str = "x-grok-exact-repetition-check";
 pub const DEFAULT_EXACT_REPETITION_MIN_TOKENS: usize = 64;
 
-/// `type` of the non-standard mid-stream SSE event, also its SSE `event:` name.
-/// async-openai's typed `rs::ResponseStreamEvent` does not know this variant.
-/// Raw payloads carrying this name or type must be intercepted before typed deserialization.
+/// `type` of the non-standard mid-stream SSE event.
 pub const DOOM_LOOP_CHECK_EVENT_TYPE: &str = "response.doom_loop_check";
 
 /// Byte-exact `data:` payload of a check-event frame as emitted by the server; the frame's SSE `event:` name is [`DOOM_LOOP_CHECK_EVENT_TYPE`].
-/// Exported as a fixture so transport tests pin the real bytes, not a paraphrase.
 pub const SAMPLE_CHECK_EVENT_DATA: &str = r#"{"sequence_number":4176,"type":"response.doom_loop_check","doom_loop_check":{"triggers":["tail_repetition:4@response"]}}"#;
 
 /// Companion fixture to [`SAMPLE_CHECK_EVENT_DATA`]: the follow-up frame from the same wire sample, carrying the grown **cumulative** trigger set.
 pub const SAMPLE_CHECK_EVENT_DATA_CUMULATIVE: &str = r#"{"sequence_number":4178,"type":"response.doom_loop_check","doom_loop_check":{"triggers":["tail_repetition:4@response","tail_repetition:2@response"]}}"#;
 
-/// The resolver returns `None` when the check is disabled: absence IS the off state, so there is no separate enabled flag
-/// to keep in sync. When present on `SamplerConfig`, the sampler both sends the opt-in request header and parses the
-/// reported triggers. The tunables are consumed by the recovery decision logic.
+/// The resolver returns `None` when the check is disabled: absence IS the off
+/// state, so there is no separate enabled flag to keep in sync.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DoomLoopRecoveryPolicy {
     /// Act only on `tail_repetition:{t}@thinking` triggers with `t` at or below this value.
-    /// Lower thresholds indicate tighter, more confident loops.
     #[serde(default = "default_max_threshold")]
     pub max_threshold: u32,
     /// Resample budget per turn before accepting the response as-is.
@@ -92,7 +68,6 @@ impl DoomLoopRecoveryPolicy {
         self.max_retries == Self::UNLIMITED_RETRIES || spent < self.max_retries
     }
 
-    /// Out-of-range values fail closed to 4096, not the range floor.
     pub fn clamp_window_tokens(value: u32) -> u32 {
         if Self::WINDOW_TOKENS_RANGE.contains(&value) {
             value
@@ -101,8 +76,9 @@ impl DoomLoopRecoveryPolicy {
         }
     }
 
-    /// A signal this policy treats as a real loop worth acting on: tail repetition in the thinking channel, at or below the confidence threshold.
-    /// Everything else (other channels, `low_logprob`, unknown kinds, looser thresholds) is warn-only.
+    /// A signal this policy treats as a real loop worth acting on: tail
+    /// repetition in the thinking channel, at or below the confidence
+    /// threshold.
     pub fn is_confident(&self, signal: &DoomLoopSignal) -> bool {
         let tight = |t: u32| t <= self.max_threshold;
         signal.channel == THINKING_CHANNEL
@@ -150,7 +126,6 @@ pub enum DoomLoopSignalKind {
 pub struct DoomLoopSignal {
     pub kind: DoomLoopSignalKind,
     /// Channel the loop was detected on (e.g. `thinking`, `response`).
-    /// Empty when the label carries no `@channel` suffix.
     pub channel: String,
     /// The verbatim label; the stable identity used for deduplication and logging.
     pub raw: String,
@@ -216,10 +191,8 @@ impl DoomLoopSignal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DoomLoopPeek {
     /// The payload is the non-standard `response.doom_loop_check` event.
-    /// The caller must swallow it (never forward to the typed event parser); the vec is empty when the payload is malformed.
     CheckEvent(Vec<DoomLoopSignal>),
-    /// The payload is an ordinary event whose `response` object carries a `doom_loop_check` field (the redundant terminal copy).
-    /// Forward the event as usual after recording the signals.
+    /// The payload is an ordinary event whose `response` object carries a `doom_loop_check` field.
     ResponseField(Vec<DoomLoopSignal>),
     /// Nothing doom-loop related; forward untouched.
     None,
@@ -245,9 +218,9 @@ pub fn peek_doom_loop(data: &str) -> DoomLoopPeek {
     }
 }
 
-/// A cheap substring precheck gates the peek so normal traffic never pays a JSON parse. The type confirmation prevents
-/// swallowing a legitimate event whose content text merely quotes the event-type string. An unnamed frame with an
-/// unparseable payload is NOT the check event; a real server frame always carries the name or a parseable `type` tag.
+/// A cheap substring precheck gates the peek so normal traffic never pays a
+/// JSON parse. The type confirmation prevents swallowing a legitimate event
+/// whose content text merely quotes the event-type string.
 pub fn is_check_event(event_name: &str, data: &str) -> bool {
     if event_name == DOOM_LOOP_CHECK_EVENT_TYPE {
         return true;
@@ -458,8 +431,8 @@ mod tests {
         }
     }
 
-    /// Confidence requires all three: kind `TailRepetition`, channel `thinking`, and threshold at or below `max_threshold` (boundary inclusive).
-    /// Each factor is falsified independently.
+    /// Confidence requires all of them: kind `TailRepetition`, channel `thinking`, and threshold at or below `max_threshold` (boundary
+    /// inclusive). Each factor is falsified independently.
     #[test]
     fn confidence_requires_kind_channel_and_threshold() {
         let policy = DoomLoopRecoveryPolicy::default();

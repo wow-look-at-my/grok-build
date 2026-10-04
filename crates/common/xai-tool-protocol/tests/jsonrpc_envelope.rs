@@ -1,4 +1,3 @@
-//! Envelope-shape tests for the JSON-RPC 2.0 wrappers.
 
 use serde_json::{Value, json};
 use xai_tool_protocol::{
@@ -235,9 +234,9 @@ fn full_call_envelope_serialises_to_expected_shape() {
 }
 
 /// The envelope-level `session_id` and an inner `params.session_id` (e.g.
-/// on `ToolsListParams`) are independent keys in the wire JSON tree.
-/// This test pins that invariant so a refactor that accidentally
-/// collapses the two layers (e.g. via `#[serde(flatten)]`) fails loudly.
+/// on `ToolsListParams`) are independent keys in the wire JSON tree. This
+/// test pins that invariant so a refactor that accidentally collapses
+/// both layers (e.g. via `#[serde(flatten)]`) fails loudly.
 #[test]
 fn envelope_session_id_and_inner_params_session_id_are_distinct_layers() {
     use xai_tool_protocol::{ToolDefinitionMode, ToolsListParams};

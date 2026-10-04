@@ -77,8 +77,7 @@ fn sole_manual_rename_wins_among_duplicates() {
 
 #[test]
 fn pulled_sole_manual_summary_wins_among_duplicate_autos() {
-    // Mimics what a pull writes: generated_title and title_is_manual, with session_summary matching the remote title
-    // That shape is what lets `--resume <title>` find the pulled session
+    // Mimics what a pull writes: generated_title and title_is_manual.
     let pulled = summary("pulled-hop", Some("Dup"), true);
     assert_eq!(pulled.manual_title_opt().as_deref(), Some("Dup"));
     let s = [

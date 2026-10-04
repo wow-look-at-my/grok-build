@@ -1,8 +1,4 @@
-//! In-app drag-select over a scrolled column of plain text lines, shared by modals that copy the
-//! selection on mouse-up (usage modal Session-info tab, memory modal preview).
-//!
-//! Endpoints are display columns into `lines`; callers own the press/drag state machine and the
-//! copy, this module only maps mouse cells to text and paints the band.
+//! In-app drag-select over a scrolled column of plain text lines.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

@@ -97,8 +97,7 @@ fn manifest_is_deterministic_and_includes_topics_before_observations() {
     )
     .unwrap();
     std::fs::write(scope.join("topics/alpha.md"), "# Alpha\n\nFirst topic.").unwrap();
-    // A manual note whose name sorts after every capture name, but which is
-    // older than the capture note: recency must come from modification time.
+    // A manual note whose name sorts after every capture name, but which is older than the capture note.
     let remember = scope.join("observations/_inbox/remember-zzz.md");
     std::fs::write(&remember, "# Old manual note\n\nPending evidence.").unwrap();
     let capture = scope.join("observations/_inbox/01a0-session__t000002-000002__n000.md");
@@ -215,8 +214,6 @@ fn oversized_entry_does_not_starve_later_manifest_entries() {
         temp.path(),
         V2MemoryScope::Workspace,
         V2ManifestBudget {
-            // Room for the header plus one small entry, but not the 2 KB
-            // oversized title.
             max_bytes: 400,
             max_entries: 2,
             max_description_bytes: 32,

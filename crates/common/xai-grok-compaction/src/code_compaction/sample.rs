@@ -1,30 +1,4 @@
 //! The shared bounded-retry summary-sampling loop.
-//!
-//! The canonical `sample → classify → retry` loop, used by **both** grok-build's
-//! full-replace pass ([`sample_full_replace_summary`](super::sample_full_replace_summary))
-//! and Grok chat's intra `Shared` summarizer
-//! ([`apply_intra_compaction`](crate::intra_compaction::apply_intra_compaction)).
-//! Centralising it here removes the two near-identical copies that previously
-//! lived in `code_compaction::compact` and `intra_compaction::compact`.
-//!
-//! Classification is uniform:
-//! - a usable, non-degenerate response wins immediately;
-//! - empty / degenerate responses ([`is_degenerate_summary`]) are **transient**
-//!   and retried until `max_attempts` is hit;
-//! - a sampler error is **deterministic** (no retry) when
-//!   [`CompactionSampleError::is_deterministic`](crate::CompactionSampleError::is_deterministic)
-//!   or a context-length overflow (structured
-//!   [`ContextOverflow`](crate::CompactionSampleError::ContextOverflow) or a
-//!   size-worded message per [`is_context_length_error`], except a rendered
-//!   HTTP 429 — those stay transient so a TPM Retry-After is not re-flagged);
-//!   otherwise it is transient and retried.
-//!
-//! The loop is *content-neutral*: callers build the prompt, map the structured
-//! [`SampleRetryError`] onto their own error type, and decide whether to clean
-//! the winning summary (grok-build cleans in its assembler; intra cleans via
-//! [`format_compact_summary`](super::format_compact_summary)). Per-attempt
-//! telemetry flows through the [`FullReplaceObserver`] seam; callers without
-//! per-attempt metrics (intra) pass `&()`.
 
 use std::time::Duration;
 
@@ -38,7 +12,7 @@ use super::observer::{FullReplaceAttemptOutcome, FullReplaceObserver};
 use super::summary::is_degenerate_summary;
 
 /// A successful retry-bounded sample: the **raw** winning summary (uncleaned)
-/// plus the total number of attempts made (first try + retries).
+/// plus the total number of attempts made.
 #[derive(Debug)]
 pub struct SampledSummary {
     /// Raw model summary text, exactly as emitted. Callers clean it as needed.
@@ -48,8 +22,6 @@ pub struct SampledSummary {
 }
 
 /// Terminal failure of [`sample_summary_with_retries`] after all attempts.
-///
-/// `attempts` is the number of tries made, for the caller's terminal telemetry.
 #[derive(Debug)]
 pub enum SampleRetryError {
     /// Every attempt produced an empty or degenerate (too-short) summary.
@@ -57,16 +29,14 @@ pub enum SampleRetryError {
         /// Total attempts made.
         attempts: u32,
     },
-    /// The sampler returned an error: either deterministic (re-sending the same
-    /// input cannot help — auth / schema / context overflow), or transient but
-    /// retries were exhausted.
+    /// The sampler returned an error: either deterministic (re-sending the
+    /// same input cannot help — auth / schema / context overflow).
     Failure {
         /// Rendered upstream error message.
         message: String,
         /// Whether re-sending the same input cannot help.
         deterministic: bool,
-        /// Whether the failure was a context-length overflow (a deterministic
-        /// signal the grok-build host uses to step down its input size).
+        /// Whether the failure was a context-length overflow.
         context_overflow: bool,
         /// Total attempts made.
         attempts: u32,
@@ -148,12 +118,9 @@ where
             }
             Err(e) => {
                 let message = e.to_string();
-                // Retry-After is not in Display, so a rendered 429 must not let
-                // size wording re-flag overflow.
                 let context_overflow = e.is_context_overflow()
                     || (is_context_length_error(&message) && !is_rendered_http_429(&message));
-                // A context overflow is deterministic for *this* input — retrying
-                // the same payload cannot help.
+                // A context overflow is deterministic for *this* input — retrying the same payload cannot help.
                 let deterministic = e.is_deterministic() || context_overflow;
                 let retrying = will_retry && !deterministic;
                 observer.on_attempt(
@@ -316,7 +283,6 @@ mod tests {
 
     #[tokio::test]
     async fn tpm_429_size_wording_on_other_is_retried_not_overflow() {
-        // Host Transient 429+Retry-After is Other with this Display.
         let sampler = MockSampler::scripted(vec![
             Err(CompactionSampleError::Other(anyhow::anyhow!(
                 "compact failed: API error (status 429 Too Many Requests): \
@@ -334,8 +300,6 @@ mod tests {
 
     #[tokio::test]
     async fn structured_overflow_is_not_undone_by_429_wording() {
-        // A structured size code on a 429 is a per-request cap; the host maps
-        // it to ContextOverflow even when Retry-After is present.
         let sampler = MockSampler::scripted(vec![Err(CompactionSampleError::ContextOverflow(
             "compact failed: API error (status 429 Too Many Requests): \
              request_too_large: cap"

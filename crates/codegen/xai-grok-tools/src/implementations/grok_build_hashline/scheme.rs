@@ -1,20 +1,4 @@
 //! Anchor scheme abstraction and candidate implementations.
-//!
-//! Three candidate schemes are provided:
-//!
-//! - **Candidate A** (`ContentOnly`): content-only line hash. Simplest, weakest
-//!   freshness — edits above a line do not invalidate its anchor.
-//!
-//! - **Candidate B** (`ChunkFingerprint`): local line hash + fixed-size chunk
-//!   fingerprint. Edits invalidate only anchors within the affected chunk.
-//!   Recommended starting point for benchmarking.
-//!
-//! - **Candidate C** (`CheckpointChain`): local line hash + checkpoint-derived
-//!   fingerprint computed from the nearest preceding checkpoint. Strongest
-//!   freshness detection at the cost of more anchor churn after edits.
-//!
-//! All schemes share the same whitespace-normalized local line hash from
-//! [`crate::util::hash::line_hash`].
 
 use std::fmt;
 
@@ -29,24 +13,20 @@ pub trait AnchorScheme: fmt::Debug + Send + Sync {
     /// Number of lowercase letters in the local line hash component.
     fn hash_len(&self) -> usize;
 
-    /// Generate anchors for all lines in a file. `lines` is a slice of the file's lines (without
-    /// trailing newlines). Returns one `Anchor` per line, in order.
+    /// Generate anchors for all lines in a file. `lines` is a slice of the file's lines (without trailing newlines).
     fn generate_anchors(&self, lines: &[&str]) -> Vec<Anchor>;
 
     /// Validate a parsed anchor against current file content. `anchor` is the anchor to validate.
-    /// `lines` is the current file content split by line. Returns the validation result.
     fn validate(&self, anchor: &ParsedAnchor, lines: &[&str]) -> ValidationResult;
 
-    /// Estimated number of lines read to validate a single anchor at `line_idx` (0-based) in a file
-    /// of `total_lines` lines. Used by the benchmark harness for read-amplification measurement.
-    /// Default: 1 (local line only).
+    /// Estimated number of lines read to validate a single anchor at
+    /// `line_idx` (0-based) in a file of `total_lines` lines.
     fn validation_window_lines(&self, _line_idx: usize, _total_lines: usize) -> usize {
         1
     }
 
-    /// Search for a shifted anchor within a bounded window around the original line number. Returns `ShiftResult::Found` if
-    /// exactly one nearby line validates under this scheme, `ShiftResult::Ambiguous` if multiple candidates match, and
-    /// `ShiftResult::NotFound` if none match.
+    /// Search for a shifted anchor within a bounded window around the line
+    /// number.
     fn find_shifted(
         &self,
         anchor: &ParsedAnchor,
@@ -170,19 +150,18 @@ pub enum ShiftResult {
     NotFound,
 }
 
-/// Default search radius for shifted-anchor recovery (±15 lines).
+/// Default search radius for shifted-anchor recovery (±several lines).
 pub const DEFAULT_SEARCH_RADIUS: usize = 15;
 
-/// Candidate A — content-only line hash. Anchor format: `LINE:LOCAL` (e.g. `22:abc`). Validates
-/// only the normalized content of the specified line. Edits above the line do not invalidate its
-/// anchor. Weakest freshness semantics.
+/// Candidate A — content-only line hash. Anchor format: `LINE:LOCAL` (e.g.
+/// `22:abc`).
 #[derive(Debug, Clone)]
 pub struct ContentOnly {
     hash_len: usize,
 }
 
 impl ContentOnly {
-    /// Create with default hash length (3 letters).
+    /// Create with default hash length (letters).
     pub fn new() -> Self {
         Self {
             hash_len: DEFAULT_HASH_LEN,
@@ -252,12 +231,11 @@ impl AnchorScheme for ContentOnly {
     }
 }
 
-/// Default chunk size for Candidate B (16 lines).
+/// Default chunk size for Candidate B (several lines).
 pub const DEFAULT_CHUNK_SIZE: usize = 16;
 
-/// Candidate B — chunk-fingerprinted line anchors. Anchor format: `LINE:LOCAL:CHUNK` (e.g.
-/// `22:abc:rst`). `LOCAL` is the normalized line hash. `CHUNK` is a fingerprint of the fixed-size
-/// chunk containing this line. Edits invalidate anchors only within the affected chunk.
+/// Candidate B — chunk-fingerprinted line anchors. Anchor format:
+/// `LINE:LOCAL:CHUNK` (e.g. `22:abc:rst`).
 #[derive(Debug, Clone)]
 pub struct ChunkFingerprint {
     hash_len: usize,
@@ -273,7 +251,7 @@ impl ChunkFingerprint {
         }
     }
 
-    /// Create with custom parameters. Panics if `hash_len` is not in `1..=4` or `chunk_size` is 0.
+    /// Create with custom parameters.
     pub fn with_params(hash_len: usize, chunk_size: usize) -> Self {
         assert!(
             hash_len > 0 && hash_len <= 4,
@@ -368,9 +346,8 @@ impl AnchorScheme for ChunkFingerprint {
             return ValidationResult::Stale;
         }
 
-        // Chunk-fingerprinted scheme requires context — reject truncated anchors
-        // that omit the chunk fingerprint, as they would silently weaken
-        // validation to content-only semantics.
+        // Chunk-fingerprinted scheme requires context — reject truncated
+        // anchors that omit the chunk fingerprint.
         let Some(ref expected_ctx) = anchor.context else {
             return ValidationResult::Stale;
         };
@@ -392,12 +369,11 @@ impl AnchorScheme for ChunkFingerprint {
     }
 }
 
-/// Default checkpoint interval for Candidate C (32 lines).
+/// Default checkpoint interval for Candidate C (many lines).
 pub const DEFAULT_CHECKPOINT_INTERVAL: usize = 32;
 
-/// Candidate C — checkpoint-chained line anchors. Anchor format: `LINE:LOCAL:CKPT` (e.g. `22:abc:rst`). `LOCAL` is the
-/// normalized line hash. `CKPT` is a fingerprint derived from chaining all line hashes from the nearest preceding
-/// checkpoint to this line. Strongest freshness detection but more anchor churn after edits.
+/// Candidate C — checkpoint-chained line anchors. Anchor format:
+/// `LINE:LOCAL:CKPT` (e.g. `22:abc:rst`).
 #[derive(Debug, Clone)]
 pub struct CheckpointChain {
     hash_len: usize,
@@ -413,8 +389,7 @@ impl CheckpointChain {
         }
     }
 
-    /// Create with custom parameters. Panics if `hash_len` is not in `1..=4` or
-    /// `checkpoint_interval` is 0.
+    /// Create with custom parameters.
     pub fn with_params(hash_len: usize, checkpoint_interval: usize) -> Self {
         assert!(
             hash_len > 0 && hash_len <= 4,
@@ -500,9 +475,8 @@ impl AnchorScheme for CheckpointChain {
             return ValidationResult::Stale;
         }
 
-        // Checkpoint-chained scheme requires context — reject truncated anchors
-        // that omit the checkpoint fingerprint, as they would silently weaken
-        // validation to content-only semantics.
+        // Checkpoint-chained scheme requires context — reject truncated
+        // anchors that omit the checkpoint fingerprint.
         let Some(ref expected_ctx) = anchor.context else {
             return ValidationResult::Stale;
         };
@@ -541,7 +515,7 @@ fn find_shifted_generic(
     let mut candidates: Vec<usize> = Vec::new();
 
     for idx in start..end {
-        // Skip the original line — it already failed validation.
+        // Skip the line — it already failed validation.
         if idx == orig_idx {
             continue;
         }
@@ -553,9 +527,8 @@ fn find_shifted_generic(
             continue;
         }
 
-        // If the anchor carries context, validate via the full scheme
-        // (which recomputes the contextual fingerprint at this position).
-        // For context-free anchors (Candidate A) this is skipped entirely.
+        // If the anchor carries context, validate via the full scheme (which recomputes the contextual fingerprint at this position). For context-free anchors
+        // (Candidate A) this is skipped entirely.
         if anchor.context.is_some() {
             let probe = ParsedAnchor {
                 line: idx + 1,
@@ -584,8 +557,7 @@ mod tests {
     use super::*;
 
     // -----------------------------------------------------------------------
-    // Test fixture
-    // -----------------------------------------------------------------------
+    // Test fixture.
 
     fn sample_lines() -> Vec<&'static str> {
         vec![
@@ -598,8 +570,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // ParsedAnchor tests
-    // -----------------------------------------------------------------------
+    // ParsedAnchor tests.
 
     #[test]
     fn parse_anchor_two_parts() {
@@ -631,7 +602,7 @@ mod tests {
         assert!(ParsedAnchor::parse("abc").is_none());
         assert!(ParsedAnchor::parse(":abc").is_none());
         assert!(ParsedAnchor::parse("22:").is_none());
-        assert!(ParsedAnchor::parse("0:abc").is_none()); // line 0 invalid
+        assert!(ParsedAnchor::parse("0:abc").is_none());
         assert!(ParsedAnchor::parse("22:ABC").is_none()); // uppercase
         assert!(ParsedAnchor::parse("22:abc:").is_none()); // empty context
         assert!(ParsedAnchor::parse("22:abc:XYZ").is_none()); // uppercase context
@@ -639,8 +610,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Anchor::render tests
-    // -----------------------------------------------------------------------
+    // Anchor::render tests.
 
     #[test]
     fn anchor_render_without_context() {
@@ -726,7 +696,6 @@ mod tests {
         let scheme = ContentOnly::new();
         let anchors = scheme.generate_anchors(&lines);
 
-        // Mutate line 4 and re-validate anchor 4.
         let mut mutated = lines.clone();
         let Some(slot) = mutated.get_mut(3) else {
             panic!("expected 4 sample lines: {mutated:?}");
@@ -750,7 +719,6 @@ mod tests {
         let scheme = ContentOnly::new();
         let anchors = scheme.generate_anchors(&lines);
 
-        // Change indentation of line 4 (0-indexed: 3).
         let mut reindented = lines.clone();
         let Some(slot) = reindented.get_mut(3) else {
             panic!("expected 4 sample lines: {reindented:?}");
@@ -802,7 +770,7 @@ mod tests {
 
     #[test]
     fn chunk_same_chunk_same_context() {
-        let lines = sample_lines(); // 5 lines, all in chunk 0 (size 16)
+        let lines = sample_lines();
         let scheme = ChunkFingerprint::new();
         let anchors = scheme.generate_anchors(&lines);
         let Some(first) = anchors.first() else {
@@ -816,7 +784,6 @@ mod tests {
 
     #[test]
     fn chunk_different_chunks_may_differ() {
-        // 20 lines → chunk 0 (lines 1-16), chunk 1 (lines 17-20)
         let owned: Vec<String> = (0..20).map(|i| format!("line {i}")).collect();
         let refs: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
 
@@ -831,8 +798,7 @@ mod tests {
         };
         let ctx_0 = first.context.as_ref().unwrap();
         let ctx_16 = second_chunk.context.as_ref().unwrap();
-        // Different chunks with different content should (usually) have
-        // different fingerprints; assert inequality for this specific input.
+        // Different chunks with different content should (usually) have different fingerprints.
         assert_ne!(ctx_0, ctx_16);
     }
 
@@ -858,14 +824,12 @@ mod tests {
         let scheme = ChunkFingerprint::new();
         let anchors = scheme.generate_anchors(&lines);
 
-        // Mutate line 3 (same chunk as line 1).
         let mut mutated = lines.clone();
         let Some(slot) = mutated.get_mut(2) else {
             panic!("expected 3 sample lines: {mutated:?}");
         };
         *slot = "export function Changed() {";
 
-        // Line 1's anchor should go stale because its chunk changed.
         let Some(anchor) = anchors.first() else {
             panic!("expected sample anchors: {anchors:?}");
         };
@@ -922,14 +886,12 @@ mod tests {
         let scheme = CheckpointChain::with_params(3, 32);
         let anchors = scheme.generate_anchors(&lines);
 
-        // Mutate line 2 (above line 4, same checkpoint window).
         let mut mutated = lines.clone();
         let Some(slot) = mutated.get_mut(1) else {
             panic!("expected 2 sample lines: {mutated:?}");
         };
         *slot = "// changed";
 
-        // Line 4's checkpoint fingerprint should change.
         let Some(anchor) = anchors.get(3) else {
             panic!("expected 4 sample anchors: {anchors:?}");
         };
@@ -956,21 +918,19 @@ mod tests {
 
     #[test]
     fn find_shifted_after_insert_above() {
-        // Original: 5 lines. Insert a line at the top → target shifts down by 1.
+        // Original: a few lines.
         let lines = sample_lines();
         let scheme = ContentOnly::new();
         let anchors = scheme.generate_anchors(&lines);
 
-        // Insert a new line at position 0 → all lines shift down by 1.
         let mut shifted = vec!["// new line"];
         shifted.extend_from_slice(&lines);
 
-        // Anchor for original line 3 ("export function App() {") is now at line 4.
         let Some(anchor) = anchors.get(2) else {
             panic!("expected 3 sample anchors: {anchors:?}");
         };
         let parsed = ParsedAnchor {
-            line: anchor.line, // line 3
+            line: anchor.line,
             local: anchor.local.clone(),
             context: None,
         };
@@ -1023,9 +983,6 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Finding 1: B/C reject missing context
-    // -----------------------------------------------------------------------
 
     #[test]
     fn chunk_rejects_anchor_without_context() {
@@ -1062,9 +1019,6 @@ mod tests {
         assert_eq!(scheme.validate(&truncated, &lines), ValidationResult::Stale);
     }
 
-    // -----------------------------------------------------------------------
-    // Finding 4: B/C shifted recovery after insertion/deletion
-    // -----------------------------------------------------------------------
 
     #[test]
     fn chunk_find_shifted_after_insert_above() {
@@ -1073,24 +1027,19 @@ mod tests {
         let scheme = ChunkFingerprint::with_params(3, 4);
         let anchors = scheme.generate_anchors(&lines);
 
-        // Insert a line at the top → all lines shift down by 1.
         let mut shifted = vec!["// new line"];
         shifted.extend_from_slice(&lines);
 
-        // Anchor for original line 3 with context — shifted recovery should
-        // find it at line 4 (same local + recomputed context at new position).
         let Some(anchor) = anchors.get(2) else {
             panic!("expected 3 sample anchors: {anchors:?}");
         };
         let parsed = ParsedAnchor {
-            line: anchor.line, // line 3
+            line: anchor.line,
             local: anchor.local.clone(),
             context: anchor.context.clone(),
         };
 
-        // Recovery may find, not find, or be ambiguous depending on chunk
-        // boundaries. The key invariant: it must not return Found at the
-        // original (stale) line.
+        // Recovery may find, not find, or be ambiguous depending on chunk boundaries.
         let result = scheme.find_shifted(&parsed, &shifted, 5);
         match result {
             ShiftResult::Found { new_line } => assert_ne!(new_line, anchor.line),
@@ -1129,9 +1078,6 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Finding 4: B/C ambiguity in repetitive files
-    // -----------------------------------------------------------------------
 
     #[test]
     fn chunk_ambiguity_with_repeated_lines() {
@@ -1160,14 +1106,12 @@ mod tests {
 
     #[test]
     fn checkpoint_ambiguity_less_likely_with_repeated_lines() {
-        // Checkpoint chaining produces different contexts for different positions
-        // even with identical line content, so repeated lines may NOT be ambiguous.
+        // Checkpoint chaining produces different contexts for different positions even with identical line content.
         let lines = vec!["same content"; 10];
         let scheme = CheckpointChain::new();
         let anchors = scheme.generate_anchors(&lines);
 
-        // Adjacent lines in a checkpoint window should have different context
-        // due to chaining. Verify at least some adjacent lines differ in context.
+        // Adjacent lines in a checkpoint window should have different context due to chaining.
         let mut any_differ = false;
         for w in anchors.windows(2) {
             let [a, b] = w else { continue };
@@ -1182,9 +1126,6 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Finding 3: Invalid constructor parameters
-    // -----------------------------------------------------------------------
 
     #[test]
     fn custom_hash_len_2() {

@@ -51,8 +51,7 @@ async fn file_write_is_broadcast_as_fs_changed() {
         xai_fsnotify::shared(root.path().to_path_buf(), FsConfig::default()).expect("watcher init");
     let fs_rx = source.subscribe();
     let (events_tx, mut events_rx) = broadcast::channel(16);
-    // The watcher reports paths under the canonical directory; the producer strips against that
-    // (macOS temp dirs live behind a `/var` → `/private/var` symlink).
+    // The watcher reports paths under the canonical directory.
     let watch_root = dunce::canonicalize(root.path()).expect("canonical root");
     let forwarder = tokio::spawn(async move {
         forward_fs_changes(fs_rx, &events_tx, &watch_root).await;
@@ -120,8 +119,6 @@ async fn a_batch_past_the_frame_bound_is_split_in_order() {
     );
 }
 
-/// One watcher batch is one `FsChanged`: a checkout touching a thousand files is one frame per
-/// session, not a thousand.
 #[tokio::test]
 async fn a_settle_window_of_paths_is_one_fs_changed_frame() {
     let (fs_tx, fs_rx) = broadcast::channel(4);
@@ -367,7 +364,7 @@ fn a_batch_reaches_each_index_as_one_file_event() {
     );
 }
 
-/// A rename across index roots, driven through two real indexes: `a/old.rs` (defining
+/// A rename across index roots, driven through real indexes: `a/old.rs` (defining
 /// `moved_symbol_xyz`) becomes `b/new.rs`. Each half goes to its own index as its own event, so A
 /// forgets the symbol and B learns it. Sent whole to A, A would index a file outside its root under
 /// an absolute key and B would never hear of the file.
@@ -485,8 +482,8 @@ fn a_rename_into_a_nested_root_reaches_the_inner_index() {
 }
 
 /// The producer's handle owns the watch: while it lives a fresh `shared()` on the root joins the
-/// producer's watcher (two holders); once it is dropped — no `shutdown`, just the drop — the task
-/// is aborted and a fresh `shared()` is the only holder again.
+/// producer's watcher (holders); once it is dropped — no `shutdown`, just the drop — the task is
+/// aborted and a fresh `shared()` is the only holder again.
 #[tokio::test(flavor = "multi_thread")]
 async fn dropping_the_producer_handle_ends_the_task_and_releases_the_watcher() {
     let root = tempfile::tempdir().expect("tempdir");

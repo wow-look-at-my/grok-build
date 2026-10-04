@@ -40,8 +40,8 @@ impl HistoryProvider {
     }
 }
 
-/// Rank history matches from three tiers of history sources.
-/// Priority order: local grok bash history, then shell history, then cross-CWD history.
+/// Rank history matches from tiers of history sources. Priority order: local grok bash
+/// history, then shell history, then cross-CWD history.
 fn rank_history_matches(
     prefix: &str,
     local: &[String],
@@ -578,7 +578,7 @@ mod tests {
         writeln!(f, "pwd").unwrap();
         writeln!(f, "ls").unwrap();
         let commands = load_bash_history(f.path());
-        // Dedup removes only consecutive duplicates, and "ls", "pwd", "ls" has none, so all three survive
+        // Dedup removes only consecutive duplicates, and "ls", "pwd", "ls" has none, so all of them survive
         assert_eq!(commands, &["ls", "pwd", "ls"]);
     }
 

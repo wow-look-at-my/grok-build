@@ -1,13 +1,4 @@
 //! Thread-local caches for the pager's UI settings.
-//!
-//! Every render frame reads these, so they must be cheaper than re-loading `config.toml`.
-//! Call [`prime`] at startup so the first frame never hits disk; as a safety net, the first read lazily seeds from `load_effective_config()`.
-//!
-//! Disk writes live in `xai_grok_shell::util::config::set_<field>()`; this module only caches in memory.
-//!
-//! The default consts are hardcoded because `Cell::new` needs a `const` value; tests assert they match `UiConfig::default()`.
-//!
-//! Thread-local `Cell<bool>` is safe because the TUI renders and dispatches on a single thread; multi-thread use would need `AtomicBool`.
 
 use std::cell::Cell;
 
@@ -449,7 +440,6 @@ thread_local! {
     static SCROLL_SPEED_LOADED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Read cached scroll speed (1..=100), seeding from disk and the env var on first call.
 /// `GROK_SCROLL_SPEED` overrides config.toml.
 pub fn load_scroll_speed() -> u8 {
     SCROLL_SPEED_LOADED.with(|loaded| {
@@ -549,7 +539,6 @@ thread_local! {
     static SCROLL_LINES_LOADED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Read cached `scroll_lines` (1..=10), seeding from disk and the env var on first call.
 /// `None` means the user never configured it, so the per-terminal scroll profile keeps its own lines-per-tick.
 /// `GROK_SCROLL_LINES` overrides `[ui].scroll_lines`.
 pub fn load_scroll_lines() -> Option<u8> {
@@ -637,8 +626,7 @@ pub fn prime(ui: &UiConfig) {
     );
     set_simple_mode(ui.simple_mode.unwrap_or(SIMPLE_MODE_DEFAULT));
     set_keep_text_selection(text_selection_from_ui(ui));
-    // These keys live in the layered config, not the `UiConfig` arg; seed them so the first frame skips disk
-    // `load_*` is a no-op when already set (e.g. by the startup resolve).
+    // These keys live in the layered config, not the `UiConfig` arg.
     let _ = load_vim_mode();
     let _ = load_scroll_speed();
     let _ = load_scroll_mode();
@@ -675,7 +663,7 @@ fn text_selection_from_ui(ui: &UiConfig) -> TextSelection {
     {
         return kind;
     }
-    // The legacy keys apply only when keep_text_selection is unset or non-canonical
+    // The keys apply only when keep_text_selection is unset or non-canonical
     if ui.double_click_action.as_deref() == Some("word_select") {
         return TextSelection::WordSelect;
     }
@@ -1021,7 +1009,7 @@ mod tests {
     #[test]
     fn caches_are_independent() {
         std::thread::spawn(|| {
-            // ── compact independent (the other two stay true) ──
+            // ── compact independent (the others stay true) ──
             set(false);
             set_timestamps(true);
             set_simple_mode(true);

@@ -1,28 +1,14 @@
 use super::*;
 
-// Crate-shared lock serializing tests that mutate the global process environment so concurrent test threads can't race on shared env state
-// Shared so `GROK_HOME`/`HOME` mutations here also serialize against the other env-mutating test modules under single-process `cargo test --lib`
+// Crate-shared lock serializing tests that mutate the global process environment so concurrent test threads can't race.
 use crate::ENV_TEST_LOCK as ENV_LOCK;
 
 // The crate-shared generic env-var guard, defined once in `lib.rs`
 use crate::TestEnvGuard as EnvVarGuard;
 
 /// An empty user tier for one test, isolated for this value's lifetime.
-///
-/// The resolvers below merge the user tier into every result — `~/.claude`
-/// settings via `dirs::home_dir()`, and `$GROK_HOME/config.toml` for the
-/// claude-import cutoff marker. A machine that actually uses Claude Code
-/// therefore contributes rules and a `defaultMode` the test never wrote, so
-/// a test asserting on what resolved passes on CI (which has no `~/.claude`)
-/// and fails for anyone who has one. Bind this in any test that resolves.
-///
-/// `GROK_HOME` isolation is best-effort under `cargo test --lib`:
-/// `xai_grok_config::grok_home()` caches in a process-wide `OnceLock`, so an
-/// earlier test in the same process may already have pinned it. Under
-/// nextest — one process per test, what CI runs — it always takes effect.
 struct IsolatedHome {
-    /// Declared first so it drops first: the env restore runs before the
-    /// lock releases, and both run before the temp dir is removed.
+    /// Declared first so it drops first: the env restore runs before the lock releases.
     _env: crate::LockedTestEnv,
     home: tempfile::TempDir,
 }
@@ -45,10 +31,6 @@ impl IsolatedHome {
     }
 
     /// Drive `fut` on a fresh current-thread runtime.
-    ///
-    /// The async resolvers run this way rather than under `#[tokio::test]`
-    /// so the env lock is never held across an `.await` (clippy
-    /// `await_holding_lock`).
     fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -286,9 +268,6 @@ fn load_settings_with_default_mode() {
     assert_eq!(settings.default_mode, Some("acceptEdits".to_string()));
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Phase 4: Integration / Precedence Tests
-// ═══════════════════════════════════════════════════════════════════════
 
 #[test]
 fn integration_claude_settings_file_to_permission_config() {
@@ -355,7 +334,6 @@ fn discovery_priority_order() {
         // Ensure global paths (if any) come after project
         for (i, p) in paths.iter().enumerate() {
             if p.to_string_lossy().contains("/.claude/") && i < idx {
-                // This is a project path before our project_local, which is fine
             }
         }
     }
@@ -383,11 +361,7 @@ fn discovery_with_no_settings_files() {
 
 #[test]
 fn project_claude_absent_when_home_is_git_repo() {
-    // Home-is-a-git-repo (dotfiles in $HOME): for a cwd under home, the
-    // repo-root walk must NOT reach $HOME and treat `~/.claude` as
-    // project-tier (its env is injected into every spawned subprocess).
-    // Serialize + guard $HOME (find_repo_root reaches home via `.git`, and
-    // the guard reads dirs::home_dir()).
+    // Home-is-a-git-repo (dotfiles in $HOME): for a cwd under home, the repo-root walk must NOT reach $HOME and treat `~/.claude`.
     let home = IsolatedHome::new();
     git2::Repository::init(home.path()).unwrap();
     let claude_dir = home.path().join(".claude");
@@ -648,8 +622,7 @@ fn load_settings_no_env_field() {
 
 #[test]
 fn load_claude_env_merges_with_precedence() {
-    // Isolate GROK_HOME so the claude-import marker reads clean; an imported dev machine would otherwise early-return an empty map
-    // The project tier overrides any real `~/.claude`, so the per-key assertions hold without isolating HOME
+    // Isolate GROK_HOME so the claude-import marker reads clean.
     let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = tempfile::tempdir().unwrap();
     let _home_guard = EnvVarGuard::set("GROK_HOME", home.path());
@@ -680,8 +653,7 @@ fn load_claude_env_merges_with_precedence() {
 
 #[test]
 fn load_claude_env_empty_when_no_settings() {
-    // Isolate GROK_HOME (claude-import marker) and HOME (global `~/.claude`)
-    // Neither a dev machine's import marker nor its real `~/.claude` env can then trip the empty-map assertion
+    // Isolate GROK_HOME (claude-import marker) and HOME (global `~/.claude`).
     let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = tempfile::tempdir().unwrap();
     let _home_guard = EnvVarGuard::set("GROK_HOME", home.path());
@@ -694,8 +666,7 @@ fn load_claude_env_empty_when_no_settings() {
 
 #[test]
 fn load_claude_env_with_project_drops_repo_env_when_untrusted() {
-    // Repo-tree `.claude` env is injected into every subprocess, so an untrusted folder must drop it
-    // Isolate `GROK_HOME` so the import marker is clean and the unique key stays independent of the host `~/.claude`
+    // Repo-tree `.claude` env is injected into every subprocess.
     let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = tempfile::tempdir().unwrap();
     let _home_guard = EnvVarGuard::set("GROK_HOME", home.path());
@@ -869,8 +840,7 @@ fn managed_deny_rules_block_env_reads() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Bare tool name parsing tests
-// ═══════════════════════════════════════════════════════════════════════
+// Bare tool name parsing tests.
 
 #[test]
 fn parse_bare_bash_tool_name() {
@@ -925,8 +895,7 @@ fn merge_permissions_across_project_and_global_settings() {
     let tmp = tempfile::tempdir().unwrap();
     let cwd = tmp.path();
 
-    // Simulate a "global" settings file at the cwd level
-    // In a real scenario this would be ~/.claude; the test uses two nested directories to exercise the merge
+    // Simulate a "global" settings file at the cwd level In a real scenario this would be ~/.claude.
     let repo_dir = cwd.join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
     // Create .git so the repo root is found
@@ -1112,8 +1081,7 @@ fn default_mode_inherited_from_parent_when_not_set() {
 
 #[test]
 fn single_file_still_works() {
-    // Isolate HOME so host/CI `~/.claude` rules don't bleed into the count
-    // (paths merge global + project).
+    // Isolate HOME so host/CI `~/.claude` rules don't bleed into the count (paths merge global + project).
     let _home = IsolatedHome::new();
 
     let tmp = tempfile::tempdir().unwrap();
@@ -1795,8 +1763,8 @@ fn catchall_allow_covers_freeform_dimensions() {
         &ToolFilter::Bash,
         Some("npm*")
     )));
-    // Regression: a URL-glob catch-all (`WebFetch(*://*)`) matches every URL at enforcement
-    // The bash-shaped probe missed it, so it must be dropped
+    // Regression: a URL-glob catch-all (`WebFetch(*://*)`) matches every URL
+    // at enforcement The bash-shaped probe missed it.
     assert!(is_catchall_allow(&allow_tool(
         &ToolFilter::WebFetch,
         Some("*://*")
@@ -1816,8 +1784,7 @@ fn catchall_allow_covers_freeform_dimensions() {
 
 #[test]
 fn admin_source_trusts_only_root_owned_tiers() {
-    // Only managed-settings and the system-dir requirements layer are admin;
-    // the user-writable `~/.grok/requirements.toml` is not, despite its path.
+    // Only managed-settings and the system-dir requirements layer are admin.
     let p = std::path::PathBuf::from("x");
     assert!(is_admin_source(&RequirementSource::ManagedSettings {
         path: p.clone()
@@ -1893,7 +1860,7 @@ fn drop_untrusted_catchall_allows_is_source_aware() {
     assert_eq!(kept.len(), 7);
     assert!(skipped.is_empty());
 
-    // Pin: untrusted catch-alls (`*`, `**`, `**/*`) drop; the scoped `src/**` and the two root-owned catch-alls survive
+    // Pin: untrusted catch-alls (`*`, `**`, `**/*`) drop; the scoped `src/**` and both root-owned catch-alls survive
     let mut skipped = Vec::new();
     let kept = drop_untrusted_catchall_allows(rules, Some(PIN), &mut skipped);
     assert_eq!(
@@ -2861,8 +2828,7 @@ fn permission_mode_hint_apply_matrix() {
     ));
     assert_eq!(auto.as_ref().unwrap().prompt_policy, PromptPolicy::Auto);
 
-    // Explicit default / plan / acceptEdits / invalid fail-safe all project to Ask but ARE configured modes
-    // The provenance bit must refuse the upgrade
+    // Explicit default / plan / acceptEdits / invalid fail-safe all project to Ask.
     let mut explicit_default = configured(PromptPolicy::Ask);
     assert!(!apply_permission_mode_hint(
         &mut explicit_default,

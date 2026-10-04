@@ -164,8 +164,7 @@ fn bench_streaming_full_rerender(c: &mut Criterion) {
     group.finish();
 }
 
-/// Generate a hyperlink-heavy markdown document.
-/// Each block contains 4 inline links and 1 autolink so the renderer's link-translation path is exercised on most rendered lines. Designed to surface O(lines * link_targets) costs in `translate_link_targets`.
+/// Generate a hyperlink-heavy markdown document. Designed to surface O(lines * link_targets) costs in `translate_link_targets`.
 fn generate_hyperlink_content(num_blocks: usize) -> String {
     let mut content = String::new();
     for i in 0..num_blocks {
@@ -437,8 +436,8 @@ fn bench_streaming_open_yaml_incremental(c: &mut Criterion) {
     for num_lines in [100, 500, 1081] {
         let lines = generate_yaml_lines(num_lines);
 
-        // Only the cache-on path ships; the parameter is just the line count
-        // (no A/B baseline here — the no-cache baseline was measured ad hoc and
+        // Only the cache-on path ships; the parameter is the line count (no
+        // A/B baseline here — the no-cache baseline was measured ad hoc and
         // is not committed).
         group.bench_with_input(
             BenchmarkId::from_parameter(num_lines),
@@ -463,12 +462,10 @@ fn bench_streaming_open_yaml_incremental(c: &mut Criterion) {
     group.finish();
 }
 
-/// Closed scala fences inside bullet list items, then `trailing_words` more streamed content in the same never-closing list. Lists can't checkpoint, so the fences stay in the re-rendered tail for the whole stream
-/// (~108 ms/token, ~4.5 s UI stall).
+/// Closed scala fences inside bullet list items, then `trailing_words` more streamed content in the same never-closing list.
 fn generate_fence_in_list_content(trailing_words: usize) -> String {
     let mut s = String::new();
     s.push_str("Here is where you're stuck:\n\n");
-    // Two list items embedding closed scala fences (the pathological shape).
     for i in 0..2 {
         s.push_str(&format!(
             "- **[File{i}.scala:{}](https://example.com/f{i})** (domain)\n  \

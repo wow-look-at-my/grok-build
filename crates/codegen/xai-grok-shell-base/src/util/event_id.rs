@@ -1,7 +1,4 @@
 //! Event ID generation for session notifications.
-//!
-//! Provides a globally unique event ID format `{session_id}-{counter}` that the relay uses for deduplication.
-//! The counter is monotonically increasing across the entire agent process, so event IDs are always comparable.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -9,16 +6,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Generates a unique event ID for correlation across agent/relay/client.
-///
-/// Format: `{session_id}-{counter}`; the relay compares event IDs numerically by extracting the counter suffix.
 pub fn generate_event_id(session_id: &str) -> String {
     let count = EVENT_COUNTER.fetch_add(1, Ordering::SeqCst);
     format!("{}-{}", session_id, count)
 }
 
-/// Stamp `_meta.eventId` and `agentTimestampMs` onto a notification's meta unless an `eventId` is already present, preserving other meta fields.
-/// The reconnect cursor (`session/load` `_meta.cursor`) can only bound the replay tail when each persisted line is identifiable.
-/// The same id must go out on the live broadcast so clients advance their cursor to ids that exist on disk. Broadcast-only notifications are deliberately left unstamped. A cursor pointing at an id absent from `updates.jsonl` never resolves and forces a full replay on every reconnect.
+/// Stamp `_meta.eventId` and `agentTimestampMs` onto a notification's meta
+/// unless an `eventId` is already present, preserving other meta fields. The
+/// reconnect cursor (`session/load` `_meta.cursor`) can only bound the replay
+/// tail when each persisted line is identifiable. The same id must go out on
+/// the live broadcast so clients advance their cursor to ids that exist on
+/// disk. Broadcast-only notifications are deliberately left unstamped.
 pub fn ensure_event_id_meta(
     session_id: &str,
     meta: &mut Option<serde_json::Map<String, serde_json::Value>>,
@@ -38,9 +36,8 @@ pub fn ensure_event_id_meta(
         .or_insert_with(|| timestamp_ms.into());
 }
 
-/// Raise the global event counter so the next generated id is at least `next`. The counter is process-global and starts at 0 on every launch.
-/// Client dedup (`acp::meta::NotificationMeta::event_seq`) relies on `eventId` increasing over a session's whole history, not just one process.
-/// On `--resume` (or any reload into a fresh process) the replayed transcript carries the original process's high counters. Without re-seeding, this process would mint lower ids for new live events. Uses `fetch_max`, so it only ever raises the counter and is safe to call from concurrently-loading sessions.
+/// Raise the global event counter so the next generated id is at least
+/// `next`.
 pub fn ensure_event_counter_at_least(next: u64) {
     EVENT_COUNTER.fetch_max(next, Ordering::SeqCst);
 }
@@ -58,8 +55,7 @@ mod tests {
 
     #[test]
     fn ensure_event_counter_at_least_only_raises() {
-        // Re-seeding to a high floor makes the next id continue past it; this is what keeps `--resume` from minting ids below the replayed maximum
-        // The floor is very high so concurrent tests (which only ever raise the shared counter via fetch_add/fetch_max) cannot push it back down
+        // Re-seeding to a high floor makes the next id continue past it.
         ensure_event_counter_at_least(5_000_000);
         let counter1: u64 = generate_event_id("sess")
             .rsplit('-')
@@ -109,8 +105,8 @@ mod tests {
 
     #[test]
     fn ensure_event_id_meta_keeps_existing_id() {
-        // An already-stamped id (e.g. the emit site stamped before the persist chokepoint re-checks) must survive.
-        // The persisted line has to match the live broadcast copy
+        // An already-stamped id (e.g. the emit site stamped before the
+        // persist chokepoint re-checks) must survive.
         let mut meta = serde_json::json!({ "eventId": "sess-x-42" })
             .as_object()
             .cloned();

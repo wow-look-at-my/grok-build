@@ -1,5 +1,4 @@
-//! The single refresh owner: every managed-config fetch and apply is driven from here.
-
+//! The refresh owner: every managed-config fetch and apply is driven from here.
 use xai_grok_login::GrokAuth;
 
 use super::ManagedConfigError;
@@ -131,8 +130,8 @@ async fn fetch_managed_config_once(
         }
     };
 
-    // reqwest's `json()` tags a mid-body drop and malformed JSON both as `Kind::Decode`;
-    // reading `bytes()` first keeps interruption (retryable) apart from bad JSON (terminal).
+    // reqwest's `json()` tags a mid-body drop and malformed JSON both as
+    // `Kind::Decode`.
     let bytes = match resp.bytes().await {
         Ok(b) => b,
         Err(e) => {
@@ -423,7 +422,7 @@ fn policy_repair_pending_from(signed_in_team: &std::io::Result<bool>) -> bool {
     if matches!(signed_in_team, Ok(false)) {
         return false;
     }
-    // Ignore expiry: a usable same-identity cache should not refresh just to re-learn the team id.
+    // Ignore expiry: a usable same-identity cache should not refresh to re-learn the team id.
     let identity = store::current_serving_identity_any_expiry();
     matches!(identity, crate::config::ServingIdentity::None)
         || crate::config::is_managed_config_hard_stale_for(&identity)
@@ -436,8 +435,7 @@ pub async fn ensure_managed_policy_present(
     xai_grok_telemetry::startup::enter(xai_grok_telemetry::startup::StartupPhase::ManagedPolicy);
     let signed_in_team = store::team_principal_signed_in();
     xai_grok_telemetry::startup::set_auth_mode(policy::auth_mode(&signed_in_team));
-    // A parked refresh applies here, pre-sandbox, before staleness is judged; it gates
-    // itself (fetch-disabled or unverifiable discards, missing principal self-refuses).
+    // A parked refresh applies here, pre-sandbox, before staleness is judged.
     store::apply_staged_managed_config();
     if !policy_repair_pending_from(&signed_in_team) {
         return;

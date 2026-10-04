@@ -1,15 +1,9 @@
 use super::*;
 
-/// Fraction of the remaining context-window budget a single tool call's
-/// output may consume, in [`SessionActor::reseed_context_budget_output_cap`].
-/// Leaves headroom for the system prompt, tool schemas, and the model's own
-/// next turn rather than handing 100% of what's left to one tool result.
+/// Fraction of the remaining context-window budget a single tool call's output may consume.
 const CONTEXT_BUDGET_OUTPUT_FRACTION: f64 = 0.8;
 
-/// Floor for the budget-derived output cap so a nearly-full context window
-/// doesn't shrink every tool's cap to a handful of bytes and fail every tool
-/// call outright; a caller this close to the window should already be
-/// hitting auto-compact separately.
+/// Floor for the budget-derived output cap so a nearly-full context window doesn't shrink every tool's cap to a handful of bytes.
 const MIN_CONTEXT_BUDGET_OUTPUT_BYTES: usize = 4_000;
 
 pub(super) const MANAGED_HOOKS_ONLY_REFUSAL: &str =
@@ -95,23 +89,7 @@ impl SessionActor {
         }
     }
 
-    /// Re-resolve the live per-tool-call output cap from this session's
-    /// remaining context-window budget and update the toolset's
-    /// `TruncationCfg` resource to match.
-    ///
-    /// A tool's byte cap is otherwise a fixed config value with no relation to
-    /// how full the context window already is: a single large result (e.g. a
-    /// `run_terminal_cmd` `grep`/`cat` over a multi-GB file) can be appended to
-    /// the transcript at its full configured size even when there is nowhere
-    /// near enough context left for the *next* model request to include it —
-    /// overflowing the window outright. Auto-compact does not catch this: it
-    /// compacts *prior* history, and cannot shrink the tool result the model
-    /// is about to receive in the current step.
-    ///
-    /// Called before each tool-dispatch step (`turn.rs`), mirroring
-    /// [`Self::reseed_mcp_output_cap`]'s field-level `TruncationCfg` update.
-    /// A missing sampling config (no model resolved yet) leaves the existing
-    /// cap untouched rather than clearing it.
+    /// Re-resolve the live per-tool-call output cap from this session's remaining context-window budget and update the toolset's `TruncationCfg` resource to match. A tool's byte cap is otherwise a fixed config value with no relation to how full the context window already is: a single large result (e.g. a `run_terminal_cmd` `grep`/`cat` over a multi-GB file) can be appended to the transcript at its full configured size even when there is nowhere near enough context left for the *next* model request to include it — overflowing the window outright. Auto-compact does not catch this: it compacts *prior* history, and cannot shrink the tool result the model is about to receive in the current step. Called before each tool-dispatch step (`turn.rs`), mirroring [`Self::reseed_mcp_output_cap`]'s field-level `TruncationCfg` update. A missing sampling config (no model resolved yet) leaves the existing cap untouched rather than clearing it.
     pub(crate) async fn reseed_context_budget_output_cap(&self) {
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
         let Some(sampling_cfg) = self.chat_state_handle.get_sampling_config().await else {
@@ -147,9 +125,9 @@ impl SessionActor {
         }
     }
 
-    /// Whether `name` resolves to a managed-policy (non-disableable) hook in the live registry, keyed on the spec's typed `layer`, never on the name.
-    /// Fails open on a missing registry or name: a disable entry that slips through is inert because the dispatcher re-checks provenance at run time.
-    /// This modal check is UX; the dispatcher is the enforcement boundary.
+    /// Whether `name` resolves to a managed-policy (non-disableable) hook in
+    /// the live registry, keyed on the spec's typed `layer`, never on the
+    /// name.
     pub(super) fn is_managed_policy_hook(&self, name: &str) -> bool {
         self.hook_registry
             .borrow()
@@ -234,8 +212,7 @@ impl SessionActor {
                 },
                 Ok((root, true)) => {
                     let reload_msg = self.reload_hooks_impl().await;
-                    // Revoking trust must drop a previously seeded repo MCP output cap right away, not at the next config reload
-                    // The resolver is trust-gated, so this call clears it
+                    // Revoking trust must drop a seeded repo MCP output cap right away, not at the next config reload The resolver is trust-gated.
                     self.reseed_mcp_output_cap().await;
                     ActionOutcome {
                         status: OutcomeStatus::Success,
@@ -447,8 +424,7 @@ impl SessionActor {
                         requires_restart: false,
                     };
                 }
-                // Shared gated pipeline (parse → registry flock → gate → save → auto-enable): this arm can't
-                // bypass the lockdown; blocking work runs off the LocalSet (invariant: plugin/acquire.rs).
+                // Shared gated pipeline (parse → registry flock → gate → save → auto-enable): this arm can't bypass the lockdown.
                 let cwd = self.session_info.cwd.clone();
                 let cloned_source = source.clone();
                 let installed = tokio::task::spawn_blocking(move || {
@@ -576,8 +552,8 @@ impl SessionActor {
             PluginsAction::Update { plugin_id } => {
                 use crate::plugin::{RepoUpdateOutcome, UpdateError};
 
-                // Shared gated update pipeline: this arm can't force-sync a blocked source; sync fetches
-                // run off the LocalSet (invariant: plugin/acquire.rs).
+                // Shared gated update pipeline: this arm cannot force-sync a
+                // blocked source.
                 let name = plugin_id
                     .as_deref()
                     .map(|id| id.rsplit('/').next().unwrap_or(id).to_string());
@@ -638,8 +614,7 @@ impl SessionActor {
                     Ok(Err(e @ UpdateError::RegistrySave { .. })) => ActionOutcome {
                         status: OutcomeStatus::InternalError,
                         message: e.to_string(),
-                        // Fetched updates may be live on disk despite the
-                        // stale registry.
+                        // Fetched updates may be live on disk despite the stale registry.
                         requires_reload: true,
                         requires_restart: false,
                     },
@@ -788,7 +763,8 @@ impl SessionActor {
         // Reconcile folder-trust so a mid-session /hooks-trust (or --trust) grant counts on reload, then gate project hook sources on the verdict
         let cwd = std::path::Path::new(&self.session_info.cwd);
         let is_trusted = crate::agent::folder_trust::resolve_and_record(cwd, None, false);
-        // discover_hooks is the single load entry point, so all vendors (compat and native) and custom hook-paths match the session-startup sites
+        // discover_hooks is the load entry point, so all vendors (compat and
+        // native) and custom hook-paths match the session-startup sites
         let (mut registry, errors) = crate::util::hooks::discover_hooks(
             git_root.as_deref(),
             &self.rebuild_spec.compat,
@@ -799,7 +775,6 @@ impl SessionActor {
         }
         *self.hook_load_errors.borrow_mut() = errors.iter().map(|e| e.to_string()).collect();
         // Re-append plugin hooks from current plugin registry.
-        // Clone the Arc out of the RefCell so the borrow is dropped immediately.
         let plugin_registry_snapshot = self.plugin_registry.borrow().clone();
         if let Some(ref pr) = plugin_registry_snapshot {
             for plugin in pr.active_plugins() {
@@ -875,14 +850,11 @@ impl SessionActor {
         xai_grok_telemetry::unified_log::info("reload_plugins_impl: start", Some(sid), None);
 
         // Folder-trust gates repo-local project plugins (hooks/MCP).
-        // Resolve and record the verdict for this cwd before the plugins-config read below, whose project-paths merge reads the gate.
-        // commands/list and the fan-out order these the same way, so no gate read ever precedes the site's own resolve.
         let project_trusted =
             crate::agent::folder_trust::resolve_and_record(session_cwd, None, false);
 
         let t0 = std::time::Instant::now();
-        // Resolve the effective [plugins] config: global, ancestor project configs, and the compat merge
-        // Shared with commands/list and the eager fan-out so all paths discover the same plugins for this cwd
+        // Resolve the effective [plugins] config: global, ancestor project configs.
         let plugins_cfg = crate::config::resolve_effective_plugins_config(session_cwd);
         let config_read_ms = t0.elapsed().as_millis();
 
@@ -903,7 +875,6 @@ impl SessionActor {
         );
 
         // Adopt plugin hooks, MCP, and plugin-contributed skills into this session.
-        // Sessions with `_meta.pluginDirs` rebuild their own view instead; the shared snapshot never carries them
         let session_dirs = self.session_plugin_dirs();
         let new_registry_snapshot = if session_dirs.is_empty() {
             handle.snapshot()
@@ -1014,8 +985,8 @@ impl SessionActor {
                     hook_reg.remove_by_prefix("plugin/");
                     hook_reg.append_specs(new_specs);
                 } else if !new_specs.is_empty() {
-                    // No registry yet: bootstrap config-layer and file hooks the way reload_hooks_impl does
-                    // Starting from empty sources instead would let a plugin-first snapshot drop config hooks
+                    // No registry yet: bootstrap config-layer and file hooks
+                    // the way reload_hooks_impl does Starting.
                     let git_root =
                         xai_grok_workspace::session::git::find_git_root_from_path(session_cwd).ok();
                     let is_trusted =
@@ -1041,8 +1012,6 @@ impl SessionActor {
         );
 
         // Always re-merge plugin-contributed MCP servers and apply them via an order-insensitive diff.
-        // Unchanged servers stay connected; only added, changed, or removed ones are re-initialized.
-        // The order-sensitive `update_configs` would tear everything down instead, because merge order is non-deterministic.
         let t_mcp = std::time::Instant::now();
         let client_seed = self.initial_client_mcp_servers.borrow().clone();
         let new_mcp_servers = crate::session::agent_mcp::rematerialize_with_agent_overlay(
@@ -1107,8 +1076,6 @@ impl SessionActor {
         );
 
         // Notify pager about registry changes so the modal auto-refreshes.
-        // Extract all RefCell borrows into locals before the .await so no Ref guard is alive across the suspension point
-        // Otherwise send_xai_notification's Notification hooks, which also borrow these RefCells, panic with BorrowMutError
         let t_notify = std::time::Instant::now();
         {
             let hooks = crate::extensions::hooks::current_hook_infos(

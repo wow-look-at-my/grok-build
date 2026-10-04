@@ -1,6 +1,4 @@
 //! Shared URL-opening and scheme validation utilities.
-//!
-//! Keyboard navigation, mouse clicks, and action dispatch all open links through these helpers.
 
 use std::collections::HashMap;
 
@@ -14,7 +12,6 @@ pub enum OpenUrlResult {
     /// Scheme was rejected by the safety filter.
     RejectedScheme,
     /// Browser cannot run here (headless / no display) or the opener failed to spawn.
-    /// Callers should show the URL so the user can open it manually.
     BrowserUnavailable,
 }
 
@@ -76,7 +73,7 @@ pub fn open_url(url: &str) -> bool {
     }
 
     // Skip the doomed spawn on headless Linux VMs (no DISPLAY or Wayland)
-    // Billing Upgrade and Buy-credits clicks then fall back to showing the URL instead of silently doing nothing
+    // Billing Upgrade and Buy-credits clicks then fall back.
     if !browser_open_likely_available() {
         tracing::info!("skipping browser open: no display server / BROWSER");
         return false;
@@ -110,9 +107,8 @@ fn spawn_url_opener(url: &str) -> bool {
     }
     let verb = wide("open");
     let target = wide(url);
-    // SAFETY: `verb` and `target` are NUL-terminated UTF-16 buffers that outlive the call;
-    // optional hwnd/params/directory are null. The pseudo-HINSTANCE is only compared
-    // (>32 means success), never dereferenced.
+    // SAFETY: `verb` and `target` are NUL-terminated UTF-16 buffers that
+    // outlive the call; optional hwnd/params/directory are null.
     let result = unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
@@ -168,7 +164,6 @@ fn build_open_path_command(path: &std::path::Path) -> std::process::Command {
 }
 
 /// Trusted filesystem path (no scheme check, unlike [`open_url`]).
-/// Windows avoids `cmd /c start`: `%VAR%` expansion corrupts percent-encoded session paths.
 #[allow(clippy::disallowed_methods)] // fire and forget; the child is reaped when this process exits
 pub fn open_path(path: &std::path::Path) -> bool {
     // Never launch a real GUI app in tests.
@@ -193,7 +188,6 @@ pub fn open_path(path: &std::path::Path) -> bool {
 }
 
 /// `raw_arg` keeps Explorer's `/select,"<path>"` quoting; no `cmd`, so `%` in urlencoded paths is not expanded.
-/// A missing file opens the parent folder (no `/select`) instead of Home.
 #[cfg(all(not(test), target_os = "windows"))]
 #[allow(clippy::disallowed_methods)] // fire and forget; the child is reaped when this process exits
 fn reveal_in_explorer(path: &std::path::Path) -> bool {
@@ -216,8 +210,7 @@ fn reveal_in_explorer(path: &std::path::Path) -> bool {
 
     let select_file = target.is_file();
     let mut command = std::process::Command::new("explorer");
-    // Escape embedded double-quotes in the path so the `/select,"<path>"` quoting does not break
-    // Windows file-system paths cannot legally contain `"`, but percent-decoded display paths or future user-chosen filenames could, so be defensive
+    // Escape embedded double-quotes in the path.
     let escaped = target.display().to_string().replace('"', "\"\"");
     if select_file {
         command.raw_arg(format!("/select,\"{}\"", escaped));
@@ -230,7 +223,6 @@ fn reveal_in_explorer(path: &std::path::Path) -> bool {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     xai_tty_utils::detach_std_command(&mut command);
-    // explorer.exe returns exit code 1 even on success, so a successful spawn is the best signal we have
     match command.spawn() {
         Ok(_) => true,
         Err(e) => {
@@ -476,8 +468,7 @@ mod tests {
 
     #[test]
     fn ensure_query_param_preserves_fragment() {
-        // The current remote settings value uses a hash fragment for client-side routing (`grok.com/#supergrok`)
-        // We still want the referrer attached
+        // The current remote settings value uses a hash fragment for client-side routing (`grok.com/#supergrok`).
         let out = ensure_query_param("https://grok.com/#supergrok", "referrer", "grok-build");
         assert_eq!(out, "https://grok.com/?referrer=grok-build#supergrok");
     }

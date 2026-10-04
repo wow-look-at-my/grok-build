@@ -486,8 +486,6 @@ impl SessionActor {
             self.chat_state_handle.replace_conversation(conversation);
         } else {
             // Mid-session: only the system-message head is safe to touch.
-            // `conversation[1]` is a real turn by now, not the zero-turn
-            // prefix slot — leave every other conversation item alone.
             let mut conversation = self.chat_state_handle.get_conversation().await;
             let _ = replace_or_insert_system_head(&mut conversation, &new_system_prompt);
             self.chat_state_handle.replace_conversation(conversation);

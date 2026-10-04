@@ -1,13 +1,4 @@
 //! Async settings getter.
-//!
-//! One owner per `(origin, identity)` scope drives a load, chosen under the
-//! state lock so two concurrent starts cannot both fetch; callers observe that
-//! scope's `watch` cell, so a timeout or cancel drops only the observation, not
-//! the load.
-//!
-//! Protocol: [`warm_startup_settings`] starts the load, [`await_startup_settings`]
-//! (async) or [`block_on_startup_settings`] (multi-thread runtimes only) observes
-//! it, and [`consume_wait`] installs the outcome after a live scope recheck.
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -21,18 +12,13 @@ use crate::agent::config::Config;
 use crate::util::config::RemoteSettings;
 use xai_grok_login::{GrokAuth, GrokComConfig};
 
-/// A settings load request. Warm a load with [`resolve`](Self::resolve) or
-/// [`from_config`](Self::from_config); a consume-time recheck reuses the warmed
-/// [`auth`](Self::auth) rather than re-reading disk.
+/// A settings load request.
 #[derive(Clone)]
 pub struct SettingsQuery {
     auth: Option<GrokAuth>,
     origin: String,
     alpha_test_key: Option<String>,
-    /// The grok.com config disk auth was resolved under. The commit-time
-    /// identity re-check must resolve through the same config: the default
-    /// config only sees env, so a file- or managed-configured IdP would
-    /// otherwise read as a credential change on every load.
+    /// The grok.com config disk auth was resolved under.
     auth_config: Option<GrokComConfig>,
 }
 
@@ -62,9 +48,7 @@ impl SettingsQuery {
         }
     }
 
-    /// The auth this query resolved to. A consume-time recheck reuses this
-    /// warmed credential instead of re-reading disk, so a just-refreshed
-    /// session that has not yet been persisted is not mistaken for a change.
+    /// The auth this query resolved to.
     pub fn auth(&self) -> Option<&GrokAuth> {
         self.auth.as_ref()
     }
@@ -122,10 +106,9 @@ impl SettingsOutcome {
         }
     }
 
-    /// Whether this outcome may still be installed under `cfg`. A repair between
-    /// warm and consume can rewrite the origin or identity, so re-check both.
-    /// `warmed_auth` is the credential the load was warmed with, reused here so a
-    /// just-refreshed session not yet on disk is not read as a credential change.
+    /// Whether this outcome may still be installed under `cfg`. A repair
+    /// between warm and consume can rewrite the origin or identity, so
+    /// re-check both.
     pub(crate) fn install_allowed(
         &self,
         cfg: &crate::agent::config::Config,
@@ -134,11 +117,8 @@ impl SettingsOutcome {
         self.scope_matches(&SettingsQuery::from_config(cfg, warmed_auth.cloned()))
     }
 
-    /// Consume-time recheck for callers holding a `GrokComConfig` rather than a
-    /// `Config` (the pager). `auth` is the credential the caller warmed the load
-    /// with: it wins over disk so a just-refreshed session that has not yet been
-    /// persisted still matches, while origin and policy are re-resolved live so a
-    /// repair between warm and consume is still caught.
+    /// Consume-time recheck for callers holding a `GrokComConfig` rather than a `Config` (the pager). `auth` is the credential the caller warmed the load with: it wins over disk so a just-refreshed session that has not yet been persisted still matches, while origin and policy are re-resolved
+    /// live so a repair between warm and consume is still caught.
     fn take_if_in_scope(
         self,
         auth: Option<&GrokAuth>,
@@ -233,9 +213,8 @@ fn lock_state() -> std::sync::MutexGuard<'static, StartupState> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// A completed skip (not attempted, no settings) published because the scope
-/// went ineligible after the owner was chosen. A now-eligible scope must not
-/// reuse it.
+/// A completed skip (not attempted, no settings) published because the scope went ineligible after the owner was chosen. A now-eligible
+/// scope must not reuse it.
 fn owner_published_skip(owner: &Owner) -> bool {
     owner
         .tx
@@ -245,7 +224,7 @@ fn owner_published_skip(owner: &Owner) -> bool {
 }
 
 /// Choose one owner per scope and return a receiver on its outcome. The state
-/// lock is held across the check, spawn, and store, so two concurrent starts
+/// lock is held across the check, spawn, and store, so concurrent starts
 /// cannot both fetch; a start for a different scope aborts the stale owner
 /// first. Returns `None` only when there is no runtime to spawn on.
 fn warm_and_subscribe(query: &SettingsQuery) -> Option<watch::Receiver<Option<SettingsOutcome>>> {
@@ -256,9 +235,7 @@ fn warm_and_subscribe(query: &SettingsQuery) -> Option<watch::Receiver<Option<Se
         if owner.key == key && !owner_published_skip(owner) {
             return Some(owner.tx.subscribe());
         }
-        // Different scope, or a completed skip from transient ineligibility (a
-        // repair). A now-eligible scope must start a fresh load instead of
-        // reusing that skip for the process lifetime.
+        // Different scope, or a completed skip from transient ineligibility (a repair).
         owner.abort.abort();
     }
     let (tx, rx) = watch::channel(None);
@@ -302,7 +279,7 @@ pub fn reset_startup_settings_for_tests() {
 }
 
 /// Cache-first settings load. Fetch on miss; write the signed cache only on
-/// success after a policy and identity re-check. Never joins the startup watch.
+/// success after a policy and identity re-check.
 #[cfg(any(test, feature = "test-support"))]
 pub async fn get_settings(query: SettingsQuery) -> SettingsOutcome {
     load_settings(query).await
@@ -526,8 +503,7 @@ fn load_settings_blocking(query: SettingsQuery) -> SettingsOutcome {
     let Some(settings) = settings else {
         return SettingsOutcome::failed();
     };
-    // Live fetch: a pending write, or the cache was disabled (no write). A cache
-    // hit has no write, so the commit scope only gates live fetches.
+    // Live fetch: a pending write, or the cache was disabled (no write).
     let is_live_fetch = write.is_some() || super::settings_cache_disabled();
     if is_live_fetch {
         let current_origin = super::resolve_startup_endpoints().proxy_url();

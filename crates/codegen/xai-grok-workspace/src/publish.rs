@@ -1,11 +1,4 @@
 //! Publish (strict): the merge-or-fail publish flow.
-//!
-//! `Publish(app)` commits if dirty, runs `MergeToMain` (conv into main), and on success builds/deploys from the merge SHA and records it.
-//! On merge failure it returns an error and **does not deploy**.
-//! No silent force-push, no deploy off an unmerged conv branch.
-//!
-//! The flow is expressed over the [`PublishBackend`] trait so it is unit-testable without a live workspace/deployer.
-//! The production adapter wires each method to the corresponding WorkspaceOp (`Commit`, `MergeToMain`) and the app deployer.
 
 use async_trait::async_trait;
 
@@ -46,7 +39,6 @@ pub enum PublishError {
     #[error("commit before publish failed: {0}")]
     Commit(String),
     /// The merge into the target branch hit conflicts.
-    /// The conversation should be parked in a "needs resolution" frontend state; nothing is deployed.
     #[error("merge into '{target}' has conflicts in {} file(s); not deployed", .files.len())]
     MergeConflict { target: String, files: Vec<String> },
     /// The merge failed for a non-conflict reason (e.g. remote unavailable).
@@ -56,7 +48,6 @@ pub enum PublishError {
     #[error("publish precondition failed: {0}")]
     Precondition(String),
     /// Merge succeeded but the deploy step failed.
-    /// The merge is durable on the target branch (git is the source of truth); a retry can re-deploy the SHA.
     #[error("deploy of merge sha {sha} failed: {message}")]
     Deploy { sha: String, message: String },
 }
@@ -70,7 +61,6 @@ pub trait PublishBackend {
     /// Commit the working tree onto the conv branch. Returns the new HEAD sha.
     async fn commit(&self, message: &str) -> Result<Option<String>, PublishError>;
     /// Merge the conv branch into `target` (never rebase, never force).
-    /// `push` requires the merged target to be delivered to the durable remote before returning success, so a deployed SHA is always on `origin`.
     async fn merge_to_main(
         &self,
         conv_branch: &str,

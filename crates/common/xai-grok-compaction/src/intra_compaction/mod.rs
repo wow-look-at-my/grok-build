@@ -1,10 +1,4 @@
-//! Intra-turn compaction — orchestration of the
-//! `select → sample → guard → commit` pass, generic over
-//! [`CompactionItemBuilder`](crate::CompactionItemBuilder).
-//!
-//! Harness wiring (trigger call sites, LLM transport, metrics backends,
-//! state commit) stays per-harness; the Grok chat host
-//! wraps these entry points with its tokenizer + metrics observers.
+//! Intra-turn compaction — orchestration of the `select → sample → guard → commit` pass, generic.
 
 pub mod compact;
 pub mod config;

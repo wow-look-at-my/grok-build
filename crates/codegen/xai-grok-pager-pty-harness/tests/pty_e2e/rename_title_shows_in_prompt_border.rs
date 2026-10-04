@@ -5,8 +5,8 @@ use super::common::*;
 /// Title used for the manual `/rename`; unique so screen scans are unambiguous.
 const RENAME_TITLE: &str = "PTYRENAMETITLE";
 
-/// The prompt-box top-border row carrying the inline title: the line holding both the title and the `╮` corner.
-/// It works on whole lines on purpose: byte-slicing box-drawing rows panics on char boundaries.
+/// The prompt-box top-border row carrying the inline title: the line holding
+/// both the title and the `╮` corner.
 fn title_border_row(screen: &str, title: &str) -> Option<String> {
     screen
         .lines()
@@ -137,9 +137,9 @@ fn spawn_settled_session(content: &ContentController, project: &Path) -> PtyHarn
     harness
 }
 
-/// Type `/rename <title>` paced (bulk injection coalesces into a paste right after a turn), submit it, and wait for the durable-write ack.
-/// The border title itself renders from the optimistic local `display_name`.
-/// The "Session renamed to" block only lands after the shell's locked `summary.json` write round-trips.
+/// Type `/rename <title>` paced (bulk injection coalesces into a paste right
+/// after a turn), submit it, and wait for the durable-write ack. The border
+/// title itself renders from the optimistic local `display_name`.
 fn submit_rename(harness: &mut PtyHarness, title: &str) {
     inject_keys_paced(harness, format!("/rename {title}").as_bytes());
     harness.inject_keys(b"\r").expect("submit /rename");

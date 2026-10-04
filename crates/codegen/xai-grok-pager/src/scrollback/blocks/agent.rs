@@ -94,9 +94,8 @@ impl AgentMessageBlock {
         &mut self.content
     }
 
-    /// Get copyable text for this block.
-    /// When `raw` is true, returns the raw markdown source.
-    /// When `raw` is false, returns the rendered text (styles stripped).
+    /// Get copyable text for this block. When `raw` is true, returns the raw
+    /// markdown source.
     pub fn copy_text(&self, raw: bool) -> String {
         if raw {
             self.content.text()
@@ -109,16 +108,16 @@ impl AgentMessageBlock {
 impl AgentMessageBlock {
     /// Resolve the diagram display mode from the user setting without building `output()`; cheap enough to gate the per-frame affordance path.
     fn mermaid_display_mode(&self) -> mermaid_content::MermaidDisplay {
-        // Minimal mode commits static text with no draw loop to paint the clickable affordance row, so suppress it there
-        // The diagram art still renders; its source stays natively selectable
-        // The inline-overlay force-off flag is set iff minimal
+        // Minimal mode commits static text with no draw loop to paint the
+        // clickable affordance row, so suppress it there The diagram art
+        // still renders.
         mermaid_content::mermaid_display_static(
             crate::appearance::cache::load_render_mermaid(),
             crate::terminal::image::scrollback_inline_overlay_forced_off(),
         )
     }
 
-    /// It is deterministic for a given `ctx`, so the two calls produce matching rows and offsets without a shared cache
+    /// It is deterministic for a given `ctx`, so both calls produce matching rows and offsets without a shared cache
     /// that could drift. Only callers that have already confirmed there are diagrams and we are not in raw mode should
     /// reach here. The common diagram-free path never pays this build.
     fn rendered_output(
@@ -126,8 +125,7 @@ impl AgentMessageBlock {
         ctx: &BlockContext,
     ) -> (BlockOutput, Vec<mermaid_content::DiagramAffordance>) {
         let mut out = self.content.output(ctx.width as usize);
-        // Diagram pre-wrap ranges in document order
-        // The fence count and order are width-invariant, so range index `idx` pairs with the diagram's source (`self.mermaid.source(idx)`)
+        // Diagram pre-wrap ranges in document order The fence count and order are width-invariant.
         let ranges = self.content.mermaid_block_ranges();
 
         match self.mermaid_display_mode() {
@@ -165,9 +163,7 @@ impl BlockContent for AgentMessageBlock {
     }
 
     fn estimate_extra_rows(&self) -> u16 {
-        // Each diagram inserts one treatment row (affordance row or fallback caption) into output() that the source-text estimate can't see
-        // Count one per diagram (a safe over-estimate if a range is empty) so the off-screen estimate never under-reserves
-        // Raw mode and the `off` setting add no such row
+        // Each diagram inserts one treatment row (affordance row or fallback caption) into output() that the source-text estimate can't see Count one per diagram.
         if self.mermaid.is_empty()
             || self.content.is_raw()
             || self.mermaid_display_mode() == mermaid_content::MermaidDisplay::SourceOnly
@@ -281,8 +277,7 @@ mod tests {
         let off = AgentMessageBlock::new(MERMAID_MD).output(&ctx(40, false));
         assert_eq!(non_selectable(&off), 0, "off mode must not add a row");
 
-        // auto: exactly one extra non-selectable row beneath the diagram (the affordance row)
-        // The row is blank in `output()`; the draw loop paints its `◇ mermaid [Open Image] [Copy Image Path] [Copy Source]` buttons
+        // auto: exactly one extra non-selectable row beneath the diagram (the affordance row) The row is blank in `output()`.
         crate::appearance::cache::set_render_mermaid(RenderMermaid::Auto);
         let auto = AgentMessageBlock::new(MERMAID_MD).output(&ctx(40, false));
         assert_eq!(
@@ -300,8 +295,7 @@ mod tests {
 
     #[test]
     fn mermaid_treatment_row_preserves_hyperlink_line_mapping() {
-        // The inserted treatment row (caption or affordance) is a joiner-continuation line, so it must NOT add a logical (pre-wrap) line
-        // Otherwise the hyperlink overlay walk desyncs for the paragraph after the diagram
+        // The inserted treatment row (caption or affordance) is a joiner-continuation line.
         let md = "before\n\n```mermaid\nA-->B\n```\n\n[link](https://example.com) trailing\n";
         crate::appearance::cache::set_render_mermaid(RenderMermaid::Off);
         let off = AgentMessageBlock::new(md).output(&ctx(60, false));
@@ -316,9 +310,7 @@ mod tests {
             "treatment row must not introduce a new logical line",
         );
 
-        // The renderer's hyperlinks are pre-wrap and unchanged by the inserted row (it lives in the BlockOutput, not the renderer)
-        // Walk the output's joiners to recover each row's pre-wrap index
-        // The link's pre-wrap line must still map to its row; the inserted row did not shift it
+        // The renderer's hyperlinks are pre-wrap and unchanged by the inserted row (it lives in the BlockOutput, not the renderer) Walk the output's joiners.
         let link_line = block
             .content()
             .with_hyperlinks(|hs| hs.iter().map(|h| h.line_index).min())
@@ -373,8 +365,7 @@ mod tests {
             };
             assert_eq!(aff.source, "A-->B\n");
 
-            // The diagram is shown as its source code block (never an image)
-            // The affordance row sits at its reported (non-selectable) offset
+            // The diagram is shown as its source code block (never an image) The affordance row sits at its reported (non-selectable).
             let out = block.output(&ctx(60, false));
             assert!(
                 shown_text(&out).contains("A-->B"),
@@ -415,9 +406,8 @@ mod tests {
         fn copy_over_diagram_yields_fence_body() {
             use crate::scrollback::block::RenderBlock;
             crate::appearance::cache::set_render_mermaid(RenderMermaid::On);
-            // Drive the real whole-block copy path (`copy_visible_text_in_state`, then `plain_text_from_output`)
-            // Re-implementing the selectable filter would drift from production
-            // The source code block is selectable; the blank affordance row is excluded
+            // Drive the real whole-block copy path
+            // (`copy_visible_text_in_state`, then `plain_text_from_output`).
             let block = RenderBlock::AgentMessage(AgentMessageBlock::new(
                 "```mermaid\nA-->B\nC-->D\n```\n",
             ));
@@ -428,7 +418,7 @@ mod tests {
             assert!(copied.contains("C-->D"), "copy yields source: {copied:?}");
         }
 
-        /// With two diagrams, each affordance row anchors at its OWN (non-selectable) row in the final output, in document order.
+        /// With diagrams, each affordance row anchors at its OWN (non-selectable) row in the final output, in document order.
         /// Each row carries that diagram's own source.
         #[test]
         fn two_diagrams_each_anchor_at_their_own_row() {

@@ -53,8 +53,7 @@ fn set_yolo_mode_on_drains_permission_queue_with_allow_once() {
     let mut app = test_app_with_agent();
     let agent = app.agents.get_mut(&AgentId(0)).unwrap();
 
-    // Inject a fake queued permission
-    // The drain uses `find(|o| o.kind == AllowOnce)`, so at least one AllowOnce option is needed to exercise the happy path
+    // Inject a fake queued permission The drain uses `find(|o| o.kind == AllowOnce)`.
     let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
     let request = acp::RequestPermissionRequest::new(
         acp::SessionId::new(Arc::from("test-sess")),
@@ -107,8 +106,9 @@ fn set_yolo_mode_on_drains_permission_queue_with_allow_once() {
         agent_ref(&app, AgentId(0)).permission_queue.is_empty(),
         "YOLO ON must drain the permission_queue",
     );
-    // Verify the `AllowOnce` response was actually sent (NOT `Cancelled`)
-    // A regression to `Cancelled` would silently reject every queued permission when the user enables YOLO, the exact failure this test prevents
+    // Verify the `AllowOnce` response was sent (NOT `Cancelled`) A regression
+    // to `Cancelled` would silently reject every queued permission when the
+    // user enables YOLO, the exact failure this test prevents
     match response_rx.try_recv() {
         Ok(Ok(acp::RequestPermissionResponse {
             outcome:
@@ -247,7 +247,7 @@ fn set_permission_mode_auto_persists_without_yolo() {
 }
 
 /// Feature gate OFF: a SetPermissionMode(Auto) commit (e.g. from the settings modal) degrades to Ask.
-/// It reads the same `app.auto_mode_gate` the Shift+Tab cycle uses, so the two never disagree.
+/// It reads the same `app.auto_mode_gate` the Shift+Tab cycle uses, so both never disagree.
 #[test]
 fn set_permission_mode_auto_degrades_to_ask_when_gated_off() {
     use crate::app::actions::PermissionModeKind;
@@ -299,8 +299,6 @@ fn rollback_permission_mode_unknown_canonical_defaults_to_ask() {
         "unknown canonical → safe default (ask = no auto-approve)",
     );
     assert_eq!(app.current_ui.permission_mode.as_deref(), Some("ask"));
-    // The failure toast is the standard `✗ Could not save permission_mode: …` format
-    // Schema corruption and real disk failure currently share that wording; pinned here so a future divergence is intentional
 }
 
 /// Rollback path refreshes open modal snapshots in the same way the success path does.
@@ -365,8 +363,8 @@ fn set_permission_mode_ask_emits_brand_consistent_toast() {
     assert!(!agent_ref(&app, AgentId(0)).session.is_yolo());
     assert_eq!(app.current_ui.permission_mode.as_deref(), Some("ask"));
 
-    // The toast brands as "Permission mode", not "Always-approve"
-    // The Ask arm used to reuse `yolo_toast(false)`, producing the mismatched "✓ Always-approve: off"
+    // The toast brands as "Permission mode", not "Always-approve" The Ask arm
+    // used to reuse `yolo_toast(false)`.
     let toast = agent_ref(&app, AgentId(0))
         .toast
         .as_ref()
@@ -401,8 +399,7 @@ fn set_permission_mode_ask_emits_brand_consistent_toast() {
 fn set_permission_mode_with_live_yolo_and_no_ui_mirror_rolls_back_to_always_approve() {
     use crate::app::actions::PermissionModeKind;
     let mut app = test_app_with_agent();
-    // Simulate `--yolo` startup: agent yolo and default_yolo set, but `current_ui.permission_mode = None`
-    // (The config has no `[ui] permission_mode` setting.)
+    // Simulate `--yolo` startup: agent yolo and default_yolo set, but `current_ui.permission_mode = None`.
     app.agents.get_mut(&AgentId(0)).unwrap().session.yolo_mode = true;
     app.default_yolo = true;
     app.current_ui.permission_mode = None;
@@ -439,7 +436,6 @@ fn set_permission_mode_with_live_yolo_and_no_ui_mirror_rolls_back_to_always_appr
 fn rollback_permission_mode_default_canonical_preserves_default() {
     use crate::settings::SettingValue;
     let mut app = test_app_with_agent();
-    // Pre-flip to YOLO so the rollback has somewhere to roll back FROM
     let _ = dispatch(Action::SetYoloMode(true), &mut app);
     assert!(agent_ref(&app, AgentId(0)).session.is_yolo());
     assert_eq!(

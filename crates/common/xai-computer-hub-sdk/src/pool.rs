@@ -1,10 +1,4 @@
 //! Process-wide connection pool keyed by `(url, principal)`.
-//!
-//! Two [`crate::ToolServer`] builds with the same `(url, credential)`
-//! observe the same `Arc<HubConnection>`; distinct credentials open
-//! distinct sockets. The pool is the canonical entry point — direct
-//! [`crate::HubConnection::connect`] calls are reserved for tests and
-//! one-shot programs that explicitly want unpooled behaviour.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,49 +16,19 @@ use crate::connection::{
 };
 use crate::error::ClientError;
 
-/// Idle window for the reaper: a pooled connection is evictable once it is
-/// unused (`Arc::strong_count == 1`, i.e. only the pool holds it) **and**
-/// `now - last_handout >= DEFAULT_POOL_IDLE_TTL`.
-///
-/// Note the clock is `last_handout` (the last time the pool returned the
-/// connection), not the moment the last consumer `Arc` was dropped: a
-/// connection held longer than the TTL and then released is eligible on the
-/// very next sweep, with no extra post-drop grace period. The only hard
-/// guarantee is that an in-use connection (`strong_count > 1`) is never
-/// reaped. Tuned well above the server's own 90s dead-peer idle timeout so a
-/// short borrow between turns of an active conversation isn't churned.
+/// Idle window for the reaper: a pooled connection is evictable once it is unused (`Arc::strong_count == 1`, i.e. only the pool holds it).
 pub const DEFAULT_POOL_IDLE_TTL: Duration = Duration::from_secs(300);
 
 /// How often the shared pool's idle reaper scans for evictable entries.
 pub const DEFAULT_POOL_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// A pooled connection plus the last time it was handed out to a caller.
-///
-/// `last_handout` is refreshed on every [`HubConnectionPool::get_or_connect`]
-/// hit (and on the initial insert), so a connection that is repeatedly
-/// re-fetched never looks idle even if its [`Arc`] strong count briefly
-/// returns to 1 between fetches. Eviction additionally requires
-/// `Arc::strong_count == 1` (only the pool holds it), so a connection a
-/// consumer still holds is never reaped regardless of `last_handout`.
 struct Pooled {
     conn: Arc<HubConnection>,
     last_handout: Instant,
 }
 
 /// The process-global pool used by [`HubConnectionPool::shared`].
-///
-/// `tokio::sync::OnceCell` is preferred over `std::sync::OnceLock` /
-/// `LazyLock` here because the pool is only ever observed from
-/// async contexts (the connection actor lives on a tokio runtime
-/// already), so the async-aware `get_or_init` semantics avoid the
-/// blocking-init footgun of the sync alternatives without taking a
-/// hard dependency on additional sync primitives.
-///
-/// Tests MUST use [`HubConnectionPool::new`] to avoid cross-test
-/// pollution: cargo runs all integration tests in the same binary
-/// unless otherwise configured, so any test that touches
-/// `HubConnectionPool::shared()` leaves the pool populated for
-/// subsequent tests.
 static SHARED: OnceCell<Arc<HubConnectionPool>> = OnceCell::const_new();
 
 /// Pool of live server connections.
@@ -89,16 +53,9 @@ impl HubConnectionPool {
         })
     }
 
-    /// Return the process-wide shared pool, lazily initialising it on
-    /// the first call. Subsequent callers in the same process observe
-    /// the same `Arc`.
-    ///
-    /// The shared pool spawns an idle reaper (see [`Self::spawn_idle_reaper`])
-    /// exactly once, so a connection that is unused (`strong_count == 1`) and
-    /// has not been handed out for [`DEFAULT_POOL_IDLE_TTL`] is closed instead
-    /// of living for the whole process lifetime. (Unpooled / test pools built
-    /// via [`Self::new`] do not
-    /// get a reaper; they can call [`Self::sweep_idle`] directly.)
+    /// Return the process-wide shared pool, lazily initialising it on the
+    /// first call. Subsequent callers in the same process observe the same
+    /// `Arc`.
     pub async fn shared() -> Arc<Self> {
         SHARED
             .get_or_init(|| async {
@@ -110,19 +67,14 @@ impl HubConnectionPool {
             .clone()
     }
 
-    /// Look up an existing pooled connection for `(url, credential)`,
-    /// or open a fresh one if no pooled entry exists.
-    ///
-    /// `kind` is the connection role announced in the hello frame. The
-    /// pool is keyed by `(url, principal)` only; mixing
-    /// [`ConnectionKind`] values for the same `(url, principal)` is a
-    /// caller error and surfaces as a [`ClientError::InvalidConfig`].
-    ///
-    /// The optional extra access key is not part of the pool key, so the first
-    /// caller's key is the one carried on a shared connection's handshake (in
-    /// practice it is a per-deployment constant). The plaintext-scheme guard is
-    /// re-checked on every call below so it can't be bypassed by a cached
-    /// insecure entry.
+    /// Look up an existing pooled connection for `(url, credential)`, or open
+    /// a fresh one if no pooled entry exists. `kind` is the connection role
+    /// announced in the hello frame. The pool is keyed by `(url, principal)`
+    /// only; mixing [`ConnectionKind`] values for the same `(url, principal)`
+    /// is a caller error and surfaces as a [`ClientError::InvalidConfig`].
+    /// The optional extra access key is not part of the pool key, so the
+    /// first caller's key is the one carried on a shared connection's
+    /// handshake (in practice it is a per-deployment constant).
     pub async fn get_or_connect(
         self: &Arc<Self>,
         url: Url,
@@ -263,10 +215,7 @@ impl HubConnectionPool {
         self.connections.is_empty()
     }
 
-    /// Forget the pooled connection for `key`. The actual underlying
-    /// `Arc<HubConnection>` is dropped only when no other holder
-    /// keeps a reference; the next [`Self::get_or_connect`] for the
-    /// same key opens a fresh socket.
+    /// Forget the pooled connection for `key`.
     pub fn forget(&self, key: &ConnKey) {
         if self.connections.remove(key).is_some() {
             crate::metrics::pool_connections_dec();
@@ -274,22 +223,16 @@ impl HubConnectionPool {
     }
 
     /// Close and remove every pooled connection that is BOTH unused (no live
-    /// consumer holds an `Arc` — only the pool does, so `strong_count == 1`)
-    /// AND idle longer than `idle_ttl` (no hand-out within the window).
+    /// consumer holds an `Arc` — only the pool does, so `strong_count ==
+    /// 1`) AND idle longer than `idle_ttl` (no hand-out within the window).
     /// Removing the entry drops the pool's last `Arc<HubConnection>`, whose
     /// `Drop` closes the socket.
-    ///
-    /// The strong-count check runs inside the map's per-shard lock (via
-    /// [`DashMap::retain`]), serialised against `get_or_connect`, so a
-    /// connection handed out concurrently is never evicted out from under a
-    /// caller. Returns the number of connections evicted.
     pub fn sweep_idle(&self, idle_ttl: Duration) -> usize {
         let now = Instant::now();
         let mut evicted = 0usize;
         self.connections.retain(|_key, pooled| {
             let idle_for = now.saturating_duration_since(pooled.last_handout);
-            // `strong_count == 1` ⇒ only this pool entry references the
-            // connection, so no consumer can still be using it.
+            // `strong_count == 1` ⇒ only this pool entry references the connection.
             let unused = Arc::strong_count(&pooled.conn) == 1;
             let evict = unused && idle_for >= idle_ttl;
             if evict {
@@ -330,10 +273,8 @@ impl HubConnectionPool {
         })
     }
 
-    /// Like [`Self::forget`] but identity-checked: only removes the slot
-    /// when `predicate` accepts the currently-stored connection. The
-    /// self-evicting actor passes an `Arc::ptr_eq` check so a race-loser
-    /// can never drop the winner's fresh entry (ABA-safe).
+    /// Like [`Self::forget`] but identity-checked: only removes the slot when
+    /// `predicate` accepts the currently-stored connection.
     pub(crate) fn forget_if(
         &self,
         key: &ConnKey,

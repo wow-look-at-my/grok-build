@@ -10,10 +10,10 @@ Settings resolve highest-priority first:
 
 1. **CLI flags** (e.g. `--yolo`, `--model`, `--sandbox`)
 2. **Environment variables** (e.g. `XAI_API_KEY`, `GROK_MEMORY`)
-3. **`requirements.toml` / MDM** (org-enforced; clamps every config layer below, including the overlay)
+3. **`requirements.toml` / MDM** (org-enforced. Clamps every config layer below, including the overlay)
 4. **`GROK_CONFIG` / `GROK_CONFIG_PATH` overlay** (above `config.toml` and managed, below `requirements.toml` / MDM)
 5. **config.toml** (`~/.grok/config.toml`)
-6. **`managed_config.toml`** (org-deployed defaults; below `config.toml`)
+6. **`managed_config.toml`** (org-deployed defaults. Below `config.toml`)
 7. **Built-in defaults**
 
 Within the config-file tier, the layers merge lowest-to-highest: `managed_config.toml` → `config.toml` → `GROK_CONFIG` overlay → `requirements.toml` / MDM. So `requirements.toml` and MDM clamp **both** your `config.toml` and the overlay.
@@ -27,7 +27,7 @@ A harness or ACP client that launches `grok agent stdio` can inject settings wit
 - **`GROK_CONFIG`**: an inline JSON object overlay.
 - **`GROK_CONFIG_PATH`**: an *additional* file overlay (not a replacement for `config.toml`), a JSON or TOML file read by its extension (`.json` → JSON, else TOML). `GROK_CONFIG` wins if both are set. An empty `GROK_CONFIG` is treated as unset, and a malformed one logs a warning and falls through to `GROK_CONFIG_PATH`.
 
-The overlay is **deep-merged** on top of your `config.toml` (it overrides only the keys it sets), placed above the user/managed layers but **below** `requirements.toml` / MDM so an enterprise pin still wins. A malformed blob is ignored with a warning. This mirrors `CODEX_CONFIG` from the `codex-acp` adapter (a JSON object merged into the session config); Grok is ACP-native, so the overlay lives in the agent itself. It only affects settings read from the merged config, and it is **not** a permission-escalation path. The overlay is confined, fail-closed, to an **allowlist** of soft settings (`models`, `features`, a narrowed `toolset`, and a `shell_environment_policy` limited to its filter fields, which select among env names the launcher already controls and cannot inject an env value into tool subprocesses); every other table is dropped at the choke point, so the overlay cannot spawn commands, set auth policy, redirect network traffic, elevate trust, or add a discovery source. Even on the allowlisted settings, a specific set of security gates read the raw disk layers rather than the overlay. The `ConfigLayers::env_overlay` rustdoc is the canonical list of what the overlay can and cannot reach and which gates read it overlay-free; see also the [internal environment-variables reference](../internal/22-environment-variables.md). Use `GROK_DEFAULT_SELECTED_PERMISSION` for headless permission control. For example, to set the default reasoning effort:
+The overlay is **deep-merged** on top of your `config.toml` (it overrides only the keys it sets), placed above the user/managed layers but **below** `requirements.toml` / MDM. As a result, an enterprise pin still wins. A malformed blob is ignored with a warning. This mirrors `CODEX_CONFIG` from the `codex-acp` adapter (a JSON object merged into the session config). Grok is ACP-native. As a result, the overlay lives in the agent itself. It only affects settings read from the merged config. It is **not** a permission-escalation path. The overlay is confined, fail-closed, to an **allowlist** of soft settings (`models`, `features`, a narrowed `toolset`, and a `shell_environment_policy` limited to its filter fields, which select among env names the launcher already controls and cannot inject an env value into tool subprocesses). Every other table is dropped at the choke point. As a result, the overlay cannot spawn commands, set auth policy, redirect network traffic, elevate trust, or add a discovery source. Even on the allowlisted settings, a specific set of security gates read the raw disk layers rather than the overlay. The `ConfigLayers::env_overlay` rustdoc is the canonical list of what the overlay can and cannot reach and which gates read it overlay-free. See also the [internal environment-variables reference](../internal/22-environment-variables.md). Use `GROK_DEFAULT_SELECTED_PERMISSION` for headless permission control. For example, to set the default reasoning effort:
 
 ```bash
 GROK_CONFIG='{"models": {"default_reasoning_effort": "high"}}' grok agent stdio
@@ -132,7 +132,7 @@ name = "my-custom-agent"
 
 #### Input mode
 
-`[ui] simple_mode` controls how you edit text in the **prompt** — the input editor. It has nothing to do with how you move around the scrollback; that's [`vim_mode`](#vim-mode).
+`[ui] simple_mode` controls how you edit text in the **prompt** — the input editor. It has nothing to do with how you move around the scrollback. That is [`vim_mode`](#vim-mode).
 
 | Value | Behavior |
 |-------|----------|
@@ -146,7 +146,7 @@ To switch the prompt to vim-style editing:
 simple_mode = false
 ```
 
-You can also flip it from the settings pane (`/settings` → **Disable vim input mode**); Grok writes your choice to `[ui] simple_mode`. `simple_mode` and `vim_mode` are independent — one governs the prompt editor, the other governs scrollback navigation. See [Keyboard Shortcuts](03-keyboard-shortcuts.md) for the full binding reference.
+You can also flip it from the settings pane (`/settings` → **Disable vim input mode**). Grok writes your choice to `[ui] simple_mode`. `simple_mode` and `vim_mode` are independent — one governs the prompt editor, the other governs scrollback navigation. See [Keyboard Shortcuts](03-keyboard-shortcuts.md) for the full binding reference.
 
 #### Default selected permission
 
@@ -164,11 +164,11 @@ When the agent asks to run a command (or take some other tool action), the appro
 default_selected_permission = "allow_once"
 ```
 
-After you answer the first prompt the cursor turns **sticky**: each later prompt preselects whatever you last confirmed (pick "No" once and subsequent prompts start on their reject row), carrying across edit / bash / MCP prompts until you restart. So this setting only picks the starting point.
+After you answer the first prompt the cursor turns **sticky**: each later prompt preselects whatever you last confirmed (pick "No" once and subsequent prompts start on their reject row), carrying across edit / bash / MCP prompts. This is until you restart. So this setting only picks the starting point.
 
-Values match case-insensitively; an unset or unrecognized value falls back to `always_allow_all_sessions`. The `allow_command_always` row is always scoped to the specific action being approved (command / tool / domain / edit-session), never a global allow-everything — that's what `always_allow_all_sessions` is for. Note the per-command "Always allow" rows appear while `[ui] remember_tool_approvals` is enabled (the default; set it to `false` to hide them). See [22-permissions-and-safety.md](22-permissions-and-safety.md).
+Values match case-insensitively. An unset or unrecognized value falls back to `always_allow_all_sessions`. The `allow_command_always` row is always scoped to the specific action being approved (command / tool / domain / edit-session), not a global allow-everything — that is what `always_allow_all_sessions` is for. Note the per-command "Always allow" rows appear while `[ui] remember_tool_approvals` is enabled (the default. Set it to `false` to hide them). See [22-permissions-and-safety.md](22-permissions-and-safety.md).
 
-You can also override this with `GROK_DEFAULT_SELECTED_PERMISSION`, which is handy for headless or agent test runs that shouldn't mutate `config.toml`. Precedence: env var → `config.toml` → `always_allow_all_sessions`.
+You can also override this with `GROK_DEFAULT_SELECTED_PERMISSION`, which is handy for headless or agent test runs that must not mutate `config.toml`. Precedence: env var → `config.toml` → `always_allow_all_sessions`.
 
 #### Vim mode
 
@@ -179,7 +179,7 @@ You can also override this with `GROK_DEFAULT_SELECTED_PERMISSION`, which is han
 | `false` (default) | Bare-letter and `Shift+letter` keys (`j`/`k`, `h`/`l`, `g`/`G`, `y`/`Y`, `o`/`O`, `r`, `x`, `e`/`E`, `H`/`L`, plus `i`) are suppressed in the scrollback: pressing one focuses the prompt and types the character. Arrows, `Tab`, `Space`, `PageUp`/`PageDown`, and every `Ctrl+letter` shortcut still navigate. `Esc` is **not** a scrollback key — it never cancels a running turn (`Ctrl+C` does), and while idle follows the clear / rewind policy (see [Keyboard Shortcuts](03-keyboard-shortcuts.md#escape)). |
 | `true` | All vim-style scrollback bindings are active, exactly as listed in [Keyboard Shortcuts](03-keyboard-shortcuts.md). Esc behavior is the same in both settings. |
 
-Toggle it at runtime with `/vim-mode`, or from `/settings` → **Vim scrollback navigation**. Grok writes the change to `[ui] vim_mode` immediately and applies it to every future pager session, including new agents and subagents in the same process. There's no per-session override — `config.toml` is the source of truth on next launch. `vim_mode` is independent of `simple_mode`.
+Toggle it at runtime with `/vim-mode`, or from `/settings` → **Vim scrollback navigation**. Grok writes the change to `[ui] vim_mode` immediately and applies it to every future pager session, including new agents and subagents in the same process. There is no per-session override — `config.toml` is the source of truth on next launch. `vim_mode` is independent of `simple_mode`.
 
 #### Snap prompt to top on send
 
@@ -187,7 +187,7 @@ By default, sending a prompt scrolls it to the top of the viewport so the respon
 
 #### Scrolling
 
-Four `[ui]` settings tune mouse-wheel and trackpad scrolling. All apply immediately and are editable from the settings pane (`/settings` → **Scroll speed** / **Scroll input** / **Scroll lines** / **Invert scroll**).
+`[ui]` settings tune mouse-wheel and trackpad scrolling. All apply immediately and are editable from the settings pane (`/settings` → **Scroll speed** / **Scroll input** / **Scroll lines** / **Invert scroll**).
 
 | Key | Values (default) | Behavior |
 |-----|------------------|----------|
@@ -255,9 +255,9 @@ allowed_domains = ["docs.x.ai", "arxiv.org"]
 
 `allow_local` is off by default (SSRF fail-closed). Turn it on (or set `GROK_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only — private, link-local, and cloud-metadata ranges stay blocked. Resolution: TOML > env > default off.
 
-`[toolset.web_search]` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**; if you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model — the model's own per-call `allowed_domains` is ignored whenever you have set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you have configured nothing. Resolution: requirements → user `config.toml` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes don't apply mid-session.
+`[toolset.web_search]` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**. If you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model. The model's own per-call `allowed_domains` is ignored whenever you have set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you have configured nothing. Resolution: requirements → user `config.toml` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes do not apply mid-session.
 
-`[toolset.ask_user_question]` is honored across **requirements.toml**, **managed config**, and your user **`config.toml`**. Precedence: requirements → env (`GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `GROK_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `timeout_enabled = false` in your user config to disable the automatic questionnaire timeout for yourself; `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval); changes apply to newly started sessions.
+`[toolset.ask_user_question]` is honored across **requirements.toml**, **managed config**, and your user **`config.toml`**. Precedence: requirements → env (`GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `GROK_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `timeout_enabled = false` in your user config to disable the automatic questionnaire timeout for yourself. `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval). Changes apply to newly started sessions.
 
 ### Authentication
 
@@ -309,7 +309,7 @@ permission_classifier = "grok-4.5-fast"
 | `goal_summarizer` | The closing summary of a goal | Session model |
 | `subagent_default` | Any subagent with no pin of its own | Session model |
 
-Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The one exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
+Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
 
 Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`. A `[subagents.models]` entry and an agent definition's own `model` both win over `subagent_default`.
 
@@ -317,10 +317,7 @@ A slot naming a model your account cannot reach logs a warning and falls back to
 
 ### Custom models
 
-Add custom model endpoints to use alternative providers or self-hosted models.
-Each endpoint is a `[model.<id>]` entry. The base URL must include any
-provider-specific prefix such as `/v1`; Grok appends `/chat/completions` or
-`/responses`.
+Add custom model endpoints to use alternative providers or self-hosted models. Each endpoint is a `[model.<id>]` entry. The base URL must include any provider-specific prefix such as `/v1`. Grok appends `/chat/completions` or `/responses`.
 
 ```toml
 [model.my-model]
@@ -353,7 +350,7 @@ model = "acme-fast-1"
 model_provider = "acme"
 ```
 
-A model's own field always wins; the provider fills in the rest. See [Provider Defaults](11-custom-models.md#provider-defaults).
+A model's own field always wins. The provider fills in the rest. See [Provider Defaults](11-custom-models.md#provider-defaults).
 
 To override a built-in model, use its name as the section key and set only the fields you need:
 
@@ -385,20 +382,15 @@ url = "https://mcp.example.com/api/mcp"  # HTTP/SSE transport
 headers = { "x-mcp-session-id" = "{{session_id}}" }
 ```
 
-Remote (HTTP/SSE) servers receive a default `User-Agent: grok-cli/<version>` header; a
-valid `User-Agent` entry in `headers` overrides it (Figma servers receive bare
-`grok-cli`). See [MCP servers](07-mcp-servers.md) for details.
+Remote (HTTP/SSE) servers receive a default `User-Agent: grok-cli/<version>` header. A valid `User-Agent` entry in `headers` overrides it (Figma servers receive bare `grok-cli`). See [MCP servers](07-mcp-servers.md) for details.
 
-MCP servers can also be set per-project in `.grok/config.toml`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules; every other section loads only from `~/.grok/config.toml`.
+MCP servers can also be set per-project in `.grok/config.toml`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules. Every other section loads only from `~/.grok/config.toml`.
 
-Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.toml` (current dir) > `<repo-root>/.grok/config.toml` > `~/.grok/config.toml`. `[permission]` rules aren't overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
+Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.toml` (current dir) > `<repo-root>/.grok/config.toml` > `~/.grok/config.toml`. `[permission]` rules are not overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
 
 ### Memory
 
-Persist knowledge across sessions. Enable it with `[memory] enabled = true` or
-`GROK_MEMORY=1`; an explicit `[memory] enabled = false` turns it off even when a
-managed remote setting enables it. Notes recorded by earlier versions are
-carried over automatically. See [13-memory.md](13-memory.md).
+Persist knowledge across sessions. Enable it with `[memory] enabled = true` or `GROK_MEMORY=1`. An explicit `[memory] enabled = false` turns it off even when a managed remote setting enables it. Notes recorded by earlier versions are carried over automatically. See [13-memory.md](13-memory.md).
 
 ```toml
 [memory]
@@ -439,11 +431,11 @@ plan = false
 explore = "grok-4.6"               # route to different models
 ```
 
-To pin the model a subagent uses, set its entry under `[subagents.models]`. `usage_frequency` doesn't gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating; see [Subagents and Personas](16-subagents.md#usage-frequency).
+To pin the model a subagent uses, set its entry under `[subagents.models]`. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
 
 ### Goal mode and background workflows
 
-`/goal` has two drivers, chosen by the background-workflows setting. With workflows enabled, the host-owned workflow engine evaluates rounds and drives completion verification; with them disabled, `/goal` falls back to the legacy model-facing `update_goal` tool. Whether `/goal` is available at all is a separate switch (the goal feature setting).
+`/goal` has drivers, chosen by the background-workflows setting. With workflows enabled, the host-owned workflow engine evaluates rounds and drives completion verification. With them disabled, `/goal` falls back to the legacy model-facing `update_goal` tool. Whether `/goal` is available at all is a separate switch (the goal feature setting).
 
 Background workflows — the `workflow` tool, named `.grok/workflows/*.rhai` scripts, `/deep-research`, and `/workflow` launches — are **on by default**. Disable with config, env, or remote settings.
 
@@ -452,7 +444,7 @@ Background workflows — the `workflow` tool, named `.grok/workflows/*.rhai` scr
 enabled = false                       # disable background workflows (or GROK_WORKFLOWS=0)
 ```
 
-Project workflows are discovered from `<repo-root>/.grok/workflows/`; user workflows from `~/.grok/workflows/`. Discovery and invocation key off the script's `meta.name`, so keep each filename aligned with its `meta.name`. Built-ins win over project names, and project names win over user names, so keep names unique across scopes.
+Project workflows are discovered from `<repo-root>/.grok/workflows/`. User workflows from `~/.grok/workflows/`. Discovery and invocation key off the script's `meta.name`, so keep each filename aligned with its `meta.name`. Built-ins win over project names, and project names win over user names, so keep names unique across scopes.
 
 #### Which model runs the `/goal` roles
 
@@ -469,7 +461,7 @@ follow_remote_role_models = true       # opt in to server-pushed role pins
 
 A `[goal]` pin wins over the matching `[models]` slot. `follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
 
-Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflow runs` dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle isn't a reusable definition name, so the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
+Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflow runs` dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle is not a reusable definition name. As a result, the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
 
 ### Skills
 
@@ -502,11 +494,11 @@ hooks = true      # scan ~/.claude/settings.json for hooks
 sessions = true   # staged; no scanner consumer yet
 ```
 
-For Claude and Cursor, `rules` and `agents` are independent: turning off named instruction files doesn't disable the home or project rules directory, and turning off rules doesn't disable named files. Claude's `agents` cell gates home-level `~/.claude/` named files and project `<dir>/.claude/CLAUDE*.md`; generic top-level `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` stay recognized. Project rule paths are scanned at every directory from the repo root down to the current one.
+For Claude and Cursor, `rules` and `agents` are independent. Turning off named instruction files does not disable the home or project rules directory, and turning off rules does not disable named files. Claude's `agents` cell gates home-level `~/.claude/` named files and project `<dir>/.claude/CLAUDE*.md`. Generic top-level `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` stay recognized. Project rule paths are scanned at every directory from the repo root down to the current one.
 
-Each cell can be set via environment variable or `config.toml`; see the environment-variables reference for the names. Resolution: env var > config.toml > default (on).
+Each cell can be set via environment variable or `config.toml`. See the environment-variables reference for the names. Resolution: env var > config.toml > default (on).
 
-`grok inspect` reports cells that still need session-start resolution as `?` until a value is available; cells with an explicit env or TOML value use that value. Affected discovery entries report `compatibilityStatus: "unresolved"` in JSON and `[compat unresolved]` in human output.
+`grok inspect` reports cells that still need session-start resolution as `?` until a value is available. Cells with an explicit env or TOML value use that value. Affected discovery entries report `compatibilityStatus: "unresolved"` in JSON and `[compat unresolved]` in human output.
 
 ### Plugins
 
@@ -518,7 +510,7 @@ disabled = ["user/a1b2c3d4/noisy-plugin"]
 
 ### Hints
 
-`[hints]` holds small persisted UI preferences: remembered answers and modal layout. Grok writes these for you as you use the TUI, but you can edit or delete them by hand; removing a key restores the default.
+`[hints]` holds small persisted UI preferences: remembered answers and modal layout. Grok writes these for you as you use the TUI. However, you can edit or delete them by hand. Removing a key restores the default.
 
 `[hints]` is read from the **effective config merge**, with the usual precedence: system managed → user `managed_config.toml` → user `config.toml` → user `requirements.toml` → system `requirements.toml`, higher layers winning. The TUI only ever **writes** these to your user `~/.grok/config.toml`.
 
@@ -537,7 +529,7 @@ fork_worktree_mode = "ask"             # /fork worktree prompt: "ask" | "always"
 
 ### Notifications
 
-Fire terminal notifications when the agent finishes a turn or needs approval. They use terminal-native protocols (OSC 9, OSC 99, OSC 777, or BEL) and are focus-gated by default, so they only fire when you're not looking at the terminal.
+Fire terminal notifications when the agent finishes a turn or needs approval. They use terminal-native protocols (OSC 9, OSC 99, OSC 777, or BEL) and are focus-gated by default, so they only fire when you are not looking at the terminal.
 
 ```toml
 [ui.notifications]
@@ -620,7 +612,7 @@ timeout_secs = 5
 
 Run `/doctor` in the affected session. It shows the detected notification and focus issues, the relevant configuration file, and the steps to resolve them. An explicit `method = "bel"` is treated as intentional. `method = "none"` turns off notification and focus findings.
 
-**Sleep prevention not taking effect:** on macOS, sleep prevention uses `IOPMAssertionCreateWithName` via CoreFoundation; on Linux, `systemd-inhibit` (which must be on `$PATH`). Make sure the relevant tool is available. Prevention is only active during agent turns and releases automatically when the turn ends.
+**Sleep prevention not taking effect:** on macOS, sleep prevention uses `IOPMAssertionCreateWithName` via CoreFoundation. On Linux, `systemd-inhibit` (which must be on `$PATH`). Make sure the relevant tool is available. Prevention is only active during agent turns and releases automatically when the turn ends.
 
 ### Status line
 
@@ -632,7 +624,7 @@ type = "builtin"                # builtin | command | disabled
 items = ["cwd", "model", "context"]
 ```
 
-The other keys are `items` (which built-in segments to show, in order), `command`, `padding`, and `refresh_interval` (in seconds; re-runs a `command` row on a timer, so an incident page or a CI status reaches an idle session). The [Status Line guide](25-status-line.md) documents all of them, along with the JSON contract a `command` script reads on stdin and an example script.
+The other keys are `items` (which built-in segments to show, in order), `command`, `padding`, and `refresh_interval` (in seconds. Re-runs a `command` row on a timer, so an incident page or a CI status reaches an idle session). The [Status Line guide](25-status-line.md) documents all of them, along with the JSON contract a `command` script reads on stdin and an example script.
 
 ### Keyboard shortcuts
 
@@ -642,9 +634,9 @@ Keyboard shortcuts are **not** configurable — all bindings are built in. See [
 
 These are independent knobs (see [Monitoring Usage](24-monitoring-usage.md#related-settings)):
 
-- **`[features] telemetry`** / `GROK_TELEMETRY_ENABLED` — the product-analytics master switch. `/privacy` doesn't change it.
-- **Coding data, retention, and training** — the Settings row `/privacy` opens; coding-data sharing, separate from telemetry.
-- **`[telemetry] trace_upload`** / `GROK_TELEMETRY_TRACE_UPLOAD` — session traces; follows telemetry when unset.
+- **`[features] telemetry`** / `GROK_TELEMETRY_ENABLED` — the product-analytics master switch. `/privacy` does not change it.
+- **Coding data, retention, and training** — the Settings row `/privacy` opens. Coding-data sharing, separate from telemetry.
+- **`[telemetry] trace_upload`** / `GROK_TELEMETRY_TRACE_UPLOAD` — session traces. Follows telemetry when unset.
 - **`[telemetry] otel_*`** / `GROK_EXTERNAL_OTEL` — external OTEL to your own collector (below).
 
 When telemetry is on, enterprises running their own collector can redirect it or turn parts off under `[telemetry]`:
@@ -659,7 +651,7 @@ trace_upload = false                                      # disable session/trac
 
 Set these only to point telemetry at your own infrastructure or to switch parts off. The built-in endpoint and credentials are managed by Grok — leave them unset to use the defaults.
 
-The same `[telemetry]` table also configures the **external OpenTelemetry stream**, an independent opt-in (it doesn't require the telemetry toggle above) that ships a curated, content-free usage schema to your *own* OTLP collector. Collector auth comes from `OTEL_EXPORTER_OTLP_HEADERS` and is never stored on disk. See [Monitoring & Usage](24-monitoring-usage.md) for the full schema, env vars, and privacy model.
+The same `[telemetry]` table also configures the **external OpenTelemetry stream**, an independent opt-in (it does not require the telemetry toggle above) that ships a curated, content-free usage schema. This is to your *own* OTLP collector. Collector auth comes from `OTEL_EXPORTER_OTLP_HEADERS` and is never stored on disk. See [Monitoring & Usage](24-monitoring-usage.md) for the full schema, env vars, and privacy model.
 
 ```toml
 [telemetry]
@@ -677,10 +669,7 @@ otel_log_tool_details = true                              # metadata/preview; en
 otel_log_tool_content = false                             # full-body gate; independent of details — does not imply names/paths
 ```
 
-Listed `[telemetry] otel_*` keys in signed `requirements.toml` **pin** over
-process env (destination lock). `managed_config.toml` does not. There is no
-`headers` key — collector tokens stay in `OTEL_EXPORTER_OTLP_HEADERS`. See
-[Monitoring & Usage](24-monitoring-usage.md).
+Listed `[telemetry] otel_*` keys in signed `requirements.toml` **pin** over process env (destination lock). `managed_config.toml` does not. There is no `headers` key — collector tokens stay in `OTEL_EXPORTER_OTLP_HEADERS`. See [Monitoring & Usage](24-monitoring-usage.md).
 
 ### Removed keys
 
@@ -745,7 +734,7 @@ mouse_hover = true                    # show hover highlight on the prompt widge
 show_prefix = true                    # show the prompt prefix character
 ```
 
-Compact mode isn't persisted here — control it at runtime with `[ui] compact_mode` or the `/compact-mode` command.
+Compact mode is not persisted here — control it at runtime with `[ui] compact_mode` or the `/compact-mode` command.
 
 ### Scrollback
 
@@ -784,7 +773,7 @@ highlight_overlays_border = false     # highlight extends over selection box bor
 dim_accent = 0.5                      # dimming factor for collapsed accents (0.0-1.0)
 ```
 
-`respect_manual_folds` is off by default. Turn it on and a block you fold by hand is pinned: streaming updates and finish events (a thinking block ending, say) leave its fold state alone, and expanding a block while follow-mode is tailing new content stops the auto-scroll so the view stays put. Follow resumes via `Shift+G`, `j` at the last entry, scrolling past the bottom, or sending a new prompt. `Shift+E` clears all pins; `Ctrl+E` clears pins on thinking blocks.
+`respect_manual_folds` is off by default. Turn it on and a block you fold by hand is pinned: streaming updates. Finish events (a thinking block ending, say) leave its fold state alone, and expanding a block while follow-mode is tailing new content stops the auto-scroll. As a result, the view stays put. Follow resumes via `Shift+G`, `j` at the last entry, scrolling past the bottom, or sending a new prompt. `Shift+E` clears all pins. `Ctrl+E` clears pins on thinking blocks.
 
 ### Block configuration
 
@@ -967,7 +956,7 @@ Project-scoped MCP servers override global ones with the same name (full replace
 
 ## LSP servers
 
-Language servers power passive diagnostics and the optional `lsp` tool (see the [`lsp_tools`](#general-settings) feature flag). Definitions come from three sources and merge by server name:
+Language servers power passive diagnostics and the optional `lsp` tool (see the [`lsp_tools`](#general-settings) feature flag). Definitions come from multiple sources and merge by server name:
 
 | Source | Location | Scope |
 |--------|----------|-------|
@@ -981,4 +970,4 @@ When the same server name comes from more than one source, it resolves highest-p
 2. **User** — `~/.grok/lsp.json`
 3. **Plugins** — file-based `.lsp.json`, then inline `lspServers`, in plugin load order
 
-Project and user entries replace lower-priority ones of the same name. Plugin entries only add servers whose names aren't already defined by a local file, so a local `lsp.json` always wins over a plugin. Plugin LSP servers load only after the plugin is trusted (see [Plugins](09-plugins.md)).
+Project and user entries replace lower-priority ones of the same name. Plugin entries only add servers whose names are not already defined by a local file, so a local `lsp.json` always wins over a plugin. Plugin LSP servers load only after the plugin is trusted (see [Plugins](09-plugins.md)).

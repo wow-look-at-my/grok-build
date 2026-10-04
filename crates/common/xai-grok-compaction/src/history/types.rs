@@ -9,12 +9,9 @@ pub enum CompactionStrategy {
     /// Send all turns to the LLM in one shot (original behaviour).
     #[default]
     Basic,
-    /// Divide turns into ≤ `dnc_chunk_token_limit` chunks, compact each,
-    /// then combine the summaries into a final compaction.
+    /// Divide turns into ≤ `dnc_chunk_token_limit` chunks, compact each.
     DivideAndConquer,
-    /// grok-build style full-replace summarization: summarize the selected
-    /// persisted history range with the code-compaction full-replace prompt and
-    /// persist the summary as the durable conversation compaction overlay.
+    /// grok-build style full-replace summarization: summarize the selected persisted history range.
     FullReplace,
 }
 

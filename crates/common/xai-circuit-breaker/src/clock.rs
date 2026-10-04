@@ -1,8 +1,4 @@
 //! Time source abstraction used by [`crate::CircuitBreaker`].
-//!
-//! Production uses [`SystemClock`]. Tests construct a [`MockClock`]
-//! (gated on `cfg(test)` and the `test-hooks` feature) to drive
-//! open-duration windows deterministically.
 
 #[cfg(any(test, feature = "test-hooks"))]
 use std::sync::Mutex;

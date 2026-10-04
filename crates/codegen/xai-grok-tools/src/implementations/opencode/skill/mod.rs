@@ -1,8 +1,4 @@
 //! `skill` tool — OpenCode variant of the skill tool.
-//!
-//! Loads a user-defined skill by name, reads its `SKILL.md` content,
-//! lists up to 10 bundled files from the skill directory, and returns
-//! the result wrapped in `<skill_content>` XML.
 
 use std::path::Path;
 
@@ -326,7 +322,6 @@ impl xai_tool_runtime::Tool for SkillTool {
             );
         }
 
-        // ── List bundled files (up to 10) ────────────────────────────
         let files = list_skill_files(&skill, 10).await;
 
         // ── Build output ─────────────────────────────────────────────
@@ -437,7 +432,7 @@ mod tests {
             make_test_skill("commit", SkillScope::User, "/path/user"),
         ];
 
-        // Short name "commit" matches two scopes -- should be Ambiguous.
+        // Short name "commit" matches scopes -- should be Ambiguous.
         let result = find_skill("commit", &skills);
         match result {
             FindSkillResult::Ambiguous(qualified) => {
@@ -914,7 +909,6 @@ mod tests {
         )
         .unwrap();
 
-        // Create 15 extra files in the skill directory.
         for i in 1..=15 {
             std::fs::write(
                 tmp.path().join(format!("file{i:02}.txt")),

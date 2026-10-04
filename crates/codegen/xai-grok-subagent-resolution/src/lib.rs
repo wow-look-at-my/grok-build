@@ -1,16 +1,4 @@
 //! Extracts the pure-logic "resolution" phase of subagent spawning from `xai-grok-shell` into a reusable library.
-//! Given a spawn request and a resolution context (roles, personas, parent state), this crate resolves:
-//!
-//! - Effective runtime config (model, persona, capability mode, isolation) via precedence: explicit override > role > persona > parent.
-//! - Persona instruction loading (inline `instructions` and `instructions_file`).
-//! - Role prompt file loading.
-//! - Resume identity validation (type/persona match checks; a model override is silently ignored).
-//!
-//! This crate has no dependency on session, coordinator, or transport types.
-//! It serves local hosts (e.g. `xai-grok-shell`) and any future remote spawn path that needs only pure resolution logic.
-//!
-//! Definition discovery, gating, prompt context, runtime defaults, and capability/depth tool policy are shared here.
-//! Choosing the model from the catalog and creating the child workspace stay in the host adapters.
 
 #![deny(clippy::indexing_slicing)]
 

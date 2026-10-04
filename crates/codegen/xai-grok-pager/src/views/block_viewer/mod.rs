@@ -1,10 +1,4 @@
 //! Fullscreen content viewer for scrollback blocks.
-//!
-//! Opens via Ctrl-F on a selected block, replaces the scrollback area.
-//! Provides ListPane-based navigation, search, visual-select, and copy.
-//!
-//! Supports thinking/agent message blocks (markdown content).
-//! Execute and edit viewers will be added in later phases.
 
 use std::time::Instant;
 
@@ -160,13 +154,11 @@ pub struct BlockViewerPane {
     pub copy_meta_pending: bool,
     /// Set by handle_key when 'y' is pressed on edit blocks. Caller should copy patch.
     pub copy_content_pending: bool,
-    /// Per-item diff metadata for edit viewer (parallel to `items`).
-    /// `None` entries are separator lines between hunks.
+    /// Per-item diff metadata for edit viewer (parallel to `items`). `None` entries are separator lines between hunks.
     diff_meta: Vec<Option<DiffLineMeta>>,
     /// Last observed content generation (for streaming change detection).
     last_generation: u64,
     /// Whether the block was running when the viewer last checked.
-    /// Used to detect the transition from running to finished (disable follow once).
     was_running: bool,
     /// Task ID for BgTask viewers (for looking up stdout in central store).
     pub bg_task_id: Option<String>,
@@ -174,17 +166,12 @@ pub struct BlockViewerPane {
     last_theme: ThemeKind,
     /// Modal chrome state (close button hover, popup area, etc.).
     pub modal: ModalWindowState,
-    /// Cached prepend (preamble) ContentLines from the last render, combined with `items` to produce the unified vec the ListPane sees.
-    /// Needed so scroll / mouse / key handlers index into the same item space the layout was prepared against (`prepared_items_count`).
+    /// Cached prepend (preamble) ContentLines from the last render, combined with `items`.
     prepend_items: Vec<ContentLine>,
     pub text_drag: Option<TextDrag>,
     /// Text copied on the last drag release.
-    /// The `Up(Left)` handler extracts the text immediately (same as scrollback `finish_text_drag`).
-    /// The caller drains this with `.take()` and copies it to the clipboard.
     pub drag_copy_text: Option<String>,
     /// Cached unified items vec (prepend then body).
-    /// Rebuilt by `rebuild_unified_cache` to avoid re-cloning on every handler and render call within the same frame.
-    /// Callers that hold `&mut self` call `rebuild_unified_cache()` first, then reference `self.cached_unified` via a disjoint field borrow.
     cached_unified: Vec<ContentLine>,
     click_count: u8,
     last_click_at: Option<Instant>,
@@ -883,8 +870,7 @@ impl BlockViewerPane {
             &config,
         );
 
-        // Build a flat list of DiffLine references from all hunks, interleaving None for separator lines (which render_diff_lines inserts)
-        // The rendered output has: [hunk0 lines...] [separator] [hunk1 lines...] ...
+        // Build a flat list of DiffLine references from all hunks.
         let mut meta_source: Vec<Option<&xai_grok_pager_diff::DiffLine>> = Vec::new();
         for (i, hunk) in edit.hunks.iter().enumerate() {
             if i > 0 && !config.hunk_separator.is_empty() {
@@ -892,8 +878,6 @@ impl BlockViewerPane {
             }
             for diff_line in hunk {
                 meta_source.push(Some(diff_line));
-                // Wrapped lines: render_diff_hunk_highlighted may produce multiple DiffLineOutput per DiffLine
-                // For now, assume 1:1 mapping since we use width=500 (very wide, unlikely to wrap)
             }
         }
 
@@ -1025,8 +1009,7 @@ impl BlockViewerPane {
         if self.was_running && !entry.is_running {
             self.was_running = false;
             self.list_state.disable_follow_permanently();
-            // Layout may be stale after invalidate_layout, so we can't use select_last, which reads layout.item_count
-            // select_by_id is resolved on next prepare_layout
+            // Layout may be stale after invalidate_layout.
             if let Some(id) = self.last_nonempty_body_id() {
                 self.list_state.select_by_id(id);
             }
@@ -1292,8 +1275,6 @@ impl BlockViewerPane {
             self.copy_content_pending = false;
             let result = if self.kind == ViewerKind::Edit {
                 // Patch from copy range (visual selection or current line).
-                // copy_range() returns indices into the unified vec (prepend then items), but diff_meta is parallel to items only
-                // Adjust by subtracting the prepend offset so we index diff_meta correctly
                 let copy_range = self.list_state.copy_range();
                 let path = match &entry.block {
                     RenderBlock::ToolCall(ToolCallBlock::Edit(edit)) => Some(&edit.path),
@@ -1428,9 +1409,7 @@ impl BlockViewerPane {
 
         self.last_content_area = content_area;
 
-        // Cache prepend lines as ContentLines so the input handlers (scroll / mouse / key) can rebuild the same unified vec the ListPane saw
-        // Otherwise they index a smaller `items` vec and panic when the cursor / scroll math points past its end
-        // Header IDs are placed in the high u64 range so they never collide with content IDs (which start at 0 and grow upward)
+        // Cache prepend lines as ContentLines so the input handlers (scroll / mouse / key).
         self.install_prepend_lines(prepend_lines);
         self.ensure_body_cursor();
 

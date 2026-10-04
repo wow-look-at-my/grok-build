@@ -7,20 +7,17 @@ use xai_grok_voice::VoiceEvent;
 use crate::app::app_view::{AppView, VoiceTarget};
 use crate::views::prompt_widget::PromptWidget;
 
-/// Whether a draft counts as blank for voice insertion: an empty or whitespace-only draft is
-/// replaced wholesale rather than dictated into. Shared by the insert, submit-merge, and ghost
-/// preview paths so they agree on what "blank" means.
+/// Whether a draft counts as blank for voice insertion.
 pub(crate) fn prompt_blank_for_voice(text: &str) -> bool {
     text.trim().is_empty()
 }
 
-/// Wraps a voice `fragment` with a leading and/or trailing space so it reads as its own word at
-/// byte offset `at` in `text`, adding each space only where the neighbor is non-whitespace.
-///
-/// `text`/`at` must describe the buffer as it will look when the fragment lands — with any active
-/// selection already removed — so the neighbors are the characters that actually end up adjacent.
-/// `at` must be a UTF-8 char boundary. The insertion, the submit merge, and the ghost preview all
-/// route through this so their spacing cannot drift.
+/// Wraps a voice `fragment` with a leading and/or trailing space so it reads
+/// as its own word at byte offset `at` in `text`, adding each space only
+/// where the neighbor is non-whitespace. `text`/`at` must describe the buffer
+/// as it will look when the fragment lands — with any active selection
+/// already removed — so the neighbors are the characters that end up
+/// adjacent. `at` must be a UTF-8 char boundary.
 pub(crate) fn space_voice_fragment(text: &str, at: usize, fragment: &str) -> String {
     let needs_leading = at > 0
         && text
@@ -83,13 +80,11 @@ pub(crate) fn merge_voice_fragment(
     merged
 }
 
-/// A promoted interim fragment plus the span it replaced, so a submit path that merges a separately
-/// captured payload can drop the fragment at the same place — replacing the same selection — instead
-/// of appending it.
+/// A promoted interim fragment plus the span it replaced, so a submit path
+/// that merges a separately captured payload can drop the fragment.
 pub(crate) struct VoiceInterimCommit {
     pub fragment: String,
-    /// Byte range replaced in the bound draft: the active selection at commit time, or an empty
-    /// range at the caret. `None` only when the draft was unreachable (append fallback).
+    /// Byte range replaced in the bound draft: the active selection at commit time, or an empty range at the caret.
     pub replace: Option<Range<usize>>,
 }
 
@@ -136,8 +131,7 @@ fn insert_voice_fragment_into_widget(prompt: &mut PromptWidget, fragment: &str) 
         None => (existing.to_owned(), prompt.cursor()),
     };
     let insertion = space_voice_fragment(&base, at, fragment);
-    // Route through insert_replacing_selection so dictation over a selection replaces it the way
-    // typed input would, and any image chips the selection spanned get resynced.
+    // Route through insert_replacing_selection so dictation over a selection replaces it the way typed input would.
     prompt.insert_replacing_selection(&insertion);
 }
 
@@ -156,9 +150,8 @@ pub(crate) fn commit_interim_into_prompt(app: &mut AppView) -> Option<VoiceInter
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .map(str::to_owned)?;
-    // Span replaced in the bound draft before insertion — the active selection, or an empty range
-    // at the caret — so a submit path merging a separately captured payload replaces the same span
-    // the live insertion does instead of leaving the selected text in place.
+    // Span replaced in the bound draft before insertion — the active
+    // selection, or an empty range at the caret.
     let replace = bound_voice_prompt_mut(app).map(|prompt| match prompt.selection_range() {
         Some(sel) => sel,
         None => {
@@ -183,8 +176,8 @@ pub fn handle_voice_event(app: &mut AppView, event: VoiceEvent) -> bool {
         }
         VoiceEvent::UtteranceFinal { text } => {
             app.voice_clear_interim();
-            // The mic stays open across pauses; the user stops it explicitly, then presses Enter to send
-            // The bound target survives a stop (`Stopping`), so a trailing final after an explicit stop still lands
+            // The mic stays open across pauses; the user stops it explicitly, then presses Enter to send The bound
+            // target survives a stop (`Stopping`).
             if !text.trim().is_empty() {
                 insert_voice_text_into_prompt(app, text.trim());
             }

@@ -1,13 +1,4 @@
 //! Single-flight guard for interactive login.
-//!
-//! At most one device-code or loopback wait runs at a time.
-//! Starting a new attempt (or an explicit `x.ai/auth/cancel`) cancels the previous one, so a remint or retry cannot stack device-code flows.
-//!
-//! The attempt owns **all** attempt-scoped state: the cancellation token and the code/url channels.
-//! Replacing an attempt therefore swaps everything atomically.
-//! A cancelled predecessor that finishes late structurally cannot touch its successor's channels.
-//! Generations guard `end()` the same way: a stale finisher must not clear a newer attempt.
-//! Client `request_seq` scopes explicit cancels so a delayed `x.ai/auth/cancel` cannot tear down a successor login.
 
 use std::cell::{Cell, RefCell};
 use tokio_util::sync::CancellationToken;
@@ -20,7 +11,6 @@ pub struct AttemptChannels {
     /// Forwards pasted codes from `x.ai/auth/submit_code` to the flow.
     code_tx: tokio::sync::mpsc::Sender<String>,
     /// Yields the auth URL to `x.ai/auth/get_url`.
-    /// `Option` so [`AuthSingleFlight::take_url_rx`] can move it out while the attempt lives on (one-shot read).
     url_rx: Option<tokio::sync::oneshot::Receiver<AuthUrlInfo>>,
 }
 
@@ -47,7 +37,6 @@ pub struct AuthSingleFlight {
 }
 
 /// RAII end for a [`AuthSingleFlight::begin`] generation.
-/// Calls [`AuthSingleFlight::end`] on drop so an aborted authenticate future cannot leak attempt state.
 pub struct AuthAttemptGuard<'a> {
     sf: &'a AuthSingleFlight,
     generation: u64,
@@ -103,8 +92,8 @@ impl AuthSingleFlight {
         )
     }
 
-    /// Finish an attempt: drops its token *and channels* only if `generation` is still the active one.
-    /// A stale finisher must not clear a newer attempt's state.
+    /// Finish an attempt: drops its token *and channels* only if `generation`
+    /// is still the active one.
     pub fn end(&self, generation: u64) {
         if self.generation.get() == generation {
             *self.active.borrow_mut() = None;
@@ -112,7 +101,6 @@ impl AuthSingleFlight {
     }
 
     /// Cancel the active attempt, if any. Idempotent.
-    /// Prefer [`Self::cancel_for_client_seq`] when the caller has a pager `request_seq` so a delayed cancel cannot tear down a newer login.
     pub fn cancel(&self) {
         if let Some(prev) = self.active.borrow_mut().take() {
             tracing::info!("auth: interactive auth cancelled");
@@ -248,7 +236,7 @@ mod tests {
         let (ch, mut code_rx) = channels();
         let (_second, _g2) = sf.begin(Some(ch), Some(2));
 
-        sf.end(first_gen); // stale finisher (attempt #1's cleanup)
+        sf.end(first_gen);
 
         sf.submit_code("1234".into())
             .expect("successor's code channel must still be wired");
@@ -287,7 +275,7 @@ mod tests {
         let (first, _g1) = sf.begin(None, Some(1));
         let (second, _g2) = sf.begin(None, Some(2));
         assert!(first.is_cancelled());
-        sf.cancel_for_client_seq(1); // delayed cancel for attempt 1
+        sf.cancel_for_client_seq(1);
         assert!(
             !second.is_cancelled(),
             "stale cancel must not tear down the successor"

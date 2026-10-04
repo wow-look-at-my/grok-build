@@ -1,14 +1,12 @@
 //! Default action definitions for the MVP.
-//!
-//! All key bindings are defined here, not scattered across event handlers.
 
 use crate::key;
 use crate::terminal::{TerminalName, terminal_context};
 
 use super::{ActionDef, ActionId, Category, When};
 
-/// True when `Ctrl+.` is not a reliable primary key for the shortcuts cheatsheet. Both keys stay registered either
-/// way; this only chooses which the UI advertises.
+/// True when `Ctrl+.` is not a reliable primary key for the shortcuts
+/// cheatsheet.
 pub fn ctrl_dot_unreliable() -> bool {
     terminal_context().ctrl_dot_unreliable() || cfg!(target_os = "windows") || crate::host::is_wsl()
 }
@@ -18,8 +16,7 @@ pub fn ctrl_dot_unreliable() -> bool {
 /// `mouse_reporting_toggle_enabled` gates the opt-in `ToggleMouseCapture` shortcut (see below); pass `false` for the standard set.
 pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<ActionDef> {
     let ctx = terminal_context();
-    // xterm.js embeds have no KKP and the host often steals Ctrl+I
-    // Share one family flag for quit / half-page / interject so VS Code-family embeds match VS Code
+    // xterm.js embeds have no KKP and the host often steals Ctrl+I Share one family flag for quit / half-page / interject.
     let in_vscode_family = ctx.brand.is_vscode_family();
     let in_vscode = in_vscode_family;
     let in_apple_terminal = ctx.brand == TerminalName::AppleTerminal;
@@ -518,16 +515,13 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             id: ActionId::ToggleQueue,
             label: "queue",
             description: "Toggle prompt queue",
-            // Local macOS VS Code family only: ; / ' often never arrive (saw Ctrl+4 in input-debug)
-            // SSH and non-Mac keep ; with ' as alt
-            // Win/Linux VS maps Ctrl+4 to focusFourthEditorGroup
+            // Local macOS VS Code family only:; / ' often never arrive (saw Ctrl+4 in input-debug) SSH and non-Mac keep; with '.
             default_key: if local_mac_vscode {
                 key!('4', CONTROL)
             } else {
                 key!(';', CONTROL)
             },
-            // Apostrophe alt for consoles that drop Ctrl on `;`
-            // Local Mac VS also keeps ; / ' as alts alongside primary Ctrl+4
+            // Apostrophe alt for consoles that drop Ctrl on `;` Local Mac VS also keeps.
             alt_keys: if local_mac_vscode {
                 vec![key!(';', CONTROL), key!('\'', CONTROL)]
             } else {
@@ -604,8 +598,7 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             } else {
                 key!(Enter, CONTROL)
             },
-            // Windows: Ctrl+Enter may drop Ctrl, so Ctrl+I is an alt
-            // VS Code family: no alts (Ctrl+L sole chord; OpenExtensions unbound so it does not steal)
+            // Windows: Ctrl+Enter may drop Ctrl, so Ctrl+I is an alt VS Code family.
             alt_keys: if in_apple_terminal {
                 vec![key!(Enter, CONTROL), key!('i', CONTROL)]
             } else if in_vscode_family {
@@ -637,8 +630,7 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             long_help: None,
         },
         ActionDef {
-            // Voice capture chord (the same capture as `/voice`; Esc/Enter stop). Ctrl+Space decodes on every terminal
-            // (without the Kitty protocol it collapses to NUL, reported as `Char(' ')`+CONTROL).
+            // Voice capture chord (the same capture as `/voice`; Esc/Enter stop).
             id: ActionId::VoiceToggle,
             label: "mic",
             description: "Voice dictation (Ctrl+Space / F8)",
@@ -654,8 +646,7 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
                 "Microphone capture for dictation, bound to Ctrl+Space (or F8: handy where Ctrl+Space is taken, e.g. macOS input-source switching; use Fn+F8 on a laptop).\nBehavior follows the Voice capture setting: toggle (press to start, press again to stop) or hold-to-talk (hold to record, release to stop), where hold needs a Kitty-protocol terminal and falls back to toggle elsewhere. `/voice` toggles everywhere.\nSpeech is transcribed straight into the prompt.",
             ),
         },
-        // Prompt history has no key chord of its own:
-        // `/history` opens the search panel; Up on an empty prompt browses.
+        // Prompt history has no key chord of its own: `/history` opens the search panel; Up on an empty prompt browses.
         ActionDef {
             id: ActionId::ToggleMultiline,
             label: "multiline",
@@ -851,8 +842,8 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             label: "dashboard",
             description: "Open the Agent Dashboard",
             default_key: key!('\\', CONTROL),
-            // Classic C0 FS (0x1c): without KKP, Ctrl+\ arrives as Char('4')+CONTROL (e.g. Apple Terminal).
-            // Omit when ToggleQueue already owns Ctrl+4
+            // Classic C0 FS (0x1c): without KKP, Ctrl+\ arrives as
+            // Char('4')+CONTROL (e.g. Apple Terminal).
             alt_keys: if local_mac_vscode {
                 vec![]
             } else {
@@ -943,8 +934,7 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             id: ActionId::DashboardCycleMode,
             label: "mode",
             description: "Cycle dispatch mode",
-            // All Shift+Tab encodings; see `input::key::shift_tab_keys()`
-            // Registry `matches` is exact-modifier, so the SHIFT-bearing forms must be alts
+            // All Shift+Tab encodings.
             default_key: crate::input::key::shift_tab_keys()[0],
             alt_keys: crate::input::key::shift_tab_keys()
                 .get(1..)
@@ -963,9 +953,7 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             id: ActionId::DashboardToggleGrouping,
             label: "group",
             description: "Toggle row grouping",
-            // `Ctrl+G` ("group")
-            // `Ctrl+S` was reassigned to the peek / dispatch "send + open" chord so `Shift+Enter` could be freed for newline insertion
-            // (`Ctrl+G` also has a mode-specific `When::AgentScreen` action, a context that never overlaps the dashboard.)
+            // `Ctrl+G` ("group") `Ctrl+S` was reassigned to the peek / dispatch "send + open" chord so `Shift+Enter` could be freed.
             default_key: key!('g', CONTROL),
             alt_keys: vec![],
             category: Category::Dashboard,
@@ -1026,9 +1014,11 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             requires_confirmation: false,
             long_help: None,
         },
-        // `DashboardExit` is registered as a discoverable action with its default key set to Esc. The Esc cascade in
-        // `state::handle_key` runs before this registry lookup, so Esc always cascades. The original Esc cascade still
-        // works because the cascade is keyed on `KeyCode::Esc` directly. The contract is therefore: "Esc always cascades.
+        // `DashboardExit` is registered as a discoverable action with its
+        // default key set to Esc. The Esc cascade in `state::handle_key` runs
+        // before this registry lookup, so Esc always cascades. The Esc
+        // cascade still works because the cascade is keyed on `KeyCode::Esc`
+        // directly. The contract is therefore: "Esc always cascades.
         ActionDef {
             id: ActionId::DashboardExit,
             label: "exit",
@@ -1102,9 +1092,7 @@ pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<Actio
             id: ActionId::DashboardOverlayExit,
             label: "close overlay",
             description: "Back to dashboard",
-            // The primary back-out shortcuts are reached through different routes. A `[✗]` click, routed via this action by
-            // the mouse handler The `default_key` mirrors the primary route, Ctrl+\ (OpenDashboard, treated as overlay-exit),
-            // so the cheatsheet hint is accurate (Ctrl+W is not used here.
+            // The primary back-out shortcuts are reached through different routes.
             default_key: key!('\\', CONTROL),
             alt_keys: vec![],
             category: Category::Dashboard,

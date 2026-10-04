@@ -1,31 +1,4 @@
-//! This module provides scrollbar rendering using `tui-scrollbar` for smooth Unicode-based scrollbars with sub-character precision.
-//!
-//! # Visual Design
-//!
-//! The scrollbar visibility indicates follow mode state:
-//! - **Following (at bottom):** Very dim scrollbar (subtle indicator of content above)
-//! - **Not following:** Brighter scrollbar (draws attention to "scrolled up" state)
-//!
-//! # Layout
-//!
-//! Callers should reserve space for the scrollbar:
-//! - 1 column gap (visual separation from content)
-//! - 1 column track (the scrollbar itself)
-//!
-//! Use [`split_area_for_scrollbar`] to compute content and scrollbar areas.
-//!
-//! # TODO: Mouse Support
-//!
-//! `tui-scrollbar` already provides mouse interaction support via:
-//! - [`tui_scrollbar::ScrollBarInteraction`] for drag state
-//! - [`tui_scrollbar::ScrollEvent`] / [`tui_scrollbar::PointerEvent`] for input
-//! - [`tui_scrollbar::ScrollBar::handle_event`] for hit testing and drag math
-//!
-//! To wire this up:
-//! 1. Store `ScrollBarInteraction` in pane state
-//! 2. Translate crossterm `MouseEvent` to `tui_scrollbar::PointerEvent`
-//! 3. Call `scrollbar.handle_event()` to get `ScrollCommand::SetOffset`
-//! 4. Update scroll position accordingly
+//! This module provides scrollbar rendering using `tui-scrollbar` for smooth Unicode-based scrollbars.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -40,8 +13,6 @@ use tui_scrollbar::ScrollLengths;
 use tui_scrollbar::{SUBCELL, ScrollMetrics};
 
 /// When set, every scrollbar renders as a no-op.
-/// The pager toggles this on in minimal (scrollback-native) mode, where lists/dropdowns show no scrollbar at all.
-/// They scroll internally and the footer carries the "↑/↓ navigate" hint.
 static SCROLLBARS_HIDDEN: AtomicBool = AtomicBool::new(false);
 
 /// Globally hide or show all scrollbars. See [`SCROLLBARS_HIDDEN`].
@@ -87,9 +58,8 @@ pub fn split_area_for_scrollbar(area: Rect) -> (Rect, Option<Rect>) {
     (content_area, Some(scrollbar_area))
 }
 
-/// Unlike [`split_area_for_scrollbar`], this gives full width to content when scrollbar won't be shown (`total_lines <= viewport_lines`).
-///
-/// Use this when you know the content height before splitting.
+/// Unlike [`split_area_for_scrollbar`], this gives full width to content when
+/// scrollbar won't be shown (`total_lines <= viewport_lines`).
 pub fn maybe_split_for_scrollbar(area: Rect, total_lines: u16) -> (Rect, Option<Rect>) {
     if needs_scrollbar(total_lines, area.height) {
         split_area_for_scrollbar(area)
@@ -103,7 +73,6 @@ pub fn needs_scrollbar(total_lines: u16, viewport_lines: u16) -> bool {
     total_lines > viewport_lines
 }
 
-/// Track plus one column of slop: a thumb flush against a border is read as a two-column widget, so near-miss presses must still grab.
 pub fn scrollbar_grab_zone(track: Rect) -> Rect {
     let x = track.x.saturating_sub(SCROLLBAR_GAP_COLS);
     Rect {
@@ -182,8 +151,8 @@ pub fn render_scrollbar(
     );
 }
 
-/// Some emulators (notably macOS Terminal.app) do not stretch the `█` glyph over the cell's line-gap pixels.
-/// A foreground-only thumb therefore renders striped with dark bars; the background fill covers the whole cell box.
+/// Some emulators (notably macOS Terminal.app) do not stretch the `█` glyph
+/// over the cell's line-gap pixels.
 fn thumb_fill_style(thumb_style: Style) -> Style {
     match thumb_style.fg {
         Some(fg) => thumb_style.bg(fg),
@@ -195,7 +164,7 @@ fn thumb_fill_style(thumb_style: Style) -> Style {
 fn scrollbar_styles(is_following: bool) -> (Style, Style) {
     let theme = crate::theme::Theme::current();
     if is_following {
-        // Very dim: scrollbar is subtle when following
+        // Dim: scrollbar is subtle when following
         let track_style = Style::new().bg(theme.scrollbar_bg);
         let thumb_style = Style::new().fg(theme.scrollbar_fg).bg(theme.scrollbar_bg);
         (track_style, thumb_style)
@@ -281,7 +250,6 @@ mod tests {
         let area = Rect::new(0, 0, 40, 10);
         let (content, scrollbar) = split_area_for_scrollbar(area);
 
-        // Content width is 40 minus the 2 columns for gap + track
         assert_eq!(content.width, 38);
         assert_eq!(content.height, 10);
 
@@ -304,9 +272,8 @@ mod tests {
     fn test_maybe_split_reserves_when_needed() {
         let area = Rect::new(0, 0, 40, 10);
 
-        // Content overflows (20 > 10), so scrollbar space is reserved
         let (content, scrollbar) = maybe_split_for_scrollbar(area, 20);
-        assert_eq!(content.width, 38); // Reduced by 2 for gap + scrollbar track
+        assert_eq!(content.width, 38);
         assert!(scrollbar.is_some());
     }
 
@@ -314,7 +281,6 @@ mod tests {
     fn test_maybe_split_full_width_when_not_needed() {
         let area = Rect::new(0, 0, 40, 10);
 
-        // Content fits (5 <= 10), so content gets full width
         let (content, scrollbar) = maybe_split_for_scrollbar(area, 5);
         assert_eq!(content.width, 40);
         assert!(scrollbar.is_none());
@@ -373,8 +339,7 @@ mod tests {
 
     #[test]
     fn test_render_scrollbar_following_vs_not() {
-        // Pinned: asserts distinct RGB thumb bgs, which the ambient terminal
-        // theme (all-Reset bgs) legitimately doesn't produce.
+        // Pinned: asserts distinct RGB thumb bgs.
         let _guard = crate::theme::cache::pin_theme();
         let area = Rect::new(0, 0, 10, 10);
         let (_, scrollbar_area) = split_area_for_scrollbar(area);

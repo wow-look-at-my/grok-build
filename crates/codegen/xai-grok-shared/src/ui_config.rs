@@ -9,14 +9,7 @@ pub struct UiConfig {
     pub max_thoughts_width: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
-    /// The `[models]` harness model slots the user set, keyed by slot id
-    /// (`xai_grok_models::HARNESS_MODEL_SLOTS`). A slot the user left alone
-    /// is absent, and the settings modal shows it as "(no override)".
-    ///
-    /// This is a READ-ONLY projection of the `[models]` table for the
-    /// settings modal, not a `[ui]` key: `[models]` stays the one place a
-    /// slot is written. Hence `serde(skip)` — serializing it would put a
-    /// second copy under `[ui]` for the next reader to disagree with.
+    /// The `[models]` harness model slots the user set, keyed by slot id (`xai_grok_models::HARNESS_MODEL_SLOTS`).
     #[serde(skip)]
     pub harness_models: std::collections::BTreeMap<String, String>,
     /// YOLO mode. Read by `util::config`, declared here for `serde_ignored`.
@@ -37,75 +30,47 @@ pub struct UiConfig {
     /// Legacy name for `permission_mode`. Declared for `serde_ignored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_mode: Option<String>,
-    /// Which permission option the cursor preselects on the first permission prompt of a session. One of `allow_once`,
-    /// `allow_always`, or `reject`. After the first prompt, the cursor sticks to the user's last-used option kind. When
-    /// unset, the first prompt preselects the "Always allow on all sessions" (enable-always-approve) row.
+    /// Which permission option the cursor preselects on the first permission prompt of a session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_selected_permission: Option<String>,
     /// Written by the pager's appearance persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_timestamps: Option<bool>,
-    /// Timeline sidebar (per-turn tick rail in place of the scrollbar).
-    /// `None` means off (client default; opt-in). Written by the pager's settings modal.
+    /// Timeline sidebar (per-turn tick rail in place of the scrollbar). `None` means off (client default; opt-in).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_timeline: Option<bool>,
     /// The dashboard preview includes the selected session's reply panel. Unset means on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dashboard_preview: Option<bool>,
-    /// Snap a just-sent prompt to the viewport top. `None` means on (default).
-    /// Written by the pager's settings modal.
+    /// Snap a just-sent prompt to the viewport top. `None` means on (default). Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_flip_on_send: Option<bool>,
     /// Ask before rewinding conversation history. `None` means on (default).
-    /// Written by the pager's settings modal / rewind "Yes, and don't ask again".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm_before_rewind: Option<bool>,
-    /// Gate the model's turn end on unfinished todos: like a stop hook, the
-    /// model is sent back to finish or close them, and only after the stop-hook
-    /// continuation budget is exhausted can it stop anyway. `None` = on
-    /// (default). Written by the pager's settings modal
-    /// (`[ui].stop_gate_unfinished_todos`).
+    /// Gate the model's turn end on unfinished todos.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_gate_unfinished_todos: Option<bool>,
-    /// Gate the model's turn end on red CI for the branch it pushed: the model
-    /// is sent back to read the failing logs and fix them, and only after the
-    /// stop-hook continuation budget is exhausted can it stop anyway. A branch
-    /// with no runs, or with runs still in flight, never blocks a stop.
-    /// `None` = on (default). (`[ui].stop_gate_ci_failing`.)
+    /// Gate the model's turn end on red CI for the branch it pushed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_gate_ci_failing: Option<bool>,
-    /// Reissue a model call whose output rate stays under this many tokens per
-    /// second for [`Self::output_rate_sustained_secs`]. `None` or `0` = off,
-    /// which is the default: a floor belongs to an endpoint that collapses,
-    /// and a session-wide guess would reissue against a model that is merely
-    /// slow. `[model.<id>].min_output_tokens_per_sec` overrides it for one
-    /// model. (`[ui].min_output_tokens_per_sec`.)
+    /// Reissue a model call whose output rate stays under this many tokens per second.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<u32>,
-    /// How long the rate must stay under the floor before the request is
-    /// reissued. `None` = 10 seconds. A dip shorter than this is a pause, not
-    /// a collapsed engine. (`[ui].output_rate_sustained_secs`.)
+    /// How long the rate must stay under the floor before the request is reissued. `None` = 10 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_sustained_secs: Option<u32>,
     /// Trailing window the output rate is averaged over. `None` = 10 seconds.
-    /// A legacy `[output_rate_floor].window_secs` applies when this is unset.
-    /// (`[ui].output_rate_window_secs`.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_window_secs: Option<u32>,
-    /// How many times one model call is reissued for slow output before the
-    /// response is accepted at whatever rate it runs. `None` = 2. A legacy
-    /// `[output_rate_floor].max_retries` applies when this is unset.
-    /// (`[ui].output_rate_max_retries`.) `-1` or `"unlimited"` never runs out.
+    /// How many times one model call is reissued for slow output before the response is accepted.
     #[serde(
         default,
         with = "xai_grok_config_types::retry_budget",
         skip_serializing_if = "Option::is_none"
     )]
     pub output_rate_max_retries: Option<u32>,
-    /// Reissue a model call that has produced no output this many seconds
-    /// after the request was sent. `None` = 120 seconds, `0` = off. It shares
-    /// the output-rate reissue budget. `[model_providers.<id>]` and
-    /// `[model.<id>]` override it. (`[ui].ttft_timeout_secs`.)
+    /// Reissue a model call that has produced no output this many seconds after the request was sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttft_timeout_secs: Option<u32>,
     /// The most model requests this process sends at once.
@@ -117,58 +82,41 @@ pub struct UiConfig {
     /// Theme to use when the OS is in light mode. Written by the pager's theme persist module.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_light_theme: Option<String>,
-    /// Mouse-wheel and trackpad scroll speed multiplier (1 to 100).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_speed: Option<u8>,
     /// Force scroll input classification (`auto` | `wheel` | `trackpad`).
-    /// Written by the pager's settings modal; unset defaults to `auto`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_mode: Option<String>,
     /// Invert vertical scroll direction ("natural" scrolling).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub invert_scroll: Option<bool>,
-    /// Lines per scroll tick, applied to BOTH wheel and trackpad pricing (1 to 10).
-    /// Unset keeps the per-terminal scroll profile's values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_lines: Option<u8>,
     /// Vim-style scrollback navigation (hjkl, gg/G, /).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vim_mode: Option<bool>,
-    /// How ` ```mermaid ` code blocks are rendered (`auto` | `on` | `off`).
-    /// Written by the pager's settings modal.
+    /// How ` ```mermaid ` code blocks are rendered (`auto` | `on` | `off`). Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_mermaid: Option<String>,
     /// Hunk-tracker mode the pager advertises to the agent (`agent_only` | `all_dirty` | `off`).
-    /// Written by the pager's settings modal; read at connect time (CLI `--hunk-tracker-mode` / `GROK_HUNK_TRACKER` override it).
-    /// Unset defaults to `off`, which disables hunk tracking entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hunk_tracker_mode: Option<String>,
-    /// Voice capture chord behavior: `toggle` or `hold` (hold-to-talk; needs a Kitty-protocol terminal, else falls back to toggle).
-    /// Written by the settings modal; unset defaults to `hold`.
+    /// Voice capture chord behavior: `toggle` or `hold` (hold-to-talk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_capture_mode: Option<String>,
-    /// Speech-to-text language preference for voice dictation. A Grok STT catalog code (`en`, `es`, `ja`, …; see xAI STT
-    /// supported languages) or `auto` (system locale, resolved at connect). Written by the settings modal; unset leaves
-    /// `[voice].language` / default `en`. When set, overrides `[voice].language` for the session.
+    /// Speech-to-text language preference for voice dictation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_stt_language: Option<String>,
     /// Whether the Ctrl+Space / F8 voice-dictation shortcut is active.
-    /// Written by the settings modal; unset defaults to `true` (shortcut on).
-    /// When `false` the chord is ignored; `/voice` still starts dictation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_keybind_enabled: Option<bool>,
-    /// When `true`, registers `Ctrl+R` (while scrollback is focused) to toggle terminal mouse reporting (mouse capture). That
-    /// hands selection back to the terminal for native click-drag copy/paste. Opt-in only; unset/false leaves mouse reporting
-    /// always on with no toggle shortcut. The prompt keeps `Ctrl+R` for history search; focus scrollback (Esc/Tab) first.
+    /// When `true`, registers `Ctrl+R` (while scrollback is focused) to toggle terminal mouse reporting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mouse_reporting_toggle: Option<bool>,
-    /// When cancelling a parent turn with running subagents: `always_stop` stops them without prompting, `always_continue` leaves them running.
-    /// Unset/`ask` shows the cancel-turn picker.
-    /// Written by the pager when the user picks "Always stop" / "Always continue".
+    /// When cancelling a parent turn with running subagents: `always_stop` stops them without prompting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_subagents_on_turn_cancel: Option<String>,
-    /// User knob for the `remember_tool_approvals` gate: per-tool "Always allow …" prompt options (resolver default: on).
-    /// Written by the settings modal; requirements/env/managed/remote settings also feed the gate.
+    /// User knob for the `remember_tool_approvals` gate: per-tool "Always allow …" prompt options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remember_tool_approvals: Option<bool>,
     /// In-app drag selection highlight: `flash` | `hold` (legacy bool accepted).
@@ -181,8 +129,7 @@ pub struct UiConfig {
     /// Legacy TTL ms; only `Some(0)` counts when `keep_text_selection` is unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection_highlight_duration_ms: Option<u64>,
-    /// Show agent thinking/reasoning blocks in the TUI scrollback.
-    /// `None` means on (client default). Written by the pager's settings modal.
+    /// Show agent thinking/reasoning blocks in the TUI scrollback. `None` means on (client default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show_thinking_blocks: Option<bool>,
     /// Summarize each thinking block and show the summary under its collapsed header.
@@ -192,41 +139,30 @@ pub struct UiConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_tool_verbs: Option<bool>,
     /// Show Edit tool calls as a collapsed one-line `+N/-M` diffstat summary by default (expand for the diff).
-    /// `None` means off (client default). Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collapsed_edit_blocks: Option<bool>,
-    /// Next-prompt suggestions (tab autocomplete ghost text) after each turn.
-    /// `None` means on (client default).
-    /// Written by the pager's settings modal; the `GROK_PROMPT_SUGGESTIONS` env var overrides at runtime.
+    /// Next-prompt suggestions (tab autocomplete ghost text) after each turn. `None` means on (client default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_suggestions: Option<bool>,
     /// Startup cursor style: `None` (default) inherits the terminal's own style.
-    /// `Some(true)` forces the legacy blinking block, `Some(false)` a steady block.
-    /// Config-file-only knob (no /settings row).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_blink: Option<bool>,
     /// `"fullscreen"` | `"minimal"`; unset uses the product default, fullscreen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screen_mode: Option<String>,
-    /// Retired hidden opt-in for terminal-like double/triple-click word/line selection. Superseded by `keep_text_selection =
-    /// "word_select"`. Still read only when `keep_text_selection` is unset; Settings clears this on write. `"word_select"` |
-    /// unset.
+    /// Retired hidden opt-in for terminal-like double/triple-click word/line selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub double_click_action: Option<String>,
     /// Per-tip contextual-hint opt-outs (`[ui.contextual_hints]`).
-    /// Each `None` inherits the remote/default (on); `Some` is a user-explicit choice that beats the remote tier.
-    /// Skipped on the wire when untouched so the section only appears once a user toggles a tip.
     #[serde(default, skip_serializing_if = "ContextualHints::is_default")]
     pub contextual_hints: ContextualHints,
     /// Combine consecutive queued follow-ups into one turn. `None` means off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub combine_queued_prompts: Option<bool>,
     /// Mid-turn follow-up routing: `"queue"` (default) or `"steer"`. `None` behaves as queue.
-    /// Steer promotes server-queued follow-ups as interjections at the next tool or model safe point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub follow_up_behavior: Option<String>,
     /// Display-refresh probe and auto-cadence (`[ui.display_refresh]`).
-    /// Per-field `None` inherits remote/default; skipped when untouched.
     #[serde(default, skip_serializing_if = "DisplayRefreshSettings::is_default")]
     pub display_refresh: DisplayRefreshSettings,
     /// `[ui.status_line]`. Disabled by default.
@@ -260,10 +196,9 @@ pub struct ContextualHints {
     /// Word-select tip after double-clicking scrollback while Text selection is still fold/nav (`flash` / `hold`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub word_select: Option<bool>,
-    /// Export/copy tip after three nearby drag-copies.
+    /// Export/copy tip after nearby drag-copies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_copy: Option<bool>,
-    /// SSH wrap session-load tip (recommend `grok wrap ssh` when the session runs over SSH without an OSC 52 sink).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_wrap: Option<bool>,
 }
@@ -370,13 +305,11 @@ impl UiConfig {
         self.dashboard_preview.unwrap_or(true)
     }
 
-    /// The single source of truth for the timeline-sidebar default (opt-in). TODO: migrate the other boolean UI settings
-    /// (show_timestamps, simple_mode, show_thinking_blocks, …) to the same const and resolver pattern. They currently
-    /// duplicate their default literal across cache.rs / config.rs / defs.rs / setters.rs / registry.rs.
+    /// The source of truth for the timeline-sidebar default (opt-in).
     pub const SHOW_TIMELINE_DEFAULT: bool = false;
 
-    /// Resolved timeline-sidebar setting: the configured value, or [`Self::SHOW_TIMELINE_DEFAULT`] when unset.
-    /// The one place the default is applied: every layer (cache, appearance config, settings modal) reads through here so they cannot drift.
+    /// Resolved timeline-sidebar setting: the configured value, or
+    /// [`Self::SHOW_TIMELINE_DEFAULT`] when unset.
     pub fn show_timeline_enabled(&self) -> bool {
         self.show_timeline.unwrap_or(Self::SHOW_TIMELINE_DEFAULT)
     }
@@ -413,9 +346,7 @@ impl UiConfig {
             .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
     }
 
-    /// Default for [`Self::thinking_summaries`] when unset. This is the one home
-    /// for it: a session resolves the switch through
-    /// [`Self::thinking_summaries_enabled`], never by reading the table by hand.
+    /// Default for [`Self::thinking_summaries`] when unset.
     pub const THINKING_SUMMARIES_DEFAULT: bool = true;
 
     pub fn thinking_summaries_enabled(&self) -> bool {
@@ -423,10 +354,7 @@ impl UiConfig {
             .unwrap_or(Self::THINKING_SUMMARIES_DEFAULT)
     }
 
-    /// Default for [`Self::min_output_tokens_per_sec`] when unset. Well under
-    /// what any endpoint here reaches in health, so an ordinary stream never
-    /// approaches it and a collapsed engine is still caught. A zero here ships
-    /// the gate dead, which is the same as not having it.
+    /// Default for [`Self::min_output_tokens_per_sec`] when unset.
     pub const MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT: u32 = 15;
 
     /// Default for [`Self::output_rate_sustained_secs`] when unset.
@@ -458,9 +386,7 @@ impl UiConfig {
             .unwrap_or(Self::OUTPUT_RATE_MAX_RETRIES_DEFAULT)
     }
 
-    /// Default for [`Self::ttft_timeout_secs`] when unset. A reasoning model
-    /// can prefill for minutes, so this stays well above an ordinary first
-    /// token and under the 300 s stream idle timeout.
+    /// Default for [`Self::ttft_timeout_secs`] when unset.
     pub const TTFT_TIMEOUT_SECS_DEFAULT: u32 = 120;
 
     pub fn ttft_timeout_secs_value(&self) -> u32 {
@@ -509,7 +435,6 @@ impl UiConfig {
         self.follow_up_behavior() == "steer"
     }
 
-    /// True when the highlight should not dismiss on a timer (`hold` / `word_select`, or legacy duration 0).
     pub fn keep_text_selection_enabled(&self) -> bool {
         if let Some(ref s) = self.keep_text_selection {
             return s == "hold" || s == "word_select";

@@ -1,16 +1,4 @@
 //! Slash command MRU / recency (`$GROK_HOME/slash-mru.json`).
-//!
-//! A flat map from canonical command name to `last_used` timestamp.
-//! Tiebreaks use recency decay (7-day half-life, 0.1 floor); the map is bounded to [`MAX_ENTRIES`] entries.
-//!
-//! Ownership: each [`crate::slash::SlashController`] holds an `Rc<RefCell<SlashMru>>` (single-threaded UI; no mutex).
-//! `AppView` owns one store and injects it into every controller (agent prompts and dashboard dispatch) so they stay in sync.
-//! There is no process-global singleton. Default and test controllers get an isolated in-memory store (no disk I/O).
-//!
-//! Persistence: a `touch` only marks the store dirty (never blocks the UI on disk).
-//! When a command is recorded, the controller hands an owned [`MruSnapshot`] to [`persist_async`].
-//! That function serializes writes through one long-lived background thread (atomic temp file and rename).
-//! The `Rc<RefCell>` itself never crosses a thread boundary; only the `Send` snapshot does.
 
 use std::collections::HashMap;
 use std::fs;
@@ -120,8 +108,7 @@ impl SlashMru {
                     error = %e,
                     "slash MRU: read failed; using empty store, persistence disabled for session"
                 );
-                // Mark loaded so we do not retry the read on every `rank_score` call (once per candidate per keystroke on the UI thread)
-                // Disable persistence so we never clobber a file we could not read
+                // Mark loaded so we do not retry the read on every `rank_score` call (once per candidate per keystroke on the UI thread) Disable persistence.
                 self.loaded = true;
                 self.persist_enabled = false;
             }
@@ -208,8 +195,8 @@ impl SlashMru {
         })
     }
 
-    /// Re-flag unpersisted changes after a failed write so the next [`Self::take_persist_snapshot`] retries.
-    /// This is a no-op when persistence is off.
+    /// Re-flag unpersisted changes after a failed write so the next
+    /// [`Self::take_persist_snapshot`] retries.
     pub fn mark_dirty(&mut self) {
         if self.persist_enabled {
             self.dirty = true;
@@ -227,7 +214,6 @@ impl SlashMru {
 }
 
 /// An owned, `Send` snapshot of the MRU ready to write to disk.
-/// [`SlashMru::take_persist_snapshot`] produces it on the UI thread; [`persist_async`] writes it off-thread.
 #[derive(Debug)]
 pub struct MruSnapshot {
     path: PathBuf,
@@ -354,7 +340,7 @@ mod tests {
         mru.loaded = true;
         mru.touch("p", "plan");
         assert!(mru.take_persist_snapshot().is_some());
-        assert!(mru.take_persist_snapshot().is_none()); // nothing to retry yet
+        assert!(mru.take_persist_snapshot().is_none());
         mru.mark_dirty();
         assert!(mru.take_persist_snapshot().is_some()); // retried
     }

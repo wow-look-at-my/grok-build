@@ -1,7 +1,4 @@
 //! Install plugins from a marketplace source into the managed plugin storage.
-//!
-//! Routes through the existing `InstallRegistry` and `git_install` pipeline.
-//! Adds marketplace provenance to the installed repo record.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -119,8 +116,9 @@ pub fn install_from_remote_url(
         })
         .transpose()?;
     let (url, git_ref, git_sha) = git_install::clone_operands(url, git_ref, git_sha)?;
-    // Short-circuit before the pin gate, without fetching
-    // Re-install of an already-present plugin must not refuse just because the catalog entry is unpinned
+    // Short-circuit before the pin gate, without fetching Re-install of an
+    // already-present plugin must not refuse because the catalog entry is
+    // unpinned
     if let Some((existing_key, _)) = find_installed_marketplace_plugin(
         registry,
         &provenance.source_url_or_path,
@@ -378,9 +376,8 @@ pub fn update_from_marketplace_entry_transactional(
 
     registry.insert(repo_key.clone(), new_repo);
     if let Err(save_error) = registry.save() {
-        // The directory swap already succeeded (final_path holds the new plugin).
-        // Only revert the registry record once the files are actually restored
-        // Otherwise we would leave the new files on disk while the registry claims the old version
+        // The directory swap already succeeded (final_path holds the new
+        // plugin).
         let fs_rolled_back = remove_path_if_exists(&final_path).is_ok()
             && std::fs::rename(&backup_path, &final_path).is_ok();
         if !fs_rolled_back {
@@ -908,7 +905,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&install_dir);
         std::fs::create_dir_all(&install_dir).unwrap();
         // Build the registry against an explicit tempdir rather than going through `InstallRegistry::load()`.
-        // `load()` resolves the install dir via the process-global `grok_home()` `OnceLock` (first-write-wins). A parallel test in this binary can cache the real `~/.grok` before this runs, which would leak the registry tests into the real home and make them order-dependent and flaky.
         let mut registry = InstallRegistry::empty(install_dir);
         f(&mut registry)
     }

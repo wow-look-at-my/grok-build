@@ -29,8 +29,7 @@ async fn the_payload_carries_real_values_or_no_field_at_all() {
             let actor = create_test_actor(50_000, 100_000, 85, gateway_tx, persistence_tx).await;
 
             let ctx = actor.build_status_context().await;
-            // The payload promises two of its fields are copies of other fields
-            // Both are built from one source today, so this fails the day one of them is sourced separately and the promise quietly stops holding
+            // The payload promises some of its fields are copies of other fields Both are built from one source today.
             assert_eq!(ctx.cwd, ctx.workspace.current_dir);
             if let Some(worktree) = &ctx.worktree {
                 assert_eq!(worktree.branch, ctx.workspace.branch);

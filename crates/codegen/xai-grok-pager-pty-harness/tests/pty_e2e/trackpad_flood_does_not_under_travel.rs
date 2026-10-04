@@ -4,27 +4,18 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-// Regression: trackpad feel — fast flicks must not under-travel. The trackpad cap only binds once
-// a stream is CONFIRMED trackpad, which happens mid-stream only on ept=1 brands. Under the
-// parent's fixed 6-line cap the same flood delivers at most 6 lines per 16ms slot.
+// Regression: trackpad feel — fast flicks must not under-travel.
 
-/// Tall enough that maximum plausible travel, bounded by the ~590-row desired total at full nominal acceleration, never clamps at the transcript top.
-/// A clamp there would mask the travel measurement.
+/// Tall enough that maximum plausible travel, bounded by the ~590-row desired total at full nominal acceleration, never clamps.
 const MARKER_COUNT: usize = 700;
 
-/// 40 spaced single reports at a nominal 6ms: the ept=1 brand promotes the stream to confirmed trackpad at the 3rd event (avg interval < 30ms).
-/// That engages the per-flush cap under test.
 const BURST_EVENTS: usize = 40;
 
 const BURST_INTERVAL: Duration = Duration::from_millis(6);
 
 /// Rows the flood must travel.
-/// The floor sits below every delivery regime of the new code (jitter floor ≈ 240) and above the parent's capped ceiling (≈ 130).
 const TRAVEL_FLOOR: usize = 200;
 
-/// A fully batched arrival delivers over at most one in-batch flush + ~5 post-stop cadence slots +
-/// one finalize flush (≈ 7 painted frames). A genuine cap regression instead must pace the 260ms
-/// burst window at 6 lines per 16ms slot (≥ 21 frames to reach ~138 rows).
 const COMPRESSED_BURST_FRAMES_MAX: u64 = 12;
 
 /// A dense trackpad flood at high scroll speed must move the viewport by at least [`TRAVEL_FLOOR`] rows.

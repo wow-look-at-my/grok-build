@@ -1,10 +1,4 @@
 //! Identifier newtypes.
-//!
-//! Every wire-traveling id has a dedicated newtype to prevent accidental
-//! mixing (e.g. passing a `SessionId` where a `ToolId` is expected).
-//! Constructors validate; `Deserialize` re-uses the constructor, so values
-//! that round-trip from the wire share the same invariants as values built
-//! locally.
 
 use std::fmt;
 use std::str::FromStr;
@@ -109,8 +103,6 @@ macro_rules! opaque_id {
 }
 
 /// Prefix reserved for hub-internal session-owner keys (bot-relay rotate lock).
-/// Rejected from client-supplied [`SessionId`] values so `session.open` cannot
-/// occupy those keys.
 pub const HUB_RESERVED_SESSION_PREFIX: &str = "__hub:";
 
 fn validate_session_id(s: &str) -> Result<(), IdError> {
@@ -124,9 +116,6 @@ fn validate_session_id(s: &str) -> Result<(), IdError> {
 
 opaque_id!(
     /// Session identifier. Service-issued or carried from a JWT claim.
-    ///
-    /// The lexical prefix [`HUB_RESERVED_SESSION_PREFIX`] is reserved for
-    /// hub-internal locks and rejected from client-supplied values.
     SessionId,
     extra_validator = validate_session_id
 );
@@ -143,9 +132,7 @@ opaque_id!(
     RequestId
 );
 opaque_id!(
-    /// End-to-end identifier for a single tool invocation.
-    ///
-    /// SDKs SHOULD use UUID v7 (see [`ToolCallId::new_v7`]).
+    /// End-to-end identifier for a single tool invocation. SDKs SHOULD use UUID v7 (see [`ToolCallId::new_v7`]).
     ToolCallId
 );
 
@@ -169,24 +156,14 @@ fn validate_server_id(s: &str) -> Result<(), IdError> {
 
 opaque_id!(
     /// Server identifier.
-    ///
-    /// Opaque non-empty string; the lexical prefix `auto:` is reserved for
-    /// computer-hub-synthesised ids and rejected from client-supplied values.
     ServerId,
     extra_validator = validate_server_id
 );
 
 impl ServerId {
     /// Synthesise the deterministic computer-hub-side id for a single-tool
-    /// `register_tool` that omits `server_id`.
-    ///
-    /// Bypasses [`ServerId::new`]'s reserved-prefix check.
-    /// `connection_id` is part of the signature so callers can't omit
-    /// the connection scope they are implicitly relying on, even though
-    /// the current encoding does not mix it in. Two connections that
-    /// register the same `tool_id` without an explicit `server_id`
-    /// share the synthesised id but stay distinct in the registry's
-    /// primary `(connection_id, tool_id)` table.
+    /// `register_tool` that omits `server_id`. Bypasses [`ServerId::new`]'s
+    /// reserved-prefix check.
     pub fn synthesize_for_tool(
         #[allow(unused_variables)] connection_id: &ConnectionId,
         tool_id: &ToolId,
@@ -217,19 +194,11 @@ fn is_well_formed_tool_id(s: &str) -> bool {
 }
 
 opaque_id!(
-    /// Tool identifier.
-    ///
-    /// Format: `{namespace}:{name}` or `{name}`. Each segment must match
-    /// `[a-zA-Z0-9_-]+`.
+    /// Tool identifier. Format: `{namespace}:{name}` or `{name}`. Each segment must match `[a-zA-Z0-9_-]+`.
     ToolId,
     extra_validator = validate_tool_id
 );
 
-/// Per-connection monotonic notification sequence (starts at 0 on every new
-/// connection).
-///
-/// The inner `u64` is private so `new`, `From<u64>`, and `Default` are the
-/// only construction paths.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize,
 )]

@@ -3,7 +3,6 @@ use std::str::FromStr;
 use crate::permission::types::{PatternMode, PermissionRule, PromptPolicy, RuleAction, ToolFilter};
 
 /// Recognized `permissions.defaultMode` values.
-/// Unknown strings fail `FromStr` and fall back to [`Self::Default`], but still claim their settings scope so a typo blocks a looser parent mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DefaultPermissionMode {
     Default,
@@ -63,8 +62,7 @@ pub(crate) struct DefaultModeEffects {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Error Type
-// ═════════════════════════════════════════════════════════════════════════════
+// Error Type.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleParseError {
@@ -211,8 +209,7 @@ pub fn parse_permission_rule(
                 // `*` covers every MCP tool, so the rule is tool-wide (no pattern)
                 None
             } else if rest.contains("__") {
-                // The rest is already `<server>__<tool>` (or `<server>__*`), the Grok qualified name, so use it verbatim
-                // Server names may contain single underscores, but `__` only ever separates server from tool
+                // The rest is already `<server>__<tool>` (or `<server>__*`), the Grok qualified name.
                 Some(rest.to_string())
             } else {
                 // Server-only rule: cover every tool on that server.
@@ -302,8 +299,8 @@ pub(crate) fn strip_domain_prefix(pattern: String) -> (String, PatternMode) {
     }
 }
 
-/// A trailing `:*` turns the Bash pattern into the bare prefix before it; a `:*` anywhere else is literal.
-/// The prefix matches raw, with no word-boundary check, the same way the evaluator prefix-matches every Bash literal.
+/// A trailing `:*` turns the Bash pattern into the bare prefix before it; a
+/// `:*` anywhere else is literal.
 pub(crate) fn strip_bash_colon_wildcard(pattern: String) -> String {
     match pattern.strip_suffix(":*") {
         Some(prefix) => prefix.to_string(),

@@ -11,7 +11,6 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 16_000;
 #[serde(default)]
 pub struct VoiceConfig {
     /// HTTPS API root (or bare host).
-    /// Bases may end in `/v1` or `/xai/v1`; the default STT path de-duplicates a leading `v1/` so both become `…/v1/stt`.
     pub api_base: String,
     pub stt_ws_path: String,
     /// Preferred STT language (catalog code or `"auto"`). [`crate::language_for_api`] resolves it at connect time.

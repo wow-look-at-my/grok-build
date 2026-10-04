@@ -1,7 +1,4 @@
 //! Hook installation and a threshold monitor for jemalloc heap profiling.
-//!
-//! The composition root installs the jemalloc ops; without a hook (tests, Windows, non-jemalloc builds) every function here is inert.
-//! The monitor polls `stats.resident` and uploads dumps via `gcs::upload_file`.
 
 mod monitor;
 
@@ -12,8 +9,6 @@ pub use monitor::{
     resolve_jemalloc_heap_profile, sanitize_version, should_latch,
 };
 
-/// Recommended jemalloc `lg_prof_sample` (2^19 bytes, about 512 KiB).
-/// Keep process `MALLOC_CONF` / `_RJEM_MALLOC_CONF` and dump metadata in sync with this value (unit-test BUILD env and ops docs).
 pub const LG_PROF_SAMPLE: u32 = 19;
 
 use std::path::Path;

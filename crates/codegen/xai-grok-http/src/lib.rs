@@ -1,11 +1,6 @@
-#![allow(clippy::expect_used)] // 5 hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
 
 //! HTTP clients for the application.
-//!
-//! Building a `reqwest::Client` is expensive (~95ms: it loads OS TLS roots), so
-//! the shared clients are `OnceLock`-cached. Sampling traffic uses the
-//! process-wide clients owned by `xai_grok_sampler::shared_http`. TLS policy
-//! (backend pin, roots, provider) lives in `xai_grok_extra_ca`.
 
 #![deny(clippy::indexing_slicing)]
 
@@ -19,8 +14,7 @@ use xai_grok_workspace::permission::ClientType;
 pub const STARTUP_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Cap on auth during a non-interactive boot (token refresh or cold-start mint).
 pub const STARTUP_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-/// Ceiling on a single startup token-refresh round trip, separate from
-/// `STARTUP_FETCH_TIMEOUT` so the two tune independently.
+/// Ceiling on a single startup token-refresh round trip, separate from `STARTUP_FETCH_TIMEOUT`.
 pub const STARTUP_AUTH_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Outer bound on a single settings-reapply task (drives up to `SETTINGS_FETCH_MAX_ATTEMPTS` fetches).
 pub const SETTINGS_REAPPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -40,9 +34,6 @@ const _: () = assert!(
     STARTUP_SETTINGS_WAIT_DEADLINE.as_millis() < SETTINGS_REAPPLY_TIMEOUT.as_millis(),
     "STARTUP_SETTINGS_WAIT_DEADLINE must stay under SETTINGS_REAPPLY_TIMEOUT"
 );
-/// Covers the worst-case three-attempt settings ladder with backoff. Settings and
-/// models run concurrently, each on its own budget, so a slow models fetch cannot
-/// consume this window; must exceed `STARTUP_SETTINGS_WAIT_DEADLINE`.
 pub const MANAGED_STARTUP_SETTINGS_WAIT_DEADLINE: std::time::Duration =
     std::time::Duration::from_secs(25);
 const _: () = assert!(
@@ -54,8 +45,7 @@ const _: () = assert!(
     "MANAGED_STARTUP_SETTINGS_WAIT_DEADLINE must stay under SETTINGS_REAPPLY_TIMEOUT"
 );
 
-/// Lower bound on a client's connect-to-leader timeout: a slow but valid boot
-/// (bounded startup auth + leader startup + handshake) must never be aborted.
+/// Lower bound on a client's connect-to-leader timeout: a slow but valid boot (bounded startup auth + leader startup + handshake).
 pub const MIN_CLIENT_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const _: () = assert!(
     MIN_CLIENT_CONNECT_TIMEOUT.as_millis() >= 2 * STARTUP_AUTH_TIMEOUT.as_millis(),

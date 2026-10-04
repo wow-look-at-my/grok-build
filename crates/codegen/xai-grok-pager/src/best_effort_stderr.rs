@@ -1,16 +1,7 @@
-//! Stderr lines for paths where fd 2 may already be dead.
-//!
-//! Once stderr's reader is gone (a closed terminal pane, a pipe whose reader exited) every
-//! write fails, `eprintln!` panics on that failure, and under `panic = "abort"` the panic is a
-//! SIGABRT plus a crash report on the next launch. The exit error report, the slow session-end
-//! notice, and headless plain-format diagnostics all run when fd 2 is likely to be exactly that
-//! dead terminal, so they write through here: one attempt, and failure is reported, not raised.
 
 use std::io::Write;
 
 /// Write `line` and a newline to `w`; `false` when the write failed.
-///
-/// The writer is a parameter so callers can be tested against a closed pipe in-process.
 pub fn write_line(w: &mut impl Write, line: &str) -> bool {
     writeln!(w, "{line}").is_ok()
 }

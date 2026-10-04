@@ -1,10 +1,4 @@
 //! Formatting functions for AskUserQuestion tool results.
-//!
-//! Each function produces the **exact** model-visible string for one of the
-//! four user-action paths.
-//!
-//! The tests below pin the exact output strings and serve as the
-//! source-of-truth specification.
 
 use std::collections::HashMap;
 
@@ -15,17 +9,13 @@ use super::types::QuestionAnnotation;
 
 // ── Path D: Cancel ──────────────────────────────────────────────────────
 
-/// Tool result text when the user cancels / dismisses the question UI. Cancel is a normal user
-/// decision, not a tool failure, so this is a purpose-built message rather than a generic
-/// permission-denial string.
+/// Tool result text when the user cancels / dismisses the question UI.
 pub const CANCEL_TEXT: &str = "User declined to answer the questions. Continue with the task using your best judgment, or ask different questions.";
 
-/// Tool result text for unanswered questionnaires in non-interactive sessions
-/// (headless `-p`, SDK): there is no user, so "user declined" would be a lie.
+/// Tool result text for unanswered questionnaires in non-interactive sessions (headless `-p`, SDK): there is no user.
 pub const NO_OPERATOR_TEXT: &str = "No user is available to answer questions in this non-interactive session. Continue with your best judgment; do not wait for clarification.";
 
-/// Single source for the unanswered (cancel / timeout) tool result text, so
-/// the two paths cannot drift between interactive and non-interactive wording.
+/// Single source for the unanswered (cancel / timeout) tool result text.
 pub fn unanswered_text(non_interactive: bool) -> &'static str {
     if non_interactive {
         NO_OPERATOR_TEXT
@@ -85,9 +75,9 @@ pub fn format_id_keyed_accepted_tool_result(
         .filter_map(|q| {
             let qid = q.id.as_ref()?;
             let labels = answers.get(&q.question)?;
-            // Each selected label is its own `Vec` element (the wire format no longer joins labels
-            // with `", "`), so we look each one up directly. No splitting, no ambiguity around
-            // labels that contain commas or share substrings with other labels.
+            // Each selected label is its own `Vec` element (the wire format
+            // no longer joins labels with `", "`), so we look each up
+            // directly.
             let oids: Vec<&str> = labels
                 .iter()
                 .filter_map(|label| {
@@ -130,8 +120,8 @@ pub fn format_id_keyed_accepted_tool_result(
 // ── Path B: Chat about this (plan mode) ─────────────────────────────────
 
 /// Format the tool result for Path B ("Chat about this" / respond-to-agent). Iterates ALL original questions. Answered
-/// questions show their label; unanswered questions show "(No answer provided)". Lines 2-4 and "Questions asked:" have
-/// 4-space indentation. Question bullets have no indentation. Answer lines have 2-space indentation.
+/// questions show their label; unanswered questions show "(No answer provided)". Question bullets have no indentation.
+/// Answer lines have 2-space indentation.
 pub fn format_chat_about_this(
     questions: &[Question],
     partial_answers: &HashMap<String, String>,
@@ -322,8 +312,7 @@ mod tests {
 
     #[test]
     fn format_accepted_partial() {
-        // Only answered questions appear. Unanswered questions are omitted by the caller
-        // (the answers IndexMap simply doesn't contain them).
+        // Only answered questions appear.
         let mut answers = IndexMap::new();
         answers.insert("Which database?".to_string(), vec!["Redis".to_string()]);
         // "Which framework?" is unanswered => not in the map
@@ -333,9 +322,9 @@ mod tests {
         assert!(!result.contains("Which framework?"));
     }
 
-    // Alternate id-keyed formatter tests Pin both result strings (single question and three
-    // questions) so any drift in the formatter trips a deterministic failure. Update the literal
-    // strings deliberately if the wire format ever changes.
+    // Alternate id-keyed formatter tests Pin both result strings (single question and questions)
+    // so any drift in the formatter trips a deterministic failure. Update the literal strings
+    // deliberately if the wire format ever changes.
     fn id_keyed_q(qid: &str, prompt: &str, opts: &[(&str, &str)]) -> super::super::Question {
         super::super::Question {
             question: prompt.to_string(),
@@ -426,9 +415,8 @@ mod tests {
 
     #[test]
     fn format_id_keyed_multi_select_inferred_csv() {
-        // Multi-select with multiple selections joins option ids with ", "
-        // at format time. Each selected label arrives as its own Vec
-        // element (the wire format no longer joins them).
+        // Multi-select with multiple selections joins option ids with ", " at
+        // format time.
         let questions = vec![id_keyed_q(
             "q3",
             "What do you lean on before a push? (pick any)",

@@ -1,9 +1,4 @@
 //! In-process transport that resolves through a [`CompoundResolver`].
-//!
-//! `LocalTransport` is bound to a single `(user_id, session_id)` at
-//! construction. Authorisation returns a principal pre-populated with the
-//! bound session and the `tool.invoke` scope; per-call dispatch resolves
-//! against the bound session's view of the resolver.
 
 use std::sync::Arc;
 
@@ -17,9 +12,6 @@ use crate::resolver::CompoundResolver;
 use crate::transport::{Principal, Transport, TransportKind};
 
 /// The scope `LocalTransport::authorize` grants to its principal.
-///
-/// Hoisted so adapters that authorise principals through other paths
-/// can match the local convention without restating the literal.
 pub const LOCAL_INVOKE_SCOPE: &str = "tool.invoke";
 
 /// Transport that dispatches against an in-process resolver.

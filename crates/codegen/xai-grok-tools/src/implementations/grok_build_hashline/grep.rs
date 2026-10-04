@@ -1,8 +1,4 @@
 //! `hashline_grep` — anchor-annotated search results.
-//!
-//! Delegates to the standard `GrepTool` for ripgrep execution, then
-//! post-processes content-mode output to inject scheme-aware anchors.
-//! Enables grep → edit workflows without an intermediate file read.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -384,7 +380,7 @@ mod tests {
         let output = String::from_utf8_lossy(&result);
 
         // Anchored lines should have the pattern NUM:LOCAL:CONTEXT:CONTENT
-        // (3 colons for chunk scheme: line:local:context:content).
+        // (colons for chunk scheme: line:local:context:content).
         for line in output.lines() {
             if line.starts_with(|c: char| c.is_ascii_digit()) {
                 let colon_count = line.matches(':').count();
@@ -519,7 +515,6 @@ mod tests {
         let output = String::from_utf8_lossy(&result);
 
         // The file header should be recognized despite starting with digits.
-        // Line 1 should be annotated with anchors from the correct file.
         let line_1 = output.lines().find(|l| l.starts_with('1')).unwrap();
         let colon_count = line_1.matches(':').count();
         assert!(
@@ -537,7 +532,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let fs = Arc::new(LocalFs);
 
-        // files_with_matches output has no numbered lines — just file paths.
+        // files_with_matches output has no numbered lines — file paths.
         let rg_output = format!(
             "<workspace_result workspace_path=\"{}\">\n\
              Found 2 files\n\
@@ -582,8 +577,7 @@ mod tests {
         let result = inject_anchors(rg_output.as_bytes(), tmp.path(), &*fs, &*scheme).await;
         let output = String::from_utf8_lossy(&result);
 
-        // Count lines should pass through. They look like "src/main.rs:5"
-        // which parse_rg_line won't match (path contains '/', not just digits).
+        // Count lines should pass through.
         assert!(output.contains("src/main.rs:5"));
         assert!(output.contains("src/lib.rs:3"));
     }
@@ -618,7 +612,7 @@ mod tests {
         let result = inject_anchors(rg_output.as_bytes(), tmp.path(), &*fs, &*scheme).await;
         let output = String::from_utf8_lossy(&result);
 
-        // All 4 lines should be anchored (same file, same cache entry).
+        // All lines should be anchored (same file, same cache entry).
         let anchored_count = output
             .lines()
             .filter(|l| l.starts_with(|c: char| c.is_ascii_digit()))
@@ -696,7 +690,7 @@ mod tests {
             "inject_anchors should have timed out"
         );
 
-        // On timeout, production keeps the original output unchanged.
+        // On timeout, production keeps the output unchanged.
         let unanchored_str = String::from_utf8_lossy(rg_bytes);
         for line in unanchored_str.lines() {
             if line.starts_with(|c: char| c.is_ascii_digit()) {

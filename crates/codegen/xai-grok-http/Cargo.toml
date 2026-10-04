@@ -8,7 +8,6 @@ description = "Shared reqwest HTTP clients and User-Agent construction for the g
 [dependencies]
 reqwest = { workspace = true, features = ["blocking", "rustls-tls-native-roots"] }
 reqwest-middleware = { workspace = true }
-# Same 0.23 as reqwest's rustls, so the certificate classifier's downcast resolves.
 rustls = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

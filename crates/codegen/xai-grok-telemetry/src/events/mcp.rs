@@ -38,8 +38,7 @@ pub struct McpServerFailed {
     pub error_type: McpErrorType,
     pub duration_ms: u64,
     pub timeout_sec: u64,
-    /// Failure text for the external `error_message` attr (CONTENT gate).
-    /// `#[serde(skip)]`.
+    /// Failure text for the external `error_message` attr (CONTENT gate). `#[serde(skip)]`.
     #[serde(skip)]
     pub error_message: Option<String>,
 }

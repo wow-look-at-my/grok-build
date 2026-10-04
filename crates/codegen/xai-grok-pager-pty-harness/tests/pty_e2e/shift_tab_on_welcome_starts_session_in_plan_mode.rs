@@ -26,7 +26,6 @@ async fn shift_tab_on_welcome_starts_session_in_plan_mode() {
         .wait_for_text("Switched to mode: Plan", Duration::from_secs(10))
         .expect("plan mode banner after Shift+Tab on welcome screen");
 
-    // Second press cycles Plan to Auto (gate defaults ON)
     harness.inject_keys(b"\x1b[Z").expect("inject BackTab");
     harness
         .wait_for_text("Switched to mode: Auto", Duration::from_secs(10))

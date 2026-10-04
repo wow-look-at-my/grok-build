@@ -1,7 +1,4 @@
 //! Dropdown renderer for shell command completion suggestions.
-//!
-//! Mirrors the `slash_dropdown.rs` layout: aligned label column, description, selection highlight, and mouse hover.
-//! A scrollbar appears when items exceed `MAX_VISIBLE_ROWS`.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -23,7 +20,6 @@ const LABEL_DESC_GAP: usize = 2;
 /// Prefix width (`"❯ "` or `"  "`).
 const PREFIX_W: usize = 2;
 
-/// Height needed for the dropdown (separator + items), or 0 when hidden.
 pub fn dropdown_height(state: &CompletionDropdownState) -> u16 {
     if !state.open || state.items.is_empty() {
         return 0;
@@ -47,10 +43,6 @@ pub fn scroll_offset(state: &CompletionDropdownState) -> usize {
 }
 
 fn compute_label_column_w(items: &[CompletionItemParsed], content_w: usize) -> usize {
-    // The available width is the only bound: 60% of it for the label, the rest
-    // for the description. Every row contributes -- excluding the long ones
-    // leaves nothing to take a max over when they are ALL long, and the
-    // zero-width column that results truncates every label to nothing.
     let budget = content_w * 3 / 5;
     let max_w = items.iter().map(|r| r.display.width()).max().unwrap_or(0);
     max_w.min(budget)
@@ -299,7 +291,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(dropdown_height(&state), 3); // One separator row plus two item rows
+        assert_eq!(dropdown_height(&state), 3); // One separator row plus item rows
     }
 
     #[test]
@@ -435,8 +427,7 @@ mod tests {
         assert!(state.hovered.is_none());
         assert_eq!(state.generation, 5);
         assert!(state.items.is_empty());
-        // `request_text` and `request_cursor` stay; they are inert without items
-        // The next batch of results overwrites them atomically with the new items
+        // `request_text` and `request_cursor` stay; they are inert without items The next batch of results overwrites them atomically.
         assert_eq!(state.request_text, "a");
         assert_eq!(state.request_cursor, 1);
     }
@@ -463,10 +454,10 @@ mod label_column_tests {
     /// A catalog of uniformly long labels must still render, and on a wide
     /// terminal it must render in full.
     ///
-    /// Gateway-style ids (`provider/vendor:family:size`) run past 40 columns on
-    /// their own, and the selected row adds " (current)" on top. Deriving the
-    /// column by discarding long labels discards all of them here, leaving a
-    /// zero-width column: rows that draw, highlight and select while showing
+    /// Gateway-style ids (`provider/vendor:family:size`) run past many columns
+    /// on their own, and the selected row adds " (current)" on top. Deriving
+    /// the column by discarding long labels discards all of them here, leaving
+    /// a zero-width column: rows that draw, highlight and select while showing
     /// nothing.
     #[test]
     fn a_catalog_of_long_labels_renders_in_full_on_a_wide_terminal() {

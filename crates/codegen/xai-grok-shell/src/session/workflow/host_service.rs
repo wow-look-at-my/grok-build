@@ -24,13 +24,7 @@ pub(crate) const WORKFLOW_MAX_AGENT_RUNS: u32 =
 pub(crate) const DEFAULT_WORKFLOW_MAX_CONCURRENT_AGENTS: usize = 32;
 
 /// The configured cap clamped to the machine's parallelism, so small hosts
-/// run fewer agents at once. This is the session's OVERALL workflow-agent
-/// concurrency: `WorkflowManager` sizes one shared semaphore from it and
-/// every active run in the session draws its slots from that same pool, so
-/// several concurrent runs never push total live agents past this cap. An
-/// operator in an environment where too many concurrent requests trip a hard
-/// rate limit sets this (or `GROK_WORKFLOW_MAX_CONCURRENT_AGENTS`) low enough
-/// to stay under it.
+/// run fewer agents at once.
 pub(crate) fn workflow_max_concurrent_agents(configured: usize) -> usize {
     workflow_max_concurrent_agents_from(
         configured,
@@ -79,13 +73,9 @@ pub(crate) struct WorkflowAgentStats {
 
 pub(crate) struct WorkflowHostParams {
     pub run_id: String,
-    /// The configured cap, kept for logging/telemetry; the actual limit is
-    /// enforced by `agent_slots`, which this run's cap was sized into.
+    /// The configured cap, kept for logging/telemetry.
     pub max_concurrent_agents: usize,
-    /// Slots shared by every active run in the session (owned by
-    /// `WorkflowManager`), so wider fan-outs queue in order across runs too —
-    /// not just within one. This is what caps a workflow's OVERALL
-    /// concurrency, as opposed to any single run's.
+    /// Slots shared by every active run in the session (owned by `WorkflowManager`), so wider fan-outs queue in order across runs too.
     pub agent_slots: Arc<tokio::sync::Semaphore>,
     pub cwd: PathBuf,
     pub scratch_dir: PathBuf,
@@ -185,13 +175,8 @@ struct HostService {
     params: WorkflowHostParams,
 }
 
-/// The run's roster row for one agent, and the totals that round charged to it.
-///
-/// `finish` is called on every path that returns a value. Drop covers the one
-/// path that returns nothing: a round that unwound leaves no caller to record
-/// the row, so the guard records it. Without that, the row keeps the state
-/// "running" for the rest of the run's life -- and a row in that state is the
-/// one the capped roster refuses to evict.
+/// The run's roster row for one agent, and the totals that round charged to
+/// it. `finish` is called on every path that returns a value.
 struct FinishOnce<'a> {
     host: &'a HostService,
     agent_id: String,
@@ -249,10 +234,6 @@ impl Drop for FinishOnce<'_> {
 }
 
 /// One live agent of a run, for as long as a single spawn round is in flight.
-///
-/// The count feeds the run's live-agent readout and its peak-concurrency
-/// stat, and it is what a reader distinguishes a running run from a stalled
-/// one. A round that unwinds has to hand the count back like any other.
 struct ActiveAgent<'a> {
     host: &'a HostService,
 }
@@ -1103,8 +1084,8 @@ mod tests {
     }
 
     /// Like [`test_host_params`], but the caller supplies the agent-slot
-    /// semaphore, so two calls can share one pool the way two runs launched
-    /// from the same `WorkflowManager` do.
+    /// semaphore, so calls can share one pool the way multiple runs
+    /// launched from the same `WorkflowManager` do.
     fn test_host_params_with_slots(
         run_id: &str,
         max_concurrent_agents: usize,
@@ -1345,7 +1326,7 @@ mod tests {
         };
         succeed(queued);
 
-        // Slot acquisition order between the two dispatched requests is unspecified, so assert both replies only after both agents ran
+        // Slot acquisition order between both dispatched requests is unspecified, so assert both replies only after both agents ran
         assert!(
             first
                 .await
@@ -1368,7 +1349,7 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
     }
 
-    /// Two runs launched from the same `WorkflowManager` share its
+    /// Runs launched from the same `WorkflowManager` share its
     /// `agent_slots` semaphore. This proves the cap is enforced OVERALL,
     /// across both runs at once, not just within each run separately.
     #[tokio::test]

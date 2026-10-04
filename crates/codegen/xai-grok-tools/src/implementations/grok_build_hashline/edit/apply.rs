@@ -1,8 +1,4 @@
 //! Core edit-application logic for `hashline_edit`.
-//!
-//! Validates anchors against the pre-edit file snapshot, detects overlapping
-//! edits, sorts operations bottom-up, and applies them. Returns a fresh-anchor
-//! snippet of the edited region.
 
 use std::path::Path;
 
@@ -73,10 +69,10 @@ fn detect_anchor_prefix_in_content(content: &str) -> Option<usize> {
 fn anchor_content_error(op_label: &str, content: &str, line_num: usize) -> HashlineEditError {
     let offending_line = content.lines().nth(line_num - 1).unwrap_or("").to_owned();
 
-    // Build a small context snippet (up to 3 lines around the offending line).
+    // Build a small context snippet (up to a few lines around the offending line).
     let lines: Vec<&str> = content.lines().collect();
-    let ctx_start = line_num.saturating_sub(1).saturating_sub(1); // 1 line before (0-based)
-    let ctx_end = (line_num + 1).min(lines.len()); // 1 line after
+    let ctx_start = line_num.saturating_sub(1).saturating_sub(1);
+    let ctx_end = (line_num + 1).min(lines.len());
     let context: String = (ctx_start..ctx_end)
         .map(|i| {
             let marker = if i + 1 == line_num { ">>>" } else { "   " };
@@ -131,8 +127,7 @@ struct ResolvedOp {
 pub(crate) struct ApplyResult {
     /// The structured output (success or error).
     pub output: HashlineEditOutput,
-    /// The new file content string. `Some` only when `output` is
-    /// `EditsApplied`; `None` on error.
+    /// The new file content string. `Some` only when `output` is `EditsApplied`; `None` on error.
     pub new_content: Option<String>,
     /// Per-edit region details for diff metadata. Empty on error or whole-file write.
     pub edit_details: Vec<EditRegionDetail>,
@@ -250,7 +245,6 @@ pub(crate) fn apply_edits(
     let mut result_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
 
     // Collect each edit's affected region (0-based, pre-splice coordinates).
-    // We record post-splice positions by tracking cumulative line-count shifts.
     let mut edit_regions: Vec<(usize, usize)> = Vec::with_capacity(resolved.len());
     let mut edit_details: Vec<EditRegionDetail> = Vec::with_capacity(resolved.len());
     let mut cumulative_shift: isize = 0;
@@ -313,8 +307,6 @@ pub(crate) fn apply_edits(
 }
 
 /// Maximum total snippet lines before switching to per-region snippets.
-/// When the contiguous range from first to last edit exceeds this, we show
-/// individual ±SNIPPET_CONTEXT windows separated by `... N lines not shown ...`.
 const MAX_CONTIGUOUS_SNIPPET: usize = 80;
 
 /// Build the snippet output for a batch of edits. If all edits fall within `MAX_CONTIGUOUS_SNIPPET`
@@ -451,9 +443,7 @@ fn resolve_op(
             let insert_at = if anchor == "0:" {
                 0
             } else if anchor == "EOF" {
-                // Insert at the actual end of file content. If the file ends
-                // with '\n', split_lines produces a synthetic trailing empty
-                // line — insert before it rather than after it.
+                // Insert at the actual end of file content.
                 let len = lines.len();
                 if len > 1 && lines.last().is_some_and(|line| line.is_empty()) {
                     len - 1
@@ -549,8 +539,9 @@ fn validate_anchor(
         Some(p) => p,
         None => {
             // Recovery: the model sometimes drops the line number, sending
-            // just "ab:cd" instead of "22:ab:cd". Try matching the hash suffix
-            // against generated anchors — accept if exactly one line matches.
+            // "ab:cd" instead of "22:ab:cd". Try matching the hash suffix
+            // against generated anchors — accept if exactly one line
+            // matches.
             if let Some(recovered) = recover_anchor_by_suffix(anchor_str, lines, scheme) {
                 tracing::debug!(
                     anchor = anchor_str,
@@ -602,7 +593,7 @@ fn validate_anchor(
             let shift = scheme.find_shifted(&parsed, lines, DEFAULT_SEARCH_RADIUS);
             let anchors = scheme.generate_anchors(lines);
 
-            // Wider context for recovery (±5 lines).
+            // Wider context for recovery (±a few lines).
             let recovery_ctx = 5;
             let ctx_start = parsed.line.saturating_sub(1).saturating_sub(recovery_ctx);
             let ctx_end = (parsed.line + recovery_ctx).min(lines.len());
@@ -946,15 +937,14 @@ mod tests {
     #[test]
     fn batch_ordering_bottom_up() {
         let anchors = anchors_for(SAMPLE);
-        // Two non-overlapping replacements at lines 2 and 4.
         let ops = vec![
             HashlineOp::Replace {
-                anchor: nth(&anchors, 1), // line 2
+                anchor: nth(&anchors, 1),
                 end_anchor: None,
                 content: "    let x = 100;".to_owned(),
             },
             HashlineOp::Replace {
-                anchor: nth(&anchors, 3), // line 4
+                anchor: nth(&anchors, 3),
                 end_anchor: None,
                 content: "    println!(\"changed\");".to_owned(),
             },
@@ -980,7 +970,6 @@ mod tests {
 
         let anchors = anchors_for(&content);
 
-        // Edit lines near the top (line 5) and near the bottom (line 195).
         let ops = vec![
             HashlineOp::Replace {
                 anchor: nth(&anchors, 4),
@@ -1026,12 +1015,12 @@ mod tests {
         let anchors = anchors_for(SAMPLE);
         let ops = vec![
             HashlineOp::Replace {
-                anchor: nth(&anchors, 1), // line 2
+                anchor: nth(&anchors, 1),
                 end_anchor: None,
                 content: "    let x = 99;".to_owned(),
             },
             HashlineOp::Replace {
-                anchor: nth(&anchors, 3), // line 4
+                anchor: nth(&anchors, 3),
                 end_anchor: None,
                 content: "    println!(\"hi\");".to_owned(),
             },
@@ -1081,7 +1070,7 @@ mod tests {
 
         match apply_edits(&content, &ops, &test_path(), &*test_scheme()).output {
             HashlineEditOutput::EditsApplied(result) => {
-                // All three edit regions should appear in the snippet.
+                // All of them edit regions should appear in the snippet.
                 assert!(
                     result.snippet.contains("line_4") || result.snippet.contains("line_6"),
                     "Snippet should show context around the deletion"
@@ -1174,11 +1163,11 @@ mod tests {
         let ops = vec![
             HashlineOp::Replace {
                 anchor: nth(&anchors, 1),
-                end_anchor: Some(nth(&anchors, 3)), // lines 2-4
+                end_anchor: Some(nth(&anchors, 3)),
                 content: "a".to_owned(),
             },
             HashlineOp::Replace {
-                anchor: nth(&anchors, 2), // line 3 — overlaps
+                anchor: nth(&anchors, 2),
                 end_anchor: None,
                 content: "b".to_owned(),
             },
@@ -1240,11 +1229,11 @@ mod tests {
         let ops = vec![
             HashlineOp::Replace {
                 anchor: nth(&anchors, 1),
-                end_anchor: Some(nth(&anchors, 3)), // lines 2-4
+                end_anchor: Some(nth(&anchors, 3)),
                 content: "a".to_owned(),
             },
             HashlineOp::Replace {
-                anchor: nth(&anchors, 2), // line 3 — overlaps
+                anchor: nth(&anchors, 2),
                 end_anchor: None,
                 content: "b".to_owned(),
             },
@@ -1262,8 +1251,8 @@ mod tests {
     fn end_before_start_error() {
         let anchors = anchors_for(SAMPLE);
         let ops = vec![HashlineOp::Replace {
-            anchor: nth(&anchors, 3),           // line 4
-            end_anchor: Some(nth(&anchors, 1)), // line 2 — before start
+            anchor: nth(&anchors, 3),
+            end_anchor: Some(nth(&anchors, 1)),
             content: "x".to_owned(),
         }];
 
@@ -1322,8 +1311,7 @@ mod tests {
 
         match apply_edits(content, &ops, &test_path(), &*test_scheme()).output {
             HashlineEditOutput::EditsApplied(result) => {
-                // "line3" should appear right after "line2" in the snippet,
-                // without an intervening blank line.
+                // "line3" should appear right after "line2" in the snippet, without an intervening blank line.
                 assert!(result.snippet.contains("line3"));
                 // Count content lines in snippet (excluding "lines not shown").
                 let content_lines: Vec<&str> = result
@@ -1368,7 +1356,7 @@ mod tests {
         let anchors = anchors_for(SAMPLE);
         let ops = vec![
             HashlineOp::InsertAfter {
-                anchor: nth(&anchors, 1), // after line 2
+                anchor: nth(&anchors, 1),
                 content: "    // first".to_owned(),
             },
             HashlineOp::InsertAfter {
@@ -1401,11 +1389,11 @@ mod tests {
         let ops = vec![
             HashlineOp::Replace {
                 anchor: nth(&anchors, 1),
-                end_anchor: Some(nth(&anchors, 3)), // lines 2-4
+                end_anchor: Some(nth(&anchors, 3)),
                 content: "replaced".to_owned(),
             },
             HashlineOp::InsertAfter {
-                anchor: nth(&anchors, 2), // line 3 — inside replaced span
+                anchor: nth(&anchors, 2),
                 content: "inserted".to_owned(),
             },
         ];
@@ -1426,11 +1414,11 @@ mod tests {
         let ops = vec![
             HashlineOp::Replace {
                 anchor: nth(&anchors, 1),
-                end_anchor: Some(nth(&anchors, 3)), // 0-based [1..4)
+                end_anchor: Some(nth(&anchors, 3)),
                 content: "replaced".to_owned(),
             },
             HashlineOp::InsertAfter {
-                anchor: "0:".to_owned(), // inserts at idx 0, before range
+                anchor: "0:".to_owned(),
                 content: "header".to_owned(),
             },
         ];
@@ -1446,16 +1434,14 @@ mod tests {
     #[test]
     fn insert_at_start_of_replace_range_rejected() {
         let anchors = anchors_for(SAMPLE);
-        // Replace 0-based [1..4). Insert after line 1 → insert_at=2, but
-        // insert_after anchor[0] (line 1) → insert_at=1, which is range.start.
         let ops = vec![
             HashlineOp::Replace {
                 anchor: nth(&anchors, 1),
-                end_anchor: Some(nth(&anchors, 3)), // 0-based [1..4)
+                end_anchor: Some(nth(&anchors, 3)),
                 content: "replaced".to_owned(),
             },
             HashlineOp::InsertAfter {
-                anchor: nth(&anchors, 0), // after line 1 → insert_at=1 = range.start
+                anchor: nth(&anchors, 0),
                 content: "at_range_start".to_owned(),
             },
         ];
@@ -1473,20 +1459,18 @@ mod tests {
     #[test]
     fn insert_at_exclusive_end_of_replace_range_allowed() {
         let anchors = anchors_for(SAMPLE);
-        // Replace lines 2-3 (0-based: [1..3))
         let ops = vec![
             HashlineOp::Replace {
                 anchor: nth(&anchors, 1),
-                end_anchor: Some(nth(&anchors, 2)), // lines 2-3
+                end_anchor: Some(nth(&anchors, 2)),
                 content: "replaced".to_owned(),
             },
             HashlineOp::InsertAfter {
-                anchor: nth(&anchors, 2), // insert after line 3 — at idx 3, which is exclusive end
+                anchor: nth(&anchors, 2),
                 content: "after_range".to_owned(),
             },
         ];
 
-        // insert_at=3 is NOT inside [1..3), so this should succeed.
         match apply_edits(SAMPLE, &ops, &test_path(), &*test_scheme()).output {
             HashlineEditOutput::EditsApplied(result) => {
                 assert!(result.snippet.contains("after_range"));
@@ -1573,7 +1557,6 @@ mod tests {
         let anchors = anchors_for(SAMPLE);
         let anchor_line2 = nth(&anchors, 1); // "    let x = 1;"
 
-        // Insert 2 lines at the top → line 2 shifts to line 4.
         let mut shifted_lines: Vec<&str> = vec!["// new1", "// new2"];
         let orig: Vec<&str> = SAMPLE.lines().collect();
         shifted_lines.extend_from_slice(&orig);
@@ -1587,9 +1570,9 @@ mod tests {
 
         match apply_edits(&shifted_content, &ops, &test_path(), &*test_scheme()).output {
             HashlineEditOutput::Error(e) => {
-                // With chunk-based scheme, insertion changes chunk boundaries, so recovery may or
-                // may not find the shifted line depending on whether the chunk context still
-                // matches. Both AnchorStale (with or without shifted_to) are acceptable outcomes.
+                // With chunk-based scheme, insertion changes chunk
+                // boundaries, so recovery may or may not find the shifted
+                // line depending on whether the chunk context still matches.
                 assert!(
                     e.error == HashlineEditErrorKind::AnchorStale
                         || e.error == HashlineEditErrorKind::AmbiguousAnchor,
@@ -1615,7 +1598,6 @@ mod tests {
         let anchors = anchors_for(SAMPLE);
         let anchor_line4 = nth(&anchors, 3); // "    println!(...)"
 
-        // Delete line 1 → line 4 shifts to line 3.
         let mut lines: Vec<&str> = SAMPLE.lines().collect();
         lines.remove(0);
         let modified = lines.join("\n");
@@ -1629,7 +1611,6 @@ mod tests {
         match apply_edits(&modified, &ops, &test_path(), &*test_scheme()).output {
             HashlineEditOutput::Error(e) => {
                 assert_eq!(e.error, HashlineEditErrorKind::AnchorStale);
-                // Recovery should find the content at line 3.
                 if let Some(new_line) = e.shifted_to {
                     assert_eq!(new_line, 3);
                     assert!(e.shifted_anchor.is_some());
@@ -1646,7 +1627,6 @@ mod tests {
         let anchors = anchors_for(SAMPLE);
         let anchor_line2 = nth(&anchors, 1);
 
-        // Replace line 2's content entirely.
         let mut lines: Vec<&str> = SAMPLE.lines().collect();
         let Some(line) = lines.get_mut(1) else {
             panic!("expected SAMPLE line 1, len {}", lines.len());
@@ -1699,9 +1679,9 @@ mod tests {
 
         match apply_edits(&shifted_content, &ops, &test_path(), &*test_scheme()).output {
             HashlineEditOutput::Error(e) => {
-                // Content-only local hash with chunk context: may be ambiguous
-                // or may find a shifted match depending on chunk boundaries.
-                // The key invariant: it should NOT silently succeed.
+                // Content-only local hash with chunk context: may be
+                // ambiguous or may find a shifted match depending on chunk
+                // boundaries.
                 assert!(
                     e.error == HashlineEditErrorKind::AnchorStale
                         || e.error == HashlineEditErrorKind::AmbiguousAnchor,
@@ -1749,7 +1729,6 @@ mod tests {
         let anchors = anchors_for(SAMPLE);
         let anchor_line2 = nth(&anchors, 1);
 
-        // Insert 1 line at top → line 2 shifts to line 3.
         let mut shifted_lines: Vec<&str> = vec!["// new"];
         let orig: Vec<&str> = SAMPLE.lines().collect();
         shifted_lines.extend_from_slice(&orig);
@@ -1783,22 +1762,17 @@ mod tests {
         }
     }
 
-    /// Deterministic test proving shifted recovery works with a real full chunk-context anchor — the same shape `hashline_read` emits. Scenario:
-    /// insert exactly `chunk_size` (8) lines at position 0. Every original line shifts by +8. A line originally at position `p` moves to `p+8`,
-    /// which is in the next chunk — but that chunk now contains the same lines as the original chunk at `p`.
+    /// Deterministic test proving shifted recovery works with a real full chunk-context anchor — the same shape `hashline_read` emits. A line
+    /// originally at position `p` moves to `p+8`, which is in the next chunk — but that chunk now contains the same lines as the original chunk
+    /// at `p`.
     #[test]
     fn deterministic_shifted_recovery_with_full_anchor() {
-        // 16 unique lines → chunks [0,8) and [8,16).
         let lines: Vec<String> = (0..16).map(|i| format!("unique_line_{i}")).collect();
         let original = lines.join("\n");
 
-        // Get the FULL anchor (with chunk context) for line 5.
         let full_anchors = anchors_for(&original);
-        let full_anchor = nth(&full_anchors, 4); // line 5, has :local:context
+        let full_anchor = nth(&full_anchors, 4);
 
-        // Insert exactly 8 new lines at the top.
-        // Line 5 → position 13. Chunk at [8,16) in the shifted file =
-        // original lines [0,8) = same chunk content → same fingerprint.
         let inserted: Vec<String> = (0..8).map(|i| format!("inserted_{i}")).collect();
         let mut shifted_lines = inserted;
         shifted_lines.extend(lines);
@@ -1810,7 +1784,6 @@ mod tests {
             content: "REPLACED".to_owned(),
         }];
 
-        // Step 1: edit fails (anchor at line 5 now has different content).
         let err = match apply_edits(&shifted_content, &ops, &test_path(), &*test_scheme()).output {
             HashlineEditOutput::Error(e) => e,
             HashlineEditOutput::EditsApplied(_) => {
@@ -1818,17 +1791,15 @@ mod tests {
             }
         };
 
-        // Step 2: recovery MUST find the shifted line (chunk alignment preserved).
         assert!(
             err.shifted_to.is_some(),
             "Recovery must find shifted line with full chunk anchor. Error: {}",
             err.message
         );
-        assert_eq!(err.shifted_to.unwrap(), 13); // line 5 + 8 = line 13
+        assert_eq!(err.shifted_to.unwrap(), 13);
         let fresh = err.shifted_anchor.expect("shifted_anchor must be present");
         assert!(err.message.contains("Retry"));
 
-        // Step 3: retry with the shifted anchor MUST succeed.
         let retry_ops = vec![HashlineOp::Replace {
             anchor: fresh,
             end_anchor: None,
@@ -1978,7 +1949,7 @@ mod tests {
         );
         // New line should account for the insertion shift
         assert_eq!(detail(&result.edit_details, 1).old_line, 4);
-        assert_eq!(detail(&result.edit_details, 1).new_line, 5); // shifted by 1
+        assert_eq!(detail(&result.edit_details, 1).new_line, 5);
     }
 
     #[test]
@@ -2136,7 +2107,6 @@ mod tests {
         let scheme = ChunkFingerprint::with_params(3, 8);
         let anchors = scheme.generate_anchors(&lines);
 
-        // Get the suffix (hash portion without line number) for line 3.
         let suffix = anchor_suffix(nth_ref(&anchors, 2));
         assert!(!suffix.is_empty());
 

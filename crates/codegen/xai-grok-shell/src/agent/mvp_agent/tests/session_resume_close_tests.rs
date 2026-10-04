@@ -1,5 +1,5 @@
-//! Unit-level resume and close: request translation, kind resolution, and close ordering.
-//! Protocol behavior is asserted on the wire in `tests/acp_session_setup_wire.rs`.
+//! Unit-level resume and close: request translation, kind resolution, and
+//! close ordering.
 use crate::agent::mvp_agent::session_lifecycle::{
     CLOSE_INTAKE_WAIT, CLOSE_TOTAL_BUDGET, CloseOutcome,
 };

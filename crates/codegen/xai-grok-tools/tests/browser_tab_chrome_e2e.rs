@@ -5,7 +5,7 @@
 //! these drive the tools themselves, so the output the model actually sees is
 //! what gets asserted.
 //!
-//! Ignored by default — CI has no Chrome. Run them with:
+//! Ignored by default — CI has no Chrome. Run them with.
 //!
 //! ```bash
 //! cargo test -p xai-grok-tools --features browser --test browser_tab_chrome_e2e \

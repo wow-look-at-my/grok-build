@@ -473,9 +473,7 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
         agent.allocate_turn_number(&sid);
     }
     assert_eq!(agent.session_turn_number(&sid), Some(3));
-    // Trace upload is hard-disabled in this build: even with enabling
-    // config, no trace context is created, no counter burns, and nothing
-    // is persisted for upload.
+    // Trace upload is hard-disabled in this build.
     let built = agent
         .build_harness_trace_uploads(
             &sid,
@@ -995,10 +993,7 @@ fn harnesses_are_compatible_rejects_strict_mismatches() {
 
 /// An agent type nobody has heard of is never strict, because
 /// `is_strict_harness_agent_type` refuses to enforce a harness it cannot
-/// resolve -- so against the non-strict default it is COMPATIBLE. Worth
-/// pinning: a test that wants a mismatch has to name a real strict harness, and
-/// an invented one silently produces the opposite of what it looks like it asks
-/// for. (Against a strict harness it still mismatches, from the other side.)
+/// resolve -- so against the non-strict default it is COMPATIBLE.
 #[test]
 fn an_unknown_agent_type_is_never_strict() {
     assert!(harnesses_are_compatible("grok-build", "cursor"));
@@ -1826,9 +1821,9 @@ fn parse_code_nav_capability_false_returns_false() {
     );
     assert!(!MvpAgent::parse_code_nav_capability(&init));
 }
-/// Verify that two session handles with different code-nav state produce independent eligibility outcomes, the key leader-mode isolation test.
-/// This tests the `code_nav_eligibility_for_request` lookup path directly by inspecting the per-handle fields rather than building a full agent.
-/// That mirrors what the method actually reads at runtime.
+/// Verify that session handles with different code-nav state produce independent eligibility outcomes, the key leader-mode isolation test. This
+/// tests the `code_nav_eligibility_for_request` lookup path directly by inspecting the per-handle fields rather than building a full agent. That
+/// mirrors what the method actually reads at runtime.
 #[tokio::test]
 async fn test_per_session_code_nav_isolation() {
     let web_handle = {
@@ -1920,8 +1915,8 @@ fn assert_no_update_mcp_servers(cmds: &[SessionCommand]) {
         "mcp/list must not push UpdateMcpServers"
     );
 }
-/// `mcp/list` refresh with two resident sessions: cache=false with a committed catalog fans `RefreshMcpSearchIndex`.
-/// A failed catalog and cache=true do not.
+/// `mcp/list` refresh with resident sessions: cache=false with a committed catalog fans `RefreshMcpSearchIndex`. A
+/// failed catalog and cache=true do not.
 #[tokio::test(flavor = "current_thread")]
 async fn mcp_list_gateway_refresh_fans_only_on_committed_uncached_catalog() {
     let local = tokio::task::LocalSet::new();
@@ -2823,9 +2818,9 @@ async fn shared_plugin_registry_snapshot_reads_plugins_config_from_disk() {
         "rebuild must take `disabled` from config on disk, not the boot-time config"
     );
 }
-/// Scaffolding for the session-less `x.ai/plugins/reload` regressions: a hermetic GROK_HOME, the
-/// folder-trust feature in its release-build default (`GROK_FOLDER_TRUST` unset), and an agent whose
-/// launch dir is `repo` (captured from the process cwd at construction, so callers hold `serial`).
+/// Scaffolding for the session-less `x.ai/plugins/reload` regressions: a
+/// hermetic GROK_HOME, the folder-trust feature in its release-build default
+/// (`GROK_FOLDER_TRUST` unset).
 struct ReloadHarness {
     _env: Vec<xai_grok_test_support::EnvGuard>,
     _home: tempfile::TempDir,
@@ -3095,7 +3090,7 @@ async fn wait_for_in_flight_load_wakes_on_failed_load() {
         })
         .await;
 }
-/// Two concurrent loads of the same session: the first guard's drop must not remove the second load's marker.
+/// Concurrent loads of the same session: the first guard's drop must not remove the second load's marker.
 /// Waiters keep waiting on the newer in-flight load.
 #[tokio::test]
 async fn concurrent_load_guards_do_not_clobber_each_other() {
@@ -3264,7 +3259,6 @@ async fn test_web_session_with_capability_is_eligible() {
         "web session with code-nav capability must be eligible"
     );
 }
-/// TUI session is rejected at gate 1 (client type) regardless of capability.
 #[tokio::test]
 async fn test_tui_session_is_rejected() {
     let sid = acp::SessionId::new("sess-tui");
@@ -3277,7 +3271,6 @@ async fn test_tui_session_is_rejected() {
         "TUI client must be rejected at gate 1 (client type)"
     );
 }
-/// Web session without capability is rejected at gate 2.
 #[tokio::test]
 async fn test_web_session_without_capability_is_rejected() {
     let sid = acp::SessionId::new("sess-web-no-cap");
@@ -3290,7 +3283,7 @@ async fn test_web_session_without_capability_is_rejected() {
         "web client without capability must be rejected at gate 2"
     );
 }
-/// Leader-mode isolation: two sessions with different code-nav state return independent results.
+/// Leader-mode isolation: sessions with different code-nav state return independent results.
 #[tokio::test]
 async fn test_leader_mode_two_sessions_stay_isolated() {
     let web_sid = acp::SessionId::new("web");
@@ -3544,8 +3537,8 @@ fn on_demand_enabled_from_remote_settings() {
     let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
     assert_eq!(rs.on_demand_enabled, None);
 }
-/// Regression for a 401 sequence seen in production. After a long idle window, the auth manager may have no live token by the time `session/new` runs.
-/// For session-based auth methods we MUST still report `SessionToken` so chat_state credentials retain the session-token shape. `try_refresh_session_token` then runs on the next prompt instead of early-returning.
+/// After a long idle window, the auth manager may have no live token by the time `session/new` runs. For session-based auth methods we MUST still report `SessionToken` so chat_state credentials retain the
+/// session-token shape. `try_refresh_session_token` then runs on the next prompt instead of early-returning.
 #[tokio::test(flavor = "current_thread")]
 async fn auth_type_session_based_no_current_returns_session_token() {
     for method_id in [
@@ -3599,8 +3592,9 @@ async fn auth_type_session_based_with_current_returns_session_token() {
     assert!(agent.auth_manager.current().is_some());
     assert_eq!(agent.auth_type(), xai_chat_state::AuthType::SessionToken,);
 }
-/// Defensive case: no `auth_method_id` selected yet (pre-`authenticate` state) and no live credential. We default to `ApiKey`. Callers key off this value (e.g. `resolve_chat_state_auth_type` for chat routing).
-/// Any other default would route session-token-shaped traffic through cli-chat-proxy before a method has been chosen.
+/// Defensive case: no `auth_method_id` selected yet (pre-`authenticate`
+/// state) and no live credential. We default to `ApiKey`. Callers key off
+/// this value (e.g. `resolve_chat_state_auth_type` for chat routing).
 #[tokio::test(flavor = "current_thread")]
 async fn auth_type_no_method_id_no_current_returns_api_key() {
     let agent = build_minimal_agent_for_tests();
@@ -3767,8 +3761,8 @@ async fn prepare_video_gen_config_respects_feature_flag() {
         VideoGenConfig::Disabled
     ));
 }
-/// The imagine tier gate fails **open**: with no resolved auth we can't confirm a restricted personal tier. The tools stay advertised and un-flagged. The server 429 remains the authoritative backstop.
-/// Guards against accidentally disabling a paid feature when tier info hasn't loaded.
+/// The imagine tier gate fails **open**: with no resolved auth we can't confirm a restricted personal tier. The tools stay advertised and un-flagged. Guards against accidentally disabling a paid
+/// feature when tier info hasn't loaded.
 #[tokio::test(flavor = "current_thread")]
 async fn prepare_image_gen_config_fails_open_without_auth() {
     use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
@@ -3936,8 +3930,7 @@ fn enable_trace_upload_config(agent: &MvpAgent) {
 }
 #[tokio::test]
 async fn product_analytics_stays_disabled_even_with_telemetry_config_on() {
-    // Telemetry is hard-disabled in this build: enabling config must not
-    // turn product analytics back on.
+    // Telemetry is hard-disabled in this build: enabling config must not turn product analytics back on.
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_product_telemetry(&agent);
     assert!(!agent.product_analytics_enabled());
@@ -3968,7 +3961,6 @@ async fn product_analytics_disabled_when_telemetry_off() {
     agent.cfg.borrow_mut().features.telemetry = Some(crate::agent::config::TelemetryMode::Disabled);
     assert!(!agent.product_analytics_enabled());
 }
-/// Counting HTTP stub: any request increments the counter and gets a storage-proxy-shaped 200 so the client does not retry.
 async fn spawn_counting_storage_stub() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
     let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let count_clone = count.clone();
@@ -4012,8 +4004,7 @@ async fn diagnostic_upload_skipped_for_opted_out_user() {
 }
 #[tokio::test]
 async fn diagnostic_upload_not_wired_even_for_normal_user() {
-    // Trace upload is hard-disabled in this build: even a normal user with
-    // fully-enabling config gets no diagnostics uploader and zero egress.
+    // Trace upload is hard-disabled in this build.
     let (stub_url, count) = spawn_counting_storage_stub().await;
     let agent = build_agent_with_auth(xai_grok_login::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
@@ -4078,8 +4069,8 @@ async fn diagnostic_upload_skipped_after_mid_session_trace_upload_kill_switch() 
 }
 use crate::session::storage::search::IndexDecision;
 /// A grok home of its own, with the switch left at its registered default.
-/// `decide_search_index` stops short of a session store, but do not reach `bootstrap_once`.
-/// `bootstrap_once` takes the process-cached `grok_home()`, which these guards cannot redirect, so it could index the developer's own store.
+/// `decide_search_index` stops short of a session store, but do not reach
+/// `bootstrap_once`.
 fn search_index_env() -> (tempfile::TempDir, [xai_grok_test_support::EnvGuard; 2]) {
     use xai_grok_test_support::EnvGuard;
     let home = tempfile::tempdir().unwrap();
@@ -4109,7 +4100,7 @@ async fn search_index_honors_the_session_search_feature() {
         "the feature is on by default, so this process keeps an index"
     );
 }
-/// Reclaiming is the one irreversible half of the deferred work, and the six hour throttle then hides the run that could have honored a remote veto.
+/// Reclaiming is the one irreversible half of the deferred work, and those hour throttle then hides the run that could have honored a remote veto.
 #[tokio::test]
 #[serial_test::serial]
 async fn auto_gc_declines_until_the_remote_answer_settles() {
@@ -4282,8 +4273,7 @@ async fn session_opened_before_the_decision_sees_it_land() {
 /// A mid-session remote-settings flip (kill switch) then stops collection without a new session.
 #[tokio::test]
 async fn collection_config_gate_mirror_follows_trace_upload_flip() {
-    // Trace upload is hard-disabled in this build: the live mirror must be
-    // off even with maximally-enabling config, and stay off after any flip.
+    // Trace upload is hard-disabled in this build: the live mirror must be off even with maximally-enabling config.
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
     agent.sync_collection_config_gate();
@@ -5726,7 +5716,6 @@ fn cancel_does_not_forward_to_bridge_in_local_mode() {
         );
     });
 }
-/// Regression (post-cancel slot hang, first bad release 0.2.101; see `dispatch_lock`).
 /// SDK e2e shape: `test_cancel_ends_in_flight_turn_and_frees_slot` (grok-agent-sdk).
 #[test]
 fn cancel_never_overtakes_in_flight_prompt_intake() {
@@ -5927,8 +5916,8 @@ fn spawn_active_work_actor(
         }
     });
 }
-/// Drive `x.ai/internal/evict_sessions` through the real `ext_notification` handler path (not the internal helper).
-/// This matches how the leader server signals a client disconnect.
+/// Drive `x.ai/internal/evict_sessions` through the real `ext_notification`
+/// handler path (not the internal helper).
 async fn drive_disconnect(agent: &MvpAgent, sid: &acp::SessionId) {
     drive_disconnect_many(agent, &[sid]).await;
 }
@@ -6499,9 +6488,8 @@ fn disconnect_keeps_the_workflow_session_and_evicts_the_idle_one() {
         );
     });
 }
-/// Mixed batch in a *single* `x.ai/internal/evict_sessions` notification, the realistic disconnect shape.
-/// This is the path that exercises `handle_evict_sessions`' `join_all` two-pass (concurrent `IsBusy` checks, then sequential act).
-/// One session's actor reports busy (kept resident, `Working`, no `Shutdown`); the other is idle (unloaded, `Dormant`, `Shutdown` sent). Each must get its own outcome with no cross-contamination between the concurrent check pass and the sequential act pass.
+/// Mixed batch in a *single* `x.ai/internal/evict_sessions` notification, the realistic disconnect shape. One session's actor reports busy (kept resident, `Working`, no `Shutdown`); the other is idle (unloaded, `Dormant`, `Shutdown` sent). Each must get its
+/// own outcome with no cross-contamination between the concurrent check pass and the sequential act pass.
 #[test]
 fn disconnect_mixed_batch_keeps_busy_unloads_idle() {
     run_local_for_bridge_test(|| async {
@@ -7179,7 +7167,7 @@ async fn hydration_merges_only_into_the_same_unresolved_principal() {
         );
     }
 }
-/// Two pagers ask while the cache is unknown; the second answer finds it resolved and must still tell its caller.
+/// Pagers ask while the cache is unknown; the second answer finds it resolved and must still tell its caller.
 #[tokio::test]
 async fn concurrent_hydrations_both_hear_the_resolved_capability() {
     let server = xai_grok_test_support::MockInferenceServer::start()
@@ -7439,8 +7427,7 @@ async fn same_credential_refresh_does_not_flap_resolved_gate() {
         "a same-credential refresh must not flap a gate already resolved for it"
     );
 }
-/// A `/settings` 401 from a token that rotated mid-flight must self-heal: refresh once and, if the token changed, re-fetch with it.
-/// Without the re-fetch the stale 401 fails OPEN (no remote policy).
+/// Without the re-fetch the stale fails OPEN (no remote policy).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial_test::serial]
 async fn settings_self_heal_refetches_after_token_rotation() {
@@ -8841,9 +8828,9 @@ fn subagent_rate_limit_max_attempts_env_is_parsed_leniently() {
 }
 #[cfg(feature = "dhat-heap")]
 mod dhat_soak;
-/// A leader multiplexes many clients behind one `initialize`, so the answer has to travel with the session.
-/// Without the session-meta read, one terminal with the row off decides for every other terminal sharing the leader.
-/// Silence means off, since the payload costs a git discovery and three round trips.
+/// A leader multiplexes many clients behind one `initialize`, so the answer has to travel with the session. Without
+/// the session-meta read, one terminal with the row off decides for every other terminal sharing the leader. Silence
+/// means off, since the payload costs a git discovery and round trips.
 #[test]
 fn session_meta_outranks_the_client_that_started_the_process() {
     let says_nothing = || {

@@ -45,7 +45,6 @@ async fn script_is_handed_the_payload_on_stdin_and_the_terminal_size() {
 async fn payload_past_a_pipe_buffer_survives_a_script_that_writes_first() {
     let mut ctx = ctx();
     ctx.session_name = Some("n".repeat(128 * 1024));
-    // Past the 64 KiB Linux pipe buffer in both directions.
     let script = "head -c 70000 /dev/zero | tr '\\0' x; cat >/dev/null; printf done";
 
     let row = tokio::time::timeout(
@@ -79,7 +78,6 @@ async fn runaway_output_is_capped_rather_than_waiting_out_the_deadline() {
     assert!(lines.iter().all(|line| *line == "hello"), "got {row:?}");
 }
 
-/// Past the 64 KiB the log keeps and the 64 KiB the pipe buffers, so the script is still writing when the log has all it wants.
 const STDERR_PAST_THE_CAP: &str = "printf '%300000s' '' >&2";
 
 #[tokio::test]
@@ -151,8 +149,7 @@ async fn script_that_exits_cleanly_still_loses_what_it_backgrounded() {
 
 #[tokio::test]
 async fn background_job_holding_stdout_does_not_hold_the_row() {
-    // No redirect, so the grandchild inherits stdout and the pipe stays open for five seconds after the shell exits
-    // Reading to EOF would wait for it
+    // No redirect, so the grandchild inherits stdout and the pipe stays open for a few seconds after the shell exits Reading to EOF would wait.
     let started = Instant::now();
     let row =
         row_text(run_status_command("sleep 5 & printf row", &ctx(), ROW, COMMAND_TIMEOUT).await);

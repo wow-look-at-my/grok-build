@@ -218,7 +218,7 @@ fn resolve_skill_path(raw: &str, cwd: &str) -> String {
         PathBuf::from(cwd).join(&expanded)
     };
 
-    // canonicalize resolves symlinks and `..`; fall back to the joined path if it fails (e.g. the path doesn't exist yet)
+    // canonicalize resolves symlinks and `..`.
     dunce::canonicalize(&absolute)
         .unwrap_or(absolute)
         .to_string_lossy()
@@ -234,8 +234,6 @@ fn discover_auto_sources(cwd: &str, skills: &[SkillInfo]) -> Vec<(String, usize)
         .and_then(|repo| repo.workdir().map(|p| p.to_path_buf()));
 
     // After /import-claude, do not list hardcoded .claude/skills/ paths.
-    // Import writes those dirs to [paths] extra_skill_dirs for the source UI.
-    // list_skills_with_plugins still does not read extra_skill_dirs.
     let imported = crate::claude_import::is_claude_import_marked();
     let local_dir_names: &[&str] = if imported {
         &[".grok", ".agents"]
@@ -459,8 +457,7 @@ pub async fn handle(
         "x.ai/skills/list" => {
             let req: SkillsListRequest = serde_json::from_str(args.params.get())?;
             let skills = reload_skills(&req.cwd, plugin_registry, compat).await;
-            // Sessions otherwise learn about disk changes only from inotify,
-            // which misses writes made through another NFS client.
+            // Sessions otherwise learn about disk changes only from inotify.
             agent.refresh_skill_baseline_for_all_sessions();
             super::to_ext_response(Ok(SkillsListResponse { skills }))
         }

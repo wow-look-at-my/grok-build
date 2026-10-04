@@ -1,22 +1,16 @@
-#![allow(clippy::cast_lossless)] // 2 hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
-#![allow(clippy::cast_precision_loss)] // 2 hits predate the gate
-#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
+#![allow(clippy::cast_sign_loss)]
 
 //! Pure shared token-estimation primitives.
-//!
-//! This crate is the single source of truth for the bytes/4 heuristic and the
-//! derived-display arithmetic that `/context`, `/session-info`, the auto-compact
-//! gates, the preflight overflow check, and every client renderer use to talk
-//! about context-window usage.
 
 #![deny(clippy::indexing_slicing)]
 
 /// Bytes per token under the rough character-based heuristic.
 pub const BYTES_PER_TOKEN: u64 = 4;
 
-/// Per-image approximate token cost when summing
-/// low-resolution image patches.
+/// Per-image approximate token cost when summing low-resolution image patches.
 pub const IMAGE_TOKEN_ESTIMATE: u64 = 765;
 
 /// Bytes/4 estimate of a string's token count.
@@ -26,8 +20,7 @@ pub fn estimate_tokens(s: &str) -> u64 {
 }
 
 /// Inverse of [`estimate_tokens`]: convert a token budget into a character
-/// budget. Used by skill discovery to size text passages against the model's
-/// context window.
+/// budget.
 #[inline]
 pub fn estimate_chars(tokens: u64) -> u64 {
     tokens.saturating_mul(BYTES_PER_TOKEN)
@@ -56,9 +49,7 @@ pub fn usage_percentage_u8(used: u64, total: u64) -> u8 {
     usage_percentage(used, total).round() as u8
 }
 
-/// Integer-arithmetic (truncating) usage percentage, clamped to `100`. Differs from [`usage_percentage_u8`] in two ways:
-/// no `f64` round-trip, and the result is truncated (not rounded). Returns `u8` because the result is bounded to `100`.
-/// Saturates on overflow via `saturating_mul`.
+/// Integer-arithmetic (truncating) usage percentage, clamped to `100`.
 #[inline]
 pub fn usage_percentage_truncated_u8(used: u64, total: u64) -> u8 {
     used.saturating_mul(100)
@@ -73,9 +64,9 @@ pub fn free_tokens(total: u64, used: u64) -> u64 {
     total.saturating_sub(used)
 }
 
-/// True when `used >= context_window * threshold_percent / 100`. Returns `false` for `context_window == 0` so callers do
-/// not have to special-case missing windows. Computed in integer arithmetic to match the existing auto-compact gate
-/// semantics.
+/// True when `used >= context_window * threshold_percent / 100`. Returns
+/// `false` for `context_window == 0` so callers do not have to special-case
+/// missing windows.
 #[inline]
 pub fn exceeds_threshold(used: u64, context_window: u64, threshold_percent: u8) -> bool {
     if context_window == 0 {
@@ -104,26 +95,13 @@ pub fn exceeds_threshold_with_headroom(
 }
 
 /// Smallest output budget a request may carry.
-///
-/// A provider rejects `max_tokens: 0`, and an answer shorter than this is
-/// not an answer. A prompt that leaves less room than this is over the
-/// window: the request goes out at this floor and the provider's own
-/// overflow error is the honest report of it.
 pub const MIN_OUTPUT_TOKENS: u64 = 1024;
 
 /// Share of the window held back when the prompt size is an estimate.
-///
-/// Every prompt count in this process is bytes/4, or the provider's own count
-/// for the last response plus a bytes/4 delta. Either can read low, and one
-/// token low is a rejected request. 1% of the window is slack the output
-/// budget will not miss.
 pub const PROMPT_ESTIMATE_SLACK_PERCENT: u64 = 1;
 
 /// The window to fit an output budget into when the prompt count is an
 /// estimate: [`PROMPT_ESTIMATE_SLACK_PERCENT`] held back.
-///
-/// Returns 0 for an unknown (`0`) window, which [`fit_output_tokens`] reads as
-/// "make no claim".
 #[inline]
 pub fn window_less_estimate_slack(context_window: u64) -> u64 {
     context_window.saturating_sub(
@@ -134,8 +112,6 @@ pub fn window_less_estimate_slack(context_window: u64) -> u64 {
 }
 
 /// Room left in `context_window` for the response once the prompt is in it.
-///
-/// Returns 0 when the prompt alone fills the window.
 #[inline]
 pub fn output_room(context_window: u64, prompt_tokens: u64) -> u64 {
     context_window.saturating_sub(prompt_tokens)
@@ -143,15 +119,6 @@ pub fn output_room(context_window: u64, prompt_tokens: u64) -> u64 {
 
 /// The output budget a request may ask for so that prompt plus output stays
 /// inside `context_window`.
-///
-/// A provider counts the requested output against the same window as the
-/// prompt, so `requested` is not a free parameter: a 737_857-token prompt and
-/// a 262_144-token output budget is 1_000_001 tokens against a 1_000_000-token
-/// window, and the server rejects the request rather than the answer.
-///
-/// `context_window == 0` means the window is unknown, so the caller's value
-/// passes through unchanged. The result never drops below
-/// [`MIN_OUTPUT_TOKENS`] — see that constant for why.
 #[inline]
 pub fn fit_output_tokens(requested: u64, prompt_tokens: u64, context_window: u64) -> u64 {
     if context_window == 0 {
@@ -172,7 +139,6 @@ mod tests {
     #[test]
     fn a_request_that_fits_is_left_alone() {
         assert_eq!(fit_output_tokens(262_144, 100_000, 1_000_000), 262_144);
-        // Exactly full is still legal: 737_856 + 262_144 == 1_000_000.
         assert_eq!(fit_output_tokens(262_144, 737_856, 1_000_000), 262_144);
     }
 
@@ -209,8 +175,6 @@ mod tests {
     fn the_slack_is_one_percent_and_zero_stays_zero() {
         assert_eq!(window_less_estimate_slack(1_000_000), 990_000);
         assert_eq!(window_less_estimate_slack(0), 0);
-        // The reported prompt then leaves 252_143 for the answer instead of
-        // landing exactly on the wall.
         assert_eq!(
             fit_output_tokens(262_144, 737_857, window_less_estimate_slack(1_000_000)),
             252_143
@@ -258,18 +222,15 @@ mod tests {
         assert_eq!(usage_percentage_u8(0, 100), 0);
         assert_eq!(usage_percentage_u8(50, 100), 50);
         assert_eq!(usage_percentage_u8(99, 100), 99);
-        // 12_700 / 256_000 = 0.04960... -> 5 after rounding
         assert_eq!(usage_percentage_u8(12_700, 256_000), 5);
         assert_eq!(usage_percentage_u8(150, 100), 100);
     }
 
-    /// Half-boundary contract — locks rounding direction. `85 / 200 = 0.425`
-    /// becomes `42.5%` which rounds half-up to `43`. The truncating helper
-    /// returns `42` for the same input (see `usage_percentage_truncated_u8`).
+    /// Half-boundary contract — locks rounding direction. `85 / 200 =
+    /// 0.425` becomes `42.5%` which rounds half-up to `43`.
     #[test]
     fn usage_percentage_u8_rounds_half_up() {
         assert_eq!(usage_percentage_u8(85, 200), 43);
-        // 7 / 8 = 0.875, rounds to 88 (truncated would be 87).
         assert_eq!(usage_percentage_u8(7, 8), 88);
     }
 
@@ -282,13 +243,11 @@ mod tests {
         assert_eq!(usage_percentage_truncated_u8(u64::MAX, 1), 100);
     }
 
-    /// Truncation contract — distinguishes this helper from `usage_percentage_u8`, which rounds. Locks in that
-    /// `exceeds_threshold(used, cw, p)` and `usage_percentage_truncated_u8(used, cw) >= p` agree.
+    /// Truncation contract — distinguishes this helper from
+    /// `usage_percentage_u8`, which rounds.
     #[test]
     fn usage_percentage_truncated_u8_truncates_does_not_round() {
-        // 85 / 200 = 0.425, truncated -> 42 (rounded would be 43).
         assert_eq!(usage_percentage_truncated_u8(85, 200), 42);
-        // 7 / 8 = 0.875, truncated -> 87 (rounded would be 88).
         assert_eq!(usage_percentage_truncated_u8(7, 8), 87);
     }
 
@@ -308,14 +267,11 @@ mod tests {
     }
 
     /// Strict-boundary contract — pin the `>=` semantics. At cw=1000, pct=85, `850 * 100 == 1000 * 85` so the gate must fire
-    /// at exactly 850 tokens. This is one token earlier than the legacy `>` gate (`total > cw * pct / 100` which fired at
-    /// 851).
+    /// at multiple tokens.
     #[test]
     fn exceeds_threshold_fires_on_strict_boundary() {
         assert!(exceeds_threshold(850, 1000, 85));
         assert!(!exceeds_threshold(849, 1000, 85));
-        // 1000 * 85 / 100 = 850, so 850 is the new strict boundary.
-        // Same shape at the other commonly-configured threshold (95%):
         assert!(exceeds_threshold(950, 1000, 95));
         assert!(!exceeds_threshold(949, 1000, 95));
     }
@@ -348,7 +304,6 @@ mod tests {
 
     #[test]
     fn exceeds_threshold_with_headroom_subtracts_headroom() {
-        // 100K window, 85% threshold = 85_000. Headroom 4_000 -> fires at 81_000.
         assert!(!exceeds_threshold_with_headroom(80_999, 100_000, 85, 4_000));
         assert!(exceeds_threshold_with_headroom(81_000, 100_000, 85, 4_000));
     }
@@ -361,8 +316,6 @@ mod tests {
 
     #[test]
     fn exceeds_threshold_with_headroom_headroom_larger_than_threshold_saturates() {
-        // 100K * 85% = 85_000 (8_500_000 scaled). Headroom 1M tokens scales to
-        // 100_000_000 — saturating sub yields 0, so any used fires.
         assert!(exceeds_threshold_with_headroom(0, 100_000, 85, 1_000_000));
     }
 }

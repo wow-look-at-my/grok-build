@@ -1,14 +1,4 @@
 //! Behavior version catalog for version-managed tools.
-//!
-//! This module defines which tools are version-managed, the available behavior
-//! presets (e.g. `"current"`, `"legacy-0.4.10"`), and the resolution logic that
-//! maps (preset, tool_id, per_tool_override) → concrete `contract_version`.
-//!
-//! ## Reminder behavior policy
-//!
-//! Reminders (per-tool and cross-cutting) always use current behavior regardless
-//! of the selected behavior preset. This is a deliberate design choice:
-//! reminders are a quality-of-life feature, not part of the tool contract.
 
 use std::collections::HashMap;
 
@@ -39,27 +29,20 @@ pub struct VersionLifecycle {
     pub version: &'static str,
     /// Independent lifecycle for this tool+version pair.
     pub lifecycle: BehaviorLifecycle,
-    /// Suggested replacement when deprecated/removed. Must itself be a
-    /// supported Active version for the same tool.
+    /// Suggested replacement when deprecated/removed. Must itself be a supported Active version for the same tool.
     pub replacement: Option<&'static str>,
     /// Optional deprecation message for operational tooling.
     pub deprecation_note: Option<&'static str>,
-    /// The crate release version in which this catalog entry was first added. This is catalog-introduction metadata, not
-    /// behavior-origin metadata. For reconstructed legacy behavior, this is the release that added the legacy port to the
-    /// catalog. Empty string for `"current"` (moving alias with no fixed origin).
+    /// The crate release version in which this catalog entry was first added.
     pub cataloged_in: &'static str,
     /// Optional opaque references for humans browsing the catalog.
-    /// Prefer empty; do not embed external PR/issue number lists here.
-    /// Empty slice for `"current"` (moving alias).
     pub source_refs: &'static [&'static str],
-    /// One-line summary of what this version's behavior is.
-    /// Empty string for `"current"` (moving alias).
+    /// One-line summary of what this version's behavior is. Empty string for `"current"` (moving alias).
     pub summary: &'static str,
 }
 
-/// A named behavior preset (bundle) that maps tool IDs to default contract versions.
-/// Architecturally a "bundle" — a convenience mapping from a label to per-tool version defaults.
-/// Not canonical; must validate against `TOOL_VERSION_REGISTRY`.
+/// A named behavior preset (bundle) that maps tool IDs to default contract
+/// versions.
 #[derive(Debug)]
 pub struct PresetEntry {
     /// Preset name, e.g. `"current"` or `"legacy-0.4.10"`.
@@ -67,14 +50,11 @@ pub struct PresetEntry {
     /// Lifecycle stage of this preset.
     pub lifecycle: BehaviorLifecycle,
     /// Per-tool default versions for this preset.
-    /// Keys are fully-qualified tool IDs (e.g. `"GrokBuild:run_terminal_cmd"`).
-    /// Tools not listed here fall back to `"current"`.
     pub tool_defaults: &'static [(&'static str, &'static str)],
 }
 
-/// Fully-qualified IDs of version-managed tools. Only tools listed here can have `behavior_version`
-/// overrides. Uses fully-qualified IDs (`Namespace:tool_id`) to prevent collisions between
-/// namespaces (e.g. `GrokBuild:run_terminal_cmd` vs. `GrokBuildConcise:run_terminal_cmd`).
+/// Fully-qualified IDs of version-managed tools. Only tools listed here can
+/// have `behavior_version` overrides.
 pub const MANAGED_TOOLS: &[&str] = &[
     "GrokBuild:run_terminal_cmd",
     "GrokBuild:read_file",
@@ -85,9 +65,9 @@ pub const MANAGED_TOOLS: &[&str] = &[
     "GrokBuild:get_task_output",
 ];
 
-// Helper constant for concise registry entries. `V_CURRENT` is a moving alias — its metadata fields
-// are empty because `"current"` changes meaning over time. Stable canonical versions use per-tool
-// legacy constants with tool-specific metadata.
+// Helper constant for concise registry entries. `V_CURRENT` is a moving alias
+// — its metadata fields are empty because `"current"` changes meaning over
+// time.
 const V_CURRENT: VersionLifecycle = VersionLifecycle {
     version: "current",
     lifecycle: BehaviorLifecycle::Active,
@@ -99,7 +79,7 @@ const V_CURRENT: VersionLifecycle = VersionLifecycle {
 };
 
 // Per-tool legacy constants — each carries tool-specific metadata because
-// the legacy behavior differs per tool.
+// the behavior differs per tool.
 const V_LEGACY_BASH: VersionLifecycle = VersionLifecycle {
     version: "legacy-0.4.10",
     lifecycle: BehaviorLifecycle::Active,
@@ -155,9 +135,8 @@ const V_LEGACY_TASK_OUTPUT: VersionLifecycle = VersionLifecycle {
     summary: "Simple not-found text without known task ID enumeration",
 };
 
-/// Per-tool version registry — canonical source for which versions each managed tool supports and their individual lifecycle. 7 managed tools
-/// total 6 legacy-ported (support both `"current"` and `"legacy-0.4.10"`) 1 managed but unported (`grep` — only `"current"`) Each legacy-ported
-/// tool has its own `V_LEGACY_*` constant with tool-specific `summary` and `source_refs`. Do not use a shared legacy constant.
+/// Per-tool version registry — canonical source for which versions each managed tool supports and their individual lifecycle. Do not use a
+/// shared legacy constant.
 pub const TOOL_VERSION_REGISTRY: &[ToolVersionEntry] = &[
     ToolVersionEntry {
         fq_tool_id: "GrokBuild:run_terminal_cmd",
@@ -216,9 +195,8 @@ pub const PRESETS: &[PresetEntry] = &[
     PresetEntry {
         name: "release-0.1.157",
         lifecycle: BehaviorLifecycle::Active,
-        // At 0.1.157, all managed tools were at `current`. No per-tool
-        // version other than `legacy-0.4.10` had been carved out yet.
-        // `grep` was managed but current-only (no legacy port).
+        // No per-tool version other than `legacy-0.4.10` had been carved out
+        // yet. `grep` was managed but current-only (no legacy port).
         tool_defaults: &[
             ("GrokBuild:run_terminal_cmd", "current"),
             ("GrokBuild:read_file", "current"),
@@ -231,9 +209,7 @@ pub const PRESETS: &[PresetEntry] = &[
     },
 ];
 
-/// Check whether a contract version string is the legacy-0.4.10 version. Use this for tools with trivial version deltas
-/// (e.g. `kill_task`, `get_task_output` which only differ in not-found wording). For tools with substantial version
-/// divergence, prefer a typed enum like `BashVersion` or `ListDirVersion`.
+/// Check whether a contract version string is the legacy-0.4.10 version.
 pub fn is_legacy_contract(contract_version: Option<&str>) -> bool {
     contract_version == Some("legacy-0.4.10")
 }
@@ -299,9 +275,9 @@ pub struct VersionResolution {
     pub warnings: Vec<VersionWarning>,
 }
 
-/// Resolve the concrete contract version for a tool. `per_tool_override` — if `Some`, use it (validated against known versions). Preset
-/// `tool_defaults` entry for this `fq_tool_id`. `"current"` (fallback for managed tools not yet in preset defaults). `Ok(Some(version))` — for
-/// version-managed tools. `Ok(None)` — for tools NOT in `MANAGED_TOOLS` (unmanaged). Unknown preset name Unknown `per_tool_override` value
+/// Resolve the concrete contract version for a tool. `per_tool_override` —
+/// if `Some`, use it (validated against known versions). Preset
+/// `tool_defaults` entry for this `fq_tool_id`.
 pub fn resolve_version(
     preset_name: &str,
     fq_tool_id: &str,
@@ -471,7 +447,6 @@ mod tests {
 
     #[test]
     fn legacy_preset_resolves_all_ported_tools() {
-        // All 6 ported tools should resolve to "legacy-0.4.10" under the legacy preset.
         for fq_id in &[
             "GrokBuild:run_terminal_cmd",
             "GrokBuild:read_file",
@@ -588,9 +563,7 @@ mod tests {
 
     #[test]
     fn deprecated_version_produces_tool_warning() {
-        // Test the deprecated path directly via validate_and_resolve. We can't mutate the static registry, so we call the internal function which
-        // checks per-tool lifecycle from the registry. For this test, we need a version that IS in the registry. Since all current versions are
-        // Active, we test the code path by calling validate_and_resolve on an Active version and verifying no warning, then documenting the contract.
+        // Test the deprecated path directly via validate_and_resolve.
         let (version, warnings) =
             validate_and_resolve("GrokBuild:run_terminal_cmd", "current").unwrap();
         assert_eq!(version, Some("current".to_string()));
@@ -599,8 +572,7 @@ mod tests {
             "Active version should produce no warning"
         );
 
-        // Verify the Deprecated branch structure is reachable:
-        // validate_and_resolve for a version not in registry → Err
+        // Verify the Deprecated branch structure is reachable.
         let err = validate_and_resolve("GrokBuild:grep", "legacy-0.4.10").unwrap_err();
         assert!(err.contains("is not supported"), "got: {err}");
     }
@@ -608,8 +580,6 @@ mod tests {
     #[test]
     fn removal_candidate_version_is_rejected() {
         // RemovalCandidate versions should be rejected with replacement.
-        // Since no current versions are RemovalCandidate, verify the error
-        // for unsupported version (which exercises the same not-found path).
         let err = validate_and_resolve("GrokBuild:grep", "legacy-0.4.10").unwrap_err();
         assert!(err.contains("is not supported for tool"));
         assert!(err.contains("supported versions: [current]"));

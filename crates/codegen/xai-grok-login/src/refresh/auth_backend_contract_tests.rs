@@ -1,5 +1,4 @@
 //! Auth-backend contract tests against a mock IdP whose `/token` response is forced per case.
-//! They assert the refresh outcome, the storm cap, and the `manual_auth` event emitted on the live recovery path.
 
 use super::*;
 use crate::error::RefreshTokenFailedReason;
@@ -119,8 +118,7 @@ async fn auth_backend_contract_token_responses_map_to_outcomes() {
         ),
         ("bare_4xx_no_body", 400, "", Expect::Transient),
         ("malformed_body", 400, "not json", Expect::Transient),
-        // A body mangled by a proxy or WAF must degrade to retry, never a false permanent lock
-        // A nested error object or a non-string `error` is not a recognized top-level code, so it stays transient
+        // A body mangled by a proxy or WAF must degrade to retry.
         (
             "nested_error_object",
             400,
@@ -165,8 +163,8 @@ async fn auth_backend_contract_token_responses_map_to_outcomes() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn auth_backend_contract_concurrent_401s_hit_idp_once() {
     let hits = Arc::new(AtomicU32::new(0));
-    // The 100ms /token delay lets every caller pass the pre-lock check and queue on refresh_lock before the leader records the verdict
-    // That ordering is what exercises the in-lock `RefreshStep::Recheck`
+    // The 100ms /token delay lets every caller pass the pre-lock check and
+    // queue on refresh_lock.
     let (base_url, server) = start_idp(
         400,
         r#"{"error":"invalid_grant"}"#.to_string(),
@@ -302,7 +300,6 @@ async fn auth_backend_contract_dead_token_emits_typed_manual_auth_event() {
 #[tokio::test]
 async fn auth_backend_contract_transient_failures_escalate_to_non_sticky_permanent() {
     let hits = Arc::new(AtomicU32::new(0));
-    // Persistent 503: every refresh attempt is transient.
     let (base_url, server) = start_idp(503, "{}".to_string(), hits, 0).await;
     let dir = tempfile::tempdir().unwrap();
     let auth_manager = Arc::new(
@@ -311,7 +308,6 @@ async fn auth_backend_contract_transient_failures_escalate_to_non_sticky_permane
     auth_manager.hot_swap(expired_oidc(&base_url));
 
     // One refresher instance: it owns the consecutive-failure counter.
-    // The budget exceeds try_recover_unauthorized's per-recovery attempts, so a single 401 recovery cannot escalate; exhaust the full budget here
     let refresher = OidcRefresher::new(auth_manager.clone());
     let mut outcomes = Vec::new();
     for _ in 0..5 {
@@ -350,9 +346,8 @@ async fn auth_backend_contract_transient_failures_escalate_to_non_sticky_permane
     server.abort();
 }
 
-/// Two `AuthManager`s sharing one auth.json stand in for two CLI processes.
-/// The auth.json flock must serialize their refreshes so the shared refresh token is spent at the IdP exactly once.
-/// The loser adopts the rotated token from disk instead of racing a second exchange (which the IdP could revoke as reuse).
+/// The auth.json flock must serialize their refreshes so the shared refresh token is spent at the IdP exactly once. The
+/// loser adopts the rotated token from disk instead of racing a second exchange (which the IdP could revoke as reuse).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn auth_backend_contract_two_instances_share_one_idp_call() {
     let hits = Arc::new(AtomicU32::new(0));
@@ -365,7 +360,7 @@ async fn auth_backend_contract_two_instances_share_one_idp_call() {
     .await;
     let dir = tempfile::tempdir().unwrap();
 
-    // Distinct managers, same on-disk auth.json: separate flock OFDs, so they genuinely contend like two processes
+    // Distinct managers, same on-disk auth.json: separate flock OFDs, so they genuinely contend like processes
     let new_instance = || {
         let m = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default()).with_proxy_base_url(&url),

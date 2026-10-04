@@ -2,16 +2,12 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-// Reproduction: horizontal resize must not lose the scroll position. It only happens when NOT
-// following; in follow/tail mode grok re-pins to the bottom (no jump). It then resizes the WIDTH
-// only.
+// Reproduction: horizontal resize must not lose the scroll position.
 
 /// Unique marker on its own (non-wrapping) line, with WRAPPING content above it.
 const MARKER: &str = "SCROLL_ANCHOR_MARKER_ZZZ";
 
 /// First line of the response.
-/// When this is NOT on screen we have scrolled past the top of the response, so `scroll_offset > 0` (the regime where the bug lives).
-/// At the absolute top staying-at-top is correct, so there is no bug.
 const TOP_SENTINEL: &str = "TOP_OF_RESPONSE_AAA";
 
 /// Last line of the response. When this is NOT on screen we are not pinned to the bottom, not following.
@@ -20,22 +16,19 @@ const BOTTOM_SENTINEL: &str = "BOTTOM_OF_RESPONSE_QQQ";
 /// Number of long, WRAPPING paragraphs placed above the marker.
 const WRAP_LINES_ABOVE: usize = 10;
 
-/// Short, NON-wrapping paragraphs placed immediately above the marker. The marker is parked in the
-/// middle of the viewport, so there must be enough of these to fill the rows directly above it.
+/// Short, NON-wrapping paragraphs placed immediately above the marker.
 const GUARD_LINES: usize = 16;
 
-/// Short, non-wrapping filler below the marker. Enough to exceed a viewport so
-/// the marker can be parked mid-viewport with the bottom scrolled off.
+/// Short, non-wrapping filler below the marker.
 const FILLER_BELOW: usize = 30;
 
-/// Spawn width (cols). 120 is the harness default.
+/// Spawn width (cols).
 const WIDE_COLS: u16 = DEFAULT_COLS;
 
-/// Resize width (cols). Narrower, so the wrapping lines above the marker grow from 2 to 3 display rows each.
+/// Resize width (cols).
 const NARROW_COLS: u16 = 80;
 
 /// Allowed marker drift (viewport rows) across a width-only resize.
-/// A correct (scroll-anchored) reflow keeps the marker within a row or two; the bug moves it by ~`WRAP_LINES_ABOVE` rows.
 const POS_TOLERANCE: i32 = 2;
 
 /// That gives a predictable one-hard-line-per-line layout where only the long paragraphs re-wrap on
@@ -44,8 +37,6 @@ fn scroll_anchor_response() -> String {
     let mut paragraphs: Vec<String> = Vec::new();
     paragraphs.push(TOP_SENTINEL.to_string());
 
-    // ~220-char unbreakable paragraphs: they wrap to 2 display rows at 120 cols and 3 at 80 cols. That
-    // shows up as TOP_OF_RESPONSE_AAA still on screen while BOTTOM_OF_RESPONSE_QQQ never arrives.
     let wrapping = "W".repeat(220);
     for _ in 0..WRAP_LINES_ABOVE {
         paragraphs.push(wrapping.clone());
@@ -67,23 +58,18 @@ fn scroll_anchor_response() -> String {
 }
 
 /// SGR mouse wheel-up at a position inside the scrollback pane (1-based wire coords).
-/// Same bytes as `sgr_mouse(SGR_SCROLL_UP, WHEEL_ROW, WHEEL_COL, 'M')` from `super::scroll`; new scroll tests should use that helper spelling.
 const WHEEL_UP: &[u8] = b"\x1b[<64;40;12M";
-/// SGR mouse wheel-down (button 65) at the same position.
 const WHEEL_DOWN: &[u8] = b"\x1b[<65;40;12M";
 
 /// Park the marker mid-viewport, scrolled into the MIDDLE of the transcript: marker visible, TOP
 /// and BOTTOM sentinels both scrolled off.
 fn park_marker_mid(h: &mut PtyHarness) -> Option<(u16, u16)> {
-    // Band (screen rows) we want the marker parked in
-    // Aim for the MIDDLE of the viewport so the jump keeps the marker on screen rather than scrolling it off either edge
-    // The resize-induced jump is ~WRAP_LINES_ABOVE rows, observed to move the marker UP toward the top
+    // Band (screen rows) we want the marker parked in Aim for the MIDDLE of the viewport so the jump keeps the marker on screen.
     const BAND_LO: u16 = 20;
     const BAND_HI: u16 = 32;
 
     let deadline = Instant::now() + Duration::from_secs(40);
 
-    // Phase 1: coarse scroll up until the marker is on screen at all.
     while Instant::now() < deadline {
         if locate_screen_text(&h.screen_contents(), MARKER).is_some() {
             break;
@@ -94,7 +80,6 @@ fn park_marker_mid(h: &mut PtyHarness) -> Option<(u16, u16)> {
         h.update(Duration::from_millis(200));
     }
 
-    // Phase 2: refine into the mid-viewport band with top and bottom scrolled off
     while Instant::now() < deadline {
         let screen = h.screen_contents();
         let pos = locate_screen_text(&screen, MARKER);
@@ -133,9 +118,7 @@ async fn resize_preserves_scroll_position() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(scroll_anchor_response());
 
-    // Spawn FULLSCREEN (alt-screen). `Viewport::Fullscreen` is autoresized on a terminal resize with NO DSR cursor probe.
-    // Grok thus re-wraps the scrollback at the new width and the stale `scroll_offset` shows the jump in grok's OWN rendered output
-    // The alt-screen grid is not reflowed by the terminal on resize, so this isolates grok's scroll-anchor logic with no harness confound
+    // Spawn FULLSCREEN (alt-screen).
     let binary = pager_binary().expect("resolve pager binary");
     let mut harness =
         PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, WIDE_COLS, &content, &[])
@@ -145,8 +128,8 @@ async fn resize_preserves_scroll_position() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
 
-    // Submit a prompt and wait for the whole response to render
-    // The bottom sentinel is the last thing streamed, so we are following, pinned to the bottom
+    // Submit a prompt and wait for the whole response to render The bottom
+    // sentinel is the last thing streamed.
     harness
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit prompt");
@@ -172,9 +155,8 @@ async fn resize_preserves_scroll_position() {
     });
     let screen_before = harness.screen_contents();
 
-    // Setup guards: we must be scrolled into the MIDDLE (bug regime), i.e. the marker is visible while BOTH sentinels are scrolled off.
-    // If either of these fails the reproduction is invalid (we'd be at the top or following)
-    // These are SETUP failures, distinct from the position assertion below
+    // Setup guards: we must be scrolled into the MIDDLE (bug regime), i.e.
+    // the marker is visible while BOTH sentinels are scrolled off.
     assert!(
         !screen_before.contains(TOP_SENTINEL),
         "setup: TOP sentinel visible → scroll_offset == 0 (at the absolute top, \

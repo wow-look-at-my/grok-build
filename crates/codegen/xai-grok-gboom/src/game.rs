@@ -35,17 +35,12 @@ const PLAYER_RADIUS: f32 = 0.20;
 const IMP_RADIUS: f32 = 0.30;
 
 /// Movement tuning: a continuous "held" model.
-/// With no key-release events, each press/repeat refreshes a per-control hold timer ([`HOLD_WINDOW`]).
-/// A constant target while held means speed doesn't sawtooth with the OS key-repeat cadence, yet releasing glides to a stop.
 const MOVE_SPEED: f32 = 3.3; // tiles/s while a move key is held
-const TURN_SPEED: f32 = 2.2; // rad/s (~125°/s) while a turn key is held
+const TURN_SPEED: f32 = 2.2;
 /// Velocity-smoothing time constants (seconds).
-/// Small values give a snappy response with just enough ramp to read as momentum rather than teleporting.
 const MOVE_ACCEL_TAU: f32 = 0.08;
 const TURN_ACCEL_TAU: f32 = 0.07;
 /// How long after each press/repeat a control stays "held".
-/// It must exceed the slowest expected key-repeat interval (about 30 to 60 ms) so motion never stutters between repeats.
-/// It must also stay short enough that releasing stops promptly.
 const HOLD_WINDOW: f32 = 0.16;
 
 const PLAYER_MAX_HP: i32 = 100;
@@ -69,11 +64,11 @@ const IMP_BITE_DAMAGE: i32 = 7;
 pub(super) struct Map {
     pub w: usize,
     pub h: usize,
-    cells: Vec<u8>, // 0 is floor, 1..=4 the wall texture id
+    cells: Vec<u8>,
 }
 
 impl Map {
-    /// Wall texture id at a cell, or 0 for floor. Out of bounds is solid.
+    /// Out of bounds is solid.
     #[inline]
     pub fn cell(&self, x: i32, y: i32) -> u8 {
         if x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 {
@@ -106,7 +101,7 @@ impl Map {
         false
     }
 
-    /// Line-of-sight check between two points (wall occlusion only), a standard DDA over grid cells.
+    /// Line-of-sight check between points (wall occlusion only), a standard DDA over grid cells.
     pub fn los(&self, x0: f32, y0: f32, x1: f32, y1: f32) -> bool {
         let dx = x1 - x0;
         let dy = y1 - y0;
@@ -174,7 +169,6 @@ pub(super) struct Player {
     fire_cooldown: f32,
     /// Remaining muzzle-flash display time.
     pub muzzle: f32,
-    /// Damage flash intensity, decays to 0.
     pub damage_flash: f32,
     /// Accumulated distance for view/gun bobbing.
     pub bob: f32,
@@ -188,7 +182,6 @@ impl Player {
 }
 
 /// Movement controls, fed by key press/repeat events.
-/// The discriminants double as indices into [`Game::hold`], so keep them field-less.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Control {
     Forward,
@@ -286,12 +279,8 @@ pub(super) struct Game {
     pub kills: u32,
     pub time: f32,
     /// Per-control "held" countdown in seconds, indexed by `Control as usize`. Positive means held.
-    /// In timer mode each press/repeat refreshes it to [`HOLD_WINDOW`] and `step` decrements it.
-    /// In release-aware mode a press latches it (and only [`Game::release`] clears it), so several keys can be held at once.
     hold: [f32; Control::COUNT],
     /// Whether the terminal delivers key-release events (Kitty keyboard protocol).
-    /// When true, controls latch on press and clear on release, so the player can move and turn at once.
-    /// When false, the timer bridges the gaps between OS key-repeats for a single key.
     release_aware: bool,
     /// Set by [`Game::queue_fire`], consumed by the next `step`.
     fire_queued: bool,
@@ -354,7 +343,6 @@ impl Game {
     }
 
     /// Switch between the release-aware and timer movement models.
-    /// It is set once when the game opens, from the terminal's keyboard capability.
     pub fn set_release_aware(&mut self, release_aware: bool) {
         self.release_aware = release_aware;
     }
@@ -372,8 +360,6 @@ impl Game {
     }
 
     /// Register a press/repeat event for `control`.
-    /// In release-aware mode the control latches until [`Game::release`]; otherwise it stays held for [`HOLD_WINDOW`] seconds.
-    /// Velocity is applied in `step`.
     pub fn press(&mut self, control: Control) {
         if let Some(slot) = self.hold.get_mut(control as usize) {
             *slot = if self.release_aware {
@@ -392,7 +378,6 @@ impl Game {
     }
 
     /// Un-latch every control.
-    /// It is called on focus loss so a release event dropped while the window was unfocused can't latch movement forever.
     pub fn release_all(&mut self) {
         self.hold = [0.0; Control::COUNT];
     }
@@ -428,8 +413,7 @@ impl Game {
         let held = |c: Control| self.hold.get(c as usize).is_some_and(|&t| t > 0.0);
         let axis = |pos: Control, neg: Control| (held(pos) as i32 - held(neg) as i32) as f32;
 
-        // Steady target velocities from the held controls
-        // The forward/strafe pair is clamped to unit length so moving diagonally isn't faster than moving straight
+        // Steady target velocities from the held controls The forward/strafe pair is clamped to unit length so moving diagonally isn't faster.
         let mut fwd = axis(Control::Forward, Control::Back);
         let mut strafe = axis(Control::StrafeRight, Control::StrafeLeft);
         let mag = (fwd * fwd + strafe * strafe).sqrt();
@@ -441,8 +425,7 @@ impl Game {
         let target_strafe = strafe * MOVE_SPEED;
         let target_rot = axis(Control::TurnRight, Control::TurnLeft) * TURN_SPEED;
 
-        // Frame-rate-independent exponential smoothing toward the targets
-        // A constant target while held means no sawtooth, and a zero target on release glides to a stop
+        // Frame-rate-independent exponential smoothing toward the targets A constant target while held means no sawtooth, and a zero target.
         let move_blend = 1.0 - (-dt / MOVE_ACCEL_TAU).exp();
         let turn_blend = 1.0 - (-dt / TURN_ACCEL_TAU).exp();
 
@@ -558,7 +541,7 @@ impl Game {
                             imp.state = ImpState::Attacking { t: IMP_WINDUP };
                         }
                     } else {
-                        // The walk cycle only advances while actually moving, so an imp waiting out its attack cooldown doesn't march in place
+                        // The walk cycle only advances while moving.
                         imp.anim += dt;
                         self.chase_step(i, px, py, dist, dt);
                     }
@@ -617,7 +600,6 @@ impl Game {
         let mut mx = (px - ix) / dist;
         let mut my = (py - iy) / dist;
 
-        // Separation: push away from live imps closer than 0.7 tiles (0.49 = 0.7²) so the pack doesn't collapse into one sprite
         for (j, other) in self.imps.iter().enumerate() {
             if i == j || !other.alive() {
                 continue;
@@ -652,9 +634,7 @@ mod tests {
 
     #[test]
     fn all_imp_spawns_reachable_from_player_start() {
-        // Flood-fill walkable cells from the player start; every imp spawn must be in the same connected component
-        // Reachable cells are non-solid, so this also proves spawns sit on floor tiles
-        // It guards future map edits against sealing a demon into an unreachable room
+        // Flood-fill walkable cells from the player start.
         let game = Game::new();
         assert!(game.total_imps() >= 5, "want a meaningful demon count");
         let (w, h) = (game.map.w, game.map.h);
@@ -722,7 +702,7 @@ mod tests {
     #[test]
     fn shooting_an_imp_in_front_damages_and_eventually_kills() {
         let mut game = Game::new();
-        // Plant a target two tiles in front of the player, clear LOS.
+        // Plant a target tiles in front of the player, clear LOS.
         let (dx, dy) = game.player.dir();
         let (tx, ty) = (game.player.x + dx * 2.0, game.player.y + dy * 2.0);
         let Some(imp) = game.imps.first_mut() else {
@@ -851,9 +831,7 @@ mod tests {
 
     #[test]
     fn release_aware_supports_simultaneous_move_and_turn() {
-        // On a Kitty-keyboard terminal, holding W and an arrow must both move and turn
-        // The terminal only auto-repeats the last key, so forward gets a single press then nothing until release
-        // Latching on press (release-aware) keeps it moving without repeats
+        // On a Kitty-keyboard terminal, holding W and an arrow must both move and turn The terminal only auto-repeats the last key.
         let mut game = Game::new();
         game.set_release_aware(true);
         game.player.angle = 0.0; // facing +x
@@ -921,8 +899,8 @@ mod tests {
             }
             game.player.vel_forward
         }
-        let fast = sustained_speed(0.03); // ~33 Hz
-        let slow = sustained_speed(0.12); // ~8 Hz, still under HOLD_WINDOW
+        let fast = sustained_speed(0.03);
+        let slow = sustained_speed(0.12);
         assert!((fast - MOVE_SPEED).abs() < 0.1, "fast cadence: {fast}");
         assert!(
             (fast - slow).abs() < 0.25,

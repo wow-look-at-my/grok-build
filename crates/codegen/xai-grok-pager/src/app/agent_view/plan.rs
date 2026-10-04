@@ -73,8 +73,9 @@ impl AgentView {
             v.kind == crate::views::file_search::line_viewer::LineViewerKind::PlanPreview
         })
     }
-    /// Whether the user is composing a comment via the prompt input inside the *casual* plan preview (the modal opened with no `plan_approval_view`).
-    /// Mirrors the `pav.focus == Commenting` check used by the plan-approval path so the prompt/footer behaves identically across both modes.
+    /// Whether the user is composing a comment via the prompt input inside
+    /// the *casual* plan preview (the modal opened with no
+    /// `plan_approval_view`).
     pub(super) fn is_casual_commenting(&self) -> bool {
         self.plan_approval_view.is_none()
             && self.is_plan_viewer()
@@ -96,9 +97,9 @@ impl AgentView {
         }
         self.plan_file_path().is_some_and(|path| path.is_file())
     }
-    /// Whether the "plan" status-bar chip should be rendered.
-    /// Visible while plan mode is active, or always when the user has set `show_plan_chip = true` in `pager.toml`.
-    /// Hidden by default once the user exits plan mode.
+    /// Whether the "plan" status-bar chip should be rendered. Visible while
+    /// plan mode is active, or always when the user has set `show_plan_chip =
+    /// true` in `pager.toml`.
     pub(super) fn should_show_plan_chip(
         &self,
         appearance: &crate::appearance::AppearanceConfig,
@@ -171,7 +172,6 @@ impl AgentView {
     }
     /// Leave Plan after an approved build. No-op if Default already left, or
     /// if the user staged a later mode change (`plan_mode_pending` is set).
-    /// Pending stays None so a later agent Plan entry is not user-requested.
     pub(crate) fn leave_plan_after_approved_build(&mut self) {
         if self.plan_mode_pending.is_some() || !self.plan_mode_active {
             return;
@@ -194,16 +194,15 @@ impl AgentView {
             format!("{}\n\n{notes}", content.trim_end())
         }
     }
-    /// Forget a waiting CreatePlan. Leaves `execute_plan_prompt_id` so a later
-    /// `PromptResponse` can still match the dispatched build.
-    /// Also drops approve/build: Default confirm has already cleared `last_plan`.
+    /// Forget a waiting CreatePlan. Leaves `execute_plan_prompt_id` so a
+    /// later `PromptResponse` can still match the dispatched build.
     pub(crate) fn forget_waiting_plan(&mut self) {
         self.kept_plan.clear();
         self.pending_post_turn_commit = None;
         self.dismiss_plan_review_ui();
     }
-    /// Approve and abandon forget the waiting plan. Revise must not call this.
-    /// Post-turn approve waits until Default is confirmed (the build started).
+    /// Approve and abandon forget the waiting plan. Revise must not call
+    /// this.
     pub(crate) fn clear_kept_plan(&mut self) {
         self.forget_waiting_plan();
         self.execute_plan = None;
@@ -390,8 +389,8 @@ impl AgentView {
         self.line_viewer = Some(viewer);
     }
     /// Test fixture: drive the agent into casual-commenting state (line viewer open in plan-preview mode, `casual_commenting_range` set).
-    /// Makes the `Event::Paste` plan-feedback arm reachable from a unit test without spawning the real keystroke pipeline.
-    /// One helper instead of three field mutations, so a refactor of this state only updates the fixture.
+    /// Makes the `Event::Paste` plan-feedback arm reachable from a unit test without spawning the real keystroke pipeline. One helper
+    /// instead of field mutations, so a refactor of this state only updates the fixture.
     #[cfg(test)]
     pub(crate) fn enter_casual_commenting_for_test(&mut self) {
         let mut viewer =
@@ -586,11 +585,8 @@ impl AgentView {
         self.close_plan_review_and_forget(PlanReviewOutcome::Abandoned);
         InputOutcome::Changed
     }
-    /// The shell leaves plan mode, but its confirming `CurrentModeUpdate("default")` is fire-and-forget and only arrives after the exit tool runs.
-    /// So flip the mode indicator optimistically here; a lost update would otherwise leave the badge stuck on "plan".
-    /// Not for the revision path (`send_plan_feedback`): the shell stays in plan mode there, so the indicator must stay on.
-    /// Post-turn approve / abandon commit from `commit_post_turn_plan_*` after
-    /// ExecutePlan / SetPlanMode(Off) is accepted.
+    /// The shell leaves plan mode, but its confirming `CurrentModeUpdate("default")` is fire-and-forget and only arrives after the exit tool runs. So flip the mode indicator optimistically here; a lost update would
+    /// otherwise leave the badge stuck on "plan".
     fn close_plan_review_and_forget(&mut self, outcome: PlanReviewOutcome) {
         if self.plan_mode_pending.unwrap_or(self.plan_mode_active) {
             self.plan_mode_pending = Some(false);
@@ -609,9 +605,8 @@ impl AgentView {
             PlanReviewOutcome::Abandoned => "abandon",
         });
     }
-    /// Close a post-turn review only after its follow-up dispatch is accepted.
-    /// Approve, revise, and abandon share this so a refuse cannot record a
-    /// verdict, toast "sent", drop comments, or skip session/set_mode.
+    /// Close a post-turn review only after its follow-up dispatch is
+    /// accepted.
     pub(crate) fn commit_post_turn_plan_approved(&mut self) {
         self.commit_post_turn_plan_review(PostTurnPlanCommit::Approved);
     }

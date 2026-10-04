@@ -45,12 +45,6 @@ your response.
 </summary_request>"#;
 
 /// Which summarization prompt a full-replace pass should send.
-///
-/// The prompt is owned by the harness's [`CompactionSampler`] impl (it appends
-/// the prompt as the final user message before sampling), not by the shared
-/// orchestrator. This enum lets each harness select the right one in one place
-/// so the structured (grok-build) and short self-summary prompts stay
-/// shared instead of duplicated per harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SummaryPromptKind {
     /// grok-build's detailed, numbered-section summary prompt.
@@ -105,8 +99,8 @@ mod tests {
 
     #[test]
     fn kind_structured_matches_build_summary_prompt() {
-        // The Structured kind must be byte-identical to the legacy entry point
-        // so routing through the selector never changes grok-build's prompt.
+        // The Structured kind must be byte-identical to the entry point so
+        // routing through the selector never changes grok-build's prompt.
         assert_eq!(
             build_summary_prompt_kind(SummaryPromptKind::Structured, None),
             build_summary_prompt(None)

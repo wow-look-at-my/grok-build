@@ -1,5 +1,4 @@
 //! Unit tests for [`super::manager::AuthManager`].
-//! Extracted from `manager.rs` so the implementation reads top-to-bottom; wired in via `#[path = "manager_tests.rs"] mod tests;` in manager.rs.
 use super::*;
 use crate::error::RefreshTokenError;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -474,9 +473,9 @@ fn is_data_collection_disabled_matrix() {
         );
     }
 }
-/// Fail directions of the two `AuthManager` collection predicates.
-/// `is_data_collection_disabled` fails open on missing credentials, the legacy behavior the telemetry and sync gates share.
-/// `allows_data_collection` fails closed: nothing may leave the machine while privacy state is unknown, e.g. after a mid-session `/logout`.
+/// Fail directions of both `AuthManager` collection predicates. `is_data_collection_disabled` fails open on missing credentials, the legacy
+/// behavior the telemetry and sync gates share. `allows_data_collection` fails closed: nothing may leave the machine while privacy state is
+/// unknown, e.g. after a mid-session `/logout`.
 #[test]
 fn manager_collection_predicates_fail_directions() {
     let dir = tempfile::tempdir().unwrap();
@@ -1332,9 +1331,8 @@ async fn refresh_chain_surfaces_transient_failure() {
         "TransientFailure should surface as a transient refresh error, got {err:?}"
     );
 }
-/// Regression: `current()` and `auth()` must agree on whether an expired API key is usable.
-/// Pre-fix, `current()` filtered with `!is_token_expired()` (returning None) while the `auth()` `TokenType::ApiKey` branch cloned the stale entry.
-/// The UI saw "logged out" while downstream consumers (trace upload, MCP, embeddings) sent the stale key and hit 401.
+/// Regression: `current()` and `auth()` must agree on whether an expired API key is usable. Pre-fix, `current()` filtered with
+/// `!is_token_expired()` (returning None) while the `auth()` `TokenType::ApiKey` branch cloned the stale entry.
 #[tokio::test]
 async fn auth_returns_expired_api_key_consistently_with_current() {
     let dir = tempfile::tempdir().unwrap();
@@ -1559,9 +1557,8 @@ async fn proactive_refresh_counts_a_reissued_bearer_as_progress() {
     );
     cancel.cancel();
 }
-/// Regression: `start_proactive_refresh` must be idempotent. Without the guard a second call on the same `Arc<AuthManager>` would `tokio::spawn` two background tasks racing on the same in-memory state.
+/// Regression: `start_proactive_refresh` must be idempotent. Without the guard a second call on the same `Arc<AuthManager>` would `tokio::spawn` background tasks racing on the same in-memory state.
 /// `proactive_iteration_count` is vacuous here: the ApiKey fixture (`expires_at: None`) makes every task sleep for `BACKOFF_INTERVAL` immediately.
-/// `proactive_start_count()` is bumped inside the `compare_exchange` success branch, so it reads exactly 1 when the guard fires and N otherwise.
 #[tokio::test]
 async fn start_proactive_refresh_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
@@ -3189,8 +3186,8 @@ async fn update_recovers_from_whitespace_only_auth_json() {
     let on_disk = std::fs::read_to_string(&auth_path).unwrap();
     assert!(on_disk.contains("ws-token"), "credential must be persisted");
 }
-/// The demotion, and therefore whether a dozen processes keep their credentials, rests entirely on this comparison.
-/// Pin its three cases directly rather than only through the refresh chain.
+/// The demotion, and therefore whether a processes keep their credentials, rests entirely on this comparison. Pin
+/// its cases directly rather than only through the refresh chain.
 #[test]
 fn refresh_token_superseded_needs_a_successor_on_disk() {
     assert!(
@@ -3309,9 +3306,8 @@ async fn refresh_chain_server_rejected_bypasses_valid_token_double_check() {
         "in-memory token must be updated to the refreshed one"
     );
 }
-/// Two tasks both get 401 and call refresh_chain(ServerRejected) concurrently.
-/// The second caller must return the already-refreshed token without contacting the IdP again.
-/// This prevents the double-refresh race where the second caller sends a rotated refresh token and gets invalid_grant.
+/// The second caller must return the already-refreshed token without contacting the IdP again. This prevents the
+/// double-refresh race where the second caller sends a rotated refresh token and gets invalid_grant.
 #[tokio::test]
 async fn refresh_chain_server_rejected_concurrent_skips_redundant_refresh() {
     let dir = tempfile::tempdir().unwrap();
@@ -3641,9 +3637,8 @@ fn force_reload_clears_wrong_team_token() {
         "force_reload must clear auth.json on a pin violation"
     );
 }
-/// A real incident in miniature: a live in-memory OIDC session (RT present, no permanent_failure) while `auth.json` transiently reads as missing.
-/// E.g. the first read right after wake-from-sleep resolves the path to `ENOENT`. The refresh token may exist nowhere else, so the reload must RETAIN it, not discard it.
-/// The discard previously cascaded: 401, reactive refresh, suspend straddle, invalid_grant.
+/// A real incident in miniature: a live in-memory OIDC session (RT present, no permanent_failure) while `auth.json` transiently reads as missing. E.g. the first read
+/// right after wake-from-sleep resolves the path to `ENOENT`. The refresh token may exist nowhere else, so the reload must RETAIN it, not discard it.
 #[test]
 fn force_reload_retains_live_rt_on_transient_file_missing() {
     let dir = tempfile::tempdir().unwrap();
@@ -4216,7 +4211,6 @@ async fn dark_wake_does_not_defer_when_no_usable_token() {
     );
     assert_eq!(call_count.load(Ordering::SeqCst), 1);
 }
-/// A 401 recovery is never deferred for dark wake: the server already rejected what we hold, so deferring can only prolong the failure.
 #[tokio::test]
 async fn dark_wake_does_not_defer_server_rejected_recovery() {
     let dir = tempfile::tempdir().unwrap();
@@ -4391,7 +4385,6 @@ async fn sleep_gate_auto_expires_after_max() {
     );
 }
 /// Regression test for the dual-clock backstop. A gate that straddled a real system sleep must auto-expire even though the monotonic clock is still fresh. The wall clock advanced past the bound during sleep.
-/// Before the wall-clock arm this gate stayed shut and an expired token reached the server, the 401 this fix targets.
 #[tokio::test]
 async fn sleep_gate_auto_expires_when_wall_clock_passes_during_sleep() {
     let dir = tempfile::tempdir().unwrap();
@@ -4744,7 +4737,6 @@ async fn requires_manual_reauth_true_for_sticky_verdict_and_no_refresher() {
         "a sticky RefreshTokenRejected verdict must demand /login"
     );
 }
-/// Treating a failed provider run as self-healing is what let an expired credential in and then 401'd every turn.
 /// The verdict still ages out, so a later launch gets to retry the provider.
 #[tokio::test]
 async fn requires_manual_reauth_true_after_external_provider_refresh_failed() {

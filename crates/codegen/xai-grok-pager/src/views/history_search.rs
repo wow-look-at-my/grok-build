@@ -1,13 +1,4 @@
 //! Prompt history search with background-thread nucleo matching.
-//!
-//! Architecture mirrors the file search `FuzzyFileMatcherDaemon`:
-//! - A background `std::thread` owns the nucleo `Matcher` and `MultiPattern`.
-//! - The UI thread sends queries via a channel (`set_query`) and never blocks.
-//! - The background thread scores items, computes indices, and writes results to `Arc<Mutex<…>>`.
-//! - The UI thread polls results on each tick via `poll()`.
-//! - The daemon spawns lazily on first activation and is kept for reuse.
-//!   Every `PromptWidget` (one per agent view, including subagent child views) owns a `HistorySearchState`.
-//!   An eager spawn would therefore leak one parked thread per subagent for the process lifetime.
 
 use std::sync::{
     Arc, Mutex,
@@ -285,18 +276,12 @@ pub struct HistorySearchState {
     last_gen: usize,
     pub selected: usize,
     /// While `true`, selection tracks the bottom-most entry (most recent, or best match) as results stream in.
-    /// Set on `activate`, cleared once the user navigates (Up/Down/PageUp/PageDown/click).
-    /// This makes the overlay open with the most recent prompt selected at the bottom of the list.
     stick_to_bottom: bool,
     /// The last query sent to the daemon.
-    /// Distinguishes a genuine query change (the user typed, so selection re-anchors to the best match) from a re-application of the same query.
-    /// A late background `PromptHistoryLoaded` refresh re-sends the current query and must not clobber the user's selection.
     last_query: String,
     /// Mouse-hovered result index (visual highlight only).
     hovered: Option<usize>,
     /// Browse (the Up-arrow entry point): the selection lives in the composer (live-populated on every move).
-    /// Typing detaches to edit, and Down at the newest entry closes.
-    /// Search (`/history`) keeps the composer as the filter query instead.
     mode: Mode,
 }
 
@@ -337,9 +322,8 @@ impl HistorySearchState {
         self.daemon.is_some()
     }
 
-    /// Send to the daemon.
-    /// A disconnected channel means the matcher thread is gone (panicked).
-    /// Drop the daemon so the next activation respawns it instead of serving an overlay that never updates.
+    /// Send to the daemon. A disconnected channel means the matcher thread is
+    /// gone (panicked).
     fn send(&mut self, msg: Msg) {
         let Some(daemon) = &self.daemon else {
             return;
@@ -378,17 +362,15 @@ impl HistorySearchState {
         self.send(Msg::SetItems(items));
     }
 
-    /// Activate in Search mode (`/history`): send items to the daemon and show the overlay.
-    /// The composer is the filter query; navigation highlights only, Enter/Tab accepts.
-    /// Returns `false` when the matcher thread could not start; the overlay stays closed and callers must leave the composer alone.
+    /// Activate in Search mode (`/history`): send items to the daemon and
+    /// show the overlay.
     #[must_use]
     pub fn activate(&mut self, history: &[HistoryEntry], current_text: &str) -> bool {
         self.activate_inner(history, current_text, Mode::Search)
     }
 
-    /// Activate in Browse mode (Up on an empty prompt): the same panel, but the caller fills the newest entry straight into the composer.
-    /// Every selection move live-populates the composer; typing detaches to edit, and Down at the newest entry closes the panel.
-    /// Returns `false` when the matcher thread could not start.
+    /// Activate in Browse mode (Up on an empty prompt): the same panel, but
+    /// the caller fills the newest entry straight into the composer.
     #[must_use]
     pub fn activate_browse(&mut self, history: &[HistoryEntry], current_text: &str) -> bool {
         self.activate_inner(history, current_text, Mode::Browse)
@@ -424,9 +406,9 @@ impl HistorySearchState {
         self.active && self.mode == Mode::Browse
     }
 
-    /// Deactivate: clear the overlay.
-    /// The daemon thread stays alive for reuse, but its copy of the history is released (`activate` re-sends items).
-    /// Retained memory is therefore bounded by the time the overlay is open.
+    /// Deactivate: clear the overlay. The daemon thread stays alive for
+    /// reuse, but its copy of the history is released (`activate` re-sends
+    /// items).
     pub fn deactivate(&mut self) {
         self.active = false;
         self.mode = Mode::Search;
@@ -440,8 +422,8 @@ impl HistorySearchState {
         if self.daemon.is_none() {
             return;
         }
-        // A genuinely new query (the user typed) re-anchors selection to the best match at the bottom
-        // Re-applying the *same* query (e.g. a late `PromptHistoryLoaded` refresh) must not move a selection the user has already navigated to.
+        // A genuinely new query (the user typed) re-anchors selection to the
+        // best match at the bottom Re-applying the *same* query.
         if query != self.last_query {
             self.last_query = query.to_string();
             self.stick_to_bottom = true;
@@ -524,8 +506,8 @@ impl HistorySearchState {
         true
     }
 
-    /// Move the selection one row down (newer). No wrap: returns `false` at the bottom (newest).
-    /// The caller closes the overlay there, so a Down right after opening (newest is selected) backs out of history.
+    /// Move the selection one row down (newer). No wrap: returns `false` at
+    /// the bottom (newest).
     pub fn move_down(&mut self) -> bool {
         let len = self.snapshot.items.len();
         if len == 0 || self.selected >= len - 1 {
@@ -551,8 +533,7 @@ impl HistorySearchState {
 
     /// Selected entry (returns `None`; use `selected_text()` instead).
     pub fn selected(&self) -> Option<&HistoryEntry> {
-        // We can't return &HistoryEntry from Arc<[HistoryMatchResult]>; callers should use selected_text()
-        // None satisfies the type signature used by the accept logic; the accept path uses selected_text() via a separate check
+        // We cannot return &HistoryEntry from Arc<[HistoryMatchResult]>.
         None
     }
 

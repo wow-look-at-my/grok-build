@@ -77,7 +77,7 @@ grok agent --always-approve serve --bind 127.0.0.1:2419 --secret <token>
 grok agent --always-approve serve --bind 127.0.0.1:2419 --secret <token>
 ```
 
-Clients connect over WebSocket and authenticate with the secret token. If you omit `--secret`, the agent prints a generated token at startup, or set `GROK_AGENT_SECRET`. The process keeps state across client reconnects. Permissions match other entry points; see [Permissions and safety](22-permissions-and-safety.md).
+Clients connect over WebSocket and authenticate with the secret token. If you omit `--secret`, the agent prints a generated token at startup, or set `GROK_AGENT_SECRET`. The process keeps state across client reconnects. Permissions match other entry points. See [Permissions and safety](22-permissions-and-safety.md).
 
 This is a server you run yourself — Grok's hosted cloud sandboxes do not run `grok agent serve`.
 
@@ -136,7 +136,7 @@ ACP streams structured events. Each `session/update` notification carries a `ses
 | `plan`                | The agent's execution plan.                           |
 | `thinking_summary`    | A one-or-two-sentence summary of one model call's reasoning, keyed to that call's `streamStartMs` (`stream_start_ms`). It is written by a separate call that starts when the response ends, so it arrives on the `x.ai/session/update` rail after that call's own chunks, and is persisted with them. Absent when `[ui].thinking_summaries` is off, or when the response carried no thinking text. A subagent's summary carries the subagent's session id. |
 
-Each update names its type, so a client can render distinct panels for reasoning, tool calls, and response text.
+Each update names its type. As a result, a client can render distinct panels for reasoning, tool calls, and response text.
 
 ---
 
@@ -156,7 +156,7 @@ Beyond the base ACP protocol, Grok defines extension methods under the `x.ai/` p
 | **Authentication**         | `x.ai/auth/*`        | `get_url`, `submit_code`                         |
 | **Feedback & Telemetry**   | `x.ai/*`             | `feedback`, `telemetry/*`                        |
 
-The tables here show representative methods in each category. The `x.ai/*` set is SpaceXAI-specific and may expand across releases, so treat it as non-exhaustive and discover the available methods from the agent's `initialize` response.
+The tables here show representative methods in each category. The `x.ai/*` set is SpaceXAI-specific. The `x.ai/*` set may expand across releases, so treat it as non-exhaustive and discover the available methods from the agent's `initialize` response.
 
 ### Notifications (agent to client)
 
@@ -191,7 +191,7 @@ The agent sends push notifications to clients for real-time updates:
 }
 ```
 
-The response is the **complete, updated** option list. A `config_option_update` session notification mirrors it to every subscribed client. In leader mode the proxy snoops `configId: model` so each client's `default_model` stays in sync. Boolean values are rejected; exposing boolean options is not implemented yet.
+The response is the **complete, updated** option list. A `config_option_update` session notification mirrors it to every subscribed client. In leader mode the proxy snoops `configId: model` so each client's `default_model` stays in sync. Boolean values are rejected. Exposing boolean options is not implemented yet.
 
 ---
 

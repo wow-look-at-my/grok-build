@@ -79,7 +79,6 @@ fn normalize_forked_context_consecutive_users() {
     }
 }
 /// After normalization and system prompt replacement, the conversation shape is [System(child's), BackgroundContext].
-/// The Prompt command then appends the task as [2], giving [System(child's), BackgroundContext, Task].
 #[test]
 fn end_to_end_normalized_conversation_shape() {
     use xai_grok_sampling_types::conversation::ConversationItem;
@@ -2252,8 +2251,8 @@ async fn read_parent_sampling_config_fallback_wires_bearer_resolver() {
     let (config, _) = read_parent_sampling_config(&ctx).await;
     assert!(config.bearer_resolver.is_some());
 }
-/// The inherit-live path honors `would_strip_fallback_key` like the other two paths.
-/// It used to install the resolver unconditionally, stripping a no-session parent's env-key fallback.
+/// The inherit-live path honors `would_strip_fallback_key` like the other paths. It used to install
+/// the resolver unconditionally, stripping a no-session parent's env-key fallback.
 #[tokio::test]
 async fn read_parent_sampling_config_live_never_strips_a_fallback_key() {
     let mut ctx = ctx_with_toggle(HashMap::new());
@@ -2305,8 +2304,8 @@ async fn read_parent_sampling_config_fallback_no_resolver_for_api_key_method() {
     let (config, _) = read_parent_sampling_config(&ctx).await;
     assert!(config.bearer_resolver.is_none());
 }
-/// The override path wires the resolver for a session key regardless of freshness. Hard-expired (the post-sleep 401 window) is the case that matters.
-/// Gating on whether the key is still valid would freeze the subagent for life. The sampler strips the dead seeded key at request time instead.
+/// The override path wires the resolver for a session key regardless of freshness. Gating on whether the key is still valid would freeze the subagent
+/// for life. The sampler strips the dead seeded key at request time instead.
 #[test]
 fn resolve_model_override_wires_resolver_for_fresh_and_hard_expired_session_keys() {
     for auth in [
@@ -2675,7 +2674,6 @@ async fn resolve_subagent_agent_definition_pin_applies_for_light_parent() {
     assert_eq!(config.model, "pinned-model");
     assert_eq!(model_id.0.as_ref(), "pinned-model");
 }
-/// Priority 1 (`[subagents.models]`) wins over Priority 2 (`AgentDefinition.model`) when both pins are set and both resolve.
 #[tokio::test]
 async fn resolve_subagent_config_override_wins_over_agent_definition() {
     use xai_grok_agent::config::ModelOverride;

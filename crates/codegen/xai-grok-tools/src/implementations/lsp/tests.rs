@@ -16,9 +16,7 @@ use super::{LspBackend, LspError, LspOperation, LspToolInput, file_uri};
 mod mock_servers;
 use mock_servers::*;
 
-/// How long a test waits for something a mock server has to get around to. One constant for the
-/// suite rather than a hand-rolled iteration count at each call site, so a slow machine is retuned
-/// in one place.
+/// How long a test waits for something a mock server has to get around to.
 const WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
 
 /// Poll until `ready`, or fail saying what was being waited for.
@@ -34,13 +32,9 @@ async fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
 }
 
 /// A file is held for this long in tests that are about letting go of one.
-/// Long enough not to race a mock server's own latency, short enough that a
-/// test can wait it out.
 const BRIEF_VERDICT_TTL: std::time::Duration = std::time::Duration::from_millis(150);
 
-/// The production rules, on a timescale a test can sit through. The real
-/// durations are unit-tested against an injected clock in `pending.rs`; this is
-/// for exercising the drain that consults them.
+/// The production rules, on a timescale a test can sit through.
 fn brief_policy() -> super::pending::PendingPolicy {
     super::pending::PendingPolicy {
         verdict_ttl: BRIEF_VERDICT_TTL,
@@ -142,7 +136,6 @@ async fn did_change_carries_range_for_incremental_servers() {
     let (workspace, mut client) = start_client_with(&script_path).await;
 
     let file = workspace.path().join("test.ts");
-    // Two lines; the second is 5 UTF-16 units long, so the document ends at 1:5.
     let first = "const x = 1;\nabcde";
     std::fs::write(&file, first).unwrap();
     client.notify_file_change(&file, first, "typescript");
@@ -257,8 +250,7 @@ async fn a_premature_empty_answer_does_not_erase_known_diagnostics() {
         Some("real problem 1".to_string())
     );
 
-    // The next edit draws the empty answer. The diagnostics we already have
-    // must survive it, and the server's next word must land.
+    // The next edit draws the empty answer.
     client.notify_file_change(&file, "let x = 2;\n", "typescript");
 
     let mut settled = None;
@@ -345,8 +337,7 @@ async fn an_answer_the_store_refused_leaves_no_result_id_behind() {
         Some("the problem".to_string())
     );
 
-    // The second pull answers "clean", but the file changes again before that
-    // answer lands, so the store keeps the errors and never stores the answer.
+    // The second pull answers "clean", but the file changes again before that answer lands.
     client.notify_file_change(&file, "let x = 2;\n", "typescript");
     let marker = workspace.path().join(SECOND_PULL_MARKER);
     for _ in 0..300 {
@@ -358,8 +349,7 @@ async fn an_answer_the_store_refused_leaves_no_result_id_behind() {
     assert!(marker.exists(), "the server never started its second pull");
     client.notify_file_change(&file, "let x = 3;\n", "typescript");
 
-    // The server's verdict on the file as it stands now must get through. It
-    // only can if we stopped claiming to hold a clean report we never stored.
+    // The server's verdict on the file as it stands now must get through.
     let mut settled = false;
     for _ in 0..500 {
         if client.get_diagnostics(&file).is_empty() {
@@ -384,9 +374,7 @@ async fn pull_diagnostics_are_not_retried_on_a_server_that_says_it_has_none() {
 
     let (_dir, script_path) = write_pull_rejecting_server();
     let (workspace, mut client) = start_client_with(&script_path).await;
-    // This one advertises no diagnostic provider, which is not proof of
-    // absence — Roslyn implements the handler without advertising it — so an
-    // unadvertised server still gets asked.
+    // This advertises no diagnostic provider, which is not proof of absence — Roslyn implements the handler without advertising it —.
     assert_eq!(client.pull.support(), PullSupport::Asking);
 
     let file = workspace.path().join("test.ts");
@@ -448,8 +436,7 @@ async fn did_change_stays_rangeless_for_full_sync_servers() {
     std::fs::write(&file, "const x = 1;\n").unwrap();
     client.notify_file_change(&file, "const x = 1;\n", "typescript");
     client.notify_file_change(&file, "const x = 2;\n", "typescript");
-    // The mock full-sync server accepts both forms; the assertion that matters
-    // is that it stayed up and kept publishing.
+    // The mock full-sync server accepts both forms.
     let diags = poll_diagnostics(&client, &file, 1).await;
     assert!(!diags.is_empty());
 
@@ -582,8 +569,8 @@ async fn e2e_spawn_failure_is_graceful() {
     );
 }
 
-/// 2 good + 1 bad server. Verifies bad one is skipped, routing works,
-/// and combined diagnostics summary includes both files.
+/// Verifies bad one is skipped, routing works, and combined
+/// diagnostics summary includes both files.
 #[tokio::test(flavor = "current_thread")]
 async fn e2e_multi_server_routing() {
     let (_dir, script_path) = write_mock_server();
@@ -632,7 +619,6 @@ async fn e2e_multi_server_routing() {
     );
 
     mgr.ensure_initialized().await;
-    // Bad server skipped, 2 good ones remain.
     assert_eq!(mgr.clients.len(), 2);
 
     // .ts and .py route to their respective servers.
@@ -675,7 +661,7 @@ async fn e2e_multi_server_routing() {
         summary.text
     );
     assert_eq!(summary.file_count, 2);
-    assert_eq!(summary.diagnostic_count, 4); // 2 per file (error + warning)
+    assert_eq!(summary.diagnostic_count, 4);
 
     mgr.lock().await.shutdown().await;
 }
@@ -737,7 +723,7 @@ async fn e2e_real_typescript_language_server() {
 
     client.notify_file_change(&ts_file, "const x: number = 'hello';\n", "typescript");
 
-    // Real servers take longer — poll for up to 10 seconds.
+    // Real servers take longer — poll for a bounded number of seconds.
     let diags = {
         let mut result = vec![];
         for _ in 0..200 {
@@ -784,13 +770,12 @@ async fn e2e_session_diagnostics_injection_flow() {
     let workspace = tempfile::tempdir().unwrap();
     let mut mgr = single_server_manager(&script_path, &workspace).await;
 
-    // Step 1: tool edits file -> fire-and-forget notify (returns immediately).
     let edited_file = workspace.path().join("component.ts");
     let content = "const x: number = 'wrong_type';\n";
     std::fs::write(&edited_file, content).unwrap();
     mgr.notify_file_changed(&edited_file, content);
 
-    // Step 2: (simulated) other tools run... time passes... LSP server responds.
+    // time passes... LSP server responds.
     wait_for_server(&mgr, &edited_file, 2000).await;
 
     let mgr = tokio::sync::Mutex::new(mgr);
@@ -812,12 +797,10 @@ async fn e2e_session_diagnostics_injection_flow() {
     assert_eq!(summary.file_count, 1);
     assert_eq!(summary.diagnostic_count, 2);
 
-    // Step 4: the injected user message the model sees.
     let injected = format!("<system-reminder>\n{}\n</system-reminder>", summary.text);
     assert!(injected.contains("mock error: undeclared variable"));
     assert!(injected.contains("mock warning: unused import"));
 
-    // Step 5: .py has no server — notify is a no-op.
     {
         let mut mgr = mgr.lock().await;
         let py_file = workspace.path().join("script.py");
@@ -972,8 +955,7 @@ async fn e2e_restart_monitor_preserves_replacement_client() {
 
             {
                 let mut mgr = lsp_manager.lock().await;
-                // Mutate in place: LspClient now implements Drop, so moving
-                // fields out with `..stale` is rejected.
+                // Mutate in place: LspClient now implements Drop, so moving fields out with `..stale` is rejected.
                 let mut stale = mgr.clients.remove("mock-ts").unwrap();
                 stale.lifecycle_id = original_lifecycle_id;
                 for (uri, lang) in tracked_docs {
@@ -1027,8 +1009,7 @@ async fn restart_monitor_exits_when_manager_arc_dropped() {
             let workspace = tempfile::tempdir().unwrap();
             let mgr = single_server_manager(&script_path, &workspace).await;
 
-            // A live client keeps the monitor polling (rather than exiting on a
-            // missing client), so the only way out is a failed `Weak` upgrade.
+            // A live client keeps the monitor polling (rather than exiting on a missing client).
             let lsp_manager = Arc::new(tokio::sync::Mutex::new(mgr));
             let monitor = tokio::task::spawn_local(restart_monitor(
                 Arc::downgrade(&lsp_manager),
@@ -1176,9 +1157,7 @@ async fn e2e_restart_monitor_emits_failed_on_restart_init_error() {
                 args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
                 env,
                 extensions: ext_map,
-                // Generous startup window: the init-failure server responds to `initialize` (and bumps the on-disk counter) essentially instantly, so a large
-                // timeout adds no latency on the happy path. It only removes a cold-start race — with a tight 500ms window a slow python3 spawn under load is
-                // killed *before* it increments the counter, so `attempts` (deterministically 3) and the on-disk counter (2) diverge and the test flakes.
+                // Generous startup window: the init-failure server responds to `initialize` (and bumps the on-disk counter) instantly.
                 startup_timeout: Some(10_000),
                 restart_on_crash: Some(true),
                 max_restarts: Some(3),
@@ -1217,9 +1196,7 @@ async fn e2e_restart_monitor_emits_failed_on_restart_init_error() {
             }
 
             let mut saw_failed = false;
-            // Restart backoff is 1s + 2s + 4s = 7s of mandatory sleeps before the budget is
-            // exhausted; the deadline only bounds the failure wait (the loop breaks as soon as the
-            // notification arrives), so keep it well clear of that floor to stay robust under load.
+            // Restart backoff is 1s + 2s + 4s = 7s of mandatory sleeps before the budget is exhausted.
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
             while tokio::time::Instant::now() < deadline {
                 match tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await {
@@ -1300,8 +1277,8 @@ async fn e2e_drain_timeout_preserves_pending_diagnostics() {
 }
 
 /// A server that never reports diagnostics must not keep files pending forever: the set would grow
-/// for the whole session and every later drain would block for its full timeout. The two things
-/// being checked here are separate on purpose.
+/// for the whole session and every later drain would block for its full timeout. Both things being
+/// checked here are separate on purpose.
 #[tokio::test(flavor = "current_thread")]
 async fn drain_gives_up_on_a_server_that_never_reports() {
     let (_dir, script_path) = write_silent_server();
@@ -1329,9 +1306,8 @@ async fn drain_gives_up_on_a_server_that_never_reports() {
         "a file nobody ever answers for must not be waited on forever"
     );
 
-    // And later drains return immediately rather than waiting out the timeout,
-    // because the server has now been silent for longer than it is worth
-    // blocking on.
+    // And later drains return immediately rather than waiting out the
+    // timeout, because the server has now been silent.
     mgr.lock()
         .await
         .notify_file_changed(&test_file, "const y = 2;\n");
@@ -1488,8 +1464,7 @@ async fn a_server_that_starts_answering_is_waited_on_again() {
         .expect("the answer it finally gave must be reported");
     assert!(summary.text.contains("server is back"), "{}", summary.text);
 
-    // And the next edit is waited on again, so an answer arriving during that
-    // wait is reported rather than missed.
+    // And the next edit is waited on again, so an answer arriving during that wait is reported rather than missed.
     let next = workspace.path().join("awake.ts");
     std::fs::write(&next, "const y = 2;\n").unwrap();
     let next_uri = file_uri(&next).unwrap().to_string();
@@ -1595,7 +1570,6 @@ async fn a_pushed_verdict_on_the_previous_revision_does_not_settle_the_edit() {
         opened.text
     );
 
-    // The edit takes the document to version 2; the server answers about 1.
     mgr.lock()
         .await
         .notify_file_changed(&file, "const y = 2;\n");
@@ -1646,8 +1620,7 @@ async fn a_server_that_publishes_is_not_second_guessed_with_a_pull() {
         let text = format!("const y = {round};\n");
         std::fs::write(&file, &text).unwrap();
         mgr.lock().await.notify_file_changed(&file, &text);
-        // Leftover confirmation pull can occupy the mock's stdin before
-        // this edit's push.
+        // Leftover confirmation pull can occupy the mock's stdin before this edit's push.
         let summary = drain_until_reported(&mgr, "the check that only the push channel runs").await;
         assert!(
             summary.contains("the check that only the push channel runs"),
@@ -1723,8 +1696,7 @@ async fn a_refresh_we_cannot_act_on_does_not_discard_what_we_know() {
     let summary = drain_until_reported(&mgr, "a real problem").await;
     assert!(summary.contains("a real problem"), "{summary}");
 
-    // The refresh request has been answered by now; the diagnostics it could
-    // not replace must still be there.
+    // The refresh request has been answered by now; the diagnostics it could not replace must still be there.
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let uri = file_uri(&file).unwrap().to_string();
     assert_eq!(
@@ -1761,12 +1733,10 @@ async fn an_edit_during_the_confirmation_does_not_cost_us_the_errors() {
     // Second edit: the answer is clean, so the pull waits to be sure.
     client.notify_file_change(&file, "const y = 2;\n", "typescript");
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    // Third edit, while that wait is still running. The confirmation the pull
-    // is about to receive is about the second edit's text, not this one's.
+    // Third edit, while that wait is still running.
     client.notify_file_change(&file, "const y = 3;\n", "typescript");
 
-    // Long enough for the confirmation to come back and be acted on, and for
-    // the re-pull it queued to run into the server's silence.
+    // Long enough for the confirmation to come back and be acted on, and for the re-pull it queued to run.
     tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
     let held = client.get_diagnostics(&file);
     assert_eq!(
@@ -1804,9 +1774,7 @@ async fn a_server_that_announces_it_is_ready_is_waited_on_again() {
         .await
         .notify_file_changed(&file, "const y = 1;\n");
 
-    // Past the first pull (refused, leaving the server looking silent) and the
-    // announcement that followed it. The re-pull that announcement queued is in
-    // flight but has not answered yet.
+    // Past the first pull (refused, leaving the server looking silent) and the announcement that followed it.
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
     let summary = drain_lsp_diagnostics(&mgr, std::time::Duration::from_secs(2))
@@ -1886,13 +1854,10 @@ async fn a_server_reporting_clean_files_is_still_waited_on() {
     let (_dir, script_path) = write_selective_pull_server();
     let workspace = tempfile::tempdir().unwrap();
     let mgr = tokio::sync::Mutex::new(single_server_manager(&script_path, &workspace).await);
-    // Comfortably longer than the pull's own retry, so a clean answer lands
-    // inside the drain rather than after it.
+    // Comfortably longer than the pull's own retry, so a clean answer lands inside the drain rather than after it.
     let timeout = std::time::Duration::from_secs(3);
 
-    // Let the server say something first. Until it has, a clean answer is not taken as a verdict —
-    // we cannot yet tell a pull-only server from one that publishes and has not got round to it —
-    // and this test is about what happens *after* we know what kind of server it is.
+    // Let the server say something first.
     let first = workspace.path().join("broken0.ts");
     std::fs::write(&first, "const bad = ;\n").unwrap();
     mgr.lock()
@@ -2031,8 +1996,7 @@ async fn scope_reaps_enrolled_language_server_child() {
         "enroll must register the server group"
     );
 
-    // Take the child handle to observe death; the client keeps the owning
-    // Arc<ProcessGroup>, so the scope's weak stays live across kill_all.
+    // Take the child handle to observe death.
     let mut child = client.child_process.take().expect("stdio child");
     scope.kill_all();
 
@@ -2064,9 +2028,7 @@ async fn scope_reaps_enrolled_language_server_child() {
         );
     }
 
-    // Linux: the leader is dead but unreaped, so its pgid is still reserved — the client Drop's
-    // killpg targets the zombie's group, not a reused pgid. macOS: dropping before the reap keeps
-    // the same pgid-reservation safety, at the cost of not isolating kill_all from the Drop killpg.
+    // Linux: the leader is dead but unreaped, so its pgid is still reserved — the client Drop's killpg targets the zombie's group.
     drop(client);
 
     assert!(
@@ -2148,9 +2110,7 @@ async fn e2e_real_roslyn_survives_editing() {
                 projects: vec!["App.csproj".to_string()],
             }),
             startup_timeout: Some(120_000),
-            // Deliberate, and the assertion below depends on it: with the default (`false`) a torn-down server is never rebuilt, so the lifecycle id could
-            // not move and "no restarts" would hold vacuously. Enabling it is also the configuration under which the memory growth was observed — the
-            // rebuild is what costs the gigabytes. With it off, the same crash simply ends C# diagnostics for the session.
+            // Deliberate, and the assertion below depends on it: with the default (`false`) a torn-down server is never rebuilt.
             restart_on_crash: Some(true),
             ..Default::default()
         },
@@ -2169,8 +2129,7 @@ async fn e2e_real_roslyn_survives_editing() {
     let started_lifecycle = csharp.lifecycle_id;
     let mgr = std::sync::Arc::new(tokio::sync::Mutex::new(mgr));
     // The restart monitor is what would rebuild a torn-down server, and
-    // rebuilding is what the bug cost. Without it running, this test could not
-    // observe the failure it is here to rule out.
+    // rebuilding is what the bug cost.
     let monitor = tokio::spawn(super::restart_monitor(
         std::sync::Arc::downgrade(&mgr),
         "csharp".to_string(),
@@ -2182,8 +2141,7 @@ async fn e2e_real_roslyn_survives_editing() {
         std::fs::write(&file, &text).unwrap();
         mgr.lock().await.notify_file_changed(&file, &text);
 
-        // Generous: a real solution takes its time, and the point is what the
-        // server ends up saying, not how fast.
+        // Generous: a real solution takes its time, and the point is what the server ends up saying, not how fast.
         let summary = drain_lsp_diagnostics(&mgr, std::time::Duration::from_secs(5)).await;
         if summary
             .as_ref()

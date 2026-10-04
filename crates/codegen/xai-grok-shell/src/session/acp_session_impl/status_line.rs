@@ -67,8 +67,8 @@ fn build_context_window(
     totals: Option<&PromptUsageModel>,
     auto_compact_threshold_percent: u8,
 ) -> StatusLineContextWindow {
-    // The shared rounding, not a fourth spelling of it
-    // The field is omitted rather than zero when the window is unknown, which is the only part the helper cannot express
+    // The shared rounding, not a fourth spelling of it The field is omitted
+    // rather than zero when the window is unknown.
     let used_percentage = used_tokens
         .filter(|_| size > 0)
         .map(|used| xai_token_estimation::usage_percentage_u8(used, size));
@@ -78,8 +78,8 @@ fn build_context_window(
         session_input_tokens: totals.map(|t| t.input_tokens),
         session_output_tokens: totals.map(|t| t.output_tokens),
         session_usage: totals.filter(|t| t.model_calls > 0).map(|t| {
-            // The three buckets are disjoint and must sum to `input_tokens`
-            // A violation would zero the fresh-input figure and desync the reported totals, so catch a ledger regression in CI
+            // The buckets are disjoint and must sum to `input_tokens` A violation would zero the fresh-input figure and desync
+            // the reported totals, so catch a ledger regression in CI
             debug_assert!(
                 t.input_tokens >= t.cached_read_tokens + t.cache_creation_tokens,
                 "input_tokens {} < cached_read {} + cache_creation {}",
@@ -131,7 +131,6 @@ impl SessionActor {
                 .unwrap_or_else(|| id.clone())
         });
 
-        // A failed read stays absent rather than 0, which renders as `0% ctx`.
         let used_tokens = self
             .chat_state_handle
             .try_get_estimated_total_tokens()
@@ -170,9 +169,8 @@ impl SessionActor {
             .then(|| build_worktree(&repo_state, &cwd, branch.clone()));
         let prompt_id = match self.current_prompt_id.lock() {
             Ok(id) => id.clone(),
-            // Recovered rather than dropped: the value behind the lock is one optional id, which a panic elsewhere cannot leave half-written
-            // Losing it would stop the turn timer for the session
-            // Logged because the panic that poisoned it is worth knowing about
+            // Recovered rather than dropped: the value behind the lock is one
+            // optional id.
             Err(poisoned) => {
                 tracing::warn!(
                     "status_line: current_prompt_id lock poisoned; using its last value"
@@ -254,7 +252,6 @@ impl SessionActor {
     }
 
     /// Wakes [`run_status_emitter`] rather than building inline.
-    /// The payload takes a git discovery and three chat-state round trips, and nothing waits on it.
     pub(crate) fn emit_status_snapshot_detached(&self) {
         self.status_wake.notify_one();
     }
@@ -289,8 +286,6 @@ pub(super) async fn run_status_emitter(session: std::sync::Weak<SessionActor>) {
 }
 
 /// The emitter's wake, which also ends it: dropping this wakes the loop a last time and the upgrade that follows fails.
-/// Otherwise the task parks on a wake nobody will send, for the life of a process whose sessions share one `LocalSet`.
-/// A type rather than `impl Drop for SessionActor`, which would forbid moving fields out of the actor, as several call sites do.
 #[derive(Debug, Default)]
 pub(crate) struct StatusWake(Arc<tokio::sync::Notify>);
 
@@ -307,14 +302,12 @@ impl StatusWake {
 
 impl Drop for StatusWake {
     fn drop(&mut self) {
-        // `notify_one`, not `notify_waiters`: a session dropped the moment a build finishes has no waiter yet
-        // Only `notify_one` leaves the permit that releases the park that comes next
+        // `notify_one`, not `notify_waiters`: a session dropped the moment a build finishes has no waiter yet Only `notify_one` leaves the permit.
         self.0.notify_one();
     }
 }
 
 /// Builds once, then once more per wake.
-/// Awaiting each build before the next prevents two racing, and `Notify` collapses a burst into one extra build.
 async fn emit_loop<F, Fut>(wake: Arc<tokio::sync::Notify>, mut build: F)
 where
     F: FnMut() -> Option<Fut>,

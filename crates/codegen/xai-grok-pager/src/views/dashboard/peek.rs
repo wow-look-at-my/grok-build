@@ -1,6 +1,4 @@
 //! Peek-panel state and helpers.
-//!
-//! A stub for the panel, with enough infrastructure to lift the question text and permission options directly off the parent agent.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -18,8 +16,8 @@ pub struct PeekLiveTailArgs<'a> {
 }
 
 /// Exclusive bottom y of the live-tail middle band (above the reply). Reserves a 1-row breathing
-/// blank above the reply only when the middle still has at least 2 rows after that blank, so pin
-/// and body can share.
+/// blank above the reply only when the middle still has a couple of rows after that blank, so
+/// pin and body can share.
 fn live_tail_middle_bottom(middle_top: u16, reply_top_y: u16) -> u16 {
     let with_blank = reply_top_y.saturating_sub(1);
     let h_with_blank = with_blank.saturating_sub(middle_top);
@@ -32,16 +30,16 @@ fn live_tail_middle_bottom(middle_top: u16, reply_top_y: u16) -> u16 {
     }
 }
 
-/// Maximum number of rows the `❯ reply` input grows to as the user inserts newlines (Shift+Enter /
-/// Alt+Enter). The layout additionally clamps the whole box to keep at least one list row.
+/// Maximum number of rows the `❯ reply` input grows to as the user inserts newlines (Shift+Enter / Alt+Enter).
 pub const MAX_REPLY_ROWS: u16 = 6;
 
 // Paste chips (`[Pasted: N lines]` with preview/expand), word navigation, undo, and text selection
 // therefore behave like the other inputs.
 
-/// Display content for the peek panel, recomputed live from the currently-selected agent (see [`compute_peek_fields`]).
-/// Split out from [`PeekPanelState`] so the panel refreshes every frame, following the selection cursor and showing live status.
-/// The refresh preserves the user's in-progress reply draft (the dashboard's `peek_reply` widget).
+/// Display content for the peek panel, recomputed live from the
+/// currently-selected agent (see [`compute_peek_fields`]). Split out from
+/// [`PeekPanelState`] so the panel refreshes every frame, following the
+/// selection cursor and showing live status.
 #[derive(Debug, Clone)]
 pub struct PeekFields {
     pub label: String,
@@ -53,7 +51,6 @@ pub struct PeekFields {
     pub options: Vec<(String, String)>,
     pub request_id: Option<usize>,
     /// Index into `options` of the `RejectOnce` ("No") option, when the request has one.
-    /// Selecting it lets the user type a free-text feedback message (mirrors the chat permission panel).
     pub reject_option: Option<usize>,
 }
 
@@ -68,39 +65,28 @@ pub struct PeekPanelState {
     pub label: String,
     /// Time-ago suffix for the header line (e.g. `"2m"`, `"1d"`, `"just now"`). Painted right-aligned in dim grey.
     pub time_ago: String,
-    /// Type of the most recent agent response, shown as the header's left label:
-    /// `"Thinking"` / `"Thought"`, `"Response"`, `"Edit"`, `"Read"`, `"Bash"`, … (or `"Working"` / `"Idle"` when the agent hasn't responded yet).
-    /// See [`extract_last_response_type`].
+    /// Type of the most recent agent response, shown as the header's left label: `"Thinking"` / `"Thought"`, `"Response"`, `"Edit"`, `"Read"`.
     pub response_type: String,
     /// First line of the most recent user prompt, or `None`.
     pub last_user_message: Option<String>,
     /// Question text from a pending `PermissionView`, when applicable.
     pub question: Option<String>,
     /// Multiple-choice options for a pending permission request.
-    /// Each option's `id` corresponds to a `acp::PermissionOptionId`.
     pub options: Vec<(String, String)>,
     /// `PermissionViewState::id` captured at refresh time.
-    /// Used to detect a stale answer when the front of the permission queue rotates between snapshot and key-press.
     pub request_id: Option<usize>,
     /// Index into `options` of the `RejectOnce` ("No") option, when the pending request has one.
-    /// When that option is highlighted the user can type a free-text feedback message, mirroring the chat permission panel.
-    /// The dashboard's `peek_reply` widget is reused as the buffer.
     pub reject_option: Option<usize>,
     /// Whether the reply input is focused (bright border and caret, vs row-nav keys).
-    /// Non-vim defaults focused; vim defaults unfocused so `j`/`k` keep selecting.
-    /// Same-row live updates keep focus; a row change in vim clears it.
     pub focused: bool,
     /// With `None` the panel only navigates: `↑`/`↓` switch agents and `Enter` opens the row in detail.
     pub selected_option: Option<usize>,
-    /// Peeked agent's current model display name, painted on the box's bottom border (mirrors the dispatch box's config badge).
-    /// `None` when unknown. Set by the render-time refresh from the live agent, not carried in [`PeekFields`].
+    /// Peeked agent's current model display name, painted on the box's bottom border.
     pub model_name: Option<String>,
     /// Whether the peeked agent runs in always-approve (yolo) mode.
-    /// Shown as an `always-approve` flag next to the model on the bottom border, the same signal the dashboard row badge carried.
     pub auto_approve: bool,
     /// Whether the peeked agent is in Auto (LLM classifier) mode. Shown as an `auto` flag (mutually exclusive with `always-approve`; yolo wins).
     pub auto: bool,
-    /// Session-mode flag on the bottom border (`plan`, `ask`). `None` in the default mode.
     pub mode_label: Option<&'static str>,
 }
 
@@ -121,7 +107,7 @@ impl PeekPanelState {
             // Vim: unfocused so row nav isn't stolen by the reply; non-vim: focused to type.
             focused: !crate::appearance::cache::load_vim_mode(),
             selected_option: None,
-            // Populated by the render-time refresh from the live agent (see `peek_model_and_mode`); defaults are harmless until then
+            // Populated by the render-time refresh from the live agent (see `peek_model_and_mode`).
             model_name: None,
             auto_approve: false,
             auto: false,
@@ -163,9 +149,8 @@ impl PeekPanelState {
         row_changed
     }
 
-    /// Whether the pending question is an agent `AskUserQuestion` (the Ask tool) rather than a permission request.
-    /// Permissions carry a `request_id` (their stale-guard id); ask questions don't.
-    /// Drives the freeform placeholder and which answer action is emitted.
+    /// Whether the pending question is an agent `AskUserQuestion` (the Ask
+    /// tool) rather than a permission request.
     pub fn is_ask_question(&self) -> bool {
         self.question.is_some() && self.request_id.is_none()
     }
@@ -289,7 +274,7 @@ pub fn compute_peek_fields(
                 reject_option,
             })
         }
-        // Roster-only rows are not locally hosted; there is no local `AgentView` to peek into
+        // Roster-only rows are not locally hosted.
         DashboardRowId::Roster { .. } | DashboardRowId::Workspace { .. } => None,
     }
 }
@@ -335,7 +320,6 @@ pub struct PeekRenderResult {
     /// Screen position of the reply caret, when the reply / feedback input is focused. The caller parks the terminal cursor here.
     pub caret: Option<(u16, u16)>,
     /// Screen rect of the reply input row (the `❯ reply` line, or the reject-feedback slot in question mode).
-    /// Recorded by the caller for mouse routing (click-to-focus, drag text selection).
     pub reply_rect: Option<Rect>,
 }
 
@@ -408,8 +392,6 @@ pub fn render_peek_panel(
         return PeekRenderResult::default();
     }
 
-    // Focus-aware chrome, mirroring the dispatch box's two-focus model
-    // A focused reply input gets the bright selection border (and a caret below); an unfocused one (Tab) dims to the prompt border and hides the caret
     let border_fg = if panel.focused {
         theme.selection_border
     } else {
@@ -424,8 +406,7 @@ pub fn render_peek_panel(
     // Bottom-right model and always-approve indicator on the box's bottom border.
     paint_peek_config_badge(buf, area, theme, panel, reply, multiline);
 
-    // Record badge on the top border while the mic is live
-    // The peek panel replaces the dispatch box, so without this a capture started with a row selected would show no indicator
+    // Record badge on the top border while the mic is live The peek panel replaces the dispatch box.
     super::render::paint_record_badge(buf, area, theme, voice_listening);
 
     // Add a 1-cell left and right inset inside the rounded chrome so content doesn't hug the border
@@ -439,8 +420,6 @@ pub fn render_peek_panel(
         return PeekRenderResult::default();
     }
 
-    // Layout INSIDE the padded inner box: row 0: time-ago + status line middle rows: up to 3 lines of
-    // the last agent response.
     let prefix = "\u{276F} ";
     let prefix_w = UnicodeWidthStr::width(prefix) as u16;
     let reply_text_w = inner.width.saturating_sub(prefix_w);
@@ -449,9 +428,7 @@ pub fn render_peek_panel(
     let reply_top_y = inner.y + inner.height.saturating_sub(reply_rows);
 
     if let Some(ref q) = panel.question {
-        // Permission / ask-tool pending: render the question and options across the WHOLE inner box (the `❯ reply` row is hidden here)
-        // The highlighted option carries a ▸ marker
-        // The `RejectOnce` ("No") option accepts inline free-text feedback that the user types after selecting it (mirrors the chat permission panel)
+        // Permission / ask-tool pending: render the question and options across the WHOLE inner box (the `❯ reply` row is hidden here).
         let mut y = inner.y;
         let q_line = format!("\u{25B8} {q}");
         let trunc = truncate_str(&q_line, inner.width as usize);
@@ -472,8 +449,7 @@ pub fn render_peek_panel(
             if y > max_opt_y {
                 break;
             }
-            // Mark an option selected only while the panel is focused AND the user has actually selected it
-            // The default is `None`, no selection, so the panel reads as navigation, not answering
+            // Mark an option selected only while the panel is focused AND the user has selected it The default is `None`, no selection.
             let selected = panel.focused && panel.selected_option == Some(i);
             let is_reject = panel.reject_option == Some(i);
             let marker = if selected { "\u{25B8} " } else { "  " };
@@ -503,7 +479,6 @@ pub fn render_peek_panel(
                     reply_rect = Some(slot);
                     if reply.text().is_empty() {
                         // Permission reject vs. ask-tool "Other" free-text.
-                        // Painted manually (not via the widget's unfocused-only placeholder) so the hint stays visible while the caret sits on the row
                         let placeholder_text = if panel.is_ask_question() {
                             "Other (type your own answer)"
                         } else {
@@ -537,8 +512,6 @@ pub fn render_peek_panel(
             }
             y += 1;
         }
-        // Two-focus cue: slightly dim the whole question panel when it's not focused (Tab returns to row nav)
-        // That makes clear the options aren't live to answer. The border already dims; this fades the content.
         if !panel.focused {
             crate::render::color::recede_area(buf, frame_inner, theme.bg_base, 0.45);
         }
@@ -547,19 +520,16 @@ pub fn render_peek_panel(
     }
 
     {
-        // Last-response TYPE on the LEFT, time-ago on the FAR RIGHT, like the row list's primary/secondary
-        // columns. The label is truncated so it never collides with the time.
+        // Last-response TYPE on the LEFT, time-ago on the FAR RIGHT, like the row list's primary/secondary columns.
         let time = panel.time_ago.as_str();
         let time_w = UnicodeWidthStr::width(time) as u16;
-        // Reserve the time column (plus a 1-cell gap) on the right; the label gets the rest
-        // When the box is too narrow for both, the label wins and the time is dropped
+        // Reserve the time column (plus a 1-cell gap) on the right.
         let label_avail = if time_w > 0 && time_w + 1 < inner.width {
             inner.width.saturating_sub(time_w + 1) as usize
         } else {
             inner.width as usize
         };
-        // While Working, the status label is secondary (a touch brighter than dim chrome)
-        // Live-tail keeps painting the middle regardless
+        // While Working, the status label is secondary (a touch brighter than dim chrome).
         let working = panel.response_type == "Working";
         let label_style = if working {
             Style::default().fg(theme.text_secondary)
@@ -575,8 +545,7 @@ pub fn render_peek_panel(
         }
 
         let middle_top = inner.y + 1;
-        // Match `peek_live_tail_desired_content`: blank only when the middle still has at least 2 rows after it (pin and body)
-        // When only 1 row remains, keep it
+        // Match `peek_live_tail_desired_content`: blank only when the middle still has a couple of rows after it (pin and body).
         let middle_bottom = live_tail_middle_bottom(middle_top, reply_top_y);
         let middle_h = middle_bottom.saturating_sub(middle_top);
         let middle_area = Rect {
@@ -604,9 +573,8 @@ pub fn render_peek_panel(
         }
     }
 
-    // `❯ reply` live input occupying the bottom `reply_rows` rows, rendered through the shared
-    // `PromptWidget`. The `❯` prefix is painted manually on the FIRST reply row only (always
-    // `accent_user`; the unfocused blend below dims it).
+    // `❯ reply` live input occupying the bottom `reply_rows` rows, rendered
+    // through the shared `PromptWidget`.
     buf.set_string(
         inner.x,
         reply_top_y,
@@ -646,8 +614,8 @@ pub fn render_peek_panel(
             voice_overlay,
         )
         .cursor_pos;
-    // The clickable reply rect spans all reply rows and includes the `❯ ` prefix column for a fatter mouse target
-    // The widget maps clicks left of its text area to position 0
+    // The clickable reply rect spans all reply rows and includes the `❯ `
+    // prefix column for a fatter mouse target.
     let reply_rect = Some(Rect {
         x: inner.x,
         y: reply_top_y,
@@ -655,16 +623,12 @@ pub fn render_peek_panel(
         height: reply_rows,
     });
 
-    // Two-focus cue: slightly dim the whole panel content when it's not focused (Tab returns to row nav), matching the question panel
-    // The border already dims; this fades the response and reply so it's clear the input isn't active
-    // Caret is `None` when unfocused, so dimming the painted cells doesn't affect cursor placement
     if !panel.focused {
         crate::render::color::recede_area(buf, frame_inner, theme.bg_base, 0.45);
     }
     PeekRenderResult { caret, reply_rect }
 }
 
-/// Returns at least 1.
 pub fn reply_row_count(
     reply: &crate::views::prompt_widget::PromptWidget,
     reply_text_width: u16,
@@ -701,14 +665,12 @@ pub fn extract_last_response_type(agent: &AgentView) -> String {
             Some(TurnActivity::Responding) => return "Response".to_string(),
             Some(TurnActivity::AutoCompacting) => return "Compacting".to_string(),
             Some(TurnActivity::Retrying { .. }) => return "Retrying".to_string(),
-            // A tool is executing: fall through to the scan to recover its specific label (Bash/Read/…)
-            // A missing/stale block yields the generic "Working" fallback below
+            // A tool is executing: fall through to the scan to recover its specific label (Bash/Read/…).
             Some(TurnActivity::ToolRunning { .. }) => {}
             // Blocked on a suppressed tool (task output / wait / sleep): keep the compact "Working" label
             Some(TurnActivity::Waiting(_)) => return "Working".to_string(),
             Some(TurnActivity::WritingToolCall(_)) => return "Preparing".to_string(),
-            // Turn running but no live activity (e.g. just granted a permission and waiting for tool results / the next inference).
-            // Show "Working", never a stale response
+            // Turn running but no live activity (e.g. granted a permission and waiting for tool results / the next inference). Show "Working".
             None => return "Working".to_string(),
         }
     }
@@ -719,9 +681,8 @@ pub fn extract_last_response_type(agent: &AgentView) -> String {
         };
         match &entry.block {
             RenderBlock::AgentMessage(_) => {
-                // Idle: the last message is the result ("Response")
-                // While running we only reach here in the ToolRunning case (other activities returned above)
-                // A message is then stale, so skip it and fall through to "Working" / a newer tool label
+                // Idle: the last message is the result ("Response") While
+                // running we only reach here in the ToolRunning case.
                 if running {
                     break;
                 }
@@ -755,7 +716,7 @@ pub fn extract_last_response_type(agent: &AgentView) -> String {
             RenderBlock::BgTask(_) => return "Task".to_string(),
             RenderBlock::Btw(_) => return "Btw".to_string(),
             RenderBlock::ContextInfo(_) => return "Context".to_string(),
-            // The user's latest input marks the turn boundary; there's no agent response after it yet
+            // The user's latest input marks the turn boundary.
             RenderBlock::UserPrompt(_) => break,
             // Structural blocks carry no response type; keep scanning
             RenderBlock::System(_)
@@ -771,8 +732,8 @@ pub fn extract_last_response_type(agent: &AgentView) -> String {
     }
 }
 
-/// Pull the first line of the most recent user prompt (`RenderBlock::UserPrompt`) from the agent's scrollback.
-/// Sanitised and ANSI-stripped. Returns `None` when the user hasn't sent any prompts yet.
+/// Pull the first line of the most recent user prompt
+/// (`RenderBlock::UserPrompt`) from the agent's scrollback.
 pub fn extract_last_user_message(agent: &AgentView) -> Option<String> {
     crate::views::session_title::last_user_prompt_line(agent)
 }
@@ -833,8 +794,7 @@ pub fn extract_recent_lines(agent: &AgentView, count: usize) -> Vec<String> {
 /// allocate the full body.
 fn block_short_text(block: &crate::scrollback::block::RenderBlock) -> Option<String> {
     use crate::scrollback::block::RenderBlock;
-    /// Read just the first non-empty line of a body owned elsewhere.
-    /// `lines()` iterates without allocating; the `.to_string()` at the end is the only allocation, sized to the first line only.
+    /// Read the first non-empty line of a body owned elsewhere.
     fn first_line_of(body: &str) -> String {
         body.lines().next().unwrap_or("").to_string()
     }
@@ -855,8 +815,6 @@ fn block_short_text(block: &crate::scrollback::block::RenderBlock) -> Option<Str
     }
 }
 
-/// `n = 0` returns `None` (it would otherwise `saturating_sub(1)` to index 0 and erroneously select
-/// option 1).
 pub fn peek_number_key(state: &super::state::DashboardState, n: usize) -> Option<Action> {
     let panel = state.peek.as_ref()?;
     // No active question, or 0/out-of-range indices, is a no-op
@@ -920,10 +878,7 @@ mod tests {
 
     #[test]
     fn live_tail_middle_bottom_skips_blank_when_only_one_content_row() {
-        // status@0, middle from 1, 3-line reply starts at 3, so span 2
-        // A blank would leave middle_h=1 (pin-only); expand so pin and body fit
         assert_eq!(live_tail_middle_bottom(1, 3), 3);
-        // Generous middle (span 4) keeps blank above reply.
         assert_eq!(live_tail_middle_bottom(1, 5), 4);
         // Zero middle span stays empty.
         assert_eq!(live_tail_middle_bottom(3, 3), 2);
@@ -939,7 +894,6 @@ mod tests {
         use ratatui::buffer::Buffer;
         use ratatui::layout::Rect;
 
-        // borders(2) + inner content_rows(6) = 8.
         let area = Rect::new(0, 0, 80, 8);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
@@ -985,8 +939,7 @@ mod tests {
     fn render_peek_working_status_uses_secondary_colour() {
         use ratatui::buffer::Buffer;
         use ratatui::layout::Rect;
-        // Fixed RGB palette: dim metadata carries a gray_dim fg there (the
-        // DIM attribute on the terminal theme).
+        // Fixed RGB palette: dim metadata carries a gray_dim fg there (the DIM attribute on the terminal theme).
         let theme = Theme::groknight();
         let render = |response_type: &str| {
             let mut buf = Buffer::empty(Rect::new(0, 0, 80, 6));
@@ -1008,7 +961,6 @@ mod tests {
             );
             buf
         };
-        // Inner content sits two cells in (1 border, 1 pad inset): status at (2,1)
         let working = render("Working");
         assert_eq!(
             working.cell((2, 1)).map(|c| c.symbol()),
@@ -1105,7 +1057,7 @@ mod tests {
             "no flag without yolo: {plain_bottom:?}",
         );
 
-        // Plan mode shows a `plan` flag (so all three Shift+Tab cycle states are visible on the badge)
+        // Plan mode shows a `plan` flag (so all of them Shift+Tab cycle states are visible on the badge)
         let mut planp =
             PeekPanelState::new(DashboardRowId::TopLevel(AgentId(0)), fields("Response"));
         planp.model_name = Some("Grok 4 Fast".to_string());
@@ -1163,7 +1115,6 @@ mod tests {
             None,
             None,
         );
-        // Badge `" ● rec "` starts at x = area.x + 2, so the dot is at x = 3.
         assert_eq!(
             buf.cell((3, 0)).map(|c| c.symbol()),
             Some("\u{25CF}"),
@@ -1254,8 +1205,8 @@ mod tests {
         assert!(content.contains("Edit"));
         // The most recent user message is NOT jammed into the header.
         assert!(!content.contains("hello, can you help?"));
-        // Reply input on the bottom row
-        // Focused by default, so the dim `reply…` placeholder is suppressed (the caret is the affordance, mirroring the dispatch box)
+        // Reply input on the bottom row Focused by default, so the dim
+        // `reply…` placeholder is suppressed.
         assert!(
             content.contains('\u{276F}'),
             "peek must paint ❯ on the reply row"
@@ -1399,7 +1350,6 @@ mod tests {
         );
     }
 
-    /// An unfocused simple peek (response and reply) dims its CONTENT as a two-focus cue, not just the border.
     /// At least one interior cell's fg is faded toward bg relative to the focused render.
     #[test]
     fn render_peek_unfocused_simple_panel_dims_content() {
@@ -1439,8 +1389,7 @@ mod tests {
                 }
             }
         }
-        // On terminals without truecolor the theme quantizes to named / indexed colors that `blend_color` leaves unchanged
-        // The dim is a no-op there (the border still dims). Only assert the content fade when the active theme actually supports blending.
+        // On terminals without truecolor the theme quantizes to named / indexed colors that `blend_color` leaves unchanged The dim is a no-op there.
         let blend_supported =
             crate::render::color::blend_color(theme.bg_base, theme.text_primary, 0.45).is_some();
         if blend_supported {
@@ -1452,7 +1401,6 @@ mod tests {
     }
 
     /// When a permission is pending, the peek paints the question and numbered options at the top and shows the reply slot on the last inner row.
-    /// The 1-9 keys still answer the permission via `peek_number_key`.
     #[test]
     fn render_peek_paints_permission_question_with_options() {
         use ratatui::buffer::Buffer;
@@ -1529,7 +1477,7 @@ mod tests {
                 reject_option: None,
             },
         );
-        panel.selected_option = Some(1); // highlight the 2nd option
+        panel.selected_option = Some(1);
         panel.focused = true;
         let mut reply = test_reply();
         let _ = render_peek_panel(
@@ -1852,7 +1800,6 @@ mod tests {
         let _ = reply.handle_paste(pasted);
         // Cursor sits after the chip, so the preview is shown (near-cursor)
         let mut buf = Buffer::empty(Rect::new(0, 0, 80, 14));
-        // min_height for the preview overlay is 5.
         let overlay = Rect::new(0, 0, 80, 7);
         let panel_area = Rect::new(0, 7, 80, 7);
         let _ = render_peek_panel(
@@ -1994,7 +1941,6 @@ mod tests {
         }
     }
 
-    /// n=0 returns None (no off-by-one selection of option 1).
     #[test]
     fn peek_number_key_zero_is_none() {
         let opts = vec![("a".to_string(), "A".to_string())];
@@ -2026,6 +1972,4 @@ mod tests {
         assert!(peek_number_key(&state, 1).is_none());
     }
 
-    // Real `extract_recent_lines` coverage lives in dispatch.rs tests (`extract_recent_lines_*`)
-    // It needs a real `AgentView` built via `test_app_with_agent()`
 }

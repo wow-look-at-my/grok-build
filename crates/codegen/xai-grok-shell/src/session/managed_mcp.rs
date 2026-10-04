@@ -1,18 +1,4 @@
 //! Shell-side MCP merge: local/plugin/compat sources plus admitted client servers.
-//! Managed connectors exist only via the gateway catalog (`GET /v1/mcp/tools/list`), not as injected `grok_com_*` HTTP servers.
-//!
-//! Merge layers are applied in order, keyed by server NAME (two names sharing one URL are distinct servers).
-//! Later `insert()` beats earlier `or_insert()`:
-//!   - config.toml    — seeds the map; `enabled = false` blocks lower layers
-//!   - Plugins        — `or_insert` (won't override config.toml)
-//!   - ~/.claude.json — `or_insert` (imported user/local MCP servers)
-//!   - `.mcp.json`    — `or_insert` (team baseline)
-//!   - Client         — `insert` (wins except servers rejected by a disabled
-//!                      vendor `mcps` kill switch, which matches by normalized
-//!                      URL; see `admit_client_mcp_servers`)
-//!
-//! The gateway catalog/call core lives in `xai_grok_shell_session_support::managed_mcp`.
-//! It is re-exported here so `crate::session::managed_mcp::…` paths keep resolving unchanged.
 
 pub use xai_grok_shell_session_support::managed_mcp::*;
 
@@ -45,14 +31,13 @@ pub(crate) fn mcp_server_name(s: &acp::McpServer) -> &str {
     }
 }
 
-/// Merge/discovery map key: server NAME is the sole merge identity (two names sharing one URL are distinct servers).
-/// Every name-keyed map in this module must derive its key through this helper so merge and discovery keying cannot desynchronize.
+/// Merge/discovery map key: server NAME is the sole merge identity (names
+/// sharing one URL are distinct servers).
 fn mcp_merge_key(s: &acp::McpServer) -> String {
     mcp_server_name(s).to_string()
 }
 
-/// Whole-definition equality. Not the derived `==` directly: `env`/`headers` come from HashMap
-/// iteration, so two loads of one TOML differ in order; `args` order stays significant.
+/// Whole-definition equality.
 fn mcp_server_definitions_equal(a: &acp::McpServer, b: &acp::McpServer) -> bool {
     canonical_definition(a) == canonical_definition(b)
 }
@@ -174,8 +159,7 @@ fn merge_managed_mcp_servers_with_policy_from(
     compat: &xai_grok_tools::types::compat::CompatConfig,
     ms: &xai_grok_workspace::permission::resolution::ManagedSettings,
 ) -> Vec<McpServerWithPolicy> {
-    // Project-scoped names classify their servers foreign AND feed the
-    // project-MCP pin; computed once for both (via `mcp_subject`).
+    // Project-scoped names classify their servers foreign AND feed the project-MCP pin.
     let project = crate::agent::folder_trust::project_scoped_mcp_names(cwd);
     // Server and subject share one map entry, so a key collision can never
     // pair a surviving server with another definition's subject.
@@ -205,8 +189,7 @@ fn merge_managed_mcp_servers_with_policy_from(
     let disabled = crate::util::config::disabled_mcp_server_names(cwd);
 
     let mut merged: Vec<(acp::McpServer, McpSubject)> = servers.into_values().collect();
-    // Sort by name: HashMap order is random, and the order-sensitive downstream equality would
-    // see a no-op reload as changed (spuriously restarting MCP init).
+    // Sort by name: HashMap order is random.
     merged.sort_by(|a, b| mcp_server_name(&a.0).cmp(mcp_server_name(&b.0)));
     // Folder-trust gate: an untrusted workspace's project-scoped servers drop before spawn;
     // composes with the managed policy applied next.
@@ -580,8 +563,7 @@ pub(crate) fn discover_mcp_definitions_ignoring_disable(
     let sub = &crate::config::expand_env_vars_in_string;
     let toml_claimed = crate::util::config::all_toml_mcp_server_names(cwd);
 
-    // TOML wins its name (insert); lower tiers or_insert. Subjects come from the merge's
-    // classifier, so setup/stub verdicts can't diverge on a name collision.
+    // TOML wins its name (insert); lower tiers or_insert.
     let project = crate::agent::folder_trust::project_scoped_mcp_names(cwd);
     let mut by_name: HashMap<String, (acp::McpServer, McpSubject)> = HashMap::new();
     for (name, (config, scope)) in load_mcp_server_configs_with_project(cwd) {
@@ -613,8 +595,8 @@ pub(crate) fn discover_mcp_definitions_ignoring_disable(
         &project,
         |(server, _)| mcp_server_name(server),
     );
-    // Project-pin-dropped definitions stay: consumers gate through `mcp_verdict`, whose ProjectPin
-    // leg names the pinning source — dropping them misreported "not found in config".
+    // Project-pin-dropped definitions stay: consumers gate through
+    // `mcp_verdict`.
     entries
         .into_iter()
         .map(|(server, subject)| (mcp_merge_key(&server), (server, subject)))
@@ -1221,8 +1203,7 @@ command = "echo"
         );
         assert_eq!(names(&out), vec!["ok"]);
 
-        // An advisory deny binds only foreign subjects: the TOML-owned
-        // (grok-native) definition survives, the vendor-defined one drops.
+        // An advisory deny binds only foreign subjects: the TOML-owned (grok-native) definition survives.
         let toml_servers = HashMap::from([("corp".to_string(), corp())]);
         let advisory = deny(PolicySourceAuthority::Advisory);
         let kept =
@@ -1240,8 +1221,8 @@ command = "echo"
                 .is_empty()
         );
 
-        // Squatting the TOML name with a different definition stays foreign under an advisory
-        // name deny: another URL, a transport swap onto the Http name, a Stdio with another command.
+        // Squatting the TOML name with a different definition stays foreign
+        // under an advisory name deny: another URL.
         let stdio = |cmd: &str| {
             acp::McpServer::Stdio(acp::McpServerStdio::new(
                 "corp",
@@ -1306,7 +1287,7 @@ enabled = false
     }
 
     /// The native match compares a `load_mcp_servers` payload with `load_mcp_servers_toml_only`;
-    /// pin from disk that the two loaders agree, HashMap-ordered `env`/`headers` included.
+    /// pin from disk that both loaders agree, HashMap-ordered `env`/`headers` included.
     #[test]
     fn toml_loaders_agree_on_env_and_header_bearing_definitions() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1342,7 +1323,7 @@ headers = { "X-A" = "1", "X-B" = "2", "X-C" = "3" }
         }
     }
 
-    /// Two loads of the same TOML emit `env`/`headers` in HashMap order; the native match must not depend on it.
+    /// Loads of the same TOML emit `env`/`headers` in HashMap order; the native match must not depend on it.
     #[test]
     fn definition_equality_ignores_env_and_header_order_but_not_args() {
         let stdio = |args: Vec<&str>, env: Vec<(&str, &str)>| {
@@ -2026,8 +2007,7 @@ headers = { "X-A" = "1", "X-B" = "2", "X-C" = "3" }
                 .collect()
         };
 
-        // Pin disabled: project servers dropped, except the explicitly
-        // allowlisted one; the user-tier server survives.
+        // Pin disabled: project servers dropped, except the explicitly allowlisted one; the user-tier server survives.
         let mut ms = settings_with_policy(policy.clone());
         ms.project_mcp = PolicyPin::Disabled {
             source: std::path::PathBuf::from("/etc/grok/requirements.toml"),
@@ -2099,8 +2079,7 @@ enabled = false
         );
     }
 
-    /// Builds a trusted git repo whose project config.toml declares two HTTP servers sharing one URL, each with its own auth header.
-    /// This mirrors a real setup: one ClickHouse endpoint, two orgs.
+    /// This mirrors a real setup: one ClickHouse endpoint, orgs.
     fn same_url_project_repo() -> tempfile::TempDir {
         let cwd = empty_cwd();
         std::fs::create_dir_all(cwd.path().join(".grok")).unwrap();
@@ -2126,7 +2105,7 @@ Authorization = "Bearer org2-token"
         cwd
     }
 
-    /// Server NAME is the identity: two entries sharing one URL are distinct servers, and each keeps its own transport config.
+    /// Server NAME is the identity: entries sharing one URL are distinct servers, and each keeps its own transport config.
     #[test]
     fn same_url_different_names_both_survive_merge() {
         let cwd = same_url_project_repo();

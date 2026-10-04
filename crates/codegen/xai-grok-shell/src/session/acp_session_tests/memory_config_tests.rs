@@ -1021,8 +1021,7 @@ async fn test_session_close_does_not_run_dream() {
         .await;
 }
 /// Drives the real `run_session` loop and asserts the launch dream fires when gated (not a subagent,
-/// memory enabled, open gate). This guards the launch wiring itself: removing the launch
-/// `spawn_dream_check` leaves `dream_count` at 0, which calling `maybe_run_dream` directly would miss.
+/// memory enabled, open gate).
 #[tokio::test(flavor = "current_thread")]
 #[allow(clippy::field_reassign_with_default)]
 async fn test_run_session_spawns_launch_dream() {

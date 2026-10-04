@@ -32,9 +32,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 use std::collections::HashSet;
 use std::time::Instant;
-/// AppView-owned per-frame inputs to [`AgentView::draw`]: state the agent view cannot see itself (voice pipeline, Esc ownership, status row).
-/// Grouped (mirroring `WelcomeRenderParams`) so the next app-level render fact extends this struct instead of every `draw` call site.
-/// Tests take `Default` and override only what they exercise.
+/// AppView-owned per-frame inputs to [`AgentView::draw`]: state the agent
+/// view cannot see itself (voice pipeline, Esc ownership, status row).
+/// Grouped (mirroring `WelcomeRenderParams`) so the next app-level render
+/// fact extends this struct instead of every `draw` call site.
 #[derive(Default)]
 pub struct AppRenderParams<'a> {
     /// Voice feature available (shows the mic affordances).
@@ -46,12 +47,9 @@ pub struct AppRenderParams<'a> {
     /// The status row this frame paints, or `Off` when this frame has none.
     pub status_line: crate::views::status_line::StatusLineFrame,
     pub workspace_dashboard_enabled: bool,
-    /// Header chrome the dashboard adds when this view is its session overlay: the agent's title (omitted when the session is
-    /// unnamed) and its `i/n` position in the overlay's cycle order. `position` is `None` outside the overlay or for an agent the
-    /// dashboard filter hid; a lone agent gets `Some((1, 1))`, so the switcher gates on [`OverlayHeader::can_cycle`], not `is_some`.
+    /// Header chrome the dashboard adds when this view is its session overlay.
     pub overlay_header: OverlayHeader<'a>,
-    /// The footer's `Ctrl+X` label when this view stands in for another agent (a subagent's fullscreen takeover): the
-    /// parent's resolved stop/archive/close action, which the child cannot compute from its own state.
+    /// The footer's `Ctrl+X` label when this view stands in for another agent (a subagent's fullscreen takeover).
     pub overlay_stop_label: Option<&'static str>,
 }
 /// What the dashboard overlay contributes to the header row (see [`AppRenderParams::overlay_header`]).
@@ -253,9 +251,9 @@ impl AgentView {
             }
         }
     }
-    /// Returns the *exact* hints the bottom shortcuts bar would render right now.
-    /// Single source of truth for context-sensitive shortcuts (pane, overlays, sub-modes, selection state, turn running, plan/queue).
-    /// Both the bar renderer and the Ctrl+. cheatsheet Current section delegate here, so the two stay identical in the active context.
+    /// Returns the *exact* hints the bottom shortcuts bar would render right
+    /// now. Single source of truth for context-sensitive shortcuts (pane,
+    /// overlays, sub-modes, selection state, turn running, plan/queue).
     pub fn current_shortcut_hints(&self, registry: &ActionRegistry) -> Vec<HintItem> {
         match self.shortcuts_bar_content(registry) {
             ShortcutsBarContent::Surface(hints) | ShortcutsBarContent::Pane(hints) => hints,
@@ -316,8 +314,8 @@ impl AgentView {
             KeyOwner::Pane => ShortcutsBarContent::Pane(self.normal_pane_hints(registry)),
         }
     }
-    /// An open line viewer paints its own hints over this row further down `draw`, so the bar is silent.
-    /// The two exceptions, where the viewer defers: the plan-approval prompt, whose keys the viewer's intercept forwards, and a casual comment draft.
+    /// An open line viewer paints its own hints over this row further down `draw`, so the bar is silent. Both exceptions, where the viewer defers:
+    /// the plan-approval prompt, whose keys the viewer's intercept forwards, and a casual comment draft.
     fn line_viewer_bar(&self) -> ShortcutsBarContent {
         use crate::views::shortcuts_bar::HintItem;
         if let Some(pav) = self
@@ -335,8 +333,8 @@ impl AgentView {
         }
         ShortcutsBarContent::Hidden
     }
-    /// Shared "normal pane" hints: the flag computation, `build_hints`, and the queue hint.
-    /// Single source of truth for the two former duplicated blocks in `current_shortcut_hints` and `draw`.
+    /// Shared "normal pane" hints: the flag computation, `build_hints`, and the queue hint. Single source
+    /// of truth for both former duplicated blocks in `current_shortcut_hints` and `draw`.
     fn normal_pane_hints(&self, registry: &ActionRegistry) -> Vec<HintItem> {
         let fold_label = self.selected_fold_label();
         let is_editing = matches!(self.prompt_mode, PromptMode::EditingQueued { .. });
@@ -553,7 +551,6 @@ impl AgentView {
         left_spans
     }
     /// `area` is the screen region assigned to this agent view.
-    /// When a tracing overlay is visible, this is smaller than `f.area()`.
     #[allow(clippy::too_many_arguments)]
     /// Render the agent into `area`.
     /// `in_dashboard_overlay` is `true` when this view is being rendered inside the dashboard's session-overlay.
@@ -1360,15 +1357,7 @@ impl AgentView {
                 status.push_front("link_url", Line::from(Span::styled(display, link_style)));
             }
         }
-        // Top-right: this run's total cost. The agent's own session ledger is
-        // the source of truth — it counts every model call and subagent fold,
-        // including spend behind a message that was rewound or never rendered,
-        // which a sum over the scrollback cannot see. The scrollback sum is the
-        // fallback for an agent too old to report the total, and only while it
-        // measures the same run: after a reload replays priced messages it
-        // measures an earlier run instead, and showing that would mean the
-        // number FALLS at the next live call. Absent until something reports a
-        // cost — never a fabricated `$0.00`.
+        // Top-right: this run's total cost.
         let session_cost_ticks = self
             .session
             .tracker
@@ -1437,11 +1426,11 @@ impl AgentView {
             .current_branch
             .clone()
             .or_else(|| lazy_git.as_ref().and_then(|i| i.branch.clone()));
-        // Realtime CI-status dot (issue #40): a colored dot beside the branch
-        // whose state is polled from the `gh` CLI. The poll is throttled and
-        // off-thread (see `ci_status::ci_status_lazy`), so this render call is
-        // cheap; absent a real branch (detached/empty) or any CI signal, no
-        // dot is drawn — a graceful "no CI status" state.
+        // Realtime CI-status dot: a colored dot beside the branch whose state
+        // is polled from the `gh` CLI. The poll is throttled and off-thread
+        // (see `ci_status::ci_status_lazy`), so this render call is cheap;
+        // absent a real branch (detached/empty) or any CI signal, no dot is
+        // drawn — a graceful "no CI status" state.
         if let Some(b) = branch.as_deref()
             && !b.is_empty()
             && let Some(dot_span) =
@@ -1450,12 +1439,7 @@ impl AgentView {
                         crate::ci_status::CiStatus::Red => Some(theme.accent_error),
                         crate::ci_status::CiStatus::Yellow => {
                             // While CI is running, pulse the yellow dot's HSV
-                            // value so it visibly "thinks". The phase is wall-clock
-                            // time, not the animation tick: the tick cadence
-                            // follows whatever else the UI is doing (Slow on an
-                            // idle session, ~30 fps while streaming), so a
-                            // tick-counted pulse breathes at a different speed
-                            // depending on how busy the screen is.
+                            // value so it visibly "thinks".
                             let dyn_col =
                                 crate::ci_status::in_progress_dot_color(rgb_of(theme.warning));
                             Some(ratatui::style::Color::Rgb(dyn_col.0, dyn_col.1, dyn_col.2))
@@ -4972,29 +4956,28 @@ fn rgb_of(color: ratatui::style::Color) -> (u8, u8, u8) {
 /// Map a 256-color palette index to approximate RGB (the common xterm cube).
 fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
     if i < 16 {
-        // Standard 16 colors; built-in grayscale + base palette, approximated.
+        // Standard colors; built-in grayscale + base palette, approximated.
         const BASE: [(u8, u8, u8); 16] = [
-            (0, 0, 0),       // 0 black
-            (128, 0, 0),     // 1 red
-            (0, 128, 0),     // 2 green
-            (128, 128, 0),   // 3 yellow
-            (0, 0, 128),     // 4 blue
-            (128, 0, 128),   // 5 magenta
-            (0, 128, 128),   // 6 cyan
-            (192, 192, 192), // 7 white
-            (128, 128, 128), // 8 bright black
-            (255, 0, 0),     // 9 bright red
-            (0, 255, 0),     // 10 bright green
-            (255, 255, 0),   // 11 bright yellow
-            (0, 0, 255),     // 12 bright blue
-            (255, 0, 255),   // 13 bright magenta
-            (0, 255, 255),   // 14 bright cyan
-            (255, 255, 255), // 15 bright white
+            (0, 0, 0),
+            (128, 0, 0),
+            (0, 128, 0),
+            (128, 128, 0),
+            (0, 0, 128),
+            (128, 0, 128),
+            (0, 128, 128),
+            (192, 192, 192),
+            (128, 128, 128),
+            (255, 0, 0),
+            (0, 255, 0),
+            (255, 255, 0),
+            (0, 0, 255),
+            (255, 0, 255),
+            (0, 255, 255),
+            (255, 255, 255),
         ];
         return BASE.get(usize::from(i)).copied().unwrap_or_default();
     }
     if i < 232 {
-        // 6×6×6 color cube starting at 16.
         let n = (i - 16) as u16;
         let r = n / 36;
         let g = (n % 36) / 6;
@@ -5002,7 +4985,6 @@ fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
         let chan = |v: u16| -> u8 { (if v == 0 { 0 } else { 55 + v * 40 }) as u8 };
         return (chan(r), chan(g), chan(b));
     }
-    // Grayscale ramp 232..=255.
     let g = 8 + (i - 232) * 10;
     (g, g, g)
 }

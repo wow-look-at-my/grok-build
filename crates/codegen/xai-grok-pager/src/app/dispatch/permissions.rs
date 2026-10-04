@@ -67,14 +67,11 @@ pub(super) fn build_selection_meta(
     }
 
     if let Some(edited) = edited.filter(|_| {
-        // The editor authors an *allow* pattern, so apply it only to the bash allow-always option
-        // A different selection (reject-always, allow-once) made while the editor is open must fall through to the arrow word-scope
-        // Otherwise the allow text would land in the deny set
+        // The editor authors an *allow* pattern.
         option_id.0.as_ref() == "allow-always-command" && perm.bash_highlights.is_some()
     }) {
-        // Glob only when the editor is dirty
-        // An unedited save is a literal grant of the pre-filled command, so metacharacters from the command itself (e.g. `find . -name *.rs`)
-        // stay literal
+        // Glob only when the editor is dirty An unedited save is a literal
+        // grant of the pre-filled command.
         return serde_json::to_value(BashCommandSelectedTerms {
             command_parts: vec![edited.pattern],
             is_glob: edited.is_glob,
@@ -83,8 +80,9 @@ pub(super) fn build_selection_meta(
         .and_then(obj);
     }
 
-    // Each scoped row owns its selection (the deny row narrows freely, the allow row is clamped)
-    // So the persisted words must come from the count of the row that was actually chosen
+    // Each scoped row owns its selection (the deny row narrows freely, the
+    // allow row is clamped) So the persisted words must come from the count
+    // of the row that was chosen
     let count =
         if option_id.0.as_ref() == crate::views::permission_view::REJECT_ALWAYS_COMMAND_OPTION_ID {
             perm.bash_deny_selection_count
@@ -129,9 +127,8 @@ pub(super) fn dispatch_permission_select(
     let enable_always_approve =
         option_id.0.as_ref() == xai_grok_workspace::permission::ENABLE_ALWAYS_APPROVE_OPTION_ID;
 
-    // Remember the user's choice (by option kind) so the next prompt's cursor sticks to it
-    // Allow-flavored choices only: a rejection must not steer a later prompt's cursor onto a reject row
-    // Letting it stick would steer an unrelated later prompt onto its "always allow this command" row, escalating scope
+    // Remember the user's choice (by option kind) so the next prompt's cursor
+    // sticks to it Allow-flavored choices only.
     let steers_next_cursor = !enable_always_approve
         && option_id.0.as_ref() != xai_grok_workspace::permission::ALLOW_EDITS_SESSION_OPTION_ID;
     if steers_next_cursor
@@ -163,9 +160,9 @@ pub(super) fn dispatch_permission_select(
     // Queue transition: restore prompt if queue is now empty, clear if next-front.
     resolve_permission_queue_transition(agent);
 
-    // "Enable always-approve" side effect: flip YOLO, persist, and notify
-    // So the user couldn't have selected this option
-    // The `is_yolo()` guard is defensive; a redundant call would re-emit the toast and a duplicate `PersistPermissionMode` effect, but is safe
+    // "Enable always-approve" side effect: flip YOLO, persist, and notify So
+    // the user cannot have selected this option The `is_yolo()` guard is
+    // defensive.
     if enable_always_approve {
         let already_on = app
             .agents
@@ -301,8 +298,7 @@ pub(super) fn restore_permission_stashes(agent: &mut AgentView) {
         agent.plan_freeform_prefill_deferred = false;
         agent.restore_card_prompt(stashed);
     } else if agent.plan_freeform_prefill_deferred {
-        // Only when exit_plan_mode deferred the prefill under an open permission
-        // On any other restore (e.g. YOLO with an empty queue), freeform notes typed during plan review must not be wiped or re-prefilled.
+        // Only when exit_plan_mode deferred the prefill under an open permission On any other restore (e.g. YOLO with an empty queue).
         agent.plan_freeform_prefill_deferred = false;
         if let Some(pav) = agent.plan_approval_view.as_ref() {
             let session = pav.stashed_prompt.clone_for_live_prefill();

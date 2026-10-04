@@ -1112,8 +1112,8 @@ impl AgentView {
         }
         false
     }
-    /// Test-only access to [`submit_question_answers`] so dispatch tests can verify the full submit/cancel pipeline for local questions.
-    /// That covers `prompt.restore` and `cleanup_question_state`, not just the inner `translate_local_submit` shim.
+    /// Test-only access to [`submit_question_answers`] so dispatch tests can
+    /// verify the full submit/cancel pipeline for local questions.
     #[cfg(test)]
     pub(crate) fn submit_question_answers_for_test(&mut self, skipped: bool) -> InputOutcome {
         self.submit_question_answers(skipped)
@@ -1331,7 +1331,6 @@ mod cancel_turn_mouse_tests {
             ScrollbackState::new(),
         )
     }
-    /// Panel with one synthetic Rect per choice, stacked at y=10.
     fn setup_panel(agent: &mut AgentView) {
         agent.cancel_turn_view = Some(CancelTurnViewState {
             active_idx: 0,
@@ -1746,8 +1745,8 @@ mod permission_scope_key_tests {
             assert_eq!(perm.active_idx, 0, "cursor must not jump");
         }
     }
-    /// A decoy `AllowAlways`-kind option sits before the exact bash allow row.
-    /// It must not capture the arrow jump, the `e` editor entry, or the editor's Enter submit; all three must target `allow-always-command`.
+    /// A decoy `AllowAlways`-kind option sits before the exact bash allow row. It must not capture the arrow jump, the `e` editor entry, or
+    /// the editor's Enter submit; all of them must target `allow-always-command`.
     #[test]
     fn scoped_actions_target_exact_allow_always_command_id() {
         let mut agent = make_agent();
@@ -1938,7 +1937,7 @@ mod permission_scope_key_tests {
         assert!(!agent.permission_queue.front().unwrap().args_expanded);
     }
     /// Ctrl-F is handled before the focus match, so it toggles in Options, FollowupInput, and PatternEdit alike.
-    /// The footer hint shows in all three for the same reason.
+    /// The footer hint shows in all of them for the same reason.
     #[test]
     fn ctrl_f_toggles_in_every_focus_mode() {
         use crate::views::permission_view::PermissionFocus;
@@ -1974,8 +1973,6 @@ mod permission_scope_key_tests {
 #[cfg(test)]
 mod question_no_freeform_tests {
     //! Freeform ("Other") gating for `no_freeform` question modals, e.g. the SuperGrok upsell.
-    //! Regression tests for the bug where clicking under the last option of the upsell selected the (hidden) freeform row.
-    //! That let the user type into a modal that offers no free text.
     use super::super::test_fixtures::make_agent;
     use crate::actions::ActionRegistry;
     use crate::app::agent_view::AgentView;
@@ -2202,7 +2199,6 @@ mod question_no_freeform_tests {
 #[cfg(test)]
 mod question_freeform_chip_tests {
     //! Paste-chip round trip through the question freeform input.
-    //! Re-entering input mode used to reload the unchanged draft with a wholesale `set_text`, expanding every chip into raw text.
     use super::super::test_fixtures::make_agent;
     use super::question_no_freeform_tests::{down, draw_frame, open_question, qv};
     use crate::app::agent_view::AgentView;
@@ -2344,7 +2340,6 @@ mod question_freeform_chip_tests {
 #[cfg(test)]
 mod question_answer_focus_tests {
     //! The question card's answer walk.
-    //! Tab used to hand focus to the scrollback while the card stayed drawn; these tests pin the walk that replaced it.
     use super::super::test_fixtures::make_agent;
     use super::super::{AgentPane, AgentView};
     use super::question_no_freeform_tests::open_question;

@@ -95,9 +95,8 @@ async fn critical_announcement_title_on_welcome() {
     harness.quit().expect("clean quit");
 }
 
-/// After entering a session, the critical banner is exactly the two-line layout.
-/// Row one is `! Title` with a right-aligned `[hide]` button.
-/// Row two is the message, column-aligned with the title, followed by `hide: /announcements hide`.
+/// After entering a session, the critical banner is exactly those-line layout. Row one is `!
+/// Title` with a right-aligned `[hide]` button.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn critical_announcement_session_banner_two_lines() {
@@ -136,7 +135,6 @@ async fn critical_announcement_session_banner_two_lines() {
         !screen.contains('‼') && !screen.contains('⚠') && !screen.contains('ℹ'),
         "session banner must not use severity emoji prefixes\nscreen:\n{screen}"
     );
-    // Two-row layout: [hide] shares the title row; the CTA shares the message row; the message column lines up with the title column (past the `! `)
     let (t_row, t_col) = locate_screen_text(&screen, CRIT_TITLE).expect("locate title on screen");
     let (m_row, m_col) = locate_screen_text(&screen, CRIT_MSG).expect("locate message on screen");
     assert_eq!(
@@ -170,8 +168,6 @@ async fn critical_announcement_hide_button_click_hides_banner() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} hide button click."));
 
-    // The message is 115 cols and the row-1 budget is DEFAULT_COLS − 29
-    // The truncation asserts below hold only while DEFAULT_COLS is at most 143
     let long_msg = format!(
         "{CRIT_MSG} elevated error rates persist across regions check status.x.ai for updates and retry your request later"
     );
@@ -571,14 +567,15 @@ async fn promo_announcement_banner_slash_gate_and_critical_preemption() {
         .wait_for_text(HIDE_CTA, Duration::from_secs(5))
         .expect("hide CTA on promo row");
 
-    // One-line layout: the row starts with the [label] button and carries both right-hand hide affordances (the promo message is not painted here)
+    // One-line layout: the row starts with the [label] button and carries both right-hand hide affordances.
     let screen = harness.screen_contents();
     assert!(
         !screen.contains(PROMO_MSG),
         "the promo message must NOT paint on the session banner\nscreen:\n{screen}"
     );
-    // The `[label]` button also renders on the in-session top header (after the cwd)
-    // Target the BANNER row specifically: the only row carrying both the button and the hide affordances (the header has neither)
+    // The `[label]` button also renders on the in-session top header (after
+    // the cwd) Target the BANNER row specifically: the only row carrying both
+    // the button.
     let row_line = screen
         .lines()
         .find(|l| l.contains(PROMO_BUTTON) && l.contains(HIDE_CTA))
@@ -622,7 +619,8 @@ async fn promo_announcement_banner_slash_gate_and_critical_preemption() {
         .wait_for_text(PROMO_BUTTON, Duration::from_secs(10))
         .expect("promo banner still up after slash dismiss");
 
-    // Critical published mid-promo, with the promo STILL in the list: the single slot flips to the critical banner (precedence, not replacement)
+    // Critical published mid-promo, with the promo STILL in the list: the
+    // slot flips to the critical banner (precedence, not replacement)
     content.server().set_settings(json!({
         "allow_access": true,
         "announcements": [
@@ -659,8 +657,6 @@ async fn promo_cta_click_opens_link_and_hide_roundtrip() {
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} promo click."));
     let url_file = content.home().join("opened-urls.txt");
     let url_file_str = url_file.to_str().expect("utf8 url file path").to_owned();
-    // OSC 8 emission is gated on a Native-capable brand (`hyperlink_route`)
-    // Pin WezTerm like the file-path hyperlink test so the byte-level OSC 8 assert below is meaningful
     let extra_env = [
         ("GROK_TEST_OPEN_URL_FILE", url_file_str.as_str()),
         ("TERM_PROGRAM", "WezTerm"),
@@ -675,8 +671,6 @@ async fn promo_cta_click_opens_link_and_hide_roundtrip() {
         .wait_for_text(PROMO_BUTTON, Duration::from_secs(30))
         .expect("promo [label] button in live session");
 
-    // Give the frame a beat to flush, then prove the button cells carry the CTA URL as OSC 8
-    // The URL never renders as text, so raw-stream presence means the hyperlink wrap
     harness.update(Duration::from_millis(400));
     let raw = String::from_utf8_lossy(harness.raw_output()).into_owned();
     assert!(
@@ -713,7 +707,7 @@ async fn promo_cta_click_opens_link_and_hide_roundtrip() {
         .inject_keys(click.as_bytes())
         .expect("click [label]");
 
-    // Dispatch resolves the promo URL from current state and routes it via open_url_if_safe; the URL file records it instead of launching a browser
+    // Dispatch resolves the promo URL from current state and routes it via open_url_if_safe.
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         harness.update(Duration::from_millis(100));
@@ -758,8 +752,8 @@ async fn promo_cta_click_opens_link_and_hide_roundtrip() {
         }
     }
 
-    // ...and show restores the button (round trip through the persisted hidden ids)
-    // The message stays hero-only, so the banner restores just the button
+    // ...and show restores the button (round trip through the persisted
+    // hidden ids) The message stays hero-only.
     harness
         .inject_keys(b"/announcements show\r")
         .expect("show command");
@@ -867,7 +861,6 @@ fn pinned_promo_override_json() -> String {
     )
 }
 
-/// [`spawn_with_announcements`] with extra env pairs appended (e.g. `GROK_TEST_OPEN_URL_FILE` and a `TERM_PROGRAM` pin for OSC 8).
 fn spawn_with_announcements_and_env(
     content: &ContentController,
     override_json: &str,
@@ -904,7 +897,6 @@ async fn pinned_promo_multi_surface_and_ctrl_o_open() {
     let mut harness =
         spawn_with_announcements_and_env(&content, &pinned_promo_override_json(), &extra_env);
 
-    // (1) Welcome hero: [label], no [hide].
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
@@ -917,7 +909,6 @@ async fn pinned_promo_multi_surface_and_ctrl_o_open() {
         "a pinned promo shows no [hide] on welcome\nscreen:\n{screen}"
     );
 
-    // (2) Enter a session.
     harness
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit prompt to enter session");
@@ -925,7 +916,6 @@ async fn pinned_promo_multi_surface_and_ctrl_o_open() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("session response");
 
-    // (3) and (4): the [label] paints on BOTH the top header row (after the cwd) and the above-prompt banner, none with [hide]
     harness
         .wait_for_text(PROMO_BUTTON, Duration::from_secs(10))
         .expect("upgrade CTA in session");
@@ -948,8 +938,6 @@ async fn pinned_promo_multi_surface_and_ctrl_o_open() {
         "the cta.caption must paint after the banner button and never after the header button\nscreen:\n{screen}"
     );
 
-    // (5) Ctrl+O opens the CTA url via the URL file (the pinned promo steals the chord from YOLO)
-    //     The banner cells also carry the URL as OSC 8
     let raw = String::from_utf8_lossy(harness.raw_output()).into_owned();
     assert!(
         raw.contains(PROMO_URL),

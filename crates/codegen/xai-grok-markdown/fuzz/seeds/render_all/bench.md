@@ -12,7 +12,7 @@ Every frame follows the same sequence of stages. Content flows **downward** thro
 2. **Word wrapping** — `word_wrap_lines_with_joiners()` breaks logical lines into physical rows that fit the viewport width, tracking *joiners* (continuation markers like `↳`) for copy/paste fidelity.
 3. **Block output** — `BlockContent::output()` packages wrapped lines into a `BlockOutput` with per-line metadata: background colour, joiner strings, and optional decorations.
 4. **Entry rendering** — `EntryRenderer` composes the accent column (`┃`), left/right padding, and block content into a horizontal strip. Vertical padding (vpad) adds breathing room above and below.
-5. **Viewport clipping** — `render_scrolled_entries_with_scratch()` walks the entry list, skips off-screen entries, and uses a `ScratchBuffer` to render partially-visible entries into a temp buffer before copying the visible slice.
+5. **Viewport clipping** — `render_scrolled_entries_with_scratch()` walks the entry list, skips off-screen entries, and uses a `ScratchBuffer` to render partially-visible entries into a temp buffer. This is before copying the visible slice.
 6. **Buffer diff** — ratatui's `Terminal::flush()` diffs the old and new `Buffer` and emits only changed cells as escape sequences. This is **O(changed cells)**, not O(total cells).
 
 > **💡 Key insight**: steps 1–3 are **cached** across frames. Only step 4–5 run every frame. Profiling should focus there.
@@ -33,11 +33,11 @@ Every frame follows the same sequence of stages. Content flows **downward** thro
 
 ## 🧱 Block Types and Their Render Cost
 
-Each `RenderBlock` variant has different rendering characteristics. Here's a breakdown of the major block types with their typical content patterns and associated costs:
+Each `RenderBlock` variant has different rendering characteristics. Here is a breakdown of the major block types with their typical content patterns and associated costs:
 
 ### `AgentMessageBlock` — the heaviest hitter 🔥
 
-Agent messages contain **arbitrary markdown**: paragraphs, code blocks, tables, lists, inline formatting. A single agent response can easily exceed 200 wrapped lines. The `MarkdownContent` subsystem does the heavy lifting:
+Agent messages contain **arbitrary markdown**: paragraphs, code blocks, tables, lists, inline formatting. A single agent response can easily exceed many wrapped lines. The `MarkdownContent` subsystem does the heavy lifting:
 
 - `StreamingMarkdownRenderer::push_and_render()` incrementally parses and highlights
 - `word_wrap_lines_with_joiners()` handles Unicode-aware line breaking with `unicode-width`
@@ -87,7 +87,7 @@ pub fn word_wrap_lines_with_joiners(
 
 ### `ThinkingBlock` — truncated by default
 
-Thinking blocks render identically to agent messages but default to `DisplayMode::Truncated` (3 visible lines + `⋯ N more lines`). When expanded, they're as expensive as agent messages. The truncation logic runs *after* wrapping, so the full wrap cost is paid even when collapsed — a potential optimisation target.
+Thinking blocks render identically to agent messages but default to `DisplayMode::Truncated` (a few visible lines + `⋯ N more lines`). When expanded, they are as expensive as agent messages. The truncation logic runs *after* wrapping, so the full wrap cost is paid even when collapsed — a potential optimisation target.
 
 ### `ToolCallBlock` variants
 
@@ -102,7 +102,7 @@ Thinking blocks render identically to agent messages but default to `DisplayMode
 
 ### `UserPromptBlock` — lightweight ✨
 
-User prompts are short (1–5 lines typically), render with a `┃` accent in `accent_user` colour, and are **never foldable**. They're the cheapest block to render.
+User prompts are short (1–a few lines typically), render with a `┃` accent in `accent_user` colour, and are **never foldable**. They are the cheapest block to render.
 
 ---
 
@@ -149,7 +149,7 @@ pub fn blend_color(base: Color, color: Color, opacity: f32) -> Option<Color> {
 
 ## 📦 The `ScratchBuffer` and Partial Rendering
 
-When an entry is **partially visible** (clipped at top or bottom of the viewport), we can't render directly into the output buffer — we'd write cells outside the visible area. Instead:
+When an entry is **partially visible** (clipped at top or bottom of the viewport), we cannot render directly into the output buffer — we'd write cells outside the visible area. Instead:
 
 1. Resize a reusable `ScratchBuffer` to the entry's full height
 2. Render the complete entry into scratch
@@ -189,9 +189,9 @@ Terminal rendering must account for **variable-width characters**. The `unicode-
 | Zero-width | ZWJ, ZWNJ | 0 | Used in emoji sequences like 👨‍👩‍👧‍👦 |
 | Tab | `\t` | — | Not handled by unicode-width; we expand to spaces |
 
-The word wrapper must **never split a wide character** across the column boundary. If a 2-cell-wide char would start at column `width - 1`, we must wrap it to the next line and pad the current line with a space.
+The word wrapper must **never split a wide character** across the column boundary. If a 2-cell-wide char will start at column `width - 1`, we must wrap it to the next line and pad the current line. This is with a space.
 
-Here's a stress test: `漢字テスト🦀🚀🎨` contains 5 double-width CJK chars (10 columns) plus 3 double-width emoji (6 columns) = 16 columns total. At `width = 10`, this wraps to 2 lines. At `width = 7`, it wraps to 3 lines with padding cells.
+Here is a stress test: `漢字テスト🦀🚀🎨` contains double-width CJK chars (10 columns) plus 3 double-width emoji (6 columns) = 16 columns total. At `width = 10`, this wraps to a couple of lines. At `width = 7`, it wraps to a few lines with padding cells.
 
 ---
 
@@ -212,13 +212,13 @@ Fenced code blocks trigger full **syntect** highlighting. The highlighting pipel
 4. Convert syntect styles to ratatui `Span` styles (mapping RGB colours)
 5. Each line gets `Style::default().bg(theme.bg_dark)` as a block background
 
-The syntect state machine is **line-stateful** — each line's highlighting depends on the parse state at the end of the previous line. This means we can't parallelise highlighting within a single code block, but we *can* cache the result.
+The syntect state machine is **line-stateful** — each line's highlighting depends on the parse state at the end of the line. This means we cannot parallelise highlighting within a single code block, but we *can* cache the result.
 
 ---
 
 ## 🧪 Testing Patterns
 
-The scrollback rendering has comprehensive snapshot tests using `insta`. Here's the typical pattern:
+The scrollback rendering has comprehensive snapshot tests using `insta`. Here is the typical pattern:
 
 ```python
 # This is a Python code block to exercise a different syntax highlighter.
@@ -311,7 +311,7 @@ On a modern machine (M2 Pro), we expect:
 - **~15% of time** in `BlockContent::output()` (cache hit path — just iterating cached lines)
 - **~5% of time** in layout computation (`HorizontalLayout`, `EntryLayout`, gap math)
 
-If the benchmark shows >500 µs/frame, there's likely an unexpected cache miss or allocation in the hot path. Use `cargo bench -- --profile-time 10` with `flamegraph` to identify the culprit.
+If the benchmark shows >500 µs/frame, there is likely an unexpected cache miss or allocation in the hot path. Use `cargo bench -- --profile-time 10` with `flamegraph` to identify the culprit.
 
 ---
 
@@ -319,7 +319,7 @@ If the benchmark shows >500 µs/frame, there's likely an unexpected cache miss o
 
 Here are some strings that exercise interesting rendering edge cases:
 
-- **Emoji sequences**: 👨‍👩‍👧‍👦 (family ZWJ sequence, should be width 2 but terminal support varies)
+- **Emoji sequences**: 👨‍👩‍👧‍👦 (family ZWJ sequence, must be width 2 but terminal support varies)
 - **Flags**: 🇺🇸 🇯🇵 🇩🇪 (regional indicator pairs)
 - **Fullwidth**: `ＡＢＣＤＥ` (each char is 2 columns wide)
 - **Combining**: `naïve` vs `naïve` (precomposed U+00EF vs combining U+0308)
@@ -334,4 +334,4 @@ The renderer must handle all of these without panicking or producing garbled out
 
 ---
 
-*Generated for benchmarking purposes. Total: ~230 lines of rich markdown content with multiple code blocks, tables, inline code, emoji, wide Unicode characters, and varied formatting.*
+*Generated for benchmarking purposes. Total: many lines of rich markdown content with multiple code blocks, tables, inline code, emoji, wide Unicode characters, and varied formatting.*

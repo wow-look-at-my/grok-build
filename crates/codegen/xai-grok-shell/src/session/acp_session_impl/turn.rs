@@ -12,25 +12,16 @@ static TURNS_ACTIVE: xai_grok_telemetry::activity::ActivityGauge =
     xai_grok_telemetry::activity::ActivityGauge::work(
         xai_grok_telemetry::activity::TURNS_ACTIVE_KEY,
     );
-/// Synthetic tool for schema-constrained final answers on backends without native
-/// output constraints (Messages API); intercepted in the loop, never really executed.
+/// Synthetic tool for schema-constrained final answers on backends without native output constraints (Messages API).
 const STRUCTURED_OUTPUT_TOOL: &str = "StructuredOutput";
 /// Max times the model may re-call `StructuredOutput` with non-conforming args before the turn ends with the last validation error.
 const STRUCTURED_OUTPUT_MAX_RETRIES: u32 = 3;
 /// Whether the harvest that folds queued follow-ups into the running turn
 /// should run before this model request.
-///
-/// `loop_index` alone marks the opening pass of a call to
-/// `process_conversation_turn` — but a goal round or an auto-recovery retry
-/// calls that function fresh, resetting `loop_index` to 0, so its own
-/// `loop_index == 1` looks identical to the true start of the turn.
-/// `first_round` is the part of "opening pass of the WHOLE turn" that
-/// survives across those calls: only the very first round passes `true`.
 pub(crate) fn should_harvest_before_request(loop_index: u32, first_round: bool) -> bool {
     loop_index > 1 || !first_round
 }
-/// Turn-freeze usage drain: bounds a wedged foreground child at turn end; folds normally land in one or two polls because they run before worktree dispose.
-/// The child completion path's bounded parent awaits are sized to fit inside this (compile-time asserted at `PARENT_ACK_TIMEOUT`).
+/// Turn-freeze usage drain: bounds a wedged foreground child at turn end.
 pub(crate) const SUBAGENT_USAGE_DRAIN: std::time::Duration = std::time::Duration::from_secs(120);
 /// What a `StructuredOutput` tool call means for the turn (see
 /// `handle_structured_output_tool_call`).
@@ -118,8 +109,9 @@ impl TurnTelemetryOutcome {
         }
     }
 }
-/// Emits exactly one `grok_code.turn_completed` per turn task: [`emit`](Self::emit) once the outcome
-/// is known, else a `task_aborted` fallback on [`Drop`] when the turn future is aborted first.
+/// Emits exactly one `grok_code.turn_completed` per turn task:
+/// [`emit`](Self::emit) once the outcome is known, else a `task_aborted`
+/// fallback on [`Drop`].
 struct TurnCompletionEmitter {
     session: Arc<SessionActor>,
     model_id: String,
@@ -143,8 +135,8 @@ impl TurnCompletionEmitter {
         self.turn_tokens = Some(turn_tokens);
         self.context_tokens = context_tokens;
     }
-    /// Re-anchor the model and duration clock when the turn's work starts (post-setup), so an abort
-    /// during the turn measures like a completed turn instead of counting setup time.
+    /// Re-anchor the model and duration clock when the turn's work starts
+    /// (post-setup).
     fn begin_turn_work(&mut self, model_id: String, started: std::time::Instant) {
         self.model_id = model_id;
         self.started = started;
@@ -207,18 +199,14 @@ fn validate_structured_output(
         Err(e) => Err(format!("output does not match the required schema: {e}")),
     }
 }
-/// Result of the turn-end usage drain (and cancel's no-drain snapshot).
-/// Only [`Self::fail_closed`] marks the ledgers.
-/// Sticky and background live are report-level only (tokens still land on the session ledger).
+/// Result of the turn-end usage drain (and cancel's no-drain snapshot). Only
+/// [`Self::fail_closed`] marks the ledgers.
 pub(super) struct UsageDrainOutcome {
     /// Query failure, or a foreground child still live after timeout/cancel.
-    /// Marks both the prompt and session bills incomplete.
-    /// (True apply-miss stains ledgers at fold time via `mark_apply_miss_incomplete`, not here.)
     pub(super) fail_closed: bool,
     /// A background child is still running: only this prompt's report is incomplete; its spend reaches the session ledger at completion.
     pub(super) background_live: bool,
     /// Pin-scoped sticky (session-only attribution or apply-miss report).
-    /// Marks the report incomplete only; it does not stain ledgers by itself.
     pub(super) sticky_report: bool,
 }
 impl UsageDrainOutcome {
@@ -247,8 +235,8 @@ impl UsageDrainOutcome {
         }
     }
 }
-/// Accumulates a round's per-call token usage and tool-call presence across the agentic loop's model calls, recording running totals on the round span.
-/// Kept out of the loop body so telemetry bookkeeping doesn't obscure control flow.
+/// Accumulates a round's per-call token usage and tool-call presence across
+/// the agentic loop's model calls.
 #[derive(Default)]
 struct TurnSpanTotals {
     input_tokens: i64,
@@ -256,8 +244,8 @@ struct TurnSpanTotals {
     cache_read_tokens: i64,
     has_tool_call: bool,
 }
-/// Sums of every completed round's [`TurnSpanTotals`], stamped on the turn's one turn-end
-/// snapshot (`take_completed_turn_snapshot`).
+/// Sums of every completed round's [`TurnSpanTotals`], stamped on the turn's
+/// one turn-end snapshot.
 #[derive(Default)]
 pub(super) struct TurnSampling {
     pub(super) input_tokens: u64,
@@ -337,16 +325,13 @@ pub(super) fn record_failed_sample_on_turn_span(
     };
     record_last_sample(span, stop_reason, false, 0);
 }
-/// How the turn's per-block user-message echo is published to clients / `updates.jsonl`.
-/// Turns whose content must not render as a user prompt (notification drain) are hidden by the *pager* via the `hideFromScrollback` chunk meta.
-/// The persisted line is never omitted.
+/// How the turn's per-block user-message echo is published to clients /
+/// `updates.jsonl`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UserEchoMode {
     /// Broadcast live and persist (real user / cron / skill turns).
     Broadcast,
     /// Persist without live broadcast.
-    /// Interject-fallback: panes already rendered the text, so a live echo would duplicate it.
-    /// Notification drain: model-only content (the UI shows it via side channels: monitor gutter, task pane) that no pane should render live.
     PersistOnly,
 }
 fn user_echo_mode(prompt_id: &str, input_origin: &InputOrigin) -> UserEchoMode {
@@ -1324,12 +1309,7 @@ impl SessionActor {
             let mut round_trace = trace_gcs_config;
             let mut round_artifact = artifact_tracker;
             let mut stop_continuations_this_turn: u32 = 0;
-            // Each goal round and auto-recovery retry calls
-            // `process_conversation_turn_with_recovery` fresh, so its own
-            // opening-pass skip (via `loop_index`) cannot tell a later
-            // round's first request from the turn's own. `first_round` is the
-            // part of that check that must survive across those calls: true
-            // only for the very first round below.
+            // Each goal round and auto-recovery retry calls `process_conversation_turn_with_recovery` fresh.
             let mut first_round = true;
             let mut salvage =
                 super::length_salvage::LengthSalvage::new(self.length_salvage_budget());
@@ -1411,17 +1391,12 @@ impl SessionActor {
                     .await
                 {
                     StopGateDecision::AllowStop => {
-                        // The built-in todo-stop gate is just another stop
-                        // hook: it fires after the user hooks allowed the
-                        // stop, consumes the SAME continuation budget (a
-                        // model that never engages its todos still stops
-                        // after MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
-                        // continuations), and its feedback rides the same
-                        // stop_hook_feedback user message.
-                        // The CI gate is the second built-in participant, and
-                        // it runs before the todo gate so a red branch is
-                        // reported even on a turn whose todos are all closed.
-                        // Both consume the same continuation budget.
+                        // The built-in todo-stop gate is another stop hook:
+                        // it fires after the user hooks allowed the stop,
+                        // consumes the SAME continuation budget (a model that
+                        // never engages its todos still stops after
+                        // MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
+                        // continuations).
                         if let Some(feedback) = self
                             .ci_stop_gate_feedback(prompt_id, stop_continuations_this_turn)
                             .await
@@ -1820,9 +1795,8 @@ impl SessionActor {
             Err(e) => Err(crate::sampling::error::attach_prompt_usage(e, usage)),
         }
     }
-    /// Wait for turn-blocking subagents (up to [`SUBAGENT_USAGE_DRAIN`] on the turn task), snapshot, clear sticky.
-    /// Background children never gate the drain: the prompt report is marked incomplete immediately and their spend reaches the session ledger when they finish.
-    /// Cancel intentionally skips this multi-second drain (actor-loop safety).
+    /// Wait for turn-blocking subagents (up to [`SUBAGENT_USAGE_DRAIN`] on
+    /// the turn task), snapshot, clear sticky.
     #[tracing::instrument(
         name = "session.freeze_prompt_usage",
         skip_all,
@@ -2006,9 +1980,8 @@ impl SessionActor {
             "injected mid-turn monitor events as hidden synthetic user message"
         );
     }
-    /// Success. Reset `goal_continuation_streak` to 0. Then call `maybe_queue_goal_continuation` unless `suppress_goal_continuation` (stationarity silent EndTurn).
-    /// When the goal is not `Active` (`goal_active_now == false`), both branches are skipped.
-    /// Neither streak moves and the existing pause cause is preserved.
+    /// Success. Then call `maybe_queue_goal_continuation` unless `suppress_goal_continuation` (stationarity silent EndTurn). When the goal is not `Active`
+    /// (`goal_active_now == false`), both branches are skipped. Neither streak moves and the existing pause cause is preserved.
     pub(crate) async fn handle_turn_end(
         &self,
         turn_succeeded: bool,
@@ -2875,17 +2848,8 @@ impl SessionActor {
                 .await;
                 return Ok(TurnOutcome::StationarityEnded);
             }
-            // Ahead of the drain, and so ahead of a model request: a follow-up
-            // queued mid-turn reaches the model on the next request rather
-            // than after the turn it was aimed at. Skipped on the opening pass
-            // of the WHOLE turn (`loop_index == 1` and `first_round`) — the
-            // turn has produced nothing to steer yet, and a row queued in that
-            // window is picked up on the pass after it. `loop_index` alone
-            // cannot tell the opening pass of the turn from the opening pass
-            // of a later round: a goal continuation and an auto-recovery retry
-            // both call this function fresh, resetting `loop_index` to 0, so
-            // `first_round` carries the turn-scoped half of the check across
-            // those calls.
+            // Ahead of the drain, and so ahead of a model request: a
+            // follow-up queued mid-turn reaches the model.
             if should_harvest_before_request(loop_index, first_round) {
                 self.harvest_queued_prompts_into_interjections(false).await;
             }
@@ -2969,10 +2933,7 @@ impl SessionActor {
             if self.tool_context.task_output_token_budget.is_none() && !turn_parked.is_parked() {
                 self.refresh_token_if_expired().await;
             }
-            // A `/compact` the user sent while this turn was running. Here is
-            // the turn's own safe point: no model call is in flight, so
-            // replacing the conversation loses nothing. Ungated by the
-            // subagent budget check below — the user asked for this one.
+            // A `/compact` the user sent while this turn was running.
             self.run_pending_manual_compact().await;
             if self.tool_context.task_output_token_budget.is_none()
                 && !turn_parked.is_parked()
@@ -3284,29 +3245,18 @@ impl SessionActor {
                     continue;
                 }
                 Ok(SamplerTurnOutcome::CancelledForInterjection { partial }) => {
-                    // ASAP injection: the in-flight stream was cancelled so the
-                    // turn loop can drain the pending interjection NOW and
-                    // resubmit, instead of waiting for the (potentially long)
-                    // stream to finish. Commit any partial assistant text the
-                    // model had already produced so the resubmitted request
-                    // sees `partial assistant turn + user interjection` and the
-                    // conversation stays consistent.
+                    // ASAP injection: the in-flight stream was cancelled so
+                    // the turn loop can drain the pending interjection NOW
+                    // and resubmit.
                     if let Some(partial) = partial {
                         self.record_assistant_response(partial, false).await;
                     }
-                    // Drain the interjection that triggered the cancel so it
-                    // lands before the next model request; the loop then
-                    // `continue`s and rebuilds the request from the updated
-                    // chat state (partial assistant + interjection + prior
-                    // history).
+                    // Drain the interjection that triggered the cancel so it lands before the next model request.
                     self.drain_pending_interjections().await;
                     continue;
                 }
                 Ok(SamplerTurnOutcome::MaxTokensTruncated { partial }) => {
-                    // The provider cut the response off at its output-token
-                    // cap. Bounded by the same max-turns counter a tool round
-                    // uses: an unbroken run of truncated responses is a
-                    // runaway generation, not a legitimate long answer.
+                    // The provider cut the response off at its output-token cap.
                     let next_turn = tool_turn_count + 1;
                     if let Some(limit) = self.max_turns
                         && next_turn > limit
@@ -3519,9 +3469,7 @@ impl SessionActor {
                 "tokens_per_sec": tokens_per_sec,
             });
             // p50 hides the shape of an uneven stream, which is the whole
-            // question when a receive rate stutters. The per-chunk arrival
-            // curve answers it, and is opt-in because it is one number per
-            // chunk on a log that is otherwise one line per model call.
+            // question when a receive rate stutters.
             if crate::session::inference_metrics::log_stream_timing()
                 && let Some(obj) = inference_ctx.as_object_mut()
             {
@@ -3579,8 +3527,7 @@ impl SessionActor {
             let response_cost_ticks =
                 self.record_response_token_usage(&response, Some(model_duration_ms));
             // Read the session ledger AFTER the fold above so the client's
-            // running total moves on every call, not once per turn. Both ride
-            // the same actor channel, so this query is ordered after the fold.
+            // running total moves on every call, not once per turn.
             let session_cost_ticks = self
                 .chat_state_handle
                 .try_get_session_usage()
@@ -3962,10 +3909,7 @@ impl SessionActor {
                     },
                 )
                 .await;
-            // Re-resolve the live per-tool-call output cap from the current
-            // remaining context-window budget before these tools run, so a
-            // single tool result can't by itself hand back more than what's
-            // actually left of the window — see `reseed_context_budget_output_cap`.
+            // Re-resolve the live per-tool-call output cap from the current remaining context-window budget before these tools run.
             self.reseed_context_budget_output_cap().await;
             let execute_tool_calls_result = {
                 let _tool_phase = turn_phases.begin_tool_blocking();
@@ -4030,15 +3974,13 @@ impl SessionActor {
 }
 /// Discard an egregious (2x cap) media-gen generation and re-sample this many times; later over-caps in the same turn use first-K.
 const MAX_MEDIA_GEN_OVER_CAP_RESAMPLES: u32 = 1;
-/// Tool kinds whose identical repeats are almost never productive, so they get tighter thresholds than everything else.
-/// A production turn repeated one `ToolKind::Plan` call (`todo_write`) with byte-identical arguments 12 times (224 in the turn).
-/// Names are client-renameable and vary by toolset (`read_file`, `hashline_read`, `Read`; `todo_write`, `todowrite`); the registered kind does not.
+/// Tool kinds whose identical repeats are almost never productive, so they
+/// get tighter thresholds than everything else.
 fn is_problematically_repeating_kind(kind: Option<ToolKind>) -> bool {
     matches!(kind, Some(ToolKind::Read | ToolKind::Plan))
 }
-/// Whether a whole sampling step belongs in the tight tier: every call in it must be a problematically repeating kind.
-/// Order-insensitive, like [`step_signature`]: a reordered step is the same step, so it must not flip tiers.
-/// Requiring *every* call, rather than any, keeps a mixed step in the looser tier.
+/// Whether a whole sampling step belongs in the tight tier: every call in it
+/// must be a problematically repeating kind.
 fn step_is_problematically_repeating(kinds: &[Option<ToolKind>]) -> bool {
     !kinds.is_empty()
         && kinds
@@ -4113,7 +4055,6 @@ struct IdenticalToolCallRun {
     last_signature_hash: Option<u64>,
     tool_name: String,
     /// Whether the repeated step is in the tight threshold tier.
-    /// Decided by the registered kinds of every call in it (see [`step_is_problematically_repeating`]).
     problematically_repeating_step: bool,
     run_len: u32,
     is_true_noop_run: bool,
@@ -4155,9 +4096,8 @@ impl IdenticalToolCallRun {
             NUDGE_AFTER_IDENTICAL_TOOL_CALLS
         }
     }
-    /// Once per identical run at/after the nudge threshold. Call only after results are committed.
-    ///
-    /// `true` keepalive runs are exempt: they end the turn silently at [`MAX_CONSECUTIVE_TRUE_NOOPS`] rather than being told to stop polling.
+    /// Once per identical run at/after the nudge threshold. Call only after
+    /// results are committed.
     fn take_nudge(&mut self) -> bool {
         let fire = !self.is_true_noop_run && self.run_len >= self.nudge_threshold() && !self.nudged;
         self.nudged |= fire;
@@ -4555,7 +4495,6 @@ mod last_sample_span_tests {
         }
         response
     }
-    /// Two delivered samples: legacy fields aggregate, `last_sample.*` tracks the final one.
     #[test]
     fn last_sample_fields_track_final_sample_while_legacy_fields_aggregate() {
         let (fields, _guard) = capture();

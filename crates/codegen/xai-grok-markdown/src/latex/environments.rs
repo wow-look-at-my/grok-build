@@ -19,8 +19,7 @@ pub(super) fn render_environment(
     };
     let env_name = env_name.trim().trim_end_matches('*');
 
-    // Capture body source until the matching `\end{name}`, tracking nesting of same-named environments
-    // The scan reads raw source from the cursor
+    // Capture body source until the matching `\end{name}`, tracking nesting of same-named environments The scan reads raw source.
     let body_start = cursor.pos;
     let mut body_end = cursor.src.len();
     let mut resume = cursor.src.len();
@@ -97,9 +96,8 @@ fn command_at(rest: &str, word: &str) -> bool {
             .is_some_and(|c| c.is_ascii_alphabetic())
 }
 
-/// Split an environment body into rows (`\\`) and cells (`&`) at brace and environment depth 0.
-/// Render each cell, then lay the rows out according to the environment.
-/// In `flat` mode, matrix/cases environments render as a single row with `; ` between matrix rows.
+/// Render each cell, then lay the rows out according to the environment. In `flat` mode,
+/// matrix/cases environments render as a single row with `; ` between matrix rows.
 fn env_rows_to_strings(
     body: &str,
     env_name: &str,
@@ -191,7 +189,8 @@ fn env_rows_to_strings(
     let n_rows = rendered_rows.len();
 
     if is_matrix {
-        // Flat (inline) mode: one row, single delimiter pair, rows joined with `; `, as in `(1  2; 3  4)`
+        // Flat (inline) mode: one row, single delimiter pair, rows joined
+        // with `; `, as in `(1 2; 3 4)`
         if flat {
             let inner = rendered_rows
                 .iter()
@@ -259,8 +258,9 @@ fn env_rows_to_strings(
             })
             .collect()
     } else {
-        // aligned/align/gather/split/equation/…: `&` is an invisible alignment marker; rejoin cells with a single space
-        // Each row becomes one string; the caller's box attachment (or flat `; ` join) handles the rest
+        // aligned/align/gather/split/equation/…: `&` is an invisible
+        // alignment marker; rejoin cells with a single space Each row becomes
+        // one string.
         rendered_rows
             .iter()
             .map(|cells| {

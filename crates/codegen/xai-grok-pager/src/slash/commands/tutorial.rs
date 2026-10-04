@@ -1,7 +1,4 @@
 //! `/tutorial` -- open the onboarding tutorial overlay.
-//!
-//! Purely opt-in: this command (also listed in the command palette) is the
-//! only way the tutorial opens — it never auto-shows.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

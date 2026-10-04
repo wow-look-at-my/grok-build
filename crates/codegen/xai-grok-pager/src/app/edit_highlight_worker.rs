@@ -1,16 +1,4 @@
 //! Full-file syntax highlight for edit diffs, off the draw thread.
-//!
-//! Mirrors [`super::mermaid_worker`]: one `std::thread` and mpsc, coalesced by `entry_id` (latest job wins), polled each tick via `try_recv`.
-//! First paint stays hunk-only on the UI thread; this worker upgrades to file-scoped styles when the post-edit file is readable and within the caps.
-//! The caps are [`crate::scrollback::blocks::tool::EDIT_HL_MAX_BYTES`] and [`crate::scrollback::blocks::tool::EDIT_HL_MAX_LINES`].
-//!
-//! # Cost model
-//!
-//! - **First paint**: hunk-only; never full-file on the UI thread.
-//! - **Upgrade**: one syntect pass up to the last hunk line, off-thread; paints then overlay the style map onto the ordinary hunk render.
-//! - **Over cap or read fail**: stay hunk-only; no unbounded work.
-//!
-//! `benches/edit_highlight` measures the costs.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -153,7 +141,6 @@ fn run_job(job: &EditHlJob) -> EditHlOutcome {
     }
 
     let path = std::path::Path::new(&job.path);
-    // Read the theme beside the syntect walk so the result is labeled with the kind its foregrounds were baked under
     let theme = crate::theme::cache::current_kind();
     match compute_file_scoped_styles(path, &file_text, &job.hunks) {
         Some(by_new_line) => EditHlOutcome::Ready {
@@ -334,8 +321,7 @@ impl AgentView {
             }
         }
         if disconnected {
-            // Near-unreachable in shipped builds: panic=abort kills the whole pager with the worker, as mermaid_worker documents
-            // In unwind builds this stops a dead worker from stranding `pending` and pinning `TickDemand::Fast` forever
+            // Near-unreachable in shipped builds: panic=abort kills the whole pager with the worker.
             self.abandon_edit_hl_worker("result channel disconnected");
         }
         redraw

@@ -1,6 +1,4 @@
-//! The failures a script entry answers with in place of its content, and the record of what the
-//! mock did to a request. A failure answers the entry's request without advancing the script, so the
-//! client's retry meets the same position.
+//! The failures a script entry answers with in place of its content, and the record of what the mock did to a request.
 
 use std::time::Duration;
 
@@ -16,8 +14,7 @@ pub(crate) const CONTENT_FILTER_REPLY: &str = "MOCK-CONTENT-FILTER";
 pub const LOOPING_REPLY: &str = "MOCK-LOOP MOCK-LOOP MOCK-LOOP MOCK-LOOP";
 /// The header a client sends to opt into the inference API's loop detector.
 pub const DOOM_LOOP_CHECK_HEADER: &str = "x-grok-doom-loop-check";
-/// A single SSE data frame whose payload is not valid JSON, so the client's stream decoder fails to
-/// deserialize a chunk and surfaces a serialization error.
+/// A single SSE data frame whose payload is not valid JSON.
 pub(crate) const MALFORMED_SSE_BODY: &str = "data: {grok-mock malformed chunk\n\n";
 /// The detector report a looping reply carries: the tightest tail repetition on the thinking channel.
 pub const DOOM_LOOP_TRIGGER: &str = "tail_repetition:2@thinking";
@@ -34,7 +31,6 @@ pub struct StatusFailure {
 }
 
 impl StatusFailure {
-    /// A status outside 100 to 999 panics here rather than in the handler.
     pub fn new(status: u16) -> Self {
         assert!(
             StatusCode::from_u16(status).is_ok(),
@@ -191,8 +187,8 @@ impl Failure {
     }
 }
 
-/// What the mock did to one request in place of answering it plainly, on its log entry. A stall
-/// combined with another failure records that failure.
+/// What the mock did to one request in place of answering it plainly, on its
+/// log entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObservedFailure {
     Status(u16),

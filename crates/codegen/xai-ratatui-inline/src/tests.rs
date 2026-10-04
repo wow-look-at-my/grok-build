@@ -84,13 +84,11 @@ impl TerminalLike for MockTerminal {
     }
 
     fn reset_back_buffer(&mut self) {
-        // Mock implementation - just track that it was called
+        // Mock implementation - track that it was called
         self.clear_count += 1;
     }
 }
 
-/// Tests for the diffed OSC 8 hyperlink layer (`set_frame_links` /
-/// `flush_with_links`).
 mod links {
     use std::io::{self, Write};
 
@@ -102,14 +100,12 @@ mod links {
 
     use crate::{LinkSpan, Terminal};
 
-    /// Backend that records the raw byte stream and renders each drawn cell as
-    /// its bare symbol, so tests can assert on OSC 8 sequences interleaved with
-    /// cell content without depending on crossterm's exact SGR output.
+    /// Backend that records the raw byte stream and renders each drawn cell
+    /// as its bare symbol.
     #[derive(Default)]
     struct RecordingBackend {
         buf: Vec<u8>,
-        /// Total lines passed to `append_lines` (used by the
-        /// `set_viewport_height` grow-path test).
+        /// Total lines passed to `append_lines` (used by the `set_viewport_height` grow-path test).
         appended_lines: u16,
         cursor_y: u16,
         cursor_sets: u16,
@@ -214,8 +210,6 @@ mod links {
         }
     }
 
-    /// Render `text` at (0,0), set `spans`, flush, and return the bytes emitted
-    /// during this single frame.
     fn frame(t: &mut Terminal<RecordingBackend>, text: &str, spans: &[LinkSpan]) -> String {
         t.backend_mut().buf.clear();
         {
@@ -249,9 +243,8 @@ mod links {
 
     #[test]
     fn grow_viewport_scrolls_committed_lines_into_history() {
-        // A small inline viewport near the bottom of the screen, grown to full height, must scroll the rows it will cover up
-        // into native scrollback (append_lines) instead of overwriting them. Regression guard for the previously-commented-out
-        // scroll_up in set_viewport_height's grow path (the overlay host depends on this in minimal mode).
+        // A small inline viewport near the bottom of the screen, grown to
+        // full height, must scroll the rows it will cover up.
         let mut t = Terminal::with_options(
             RecordingBackend::default(),
             TerminalOptions {
@@ -262,7 +255,6 @@ mod links {
         // Pin the 3-row viewport near the bottom of the 24-row screen.
         t.set_viewport_area(Rect::new(0, 21, 80, 3));
         let before = t.backend().appended_lines;
-        // Grow to full height: overflow = (21 + 24) - 24 = 21 rows must scroll up.
         t.set_viewport_height(24).unwrap();
         let scrolled = t.backend().appended_lines - before;
         assert!(
@@ -278,20 +270,15 @@ mod links {
         let mut t = Terminal::with_options(
             RecordingBackend::default(),
             TerminalOptions {
-                // Stored Inline height starts tall (mimics a streaming turn that
-                // grew the viewport to near full screen).
+                // Stored Inline height starts tall.
                 viewport: Viewport::Inline(21),
             },
         )
         .unwrap();
-        // Out-of-band shrink to a 3-row viewport pinned at the bottom of the
-        // 24-row screen — as the commit path does. This does NOT update the
-        // stored Inline height (still 21), creating the drift.
+        // Out-of-band shrink to a 3-row viewport pinned at the bottom of the 24-row screen — as the commit path does.
         t.set_viewport_area(Rect::new(0, 21, 80, 3));
 
         let before = t.backend().appended_lines;
-        // Against the real height (3) this is a GROW that overflows the bottom by (21 + 10) - 24 = 7 rows, which must scroll up.
-        // Against the stale stored height (21) it would look like a shrink and scroll nothing.
         t.set_viewport_height(10).unwrap();
 
         let scrolled = t.backend().appended_lines - before;
@@ -393,7 +380,7 @@ mod links {
         )
         .unwrap();
         t.set_viewport_area(Rect::new(0, 22, 80, 2));
-        // screen_height-1 = 23. A 24-row wrap chain ends a mid-chunk while xenl is pending.
+        // A 24-row wrap chain ends a mid-chunk while xenl is pending.
         let mut rows: Vec<(String, bool, bool)> =
             (0..24).map(|i| (format!("W{i:02}"), true, true)).collect();
         rows.push(("END".into(), false, false));
@@ -435,9 +422,8 @@ mod links {
 
     #[test]
     fn insert_before_rows_long_wrap_chain_xenl_consume_does_not_extra_scroll() {
-        // Live region at the bottom: scroll-to-fill pins the last painted row on
-        // last_screen unless consume gets its own slack. Dummy-space wrap from
-        // there extra-scrolls and native-copy-joins the leftover space.
+        // Live region at the bottom: scroll-to-fill pins the last painted row
+        // on last_screen unless consume gets its own slack.
         let mut t = Terminal::with_options(
             RecordingBackend::default(),
             TerminalOptions {
@@ -667,9 +653,7 @@ mod links {
     fn link_removed_next_frame_rewrites_cells_without_osc8() {
         let mut t = term(20, 3);
         let _ = frame(&mut t, "AB", &[span(0, 2, "https://x.ai", None)]);
-        // Same glyphs, but the link is gone: the cells must be rewritten (so the
-        // terminal's hyperlink clears) and carry no OSC 8. This is the `/new`
-        // regression — clearing is driven purely by the diff.
+        // Same glyphs, but the link is gone.
         let out = frame(&mut t, "AB", &[]);
         assert!(out.contains("AB"), "cells should be redrawn: {out:?}");
         assert!(!out.contains("\x1b]8;"), "stale OSC8 leaked: {out:?}");
@@ -788,8 +772,7 @@ mod links {
 
     #[test]
     fn unnamed_wrapped_same_url_share_osc8_id() {
-        // Scanned wrap fragments have no source id. They must still share a
-        // reminted OSC 8 id so Windows Terminal groups the wrap as one link.
+        // Scanned wrap fragments have no source id.
         let mut t = term(20, 3);
         t.backend_mut().buf.clear();
         {
@@ -850,8 +833,7 @@ mod links {
     #[test]
     fn wide_char_under_link_wraps_lead_cell_only() {
         let mut t = term(20, 3);
-        // A width-2 char occupies two cells; only the lead cell is drawn, and
-        // the OSC 8 wraps it.
+        // A width-2 char occupies cells; only the lead cell is drawn, and the OSC multiple wraps it.
         let out = frame(&mut t, "世", &[span(0, 2, "https://x.ai", None)]);
         assert!(
             out.contains("\x1b]8;id=1;https://x.ai\x07世\x1b]8;;\x07"),
@@ -861,9 +843,7 @@ mod links {
 
     #[test]
     fn nonzero_origin_viewport_maps_links() {
-        // The screen→cell mapping subtracts the viewport offset; verify a link
-        // at an absolute (row, col) inside a non-origin viewport wraps the right
-        // cells (regression guard for `(y - area.y)` / `(x - area.x)`).
+        // The screen→cell mapping subtracts the viewport offset.
         let area = Rect::new(2, 5, 20, 4);
         let mut t = Terminal::with_options(
             RecordingBackend::default(),

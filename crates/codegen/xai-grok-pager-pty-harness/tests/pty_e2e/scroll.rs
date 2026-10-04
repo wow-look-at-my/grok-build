@@ -1,11 +1,4 @@
 //! Scroll-test support: timed wheel-burst drivers and viewport-marker helpers.
-//! Scroll tests import via `use super::scroll::*;` alongside `use super::common::*;`.
-//!
-//! Frame capture convention: use the harness's live parser (the `renders_on_action.rs` pattern).
-//! Call `reset_timing()` before the interaction and `frame_timings()` / `frame_count()` after the drain.
-//! Frame COUNT and per-frame CHARS are byte-deterministic and CI-assertable; DURATIONS are not.
-//! Durations are load-sensitive, and the no-drain drivers below parse the burst's chunks during the post-burst `update()`.
-//! So durations reflect drain pacing rather than real frame timing.
 
 use std::time::Duration;
 
@@ -17,15 +10,12 @@ use super::common::{
     PROMPT, WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT, locate_screen_text, pager_binary, sgr_mouse,
 };
 
-/// Wheel-report position, 0-based (row,col): inside the scrollback pane at the default 50×120 PTY.
-/// Encodes to the same bytes as the raw constants in `resize_preserves_scroll_position.rs` (wire `40;12`).
 pub(crate) const WHEEL_ROW: u16 = 11;
 
 pub(crate) const WHEEL_COL: u16 = 39;
 
-/// Emit one SGR (DECSET 1006) wheel press report per entry of `btns` at 0-based (row,col) via
-/// [`sgr_mouse`]. Sleeps `interval` host-side (`std::thread::sleep`) BETWEEN writes, never before
-/// the first or after the last.
+/// Sleeps `interval` host-side (`std::thread::sleep`) BETWEEN writes, never before the first or
+/// after the last.
 pub(crate) fn send_wheel_sequence(
     h: &mut PtyHarness,
     btns: &[u16],
@@ -59,7 +49,6 @@ pub(crate) fn send_wheel_burst(
 const MARKER_PREFIX: &str = "MARKER-";
 
 /// Unique numbered marker line `n` (`MARKER-0042`).
-/// Zero-padded so every marker is the same width and no marker is a substring of another within a [`marker_response`] transcript.
 pub(crate) fn marker_line(n: usize) -> String {
     format!("{MARKER_PREFIX}{n:04}")
 }
@@ -84,9 +73,9 @@ pub(crate) fn marker_screen_row(h: &PtyHarness, marker: &str) -> Option<u16> {
     locate_screen_text(&h.screen_contents(), marker).map(|(row, _)| row)
 }
 
-/// Index of the topmost marker on screen: a single top-down pass parsing the first `MARKER-nnnn` occurrence.
-/// `None` when no marker is visible; malformed hits are skipped.
-/// Scrolling UP strictly decreases it by the number of rows scrolled, the primitive for "viewport moved by K rows / did not jump" assertions.
+/// Index of the topmost marker on screen: a single top-down pass parsing the
+/// first `MARKER-nnnn` occurrence. `None` when no marker is visible;
+/// malformed hits are skipped.
 pub(crate) fn topmost_visible_marker(h: &PtyHarness) -> Option<usize> {
     h.screen_contents().lines().find_map(|line| {
         let digits_at = line.find(MARKER_PREFIX)? + MARKER_PREFIX.len();
@@ -94,9 +83,9 @@ pub(crate) fn topmost_visible_marker(h: &PtyHarness) -> Option<usize> {
     })
 }
 
-/// Spawn the pager over a `marker_count`-marker transcript and drive it to the primed scroll-test
-/// state. `reset_timing()` is applied last, so counted frames come only from what the caller does
-/// next. Destructure the controller as `_content`, never `_`. Fixes must flow both ways.
+/// Spawn the pager over a `marker_count`-marker transcript and drive it to
+/// the primed scroll-test state. `reset_timing()` is applied last, so counted
+/// frames come only from what the caller does next.
 pub(crate) async fn spawn_bottom_pinned_marker_scrollback(
     marker_count: usize,
 ) -> (PtyHarness, ContentController, usize) {
@@ -128,14 +117,15 @@ pub(crate) async fn spawn_bottom_pinned_marker_scrollback_with_env(
     harness
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit prompt");
-    // The LAST marker is the last thing streamed, so the whole transcript is in
+    // The LAST marker is the last thing streamed.
     harness
         .wait_for_text(&marker_line(marker_count - 1), Duration::from_secs(60))
         .expect("response finished streaming");
     harness.update(Duration::from_millis(500));
 
-    // Setup guards: bottom-pinned after the stream, the first marker must be off-screen-top (the transcript overflows the viewport)
-    // Some later marker must be visible; otherwise there is nothing to scroll into view
+    // Setup guards: bottom-pinned after the stream, the first marker must be
+    // off-screen-top (the transcript overflows the viewport) Some later
+    // marker must be visible.
     assert!(
         marker_screen_row(&harness, &marker_line(0)).is_none(),
         "setup: {} already visible → transcript not taller than the screen\nscreen:\n{}",
@@ -162,8 +152,6 @@ pub(crate) async fn spawn_bottom_pinned_marker_scrollback_with_env(
 }
 
 /// End marker of a [`spawn_streaming_marker_turn`] stream: the final streamed word.
-/// The spawn guards pin it off-screen while the tail streams; bottom-pinned follow renders it once the viewport tracks the stream to its end.
-/// It witnesses both "stream still in flight" and "viewport followed the live bottom" assertions.
 pub(crate) const STREAM_END_SENTINEL: &str = "STREAMDONE";
 
 /// Turn text for [`spawn_streaming_marker_turn`].

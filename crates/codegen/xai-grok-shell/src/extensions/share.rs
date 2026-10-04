@@ -1,8 +1,4 @@
 //! `x.ai/share_session` extension handler.
-//!
-//! Loads a local session, exports it, uploads the message payload to cloud storage via a signed URL, and asks the backend for a public share URL.
-//! The signed URL lets large sessions bypass the proxy/backend body-size limits.
-//! Best-effort metadata upload is fire-and-forget on the spawned task.
 
 use agent_client_protocol as acp;
 
@@ -81,7 +77,6 @@ async fn handle_share_session(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRe
     // Obtain trace context once; used for the signed URL upload and then moved into the spawned metadata task
     let trace_context = agent.get_trace_context(&info, current_turn).await;
 
-    // Upload session data to cloud storage via signed URL so large sessions don't hit the 413 body-size limit on the backend API
     if let Some(ref ctx) = trace_context {
         upload_share_data_to_gcs(
             &request.session_id,
@@ -93,7 +88,6 @@ async fn handle_share_session(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRe
     }
 
     // Upload to backend and get share URL.
-    // The `save_session_data` call may fail with 413 for very large sessions; that is acceptable because the data is already in cloud storage
     let client = BackendClient::new().with_auth_manager(agent.auth_manager.clone());
     let agent_id = agent_id();
     let share_url = client
@@ -189,8 +183,6 @@ mod tests {
         let expires_at = Utc::now() + ttl;
 
         // We must explicitly set oidc_issuer to a first-party xAI issuer.
-        // Only OIDC tokens against https://auth.x.ai (or the local-dev equivalent) return true from is_xai_auth()
-        // The share tests need that to exercise the happy path through require_xai_auth_for_share
         let auth = GrokAuth {
             auth_mode: AuthMode::Oidc,
             oidc_issuer: Some("https://auth.x.ai".to_string()),

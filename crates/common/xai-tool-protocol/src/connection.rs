@@ -54,16 +54,6 @@ mod tests {
 }
 
 /// How the computer hub exposes the registered tool set to the model.
-///
-/// `Concise` carries a configurable meta-tool pair so callers can choose
-/// the model-facing names of the search/invoke meta-tools per session.
-///
-/// Wire form is adjacently tagged on `mode`: `Full` serialises as
-/// `{"mode": "full"}` (an object, not a bare string), and `Concise` as
-/// `{"mode": "concise", "meta_search": "...", "meta_call": "..."}`.
-///
-/// `Copy` is intentionally NOT derived: `Concise`'s [`crate::ToolId`]
-/// fields wrap heap strings.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum ToolDefinitionMode {

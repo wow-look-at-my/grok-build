@@ -1,12 +1,4 @@
 //! Backend trait abstracting how subagent operations are dispatched.
-//!
-//! `SubagentBackend` decouples the tool implementations (`TaskTool`,
-//! `TaskOutputTool`, `KillTaskTool`) from the transport mechanism used to
-//! communicate with the subagent coordinator.
-//!
-//! All hosts use [`ChannelBackend`].
-//! The receiver is owned by the shared single-writer coordinator actor; only
-//! the child runner plugged into that actor differs by host.
 
 use std::sync::Arc;
 
@@ -30,17 +22,14 @@ use xai_tool_runtime::ToolError;
 /// `KillTaskTool` can operate identically regardless of the underlying transport.
 #[async_trait::async_trait]
 pub trait SubagentBackend: Send + Sync + 'static {
-    /// Spawn a subagent and await its terminal result. The returned value is completion, cancellation, a foreground-budget handoff, or a definite
-    /// reject — never a Task background start ack. `registered_tx`, when `Some`, is signaled once the child is recorded pending or queued. Callers
-    /// that send to a spawning child must pass this oneshot; `None` means there is no registration signal and a later send can fail immediately.
+    /// Spawn a subagent and await its terminal result.
     async fn spawn(
         &self,
         request: SubagentRequest,
         registered_tx: Option<oneshot::Sender<()>>,
     ) -> Result<SubagentResult, ToolError>;
 
-    /// Query the current state of a subagent by ID. When `block` is true the backend waits (up to
-    /// `timeout_ms`) for the subagent to reach a terminal state before responding.
+    /// Query the current state of a subagent by ID.
     async fn query(
         &self,
         id: &str,
@@ -49,8 +38,6 @@ pub trait SubagentBackend: Send + Sync + 'static {
     ) -> Option<SubagentSnapshot>;
 
     /// Admit one bounded message to an owned active descendant.
-    ///
-    /// Backends without active-message support return [`ActiveAgentMessageOutcome::Unsupported`].
     async fn send_active_message(
         &self,
         _request: ActiveAgentMessageRequest,
@@ -62,17 +49,14 @@ pub trait SubagentBackend: Send + Sync + 'static {
     async fn cancel(&self, id: &str) -> SubagentCancelOutcome;
 
     /// Validate a subagent type synchronously before spawning.
-    /// Returns `CoordinatorGone` on channel close and `ValidationUnavailable`
-    /// on responder drop / timeout.
     async fn validate_type(
         &self,
         subagent_type: &str,
         parent_session_id: &str,
     ) -> SubagentValidateTypeOutcome;
 
-    /// Describe a subagent type's resolved toolset (tool names + capability flags) before spawning. Read-only: builds the agent definition and
-    /// applies the same parent-dependent toolset re-selection a spawn would, then reports the result without starting a child session. Returns
-    /// [`SubagentDescribeOutcome::Unavailable`] on channel close / responder drop / timeout (modeled exactly on [`Self::validate_type`]).
+    /// Describe a subagent type's resolved toolset (tool names + capability
+    /// flags) before spawning.
     async fn describe_subagent_type(
         &self,
         subagent_type: &str,
@@ -81,8 +65,7 @@ pub trait SubagentBackend: Send + Sync + 'static {
     ) -> SubagentDescribeOutcome;
 }
 
-/// Resource wrapper injected into every session's `Resources`. Wraps an `Arc<dyn SubagentBackend>`
-/// so the backend can be shared across concurrent tool invocations within the same session.
+/// Resource wrapper injected into every session's `Resources`.
 #[derive(Clone)]
 pub struct SubagentBackendResource(pub Arc<dyn SubagentBackend>);
 
@@ -741,13 +724,9 @@ async fn await_validate_reply(
 }
 
 /// Default `validate_type` timeout; override via [`VALIDATE_TYPE_TIMEOUT_ENV_VAR`].
-/// A short default false-fails while the coordinator is busy; a shut-down
-/// coordinator still fails instantly on the closed channel.
 pub const VALIDATE_TYPE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Default `describe_subagent_type` timeout. Kept short: the `/goal` role gate awaits describe
-/// serially per distinct agent type before failing open, so a long budget multiplies into a
-/// turn-start stall. Override via [`DESCRIBE_TYPE_TIMEOUT_ENV_VAR`].
+/// Default `describe_subagent_type` timeout.
 pub const DESCRIBE_TYPE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Env-var override for [`VALIDATE_TYPE_TIMEOUT`] (positive milliseconds).

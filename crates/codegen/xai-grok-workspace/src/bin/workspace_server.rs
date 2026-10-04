@@ -1,9 +1,6 @@
-#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::expect_used)]
 
 //! Standalone workspace ToolServer for remote sandboxes.
-//!
-//! Reads OIDC credentials from `~/.grok/auth.json`, connects to a
-//! server, exposes workspace tools, and refreshes tokens automatically.
 #![deny(clippy::indexing_slicing)]
 use clap::Parser;
 use std::path::PathBuf;
@@ -20,7 +17,6 @@ use xai_grok_workspace_daemon::preview_supervisor::{
     self, PreviewActivitySink, PreviewArgs, PreviewVisibility,
 };
 /// OTLP `service.name` for this binary's exported traces/logs/metrics and direct-OTLP fastrace export.
-/// Single source so the call sites can't drift.
 const SERVICE_NAME: &str = "prod_grok_workspace";
 const EXIT_SERVER_ID_INVALID: i32 = 3;
 const INVALID_SERVER_ID_MARKER: &str = "workspace-server: invalid --server-id";
@@ -70,7 +66,6 @@ async fn dwell_after_hub_connect_failed() {
 #[command(about = "Standalone workspace ToolServer for the server connection")]
 struct Args {
     /// Print the capability manifest as JSON to stdout and exit 0.
-    /// Legacy binaries reject the unknown flag via clap (non-zero exit), giving the launcher a definitive feature probe.
     #[arg(long)]
     capabilities: bool,
     #[arg(long, default_value = "wss://computer-hub.grok.com/v1/tools")]
@@ -80,12 +75,9 @@ struct Args {
     #[arg(long)]
     cwd: Option<PathBuf>,
     /// Stable server identity for hub registration.
-    /// Used as the `server_id` in `servers.list` and `server.bind` so clients can address this specific workspace server.
-    /// When omitted, the SDK default ("workspace-server") is used.
     #[arg(long)]
     server_id: Option<String>,
     /// JSON metadata attached to the tool server registration.
-    /// Propagated to `ServerInfo.metadata` in `servers.list` responses.
     #[arg(long)]
     metadata: Option<String>,
     /// Deprecated no-op, accepted for one release so existing callers don't trip clap: nothing writes or reads this path.
@@ -100,12 +92,9 @@ struct Args {
     #[arg(long, default_value_t = diag_server::DEFAULT_DIAG_PORT)]
     diag_port: u16,
     /// Permit a plaintext `ws://` hub on a non-loopback host.
-    /// Only for a mesh-secured transport; the bearer crosses the network otherwise.
     #[arg(long)]
     allow_insecure_ws: bool,
-    /// Route per-turn uploads through the durable on-disk upload queue (retries and spill-to-disk) instead of the legacy `gcs::upload_bytes` path.
-    /// Enabled by default. Accepts `true`/`false`.
-    /// Pass `--upload-queue-enabled false` (or set `GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED=false`) to fall back to the legacy inline path.
+    /// Route per-turn uploads through the durable on-disk upload queue (retries and spill-to-disk) instead.
     #[arg(
         long,
         env = "GROK_WORKSPACE_UPLOAD_QUEUE_ENABLED",
@@ -117,7 +106,6 @@ struct Args {
     #[arg(long)]
     require_explicit_toolset: bool,
     /// Trust project-scoped LSP servers from `<repo>/.grok/lsp.json`.
-    /// Defaults off; sandbox opts in only after workspace trust is established.
     #[arg(
         long,
         env = "GROK_WORKSPACE_PROJECT_LSP_TRUSTED",
@@ -126,8 +114,6 @@ struct Args {
     )]
     project_lsp_trusted: bool,
     /// Confine `x.ai/fs/*` resolution to the workspace root (reject `..`, absolute-outside-root, symlink escapes).
-    /// On by default: the standalone server always backs a remote-sandbox workspace, a real tenant boundary.
-    /// Override with `GROK_WORKSPACE_CONFINE_FS_TO_ROOT=false` (e.g. local dev).
     #[arg(
         long,
         env = "GROK_WORKSPACE_CONFINE_FS_TO_ROOT",
@@ -135,9 +121,7 @@ struct Args {
         action = clap::ArgAction::Set,
     )]
     confine_fs_to_workspace_root: bool,
-    /// Self-daemonize at startup: double-fork and `setsid()` into a new session and process group, escaping the launcher's process-group reap.
-    /// Redirect stdio to a log file and hold a single-instance pidfile lock.
-    /// Off by default; the launcher passes it in the supervised deployment mode. With the flag absent, startup is unchanged.
+    /// Self-daemonize at startup: double-fork and `setsid()` into a new session and process group.
     #[arg(long)]
     daemonize: bool,
     /// Where `--daemonize` redirects stdout and stderr. Ignored without `--daemonize`.
@@ -146,21 +130,16 @@ struct Args {
     /// Single-instance pidfile lock path used with `--daemonize`. Ignored without `--daemonize`.
     #[arg(long, default_value = daemonize::DEFAULT_PIDFILE_PATH)]
     pid_file: PathBuf,
-    /// Record `workspace_oom_protect_applied` and lower or recheck `oom_score_adj` to -900.
-    /// Force `GROK_TOOLS_RESET_CHILD_OOM` so shell/pty children reset to 0.
-    /// Complements always-on self-protect after pre-unshare inheritance; forces the child reset even if the early write failed. Off by default.
     #[arg(long)]
     oom_protect: bool,
     #[command(flatten)]
     preview: PreviewCliArgs,
 }
-/// Preview-proxy supervision flags.
-/// Forwarded 1:1 to the `/usr/local/bin/xai-grok-preview-proxy` child (see `cli.rs` for the proxy's flag names).
-/// Off by default: when `--preview-enabled` is absent the supervisor is never started and startup is byte-for-byte the non-preview path.
+/// Preview-proxy supervision flags. Off by default: when `--preview-enabled` is absent the supervisor is never started and startup is
+/// byte-for-byte the non-preview path.
 #[derive(clap::Args, Debug)]
 struct PreviewCliArgs {
     /// Spawn and supervise the in-sandbox preview-proxy.
-    /// The launcher passes this only when the proxy binary was mounted into this container.
     #[arg(long)]
     preview_enabled: bool,
     /// Proxy `--preview-port` (externally exposed listener). When absent, the proxy default applies.
@@ -170,14 +149,12 @@ struct PreviewCliArgs {
     #[arg(long)]
     preview_control_port: Option<u16>,
     /// Proxy `--visibility` (`owner` | `public`). When absent, the proxy default applies.
-    /// Validated here so a bad value fails fast instead of crash-looping the proxy.
     #[arg(long, value_enum)]
     preview_visibility: Option<PreviewVisibility>,
     /// Proxy `--instance-suffix` for inbound Host validation.
     #[arg(long)]
     preview_instance_suffix: Option<String>,
     /// Proxy `--auth-redirect`: URL the unauthenticated handshake redirects to.
-    /// Required for the default `owner` gate to redirect rather than deny.
     #[arg(long)]
     preview_auth_redirect: Option<String>,
     /// Proxy `--allow-public` org public-policy gate (forwarded only when set).
@@ -210,7 +187,6 @@ impl PreviewCliArgs {
     }
 }
 /// Binds the preview-activity scraper to the workspace `ActivityTracker`.
-/// `xai-grok-workspace-daemon` deliberately does not depend on `xai-grok-workspace`, so this binary owns the one adapter between them.
 struct TrackerSink(std::sync::Arc<xai_grok_workspace::activity::ActivityTracker>);
 impl PreviewActivitySink for TrackerSink {
     fn note_preview_routed_activity(&self) {
@@ -227,8 +203,8 @@ impl PreviewActivitySink for TrackerSink {
         self.0.preview_activity_window_ms()
     }
 }
-/// Capability manifest printed by `--capabilities`, consumed by the sandbox launcher to pick a launch protocol.
-/// Additions are backward-compatible.
+/// Capability manifest printed by `--capabilities`, consumed by the sandbox
+/// launcher to pick a launch protocol.
 #[derive(Debug, serde::Serialize)]
 struct Capabilities {
     /// The in-guest diagnostics HTTP server (`/ready`, `/statusz`, `/logs`).
@@ -283,10 +259,7 @@ fn main() -> anyhow::Result<()> {
     let rt = xai_tty_utils::runtime::build_with_blocking_pool(&mut builder)?;
     rt.block_on(run(args, cwd, oom_protection, oom_protect_applied))
 }
-/// The same binary serves sandbox containers and headless user machines. Only the sandbox launcher
-/// passes a `sandbox_id` in `--metadata`, so that is the opt-in to the sandbox's full catalog and
-/// credential reach; the environment is not a policy input (a `grok --local-workspace` spawned by a
-/// hook or MCP child inherits `GROK_SESSION_ID`). Pickers label the server by the same kind.
+/// The same binary serves sandbox containers and headless user machines.
 fn host_kind_for(metadata: Option<&serde_json::Value>) -> WorkspaceHostKind {
     let is_sandbox = metadata
         .map(WorkspaceServerMetadata::from_metadata)
@@ -297,15 +270,12 @@ fn host_kind_for(metadata: Option<&serde_json::Value>) -> WorkspaceHostKind {
         WorkspaceHostKind::Daemon
     }
 }
-/// Whether to set `GROK_TOOLS_RESET_CHILD_OOM` after the always-on protect attempt.
-/// Always-on success must set it so children do not inherit -900.
-/// `--oom-protect` forces the env even when the early write failed (pre-unshare may still have left the score at -900).
+/// Whether to set `GROK_TOOLS_RESET_CHILD_OOM` after the always-on protect
+/// attempt.
 fn should_set_reset_child_oom(early_protect_ok: bool, oom_protect_flag: bool) -> bool {
     early_protect_ok || oom_protect_flag
 }
 /// Whether the startup log should report OOM protection as active.
-/// Prefer the `--oom-protect` apply outcome when present (already-at-target after pre-unshare counts as active even if the early write failed).
-/// Without the flag, report the always-on write only.
 fn oom_protect_log_active(applied: Option<bool>, early_ok: bool) -> bool {
     applied.unwrap_or(early_ok)
 }
@@ -598,7 +568,6 @@ mod tests {
         }
     }
     /// The env-resolved discovery refresh must reach the proxy argv only when set.
-    /// `None` (env unset or 0) leaves `--discovery-refresh-ms` out of the argv.
     #[test]
     fn into_preview_args_forwards_the_discovery_refresh_only_when_resolved() {
         let cli = || PreviewCliArgs {

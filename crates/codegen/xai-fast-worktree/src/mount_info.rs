@@ -1,7 +1,4 @@
 //! Shared `/proc/self/mountinfo` parser.
-//!
-//! Parses mountinfo once into structured `MountEntry` values, shared across
-//! overlay and btrfs detection so we avoid duplicate parsing.
 
 use std::path::{Path, PathBuf};
 
@@ -76,9 +73,7 @@ pub fn overlay_upperdirs_all_namespaces() -> std::collections::HashSet<PathBuf> 
             if entry.fs_type == "overlay"
                 && let Some(u) = extract_option(&entry.super_options, "upperdir")
             {
-                // Unescape mountinfo octal escapes (e.g. `\040` → space) so the
-                // stored upperdir matches the real filesystem paths callers
-                // compare against (mirrors `find_overlay_mount`).
+                // Unescape mountinfo octal escapes (e.g. `\040` → space) so the stored upperdir matches the real filesystem paths callers compare against.
                 uppers.insert(PathBuf::from(unescape_mountinfo(&u)));
             }
         }
@@ -148,21 +143,16 @@ pub fn find_overlay_mount(entries: &[MountEntry], path: &Path) -> Option<Overlay
     })
 }
 
-/// Result of comparing the current process's mount namespace with PID 1's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MountNsStatus {
-    /// Current process is in a mount namespace distinct from PID 1's.
     Private,
-    /// Current process shares PID 1's mount namespace.
     Host,
-    /// Could not determine — e.g. `/proc/1/ns/mnt` is unreadable for a non-root
-    /// process (needs to own PID 1 or have `CAP_SYS_PTRACE`).
+    /// Could not determine — e.g. `/proc/1/ns/mnt` is unreadable for a non-root process.
     Unknown,
 }
 
-/// Classify this process's mount namespace vs PID 1. Private-ns mounts die with
-/// the namespace, so overlay/bind worktrees must avoid them. `Unknown` (PID 1
-/// unreadable) is treated as not-private; non-root private-ns overlay is a residual.
+/// Private-ns mounts die with the namespace, so overlay/bind worktrees must avoid
+/// them.
 pub fn current_mount_ns_status() -> MountNsStatus {
     let status = mount_ns_status(
         std::fs::read_link("/proc/self/ns/mnt"),
@@ -404,7 +394,6 @@ mod tests {
 
     #[test]
     fn test_unescape_mountinfo_backslash() {
-        // \134 is ASCII backslash
         assert_eq!(unescape_mountinfo("/a\\134b"), "/a\\b");
     }
 

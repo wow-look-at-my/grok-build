@@ -1,21 +1,4 @@
 //! Terminal inline image rendering (Kitty / iTerm2 protocols).
-//!
-//! Provides escape-sequence helpers for rendering images inside the existing preview overlay.
-//! The text-fallback path in [`crate::render::image_overlay`] remains the primary preview.
-//! This module adds pixel-level rendering for supported terminals.
-//!
-//! # Supported protocols
-//!
-//! - **Kitty graphics protocol**: used by Kitty, Ghostty, WezTerm, Warp
-//! - **iTerm2 inline images**: helpers exist but are currently gated off in [`protocol_for_brand()`] (see there for why).
-//!   The text fallback is used for iTerm2 instead.
-//!
-//! # Usage
-//!
-//! 1. Call [`detect_graphics_protocol()`] once (cached).
-//! 2. During draw, if an image preview is active, call [`render_kitty_image()`] or [`render_iterm2_image()`] to build the escape sequence.
-//! 3. Write the escape sequence to stderr **after** the ratatui cell flush but inside the synchronized-output block.
-//! 4. Coordinate shared ID-1 ownership through [`super::overlay`].
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,8 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::{TerminalName, terminal_context};
 
 // -------------------------------------------------------------------------
-// Graphics protocol detection
-// -------------------------------------------------------------------------
+// Graphics protocol detection.
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum GraphicsProtocol {
@@ -48,15 +30,14 @@ static GRAPHICS_PROTOCOL: OnceLock<GraphicsProtocol> = OnceLock::new();
 /// Minimal mode never runs the draw loop, so overlays stay off and media uses the text affordance instead of blank image rows.
 static INLINE_OVERLAY_FORCE_OFF: AtomicBool = AtomicBool::new(false);
 
-/// Force scrollback inline-media overlays off (`off = true`) or restore the capability-based default (`off = false`) process-wide.
-/// Called once at startup by the pager when minimal mode is active.
+/// Force scrollback inline-media overlays off (`off = true`) or restore the
+/// capability-based default (`off = false`) process-wide.
 pub fn set_inline_overlay_force_off(off: bool) {
     INLINE_OVERLAY_FORCE_OFF.store(off, Ordering::Relaxed);
 }
 
-/// Whether scrollback inline-media overlays are currently forced off, i.e. the process is in minimal/scrollback-native mode.
-/// That mode commits static text and never runs the interactive draw loop.
-/// Also used to suppress affordances the draw loop paints (e.g. the mermaid button row) that would otherwise commit as blank rows.
+/// Whether scrollback inline-media overlays are forced off, i.e. the process
+/// is in minimal/scrollback-native mode.
 pub fn scrollback_inline_overlay_forced_off() -> bool {
     INLINE_OVERLAY_FORCE_OFF.load(Ordering::Relaxed)
 }
@@ -150,7 +131,7 @@ pub fn protocol_for_brand(brand: TerminalName, is_windows: bool) -> GraphicsProt
         TerminalName::Ghostty => GraphicsProtocol::Kitty,
         TerminalName::WezTerm => GraphicsProtocol::Kitty,
         TerminalName::WarpTerminal => GraphicsProtocol::Kitty,
-        // OSC 1337 lacks placement/clear primitives, so scrollback images do not track the grid. Preview opts in separately.
+        // OSC lacks placement/clear primitives, so scrollback images do not track the grid. Preview opts in separately.
         TerminalName::Iterm2 => GraphicsProtocol::None,
         _ => GraphicsProtocol::None,
     }
@@ -178,7 +159,7 @@ pub fn prompt_preview_graphics_protocol() -> GraphicsProtocol {
     })
 }
 
-/// iTerm2 needs `TERM_FEATURES` `F` or OSC 1337 leaks base64. That var does not cross SSH, so absence there is not a denial.
+/// iTerm2 needs `TERM_FEATURES` `F` or OSC multiple leaks base64. That var does not cross SSH, so absence there is not a denial.
 pub fn prompt_preview_protocol_for_brand(
     brand: TerminalName,
     is_windows: bool,
@@ -197,9 +178,7 @@ pub fn prompt_preview_protocol_for_brand(
     protocol_for_brand(brand, is_windows)
 }
 
-// -------------------------------------------------------------------------
-// Kitty graphics protocol
-// -------------------------------------------------------------------------
+// ------------------------------------------------------------------------- Kitty graphics protocol.
 
 /// Shared placement ID; every renderer must coordinate through [`super::overlay`].
 pub(super) const KITTY_PLACEMENT_ID: u32 = 1;
@@ -236,8 +215,8 @@ pub fn prepare_kitty_overlay_image_bytes(image_data: &[u8]) -> Option<Vec<u8>> {
         return Some(image_data.to_vec());
     }
 
-    // On macOS, convert via `sips` through a temp file
-    // CoreGraphics handles ICC colour profiles correctly, avoiding the artifacts that the `image` crate's JPEG-to-PNG path can produce
+    // On macOS, convert via `sips` through a temp file CoreGraphics handles
+    // ICC colour profiles correctly.
     if cfg!(target_os = "macos")
         && let Some(png) = convert_via_sips(image_data)
     {
@@ -387,7 +366,7 @@ fn kitty_chunked_escape(image_data: &[u8], first_chunk_header: &str) -> String {
 
 /// Place an already-transmitted image at the cursor position (`a=p`).
 ///
-/// Tiny escape (~50 bytes): no image data, just placement metadata.
+/// Tiny escape (many bytes): no image data, just placement metadata.
 pub fn place_kitty_image(image_id: u32, cols: u16, rows: u16, z: i32) -> String {
     format!(
         "\x1b_Ga=p,i={},p={},c={},r={},z={},C=1,q=2\x1b\\",
@@ -462,8 +441,6 @@ pub(super) fn build_overlay_image_escapes_for_protocol(
             ));
         }
         GraphicsProtocol::ITerm2 => {
-            // Unlike Kitty (`C=1`), OSC 1337 advances the cursor past the image, so save/restore it (DECSC/DECRC) around the write
-            // These escapes are written post-flush, after ratatui parked the caret for the frame
             esc.push_str("\x1b7");
             esc.push_str(&format!("\x1b[{};{}H", cell_y + 1, cell_x + 1));
             esc.push_str(&render_iterm2_image(image_data, cols, rows));
@@ -487,9 +464,8 @@ pub fn transmit_inline_image(image_data: &[u8], image_id: u32) -> Option<String>
     }
 }
 
-/// For Kitty: ~80 bytes (no image data, just placement with crop).
-/// For iTerm2: sends full image data only when `emit_iterm_data` is true (no crop support).
-/// Pass `false` after the first placement to avoid re-decoding the same image on every TUI frame.
+/// For iTerm2: sends full image data only when `emit_iterm_data` is true (no crop support). Pass
+/// `false` after the first placement to avoid re-decoding the same image on every TUI frame.
 #[allow(clippy::too_many_arguments)]
 pub fn place_inline_image(
     image_data: &[u8],
@@ -552,11 +528,9 @@ pub fn place_inline_image(
     Some(esc)
 }
 
-/// Fallback cell width/height ratio (typical monospace cell ~8×16 px), used when the terminal does not report its pixel size.
 const DEFAULT_CELL_ASPECT: f64 = 0.5;
 
-/// Protocols fill the cell rect, so an assumed 1:2 cell stretches other fonts. Implausible reports (tmux, Windows, non-tty) use the default.
-/// Once per process: zoom scales both axes. Tests pin the fallback.
+/// Implausible reports (tmux, Windows, non-tty) use the default. Once per process: zoom scales both axes. Tests pin the fallback.
 fn cell_aspect() -> f64 {
     #[cfg(any(test, feature = "test-support"))]
     {
@@ -590,7 +564,6 @@ fn cell_aspect_from(ws: &crossterm::terminal::WindowSize) -> f64 {
     }
 }
 
-/// Uses measured [`cell_aspect`] so a 1:1 image stays visually square; cells are not square.
 pub fn fit_image_to_cells(img_w: u32, img_h: u32, max_cols: u16, max_rows: u16) -> (u16, u16) {
     if img_w == 0 || img_h == 0 || max_cols == 0 || max_rows == 0 {
         return (max_cols.max(1), max_rows.max(1));
@@ -600,8 +573,7 @@ pub fn fit_image_to_cells(img_w: u32, img_h: u32, max_cols: u16, max_rows: u16) 
 
     let img_aspect = img_w as f64 / img_h as f64;
 
-    // Convert image aspect to cell-space: how many columns per row the image needs to look correct
-    // A cell is `cell_aspect` times as wide as it is tall, so we divide by cell_aspect
+    // Convert image aspect to cell-space: how many columns per row the image needs to look correct A cell is `cell_aspect` times as wide.
     let cols_per_row = img_aspect / cell_aspect;
 
     // Try fitting by width first.
@@ -620,9 +592,7 @@ pub fn fit_image_to_cells(img_w: u32, img_h: u32, max_cols: u16, max_rows: u16) 
     }
 }
 
-// =========================================================================
-// Tests
-// =========================================================================
+// ========================================================================= Tests.
 
 #[cfg(test)]
 mod tests;

@@ -1,10 +1,4 @@
 //! Core telemetry tracking: product events and Mixpanel.
-//!
-//! All calls route through [`track`].
-//! Precedence: env overrides config, config overrides remote config, remote config overrides the default.
-//!
-//! The HTTP client is injected via [`init`]/[`init_if_needed`].
-//! That keeps this crate from depending on shell's `User-Agent` builder, which couples to the `permission` module.
 use crate::config::{TelemetryConfig, TelemetryMode};
 use crate::http::OriginClientInfo;
 use crate::session_ctx::EmitterOrigin;
@@ -24,9 +18,8 @@ fn event_value(event_name: &str) -> &str {
     }
     event_name
 }
-/// Do not put the event name in this field: the sink truncates to 36 chars and rejects most other characters. A truncated
-/// name-prefixed id collapses to a constant and dedups a user's same-second events; one with `:` is dropped and
-/// regenerated. A bare UUID always validates.
+/// Do not put the event name in this field: the sink truncates to multiple
+/// chars and rejects most other characters.
 fn product_analytics_insert_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
@@ -58,7 +51,7 @@ impl std::fmt::Debug for TelemetryClient {
 }
 /// Opts a dev build (no `GROK_VERSION` at compile time) back into the baked production sinks.
 const ALLOW_DEV_BUILD_ENV: &str = "GROK_TELEMETRY_ALLOW_DEV_BUILD";
-/// `from_config` runs on every (re-)init, up to three times per process; the disarm is logged once.
+/// `from_config` runs on every (re-)init, a bounded number of times per process; the disarm is logged once.
 static DEV_BUILD_DISARM_LOGGED: Once = Once::new();
 impl TelemetryClient {
     pub fn from_config(
@@ -621,9 +614,8 @@ mod tests {
         );
         assert_eq!(reserved, expected);
     }
-    /// `event_value`'s first-match-wins over `EmitterOrigin::ALL` is only correct because no origin's `event_prefix()` is a prefix of another's.
-    /// A future origin like `"grok-shell-ext-"` would let an earlier `ALL` entry strip the shorter prefix first and yield the wrong `event_value`.
-    /// Pin the invariant so adding such a variant fails the suite rather than silently corrupting analytics.
+    /// `event_value`'s first-match-wins over `EmitterOrigin::ALL` is only
+    /// correct because no origin's `event_prefix()` is a prefix of another's.
     #[test]
     fn emitter_prefixes_are_mutually_exclusive() {
         for a in EmitterOrigin::ALL {

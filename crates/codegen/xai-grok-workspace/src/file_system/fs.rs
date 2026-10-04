@@ -18,7 +18,6 @@ pub trait AsyncFileSystem: Send + Sync {
     fn root(&self) -> &Path;
 
     /// Re-root this filesystem. Default is a no-op.
-    /// [`LocalFs`] overrides it with a remount that can be set once, so `/workspace` can follow a later `session_root` without dropping the `Arc`.
     fn remount_root(&self, _root: PathBuf) {}
 
     async fn exists(&self, path: &Path) -> Result<bool, FsError>;

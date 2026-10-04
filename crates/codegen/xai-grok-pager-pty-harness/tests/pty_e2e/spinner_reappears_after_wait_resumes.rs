@@ -1,6 +1,4 @@
 //! PTY, flag-file driven like `endline_park_is_markerless`: the pager parks on a blocking wait.
-//! Releasing the flag completes the task and a slow continuation streams in the SAME turn.
-//! Asserts the running chrome returns (regression: stale tracker waits kept the idle look after resume).
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -20,7 +18,6 @@ async fn spinner_reappears_after_wait_resumes() {
         format!("while [ ! -e {} ]; do /bin/sleep 0.2; done", flag.display())
     };
 
-    // Tool call 1: the flag-gated background command the turn will wait on.
     let bg_args = json!({
         "command": gated_loop(&park_flag),
         "description": "flag-gated command",
@@ -30,7 +27,6 @@ async fn spinner_reappears_after_wait_resumes() {
     let _background_turn =
         expect_tool_turn(&content, "call_spinner_bg", "run_terminal_command", bg_args);
 
-    // Tool call 2: the flag-gated foreground hold for id extraction.
     let id_hold_args = json!({
         "command": gated_loop(&id_ready_flag),
         "description": "hold for id extraction"
@@ -43,8 +39,7 @@ async fn spinner_reappears_after_wait_resumes() {
         id_hold_args,
     );
 
-    // Fallback for the post-wait continuation: a slow stream (~5s at the chunk delay set just before the flag release)
-    // The test can then observe the running chrome WHILE the same turn is streaming again
+    // Fallback for the post-wait continuation: a slow stream (~5s at the chunk delay set before the flag release).
     content.set_response(slow_turn_text("RESUMED_STREAM"));
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -79,7 +74,6 @@ async fn spinner_reappears_after_wait_resumes() {
         )
     });
 
-    // Tool call 3: block on the REAL task until it completes (600s survives the wait cap; releasing the flag below completes it long before)
     let wait_args = json!({
         "task_ids": [task_id],
         "timeout_ms": 600_000
@@ -123,8 +117,7 @@ async fn spinner_reappears_after_wait_resumes() {
         harness.screen_contents()
     );
 
-    // Complete the wait: pace the continuation, then release the flag
-    // The gated command exits, the blocking wait returns its output, and the model resumes streaming in the SAME turn
+    // Complete the wait: pace the continuation, then release the flag The gated command exits, the blocking wait returns its output.
     content.set_chunk_delay(Some(Duration::from_millis(150)));
     std::fs::write(&park_flag, b"done").expect("release flag");
 

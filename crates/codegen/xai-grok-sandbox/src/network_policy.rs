@@ -1,7 +1,4 @@
 //! Pure policy modeling for future child website egress.
-//!
-//! These types are not selected by sandbox profiles or enforced by the current runtime.
-//! Constructing a policy does not grant or restrict network access.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -15,9 +12,8 @@ use url::{Host, Url};
 /// Version of the compact JSON produced by [`NetworkPolicySnapshot`].
 pub const NETWORK_POLICY_SNAPSHOT_VERSION: u32 = 1;
 
-/// Requested child-network behavior for future enforcement backends.
-///
-/// This is not currently selected or enforced by the sandbox runtime.
+/// Requested child-network behavior for future enforcement backends. This is
+/// not selected or enforced by the sandbox runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", content = "policy", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -46,9 +42,8 @@ pub enum WebsiteAction {
     Deny,
 }
 
-/// Exact HTTP(S) origin with an IDNA ASCII hostname and effective nonzero port.
-///
-/// Equality never includes subdomains, redirects, paths, or another scheme or port.
+/// Exact HTTP(S) origin with an IDNA ASCII hostname and effective nonzero
+/// port.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WebsiteOrigin {
     scheme: String,
@@ -228,8 +223,6 @@ impl WebsitePolicy {
 }
 
 /// Versioned deterministic JSON and SHA-256 identity for later persistence.
-///
-/// The snapshot is not currently written to sessions or used for enforcement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NetworkPolicySnapshot {
     version: u32,

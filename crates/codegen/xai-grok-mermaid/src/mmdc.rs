@@ -1,12 +1,4 @@
 //! Optional `mmdc` (mermaid-cli) engine, detected at runtime.
-//!
-//! High-fidelity but heavy (Node and headless Chromium), so it is never selected automatically.
-//! A caller opts in via [`MmdcEngine::detect`] or [`MmdcEngine::new`].
-//! `mmdc` produces the SVG; we rasterize it through [`crate::rasterize`] so the same protections (no file resolvers, bundled font) and sizing apply.
-//!
-//! Security: the subprocess is spawned with [`xai_tty_utils::detach_std_command`], [`xai_tty_utils::pager_env`], and null stdio.
-//! Source is passed via a private temp file.
-//! The shared [`crate::run_with_timeout`] enforces a wall-clock budget and reaps the process group (including Chromium grandchildren) on breach.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -23,9 +15,8 @@ pub fn detect_mmdc() -> Option<PathBuf> {
     which::which("mmdc").ok()
 }
 
-/// An engine that shells out to `mmdc` (mermaid-cli).
-/// Off by default: construct it explicitly (it requires Node and headless Chromium).
-/// Use [`MmdcEngine::detect`] to build one only if `mmdc` is present.
+/// An engine that shells out to `mmdc` (mermaid-cli). Off by default:
+/// construct it explicitly (it requires Node and headless Chromium).
 pub struct MmdcEngine {
     bin: PathBuf,
     timeout: Duration,
@@ -68,8 +59,6 @@ impl MermaidEngine for MmdcEngine {
         let input = dir.path().join("diagram.mmd");
         let output = dir.path().join("diagram.svg");
 
-        // Create atomically with 0600 (no umask/chmod TOCTOU window)
-        // The parent tempdir is already 0700
         write_private(&input, source)
             .map_err(|e| MermaidError::Rasterize(format!("could not write source: {e}")))?;
 
@@ -122,7 +111,6 @@ fn map_subprocess_error(e: SubprocessError) -> MermaidError {
     }
 }
 
-/// Write `contents` to `path`, creating it atomically with owner-only (0600) permissions on unix so there is no umask/chmod TOCTOU window.
 fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -227,8 +215,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn with_timeout_is_honored() {
-        // A fake that sleeps far longer than the configured timeout must time out and be reaped quickly
-        // That proves with_timeout feeds run_with_timeout
+        // A fake that sleeps far longer than the configured timeout must time out and be reaped quickly.
         let (_dir, bin) = fake_mmdc("sleep 30");
         let start = Instant::now();
         let err = MmdcEngine::new(bin)

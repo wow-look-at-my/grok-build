@@ -1,7 +1,4 @@
 //! `kill_task` tool — new architecture (`Tool` trait).
-//!
-//! Terminates a running background task. Reads the `Terminal` resource
-//! from Resources to access the terminal backend.
 
 pub mod terminal_command;
 pub use terminal_command::KillTerminalCommandTool;
@@ -17,16 +14,11 @@ use crate::types::tool::ToolKind;
 use crate::types::tool::ToolNamespace;
 use xai_tool_types::{KillTaskOutput, KillTaskResult, KillTaskToolInput};
 
-// ───────────────────────────────────────────────────────────────────────────
-// Tool implementation
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────── Tool implementation.
 
 #[derive(Debug, Default)]
 pub struct KillTaskTool;
 
-// Legacy message helpers Historical fixture captured from an earlier (0.4.10) revision of this tool. In 0.4.10, kill_task returned:
-// Err(ToolError::ProcessManagerError(format!("Task {} not found", input.task_id))) The meaningful customer-facing message content is the inner
-// string. Subagent wording is out of scope — subagents didn't exist in 0.4.10.
 
 /// Exact historical not-found message for `kill_task` in legacy-0.4.10.
 fn render_legacy_kill_task_not_found(task_id: &str) -> String {
@@ -42,11 +34,9 @@ async fn not_found_response(
 ) -> KillTaskOutput {
     if is_legacy {
         // Legacy: simple error without task ID enumeration.
-        // Subagent wording is out of scope — subagents didn't exist in 0.4.10.
         return KillTaskOutput::TaskNotFound(render_legacy_kill_task_not_found(task_id));
     }
-    // Current: include known task IDs for discoverability.
-    // The terminal backend is shared with the root session.
+    // Current: include known task IDs for discoverability. The terminal backend is shared with the root session.
     let mut known = terminal.list_tasks().await;
     known.retain(|task| crate::reminders::task_completion::task_owned_by_session(task, my_owner));
     let msg = if known.is_empty() {
@@ -415,8 +405,7 @@ mod tests {
     fn tool_name_and_description() {
         let tool = KillTaskTool;
         assert_eq!(xai_tool_runtime::Tool::id(&tool).as_str(), "kill_task");
-        // The static fallback is the shared builder's default grok-build
-        // rendering (monitor + task + bash present) for the current OS.
+        // The static fallback is the shared builder's default grok-build rendering (monitor + task + bash present).
         let desc = crate::types::tool_metadata::ToolMetadata::description_template(&tool);
         assert!(desc.contains("subagent"));
         assert!(desc.contains("monitor"));
@@ -655,8 +644,7 @@ mod tests {
 
     #[tokio::test]
     async fn current_kill_task_not_found_includes_discoverability() {
-        // Current (non-legacy) path must still include known task IDs
-        // or "No background tasks or subagents exist" text.
+        // Current (non-legacy) path must still include known task IDs or "No background tasks or subagents exist" text.
         let resources = resources_with_terminal(KO::NotFound);
         let tool = KillTaskTool;
 

@@ -1,7 +1,4 @@
-//! Decode-side coverage for `ToolErrorWire::Internal`'s optional `detail`:
-//! a populated detail must become the reconstructed `ToolError`'s message,
-//! and its absence (frames from older peers) must fall back to the historic
-//! constant.
+//! Decode-side coverage for `ToolErrorWire::Internal`'s optional `detail`.
 
 use serde_json::json;
 use xai_computer_hub_core::{error_from_envelope, tool_error_from_wire};

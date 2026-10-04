@@ -1,5 +1,4 @@
 //! Pulls extracted images off tool output for the session's vision follow-up.
-//! Nothing here depends on `SessionActor`, so tests call these as plain functions.
 
 use super::*;
 use xai_grok_tools::util::base64_images::ExtractedImage;
@@ -17,8 +16,8 @@ pub(super) fn drain_tool_layer_extracted_images(
     }
 }
 
-/// `ToolRunResult` whose extracted images have already been drained off `output`.
-/// Construct only via [`Self::new`], so neither PostToolUse serialization nor the bridge's success path can skip the drain.
+/// `ToolRunResult` whose extracted images have already been drained off
+/// `output`.
 pub(super) struct DrainedToolSuccess {
     result: ToolRunResult,
     tool_layer_images: Vec<ExtractedImage>,

@@ -1,7 +1,4 @@
 //! Binary crash blob format ("GCRX").
-//!
-//! The signal handler writes this format using only `libc::write` (no allocation).
-//! The startup reader parses it in normal Rust context.
 
 /// Magic bytes identifying a valid crash file.
 pub const MAGIC: [u8; 4] = *b"GCRX";
@@ -15,12 +12,10 @@ pub const MAX_FRAMES: usize = 64;
 /// Length of the null-padded version string field.
 pub const VERSION_STRING_LEN: usize = 32;
 
-/// Fixed header size (before the variable-length frames array).
-/// magic(4) version(1) signal(1) si_code(4) si_addr(8) pid(4) timestamp(8) n_frames(2) app_version(32).
-/// All multi-byte integers are little-endian.
+/// Fixed header size (before the variable-length frames array). magic(4) version(1) signal(1) si_code(4) si_addr(8) pid(4).
 pub const HEADER_SIZE: usize = 4 + 1 + 1 + 4 + 8 + 4 + 8 + 2 + VERSION_STRING_LEN;
 
-/// Total maximum file size: header + 64 frames * 8 bytes each.
+/// Total maximum file size: header + frames * several bytes each.
 pub const MAX_FILE_SIZE: usize = HEADER_SIZE + MAX_FRAMES * 8;
 
 /// Parsed crash data from a `last-crash.bin` file.

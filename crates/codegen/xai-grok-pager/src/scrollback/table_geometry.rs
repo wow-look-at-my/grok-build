@@ -1,12 +1,10 @@
-//! Box-drawing table grid detection so selection inside rendered tables operates on cells; anything `detect` can't prove falls back to linear.
-//! Table lines never soft-wrap, so one rendered line is one block line.
+//! Box-drawing table grid detection so selection inside rendered tables operates on cells.
 
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 use xai_grok_markdown::{TableCellCopy, TableCopyMeta};
 
-/// A cell position within a detected grid: `row` indexes logical rows (the header is row 0), `col` indexes columns left to right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellRef {
     pub row: usize,
@@ -14,16 +12,13 @@ pub struct CellRef {
 }
 
 /// Geometry of one box-drawing table, in the block's line/column space.
-/// Line indices are `block_line_idx` values, columns are display columns in the same space as `RangeHit::col_within_range`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableGeometry {
     /// Full extent of the grid, top border line ..= bottom border line (half-open).
     line_range: Range<usize>,
-    /// Display columns of the vertical grid lines, ascending.
-    /// `junction_cols.len() == column count + 1`.
+    /// Display columns of the vertical grid lines, ascending. `junction_cols.len() == column count + 1`.
     junction_cols: Vec<u16>,
-    /// Per logical row, the contiguous block-line range of its content lines (a row wrapped inside cells spans several lines).
-    /// Never empty.
+    /// Per logical row, the contiguous block-line range of its content lines.
     rows: Vec<Range<usize>>,
 }
 
@@ -51,8 +46,8 @@ enum GridLine {
 
 const BAR: char = '\u{2502}'; // │
 
-/// Chars permitted before a grid's left edge: indentation and blockquote bars.
-/// (`│ `-prefixed tables render inside quotes with fully selectable text; see `QuoteBarStrip`.)
+/// Chars permitted before a grid's left edge: indentation and blockquote
+/// bars.
 fn is_prefix_char(c: char) -> bool {
     c == ' ' || c == BAR
 }
@@ -121,7 +116,7 @@ fn parse_border_row(text: &str) -> Option<(Vec<u16>, BorderKind)> {
         }
     }
 
-    // A grid needs at least two junctions (one column) and a closing corner.
+    // A grid needs at least junctions (one column) and a closing corner.
     if !closed || junctions.len() < 2 {
         return None;
     }
@@ -173,14 +168,12 @@ impl TableGeometry {
     /// Detect the grid containing `at_line`, reading lines through `text_at`.
     /// `None` unless `at_line` sits inside a fully-enclosed, column-consistent grid; callers then fall back to linear.
     pub fn detect(text_at: impl Fn(usize) -> Option<String>, at_line: usize) -> Option<Self> {
-        // The anchor line itself must be part of a grid
-        // Its border row (or, for content rows, the nearest border row above) fixes the junction set every other line is validated against
+        // The anchor line itself must be part of a grid Its border row (or, for content rows, the nearest border row above).
         let anchor_text = text_at(at_line)?;
         let junctions: Vec<u16> = if let Some((j, _)) = parse_border_row(&anchor_text) {
             j
         } else {
             // Walk up to the nearest border row to fix the junction set.
-            // Capped: a real anchor's border is at most one wrapped row above; a long walk means prose that merely starts with prefix chars, not a table
             const MAX_JUNCTION_SEARCH: usize = 400;
             let mut found: Option<Vec<u16>> = None;
             let mut line = at_line;
@@ -208,8 +201,8 @@ impl TableGeometry {
                     kind: BorderKind::Top,
                     ..
                 } => break,
-                // Hitting a bottom border strictly above `at_line` means `at_line` was below the grid, not inside it
-                // (`at_line` itself may be the bottom border.)
+                // Hitting a bottom border strictly above `at_line` means
+                // `at_line` was below the grid.
                 GridLine::Border {
                     kind: BorderKind::Bottom,
                     ..
@@ -291,7 +284,7 @@ impl TableGeometry {
         self.rows.get(row).cloned().unwrap_or(0..0)
     }
 
-    /// Display-column band of a column's cell interior: everything strictly between the two flanking `│` glyphs (padding included).
+    /// Display-column band of a column's cell interior: everything strictly between both flanking `│` glyphs (padding included).
     /// Empty when `col` is out of range so callers never panic on a stale `CellRef`.
     pub fn band(&self, col: usize) -> Range<u16> {
         let Some(&left) = self.junction_cols.get(col) else {
@@ -406,8 +399,8 @@ impl TableGeometry {
         meta.cells.get(idx)
     }
 
-    /// TSV for the rectangular cell range spanned by `a` and `b` (order irrelevant): cells tab-joined, rows newline-joined.
-    /// Tabs inside cell text are flattened to spaces so the TSV shape survives.
+    /// TSV for the rectangular cell range spanned by `a` and `b` (order
+    /// irrelevant): cells tab-joined, rows newline-joined.
     pub fn grid_tsv(
         &self,
         a: CellRef,
@@ -565,7 +558,6 @@ mod tests {
     #[test]
     fn cell_lookup_and_bands() {
         let geom = TableGeometry::detect(src(TABLE), 4).unwrap();
-        // "│ Alice   │ Eng    │": junctions at cols 0, 10, 19
         assert_eq!(geom.band(0), 1..10);
         assert_eq!(geom.band(1), 11..19);
         assert_eq!(geom.cell_at(4, 3), Some(CellRef { row: 1, col: 0 }));
@@ -592,8 +584,6 @@ mod tests {
         // Above or below the grid clamps to the first or last row
         assert_eq!(geom.latched_cell_at(held, 0, 3), CellRef { row: 0, col: 0 });
         assert_eq!(geom.latched_cell_at(held, 8, 3), CellRef { row: 2, col: 0 });
-        // "│ Alice   │ Eng    │": junctions at 0, 10, 19; bands 1..10, 11..19
-        // The junction and both flanking padding columns keep the held column.
         assert_eq!(geom.latched_cell_at(held, 4, 9), held);
         assert_eq!(geom.latched_cell_at(held, 4, 10), held);
         assert_eq!(geom.latched_cell_at(held, 4, 11), held);
@@ -794,7 +784,6 @@ mod tests {
             geom.cell_text(CellRef { row: 0, col: 0 }, src(emoji)),
             "名前"
         );
-        // Click on the second display column of 名 resolves to col 0.
         assert_eq!(geom.cell_at(1, 3), Some(CellRef { row: 0, col: 0 }));
     }
 

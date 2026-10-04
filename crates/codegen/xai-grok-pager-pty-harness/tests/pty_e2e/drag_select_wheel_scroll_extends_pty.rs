@@ -4,15 +4,13 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-/// Tall enough that a mid-drag wheel burst has ~150 rows of headroom above the bottom-pinned viewport.
+/// Tall enough that a mid-drag wheel burst has many rows of headroom above the bottom-pinned viewport.
 const MARKER_COUNT: usize = 240;
 
 /// Wheel-up reports sent mid-drag in one write (batched with the follow-up one-cell motion so no redraw separates them).
 const WHEEL_NOTCHES: usize = 16;
 
-/// A marker this many lines above the pre-wheel head must land in the copy; that proves the wheel extended the selection.
-/// 16 notches scroll at least 16 rows under any stream classification, so the post-wheel head is at least this far up.
-/// The pre-wheel span was 2 rows.
+/// A marker this many lines above the pre-wheel head must land in the copy.
 const MIN_EXTEND_LINES: usize = 12;
 
 /// PTY: wheel-scrolling mid-drag extends the selection. Only the post-render reclamp can extend the
@@ -26,15 +24,12 @@ async fn drag_select_wheel_scroll_extends_pty() {
     )
     .await;
 
-    // Anchor ~25 rows below the topmost visible marker: mid-screen, clear of both autoscroll edge zones
     let anchor_idx = top_before + 25;
     let anchor_marker = marker_line(anchor_idx);
     let screen = harness.screen_contents();
     let (row_a, col_a) = locate_screen_text(&screen, &anchor_marker)
         .unwrap_or_else(|| panic!("could not locate {anchor_marker:?}; screen:\n{screen}"));
 
-    // Press at the END of the anchor marker, then drag two rows UP ending at the marker's start column
-    // The anchor line is the span's bottom endpoint; its slice runs 0..=press col, keeping the token whole
     let press_col = col_a + anchor_marker.len() as u16 - 1;
     let mut drag = String::new();
     drag.push_str(&sgr_mouse(0, row_a, press_col, 'M'));

@@ -1,9 +1,4 @@
-//! The markdown renderer rewrites each `>` quote marker to a `│` bar styled `blockquote_outer` (xai-grok-markdown parse.rs).
-//! The bar is then ordinary span content and would leak into drag-select copies.
-//! The helpers here detect that prefix on a rendered row and exclude it from selection via [`Selectable::Spans`].
-//! Tool headers and diff gutters exclude their decorations the same way.
-//! [`MarkdownContent::output`](super::markdown_content::MarkdownContent::output) renders through these helpers.
-//! So does [`ThinkingBlock`](super::ThinkingBlock)'s render path.
+//! The markdown renderer rewrites each `>` quote marker to a `│` bar styled `blockquote_outer`.
 
 use std::borrow::Cow;
 
@@ -13,8 +8,8 @@ use ratatui::text::{Line, Span};
 use crate::scrollback::types::Selectable;
 use crate::theme::Theme;
 
-/// Built once per output pass: whether to strip quote bars, and the bar style the theme paints them with.
-/// Raw mode skips the `Theme::current()` lookup entirely.
+/// Built once per output pass: whether to strip quote bars, and the bar style
+/// the theme paints them with.
 #[derive(Clone, Copy)]
 pub(crate) struct QuoteBarStrip {
     /// `None` means stripping is disabled (raw mode shows source `>` markers).
@@ -37,9 +32,8 @@ impl QuoteBarStrip {
     }
 }
 
-/// The exact ratatui style the renderer paints parser-generated blockquote bars with. This mirrors
-/// `blockquote_outer` in pager-render's theme/md_style.rs, and a comment there points back here. The end-to-end
-/// tests below trip if either side drifts.
+/// The exact ratatui style the renderer paints parser-generated blockquote
+/// bars with.
 fn quote_bar_style() -> Style {
     let muted = Theme::current().md_muted;
     let style = Style::default().add_modifier(Modifier::DIM);
@@ -86,7 +80,6 @@ fn rendered_quote_prefix_len(line: &Line<'_>, bar_style: Style) -> Option<usize>
     Some(len)
 }
 
-/// Split `line`'s spans at `byte_offset` (splitting a straddling span in two) and return the number of spans covering `0..byte_offset`.
 fn split_spans_at(line: &mut Line<'static>, byte_offset: usize) -> usize {
     let mut acc = 0usize;
     for i in 0..line.spans.len() {
@@ -129,8 +122,8 @@ fn split_spans_at(line: &mut Line<'static>, byte_offset: usize) -> usize {
 /// so multi-line copies keep the blank line. The bar must be the FIRST span: a quote indented under a list item (`-
 /// > quoted`, bullet span first) keeps its prefix in copies.
 fn quote_prefix_selectable(line: &mut Line<'static>, bar_style: Style) -> Selectable {
-    // Only parser-generated bars are a lone 1-char span carrying the blockquote_outer style
-    // A literal "│ " in prose or code stays glued to its content span or carries a different style, so it is left intact
+    // Only parser-generated bars are a lone 1-char span carrying the
+    // blockquote_outer style A literal "│ ".
     let genuine = line
         .spans
         .first()
@@ -212,11 +205,11 @@ mod tests {
         let literal_second = Line::from(vec![Span::styled("│", bq), Span::raw(" │ box art")]);
         assert_eq!(rendered_quote_prefix_len(&literal_second, bq), None);
 
-        // Degenerate `> │` (content is just a bar).
+        // Degenerate `> │` (content is a bar).
         let bar_only_content = Line::from(vec![Span::styled("│", bq), Span::raw(" │")]);
         assert_eq!(rendered_quote_prefix_len(&bar_only_content, bq), None);
 
-        // Nested variant `> > │ deep`: two genuine bars, then a literal one.
+        // Nested variant `> > │ deep`: genuine bars, then a literal one.
         let nested_literal = Line::from(vec![
             Span::styled("│", bq),
             Span::raw(" "),
@@ -243,7 +236,7 @@ mod tests {
             quote_prefix_selectable(&mut line, quote_bar_style()),
             Selectable::Spans(2..3)
         );
-        // The glued " text" span was split so the prefix ends on a boundary.
+        // The glued " text" span.
         assert_eq!(line.spans.get(1).map(|s| s.content.as_ref()), Some(" "));
         assert_eq!(line.spans.get(2).map(|s| s.content.as_ref()), Some("text"));
     }
@@ -310,7 +303,7 @@ mod tests {
             );
         }
 
-        // Reconstructing via each line's joiner (the drag-copy join rule) yields the original text
+        // Reconstructing via each line's joiner (the drag-copy join rule) yields the text
         let mut joined = String::new();
         for (i, line) in out.lines.iter().enumerate() {
             if i > 0 {
@@ -368,8 +361,7 @@ mod tests {
 
     #[test]
     fn literal_bar_at_quote_content_start_is_not_stripped() {
-        // Quoted box-drawing output: the content's own bar must never be consumed as a nesting level (that would DELETE user bytes from the copy)
-        // The row degrades to the conservative interior-bar class
+        // Quoted box-drawing output: the content's own bar must never be consumed as a nesting level (that would DELETE user bytes from the copy).
         let md = MarkdownContent::new("> │ box art");
         let out = md.output(80);
         let line = find_line(&out, "box art");

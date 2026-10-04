@@ -14,8 +14,8 @@ fn db_path_in(root_dir: &Path) -> PathBuf {
     xai_sqlite_journal::JournalMode::for_db_path(&path).effective_db_path(&path)
 }
 
-/// The same path, with the parent directory created owner only, because the index duplicates session text into the database file.
-/// Best effort: the classifier needs the directory to exist.
+/// The same path, with the parent directory created owner only, because the
+/// index duplicates session text into the database file.
 pub(crate) fn search_db_path(root_dir: &Path) -> PathBuf {
     let _ = xai_grok_config::create_dir_all_owner_only(&root_dir.join("sessions"));
     db_path_in(root_dir)
@@ -30,7 +30,8 @@ pub(crate) fn sqlite_to_io_error(error: rusqlite::Error) -> io::Error {
     io::Error::other(format!("sqlite error: {error}"))
 }
 
-/// Rate-limits a repetitive log site: the first `cap` events go to `warn`, the rest to `debug`; the budget resets when the search cache is healed.
+/// Rate-limits a repetitive log site: the first `cap` events go to `warn`,
+/// the rest to `debug`.
 pub(crate) struct HealAwareLogCounter {
     count: AtomicU64,
     epoch_seen: AtomicU64,

@@ -8,17 +8,14 @@ use crate::ext::Extensions;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ToolDescription {
-    /// Tool name (e.g. "web_search", "read_file") that is called by
-    /// the model.
+    /// Tool name (e.g. "web_search", "read_file") that is called by the model.
     pub name: String,
 
-    /// Optional namespace grouping (e.g. "github", "slack").
-    /// None for xAI native tools.
+    /// Optional namespace grouping (e.g. "github", "slack"). None for xAI native tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
 
-    /// Display name (e.g. "Web Search") can be shown to the model.
-    /// If absent, derive the title from 'name'.
+    /// Display name (e.g. "Web Search") can be shown to the model. If absent, derive the title from 'name'.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
@@ -29,18 +26,11 @@ pub struct ToolDescription {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arguments_schema: Option<Value>,
 
-    /// High-level tool kind (stable snake_case, e.g. "read"), set by the tool
-    /// server so consumers can group tools by kind. `None` if undeclared.
+    /// High-level tool kind (stable snake_case, e.g. "read"), set by the tool server so consumers can group tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
 
-    /// Metadata attached by downstream libraries to support
-    /// custom tool behavior. NOT serialized and NOT sent over
-    /// the wire.
-    ///
-    /// Note: 'Extensions' always compares as equal (it carries opaque
-    /// runtime data), so 'ToolDescription's derived 'PartialEq' ignores
-    /// this field. See 'Extensions' for details.
+    /// Metadata attached by downstream libraries to support custom tool behavior.
     #[serde(skip)]
     pub extra: Extensions,
 }
@@ -81,12 +71,6 @@ impl ToolDescription {
     }
 
     /// Derive structured arguments from the attached `arguments_schema`.
-    ///
-    /// **Lossy** — this only extracts flat, top-level properties and a
-    /// limited subset of JSON Schema keywords (see
-    /// [`parse_arguments_from_schema_lossy`](crate::schema_utils::parse_arguments_from_schema_lossy)
-    /// for the full list). Used by UI/render helpers that do not speak full
-    /// JSON Schema.
     pub fn to_arguments_lossy(&self) -> Vec<ToolArgument> {
         self.arguments_schema
             .as_ref()
@@ -170,8 +154,7 @@ pub struct ToolArgument {
     /// Human-readable description of the argument.
     pub description: String,
 
-    /// Type of the argument. Accepts both a single JSON Schema type
-    /// ("string") and an array of types ("string", "null").
+    /// Type of the argument.
     #[serde(rename = "type", default)]
     pub arg_type: SchemaType,
 
@@ -179,8 +162,7 @@ pub struct ToolArgument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<serde_json::Value>,
 
-    /// Whether the argument is required.
-    /// Defaults to true. Omitted from JSON when true.
+    /// Whether the argument is required. Defaults to true. Omitted from JSON when true.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub required: bool,
 
@@ -379,11 +361,9 @@ impl SchemaType {
         Self::default()
     }
 
-    /// The "primary" (first non-null) type, used for classification.
-    ///
-    /// For `Single(t)` this is just `t`.
-    /// For `Multiple([String, Null])` this is `String`.
-    /// For `Multiple([Null])` or bare `Single(Null)` this is `Null`.
+    /// The "primary" (first non-null) type, used for classification. For
+    /// `Single(t)` this is `t`. For `Multiple([String, Null])` this is
+    /// `String`.
     pub fn primary_type(&self) -> ArgumentType {
         match self {
             Self::Single(t) => *t,
@@ -430,11 +410,8 @@ impl SchemaType {
         }
     }
 
-    /// Returns `true` when **any** type in the union is numeric
-    /// (integer or number).
-    ///
-    /// Numeric bounds (`minimum`, `maximum`, etc.) are only meaningful
-    /// when this returns `true`.
+    /// Returns `true` when **any** type in the union is numeric (integer or
+    /// number).
     pub fn is_numeric(&self) -> bool {
         match self {
             Self::Single(t) => t.is_numeric(),

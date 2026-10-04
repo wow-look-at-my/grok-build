@@ -46,9 +46,8 @@ impl PipeReader {
         std::mem::take(&mut Self::lock_buffer(&self.buffer))
     }
 
-    /// Wait for EOF (pipe closed by all writers) at most [`KILL_REAP_TIMEOUT`], then return everything read so far. Callers only join after the child was reaped or killed, so EOF is normally immediate.
-    /// The bound is a backstop for writers that outlive the command and keep the pipe open, like a background descendant (`printf hi; sleep 30 &`).
-    /// A process wedged in uninterruptible kernel I/O (D-state) also holds the pipe open, and not even SIGKILL moves it.
+    /// Wait for EOF (pipe closed by all writers) at most
+    /// [`KILL_REAP_TIMEOUT`], then return everything read so far.
     async fn join_bounded(mut self) -> Vec<u8> {
         if time::timeout(KILL_REAP_TIMEOUT, &mut self.task)
             .await
@@ -110,8 +109,7 @@ impl AsyncTerminalRunner for LocalTerminalRunner {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        // Detach from the controlling terminal so child processes (e.g. GPG pinentry) cannot open /dev/tty and corrupt the TUI.
-        // (This also makes the child its own session/group leader, which the ProcessGroup attach below relies on.)
+        // Detach from the controlling terminal so child processes (e.g. GPG pinentry) cannot open /dev/tty.
         xai_grok_tools::util::detach_command(&mut cmd);
         xai_grok_sandbox::child_net::restrict_child_network(&mut cmd);
 
@@ -121,8 +119,9 @@ impl AsyncTerminalRunner for LocalTerminalRunner {
             .spawn()
             .map_err(|e| TerminalError::Other(format!("Failed to start shell: {e}")))?;
 
-        // Own the whole tree, not just the direct shell On timeout the group is killed so grandchildren can't keep running (and can't hold the output pipes open past the kill)
-        // This is the same pattern as `gateway_bridge::local_workspace_supervisor` The group kill is extra on top of the direct kill, so a failure to create or attach the group only logs and the shell keeps running
+        // Own the whole tree, not the direct shell On timeout the group is
+        // killed so grandchildren cannot keep running (and cannot hold the
+        // output pipes open past the kill) This is the same pattern.
         let process_group = match xai_tty_utils::ProcessGroup::new() {
             Ok(mut group) => {
                 if let Err(e) = group.attach(&child) {
@@ -158,9 +157,9 @@ impl AsyncTerminalRunner for LocalTerminalRunner {
                 .code(),
             Err(_) => {
                 timed_out = true;
-                // Kill the direct child AND the whole group (grandchildren) Then return the synthetic timeout result without waiting for the corpse: `timed_out: true` already tells the caller everything
-                // A D-state child would never become reapable anyway Both kills are unconditional: `kill()` on a group whose attach failed is a silent no-op The direct `start_kill` is the guaranteed floor (same as `util/subprocess.rs`)
-                // The kills close the pipes, so the bounded joins below return immediately in the normal case The abandoned child goes to tokio's orphan reaper
+                // Kill the direct child AND the whole group (grandchildren)
+                // Then return the synthetic timeout result without waiting
+                // for the corpse.
                 if let Err(e) = child.start_kill() {
                     tracing::warn!("Failed to kill timed-out process: {e}");
                 }
@@ -174,8 +173,6 @@ impl AsyncTerminalRunner for LocalTerminalRunner {
         };
 
         // Join concurrently (worst case one reap bound, not one per pipe).
-        // The joins are bounded on the natural-exit arm too
-        // A background descendant that outlives the shell (`printf hi; sleep 30 &`) holds the pipes open past the child's exit
         let (stdout_result, stderr_result) =
             tokio::join!(stdout_reader.join_bounded(), stderr_reader.join_bounded());
 
@@ -264,26 +261,24 @@ mod tests {
     #[cfg(unix)]
     async fn test_timeout_kills_grandchildren_and_returns_promptly() {
         let mut request = make_request("sleep 5 & echo bgpid=$!; sleep 5");
-        // Long enough that spawning the shell and reading its first line wins
-        // the race on a loaded runner -- at 300ms the kill sometimes landed
-        // before `bgpid=` was ever collected -- and still nowhere near the 5s
-        // sleeps this must not wait for.
+        // Long enough that spawning the shell and reading its first line wins the race on a loaded runner.
         request.timeout = std::time::Duration::from_millis(1500);
 
         let started = std::time::Instant::now();
         let result = LocalTerminalRunner.run(request).await.unwrap();
 
         assert!(result.timed_out, "run should report the timeout");
-        // The bound covers the 0.3s request timeout plus the pipe EOF from the group kill (normally instant, at worst KILL_REAP_TIMEOUT)
-        // Anything near the 5s sleeps means we waited for the grandchild
+        // The bound covers the 0.3s request timeout plus the pipe EOF from
+        // the group kill (normally instant, at worst KILL_REAP_TIMEOUT).
         assert!(
             started.elapsed() < std::time::Duration::from_secs(4),
             "timeout path must not wait for the killed tree (took {:?})",
             started.elapsed()
         );
 
-        // Outcome: the background grandchild must actually be dead, proving the group kill reached it
-        // Poll briefly: the SIGKILL is delivered synchronously but init may reap the orphan a beat later
+        // Outcome: the background grandchild must be dead, proving the group
+        // kill reached it Poll briefly: the SIGKILL is delivered
+        // synchronously but init may reap the orphan a beat later
         let bg_pid = result
             .combined_output
             .lines()

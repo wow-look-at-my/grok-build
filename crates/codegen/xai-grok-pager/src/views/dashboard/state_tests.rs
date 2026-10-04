@@ -109,7 +109,7 @@ fn persisted_row_id_invalid() {
     assert!(PersistedRowId::from_key("garbage").is_none());
     // top:<empty> rejected.
     assert!(PersistedRowId::from_key("top:").is_none());
-    // Stale subagent-row keys are ignored, including ones that used to parse.
+    // Stale subagent-row keys are ignored, including ones.
     assert!(PersistedRowId::from_key("sub:p-1:c-1").is_none());
     assert!(PersistedRowId::from_key("sub:parent-x:abc:def:ghi").is_none());
     assert!(PersistedRowId::from_key("sub::child").is_none());
@@ -155,7 +155,6 @@ fn gc_drops_stale_ids() {
     let mut state = DashboardState::new();
     state.pinned.insert(DashboardRowId::TopLevel(AgentId(7)));
     state.reorder.push(DashboardRowId::TopLevel(AgentId(7)));
-    // Alive predicate says agent 7 no longer exists.
     state.gc_stale_refs(&|_| false);
     assert!(state.pinned.is_empty());
     assert!(state.reorder.is_empty());
@@ -260,8 +259,7 @@ fn ctrl_g_toggles_grouping_ctrl_s_does_not() {
         "Ctrl+G must emit DashboardToggleGrouping",
     );
 
-    // Ctrl+S on the empty `+ New Agent` button is "send + open"
-    // (create and open detail), NOT a grouping toggle
+    // Ctrl+S on the empty `+ New Agent` button is "send + open" (create and open detail), NOT a grouping toggle
     let ctrl_s = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
     assert!(
         matches!(
@@ -488,7 +486,7 @@ fn gc_preserves_order_of_remaining_reorder_entries() {
     assert_eq!(state.reorder, vec![alive1, alive2, alive3]);
 }
 
-/// Two different pinned rows coexist.
+/// Different pinned rows coexist.
 #[test]
 fn pin_two_different_rows_coexist() {
     let mut state = DashboardState::new();
@@ -732,8 +730,7 @@ fn rename_mode_routes_bracketed_paste_only_to_rename_editor() {
 fn worktree_dialog_cancel_restores_stashed_prompt_state() {
     let mut state = DashboardState::new();
     let reg = crate::actions::ActionRegistry::defaults();
-    // Simulate the prompt-send path: the prompt is stashed, the dialog
-    // is opened, and the dispatch input is cleared.
+    // Simulate the prompt-send path: the prompt is stashed, the dialog is opened, and the dispatch input is cleared.
     state.dispatch.set_text("fix the bug ");
     let draft_end = state.dispatch.text().len();
     state.dispatch.set_cursor(draft_end);
@@ -840,9 +837,7 @@ fn esc_closes_peek_first() {
 }
 
 fn state_with_open_peek() -> DashboardState {
-    // PeekPanelState::new seeds focus from load_vim_mode(); pin off so
-    // older tests that assume a focused reply don't depend on config /
-    // process cache. Vim tests set true and restore themselves.
+    // PeekPanelState::new seeds focus from load_vim_mode(); pin off so older tests that assume a focused reply don't depend.
     crate::appearance::cache::set_vim_mode(false);
     let mut s = make_state_with_selection();
     s.peek = Some(super::super::peek::PeekPanelState::new(
@@ -859,8 +854,6 @@ fn state_with_open_peek() -> DashboardState {
 fn peek_unfocused_editing_chords_do_not_leak_to_dispatch() {
     let mut state = state_with_open_peek();
     let reg = crate::actions::ActionRegistry::defaults();
-    // Hidden new-session draft, caret at END (where Backspace bites;
-    // set_text alone parks it at 0).
     state.dispatch.set_text("hidden draft");
     state.dispatch.set_cursor(state.dispatch.text().len());
     // Tab → unfocus the reply (it becomes a row-nav surface).
@@ -1344,7 +1337,6 @@ fn peek_arrows_switch_selected_agent() {
 fn peek_arrows_move_caret_when_reply_has_content() {
     let mut state = state_with_open_peek();
     let reg = crate::actions::ActionRegistry::defaults();
-    // Two-line draft (caret at the start after set_text).
     state.peek_reply.set_text("line one\nline two");
 
     // Down must NOT switch agents — it moves the caret down a line.
@@ -1394,8 +1386,7 @@ fn dispatch_arrows_move_caret_with_content_navigate_when_empty() {
         InputOutcome::Action(Action::DashboardSelectNext)
     ));
 
-    // Non-empty multi-line prompt → Up/Down edit the caret, never
-    // switching the selected row.
+    // Non-empty multi-line prompt → Up/Down edit the caret, never switching the selected row.
     let mut typed = make_state_with_selection();
     typed.dispatch.set_text("line one\nline two");
     let down = typed.handle_key(&KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &reg);
@@ -1465,12 +1456,10 @@ fn peek_ctrl_keys_fall_through_not_typed() {
     let reg = crate::actions::ActionRegistry::defaults();
     let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
     let _ = state.handle_key(&ctrl_a, &reg);
-    // 'a' must not have been typed into the reply (Ctrl+A is the
-    // caret-to-start editing chord, not text input).
+    // 'a' must not have been typed into the reply (Ctrl+A is the caret-to-start editing chord, not text input).
     assert!(state.peek_reply.text().is_empty());
 
-    // A registry-bound dashboard chord still falls through to its
-    // action with the peek open (Ctrl+T → pin toggle).
+    // A registry-bound dashboard chord still falls through to its action with the peek open (Ctrl+T → pin toggle).
     let ctrl_t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
     assert!(
         matches!(
@@ -1540,7 +1529,6 @@ fn peek_arrows_navigate_options_and_enter_answers() {
     ));
     assert_eq!(state.peek.as_ref().unwrap().selected_option, Some(0));
 
-    // Now Down moves within the options to option 1.
     assert!(matches!(
         state.handle_key(&down, &reg),
         InputOutcome::Changed
@@ -1554,7 +1542,6 @@ fn peek_arrows_navigate_options_and_enter_answers() {
     ));
     assert_eq!(state.peek.as_ref().unwrap().selected_option, Some(1));
 
-    // Enter answers the selected option (index 1 → "deny").
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     match state.handle_key(&enter, &reg) {
         InputOutcome::Action(Action::DashboardPermissionSelect {
@@ -1572,7 +1559,7 @@ fn peek_arrows_navigate_options_and_enter_answers() {
     let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
     let _ = state.handle_key(&up, &reg);
     assert_eq!(state.peek.as_ref().unwrap().selected_option, Some(0));
-    // Up again at the FIRST option spills out to the previous row.
+    // Up again at the FIRST option spills out to the row.
     assert!(matches!(
         state.handle_key(&up, &reg),
         InputOutcome::Action(Action::DashboardSelectPrev)
@@ -1646,12 +1633,10 @@ fn peek_reject_option_accepts_typed_feedback() {
     ));
     let reg = crate::actions::ActionRegistry::defaults();
 
-    // With no option selected, typing a letter is consumed — no feedback
-    // composed and it doesn't leak into the reply buffer.
+    // With no option selected, typing a letter is consumed — no feedback composed and it doesn't leak.
     let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), &reg);
     assert!(state.peek_reply.text().is_empty());
 
-    // Select the reject option (index 1 → key `2`), then type feedback.
     let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), &reg);
     assert_eq!(state.peek.as_ref().unwrap().selected_option, Some(1));
     for c in ['n', 'o', 'p', 'e'] {
@@ -1683,8 +1668,8 @@ fn peek_clear_wipes_undo_so_ctrl_z_cannot_resurrect_draft() {
     // Simulate the row-change / lifecycle clear.
     state.clear_peek_reply();
     assert!(state.peek_reply.text().is_empty());
-    // Ctrl+Z while the (now different-agent) reply is focused must
-    // NOT bring the old draft back.
+    // Ctrl+Z while the (now different-agent) reply is focused must NOT bring
+    // the draft back.
     let _ = state.handle_key(
         &KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL),
         &reg,
@@ -1934,7 +1919,7 @@ fn peek_ask_question_answer_routing() {
     let mut state = make_state_with_selection();
     let mut f = peek_fields_for_test("Awaiting your input");
     f.question = Some("Which approach?".into());
-    // Two real options and an appended "Other" free-text row
+    // Real options and an appended "Other" free-text row
     f.options = vec![
         ("Redis".into(), "Redis".into()),
         ("In-memory".into(), "In-memory".into()),
@@ -1964,8 +1949,6 @@ fn peek_ask_question_answer_routing() {
         other => panic!("expected DashboardQuestionAnswer, got {other:?}"),
     }
 
-    // Select the "Other" row (index 2 → key `3`), type free-text, Enter
-    // → freeform answer.
     let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), &reg);
     assert_eq!(state.peek.as_ref().unwrap().selected_option, Some(2));
     for c in ['s', 'q', 'l'] {
@@ -2007,8 +1990,7 @@ fn peek_tab_toggles_focus_and_typing_refocuses() {
 #[test]
 fn vim_peek_opens_unfocused_jk_nav_enter_focuses() {
     let mut state = state_with_open_peek();
-    // Fixture pins vim off; re-enable and rebuild so the panel is
-    // born unfocused under vim.
+    // Fixture pins vim off; re-enable and rebuild so the panel is born unfocused under vim.
     crate::appearance::cache::set_vim_mode(true);
     state.peek = Some(super::super::peek::PeekPanelState::new(
         DashboardRowId::TopLevel(AgentId(0)),
@@ -2165,8 +2147,7 @@ fn dispatch_mouse_drag_selects_text() {
     for (kind, column) in [
         (MouseEventKind::Down(MouseButton::Left), 4),
         (MouseEventKind::Drag(MouseButton::Left), 12),
-        // The drag continues past the right edge of the box and is
-        // released there; the selection must keep extending.
+        // The drag continues past the right edge of the box and is released there; the selection must keep extending.
         (MouseEventKind::Drag(MouseButton::Left), 70),
         (MouseEventKind::Up(MouseButton::Left), 70),
     ] {
@@ -2321,9 +2302,7 @@ fn esc_with_selection_deselects() {
 fn enter_on_focused_button_with_empty_prompt_emits_create_with_detail() {
     use crate::app::actions::Action;
     let mut state = DashboardState::new();
-    // Fresh state defaults to button-focused; pin that
-    // precondition so a future regression doesn't quietly
-    // flip the default away from the button.
+    // Fresh state defaults to button-focused; pin that precondition so a future regression doesn't quietly flip the default away.
     assert!(state.new_agent_button_focused());
     let reg = crate::actions::ActionRegistry::defaults();
     let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
@@ -2479,17 +2458,14 @@ fn esc_cascade_blurs_then_deselects_then_exits() {
     assert!(!state.list_focused, "input focused by default");
     let reg = crate::actions::ActionRegistry::defaults();
     let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-    // 1: blur the input to the list (selection survives).
     let first = state.handle_key(&key, &reg);
     assert!(matches!(first, InputOutcome::Changed));
     assert!(state.list_focused, "first Esc unfocuses the input");
     assert!(state.selected.is_some(), "selection survives the blur");
-    // 2: deselect the row.
     let second = state.handle_key(&key, &reg);
     assert!(matches!(second, InputOutcome::Changed));
     assert!(state.selected.is_none());
     assert!(state.new_agent_button_focused());
-    // 3: exit.
     let third = state.handle_key(&key, &reg);
     assert!(
         matches!(third, InputOutcome::Action(Action::ExitDashboard)),
@@ -2805,7 +2781,7 @@ fn vim_on_jk_type_into_input_when_focused() {
     crate::appearance::cache::set_vim_mode(false);
 }
 
-/// Tab toggles the two-focus model: input bar ↔ overview list.
+/// Tab toggles those-focus model: input bar ↔ overview list.
 #[test]
 fn tab_toggles_input_and_list_focus() {
     let reg = crate::actions::ActionRegistry::defaults();
@@ -3057,7 +3033,7 @@ fn enter_on_peek_reply_paste_chip_expands() {
     let reg = crate::actions::ActionRegistry::defaults();
     state.peek.as_mut().unwrap().focused = true;
     let pasted = "a\nb\nc";
-    // Peek reply is compact → 2-line threshold; 3 lines still chips.
+    // Peek reply is compact → 2-line threshold; a few lines still chips.
     let _ = state.handle_input(&Event::Paste(pasted.to_string()), &reg);
     assert_eq!(state.peek_reply.textarea.elements().len(), 1);
     state.peek_reply.set_cursor(0);
@@ -3273,8 +3249,7 @@ fn bracketed_paste_with_peek_open_goes_to_reply() {
         DashboardRowId::TopLevel(AgentId(0)),
         peek_fields_for_test("Idle"),
     )));
-    // Unfocused (Tab → row nav) — paste must still target the reply
-    // and re-focus it ("pasting implies an intent to reply").
+    // Unfocused (Tab → row nav) — paste must still target the reply and re-focus it.
     state.peek.as_mut().unwrap().focused = false;
     let outcome = state.handle_input(&Event::Paste("hello\nworld".to_string()), &reg);
     assert!(matches!(outcome, InputOutcome::Changed));
@@ -3986,8 +3961,9 @@ fn stashed_peek_reply_dropped_when_question_active() {
     );
 }
 
-// `/` literal and `Ctrl+/` search mode (replaces the old behaviour where `/` entered a filter and
-// silently swallowed prompts starting with a filter prefix).
+// `/` literal and `Ctrl+/` search mode (replaces the behaviour where `/`
+// entered a filter and silently swallowed prompts starting with a filter
+// prefix).
 
 /// `/` types a literal slash into the prompt — it no longer
 /// enters a filter mode. (Filtering moved to `Ctrl+/`.)
@@ -4170,8 +4146,7 @@ fn single_click_on_row_attaches_immediately() {
         }
         other => panic!("expected DashboardAttach on single click, got {other:?}"),
     }
-    // The clicked row also becomes selected so a follow-up Esc
-    // returns the cursor to where the user clicked.
+    // The clicked row also becomes selected so a follow-up Esc returns the cursor to where the user clicked.
     assert_eq!(state.selected.as_ref(), Some(&row_id));
 }
 
@@ -4249,8 +4224,7 @@ fn slash_model_dropdown_click_selects_model_not_session_row() {
     );
     state.models.update_catalog(available);
     state.models.set_current(model_id, None);
-    // Mirror how the real dashboard types into the dispatch box:
-    // caret at end so `/model ` is in the args phase.
+    // Mirror how the real dashboard types into the dispatch box: caret at end so `/model ` is in the args phase.
     state.dispatch.set_text("/model ");
     let end = state.dispatch.text().len();
     state.dispatch.textarea.set_cursor(end);
@@ -4436,8 +4410,7 @@ fn idle_overflow_vim_hl_focus_gated() {
     assert!(show_all_after_l, "list-focused vim `l` must reveal");
     assert!(!show_all_after_h, "list-focused vim `h` must re-fold");
 
-    // vim ON with the INPUT focused (list_focused == false) and an empty draft —
-    // `h`/`l` must type into the prompt, never toggle show-all.
+    // vim ON with the INPUT focused (list_focused == false) and an empty draft — `h`/`l` must type into the prompt.
     crate::appearance::cache::set_vim_mode(true);
     let mut state = DashboardState::new();
     state.focus_idle_overflow();
@@ -4475,7 +4448,7 @@ fn idle_overflow_esc_focuses_new_agent_button() {
     );
 }
 
-/// The overflow cursor is mutually exclusive with the other three
+/// The overflow cursor is mutually exclusive with the others
 /// cursor targets — focusing any of them clears it.
 #[test]
 fn focusing_other_targets_clears_idle_overflow() {
@@ -4587,8 +4560,8 @@ fn section_hover_sets_and_clears_hovered_section() {
     assert_eq!(state.hovered_section, None);
 }
 
-/// `focus_section` / `focus_row` / `focus_new_agent_button` keep the
-/// three cursor targets mutually exclusive.
+/// `focus_section` / `focus_row` / `focus_new_agent_button` keep
+/// those cursor targets mutually exclusive.
 #[test]
 fn cursor_targets_are_mutually_exclusive() {
     let mut state = DashboardState::new();
@@ -4694,7 +4667,6 @@ fn shortcuts_modal_key_toggles_inline_expand() {
         expanded_ids: std::collections::HashSet::new(),
         mode: crate::views::shortcuts_help::ShortcutsHelpMode::Browse,
     });
-    // Land on the first registry-backed hint (the section header is row 0).
     modal.state.selected = 1;
     state.shortcuts_modal = Some(modal);
 
@@ -4808,8 +4780,7 @@ fn nav_key_disarms_pending_delete_confirm() {
         "a nav keypress must disarm the pending delete confirm",
     );
 
-    // Control — Ctrl+X itself preserves the armed confirm so the
-    // dispatcher can observe it and delete.
+    // Control — Ctrl+X itself preserves the armed confirm so the dispatcher can observe it and delete.
     state.arm_delete(DashboardRowId::TopLevel(AgentId(0)));
     let _ = state.handle_key(
         &KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
@@ -4820,9 +4791,7 @@ fn nav_key_disarms_pending_delete_confirm() {
         "Ctrl+X must preserve the armed confirm for the dispatcher",
     );
 
-    // The actual repro path: peek is open by default for a selected row, and `handle_peek_key`
-    // CONSUMES Up/Down (agent switch) — the disarm must sit above that intercept or nav keys never
-    // reach it and the footer hint lingers.
+    // The actual repro path: peek is open by default for a selected row.
     state.arm_delete(DashboardRowId::TopLevel(AgentId(0)));
     state.peek = Some(super::super::peek::PeekPanelState::new(
         DashboardRowId::TopLevel(AgentId(0)),
@@ -5363,14 +5332,12 @@ fn section_vim_hl_collapse_expand() {
     let collapsed_after_h = state.is_section_collapsed(key_sec);
     let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE), &reg);
     let collapsed_after_l = state.is_section_collapsed(key_sec);
-    // Reset before asserting so a failure can't leak vim state
-    // into another test sharing this thread's cache.
+    // Reset before asserting so a failure can't leak vim state into another test sharing this thread's cache.
     crate::appearance::cache::set_vim_mode(false);
     assert!(collapsed_after_h, "list-focused vim `h` must collapse");
     assert!(!collapsed_after_l, "list-focused vim `l` must expand");
 
-    // vim ON with the INPUT focused (list_focused == false) and an empty draft —
-    // `h`/`l` must type into the prompt, never fold the section.
+    // vim ON with the INPUT focused (list_focused == false) and an empty draft — `h`/`l` must type into the prompt.
     crate::appearance::cache::set_vim_mode(true);
     let mut state = DashboardState::new();
     state.focus_section(key_sec);
@@ -5390,8 +5357,7 @@ fn section_vim_hl_collapse_expand() {
         "input-focused vim `h`/`l` must type into the dispatch input",
     );
 
-    // vim OFF — bare letters are dispatch-input edits, never
-    // collapse keys, even with a section header selected.
+    // vim OFF — bare letters are dispatch-input edits, never collapse keys, even with a section header selected.
     let mut state = DashboardState::new();
     state.focus_section(key_sec);
     let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE), &reg);
@@ -5484,8 +5450,7 @@ fn reanchor_keeps_live_section_cursor() {
 fn reanchor_moves_collapse_hidden_row_cursor_to_its_header() {
     let mut state = DashboardState::new();
     state.set_section_collapsed(SectionKey::State(RowState::Working), true);
-    // The row was selected while (say) Idle; it has since started
-    // Working — and "Working" is collapsed.
+    // The row was selected while (say) Idle; it has since started Working — and "Working" is collapsed.
     state.focus_row(DashboardRowId::TopLevel(AgentId(1)));
     let rows = vec![reanchor_test_row(1, RowState::Working)];
     state.reanchor_selection(&rows);
@@ -5588,8 +5553,7 @@ fn click_on_dispatch_box_focuses_input_in_both_modes() {
         state.dispatch_rect = Some(box_rect);
         let outcome = state.handle_mouse(&click);
         let focused_input = !state.list_focused;
-        // Reset before asserting so a failure can't leak vim state
-        // into another test sharing this thread's cache.
+        // Reset before asserting so a failure can't leak vim state into another test sharing this thread's cache.
         crate::appearance::cache::set_vim_mode(false);
         assert!(
             matches!(outcome, InputOutcome::Changed),
@@ -5610,7 +5574,7 @@ fn click_outside_dispatch_box_leaves_focus() {
     use ratatui::layout::Rect;
     let mut state = DashboardState::new();
     state.list_focused = true;
-    // Box occupies the first 3 rows; click well below it.
+    // Box occupies the first a few rows; click well below it.
     state.dispatch_rect = Some(Rect {
         x: 0,
         y: 0,
@@ -5666,7 +5630,6 @@ fn ctrl_backslash_only_bound_to_dashboard_navigation() {
 fn clamp_viewport_pulls_offset_when_rows_shrink() {
     let mut s = DashboardState::new();
     s.viewport_offset = 10;
-    // No selection, viewport=5, total=8 → max_offset = 3.
     s.clamp_viewport(None, 5, 8);
     assert_eq!(s.viewport_offset, 3);
 }
@@ -5678,8 +5641,6 @@ fn clamp_viewport_pulls_offset_when_rows_shrink() {
 fn clamp_viewport_snaps_to_selection() {
     let mut s = DashboardState::new();
     s.viewport_offset = 0;
-    // Selection at line 12, viewport=5, total=20.
-    // 12 >= offset + 5 (0 + 5) → offset = 12 + 1 - 5 = 8.
     s.clamp_viewport(Some(12), 5, 20);
     assert_eq!(s.viewport_offset, 8);
 }
@@ -5691,19 +5652,14 @@ fn clamp_viewport_snaps_offset_up_when_selection_scrolls_above() {
     let mut s = DashboardState::new();
     s.viewport_offset = 10;
     s.clamp_viewport(Some(2), 5, 20);
-    // sel_idx < offset → offset = sel_idx (2).
     assert_eq!(s.viewport_offset, 2);
 }
 
-/// zero-height viewport: clamp returns 0 (no visible
-/// rows means nothing to scroll to).
 #[test]
 fn clamp_viewport_handles_zero_viewport_height() {
     let mut s = DashboardState::new();
     s.viewport_offset = 5;
     s.clamp_viewport(Some(3), 0, 10);
-    // viewport_h = 0 → no snap-to-selection; max_offset = total -
-    // 0 = 10, so offset stays at 5.
     assert_eq!(s.viewport_offset, 5);
 }
 
@@ -5742,9 +5698,6 @@ fn handle_scroll_negative_moves_offset_up() {
     assert_eq!(s.viewport_offset, 6);
 }
 
-/// Saturating arithmetic guards the upper-edge: scrolling up
-/// when already at 0 stays at 0 (no underflow panic) and still
-/// flips the manual-scroll flag.
 #[test]
 fn handle_scroll_saturates_at_zero() {
     let mut s = DashboardState::new();
@@ -5761,8 +5714,6 @@ fn handle_scroll_saturates_at_zero() {
 fn clamp_viewport_skips_snap_when_manual_scroll_active() {
     let mut s = DashboardState::new();
     s.manual_scroll_active = true;
-    // viewport_h=5, total=50, selection at line 0 — without the
-    // skip, the snap would pull offset back to 0.
     s.viewport_offset = 20;
     s.clamp_viewport(Some(0), 5, 50);
     assert_eq!(
@@ -5780,7 +5731,6 @@ fn clamp_viewport_still_clamps_max_offset_when_manual_scroll_active() {
     s.manual_scroll_active = true;
     s.viewport_offset = 100;
     s.clamp_viewport(Some(0), 5, 20);
-    // max_offset = 20 - 5 = 15.
     assert_eq!(s.viewport_offset, 15);
 }
 
@@ -5795,8 +5745,6 @@ fn clear_manual_scroll_re_engages_snap_to_selection() {
     s.clear_manual_scroll();
     assert!(!s.manual_scroll_active);
     s.clamp_viewport(Some(0), 5, 50);
-    // With the flag cleared, the snap pulls the offset back so
-    // selection at line 0 is visible.
     assert_eq!(s.viewport_offset, 0);
 }
 
@@ -5806,8 +5754,6 @@ fn clear_manual_scroll_re_engages_snap_to_selection() {
 #[test]
 fn env_var_force_disables() {
     // SAFETY: the test temporarily mutates a process-wide env var.
-    // `serial_test`'s lock ensures no other test marked with the
-    // same `GROK_AGENT_DASHBOARD` key reads it concurrently.
     unsafe { std::env::set_var("GROK_AGENT_DASHBOARD", "0") };
     assert!(!super::super::dashboard_enabled());
     unsafe { std::env::remove_var("GROK_AGENT_DASHBOARD") };
@@ -6079,8 +6025,7 @@ fn location_picker_enter_selects_recent() {
 fn location_picker_tab_fills_selected_path() {
     let mut state = DashboardState::new();
     state.location_picker = Some(location_picker(vec![
-        // Paths outside $HOME so `display_path` leaves them absolute,
-        // keeping the assertion independent of the test machine's home.
+        // Paths outside $HOME so `display_path` leaves them absolute.
         location_candidate("/opt/projects/alpha", "alpha"),
         location_candidate("/opt/projects/beta", "beta"),
     ]));

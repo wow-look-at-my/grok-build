@@ -1,5 +1,4 @@
-//! PTY e2e tests for the runtime XTVERSION probe, run with:
-//! `cargo test -p xai-grok-pager-pty-harness --test pty_xtversion -- --ignored --nocapture`
+//! PTY e2e tests for the runtime XTVERSION probe.
 
 use std::time::Duration;
 
@@ -260,8 +259,7 @@ async fn unknown_brand_late_reply_swallowed_and_recorded() {
         "pager never emitted the XTVERSION query for an unknown terminal"
     );
 
-    // Answer ~1s after the query: far past any blocking read, still inside the window where the filter accepts a reply
-    // That window is anchored on query emission; welcome render can exceed it under parallel-test load
+    // Answer ~1s after the query: far past any blocking read, still inside the window where the filter accepts a reply That window is anchored.
     harness.update(Duration::from_millis(1000));
     harness
         .inject_keys(b"\x1bP>|PtyHarnessTerm 9.9\x1b\\")
@@ -295,8 +293,7 @@ async fn unknown_brand_keystrokes_interleaved_with_reply() {
         "pager never emitted the XTVERSION query for an unknown terminal"
     );
 
-    // Interleave right after the query so the filter is provably still accepting the reply
-    // Welcome render can exceed the acceptance window under parallel-test load
+    // Interleave right after the query so the filter is provably still accepting the reply Welcome render can exceed the acceptance window.
     harness.inject_keys(b"he").expect("type before reply");
     harness.update(Duration::from_millis(50));
     harness

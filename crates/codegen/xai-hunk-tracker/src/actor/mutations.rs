@@ -1,16 +1,4 @@
 //! Mutation commands for the HunkTrackerActor.
-//!
-//! These methods handle file changes and state mutations.
-//!
-//! ## Path Convention
-//!
-//! All paths in the hunk tracker are stored as **absolute paths**. This provides:
-//! - Unambiguous file identification
-//! - No need for working_dir context when processing paths
-//! - Simpler path handling across the codebase
-//!
-//! Callers should pass absolute paths to `record_agent_write`, `handle_file_change`,
-//! and `handle_file_deleted`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -24,18 +12,14 @@ use super::HunkTrackerActor;
 use super::file_utils::{classify_string, missing_content, read_file_bounded};
 use super::state::{FileContentState, FileHunkState};
 
-/// Log-line prefix emitted only when [`HunkTrackerActor::refresh_all_baselines`]
-/// runs a real scan. Test scan counters match on it; keep it the single source
-/// of truth for the string.
+/// Log-line prefix emitted only when [`HunkTrackerActor::refresh_all_baselines`] runs a real scan.
 pub const REFRESH_SCAN_LOG_PREFIX: &str = "refresh_all_baselines: completed in";
 
-/// Log-line prefix for the unchanged-git-state skip path of
-/// [`HunkTrackerActor::refresh_all_baselines`] (no scan ran).
+/// Log-line prefix for the unchanged-git-state skip path of [`HunkTrackerActor::refresh_all_baselines`] (no scan ran).
 pub const REFRESH_SKIP_LOG_PREFIX: &str = "refresh_all_baselines: git state unchanged";
 
-/// Strip a single trailing newline (`\r\n` or `\n`) for equality comparison. Git-stored content typically has exactly one
-/// trailing newline appended. We strip only one to avoid falsely treating files with meaningful trailing whitespace as
-/// clean. Bare `\r` (classic Mac) is intentionally out of scope.
+/// Strip a single trailing newline (`\r\n` or `\n`) for equality comparison.
+/// Git-stored content typically has exactly one trailing newline appended.
 fn strip_single_trailing_newline(content: &str) -> &str {
     content
         .strip_suffix("\r\n")
@@ -63,8 +47,8 @@ impl HunkTrackerActor {
         // but skip hunk computation — we don't diff these.
         if !current_state.is_diffable() {
             if !self.file_states.contains_key(&path) {
-                // For new files, establish baseline from git or previous_content
-                // Preserve previous_content when supplied (don't throw away available baseline)
+                // For new files, establish baseline from git or
+                // previous_content Preserve previous_content when supplied.
                 let baseline = if let Some(prev) = previous_content {
                     classify_string(prev)
                 } else {
@@ -233,8 +217,8 @@ impl HunkTrackerActor {
                 path: path.clone(),
                 is_agent_file: false,
             });
-            // If the baseline exists in HEAD but the file is missing/non-diffable
-            // on disk, compute a deletion hunk (e.g., staged deletion after soft reset).
+            // If the baseline exists in HEAD but the file is
+            // missing/non-diffable on disk.
             if has_diffable_baseline {
                 self.recompute_hunks(&path, None, HunkSource::External);
             }
@@ -278,8 +262,7 @@ impl HunkTrackerActor {
             .is_some_and(|s| s.baseline_accepted)
         {
             // Existing file with accepted baseline — check if content was
-            // restored to git HEAD (e.g., `git restore .`). If so, reset
-            // baseline so the file appears clean.
+            // restored to git HEAD (e.g., `git restore .`).
             let git_head_state = match preloaded_baseline.take() {
                 Some(b) => b,
                 None => self.read_baseline(&path).await,
@@ -295,8 +278,7 @@ impl HunkTrackerActor {
                 (FileContentState::LfsPointer { .. }, FileContentState::LfsPointer { .. }) => true,
                 (FileContentState::Symlink, FileContentState::Symlink) => true,
                 // Symlink on disk vs Full(target) in HEAD (or vice versa):
-                // git stores symlinks as plain text blobs, so the types
-                // differ even when the file is unchanged. Consult dirty cache.
+                // git stores symlinks as plain text blobs.
                 (FileContentState::Symlink, FileContentState::Full(_))
                 | (FileContentState::Full(_), FileContentState::Symlink) => {
                     let rel = path.strip_prefix(&self.working_dir).unwrap_or(&path);
@@ -341,9 +323,7 @@ impl HunkTrackerActor {
                 return;
             }
 
-            // Check if the file exists in git HEAD. If so, this is a meaningful
-            // deletion that should produce a deletion hunk (e.g., user ran
-            // `rm foo.txt` on a committed file).
+            // Check if the file exists in git HEAD.
             let baseline = self.read_baseline(&path).await;
             if matches!(baseline, FileContentState::Missing) {
                 return; // Not in HEAD either, nothing to track
@@ -372,9 +352,8 @@ impl HunkTrackerActor {
 
         // File IS tracked — existing logic below.
 
-        // If the file still exists on disk, this was a replace (e.g.,
-        // `git restore`), not a true deletion. Delegate to
-        // handle_file_change which handles baseline refresh correctly.
+        // If the file still exists on disk, this was a replace (e.g., `git
+        // restore`), not a true deletion.
         if path.exists() {
             self.handle_file_change(path).await;
             return;
@@ -393,7 +372,6 @@ impl HunkTrackerActor {
         };
 
         // Set current_content to Missing (deleted) and recompute hunks.
-        // Don't remove from file_states — the baseline still exists in HEAD.
         self.recompute_hunks(&path, None, source);
     }
 
@@ -426,9 +404,8 @@ impl HunkTrackerActor {
         }
     }
 
-    /// Refresh all baselines from the current git HEAD and re-read current content from disk for every tracked file. This is
-    /// called after a git HEAD/index change to reconcile stale state. For each tracked file: Re-read baseline from the new
-    /// HEAD; Re-read current content from disk; Drop files that are now clean (baseline == current, not agent files).
+    /// Refresh all baselines from the current git HEAD and re-read current
+    /// content from disk for every tracked file.
     pub(super) async fn refresh_all_baselines(&mut self) {
         self.refresh_all_baselines_except(&HashSet::new()).await;
     }
@@ -436,9 +413,9 @@ impl HunkTrackerActor {
     /// Same as `refresh_all_baselines` but skips paths in `skip`. Returns
     /// immediately when AgentOnly has nothing tracked (no per-file work to do).
     pub(super) async fn refresh_all_baselines_except(&mut self, skip: &HashSet<PathBuf>) {
-        // AgentOnly with nothing tracked has no work: it never auto-discovers, and the dirty/staged caches are read only for
-        // tracked files. Skipping avoids a full-worktree gix scan per git change. AllDirty must still scan — that is how it
-        // discovers newly-dirty files.
+        // AgentOnly with nothing tracked has no work: it never
+        // auto-discovers, and the dirty/staged caches are read only for
+        // tracked files.
         if self.mode == TrackingMode::AgentOnly && self.file_states.is_empty() {
             return;
         }
@@ -453,9 +430,8 @@ impl HunkTrackerActor {
             self.repo_sync_state = repo_sync_state;
         }
 
-        // AgentOnly never auto-discovers and only consults the caches for tracked paths, so the scan is scoped to them. Paths
-        // that can't be made working-dir-relative are dropped: the caches are keyed working-dir-relative, so such paths could
-        // never match a cache entry anyway.
+        // AgentOnly never auto-discovers and only consults the caches for
+        // tracked paths, so the scan is scoped to them.
         let scope: Option<Vec<PathBuf>> = match self.mode {
             TrackingMode::AllDirty => None,
             TrackingMode::AgentOnly => Some(
@@ -467,9 +443,8 @@ impl HunkTrackerActor {
             ),
         };
         match scope {
-            // Clear the caches rather than keep them: their entries predate the HEAD/index move that brought us here, and the
-            // repo_sync_state committed above would short-circuit every later refresh into serving those stale entries
-            // (get_staged_files, staged flags). Consistent-empty matches the scope: the caches describe nothing we track.
+            // Clear the caches rather than keep them: their entries predate
+            // the HEAD/index move that brought us here.
             Some(rels) if rels.is_empty() => {
                 self.git_dirty_cache.clear();
                 self.git_staged_cache.clear();
@@ -544,21 +519,18 @@ impl HunkTrackerActor {
                 | (FileContentState::LfsPointer { .. }, FileContentState::LfsPointer { .. })
                 | (FileContentState::Symlink, FileContentState::Symlink) => {
                     // Non-diffable states with matching types: consult git dirty cache.
-                    // The dirty cache was refreshed above so it reflects current HEAD.
                     let rel = path.strip_prefix(&self.working_dir).unwrap_or(&path);
                     !self.git_dirty_cache.contains(rel)
                 }
-                // LFS pointer baseline with different current content type (e.g. the
-                // normal smudge case: baseline=pointer, current=binary). These are
-                // NOT diffable but may be clean per git status. Consult dirty cache.
+                // LFS pointer baseline with different current content type (e.g. the normal smudge case:
+                // baseline=pointer, current=binary).
                 (FileContentState::LfsPointer { .. }, _)
                 | (_, FileContentState::LfsPointer { .. }) => {
                     let rel = path.strip_prefix(&self.working_dir).unwrap_or(&path);
                     !self.git_dirty_cache.contains(rel)
                 }
                 // Symlink on disk vs Full(target) in HEAD (or vice versa):
-                // git stores symlinks as plain text blobs, so the types
-                // differ even when the file is unchanged. Consult dirty cache.
+                // git stores symlinks as plain text blobs.
                 (FileContentState::Symlink, FileContentState::Full(_))
                 | (FileContentState::Full(_), FileContentState::Symlink) => {
                     let rel = path.strip_prefix(&self.working_dir).unwrap_or(&path);

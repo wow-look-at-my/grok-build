@@ -8,12 +8,10 @@ use crate::scrollback::state::ScrollbackState;
 use agent_client_protocol as acp;
 
 /// Refusal shown when a dispatch path can't proceed without a bound session.
-/// Every path in this module tree that says exactly this uses it; the action-specific variants ("No active session to delete") stay separate.
 pub(super) const NO_SESSION_NOTICE: &str = "No active session";
 
-/// The active agent's root session id, if any.
-/// Used to scope server-queue edit Effects to the foregrounded session.
-/// Root-only by construction, even under a subagent takeover: the read-only child queue pane keeps child actions out.
+/// The active agent's root session id, if any. Used to scope server-queue
+/// edit Effects to the foregrounded session.
 pub(super) fn active_agent_session_id(app: &AppView) -> Option<acp::SessionId> {
     let ActiveView::Agent(id) = app.active_view else {
         return None;
@@ -22,7 +20,6 @@ pub(super) fn active_agent_session_id(app: &AppView) -> Option<acp::SessionId> {
 }
 
 /// Apply a closure to the active agent (if any).
-/// When a subagent view is active, resolves to the **child** view so actions like SelectNext, GotoBottom, etc. target the visible view.
 pub(super) fn with_active_agent(app: &mut AppView, f: impl FnOnce(&mut AgentView)) {
     if let Some(agent) = get_active_agent_mut(app) {
         f(agent);
@@ -181,8 +178,6 @@ pub(crate) enum SwitchCause {
     Load,
     /// Triggered by the agent picker (dashboard attach / switch).
     Picker,
-    // There is no `Dashboard` variant: the dashboard attach path sets `DashboardState::attached_agent` directly and never reaches `switch_to_agent`
-    // Any future caller can re-add it
 }
 
 /// Show the launch-blocked `--yolo` notice once on the first agent view (the TUI owns the terminal, so stderr is gone); idempotent via `.take()`.
@@ -212,8 +207,7 @@ pub(super) fn sync_active_permission_mode_mirror(app: &mut AppView) {
     let reanchor = if is_yolo {
         Some("always-approve")
     } else if is_auto && app.auto_mode_gate {
-        // Gate-aware: never re-anchor the global mirror to "auto" when the feature gate is off, even if a stale per-session `auto_mode` survived
-        // (Defense-in-depth with the settings kill-switch fan-out.)
+        // Gate-aware: never re-anchor the global mirror to "auto" when the feature gate is off.
         Some("auto")
     } else if matches!(
         app.current_ui.permission_mode.as_deref(),
@@ -234,8 +228,8 @@ pub(super) fn sync_active_permission_mode_mirror(app: &mut AppView) {
 /// Dashboard-first flows that assign `Agent` directly must call the notice themselves.
 pub(crate) fn switch_to_agent(app: &mut AppView, target: AgentId, cause: SwitchCause) {
     // Structural backstop for the auth and folder-trust session gate
-    // Asserting the gate here makes "no session is created while `TrustState::Pending`" a property of the flow rather than of each call site
-    // This assert therefore never fires on the reachable gated paths
+    // Asserting the gate here makes "no session is created while
+    // `TrustState::Pending`" a property of the flow.
     debug_assert!(
         matches!(cause, SwitchCause::Picker) || app.session_startup_allowed(),
         "session creation via {cause:?} requires the startup gate open (auth + folder trust)"
@@ -261,9 +255,7 @@ pub(crate) fn switch_to_agent(app: &mut AppView, target: AgentId, cause: SwitchC
         _ => None,
     };
     app.active_view = ActiveView::Agent(target);
-    // Re-anchor the global permission-mode mirror to the now-active agent
-    // The cycle's `sync_active_auto_flag` (derived from the global) then can't copy a different agent's stale Auto/Always-Approve onto this one
-    // Per-session yolo/auto are the source of truth; the global is a write-only mirror
+    // Re-anchor the global permission-mode mirror to the now-active agent The cycle's `sync_active_auto_flag` (derived from the global).
     sync_active_permission_mode_mirror(app);
     // Seed the auto feature gate on the (possibly new) active agent's slash registry
     app.sync_permission_mode_slash_gate();

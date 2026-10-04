@@ -1,17 +1,7 @@
-#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
 
 //! Shared circuit breaker.
-//!
-//! Sliding-window-with-min-samples algorithm: the breaker trips when
-//! `sample_count >= min_samples AND error_rate >= error_rate_threshold`
-//! over the live window. Server- and client-side consumers run the same
-//! state machine and pick a preset via [`BreakerConfig::server`] or
-//! [`BreakerConfig::client`].
-//!
-//! The breaker is protocol-agnostic (it operates on [`Outcome`]); classification
-//! helpers exist for HTTP ([`RetryPolicy`]) and gRPC ([`GrpcRetryPolicy`], `grpc`
-//! feature).
 
 mod breaker;
 mod clock;
@@ -36,4 +26,3 @@ pub use registry::CircuitBreakerRegistry;
 pub use retry_policy::{Disposition, RetryPolicy};
 pub use state::{BreakerOpen, BreakerState, Outcome};
 
-// The crate's public surface is the re-exports above.

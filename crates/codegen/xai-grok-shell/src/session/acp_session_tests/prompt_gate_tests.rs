@@ -1,9 +1,4 @@
 //! `UserPromptSubmit` prompt-gate enforcement.
-//!
-//! These drive the SHIPPED turn path (`handle_prompt` calling `handle_turn_input`) with a real on-disk hook registry.
-//! A blocking hook must cancel the turn as `HookDenied` before the sampler runs.
-//! A synthetic origin must stay observe-only.
-//! A hook-denied completion must park the queue until the user re-engages.
 
 use super::support::*;
 use super::*;
@@ -821,8 +816,8 @@ async fn blocked_prompt_never_reaches_persistence() {
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             actor.hook_resolved_workspace_root = "/tmp".to_string();
             let actor = Arc::new(actor);
-            // The reason deliberately shares no word with the prompt
-            // The block annotation persists legitimately, so the probe below must only ever match the prompt text itself
+            // The reason deliberately shares no word with the prompt The
+            // block annotation persists legitimately, so the probe.
             *actor.hook_registry.borrow_mut() = Some(std::sync::Arc::new(prompt_gate_registry(
                 "if grep -q secret; then echo 'not allowed' >&2; exit 2; fi",
             )));

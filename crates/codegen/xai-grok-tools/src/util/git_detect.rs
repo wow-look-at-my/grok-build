@@ -1,7 +1,5 @@
 //! Detection of `git commit` / `gh pr create` / `gh pr merge` in terminal
-//! commands, shared by the bash tool's counter spans and the shell's PR-metric
-//! session signals (the shell inspects `BashOutput.command` / output at its
-//! tool-result chokepoint rather than receiving detection through the tool).
+//! commands, shared by the bash tool's counter spans.
 
 /// Git/GitHub operations detected in a successful terminal command.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

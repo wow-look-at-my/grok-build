@@ -9,9 +9,8 @@ use crate::error::HookError;
 use crate::event::HookEventName;
 use crate::matcher::HookMatcher;
 
-/// The loaded set of hooks, indexed by event type for fast lookup.
-/// This is a point-in-time snapshot.
-/// Edits to hook files on disk are only picked up by new sessions.
+/// The loaded set of hooks, indexed by event type for fast lookup. This is a
+/// point-in-time snapshot.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HookRegistry {
     hooks: HashMap<HookEventName, Vec<HookSpec>>,
@@ -958,8 +957,9 @@ mod tests {
             HookProvenance::Requirements
         );
 
-        // Managed-vs-managed pair: `$GROK_HOME/requirements.toml` arrives before `/etc/grok`, but the root-owned tier outranks it
-        // The no-disable rule and pinned fields must not resolve under the user-writable copy
+        // Managed-vs-managed pair: `$GROK_HOME/requirements.toml` arrives
+        // before `/etc/grok`, but the root-owned tier outranks it The
+        // no-disable rule and pinned fields must not resolve.
         let registry = registry_from_specs_deduped(vec![
             spec(
                 "requirements/user:pre[0]",

@@ -1,6 +1,4 @@
-//! Sandbox profiles. Built-in: `workspace`, `devbox`, `read-only`, `strict`,
-//! `off`. Custom profiles via `~/.grok/sandbox.toml` or `.grok/sandbox.toml`.
-//! A custom profile's `deny` list is kernel-enforced (read and write/rename) on both platforms.
+//! Sandbox profiles. Built-in: `workspace`, `devbox`, `read-only`, `strict`, `off`.
 
 #[cfg(all(feature = "enforce", unix))]
 use nono::{AccessMode, CapabilitySet};
@@ -73,10 +71,7 @@ pub enum ProfileName {
     Devbox,
     ReadOnly,
     Strict,
-    /// The reserved re-exec **jail** (path mounts via `--ro`/`--rw`/`--rn`), not
-    /// a nono/Landlock/Seatbelt profile. Magic and un-overridable: a project or
-    /// custom `sandbox.toml` profile cannot redefine it, and it never builds a
-    /// `SandboxProfile`/`SandboxManager`.
+    /// The reserved re-exec **jail** (path mounts via `--ro`/`--rw`/`--rn`), not a nono/Landlock/Seatbelt profile.
     Pathbox,
     Off,
     Custom(String),
@@ -184,9 +179,8 @@ fn load_config_file(path: &Path) -> Option<SandboxConfig> {
     }
 }
 
-/// `/dev/tty` always exists, but without a controlling terminal `open()` returns ENXIO and nono's apply aborts the entire
-/// ruleset. Other open errors (notably EISDIR on directory nodes) must not drop the path: directories are granted via
-/// [`DEVICE_DIRS`] / `allow_path`. A plain `File::open` EISDIR does not mean Landlock would reject the grant.
+/// `/dev/tty` always exists, but without a controlling terminal `open()`
+/// returns ENXIO and nono's apply aborts the entire ruleset.
 #[cfg(all(feature = "enforce", unix))]
 fn device_file_openable(path: &Path) -> bool {
     match std::fs::File::open(path) {
@@ -194,8 +188,7 @@ fn device_file_openable(path: &Path) -> bool {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
         // ENXIO/ENODEV: e.g. /dev/tty with no controlling terminal; PathFd materialization would abort the whole Landlock ruleset.
         Err(e) if matches!(e.raw_os_error(), Some(libc::ENXIO) | Some(libc::ENODEV)) => false,
-        // EISDIR, EACCES, etc.: still attempt the grant path
-        // allow_file may reject ExpectedFile; that only skips this entry, not the whole apply
+        // EISDIR, EACCES, etc.: still attempt the grant path allow_file may reject ExpectedFile; that only skips this entry.
         Err(_) => true,
     }
 }
@@ -283,9 +276,7 @@ impl ProfileName {
             caps = caps.allow_path(path_str, AccessMode::Read)?;
         }
 
-        // Read-write paths. nono/Landlock need the path to exist at apply time (it opens an O_PATH fd), but new files within a
-        // granted directory can be created freely after the sandbox is applied. Symlink children of grok_home fail closed unless
-        // the canonical dir is this home's same-named child or default ~/.grok/sessions.
+        // Read-write paths. nono/Landlock need the path to exist at apply time (it opens an O_PATH fd).
         let home = grok_home();
         for path in &profile.read_write {
             let Some(grant) = Self::read_write_grant_path(path, &home) else {
@@ -306,8 +297,9 @@ impl ProfileName {
         // Device special files (character devices like /dev/null, /dev/tty, etc.).
         for dev in DEVICE_FILES {
             let p = Path::new(dev);
-            // nono opens each entry read-only at apply time
-            // A node that exists but cannot be opened would abort the whole ruleset, not just itself
+            // nono opens each entry read-only at apply time A node that
+            // exists but cannot be opened would abort the whole ruleset, not
+            // itself
             if !device_file_openable(p) {
                 continue;
             }
@@ -344,9 +336,7 @@ impl ProfileName {
             apply_write_deny_paths_to_capability_set(&mut caps, &pairs, &profile.read_write)?;
         }
 
-        // Kernel deny (read and write): macOS Seatbelt rules; Linux via bwrap bind-over Key on an empty deny set, not profile
-        // type, so nothing unintentional is enforced. Globs become anchored Seatbelt regexes on macOS (a no-op here on Linux,
-        // where they are expanded and bound over at bwrap re-exec)
+        // Kernel deny (read and write): macOS Seatbelt rules.
         let (exact_deny, glob_deny) = partition_deny_entries(&profile.deny);
         let all_denied = effective_deny_paths(workspace, &exact_deny);
         if !all_denied.is_empty() {
@@ -408,17 +398,17 @@ impl ProfileName {
 
     fn resolve(&self, workspace: &Path, config: &SandboxConfig) -> anyhow::Result<SandboxProfile> {
         match self {
-            // Selected `off` is handled before resolve (empty CapabilitySet / early return in apply)
-            // Reaching here is almost always a custom profile with `extends = "off"` / `"none"`; return Err, never panic
+            // Selected `off` is handled before resolve (empty CapabilitySet /
+            // early return in apply) Reaching here is almost always a custom
+            // profile.
             Self::Off => anyhow::bail!(
                 "sandbox profile 'off' cannot be resolved as a base profile; \
                  choose a built-in base (workspace, devbox, read-only, strict)"
             ),
 
             // The pathbox jail is not a nono/Landlock/Seatbelt profile: it is
-            // applied by the re-exec jail (jail.rs) and `apply_sandbox` returns
-            // before reaching resolve. Reaching here means a call site skipped
-            // that interception — fail closed rather than build a hollow profile.
+            // applied by the re-exec jail (jail.rs) and `apply_sandbox`
+            // returns before reaching resolve.
             Self::Pathbox => anyhow::bail!(
                 "sandbox profile 'pathbox' is the path-mount jail, not a resolvable \
                  deny profile; it is applied by the re-exec jail, not SandboxManager"
@@ -435,9 +425,7 @@ impl ProfileName {
             }),
 
             Self::Devbox => {
-                // Everything writable except /data Can't grant "/" because Landlock has no deny_path; sub-path exceptions are only
-                // possible by not granting the parent. /data is excluded from read_write here (so it is not writable) but is
-                // deliberately NOT a kernel-deny. It stays readable via default_read.
+                // Everything writable except /data Can't grant "/" because Landlock has no deny_path.
                 let exclude = [PathBuf::from("/data")];
                 let mut read_write = vec![workspace.to_path_buf()];
                 if let Ok(entries) = std::fs::read_dir("/") {
@@ -497,9 +485,7 @@ impl ProfileName {
                 .chain(std::iter::once(home.join("Library")))
                 .filter(|p| p.exists())
                 .chain(std::iter::once(workspace.to_path_buf()))
-                // Read-only: AuthManager/config/hooks need the parent
-                // Landlock cannot carve children out of a write grant, so grok_home itself stays off read_write
-                // Only sessions/ is writable; events JSONL lives there
+                // Read-only: AuthManager/config/hooks need the parent Landlock cannot carve children out of a write grant.
                 .chain(std::iter::once(grok_home()))
                 .collect();
 
@@ -873,8 +859,7 @@ mod tests {
     #[test]
     #[cfg(all(feature = "enforce", unix))]
     fn custom_extends_devbox_has_no_data_in_deny() {
-        // Regression: devbox excludes /data via a local list, not profile.deny
-        // Inheriting it into the kernel deny set would wrongly read-deny /data and force fail-closed
+        // Regression: devbox excludes /data via a local list.
         let workspace = std::env::current_dir().unwrap();
         let config = SandboxConfig {
             profiles: HashMap::from([(
@@ -1190,9 +1175,7 @@ read_write = ["/tmp/ci-artifacts"]
             Ok(_) | Err(_) => {}
         }
 
-        // Directories must stay grantable
-        // On Linux, File::open returns EISDIR; on macOS it often succeeds
-        // Either way the probe must return true so directory devices (e.g. /dev/fd via DEVICE_DIRS) are not dropped.
+        // Directories must stay grantable On Linux, File::open returns EISDIR.
         let dir = std::env::temp_dir().join(format!("grok-sbx-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         match std::fs::File::open(&dir) {

@@ -1,8 +1,4 @@
 //! Shared filesystem core for the fs list/read ops.
-//!
-//! The shell-local `session::file_system`, [`ext_fs`](super::ext_fs), and [`client_fs`](super::client_fs) all list and read through here.
-//! A walk or read fix lands in all three at once.
-//! Each maps the neutral [`ListedEntry`] / [`ChunkPayload`] to its own wire shape (path form, timestamp format, type tags).
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -12,18 +8,13 @@ use ignore::{WalkBuilder, overrides::OverrideBuilder};
 use xai_grok_workspace_types::rpc::fs::FsReadEncoding;
 
 /// Hard cap on entries collected per list call before sorting.
-/// A pathological directory truncates (`truncated = true`) instead of ballooning memory.
-/// Every fs consumer shares this cap.
 pub const MAX_LIST_COLLECT: usize = 50_000;
 
 /// Server-side cap on a single ranged read's effective byte budget (`min(length, max_bytes)`).
-/// 4 MiB raw (about 5.3 MiB as base64) stays under the server's 8 MiB frame cap.
-/// Every fs read consumer shares this cap.
 pub const MAX_READ_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Resolve a ranged read's effective byte budget; every fs read consumer clamps through here so the policy cannot drift.
-/// An absent `length` means "to EOF", but the result is always capped at the caller's `max_bytes` and the hard [`MAX_READ_BYTES`] server limit.
-/// A short read is therefore expected; callers detect more data by comparing the returned bytes (at `offset`) against the file `size`.
+/// Resolve a ranged read's effective byte budget; every fs read consumer
+/// clamps through here so the policy cannot drift.
 pub fn clamp_read_length(length: Option<u64>, max_bytes: u64) -> u64 {
     length
         .unwrap_or(u64::MAX)
@@ -40,8 +31,6 @@ pub(super) struct FsWalk<'a> {
     pub include_globs: &'a [String],
     pub exclude_globs: &'a [String],
     /// When set, a symlink whose canonical target leaves this canonical root is excluded and not descended into.
-    /// A walk of a confined tree therefore cannot enumerate paths outside it.
-    /// `None` keeps the shell's unconfined behavior.
     pub confine_to_canonical_root: Option<PathBuf>,
 }
 
@@ -183,8 +172,6 @@ pub struct ListOptions<'a> {
 }
 
 /// Whether more entries exist than this page returned.
-/// Gating the cap term on `start < total` is what makes a `while truncated { offset += limit }` loop terminate.
-/// Once a client has consumed every collected entry the flag drops to false instead of reporting the (unreachable) over-cap remainder forever.
 fn page_truncated(start: usize, end: usize, total: usize, hit_cap: bool) -> bool {
     end < total || (hit_cap && start < total)
 }
@@ -243,7 +230,6 @@ pub enum ChunkPayload {
     /// Valid UTF-8 text (caller places it in a `content` field).
     Text(String),
     /// Base64 of the raw bytes (caller places it in a `contentBase64` field).
-    /// This is the payload when `base64` is requested or the bytes are not UTF-8.
     Base64(String),
 }
 
@@ -292,20 +278,16 @@ mod tests {
 
     #[test]
     fn page_truncated_signals_more_pages_within_collected_set() {
-        // 100 collected, no cap, page [0,10), so more remain
         assert!(page_truncated(0, 10, 100, false));
-        // Page [90,100) is the last, so nothing remains
         assert!(!page_truncated(90, 100, 100, false));
     }
 
     #[test]
     fn page_truncated_terminates_when_paging_past_collection_cap() {
-        // Cap hit, total clamped to 50 collected, limit 10.
         // Populated pages stay truncated (the listing is incomplete)
         assert!(page_truncated(0, 10, 50, true));
         assert!(page_truncated(40, 50, 50, true));
-        // Once the client pages past the collected window the flag drops
-        // A `while truncated { offset += limit }` loop terminates instead of fetching empty pages forever
+        // Once the client pages past the collected window the flag drops A `while truncated { offset += limit }` loop terminates instead.
         assert!(!page_truncated(50, 50, 50, true));
         assert!(!page_truncated(60, 50, 50, true));
     }

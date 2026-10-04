@@ -1,12 +1,4 @@
 //! Shared `reqwest::Client`s for uncredentialed sampling requests.
-//!
-//! Sharing the uncredentialed clients is safe because their builders take no config-derived input.
-//! Auth, extra headers, base URL, and User-Agent are applied per-request in `SamplingClient::post`.
-//! Stale connections are bounded by h2 keepalive (15s ping, 5s timeout), 90s idle-pool eviction, and the pool-less HTTP/1.1 first-retry rebuild.
-//! Connections whose per-session runtime died are discarded by hyper's checkout ready-check, with the retry loop covering the rest.
-//!
-//! Wire behavior is pinned by the `shared_http_wire` and `shared_http_kill_switch` binaries.
-//! `GROK_EXTRA_CA_BUNDLE` adds extra CA roots to these clients and the mTLS clients.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -93,7 +85,6 @@ pub(crate) fn client_http1() -> Result<reqwest::Client, reqwest::Error> {
 }
 
 /// Build a `reqwest::Client` for sampling with HTTP/2 and connection pooling.
-/// Env knobs are read once, when the shared client is first built.
 fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
     xai_grok_extra_ca::build_reqwest_client(configure_http2)
 }

@@ -1,25 +1,4 @@
 //! Integration tests for overlay-on-FUSE worktree creation and cleanup.
-//!
-//! These tests exercise the full e2e flow:
-//!   1. **Overlay creation**: detect FUSE+btrfs stack → create btrfs subvolume
-//!      as the overlay upper, mount overlayfs on top of the FUSE lower.
-//!   2. **Worktree creation**: create a worktree via overlay snapshot — snapshot
-//!      the upper dir, mount a new overlay with the snapshot as upper, verify
-//!      the worktree is a usable git repo.
-//!   3. **Manual cleanup**: remove overlay worktrees, clean up orphaned snapshots,
-//!      and bulk-clean worktrees via `cleanup_worktrees_in`.
-//!
-//! # Prerequisites
-//!
-//! These tests require a real FUSE+overlayfs+btrfs stack. They auto-skip when
-//! the infrastructure is not present by checking:
-//!   - `/proc/self/mountinfo` for an overlayfs mount with a FUSE lower layer
-//!   - The overlay upper dir is on btrfs
-//!
-//! A typical layout looks like:
-//!   lower: `<overlay-root>/fuse-lower`  (FUSE mount)
-//!   upper: `<overlay-root>/upper`       (btrfs subvolume)
-//!   mount: `<workspace>/repo`           (overlayfs)
 
 #![cfg(target_os = "linux")]
 
@@ -32,8 +11,8 @@ use xai_fast_worktree::{
 
 // ── Test infrastructure ──────────────────────────────────────────────────
 
-/// Parsed overlay environment, or `None` when the FUSE+overlay+btrfs
-/// stack is not available (CI, local laptop, hosts without the stack).
+/// Parsed overlay environment, or `None` when the FUSE+overlay+btrfs stack is
+/// not available.
 struct OverlayTestEnv {
     /// The overlayfs mount point (e.g., `/workspace/repo`).
     mount_point: PathBuf,
@@ -223,8 +202,7 @@ fn force_cleanup_snapshot(path: &Path) {
 fn force_unmount(path: &Path) {
     if path.exists() {
         // SAFETY: `c_path` is a valid, NUL-terminated CString that outlives
-        // the `umount2` call. MNT_DETACH performs a lazy unmount so it won't
-        // block even if the mount is busy.
+        // the `umount2` call.
         unsafe {
             let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
             libc::umount2(c_path.as_ptr(), libc::MNT_DETACH);
@@ -232,7 +210,7 @@ fn force_unmount(path: &Path) {
     }
 }
 
-// ── 1. Overlay = FUSE + btrfs subvolume ──────────────────────────────────
+// Overlay = FUSE + btrfs subvolume ──────────────────────────────────
 
 /// Verify detection: the source repo's overlay has a FUSE lower and btrfs upper.
 #[test]
@@ -249,8 +227,7 @@ fn test_detect_fuse_overlay_on_source_repo() {
     );
     assert!(
         env.lower_dir.exists() || {
-            // FUSE lower might return EIO if daemon crashed — that's fine,
-            // we just need to know it was detected.
+            // FUSE lower might return EIO if daemon crashed — that's fine, we need to know it was detected.
             eprintln!(
                 "NOTE: lower_dir {} not accessible (FUSE may be down)",
                 env.lower_dir.display()
@@ -339,7 +316,6 @@ fn test_overlay_mount_fuse_lower_btrfs_upper() {
     force_unmount(&mount_target);
     force_cleanup_snapshot(&snap_upper);
 
-    // Step 1: Snapshot the upper.
     let snap_result = std::process::Command::new("btrfs")
         .args([
             "subvolume",
@@ -351,11 +327,9 @@ fn test_overlay_mount_fuse_lower_btrfs_upper() {
         .expect("btrfs should work");
     assert!(snap_result.status.success(), "snapshot creation failed");
 
-    // Step 2: Create work dir + mount target.
     std::fs::create_dir_all(&work_dir).unwrap();
     std::fs::create_dir_all(&mount_target).unwrap();
 
-    // Step 3: Mount overlay.
     let mount_data = format!(
         "lowerdir={},upperdir={},workdir={},index=on",
         env.lower_dir.display(),
@@ -388,7 +362,6 @@ fn test_overlay_mount_fuse_lower_btrfs_upper() {
         "target should be a mountpoint"
     );
 
-    // Step 4: Verify the overlay is readable (files from lower + upper visible).
     // The .git dir comes from the upper (repo changes). The FUSE lower has the
     // base tree. Together they should look like the full repo.
     assert!(
@@ -401,7 +374,6 @@ fn test_overlay_mount_fuse_lower_btrfs_upper() {
         "overlay mount should expose repo files"
     );
 
-    // Step 5: Verify writable — writes go to the snapshot upper, not the FUSE lower.
     let test_file = mount_target.join(".overlay-write-test");
     std::fs::write(&test_file, "hello from overlay test").unwrap();
     assert!(test_file.exists());
@@ -422,7 +394,7 @@ fn test_overlay_mount_fuse_lower_btrfs_upper() {
     let _ = std::fs::remove_dir_all(&worktrees_dir);
 }
 
-// ── 2. Worktree = FUSE + snapshot ────────────────────────────────────────
+// Worktree = FUSE + snapshot ────────────────────────────────────────
 
 /// Create a worktree via `WorktreeBuilder` on the overlay source repo and
 /// verify it produced a valid git worktree with zero files copied (overlay
@@ -631,7 +603,7 @@ fn test_overlay_worktree_git_status() {
     let _ = remove_worktree(&result.worktree_path);
 }
 
-// ── 3. Manual cleanup ────────────────────────────────────────────────────
+// Manual cleanup ────────────────────────────────────────────────────
 
 /// `remove_worktree` on an overlay worktree should unmount + delete snapshot.
 #[test]
@@ -692,7 +664,7 @@ fn test_cleanup_worktrees_in_removes_overlay_worktrees() {
 
     let base_name = unique_name("wt-bulk");
 
-    // Two overlay worktrees under `<overlay_root>/worktrees/<base>-cleanup/`.
+    // Overlay worktrees under `<overlay_root>/worktrees/<base>-cleanup/`.
     let cleanup_dir = env
         .overlay_root
         .join("worktrees")
@@ -708,8 +680,6 @@ fn test_cleanup_worktrees_in_removes_overlay_worktrees() {
     }
 
     // Create worktrees that land inside our cleanup_dir structure.
-    // WorktreeBuilder places snapshots at <overlay_root>/worktrees/<dest_name>/
-    // so we need to use the overlay_root's worktrees dir as the parent for cleanup.
     let r_a = WorktreeBuilder::new(&env.mount_point, &dest_a).create();
     let r_b = WorktreeBuilder::new(&env.mount_point, &dest_b).create();
 
@@ -720,8 +690,7 @@ fn test_cleanup_worktrees_in_removes_overlay_worktrees() {
     assert!(r_a.worktree_path.exists());
     assert!(r_b.worktree_path.exists());
 
-    // Now clean up via cleanup_worktrees_in on the parent dir that contains .git
-    // The worktrees have .git so cleanup_worktrees_in should find them.
+    // Now clean up via cleanup_worktrees_in on the parent dir that contains .git The worktrees have .git.
     let report: CleanupReport = cleanup_worktrees_in(&cleanup_dir);
 
     eprintln!(
@@ -808,8 +777,6 @@ fn test_cleanup_orphaned_overlay_snapshots() {
         "orphaned metadata should be deleted after cleanup"
     );
 
-    // Note: report.removed counts ALL orphans cleaned up, which may include
-    // orphans from other tests or previous runs. We just verify our snapshot is gone.
 }
 
 /// Verify that metadata written during overlay worktree creation survives
@@ -863,8 +830,7 @@ fn test_overlay_metadata_survives_unmount() {
 
     // Cleanup.
     let _ = remove_worktree(&result.worktree_path);
-    // If remove_worktree didn't fully clean up (since we already unmounted),
-    // force cleanup.
+    // If remove_worktree didn't fully clean up (since we already unmounted), force cleanup.
     let snap_upper = wt_base.join("upper");
     force_cleanup_snapshot(&snap_upper);
     let _ = std::fs::remove_dir_all(&wt_base);
@@ -894,8 +860,7 @@ fn test_overlay_worktree_uses_dedicated_work_dir() {
         "overlay worktree should snapshot, not copy"
     );
 
-    // The live overlay mount's workdir must be the dedicated name, distinct from
-    // the source's "work" (read from mountinfo — robust to the wt_base layout).
+    // The live overlay mount's workdir must be the dedicated name.
     let workdir = overlay_workdir_for(&result.worktree_path)
         .expect("worktree should be a live overlay mount with a workdir");
     assert_eq!(

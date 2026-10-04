@@ -31,8 +31,7 @@ async fn mid_turn_slash_dropdown_esc_dismisses_not_cancel() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("stream started");
 
-    // Open the slash dropdown mid-turn
-    // "/mod" narrows to `/model`, whose description renders only in the dropdown (not in the typed text)
+    // Open the slash dropdown mid-turn "/mod" narrows to `/model`.
     inject_keys_paced(&mut harness, b"/mod");
     harness
         .wait_for_text("Switch the active model", Duration::from_secs(10))

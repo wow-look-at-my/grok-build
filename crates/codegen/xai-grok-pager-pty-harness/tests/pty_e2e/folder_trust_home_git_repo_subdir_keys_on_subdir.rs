@@ -30,8 +30,7 @@ async fn folder_trust_home_git_repo_subdir_keys_on_subdir() {
     )
     .expect("spawn pager");
 
-    // Check the trust store directly, not via `folder_is_trusted`: the assertions below query both the
-    // subdir and `$HOME` against the same store file.
+    // Check the trust store directly, not via `folder_is_trusted`.
     let store_path = content.home().join(".grok").join(TRUST_FILE_NAME);
 
     // The question renders (keyed on the subdir), and the store is empty first.

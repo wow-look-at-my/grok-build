@@ -206,9 +206,7 @@ fn classify_image_error_maps_io_unexpected_eof_to_truncated() {
     );
 }
 
-/// Minimal valid ICO wrapping one PNG frame. The `image` crate's `ico`
-/// feature is enabled, so `guess_format` returns `ImageFormat::Ico` —
-/// which is intentionally NOT on the inference-side allow-list.
+/// Minimal valid ICO wrapping one PNG frame.
 fn ico_with_png_frame() -> Vec<u8> {
     xai_test_utils::image::ico_with_png_frame(&png_bytes(8, 8), 8, 8)
 }
@@ -324,8 +322,7 @@ fn transcode_to_endpoint_png_leaves_large_gif_dimensions() {
 /// upscale would exceed MAX_TRANSCODE_DECODE_PIXELS — must not resize.
 #[test]
 fn transcode_to_endpoint_png_skips_upscale_when_post_resize_exceeds_budget() {
-    // 8000×2 = 16_000 px (under 16M). Short side 2 needs ×64 → 512_000×128 =
-    // 65_536_000 px (> 16M). Upscale must be skipped.
+    // Upscale must be skipped.
     let png = transcode_to_endpoint_png(&bmp_bytes(8000, 2))
         .expect("needs transcode")
         .expect("decode ok");
@@ -349,8 +346,6 @@ fn transcode_to_endpoint_png_handles_ico() {
     assert_eq!(mime, "image/png");
 }
 
-/// Corrupt GIF must surface as an error, not as `None` (caller would otherwise
-/// pass the broken bytes through and trip the inference backend with a 400).
 #[test]
 fn transcode_to_endpoint_png_corrupt_gif_is_err_not_none() {
     let mut gif = gif_bytes(8, 8);
@@ -467,7 +462,7 @@ fn jpeg_reaches_eoi_scans_through_restart_markers() {
     #[rustfmt::skip]
     let full: Vec<u8> = vec![
         0xFF, 0xD8,                                     // SOI
-        0xFF, 0xDD, 0x00, 0x04, 0x00, 0x02,             // DRI, interval 2
+        0xFF, 0xDD, 0x00, 0x04, 0x00, 0x02,
         0xFF, 0xDA, 0x00, 0x08, 1, 2, 3, 4, 5, 6,       // SOS header
         0x12, 0x34, 0xFF, 0x00, 0x56,                   // entropy + stuffed FF
         0xFF, 0xD0, 0x78, 0x9A,                         // RST0, more entropy
@@ -493,14 +488,14 @@ fn jpeg_reaches_eoi_walks_multiple_scans() {
     #[rustfmt::skip]
     let full: Vec<u8> = vec![
         0xFF, 0xD8,                                     // SOI
-        0xFF, 0xDA, 0x00, 0x08, 1, 2, 3, 4, 5, 6,       // SOS 1
-        0x11, 0x22, 0xFF, 0x00, 0x33,                   // entropy 1
-        0xFF, 0xDA, 0x00, 0x08, 1, 2, 3, 4, 5, 6,       // SOS 2
-        0x44, 0x55,                                     // entropy 2
+        0xFF, 0xDA, 0x00, 0x08, 1, 2, 3, 4, 5, 6,
+        0x11, 0x22, 0xFF, 0x00, 0x33,
+        0xFF, 0xDA, 0x00, 0x08, 1, 2, 3, 4, 5, 6,
+        0x44, 0x55,
         0xFF, 0xD9,                                     // EOI
     ];
     assert!(jpeg_reaches_eoi(&full));
-    let cut = full.len() - 3; // inside entropy 2
+    let cut = full.len() - 3;
     let Some(prefix) = full.get(..cut) else {
         panic!("cut {cut} past jpeg fixture of len {}", full.len());
     };
@@ -553,8 +548,7 @@ fn png_structurally_valid_valid_true_truncated_false() {
 #[test]
 fn png_structurally_valid_rejects_corrupt_crc() {
     let png = png_bytes(32, 32);
-    // Flip one byte inside the IDAT payload (past sig + IHDR chunk and
-    // the IDAT header, before the trailing IEND + CRCs).
+    // Flip one byte inside the IDAT payload.
     let mut corrupt = png.clone();
     let idat = corrupt
         .windows(4)
@@ -574,8 +568,6 @@ fn png_structurally_valid_rejects_corrupt_crc() {
 #[test]
 fn jpeg_reaches_eoi_skips_stray_inter_segment_bytes() {
     let jpeg = noisy_jpeg(64, 64);
-    // Splice garbage right after the APP0 segment (SOI + APP0 header
-    // at offset 2; APP0 length at offset 4).
     assert_eq!(
         jpeg.get(2..4),
         Some([0xFF, 0xE0].as_slice()),

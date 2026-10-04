@@ -816,7 +816,6 @@ impl SignalWatcher {
         should_exit: bool,
     ) -> Result<Self> {
         let mut fds = [-1; 2];
-        // SAFETY: `fds` is a writable two-element array.
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(std::io::Error::last_os_error()).context("create signal self-pipe");
         }

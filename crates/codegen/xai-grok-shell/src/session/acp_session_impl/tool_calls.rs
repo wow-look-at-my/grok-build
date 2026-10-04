@@ -37,8 +37,7 @@ fn is_mcp_create_pull_request(tool_name: &str) -> bool {
     }
 }
 /// An MCP tool that returned an error result routes to `PostToolUseFailure`
-/// instead of `PostToolUse`. Built-in logical errors (a non-zero
-/// `run_terminal_command` exit, a file-not-found) stay on `PostToolUse`.
+/// instead of `PostToolUse`.
 fn is_mcp_error_result(output: &ToolsToolOutput) -> bool {
     matches!(output, ToolsToolOutput::MCP(_)) && output.is_error()
 }
@@ -81,13 +80,10 @@ fn should_flush_held_queue_before_wait(
     has_interruptible_wait && steer && !goal_loop_active
 }
 use crate::tools::tool_context::BlockingWaitGuard;
-/// Clears `awaiting_plan_approval` (and re-persists) when the [`SessionActor::request_plan_approval`] await resolves or is dropped.
-/// Resolve means a decision came back; drop means the model turn was cancelled, so a cancelled in-session approval can never strand the bit `true`.
-/// `PlanModeState` writes are immediate (no debounce), so writing `false` here would race the quit and lose the gate.
+/// Clears `awaiting_plan_approval` (and re-persists) when the [`SessionActor::request_plan_approval`] await resolves.
 struct AwaitingApprovalGuard<'a>(&'a SessionActor);
 impl AwaitingApprovalGuard<'_> {
     /// Keep `awaiting_plan_approval` set (skip the clear-on-drop).
-    /// Used when the client disconnected without answering, so resume re-parks the approval.
     fn disarm(self) {
         std::mem::forget(self);
     }
@@ -193,9 +189,8 @@ pub(super) fn plan_mode_edit_gate(
         _ => PlanEditGate::Allow,
     }
 }
-/// Typed view of an `exit_plan_mode` approval decision.
-/// The wire type (`ExitPlanModeExtResponse`) carries `outcome` as a string.
-/// Unknown / unrecognized outcomes map to [`Cancelled`](Self::Cancelled) so the session fails CLOSED (stays in plan mode) rather than auto-approving.
+/// Typed view of an `exit_plan_mode` approval decision. The wire type
+/// (`ExitPlanModeExtResponse`) carries `outcome` as a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PlanApprovalOutcome {
     Approved,
@@ -213,9 +208,9 @@ impl PlanApprovalOutcome {
         }
     }
 }
-/// Classify an `ext_method` failure.
-/// Returns `false` when it was delivered but the client went away before answering (quit / disconnect / leader restart).
-/// Any other error (including a non-`acp_send` error) defaults to `false` so the approval is kept pending and never auto-approved.
+/// Classify an `ext_method` failure. Returns `false` when it was delivered
+/// but the client went away before answering (quit / disconnect / leader
+/// restart).
 fn ext_method_no_client(err: &acp::Error) -> bool {
     matches!(
         xai_acp_lib::acp_channel_failure(err),
@@ -272,7 +267,6 @@ fn revise_plan_message(feedback: &str) -> String {
     }
 }
 /// What the resume re-park does with the user's decision.
-/// Extracted from `resume_plan_approval` so the branch logic is unit-testable without driving a real turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ResumeAction {
     /// Approved: leave plan mode and start an implement turn (Agent mode).
@@ -1278,8 +1272,7 @@ impl SessionActor {
                     session_id = %self.session_info.id.0,
                     tool_name = %prepared.tool_name,
                     artifact = %artifact,
-                    // i64: redact drops u64 (serializes as string)
-                    // None means the field is omitted
+                    // i64: redact drops u64 (serializes as string) None means the field is omitted
                     segment_index = artifact.segment_index().map(|i| i as i64),
                     success = tool_outcome.ran_successfully(),
                     duration_ms = duration_ms as i64,
@@ -2149,9 +2142,7 @@ impl SessionActor {
                         | ToolKind::MemoryGet
                         | ToolKind::WebSearch
                         | ToolKind::WebFetch
-                        // The `ci` tool is a read of GitHub state: it declares
-                        // itself read-only, and a missing kind here would make
-                        // the shell prompt for approval on every CI query.
+                        // The `ci` tool is a read of GitHub state: it declares itself read-only.
                         | ToolKind::Ci
                         | ToolKind::EnterPlan
                         | ToolKind::ExitPlan
@@ -2368,8 +2359,7 @@ impl SessionActor {
             _ => serde_json::to_value(&tool_call_input)?,
         };
         let mut canonical_meta = self.stamp_tool_meta(None, wire_name, Some(&tool_call_input));
-        // One function names every tool call, finished or still streaming, so a
-        // row cannot rename itself when the last argument byte lands.
+        // One function names every tool call, finished or still streaming.
         let kind = self.agent.borrow().tool_bridge().tool_kind(wire_name);
         let title = tool_title::tool_input_title(
             &tool_call_input,
@@ -2431,7 +2421,7 @@ impl SessionActor {
                     acp::ToolKind::Read,
                     vec![
                         acp::ToolCallLocation::new(read_file.path)
-                            // Same normalization as the canonical `_meta` input, so one event can't show two start lines
+                            // Same normalization as the canonical `_meta` input, so one event can't show start lines
                             .line(
                                 xai_grok_tools::normalization::norm_offset_i64(read_file.offset)
                                     .map(|l| l as u32),
@@ -3131,9 +3121,7 @@ impl SessionActor {
                 live.entry(tool_index)
                     .or_insert_with(|| tool_title::StreamingToolArgs::new(name.to_string()));
             }
-            // Only the opening fragment carries the name. One that arrives for
-            // an index that never opened belongs to a call this session cannot
-            // name.
+            // Only the opening fragment carries the name.
             let entry = live.get_mut(&tool_index)?;
             if let Some(delta) = arguments_delta {
                 entry.push(delta);
@@ -3145,11 +3133,7 @@ impl SessionActor {
         };
         let completed = crate::session::helpers::partial_json::complete_partial_json(&args)?;
         let value = serde_json::from_str::<serde_json::Value>(&completed).ok()?;
-        // An empty object names nothing worth showing. A tool that takes no
-        // arguments does parse from one and would be named correctly, but so
-        // would a half-written `{"path":`, and that one reads as "Read" with an
-        // empty path. Waiting for the first whole field costs the argument-less
-        // tools a few milliseconds and keeps the blank titles out.
+        // An empty object names nothing worth showing.
         if !value.as_object().is_some_and(|obj| !obj.is_empty()) {
             return None;
         }
@@ -3308,8 +3292,7 @@ mod ci_tool_title_tests {
 
     #[test]
     fn a_ci_call_about_another_repository_says_which() {
-        // A query that goes to a different repository must not read in the
-        // transcript as a query about the session's own branch.
+        // A query that goes to a different repository must not read in the transcript.
         let mut ask = input(CiAction::Status, Some("fix/darwin-version-stamp"));
         ask.repo = Some("wow-look-at-my/go-toolchain".to_string());
         assert_eq!(

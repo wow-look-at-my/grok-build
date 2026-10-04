@@ -146,9 +146,7 @@ pub(super) fn dispatch_copy_assistant_message(
     });
 }
 
-/// Dispatch for the `/export` command.
-/// Collects the active (sub)agent's scrollback and renders a clean Markdown transcript.
-/// The transcript is written to the (tilde-expanded) file, or copied to the clipboard through the full route (native, tmux, OSC 52).
+/// Dispatch for the `/export` command. Collects the active (sub)agent's scrollback and renders a clean Markdown transcript.
 pub(super) fn dispatch_export_conversation(
     app: &mut AppView,
     file_path: Option<std::path::PathBuf>,
@@ -197,9 +195,7 @@ pub(super) fn dispatch_export_conversation(
                 }
             }
         } else {
-            // Clipboard path: a stats block (like assistant copy) and a route-aware toast (like block-content copy and selection)
-            // The scrollback line reflects where the copy actually landed, the same pattern as /copy N
-            // It never claims clipboard success when the delivery fell back to the backup file
+            // Clipboard path: a stats block (like assistant copy) and a route-aware toast (like block-content copy and selection).
             let stats = crate::clipboard::clipboard_stats_suffix(&md);
             let delivery = agent.copy_to_clipboard(&md);
             let block_msg = match &delivery {
@@ -370,9 +366,8 @@ pub(super) fn dispatch_open_block_viewer(app: &mut AppView) {
     });
 }
 
-/// The fetches that populate every Extensions-modal tab.
-/// Three callers share it: opening the modal manually, the auth flow after a CTA install, and the session-ready handler that runs a deferred fetch.
-/// Sharing keeps them from drifting and leaving a tab stuck on its initial `Loading` state.
+/// The fetches that populate every Extensions-modal tab. Callers share it: opening the modal manually, the auth flow after a CTA install, and the
+/// session-ready handler that runs a deferred fetch. Sharing keeps them from drifting and leaving a tab stuck on its initial `Loading` state.
 pub(super) fn extensions_modal_tab_fetches(
     modal: &mut crate::views::extensions_modal::ExtensionsModalState,
     agent_id: AgentId,
@@ -694,8 +689,7 @@ pub(super) fn handle_plugins_list_loaded(
             }
             Err(e) => TabDataState::Error(e),
         };
-        // Clear pending_action so the UI unblocks as soon as the plugins list arrives
-        // Marketplace can continue loading independently via its own TabDataState::Loading
+        // Clear pending_action so the UI unblocks as soon as the plugins list arrives Marketplace can continue loading independently.
         modal.pending_action = None;
         modal.pending_entry_index = None;
     }
@@ -782,7 +776,6 @@ pub(super) fn handle_marketplace_list_loaded(
             Ok(mut response) => {
                 response.sanitize();
                 // Only default to collapsed on first load (when state is Loading).
-                // On reloads (after install/uninstall/refresh), preserve the user's expand/collapse choices
                 let is_first_load = matches!(modal.marketplace_data, TabDataState::Loading);
                 if is_first_load {
                     modal.marketplace_collapsed_sources = (0..response.sources.len()).collect();
@@ -818,7 +811,6 @@ pub(super) fn handle_skills_toggle_done(
             }
         }
     }
-    // The toggle effect already called x.ai/skills/refresh-baseline
-    // That triggers the session to reload skills and push an AvailableCommandsUpdate notification with the updated list
+    // The toggle effect already called x.ai/skills/refresh-baseline That triggers the session to reload skills.
     vec![]
 }

@@ -1,7 +1,4 @@
 //! `/settings`: open the settings modal.
-//!
-//! There is no direct jump to one setting: args are silently discarded and the modal always opens.
-//! Use the in-modal `/` filter to search.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

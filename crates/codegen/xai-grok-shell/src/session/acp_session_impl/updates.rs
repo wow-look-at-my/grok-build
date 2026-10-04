@@ -1,5 +1,4 @@
 //! Outbound updates for `SessionActor`: `send_update` and its buffered/transient/direct variants.
-//! Also xAI-notification handling and the gateway-bridge dispatch shims.
 use super::*;
 /// Hook / image-intake diagnostics and background_tasks snapshots leave the no-output rewind window open; every other variant closes it.
 /// `HookRunStarted` fires for the prompt gate before any output, so a Ctrl+C during a slow gate must still rewind the prompt.
@@ -141,7 +140,6 @@ pub(super) enum SubagentUsageApply {
     /// Tokens attributed to the live open prompt (and session).
     AttributedToPrompt,
     /// Tokens landed on the session ledger only (pin mismatch / no live pin).
-    /// Sticky report only: do not stain ledgers for "missing" spend.
     SessionOnly,
 }
 impl SessionActor {
@@ -323,9 +321,10 @@ impl SessionActor {
             .event_tx
             .send(SessionEvent::Notification(notification.into()));
     }
-    /// Routes through `event_tx`, the `ReplayBuffer`, and `emit_buffered`, so chunks are merged, debounced, and emitted.
-    /// For one-shot xAI events (RetryState, ImageCompressed, HookExecution, AutoCompactCompleted, etc.), use `send_xai_notification` instead.
-    /// The frequency-based split (`send_buffered_xai_update` vs `send_xai_notification`) mirrors the ACP-side split.
+    /// Routes through `event_tx`, the `ReplayBuffer`, and `emit_buffered`, so
+    /// chunks are merged, debounced, and emitted. For one-shot xAI events
+    /// (RetryState, ImageCompressed, HookExecution, AutoCompactCompleted,
+    /// etc.), use `send_xai_notification` instead.
     pub(super) async fn send_buffered_xai_update(&self, update: XaiSessionUpdate) {
         self.close_rewind_window().await;
         let notification = XaiSessionNotification {

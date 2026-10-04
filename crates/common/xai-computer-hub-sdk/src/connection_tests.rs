@@ -1,7 +1,4 @@
 use super::*;
-/// Window expected for the default table, using *literal* 1 s / 10 s
-/// so a change to [`RECONNECT_SPREAD_FLOOR`] or the cap is a
-/// deliberate test edit, not a tautology on the constant.
 fn expected_default_window(attempt: u32) -> Duration {
     let slots_ms = [100_u64, 200, 500, 1_000, 2_000, 5_000, 10_000];
     let idx = (attempt as usize).saturating_sub(1).min(slots_ms.len() - 1);
@@ -317,11 +314,9 @@ fn initial_connect_retryable_classifies_errors() {
         url: Url::parse("ws://hub.example.com/").expect("valid url"),
     }));
 }
-/// A listener that accepts the TCP connection but never answers the
-/// WebSocket upgrade black-holes an unbounded connect (the 2026-08-19
-/// hub-roll incident shape). The per-attempt budget must convert the
-/// hang into a retryable `NetworkError` and the attempt cap must bound
-/// the total wait instead of retrying forever.
+/// The per-attempt budget must convert the hang into a retryable
+/// `NetworkError` and the attempt cap must bound the total wait
+/// instead of retrying forever.
 #[tokio::test]
 async fn initial_connect_times_out_and_bounds_retries_against_black_hole() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -818,10 +813,7 @@ fn conn_health_accumulates_jump_across_refreshes() {
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
-/// In-memory [`futures::Sink`] for `run_writer` tests. Records the
-/// text payload of every `Message::Text` sent and counts every
-/// `Message::Ping` (keepalive). When the `fail` flag is set, `send`
-/// errors at `poll_ready`, modelling a dead socket.
+/// In-memory [`futures::Sink`] for `run_writer` tests.
 #[derive(Clone)]
 struct RecordingSink {
     recorded: Arc<std::sync::Mutex<Vec<String>>>,
@@ -2403,11 +2395,6 @@ async fn call_request_with_timeout_reclaims_waiter_on_deadline() {
 /// off the abandoned stream — falling back into the reader phase would
 /// park in `stream.next()` on the live old connection forever (the
 /// reconnect signal was already consumed), stalling the retry loop.
-///
-/// Mock: conn #0 (initial) completes the handshake and stays healthy;
-/// conn #1 (first reconnect) is dropped before the ack (transport
-/// failure); conn #2 must then be attempted and complete. With the bug,
-/// upgrade #2 never happens and the test times out.
 #[tokio::test]
 async fn forced_reconnect_retries_past_failed_attempt_without_repolling_old_stream() {
     use futures::{SinkExt as _, StreamExt as _};
@@ -2493,10 +2480,6 @@ async fn forced_reconnect_retries_past_failed_attempt_without_repolling_old_stre
     conn.request_shutdown();
     conn.await_shutdown().await;
 }
-/// After a *stable* connection a new outage starts at attempt 1. A
-/// failed attempt in the first episode still increments so
-/// `on_reconnect` reports 2; `reset_after = 0` treats even a brief
-/// socket as stable so the next episode is 1 again.
 #[tokio::test]
 async fn successful_reconnect_resets_attempt_after_stable_dwell() {
     use futures::{SinkExt as _, StreamExt as _};
@@ -2843,8 +2826,6 @@ async fn attempt_reset_ignores_latency_between_detect_and_gate() {
     conn.request_shutdown();
     conn.await_shutdown().await;
 }
-/// 4409 is reconnectable (not 41xx terminal). A drain followed by an
-/// immediate redrop must climb the ladder, not reset to slot 1.
 #[tokio::test]
 async fn drain_4409_then_quick_redrop_climbs_attempt() {
     use futures::{SinkExt as _, StreamExt as _};
@@ -3306,9 +3287,8 @@ async fn reader_deadline_huge_override_saturates_instead_of_panicking() {
         "saturating re-arm must neither panic nor fire"
     );
 }
-/// Sink for writer↔reader composition tests: echoes every keepalive
-/// `Ping` back as a `Pong` on the reader's inbound channel, emulating a
-/// healthy server whose only traffic is the keepalive exchange.
+/// Sink for writer↔reader composition tests: echoes every keepalive `Ping`
+/// back as a `Pong` on the reader's inbound channel.
 struct PongEchoSink {
     inbound: InboundTx,
 }

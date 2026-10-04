@@ -1,6 +1,4 @@
 //! [`SamplerConfig`] is the per-request configuration handed to the sampler.
-//! It deliberately does **not** alias `xai_grok_sampling_types::SamplingConfig`.
-//! Aliasing would pull transitive dependencies on shell-specific types (`xai-grok-tools`, etc.) into the sampler crate.
 
 use std::num::NonZeroU64;
 use std::path::PathBuf;
@@ -22,10 +20,6 @@ pub enum AuthScheme {
     Bearer,
     XApiKey,
     /// Do not attach authentication headers.
-    ///
-    /// This is useful for local OpenAI-compatible servers and, importantly,
-    /// prevents a live first-party session credential from being forwarded to
-    /// an unrelated endpoint.
     None,
 }
 
@@ -57,7 +51,6 @@ pub struct SamplerConfig {
     #[serde(default)]
     pub request_compression: RequestCompression,
     /// Extra request headers applied verbatim. The sampler never inspects the URL to derive headers.
-    /// Callers (the session) inject proxy auth and other access headers here before constructing the config.
     pub extra_headers: IndexMap<String, String>,
     /// Additional Responses API `include` values not represented by the typed client.
     #[serde(default)]
@@ -68,29 +61,16 @@ pub struct SamplerConfig {
     /// Header name to environment variable, resolved into request headers at client build and never persisted.
     #[serde(default)]
     pub env_http_headers: IndexMap<String, String>,
-    /// Extra top-level fields merged into every request body, from
-    /// `[model.<id>].extra_body` / `[model_providers.<id>].extra_body`.
-    ///
-    /// The typed request structs here are closed, so a per-deployment setting
-    /// that only one target understands has nowhere else to go: LM Studio's
-    /// `ttl` and Ollama's `keep_alive`, `truncate` and `options.num_ctx` are
-    /// each one of those. Merged after the body is built, so it can never
-    /// displace a field a builder decided.
+    /// Extra top-level fields merged into every request body.
     #[serde(default)]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
-    /// Total context window size in tokens. The session reads it for its
-    /// compaction decisions. The sampler holds one thing to it: the requested
-    /// output shares this window with the prompt, so `apply_conversation_defaults`
-    /// cuts `max_output_tokens` to what is left rather than send a body the
-    /// provider rejects on its arithmetic. `0` means unknown, and nothing is cut.
+    /// Total context window size in tokens. The session reads it for its compaction decisions.
     pub context_window: u64,
-    /// Provider request-body cap, already defaulted from `api_backend` by model resolution; `None` budgets to 50 MiB.
     #[serde(default)]
     pub max_request_bytes: Option<NonZeroU64>,
     pub force_http1: bool,
     pub max_retries: Option<u32>,
     /// Total-attempt ceiling for rate-limited requests.
-    /// `None` keeps the actor's [`RetryPolicy::rate_limit_retry_threshold`].
     #[serde(default)]
     pub rate_limit_retry_threshold: Option<u32>,
     pub stream_tool_calls: bool,
@@ -102,12 +82,7 @@ pub struct SamplerConfig {
     #[serde(default)]
     pub reasoning_summary: Option<ReasoningSummary>,
 
-    /// Which optional message properties this target's Chat Completions schema
-    /// accepts. [`ChatMessageProfile::PERMISSIVE`] (the default) sends
-    /// `model_id`/`reasoning_content` on replayed assistant messages;
-    /// [`ChatMessageProfile::STRICT`] omits them for providers that validate
-    /// message schemas strictly. Set from the per-model
-    /// `strict_message_schema` config flag.
+    /// Which optional message properties this target's Chat Completions schema accepts.
     #[serde(default)]
     pub chat_message_profile: ChatMessageProfile,
 
@@ -121,9 +96,6 @@ pub struct SamplerConfig {
     pub conversation_group_id: Option<ConversationGroupId>,
     pub client_version: Option<String>,
 
-    /// Hook invoked on every 401 response with the bearer that was actually sent on the wire.
-    /// Implementations typically compare it against a live credential source to tell a stale token from a server-rejected live one.
-    /// `None` (default) is a no-op; the 401 arm still returns `SamplingError::Auth`.
     #[serde(skip)]
     pub attribution_callback: Option<SharedAttributionCallback>,
 
@@ -143,13 +115,10 @@ pub struct SamplerConfig {
     pub compaction_at_tokens: Option<CompactionAtTokens>,
 
     /// Server-side doom-loop check policy; `None` disables it.
-    /// It also absorbs the reported trigger events (unlike environment headers in [`Self::extra_headers`], this gates the client's decode behavior).
     #[serde(default)]
     pub doom_loop_recovery: Option<DoomLoopRecoveryPolicy>,
 
-    /// Floor on the model's output tokens/sec; `None` (or an unarmed policy)
-    /// leaves the stream ungated. A response that stays under the floor for a
-    /// whole window is abandoned and resampled on this policy's own budget.
+    /// Floor on the model's output tokens/sec; `None` (or an unarmed policy) leaves the stream ungated.
     #[serde(default)]
     pub output_rate_floor: Option<xai_grok_sampling_types::OutputRateFloorPolicy>,
 
@@ -209,9 +178,8 @@ impl Default for SamplerConfig {
 pub trait BearerResolver: Send + Sync + std::fmt::Debug {
     fn current_bearer(&self) -> Option<String>;
 
-    /// Awaited by the client right before it stamps a request; [`Self::current_bearer`] is read afterwards.
-    /// A resolver that can renew its bearer does so here when the cached one would not survive the send, so the request never leaves with no credential.
-    /// Default: no-op.
+    /// Awaited by the client right before it stamps a request;
+    /// [`Self::current_bearer`] is read afterwards.
     fn prepare_for_send(
         &self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
@@ -225,8 +193,7 @@ pub type SharedBearerResolver = std::sync::Arc<dyn BearerResolver>;
 pub trait HeaderInjector: Send + Sync + std::fmt::Debug {
     fn inject(&self, headers: &mut reqwest::header::HeaderMap);
 
-    /// Runs right after each streaming HTTP span is created and before it has children.
-    /// Default: no-op.
+    /// Runs right after each streaming HTTP span is created and before it has children. Default: no-op.
     fn set_span_parent(&self, _span: &tracing::Span, _traceparent: &str) {}
 }
 
@@ -237,7 +204,6 @@ pub type SharedHeaderInjector = std::sync::Arc<dyn HeaderInjector>;
 pub struct RetryPolicy {
     pub max_retries: u32,
     /// Total-attempt ceiling for rate-limited requests before escalating to the caller.
-    /// Lower than `max_retries` because rate-limit waits can be long.
     pub rate_limit_retry_threshold: u32,
     #[serde(default)]
     pub retry_only_before_output: bool,
@@ -253,8 +219,8 @@ impl Default for RetryPolicy {
     }
 }
 
-/// Identity of the client that originated the request, used for User-Agent rendering.
-/// The shell layer composes this with platform info into a final UA string.
+/// Identity of the client that originated the request, used for User-Agent
+/// rendering.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct OriginClientInfo {
     pub product: String,

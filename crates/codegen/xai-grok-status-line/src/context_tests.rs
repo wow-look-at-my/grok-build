@@ -4,9 +4,9 @@ use super::*;
 
 const DIR: &str = "/home/user/project";
 
-/// Returns the shared fixture: the JSON a command row receives on stdin, which the pager's guide test and the SDK suites also read.
-/// A field renamed in the type fails this test, the guide test, and the SDK suites.
-/// It carries `session_name`, which the client overlays for a command row; the agent's own notification leaves that field null.
+/// Returns the shared fixture: the JSON a command row receives on stdin,
+/// which the pager's guide test and the SDK suites also read. A field renamed
+/// in the type fails this test, the guide test, and the SDK suites.
 fn wire_fixture() -> serde_json::Value {
     let mut fixture: serde_json::Value =
         serde_json::from_str(include_str!("../testdata/status_wire.json"))

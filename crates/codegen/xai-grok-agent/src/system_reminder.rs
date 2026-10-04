@@ -1,8 +1,6 @@
 //! Reminder policy: wraps xai-grok-tools reminder config.
 
-/// Default per-prompt fire cap for the runtime turn-end TodoGate.
-/// Used only as the default for `TodoGateConfig`.
-/// The runtime consumer reads the live value from `ReminderPolicy.todo_gate.max_fires_per_prompt`, so this constant is NOT a hardcoded cap.
+/// Default per-prompt fire cap for the runtime turn-end TodoGate. Used only as the default for `TodoGateConfig`.
 pub const DEFAULT_TODO_GATE_MAX_FIRES: u32 = 2;
 
 /// Session-level system reminder policy.
@@ -14,15 +12,9 @@ pub struct ReminderPolicy {
     pub todo_nudge: TodoNudgeConfig,
     /// Configuration for the runtime turn-end TodoGate.
     pub todo_gate: TodoGateConfig,
-    /// Master switch for the built-in todo-stop gate: at the turn-end stop
-    /// gate the model is sent back to its unfinished todos (consuming the same
-    /// continuation budget as stop hooks) before being allowed to stop.
-    /// Default ON; driven by the persisted `[ui].stop_gate_unfinished_todos`.
+    /// Master switch for the built-in todo-stop gate: at the turn-end stop gate the model is sent back to its unfinished todos.
     pub stop_gate_unfinished_todos: bool,
-    /// Master switch for the built-in CI-stop gate: at the turn-end stop gate a
-    /// model whose branch has a failing run is sent back to read the logs and
-    /// fix them, consuming the same continuation budget as stop hooks.
-    /// Default ON; driven by the persisted `[ui].stop_gate_ci_failing`.
+    /// Master switch for the built-in CI-stop gate: at the turn-end stop gate a model whose branch has a failing run is sent back to read the logs.
     pub stop_gate_ci_failing: bool,
 }
 
@@ -60,14 +52,11 @@ impl Default for TodoNudgeConfig {
 }
 
 /// Configuration for the runtime turn-end TodoGate.
-/// Injects a `<system-reminder>` if pending or unbacked in-progress todos remain after a content-only assistant message.
-/// Disabled by default; opt in via remote settings or the `--todo-gate` flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TodoGateConfig {
     /// Whether the gate runs at all.
     pub enabled: bool,
-    /// Hard cap on how many times the gate may fire per user prompt before the next turn is allowed to end with `TurnOutcome::Completed`.
-    /// Bounds the worst-case extra inference cost.
+    /// Hard cap on how many times the gate may fire per user prompt before the next turn is allowed to end.
     pub max_fires_per_prompt: u32,
 }
 
@@ -104,7 +93,7 @@ mod tests {
             "TodoGate ships disabled; remote/local opt-in required"
         );
         assert_eq!(policy.todo_gate.max_fires_per_prompt, 2);
-        // The two reminder mechanisms are independent; flipping one must not change the other
+        // Both reminder mechanisms are independent; flipping one must not change the other
         assert!(policy.todo_nudge.enabled);
     }
 }

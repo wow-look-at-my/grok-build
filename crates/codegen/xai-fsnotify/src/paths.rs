@@ -1,11 +1,4 @@
-//! `.git/` path classification. Component-based against the discovered
-//! `git_dir` (not substring matching), so `/tmp/.git-backup/HEAD` is safe
-//! and Windows separators work.
-//!
-//! Watched: `HEAD`, `index`, `refs/*`, `packed-refs`, `FETCH_HEAD`.
-//! Skipped: `COMMIT_EDITMSG`, `MERGE_HEAD`, `REBASE_HEAD`, `objects/*`
-//! (too noisy or no meaningful state change). `index.lock` is handled by
-//! the lock state machine, not here.
+//! `.git/` path classification.
 
 use std::path::Path;
 

@@ -1,37 +1,4 @@
-//! `/debug <what is wrong>` — a self-debugging skill: hand the model this
-//! process's execution context (binary, config, log, model) and turn it loose
-//! on the user's question.
-//!
-//! `/debug why was the context size defaulted to 256k?` injects the question
-//! together with the answers the model would otherwise have to guess at:
-//!
-//! - The debug-log file the firehose writes for this session. `/debug` turns
-//!   the firehose on first (`debug_log::enable_firehose`), in this process and,
-//!   through `ENABLE_FIREHOSE_META` on the prompt block, in the agent process.
-//!   The file is `<grok_home>/debug/<session_id>.txt`, or the one file that
-//!   `GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>` names. It is created if it does
-//!   not exist.
-//! - Whether the firehose ran since launch or only since this `/debug`.
-//! - The rest of the execution context — running binary vs installed binary
-//!   (staleness), version and commit, config layers, model id, context window,
-//!   effort, `GROK_*`/`XAI_*` environment — assembled by
-//!   [`super::debug_context::DebugContext`].
-//!
-//! Delivery is [`CommandResult::InjectSkill`], the same path skills and `/loop`
-//! use, so the injected prompt reaches the model as the next turn's content.
-//!
-//! Args that are not one of the reserved overlay keywords are the user's
-//! question, verbatim. The overlay toggles keep their keywords:
-//! - `/debug` bare / `/debug on` — inject the context with no question; the
-//!   model debugs whatever the user says next.
-//! - `/debug scroll` — the scroll-diagnostics HUD; same
-//!   [`Action::ToggleScrollDebugHud`] as `/scroll-debug`, which stays
-//!   registered as the hidden long-form alias.
-//! - `/debug fps` — the release-safe FPS HUD
-//!   ([`crate::views::fps_hud`]).
-//! - `/debug log` — the scroll flight recorder
-//!   ([`crate::input::scroll_log`]), runtime-constructed to a fresh
-//!   timestamped path.
+//! `/debug <what is wrong>` — a self-debugging skill.
 
 use std::path::{Path, PathBuf};
 
@@ -116,8 +83,7 @@ impl SlashCommand for DebugCommand {
         description: "Debug grok itself: inject this session's execution context and a question",
         usage: "/debug [<what is wrong> | scroll | fps | log]",
         takes_args: true,
-        // The injection needs a session id to resolve the log path, so the
-        // session-less dashboard input does not offer it.
+        // The injection needs a session id to resolve the log path.
         session_scoped: true,
         arg_placeholder: "what is wrong? (or: scroll | fps | log)",
     }
@@ -142,8 +108,7 @@ impl SlashCommand for DebugCommand {
             "scroll" => CommandResult::Action(Action::ToggleScrollDebugHud),
             "fps" => CommandResult::Action(Action::ToggleFpsHud),
             "log" => CommandResult::Action(Action::ToggleScrollLog),
-            // Everything else is the user's question — `on` and a bare `/debug`
-            // are the same invocation with no question attached.
+            // Everything else is the user's question — `on` and a bare `/debug` are the same invocation.
             request => inject(ctx, if request == "on" { "" } else { request }),
         }
     }
@@ -168,7 +133,6 @@ fn inject(ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
     );
     // Ensure the log file exists so the advertised path is real and readable
     // by the model's tools, even before the firehose writes to it.
-    // Best-effort: if the dir can't be created the injection still proceeds.
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -244,7 +208,7 @@ mod tests {
         );
     }
 
-    /// `/debug scroll` and `/scroll-debug` must stay routed to the same action: the HUD has one toggle, two spellings.
+    /// `/debug scroll` and `/scroll-debug` must stay routed to the same action: the HUD has one toggle, spellings.
     #[test]
     fn debug_scroll_routes_to_same_action_as_scroll_debug() {
         let models = ModelState::default();

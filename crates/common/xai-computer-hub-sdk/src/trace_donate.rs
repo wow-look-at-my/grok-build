@@ -1,7 +1,4 @@
-//! Forward selected spans to the connected server over the WebSocket
-//! transport (`traces.donate`). The bounded retry buffer + drain barrier
-//! live in [`crate::donate_pump`]; overflow drops spans — telemetry,
-//! never correctness.
+//! Forward selected spans to the connected server over the WebSocket transport (`traces.donate`).
 
 use std::borrow::Cow;
 

@@ -1,7 +1,4 @@
-//! The machine-local acquire slot: an exclusive flock on a small file under a local directory, held
-//! for exactly one open+flock attempt on the target. The slot name is a pure function of the target
-//! path string, so nothing here canonicalizes or stats the target. Slot files are never unlinked:
-//! unlinking races a sibling that already opened the old inode and leaves two holders of one slot.
+//! The machine-local acquire slot: an exclusive flock on a small file under a local directory, held for exactly one open+flock attempt.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -18,9 +15,7 @@ pub const SLOT_DIR_ENV: &str = "GROK_FILE_LOCK_SLOT_DIR";
 pub(crate) enum SlotAttempt {
     /// Proceed with the attempt: the slot is held (`Some`) or this call runs unguarded (`None`).
     Ready(Option<SlotGuard>),
-    /// The caller's deadline arrived less than a full grace into the wait with the slot still held:
-    /// indistinguishable from ordinary contention, so the target stays untouched and the caller
-    /// reports `Timeout`.
+    /// The caller's deadline arrived less than a full grace into the wait with the slot still held: indistinguishable from ordinary contention.
     #[cfg(unix)]
     DeadlineReached,
 }
@@ -31,7 +26,7 @@ const MAX_HINT_LEN: usize = 48;
 
 /// Pure: `<dir>/<hint>.<fnv1a64 of the lexically normalized target>.slot`. Normalization is
 /// `Path::components()` only (collapses `.` and repeated separators, resolves neither `..` nor
-/// symlinks), so two spellings of one path share a slot without any filesystem access.
+/// symlinks), so spellings of one path share a slot without any filesystem access.
 pub fn slot_path_in(dir: &Path, target: &Path) -> PathBuf {
     let mut normalized = Vec::new();
     for component in target.components() {
@@ -93,7 +88,6 @@ mod unix {
     /// What to do with a slot directory we own whose mode lets group or others in.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) enum LooseMode {
-        /// The default directory is ours by construction: chmod it to 0700.
         Tighten,
         /// A caller-supplied directory may be shared on purpose: refuse it (the caller fails open).
         Refuse,
@@ -113,8 +107,6 @@ mod unix {
         }
     }
 
-    /// Create `dir` with mode 0700 if missing, then require a non-symlink directory owned by `euid`
-    /// whose mode admits nobody else (see [`LooseMode`] for a looser one).
     pub(crate) fn verify_slot_dir(dir: &Path, euid: u32, loose: LooseMode) -> io::Result<()> {
         use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 
@@ -149,9 +141,8 @@ mod unix {
         Ok(())
     }
 
-    /// Resolve, create (mode 0700), and verify the slot directory: `$GROK_FILE_LOCK_SLOT_DIR` when
-    /// set and absolute, else `/tmp/grok-file-lock-<euid>`. `None` means no usable directory; the
-    /// caller then acquires unguarded, since exclusion comes from the target lock alone.
+    /// `None` means no usable directory; the caller then acquires unguarded, since exclusion comes
+    /// from the target lock alone.
     pub(crate) fn slot_dir() -> Option<PathBuf> {
         let euid = current_euid();
         let override_dir = std::env::var_os(SLOT_DIR_ENV).map(PathBuf::from);
@@ -290,8 +281,8 @@ mod unix {
         _file: File,
     }
 
-    /// `O_RDWR|O_CREAT|O_NOFOLLOW`, mode 0600, never truncated. The opened inode must be a regular
-    /// file owned by `euid`; anything else means the slot directory was tampered with.
+    /// The opened inode must be a regular file owned by `euid`; anything else means the slot
+    /// directory was tampered with.
     fn open_slot_file(path: &Path, euid: u32) -> io::Result<File> {
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 

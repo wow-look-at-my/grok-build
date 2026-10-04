@@ -3,8 +3,6 @@
 use super::*;
 
 /// Minimum toolset a role needs, checked by the parent-side gate.
-/// A configured harness `agent_type` whose role toolset lacks the capability fails open to the current model and session harness.
-/// Failing open beats spawning an unusable verifier.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum RoleCapability {
     /// Reads and greps code to corroborate diff hunks.
@@ -27,9 +25,8 @@ impl RoleCapability {
     }
 }
 
-/// Panel-scoped memoization for `resolve_goal_role_override`: at most one `describe_subagent_type` coordinator round-trip per distinct `agent_type`.
-/// So a multi-index skeptic panel sharing one agent_type costs one round-trip instead of N.
-/// A single planner/strategist resolve uses a fresh (empty) cache; no cross-call sharing is needed.
+/// Panel-scoped memoization for `resolve_goal_role_override`: at most one
+/// `describe_subagent_type` coordinator round-trip per distinct `agent_type`.
 #[derive(Default)]
 pub(crate) struct PanelResolveCache {
     /// Maps a harness `agent_type` to its describe outcome (the coordinator's answer for the role's `general-purpose` toolset on that harness).
@@ -91,9 +88,8 @@ pub(crate) fn fail_open_detail(
     }
 }
 
-/// How [`SessionActor::record_verdict_on_orchestration`] updates the orchestration's `last_classifier_gaps`.
-/// A real `NotAchieved` panel result stamps fresh curated gaps (`Set`), and a verdict that resolves them clears (`Clear`).
-/// A synthetic verdict that ran no panel leaves any stored real gaps replaying into the continuation directive (`Preserve`).
+/// How [`SessionActor::record_verdict_on_orchestration`] updates the
+/// orchestration's `last_classifier_gaps`.
 pub(crate) enum GapsUpdate<'a> {
     Set(&'a str),
     Clear,
@@ -852,8 +848,7 @@ impl SessionActor {
         use xai_grok_tools::implementations::grok_build::task::types::SubagentDescribeOutcome;
 
         // An empty agent type is the pool's spelling of "keep the parent's
-        // harness" — what a `[models] goal_skeptic` slot resolves to. There
-        // is no toolset to probe, so it takes the model-only path.
+        // harness" — what a `[models] goal_skeptic` slot resolves to.
         if pair.agent_type.is_empty() {
             return self
                 .resolve_goal_role_model_only(role, skeptic_idx, &pair.model)
@@ -958,8 +953,7 @@ impl SessionActor {
             bridge.tool_for_kind(ToolKind::WebSearch).await,
             bridge.tool_for_kind(ToolKind::WebFetch).await,
         )
-        // The planner builds its own todo list with the parent's `Plan` tool, so
-        // its prompt names THAT tool rather than the literal `todo_write`.
+        // The planner builds its own todo list with the parent's `Plan` tool.
         .with_todo(bridge.tool_for_kind(ToolKind::Plan).await)
     }
 

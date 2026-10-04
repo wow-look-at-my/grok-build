@@ -9,8 +9,8 @@ use std::time::Duration as StdDuration;
 use xai_grok_telemetry::unified_log::LogLevel;
 /// Timeout for the `/user` fetch, shared by the inline (login) and background paths.
 const USER_FETCH_TIMEOUT: StdDuration = StdDuration::from_secs(10);
-/// Logs `auth update enrichment dropped` if the task is cancelled before it finishes.
-/// Normal completion calls `disarm` first, which suppresses the log.
+/// Logs `auth update enrichment dropped` if the task is cancelled before it
+/// finishes.
 pub(super) struct EnrichmentExitGuard {
     pub(super) started: std::time::Instant,
     pub(super) armed: bool,

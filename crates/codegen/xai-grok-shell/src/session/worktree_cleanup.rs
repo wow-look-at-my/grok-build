@@ -1,4 +1,4 @@
-//! Must not stat or walk a Grove dest: `Path::exists` / `remove_dir_all` can hang or delete retained backing when dest is mounted or inconclusive.
+//! Must not stat or walk a Grove dest.
 
 use std::path::{Path, PathBuf};
 

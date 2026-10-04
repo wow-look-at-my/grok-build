@@ -1,10 +1,4 @@
 //! Glob deny entries: detection, the macOS Seatbelt-regex translation, and the Linux launch-time expansion.
-//! A deny entry is a GLOB iff it contains a glob metacharacter.
-//! macOS emits an anchored runtime regex (covers files created after launch).
-//! Linux expands to concrete existing matches at bwrap launch (best-effort).
-//!
-//! Parity invariant: `validate_deny_glob` accepts/rejects identically on both platforms, and the accepted subset translates the SAME on both.
-//! The `macos_regex_matches_globset_property` cross-product test asserts this.
 
 #[cfg(all(feature = "enforce", unix))]
 use nono::CapabilitySet;
@@ -98,9 +92,7 @@ pub(crate) fn validate_deny_glob(glob: &str) -> anyhow::Result<()> {
             );
         }
     }
-    // Char classes: support only the simple subset that translates identically to globset. Reject a literal `]`-first member
-    // (`[]a]`) and any nested `[` (which covers POSIX `[[:…:]]`). They are rejected because globset and the hand-rolled
-    // regex parse them differently (A leading `!`/`^` negation IS supported.)
+    // Char classes: support only the simple subset that translates identically to globset.
     let cc: Vec<char> = glob.chars().collect();
     let mut i = 0;
     while i < cc.len() {
@@ -185,8 +177,7 @@ fn glob_tail_to_regex(tail: &str) -> String {
             '?' => out.push_str("[^/]"),
             '[' => {
                 out.push('[');
-                // globset treats a leading `!` OR `^` as negation, so it becomes regex `[^…]`
-                // (validate_deny_glob has rejected the class forms that would drift).
+                // globset treats a leading `!` OR `^` as negation.
                 if matches!(chars.peek(), Some('!') | Some('^')) {
                     chars.next();
                     out.push('^');
@@ -256,8 +247,8 @@ fn glob_to_seatbelt_regexes(workspace: &Path, glob: &str) -> Vec<String> {
     regexes
 }
 
-/// Wrap a finished regex body in a Seatbelt `(regex #"…")` filter, escaping the SBPL string delimiter and rejecting control chars.
-/// Fail-closed: returns `None` for an inexpressible pattern so the caller errors rather than emitting a rule that silently targets the wrong path.
+/// Wrap a finished regex body in a Seatbelt `(regex #"…")` filter, escaping
+/// the SBPL string delimiter and rejecting control chars.
 #[cfg(all(feature = "enforce", target_os = "macos"))]
 fn seatbelt_regex_filter(regex: &str) -> Option<String> {
     if regex.chars().any(|c| c.is_control()) {
@@ -283,13 +274,11 @@ pub(crate) fn apply_deny_globs_to_capability_set(
     #[cfg(target_os = "macos")]
     {
         for glob in globs {
-            // Fail CLOSED on any glob that isn't expressible identically on both
-            // platforms (braces/backslash) or is malformed — same check Linux runs.
+            // Fail CLOSED on any glob that isn't expressible identically on both platforms (braces/backslash) or is malformed.
             validate_deny_glob(glob)?;
             let regexes = glob_to_seatbelt_regexes(workspace, glob);
             if regexes.is_empty() {
-                // Fail CLOSED: a glob we can't anchor would be silently
-                // unprotected while the sandbox still reports active.
+                // Fail CLOSED: a glob we can't anchor would be silently unprotected.
                 anyhow::bail!("cannot translate deny glob {glob:?} to a Seatbelt regex");
             }
             for regex in regexes {
@@ -317,8 +306,8 @@ pub(crate) fn apply_deny_globs_to_capability_set(
     Ok(())
 }
 
-/// Launch-time expansion caps: a mount namespace can't glob at runtime, so matches are enumerated once at launch.
-/// Exceeding a cap fails closed.
+/// Launch-time expansion caps: a mount namespace can't glob at runtime, so
+/// matches are enumerated once at launch.
 #[cfg(all(feature = "enforce", target_os = "linux"))]
 #[derive(Clone, Copy)]
 pub(crate) struct DenyGlobCaps {
@@ -326,7 +315,7 @@ pub(crate) struct DenyGlobCaps {
     pub depth: usize,
     /// Each match becomes one `--ro-bind`; kept under bwrap's argv budget.
     pub matches: usize,
-    /// Visited-entry budget bounding launch latency; the walk includes gitignored/hidden trees, so ordinary repos reach hundreds of thousands.
+    /// Visited-entry budget bounding launch latency.
     pub entries: usize,
 }
 
@@ -426,9 +415,7 @@ pub(crate) fn expand_deny_globs(
     // First fail-closed cause wins; parallel walkers race to `Quit`.
     let failure: OnceLock<String> = OnceLock::new();
     let visited = AtomicUsize::new(0);
-    // Overlapping globs share one walk
-    // A nested root is covered by its parent's walk only when the segment below the parent holds no symlinks (the walk does not descend them)
-    // Its canonical path then equals the parent's canonical path plus that segment
+    // Overlapping globs share one walk A nested root is covered by its parent's walk only when the segment below the parent holds no symlinks.
     let mut walked: Vec<&Path> = Vec::new();
     for root in &roots {
         if !root.exists() {
@@ -635,8 +622,7 @@ mod tests {
     #[test]
     #[cfg(all(feature = "enforce", target_os = "macos"))]
     fn glob_to_regex_doubles_private_aliased_root() {
-        // A workspace under /tmp (firmlinked to /private/tmp) must emit a deny regex for BOTH alias roots
-        // Otherwise the broad read-allow leaks via the alias
+        // A workspace under /tmp (firmlinked to /private/tmp) must emit a deny regex for BOTH alias roots Otherwise the broad read-allow leaks.
         let regexes = glob_to_seatbelt_regexes(Path::new("/tmp/projalias"), "**/.env");
         assert!(
             regexes.contains(&"^/tmp/projalias/(.*/)?\\.env$".to_string()),
@@ -651,9 +637,8 @@ mod tests {
     #[test]
     #[cfg(all(feature = "enforce", target_os = "macos"))]
     fn macos_regex_matches_globset_property() {
-        // PARITY GUARD (cross-product) For EVERY pattern `validate_deny_glob` accepts, the hand-rolled macOS regex must match a
-        // path IFF globset (the Linux backend) matches it. Patterns are generated from building blocks crossed with sample
-        // paths, so any future dialect drift fails mechanically. Rejected forms are asserted to fail closed
+        // PARITY GUARD (cross-product) For EVERY pattern `validate_deny_glob`
+        // accepts.
         let segs = [
             "a", "x.y", "*", "?", "**", "[abc]", "[a-z]", "[!a]", "[^a]", "[.]", "[*]", "[a^]",
             "[a-]", "[-a]", "*]",
@@ -683,7 +668,6 @@ mod tests {
             "]",
             "a]",
         ];
-        // Build single- and two-segment patterns from the blocks.
         let mut patterns: Vec<String> = Vec::new();
         for a in segs {
             patterns.push(a.to_string());
@@ -896,7 +880,7 @@ mod tests {
                 .unwrap_err();
             assert!(err.contains("visited over 3 entries"), "{err}");
             assert!(err.contains(workspace.to_str().unwrap()), "{err}");
-            // Exactly at the budget (root dir + 10 files) still succeeds.
+            // Exactly at the budget (root dir + files) still succeeds.
             assert!(
                 expand_deny_globs(&workspace, &["**/*.pem".to_string()], caps(64, 4096, 11))
                     .is_ok()
@@ -1041,7 +1025,7 @@ mod tests {
             std::fs::write(outside.join("real.pem"), "x").unwrap();
             std::os::unix::fs::symlink(outside.join("real.pem"), workspace.join("link.pem"))
                 .unwrap();
-            // One matched symlink yields two bind paths: logical and canonical
+            // One matched symlink yields bind paths: logical and canonical
             assert!(
                 expand_deny_globs(&workspace, &["**/*.pem".to_string()], caps(64, 1, 200_000))
                     .is_err()

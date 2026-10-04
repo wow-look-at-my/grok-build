@@ -1,10 +1,4 @@
-//! Legacy-console fallbacks for chrome glyphs that don't ship in the legacy Windows ConHost default font (Consolas / Lucida Console).
-//!
-//! Fallbacks are ASCII where possible (`x`, `o`, `c`, `*`), or a CP437 glyph when one reads better and still renders on the raster font.
-//!
-//! ConHost does no font fallback, so missing glyphs render as tofu.
-//! Windows Terminal, VS Code, and modern emulators bundle fonts (or fall back to one) that cover the glyphs we use as chrome.
-//! The substitution therefore only fires for legacy `cmd.exe` / `powershell.exe`.
+//! Legacy-console fallbacks for chrome glyphs that don't ship in the Windows ConHost default font.
 
 use std::borrow::Cow;
 use std::sync::OnceLock;
@@ -12,7 +6,7 @@ use std::sync::OnceLock;
 use crate::host::HostOs;
 use crate::terminal::{TerminalName, terminal_context};
 
-/// `"❯ "` normally, `"> "` on legacy ConHost. Always 2 columns wide.
+/// `"❯ "` normally, `"> "` on legacy ConHost.
 pub fn prompt_arrow() -> &'static str {
     if is_legacy_windows_console() {
         "> "
@@ -35,7 +29,7 @@ pub fn record_dot(filled: bool) -> &'static str {
     }
 }
 
-/// `"❙"` normally, `"|"` on legacy ConHost. Always 1 column wide.
+/// `"❙"` normally, `"|"` on legacy ConHost.
 pub fn collapsed_accent() -> &'static str {
     if is_legacy_windows_console() {
         "|"
@@ -44,9 +38,7 @@ pub fn collapsed_accent() -> &'static str {
     }
 }
 
-/// `"✗"` (U+2717 BALLOT X) normally, `"x"` on legacy ConHost. Always 1 column wide.
-///
-/// Used for close / cancel / kill buttons and failure status markers.
+/// `"✗"` (U+2717 BALLOT X) normally, `"x"` on legacy ConHost.
 pub fn ballot_x() -> &'static str {
     if is_legacy_windows_console() {
         "x"
@@ -55,7 +47,7 @@ pub fn ballot_x() -> &'static str {
     }
 }
 
-/// Check mark; legacy ConHost uses CP437 `√` so the raster font still reads as done. Always 1 column.
+/// Check mark; legacy ConHost uses CP437 `√` so the raster font still reads as done.
 pub fn check_mark() -> &'static str {
     if is_legacy_windows_console() {
         "\u{221A}"
@@ -73,9 +65,6 @@ pub fn enlarge() -> &'static str {
     }
 }
 
-/// `"⧉"` (U+29C9 TWO JOINED SQUARES) normally, `"c"` on legacy ConHost. Always 1 column wide.
-///
-/// The copy button glyph on the scrollback selection box (pairs with [`enlarge`]).
 pub fn copy_icon() -> &'static str {
     if is_legacy_windows_console() {
         "c"
@@ -84,9 +73,8 @@ pub fn copy_icon() -> &'static str {
     }
 }
 
-/// `"⇣"` (U+21E3 DOWNWARDS DASHED ARROW) normally, `"↓"` (U+2193) on legacy ConHost. Always 1 column wide.
-///
-/// Used for the context-token count in the turn-status line.
+/// `"⇣"` (U+21E3 DOWNWARDS DASHED ARROW) normally, `"↓"` (U+2193) on
+/// legacy ConHost.
 pub fn token_arrow() -> &'static str {
     if is_legacy_windows_console() {
         "\u{2193}"
@@ -96,7 +84,6 @@ pub fn token_arrow() -> &'static str {
 }
 
 /// Monitor-running pulse. Only `○` is CP437, so legacy ConHost pulses by fill, not size.
-/// Every frame is 1 column so the trailing label does not shift.
 pub fn monitor_icon_frames() -> &'static [&'static str] {
     const FANCY: &[&str] = &["\u{25CB}", "\u{25CE}", "\u{25C9}", "\u{25CE}"];
     const FALLBACK: &[&str] = &["\u{00B7}", "\u{25CB}", "\u{2022}", "\u{25CB}"];
@@ -107,7 +94,7 @@ pub fn monitor_icon_frames() -> &'static [&'static str] {
     }
 }
 
-/// Filled diamond; legacy ConHost uses CP437 `♦` so the raster font still renders. Always 1 column.
+/// Filled diamond; legacy ConHost uses CP437 `♦` so the raster font still renders.
 pub fn diamond_filled() -> &'static str {
     if is_legacy_windows_console() {
         "\u{2666}"
@@ -116,7 +103,7 @@ pub fn diamond_filled() -> &'static str {
     }
 }
 
-/// Hollow diamond for unused/idle markers; legacy ConHost uses CP437 `○`. Always 1 column.
+/// Hollow diamond for unused/idle markers; legacy ConHost uses CP437 `○`.
 pub fn diamond_hollow() -> &'static str {
     if is_legacy_windows_console() {
         "\u{25CB}"
@@ -144,7 +131,7 @@ pub fn diamond_hollow_char() -> char {
     diamond_hollow().chars().next().unwrap_or('\u{25C7}')
 }
 
-/// Braille spinner; U+2800 is not CP437, so legacy ConHost uses a 1-column ASCII spinner. Frames stay 1 column so layout does not shift.
+/// Braille spinner; U+2800 is not CP437, so legacy ConHost uses a 1-column ASCII spinner.
 pub fn braille_spinner_frames() -> &'static [&'static str] {
     const FANCY: &[&str] = &[
         "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}",
@@ -171,7 +158,7 @@ pub fn dot_spinner_frames() -> &'static [&'static str] {
     }
 }
 
-/// Accent rail. CP437 has no heavy vertical, so legacy ConHost uses light `│`. Always 1 column.
+/// Accent rail. CP437 has no heavy vertical, so legacy ConHost uses light `│`.
 pub fn accent_bar() -> &'static str {
     if is_legacy_windows_console() {
         "\u{2502}"
@@ -189,9 +176,8 @@ pub fn timeline_chevron_up() -> &'static str {
     }
 }
 
-/// `"▾"` (U+25BE SMALL DOWN-POINTING TRIANGLE) normally, `"▼"` (U+25BC, CP437 `0x1F`) on legacy ConHost. Always 1 column wide.
-///
-/// The timeline sidebar's next-turn chevron; see [`timeline_chevron_up`].
+/// `"▾"` (U+25BE SMALL DOWN-POINTING TRIANGLE) normally, `"▼"` (U+25BC,
+/// CP437 `0x1F`) on legacy ConHost.
 pub fn timeline_chevron_down() -> &'static str {
     if is_legacy_windows_console() {
         "\u{25BC}"
@@ -200,9 +186,8 @@ pub fn timeline_chevron_down() -> &'static str {
     }
 }
 
-/// `"━"` (U+2501 HEAVY HORIZONTAL) normally, `"─"` (U+2500 LIGHT HORIZONTAL, CP437 `0xC4`) on legacy ConHost. Always 1 column wide.
-///
-/// Prefer [`timeline_tick_active`] for the sidebar rail: on legacy ConHost this falls back to the same light stroke used for hover.
+/// `"━"` (U+2501 HEAVY HORIZONTAL) normally, `"─"` (U+2500 LIGHT
+/// HORIZONTAL, CP437 `0xC4`) on legacy ConHost.
 pub fn heavy_horizontal() -> &'static str {
     if is_legacy_windows_console() {
         "\u{2500}"
@@ -211,14 +196,13 @@ pub fn heavy_horizontal() -> &'static str {
     }
 }
 
-/// `"─"` (U+2500 LIGHT HORIZONTAL, CP437 `0xC4`). Always 1 column wide and present on every target.
-/// Exposed so the timeline sidebar's inactive ticks share one glyph source with [`heavy_horizontal`] instead of hardcoding the codepoint.
+/// `"─"` (U+2500 LIGHT HORIZONTAL, CP437 `0xC4`).
 pub fn light_horizontal() -> &'static str {
     "\u{2500}"
 }
 
-/// Precomposed 2-col active tick for the timeline rail: `"━━"` normally, `"══"` (U+2550, CP437 `0xCD`) on legacy ConHost.
-/// The double stroke keeps the active tick distinct from the light hover/idle stroke there.
+/// Precomposed 2-col active tick for the timeline rail: `"━━"` normally,
+/// `"══"` (U+2550, CP437 `0xCD`) on legacy ConHost.
 pub fn timeline_tick_active() -> &'static str {
     if is_legacy_windows_console() {
         "\u{2550}\u{2550}"
@@ -227,8 +211,8 @@ pub fn timeline_tick_active() -> &'static str {
     }
 }
 
-/// Precomposed 2-col hover tick for the timeline rail: `"──"` (light horizontal).
-/// Idle ticks reuse a single light cell; this is the wide bright hover form.
+/// Precomposed 2-col hover tick for the timeline rail: `"──"` (light
+/// horizontal).
 pub fn timeline_tick_hover() -> &'static str {
     "\u{2500}\u{2500}"
 }
@@ -242,9 +226,8 @@ pub fn filled_dot() -> &'static str {
     }
 }
 
-/// `"▏"` (U+258F LEFT ONE EIGHTH BLOCK) normally, `"│"` (U+2502, CP437 `0xB3`) on legacy ConHost. Always 1 column wide.
-///
-/// The thin left bar marking the selected row in the dashboard and the settings panes.
+/// `"▏"` (U+258F LEFT ONE EIGHTH BLOCK) normally, `"│"` (U+2502, CP437
+/// `0xB3`) on legacy ConHost.
 pub fn selection_bar() -> &'static str {
     if is_legacy_windows_console() {
         "\u{2502}"
@@ -253,9 +236,8 @@ pub fn selection_bar() -> &'static str {
     }
 }
 
-/// `"›"` (U+203A SINGLE RIGHT-POINTING ANGLE QUOTATION MARK) normally, `">"` (ASCII) on legacy ConHost. Always 1 column wide.
-///
-/// The chevron used for collapsed fold indicators, settings breadcrumbs, the integer-stepper increment affordance, and the dashboard "next" button.
+/// `"›"` (U+203A SINGLE RIGHT-POINTING ANGLE QUOTATION MARK) normally,
+/// `">"` (ASCII) on legacy ConHost.
 pub fn chevron() -> &'static str {
     if is_legacy_windows_console() {
         ">"
@@ -282,9 +264,8 @@ pub fn chevron_down() -> &'static str {
     }
 }
 
-/// `"▾"` (U+25BE BLACK DOWN-POINTING SMALL TRIANGLE) normally, `"v"` (ASCII) on legacy ConHost. Always 1 column wide.
-///
-/// The "expanded" disclosure indicator for a collapsible dashboard section header (the section's rows are visible below it).
+/// `"▾"` (U+25BE BLACK DOWN-POINTING SMALL TRIANGLE) normally, `"v"`
+/// (ASCII) on legacy ConHost.
 pub fn disclosure_open() -> &'static str {
     if is_legacy_windows_console() {
         "v"
@@ -302,7 +283,7 @@ pub fn disclosure_closed() -> &'static str {
     }
 }
 
-/// `"▴"` (U+25B4 BLACK UP-POINTING SMALL TRIANGLE) normally, `"^"` (ASCII) on legacy ConHost. Always 1 column wide.
+/// `"▴"` (U+25B4 BLACK UP-POINTING SMALL TRIANGLE) normally, `"^"` (ASCII) on legacy ConHost.
 pub fn disclosure_up() -> &'static str {
     if is_legacy_windows_console() {
         "^"
@@ -311,9 +292,7 @@ pub fn disclosure_up() -> &'static str {
     }
 }
 
-/// `"[✗]"` normally, `"[x]"` on legacy ConHost. Always 3 columns wide.
-///
-/// Pre-composed bracketed form of [`ballot_x`] so per-frame render paths reuse a `&'static str` instead of allocating a `format!` each frame.
+/// `"[✗]"` normally, `"[x]"` on legacy ConHost.
 pub fn ballot_x_button() -> &'static str {
     if is_legacy_windows_console() {
         "[x]"
@@ -322,9 +301,7 @@ pub fn ballot_x_button() -> &'static str {
     }
 }
 
-/// `"[↗]"` normally, `"[o]"` on legacy ConHost. Always 3 columns wide.
-///
-/// Pre-composed bracketed sibling of [`ballot_x_button`] for the bg-task view / enlarge button.
+/// `"[↗]"` normally, `"[o]"` on legacy ConHost.
 pub fn enlarge_button() -> &'static str {
     if is_legacy_windows_console() {
         "[o]"
@@ -359,8 +336,8 @@ pub fn sanitize_toast_message(msg: &str) -> Cow<'_, str> {
     )
 }
 
-/// Pure glyph-to-legacy mapping behind [`legacy_glyph_fallback`], split out so tests can exercise the substitution without faking the host probe.
-/// `√` matches [`check_mark`]'s fallback; `x` matches [`ballot_x`]'s.
+/// Pure glyph-to-legacy mapping behind [`legacy_glyph_fallback`], split out
+/// so tests can exercise the substitution without faking the host probe.
 fn to_legacy_glyphs(s: &str) -> String {
     s.chars()
         .map(|c| match c {
@@ -378,8 +355,7 @@ pub fn is_legacy_windows_console() -> bool {
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| {
         forced_legacy_console_override().unwrap_or_else(|| {
-            // `env_brand`, not `brand`: bare ConHost detects as `Unknown`, but `brand` optimistically becomes `WindowsTerminal` on native Windows
-            // Font capability needs the raw detection so legacy consoles still get the ASCII glyph fallback
+            // `env_brand`, not `brand`: bare ConHost detects as `Unknown`.
             decide_legacy_windows_console(HostOs::current(), terminal_context().env_brand)
         })
     })
@@ -391,7 +367,6 @@ fn forced_legacy_console_override() -> Option<bool> {
 }
 
 /// Pure parse of the override value so tests don't touch the environment.
-/// `"1"` / `"true"` forces on, `"0"` / `"false"` forces off; anything else (including unset) is `None` so normal host/brand detection runs.
 fn parse_forced_legacy_console(value: Option<&str>) -> Option<bool> {
     match value {
         Some("1" | "true") => Some(true),
@@ -435,7 +410,6 @@ mod tests {
         assert_eq!("> ".width(), PROMPT_ARROW_WIDTH as usize);
     }
 
-    // Both record-dot states must be exactly 1 column so the "Recording" label position is stable as the indicator pulses
     #[test]
     fn record_dot_states_are_one_column() {
         assert_eq!(record_dot(true).width(), 1);
@@ -506,7 +480,6 @@ mod tests {
         }
     }
 
-    // Every spinner and monitor-pulse frame, fancy or fallback, must be 1 column so animating them never shifts the label / timer that follows
     #[test]
     fn spinner_frames_are_one_column() {
         for frame in braille_spinner_frames()
@@ -668,7 +641,8 @@ mod tests {
         }
     }
 
-    // AppleTerminal/VTE can't actually be probed on Windows; the assertion is the default-deny safety net for unfamiliar brands
+    // AppleTerminal/VTE can't be probed on Windows; the assertion is the
+    // default-deny safety net for unfamiliar brands
     #[test]
     fn unfamiliar_brands_on_windows_default_to_legacy() {
         for brand in [

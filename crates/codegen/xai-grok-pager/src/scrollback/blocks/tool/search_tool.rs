@@ -24,7 +24,6 @@ pub struct DiscoveredTool {
 #[derive(Debug, Clone)]
 pub struct SearchToolCallBlock {
     pub query: String,
-    /// Limit parameter from the input; `None` means the default of 8.
     pub limit: Option<u8>,
     pub result_count: usize,
     /// Discovered tools (parsed from output).
@@ -218,8 +217,7 @@ impl BlockContent for SearchToolCallBlock {
                     for (i, tool) in self.results.iter().enumerate() {
                         let idx_span = Span::styled(format!("  {}. ", i + 1), theme.muted());
 
-                        // Strip the trusted server prefix from tool_name and title-case both halves
-                        // Show the action bold and the server name dimmed on the right
+                        // Strip the trusted server prefix from tool_name and title-case both halves Show the action bold and the server name dimmed.
                         let action = mcp_titleize_segment(discovered_tool_action(tool));
                         let server_label = mcp_titleize_segment(&tool.server);
 

@@ -1,31 +1,4 @@
 //! Shadow `find`→`bfs` and `grep`→`ugrep` when those binaries resolve.
-//!
-//! Per-tool enable state (default on) is resolved by the host via the shared
-//! config helper `xai-grok-shell::util::config::resolve_search_tools_enabled`
-//! (requirements > env `GROK_TOOLS_FIND_BFS` / `GROK_TOOLS_GREP_UGREP` (+
-//! `GROK_FIND_BFS` / `GROK_GREP_UGREP` aliases, `DISABLE_EMBEDDED_SEARCH_TOOLS`
-//! master) > `[toolset.bash]` config.toml > managed > default), baked into the
-//! `LocalTerminalBackend` as a [`SearchShadowConfig`] and passed to
-//! [`search_injection`] per command. The enable state lives on the backend (not
-//! a process-global): a subagent that reuses the parent's backend inherits the
-//! parent's shadows instead of clobbering a shared static. This module no longer
-//! parses the flags itself.
-//!
-//! Resolve (host side, memoized): env override if a regular file → bundled binary
-//! (release builds, self-extracted to `~/.grok/vendor/<name>-<ver>-<target>`) →
-//! `~/.grok/vendor/{name}` if a regular file → `which` on the agent `$PATH`.
-//! Env/vendor only require `is_file()` as a lenient hint (no `--version` probe).
-//! This memoized path is only a *hint*: the injected shadow re-resolves at
-//! **call time** — it uses the hint when it's still *executable* (`[ -x ]`), else
-//! `command -v {bin}` on the live shell `PATH` (which includes login/rc additions
-//! the agent process may lack), else falls back to the OS `{name}`. So a removed
-//! or non-executable binary self-heals to OS `find`/`grep`, and a binary
-//! reachable only through the login shell is still found.
-//!
-//! Inject is **always** non-empty on Unix callers: either install a shadow
-//! function (which tags itself with a `__grok_shadow_{name}` marker) or a
-//! marker-gated `unalias`+`unset -f` that drops *only* a prior harness shadow —
-//! never a user-defined `find`/`grep` function replayed from the snapshot.
 
 use super::SearchShadowConfig;
 use std::path::{Path, PathBuf};
@@ -65,9 +38,7 @@ const UGREP_BYTES: &[u8] = include_bytes!(concat!(
     ".bin.zst"
 ));
 
-/// Oneline inject for shell wrappers; always ends with `"; "`. `cfg` is the backend's resolved
-/// per-tool enable state (see module docs); it is passed in per command rather than read from a
-/// process-global so subagents sharing a backend can't clobber each other's shadows.
+/// Oneline inject for shell wrappers; always ends with `"; "`.
 pub fn search_injection(cfg: SearchShadowConfig) -> String {
     build_injection(cfg.find_bfs, cfg.grep_ugrep, resolved_tools())
 }
@@ -89,9 +60,8 @@ fn build_injection(find_on: bool, grep_on: bool, tools: &ResolvedTools) -> Strin
     format!("{find}; {grep}; ")
 }
 
-/// Drop a *previously installed harness* shadow so command-word `{name}` uses the OS binary again. Gated on the `__grok_shadow_{name}` marker
-/// that [`shell_function`] sets, so a user-defined `{name}` function replayed from the shell snapshot is left intact — only the harness's own
-/// shadow is removed. `set -u`/`set -e` safe and idempotent (`unset -f` is bash + zsh).
+/// Drop a * installed harness* shadow so command-word `{name}` uses the OS
+/// binary again.
 fn restore_command(name: &str) -> String {
     format!(
         "if [ -n \"${{__grok_shadow_{name}-}}\" ]; then \
@@ -176,9 +146,8 @@ fn resolve_tool(
     )
 }
 
-/// Resolution order: explicit env path → bundled (self-extracted) → `~/.grok/vendor/<bin>` → `which`. Env and vendor only require `is_file()`
-/// here (a lenient hint, no `+x` probe) so an odd-permission copy still resolves; the injected shadow gates on `[ -x ]` at call time and falls
-/// back to the OS binary if the hint isn't executable, so a non-exec path can't hard-fail `find`/`grep`.
+/// Resolution order: explicit env path → bundled (self-extracted) →
+/// `~/.grok/vendor/<bin>` → `which`.
 fn resolve_tool_from(
     env_path: Option<PathBuf>,
     bundled: Option<PathBuf>,
@@ -228,9 +197,12 @@ fn shell_function(
             format!("{} ", qargs.join(" "))
         }
     };
-    // `local __grok_bin` is re-resolved every call. The host hint is trusted only when it's *executable* (`[ -x ]`, not just `[ -f ]`): the
-    // resolver accepts any regular file as a hint, but `exec` needs `+x`, so a non-exec hint must fall through rather than hard-fail with no OS
-    // fallback. `|| __grok_bin=''` keeps the lookup `set -e`-safe (a failed `command -v` would otherwise abort the function under errexit).
+    // `local __grok_bin` is re-resolved every call. The host hint is trusted
+    // only when it's *executable* (`[ -x ]`, not `[ -f ]`): the resolver
+    // accepts any regular file as a hint, but `exec` needs `+x`, so a
+    // non-exec hint must fall through rather than hard-fail with no OS
+    // fallback. `|| __grok_bin=''` keeps the lookup `set -e`-safe (a failed
+    // `command -v` would otherwise abort the function under errexit).
     format!(
         "unalias {name} 2>/dev/null || true; \
          {name}() {{ \
@@ -266,8 +238,7 @@ mod tests {
         // Preferred path is the fast-path hint; the shadow execs `$__grok_bin`.
         assert!(fn_body.contains("local __grok_bin=/tmp/bfs"));
         assert!(fn_body.contains("exec -a find \"$__grok_bin\" \"$@\""));
-        // Hint is trusted only when executable (`[ -x ]`, not `[ -f ]`), so a
-        // non-exec hint falls through instead of hard-failing exec.
+        // Hint is trusted only when executable (`[ -x ]`, not `[ -f ]`).
         assert!(fn_body.contains("[ -x \"$__grok_bin\" ]"));
         assert!(!fn_body.contains("[ -f \"$__grok_bin\" ]"));
         // Self-heal: live-PATH lookup + OS fallback.
@@ -334,8 +305,7 @@ mod tests {
 
     #[test]
     fn build_injection_off_emits_marker_gated_restore_not_function() {
-        // Disabled tools emit a marker-gated restore so a stale harness shadow
-        // from a prior snapshot is dropped, but a user function is left intact.
+        // Disabled tools emit a marker-gated restore so a stale harness shadow from a prior snapshot is dropped.
         let inject = build_injection(false, false, &both_tools());
         assert!(inject.ends_with("; "));
         assert!(inject.contains("if [ -n \"${__grok_shadow_find-}\" ]"));
@@ -572,7 +542,6 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi there");
     }
 
-    /// #3 regression: a user-defined `find` must survive a disabled-tool restore.
     /// Without the marker gate, the unconditional `unset -f find` dropped it.
     #[test]
     fn restore_preserves_user_function_without_marker() {
@@ -620,8 +589,6 @@ mod tests {
         );
     }
 
-    /// #1 + #4: the host hint points at a missing file, but the binary is on the
-    /// live shell `PATH` — the shadow re-resolves via `command -v` at call time.
     #[test]
     fn shadow_self_heals_via_path_lookup() {
         let Ok(bash) = which::which("bash") else {
@@ -663,8 +630,6 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "SELFHEAL X");
     }
 
-    /// #1 fallback: neither the hint nor `command -v` resolves → the OS binary
-    /// runs (via `command find`), so the shadow never breaks `find`.
     #[test]
     fn shadow_falls_back_to_os_when_binary_absent() {
         let Ok(bash) = which::which("bash") else {
@@ -690,9 +655,7 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "/dev/null");
     }
 
-    /// #1 regression: a host hint that exists but is **not executable** (e.g. a mode-0644
-    /// `GROK_TOOLS_*_PATH` / vendor copy) must fall through to the OS binary rather than hard-fail
-    /// `exec` with EACCES. The `[ -x ]` guard (not `[ -f ]`) is what makes this work.
+    /// The `[ -x ]` guard (not `[ -f ]`) is what makes this work.
     #[test]
     fn shadow_falls_back_when_hint_not_executable() {
         let Ok(bash) = which::which("bash") else {
@@ -710,7 +673,6 @@ mod tests {
         let hint = dir.join("bfs");
         std::fs::write(&hint, "#!/bin/sh\necho SHOULD_NOT_RUN\n").unwrap();
         {
-            // Mode 0644 — exists but not executable by anyone.
             use std::os::unix::fs::PermissionsExt;
             let mut perms = std::fs::metadata(&hint).unwrap().permissions();
             perms.set_mode(0o644);

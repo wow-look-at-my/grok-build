@@ -1,9 +1,4 @@
 //! `x.ai/session/usage`: cumulative session token and cost totals as [`PromptUsage`].
-//!
-//! Projects the in-memory [`xai_chat_state::UsageLedger`] (main-loop + folded
-//! subagent spend). Partial costs are preserved with a `costIsPartial` flag;
-//! only incomplete usage (genuine data loss) scrubs cost. Totals reset
-//! when a session is resumed in a new agent process.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -105,10 +100,7 @@ mod tests {
 
     #[test]
     fn response_preserves_partial_cost_with_flag() {
-        // Two main-loop calls: one reports cost (70 ticks), the other lacks
-        // cost entirely. This is a *partial* cost (not incomplete usage), so
-        // the reported ticks are preserved and `costIsPartial` is set — the
-        // TUI shows the partial sum rather than hiding it entirely.
+        // Main-loop calls: one reports cost (ticks), the other lacks cost entirely.
         let mut ledger = UsageLedger::default();
         ledger.record_main_loop_call("a", &usage(100, 10), None, Some(70));
         ledger.record_main_loop_call("a", &usage(50, 5), None, None);

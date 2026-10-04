@@ -3,14 +3,14 @@
 use super::common::*;
 use xai_grok_pager_pty_harness::StyledLine;
 
-/// Greppable tokens on the two rendered quote rows, plus the sentinel that marks the turn settled.
+/// Greppable tokens on both rendered quote rows, plus the sentinel that marks the turn settled.
 const QUOTE_ALPHA: &str = "QUOTE_ALPHA";
 const QUOTE_BRAVO: &str = "QUOTE_BRAVO";
 const QUOTE_OUTRO: &str = "QUOTE_OUTRO_DONE";
 
-/// Per-cell `(bg, inverse)` styling for one screen row, expanded from runs in column order.
-/// `StyledLine.line` is 1-based; `row` here is the 0-based `locate_screen_text` row.
-/// A selection highlight shows up as a changed `bg` or `inverse` on these cells, the same sampling as `stuck_drag_recovers_on_esc_pty`.
+/// Per-cell `(bg, inverse)` styling for one screen row, expanded from runs in
+/// column order. `StyledLine.line` is 1-based; `row` here is the 0-based
+/// `locate_screen_text` row.
 fn row_cells(lines: &[StyledLine], row: u16) -> Vec<(Option<String>, bool)> {
     let target = row as usize + 1;
     let mut cells = Vec::new();
@@ -27,8 +27,6 @@ fn row_cells(lines: &[StyledLine], row: u16) -> Vec<(Option<String>, bool)> {
     cells
 }
 
-/// `SSH_CONNECTION` is set deliberately: on macOS the clipboard route emits OSC 52 only when it
-/// believes the session is remote.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn quote_block_drag_copy_excludes_bars_pty() {
@@ -85,8 +83,7 @@ async fn quote_block_drag_copy_excludes_bars_pty() {
     harness
         .wait_for_text("Space:prompt", Duration::from_secs(10))
         .expect("scrollback focused (Space:prompt hint) after Tab");
-    // `QUOTE_OUTRO` streams in the SAME turn, so the turn-end relayout (spinner and hint rows disappearing) can land after the wait above
-    // That relayout shifts the content rows; give it a generous fixed settle, then locate coordinates from the settled screen
+    // `QUOTE_OUTRO` streams in the SAME turn, so the turn-end relayout (spinner and hint rows disappearing) can land after the wait above.
     harness.update(Duration::from_millis(1500));
 
     let screen = harness.screen_contents();
@@ -101,7 +98,6 @@ async fn quote_block_drag_copy_excludes_bars_pty() {
         alpha_row + 1,
         "quote lines should be consecutive rows; screen:\n{screen}"
     );
-    // Precondition: the bar cell is two columns left of the token
     let bar_col = alpha_col.saturating_sub(2);
     let alpha_line = screen.lines().nth(alpha_row as usize).unwrap_or("");
     assert_eq!(
@@ -113,8 +109,6 @@ async fn quote_block_drag_copy_excludes_bars_pty() {
     // Baseline styling of the quote row before any selection exists.
     let base_alpha = row_cells(&harness.screen_styled(), alpha_row);
 
-    // Start the drag ON the bar cell ("│ " sits two columns left of the token) and hold it before releasing
-    // Holding keeps the live selection overlay on the styled screen for inspection
     let bravo_end = bravo_col + "QUOTE_BRAVO second".chars().count() as u16 - 1;
     let mut held = String::new();
     held.push_str(&sgr_mouse(0, alpha_row, bar_col, 'M'));

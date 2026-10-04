@@ -1,5 +1,4 @@
-//! The `CompactionSampler` seam — the LLM call that produces summaries —
-//! plus its output and error types (shared failure classification).
+//! The `CompactionSampler` seam — the LLM call that produces summaries — plus its output and error types.
 
 use std::time::Duration;
 
@@ -8,32 +7,20 @@ use async_trait::async_trait;
 use crate::prompt::CompactionPrompt;
 
 // ---------------------------------------------------------------------------
-// Sampler output + error types
-// ---------------------------------------------------------------------------
+// Sampler output + error types.
 
-/// Raw text captured from a compaction LLM call, split by channel.
-///
-/// Used by both intra- and inter-compaction. Intra-compaction uses only
-/// `.response`; inter-compaction also persists `.thinking` for audit/debug.
+/// Raw text captured from a compaction LLM call, split by channel. Used by
+/// both intra- and inter-compaction.
 #[derive(Debug, Default, Clone)]
 pub struct LlmCompactionOutput {
     /// Text from the response channel — the actual compaction summary.
     pub response: String,
     /// Text from the thinking channel — the model's chain-of-thought reasoning.
-    /// Stored for audit/debug only; never fed back into a conversation.
     pub thinking: String,
 }
 
 /// Error types for compaction sampling, allowing callers to distinguish
 /// deterministic failures (never retry) from transient ones.
-///
-/// Harnesses should prefer the structured variants ([`Self::Build`],
-/// [`Self::Start`], [`Self::EmptyResponse`]) so the shared retry policy can
-/// classify without string matching. [`Self::Other`] remains for samplers
-/// that only surface an opaque error; the orchestrator falls back to
-/// matching the literal messages produced by the Grok chat sampler —
-/// keep those literals in sync (the `compaction_sample_error_to_intra*`
-/// tests guard the mapping).
 #[derive(Debug)]
 pub enum CompactionSampleError {
     /// The sampler hit its end-to-end timeout. Transient.
@@ -44,26 +31,16 @@ pub enum CompactionSampleError {
     /// Sampler construction failed (bad config, unknown model). Deterministic.
     Build(String),
     /// The sampling call could not be started.
-    ///
-    /// Classification is asymmetric for pre-migration parity: the *inter*
-    /// retry policy ([`Self::is_deterministic`]) treats it as deterministic
-    /// (no retry), while the *intra* orchestrator maps it to
-    /// `IntraCompactionError::SamplerStart` which its retry loop treats as
-    /// transient.
     Start(String),
     /// The model produced no response-channel content. Transient.
     EmptyResponse,
-    /// Structurally-detected size overflow (context window or transport
-    /// payload limit). Deterministic; hosts with an input ladder step down
-    /// instead of retrying.
+    /// Structurally-detected size overflow (context window or transport payload limit).
     ContextOverflow(String),
-    /// Anything else — classified by string matching for backward
-    /// compatibility with samplers that pre-date the structured variants.
+    /// Anything else — classified by string matching for backward compatibility with samplers.
     Other(anyhow::Error),
 }
 
-/// Prefix [`CompactionSampleError::Build`]'s Display stamps; user-facing
-/// normalizers strip it.
+/// Prefix [`CompactionSampleError::Build`]'s Display stamps; user-facing normalizers strip it.
 pub const SAMPLER_BUILD_FAILED_PREFIX: &str = "Compaction sampler build failed: ";
 /// Prefix [`CompactionSampleError::Start`]'s Display stamps; see above.
 pub const SAMPLER_START_FAILED_PREFIX: &str = "Compaction sampler start failed: ";
@@ -124,26 +101,14 @@ impl CompactionSampleError {
 // Sampler trait
 // ---------------------------------------------------------------------------
 
-/// Interface for the LLM call that produces compaction summaries.
-///
-/// Used by both intra-compaction (steps/history) and inter-compaction.
-/// Implemented by each harness's sampler adapter; grok-build wires its own
-/// transport.
-///
-/// Returns [`LlmCompactionOutput`] containing both response and thinking
-/// channel text. Intra-compaction uses only `.response`; inter-compaction
-/// also persists `.thinking` for audit/debug.
+/// Interface for the LLM call that produces compaction summaries. Used by
+/// both intra-compaction (steps/history) and inter-compaction.
 #[async_trait]
 pub trait CompactionSampler: Send + Sync {
     /// The harness's conversation item type.
     type Item;
 
     /// Run an LLM compaction call on the given items.
-    ///
-    /// Implementations should:
-    /// - Build a synthetic conversation from the items + prompt.
-    /// - Honor the `timeout`.
-    /// - Collect both response and thinking channel text.
     async fn sample_compaction(
         &self,
         turns: &[Self::Item],

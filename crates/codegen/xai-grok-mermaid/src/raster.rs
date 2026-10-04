@@ -1,28 +1,20 @@
 //! SVG to PNG rasterization via `resvg`/`usvg`/`tiny-skia`.
-//!
-//! Configured for untrusted input.
-//! Shaping is pinned to the bundled font face; system fonts serve only as glyph fallback for non-ASCII text.
-//! No external image resolvers: a crafted SVG cannot read `file://`, `http://`, or local paths.
-//! The PNG is produced by tiny-skia's own encoder; the `image` crate's codecs are not used on the render path.
 
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-// `usvg` comes from `resvg`'s re-export so its version matches `resvg::render` exactly (the workspace `usvg` pin is an older, incompatible line)
-// `tiny_skia` is the workspace dep, which resolves to the same version `resvg` links, so the types unify
+// `usvg` comes from `resvg`'s re-export so its version matches `resvg::render` exactly.
 use resvg::usvg;
 
 use crate::{MermaidError, RenderParams, RenderedDiagram, Rgba};
 
-/// Bundled primary sans face (Roboto Regular, Apache-2.0); system fonts are consulted only as glyph fallback for characters it lacks.
-/// The vendored layout engine measures text with fixed char-width metrics (no font file), so there is no layout/raster font to keep in sync.
-/// This face is used purely to rasterize glyphs.
+/// Bundled primary sans face (Roboto Regular, Apache-2.0).
 pub(crate) const BUNDLED_FONT: &[u8] = include_bytes!("../assets/Roboto-Regular.ttf");
 
-/// Hard ceiling on output area, applied regardless of requested size, to bound memory over huge untrusted diagrams (32 MP is about 5657x5657).
+/// Hard ceiling on output area, applied regardless of requested size.
 pub const MAX_OUTPUT_MEGAPIXELS: f32 = 32.0;
 
-/// Hard ceiling on either output axis, so an extreme-aspect diagram can't pin one dimension to a huge value even when the area cap leaves headroom.
+/// Hard ceiling on either output axis, so an extreme-aspect diagram can't pin one dimension to a huge value even.
 const MAX_OUTPUT_DIMENSION: u32 = 16_384;
 
 struct FontSet {
@@ -51,7 +43,6 @@ fn build_font_set(with_system_fonts: bool) -> FontSet {
         db.load_system_fonts();
     }
     // The engine emits font-family lists ending in a generic.
-    // None of the named families are loaded, so resolution falls to the generic
     db.set_serif_family(&family);
     db.set_sans_serif_family(&family);
     db.set_monospace_family(&family);
@@ -94,9 +85,8 @@ fn rgba_to_color(c: Rgba) -> tiny_skia::Color {
     tiny_skia::Color::from_rgba8(c.r, c.g, c.b, c.a)
 }
 
-/// Rasterize `svg` to a PNG using `params`.
-/// A [`RenderParams::background`] of `Some` fills the canvas opaquely; `None` leaves it transparent.
-/// Returns [`MermaidError::Rasterize`] if the SVG cannot be parsed, has zero size, or cannot be encoded to PNG.
+/// Rasterize `svg` to a PNG using `params`. A [`RenderParams::background`] of
+/// `Some` fills the canvas opaquely; `None` leaves it transparent.
 pub fn rasterize(svg: &str, params: &RenderParams) -> Result<RenderedDiagram, MermaidError> {
     rasterize_with_font(svg, params, font_set_for(svg))
 }
@@ -112,9 +102,7 @@ fn rasterize_with_font(
         font_resolver: pinned_resolver(font.bundled_id),
         ..Default::default()
     };
-    // SECURITY: usvg's default string resolver reads image hrefs off disk (`std::fs::read`)
-    // Replace it with a no-op so a crafted SVG can never read local files or reach the network
-    // In-memory data-URLs stay supported
+    // SECURITY: usvg's default string resolver reads image hrefs off disk (`std::fs::read`) Replace it with a no-op.
     opt.image_href_resolver.resolve_string = Box::new(|_href, _opt| None);
 
     let tree =
@@ -136,9 +124,8 @@ fn rasterize_with_font(
         pixmap.fill(rgba_to_color(bg));
     }
 
-    // Scale each axis to fill the chosen pixmap exactly
-    // After the integer clamps the two axis scales can differ by up to ~1/base_dim, a sub-pixel aspect skew for typical sizes
-    // We prefer an exact fill (no transparent margins) over perfect aspect preservation
+    // Scale each axis to fill the chosen pixmap exactly After the integer
+    // clamps the axis scales can differ by up to ~1/base_dim.
     let transform =
         tiny_skia::Transform::from_scale(width_px as f32 / base_w, height_px as f32 / base_h);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
@@ -167,8 +154,8 @@ fn effective_scale(base_w: f32, base_h: f32, params: &RenderParams) -> f32 {
         scale = 1.0;
     }
 
-    // Upscale small diagrams so OS viewers get a usable pixel budget
-    // This runs before the height/area clamps, so a min-width request can still shrink to fit
+    // Upscale small diagrams so OS viewers get a usable pixel budget This
+    // runs before the height/area clamps.
     if params.min_width_px > 0 {
         let min_scale = params.min_width_px as f32 / base_w;
         if min_scale.is_finite() && min_scale > scale {
@@ -230,7 +217,6 @@ mod tests {
 
     #[test]
     fn min_width_raises_scale_before_clamps() {
-        // A 100-wide SVG at scale 1.0 would be 100px; min_width 400 forces 4x, so 400x200
         let mut p = params(0, 10_000);
         p.min_width_px = 400;
         let out = rasterize(SVG_100X50, &p).expect("rasterize");
@@ -240,13 +226,11 @@ mod tests {
 
     #[test]
     fn for_os_viewer_uses_2x_or_min_width() {
-        // Small SVG: min_width 2560 wins over 2x (which would give 200)
         let p = RenderParams::for_os_viewer(MermaidTheme::Light, 2560, 8192);
         let out = rasterize(SVG_100X50, &p).expect("rasterize");
         assert_eq!(out.width_px, 2560);
         assert_eq!(out.height_px, 1280);
 
-        // Wide SVG: 2x intrinsic (target_width 0, scale 2) when already at least min_width
         let wide = r##"<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="500" viewBox="0 0 2000 500"><rect width="2000" height="500" fill="#00ff00"/></svg>"##;
         let out2 = rasterize(wide, &p).expect("rasterize");
         assert_eq!(out2.width_px, 4000);
@@ -255,7 +239,6 @@ mod tests {
 
     #[test]
     fn rasterize_decodes_to_expected_scaled_dimensions() {
-        // Target width 200 against a 100-wide SVG doubles it to 200x100
         let out = rasterize(SVG_100X50, &params(200, 10_000)).expect("rasterize");
         assert_eq!(out.width_px, 200);
         assert_eq!(out.height_px, 100);
@@ -317,12 +300,10 @@ mod tests {
     #[test]
     fn max_height_clamps_tall_diagram() {
         let tall = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="1000" viewBox="0 0 100 1000"><rect width="100" height="1000" fill="#00ff00"/></svg>"##;
-        // scale fallback 2.0 would give height 2000; clamp to 200.
         let mut p = params(0, 200);
         p.scale = 2.0;
         let out = rasterize(tall, &p).expect("rasterize");
         assert!(out.height_px <= 200, "height {} exceeds cap", out.height_px);
-        // Aspect ratio preserved: 100/1000 means width is about height/10
         assert!(out.width_px <= 40);
     }
 
@@ -341,9 +322,6 @@ mod tests {
 
     #[test]
     fn extreme_aspect_svg_respects_area_and_axis_caps() {
-        // A pathological 3.2e9 x 1 SVG: the float area cap leaves one axis huge
-        // The floor and `max(1)` on the sub-1px axis would otherwise inflate the integer area far past the cap
-        // Verify both the area cap and the per-axis cap hold
         let wide = r##"<svg xmlns="http://www.w3.org/2000/svg" width="3200000000" height="1" viewBox="0 0 3200000000 1"><rect width="3200000000" height="1" fill="#abcdef"/></svg>"##;
         let out = rasterize(wide, &params(0, u32::MAX)).expect("rasterize");
         let area = out.width_px as u64 * out.height_px as u64;
@@ -363,8 +341,7 @@ mod tests {
 
     #[test]
     fn clamp_dimensions_shrinks_larger_axis_to_area_cap() {
-        // Direct coverage of the area-shrink branch, which is unreachable via `rasterize` because `effective_scale` pre-caps the float area
-        // Exercises both arms of the inner `if`
+        // Direct coverage of the area-shrink branch, which is unreachable via `rasterize`.
         let max_area = (MAX_OUTPUT_MEGAPIXELS as u64) * 1_000_000;
 
         // Both axes hit the per-axis cap; since they are equal, the `width >= height` arm shrinks width
@@ -380,7 +357,6 @@ mod tests {
 
     #[test]
     fn narrow_tall_svg_clamps_width_to_one() {
-        // Width 1, height 1000, clamped to height 5: width 1*0.005 floors to 0 and is bumped to 1 (the `.max(1)` boundary)
         let narrow = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1000" viewBox="0 0 1 1000"><rect width="1" height="1000" fill="#00ff00"/></svg>"##;
         let out = rasterize(narrow, &params(0, 5)).expect("rasterize");
         assert_eq!(out.width_px, 1, "narrow width must clamp to 1");
@@ -441,11 +417,9 @@ mod tests {
 
     #[test]
     fn text_with_engine_font_family_actually_renders_glyphs() {
-        // Regression: the engine themes set font-family lists like "Inter, ..., sans-serif", none of which name the bundled Roboto face usvg resolves the generic `sans-serif` via fontdb's generic-family map (default "Arial"), which isn't loaded
-        // Unless the generics point at the bundled face, the glyphs are silently dropped and node labels render blank
-        // Black text on white: assert dark pixels exist
+        // Regression: the engine themes set font-family lists like "Inter, ..., sans-serif", none of which name the bundled Roboto face usvg resolves the generic `sans-serif` via fontdb's generic-family map (default "Arial"), which isn't loaded Unless the generics point at the bundled face.
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60" viewBox="0 0 200 60"><text x="10" y="38" font-family="Inter, ui-sans-serif, system-ui, -apple-system, &quot;Segoe UI&quot;, sans-serif" font-size="28" fill="#000000">Hello</text></svg>"##;
-        let mut p = params(0, 10_000); // scale 1.0 => 200x60
+        let mut p = params(0, 10_000);
         p.background = Some(Rgba::new(255, 255, 255, 255));
         let out = rasterize(svg, &p).expect("rasterize");
         let img = image::load_from_memory(&out.png)

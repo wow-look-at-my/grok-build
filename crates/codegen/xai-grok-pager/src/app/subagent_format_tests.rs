@@ -252,7 +252,7 @@ fn activity_label_rendered_for_each_turn_activity() {
             },
             format!("Running: {long}"),
         ),
-        // Over the limit truncates to 40 chars plus an ellipsis.
+        // Over the limit truncates to multiple chars plus an ellipsis.
         (
             TurnActivity::ToolRunning {
                 title: "a".repeat(60),

@@ -1,7 +1,4 @@
 //! Small-screen tip: on smallish terminals, advertise that `/compact-mode` reclaims the padding and sticky-header rows.
-//!
-//! Shown once per run, at the first stable agent-view draw only, never on a later resize.
-//! Below the band auto-compact already trims those rows; above it the default layout is roomy enough that the hint is noise.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -23,7 +20,6 @@ const SMALL_SCREEN_TIP_SEEN_CAP: u32 = 1;
 const SMALL_SCREEN_TIP_MAX_ROWS: u16 = 28;
 
 /// Whether `rows` falls in the band the tip targets.
-/// The band sits above the auto-compact threshold, where compacting is the user's call, and ends at [`SMALL_SCREEN_TIP_MAX_ROWS`].
 pub fn small_screen_band_contains(rows: u16) -> bool {
     (AUTO_COMPACT_MAX_ROWS + 1..=SMALL_SCREEN_TIP_MAX_ROWS).contains(&rows)
 }

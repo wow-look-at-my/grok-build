@@ -1,18 +1,8 @@
 //! Row layout for the dock.
-//!
-//! The dock is a fixed strip above the prompt, so it holds two invariants that
-//! the rest of the widget relies on:
-//!
-//! - It never asks for more rows than [`DockCounts::max_rows`], or the 2-row
-//!   floor (plus a queue-body row) when that floor is taller.
-//! - Every non-empty section keeps its header row. Sections give up rows before
-//!   a header does, and a section that cannot show every row spends its last one
-//!   on a `show N more` line and scrolls inside the band it was granted.
 
 use super::{DockCounts, DockData, DockItem, Section};
 
-/// Rows the dock may take, defaulting to its resting cap so a caller that omits
-/// it cannot collapse the dock to nothing.
+/// Rows the dock may take, defaulting to its resting cap so a caller that omits it cannot collapse the dock to nothing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct MaxRows(u16);
 
@@ -66,7 +56,6 @@ impl<T: Copy + Default> SectionSlots<T> {
 /// paint, and the queue body cannot drift apart.
 pub struct DockLayout {
     rows: Vec<DockItem>,
-    /// Rows a section can scroll through: 0 while it is collapsed.
     scrollable: SectionSlots<usize>,
     visible: SectionSlots<usize>,
     offsets: SectionSlots<usize>,
@@ -104,14 +93,11 @@ impl DockLayout {
             let Some(&granted) = grants.sections.get(slot) else {
                 continue;
             };
-            // A 0-row grant still has to paint the header. Emitting RevealRemaining
-            // on top of that would spend an unbudgeted row and let `truncate`
-            // drop a later header.
+            // A 0-row grant still has to paint the header.
             if granted == 0 {
                 continue;
             }
-            // `grant_rows` never leaves a lone row, so a granted section always
-            // paints at least one row of its own.
+            // `grant_rows` never leaves a lone row, so a granted section always paints at least one row of its own.
             let visible = grants.visible(slot, section.len);
             let offset = counts
                 .offsets
@@ -256,9 +242,6 @@ fn grant_rows(counts: &DockCounts, cap: usize) -> RowGrants {
     // Body budget is whatever remains after headers. Floors cannot exceed it.
     let mut spare = cap.saturating_sub(headers);
 
-    // Pass 1: one content row (or the only row, which becomes `show N more`). Two fair passes prefer
-    // 1+1+1 over 2+2+0, but the queue floor sits between them so a squeezed crowded dock (headers +
-    // 1+1+1 + queue) keeps a body instead of spending the last spare on a second show-more row.
     for (slot, want) in want.iter_mut().enumerate() {
         if spare == 0 {
             break;
@@ -272,15 +255,12 @@ fn grant_rows(counts: &DockCounts, cap: usize) -> RowGrants {
         }
     }
 
-    // The queue body keeps one row no section can take: without it the Queued header would paint
-    // expanded over an empty hit area. One row is also what `floor_need` budgets for it, so the second
-    // floor pass below can still reach every section; the body widens only once those floors are paid.
+    // The queue body keeps one row no section can take.
     let queue_floor = usize::from(queue_want > 0 && spare > 0);
     grants.queue_body = queue_floor as u16;
     queue_want -= queue_floor;
     spare -= queue_floor;
 
-    // Pass 2: the second row a truncated section spends on `show N more`.
     for (slot, want) in want.iter_mut().enumerate() {
         if spare == 0 {
             break;
@@ -302,9 +282,7 @@ fn grant_rows(counts: &DockCounts, cap: usize) -> RowGrants {
 
     let resting = super::MAX_DOCK_ROWS as usize;
 
-    // Inside the resting budget every section shares alike: revealing a section is purely additive, so
-    // it must not take rows the others already had. Floors may already have spent past the resting
-    // height; do not let share grow further inside that leftover.
+    // Inside the resting budget every section shares alike: revealing a section is purely additive.
     let granted: usize = grants.sections.iter().sum::<usize>() + grants.queue_body as usize;
     spare = spare.min(
         cap.min(resting)
@@ -320,23 +298,18 @@ fn grant_rows(counts: &DockCounts, cap: usize) -> RowGrants {
         spare -= 1;
     }
 
-    // A lone row can show a row or say how many are hidden, never both. Collapse every unsustainable 1
-    // first so the returned spare can buy a real 2-row grant (paint order) instead of upgrading.
+    // A lone row can show a row or say how many are hidden, never both.
     normalize_no_lone_rows(&sections, &mut grants, &mut want, &mut spare, queue_floor);
 
     // Rows past what we already granted belong to the opened sections alone.
-    // Measure from `used`, not from the resting height: floors may have already
-    // spent the first extra rows.
     let opened = sections.map(|section| section.show_all);
     let used = headers + grants.sections.iter().sum::<usize>() + grants.queue_body as usize;
     let extra = cap.saturating_sub(used);
     spare = share_rows(&mut grants, &mut want, extra, &opened);
-    // Extra share can hand a single row to an opened section that was at 0.
     normalize_no_lone_rows(&sections, &mut grants, &mut want, &mut spare, queue_floor);
     grants
 }
 
-/// A section ends up with none of its rows, at least two, or all of them.
 fn normalize_no_lone_rows(
     sections: &[SectionCounts; ROW_SECTION_COUNT],
     grants: &mut RowGrants,
@@ -365,8 +338,7 @@ fn normalize_no_lone_rows(
         {
             continue;
         }
-        // Only what the body holds above the floor it was granted is available;
-        // robbing the floor itself would leave the Queued header over dead space.
+        // Only what the body holds above the floor it was granted is available.
         let spare_body = usize::from(grants.queue_body).saturating_sub(queue_floor);
         if *spare >= 2 {
             *spare -= 2;
@@ -387,9 +359,9 @@ fn normalize_no_lone_rows(
     }
 }
 
-/// Rows the dock needs before any section has to hide a row behind a summary:
-/// every header, two rows per expanded section, and one for the queue body.
-/// May exceed [`super::MAX_DOCK_ROWS`]; [`grant_rows`] still honors a tighter `cap`.
+/// Rows the dock needs before any section has to hide a row behind a summary: every
+/// header, a couple of rows per expanded section, and one for the queue body. May
+/// exceed [`super::MAX_DOCK_ROWS`]; [`grant_rows`] still honors a tighter `cap`.
 fn floor_need(counts: &DockCounts) -> usize {
     let sections = counts.sections();
     let headers =
@@ -408,9 +380,8 @@ fn floor_need(counts: &DockCounts) -> usize {
     headers + floors + queue
 }
 
-/// Rows the dock asks for: its caller's ceiling, or the floors when those are taller. Asking below
-/// the floors would hide whole sections behind bare headers, so the floors win here and the frame's
-/// own layout does the bounding -- whatever it assigns comes back through [`DockLayout::with_cap`].
+/// Rows the dock asks for: its caller's ceiling, or the floors when those are
+/// taller.
 fn paint_cap(counts: &DockCounts) -> usize {
     counts.max_rows.rows().max(floor_need(counts))
 }
@@ -471,8 +442,7 @@ pub fn is_show_all_needed(counts: &DockCounts, section: Section) -> bool {
         Section::Watchers => without.watchers_show_all = false,
         Section::Queued => return false,
     }
-    // Judged against the resting height: `show_all` is what lifts the cap, so
-    // asking with it set would always answer "needed".
+    // Judged against the resting height: `show_all` is what lifts the cap.
     without.max_rows = MaxRows::default();
     let len = section
         .slot()

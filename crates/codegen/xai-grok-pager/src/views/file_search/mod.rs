@@ -1,12 +1,4 @@
 //! @-provider: fuzzy file completion for `@foo/bar` references.
-//!
-//! # Architecture
-//!
-//! - [`context`]: parses `@query` tokens from the text and cursor position
-//! - [`state`]: owns the fuzzy matcher daemon, results, and dropdown state
-//! - [`dropdown`]: renders the dropdown list (a ListPane wrapper)
-//! - [`line_viewer`]: centered popup file viewer
-//! - [`preview`]: file preview alongside the dropdown (not yet implemented)
 
 pub mod context;
 pub mod dropdown;

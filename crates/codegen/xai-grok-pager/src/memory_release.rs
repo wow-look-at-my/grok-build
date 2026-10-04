@@ -1,11 +1,4 @@
 //! Allocator memory-release hook.
-//!
-//! jemalloc keeps freed pages attached to the process, so the multi-hundred-MB transients a large session stages linger after they drop.
-//! The pager library cannot reference jemalloc, so the composition-root binary installs an arena-purge hook here.
-//! The library calls [`release_retained_memory`] after heavy transient drops to return the pages to the OS.
-//! Absent a hook (tests, non-jemalloc builds) everything is inert.
-//!
-//! Purges are edge-triggered on an actual drop, never per frame; draw/tick-path cliffs defer to the post-flush gap so a purge never stalls the frame.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -25,8 +18,7 @@ pub(crate) fn release_retained_memory(reason: &'static str) {
     // Skip gauge sampling entirely when tracing is off (`GROK_MEMTRACE=0` or no sink): a disabled trace must add zero syscalls to purges
     let trace = crate::memory_trace::is_active();
     let before = if trace {
-        // Same gauge precedence as the trace's threshold logic: physical footprint where available (macOS), else RSS (Linux)
-        // Purge deltas are then computable on every platform
+        // Same gauge precedence as the trace's threshold logic: physical footprint where available (macOS), else RSS (Linux).
         let mem = crate::memory_trace::sample_process_memory();
         mem.footprint_bytes.or(mem.rss_bytes)
     } else {
@@ -42,16 +34,13 @@ pub(crate) fn release_retained_memory(reason: &'static str) {
 }
 
 /// Deferred-release request flag, drained after the frame flush.
-/// `AtomicBool` rather than a thread-local: both sides are main-thread today, but the flag must not silently drop a request if that ever changes.
 static RELEASE_AFTER_DRAW: AtomicBool = AtomicBool::new(false);
 
-/// Memory-cliff tag for the pending deferred request. the `"post-draw"` default only shows up if a drain ever races
-/// a set without one.
+/// Memory-cliff tag for the pending deferred request. the `"post-draw"` default only shows up.
 static DEFER_REASON: Mutex<&'static str> = Mutex::new("post-draw");
 
-/// Request a purge to run right after the current frame flushes, drained by [`run_deferred_release`] at the end of `AppView::draw`.
-/// The purge is tagged with `reason` for the trace (see [`release_retained_memory`]).
-/// Use it for memory cliffs hit *inside* the draw/tick path, e.g. inline video stopped because it scrolled off screen.
+/// Request a purge to run right after the current frame flushes, drained by
+/// [`run_deferred_release`] at the end of `AppView::draw`.
 pub(crate) fn request_release_after_draw(reason: &'static str) {
     if let Ok(mut r) = DEFER_REASON.lock() {
         *r = reason;
@@ -73,9 +62,9 @@ pub(crate) fn run_deferred_release() {
     }
 }
 
-/// Test support: a counting release hook with a **per-thread** counter.
-/// The real `RELEASE_HOOK` is a process-global `OnceLock`, but dispatch/view code always calls [`release_retained_memory`] on the calling thread.
-/// A thread-local count lets parallel `cargo test` threads assert both "released" and "must not release" deltas without cross-test interference.
+/// Test support: a counting release hook with a **per-thread** counter. The
+/// real `RELEASE_HOOK` is a process-global `OnceLock`, but dispatch/view code
+/// always calls [`release_retained_memory`] on the calling thread.
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::cell::Cell;

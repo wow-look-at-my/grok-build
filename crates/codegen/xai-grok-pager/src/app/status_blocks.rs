@@ -1,7 +1,4 @@
 //! Read-only system-block text for `/queue`, `/tasks`, and `/usage`.
-//!
-//! Plain text committed into scrollback.
-//! The formatting lives outside `dispatch` so it is easy to unit test.
 
 use crate::app::agent::BgTaskStatus;
 use crate::app::agent_view::AgentView;

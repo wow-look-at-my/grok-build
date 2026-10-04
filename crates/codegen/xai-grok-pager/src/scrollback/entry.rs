@@ -19,20 +19,14 @@ struct CachedOutput {
 }
 
 /// Caches truncated-mode line count so layout need not call `block.output()` (syntect or full wrap) on every redraw.
-/// Streaming invalidates the layout cache on each push; without this, every entry height is recomputed.
-/// `cwd` is keyed because Edit/Read header wrap can change between absolute and relative paths.
 type CachedTruncatedHeight = (u16, bool, ThemeKind, Option<PathBuf>, u16);
 
 /// Unique identifier for a scrollback entry.
-/// EntryIds are stable across mutations: they won't become invalid if other entries are added or removed.
-/// Use this for external handles to entries (e.g., streaming tasks that need to push chunks to a specific block).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EntryId(u64);
 
 impl EntryId {
     /// Create a new EntryId with a specific value.
-    /// For production use, prefer getting EntryId from `ScrollbackState::push()` which assigns IDs automatically.
-    /// This is mainly for placeholders/testing.
     pub fn new(id: u64) -> Self {
         Self(id)
     }
@@ -66,9 +60,7 @@ pub struct ScrollbackEntry {
     /// Whether block is still running (for animation, auto-collapse).
     pub is_running: bool,
 
-    /// Whether this entry is currently waiting on user input (permission prompt, ask-user-question, etc.).
-    /// When true, the renderer replaces the wave "loading" animation with a pulsing-circle bullet to draw attention without implying active work.
-    /// Maintained by `AgentView` from `permission_queue` and `question_view` state via `ScrollbackState::set_pending_user_input`.
+    /// Whether this entry is waiting on user input (permission prompt, ask-user-question, etc.).
     pub is_pending_user_input: bool,
 
     pub display_mode: DisplayMode,
@@ -83,42 +75,21 @@ pub struct ScrollbackEntry {
     /// When this entry finished running (monotonic). Used by the renderer to flash the accent briefly after completion.
     pub finished_at: Option<std::time::Instant>,
 
-    /// The API-reported cost of this response, in USD ticks (1e10 per USD),
-    /// as reported by `ConversationResponse.cost_usd_ticks`. `None` when the
-    /// API did not report a cost (or the value was non-positive) — never
-    /// `Some(0)`. Stored on the entry so the renderer can show it in the
-    /// timestamp gutter without re-deriving it from token estimates.
+    /// The API-reported cost of this response, in USD ticks (1e10 per USD).
     pub cost_usd_ticks: Option<i64>,
 
-    /// This response's prompt cache-read hit rate (0-100), rounded, derived
-    /// from `ResponseUsage.cache_read_input_tokens` over the total prompt
-    /// tokens (`input_tokens + cache_read_input_tokens +
-    /// cache_creation_input_tokens`). `None` when the response reported no
-    /// usage, or the total prompt token count was zero.
     pub cache_hit_percent: Option<u8>,
 
     /// Cached output and its render key.
-    /// Interior-mutable so EntryRenderer (which holds `&self`) can populate and
-    /// read the cache without &mut self.
-    ///
-    /// The `is_selected` key is only meaningful for blocks whose output varies
-    /// by selection state (currently only `UserPrompt`). For all other blocks
-    /// the stored value is always `false` regardless of actual selection,
-    /// preventing unnecessary cache misses on selection changes. `cwd` is
-    /// keyed so Expanded tool path paint (relative vs absolute) invalidates.
     cached_output: RefCell<Option<CachedOutput>>,
 
-    /// Cached truncated-mode height. See [`CachedTruncatedHeight`] for why this needs its own cache separate from `cached_output`.
-    ///
-    /// Populated lazily by `ensure_truncated_height_cached`. Cleared by `invalidate_cache` together with `cached_output`.
+    /// Cached truncated-mode height.
     cached_truncated_height: RefCell<Option<CachedTruncatedHeight>>,
 
     /// Cached cheap height-estimate line count: `(content_width, lines)`.
-    /// Lets a same-width rebuild reuse the estimate instead of re-cloning the block's source text. Cleared by `invalidate_cache`.
     cached_estimate_lines: RefCell<Option<(u16, u16)>>,
 
     /// Display width of each source line. Width-independent, so unlike every other cache here it survives a resize.
-    /// Re-deriving it per width is what made a resize cost O(total conversation bytes).
     cached_line_widths: RefCell<Option<Vec<u32>>>,
 }
 
@@ -158,8 +129,6 @@ impl EffectiveOutput<'_> {
 
 impl ScrollbackEntry {
     /// Create a new entry with expanded display mode.
-    /// For production use, prefer `ScrollbackState::push()` which assigns the EntryId automatically.
-    /// This constructor is mainly for testing.
     pub fn new(block: RenderBlock) -> Self {
         Self::with_id(EntryId(0), block)
     }
@@ -188,9 +157,8 @@ impl ScrollbackEntry {
         }
     }
 
-    /// Create a new entry that is currently running.
-    /// For production use, prefer `ScrollbackState::push()` which assigns the EntryId automatically.
-    /// This constructor is mainly for testing.
+    /// Create a new entry that is running. For production use, prefer
+    /// `ScrollbackState::push()` which assigns the EntryId automatically.
     pub fn running(block: RenderBlock) -> Self {
         Self::running_with_id(EntryId(0), block)
     }
@@ -227,11 +195,6 @@ impl ScrollbackEntry {
 
     /// Attach the API-reported cost (in USD ticks, 1e10 per USD) for this
     /// entry's response, alongside `created_at`.
-    ///
-    /// Mirrors `reported_cost_ticks` normalization: a missing or non-positive
-    /// value (the wire often backfills `0`) is stored as `None` — an
-    /// unreported cost is never recorded as a free `0`, and the renderer
-    /// shows no fabricated `$0.00`.
     pub fn with_cost_usd_ticks(mut self, cost_usd_ticks: Option<i64>) -> Self {
         self.cost_usd_ticks = cost_usd_ticks.filter(|&t| t > 0);
         self
@@ -252,9 +215,9 @@ impl ScrollbackEntry {
         }
     }
 
-    /// Toggle between display modes.
-    /// Most blocks toggle between Collapsed and Expanded.
-    /// Some blocks (like thinking) cycle through 3 modes.
+    /// Toggle between display modes. Most blocks toggle
+    /// between Collapsed and Expanded. Some blocks (like
+    /// thinking) cycle through multiple modes.
     pub fn toggle_fold(&mut self) {
         if self.is_foldable() {
             self.display_mode = self
@@ -276,8 +239,6 @@ impl ScrollbackEntry {
     }
 
     /// Mark the block as completed (no longer running).
-    ///
-    /// Also clears `is_pending_user_input` since a completed tool cannot be waiting on a user response anymore.
     pub fn mark_completed(&mut self) {
         self.is_running = false;
         self.is_pending_user_input = false;
@@ -297,9 +258,8 @@ impl ScrollbackEntry {
         *self.cached_estimate_lines.borrow_mut() = None;
     }
 
-    /// Drop the heavyweight cached render output (and the block's internal rebuildable caches) while KEEPING the cheap height caches.
-    /// Layout (entry heights, scroll position) is untouched; re-rendering happens transparently if the entry scrolls back into view.
-    /// Returns `true` when something was actually dropped (for sweep stats).
+    /// Drop the heavyweight cached render output (and the block's internal
+    /// rebuildable caches) while KEEPING the cheap height caches.
     pub(crate) fn evict_render_cache(&self) -> bool {
         let had_output = self.cached_output.borrow().is_some();
         if had_output {
@@ -346,7 +306,6 @@ impl ScrollbackEntry {
     }
 
     /// Whether this entry's laid-out output is cached.
-    /// Lazy-layout tests use this to assert off-screen entries aren't rendered: `desired_height` populates the cache, the cheap estimate does not.
     #[cfg(test)]
     pub(crate) fn has_cached_output(&self) -> bool {
         self.cached_output.borrow().is_some()
@@ -362,8 +321,8 @@ impl ScrollbackEntry {
         is_selected: bool,
         cwd: Option<&Path>,
     ) {
-        // UserPrompt, ToolCall, Thinking, BgTask and Subagent vary their output() based on is_selected; for all other blocks the output is identical
-        // Normalize to false for those blocks so selection changes don't thrash the cache
+        // UserPrompt, ToolCall, Thinking, BgTask and Subagent vary their
+        // output() based on is_selected.
         let effective_selected = is_selected
             && (self.block.is_user_prompt()
                 || self.block.is_tool_call()
@@ -498,7 +457,7 @@ impl ScrollbackEntry {
         cwd: Option<&Path>,
     ) -> &BlockOutput {
         self.ensure_cached(width, appearance, false, cwd);
-        // ensure_cached just populated the cache, so unwrap through the RefCell
+        // ensure_cached populated the cache, so unwrap through the RefCell
         let cache = self.cached_output.get_mut();
         &cache.as_ref().unwrap().rendered.output
     }
@@ -619,7 +578,6 @@ mod tests {
             "a".repeat(10),
             "b".repeat(25)
         )));
-        // At width 10 the lines wrap to 1 + 1 + 3 = 5; at width 5, 2 + 1 + 5 = 8; at width 100, 3
         assert_eq!(entry.estimate_source_lines(10), 5);
         assert_eq!(entry.estimate_source_lines(5), 8);
         assert_eq!(entry.estimate_source_lines(100), 3);

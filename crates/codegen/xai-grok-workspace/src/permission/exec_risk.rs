@@ -1,5 +1,4 @@
 //! Bash request-level execution risk: argv flags that spawn programs, and ambient local/worktree git config.
-//! Flag floors run inline; ambient git2 uses `spawn_blocking` from the permission actor.
 
 use std::path::{Path, PathBuf};
 
@@ -110,7 +109,6 @@ fn is_git_config_env_flag(tok: &str) -> bool {
         return true;
     }
     let flag = tok.split_once('=').map(|(f, _)| f).unwrap_or(tok);
-    // Sole git global `--config*`; min stem `--co` (len 4).
     is_accepted_long_option_prefix(flag, "--config-env", 4)
 }
 
@@ -255,8 +253,8 @@ pub(crate) const SAFE_GIT_SUBCOMMANDS: &[&str] = &[
     "shortlog",
 ];
 
-/// Options that make an otherwise read-only git verb run content drivers or write arbitrary paths.
-/// One table on every [`SAFE_GIT_SUBCOMMANDS`] verb so a new safe verb inherits the policy; `git grep`'s `-O<cmd>` is guarded separately.
+/// Options that make an otherwise read-only git verb run content drivers or
+/// write arbitrary paths.
 const GIT_QUERY_UNSAFE_OPTIONS: &[&str] = &[
     "--filters",
     "--textconv",
@@ -265,8 +263,8 @@ const GIT_QUERY_UNSAFE_OPTIONS: &[&str] = &[
     "--open-files-in-pager",
 ];
 
-/// Git accepts uniquely-abbreviated long options, so any `--` word (pre-`=`, at least 3 chars) that prefixes a table entry fails closed.
-/// That includes abbreviations a specific verb would resolve to a benign sibling (`git grep --text` collides with `--textconv` and prompts).
+/// Git accepts uniquely-abbreviated long options, so any `--` word (pre-`=`,
+/// a few chars) that prefixes a table entry fails closed.
 fn git_query_option_is_unsafe(word: &str) -> bool {
     let flag = word.split('=').next().unwrap_or(word);
     flag.len() > 2
@@ -853,7 +851,7 @@ mod tests {
             let mut perms = std::fs::metadata(&cfg).unwrap().permissions();
             perms.set_mode(0o000);
             std::fs::set_permissions(&cfg, perms).unwrap();
-            // Root and CAP_DAC_OVERRIDE can still open mode 000 files.
+            // Root and CAP_DAC_OVERRIDE can still open mode multiple files.
             if std::fs::File::open(&cfg).is_err() {
                 assert!(
                     local_repo_config_has_exec_risk(tmp.path()),
@@ -895,9 +893,7 @@ mod tests {
         let plan = ambient_scan_plan_from_cmd("cd evil && git status", &clean).unwrap();
         assert!(ambient_exec_risk_from_plan(&plan));
 
-        // `$HOME` expansion is rejected by word-only parse, so the ambient plan is unavailable (`None`)
-        // Production maps that to fail-closed via `unparseable_exec_risk`, which calls `script_may_invoke_git`
-        // Do not invent a word-only plan that weakens the expansion boundary
+        // `$HOME` expansion is rejected by word-only parse.
         let expansion = "cd \"$HOME\" && git status";
         assert!(
             ambient_scan_plan_from_cmd(expansion, &clean).is_none(),

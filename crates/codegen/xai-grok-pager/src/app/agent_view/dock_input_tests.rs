@@ -349,8 +349,7 @@ fn enter_on_show_more_gives_the_section_the_spare_rows() {
     for child in ["child-1", "child-2"] {
         insert_running_subagent(&mut agent, child);
     }
-    // The reveal ceiling is half the space above the prompt, so the view needs
-    // a scrollback to measure.
+    // The reveal ceiling is half the space above the prompt, so the view needs a scrollback to measure.
     agent.pane_areas.scrollback = Rect::new(0, 0, 80, 24);
     let before = agent
         .dock_layout()
@@ -728,8 +727,7 @@ fn click_on_show_more_widens_the_section_in_place() {
     for child in ["child-1", "child-2"] {
         insert_running_subagent(&mut agent, child);
     }
-    // The reveal ceiling is half the space above the prompt, so the view needs
-    // a scrollback to measure.
+    // The reveal ceiling is half the space above the prompt, so the view needs a scrollback to measure.
     agent.pane_areas.scrollback = Rect::new(0, 0, 80, 24);
     let before = agent
         .dock_layout()
@@ -793,8 +791,7 @@ fn stop_click_after_a_relayout_kills_the_row_now_under_the_pointer() {
         agent.pane_areas.dock.y + more_row,
     ));
     assert!(agent.dock_tasks_show_all);
-    // Revealing re-lays the dock out, so find where a task row sits now and aim
-    // the second click there: the cached kill target must follow the pointer.
+    // Revealing re-lays the dock out, so find where a task row sits now and aim the second click there.
     let dock = agent.pane_areas.dock;
     let (row_y, index) = (0..dock.height)
         .find_map(|offset| match agent.dock_item_at(dock, dock.y + offset) {
@@ -1021,12 +1018,7 @@ fn hover_sync_hit_tests_against_the_current_frame_dock_rect() {
     let mut agent = agent_with_task_overflow();
     agent.dock_tasks_show_all = true;
     agent.last_mouse_pos = (5, 5);
-    // The previous frame's rect sat lower on screen; the pointer at row 5 is
-    // above it and would hit-test to nothing.
     agent.pane_areas.dock = Rect::new(0, 12, 80, 3);
-    // This frame the dock moved up and grew (e.g. a queue-from-prompt pin), so
-    // row 5 is dock-local row 1. Hover must follow the current rect, not the
-    // stale pane area.
     let current = Rect::new(0, 4, 80, crate::views::dock::MAX_DOCK_ROWS);
     agent.sync_dock_hover_from_pointer(current);
     assert_eq!(
@@ -1148,8 +1140,7 @@ fn clicking_selected_stop_kills_without_hover() {
     agent.dock_shown = true;
     agent.dock_on = true;
     agent.active_pane = AgentPane::Dock;
-    // Two rows would go entirely to headers; this test is about the loop row's
-    // open behaviour, so give the dock its resting height.
+    // A couple of rows will go entirely to headers.
     agent.pane_areas.dock = Rect::new(2, 4, 78, crate::views::dock::MAX_DOCK_ROWS);
     agent.dock_cursor = agent
         .dock_items()
@@ -1367,8 +1358,7 @@ fn toggle_queue_does_not_open_hidden_pane_when_dock_on_but_empty() {
 #[test]
 fn enter_and_click_open_a_task_row() {
     let mut agent = dock_with_task();
-    // Two rows would go entirely to headers; this test is about the loop row's
-    // open behaviour, so give the dock its resting height.
+    // A couple of rows will go entirely to headers.
     agent.pane_areas.dock = Rect::new(2, 4, 78, crate::views::dock::MAX_DOCK_ROWS);
     agent.dock_cursor = agent
         .dock_items()
@@ -1437,8 +1427,7 @@ fn click_opens_a_linked_loop_and_ignores_an_unlinked_one() {
     agent.dock_shown = true;
     agent.dock_on = true;
     agent.active_pane = AgentPane::Dock;
-    // Two rows would go entirely to headers; this test is about the loop row's
-    // open behaviour, so give the dock its resting height.
+    // A couple of rows will go entirely to headers.
     agent.pane_areas.dock = Rect::new(2, 4, 78, crate::views::dock::MAX_DOCK_ROWS);
     agent.dock_cursor = agent
         .dock_items()
@@ -1568,9 +1557,8 @@ fn reconcile_before_paint_resets_show_all_after_a_background_shrink() {
     let mut agent = agent_with_task_overflow();
     agent.dock_on = true;
     agent.dock_tasks_show_all = true;
-    // A background completion shrinks the section below the overflow threshold,
-    // with no dock key pressed since. The pre-paint reconciliation (not the
-    // paint pass) must drop show-all so a later refill re-enters the preview.
+    // A background completion shrinks the section below the overflow
+    // threshold, with no dock key pressed since.
     agent
         .session
         .bg_tasks
@@ -1750,7 +1738,6 @@ fn reveal_does_not_shrink_a_floor_taller_dock_assignment() {
     agent.dock_tasks_expanded = true;
     agent.dock_watchers_expanded = true;
     agent.dock_queued_expanded = true;
-    // Floor-taller assignment (11) on a short scrollback: half of 8+11 is 9.
     agent.pane_areas.scrollback = Rect::new(0, 0, 80, 8);
     agent.pane_areas.dock = Rect::new(0, 8, 80, 11);
     let assigned = agent.pane_areas.dock.height;
@@ -1778,7 +1765,6 @@ fn reveal_does_not_shrink_a_floor_taller_dock_assignment() {
 #[test]
 fn reveal_on_a_typical_terminal_does_not_shrink_the_dock() {
     let mut agent = agent_with_task_overflow();
-    // above_prompt = 16 → dock_max_rows stays 8. Floor for twelve tasks is 3.
     agent.pane_areas.scrollback = Rect::new(0, 0, 80, 8);
     agent.pane_areas.dock = Rect::new(0, 8, 80, crate::views::dock::MAX_DOCK_ROWS);
     let assigned = agent.pane_areas.dock.height;
@@ -1838,8 +1824,7 @@ fn revealed_scroll_follows_the_assigned_height_not_the_raised_request() {
     let mut agent = agent_with_task_overflow();
     agent.dock_tasks_show_all = true;
     agent.pane_areas.scrollback = Rect::new(0, 0, 80, 24);
-    // This frame assigned the resting band. The reveal request is larger
-    // (half of scrollback + dock). Scroll must still hide rows past 8.
+    // This frame assigned the resting band. The reveal request is larger (half of scrollback + dock).
     agent.pane_areas.dock = Rect::new(0, 4, 80, crate::views::dock::MAX_DOCK_ROWS);
 
     let assigned = crate::views::dock::DockLayout::with_cap(
@@ -1876,8 +1861,6 @@ fn dock_item_at_budgets_against_the_passed_rect_height() {
         ));
     agent.dock_shown = true;
     agent.dock_on = true;
-    // Prior frame was tall; this frame assigned 4. Hit-testing the live rect
-    // must cap to 4 headers, not the stale 14-row item list.
     agent.pane_areas.dock = Rect::new(0, 4, 80, 14);
     let squeezed = Rect::new(0, 4, 80, 4);
     let hit: Vec<_> = (0..4)

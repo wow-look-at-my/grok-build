@@ -1,13 +1,6 @@
 //! New-architecture tool implementations (NewTool trait).
 //!
-//! Each sub-module here contains a tool that implements `NewTool` instead
-//! of the old `Tool` trait. During migration, old implementations live in
-//! `implementations/<tool>/` and new implementations live in
-//! `implementations/grok_build/<tool>/`.
-//!
-//! The [`register_all()`] function is the single entry-point for wiring up
-//! the standard toolset. It inserts shared resources (`Terminal`,
-//! `AvailableSkills`, `BashParams`) and registers every built-in tool.
+//! Each sub-module here contains a tool that implements `NewTool` instead of the old `Tool` trait. During migration, old implementations live in `implementations/<tool>/` and new implementations live in `implementations/grok_build/<tool>/`.
 
 /// Refuse a model request to an endpoint missing from `[endpoints] allowed_endpoints`.
 pub(crate) fn allow_endpoint(url: &str, tool: &str) -> Result<(), xai_tool_runtime::ToolError> {
@@ -23,9 +16,7 @@ pub(crate) fn allow_endpoint(url: &str, tool: &str) -> Result<(), xai_tool_runti
 pub mod app_builder;
 pub mod ask_user_question;
 pub mod bash;
-/// One tail truncation in this module walks to a char boundary by hand instead
-/// of calling `util::tail_bytes`, so the byte slice it feeds that walk is left
-/// permitted. The allowance is scoped to this module, not the crate.
+/// One tail truncation in this module walks to a char boundary by hand instead of calling `util::tail_bytes`.
 #[allow(clippy::string_slice)]
 pub mod ci;
 pub mod copy_move;

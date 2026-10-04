@@ -1,7 +1,4 @@
 //! Scroll while streaming: the real-world worst case.
-//!
-//! What it stresses: simultaneous cache invalidation (from streaming) and full viewport re-render (from scrolling).
-//! It exposes `dirty_heights` and scroll-offset interactions.
 
 use std::time::{Duration, Instant};
 

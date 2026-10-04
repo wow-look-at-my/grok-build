@@ -82,7 +82,6 @@ impl BenchResults {
 
 // ── Baseline comparison ────────────────────────────────────────────────────
 
-/// Regression threshold: fail if a scenario's p99 frame time grows by more than this fraction (0.15 = 15%).
 pub const DEFAULT_REGRESSION_THRESHOLD: f64 = 0.15;
 
 /// On-disk baseline schema: `{ "<scenario>": BenchResults, ... }`.
@@ -119,7 +118,6 @@ pub struct ScenarioRegression {
     pub pct_delta: f64,
 }
 
-/// Compare the given `results` against `baseline`, returning every scenario whose p99 grew by more than `threshold` (as a fraction, e.g. 0.15 = 15%).
 ///
 /// Scenarios missing from the baseline are skipped (first run of a new scenario is not a regression).
 pub fn compare_baseline(
@@ -236,7 +234,6 @@ mod tests {
 
     #[test]
     fn jank_detection() {
-        // Nine 10ms frames plus one 50ms frame, which exceeds 2x the median
         let mut timings: Vec<FrameTiming> = (0..9)
             .map(|_| FrameTiming {
                 duration: Duration::from_millis(10),

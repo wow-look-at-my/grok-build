@@ -26,7 +26,6 @@ const MAX_BUFFER_SIZE: usize = 8 * 1024 * 1024;
 use indexmap::IndexMap;
 const PERSISTENT_EXIT_DRAIN: Duration = Duration::from_secs(1);
 /// Bounded wait for the leader flock when it is held but no socket is bound yet.
-/// Causes: a spawner mid-handoff, an old-flow client holding the flock across its ~10s spawn window, or a same-version sibling briefly holding it.
 const LEADER_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Holds the agent past `drop(local_set)`; see `LocalRef`. Declared before the `LocalSet` so an unwind keeps that order.
 type AgentKeepalive = Rc<std::cell::RefCell<Option<Rc<MvpAgent>>>>;
@@ -124,9 +123,8 @@ where
     });
     Some(task)
 }
-/// Register the process-lifetime runtime for shared filesystem watchers ([`xai_fsnotify::shared`]).
-/// Their event loops then run on a runtime that outlives individual sessions (each session builds its own short-lived runtime).
-/// Idempotent; safe to call from every agent entrypoint.
+/// Register the process-lifetime runtime for shared filesystem watchers
+/// ([`xai_fsnotify::shared`]).
 fn register_fs_watch_runtime() {
     xai_fsnotify::set_runtime_handle(tokio::runtime::Handle::current());
 }
@@ -453,9 +451,9 @@ pub async fn run_headless(
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     Ok(())
 }
-/// Whether the relay's shared [`AuthManager`] should be (re)seeded with the startup-resolved `session`. Staleness is compared by `create_time`, which is always present and bumped on every mint/refresh/login.
-/// The narrow "seed only when empty" predicate was insufficient. On a read-only disk, login's `update()` falls back to in-memory-only.
-/// The freshly constructed manager can then load an *older* scope entry from disk that login could not overwrite. Seeding only when empty would pin the manager (and relay 401 recovery) to that stale snapshot. Never clobbers an equal-or-fresher token: the same key (already in sync) or a token whose `create_time` is newer.
+/// Whether the relay's shared [`AuthManager`] should be (re)seeded with the
+/// startup-resolved `session`. Staleness is compared by `create_time`, which
+/// is always present and bumped on every mint/refresh/login.
 fn should_seed_shared_session(existing: Option<&GrokAuth>, session: &GrokAuth) -> bool {
     match existing {
         None => true,
@@ -464,9 +462,10 @@ fn should_seed_shared_session(existing: Option<&GrokAuth>, session: &GrokAuth) -
         }
     }
 }
-/// `RelayConfig` for the relay, or `None` for BYOK / no-session. The session gate is `RelayConfig::for_session` (single source of truth). The relay must SHARE the agent's `AuthManager`, never own a private one.
-/// A manager without a refresher can only adopt sibling tokens from disk. Relay 401 recovery then dead-ends whenever no other refresher is alive (sleep/wake, auth.json loss), even with a valid refresh token in memory.
-/// Sharing also puts relay recovery behind the same in-process `refresh_lock` and `permanent_failure` cache as every other consumer. Concurrent recovery paths therefore cannot double-spend a refresh token.
+/// `RelayConfig` for the relay, or `None` for BYOK / no-session. The session
+/// gate is `RelayConfig::for_session` (single source of truth). The relay
+/// must SHARE the agent's `AuthManager`, never own a private one. A manager
+/// without a refresher can only adopt sibling tokens from disk.
 fn relay_config_for_session(
     auth: Option<&GrokAuth>,
     agent_config: &AgentConfig,
@@ -511,7 +510,6 @@ fn spawn_leader_relay(
                 _ = cancel.cancelled() => return,
                 changed = relay_demand_rx.changed() => {
                     if changed.is_err() {
-                        // IPC server gone (sender dropped): leader is shutting down; never start the relay
                         return;
                     }
                 }
@@ -523,9 +521,12 @@ fn spawn_leader_relay(
         *slot_for_task.borrow_mut() = Some(handle);
     });
 }
-/// Everything needed to arm the leader's grok.com relay *after* startup. A leader that boots without auth used to disable the relay forever: the decision was made once in [`run_leader`] and never revisited.
-/// On devboxes that turned a transient mint-provider outage at provision time into a permanently invisible box.
-/// The external auth provider succeeded minutes later and the config watcher hot-reloaded the token into the leader. But the relay never connected, the agent never registered, and tooling reported the (healthy) box as "not found online" for its whole lifetime.
+/// Everything needed to arm the leader's grok.com relay *after* startup. A
+/// leader that boots without auth used to disable the relay forever: the
+/// decision was made once in [`run_leader`] and never revisited. On devboxes
+/// that turned a transient mint-provider outage at provision time into a
+/// permanently invisible box. The external auth provider succeeded minutes
+/// later and the config watcher hot-reloaded the token into the leader.
 struct DeferredRelayArm {
     relay_on_demand: bool,
     relay_demand_rx: tokio::sync::watch::Receiver<bool>,
@@ -588,7 +589,6 @@ pub struct LeaderRunOptions {
     pub relay_on_demand: bool,
     pub memory_config: Option<crate::config::MemoryConfig>,
     /// Start the worker door after readiness; `None` defers to `[cursor_worker] auto_start`.
-    /// Inert on a build without worker support.
     pub cursor_worker: Option<CursorWorkerStartArgs>,
 }
 /// Another process is wedged inside its own open+flock of the leader lock (stalled grok home). Only `tracing`

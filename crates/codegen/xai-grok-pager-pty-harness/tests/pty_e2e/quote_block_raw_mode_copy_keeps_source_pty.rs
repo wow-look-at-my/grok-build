@@ -12,8 +12,7 @@ const QUOTE_OUTRO: &str = "QUOTE_OUTRO_RAW_DONE";
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn quote_block_raw_mode_copy_keeps_source_pty() {
     let content = ContentController::start().await.expect("start content");
-    // Bare-letter scrollback bindings like `r` (ToggleRaw) resolve only in vim mode
-    // With vim off they fall through to prompt typing (lookup_with_mode)
+    // Bare-letter scrollback bindings like `r` (ToggleRaw) resolve only in vim mode With vim off they fall through to prompt typing.
     seed_ui_config(&content, "vim_mode = true\nsimple_mode = false");
     content.set_response(format!(
         "intro line\n\n> {QUOTE_ALPHA} first\n\n{QUOTE_OUTRO} line"
@@ -61,8 +60,7 @@ async fn quote_block_raw_mode_copy_keeps_source_pty() {
         harness.screen_contents()
     );
 
-    // Focus scrollback and select the agent message by clicking it, then toggle raw with `r` (ToggleRaw)
-    // The click matters: the last entry is the "Worked for" event, so `k` would select that instead
+    // Focus scrollback and select the agent message by clicking it, then toggle raw with `r` (ToggleRaw) The click matters.
     harness.inject_keys(b"\t").expect("focus scrollback");
     harness
         .wait_for_text("Space:prompt", Duration::from_secs(10))

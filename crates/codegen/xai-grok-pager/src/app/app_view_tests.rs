@@ -630,8 +630,7 @@ fn needs_animation_gates_prompt_history_tick_delivery() {
         app.needs_animation(),
         "an open prompt history overlay must request animation ticks"
     );
-    // Drive `tick()` and check the count separately, on a wall-clock
-    // deadline.
+    // Drive `tick()` and check the count separately, on a wall-clock deadline.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut delivered = false;
     while std::time::Instant::now() < deadline {
@@ -2194,9 +2193,10 @@ fn expected_tier_restricted_commands() -> Vec<String> {
         .map(|n| (*n).to_string())
         .collect()
 }
-/// The present/absent assertions must exercise the deny list, not incidental fail-closed hiding:
-/// `/imagine`, `/imagine-video` are `required_tools()`-gated, so advertise their tools (otherwise the registry fail-closes them).
-/// `/voice` is fail-closed hidden until the remote flag turns it on, so reveal it via the registry directly.
+/// The present/absent assertions must exercise the deny list, not incidental
+/// fail-closed hiding: `/imagine`, `/imagine-video` are
+/// `required_tools()`-gated, so advertise their tools (otherwise the registry
+/// fail-closes them).
 fn advertise_media_tools(app: &mut AppView) {
     app.welcome_prompt
         .slash_controller
@@ -2775,7 +2775,7 @@ fn welcome_consent_answers_and_links_are_reachable_by_key_and_click() {
     }
 }
 /// What the renderer reports is the only thing standing between a click and an acceptance.
-/// The three answers it can give have to land in the state exactly.
+/// Those answers it can give have to land in the state exactly.
 #[test]
 fn consent_paint_records_what_the_renderer_reported() {
     use crate::app::consent::{ConsentLegibility, ConsentNotice, ConsentState};
@@ -6058,9 +6058,9 @@ fn voice_target_on_agent_entered_from_dashboard() {
         "entering a session from the dashboard must not auto-stop the mic"
     );
 }
-/// Attach a popup overlay onto a freshly-built `test_app_with_agent` and return the attached agent id.
-/// Convenience for the popup-handle-input tests.
-/// `attach_popup` exists so the `handle_input`/`dispatch_scroll` tests in this file can stand up a popup'd state in two lines.
+/// Attach a popup overlay onto a freshly-built `test_app_with_agent` and return the attached agent id. Convenience for the
+/// popup-handle-input tests. `attach_popup` exists so the `handle_input`/`dispatch_scroll` tests in this file can stand up a
+/// popup'd state in a couple of lines.
 fn attach_popup(app: &mut AppView) -> super::super::agent::AgentId {
     app.active_view = ActiveView::AgentDashboard;
     let id = super::super::agent::AgentId(0);
@@ -6935,7 +6935,6 @@ fn overlay_esc_exits_when_question_nav_unselected() {
         "backing out must leave the question overlay pending",
     );
 }
-/// Multi-question Q&A: on question 2+ a bare `Esc` must NOT back out.
 /// The flow isn't at its top, so `Esc` stays in-flow (the question view handles it) and `Left` can still walk back.
 /// Only `active_tab == 0` is the back-out top.
 #[test]
@@ -6966,7 +6965,6 @@ fn overlay_esc_does_not_exit_on_later_multi_question() {
         "Esc on question 2+ of a multi-question Q&A must stay in-flow, got {outcome:?}",
     );
 }
-/// ...but from question 1 (the top of a multi-question flow) with nothing selected, a bare `Esc` still backs out, leaving the Q&A pending.
 #[test]
 fn overlay_esc_exits_at_first_multi_question() {
     let (mut app, id) = neutral_overlay_app();
@@ -7584,9 +7582,14 @@ fn handle_input_scroll_inside_popup_forwards_to_agent() {
         "scroll outside popup must advance the dashboard viewport",
     );
 }
-/// When the attached agent emits `Action::ExitSession` via the synchronous outcome path, the popup is closed but the agent stays in `app.agents`.
-/// This test pins only the synchronous-outcome branch.
-/// We can't easily synthesize an `ExitSession` from `agent.handle_input` without a real prompt event sequence, so the test exercises the popup-close intercept by feeding a key that lands in the agent's prompt and observing the popup state after the intercept runs. Concretely: we drive an Esc key (which the popup-close fast-path catches BEFORE the agent intercept). To prove the `ExitSession` branch independently, we directly invoke the intercepted-outcome path with a stub: set `attached_agent`, then call the same close routine the intercept would call. This is the smallest behavioural pin available without a full prompt-mode setup.
+/// When the attached agent emits `Action::ExitSession` via the synchronous
+/// outcome path, the popup is closed but the agent stays in `app.agents`.
+/// This test pins only the synchronous-outcome branch. We can't easily
+/// synthesize an `ExitSession` from `agent.handle_input` without a real
+/// prompt event sequence, so the test exercises the popup-close intercept by
+/// feeding a key that lands in the agent's prompt and observing the popup
+/// state after the intercept runs. Concretely: we drive an Esc key (which the
+/// popup-close fast-path catches BEFORE the agent intercept).
 #[test]
 fn handle_input_exit_session_action_closes_popup() {
     let mut app = test_app_with_agent();

@@ -1,6 +1,4 @@
 //! Renders `TodoItem`s from `xai-grok-tools` in a `ListPane`.
-//!
-//! Wraps the canonical `TodoItem` type with a `ListItem` implementation that provides status-icon prefixes and styled content.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -53,8 +51,6 @@ impl Default for TodoPaneStyle {
 }
 
 /// A `TodoItem` wrapped for display in a `ListPane`.
-///
-/// Caches the styled `Line` for `content()` and generates a status-icon `prefix()` per frame.
 #[derive(Debug, Clone)]
 pub struct TodoListEntry {
     /// Unique ID (index in the todo list, or a stable ID from the model).
@@ -162,8 +158,7 @@ const MAX_TODO_FRACTION: f32 = 0.15;
 pub struct TodoPane {
     /// Raw todo items from ACP Plan updates.
     todos: Vec<TodoItem>,
-    /// Filtered and styled entries for `ListPane` rendering.
-    /// Rebuilt from `todos` at the start of each `render()` call.
+    /// Filtered and styled entries for `ListPane` rendering. Rebuilt from `todos` at the start of each `render()` call.
     entries: Vec<TodoListEntry>,
     /// List pane state (scroll, selection, search, layout cache).
     pub list_state: ListPaneState,
@@ -247,7 +242,6 @@ impl TodoPane {
     }
 
     /// Called after an overlay state change hides the pane.
-    /// Closes the input bar if it's open mid-typing, but keeps any accepted search or filter across hide and show.
     pub fn on_state_change(&mut self) {
         if !self.overlay.visible {
             self.list_state.close_input_bar();
@@ -264,9 +258,7 @@ impl TodoPane {
         self.show_done = !self.show_done;
     }
 
-    /// Desired height in lines for layout computation. Returns 0 when hidden (overlay not visible or no
-    /// items). When visible but empty, returns 2 (for placeholder message). Otherwise: `min(10, 15% of
-    /// view_height)` but at least 1.
+    /// Desired height in lines for layout computation.
     pub fn desired_height(&self, view_height: u16) -> u16 {
         if !self.overlay.visible {
             return 0;
@@ -329,9 +321,7 @@ impl TodoPane {
         self.list_state.handle_paste(text, &self.entries)
     }
 
-    /// Handle a mouse scroll event over the todo pane area. Caps scroll speed for small viewports. The
-    /// app-level scroll accumulator can produce deltas of 3-5 lines, which would jump past most items
-    /// in a 4-row pane.
+    /// Handle a mouse scroll event over the todo pane area. Caps scroll speed for small viewports.
     pub fn handle_scroll(&mut self, lines: i32, col: u16, row: u16) {
         let max = match self.list_state.viewport_height() {
             0..=5 => 1,
@@ -366,8 +356,8 @@ impl TodoPane {
     }
 
     /// Render the todo pane into the given area. Rebuilds entries from `todos` each call, which is
-    /// cheap at the typical count of under 20 items. Runs layout, then renders the `ListPane` widget in
-    /// a padded inner area matching the scrollback's horizontal layout.
+    /// cheap at the typical count of a bounded number of items. Runs layout, then renders the
+    /// `ListPane` widget in a padded inner area matching the scrollback's horizontal layout.
     pub fn render(
         &mut self,
         area: Rect,

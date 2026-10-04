@@ -1,10 +1,4 @@
-//! Full-pipeline mouse tests for the per-task action icons: `[↗]` (view) and
-//! `[✗]` (Tasks pane kill) / `[stop]` (dock kill).
-//!
-//! Unlike `dock_input_tests`, nothing forges `pane_areas`: every test paints a
-//! real frame with `draw`, locates the icon cells the frame actually painted,
-//! and drives hover and click through `handle_mouse` at those exact cells. This
-//! is the paint-vs-hit-test agreement the user exercises.
+//! Full-pipeline mouse tests for the per-task action icons.
 use super::test_fixtures::make_agent;
 use super::{AgentView, BannerSlotParams};
 use crate::actions::ActionRegistry;

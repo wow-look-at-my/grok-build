@@ -1,9 +1,4 @@
 //! Resume re-park of the `exit_plan_mode` approval and the mid-turn disconnect handling.
-//!
-//! On resume the shell re-issues the `x.ai/exit_plan_mode` reverse-request when `awaiting_plan_approval` was persisted.
-//! That recreates a live waiter, so the pager's existing approve/revise/abandon path works unchanged.
-//! These tests pin the reverse-request shape, when the awaiting bit is set and cleared, and the mid-turn disconnect path.
-//! A graceful client disconnect must NOT auto-approve.
 
 use super::support::*;
 use super::*;

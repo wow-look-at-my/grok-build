@@ -9,14 +9,10 @@ const TITLE_SPINNER: &[char] = &[
     '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}',
 ];
 
-/// Hold each spinner frame for this many ticks before advancing. Terminals (notably Ghostty) debounce tab title
-/// updates. Writing a new title every tick (~33ms at 30fps) produces more OSC 0 writes than the tab bar can render.
-/// A divisor of 8 gives ~264ms per frame, slow enough for debounced renderers while still looking animated.
+/// Hold each spinner frame for this many ticks before advancing.
 const TITLE_SPINNER_DIVISOR: u64 = 8;
 
-/// Hold the "⚠ Action Required" label for this many ticks before toggling (only while unfocused; see the focused field below).
-/// A divisor of 15 at 30fps gives ~500ms visible, ~500ms hidden: a calm 1s blink cycle that reads as intentional rather than broken flickering.
-/// When focused we show the prefix statically to eliminate oscillation during active interaction (e.g. typing in permission modals).
+/// Hold the "⚠ Action Required" label for this many ticks before toggling.
 const ACTION_REQUIRED_BLINK_DIVISOR: u64 = 15;
 
 /// State passed into `TitleManager::update()` each tick.
@@ -29,8 +25,7 @@ pub struct TitleState<'a> {
     pub turn_elapsed: Option<std::time::Duration>,
     /// Whether the agent is busy (turn or command running), even if `activity` is `None` (the "Waiting" gap before first chunk).
     pub is_busy: bool,
-    /// Whether the terminal pane/window is currently focused (from FocusTracker).
-    /// Suppresses title blinking/oscillation while the user is actively interacting.
+    /// Whether the terminal pane/window is focused (from FocusTracker).
     pub focused: bool,
 }
 
@@ -88,7 +83,6 @@ impl TitleManager {
             std::mem::swap(&mut self.last_title, &mut self.composed);
         }
 
-        // Advance counters after rendering so the first tick sees tick_count=0 (phase 0, ActionRequired visible) and spinner_frame=0
         self.tick_count = self.tick_count.wrapping_add(1);
         self.spinner_frame =
             (self.tick_count / TITLE_SPINNER_DIVISOR) as usize % TITLE_SPINNER.len();
@@ -182,7 +176,6 @@ fn write_item(
                 return false;
             }
             // Blink (oscillate) only while unfocused, for tab attention.
-            // When focused (user actively interacting, e.g. in permission modal or prompt), show static prefix to stop distracting flash.
             let should_blink =
                 !state.focused && !(tick_count / ACTION_REQUIRED_BLINK_DIVISOR).is_multiple_of(2);
             if should_blink {
@@ -712,7 +705,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        // 40 chars + ellipsis
+        // Chars + ellipsis
         assert_eq!(mgr.last_title.chars().count(), 41);
         assert!(mgr.last_title.ends_with('\u{2026}'));
     }
@@ -831,7 +824,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        // "Running: " (9 chars) + 30 chars + ellipsis = 40 chars
+        // "Running: " (chars) + chars + ellipsis = 40 chars
         assert!(mgr.last_title.starts_with("Running: "));
         assert!(mgr.last_title.ends_with('\u{2026}'));
     }

@@ -1,9 +1,4 @@
 //! Pure functions for exporting a conversation transcript as human-readable Markdown.
-//!
-//! Used by the `/export` slash command (and its dispatch handler).
-//! The converter walks `RenderBlock`s and produces `## User` / `## Assistant` / `## Tools` sections with compact one-line tool summaries.
-//! Non-conversation blocks (system chrome, thinking, subagent lifecycle, etc.) are skipped.
-//! The output stays useful for "continue elsewhere" or archival.
 
 use super::{RenderBlock, ToolCallBlock};
 
@@ -50,8 +45,7 @@ pub fn render_blocks_to_markdown<'a>(blocks: impl IntoIterator<Item = &'a Render
                 out.push('\n');
                 last_was_agent = false;
             }
-            // Skip all non-conversation chrome: Thinking, System, SessionEvent, BgTask, Subagent, Btw, Stub, etc
-            // A skipped Thinking block leaves `last_was_agent` set, so agent messages around it share one header
+            // Skip all non-conversation chrome: Thinking, System, SessionEvent, BgTask, Subagent, Btw, Stub.
             _ => {}
         }
     }

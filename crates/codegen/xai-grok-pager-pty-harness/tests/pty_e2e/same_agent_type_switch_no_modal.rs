@@ -2,8 +2,8 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// **Same agent_type switch: no modal, normal switch.**
-/// Switching between two models that share the same agent type (or no agent type) mid-session should succeed normally without any modal.
+/// **Same agent_type switch: no modal, normal switch.** Switching between models that share the same agent type (or no agent type)
+/// mid-session should succeed normally without any modal.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn same_agent_type_switch_no_modal() {
@@ -25,7 +25,6 @@ async fn same_agent_type_switch_no_modal() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
 
-    // Send a prompt to establish turn_count > 0.
     harness
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit prompt");
@@ -38,8 +37,8 @@ async fn same_agent_type_switch_no_modal() {
         .inject_keys(b"/model model-b\r")
         .expect("type model switch");
 
-    // The switch proceeds normally; look for the model name in the status bar (bottom-right)
-    // The toast "✓ Default model: model-b" may be transient, so check for "model-b" anywhere on screen
+    // The switch proceeds normally; look for the model name in the status bar
+    // (bottom-right).
     harness
         .wait_for_text("model-b", Duration::from_secs(15))
         .expect("model-b visible on screen after switch");

@@ -210,9 +210,8 @@ fn doctor_tmux_fix_kills_term_ignoring_redirected_descendants() {
     std::fs::create_dir_all(&fake_bin).unwrap();
     let tmux = fake_bin.join("tmux");
     let pid_file = temp.path().join("descendant.pid");
-    // Publish the descendant pid from the leader *before* it exits
-    // Writing `echo $$ > pid` inside the redirected child races doctor teardown
-    // `>` truncates first, then SIGKILL can land before the digits are written, leaving an empty file (`ParseIntError { kind: Empty }`)
+    // Publish the descendant pid from the leader *before* it exits Writing `echo $$ > pid` inside the redirected child races doctor
+    // teardown `>` truncates first.
     std::fs::write(
         &tmux,
         format!(
@@ -245,7 +244,6 @@ fn doctor_tmux_fix_kills_term_ignoring_redirected_descendants() {
         });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while std::time::Instant::now() < deadline {
-            // SAFETY: kill(pid, 0) only probes liveness for the positive child PID.
             if unsafe { libc::kill(pid, 0) } != 0 {
                 break;
             }

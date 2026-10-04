@@ -1,5 +1,4 @@
-//! This module is gated on `#[cfg(test)]` and is exported as `pub(crate)` so any in-crate `#[cfg(test)] mod tests` can use it.
-//! Integration tests under `tests/` cannot reach it; for those, copy or re-implement the handful of functions here that they need.
+//! This module is gated on `#[cfg(test)]` and is exported as `pub(crate)`.
 
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
@@ -18,8 +17,8 @@ pub(crate) fn with_env_var<R>(name: &str, value: Option<&str>, f: impl FnOnce() 
 
     let result = catch_unwind(AssertUnwindSafe(f));
 
-    // SAFETY: see above. Restore unconditionally so a panic doesn't
-    // leak env state to subsequent tests.
+    // SAFETY:. Restore unconditionally so a panic doesn't leak env state to
+    // subsequent tests.
     unsafe {
         match previous {
             Some(prev) => std::env::set_var(name, prev),

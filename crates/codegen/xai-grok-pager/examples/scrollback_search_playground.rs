@@ -1,11 +1,6 @@
-#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
 
 //! Interactive playground for the scrollback search render layer.
-//!
-//! Drives a real [`ScrollbackSearchState`] over a sample scrollback.
-//! The search bar and match highlighting can be eyeballed before the feature is wired into the production input path.
-//! Type to search, `Enter` to accept, `n` / `N` to step through matches (which scrolls the match into view via `reveal_entry_line`).
-//! `Esc` clears the query (or quits when already empty), `Ctrl-Q` quits.
 
 use std::collections::VecDeque;
 use std::io::{self, stdout};
@@ -95,8 +90,7 @@ fn main() -> io::Result<()> {
     app.push("started scrollback search playground".to_string());
 
     loop {
-        // Matching runs on a background thread; pick up results each iteration and scroll the newly current match into view
-        // This mirrors the per-tick poll in the production app
+        // Matching runs on a background thread.
         if app.search.poll() {
             app.reveal_current();
         }
@@ -186,8 +180,7 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     .block(Block::default().borders(Borders::ALL).title("info"));
     f.render_widget(info, chunks[0]);
 
-    // -- Scrollback and search bar --
-    // Reserve the bottom row of the block for the search bar, exactly as the production draw path will when `scrollback_search.is_some()`
+    // -- Scrollback and search bar -- Reserve the bottom row of the block for the search bar, exactly as the production draw path will.
     let block_area = chunks[1];
     let sb_area = Rect {
         height: block_area.height.saturating_sub(1),

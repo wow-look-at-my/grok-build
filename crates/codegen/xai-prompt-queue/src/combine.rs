@@ -1,7 +1,4 @@
 //! Pure merge rules for `[ui].combine_queued_prompts`.
-//!
-//! Pager and shell keep separate call sites (local drain vs promote) but share
-//! eligibility, join, and content-meta stamping so stop conditions cannot drift.
 
 use crate::COMBINED_DISPLAY_TEXTS_META;
 
@@ -27,12 +24,6 @@ pub struct CombineGate<'a> {
 }
 
 /// Front of a combine run: plain user prompt; may carry images.
-///
-/// A row whose text is a slash invocation is never a front either: only a
-/// prompt's LEADING token is resolved as a command, so merging one into a
-/// neighbour's turn (or letting it absorb followers) delivers the literal
-/// `/cmd args` as prose. The shape comes from [`crate::is_slash_invocation`],
-/// the single definition both ends read, so no call site can forget to set it.
 pub fn can_merge_front(g: &CombineGate<'_>) -> bool {
     g.is_plain_prompt
         && !g.is_synthetic
@@ -78,7 +69,7 @@ pub fn join_texts<'a>(texts: impl IntoIterator<Item = &'a str>) -> String {
         .join(TEXT_SEPARATOR)
 }
 
-/// Multi-bubble UI when at least two original prompts were merged.
+/// Multi-bubble UI when at least original prompts were merged.
 #[inline]
 pub fn is_combined(segs: &[String]) -> bool {
     segs.len() >= 2

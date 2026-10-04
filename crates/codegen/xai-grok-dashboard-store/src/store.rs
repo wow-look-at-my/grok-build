@@ -1,5 +1,4 @@
-//! The workspace store: connection ownership and all store operations.
-//! The open/create flow lives in `store_open`.
+//! The workspace store: connection ownership and all store operations. The open/create flow lives in `store_open`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -70,9 +69,8 @@ ON CONFLICT(session_id, kind) DO UPDATE SET
     is_worktree = excluded.is_worktree,
     last_change_unix_ms = excluded.last_change_unix_ms";
 
-// The delete uses a row-value IN, not `DELETE ... LIMIT`, which needs a non-default SQLite compile flag.
-// Ties on last_change_unix_ms break on (session_id, kind) ascending, so two processes racing the same insert converge on the same victim
-// An `:excess` above 1 heals an overfull file
+// The delete uses a row-value IN, not `DELETE ... LIMIT`, which needs a
+// non-default SQLite compile flag.
 const EVICT_SQL: &str = "
 DELETE FROM members
 WHERE (session_id, kind) IN (
@@ -104,8 +102,8 @@ enum WriteAttempt<T> {
     Failed(StoreError),
 }
 
-/// Owns the single connection. `Send` but not `Sync` (`rusqlite::Connection`), with no interior locks.
-/// A caller that must not create the store must not call it.
+/// Owns the connection. `Send` but not `Sync` (`rusqlite::Connection`), with
+/// no interior locks.
 #[derive(Debug)]
 pub struct WorkspaceStore {
     pub(super) conn: rusqlite::Connection,
@@ -115,7 +113,6 @@ pub struct WorkspaceStore {
 
 impl WorkspaceStore {
     /// The handle's current schema-gate state.
-    /// A guarded write can transition it to [`SchemaState::NewerReadOnly`] after a peer upgrades the store.
     pub fn schema_state(&self) -> SchemaState {
         self.schema
     }
@@ -125,9 +122,9 @@ impl WorkspaceStore {
         &self.path
     }
 
-    /// One consistent view: grouping, members in primary-key order, and the `data_version` observed by the same read transaction.
-    /// Works in both schema states.
-    /// [`StoreError::Busy`] when the busy budget elapses, [`StoreError::Sqlite`] otherwise.
+    /// One consistent view: grouping, members in primary-key order, and the
+    /// `data_version` observed by the same read transaction. Works in both
+    /// schema states.
     pub fn snapshot(&self) -> Result<WorkspaceSnapshot> {
         let started = Instant::now();
         self.snapshot_inner()
@@ -141,9 +138,9 @@ impl WorkspaceStore {
         Ok(snapshot)
     }
 
-    /// `PRAGMA data_version` on this store's connection, in autocommit and never inside a held transaction, so WAL snapshot pinning cannot freeze it.
-    /// The value changes between two reads on a connection exactly when another connection committed to the database in the interim; Commits made on the same connection do not change the value that connection observes. A process that both writes and polls through one handle sees only *foreign* changes and never has to filter out its own; The value is only meaningful compared against a previous read on the same connection. After a reopen, re-seed the baseline from a fresh [`Self::snapshot`].
-    /// [`StoreError::Busy`] when the busy budget elapses, [`StoreError::Sqlite`] otherwise.
+    /// `PRAGMA data_version` on this store's connection, in autocommit and
+    /// never inside a held transaction, so WAL snapshot pinning cannot freeze
+    /// it.
     pub fn data_version(&self) -> Result<i64> {
         let started = Instant::now();
         self.conn
@@ -247,8 +244,7 @@ impl WorkspaceStore {
             return Ok(InsertOutcome::UpdatedExisting);
         };
 
-        // Eviction is silent in the UI by product decision, so these log lines are the only trace of the data removal
-        // They are emitted only after the commit, so a rollback cannot leave a false destruction record
+        // Eviction is silent in the UI by product decision.
         let eviction_ran = !victims.is_empty();
         let mut evicted = Vec::with_capacity(victims.len());
         for victim in victims {
@@ -427,9 +423,8 @@ impl WorkspaceStore {
         }
     }
 
-    /// Write `pin_rank` for every assignment in one all-or-nothing transaction.
-    /// The API takes a batch because renumbering a partition whose rank gap ran out must be atomic; a pin toggle passes one element.
-    /// [`StoreError::NewerSchema`] on a read-only handle,
+    /// Write `pin_rank` for every assignment in one all-or-nothing
+    /// transaction.
     pub fn set_pin_rank(&mut self, assignments: &[RankAssignment]) -> Result<()> {
         self.set_ranks(RankColumn::Pin, assignments)
     }
@@ -478,7 +473,6 @@ impl WorkspaceStore {
     pub fn set_grouping(&mut self, grouping: &Grouping) -> Result<()> {
         let started = Instant::now();
         self.with_write("set_grouping", |tx| {
-            // Schema init seeds the meta row, so the UPDATE always matches row 0
             tx.execute(
                 "UPDATE meta SET grouping = ?1 WHERE id = 0",
                 params![grouping.as_str()],
@@ -490,9 +484,8 @@ impl WorkspaceStore {
         Ok(())
     }
 
-    /// Move a member to a new session id in one transaction, ranks included.
-    /// When a row with the target key already exists, the two merge deterministically: the target keeps its `origin` and metadata as the live truth.
-    /// [`StoreError::NewerSchema`] on a read-only handle,
+    /// Move a member to a new session id in one transaction, ranks included. When a row with the target key already exists, both merge
+    /// deterministically: the target keeps its `origin` and metadata as the live truth. [`StoreError::NewerSchema`] on a read-only handle,
     pub fn rekey(&mut self, old: &MemberKey, new_session_id: SessionId) -> Result<RekeyOutcome> {
         let started = Instant::now();
         let outcome = self
@@ -520,7 +513,8 @@ impl WorkspaceStore {
             let Some((old_pin, old_order)) = old_ranks else {
                 return Err(member_not_found(old));
             };
-            // Short-circuit before the merge arm: there the "target" would be the old row itself and the final delete would destroy it
+            // Short-circuit before the merge arm: there the "target" would be
+            // the row itself and the final delete would destroy it
             if old.session_id == *new_session_id {
                 return Ok(RekeyOutcome::NoChange);
             }
@@ -709,7 +703,7 @@ fn classify_layout_snapshot_error(error: StoreError) -> StoreError {
     }
 }
 
-/// The two gapped-rank columns; both setters share this code because gap exhaustion (and its atomic renumber) applies to either.
+/// Both gapped-rank columns; both setters share this code because gap exhaustion (and its atomic renumber) applies to either.
 #[derive(Clone, Copy)]
 enum RankColumn {
     Pin,

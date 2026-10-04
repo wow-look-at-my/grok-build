@@ -1,7 +1,4 @@
 //! Dashboard host for the `/usage` modal ([`DashboardState::usage_modal`]).
-//!
-//! Routing lives in `views::usage_modal` (shared with the agent view); this module only maps the outcome onto the dashboard's modal slot
-//! and its toast surface. The modal owns keyboard and mouse until it closes, like the shortcuts cheatsheet.
 
 use crossterm::event::{Event, KeyEventKind};
 

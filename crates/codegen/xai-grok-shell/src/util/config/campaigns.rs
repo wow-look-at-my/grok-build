@@ -1,6 +1,4 @@
 //! Campaign dismiss state, remote cache, and effective-config overlay.
-//!
-//! Design, invariants, and the "adding a second governed field" recipe are documented alongside this module.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -18,7 +16,6 @@ use xai_grok_config::{
 use xai_grok_config_types::{CampaignOverride, RemoteSettings};
 
 /// FIFO cap on persisted dismissed ids.
-/// Evicting the oldest can re-nudge for a still-live campaign after a user dismisses more than this over the CLI's life.
 const MAX_DISMISSED_IDS: usize = 32;
 
 static DISMISS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -26,9 +23,9 @@ static DISMISS_TMP_NONCE: AtomicU64 = AtomicU64::new(0);
 
 static REMOTE_CAMPAIGN_CACHE: RwLock<Vec<CampaignEntry>> = RwLock::new(Vec::new());
 
-/// Seed the process-global remote campaign cache.
-/// A `None` settings value (e.g. a failed fetch) is a no-op so it can't clobber a previously-seeded cache.
-/// `Some` with zero campaigns legitimately clears it (campaigns withdrawn).
+/// Seed the process-global remote campaign cache. A `None` settings value
+/// (e.g. a failed fetch) is a no-op so it can't clobber a previously-seeded
+/// cache.
 pub fn set_remote_campaigns_from_settings(remote: Option<&RemoteSettings>) {
     let Some(remote) = remote else {
         return;
@@ -72,9 +69,7 @@ fn dismiss_campaign_ids_at(
     use fs2::FileExt as _;
     let _guard = DISMISS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let path = campaigns_state_path(home);
-    // Cross-process advisory lock over the read-modify-write: in leader mode several grok processes share `$GROK_HOME`
-    // The in-process mutex alone would let one process overwrite another's update
-    // The lock is best-effort; a lock failure still proceeds
+    // Cross-process advisory lock over the read-modify-write.
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -184,9 +179,14 @@ pub(crate) fn resolve_active_campaigns_from_layers(
     layers.resolve_campaigns(base, remote_entries, dismissed)
 }
 
-/// Campaigns eligible for dismissal when the user persists a choice (loads the layers, the remote cache, and the dismiss state).
-/// Unlike the apply path this deliberately **ignores the kill switch**: dismissing a suppressed campaign is harmless.
-/// Skipping the dismissal lets a later re-enabled campaign override a choice the user already made ("user pick wins, forever"). A layer-load failure likewise falls back to the remote cache instead of failing closed: remote campaigns still get dismissed on that path. Disk-layer campaigns can be missed until the transient failure clears (they re-dismiss on the next pick).
+/// Campaigns eligible for dismissal when the user persists a choice (loads
+/// the layers, the remote cache, and the dismiss state). Unlike the apply
+/// path this deliberately **ignores the kill switch**: dismissing a
+/// suppressed campaign is harmless. Skipping the dismissal lets a later
+/// re-enabled campaign override a choice the user already made ("user pick
+/// wins, forever"). A layer-load failure likewise falls back to the remote
+/// cache instead of failing closed: remote campaigns still get dismissed on
+/// that path.
 fn resolve_dismissable_campaigns() -> Vec<CampaignEntry> {
     let dismissed = load_dismissed_ids();
     if let Some(over) = campaigns_override() {
@@ -381,9 +381,8 @@ pub struct CampaignModelsDefault {
     pub pre_campaign: Option<String>,
 }
 
-/// `None` unless an active (non-dismissed, kill-switch-respecting, requirements-losing) campaign changes the effective `models.default`.
-/// Session creation uses this to apply a campaign to `/new` even when remote settings arrived only after boot. The `ModelsManager`'s `current_model_id` was resolved pre-campaign.
-/// `ModelsManager::apply_config` deliberately never re-targets it on a campaign-only flip, so `/new` re-evaluates here. Reading the dismiss state fresh makes a `/model` pick win instantly. [`persist_user_choice`] records the dismissal before the config write, so the very next `/new` resolves campaign-free.
+/// `None` unless an active (non-dismissed, kill-switch-respecting,
+/// requirements-losing) campaign changes the effective `models.default`.
 pub fn campaign_driven_models_default() -> Option<CampaignModelsDefault> {
     let layers = ConfigLayers::load().ok()?;
     campaign_driven_models_default_from(&layers, &cached_remote_campaigns(), &load_dismissed_ids())
@@ -435,19 +434,17 @@ struct CampaignFieldValue {
     recovery: Option<toml::Value>,
 }
 
-/// A config field a campaign may temporarily override until the user sets it. `apply_campaign_fields` drives every [`CAMPAIGN_FIELDS`] entry, so the resolve pass is one row here.
-/// A field still needs its runtime state and a `persist_*` writer through [`persist_user_choice`]. It also needs any field-specific reaction (e.g. the model catalog-miss/live-session handling in `agent::remote_config`).
+/// A config field a campaign may temporarily override until the user sets it.
 struct CampaignField {
     /// Path into the effective config; also the dismiss key shared with the writer.
     path: PatchPath,
     /// Store the resolved value, flag, and recovery onto the agent config.
     store: fn(&mut crate::agent::config::Config, CampaignFieldValue),
     /// Clear the campaign-driven flag and recovery (value untouched).
-    /// Used when resolution fails so the runtime state is defined (fail closed, matching the apply path) instead of stale.
     reset: fn(&mut crate::agent::config::Config),
 }
 
-/// Path of the `models.default` campaign field, shared by the registry row and its dismiss writer so the two can't drift.
+/// Path of the `models.default` campaign field, shared by the registry row and its dismiss writer so both can't drift.
 const MODELS_DEFAULT_PATH: PatchPath = &["models", "default"];
 
 const CAMPAIGN_FIELDS: &[CampaignField] = &[CampaignField {
@@ -474,8 +471,8 @@ fn apply_campaign_fields(
     for field in CAMPAIGN_FIELDS {
         let value = read_path(effective, field.path);
         let base_value = read_path(base, field.path);
-        // A campaign only *drives* a field when it actually changed the effective value
-        // Requirements are re-merged after campaigns, so an admin pin wins and the campaign patch is a no-op (don't flag it)
+        // A campaign only *drives* a field when it changed the effective
+        // value Requirements are re-merged after campaigns.
         let driven = value != base_value
             && active
                 .iter()
@@ -501,8 +498,7 @@ pub fn sync_campaign_fields(cfg: &mut crate::agent::config::Config) {
         set_remote_campaigns(remote.clone());
     }
     let Ok(layers) = ConfigLayers::load() else {
-        // Fail closed like the apply path: leave the field values as loaded but clear the campaign-driven flags/recovery so they can't go stale
-        // A stale flag would mislabel a user value as campaign-driven, or vice versa disable the live-session guard for a campaign value
+        // Fail closed like the apply path.
         tracing::warn!("campaigns: config layer load failed; clearing campaign-driven field state");
         for field in CAMPAIGN_FIELDS {
             (field.reset)(cfg);
@@ -518,15 +514,13 @@ pub fn sync_campaign_fields(cfg: &mut crate::agent::config::Config) {
     let _ = crate::config::apply_requirements(cfg);
 }
 
-/// Dismiss any active campaign whose patch touches `path`, then persist the setting via `update_config`.
-/// This is the single field-keyed chokepoint: a new campaign-governable field is one call here with no per-field dismiss wiring.
-/// The dismiss is recorded **before** the config write so a crash between the two can't leave the campaign active over the user's just-saved value. If the dismiss lands but the write fails, the dismiss stands: failure leans toward not nudging.
+/// Dismiss any active campaign whose patch touches `path`, then persist the setting via `update_config`. This is the single field-keyed chokepoint: a new campaign-governable field is one call here with no per-field dismiss wiring. The dismiss
+/// is recorded **before** the config write so a crash between both can't leave the campaign active over the user's just-saved value. If the dismiss lands but the write fails, the dismiss stands: failure leans toward not nudging.
 pub(super) async fn persist_user_choice(
     path: PatchPath,
     write: impl FnOnce(&mut super::mcp::Config),
 ) -> anyhow::Result<()> {
-    // Config-layer reads and the flock'd read-modify-write are blocking I/O; keep them off the async worker The task is awaited before the config write so the dismiss-before-write ordering above holds
-    // A panicked/cancelled dismiss task must NOT abort the user's write Bookkeeping failure is logged and the write proceeds (the campaign may re-nudge; the pick is never lost)
+    // Config-layer reads and the flock'd read-modify-write are blocking I/O.
     let dismissed = tokio::task::spawn_blocking(move || {
         let ids = ids_touching_paths(&resolve_dismissable_campaigns(), &[path]);
         if !ids.is_empty() {
@@ -716,7 +710,7 @@ mod tests {
         assert_eq!(nudge.value, "campaign-model");
         assert_eq!(nudge.pre_campaign.as_deref(), Some("config-model"));
 
-        // A dismissal (what a `/model` pick records first) deactivates the nudge for the very next resolution
+        // A dismissal (what a `/model` pick records first) deactivates the nudge for the next resolution
         let dismissed: HashSet<String> = ["t-models-nudge".to_string()].into_iter().collect();
         assert!(
             campaign_driven_models_default_from(&layers, &remote, &dismissed).is_none(),
@@ -918,9 +912,9 @@ mod tests {
         assert!(remote_campaign_to_entry(no_id).is_none());
     }
 
-    /// The remote JSON shape accepts `campaign_id` as an alias for `id`, matching the TOML `CampaignMeta` contract so the two sides can't drift.
-    /// The id key (either spelling) must be *consumed*, never leak into the flattened patch.
-    /// A leaked key would deep-merge junk into every effective config.
+    /// The remote JSON shape accepts `campaign_id` as an alias for `id`, matching the TOML `CampaignMeta` contract so both sides can't drift.
+    /// The id key (either spelling) must be *consumed*, never leak into the flattened patch. A leaked key would deep-merge junk into every
+    /// effective config.
     #[test]
     fn campaign_id_json_alias_is_accepted_and_does_not_leak_into_patch() {
         for raw in [

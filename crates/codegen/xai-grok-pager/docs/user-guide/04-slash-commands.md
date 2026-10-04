@@ -2,9 +2,9 @@
 
 Type `/` in the prompt to open the command menu. It fuzzy-matches as you type, and picking a command runs it immediately.
 
-Commands come from two places: **shell builtins**, handled by the agent backend (xai-grok-shell), and **pager builtins**, handled by the pager frontend (xai-grok-pager). Both show up in the same menu, and any enabled skill with `user-invocable: true` appears there too. If a skill reuses a built-in name such as `login`, the built-in keeps `/login` and the skill stays available as `/plugin-name:login` — the menu badges both so the collision is visible.
+Commands come from multiple places: **shell builtins**, handled by the agent backend (xai-grok-shell), and **pager builtins**, handled by the pager frontend (xai-grok-pager). Both show up in the same menu, and any enabled skill with `user-invocable: true` appears there too. If a skill reuses a built-in name such as `login`, the built-in keeps `/login` and the skill stays available as `/plugin-name:login`. The menu badges both so the collision is visible.
 
-Every command below lists its aliases where it has them. A few commands only appear when a feature or session state enables them; those cases are called out inline.
+Every command below lists its aliases where it has them. A few commands only appear when a feature or session state enables them. Those cases are called out inline.
 
 ---
 
@@ -37,12 +37,11 @@ Grok also auto-compacts once the context window hits 85% (tune it with `[session
 
 ### `/context`
 
-Show the context window split into System prompt, Messages, Reasoning/overhead, and Free.
-Rows for Tool definitions, Skills, and MCP servers are already counted in those totals.
+Show the context window split into System prompt, Messages, Reasoning/overhead, and Free. Rows for Tool definitions, Skills, and MCP servers are already counted in those totals.
 
 ### `/session-info`
 
-Show session details — auth method, model, turn count, and context usage. Aliases: `/status`, `/info`. Click a value or drag to select and copy; `c` copies the session ID and `y` copies the whole block.
+Show session details — auth method, model, turn count, and context usage. Aliases: `/status`, `/info`. Click a value or drag to select and copy. `c` copies the session ID and `y` copies the whole block.
 
 ### `/fork`
 
@@ -54,7 +53,7 @@ Roll the conversation back to an earlier turn and discard everything after it. `
 
 ### `/copy`
 
-Copy the most recent response's source markdown to the clipboard. Pass a number to copy the Nth-latest response instead, or a file path to write the text to a file rather than the clipboard (handy over SSH, where the local clipboard is often unreachable).
+Copy the most recent response's source markdown to the clipboard. Pass a number to copy the Nth-latest response instead, or a file path to write the text. This is to a file rather than the clipboard (handy over SSH, where the local clipboard is often unreachable).
 
 ```
 /copy
@@ -63,7 +62,7 @@ Copy the most recent response's source markdown to the clipboard. Pass a number 
 /copy 2 ~/exports/last-reply.md
 ```
 
-Every copy is also written to a backup file — `~/.grok/last-copy.txt` by default, or `GROK_COPY_FILE` if set. Confirmed copies toast briefly (e.g. `Copied!`). Unverified OSC 52 deliveries and clipboard-unreachable fallbacks name the backup path so you can recover the text.
+Every copy is also written to a backup file — `~/.grok/last-copy.txt` by default, or `GROK_COPY_FILE` if set. Confirmed copies toast briefly (e.g. `Copied!`). Unverified OSC deliveries and clipboard-unreachable fallbacks name the backup path so you can recover the text.
 
 ### `/export`
 
@@ -92,7 +91,7 @@ Rename the current session. Alias: `/title`.
 /rename --auto
 ```
 
-`--auto` unpins a manual title and lets auto-titling resume. It applies to Build sessions only — chat conversations have no local auto-titler. It must be the only argument (`/rename --auto Something` is an error). A session cannot be named `--auto` via this command; use the dashboard rename editor (`Ctrl+R`) for that pathological case.
+`--auto` unpins a manual title and lets auto-titling resume. It applies to Build sessions only — chat conversations have no local auto-titler. It must be the only argument (`/rename --auto Something` is an error). A session cannot be named `--auto` via this command. Use the dashboard rename editor (`Ctrl+R`) for that pathological case.
 
 ---
 
@@ -118,7 +117,7 @@ Set reasoning effort on the **current** model without reselecting it. Levels are
 
 ### `/always-approve` and `/auto`
 
-Both are real toggles for the permission mode: they stay in the menu, and running the mode you're already in turns it back off.
+Both are real toggles for the permission mode: they stay in the menu, and running the mode you are already in turns it back off.
 
 | Command | When off | When already on |
 |---|---|---|
@@ -129,13 +128,13 @@ Running one while the other is active switches modes — for example, `/auto` wh
 
 ### `/multiline`
 
-Toggle multiline input. When it's on, `Enter` inserts a newline and `Shift+Enter` (or `Alt+Enter`) sends the message. Mid-turn, a bare `Enter` on an empty composer still force-sends the top queued follow-up. Alias: `/ml`. With multiline off, the composer footer shows the newline chord once the draft is non-empty.
+Toggle multiline input. When it is on, `Enter` inserts a newline and `Shift+Enter` (or `Alt+Enter`) sends the message. Mid-turn, a bare `Enter` on an empty composer still force-sends the top queued follow-up. Alias: `/ml`. With multiline off, the composer footer shows the newline chord once the draft is non-empty.
 
 ### `/history`
 
 Open prompt-history search: fuzzy-search this session's prompts newest-first, then press `Enter` or `Tab` to drop a match back into the prompt.
 
-For quick recall, press `↑` on an empty prompt instead. With prompts queued, that moves focus into the queue pane, highlighting the last row; otherwise the panel opens with your most recent prompt already filled in, and `↑`/`↓` step through entries (each lands in the input), `↓` past the newest entry closes the panel, and typing edits the recalled prompt in place.
+For quick recall, press `↑` on an empty prompt instead. With prompts queued, that moves focus into the queue pane, highlighting the last row. Otherwise the panel opens with your most recent prompt already filled in, and `↑`/`↓` step through entries (each lands in the input). `↓` past the newest entry closes the panel, and typing edits the recalled prompt in place.
 
 ### `/compact-mode`
 
@@ -161,16 +160,11 @@ Open a preview of the current saved plan. Aliases: `/show-plan`, `/plan-view`.
 
 ## Memory
 
-`/flush` and `/dream` require memory enabled through `GROK_MEMORY=1`, `[memory] enabled = true`, or managed remote settings. `/memory` is available whenever a memory store is configured for the session, including when `[memory] enabled = false` turned memory off, so you can browse saved notes and turn memory on for the session from inside the modal. It is hidden only when no memory store is configured, or when `--no-memory` / `GROK_MEMORY=0` turned memory off for the whole process. `/remember` is always available.
+`/flush` and `/dream` require memory enabled through `GROK_MEMORY=1`, `[memory] enabled = true`, or managed remote settings. `/memory` is available whenever a memory store is configured for the session, including when `[memory] enabled = false` turned memory off. As a result, you can browse saved notes and turn memory on for the session from inside the modal. It is hidden only when no memory store is configured, or when `--no-memory` / `GROK_MEMORY=0` turned memory off for the whole process. `/remember` is always available.
 
 ### `/memory`
 
-Browse, view, and manage saved memories. Alias: `/mem`. Inside the modal, `t`
-turns memory on or off for the session, `x` deletes the selected note, and `s`
-shows content-free queue, lease, retention, and pinned-rollout diagnostics.
-The `t` toggle is session-scoped: it does not edit `config.toml`, and new
-sessions follow the config again. It cannot override `--no-memory` or
-`GROK_MEMORY=0`.
+Browse, view, and manage saved memories. Alias: `/mem`. Inside the modal, `t` turns memory on or off for the session, `x` deletes the selected note, and `s` shows content-free queue, lease, retention. Pinned-rollout diagnostics. The `t` toggle is session-scoped: it does not edit `config.toml`, and new sessions follow the config again. It cannot override `--no-memory` or `GROK_MEMORY=0`.
 
 ```
 /memory
@@ -178,11 +172,11 @@ sessions follow the config again. It cannot override `--no-memory` or
 
 ### `/flush`
 
-Save the current session's knowledge to memory right now, triggering an LLM summary of the most important content. Reach for it before compaction, or any time you want to lock in context. The status line shows "Flushing memory…" while it runs, and a scrollback line reports the outcome (for example "Memory flushed through turn 12").
+Save the current session's knowledge to memory right now, triggering an LLM summary of the most important content. Reach for it before compaction, or any time you want to lock in context. The status line shows "Flushing memory…" while it runs. A scrollback line reports the outcome (for example "Memory flushed through turn 12").
 
 ### `/dream`
 
-Run memory consolidation — merge session logs into organized topics. The status line shows "Consolidating memory…" while it runs, and a scrollback line reports what happened: how many observations were merged into how many topics, that there was nothing to consolidate, or that another session is already consolidating.
+Run memory consolidation — merge session logs into organized topics. The status line shows "Consolidating memory…" while it runs. A scrollback line reports what happened: how many observations were merged into how many topics. That there was nothing to consolidate, or that another session is already consolidating.
 
 ### `/remember`
 
@@ -202,7 +196,7 @@ Save a note to memory immediately, without waiting for an automatic summary.
 
 Open the extensions modal on the Hooks tab, where you can view loaded hooks, add or remove custom ones, and toggle them individually. The modal does not grant project trust — see [10-hooks.md](10-hooks.md) for the trust model.
 
-The shell also advertises individual `/hooks-list`, `/hooks-trust`, `/hooks-add`, `/hooks-remove`, and `/hooks-untrust` commands; in the pager these are folded into the `/hooks` modal.
+The shell also advertises individual `/hooks-list`, `/hooks-trust`, `/hooks-add`, `/hooks-remove`, and `/hooks-untrust` commands. In the pager these are folded into the `/hooks` modal.
 
 ### `/plugins`
 
@@ -244,14 +238,14 @@ Generate a video from a text (or image) description. It plans shots, generates s
 
 ### `/loop [interval] <prompt>`
 
-Run a prompt on a recurring interval. Give the interval as `30m`, `1 hour`, or `every 2 days`; leave it out and Grok will ask.
+Run a prompt on a recurring interval. Give the interval as `30m`, `1 hour`, or `every 2 days`. Leave it out and Grok will ask.
 
 ```
 /loop 30m check deploy status
 /loop check deploy status every hour
 ```
 
-Intervals are `Ns` (seconds, minimum 60), `Nm` (minutes), `Nh` (hours), or `Nd` (days); anything under 60 seconds is raised to the minimum. Recurring tasks expire after 7 days, and you can cancel one with `scheduler_delete` using the job ID reported when the loop is created.
+Intervals are `Ns` (seconds, minimum 60), `Nm` (minutes), `Nh` (hours), or `Nd` (days). Anything a bounded number of seconds is raised to the minimum. Recurring tasks expire after several days. You can cancel one with `scheduler_delete` using the job ID reported when the loop is created.
 
 ---
 
@@ -269,11 +263,11 @@ Set, manage, or check an autonomous goal. Grok works across rounds and only mark
 /goal clear
 ```
 
-Arguments are `<objective> [--budget <tokens>]`, or one of `status`, `pause`, `resume`, `clear`. The `--budget` here is a **token** budget for the goal run, separate from the agent-count budgets that workflows use. `/goal` appears when goal mode is enabled for the session. Which driver runs it depends on background workflows: with them on, the host evaluates each model round and runs adversarial verification on completion candidates; with them off, the legacy model-facing `update_goal` path reports progress and triggers verification.
+Arguments are `<objective> [--budget <tokens>]`, or one of `status`, `pause`, `resume`, `clear`. The `--budget` here is a **token** budget for the goal run, separate from the agent-count budgets that workflows use. `/goal` appears when goal mode is enabled for the session. Which driver runs it depends on background workflows: with them on, the host evaluates each model round and runs adversarial verification on completion candidates. With them off, the legacy model-facing `update_goal` path reports progress and triggers verification.
 
 ### `/deep-research <query>`
 
-Kick off a background research workflow. It plans a bounded set of questions, gathers structured claims with source evidence, cross-checks each claim on an independent verifier shard, and renders only the claims that survive, with their verified source locators. Failed shards, dropped claims, and researcher uncertainties are reported as coverage limitations, and the report is marked **Partial** whenever any remain.
+Kick off a background research workflow. It plans a bounded set of questions, gathers structured claims with source evidence, cross-checks each claim on an independent verifier shard. This is renders only the claims that survive, with their verified source locators. Failed shards, dropped claims, and researcher uncertainties are reported as coverage limitations. The report is marked **Partial** whenever any remain.
 
 ```
 /deep-research Compare the migration risks of PostgreSQL 17 and MySQL 9
@@ -281,13 +275,13 @@ Kick off a background research workflow. It plans a bounded set of questions, ga
 
 The command returns right away — follow progress in `/workflow runs`, and the final report appears in the conversation on its own.
 
-Workflows use an absolute cumulative `agent_budget` cap on logical child-agent calls: every `agent()` call and every item in a `parallel()` panel spends one slot, while schema-correction retries don't. The default is 128, explicit values run 1–1,024, and a panel that would cross the remaining budget is rejected before any of its children launch. Model-launched workflows set `agent_budget` on the `workflow` tool; named slash launches accept `--agent-budget N` or an `agent_budget` field in their JSON args. Named launches can also set child reasoning effort with `--effort LEVEL` or JSON `effort`, without changing the current session's `/effort`; a child script's own `effort` option takes precedence. Separately, a host-configured cap (32 by default) bounds how many children run at a time per run; larger panels queue and still act as a barrier. `budget()` reports the cap as `total`, admitted calls as `spent`, `reserved` (always zero), and `remaining`.
+Workflows use an absolute cumulative `agent_budget` cap on logical child-agent calls: every `agent()` call. Every item in a `parallel()` panel spends one slot, while schema-correction retries do not. The default is 128, explicit values run 1–1,024, and a panel that will cross the remaining budget is rejected before any of its children launch. Model-launched workflows set `agent_budget` on the `workflow` tool. Named slash launches accept `--agent-budget N` or an `agent_budget` field in their JSON args. Named launches can also set child reasoning effort with `--effort LEVEL` or JSON `effort`, without changing the current session's `/effort`. A child script's own `effort` option takes precedence. Separately, a host-configured cap (32 by default) bounds how many children run at a time per run. Larger panels queue and still act as a barrier. `budget()` reports the cap as `total`, admitted calls as `spent`, `reserved` (always zero), and `remaining`.
 
 ### `/workflow`
 
-Launch a saved workflow, or manage a running one by its session-unique display name. Launch the same workflow twice and the display names are numbered (`review-changes`, `review-changes-2`); you never need the internal run IDs. Bare `/workflow` prints a text overview of this session's runs.
+Launch a saved workflow, or manage a running one by its session-unique display name. Launch the same workflow twice and the display names are numbered (`review-changes`, `review-changes-2`). You never need the internal run IDs. Bare `/workflow` prints a text overview of this session's runs.
 
-Type `/workflow` and a space to autocomplete saved workflow names (built-in, project, and user) plus the manage verbs `runs`, `pause`, `resume`, `stop`, and `save`. Picking a name fills it in and offers launch flags before you add args; it does not launch until you press Enter. `pause` / `resume` / `stop` / `save` then list this session's run handles — a bare `/workflow stop` does not pick a run.
+Type `/workflow` and a space to autocomplete saved workflow names (built-in, project, and user) plus the manage verbs `runs`, `pause`, `resume`, `stop`, and `save`. Picking a name fills it in and offers launch flags before you add args. It does not launch until you press Enter. `pause` / `resume` / `stop` / `save` then list this session's run handles — a bare `/workflow stop` does not pick a run.
 
 ```
 /workflow review-changes --agent-budget 256 --effort high {"target":"origin/main...HEAD"}
@@ -299,15 +293,15 @@ Type `/workflow` and a space to autocomplete saved workflow names (built-in, pro
 /workflow save review-changes
 ```
 
-`/workflow runs` opens the live **Workflow Runs** dashboard in the fullscreen TUI — active and retained runs, not a catalog of saved definitions. Each row shows the run's display name, phase, agent roster, progress, and result. Inside a run's detail view, `p` pauses, `r` resumes an ordinary pause, and `x` stops. Budget-limited runs can't bare-resume: `r` returns the shell's rejection (raise the cap with a model/tool resume that passes a higher `agent_budget`), while `x` still stops. `s` saves the run's script, but it's hidden for known built-ins and numbered duplicate handles — for those, choose a new unique `meta.name` and save the edited script explicitly. In non-TUI clients, `/workflow runs` prints the same text overview as bare `/workflow`.
+`/workflow runs` opens the live **Workflow Runs** dashboard in the fullscreen TUI — active and retained runs, not a catalog of saved definitions. Each row shows the run's display name, phase, agent roster, progress, and result. Inside a run's detail view, `p` pauses, `r` resumes an ordinary pause, and `x` stops. Budget-limited runs cannot bare-resume: `r` returns the shell's rejection (raise the cap with a model/tool resume that passes a higher `agent_budget`), while `x` still stops. `s` saves the run's script. However, it is hidden for known built-ins and numbered duplicate handles — for those, choose a new unique `meta.name` and save the edited script explicitly. In non-TUI clients, `/workflow runs` prints the same text overview as bare `/workflow`.
 
-Project workflows live in `.grok/workflows/*.rhai`; user workflows live in `~/.grok/workflows/*.rhai`. A same-process pause/resume continues the original immutable script, args, and `agent_budget` cap from committed host-call results — to iterate, edit the returned script copy and launch it as a new run.
+Project workflows live in `.grok/workflows/*.rhai`. User workflows live in `~/.grok/workflows/*.rhai`. A same-process pause/resume continues the original immutable script, args, and `agent_budget` cap from committed host-call results — to iterate. This is edit the returned script copy and launch it as a new run.
 
-A budget-limited run is different: it only resumes through a model/tool resume request that supplies an `agent_budget` above the admitted agent count. A bare `/workflow resume <name>` can't raise the cap, so it rejects budget-limited runs. Runs interrupted by a process restart aren't resumed at all, because external effects have no stable cross-process identity. And resume is not exactly-once: an external effect whose result wasn't committed before a same-process pause can run again.
+A budget-limited run is different: it only resumes through a model/tool resume request that supplies an `agent_budget` above the admitted agent count. A bare `/workflow resume <name>` cannot raise the cap, so it rejects budget-limited runs. Runs interrupted by a process restart are not resumed at all, because external effects have no stable cross-process identity. And resume is not exactly-once: an external effect whose result was not committed before a same-process pause can run again.
 
 ### `/workflows`
 
-Open the extensions modal on the **Workflows** tab — a browse-only catalog of the saved workflows Grok discovered (built-ins, project `.grok/workflows/`, and user `~/.grok/workflows/`), with each entry's source, description, and path. The same catalog is listed for the model under the skill listing in the session preamble. Launch one with `/workflow <name>` (or its own slash command), then watch it in `/workflow runs`.
+Open the extensions modal on the **Workflows** tab. A browse-only catalog of the saved workflows Grok discovered (built-ins, project `.grok/workflows/`, and user `~/.grok/workflows/`), with each entry's source, description, and path. The same catalog is listed for the model under the skill listing in the session preamble. Launch one with `/workflow <name>` (or its own slash command), then watch it in `/workflow runs`.
 
 ---
 
@@ -319,7 +313,7 @@ Switch the color theme. Alias: `/t`.
 
 ### `/feedback [message]`
 
-Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you — and `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately; if the send fails, the message is saved to Drafts.
+Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you — and `Enter` loads one into Write. As a result, you can review, pick a type, and send it. `/feedback <message>` sends the message immediately. If the send fails, the message is saved to Drafts.
 
 ```
 /feedback
@@ -328,9 +322,9 @@ Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its 
 
 ### `/btw`
 
-Send an aside to the agent without interrupting the current task. The side question and its answer aren't part of the main turn.
+Send an aside to the agent without interrupting the current task. The side question and its answer are not part of the main turn.
 
-`/btw` can also appear mid-message: the whole message (minus the token) becomes the side question and nothing goes to the main turn. Only `/btw` works this way; other commands must start the message. For a multi-line side question, use `Alt+Enter` (over SSH) or `Shift+Enter`, a trailing `\`, or `/ml`. Do not rely on `Cmd+Enter`: Apple Terminal inserts a newline locally via CoreGraphics; a delivered `SUPER+Enter` (Kitty) also inserts a newline rather than sending; over SSH Cmd never arrives and the chord sends.
+`/btw` can also appear mid-message: the whole message (minus the token) becomes the side question and nothing goes to the main turn. Only `/btw` works this way. Other commands must start the message. For a multi-line side question, use `Alt+Enter` (over SSH) or `Shift+Enter`, a trailing `\`, or `/ml`. Do not rely on `Cmd+Enter`: Apple Terminal inserts a newline locally via CoreGraphics. A delivered `SUPER+Enter` (Kitty) also inserts a newline rather than sending. Over SSH Cmd never arrives and the chord sends.
 
 ```
 /btw also check the error handling
@@ -339,13 +333,13 @@ fix the retry loop first. /btw what does WBC stand for?
 
 ### `/todo <what to add>`
 
-Put something on the agent's todo list without interrupting what it is doing. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item should say, and appends it. It shares the session's context but is a different instance, so the running turn is untouched.
+Put something on the agent's todo list without interrupting what it is doing. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item must say, and appends it. It shares the session's context but is a different instance. As a result, the running turn is untouched.
 
 ```
 /todo add a way to push changes to 2 git repos
 ```
 
-Appending is the only change it can make. Edits, shell commands, and subagents are refused before they run, and its write appends: it cannot complete, reword, reorder, or drop items the agent is already working through. Captured items appear on the list prefixed `capture-`, and the agent picks them up like any other todo. The command is hidden for agents without a `todo_write` tool.
+Appending is the only change it can make. Edits, shell commands, and subagents are refused before they run, and its write appends. It cannot complete, reword, reorder, or drop items the agent is already working through. Captured items appear on the list prefixed `capture-`, and the agent picks them up like any other todo. The command is hidden for agents without a `todo_write` tool.
 
 ### `/mcps`
 
@@ -353,11 +347,11 @@ Open the MCP servers management modal.
 
 ### `/doctor`
 
-Check the current session for terminal, clipboard, color, input, notification, and sandbox issues. Doctor shows what it found and how to resolve each issue. Run `/doctor fix` to list available automatic fixes; other findings include manual steps. `/terminal-setup`, `/terminal-check`, and `/terminal-info` remain aliases.
+Check the current session for terminal, clipboard, color, input, notification, and sandbox issues. Doctor shows what it found and how to resolve each issue. Run `/doctor fix` to list available automatic fixes. Other findings include manual steps. `/terminal-setup`, `/terminal-check`, and `/terminal-info` remain aliases.
 
 ### `/debug [what is wrong]`
 
-Turn Grok on itself. The question goes to the model along with this session's execution context: the binary that is running and whether it is still the installed one, version and commit, the config directory and every config layer, the debug-log path for this session and whether logging is on, the working directory, the current model with the context window and reasoning effort it actually resolved, and the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
+Turn Grok on itself. The question goes to the model along with this session's execution context: the binary that is running and whether it is still the installed one. This is version and commit, the config directory and every config layer, the debug-log path for this session. This is whether logging is on, the working directory, the current model with the context window and reasoning effort it actually resolved. This is the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
 
 ```
 /debug why was the context size defaulted to 256k? this model is supposed to be 1m context
@@ -436,20 +430,19 @@ View credit usage or manage billing. Alias: `/cost`.
 /usage manage
 ```
 
-Inside a session this opens the usage modal with the account allowance plus that session's context and token totals. From the [Agent Dashboard](23-dashboard.md#dispatch-input) the same modal opens over the dashboard; there is no session there, so only the **Usage limit** tab carries data.
+Inside a session this opens the usage modal with the account allowance plus that session's context and token totals. From the [Agent Dashboard](23-dashboard.md#dispatch-input) the same modal opens over the dashboard. There is no session there, so only the **Usage limit** tab carries data.
 
 For persisted per-turn token and cost totals of any local session, use `grok usage <session-id> [turn]` from the shell. See [Session Management](17-sessions.md#the-grok-usage-subcommand).
 
 ### `/privacy`
 
-Open Settings on **Coding data, retention, and training**, where you choose
-**Opt in** or **Opt out**. Takes no arguments.
+Open Settings on **Coding data, retention, and training**, where you choose **Opt in** or **Opt out**. Takes no arguments.
 
 ```
 /privacy
 ```
 
-This setting doesn't touch `[features] telemetry`, `trace_upload`, or your external OTEL settings — see [Monitoring Usage](24-monitoring-usage.md#related-settings). On team accounts only a team admin can change it, and admins can also enable or disable Zero Data Retention for the team ([how to enable ZDR](https://docs.x.ai/developers/faq/security#how-to-enable-zdr)). When the choice isn't yours to make, the row says so — `ZDR` or `· Admin Managed` — instead of opening the chooser. ZDR locks coding-data sharing; it does not mute external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
+This setting does not touch `[features] telemetry`, `trace_upload`, or your external OTEL settings — see [Monitoring Usage](24-monitoring-usage.md#related-settings). On team accounts only a team admin can change it, and admins can also enable or disable Zero Data Retention for the team ([how to enable ZDR](https://docs.x.ai/developers/faq/security#how-to-enable-zdr)). When the choice is not yours to make, the row says so — `ZDR` or `· Admin Managed` — instead of opening the chooser. ZDR locks coding-data sharing. It does not mute external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
 
 ---
 
@@ -473,7 +466,7 @@ Any enabled skill with `user-invocable: true` in its SKILL.md frontmatter shows 
 /commit fix typo in README
 ```
 
-Skills from plugins work the same way. When two skills share a name across scopes, qualify it:
+Skills from plugins work the same way. When skills share a name across scopes, qualify it:
 
 ```
 /local:commit      # Project-scoped skill

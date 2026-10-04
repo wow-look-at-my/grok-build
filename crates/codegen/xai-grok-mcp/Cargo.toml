@@ -16,8 +16,8 @@ rmcp = { version = "3.4", features = [
 ] }
 xai-grok-extra-ca = { workspace = true }
 xai-grok-version = { workspace = true }
-# reqwest 0.13 feature set for MCP transports. Notably:
-# - `blocking` is for build-script style use (not actually used here today, but
+# Notably: - `blocking` is for build-script style use (not actually used here
+# today.
 #   kept for future MCP transports that may need it).
 # - `query`/`form` opt-in features stay off; rmcp transports don't use them.
 reqwest = { version = "0.13", default-features = false, features = [

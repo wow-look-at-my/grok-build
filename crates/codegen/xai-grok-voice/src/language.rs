@@ -1,15 +1,4 @@
 //! Grok Speech-to-Text language codes.
-//!
-//! Source of truth for the `language` query/form parameter on
-//! `https://api.x.ai/v1/stt` and `wss://api.x.ai/v1/stt`.
-//!
-//! Official catalog (25 languages):
-//! <https://docs.x.ai/developers/model-capabilities/audio/speech-to-text#supported-languages>
-//!
-//! Per the docs, the model can transcribe these languages regardless of the parameter.
-//! Setting `language` enables Inverse Text Normalization for that language: numbers, currencies, and units come out in written form.
-//! The STT API does **not** accept `auto` (unlike TTS); clients must send a concrete code.
-//! Use [`language_for_api`] to resolve a stored preference (including the client-only `auto` sentinel) before connecting.
 
 /// One supported STT language from the public API catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +10,6 @@ pub struct SttLanguage {
 }
 
 /// Client-only sentinel meaning “resolve from the process locale at connect time”.
-/// Never send this value to the STT API; use [`language_for_api`].
 pub const STT_LANGUAGE_AUTO: &str = "auto";
 
 /// Default STT language when unset or unrecognized.
@@ -214,7 +202,6 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// Pins the public docs catalog (25 languages as of docs last-updated May 2026).
     const DOCS_CODES: &[&str] = &[
         "ar", "cs", "da", "nl", "en", "fil", "fr", "de", "hi", "id", "it", "ja", "ko", "mk", "ms",
         "fa", "pl", "pt", "ro", "ru", "es", "sv", "th", "tr", "vi",

@@ -99,7 +99,7 @@ impl AgentView {
         }
     }
     /// Map a terminal `RewindInput` (one that doesn't itself move the cursor) to the corresponding `InputOutcome`.
-    /// Shared by the key and mouse paths so the two can't drift.
+    /// Shared by the key and mouse paths so both can't drift.
     fn rewind_input_to_outcome(input: crate::views::rewind::RewindInput) -> InputOutcome {
         use crate::views::rewind::RewindInput;
         match input {

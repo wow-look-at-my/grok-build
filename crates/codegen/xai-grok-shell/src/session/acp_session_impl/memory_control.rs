@@ -1,5 +1,4 @@
-//! Memory listing, on/off toggling, and the manual flush and Dream commands behind the
-//! `x.ai/memory/{list,toggle,flush,dream}` extension methods.
+//! Memory listing, on/off toggling, and the manual flush.
 
 use std::sync::Arc;
 
@@ -112,8 +111,7 @@ impl SessionActor {
     /// Errors when the store cannot be listed; callers must not render that as an empty store.
     pub(crate) fn memory_listing(&self) -> Result<MemoryListing, String> {
         let disabled_reason = self.memory.disabled_reason();
-        // Disabled sessions list the configured store: the notes still exist on disk, and the
-        // modal hides them behind the disabled notice until `t` turns memory back on.
+        // Disabled sessions list the configured store: the notes still exist on disk.
         let live = self.memory.storage.borrow();
         let files = match live.as_ref().or(self.memory.configured_storage.as_ref()) {
             Some(storage) => {
@@ -300,14 +298,11 @@ impl SessionActor {
         // Render before touching session state; the paths come from the policy, not the agent.
         let rendered = self.render_memory_prompt(Some(&access)).await;
         let render_failed = matches!(rendered, MemoryPromptRender::Failed);
-        // Installed before the turn check and undone on refusal. The policy only constrains file
-        // tools (containment, protected paths, manifest refresh); memory paths are plain files
-        // without it, so a turn that overlaps this window is safer with the policy than without.
+        // Installed before the turn check and undone on refusal.
         let bridge = self.agent.borrow().tool_bridge().clone();
         bridge.update_resource(access.clone()).await;
         {
-            // Sync-only section: a running turn pins `Ref<Agent>`, and `state` must not be held
-            // across an await.
+            // Sync-only section: a running turn pins `Ref<Agent>`, and `state` must not be held across an await.
             let state = self.state.lock().await;
             if state.running_task.is_some() {
                 drop(state);
@@ -630,7 +625,6 @@ mod tests {
             Some("Bazel \"gazelle\" rules")
         );
 
-        // Body pushes a multi-byte character across the 4 KiB read boundary.
         let split = inbox.join("s__t000003-000003__n000.md");
         let mut long = String::from("---\ntopic_hint: \"long\"\n---\n");
         long.push_str(&"a".repeat(4096 - long.len() - 1));

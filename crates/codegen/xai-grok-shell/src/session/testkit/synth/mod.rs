@@ -1,6 +1,4 @@
 //! On-disk session synthesis.
-//! [`replay`] writes `updates.jsonl` and `rewind_points.jsonl` envelopes directly for exact ACU and rewind control.
-//! [`bench`] appends through the real storage adapter up to a byte target for fork and copy benchmarks.
 
 pub mod bench;
 pub mod replay;

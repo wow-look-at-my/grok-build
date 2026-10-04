@@ -1,8 +1,4 @@
 //! Captures and restores file states at specific points during a session.
-//! Each "rewind point" corresponds to a user prompt and stores snapshots of all files that were read or modified during that prompt's processing.
-//!
-//! Paths in `FileSnapshot` and `RewindPoint` are stored as `FlexiblePath`: a `RelPathBuf` relative to the session CWD, or an absolute `PathBuf`.
-//! Relative paths keep sessions portable across machines; absolute ones come from older sessions.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,8 +9,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::file_system::{AsyncFileSystem, AsyncFsWrapper, bytes_to_string};
-// Minimal duplicate of the shell crate's ToolContext, kept to break a dependency cycle
-// Only the fields and methods the rewind logic needs survive, with the public API unchanged
+// Minimal duplicate of the shell crate's ToolContext, kept to break a
+// dependency cycle Only the fields.
 #[derive(Clone)]
 pub struct ToolContext {
     pub cwd: std::path::PathBuf,
@@ -253,7 +249,6 @@ pub struct RewindPoint {
     #[serde(with = "flexible_path_map_serde")]
     pub file_snapshots: HashMap<FlexiblePath, FileSnapshot>,
     /// File snapshots captured AFTER all operations for this prompt completed.
-    /// Used to detect external modifications: if the current file differs from its after-snapshot, something else changed it.
     #[serde(default, with = "flexible_path_map_serde")]
     pub after_snapshots: HashMap<FlexiblePath, FileSnapshot>,
 }
@@ -314,8 +309,8 @@ impl RewindPoint {
     }
 }
 
-/// Lightweight metadata for a single rewind point: what the rewind picker needs (which prompts have snapshots, and when).
-/// It carries none of the (potentially huge) file contents. Produced by [`scan_rewind_point_metas`].
+/// Lightweight metadata for a single rewind point: what the rewind picker
+/// needs (which prompts have snapshots, and when).
 #[derive(Debug)]
 pub struct RewindPointMeta {
     pub prompt_index: usize,
@@ -422,8 +417,7 @@ pub fn merge_rewind_points_from(
         return Vec::new();
     }
     points.sort_by_key(|p| p.prompt_index);
-    // Enforce one point per prompt_index, guarding a corrupt/legacy file with duplicate-index lines
-    // The normal append-once-per-prompt flow never hits this
+    // Enforce one point per prompt_index, guarding a corrupt/legacy file.
     points.dedup_by_key(|p| p.prompt_index);
     let split = points.partition_point(|p| p.prompt_index < target_index);
     // Indices >= target_index, ascending (so after-snapshots keep the latest).
@@ -446,8 +440,7 @@ pub fn merge_rewind_points_from(
     points
 }
 
-/// The tracker maintains a list of rewind points, one per user prompt. A tracker built via [`with_lazy_source`] does NOT read the (potentially huge) persisted rewind points up front, so resuming a session is cheap.
-/// The picker uses the metadata-only [`get_rewind_point_metas`].
+/// The tracker maintains a list of rewind points, one per user prompt.
 #[derive(Debug)]
 pub struct FileStateTracker {
     /// All rewind points for this session, indexed by prompt_index
@@ -578,7 +571,7 @@ impl FileStateTracker {
 
         let current = self.current_prompt_index.lock().await;
         let Some(prompt_index) = *current else {
-            // Not currently processing a prompt, skip capture
+            // Not processing a prompt, skip capture
             return Ok(());
         };
         drop(current); // Release lock before async operations
@@ -614,7 +607,7 @@ impl FileStateTracker {
 
         let current = self.current_prompt_index.lock().await;
         let Some(prompt_index) = *current else {
-            // Not currently processing a prompt, skip capture
+            // Not processing a prompt, skip capture
             return Ok(());
         };
         drop(current); // Release lock before async operations
@@ -707,8 +700,8 @@ impl FileStateTracker {
         result
     }
 
-    /// Intentionally does NOT trigger the historical load: a just-completed prompt's point is always in memory.
-    /// This is the live persistence path, so "resume then keep working" stays fast.
+    /// Intentionally does NOT trigger the historical load: a just-completed
+    /// prompt's point is always in memory.
     pub async fn get_rewind_point(&self, prompt_index: usize) -> Option<RewindPoint> {
         let points = self.rewind_points.lock().await;
         points.get(&prompt_index).cloned()
@@ -776,7 +769,6 @@ pub use xai_grok_workspace_types::rpc::session::{
 };
 
 /// Rewind files to the state before `target_prompt_index`. Shared implementation used by both `hub_server.rs` (workspace-side) and potentially `acp_session.rs` (shell-side).
-/// Performs: 1.
 pub async fn rewind_files(
     tracker: &FileStateTracker,
     fs: &crate::file_system::AsyncFsWrapper,
@@ -1348,7 +1340,6 @@ mod tests {
 
     #[tokio::test]
     async fn lazy_keeps_new_points_and_loads_historical_for_rewind() {
-        // Historical points 0,1 on disk; nothing in memory.
         let file = write_rewind_file(&[
             point_with_files(0, &[("a.rs", "h0")]),
             point_with_files(1, &[("b.rs", "h1")]),
@@ -1372,7 +1363,6 @@ mod tests {
             vec![0, 1, 2]
         );
 
-        // truncate_from(1) keeps only the pre-resume prompt 0.
         tracker.truncate_from(1).await;
         let remaining = tracker.get_rewind_points().await;
         assert_eq!(remaining.len(), 1);
@@ -1395,17 +1385,14 @@ mod tests {
 
     #[tokio::test]
     async fn lazy_live_capture_wins_over_disk_at_conflicting_index() {
-        // Disk has point 0 with content "disk".
         let file = write_rewind_file(&[point_with_files(0, &[("a.rs", "disk")])]);
         let tracker = FileStateTracker::with_lazy_source(file.path().to_path_buf());
 
-        // A LIVE capture at the same index 0 (before any historical load) adds an in-memory point 0 with different content
         let cwd = Path::new("/repo");
         tracker
             .add_before_snapshot_for_prompt(0, Path::new("/repo/a.rs"), cwd, Some("mem".into()))
             .await;
 
-        // The on-rewind historical load must NOT clobber the in-memory point 0 (`or_insert` keeps the live capture)
         let points = tracker.get_rewind_points().await;
         assert_eq!(points.len(), 1);
         assert_eq!(
@@ -1423,7 +1410,6 @@ mod tests {
         let file = write_rewind_file(&[point_with_files(0, &[("a.rs", "h0")])]);
         let tracker = FileStateTracker::with_lazy_source(file.path().to_path_buf());
 
-        // New in-memory point at index 1.
         let cwd = Path::new("/repo");
         tracker
             .add_before_snapshot_for_prompt(1, Path::new("/repo/b.rs"), cwd, Some("new".into()))
@@ -1479,7 +1465,6 @@ mod tests {
         ]);
         let tracker = FileStateTracker::with_lazy_source(file.path().to_path_buf());
 
-        // Merge points >= 1 into point 0's predecessor (index 0).
         tracker.merge_and_remove_from(1).await;
         let points = tracker.get_rewind_points().await;
         assert_eq!(points.len(), 1);
@@ -1490,7 +1475,6 @@ mod tests {
                 .prompt_index,
             0
         );
-        // Point 0 now also carries the merged files from points 1 and 2
         assert!(
             points
                 .first()
@@ -1669,7 +1653,6 @@ mod tests {
 
     #[test]
     fn merge_pure_missing_predecessor_drops_merged_effects() {
-        // points [0, 3], target 3: predecessor index 2 is absent (gap), so the merged point 3's file effects are dropped
         let merged = merge_rewind_points_from(
             vec![
                 point_with_files(0, &[("a.rs", "0")]),
@@ -1696,7 +1679,7 @@ mod tests {
 
     #[test]
     fn merge_pure_dedups_duplicate_indices() {
-        // Two lines with the same prompt_index (corrupt/legacy) collapse to one.
+        // A couple of lines with the same prompt_index (corrupt/legacy) collapse to one.
         let merged = merge_rewind_points_from(
             vec![
                 point_with_files(0, &[("a.rs", "first")]),

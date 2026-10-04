@@ -85,9 +85,7 @@ pub(super) fn find_working_tree_content(
             }
         };
         let dirty = match item {
-            // Staged changes keep even under a snapshot: `add -A` captures the
-            // working tree, never the index, so a staged-then-modified file
-            // would otherwise lose its staged blob.
+            // Staged changes keep even under a snapshot: `add -A` captures the working tree, never the index.
             Item::TreeIndex(_) => return Some(KeepReason::Dirty),
             Item::IndexWorktree(
                 IndexWorktreeItem::Modification { .. } | IndexWorktreeItem::Rewrite { .. },

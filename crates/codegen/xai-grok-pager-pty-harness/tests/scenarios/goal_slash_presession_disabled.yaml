@@ -32,7 +32,7 @@ steps:
     name: goal-absent-from-slash-menu-presession
     note: "/goal NOT advertised pre-session when the flag is off (fail-closed)."
   # Prove the pre-session menu is functional: an AlwaysOn builtin still shows.
-  # Clear the typed `/goal` (5 chars) with explicit backspaces, then type /compact.
+  # Clear the typed `/goal` (chars) with explicit backspaces, then type /compact.
   - action: keys
     keys: "<BS><BS><BS><BS><BS>"
   - action: type_text

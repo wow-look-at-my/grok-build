@@ -1,4 +1,3 @@
-//! `reqwest-middleware` layer: stamps auth headers and retries on 401.
 //! Gated behind the `middleware` cargo feature.
 
 use std::sync::Arc;
@@ -10,8 +9,6 @@ use crate::AuthCredentialProvider;
 use crate::bearer_fragment::bearer_suffix;
 
 /// Tail fragment of the bearer this middleware stamped, recorded into request extensions at stamp time.
-/// 401-attribution reads it back; re-resolving at record time races the refresh the 401 itself triggers.
-/// Only the tail is stored: JWT heads are a shared constant, and the tail is safe to log.
 #[derive(Clone, Debug)]
 pub struct StampedBearerSuffix(pub String);
 
@@ -273,7 +270,6 @@ mod tests {
     }
 
     /// The stamp must describe the bearer of the attempt whose response the caller holds.
-    /// After a 401, a refresh, and a retry, that is the fresh token, not the stale one stamped on the first attempt.
     #[tokio::test]
     async fn execute_with_stamp_reports_last_stamped_bearer() {
         let mut server = mockito::Server::new_async().await;
@@ -299,7 +295,7 @@ mod tests {
         let req = client.get(format!("{}/api", server.url())).build().unwrap();
         let (resp, stamp) = execute_with_stamp(&client, req).await.unwrap();
         assert_eq!(resp.status(), 200);
-        // A token of 12 chars or fewer is its own suffix
+        // A token of multiple chars or fewer is its own suffix
         assert_eq!(stamp.expect("bearer was stamped").0, "fresh-token");
         m401.assert_async().await;
         m200.assert_async().await;

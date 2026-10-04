@@ -1,17 +1,4 @@
 //! Project plugin trust management.
-//!
-//! A cloned repository could contain plugins (`.grok/plugins/`, `.claude/plugins/`) whose hook scripts or MCP server commands run arbitrary code.
-//!
-//! **Trust granularity**: per-plugin-root (not per-worktree).
-//! Trusting one plugin in a repo does not automatically trust other plugins in the same repo.
-//!
-//! **Trust key**: canonical absolute path of the plugin root directory, resolved via `dunce::canonicalize()`.
-//!
-//! **Trust storage**: `~/.grok/trusted-plugins` (one canonical path per line).
-//!
-//! **Behavior for untrusted plugins**:
-//! - Skills and agents are **discovered and listed** (metadata-only).
-//! - Hooks, MCP servers, and scripts are **blocked**.
 
 use std::collections::HashSet;
 use std::io::{BufRead, Write};
@@ -31,8 +18,8 @@ impl TrustStore {
     /// If `~/.grok/trusted-plugins` does not exist, returns an empty store.
     /// If the file cannot be read, logs a warning and returns an empty store.
     pub fn load() -> Self {
-        // Gate on user_grok_home() so a project's `.grok/trusted-plugins` is never read as the user trust store
-        // That happens when neither GROK_HOME nor a home dir resolves
+        // Gate on user_grok_home() so a project's `.grok/trusted-plugins` is
+        // never read as the user trust store That happens.
         let Some(grok) = xai_grok_config::user_grok_home() else {
             return Self {
                 trusted: HashSet::new(),
@@ -147,7 +134,7 @@ impl TrustStore {
     }
 
     /// A `[plugins].paths` entry is auto-trusted if its canonicalized path
-    /// is under the user's home directory.  Otherwise it requires explicit
+    /// is under the user's home directory. Otherwise it requires explicit
     /// trust via `~/.grok/trusted-plugins`.
     pub fn is_config_path_auto_trusted(plugin_root: &Path) -> bool {
         let Some(home) = xai_dirs::home_dir() else {
@@ -279,7 +266,7 @@ mod tests {
         let mut store = TrustStore::load_from(trust_file.clone());
         assert!(store.is_trusted(&plugin_dir));
 
-        // Revoke rewrites the file in simplified form, dropping the legacy line.
+        // Revoke rewrites the file in simplified form, dropping the line.
         store.revoke_trust(&plugin_dir).unwrap();
         assert!(!TrustStore::load_from(trust_file).is_trusted(&plugin_dir));
     }

@@ -1,6 +1,4 @@
-//! Shell writes directly via [`emit()`].
-//! Pager and desktop forward entries over ACP (`x.ai/log` notifications).
-//! Shell receives them in [`ingest_client_entries()`] and writes on their behalf.
+//! Shell writes directly via [`emit()`]. Pager and desktop forward entries over ACP (`x.ai/log` notifications).
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, Write};
@@ -14,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use xai_grok_config::grok_home;
 
 /// Binary version stamped into every log entry.
-/// Set once at startup via [`set_version()`]; entries emitted before that get `None`.
 static VERSION: OnceLock<String> = OnceLock::new();
 
 /// Register the binary version (e.g. shell's `CARGO_PKG_VERSION`).
@@ -31,8 +28,7 @@ pub const MAX_SIZE: u64 = 5 * 1024 * 1024;
 pub const LOG_METHOD: &str = "x.ai/log";
 
 // ---------------------------------------------------------------------------
-// Log entry types
-// ---------------------------------------------------------------------------
+// Log entry types.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display, Serialize, Deserialize)]
 #[strum(serialize_all = "lowercase")]
@@ -64,13 +60,9 @@ pub struct LogEntry {
     pub ts: String,
     pub src: LogSource,
     /// OS process id of the producer.
-    /// Shell, pager, and desktop all append to the same `unified.jsonl`, so without it their lines interleave indistinguishably.
-    /// `Option<u32>` is wire compatibility only: current code always stamps `Some(std::process::id())`; `None` means an older client/server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     /// Binary version (e.g. `"0.1.211"`).
-    /// Stamped by [`set_version()`] at startup so stale zombie processes are identifiable in logs.
-    /// `None` for entries from older binaries that predate this field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ver: Option<String>,
     pub lvl: LogLevel,
@@ -95,8 +87,6 @@ pub struct LogNotificationParams {
 pub struct ClientLogEntry {
     pub ts: String,
     /// Client process id.
-    /// Stamped by the client when the entry is created; preserved through ACP forwarding so the on-disk log reflects the originating process.
-    /// Optional only for wire compatibility with clients that predate this field; in-tree clients always populate it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     /// Binary version. Optional for wire compatibility with older clients.
@@ -110,30 +100,22 @@ pub struct ClientLogEntry {
     pub ctx: Option<serde_json::Value>,
 }
 
-// ---------------------------------------------------------------------------
-// Writer
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------- Writer.
 
-/// How often a writer re-checks that its handle still refers to the file at `path`, and that the file is still under [`MAX_SIZE`].
-/// Time-based rather than byte-based so a low-volume process detects a stale handle just as fast as a chatty one.
-/// A process logging one line a minute is precisely the one that would otherwise write into an unlinked inode for hours without noticing.
+/// How often a writer re-checks that its handle still refers to the file at `path`.
 const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(2);
 
 struct LogWriter {
     file: File,
     path: PathBuf,
     /// Identity of the inode this handle refers to, re-checked against the path on the maintenance cadence.
-    /// `None` on platforms with no cheap stable file id, where only disappearance is detectable.
     identity: Option<FileIdentity>,
     last_maintenance: Instant,
-    /// Set when `path` stopped resolving to our inode and reopening it failed; writes are dropped while it is set. Appending
-    /// to the old descriptor would land bytes in a file no reader can find and no process will ever trim. Dropping them loses
-    /// nothing (they were already unreadable) and stops an invisible file growing on a disk that may already be full.
+    /// Set when `path` stopped resolving to our inode and reopening it failed; writes are dropped while it is set.
     detached: bool,
 }
 
-/// `(dev, ino)` on Unix.
-/// Enough to notice that the path now resolves to a different inode than the one we hold open.
+/// `(dev, ino)` on Unix. Enough to notice that the path now resolves to a different inode than the one we hold open.
 type FileIdentity = (u64, u64);
 
 static WRITER: LazyLock<parking_lot::Mutex<Option<LogWriter>>> =
@@ -142,9 +124,8 @@ static WRITER: LazyLock<parking_lot::Mutex<Option<LogWriter>>> =
 /// See [`redirect_to_temp_for_tests`].
 static TEST_REDIRECT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Runtime-activated rather than a cargo feature: Bazel compiles production and test targets with one shared feature set.
-/// A feature gate would therefore leak into production builds. Idempotent and safe at any point: an already-open writer
-/// is re-pointed, so an emit that precedes the redirect cannot pin the real path.
+/// Runtime-activated rather than a cargo feature: Bazel compiles production
+/// and test targets with one shared feature set.
 pub fn redirect_to_temp_for_tests() {
     TEST_REDIRECT.store(true, std::sync::atomic::Ordering::Relaxed);
     *WRITER.lock() = open_writer();
@@ -188,8 +169,7 @@ pub fn file_size(path: &std::path::Path) -> u64 {
     fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
-/// Identity of whatever file currently lives at `path`, or `None` if nothing does.
-/// Compared against the identity captured at open time to detect that our descriptor has been orphaned by a rename or an unlink.
+/// Identity of whatever file lives at `path`, or `None` if nothing does.
 #[cfg(unix)]
 fn path_identity(path: &std::path::Path) -> Option<FileIdentity> {
     use std::os::unix::fs::MetadataExt;
@@ -197,8 +177,8 @@ fn path_identity(path: &std::path::Path) -> Option<FileIdentity> {
     Some((meta.dev(), meta.ino()))
 }
 
-/// Windows has no comparably cheap stable id from a path stat, so this degrades to presence detection.
-/// A deleted log is still healed, a replaced one is not.
+/// Windows has no comparably cheap stable id from a path stat, so this
+/// degrades to presence detection.
 #[cfg(not(unix))]
 fn path_identity(path: &std::path::Path) -> Option<FileIdentity> {
     fs::metadata(path).ok().map(|_| (0, 0))
@@ -304,9 +284,8 @@ fn write_entry(entry: &LogEntry) {
 /// Known limitation: a single line longer than half the file leaves no newline to cut at, and the trim is skipped rather
 /// than split that line. The log then stays over its cap until a shorter line arrives.
 pub fn trim_file(path: &std::path::Path) {
-    // `try_lock`, not `lock`: a contended trim is one somebody else is already doing, so there is nothing to wait for
-    // Waiting would park this process's writer mutex on a foreign process's I/O. Losing another half of an over-budget
-    // diagnostic log is cheaper than interleaved rewrites, so the size is deliberately not re-checked here.
+    // `try_lock`, not `lock`: a contended trim is one somebody else is
+    // already doing.
     let Ok(mut file) = OpenOptions::new().read(true).write(true).open(path) else {
         return;
     };
@@ -332,8 +311,8 @@ pub fn trim_file(path: &std::path::Path) {
         return;
     };
 
-    // Rewind rather than truncate-on-open: the tail is laid down over the head first, and only then is the file shortened
-    // The retained bytes are therefore never absent from disk
+    // Rewind rather than truncate-on-open: the tail is laid down over the
+    // head first.
     if file.rewind().is_err() {
         return;
     }
@@ -343,12 +322,10 @@ pub fn trim_file(path: &std::path::Path) {
     }
     let _ = file.set_len(tail.len() as u64);
     let _ = file.flush();
-    // The lock is released when `file` drops.
 }
 
 // ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+// Public API.
 
 /// Return a new timestamp string in the unified log format.
 fn now_ts() -> String {
@@ -728,9 +705,8 @@ mod tests {
         );
     }
 
-    /// Trimming in place is only safe for one process at a time.
-    /// Deciding on the real file size means every writer reaches [`trim_file`] in the same maintenance window once the log crosses the cap.
-    /// A trimmer that finds the log already being rewritten must leave it alone rather than interleave a second rewrite at offset 0.
+    /// Trimming in place is only safe for one process at a time. Deciding on the real file size means every writer reaches [`trim_file`] in
+    /// the same maintenance window once the log crosses the cap.
     #[test]
     fn trim_file_yields_to_a_concurrent_trimmer() {
         let dir = tempfile::tempdir().unwrap();

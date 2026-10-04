@@ -465,8 +465,7 @@ async fn usage_not_applied_mark_goes_straight_to_coordinator_without_parent() {
     };
     tokio::join!(mark, coordinator);
 }
-/// Terminal backend whose actor never answers — models a parent terminal
-/// actor starved by a busy turn.
+/// Terminal backend whose actor never answers — models a parent terminal actor starved by a busy turn.
 struct StarvedTerminal;
 #[async_trait::async_trait]
 impl xai_grok_tools::computer::types::TerminalBackend for StarvedTerminal {

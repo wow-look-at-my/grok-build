@@ -10,23 +10,17 @@ use crate::sampling::{
 use crate::session::helpers::chat::floor_char_boundary;
 
 /// Upper bound on the user text that feeds title generation.
-/// Titles only need the opening, and this keeps the request well under the model prompt limit.
 const TITLE_SOURCE_MAX_BYTES: usize = 8_000;
 
 /// Real-user turn counts at which the auto title is refreshed from the whole conversation, then frozen.
-/// Refreshing at a couple of early turns lets the title catch up to the real topic without churning enough to make sessions hard to recognize.
-/// A manual `/rename` always wins and stops refreshes.
 pub(crate) const TITLE_REFRESH_TURNS: [usize; 2] = [3, 6];
 
-/// Number of [`TITLE_REFRESH_TURNS`] checkpoints reached at `turns` real-user turns, i.e. the checkpoint index to advance to.
-/// This catches up past any checkpoints a burst of turns jumped over.
-/// Equal to `TITLE_REFRESH_TURNS.len()` means the title is frozen.
+/// Number of [`TITLE_REFRESH_TURNS`] checkpoints reached at `turns` real-user
+/// turns, i.e. the checkpoint index to advance to.
 pub(crate) fn checkpoints_reached(turns: usize) -> usize {
     TITLE_REFRESH_TURNS.iter().filter(|&&t| turns >= t).count()
 }
 
-/// Hard byte cap guarding runaway title output; the instruction already targets 5-10 words.
-/// Applied on a char boundary, so a multibyte title is capped a little shorter, which is fine for a safety bound.
 const TITLE_MAX_BYTES: usize = 80;
 
 /// An explicit sampler route a backend pins its titles to, instead of the configured default.
@@ -78,13 +72,12 @@ fn direct_session_title_sampling_config(
     }
 }
 
-/// Durable title-refresh checkpoint watermark under `{session_dir}/`: the number of [`TITLE_REFRESH_TURNS`] checkpoints already consumed.
-/// Only a committed value is persisted, so an aborted refresh still retries.
+/// Durable title-refresh checkpoint watermark under `{session_dir}/`: the number.
 pub(crate) const TITLE_REFRESH_WATERMARK_FILE: &str = "title_refresh_idx";
 
-/// Load the persisted checkpoint index, clamped to the number of checkpoints so a stale larger value still means "frozen".
-/// `None` when the session has no watermark yet (fresh, pre-feature, or feature-was-off).
-/// The caller decides the starting checkpoint for that case (see [`initial_title_refresh_idx`]).
+/// Load the persisted checkpoint index, clamped to the number of checkpoints
+/// so a stale larger value still means "frozen". `None` when the session has
+/// no watermark yet (fresh, pre-feature, or feature-was-off).
 pub(crate) fn load_title_refresh_watermark(session_dir: &std::path::Path) -> Option<usize> {
     std::fs::read_to_string(session_dir.join(TITLE_REFRESH_WATERMARK_FILE))
         .ok()
@@ -92,9 +85,9 @@ pub(crate) fn load_title_refresh_watermark(session_dir: &std::path::Path) -> Opt
         .map(|idx| idx.min(TITLE_REFRESH_TURNS.len()))
 }
 
-/// The checkpoint index a session starts at on spawn.
-/// A managed session (has a watermark) uses it; the watermark is authoritative and durable across compaction.
-/// An unmanaged session is *adopted* as open (`0`) only when the feature is enabled and it is brand new (no turns); otherwise it freezes.
+/// The checkpoint index a session starts at on spawn. A managed session (has
+/// a watermark) uses it; the watermark is authoritative and durable across
+/// compaction.
 pub(crate) fn initial_title_refresh_idx(
     watermark: Option<usize>,
     enabled: bool,
@@ -170,7 +163,6 @@ pub fn title_source_text(user_message: &str) -> String {
     display
 }
 
-/// The deterministic first-ten-words fallback shared by every initial-title path.
 pub fn title_fallback_from_user_text(user_message: &str) -> String {
     let text = title_source_text(user_message);
     let s = text

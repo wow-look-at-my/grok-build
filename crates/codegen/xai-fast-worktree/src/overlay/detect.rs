@@ -1,11 +1,4 @@
 //! FUSE+overlay detection.
-//!
-//! Detects when a path sits on a FUSE+overlayfs stack with a btrfs upper dir.
-//! All four conditions must hold for the overlay worktree path to be used:
-//! 1. Path is on an overlayfs mount
-//! 2. The overlay's lowerdir is a FUSE mount
-//! 3. The overlay's upperdir is on btrfs (snapshotable)
-//! 4. workdir is parseable
 
 use std::path::{Path, PathBuf};
 
@@ -25,8 +18,7 @@ pub struct OverlayInfo {
     pub upper_dir: PathBuf,
     /// The overlay work dir (e.g., `/var/lib/repo-fuse/instance/work`).
     pub work_dir: PathBuf,
-    /// The root directory that contains upper/ and work/ — sibling directory
-    /// for worktree snapshots (e.g., `/var/lib/repo-fuse/instance`).
+    /// The root directory that contains upper/ and work/ — sibling directory for worktree snapshots.
     pub overlay_root: PathBuf,
 }
 
@@ -49,7 +41,6 @@ pub(crate) fn detect_fuse_overlay_from_entries(
     path: &Path,
     entries: &[mount_info::MountEntry],
 ) -> Result<Option<OverlayInfo>> {
-    // Step 1: Find overlay mount containing this path.
     let overlay = match mount_info::find_overlay_mount(entries, path) {
         Some(info) => info,
         None => {
@@ -58,7 +49,6 @@ pub(crate) fn detect_fuse_overlay_from_entries(
         }
     };
 
-    // Step 2: Verify the lower layer is a FUSE mount.
     if !mount_info::is_fuse_mount(entries, &overlay.lower_dir) {
         tracing::debug!(
             lower = %overlay.lower_dir.display(),
@@ -67,7 +57,6 @@ pub(crate) fn detect_fuse_overlay_from_entries(
         return Ok(None);
     }
 
-    // Step 3: Verify the upper layer is on btrfs.
     let upper_on_btrfs = match crate::btrfs::is_btrfs(&overlay.upper_dir) {
         Ok(true) => true,
         Ok(false) => false,

@@ -27,12 +27,10 @@ use crate::render::Renderable;
 use crate::render::osc8::{LinkOverlay, OverlayLink};
 use crate::theme::Theme;
 
-/// Synthetic header `range_id`, reserved above block `selection_range` ids (which count up from 0).
-/// Expanded verb slot maps member 0's line 0 beside the header; a shared id would merge both rows into one selectable range.
 pub(crate) const GROUP_HEADER_RANGE_ID: u16 = u16::MAX;
 
-/// Label for the inline-media native-open text button (terminals without inline graphics).
-/// Graphics terminals use a shorter overlay `[Open]` instead.
+/// Label for the inline-media native-open text button (terminals without
+/// inline graphics).
 pub fn media_open_button_label(is_video: bool) -> &'static str {
     if is_video {
         "[Open Video]"
@@ -88,8 +86,8 @@ impl ScratchBuffer {
         Self(Buffer::default())
     }
 
-    /// Resize and reset buffer for reuse. We must reset because `set_style()` only changes style, not content. If
-    /// previous content was longer than new content, old chars would remain.
+    /// Resize and reset buffer for reuse. We must reset because `set_style()`
+    /// only changes style, not content.
     pub fn prepare(&mut self, width: u16, height: u16) {
         self.resize(Rect::new(0, 0, width, height));
         self.reset();
@@ -111,24 +109,17 @@ pub struct InlineMediaPlacement {
     pub screen_rect: ratatui::layout::Rect,
     /// Total image rows when fully visible (for crop calculation).
     pub full_rows: u16,
-    /// Number of rows cropped from the top (0 = no crop).
     pub top_crop_rows: u16,
     /// Screen rect of the filepath line (second line of the media block header), if visible.
-    /// Used for click-to-copy hit testing.
     pub filepath_screen_rect: Option<ratatui::layout::Rect>,
     /// Screen rect of the text `[Open]` button line, if visible.
-    /// Present only for text-button placements (media on terminals without inline-graphics support; `full_rows` is 0).
-    /// Used for click-to-open-natively hit testing.
     pub open_button_screen_rect: Option<ratatui::layout::Rect>,
     /// Whether this placement reserves a trailing `[Open]/[Copy]` (or play) button row beneath the image.
-    /// True for an overlay/image tool-media placement.
-    /// False for the text-`[Open]` placement (terminals without inline graphics), whose button is the `[Open]` text line itself.
     pub has_button_row: bool,
 }
 
-/// A visible Mermaid diagram affordance row with its screen position and the diagram source its buttons act on. The
-/// reserved (blank) row already scrolls with the surrounding content. Rendering is lazy (driven from the source on
-/// click), so no rendered path/state is carried here.
+/// A visible Mermaid diagram affordance row with its screen position and the
+/// diagram source its buttons act on.
 #[derive(Debug, Clone)]
 pub struct DiagramAffordancePlacement {
     /// Screen rect of the affordance row (one row tall, content-area width).
@@ -141,15 +132,11 @@ pub struct DiagramAffordancePlacement {
 #[derive(Debug, Clone, Default)]
 pub struct ScrollRenderResult {
     /// Virtual-y end of the passed slice: `content_y0` plus the heights and gaps of the entries given to the renderer.
-    /// Equals the full content height only when the caller passes the full list from content top.
     pub total_height: usize,
-    /// Area occupied by the selected entry (if visible).
-    /// This is used for drawing selection borders.
-    /// None if selected entry is not visible or partially clipped.
+    /// Area occupied by the selected entry (if visible). This is used for drawing selection borders.
     pub selected_area: Option<SelectedEntryArea>,
     /// Per-frame resolved selection metadata for visible content.
     pub selection_model: ResolvedSelectionModel,
-    /// Accumulated link overlay for OSC 8 post-flush emission.
     pub link_overlay: LinkOverlay,
     /// Inline media to render via post-flush escape sequences.
     pub inline_media: Vec<InlineMediaPlacement>,
@@ -193,8 +180,7 @@ pub fn render_scrolled_entries_with_scratch(
     search_highlight: Option<&regex::Regex>,
     content_y0: usize,
     entry_index_base: usize,
-    // Absolute paths of media generated in this transcript
-    // They resolve the short relative paths the model prints (`images/1.jpg`) to clickable links
+    // Absolute paths of media generated in this transcript They resolve the short relative paths the model prints (`images/1.jpg`).
     media_paths: &[std::path::PathBuf],
     group_spans: Option<(&[GroupSpan], usize)>,
     cwd: Option<&std::path::Path>,
@@ -257,8 +243,8 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
     // Create horizontal layout for this viewport using config
     let layout = HorizontalLayout::new(viewport, &appearance.scrollback.layout);
 
-    // Total height is the y of the first passed entry plus the span of this slice (including gaps). Use usize so tall
-    // sessions are never truncated. When the caller passes a viewport window, this is only the window's end.
+    // Total height is the y of the first passed entry plus the span of this
+    // slice (including gaps). Use usize so tall sessions are never truncated.
     result.total_height = content_y0
         + entry_layouts_cache
             .iter()
@@ -270,12 +256,10 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
 
     result.selection_model.content_area = layout.content;
 
-    // Reused across all visible rows so the search-highlight pass allocates at most once per frame (not once per row)
-    // Empty until search is active
+    // Reused across all visible rows so the search-highlight pass allocates at most once per frame (not once per row) Empty.
     let mut highlight_text = String::new();
 
-    // Walk only the passed slice (viewport window in production)
-    // There is no full-list EntryLayout vec; y advances from content_y0 using cached heights/gaps
+    // Walk only the passed slice (viewport window in production) There is no full-list EntryLayout vec.
     let mut y = content_y0;
     for (i, entry) in entries.iter().enumerate() {
         let Some(entry_layout_info) = entry_layouts_cache.get(i) else {
@@ -334,8 +318,9 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
 
         // Render the entry; skip_rows handles partial visibility directly
         let is_selected = selected_idx == Some(logical_idx);
-        // Both fold families feed the one label channel; a header row belongs to exactly one fold, so the branches are
-        // exclusive by construction. Without spans the walk stops at its own run-breaker classification.
+        // Both fold families feed the label channel; a header row belongs to
+        // exactly one fold, so the branches are exclusive by construction.
+        // Without spans the walk stops at its own run-breaker classification.
         let header_label = if entry_layout_info.verb_group_header {
             let show_thinking = crate::appearance::cache::load_show_thinking_blocks();
             let end = group_spans
@@ -354,8 +339,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
         } else if entry_layout_info.is_group_header()
             && crate::appearance::cache::load_group_tool_verbs()
         {
-            // Truncation headers get the aggregated vocabulary over the rows they hide (prefix only while collapsed; the whole
-            // run when expanded). The walk declines on pure thoughts or on hidden rows it cannot name.
+            // Truncation headers get the aggregated vocabulary over the rows they hide.
             let show_thinking = crate::appearance::cache::load_show_thinking_blocks();
             group_spans
                 .and_then(|(spans, base)| {
@@ -391,9 +375,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
         renderer.render(entry_content_area, buf);
 
         if dim_from_entry.is_some_and(|d| logical_idx >= d) {
-            // On the terminal-native theme `dim()` carries no fg (gray_dim is
-            // the same bright black as the user-message band, which would
-            // erase that text); de-emphasize with the DIM attribute instead.
+            // On the terminal-native theme `dim()` carries no fg.
             let dim_style = theme.dim();
             for cy in entry_content_area.y..entry_content_area.y + entry_content_area.height {
                 for cx in entry_content_area.x..entry_content_area.x + entry_content_area.width {
@@ -411,8 +393,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             }
         }
 
-        // Use cached output for selection model building. Must use the same effective width as the renderer (reduced by
-        // timestamp reservation for message blocks) to avoid cache thrashing.
+        // Use cached output for selection model building.
         let ts_reserved = timestamp_reserved_for_block(&entry.block, appearance);
         let content_width = entry_row_layout.content_width().saturating_sub(ts_reserved);
         entry.ensure_cached(content_width, appearance, is_selected, cwd);
@@ -441,8 +422,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
         let first_visible_content_y = render_y + if skip_rows < vpad_top { 1 } else { 0 };
         let max_y = render_y + render_height;
 
-        // Group-header entries draw synthetic "N more" text instead of `cached_output.lines` (the truncation fold forces
-        // height 1).
+        // Group-header entries draw synthetic "N more" text instead of `cached_output.lines`.
         let is_group_header = entry_layout_info.is_group_header();
         let verb_expanded_slot = entry_layout_info.is_expanded_verb_header();
 
@@ -452,9 +432,6 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             cached_output.lines.as_slice()
         };
 
-        // Expanded verb-group slot: the header consumes the slot's first screen row, so member 0's content maps one row below
-        // This mirrors EntryRenderer's collapse-header render path: when the header scrolls off, the first skipped row is the header, not content
-        // Shared by the selection lines, the hyperlink map, and the URL scanner below; they all read these two offsets
         let (first_visible_content_y, content_skip) = if verb_expanded_slot {
             if skip_rows == 0 {
                 (first_visible_content_y + 1, content_skip)
@@ -473,8 +450,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             && render_y < max_y
         {
             let label = header.label();
-            // Every labeled header draws the diamond chrome before the label
-            // Shift the hitbox onto the label glyphs so highlight matches the copied text (the chrome is affordance, not content)
+            // Every labeled header draws the diamond chrome before the label Shift the hitbox onto the label glyphs so highlight matches the copied text.
             let chrome_offset = group_header_chrome_prefix_width();
             result.selection_model.push_line(ResolvedSelectableLine {
                 entry_idx: logical_idx,
@@ -494,9 +470,10 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             if screen_y >= max_y {
                 break;
             }
-            // Each `BlockLine` is one already-wrapped screen row, so the single-row paint path applies. The haystack is the
-            // rendered glyphs, not the indexed source text, so the highlighted set can diverge from the index match set.
-            // Markdown markers present in source but absent on screen won't highlight.
+            // Each `BlockLine` is one already-wrapped screen row, so the
+            // single-row paint path applies. The haystack is the rendered
+            // glyphs, not the indexed source text, so the highlighted set can
+            // diverge from the index match set.
             if let Some(re) = search_highlight {
                 highlight_text.clear();
                 line_plain_text_into(&line.content, &mut highlight_text);
@@ -590,9 +567,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
                     }
                     let painted = derive_selection_text(bl);
                     let fully_visible = cols.end <= visible_width;
-                    // The row paints bidi-reordered when rtl_bidi is on, so map the logical path span to its visual cell range(s)
-                    // The hit box and OSC 8 underline must sit on the drawn glyphs
-                    // Identity (one range) under LTR / no reorder.
+                    // The row paints bidi-reordered when rtl_bidi is on, so map the logical path span to its visual cell range(s) The hit box.
                     let plain = crate::scrollback::types::line_plain_text(&bl.content);
                     for (vs, ve) in crate::render::bidi::logical_cols_to_visual(&plain, start, end)
                     {
@@ -649,9 +624,7 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             }
         }
 
-        // Collect inline media placements for visible media. Each media block (tool media only) yields one trailing
-        // placement anchored at its own `row_offset`. Partial visibility crops top/bottom so the image slides into/out of
-        // view during scrolling.
+        // Collect inline media placements for visible media.
         let content_y_start = entry_start + usize::from(verb_expanded_slot);
         let media_placements = if is_group_header && !verb_expanded_slot {
             Vec::new()
@@ -664,18 +637,14 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             let image_virtual_start = content_y_start + image_offset;
             let image_virtual_end = image_virtual_start + full_image_h;
             let viewport_bottom = viewport_start + viewport.height as usize;
-            // Keep the image clear of the right-aligned timestamp overlay (message blocks reserve trailing columns for it)
-            // Tool blocks reserve 0, so this is a no-op there
             let media_width = entry_content_area.width.saturating_sub(ts_reserved);
 
-            // Check if any part of the image area is visible (height 1 = hint-only banner).
             if image_virtual_start < viewport_bottom
                 && image_virtual_end > viewport_start
                 && full_image_h >= 1
                 && media_width >= 4
             {
                 // Compute visible portion, cropping top and bottom.
-                // Results are narrowed to u16; they are viewport-relative offsets that always fit in screen coordinates
                 let top_crop = viewport_start.saturating_sub(image_virtual_start) as u16;
                 let visible_start = image_virtual_start.max(viewport_start);
                 let visible_end = image_virtual_end.min(viewport_bottom);
@@ -716,9 +685,9 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
             }
         }
 
-        // Agent messages (the only producer) have no top vpad, so `row_offset` is measured straight from `y_start`, like
-        // inline media above. The header gate is unreachable today (agent messages are run breakers, so never verb-group
-        // members); it is structural.
+        // Agent messages (the only producer) have no top vpad, so
+        // `row_offset` is measured straight from `y_start`, like inline media
+        // above.
         let diagram_affordances = if is_group_header {
             Vec::new()
         } else {
@@ -763,7 +732,6 @@ pub(crate) fn render_scrolled_entries_with_selection_boundaries(
                     }
                 };
 
-            // Filepath line (index 1): click-to-copy
             let filepath_screen_rect =
                 line_screen_rect(content_y_start + 1, entry_content_area.width);
 
@@ -843,8 +811,7 @@ pub(crate) fn map_hyperlinks_to_overlay(
     cwd: Option<&std::path::Path>,
     overlay: &mut LinkOverlay,
 ) {
-    // Build mapping: pre-wrap line index to a vec of (wrapped_idx, col_start_in_prewrap, col_end_in_prewrap, indent_width)
-    // A joiner of None means a new pre-wrap line starts.
+    // Build mapping: pre-wrap line index to a vec of (wrapped_idx, col_start_in_prewrap, col_end_in_prewrap, indent_width) A joiner.
     let mut pre_wrap_segments: Vec<Vec<(usize, usize, usize, usize)>> = Vec::new();
     let mut current_segments: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut cumulative_col: usize = 0;
@@ -854,16 +821,13 @@ pub(crate) fn map_hyperlinks_to_overlay(
             pre_wrap_segments.push(std::mem::take(&mut current_segments));
             cumulative_col = 0;
         }
-        // Joiner represents the whitespace consumed at the wrap point
-        // It occupies display columns in the pre-wrap line but doesn't appear in either wrapped line
-        // Add BEFORE this segment so the column mapping stays aligned
+        // Joiner represents the whitespace consumed at the wrap point It
+        // occupies display columns in the pre-wrap line.
         if let Some(ref joiner) = line.joiner {
             cumulative_col += unicode_width::UnicodeWidthStr::width(joiner.as_str());
         }
 
-        // For continuation lines (those with a joiner), the content includes a subsequent_indent prefix. This indent is
-        // NOT part of the logical pre-wrap line content, so we must subtract it when mapping hyperlink column ranges.
-        // First wrap rows (no joiner) have the prefix already in pre-wrap hyperlink columns, so don't subtract it there.
+        // For continuation lines (those with a joiner), the content includes a subsequent_indent prefix.
         let indent_width = line.indent_width;
         let is_continuation = line.joiner.is_some();
         let logical_indent = if is_continuation { indent_width } else { 0 };
@@ -882,10 +846,9 @@ pub(crate) fn map_hyperlinks_to_overlay(
         pre_wrap_segments.push(current_segments);
     }
 
-    // Map each hyperlink to screen-space OverlayLinks. Unsafe schemes (javascript:, data:, …) are dropped since OSC 8
-    // URLs reach the terminal without the link_opener scheme filter.
+    // Map each hyperlink to screen-space OverlayLinks.
     let scheme_filter = crate::terminal::hyperlinks::SchemeFilter::Standard;
-    // Reused across every link segment so the row's plain text is not reallocated per segment per frame; only written when reordering is on
+    // Reused across every link segment so the row's plain text is not reallocated per segment per frame.
     let mut row_plain_buf = String::new();
     for h in hyperlinks {
         let target = if crate::app::link_opener::is_safe_to_open(&h.url, scheme_filter) {
@@ -926,9 +889,8 @@ pub(crate) fn map_hyperlinks_to_overlay(
             let local_col_start = overlap_start - seg_col_start;
             let local_col_end = overlap_end - seg_col_start;
 
-            // For the first wrap row of a pre-wrap line, the prefix is already included in the pre-wrap hyperlink columns, so
-            // don't add indent_width as a visual offset. Only continuation rows (with joiners) need the offset to skip the
-            // prepended subsequent_indent.
+            // For the first wrap row of a pre-wrap line, the prefix is
+            // already included in the pre-wrap hyperlink columns.
             let Some(wrapped_line) = block_output.lines.get(wrapped_idx) else {
                 continue;
             };

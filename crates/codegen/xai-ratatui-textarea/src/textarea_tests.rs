@@ -484,8 +484,6 @@ fn insert_and_replace_update_cursor_and_text() {
     assert_eq!(t.text(), "Xhello!Y");
     assert_eq!(t.cursor(), 1);
 
-    // replace_range cases
-    // 1) cursor before range
     let mut t = ta_with("abcd");
     t.set_cursor(1);
     t.replace_range(2..3, "Z");
@@ -544,7 +542,7 @@ fn delete_backward_word_and_kill_line_variants() {
 
     // From inside a word, delete from word start to cursor
     let mut t = ta_with("foo bar");
-    t.set_cursor(6); // inside "bar" (after 'a')
+    t.set_cursor(6);
     t.delete_backward_word();
     assert_eq!(t.text(), "foo r");
     assert_eq!(t.cursor(), 4);
@@ -582,7 +580,7 @@ fn delete_backward_word_and_kill_line_variants() {
     t.kill_to_beginning_of_line();
     assert_eq!(t.text(), "abc\nef");
 
-    // kill_to_beginning_of_line at beginning of non-first line removes the previous newline
+    // kill_to_beginning_of_line at beginning of non-first line removes the newline
     let mut t = ta_with("abc\ndef");
     t.set_cursor(4); // beginning of second line
     t.kill_to_beginning_of_line();
@@ -750,7 +748,6 @@ fn delete_forward_word_handles_atomic_elements() {
     assert_eq!(t.cursor(), elem_range.start);
 }
 
-// ===== Phase 1: Typed element tests =====
 
 #[test]
 fn element_id_is_unique_and_stable() {
@@ -783,9 +780,8 @@ fn element_at_cursor_returns_element() {
     let id = t.insert_element("[paste]", kind, None);
     t.insert_str(" after");
 
-    // Cursor is at end of element after insert_element
-    // Move to start of element
-    t.set_cursor(7); // "before " is 7 bytes, element starts at 7
+    // Cursor is at end of element after insert_element Move to start of element
+    t.set_cursor(7);
     let elem = t.element_at_cursor().expect("should find element");
     assert_eq!(elem.id, id);
     assert_eq!(elem.kind, kind);
@@ -873,7 +869,6 @@ fn elements_returns_sorted_slice() {
     assert_eq!(t.text().get(second.range.clone()).unwrap_or(""), "DDD");
 }
 
-// ===== Phase 2: Display rendering & truncation tests =====
 
 #[test]
 fn render_element_with_display_shows_display_text() {
@@ -921,7 +916,6 @@ fn truncate_line_display_no_truncation_needed() {
 #[test]
 fn truncate_line_display_with_bracket_preservation() {
     let line: Line<'static> = Line::from("[Pasted ~100 lines]");
-    // Width 12: budget = 12 - 2 (ellipsis + bracket) = 10 chars content
     let result = truncate_line_display(&line, 12);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.ends_with(']'), "should preserve ]: got {text:?}");
@@ -936,7 +930,6 @@ fn truncate_line_display_without_bracket() {
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.contains('…'));
     assert!(!text.ends_with(']'));
-    // 9 chars content + 1 ellipsis = 10
     assert_eq!(text, "very long…");
 }
 
@@ -969,9 +962,7 @@ fn truncate_preserves_multi_span_styles() {
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.ends_with(']'));
     assert!(text.contains('…'));
-    // "[" (1) + content budget (10-2=8) + "…" (1) + "]" (1) = 11? No...
-    // Budget: 10 - 2 = 8 for content. "[" is 1, so 7 more chars of "Pasted ~"
-    // Result: "[Pasted …]" which is 10 wide
+    // No...
     assert!(
         result.width() <= 10,
         "width should be <= 10, got {}",
@@ -999,9 +990,7 @@ fn render_element_with_prefix_text() {
 
 #[test]
 fn render_text_after_element_uses_display_width() {
-    // User scenario: "foo " + element("Clean build", display="[📎 Pasted 1 line, 11 chars]") + " abcde". Display: "[📎 Pasted
-    // 1 line, 11 chars]" = 1+2+1+23+1 = 28 display cols. Buffer: "Clean build" = 11 bytes. Without fix, text after element
-    // renders at buffer x, overlapping with element display.
+    // User scenario: "foo " + element("Clean build", display="[📎 Pasted 1 line, 11 chars]") + " abcde".
     let mut t = TextArea::new();
     t.insert_str("foo ");
     let display = Line::from(vec![
@@ -1019,21 +1008,16 @@ fn render_text_after_element_uses_display_width() {
     ratatui::widgets::WidgetRef::render_ref(&(&t), area, &mut buf);
 
     // Verify key cells: text before element, element display, text after element.
-    // "foo " occupies cols 0-3
     assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "f");
     assert_eq!(buf.cell((3, 0)).unwrap().symbol(), " ");
 
-    // Element display starts at col 4: "[📎 Pasted 1 line, 11 chars]"
     assert_eq!(buf.cell((4, 0)).unwrap().symbol(), "[");
     assert_eq!(buf.cell((5, 0)).unwrap().symbol(), "📎");
-    // col 6 is the wide-char continuation cell
     assert_eq!(buf.cell((7, 0)).unwrap().symbol(), " ");
     assert_eq!(buf.cell((8, 0)).unwrap().symbol(), "P");
 
-    // Element display ends at col 31 ("]")
     assert_eq!(buf.cell((31, 0)).unwrap().symbol(), "]");
 
-    // Text after element: " abcde" starting at col 32
     assert_eq!(buf.cell((32, 0)).unwrap().symbol(), " ");
     assert_eq!(buf.cell((33, 0)).unwrap().symbol(), "a");
     assert_eq!(buf.cell((34, 0)).unwrap().symbol(), "b");
@@ -1044,8 +1028,6 @@ fn render_text_after_element_uses_display_width() {
 
 #[test]
 fn render_text_after_wider_display_element_simple() {
-    // Simpler case: element buffer text "x" (1 byte), display "[LONG]" (6 cols)
-    // Suffix text "!" should render at column 6, not column 1.
     let mut t = TextArea::new();
     let display = Line::from("[LONG]");
     t.insert_element("x", ElementKind(0), Some(display));
@@ -1062,7 +1044,6 @@ fn render_text_after_wider_display_element_simple() {
     assert_eq!(rendered, "[LONG]!");
 }
 
-// ===== Phase 3: Display projection tests =====
 
 #[test]
 fn display_width_of_range_plain_text() {
@@ -1116,7 +1097,7 @@ fn set_text_and_replace_expand_tabs() {
 
     t.replace_range(4..4, "\tx");
     assert_eq!(t.text(), "col1    x    col2");
-    // Insert-only replace places cursor at end of inserted expansion (4 spaces + 'x').
+    // Insert-only replace places cursor at end of inserted expansion (spaces + 'x').
     assert_eq!(t.text().get(4..9).unwrap_or(""), "    x");
 
     let mut t0 = TextArea::new();
@@ -1138,14 +1119,12 @@ fn set_text_and_replace_expand_tabs() {
 
 #[test]
 fn remaining_tabs_count_in_display_width_and_cursor() {
-    // Simulate leftover tabs without going through expand (tab_width set after set_text
-    // would still expand on set_text; inject via tab_width=0 then enable display tabs).
+    // Simulate leftover tabs without going through expand.
     let mut t = TextArea::new();
     t.set_tab_width(0);
     t.set_text("a\tb\tc");
     assert!(t.text().contains('\t'));
     t.set_tab_width(4);
-    // "a" + 4 + "b" + 4 + "c" = 11
     assert_eq!(t.display_width_of_range(0, t.text().len()), 11);
     t.set_cursor(t.text().len());
     let area = Rect::new(0, 0, 80, 1);
@@ -1173,7 +1152,6 @@ fn multi_column_paste_tabs_readable() {
     let end = t.text().len();
     let area = Rect::new(0, 0, 80, 3);
     let (x, _y) = t.cursor_pos(area).unwrap();
-    // Ada(3) + 4 + 36(2) + 4 + London(6) = 19
     assert_eq!(x, 19);
     let bol = t.text().rfind('\n').map(|i| i + 1).unwrap_or(0);
     assert_eq!(x as usize, t.display_width_of_range(bol, end));
@@ -1232,7 +1210,6 @@ fn replace_range_with_element_expands_tabs() {
 fn unicode_plus_tabs_expansion_and_residual() {
     let mut t = TextArea::new();
     t.insert_str("名\tAge");
-    // 名 is typically width 2; plus 4 spaces + Age
     assert_eq!(t.text(), "名    Age");
     assert_eq!(
         t.display_width_of_range(0, t.text().len()),
@@ -1283,21 +1260,19 @@ fn tab_helpers_clip_and_paint() {
 fn display_width_of_range_with_display_element() {
     let mut t = TextArea::new();
     t.insert_str("ab");
-    // Element has 100 bytes of buffer text but displays as "[P]" (3 chars)
+    // Element has many bytes of buffer text but displays as "[P]" (chars)
     let buffer_text = "x".repeat(100);
     let display = Line::from("[P]");
     t.insert_element(&buffer_text, ElementKind(0), Some(display));
     t.insert_str("cd");
 
-    // Range covering just "ab" = 2
+    // Range covering "ab" = 2
     assert_eq!(t.display_width_of_range(0, 2), 2);
-    // Range covering "ab" + element = 2 + 3 = 5
     assert_eq!(t.display_width_of_range(0, 102), 5);
-    // Range covering "ab" + element + "cd" = 2 + 3 + 2 = 7
     assert_eq!(t.display_width_of_range(0, 104), 7);
-    // Range covering just the element = 3
+    // Range covering the element = 3
     assert_eq!(t.display_width_of_range(2, 102), 3);
-    // Range covering just "cd" = 2
+    // Range covering "cd" = 2
     assert_eq!(t.display_width_of_range(102, 104), 2);
 }
 
@@ -1310,17 +1285,13 @@ fn cursor_pos_uses_display_width() {
     t.insert_element(&buffer_text, ElementKind(0), Some(display));
     t.insert_str("cd");
 
-    // Cursor at end of element (buffer pos 52)
     t.set_cursor(52);
     let area = Rect::new(0, 0, 80, 1);
     let (x, _y) = t.cursor_pos(area).unwrap();
-    // Expected: "ab" (2) + "[P]" (3) = column 5
     assert_eq!(x, 5);
 
-    // Cursor at end of text (buffer pos 54)
     t.set_cursor(54);
     let (x, _y) = t.cursor_pos(area).unwrap();
-    // Expected: "ab" (2) + "[P]" (3) + "cd" (2) = column 7
     assert_eq!(x, 7);
 
     // Cursor at start
@@ -1351,12 +1322,10 @@ fn display_width_element_without_display() {
 fn display_width_with_wide_unicode_display() {
     let mut t = TextArea::new();
     t.insert_str("ab");
-    // Display text has emoji (each width 2) and CJK
-    let display = Line::from("📎漢字"); // 2 + 2 + 2 = 6 display columns
+    let display = Line::from("📎漢字");
     t.insert_element("raw", ElementKind(0), Some(display));
     t.insert_str("cd");
 
-    // "ab" = 2, element display = 6, "cd" = 2 → total 10
     assert_eq!(t.display_width_of_range(0, 2), 2);
     assert_eq!(t.display_width_of_range(2, 5), 6); // element "raw" = 3 bytes
     assert_eq!(t.display_width_of_range(0, 7), 10); // "ab" + elem + "cd"
@@ -1366,7 +1335,6 @@ fn display_width_with_wide_unicode_display() {
 fn cursor_pos_with_wide_unicode_display() {
     let mut t = TextArea::new();
     t.insert_str("a");
-    // Element display is "🚀" (width 2), buffer text is "xyz" (3 bytes)
     let display = Line::from("🚀");
     t.insert_element("xyz", ElementKind(0), Some(display));
     t.insert_str("b");
@@ -1378,24 +1346,20 @@ fn cursor_pos_with_wide_unicode_display() {
     let (x, _) = t.cursor_pos(area).unwrap();
     assert_eq!(x, 1); // "a" = 1 col
 
-    // Cursor after element (buffer pos 4 = 1 + 3)
     t.set_cursor(4);
     let (x, _) = t.cursor_pos(area).unwrap();
-    assert_eq!(x, 3); // "a" (1) + "🚀" (2) = 3
+    assert_eq!(x, 3);
 
-    // Cursor at end "b" (buffer pos 5)
     t.set_cursor(5);
     let (x, _) = t.cursor_pos(area).unwrap();
-    assert_eq!(x, 4); // "a" (1) + "🚀" (2) + "b" (1) = 4
+    assert_eq!(x, 4);
 }
 
 #[test]
 fn truncate_display_with_wide_unicode() {
-    // Display: "📎paste" = 2+5 = 7 cols, truncate to 5
     let line: Line<'static> = Line::from("📎paste");
     let result = truncate_line_display(&line, 5);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
-    // Budget = 5 - 1 (ellipsis) = 4 content cols → "📎pa" (2+1+1=4)
     assert!(text.contains('…'));
     assert!(
         result.width() <= 5,
@@ -1426,8 +1390,6 @@ fn truncate_display_preserves_zwj_graphemes() {
 
 #[test]
 fn truncate_display_wide_char_at_boundary() {
-    // Display: "ab🚀cd" = 2+2+2 = 6 cols, truncate to 4
-    // Budget = 4 - 1 = 3 content cols. "ab" = 2, "🚀" = 2 → doesn't fit → "ab…"
     let line: Line<'static> = Line::from("ab🚀cd");
     let result = truncate_line_display(&line, 4);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -1437,8 +1399,7 @@ fn truncate_display_wide_char_at_boundary() {
 
 #[test]
 fn truncate_display_bracket_with_wide_chars() {
-    // "[📎 pasted]" = 1+2+1+6+1 = 11 cols, truncate to 7
-    // Budget = 7 - 2 (ellipsis + bracket) = 5 content cols → "[📎 p…]"
+    // "[📎 pasted]" = 1+2+1+6+1 = 11 cols.
     let line: Line<'static> = Line::from("[📎 pasted]");
     let result = truncate_line_display(&line, 7);
     let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -1457,7 +1418,6 @@ fn render_element_with_wide_unicode_display() {
     let mut buf = Buffer::empty(area);
     ratatui::widgets::WidgetRef::render_ref(&(&t), area, &mut buf);
 
-    // Should show "📎漢" (4 display cols: 2+2)
     let cell0 = buf.cell((0, 0)).unwrap();
     assert_eq!(cell0.symbol(), "📎");
     let cell2 = buf.cell((2, 0)).unwrap();
@@ -1472,7 +1432,7 @@ fn backspace_at_element_end_deletes_entire_element() {
     t.insert_str("before ");
     t.insert_element("[paste]", ElementKind(0), None);
     // Cursor is now at end of element
-    assert_eq!(t.cursor(), 14); // "before " (7) + "[paste]" (7)
+    assert_eq!(t.cursor(), 14);
 
     t.delete_backward(1);
     assert_eq!(t.text(), "before ");
@@ -1499,24 +1459,20 @@ fn left_right_navigation_jumps_over_element() {
     t.insert_str("a");
     t.insert_element("[elem]", ElementKind(0), None);
     t.insert_str("b");
-    // text = "a[elem]b", element at 1..7
 
-    // Start at end, move left: should jump from 8 → 7 (before 'b'),
-    // then 7 → 1 (before element, atomic jump), then 1 → 0
     t.set_cursor(8);
-    t.move_cursor_left(); // 8 → 7
+    t.move_cursor_left();
     assert_eq!(t.cursor(), 7);
-    t.move_cursor_left(); // 7 → 1 (atomic jump over "[elem]")
+    t.move_cursor_left();
     assert_eq!(t.cursor(), 1);
-    t.move_cursor_left(); // 1 → 0
+    t.move_cursor_left();
     assert_eq!(t.cursor(), 0);
 
-    // Now right: 0 → 1, then 1 → 7 (atomic jump), then 7 → 8
-    t.move_cursor_right(); // 0 → 1
+    t.move_cursor_right();
     assert_eq!(t.cursor(), 1);
-    t.move_cursor_right(); // 1 → 7 (atomic jump over "[elem]")
+    t.move_cursor_right();
     assert_eq!(t.cursor(), 7);
-    t.move_cursor_right(); // 7 → 8
+    t.move_cursor_right();
     assert_eq!(t.cursor(), 8);
 }
 
@@ -1526,7 +1482,7 @@ fn word_delete_backward_removes_element_atomically() {
     t.insert_str("prefix ");
     t.insert_element("[pasted content]", ElementKind(0), None);
     // Cursor at end of element
-    assert_eq!(t.cursor(), 23); // 7 + 16
+    assert_eq!(t.cursor(), 23);
 
     t.delete_backward_word();
     // Should remove the entire element (it's one "word" unit)
@@ -1564,14 +1520,11 @@ fn kill_to_eol_removes_element_in_range() {
 
 #[test]
 fn ctrl_e_skips_newline_inside_element() {
-    // "foo <element:line1\nline2> bar"
-    // Ctrl-E from start should go to end of the whole line, not stop
-    // at the \n inside the element.
+    // "foo <element:line1\nline2> bar" Ctrl-E from start should go to end of the whole line.
     let mut t = TextArea::new();
     t.insert_str("foo ");
     t.insert_element("line1\nline2", ElementKind(1), None);
     t.insert_str(" bar");
-    // buffer = "foo line1\nline2 bar" (19 bytes), element at 4..15
 
     t.set_cursor(0);
     t.move_cursor_to_end_of_line(false);
@@ -1584,7 +1537,7 @@ fn ctrl_a_skips_newline_inside_element() {
     t.insert_str("foo ");
     t.insert_element("line1\nline2", ElementKind(1), None);
     t.insert_str(" bar");
-    // buffer = "foo line1\nline2 bar" (19 bytes)
+    // buffer = "foo line1\nline2 bar" (several bytes)
 
     // Set cursor to end
     t.set_cursor(t.text().len());
@@ -1598,7 +1551,6 @@ fn ctrl_e_from_element_boundary_skips_to_real_eol() {
     t.insert_str("foo ");
     t.insert_element("a\nb\nc", ElementKind(1), None);
     t.insert_str(" bar");
-    // element at 4..9
 
     // Place cursor at element start boundary
     t.set_cursor(4);
@@ -1612,7 +1564,6 @@ fn ctrl_a_from_after_element_skips_to_real_bol() {
     t.insert_str("foo ");
     t.insert_element("a\nb\nc", ElementKind(1), None);
     t.insert_str(" bar");
-    // element at 4..9, " bar" at 9..13
 
     // Place cursor on " bar"
     t.set_cursor(10);
@@ -1626,7 +1577,6 @@ fn kill_to_eol_with_multiline_element() {
     t.insert_str("foo ");
     t.insert_element("x\ny\nz", ElementKind(1), None);
     t.insert_str(" bar");
-    // buffer = "foo x\ny\nz bar", element at 4..9
 
     t.set_cursor(0);
     t.kill_to_end_of_line();
@@ -1648,21 +1598,16 @@ fn kill_to_bol_with_multiline_element() {
 
 #[test]
 fn bol_eol_with_real_newline_and_element() {
-    // "hello\nfoo <element:a\nb> bar"
-    // Two real lines. Element is on the second line.
+    // "hello\nfoo <element:a\nb> bar" Real lines. Element is on the second line.
     let mut t = TextArea::new();
     t.insert_str("hello\nfoo ");
     t.insert_element("a\nb", ElementKind(1), None);
     t.insert_str(" bar");
-    // buffer = "hello\nfoo a\nb bar"
-    // Real newline at 5. Element at 10..13. Element's \n at 11 should be skipped.
 
-    // From start of second line (pos 6), Ctrl-E should reach end
     t.set_cursor(6);
     t.move_cursor_to_end_of_line(false);
     assert_eq!(t.cursor(), t.text().len());
 
-    // From end, Ctrl-A should go back to pos 6
     t.move_cursor_to_beginning_of_line(false);
     assert_eq!(t.cursor(), 6);
 }
@@ -1685,19 +1630,15 @@ fn bol_eol_no_element_unchanged() {
 
 #[test]
 fn wrapping_uses_element_display_width() {
-    // Scenario: "foo bar " + element("Clean build", display 28 cols) at width 20.
-    // Buffer text: "foo bar Clean build" = 19 buffer cols → textwrap says it fits on one line.
-    // Display text: "foo bar [📎 Pasted 1 line, 11 chars]" = 8 + 28 = 36 display cols → should wrap.
     let mut t = TextArea::new();
     t.insert_str("foo bar ");
-    let display = Line::from("[📎 Pasted 1 line, 11 chars]"); // 28 display cols
+    let display = Line::from("[📎 Pasted 1 line, 11 chars]");
     t.insert_element("Clean build", ElementKind(0), Some(display));
-    // buffer = "foo bar Clean build" (19 bytes)
+    // buffer = "foo bar Clean build" (several bytes)
 
     let lines = t.wrapped_lines(20);
-    // The element display (28 cols) doesn't fit after "foo bar " (8 cols) on a 20-col line.
-    // But it DOES fit on a fresh 20-col line (28 > 20, so it overflows but gets its own line).
-    // Expected: line 1 = "foo bar ", line 2 = element.
+    // The element display (cols) doesn't fit after "foo bar " (cols) on a
+    // 20-col line.
     assert!(
         lines.len() >= 2,
         "Expected wrapping to produce at least 2 lines, got {} lines. \
@@ -1709,19 +1650,14 @@ fn wrapping_uses_element_display_width() {
 
 #[test]
 fn wrapping_element_fits_on_next_line() {
-    // Element display (10 cols) doesn't fit after "hello " (6 cols) on 12-col line,
-    // but fits on a fresh line.
+    // Element display (cols) doesn't fit after "hello " (cols) on 12-col line, but fits on a fresh line.
     let mut t = TextArea::new();
     t.insert_str("hello ");
-    let display = Line::from("[Pasted!]"); // 9 display cols
+    let display = Line::from("[Pasted!]");
     t.insert_element("xy", ElementKind(0), Some(display));
     t.insert_str(" z");
-    // buffer: "hello xy z" (10 bytes)
-    // display: "hello [Pasted!] z" = 6 + 9 + 2 = 17 display cols
 
     let lines = t.wrapped_lines(12);
-    // Line 1: "hello " (6 cols, fits)
-    // Line 2: "[Pasted!] z" (9 + 2 = 11 cols, fits in 12)
     assert_eq!(
         lines.len(),
         2,
@@ -1738,25 +1674,21 @@ fn wrapping_element_without_display_uses_buffer_width() {
     t.insert_str("hello ");
     t.insert_element("xy", ElementKind(0), None);
     t.insert_str(" z");
-    // buffer: "hello xy z" (10 bytes), no display override
-    // display = buffer = "hello xy z" = 10 cols
+    // buffer: "hello xy z" (several bytes), no display override display = buffer = "hello xy z" = 10 cols
 
     let lines = t.wrapped_lines(12);
-    // 10 cols fits on 12-col line → 1 line
     assert_eq!(lines.len(), 1);
 }
 
 #[test]
 fn wrapping_element_display_renders_on_correct_lines() {
-    // End-to-end: wrapping + rendering with display element. "abc " (4) + element("xy", display="[ELEM]" = 6 cols) + " d"
-    // (2). At width 8: "abc " (4) + "[ELEM]" (6) = 10 > 8 → wrap before element. Line 1: "abc " (4 cols), Line 2: "[ELEM] d"
-    // (8 cols)
+    // End-to-end: wrapping + rendering with display element.
     let mut t = TextArea::new();
     t.insert_str("abc ");
     let display = Line::from("[ELEM]");
     t.insert_element("xy", ElementKind(0), Some(display));
     t.insert_str(" d");
-    // buffer: "abc xy d" (8 bytes)
+    // buffer: "abc xy d" (several bytes)
 
     // Check wrapping (drop the Ref before rendering)
     {
@@ -1774,13 +1706,11 @@ fn wrapping_element_display_renders_on_correct_lines() {
     let mut buf = Buffer::empty(area);
     ratatui::widgets::WidgetRef::render_ref(&(&t), area, &mut buf);
 
-    // Line 1 (y=0): "abc " padded to 8
     assert_eq!(buf.cell((0, 0)).unwrap().symbol(), "a");
     assert_eq!(buf.cell((1, 0)).unwrap().symbol(), "b");
     assert_eq!(buf.cell((2, 0)).unwrap().symbol(), "c");
     assert_eq!(buf.cell((3, 0)).unwrap().symbol(), " ");
 
-    // Line 2 (y=1): "[ELEM] d"
     assert_eq!(buf.cell((0, 1)).unwrap().symbol(), "[");
     assert_eq!(buf.cell((1, 1)).unwrap().symbol(), "E");
     assert_eq!(buf.cell((5, 1)).unwrap().symbol(), "]");
@@ -1790,12 +1720,10 @@ fn wrapping_element_display_renders_on_correct_lines() {
 
 #[test]
 fn wrapping_element_with_newlines_stays_single_line() {
-    // When an element's buffer text contains \n, wrapping must NOT split at those newlines. The element's display is a
-    // single-line chip; the \n is internal. Buffer: "hello line1\nline2\nline3 world" (contains \n inside element). Display:
-    // "hello [paste] world" = 6 + 7 + 6 = 19 cols. At width 40: should be 1 visual line.
+    // When an element's buffer text contains \n, wrapping must NOT split at those newlines.
     let mut t = TextArea::new();
     t.insert_str("hello ");
-    let display = Line::from("[paste]"); // 7 display cols
+    let display = Line::from("[paste]");
     t.insert_element("line1\nline2\nline3", ElementKind(0), Some(display));
     t.insert_str(" world");
     // buffer: "hello line1\nline2\nline3 world"
@@ -1813,11 +1741,10 @@ fn wrapping_element_with_newlines_stays_single_line() {
 
 #[test]
 fn cursor_pos_after_multiline_element() {
-    // After inserting text after a multiline element, the cursor should be on the
-    // same visual line as the element chip, not bumped down by internal newlines.
+    // After inserting text after a multiline element, the cursor should be on the same visual line as the element chip.
     let mut t = TextArea::new();
     t.insert_str("hello ");
-    let display = Line::from("[paste]"); // 7 display cols
+    let display = Line::from("[paste]");
     t.insert_element("line1\nline2", ElementKind(0), Some(display));
     t.insert_str(" world");
 
@@ -1825,7 +1752,7 @@ fn cursor_pos_after_multiline_element() {
     let pos = t.cursor_pos(area);
     assert_eq!(
         pos,
-        Some((19, 0)), // 6 + 7 + 6 = 19, row 0
+        Some((19, 0)),
         "Cursor should be at col 19, row 0 after multiline element. \
          Got {:?}. Buffer: {:?}, cursor byte: {}",
         pos,
@@ -1906,7 +1833,7 @@ fn cursor_left_and_right_handle_graphemes() {
     let after_first_left = t.cursor();
     t.move_cursor_left(); // before '👍'
     let after_second_left = t.cursor();
-    t.move_cursor_left(); // before 'a'
+    t.move_cursor_left();
     let after_third_left = t.cursor();
 
     assert!(after_first_left < t.text().len());
@@ -1937,8 +1864,7 @@ fn control_b_f_fallback_control_chars_move_cursor() {
     let mut t = ta_with("abcd");
     t.set_cursor(2);
 
-    // Simulate terminals that send C0 control chars without CONTROL modifier.
-    // ^B (U+0002) should move left
+    // Simulate terminals that send C0 control chars without CONTROL modifier. ^B (U+0002) should move left
     t.input(KeyEvent::new(KeyCode::Char('\u{0002}'), KeyModifiers::NONE));
     assert_eq!(t.cursor(), 1);
 
@@ -2147,9 +2073,7 @@ fn raw_delete_chars_ignore_stray_modifiers() {
 
 #[test]
 fn del_char_treated_as_backspace() {
-    // When Kitty keyboard protocol gets silently popped, Backspace can
-    // arrive as raw DEL (0x7F) instead of KeyCode::Backspace. Ensure it
-    // deletes backward instead of inserting an invisible character.
+    // When Kitty keyboard protocol gets silently popped.
     let mut t = ta_with("hello");
     t.set_cursor(3);
     t.input(KeyEvent::new(KeyCode::Char('\u{007f}'), KeyModifiers::NONE));
@@ -2170,8 +2094,7 @@ fn del_char_treated_as_backspace() {
 
 #[test]
 fn bs_char_treated_as_backspace() {
-    // BS (0x08) arriving as Char without CONTROL modifier should also
-    // delete backward (Ctrl-H without the modifier flag).
+    // BS (0x08) arriving as Char without CONTROL modifier should also delete backward.
     let mut t = ta_with("abcde");
     t.set_cursor(4);
     t.input(KeyEvent::new(KeyCode::Char('\u{0008}'), KeyModifiers::NONE));
@@ -2181,8 +2104,7 @@ fn bs_char_treated_as_backspace() {
 
 #[test]
 fn del_char_with_selection_deletes_selection() {
-    // DEL (0x7F) arriving as Char with an active selection should delete
-    // the selection cleanly, not insert an invisible control character.
+    // DEL (0x7F) arriving as Char with an active selection should delete the selection cleanly.
     let mut t = ta_with("hello world");
     t.set_selection(0, 5);
     t.input(KeyEvent::new(KeyCode::Char('\u{007f}'), KeyModifiers::NONE));
@@ -2194,13 +2116,12 @@ fn del_char_with_selection_deletes_selection() {
 #[test]
 fn cursor_vertical_movement_across_lines_and_bounds() {
     let mut t = ta_with("short\nloooooooooong\nmid");
-    // Place cursor on second line, column 5
     let second_line_start = 6; // after first '\n'
     t.set_cursor(second_line_start + 5);
 
     // Move up: target column preserved, clamped by line length
     t.move_cursor_up();
-    assert_eq!(t.cursor(), 5); // first line has len 5
+    assert_eq!(t.cursor(), 5);
 
     // Move up again goes to start of text
     t.move_cursor_up();
@@ -2208,7 +2129,6 @@ fn cursor_vertical_movement_across_lines_and_bounds() {
 
     // Move down: from start to target col tracked
     t.move_cursor_down();
-    // On first move down, we should land on second line, at col 0 (target col remembered as 0)
     let pos_after_down = t.cursor();
     assert!(pos_after_down >= second_line_start);
 
@@ -2250,7 +2170,6 @@ fn home_end_and_emacs_style_home_end() {
 
 #[test]
 fn home_end_use_logical_line_when_soft_wrapped() {
-    // width 4 → "abcd" | "efgh" | "ij"
     let mut t = ta_with("abcdefghij");
     let _ = t.desired_height(4);
     t.set_cursor(6); // mid second visual row
@@ -2380,23 +2299,18 @@ fn alt_arrow_navigation_splits_on_hyphen() {
 
 #[test]
 fn cursor_at_wrap_boundary_shows_on_next_line() {
-    // When typing fills an entire line, the cursor sits at the exact wrap
-    // boundary.  It should be reported on the *next* visual line at col 0,
-    // not at col == width (which is the invisible right border).
+    // When typing fills an entire line, the cursor sits at the exact wrap boundary.
 
-    // Case 1: text exactly fills one line — cursor at text.len()
     let mut t = ta_with("abcde");
-    let area = Rect::new(0, 0, 5, 3); // width 5
+    let area = Rect::new(0, 0, 5, 3);
     t.set_cursor(5); // cursor right after 'e'
 
     let (x, y) = t.cursor_pos(area).unwrap();
     assert_eq!(x, 0, "cursor x should be 0 (start of virtual next line)");
     assert_eq!(y, 1, "cursor y should be 1 (next line)");
 
-    // Case 2: text wraps — cursor at the boundary between two wrapped lines
     let mut t = ta_with("abcdefgh");
-    let area = Rect::new(0, 0, 5, 3); // width 5, wraps after 'e'
-    // cursor at position 5 = start of "fgh" = should be col 0, row 1
+    let area = Rect::new(0, 0, 5, 3); // width multiple wraps
     t.set_cursor(5);
 
     let (x, y) = t.cursor_pos(area).unwrap();
@@ -2407,7 +2321,7 @@ fn cursor_at_wrap_boundary_shows_on_next_line() {
 #[test]
 fn wrapping_and_cursor_positions() {
     let mut t = ta_with("hello world here");
-    let area = Rect::new(0, 0, 6, 10); // width 6 -> wraps words
+    let area = Rect::new(0, 0, 6, 10);
     // desired height counts wrapped lines
     assert!(t.desired_height(area.width) >= 3);
 
@@ -2420,7 +2334,7 @@ fn wrapping_and_cursor_positions() {
     // With state and small height, cursor is mapped onto visible row
     let mut state = TextAreaState::default();
     let small_area = Rect::new(0, 0, 6, 1);
-    // First call: cursor not visible -> effective scroll ensures it is
+    // First call.
     let (_x, y) = t.cursor_pos_with_state(small_area, state).unwrap();
     assert_eq!(y, 0);
 
@@ -2434,19 +2348,15 @@ fn wrapping_and_cursor_positions() {
 
 #[test]
 fn cursor_pos_with_state_basic_and_scroll_behaviors() {
-    // Case 1: No wrapping needed, height fits — scroll ignored, y maps directly.
     let mut t = ta_with("hello world");
     t.set_cursor(3);
     let area = Rect::new(2, 5, 20, 3);
-    // Even if an absurd scroll is provided, when content fits the area the
-    // effective scroll is 0 and the cursor position matches cursor_pos.
+    // Even if an absurd scroll is provided.
     let bad_state = TextAreaState { scroll: 999 };
     let (x1, y1) = t.cursor_pos(area).unwrap();
     let (x2, y2) = t.cursor_pos_with_state(area, bad_state).unwrap();
     assert_eq!((x2, y2), (x1, y1));
 
-    // Case 2: Cursor below the current window — y should be clamped to the
-    // bottom row (area.height - 1) after adjusting effective scroll.
     let mut t = ta_with("one two three four five six");
     // Force wrapping to many visual lines.
     let wrap_width = 4;
@@ -2458,8 +2368,6 @@ fn cursor_pos_with_state_basic_and_scroll_behaviors() {
     let (_x, y) = t.cursor_pos_with_state(small_area, state).unwrap();
     assert_eq!(y, small_area.y + small_area.height - 1);
 
-    // Case 3: Cursor above the current window — y should be top row (0)
-    // when the provided scroll is too large.
     let mut t = ta_with("alpha beta gamma delta epsilon zeta");
     let wrap_width = 5;
     let lines = t.desired_height(wrap_width);
@@ -2479,7 +2387,6 @@ fn screen_spans_of_range_single_row() {
     let area = Rect::new(2, 1, 40, 3);
     let state = TextAreaState::default();
 
-    // "/model" = bytes 3..9, all on the first visual row.
     let spans = t.screen_spans_of_range(3..9, area, state);
     assert_eq!(spans, vec![Rect::new(5, 1, 6, 1)]);
 
@@ -2490,8 +2397,6 @@ fn screen_spans_of_range_single_row() {
 
 #[test]
 fn screen_spans_of_range_rejects_non_char_boundaries() {
-    // 'é' spans bytes 1..3; an endpoint inside it must yield no spans
-    // (tolerated like the other invalid-range shapes, never a panic).
     let t = ta_with("héllo");
     let area = Rect::new(0, 0, 10, 2);
     let state = TextAreaState::default();
@@ -2502,14 +2407,12 @@ fn screen_spans_of_range_rejects_non_char_boundaries() {
 
 #[test]
 fn screen_spans_of_range_covers_wrapped_rows() {
-    // A token wider than the wrap width must split at the line end and
-    // report one span per visual row it lands on.
+    // A token wider than the wrap width must split at the line end and report one span per visual row it lands on.
     let mut t = ta_with("aa /pr-workflow");
     t.show_scrollbar = false;
     let area = Rect::new(0, 0, 8, 4);
     let state = TextAreaState::default();
 
-    // "/pr-workflow" = bytes 3..15, display width 12 > wrap width 8.
     let spans = t.screen_spans_of_range(3..15, area, state);
     assert!(
         spans.len() >= 2,
@@ -2526,17 +2429,14 @@ fn screen_spans_of_range_covers_wrapped_rows() {
         assert_eq!(r.x, area.x, "continuation rows start at the left edge");
         assert!(r.right() <= area.x + area.width);
     }
-    // Tokens contain no whitespace, so no cell is lost at wrap boundaries:
-    // the summed span widths equal the token's display width.
+    // Tokens contain no whitespace, so no cell is lost at wrap boundaries.
     let total: u16 = spans.iter().map(|r| r.width).sum();
     assert_eq!(total, 12);
 }
 
 #[test]
 fn screen_spans_of_range_skips_offscreen_rows() {
-    // Cursor at the end scrolls the viewport to the tail: the token's
-    // first row is above the viewport, but its visible tail must still
-    // be reported (screen_position_of on the start would return None).
+    // Cursor at the end scrolls the viewport to the tail.
     let mut t = ta_with("/pr-workflow abc");
     t.show_scrollbar = false;
     let area = Rect::new(0, 0, 8, 2);
@@ -2557,8 +2457,6 @@ fn screen_spans_of_range_skips_offscreen_rows() {
 
 #[test]
 fn screen_spans_of_range_uses_display_width() {
-    // 2-cell CJK chars: 日本語 (9 bytes, display width 6) at wrap width 4
-    // renders as 日本 / 語.
     let mut t = ta_with("日本語");
     t.show_scrollbar = false;
     let area = Rect::new(1, 0, 4, 3);
@@ -2570,9 +2468,7 @@ fn screen_spans_of_range_uses_display_width() {
 
 #[test]
 fn screen_spans_of_range_clamps_to_content_edge() {
-    // Overflowing content puts the scrollbar up, so content is only `tw = width - 1` columns. Row 0's byte range keeps its
-    // trailing wrap spaces ("ab " measures 5), but the reported span must stop at the content edge (4), never reaching the
-    // scrollbar column.
+    // Overflowing content puts the scrollbar up, so content is only `tw = width - 1` columns.
     let mut t = ta_with("ab   cd ef gh");
     t.set_cursor(0);
     let area = Rect::new(0, 0, 5, 2);
@@ -2586,21 +2482,17 @@ fn screen_spans_of_range_clamps_to_content_edge() {
 fn wrapped_navigation_across_visual_lines() {
     let mut t = ta_with("abcdefghij");
     t.show_scrollbar = false;
-    // Force wrapping at width 4: lines -> ["abcd", "efgh", "ij"]
     let _ = t.desired_height(4);
 
-    // From the very start, moving down should go to the start of the next wrapped line (index 4)
     t.set_cursor(0);
     t.move_cursor_down();
     assert_eq!(t.cursor(), 4);
 
-    // Cursor at boundary index 4 should be displayed at start of second wrapped line
     t.set_cursor(4);
     let area = Rect::new(0, 0, 4, 10);
     let (x, y) = t.cursor_pos(area).unwrap();
     assert_eq!((x, y), (0, 1));
 
-    // With state and small height, cursor should be visible at row 0, col 0
     let small_area = Rect::new(0, 0, 4, 1);
     let state = TextAreaState::default();
     let (x, y) = t.cursor_pos_with_state(small_area, state).unwrap();
@@ -2608,15 +2500,13 @@ fn wrapped_navigation_across_visual_lines() {
 
     // Place cursor in the middle of the second wrapped line ("efgh"), at 'g'
     t.set_cursor(6);
-    // Move up should go to same column on previous wrapped line -> index 2 ('c')
     t.move_cursor_up();
     assert_eq!(t.cursor(), 2);
 
-    // Move down should return to same position on the next wrapped line -> back to index 6 ('g')
     t.move_cursor_down();
     assert_eq!(t.cursor(), 6);
 
-    // Move down again should go to third wrapped line. Target col is 2, but the line has len 2 -> clamp to end
+    // Move down again should go to third wrapped line.
     t.move_cursor_down();
     assert_eq!(t.cursor(), t.text().len());
 }
@@ -2624,7 +2514,6 @@ fn wrapped_navigation_across_visual_lines() {
 #[test]
 fn cursor_pos_with_state_after_movements() {
     let mut t = ta_with("abcdefghij");
-    // Wrap width 4 -> visual lines: abcd | efgh | ij
     let _ = t.desired_height(4);
     let area = Rect::new(0, 0, 4, 2);
     let mut state = TextAreaState::default();
@@ -2636,7 +2525,6 @@ fn cursor_pos_with_state_after_movements() {
     let (x, y) = t.cursor_pos_with_state(area, state).unwrap();
     assert_eq!((x, y), (0, 0));
 
-    // Move down to second visual line; should be at bottom row (row 1) within 2-line viewport
     t.move_cursor_down();
     ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
     let (x, y) = t.cursor_pos_with_state(area, state).unwrap();
@@ -2654,7 +2542,6 @@ fn cursor_pos_with_state_after_movements() {
     let (x, y) = t.cursor_pos_with_state(area, state).unwrap();
     assert_eq!((x, y), (0, 0));
 
-    // Column preservation across moves: set to col 2 on first line, move down
     t.set_cursor(2);
     ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
     let (x0, y0) = t.cursor_pos_with_state(area, state).unwrap();
@@ -2669,14 +2556,11 @@ fn cursor_pos_with_state_after_movements() {
 fn wrapped_navigation_with_newlines_and_spaces() {
     // Include spaces and an explicit newline to exercise boundaries
     let mut t = ta_with("word1  word2\nword3");
-    // Width 6 will wrap "word1  " and then "word2" before the newline
     let _ = t.desired_height(6);
 
-    // Put cursor on the second wrapped line before the newline, at column 1 of "word2"
     let start_word2 = t.text().find("word2").unwrap();
     t.set_cursor(start_word2 + 1);
 
-    // Up should go to first wrapped line, column 1 -> index 1
     t.move_cursor_up();
     assert_eq!(t.cursor(), 1);
 
@@ -2692,7 +2576,6 @@ fn wrapped_navigation_with_newlines_and_spaces() {
 
 #[test]
 fn wrapped_navigation_with_wide_graphemes() {
-    // Four thumbs up, each of display width 2, with width 3 to force wrapping inside grapheme boundaries
     let mut t = ta_with("👍👍👍👍");
     let _ = t.desired_height(3);
 
@@ -2705,13 +2588,11 @@ fn wrapped_navigation_with_wide_graphemes() {
     let pos_after_down = t.cursor();
     assert!(pos_after_down >= "👍👍".len());
 
-    // Moving up should take us back to the original position
+    // Moving up should take us back to the position
     t.move_cursor_up();
     assert_eq!(t.cursor(), "👍👍".len());
 }
 
-/// textwrap sums per-char widths, so each 2-col ZWJ cluster fills a 4-col row; Up from the end
-/// lands on row 1's cluster start, not row 2's start.
 #[test]
 fn wrapped_navigation_with_zwj_graphemes() {
     let grapheme = "👩\u{200D}💻";
@@ -2755,7 +2636,6 @@ fn buffer_pos_at_screen_plain_text_start() {
     let t = ta_with("hello");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // Click at column 0 → pos 0
     assert_eq!(t.buffer_pos_at_screen(0, 0, area, state), Some(0));
 }
 
@@ -2764,7 +2644,6 @@ fn buffer_pos_at_screen_plain_text_middle() {
     let t = ta_with("hello");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // Click at column 3 → pos 3
     assert_eq!(t.buffer_pos_at_screen(3, 0, area, state), Some(3));
 }
 
@@ -2773,7 +2652,6 @@ fn buffer_pos_at_screen_past_end_of_line() {
     let t = ta_with("hello");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // Click at column 10, line only has 5 chars → snap to end of text
     assert_eq!(t.buffer_pos_at_screen(10, 0, area, state), Some(5));
 }
 
@@ -2782,7 +2660,6 @@ fn buffer_pos_at_screen_below_text() {
     let t = ta_with("hello");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // Click on row 3, text only occupies row 0 → end of text
     assert_eq!(t.buffer_pos_at_screen(0, 3, area, state), Some(5));
 }
 
@@ -2791,11 +2668,8 @@ fn buffer_pos_at_screen_outside_area() {
     let t = ta_with("hello");
     let area = Rect::new(5, 5, 20, 5);
     let state = TextAreaState::default();
-    // Click at (0, 0) which is outside area starting at (5, 5)
     assert_eq!(t.buffer_pos_at_screen(0, 0, area, state), None);
-    // Click at (4, 5) — just left of area
     assert_eq!(t.buffer_pos_at_screen(4, 5, area, state), None);
-    // Click at (5, 4) — just above area
     assert_eq!(t.buffer_pos_at_screen(5, 4, area, state), None);
 }
 
@@ -2804,7 +2678,6 @@ fn buffer_pos_at_screen_with_area_offset() {
     let t = ta_with("hello");
     let area = Rect::new(10, 5, 20, 5);
     let state = TextAreaState::default();
-    // Click at screen (13, 5) = column 3 within the area → pos 3
     assert_eq!(t.buffer_pos_at_screen(13, 5, area, state), Some(3));
 }
 
@@ -2813,29 +2686,22 @@ fn buffer_pos_at_screen_multiline() {
     let t = ta_with("hello\nworld");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // Click on row 0, col 2 → "hello" pos 2
     assert_eq!(t.buffer_pos_at_screen(2, 0, area, state), Some(2));
-    // Click on row 1, col 1 → "world" pos 6+1 = 7
     assert_eq!(t.buffer_pos_at_screen(1, 1, area, state), Some(7));
 }
 
 #[test]
 fn buffer_pos_at_screen_wrapped_text() {
-    // "abcdefghij" at width 5 wraps into "abcde" (0..5) and "fghij" (5..10)
     let t = ta_with("abcdefghij");
     let area = Rect::new(0, 0, 5, 5);
     let state = TextAreaState::default();
-    // Click on row 0, col 2 → pos 2
     assert_eq!(t.buffer_pos_at_screen(2, 0, area, state), Some(2));
-    // Click on row 1, col 0 → pos 5 (start of second wrapped line)
     assert_eq!(t.buffer_pos_at_screen(0, 1, area, state), Some(5));
-    // Click on row 1, col 3 → pos 8
     assert_eq!(t.buffer_pos_at_screen(3, 1, area, state), Some(8));
 }
 
 #[test]
 fn buffer_pos_at_screen_scrolled() {
-    // 3 lines, area height 2 → first line scrolled off when cursor is at end
     let mut t = ta_with("aaa\nbbb\nccc");
     t.set_cursor(t.text().len()); // cursor at end → scroll to show last lines
     let area = Rect::new(0, 0, 20, 2);
@@ -2843,62 +2709,40 @@ fn buffer_pos_at_screen_scrolled() {
     // Render to compute scroll
     let mut buf = ratatui::buffer::Buffer::empty(area);
     ratatui::widgets::StatefulWidgetRef::render_ref(&(&t), area, &mut buf, &mut state);
-    // state.scroll should be 1 (skipping "aaa")
     assert_eq!(state.scroll, 1);
-    // Click row 0 = visual row 0 = wrapped line 1 ("bbb"), col 1 → pos 5
     assert_eq!(t.buffer_pos_at_screen(1, 0, area, state), Some(5));
-    // Click row 1 = visual row 1 = wrapped line 2 ("ccc"), col 2 → pos 10
     assert_eq!(t.buffer_pos_at_screen(2, 1, area, state), Some(10));
 }
 
 #[test]
 fn buffer_pos_at_screen_wide_unicode() {
-    // "a🦀b" — 🦀 is 2 columns wide (4 bytes)
     let t = ta_with("a🦀b");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // col 0 → 'a' at pos 0
     assert_eq!(t.buffer_pos_at_screen(0, 0, area, state), Some(0));
-    // col 1 → first column of 🦀 → pos 1
     assert_eq!(t.buffer_pos_at_screen(1, 0, area, state), Some(1));
-    // col 2 → second column of 🦀 → still pos 1 (within the 2-wide grapheme; display_col_to_buffer_pos snaps to start of
-    // grapheme since target_col < width_so_far). Actually: width_so_far after 'a' is 1, then 🦀 adds 2 → width_so_far=3 >
-    // target_col=2 → returns pos 1 (start of 🦀)
     assert_eq!(t.buffer_pos_at_screen(2, 0, area, state), Some(1));
-    // col 3 → 'b' at pos 5 (1 + 4 bytes for 🦀)
     assert_eq!(t.buffer_pos_at_screen(3, 0, area, state), Some(5));
 }
 
 #[test]
 fn buffer_pos_at_screen_element_with_display() {
-    // "ab" + element(buffer="raw_text", display="[X]") + "cd"
-    // Display: "ab[X]cd" — element is at display cols 2..5
     let mut t = TextArea::new();
     t.insert_str("ab");
     let display = Line::from("[X]");
     t.insert_element("raw_text", ElementKind(0), Some(display));
     t.insert_str("cd");
-    // Buffer: "abraw_textcd", element range 2..10
     assert_eq!(t.text(), "abraw_textcd");
 
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
 
-    // col 0 → 'a' at pos 0
     assert_eq!(t.buffer_pos_at_screen(0, 0, area, state), Some(0));
-    // col 1 → 'b' at pos 1
     assert_eq!(t.buffer_pos_at_screen(1, 0, area, state), Some(1));
-    // col 2 → start of element display "[X]" → snap to element start (pos 2)
     assert_eq!(t.buffer_pos_at_screen(2, 0, area, state), Some(2));
-    // col 3 → middle of element display → snap to nearest boundary
-    // display width = 3, dist_start = 1, dist_end = 2 → snap to start (pos 2)
     assert_eq!(t.buffer_pos_at_screen(3, 0, area, state), Some(2));
-    // col 4 → near end of element display → snap to end (pos 10)
-    // dist_start = 2, dist_end = 1 → snap to end
     assert_eq!(t.buffer_pos_at_screen(4, 0, area, state), Some(10));
-    // col 5 → 'c' at pos 10
     assert_eq!(t.buffer_pos_at_screen(5, 0, area, state), Some(10));
-    // col 6 → 'd' at pos 11
     assert_eq!(t.buffer_pos_at_screen(6, 0, area, state), Some(11));
 }
 
@@ -2914,17 +2758,12 @@ fn element_at_screen_hit_and_miss() {
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
 
-    // Click on 'a' (col 0) → no element
     assert!(t.element_at_screen(0, 0, area, state).is_none());
-    // Click on 'b' (col 1) → no element
     assert!(t.element_at_screen(1, 0, area, state).is_none());
-    // Click on element display (col 2) → element (snaps to start, pos 2 = element start)
     let elem = t.element_at_screen(2, 0, area, state);
     assert!(elem.is_some());
     assert_eq!(elem.unwrap().id, id);
-    // Click on element display (col 3) → still the element
     assert_eq!(t.element_at_screen(3, 0, area, state).unwrap().id, id);
-    // Click past element (col 8) → 'c' or 'd', no element
     assert!(t.element_at_screen(8, 0, area, state).is_none());
 }
 
@@ -2933,9 +2772,7 @@ fn buffer_pos_at_screen_empty_textarea() {
     let t = TextArea::new();
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // Click on empty textarea → pos 0
     assert_eq!(t.buffer_pos_at_screen(0, 0, area, state), Some(0));
-    // Click at col 5 → still pos 0 (end of empty text)
     assert_eq!(t.buffer_pos_at_screen(5, 0, area, state), Some(0));
 }
 
@@ -2970,10 +2807,8 @@ fn selection_expands_to_element_boundaries() {
     t.insert_str("ab");
     t.insert_element("element_text", ElementKind(0), None);
     t.insert_str("cd");
-    // Buffer: "abelement_textcd", element range 2..14
     assert_eq!(t.text(), "abelement_textcd");
 
-    // Select only part of the element (bytes 5..10) → should expand to 2..14
     t.set_selection(5, 10);
     let range = t.selection_range().unwrap();
     assert_eq!(range.start, 2); // expanded to element start
@@ -3018,7 +2853,6 @@ fn selection_rendering_applies_default_selection_style() {
 
     let default_bg = Color::Rgb(49, 62, 115);
     let default_fg = Color::Rgb(192, 202, 245);
-    // Cells 1, 2, 3 should have the default selection bg + fg
     for col in 1..4u16 {
         let Some(cell) = buf.cell((col, 0)) else {
             panic!("expected cell at col {col}");
@@ -3032,12 +2866,10 @@ fn selection_rendering_applies_default_selection_style() {
             "cell at col {col} should have default selection fg"
         );
     }
-    // Cell 0 ('h') and cell 4 ('o') should NOT have selection bg
     assert_ne!(buf.cell((0, 0)).map(|c| c.bg), Some(default_bg));
     assert_ne!(buf.cell((4, 0)).map(|c| c.bg), Some(default_bg));
 }
 
-// ── Phase 1: Undo/Redo plumbing tests ──
 
 #[test]
 fn redo_after_undo_restores() {
@@ -3121,17 +2953,16 @@ fn undo_delete_backward_restores_char() {
 fn undo_redo_preserves_cursor() {
     let mut ta = TextArea::new();
     ta.insert_str("abc");
-    // cursor is at 3
     ta.set_cursor(1);
-    ta.insert_str("X"); // "aXbc", cursor at 2
+    ta.insert_str("X");
     assert_eq!(ta.text(), "aXbc");
     assert_eq!(ta.cursor(), 2);
 
-    ta.undo(); // undo insert "X" → "abc", cursor at 1
+    ta.undo();
     assert_eq!(ta.text(), "abc");
     assert_eq!(ta.cursor(), 1);
 
-    ta.redo(); // redo → "aXbc", cursor at 2
+    ta.redo();
     assert_eq!(ta.text(), "aXbc");
     assert_eq!(ta.cursor(), 2);
 }
@@ -3166,16 +2997,14 @@ fn undo_stack_depth_capped() {
         ta.set_text(&format!("v{i}"));
     }
     assert_eq!(ta.text(), "v9");
-    // Stack should be capped at 5.
     assert_eq!(ta.undo.stack.len(), 5);
 
-    // We can undo at most 5 times.
+    // We can undo a bounded number of times.
     let mut count = 0;
     while ta.undo() {
         count += 1;
     }
     assert_eq!(count, 5);
-    // We've undone 5 set_text calls, landing on the 5th oldest state.
     assert_eq!(ta.text(), "v4");
 }
 
@@ -3218,16 +3047,13 @@ fn undo_redo_multiple_round_trips() {
     assert!(!ta.can_redo());
 
     // undo "z" — but wait, "z" extends the "hello" batch (same kind, consecutive cursor)?
-    // No: undo reset last_kind=None, so "z" is a fresh group.
     ta.undo();
     assert_eq!(ta.text(), "hello");
 }
 
-// ── Phase 2: Batching tests ──
 
 #[test]
 fn batch_consecutive_inserts_into_one_undo_step() {
-    // Typing "hello" char by char → batched into 1 undo step.
     let mut ta = TextArea::new();
     ta.insert_str("h");
     ta.insert_str("e");
@@ -3287,7 +3113,7 @@ fn multi_count_deletes_cross_atomic_element_boundaries() {
 fn batch_consecutive_deletes_into_one_undo_step() {
     let mut ta = TextArea::new();
     ta.insert_str("hello");
-    // 5 backspaces — all Delete kind, consecutive cursor
+    // Backspaces — all Delete kind, consecutive cursor
     ta.delete_backward(1); // o
     ta.delete_backward(1); // l
     ta.delete_backward(1); // l
@@ -3295,7 +3121,6 @@ fn batch_consecutive_deletes_into_one_undo_step() {
     ta.delete_backward(1); // h
     assert_eq!(ta.text(), "");
 
-    // 2 undo steps: 1 for insert batch, 1 for delete batch
     ta.undo(); // undo all deletes
     assert_eq!(ta.text(), "hello");
 
@@ -3311,7 +3136,6 @@ fn kind_change_breaks_batch() {
     ta.delete_backward(1); // "hell" — kind changes → new step
     assert_eq!(ta.text(), "hell");
 
-    // 2 undo steps
     ta.undo(); // undo delete
     assert_eq!(ta.text(), "hello");
     ta.undo(); // undo insert
@@ -3321,12 +3145,11 @@ fn kind_change_breaks_batch() {
 #[test]
 fn cursor_jump_breaks_insert_batch() {
     let mut ta = TextArea::new();
-    ta.insert_str("he"); // cursor at 2
-    ta.set_cursor(0); // move cursor to 0 (no mutation, just movement)
-    ta.insert_str("X"); // cursor was at 0, last_cursor was 2 → jump → new step
+    ta.insert_str("he");
+    ta.set_cursor(0);
+    ta.insert_str("X");
     assert_eq!(ta.text(), "Xhe");
 
-    // 2 undo steps
     ta.undo(); // undo "X"
     assert_eq!(ta.text(), "he");
     ta.undo(); // undo "he"
@@ -3342,15 +3165,14 @@ fn kill_always_discrete() {
     assert_eq!(ta.text(), "hello");
     ta.kill_to_end_of_line(); // kills nothing (already at EOL with no newline... wait)
 
-    // Second kill at EOL does nothing (text.len() == cursor_pos).
-    // So only 1 kill undo step.
+    // Second kill at EOL does nothing (text.len() == cursor_pos). So kill undo step.
     ta.undo(); // undo kill
     assert_eq!(ta.text(), "hello world");
 }
 
 #[test]
 fn kill_consecutive_each_own_step() {
-    // Two kill operations back-to-back should be separate undo steps.
+    // Kill operations back-to-back should be separate undo steps.
     let mut ta = TextArea::new();
     ta.insert_str("aaa bbb ccc");
     ta.set_cursor(7); // after "aaa bbb"
@@ -3404,7 +3226,6 @@ fn delete_forward_batches() {
     ta.delete_forward(1); // "de"
     assert_eq!(ta.text(), "de");
 
-    // All delete_forward calls batch into 1 step
     ta.undo(); // undo all deletes
     assert_eq!(ta.text(), "abcde");
 }
@@ -3413,7 +3234,6 @@ fn delete_forward_batches() {
 fn word_boundary_breaks_insert_batch() {
     // Typing "foo bar" char by char: ws↔non-ws transitions create checkpoints.
     let mut ta = TextArea::new();
-    // "foo" — all non-ws, batches into 1 step
     ta.insert_str("f");
     ta.insert_str("o");
     ta.insert_str("o");
@@ -3449,7 +3269,7 @@ fn word_boundary_whitespace_runs_batch_together() {
     assert_eq!(ta.text(), "a   ");
     ta.undo(); // undo "   "
     assert_eq!(ta.text(), "a");
-    ta.undo(); // undo "a"
+    ta.undo();
     assert_eq!(ta.text(), "");
 }
 
@@ -3475,9 +3295,6 @@ fn word_boundary_newlines_are_whitespace() {
 
 #[test]
 fn word_boundary_multi_char_insert_str_is_one_step() {
-    // A single insert_str("hello world") call is still 1 undo step,
-    // even though it contains a space. Boundary check only applies
-    // between separate insert_str calls.
     let mut ta = TextArea::new();
     ta.insert_str("hello world");
     assert_eq!(ta.undo.stack.len(), 1);
@@ -3519,7 +3336,6 @@ fn element_insert_always_discrete() {
     assert_eq!(ta.text(), "");
 }
 
-// ── Phase 3: Element undo/redo tests ──
 
 #[test]
 fn undo_insert_element_redo_preserves_element_id() {
@@ -3593,7 +3409,6 @@ fn undo_redo_zero_length_element_preserves_metadata_and_cursor() {
 fn undo_replace_range_with_element_restores_original() {
     let mut ta = TextArea::new();
     ta.insert_str("hello @foo world");
-    // Replace "@foo" (6..10) with an element
     let id = ta.replace_range_with_element(6..10, "@bar.rs", ElementKind(2), None);
     assert_eq!(ta.text(), "hello @bar.rs world");
     assert_eq!(ta.elements().len(), 1);
@@ -3670,7 +3485,7 @@ fn next_element_id_never_decreases_after_undo() {
     let id2 = ta.insert_element("b", ElementKind(0), None);
 
     ta.undo(); // undo element "b"
-    ta.undo(); // undo element "a"
+    ta.undo();
     assert!(ta.elements().is_empty());
 
     // New element after undo should get a fresh ID, never reuse id1 or id2.
@@ -3714,7 +3529,6 @@ fn backspace_on_element_undo_restores_element() {
     );
 }
 
-// ── Phase 4: Undo group tests ──
 
 #[test]
 fn undo_group_collapses_multiple_mutations() {
@@ -3760,14 +3574,14 @@ fn nested_groups_only_outermost_pushes() {
     let mut ta = TextArea::new();
     ta.insert_str("start");
 
-    ta.begin_undo_group(); // depth 1
+    ta.begin_undo_group();
     ta.insert_str(" A");
-    ta.begin_undo_group(); // depth 2
+    ta.begin_undo_group();
     ta.insert_str(" B");
-    ta.end_undo_group(); // depth 1 (inner end — no push)
+    ta.end_undo_group();
     assert_eq!(ta.text(), "start A B");
     ta.insert_str(" C");
-    ta.end_undo_group(); // depth 0 (outermost end — push)
+    ta.end_undo_group();
 
     assert_eq!(ta.text(), "start A B C");
 
@@ -3801,7 +3615,7 @@ fn redo_cleared_by_end_undo_group() {
     ta.insert_str("world");
     ta.end_undo_group();
 
-    // Redo from the previous undo should be cleared.
+    // Redo from the undo should be cleared.
     assert!(!ta.can_redo());
     assert_eq!(ta.text(), "world");
 }
@@ -3870,12 +3684,10 @@ fn click_places_cursor_at_correct_position() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click at column 3 → cursor at byte 3
     let action = ta.handle_mouse(mouse_down(3, 0), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
     assert_eq!(ta.cursor(), 3);
 
-    // Click at column 0 → cursor at byte 0
     let action = ta.handle_mouse(mouse_down(0, 0), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
     assert_eq!(ta.cursor(), 0);
@@ -3891,7 +3703,6 @@ fn click_on_element_returns_clicked_element() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Element occupies cols 3..7, click at col 4
     let action = ta.handle_mouse(mouse_down(4, 0), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
     let ev = ta.poll_element_event().expect("should emit element click");
@@ -3905,7 +3716,6 @@ fn click_past_end_of_line_snaps_to_line_end() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click far past end of "hi" (col 20)
     let action = ta.handle_mouse(mouse_down(20, 0), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
     assert_eq!(ta.cursor(), 2); // end of "hi"
@@ -3917,7 +3727,6 @@ fn click_below_text_snaps_to_text_end() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click on row 3 (only 1 row of text)
     let action = ta.handle_mouse(mouse_down(0, 3), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
     assert_eq!(ta.cursor(), 5); // text.len()
@@ -3966,7 +3775,6 @@ fn click_on_second_line_multiline_text() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click on row 1, col 2 → "world" starts at byte 6, so byte 8 = 'r'
     let action = ta.handle_mouse(mouse_down(2, 1), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
     assert_eq!(ta.cursor(), 8); // "hello\nwo" = 8 bytes → cursor at 'r'
@@ -3989,7 +3797,6 @@ fn drag_selects_text() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Mouse down at col 0, drag to col 5
     ta.handle_mouse(mouse_down(0, 0), area, state);
     let action = ta.handle_mouse(mouse_drag(5, 0), area, state);
     assert_eq!(action, MouseAction::SelectionUpdated);
@@ -4006,12 +3813,7 @@ fn drag_across_element_expands_to_element_boundaries() {
     ta.insert_str("ab");
     ta.insert_element("ELEM", ElementKind(0), None);
     ta.insert_str("cd");
-    // buffer: "abELEMcd"
-    // element range: 2..6
-    // display cols: a(0) b(1) E(2) L(3) E(4) M(5) c(6) d(7)
 
-    // Drag from col 1 ("b") to col 7 ("d") — fully crosses the element.
-    // Raw selection: anchor=1, head=7. Element at 2..6 is fully inside.
     ta.handle_mouse(mouse_down(1, 0), area, state);
     ta.handle_mouse(mouse_drag(7, 0), area, state);
     let range = ta.selection_range().unwrap();
@@ -4022,9 +3824,6 @@ fn drag_across_element_expands_to_element_boundaries() {
     ta.insert_element("ELEM", ElementKind(0), None);
     ta.insert_str("cd");
 
-    // Now test partial overlap: drag from col 0 to col 3 (into the element). display_col_to_buffer_pos snaps col 3 to
-    // element start (2) since dist to start (1) < dist to end (3). Raw selection 0..2 → but element at 2..6 is NOT
-    // overlapped, so no expansion.
     ta.handle_mouse(mouse_down(0, 0), area, state);
     ta.handle_mouse(mouse_drag(3, 0), area, state);
     let range = ta.selection_range().unwrap();
@@ -4035,8 +3834,6 @@ fn drag_across_element_expands_to_element_boundaries() {
     ta.insert_element("ELEM", ElementKind(0), None);
     ta.insert_str("cd");
 
-    // Drag from col 0 to col 5 — past element midpoint, so snaps to end (6).
-    // Raw selection 0..6 → element fully covered.
     ta.handle_mouse(mouse_down(0, 0), area, state);
     ta.handle_mouse(mouse_drag(5, 0), area, state);
     let range = ta.selection_range().unwrap();
@@ -4157,9 +3954,7 @@ fn undo_after_type_replace_selection_restores() {
 
 #[test]
 fn backspace_works_with_zero_width_selection() {
-    // Regression: a zero-width selection (anchor == head, from mouse
-    // jitter) caused Backspace/Delete to be silently swallowed because
-    // delete_selection() returned false but input() still returned early.
+    // Regression: a zero-width selection (anchor == head, from mouse jitter) caused Backspace/Delete to be silently swallowed.
     let mut ta = ta_with("hello");
     ta.set_cursor(5);
     // Simulate a zero-width selection (anchor == head at cursor).
@@ -4192,8 +3987,7 @@ fn ctrl_x_with_zero_width_selection_falls_through() {
     ta.set_cursor(5);
     ta.set_selection(5, 5);
 
-    // Ctrl-X on zero-width selection shouldn't eat the key. It should clear selection and fall through to normal handling
-    // (which for Ctrl-X without selection is a no-op, but the selection must be cleared).
+    // Ctrl-X on zero-width selection shouldn't eat the key.
     ta.input(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
     assert!(ta.selection.is_none());
 }
@@ -4204,7 +3998,6 @@ fn mouse_up_discards_zero_width_drag_selection() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click at col 3 then drag to same position (zero distance).
     ta.handle_mouse(mouse_down(3, 0), area, state);
     let action = ta.handle_mouse(mouse_drag(3, 0), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
@@ -4221,7 +4014,6 @@ fn drag_backward_selects_correctly() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click at col 8, drag back to col 3 (backward selection)
     ta.handle_mouse(mouse_down(8, 0), area, state);
     ta.handle_mouse(mouse_drag(3, 0), area, state);
     // selection_range() normalizes anchor/head
@@ -4241,7 +4033,7 @@ fn click_after_drag_clears_selection() {
     ta.handle_mouse(mouse_up(5, 0), area, state);
     assert!(ta.selection_range().is_some());
 
-    // New click clears the old selection
+    // New click clears the selection
     ta.handle_mouse(mouse_down(8, 0), area, state);
     assert!(ta.selection_range().is_none());
 }
@@ -4321,7 +4113,6 @@ fn double_click_selects_word() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Double-click on "hello" (col 2)
     ta.handle_mouse(mouse_down(2, 0), area, state);
     let action = ta.handle_mouse(mouse_down(2, 0), area, state);
     assert_eq!(action, MouseAction::SelectionFinished);
@@ -4332,8 +4123,7 @@ fn double_click_selects_word() {
 
 #[test]
 fn double_click_cursor_on_last_char() {
-    // Neovim places cursor on the last character of the selection,
-    // not one past the end.
+    // Neovim places cursor on the last character of the selection, not one past the end.
     let mut ta = ta_with("hello world");
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
@@ -4343,7 +4133,6 @@ fn double_click_cursor_on_last_char() {
     ta.handle_mouse(mouse_down(2, 0), area, state);
 
     assert_eq!(ta.selection_range(), Some(0..5));
-    // Cursor should be on 'o' (byte 4), not on ' ' (byte 5)
     assert_eq!(
         ta.cursor(),
         4,
@@ -4359,13 +4148,10 @@ fn double_click_cursor_on_last_char_unicode() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Double-click on "café" (col 1 = 'a')
     ta.handle_mouse(mouse_down(1, 0), area, state);
     ta.handle_mouse(mouse_down(1, 0), area, state);
 
     assert_eq!(ta.selected_text(), Some("café".to_string()));
-    // 'é' is 2 bytes (0xC3 0xA9), so "café" = [c(0), a(1), f(2), é(3,4)]
-    // Last char 'é' starts at byte 3
     assert_eq!(
         ta.cursor(),
         3,
@@ -4380,7 +4166,6 @@ fn double_click_on_second_word() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Double-click on "world" (col 8)
     ta.handle_mouse(mouse_down(8, 0), area, state);
     let action = ta.handle_mouse(mouse_down(8, 0), area, state);
     assert_eq!(action, MouseAction::SelectionFinished);
@@ -4395,7 +4180,6 @@ fn double_click_stops_at_punctuation() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Double-click on "hello" (col 2 = 'l')
     ta.handle_mouse(mouse_down(2, 0), area, state);
     let action = ta.handle_mouse(mouse_down(2, 0), area, state);
     assert_eq!(action, MouseAction::SelectionFinished);
@@ -4414,7 +4198,7 @@ fn double_click_on_punctuation_selects_punctuation_run() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Double-click on "..." (col 6 = first '.')
+    // Double-click on "..."
     ta.handle_mouse(mouse_down(6, 0), area, state);
     let action = ta.handle_mouse(mouse_down(6, 0), area, state);
     assert_eq!(action, MouseAction::SelectionFinished);
@@ -4432,7 +4216,6 @@ fn double_click_word_with_underscore() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Double-click on "hello_world" (col 3)
     ta.handle_mouse(mouse_down(3, 0), area, state);
     let action = ta.handle_mouse(mouse_down(3, 0), area, state);
     assert_eq!(action, MouseAction::SelectionFinished);
@@ -4445,20 +4228,16 @@ fn double_click_word_with_underscore() {
 
 #[test]
 fn double_click_on_element_snaps_like_single_click() {
-    // Word-selecting an element would copy its hidden buffer text to
-    // the clipboard; a double-click must instead snap to the element
-    // start and re-emit Click so the host decides what it means.
+    // Word-selecting an element would copy its hidden buffer text to the clipboard.
     let mut ta = TextArea::new();
     ta.insert_str("hi ");
     let display = Line::from("[chip]");
     let id = ta.insert_element("hidden\ntext", ElementKind(0), Some(display));
     ta.insert_str(" bye");
-    // Buffer: "hi hidden\ntext bye", element at 3..14, display "[chip]".
 
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // First click on the display (col 4) emits its own Click event.
     ta.handle_mouse(mouse_down(4, 0), area, state);
     assert!(ta.poll_element_event().is_some());
 
@@ -4480,7 +4259,6 @@ fn triple_click_selects_line() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Triple-click on first line (col 3)
     ta.handle_mouse(mouse_down(3, 0), area, state);
     ta.handle_mouse(mouse_down(3, 0), area, state);
     let action = ta.handle_mouse(mouse_down(3, 0), area, state);
@@ -4496,7 +4274,6 @@ fn triple_click_on_last_line_selects_to_end() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Triple-click on "world" (row 1, col 2)
     ta.handle_mouse(mouse_down(2, 1), area, state);
     ta.handle_mouse(mouse_down(2, 1), area, state);
     let action = ta.handle_mouse(mouse_down(2, 1), area, state);
@@ -4508,13 +4285,11 @@ fn triple_click_on_last_line_selects_to_end() {
 
 #[test]
 fn triple_click_cursor_stays_at_click_pos() {
-    // Triple-click should select the whole line but keep the cursor
-    // at the click position, not at the end of the selection.
+    // Triple-click should select the whole line but keep the cursor at the click position.
     let mut ta = ta_with("hello world\nsecond line\nthird");
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Triple-click on first line at col 3 (byte 3 = 'l')
     ta.handle_mouse(mouse_down(3, 0), area, state);
     ta.handle_mouse(mouse_down(3, 0), area, state);
     ta.handle_mouse(mouse_down(3, 0), area, state);
@@ -4522,7 +4297,6 @@ fn triple_click_cursor_stays_at_click_pos() {
     // Selection covers the full line "hello world\n"
     assert_eq!(ta.selection_range(), Some(0..12));
 
-    // Cursor should be at the click position (byte 3), not at line_end (12)
     assert_eq!(
         ta.cursor(),
         3,
@@ -4541,7 +4315,6 @@ fn selection_uses_custom_style_override() {
     let mut buf = ratatui::buffer::Buffer::empty(area);
     ratatui::widgets::WidgetRef::render_ref(&(&t), area, &mut buf);
 
-    // Cells 1, 2, 3 should have Blue background (custom selection style)
     for col in 1..4u16 {
         let Some(cell) = buf.cell((col, 0)) else {
             panic!("expected cell at col {col}");
@@ -4552,7 +4325,6 @@ fn selection_uses_custom_style_override() {
             "cell at col {col} should have Blue bg"
         );
     }
-    // Cell 0 ('h') and cell 4 ('o') should NOT have Blue bg
     assert_ne!(buf.cell((0, 0)).map(|c| c.bg), Some(Color::Blue));
     assert_ne!(buf.cell((4, 0)).map(|c| c.bg), Some(Color::Blue));
 }
@@ -4563,10 +4335,9 @@ fn double_click_on_whitespace_places_cursor() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Double-click on whitespace (col 6)
     ta.handle_mouse(mouse_down(6, 0), area, state);
     let action = ta.handle_mouse(mouse_down(6, 0), area, state);
-    // Whitespace has no word → just places cursor
+    // Whitespace has no word → places cursor
     assert_eq!(action, MouseAction::CursorPlaced);
     assert!(ta.selection_range().is_none());
 }
@@ -4577,7 +4348,6 @@ fn click_tracker_resets_on_position_change() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click at col 2, then at col 8 → not a double-click
     ta.handle_mouse(mouse_down(2, 0), area, state);
     let action = ta.handle_mouse(mouse_down(8, 0), area, state);
     // Should be a single click, not a double-click
@@ -4589,9 +4359,8 @@ fn click_tracker_resets_on_position_change() {
 
 #[test]
 fn drag_below_area_scrolls_down_and_extends_selection() {
-    // Text with 5 lines, visible area is only 3 rows tall.
+    // Text with a few lines, visible area is a few rows tall.
     let mut ta = ta_with("aaa\nbbb\nccc\nddd\neee");
-    // Place cursor at start so scroll=0.
     ta.set_cursor(0);
     let area = Rect::new(0, 0, 40, 3);
     let state = TextAreaState::default();
@@ -4600,16 +4369,12 @@ fn drag_below_area_scrolls_down_and_extends_selection() {
     ta.handle_mouse(mouse_down(0, 0), area, state);
     assert_eq!(ta.cursor(), 0);
 
-    // Drag below the visible area (row 5, past area.height=3).
     let action = ta.handle_mouse(mouse_drag(0, 5), area, state);
     assert_eq!(action, MouseAction::SelectionUpdated);
 
-    // Cursor should have moved past the visible area. With scroll=0 and height=3, visible lines are 0,1,2 (aaa,bbb,ccc).
-    // Dragging below → target_line = visible_end = 3 → "ddd" starts at byte 12. At col 0, cursor should be at byte 12 (start
-    // of "ddd").
+    // Cursor should have moved past the visible area.
     assert!(ta.cursor() >= 12);
 
-    // Selection should extend from anchor (0) to the new cursor position.
     let range = ta.selection_range().unwrap();
     assert_eq!(range.start, 0);
     assert!(range.end >= 12);
@@ -4617,7 +4382,7 @@ fn drag_below_area_scrolls_down_and_extends_selection() {
 
 #[test]
 fn drag_above_area_scrolls_up_and_extends_selection() {
-    // Text with 5 lines, start with cursor on the last line.
+    // Text with a few lines, start with cursor on the last line.
     let mut ta = ta_with("aaa\nbbb\nccc\nddd\neee");
     let area = Rect::new(0, 0, 40, 3);
 
@@ -4625,31 +4390,24 @@ fn drag_above_area_scrolls_up_and_extends_selection() {
     ta.set_cursor(ta.text().len());
     let state = TextAreaState { scroll: 2 };
 
-    // Click on bottom visible line (row 2).
     ta.handle_mouse(mouse_down(1, 2), area, state);
 
-    // Drag above the visible area (row is before area.y). Since area.y = 0, dragging to row=0 when scroll=2 means the row is
-    // at the top edge. We need a row *above* the area. With area.y=0, we can't go negative, but we can use an area with
-    // area.y > 0.
-    let area2 = Rect::new(0, 5, 40, 3); // area starts at row 5
-    ta.handle_mouse(mouse_down(1, 7), area2, state); // click at row 7 (visible)
+    // Drag above the visible area (row is before area.y).
+    let area2 = Rect::new(0, 5, 40, 3);
+    ta.handle_mouse(mouse_down(1, 7), area2, state);
 
-    // Drag above: row 3 (above area2.y=5)
     let action = ta.handle_mouse(mouse_drag(0, 3), area2, state);
     assert_eq!(action, MouseAction::SelectionUpdated);
 
     // Cursor should have moved to a line above the visible region.
-    // The exact position depends on how many lines we scroll per drag.
     let range = ta.selection_range().unwrap();
     assert!(range.start < range.end);
 }
 
 #[test]
 fn drag_below_area_moves_cursor_past_last_visible_line() {
-    // 10 short lines, area shows only 2.
     let text = "L0\nL1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9";
     let mut ta = ta_with(text);
-    // Place cursor at start so scroll=0.
     ta.set_cursor(0);
     let area = Rect::new(0, 0, 40, 2);
     let state = TextAreaState::default();
@@ -4658,40 +4416,26 @@ fn drag_below_area_moves_cursor_past_last_visible_line() {
     ta.handle_mouse(mouse_down(0, 0), area, state);
     assert_eq!(ta.cursor(), 0);
 
-    // Drag below area (row 10, way below the 2-row area).
     let action = ta.handle_mouse(mouse_drag(1, 10), area, state);
     assert_eq!(action, MouseAction::SelectionUpdated);
 
-    // With scroll=0 and height=2, visible lines are 0,1 (L0,L1).
-    // Dragging below → target_line = 2 → "L2" starts at byte 6.
-    // Cursor should be at col 1 of L2 → byte 7.
     assert!(ta.cursor() >= 6, "cursor={} should be >= 6", ta.cursor());
 }
 
 #[test]
 fn drag_above_wide_column_still_scrolls_up() {
-    // Scenario: 10 short lines ("ab"), area is 3 rows tall with area.y = 2 (so we can drag above). Scroll starts at line 5.
-    // We drag to row 1 (above area.y = 2) at column 50 (way past each 3-byte line). The cursor must land ON the target line
-    // (line 4), not spill over to line 5.
     let text = "ab\nab\nab\nab\nab\nab\nab\nab\nab\nab";
     let mut ta = ta_with(text);
-    let area = Rect::new(0, 2, 40, 3); // area starts at row 2
+    let area = Rect::new(0, 2, 40, 3);
     let state = TextAreaState { scroll: 5 };
 
-    // Place cursor on wrapped line 6 (within viewport at scroll=5).
-    // "ab\n" is 3 bytes per line, so line 6 starts at byte 18.
     ta.set_cursor(18);
 
-    // Click inside the area (row 3 = area.y + 1).
     ta.handle_mouse(mouse_down(1, 3), area, state);
 
-    // Drag above the area: row 1 (< area.y=2), column 50 (far right).
     let action = ta.handle_mouse(mouse_drag(50, 1), area, state);
     assert_eq!(action, MouseAction::SelectionUpdated);
 
-    // target_line = scroll(5) - 1 = 4.  Line 4 spans bytes 12..15.
-    // The cursor MUST be within line 4's range [12, 14], NOT at 15
-    // (which is line 5's start).
     let cursor = ta.cursor();
     assert!(
         (12..15).contains(&cursor),
@@ -4702,9 +4446,7 @@ fn drag_above_wide_column_still_scrolls_up() {
 
 #[test]
 fn drag_below_wide_column_still_scrolls_down() {
-    // Same bug but for scrolling down: dragging below the area with
-    // a wide column should place the cursor on the target line, not
-    // spill over to the next line.
+    // Same bug but for scrolling down: dragging below the area with a wide column should place the cursor on the target line.
     let text = "ab\nab\nab\nab\nab\nab\nab\nab\nab\nab";
     let mut ta = ta_with(text);
     let area = Rect::new(0, 0, 40, 3);
@@ -4716,12 +4458,9 @@ fn drag_below_wide_column_still_scrolls_down() {
     // Click inside the area.
     ta.handle_mouse(mouse_down(1, 0), area, state);
 
-    // Drag below the area: row 5 (>= area.y + height=3), column 50.
     let action = ta.handle_mouse(mouse_drag(50, 5), area, state);
     assert_eq!(action, MouseAction::SelectionUpdated);
 
-    // visible_end = 0 + 3 = 3. dist = 5 - 3 + 1 = 3. n = drag_scroll_lines_for_distance(3) = 2. target_line = (3 + 2 - 1) =
-    // 4. Line 4 spans bytes 12..15. Cursor must be within [12, 14], not at 15.
     let cursor = ta.cursor();
     assert!(
         (12..15).contains(&cursor),
@@ -4732,8 +4471,7 @@ fn drag_below_wide_column_still_scrolls_down() {
 
 #[test]
 fn drag_above_with_multibyte_line_end_does_not_panic() {
-    // Regression: clamp_to_line used `line_end - 1` which can land inside
-    // a multi-byte character (e.g. '│' = 3 bytes).
+    // Regression: clamp_to_line used `line_end - 1` which can land inside a multi-byte character.
     let text = "aaa│\nbbb│\nccc│\nddd│\neee│\nfff│\nggg│";
     let mut ta = ta_with(text);
     let area = Rect::new(0, 0, 40, 3);
@@ -4761,13 +4499,10 @@ fn drag_above_with_multibyte_line_end_does_not_panic() {
 
 #[test]
 fn selection_across_element_with_multibyte_chars_does_not_panic() {
-    // Regression: display_col_to_buffer_pos used `line_end + 1` to skip
-    // past elements, but `line_end + 1` can land inside a multi-byte
-    // character (e.g. '│' = 3 bytes).
+    // Regression: display_col_to_buffer_pos used `line_end + 1` to skip past elements.
     let mut ta = TextArea::new();
     ta.insert_str("before ");
-    // Create an element whose backing text contains multi-byte '│' chars
-    // across multiple lines — this triggers wrapping mid-element.
+    // Create an element whose backing text contains multi-byte '│' chars across multiple lines.
     let backing = "│  Ctrl+Shift+Z/Y  redo  │\n│  Ctrl+C  clear  │";
     ta.insert_element(backing, ElementKind(0), None);
     ta.insert_str(" after");
@@ -4801,12 +4536,10 @@ fn click_on_text_with_multibyte_chars_does_not_panic() {
 
 #[test]
 fn selecting_wrapped_line_ending_with_multibyte_char_does_not_panic() {
-    // Regression: when a line wraps and '│' (3-byte char) ends up right at the wrap boundary, the wrapping code (or
-    // rendering) can produce a byte position inside the multi-byte character. Reproduce: enough spaces so '│' is pushed to
-    // the next wrapped line.
-    let text = format!("{}│", " ".repeat(29)); // 29 spaces + '│' = 30 display cols
+    // Regression: when a line wraps and '│' (3-byte char) ends up right at the wrap boundary.
+    let text = format!("{}│", " ".repeat(29)); // Spaces + '│' = 30 display cols
     let mut ta = ta_with(&text);
-    let area = Rect::new(0, 0, 30, 5); // width 30 → '│' wraps to next line
+    let area = Rect::new(0, 0, 30, 5);
     let _state = TextAreaState::default();
 
     // Select across the wrap boundary.
@@ -4843,8 +4576,6 @@ fn inline_element_replaces_element_with_text() {
     ta.insert_str("before ");
     let id = ta.insert_element("pasted\ncontent\nhere", ElementKind(1), None);
     ta.insert_str(" after");
-    // Buffer: "before pasted\ncontent\nhere after"
-    // Element at "pasted\ncontent\nhere" (bytes 7..26)
 
     let inlined = ta.inline_element(id);
     assert!(inlined);
@@ -4863,7 +4594,6 @@ fn inline_element_is_undoable() {
     ta.insert_str("A ");
     let id = ta.insert_element("multi\nline", ElementKind(1), None);
     ta.insert_str(" B");
-    // Buffer: "A multi\nline B", element at 2..12
 
     assert_eq!(ta.elements().len(), 1);
 
@@ -4889,8 +4619,7 @@ fn inline_element_cursor_at_element_start() {
     let mut ta = TextArea::new();
     let id = ta.insert_element("elem", ElementKind(0), None);
     ta.insert_str(" tail");
-    // Cursor is after " tail" → at end.
-    // Move cursor to element start.
+    // Cursor is after " tail" → at end. Move cursor to element start.
     ta.set_cursor(0);
 
     ta.inline_element(id);
@@ -4904,25 +4633,18 @@ fn inline_element_cursor_at_element_start() {
 
 #[test]
 fn click_on_element_second_half_snaps_to_start() {
-    // Element with a wide display: clicking on the right half should still
-    // snap cursor to element start and emit a Click element event.
+    // Element with a wide display: clicking on the right half should still snap cursor to element start.
     let mut ta = TextArea::new();
     ta.insert_str("ab");
-    // Element display is "ELEM" (4 chars). Buffer text is "xy".
+    // Element display is "ELEM" (chars). Buffer text is "xy".
     let display = Line::from("ELEM");
     let id = ta.insert_element("xy", ElementKind(0), Some(display));
     ta.insert_str("cd");
-    // Buffer: "abxycd", element at 2..4, display "ELEM" (4 wide)
-    // Visual: a b E L E M c d
-    //         0 1 2 3 4 5 6 7
 
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
     ta.set_cursor(0);
 
-    // Click on col 5 → second half of "ELEM" display.
-    // display_col_to_buffer_pos should return elem_end=4 (closer to end).
-    // handle_mouse should detect this as on-element and snap to start.
     let action = ta.handle_mouse(mouse_down(5, 0), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
     let ev = ta.poll_element_event().expect("should emit element click");
@@ -4943,7 +4665,6 @@ fn click_on_element_first_half_snaps_to_start() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click on col 2 → first half of "ELEM" display.
     let action = ta.handle_mouse(mouse_down(2, 0), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
     let ev = ta.poll_element_event().expect("should emit element click");
@@ -4960,16 +4681,13 @@ fn click_after_element_places_cursor_not_element() {
     ta.insert_element("xy", ElementKind(0), Some(display));
     ta.insert_str("cd");
     ta.set_cursor(0);
-    // Visual: a b E L c d
-    //         0 1 2 3 4 5
 
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click on col 4 → 'c' (after element).
     let action = ta.handle_mouse(mouse_down(4, 0), area, state);
     assert_eq!(action, MouseAction::CursorPlaced);
-    assert_eq!(ta.cursor(), 4); // byte 4 = 'c'
+    assert_eq!(ta.cursor(), 4);
 }
 
 // ── Mouse wheel tests ──
@@ -5033,7 +4751,7 @@ fn mousewheel_scrolls_viewport_not_cursor() {
         .collect::<Vec<_>>()
         .join("\n");
     let mut ta = ta_with(&text);
-    let area = Rect::new(0, 0, 40, 5); // only 5 lines visible
+    let area = Rect::new(0, 0, 40, 5); // a few lines visible
     let state = TextAreaState::default();
 
     // Place cursor on "line 2"
@@ -5055,38 +4773,33 @@ fn mousewheel_scrolls_viewport_not_cursor() {
 #[test]
 fn click_after_scroll_places_cursor_at_clicked_line() {
     // After scrolling the viewport away from the cursor via mousewheel,
-    // clicking on a visible line should place the cursor on THAT line —
-    // not jump to some other position based on the old cursor location.
+    // clicking on a visible line must place the cursor on THAT line.
     let text = (0..40)
         .map(|i| format!("line {:02}", i))
         .collect::<Vec<_>>()
         .join("\n");
     let mut ta = ta_with(&text);
-    // height=20 → scroll_lines_for_height returns 3 lines/tick
+    // height=20 → scroll_lines_for_height returns a few lines/tick
     let area = Rect::new(0, 0, 40, 20);
     let mut state = TextAreaState::default();
 
-    // Cursor starts at line 0.
     ta.set_cursor(0);
 
     // Render to initialize state.scroll.
     let mut buf = Buffer::empty(area);
     ratatui::widgets::StatefulWidgetRef::render_ref(&(&ta), area, &mut buf, &mut state);
 
-    // Scroll down 3 ticks (3 lines × 3 = 9 lines).
     for _ in 0..3 {
         ta.handle_mouse(mouse_scroll_down(0, 0), area, state);
         ratatui::widgets::StatefulWidgetRef::render_ref(&(&ta), area, &mut buf, &mut state);
     }
 
-    // Viewport should now start around line 9.
     assert!(
         state.scroll >= 9,
         "viewport should have scrolled; scroll={}",
         state.scroll
     );
 
-    // Click on visual row 0 (which is now "line 09" or similar).
     ta.handle_mouse(mouse_down(0, 0), area, state);
 
     // The cursor should now be on a line that was VISIBLE.
@@ -5126,7 +4839,6 @@ fn drag_select_after_scroll_selects_visible_text() {
     }
     let scroll_after = state.scroll;
 
-    // Click-down on row 1, then drag to row 3.
     ta.handle_mouse(mouse_down(0, 1), area, state);
     // Re-render so state.scroll updates after the click.
     ratatui::widgets::StatefulWidgetRef::render_ref(&(&ta), area, &mut buf, &mut state);
@@ -5135,7 +4847,6 @@ fn drag_select_after_scroll_selects_visible_text() {
     // Selection should exist.
     let sel = ta.selection_range().expect("drag should create selection");
 
-    // The selected region should be within the visible range, not at line 0.
     let lines = ta.wrapped_lines(area.width);
     let sel_start_line = TextArea::wrapped_line_index_by_start(&lines, sel.start).unwrap();
     assert!(
@@ -5163,7 +4874,6 @@ fn drag_outside_after_mousewheel_still_scrolls() {
     let mut buf = Buffer::empty(area);
     ratatui::widgets::StatefulWidgetRef::render_ref(&(&ta), area, &mut buf, &mut state);
 
-    // Start drag at row 0.
     ta.handle_mouse(mouse_down(0, 0), area, state);
     ta.handle_mouse(mouse_drag(0, 1), area, state);
     assert!(ta.selection_range().is_some());
@@ -5173,9 +4883,7 @@ fn drag_outside_after_mousewheel_still_scrolls() {
     ratatui::widgets::StatefulWidgetRef::render_ref(&(&ta), area, &mut buf, &mut state);
     let scroll_after_wheel = state.scroll;
 
-    // Now drag below the area (row = area.y + area.height = 5).
-    // This should auto-scroll the viewport further down.
-    // We need to bypass throttle, so reset the timer.
+    // Now drag below the area (row = area.y + area.height = 5). This should auto-scroll the viewport further down.
     ta.last_drag_scroll = None;
     ta.drag_scroll_steps = 0;
     ta.handle_mouse(mouse_drag(0, area.y + area.height), area, state);
@@ -5191,14 +4899,12 @@ fn drag_outside_after_mousewheel_still_scrolls() {
 
 #[test]
 fn scroll_during_drag_preserves_selection_anchor() {
-    // Start drag at "bbb", scroll down — selection should extend,
-    // anchor stays at original position.
+    // Start drag at "bbb", scroll down — selection should extend, anchor stays at original position.
     let mut ta = ta_with("aaa\nbbb\nccc\nddd\neee\nfff\nggg");
     ta.set_cursor(0); // put cursor at start so scroll=0 is consistent
     let area = Rect::new(0, 0, 40, 3);
     let state = TextAreaState::default();
 
-    // Click-down on "bbb" (row 1, col 1 → byte 5 = second 'b')
     ta.handle_mouse(mouse_down(1, 1), area, state);
     let anchor = ta.cursor();
     assert_eq!(
@@ -5235,7 +4941,6 @@ fn scroll_during_drag_extends_selection_head() {
     let area = Rect::new(0, 0, 40, 3);
     let state = TextAreaState::default();
 
-    // Click-down on "aaa" (row 0, col 1)
     ta.handle_mouse(mouse_down(1, 0), area, state);
     // Start drag
     ta.handle_mouse(mouse_drag(2, 0), area, state);
@@ -5256,15 +4961,12 @@ fn scroll_during_drag_extends_selection_head() {
 
 #[test]
 fn down_during_active_drag_does_not_reset_anchor() {
-    // Some terminals re-emit Down(Left) after a scroll event even though
-    // the button was held the whole time.  When `drag_active` is true,
-    // a Down should be treated as a drag continuation, not a new click.
+    // Some terminals re-emit Down(Left) after a scroll event even though the button was held the whole time.
     let mut ta = ta_with("aaa\nbbb\nccc\nddd\neee\nfff\nggg");
     ta.set_cursor(0);
     let area = Rect::new(0, 0, 40, 3);
     let state = TextAreaState::default();
 
-    // Click on "aaa" (row 0, col 1), then drag to start selection.
     ta.handle_mouse(mouse_down(1, 0), area, state);
     ta.handle_mouse(mouse_drag(2, 0), area, state);
     let anchor_before = ta.selection_range().unwrap().start;
@@ -5294,7 +4996,6 @@ fn down_during_active_drag_does_not_reset_anchor() {
 
 #[test]
 fn drag_scroll_interval_ramps_up() {
-    // Step 0 → 80ms, step 1 → 60ms, step 2+ → 40ms.
     assert_eq!(TextArea::drag_scroll_interval(0), 80);
     assert_eq!(TextArea::drag_scroll_interval(1), 60);
     assert_eq!(TextArea::drag_scroll_interval(2), 40);
@@ -5303,7 +5004,6 @@ fn drag_scroll_interval_ramps_up() {
 
 #[test]
 fn drag_scroll_lines_for_distance_tiers() {
-    // Close: 1 line, farther: more lines.
     assert_eq!(TextArea::drag_scroll_lines_for_distance(1), 1);
     assert_eq!(TextArea::drag_scroll_lines_for_distance(2), 1);
     assert_eq!(TextArea::drag_scroll_lines_for_distance(3), 2);
@@ -5317,7 +5017,7 @@ fn drag_scroll_lines_for_distance_tiers() {
 
 #[test]
 fn scrollbar_not_shown_when_content_fits() {
-    // 3 lines of text in a 5-row viewport → no scrollbar needed.
+    // A few lines of text in a 5-row viewport → no scrollbar needed.
     let mut ta = TextArea::new();
     ta.insert_str("aaa\nbbb\nccc");
     let area = Rect::new(0, 0, 20, 5);
@@ -5328,7 +5028,7 @@ fn scrollbar_not_shown_when_content_fits() {
 
 #[test]
 fn scrollbar_shown_when_content_overflows() {
-    // 10 lines of text in a 5-row viewport → scrollbar needed.
+    // Several lines of text in a 5-row viewport → scrollbar needed.
     let mut ta = TextArea::new();
     ta.insert_str("1\n2\n3\n4\n5\n6\n7\n8\n9\n10");
     let area = Rect::new(0, 0, 20, 5);
@@ -5350,19 +5050,15 @@ fn scrollbar_respects_show_scrollbar_false() {
 
 #[test]
 fn scrollbar_wrapping_uses_narrower_width() {
-    // A line that fits in 20 cols but not in 19 should wrap differently
-    // when scrollbar is present.
     let mut ta = TextArea::new();
-    // 19 'a's → fits in 19 cols (no wrap).
     // Then enough other lines to overflow the viewport.
     ta.insert_str(&format!("{}\n2\n3\n4\n5\n6", "a".repeat(19)));
     let area = Rect::new(0, 0, 20, 5);
     let (cw, needs) = ta.content_width(area.width, area.height);
     assert!(needs, "overflows");
     assert_eq!(cw, 19);
-    // The 19-char line should NOT wrap at width 19 — it fits exactly.
     let lines = ta.wrapped_lines(cw);
-    // First wrapped line should contain all 19 chars.
+    // First wrapped line should contain all chars.
     let Some(first) = lines.first() else {
         panic!("expected a wrapped line: {lines:?}");
     };
@@ -5404,7 +5100,6 @@ fn click_on_scrollbar_top_scrolls_to_top() {
     let state = TextAreaState::default();
     // Scroll to the bottom first so the top of the track is NOT the thumb.
     ta.scroll_override = Some(5);
-    // Click at top of scrollbar (row 0) — should be track, jump to top.
     ta.handle_mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -5424,7 +5119,6 @@ fn click_on_text_area_does_not_trigger_scrollbar() {
     ta.insert_str("1\n2\n3\n4\n5\n6\n7\n8\n9\n10");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // Click on column 18 (text area, not scrollbar column 19).
     let action = ta.handle_mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -5446,8 +5140,6 @@ fn drag_on_scrollbar_scrolls_proportionally() {
     ta.insert_str("1\n2\n3\n4\n5\n6\n7\n8\n9\n10");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
-    // Scroll to bottom so the thumb is at the bottom, then click
-    // on the track at row 0 to start a track-based drag.
     ta.scroll_override = Some(5);
     ta.handle_mouse(
         MouseEvent {
@@ -5510,8 +5202,7 @@ fn drag_on_scrollbar_scrolls_proportionally() {
 
 #[test]
 fn scrollbar_render_produces_track_and_thumb() {
-    // Render a textarea with overflow and verify the scrollbar column
-    // has non-default styled cells.
+    // Render a textarea with overflow and verify the scrollbar column has non-default styled cells.
     let mut ta = TextArea::new();
     ta.insert_str("1\n2\n3\n4\n5\n6\n7\n8\n9\n10");
     let area = Rect::new(0, 0, 20, 5);
@@ -5526,7 +5217,6 @@ fn scrollbar_render_produces_track_and_thumb() {
         let Some(cell) = buf.cell((sb_col, row)) else {
             panic!("expected scrollbar cell at row {row}");
         };
-        // Track bg is Rgb(45,45,55); check bg is set.
         assert!(cell.style().bg.is_some(), "scrollbar cell should have bg");
         if cell.symbol() != " " {
             has_thumb = true;
@@ -5537,8 +5227,7 @@ fn scrollbar_render_produces_track_and_thumb() {
 
 #[test]
 fn no_scrollbar_column_when_content_fits() {
-    // When content fits, the rightmost column should not have
-    // scrollbar styling.
+    // When content fits, the rightmost column should not have scrollbar styling.
     let mut ta = TextArea::new();
     ta.insert_str("hello");
     let area = Rect::new(0, 0, 20, 5);
@@ -5559,31 +5248,24 @@ fn no_scrollbar_column_when_content_fits() {
 
 #[test]
 fn cursor_pos_accounts_for_scrollbar_width() {
-    // When scrollbar is shown, cursor position should use content width,
-    // not full area width.
+    // When scrollbar is shown, cursor position should use content width, not full area width.
     let mut ta = TextArea::new();
-    // Fill 18 chars + enough lines to overflow.
+    // Fill multiple chars + enough lines to overflow.
     ta.insert_str(&format!("{}\n2\n3\n4\n5\n6", "x".repeat(18)));
     let _ = ta.text.set_cursor_byte(0); // at start
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
     let pos = ta.cursor_pos_with_state(area, state);
-    // Cursor at pos 0 should be at (0, 0).
     assert_eq!(pos, Some((0, 0)));
 }
 
 #[test]
 fn click_on_scrollbar_thumb_does_not_jump() {
-    // With 10 lines in a 5-row viewport, the thumb is near the top
-    // when scroll is at 0.  Clicking on the thumb should NOT jump —
-    // it should just start a drag from the current position.
     let mut ta = TextArea::new();
     ta.insert_str("1\n2\n3\n4\n5\n6\n7\n8\n9\n10");
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
 
-    // Scroll is at 0 — thumb should be at the top of the track.
-    // Click on row 0 (top of track = on the thumb).
     let action = ta.handle_mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -5612,8 +5294,6 @@ fn click_on_scrollbar_track_jumps() {
     let area = Rect::new(0, 0, 20, 5);
     let state = TextAreaState::default();
 
-    // Scroll at 0, thumb near top.  Click at bottom of track (row 4)
-    // which should be on the track, not the thumb.
     let action = ta.handle_mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -5715,13 +5395,11 @@ fn copy_on_selection_finalized_sets_provider() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Click at 0, drag to 5, release
     ta.handle_mouse(mouse_down(0, 0), area, state);
     ta.handle_mouse(mouse_drag(5, 0), area, state);
     ta.handle_mouse(mouse_up(5, 0), area, state);
 
-    // Mouse-up copies to the provider; drop the highlight so Ctrl+V inserts
-    // instead of replacing the selection.
+    // Mouse-up copies to the provider; drop the highlight so Ctrl+V inserts instead of replacing the selection.
     ta.clear_selection();
     ta.set_cursor(5);
     ta.input(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL));
@@ -5753,7 +5431,6 @@ fn hover_enter_on_element() {
     ta.handle_mouse(mouse_moved(0, 0), area, state);
     assert!(ta.poll_element_event().is_none());
 
-    // Move over element (col 3)
     ta.handle_mouse(mouse_moved(3, 0), area, state);
     let ev = ta.poll_element_event().expect("should emit HoverEnter");
     assert_eq!(ev.id, id);
@@ -5791,11 +5468,9 @@ fn hover_stays_on_same_element_no_event() {
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Enter the element (col 3)
     ta.handle_mouse(mouse_moved(3, 0), area, state);
     ta.poll_element_event(); // consume enter
 
-    // Move within the element (col 4) — no new event
     ta.handle_mouse(mouse_moved(4, 0), area, state);
     assert!(ta.poll_element_event().is_none());
 }
@@ -5806,20 +5481,15 @@ fn hover_between_two_elements() {
     let id1 = ta.insert_element("AA", ElementKind(0), None);
     ta.insert_str(" ");
     let id2 = ta.insert_element("BB", ElementKind(0), None);
-    // Visual: A A   B B
-    //         0 1 2 3 4
 
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
 
-    // Hover element 1
     ta.handle_mouse(mouse_moved(0, 0), area, state);
     let ev = ta.poll_element_event().unwrap();
     assert_eq!(ev.id, id1);
     assert_eq!(ev.kind, TextElementEventKind::HoverEnter);
 
-    // Move to element 2 — should emit enter for id2
-    // (HoverLeave for id1 gets overwritten by HoverEnter for id2)
     ta.handle_mouse(mouse_moved(3, 0), area, state);
     let ev = ta.poll_element_event().unwrap();
     assert_eq!(ev.id, id2);
@@ -5835,9 +5505,8 @@ fn render_stateful(ta: &TextArea, area: Rect, buf: &mut Buffer, state: &mut Text
 
 #[test]
 fn scroll_override_forces_viewport_ignoring_cursor() {
-    // With 20 lines, cursor at end, and viewport of 5 rows,
-    // effective_scroll normally follows the cursor to the bottom.
-    // set_scroll_override(Some(0)) should force viewport to top.
+    // With several lines, cursor at end, and viewport of a few
+    // rows, effective_scroll normally follows the cursor to the bottom.
     let text = (0..20)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
@@ -5853,7 +5522,6 @@ fn scroll_override_forces_viewport_ignoring_cursor() {
     assert!(state.scroll > 0, "should scroll to show cursor at end");
     let normal_scroll = state.scroll;
 
-    // Set override to 0 and render: viewport at top despite cursor at end.
     ta.set_scroll_override(Some(0));
     render_stateful(&ta, area, &mut buf, &mut state);
     assert_eq!(state.scroll, 0, "override should force scroll to 0");
@@ -5870,10 +5538,10 @@ fn scroll_override_forces_viewport_ignoring_cursor() {
 #[test]
 fn scroll_override_clamped_to_max() {
     // Override value larger than max_scroll should be clamped.
-    let text = "line 0\nline 1\nline 2"; // 3 lines
+    let text = "line 0\nline 1\nline 2"; // A few
     let mut ta = ta_with(text);
     ta.set_cursor(0);
-    let area = Rect::new(0, 0, 40, 2); // 2 rows visible, max_scroll = 1
+    let area = Rect::new(0, 0, 40, 2); // A couple of rows visible,
     let mut state = TextAreaState::default();
     let mut buf = Buffer::empty(area);
 
@@ -5905,7 +5573,6 @@ fn scroll_override_survives_render_cycles() {
 
 #[test]
 fn scroll_override_save_restore_round_trip() {
-    // Render normally (cursor-follow); Save state.scroll + scroll_override; Override to 0, render collapsed.
     let text = (0..30)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
@@ -5923,7 +5590,6 @@ fn scroll_override_save_restore_round_trip() {
     assert!(original_scroll > 0);
     assert_eq!(original_override, None);
 
-    // 2. "Collapse": override to 0, render a few frames.
     ta.set_scroll_override(Some(0));
     for _ in 0..3 {
         render_stateful(&ta, area, &mut buf, &mut state);
@@ -5945,8 +5611,7 @@ fn scroll_override_save_restore_round_trip() {
 #[test]
 fn scroll_override_save_restore_with_mousewheel() {
     // Same as above but the user had mousewheel-scrolled away from cursor
-    // before collapse. Both state.scroll and scroll_override must be
-    // saved/restored for the viewport to return to its pre-collapse position.
+    // before collapse.
     let text = (0..30)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
@@ -5969,7 +5634,6 @@ fn scroll_override_save_restore_with_mousewheel() {
     assert!(mousewheel_scroll > 0, "should have scrolled away");
     assert!(mousewheel_override.is_some(), "mousewheel sets override");
 
-    // "Collapse": save both, override to 0.
     let saved_scroll = state.scroll;
     let saved_override = ta.scroll_override();
     ta.set_scroll_override(Some(0));
@@ -5982,8 +5646,7 @@ fn scroll_override_save_restore_with_mousewheel() {
     ta.set_scroll_override(saved_override);
     state.scroll = saved_scroll;
 
-    // Render "uncollapsed" — viewport should be at the mousewheel position,
-    // NOT snapped to cursor (which is at line 0).
+    // Render "uncollapsed" — viewport should be at the mousewheel position.
     render_stateful(&ta, area, &mut buf, &mut state);
     assert_eq!(
         state.scroll, mousewheel_scroll,
@@ -6089,7 +5752,6 @@ fn altgr_char_insertion_platform_dependent() {
 
 #[test]
 fn shift_number_trusts_terminal_character() {
-    // QWERTZ: terminal sends Char('/') + SHIFT for Shift+7.
     let mut t = TextArea::new();
     t.input(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT));
     assert_eq!(t.text(), "/");
@@ -6161,7 +5823,6 @@ fn shift_extension_anchor_sticky_across_granularities() {
     assert_eq!(t.selection_range(), Some(0.."alpha ".len()));
 }
 
-/// `"alpha beta"` with `"alpha"` selected via Alt+Shift+Right from 0.
 fn ta_with_word_selected() -> TextArea {
     let mut t = ta_with("alpha beta");
     t.set_cursor(0);
@@ -6304,7 +5965,6 @@ fn word_move_collapses_leftward_selection_first() {
     ));
     assert_eq!(t.selection_range(), Some(0..4));
 
-    // Right edge (4), then one word right → end of the second word.
     t.input(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT));
     assert_eq!(t.cursor(), 7);
     assert_eq!(t.selection_range(), None);
@@ -6314,7 +5974,6 @@ fn word_move_collapses_leftward_selection_first() {
         KeyCode::Left,
         KeyModifiers::ALT | KeyModifiers::SHIFT,
     ));
-    // Left edge (0), then one word left → stays at 0.
     t.input(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
     assert_eq!(t.cursor(), 0);
     assert_eq!(t.selection_range(), None);
@@ -6330,8 +5989,6 @@ fn word_move_collapses_rightward_selection_first() {
     ));
     assert_eq!(t.selection_range(), Some(4..7));
 
-    // Left edge (4), then one word left → 0 — NOT word-left from the
-    // head at 7 (which would land back on 4).
     t.input(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
     assert_eq!(t.cursor(), 0);
 
@@ -6340,7 +5997,6 @@ fn word_move_collapses_rightward_selection_first() {
         KeyCode::Right,
         KeyModifiers::ALT | KeyModifiers::SHIFT,
     ));
-    // Right edge (7), then one word right → end of the third word.
     t.input(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT));
     assert_eq!(t.cursor(), 11);
 }
@@ -6417,7 +6073,6 @@ fn triple_click_then_shift_vertical_extends_from_the_head() {
     let mut t = ta_with("one\ntwo\nthree");
     let area = Rect::new(0, 0, 40, 5);
     let state = TextAreaState::default();
-    // Triple-click "two" (row 1) → selects "two\n" (4..8), cursor at 5.
     for _ in 0..3 {
         t.handle_mouse(mouse_down(1, 1), area, state);
     }

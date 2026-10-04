@@ -1,8 +1,4 @@
-//! Mid-turn wait interrupt: remember aborted wait ids (union across concurrent aborts) and strip extras from the next wait that is a proper superset.
-//! Apply never forgets the set (siblings in the same batch still see it).
-//! Complete drops only the finished ids.
-//! Also polls for the interrupt itself (`wait_for_wait_interrupt`), names its cause
-//! (`WaitInterruptCause`), and builds the cancelled tool result.
+//! Mid-turn wait interrupt: remember aborted wait ids (union across concurrent aborts) and strip extras from the next wait.
 
 use std::time::Duration;
 

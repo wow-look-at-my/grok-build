@@ -71,11 +71,9 @@ struct Inner {
     model_switch_watch: tokio::sync::watch::Sender<u64>,
     /// Progress of the first real-catalog load, watched by bounded waits.
     catalog_progress: tokio::sync::watch::Sender<CatalogProgress>,
-    /// False while the `[model_providers.*]` listings are in flight. A session
-    /// built before they land picks its model from a catalog that lacks them.
+    /// False while the `[model_providers.*]` listings are in flight.
     provider_discovery_settled: tokio::sync::watch::Sender<bool>,
-    /// Set once the user explicitly picks a model (`/model`); guards the
-    /// first-catalog reselect from clobbering that choice.
+    /// Set once the user explicitly picks a model (`/model`).
     user_selected_model: AtomicBool,
 }
 
@@ -101,7 +99,6 @@ impl Drop for RefreshInFlightGuard {
 }
 
 /// One fetch attempt (or retry sequence), counted for bounded waiters.
-/// Begin before spawning the task; beginning supersedes an earlier `Failed`.
 struct FetchAttemptGuard {
     inner: Arc<Inner>,
     generation: u64,
@@ -129,8 +126,7 @@ impl Drop for FetchAttemptGuard {
         if self.inner.fetches_in_flight.fetch_sub(1, Ordering::AcqRel) > 1 {
             return;
         }
-        // Last attempt out with no outcome: latch so waiters return
-        // The lock makes the generation check atomic against `clear()`
+        // Last attempt out with no outcome: latch.
         let cat = self.inner.catalog.read();
         if cat.generation != self.generation
             || self.inner.fetches_in_flight.load(Ordering::Acquire) > 0
@@ -287,7 +283,7 @@ impl ModelsManager {
         let has_prefetched = prefetched_models.is_some();
         let catalog = resolve_model_catalog(cfg, prefetched_models.clone());
 
-        // Only against a real catalog. A fleet pin on built-ins-only (custom endpoint, cold cache) would reject a valid policy before the first fetch. The catalog still marks unselectable entries; this check runs after prefetch / cache.
+        // Only against a real catalog.
         if has_prefetched {
             validate_selectable(cfg, &catalog)?;
         }
@@ -770,7 +766,7 @@ impl ModelsManager {
         let config = self.inner.cfg.read().clone();
         crate::agent::init::update_telemetry_config(&config, &self.inner.auth_manager);
         self.inner.cache.invalidate();
-        // Fetches and the etag from the previous identity are stale now.
+        // Fetches and the etag from the identity are stale now.
         {
             let mut cat = self.inner.catalog.write();
             cat.generation += 1;
@@ -779,7 +775,6 @@ impl ModelsManager {
         let has_session = self.inner.auth_manager.current_or_expired().is_some();
         let fetch_auth = ModelFetchAuth::resolve(&config.endpoints, has_session);
         *self.inner.fetch_auth.write() = fetch_auth;
-        // No session but the endpoint needs one: a fetch would 401, so skip it and reset to this identity's bundled catalog
         if !has_session && fetch_auth == ModelFetchAuth::Session {
             self.clear();
             self.rebuild_bundled(&config);
@@ -1051,8 +1046,7 @@ impl ModelsManager {
 
     /// Wipe in-memory state so a previous identity's catalog doesn't leak.
     fn clear(&self) {
-        // The additive provider's models are not this identity's to wipe, so
-        // they are re-merged into the emptied catalog.
+        // The additive provider's models are not this identity's to wipe.
         let cfg = self.inner.cfg.read().clone();
         let models = self.with_additive_catalogs(&cfg, IndexMap::new());
         {

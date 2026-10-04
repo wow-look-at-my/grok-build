@@ -9,23 +9,17 @@ use crate::agent::config::ModelEntry;
 
 pub(crate) const MODELS_CACHE_FILE: &str = "models_cache.json";
 pub(crate) const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
-/// Cap on the unsigned models cache read, mirroring the settings cache: a
-/// corrupt or oversized file is a miss, not an unbounded read into memory.
+/// Cap on the unsigned models cache read, mirroring the settings cache: a corrupt or oversized file is a miss.
 const MODELS_CACHE_MAX_BYTES: u64 = 4 << 20;
 
-/// Serializes every read-check-write of the cache file so a concurrent startup
-/// commit and TTL renewal cannot both pass the monotonic check and let the
-/// older fetch win.
+/// Serializes every read-check-write of the cache file so a concurrent startup commit and TTL renewal cannot both pass the monotonic check.
 static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct ModelsCache {
-    /// Fetch-initiation time. The monotonic content key: an older fetch never
-    /// replaces a newer stored catalog.
+    /// Fetch-initiation time. The monotonic content key: an older fetch never replaces a newer stored catalog.
     pub(crate) fetched_at: DateTime<Utc>,
-    /// TTL/freshness clock, bumped by a TTL renewal. Kept separate from
-    /// `fetched_at` so renewing the TTL cannot shadow a newer-content write.
-    /// Absent means freshness is measured from `fetched_at`.
+    /// TTL/freshness clock, bumped by a TTL renewal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) renewed_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -34,8 +28,7 @@ pub(crate) struct ModelsCache {
     pub(crate) auth_method: Option<CacheAuthMethod>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) origin: Option<String>,
-    /// Per-account-and-alpha scope, like the settings cache: a different user or
-    /// alpha cohort must miss. A legacy `None` entry misses and refetches.
+    /// Per-account-and-alpha scope, like the settings cache: a different user or alpha cohort must miss.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

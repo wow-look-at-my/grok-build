@@ -1,5 +1,4 @@
-//! Installs plugin sources: git clones and local-directory copies land in the managed `installed-plugins` snapshot (not live symlinks).
-//! Trusted / user-home local installs are re-copied at session spawn / reload by [`super::local_refresh`].
+//! Installs plugin sources: git clones and local-directory copies land in the managed `installed-plugins` snapshot.
 
 use std::path::{Path, PathBuf};
 
@@ -50,8 +49,8 @@ pub fn parse_install_source(input: &str, cwd: &Path) -> InstallSource {
     if main.contains("://") || main.contains("git@") {
         // Git URL: split on @ for ref (but not the git@ prefix)
         let (url, git_ref) = if main.starts_with("git@") {
-            // SSH URL: git@host:user/repo.git@ref
-            // The @ in git@ is part of the URL, look for @ after the first :
+            // SSH URL: git@host:user/repo.git@ref The @ in git@ is part of
+            // the URL, look for @ after the first:
             if let Some(colon_pos) = main.find(':') {
                 let Some(after_colon) = main.get(colon_pos + 1..) else {
                     return InstallSource::Git {
@@ -116,8 +115,8 @@ pub fn parse_install_source(input: &str, cwd: &Path) -> InstallSource {
     }
 }
 
-/// A full commit sha (40-hex SHA-1 or 64-hex SHA-256), the only form the pin policy accepts.
-/// Branches, tags, and short prefixes are mutable or forgeable.
+/// A full commit sha (40-hex SHA-1 or 64-hex SHA-256), the only form the pin
+/// policy accepts.
 pub fn is_full_commit_sha(s: &str) -> bool {
     (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -214,7 +213,7 @@ fn is_github_shorthand(s: &str) -> bool {
         Some((b, r)) if !r.is_empty() => b,
         _ => s,
     };
-    // Must be exactly owner/repo (two non-empty segments separated by one /).
+    // Must be exactly owner/repo (non-empty segments separated by one /).
     let parts: Vec<&str> = base.splitn(3, '/').collect();
     parts.len() == 2
         && parts.first().is_some_and(|p| !p.is_empty())
@@ -296,8 +295,8 @@ pub fn install_from_source_with_label(
                     detail: format!("local path is not a directory: {}", path.display()),
                 });
             }
-            // Deliberate full copy (not a symlink): isolates the install from later source edits/deletion and keeps uninstall a simple dir remove
-            // local_refresh re-copies trusted sources to pick up new components.
+            // Deliberate full copy (not a symlink): isolates the install from
+            // later source edits/deletion.
             copy_dir_recursive(path, &repo_path).map_err(|e| InstallError::Io {
                 path: repo_path.clone(),
                 source: e,
@@ -672,7 +671,6 @@ pub enum UpdateStatus {
         ref_name: String,
     },
     /// Local install: explicit update is a no-op.
-    /// Session spawn / reload uses [`super::local_refresh`] to re-copy trusted sources (install is a full directory copy, not a live symlink).
     LiveLocal,
 }
 
@@ -733,7 +731,7 @@ pub fn update_repo(
             let new_commit = read_head_commit(repo_path);
             let changed = old_commit.as_deref() != new_commit.as_deref();
 
-            // Re-discover plugins (new ones may have been added)
+            // Re-discover plugins (new ones may
             let plugins = discover_plugins_in_dir(repo_path, subdir.as_deref())?;
 
             Ok(UpdateStatus::Updated(UpdateResult {
@@ -976,7 +974,7 @@ mod tests {
 
     #[test]
     fn parse_github_shorthand_not_deep_path() {
-        // Three segments like "a/b/c" are a local path, not shorthand
+        // Segments like "a/b/c" are a local path, not shorthand
         let source = parse_install_source("a/b/c", Path::new("/tmp"));
         match source {
             InstallSource::Local { .. } => {}
@@ -1035,7 +1033,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
 
-        // Create two plugin subdirectories
+        // Create plugin subdirectories
         std::fs::create_dir_all(root.join("linter/skills")).unwrap();
         std::fs::create_dir_all(root.join("formatter/agents")).unwrap();
         // Non-plugin dir (ignored by discovery)
@@ -1519,8 +1517,7 @@ mod tests {
             return;
         }
 
-        // Real pinned install from a local origin
-        // allowAnySHA1InWant matches make_local_repo so fetch-by-sha against file:// succeeds
+        // Real pinned install from a local origin allowAnySHA1InWant matches make_local_repo.
         let (origin, sha) = make_local_repo();
         let pinned_via_ref = InstallSource::Git {
             url: format!("file://{}", origin.path().display()),

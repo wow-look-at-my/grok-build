@@ -1,6 +1,4 @@
-//! Parsers for the managed policy keys (Claude camelCase JSON and grok
-//! snake_case TOML-as-JSON): MCP allow/deny lists, marketplace lists, and
-//! boolean pins.
+//! Parsers for the managed policy keys (Claude camelCase JSON and grok snake_case TOML-as-JSON): MCP allow/deny lists, marketplace lists.
 
 use std::path::Path;
 
@@ -70,8 +68,7 @@ pub(super) fn parse_strict_marketplaces(json: &serde_json::Value) -> PolicyKey<V
     })
 }
 
-/// Parsed `extraKnownMarketplaces`. A per-entry `autoUpdate: false` has no
-/// granular grok equivalent, so it (or an unreadable entry) pins the GLOBAL auto-update off.
+/// Parsed `extraKnownMarketplaces`.
 #[derive(Default)]
 pub(super) struct ExtraMarketplaces {
     pub entries: Vec<ManagedMarketplace>,
@@ -233,8 +230,7 @@ fn policy_field<'a, 'k>(
     PolicyKey::Present(first)
 }
 
-/// One key's value in one source. Only `Absent` means "no restriction": a
-/// `Malformed` key (wrong type, or spelled both ways with different values) fails closed.
+/// One key's value in one source.
 pub(super) enum PolicyKey<T> {
     Absent,
     Present(T),

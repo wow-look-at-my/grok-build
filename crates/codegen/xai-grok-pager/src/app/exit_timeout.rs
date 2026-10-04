@@ -3,8 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-// The default covers the worst case, `arm` called from a signal before the loop unwinds:
-// joining the agent takes up to SESSION_FLUSH_GRACE plus slack (12s), and the rest is flushes and headroom
+// The default covers the worst case, `arm` called from a signal before the loop unwinds.
 const DEFAULT_EXIT_TIMEOUT: Duration = Duration::from_secs(20);
 const EXIT_TIMEOUT_ENV: &str = "GROK_EXIT_TIMEOUT_SECS";
 const HARD_EXIT_GRACE: Duration = Duration::from_secs(5);

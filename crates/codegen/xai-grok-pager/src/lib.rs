@@ -13,8 +13,6 @@
     dead_code
 )]
 //! xai-grok-pager: Grok Build TUI.
-//!
-//! A clean-room implementation built on the v3 pager rendering engine.
 #![allow(clippy::string_slice)]
 #![deny(clippy::indexing_slicing)]
 pub mod acp;

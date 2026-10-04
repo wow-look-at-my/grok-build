@@ -1,15 +1,4 @@
 //! Parse marketplace sources from `~/.grok/config.toml`.
-//!
-//! Expected format:
-//! ```toml
-//! [[marketplace.sources]]
-//! name = "xAI Official"
-//! git = "https://github.com/xai-org/xai-plugin-marketplace.git"
-//!
-//! [[marketplace.sources]]
-//! name = "Local Dev"
-//! path = "~/dev/my-plugins"
-//! ```
 
 use std::path::PathBuf;
 
@@ -29,8 +18,6 @@ struct RawSource {
 }
 
 /// Whether remote plugin installs/updates must pin a full commit sha.
-/// Tighten-only: either `[marketplace] require_sha = true` in config.toml or `GROK_MARKETPLACE_REQUIRE_SHA=1` enables it; neither can turn it off.
-/// Defaults off so existing unpinned catalogs keep installing.
 pub fn load_require_sha(config: &toml::Value) -> bool {
     env_require_sha()
         || config
@@ -110,7 +97,6 @@ pub fn load_sources(config: &toml::Value) -> Vec<MarketplaceSource> {
 }
 
 /// Source descriptor from settings JSON.
-/// `{ "source": "git", "url": "..." }`; `{ "source": "github", "repo": "owner/repo" }`; `{ "source": "local", "path": "..." }`.
 #[derive(Debug, serde::Deserialize)]
 #[serde(tag = "source", rename_all = "lowercase")]
 enum SettingsSource {

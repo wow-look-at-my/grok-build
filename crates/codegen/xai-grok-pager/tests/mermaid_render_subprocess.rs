@@ -1,18 +1,4 @@
 //! End-to-end coverage of the out-of-process Mermaid render path.
-//!
-//! Spawns the **real** built pager binary as the hidden `__mermaid-render` child via [`render_via_subprocess`].
-//! That is the exact function the render worker uses in production. It asserts:
-//!   * a valid diagram (the cyclic login-flow) renders to a decodable PNG;
-//!   * an oversized or invalid diagram is *contained*: the child exits non-zero, the parent returns `Err`, and no PNG is written;
-//!   * a tight timeout makes the parent kill the child and return `Err` quickly: a real, process-killable timeout.
-//!
-//! These exercise the cross-platform `Command`, `current_exe()`, and `Child::kill` code against the actual binary.
-//! The in-process worker unit tests cannot (under `cargo test` the harness binary is not the pager).
-//!
-//! Every test is `#[ignore]`: it needs the built binary, so `cargo test` skips it by default. Opt in with
-//! `PAGER_BINARY=target/debug/xai-grok-pager cargo test -p xai-grok-pager --test mermaid_render_subprocess -- --ignored`
-//! (Bazel wires `PAGER_BINARY` from `//crates/codegen/xai-grok-pager-bin:xai-grok-pager`).
-//! Unlike the spawn-only suites in `xai-grok-pager-pty-harness`, this test stays here because it exercises pager library code.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -75,8 +61,6 @@ fn child_renders_login_flow_to_png() {
 #[test]
 #[ignore = "spawns the built pager binary; run with cargo test -- --ignored"]
 fn oversized_source_is_contained() {
-    // Source over the 64 KiB cap: the child rejects it and exits non-zero
-    // The parent then returns Err and no PNG is produced (the render degrades to the fallback)
     let bin = pager_binary().expect("resolve pager binary");
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("huge.png");
@@ -102,8 +86,7 @@ fn oversized_source_is_contained() {
 #[test]
 #[ignore = "spawns the built pager binary; run with cargo test -- --ignored"]
 fn invalid_diagram_is_contained() {
-    // An unrenderable diagram: the child's render errors and it exits non-zero; the parent returns Err, no PNG
-    // This is the same containment path a child panic (abort, then non-success exit) would take
+    // An unrenderable diagram: the child's render errors and it exits non-zero; the parent returns Err.
     let bin = pager_binary().expect("resolve pager binary");
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("bad.png");
@@ -128,8 +111,6 @@ fn invalid_diagram_is_contained() {
 #[test]
 #[ignore = "spawns the built pager binary; run with cargo test -- --ignored"]
 fn tight_timeout_kills_child_and_returns_err() {
-    // A 1 ms budget cannot cover spawning and rendering, so the parent must kill and reap the child and return Err. It
-    // must return promptly, not block on the child finishing.
     let bin = pager_binary().expect("resolve pager binary");
     let dir = tempfile::tempdir().expect("tempdir");
     let out = dir.path().join("slow.png");

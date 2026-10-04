@@ -51,9 +51,8 @@ fn session_thread_not_finished_while_running() {
     );
 }
 
-/// Regression test: per-session threads run independently.
-/// Asserts that B finishes within 1 second, proving A's blocking work does not stall B.
-/// On the old single-LocalSet architecture, both tasks would share one thread and B would be blocked until A's sleep yields.
+/// Regression test: per-session threads run independently. On the old single-LocalSet architecture, both tasks would share
+/// one thread and B would be blocked until A's sleep yields.
 #[test]
 fn sessions_on_separate_threads_do_not_block_each_other() {
     let (result_tx, result_rx) = std::sync::mpsc::channel::<&str>();

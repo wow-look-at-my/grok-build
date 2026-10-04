@@ -1,6 +1,4 @@
-//! Reducer test suite.
-//! A child module of `messages` so it can reach `MessagesReducer`'s private state directly.
-//! The coordinator's re-exported `wire`/`state` items arrive via `use super::*`; the shared transport/`acp` reducer items come from the crate root.
+//! Reducer test suite. A child module of `messages` so it can reach `MessagesReducer`'s private state directly.
 
 use super::usage::messages_model_usage;
 use super::wire::ModelUsage;

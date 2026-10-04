@@ -1,10 +1,4 @@
 //! RFC 8628 Device Authorization Grant, CLI side.
-//!
-//! Two-phase API:
-//!   1. `request_device_code()`: POST to server, get code and URL
-//!   2. `complete_device_code_login()`: poll until approved, persist credentials
-//!
-//! Callers control what happens between the two phases (print to stderr, show in TUI, display in IDE sidebar, etc.).
 
 use std::sync::Arc;
 
@@ -20,8 +14,6 @@ const DEFAULT_DEVICE_POLL_INTERVAL_SECS: i32 = 5;
 const DEVICE_SLOW_DOWN_INCREMENT_SECS: u64 = 5;
 const MIN_DEVICE_CODE_EXPIRY_FALLBACK_SECS: i64 = 10 * 60;
 
-/// Only the 404 "no device endpoint" case is typed, because the login flow matches on it to fall back to loopback. Every other device-code failure stays a plain `anyhow` error.
-/// Wrapping one in a `#[error(transparent)]` variant hides the `reqwest::Error` the login funnel classifies. Transparent forwards `source()` past the error it wraps.
 #[derive(Debug, Error)]
 pub enum DeviceCodeError {
     #[error(
@@ -33,8 +25,8 @@ pub enum DeviceCodeError {
 
 // --- Public types ---
 
-/// Low-cardinality hint sent to the OAuth2 provider as the `x-grok-client-surface` header. It lets device-flow metrics separate logins a human can actually finish (`Ui`, `Cli`) from headless automation (`Headless`).
-/// Headless automation mints a device code but can never reach the browser consent page. That traffic otherwise pollutes the device-flow conversion denominator.
+/// Low-cardinality hint sent to the OAuth2 provider as the
+/// `x-grok-client-surface` header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum ClientSurface {
@@ -45,8 +37,8 @@ pub enum ClientSurface {
     /// No interactive surface (CI, container, script): no human can complete.
     Headless,
 }
-/// Classify the CLI (non-TUI) surface: a TTY on stderr means a human is watching the printed URL and code.
-/// Otherwise we're headless (CI/container/script) and no one will complete the flow.
+/// Classify the CLI (non-TUI) surface: a TTY on stderr means a human is
+/// watching the printed URL and code.
 fn detect_cli_surface() -> ClientSurface {
     use std::io::IsTerminal as _;
     if std::io::stderr().is_terminal() {
@@ -102,7 +94,6 @@ struct IdTokenClaims {
     email: Option<String>,
 }
 
-// --- Phase 1: Request device code ---
 
 /// Request a device code and user code from the OAuth2 provider.
 /// This is a single HTTP POST.
@@ -171,7 +162,6 @@ pub async fn request_device_code(
     })
 }
 
-// --- Phase 2: Poll until approved ---
 
 /// Poll the token endpoint until the user approves (or denies, or the code expires).
 /// On success, persists credentials to `~/.grok/auth.json` and returns the authenticated `GrokAuth`.
@@ -263,9 +253,7 @@ pub async fn run_device_code_login_channels(
     auth_manager: &Arc<AuthManager>,
     channels: &mut Option<AuthChannels>,
 ) -> anyhow::Result<(GrokAuth, bool)> {
-    // A front-end (TUI/IDE) listening on `url_tx` renders the URL to a human, so it's `Ui`
-    // Without one we're on the CLI: a TTY means a human can act (`Cli`), no TTY means headless automation (`Headless`) that will never complete
-    // Computed before `take()` so the `request_device_code` call already carries the surface
+    // A front-end (TUI/IDE) listening on `url_tx` renders the URL to a human.
     let surface = if channels.is_some() {
         ClientSurface::Ui
     } else {
@@ -330,7 +318,8 @@ async fn prompt_and_poll(
         eprintln!();
     }
 
-    // Show the code to confirm it matches the browser (anti-phishing): a complete URL pre-fills it (just confirm), otherwise the user types it
+    // Show the code to confirm it matches the browser (anti-phishing): a
+    // complete URL pre-fills it ( confirm), otherwise the user types it
     if device_code.verification_uri_complete.is_some() {
         eprintln!("Confirm this code in your browser:");
     } else {
@@ -391,7 +380,6 @@ async fn build_auth(
         };
 
     // Device flow has no pre-selection; verify the token's principal here.
-    // Match the principal id even if `principal_type` is absent.
     let principal_policy = crate::oidc::login_principal_policy(auth_manager.grok_com_config());
     crate::oidc::enforce_login_principal(
         principal_policy.as_ref(),
@@ -761,8 +749,6 @@ pub mod tests {
         }
     }
 
-    // Real time (not `start_paused`: the shared client's 30s connect_timeout fires under auto-advance)
-    // Deadline-expiry isn't tested; the deadline is floored at 10 min (MIN_DEVICE_CODE_EXPIRY_FALLBACK_SECS)
     async fn run_poll(
         responses: Vec<(u16, serde_json::Value)>,
     ) -> anyhow::Result<(super::GrokAuth, bool)> {

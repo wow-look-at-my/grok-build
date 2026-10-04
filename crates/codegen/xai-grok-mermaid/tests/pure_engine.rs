@@ -1,6 +1,4 @@
 //! Integration tests for the public render path through the default engine.
-//!
-//! These use only the public API (`default_engine` and `render_checked`) so they exercise the real, always-compiled dagre-based engine end to end.
 
 use xai_grok_mermaid::{
     MermaidError, MermaidTheme, RenderLimits, RenderParams, default_engine, render_checked,
@@ -128,8 +126,8 @@ fn long_identifier_node_labels_survive_intact_in_svg() {
     nav --> mark --> global --> sidebar --> page";
     let svg = mermaid_to_svg::render_mermaid_to_svg(src, None)
         .expect("the real user flowchart must render to SVG");
-    // Each long identifier appears as a complete single tspan
-    // A slice at any offset could never produce the whole identifier as one tspan's content
+    // Each long identifier appears as a complete single tspan A slice at any
+    // offset could never produce the whole identifier.
     assert!(
         svg.contains(">mark_filter_restore_context</tspan>"),
         "{svg}"
@@ -225,7 +223,6 @@ fn class_annotated_ampersand_flowchart_renders_to_png() {
     }
 }
 
-/// An xychart with a categorical x-axis and two `line` series must render to a decodable PNG on both themes.
 /// This exercises the full `[Open Image]` path (source to SVG to raster); a categorical x-axis (no `-->`) previously failed to open.
 #[test]
 fn categorical_xychart_with_two_series_renders_to_png() {

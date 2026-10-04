@@ -1,28 +1,4 @@
 //! Fit FullReplace summarizer input to a **token** budget.
-//!
-//! # Ordered ladder (strict sequence — do not reorder)
-//!
-//! Stages run **in order**. A later stage is attempted **only if** earlier
-//! stages still leave `history ++ steps` over budget. Effects accumulate
-//! (e.g. `ToolTruncated` may already have dropped history).
-//!
-//! ```text
-//! 0. Verbatim              history ++ steps already ≤ budget
-//! 1. HistoryTurnSelected   drop oldest **history** turns first
-//!                          (prefer keeping all steps)
-//! 2. ToolTruncated         only if still over: prefix-clip tool results
-//!                          that alone exceed budget (grok-build style:
-//!                          max_bytes = max_tokens * 4, no binary search)
-//! 3. StepTurnsSelected     only if still over: drop oldest **step** turns
-//!                          (keep remaining history)
-//! 4. Emergency             only if still over: hard-shrink newest item
-//! ```
-//!
-//! Reuses:
-//! - [`select_turns_to_compact`] for history/step suffix selection
-//! - [`ItemTokenCounter`] for size decisions
-//! - harness [`CompactionItemBuilder::truncate_payload_for_compaction`]
-//!   (one-shot, same `tokens * 4` budget as grok-build)
 
 use tracing::info;
 
@@ -30,10 +6,8 @@ use crate::item::CompactionItemBuilder;
 use crate::select::select_turns_to_compact;
 use crate::token::ItemTokenCounter;
 
-/// Which stage of the **ordered** fit ladder first made the input fit.
-///
-/// Ladder order is fixed (see module docs). Later rungs run only when earlier
-/// ones are insufficient; earlier side-effects still apply. Telemetry only.
+/// Which stage of the **ordered** fit ladder first made the input fit. Ladder
+/// order is fixed (see module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FitRung {
     /// No change; full history++steps fits.
@@ -96,9 +70,6 @@ fn concat_turns<T: Clone>(history: &[T], steps: &[T]) -> Vec<T> {
 }
 
 /// One-shot payload shrink (grok-build: `max_bytes = max_tokens * 4`).
-///
-/// No binary search / re-tokenize loop — same as
-/// `fit_conversation_to_budget` → `truncate_item_to_tokens`.
 fn shrink_item_to_token_budget<T: CompactionItemBuilder>(item: &T, max_tokens: u32) -> T {
     item.truncate_payload_for_compaction(max_tokens)
 }
@@ -128,8 +99,6 @@ fn shrink_oversized_tool_results<T: CompactionItemBuilder>(
 }
 
 /// Keep newest contiguous suffix under `budget` (`select_turns_to_compact` keep side).
-///
-/// `counts` must match `turns` 1:1 (caller materializes once; do not re-tokenize).
 fn keep_recent_under_budget<T: CompactionItemBuilder>(
     turns: &[T],
     counts: &[u32],
@@ -187,11 +156,7 @@ fn plan_ok<T: Clone>(
 
 /// Fit `history ++ steps` into `budget` **tokens** for FullReplace summarizer input.
 ///
-/// **Ordered ladder** (strict — later only if earlier still insufficient):
-/// 1. [`FitRung::HistoryTurnSelected`] — drop oldest history first  
-/// 2. [`FitRung::ToolTruncated`] — then shrink oversized payloads  
-/// 3. [`FitRung::StepTurnsSelected`] — then drop oldest steps  
-/// 4. [`FitRung::Emergency`] — finally hard-shrink newest item  
+/// [`FitRung::Emergency`] — finally hard-shrink newest item
 ///
 /// Output `llm_turns` is always chronological: remaining history then remaining steps.
 /// [`FitPlan::rung`] is the highest stage that was required.
@@ -201,9 +166,7 @@ pub fn fit_turns_for_summarizer<T: CompactionItemBuilder>(
     counter: &dyn ItemTokenCounter<T>,
     budget: u32,
 ) -> FitPlan<T> {
-    // Materialize per-turn counts once for the pre-truncate stages. After tool
-    // shrink we re-count (payloads changed). Avoids ~N full BPE passes when the
-    // harness token cache is cold / wrong tokenizer (counter ≠ compaction model).
+    // Materialize per-turn counts once for the pre-truncate stages. After tool shrink we re-count (payloads changed).
     let mut hist_counts = token_counts(history, counter);
     let mut step_counts = token_counts(steps, counter);
     let tokens_raw = sum_counts(&hist_counts).saturating_add(sum_counts(&step_counts));
@@ -239,8 +202,6 @@ pub fn fit_turns_for_summarizer<T: CompactionItemBuilder>(
     let mut hist_omitted = 0u32;
     let mut step_omitted = 0u32;
 
-    // ── 1) HistoryTurnSelected (first) ────────────────────────────────
-    // Drop oldest history only. Prefer keeping *all* steps.
     let steps_tokens = sum_counts(&step_counts);
     if steps_tokens < budget {
         let hist_budget = budget - steps_tokens;
@@ -278,8 +239,6 @@ pub fn fit_turns_for_summarizer<T: CompactionItemBuilder>(
         );
     }
 
-    // ── 2) ToolTruncated (only if history drop still insufficient) ────
-    // One-shot prefix clip on tool results only (grok-build style).
     let (hist2, n1) = shrink_oversized_tool_results(&hist, counter, budget);
     let (step2, n2) = shrink_oversized_tool_results(&step, counter, budget);
     hist = hist2;
@@ -302,7 +261,6 @@ pub fn fit_turns_for_summarizer<T: CompactionItemBuilder>(
         );
     }
 
-    // ── 3) StepTurnsSelected (only if tools still insufficient) ───────
     let hist_tokens = sum_counts(&hist_counts);
     if hist_tokens < budget {
         let step_budget = budget - hist_tokens;
@@ -343,14 +301,6 @@ pub fn fit_turns_for_summarizer<T: CompactionItemBuilder>(
         );
     }
 
-    // ── 4) Emergency (last resort) ────────────────────────────────────
-    // grok-build: when even the newest unit alone exceeds budget, keep it
-    // truncated in place (tool result, or lone assistant/user text).
-    //
-    // If the ladder emptied both sides (e.g. select returned None and both
-    // hist/step were cleared), fall back to the original newest item so we
-    // never hand FullReplace an empty plan (which used to become
-    // NothingToCompact and abort CLE recovery).
     let combined = concat_turns(&hist, &step);
     let (source, history_turns_omitted, step_turns_omitted) = if combined.is_empty() {
         info!(
@@ -430,8 +380,7 @@ pub fn truncate_text_to_token_budget(text: &str, max_tokens: u32) -> String {
     // Reserve room for the marker so the result stays near max_bytes.
     const MARKER_RESERVE: usize = 64;
     let keep = max_bytes.saturating_sub(MARKER_RESERVE);
-    // `floor_char_boundary` is the longest prefix cut that does not land inside
-    // a multi-byte character; a budget past the end clamps to the end.
+    // `floor_char_boundary` is the longest prefix cut that does not land inside a multi-byte character.
     let end = text.floor_char_boundary(keep.min(text.len()));
     let dropped = text.len() - end;
     #[allow(clippy::string_slice)] // the index is `floor_char_boundary`'s output
@@ -580,8 +529,7 @@ mod tests {
 
     #[test]
     fn ladder_order_history_before_tool_before_steps() {
-        // Large history + huge tool in steps: history must be dropped first; if that
-        // alone is not enough, tool shrink runs before any step-turn drop.
+        // Large history + huge tool in steps: history must be dropped first.
         let hist: Vec<_> = (0..20).map(|i| MockItem::labeled("h", i, 80)).collect();
         let huge = "x".repeat(40_000);
         let steps = vec![MockItem::assistant("keep-me"), MockItem::tool(&huge)];
@@ -681,7 +629,6 @@ mod tests {
     #[test]
     fn emergency_from_select_clear_still_non_empty() {
         let hist: Vec<MockItem> = vec![];
-        // Each item alone exceeds budget=1 under CharCounter (/4, max 1).
         let steps: Vec<_> = (0..5)
             .map(|i| MockItem::user(&format!("s-{i}-{}", "x".repeat(40))))
             .collect();

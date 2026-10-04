@@ -1,9 +1,4 @@
 //! `update_goal` — model-driven goal progress reporting.
-//!
-//! Each invocation is paired with an `oneshot::Sender<UpdateGoalAck>`
-//! over the channel to `SessionActor`; the tool blocks on that ack so
-//! the model's tool reply reflects the real outcome (classifier
-//! verdict / transition / rejection), not a misleading instant success.
 
 use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::tool::{ToolKind, ToolNamespace};
@@ -49,8 +44,7 @@ pub enum UpdateGoalAck {
     Accepted { summary: String },
     /// Classifier judged the goal achieved.
     ClassifierAchieved { details_path: String },
-    /// Classifier could not produce a verdict (infra failure); the
-    /// harness fails open and treats the goal as achieved.
+    /// Classifier could not produce a verdict (infra failure); the harness fails open and treats the goal as achieved.
     ClassifierFailOpenAchieved { reason: &'static str },
     /// Classifier rejected the completion; `attempt < max_runs` so
     /// another attempt is still available.
@@ -59,30 +53,22 @@ pub enum UpdateGoalAck {
         attempt: u32,
         max_runs: u32,
     },
-    /// Classifier rejected the completion AND the per-goal cap was
-    /// reached; the goal has been auto-paused with `BackOff`.
+    /// Classifier rejected the completion AND the per-goal cap was reached.
     ClassifierCapReached { details_path: String, attempt: u32 },
-    /// Classifier rejected the completion with the same flagged gaps as
-    /// the prior attempt (no progress); the goal auto-paused early
-    /// before the cap.
+    /// Classifier rejected the completion with the same flagged gaps as the prior attempt (no progress).
     ClassifierStalled { details_path: String, attempt: u32 },
-    /// Verification found no model-fixable path (every refuter flagged a
-    /// contradiction or environment-unverifiable blocker); the goal
-    /// paused for a user decision.
+    /// Verification found no model-fixable path (every refuter flagged a contradiction or environment-unverifiable blocker).
     ClassifierBlocked { details_path: String },
     /// Classifier disabled by policy; goal marked complete directly.
     CompletedWithoutClassifier,
-    /// Second `update_goal(completed: true)` arrived while a
-    /// classifier was already verifying the previous attempt; routed
-    /// through the synthetic-NotAchieved accounting.
+    /// Second `update_goal(completed: true)` arrived while a classifier was
+    /// already verifying the attempt.
     ClassifierConcurrentInFlight {
         details_path: String,
         attempt: u32,
         max_runs: u32,
     },
-    /// Mid-turn `completed: true` was queued for classifier verification at turn-end. The verdict arrives as a system
-    /// reminder in the next user turn; the model must NOT call `update_goal(completed: true)` again until then. Invariant:
-    /// the ack is resolved IMMEDIATELY at defer time, NOT parked — parking deadlocks the single-task actor.
+    /// Mid-turn `completed: true` was queued for classifier verification at turn-end.
     DeferredToTurnEnd { pending_depth: u32 },
     /// Update was rejected; `reason` discriminates the cause and
     /// drives the tool-error code, `detail` is the model-facing
@@ -101,34 +87,23 @@ pub enum RejectReason {
     BlockSeenInDrain,
     /// `blocked_reason` set but the goal was not Active.
     BlockedAgainstNonActive,
-    /// `completed: true` arrived after the classifier cap auto-paused
-    /// the goal — model must wait for user resume.
+    /// `completed: true` arrived after the classifier cap auto-paused the goal — model must wait for user resume.
     PostCap,
-    /// `completed: true` against a non-Active goal for reasons OTHER
-    /// than the classifier cap.
+    /// `completed: true` against a non-Active goal for reasons OTHER than the classifier cap.
     NonActive,
-    /// The goal harness is not enabled for this session (no `/goal` run in progress), so there is no orchestration to update. The `update_goal`
-    /// tool and its `GoalUpdateHandle` are always exposed, so a model can call the tool outside goal mode; the drain rejects cleanly with this
-    /// reason instead of dropping the ack oneshot (which would surface as the misleading `harness_no_ack` "dropped the response channel" error).
+    /// The goal harness is not enabled for this session (no `/goal` run in progress).
     HarnessDisabled,
-    /// Reserved for strict-mode eviction surfacing; not currently
-    /// constructed (the new design acks evicted entries as
-    /// `DeferredToTurnEnd` at their own defer time).
+    /// Reserved for strict-mode eviction surfacing.
     PendingQueueEvicted,
-    /// The goal auto-paused mid-drain (cap, stall/no_progress, or
-    /// blocked); this strictly-later entry was dropped without
-    /// re-verification.
+    /// The goal auto-paused mid-drain (cap, stall/no_progress, or blocked); this strictly-later entry.
     DroppedAfterPauseInDrain,
     /// `GoalOrchestration` snapshot vanished between guard and reserve.
     OrchestrationVanished,
-    /// Goal transitioned out of Active while the classifier awaited
-    /// a verdict (user paused mid-fire).
+    /// Goal transitioned out of Active while the classifier awaited a verdict (user paused mid-fire).
     StatusChangedDuringClassifier,
-    /// In-flight short-circuit but the orchestration snapshot
-    /// vanished mid-flight.
+    /// In-flight short-circuit but the orchestration snapshot vanished mid-flight.
     InFlightOrchestrationVanished,
-    /// A lite goal's completion check judged the goal not met, or could
-    /// not reach a verdict. `detail` carries the reason.
+    /// A lite goal's completion check judged the goal not met, or could not reach a verdict.
     LiteCheckNotMet,
 }
 
@@ -151,13 +126,10 @@ impl RejectReason {
     }
 }
 
-/// Item posted across the goal-update channel: the model's input
-/// paired with the oneshot the tool will await for its reply.
+/// Item posted across the goal-update channel.
 pub type UpdateGoalEnvelope = (UpdateGoalInput, tokio::sync::oneshot::Sender<UpdateGoalAck>);
 
-/// Wrap an `UpdateGoalInput` in an envelope whose ack receiver is
-/// discarded. Test-only helper; `pub` is needed for cross-crate test
-/// access from `xai-grok-shell`.
+/// Wrap an `UpdateGoalInput` in an envelope whose ack receiver is discarded.
 #[doc(hidden)]
 pub fn envelope_for_test(input: UpdateGoalInput) -> UpdateGoalEnvelope {
     let (ack_tx, _ack_rx) = tokio::sync::oneshot::channel();
@@ -165,7 +137,6 @@ pub fn envelope_for_test(input: UpdateGoalInput) -> UpdateGoalEnvelope {
 }
 
 /// Handle for the `update_goal` tool to send commands to the session.
-/// Inserted into Resources as an ephemeral (non-serialized) resource.
 pub struct GoalUpdateHandle(pub tokio::sync::mpsc::UnboundedSender<UpdateGoalEnvelope>);
 
 impl std::fmt::Debug for GoalUpdateHandle {
@@ -175,8 +146,7 @@ impl std::fmt::Debug for GoalUpdateHandle {
 }
 
 // ---------------------------------------------------------------------------
-// Output
-// ---------------------------------------------------------------------------
+// Output.
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct UpdateGoalOutput {
@@ -186,9 +156,7 @@ pub struct UpdateGoalOutput {
 
 impl xai_tool_runtime::ToolOutput for UpdateGoalOutput {}
 
-// ---------------------------------------------------------------------------
-// Tool implementation
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------- Tool implementation.
 
 #[derive(Debug, Default)]
 pub struct UpdateGoalTool;
@@ -246,8 +214,7 @@ impl xai_tool_runtime::Tool for UpdateGoalTool {
         use crate::types::tool_metadata::shared_resources;
         let resources = shared_resources(&ctx)?;
 
-        // Fallback summary used only if the actor drops the ack
-        // oneshot without responding.
+        // Fallback summary used only if the actor drops the ack oneshot without responding.
         let fallback_summary = build_summary(&input);
 
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel::<UpdateGoalAck>();

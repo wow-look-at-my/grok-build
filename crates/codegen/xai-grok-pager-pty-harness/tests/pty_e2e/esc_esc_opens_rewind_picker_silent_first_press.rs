@@ -29,8 +29,7 @@ async fn esc_esc_opens_rewind_picker_silent_first_press() {
         .wait_for_turn_idle(Duration::from_secs(15))
         .expect("turn idle");
 
-    // First Esc: arm the rewind picker SILENTLY, with no clear/rewind confirm hint
-    // Settle between the presses: a single `ESC ESC` byte pair collapses to one `Esc` in crossterm
+    // First Esc: arm the rewind picker SILENTLY, with no clear/rewind confirm hint Settle between the presses.
     harness.inject_keys(keys::ESC).expect("first esc");
     harness.update(Duration::from_millis(200));
     let after_first = harness.screen_contents();
@@ -59,9 +58,6 @@ async fn esc_esc_opens_rewind_picker_silent_first_press() {
     harness.inject_keys(keys::ESC).expect("dismiss rewind");
     harness.update(Duration::from_millis(200));
 
-    // Phase 2: the same double-Esc must arm and open from the SCROLLBACK pane.
-    // Single Tab leaves the prompt; the "Space:prompt" footer proves the scrollback owns keys
-    // Tab toggles, so poll the render instead of re-pressing
     harness.inject_keys(b"\t").expect("tab to scrollback");
     harness
         .wait_for_text("Space:prompt", Duration::from_secs(10))

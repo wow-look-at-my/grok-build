@@ -1,8 +1,4 @@
-//! Regression test: `update_config` must not leak values from `managed_config.toml` or `requirements.toml` into the user's `config.toml`.
-//!
-//! Bug: `update_config` used `load_effective_config()` (which merges all config layers) to populate the `Config` struct.
-//! `save_config` then wrote that merged result back to the user's `config.toml`.
-//! With `auto_update = false` in `requirements.toml`, any unrelated config write (even a theme change) would permanently poison the user's config.
+//! Regression test: `update_config` must not leak values from `managed_config.toml` or `requirements.toml`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -27,8 +23,7 @@ fn test_home() -> &'static PathBuf {
 fn reset_config_files(home: &std::path::Path) {
     for name in ["config.toml", "requirements.toml", "managed_config.toml"] {
         let path = home.join(name);
-        // `remove_file` cannot clear a directory squat left by
-        // `update_config_refuses_unreadable_config_toml`; later `fs::write`
+        // `remove_file` cannot clear a directory squat left by `update_config_refuses_unreadable_config_toml`; later `fs::write`
         // then fails with EISDIR.
         match fs::symlink_metadata(&path) {
             Ok(m) if m.is_dir() => {
@@ -80,8 +75,7 @@ async fn update_config_does_not_leak_requirements_into_user_config() {
     .await
     .expect("update_config should succeed");
 
-    // --- Assert ---
-    // Read the user's config.toml back from disk (raw, no merge).
+    // --- Assert --- Read the user's config.toml back from disk (raw, no merge).
     let raw = fs::read_to_string(home.join("config.toml")).unwrap();
     let user_toml: toml::Value = toml::from_str(&raw).unwrap();
     let user_cfg = xai_grok_shell::util::config::load_config_from_toml(&user_toml);

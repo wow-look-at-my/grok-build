@@ -6,8 +6,8 @@ const DONE_SENTINEL: &str = "EDIT_MERGE_PAR_DONE";
 
 const FIXTURE: &str = "parallel_fix.py";
 
-/// PTY: with `collapsed_edit_blocks` enabled, two parallel search_replace calls to the same file in one model turn merge into a single Edit row.
-/// The merged row sums both diffstats, whatever order the completions land in.
+/// PTY: with `collapsed_edit_blocks` enabled, parallel search_replace calls to the same file in one model turn merge into a single Edit row. The
+/// merged row sums both diffstats, whatever order the completions land in.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test pty_e2e -- --ignored"]
 async fn edit_merge_parallel_pty() {
@@ -32,8 +32,7 @@ async fn edit_merge_parallel_pty() {
     .expect("write fixture");
     let abs = dunce::canonicalize(&target).unwrap_or(target.clone());
 
-    // Each replacement swaps one line for one line and the two do not overlap
-    // Both calls therefore succeed against the same starting file whatever order the shell runs them in
+    // Each replacement swaps one line for one line and both do not overlap Both calls therefore succeed against the same starting file whatever order the shell runs.
     let args_a = json!({
         "file_path": abs.to_string_lossy(),
         "old_string": "second = \"two\"",

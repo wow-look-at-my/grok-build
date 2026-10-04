@@ -129,7 +129,6 @@ pub const DEFAULT_VERIFICATION_GATE_TIMEOUT_SECS: u64 = 600;
 pub const DEFAULT_VERIFICATION_GATE_TIMEOUT_MS: u64 = DEFAULT_VERIFICATION_GATE_TIMEOUT_SECS * 1000;
 
 /// Prompt gates run before every prompt, so a stuck hook stalls the session.
-/// 30s bounds that stall while leaving room for real validation work.
 pub const DEFAULT_PROMPT_GATE_TIMEOUT_SECS: u64 = 30;
 
 pub const DEFAULT_PROMPT_GATE_TIMEOUT_MS: u64 = DEFAULT_PROMPT_GATE_TIMEOUT_SECS * 1000;
@@ -211,22 +210,18 @@ pub struct HookSpec {
     pub matcher: Option<HookMatcher>,
     pub enabled: bool,
     /// Command path, env-expanded; unresolved/modifier forms kept for the runner's `sh -c` branch.
-    /// Not re-expanded at run time. Display via `command_raw`.
     pub command: Option<PathBuf>,
     /// Pre-expansion `command` for display, so resolved secrets never leak.
     pub command_raw: Option<String>,
     /// URL (http handlers), env-expanded.
-    /// Unlike `command`, the HTTP runner re-expands at run time before SSRF validation (deliberate asymmetry).
     pub url: Option<String>,
     /// Pre-expansion `url` for display; see `command_raw`.
     pub url_raw: Option<String>,
     pub timeout_ms: u64,
     pub source_dir: PathBuf,
     /// Env injected into the hook process, and consulted by load-time `command`/`url` expansion.
-    /// Precedence from low to high: user `env` (reserved keys stripped), plugin-injected, runner-injected at spawn (authentic identity always wins).
     pub extra_env: std::collections::HashMap<String, String>,
-    /// The hook's origin and single source of truth for classification: `File` (JSON files, agent frontmatter), a config tier, or `Plugin`.
-    /// `#[serde(default)]` maps specs serialized before this field existed to `File`.
+    /// The hook's origin and single source of truth for classification: `File` (JSON files, agent frontmatter), a config tier.
     #[serde(default)]
     pub layer: HookProvenance,
 }
@@ -519,7 +514,7 @@ pub fn parse_hook_file(content: &str, file_path: &Path) -> (Vec<HookSpec>, Vec<H
     )
 }
 
-/// Build [`HookSpec`]s from a [`HooksMap`], shared by the JSON and config paths so the two never diverge.
+/// Build [`HookSpec`]s from a [`HooksMap`], shared by the JSON and config paths so both never diverge.
 fn build_specs(hooks_map: HooksMap, ctx: SpecContext<'_>) -> (Vec<HookSpec>, Vec<HookError>) {
     let mut specs = Vec::new();
     let mut errors = Vec::new();

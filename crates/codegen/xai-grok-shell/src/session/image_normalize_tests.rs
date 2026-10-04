@@ -108,7 +108,6 @@ async fn large_dimensions_resized_when_over_side_limit() {
         other => panic!("expected Compressed, got {other:?}"),
     }
 }
-/// A flat 1700x1700 attachment is under the 2000px side clamp but its 2.89 Mpx area exceeds the v9 pixel budget, so it must be downscaled.
 /// Under a side-only cap this passed through unchanged at full resolution.
 #[tokio::test]
 async fn attachment_over_area_cap_is_downscaled() {
@@ -128,7 +127,6 @@ async fn attachment_over_area_cap_is_downscaled() {
         other => panic!("expected a 2.89 Mpx image to be downscaled, got {other:?}"),
     }
 }
-/// 3438x1830 flat screenshot: aspect ratio above ~1.67, so the 2000px side clamp binds before the area cap and the long side lands exactly on 2000.
 #[tokio::test]
 async fn wide_screenshot_clamped_to_side_limit_and_area_budget() {
     let img = make_image_content(3438, 1830);
@@ -148,7 +146,6 @@ async fn wide_screenshot_clamped_to_side_limit_and_area_budget() {
         other => panic!("expected Compressed, got {other:?}"),
     }
 }
-/// Near-square 1800x1700 = 3.06 Mpx: sides are within the 2000px clamp, so only the v9 area cap triggers; the result stays under 2000 per side.
 #[tokio::test]
 async fn near_square_over_area_budget_downscaled_below_side_clamp() {
     let img = make_image_content(1800, 1700);
@@ -248,7 +245,6 @@ async fn oversize_bytes_becomes_jpeg_under_limit() {
     }
 }
 /// Regression: a byte-efficient image over the 2000px side clamp (e.g. a 2048px export) whose downscale is not smaller in bytes.
-/// The old keep-original branch returned the still-oversized original, which the API rejects on many-image requests (400).
 /// Normalize must clamp the side regardless of byte size.
 #[tokio::test]
 async fn oversize_dimension_but_byte_efficient_is_still_downscaled() {
@@ -614,7 +610,6 @@ async fn truncated_jpeg_under_size_limits_is_dropped() {
         other => panic!("expected Failed, got {other:?}"),
     }
 }
-/// A 16×16 icon clears the 8px-side floor but violates the API's 512-total-pixel floor.
 #[tokio::test]
 async fn below_total_pixel_floor_is_dropped() {
     let img = make_image_content(16, 16);
@@ -678,9 +673,6 @@ fn persisted_image_reject_reason_verdicts() {
     assert!(reason(&garbage_ico).is_some_and(|r| r.contains("Ico")));
     assert!(reason(b"not an image").is_some());
 }
-/// Regression: a camera-class photo above the old 16 Mpx decode cap must normalize via downscale, not be rejected.
-/// The production shape: a 5184×3888 ≈ 20 Mpx attachment refused with "exceeds … px decode limit".
-/// The API accepts up to ~178.9 Mpx.
 #[tokio::test]
 async fn camera_sized_photo_is_compressed_not_rejected() {
     use image::codecs::jpeg::JpegEncoder;
@@ -702,7 +694,6 @@ async fn camera_sized_photo_is_compressed_not_rejected() {
         other => panic!("expected Compressed, got {other:?}"),
     }
 }
-/// Above the API ceiling the decode is still refused (the API would 400 it regardless).
 /// SOF dims are patched because a real fixture that large is infeasible to encode.
 #[tokio::test]
 async fn above_api_ceiling_is_rejected_by_normalize() {
@@ -732,9 +723,8 @@ async fn above_api_ceiling_is_rejected_by_normalize() {
         other => panic!("expected Failed, got {other:?}"),
     }
 }
-/// The API also 400s images whose header dims exceed its `MAX_IMAGE_PIXELS` ceiling.
-/// A kept one would brick the session the same way as a below-floor image.
-/// (SOF dims are patched because encoding a real fixture above 178 Mpx is infeasible.)
+/// The API also 400s images whose header dims exceed its `MAX_IMAGE_PIXELS` ceiling. A
+/// kept one would brick the session the same way as a below-floor image.
 #[test]
 fn persisted_image_reject_reason_pixel_ceiling() {
     use image::codecs::jpeg::JpegEncoder;
@@ -1064,7 +1054,6 @@ async fn sub_8x8_image_is_rejected() {
         at(&result.dropped, 0)
     );
 }
-/// Boundary: 8×8 clears the per-side floor but not the API's 512-total-pixel floor (64 px would 400 server-side).
 #[tokio::test]
 async fn exactly_8x8_is_rejected_by_total_pixel_floor() {
     let img = make_image_content(8, 8);

@@ -1,0 +1,2 @@
+# Another project's tree: no rule reads or rewrites a byte of it.
+third_party/** linguist-vendored

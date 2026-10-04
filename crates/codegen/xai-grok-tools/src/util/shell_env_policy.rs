@@ -1,6 +1,4 @@
-//! Controls which environment variables agent subprocesses (bash tool,
-//! terminals) inherit. Default is a no-op (inherit everything); enforced at the
-//! shell spawn sites on macOS, Linux, and Windows.
+//! Controls which environment variables agent subprocesses (bash tool, terminals) inherit.
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -44,9 +42,7 @@ pub struct ShellEnvironmentPolicy {
     pub ignore_default_excludes: bool,
     #[serde(deserialize_with = "deserialize_patterns")]
     pub exclude: Vec<EnvironmentVariablePattern>,
-    /// Values inserted into the base environment before `include_only` filtering
-    /// (an unmatched name is then dropped). These seed the base; request env
-    /// layered at spawn can still override them.
+    /// Values inserted into the base environment before `include_only` filtering (an unmatched name is then dropped).
     pub set: HashMap<String, String>,
     #[serde(deserialize_with = "deserialize_patterns")]
     pub include_only: Vec<EnvironmentVariablePattern>,
@@ -88,9 +84,8 @@ impl ShellEnvironmentPolicy {
         self.include_only.is_empty() || self.include_only.iter().any(|p| p.matches(name))
     }
 
-    /// Whether `name` survives the name filters (default excludes, `exclude`, `include_only`), ignoring `inherit`/`set`.
-    /// Used to filter variables layered in after the policy base, e.g. login-shell capture. Shares its matchers with
-    /// [`create_env_from_vars`] so the two cannot drift.
+    /// Whether `name` survives the name filters (default excludes, `exclude`,
+    /// `include_only`), ignoring `inherit`/`set`.
     pub fn allows(&self, name: &str) -> bool {
         !self.matches_default_exclude(name)
             && !self.matches_exclude(name)
@@ -186,9 +181,7 @@ where
             .collect(),
     };
 
-    // Order matters: default excludes, then `exclude`, then `set`, then
-    // `include_only`. `set` lands before `include_only` so an unmatched set name
-    // is still dropped. The matchers are shared with `allows`.
+    // Order matters: default excludes, then `exclude`, then `set`, then `include_only`.
     env.retain(|k, _| !policy.matches_default_exclude(k));
     env.retain(|k, _| !policy.matches_exclude(k));
     for (k, v) in &policy.set {
@@ -205,9 +198,9 @@ where
     env
 }
 
-/// Clear the command's inherited env and install the policy-derived base env. `active` must already
-/// be noop-filtered; `None` leaves the command untouched. The one base-env code path, shared by the
-/// public entry point and the spawn sites.
+/// Clear the command's inherited env and install the policy-derived base env.
+/// `active` must already be noop-filtered; `None` leaves the command
+/// untouched.
 pub(crate) fn install_policy_base_env(
     cmd: &mut tokio::process::Command,
     active: Option<&ShellEnvironmentPolicy>,

@@ -1,16 +1,4 @@
 //! This binary applies a sandbox profile and then attempts various operations to verify kernel enforcement.
-//! Run it directly to test:
-//!
-//! ```bash
-//! # Test workspace profile (should allow writes to CWD, block ~/Desktop)
-//! cargo run -p xai-grok-sandbox --example sandbox_smoke_test
-//!
-//! # Test strict profile
-//! cargo run -p xai-grok-sandbox --example sandbox_smoke_test -- strict
-//!
-//! # Test read-only profile
-//! cargo run -p xai-grok-sandbox --example sandbox_smoke_test -- read-only
-//! ```
 
 use std::path::Path;
 use xai_grok_sandbox::{ProfileName, SandboxManager};
@@ -69,35 +57,28 @@ fn main() {
     // Test operations
     println!("\n--- Testing filesystem operations ---\n");
 
-    // Test 1: Read CWD (should always work)
     test_read("Read CWD", &workspace);
 
-    // Test 2: Read /tmp (should work for workspace/read-only)
     test_read("Read /tmp", Path::new("/tmp"));
 
-    // Test 3: Read home directory (should work for workspace/read-only, blocked for strict)
     if let Some(home) = xai_dirs::home_dir() {
         test_read("Read ~/", &home);
     }
 
-    // Test 4: Write to CWD (should work for workspace/strict, blocked for read-only)
     let test_file = workspace.join(".sandbox-test-write");
     test_write("Write to CWD", &test_file);
     let _ = std::fs::remove_file(&test_file);
 
-    // Test 5: Write to /tmp (should work for workspace/strict, blocked for read-only)
     let tmp_test = Path::new("/tmp/.grok-sandbox-test");
     test_write("Write to /tmp", tmp_test);
     let _ = std::fs::remove_file(tmp_test);
 
-    // Test 6: Write outside workspace (should be blocked for all active profiles)
     if let Some(home) = xai_dirs::home_dir() {
         let outside = home.join(".sandbox-test-blocked");
         test_write("Write to ~/", &outside);
         let _ = std::fs::remove_file(&outside);
     }
 
-    // Test 7: Read ~/.ssh (a custom profile's `deny` list could block this)
     if let Some(home) = xai_dirs::home_dir() {
         let ssh = home.join(".ssh");
         if ssh.exists() {

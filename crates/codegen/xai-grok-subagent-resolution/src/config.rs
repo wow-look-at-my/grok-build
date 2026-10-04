@@ -1,11 +1,4 @@
 //! Subagent role and persona configuration types.
-//!
-//! These are the canonical definitions for `SubagentRole`, `SubagentPersona`, and `PersonaIOField`.
-//! The shell re-exports them via `xai_grok_shell::config::{SubagentRole, SubagentPersona, PersonaIOField}`.
-//!
-//! Methods that remain in `xai-grok-shell` (on `SubagentsConfig`):
-//! - `discover_personas()` / `discover_roles()`: filesystem discovery coupled to how the shell resolves its config.
-//! - `resolve()`: config layering (CLI > env > TOML > remote) is shell-specific; this crate receives already-resolved maps.
 
 use std::path::PathBuf;
 use xai_grok_tools::implementations::skills::discovery::extract_first_paragraph;
@@ -20,28 +13,22 @@ use serde::Deserialize;
 pub struct SubagentRole {
     /// Human-readable description of what this role does.
     pub description: String,
-    /// Default capability mode for agents using this role.
-    /// One of: "read-only", "read-write", "execute", "all".
-    /// This is a config default, not an argument the model passes at spawn; `general-purpose` stays `all`.
+    /// Default capability mode for agents using this role. One of: "read-only", "read-write", "execute", "all".
     #[serde(default)]
     pub default_capability_mode: Option<String>,
     /// Model override for this role.
-    /// If set, agents using this role default to this model unless the spawn-time `model` override is provided.
     #[serde(default)]
     pub model: Option<String>,
     /// Default reasoning effort for this role (e.g. "low", "medium", "high").
-    /// Can be overridden per-spawn via `reasoning_effort` in the task tool.
     #[serde(default)]
     pub reasoning_effort: Option<String>,
     /// Path to a prompt/instruction file (relative to workspace root).
-    /// Content is loaded at spawn time and prepended to the child's prompt as a `<role-instructions>` block.
     #[serde(default)]
     pub prompt_file: Option<String>,
     /// Default isolation mode ("none" or "worktree").
     #[serde(default)]
     pub default_isolation: Option<String>,
     /// Base directory for resolving relative `prompt_file` references.
-    /// Set to the parent dir of the source `.toml` file during discovery.
     #[serde(skip)]
     pub source_dir: Option<PathBuf>,
 }
@@ -54,18 +41,13 @@ pub struct SubagentPersona {
     /// Inline instruction text applied as a persona layer.
     pub instructions: Option<String>,
     /// Optional short description shown in persona summaries.
-    /// An empty or missing value falls back to the first paragraph of `instructions`.
     pub description: Option<String>,
     /// Path to an instruction file (relative to workspace root).
-    /// Content is loaded at spawn time and merged with `instructions`.
-    /// If both are set, `instructions` is prepended before file content.
     pub instructions_file: Option<String>,
     /// Declared inputs this persona expects.
-    /// The parent agent reads these to know what file paths or context to provide in the prompt.
     #[serde(default)]
     pub inputs: Vec<PersonaIOField>,
     /// Declared outputs this persona produces.
-    /// The parent agent reads these to know what artifacts to expect and pass to the next agent.
     #[serde(default)]
     pub outputs: Vec<PersonaIOField>,
     /// Default isolation mode when this persona is used.
@@ -78,12 +60,9 @@ pub struct SubagentPersona {
     #[serde(default)]
     pub reasoning_effort: Option<String>,
     /// Base directory for resolving relative file references.
-    /// Set to the parent dir of the source `.toml` file during discovery.
-    /// When `None`, relative paths resolve against the workspace cwd.
     #[serde(skip)]
     pub source_dir: Option<PathBuf>,
     /// Absolute path to the source file this persona was loaded from.
-    /// Populated during discovery; `None` for inline config personas.
     #[serde(skip)]
     pub source_path: Option<String>,
 }

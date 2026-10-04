@@ -1,7 +1,4 @@
 //! Optional multi-user workspace helpers for loading per-user agent config.
-//!
-//! When `XAI_ROOT` and `XAI_USER` are set and the resolved directory exists, that path can contribute AGENTS.md / rules / skills discovery.
-//! Unset env vars are a no-op (typical for standalone installs).
 
 use std::path::PathBuf;
 
@@ -14,8 +11,6 @@ pub fn optional_workspace_user_dir() -> Option<PathBuf> {
 }
 
 /// Map `$XAI_USER` to a path relative to the workspace root.
-/// A bare username is nested under `x/` so it cannot collide with an unrelated same-named directory.
-/// Values that already contain a path separator are used as-is.
 fn workspace_user_relpath(user: &str) -> String {
     if user.contains('/') || user.contains('\\') {
         user.to_string()

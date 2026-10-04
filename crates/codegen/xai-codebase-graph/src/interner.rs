@@ -1,32 +1,4 @@
 //! Arena-based string interner for memory-efficient string deduplication.
-//!
-//! This module provides a string interner that stores all strings in a single
-//! contiguous buffer, minimizing allocations and improving cache locality.
-//! It uses hash-based lookup for O(1) interning operations.
-//!
-//! # Design
-//!
-//! The interner uses a two-level lookup approach:
-//! 1. **Primary lookup**: HashMap from 64-bit hash -> list of StringIds with that hash
-//! 2. **Collision resolution**: When hashes collide, actual string content is compared
-//!
-//! This gives O(1) average case for both `intern()` and `get_id()` operations.
-//!
-//! # Example
-//!
-//! ```
-//! use xai_codebase_graph::interner::StringInterner;
-//!
-//! let mut interner = StringInterner::new();
-//!
-//! let id1 = interner.intern("hello");
-//! let id2 = interner.intern("world");
-//! let id3 = interner.intern("hello"); // Returns same id as id1
-//!
-//! assert_eq!(id1, id3);
-//! assert_ne!(id1, id2);
-//! assert_eq!(interner.get(id1), Some("hello"));
-//! ```
 
 use std::hash::{Hash, Hasher};
 
@@ -36,12 +8,10 @@ use rustc_hash::FxHasher;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-/// Type alias for HashMap with u64 keys that are already hashed.
-/// Uses NoHashHasher since keys don't need re-hashing.
+/// Type alias for HashMap with u64 keys that are already hashed. Uses NoHashHasher since keys don't need re-hashing.
 type U64NoHashMap<V> = HashMap<u64, V, BuildNoHashHasher<u64>>;
 
 /// A compact identifier for an interned string.
-/// Using u32 allows up to 4 billion unique strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StringId(u32);
 
@@ -60,15 +30,11 @@ impl StringId {
 }
 
 /// Arena-based string interner for efficient string deduplication.
-/// Contiguous buffer for cache locality; hash lookup for O(1) interning.
-/// Stores arbitrary bytes, including non-UTF-8 paths.
 #[derive(Debug, Clone)]
 pub struct StringInterner {
     /// Contiguous storage for all interned byte strings
     arena: Vec<u8>,
     /// Maps hash -> StringId(s). Most buckets have exactly one entry.
-    /// Using SmallVec<[StringId; 1]> optimizes for the common case of no collisions.
-    /// Uses NoHashHasher since keys are already hashed.
     lookup: U64NoHashMap<SmallVec<[StringId; 1]>>,
     /// Maps StringId to (start, len) in arena
     offsets: Vec<(u32, u16)>,
@@ -247,9 +213,8 @@ impl StringInterner {
         &self.offsets
     }
 
-    /// Release over-allocated capacity in the arena and offsets buffers after a bulk build.
-    /// The lookup table is left unshrunk because it benefits from load-factor headroom.
-    /// Called by `ScopeGraphIndex::compact()`.
+    /// Release over-allocated capacity in the arena and offsets buffers after
+    /// a bulk build.
     pub(crate) fn shrink_to_fit(&mut self) {
         self.arena.shrink_to_fit();
         self.offsets.shrink_to_fit();

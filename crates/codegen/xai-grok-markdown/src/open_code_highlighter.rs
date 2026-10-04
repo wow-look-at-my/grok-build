@@ -1,23 +1,4 @@
 //! Streaming-render syntect caches for fenced code blocks in the unfrozen tail.
-//! Two complementary strategies sit behind one entry point ([`OpenCodeHighlighter::highlight_block`]):
-//!
-//! - **Still-open trailing block** (closing ``` not arrived): persists syntect's *resumable* per-line state across `rerender_tail` calls.
-//!   [`ParseState`] and [`HighlightState`] carry over, so each committed line is highlighted exactly once.
-//!   Without it, every push re-ran syntect over the whole growing block: O(N²) over the stream (~35 ms/push near the end of a ~1000-line block).
-//! - **Closed blocks trapped in the tail** (e.g. inside an open list, which can never checkpoint): memoizes the batch highlight.
-//!   The memo is keyed on `(fence_info, body)`, so syntect runs once per distinct fence body instead of once per streamed chunk.
-//!   A re-run cost ~50 to 100 ms; one recorded UI freeze hit 4.5 s.
-//!
-//! Both paths are byte-identical to a one-shot batch render.
-//! Invalidation is wholesale: the streaming renderer drops this struct on any theme/style/width reset.
-//!
-//! # Invariants relied upon (open-block path)
-//!
-//! - **Append-only:** while a block is open the source only grows by appending.
-//!   Because nothing freezes, the block's start offset within the tail is stable.
-//!   Both are guarded defensively here; on any mismatch the persisted state is discarded and rebuilt from scratch.
-//! - **One `Event::Text` per pass:** `TextMergeWithOffset` coalesces the block body into a single `Event::Text`.
-//!   So this is invoked once per block per render pass and only needs to persist *across* passes.
 
 use std::collections::HashMap;
 
@@ -33,19 +14,15 @@ use crate::syntax::{Syntect, syntax_highlight_raw};
 type HlLine = Vec<(SyntectStyle, String)>;
 
 /// Byte budget for memoized closed-fence bodies; cleared wholesale on overflow.
-/// Sized in body bytes (not entries) because pulldown can split a list-indented fence into per-line `Event::Text` fragments.
-/// If live bodies ever exceed the budget the memo degrades to recomputing each pass, never to unbounded memory or wrong output.
 const CLOSED_MEMO_CAP_BYTES: usize = 256 * 1024;
 
 /// Streaming syntect caches for fenced code blocks in the unfrozen tail (see module docs).
 /// Holds incremental state for the single still-open trailing block, plus a memo for closed blocks the tail re-parses every pass.
 /// Owns all the low-level syntect state so the parser/renderer don't have to.
 pub(crate) struct OpenCodeHighlighter {
-    /// Language/info token of the block currently cached.
-    /// A change means a different syntax (and colors), so the cache must be rebuilt.
+    /// Language/info token of the block cached.
     fence_info: String,
     /// Block start offset within the tail.
-    /// A change means we are looking at a different block, so the cache must be rebuilt.
     start_in_tail: usize,
     /// Bytes highlighted up to and including the last committed `\n`.
     committed_len: usize,
@@ -56,8 +33,6 @@ pub(crate) struct OpenCodeHighlighter {
     /// syntect highlight state AFTER the last committed line.
     highlight_state: HighlightState,
     /// Memo for **closed** fences still in the unfrozen tail (`fence_info -> body -> highlighted lines`).
-    /// Nested maps keep the hot lookup allocation-free.
-    /// Invalidation is inherited from `self` (the streaming renderer drops this struct on any theme/style/width reset).
     closed_memo: HashMap<String, HashMap<String, Vec<HlLine>>>,
     /// Total body bytes currently memoized, for the `CLOSED_MEMO_CAP_BYTES` budget check.
     closed_memo_bytes: usize,
@@ -144,8 +119,8 @@ impl OpenCodeHighlighter {
         start_in_tail: usize,
         text: &str,
     ) -> Option<Vec<HlLine>> {
-        // Rebuild from scratch when anything that would change the output from the very first line changes
-        // That is the language (different syntax/colors), the block position (a different block), or a non-append-only edit to the body
+        // Rebuild from scratch when anything that would change the output
+        // from the first line changes That is the language.
         let needs_rebuild = fence_info != self.fence_info
             || start_in_tail != self.start_in_tail
             || !self.committed_prefix_matches(text);
@@ -174,9 +149,9 @@ impl OpenCodeHighlighter {
         };
         for line in LinesWithEndings::from(rest) {
             if line.ends_with('\n') {
-                // The line is final: highlight it once and permanently advance the persisted state
-                // On a (practically unreachable) parse error, invalidate the cache so the next pass rebuilds from scratch
-                // That avoids resuming from a now-inconsistent `parse_state` and matches the stateless batch fallback
+                // The line is final: highlight it once and permanently
+                // advance the persisted state On a (practically unreachable)
+                // parse error.
                 let ops = match self.parse_state.parse_line(line, &syn.syntax_set) {
                     Ok(ops) => ops,
                     Err(_) => {
@@ -191,8 +166,7 @@ impl OpenCodeHighlighter {
                 self.committed_lines.push(highlighted);
                 self.committed_len += line.len();
             } else {
-                // The trailing line has no `\n` yet: it is still streaming and may be extended by the next push
-                // Highlight it on CLONES so the committed state stays anchored at the last `\n`
+                // The trailing line has no `\n` yet: it is still streaming.
                 let mut parse_state = self.parse_state.clone();
                 let mut highlight_state = self.highlight_state.clone();
                 let ops = match parse_state.parse_line(line, &syn.syntax_set) {
@@ -210,9 +184,6 @@ impl OpenCodeHighlighter {
             }
         }
 
-        // TODO: this clone keeps the open-block RETURN at O(lines)/pass = O(lines^2)/stream
-        // It only copies precomputed style spans; the expensive syntect parse/highlight CPU is already O(N) total
-        // The surrounding tail render and url_scan are likewise O(N)/pass, so this is tracked as an accepted residual, not a regression
         let mut out = self.committed_lines.clone();
         if let Some(last) = tentative {
             out.push(last);
@@ -296,7 +267,7 @@ mod tests {
         let mut cache = OpenCodeHighlighter::new(syn);
         let a = "alpha: 1\nbeta: 2\n";
         let _ = cache.highlight(syn, "yaml", 0, a).expect("hl a");
-        // Same language, different block position and body: the new body must be highlighted fresh (no stale committed lines from the old block)
+        // Same language, different block position and body: the new body must be highlighted fresh.
         let b = "gamma: 3\ndelta: 4\n";
         let got = cache.highlight(syn, "yaml", 42, b).expect("hl b");
         assert_eq!(got, batch(syn, "yaml", b));
@@ -352,8 +323,7 @@ mod tests {
     fn closed_memo_does_not_disturb_open_block_state() {
         let syn = test_syntect();
         let mut cache = OpenCodeHighlighter::new(syn);
-        // Interleave closed-memo calls with open-block incremental growth (a tail with one closed fence above an open one)
-        // Open-block output must stay batch-identical throughout
+        // Interleave closed-memo calls with open-block incremental growth (a tail with one closed fence above an open one).
         let closed = "name: pinned\n";
         let full = "a = 1\nb = 2\nc = 3\n";
         for end in 1..=full.len() {
@@ -371,8 +341,7 @@ mod tests {
     fn closed_memo_cap_overflow_keeps_output_correct() {
         let syn = test_syntect();
         let mut cache = OpenCodeHighlighter::new(syn);
-        // The bodies are sized so a handful of distinct ones cross the byte budget and trigger the wholesale clear
-        // Output must stay batch-identical before, at, and after the eviction
+        // The bodies are sized so a handful of distinct ones cross the byte budget.
         let filler = "x".repeat(CLOSED_MEMO_CAP_BYTES / 4);
         for i in 0..6 {
             let body = format!("key_{i}: \"{filler}\"\n");

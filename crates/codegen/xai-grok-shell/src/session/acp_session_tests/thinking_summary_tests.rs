@@ -1,12 +1,4 @@
 //! The summary call a thinking block triggers, driven end to end.
-//!
-//! The pager half (`scrollback::blocks::thinking`, and the pager's
-//! `acp_handler::tests::thinking_summary`) draws whatever arrives here. What
-//! these tests own is the producing half on the real path: a completed response
-//! carrying reasoning must put one request on the wire, and the
-//! update it broadcasts must carry the key the summary was written for and the
-//! cleaned text the model answered with. The switch is exercised in both
-//! positions, because a session that resolved it off must spend nothing.
 
 use super::support::*;
 use super::*;
@@ -133,8 +125,7 @@ async fn a_long_thinking_block_is_summarized_keyed_to_its_own_call() {
                 "the cleaner must strip the quotes: {summary:?}"
             );
 
-            // The same update must reach persistence, or a reload loses it while
-            // the live session still shows it.
+            // The same update must reach persistence, or a reload loses it while the live session still shows it.
             let mut persisted = false;
             while let Ok(msg) = prx.try_recv() {
                 let PersistenceMsg::Update(crate::session::storage::SessionUpdate::Xai(notif)) =
@@ -154,10 +145,7 @@ async fn a_long_thinking_block_is_summarized_keyed_to_its_own_call() {
             }
             assert!(persisted, "the summary must be persisted for a reload");
 
-            // The summary is exactly one model call, and that call carried the
-            // reasoning it was asked to summarize. The paired off-position test
-            // asserts this same counter at zero, so the count measured here is
-            // what makes that zero mean something.
+            // The summary is exactly one model call, and that call carried the reasoning it was asked to summarize.
             let bodies = server.request_bodies();
             assert_eq!(
                 bodies.len(),
@@ -221,8 +209,7 @@ async fn a_session_resolved_with_the_switch_off_asks_nothing() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            // Production sets this once at spawn from `[ui].thinking_summaries`;
-            // this is the off position of that same resolved field.
+            // Production sets this once at spawn from `[ui].thinking_summaries`.
             actor.thinking_summaries_enabled = false;
             let actor = std::sync::Arc::new(actor);
 
@@ -230,8 +217,7 @@ async fn a_session_resolved_with_the_switch_off_asks_nothing() {
             server.set_response("must never be asked for");
             aim_at(&actor, &server).await;
 
-            // Identical input to the on-position test above: only the switch
-            // differs, so a skip attributed to anything else is excluded.
+            // Identical input to the on-position test above: only the switch differs.
             let thinking = long_reasoning();
             actor.spawn_thinking_summary(&response_carrying_thinking(&thinking), Some(6_000));
 

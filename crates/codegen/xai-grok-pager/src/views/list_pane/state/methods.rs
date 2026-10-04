@@ -1,8 +1,8 @@
 use super::*;
 
 impl ListPaneState {
-    /// Create a new state with the given wrap mode and follow-mode flag. Uses default config (all
-    /// features enabled). For custom config, use [`new_with_config`].
+    /// Create a new state with the given wrap mode and follow-mode flag. Uses
+    /// default config (all features enabled).
     pub fn new(wrap_mode: WrapMode, follow_mode: bool) -> Self {
         Self::new_with_config(wrap_mode, follow_mode, ListPaneConfig::default())
     }
@@ -85,9 +85,8 @@ impl ListPaneState {
         self.multi_range.clone()
     }
 
-    /// Get the range of physical item indices to copy. In visual mode: the visual selection range.
-    /// Without visual mode: the single selected item (range of 1). Returns `None` if nothing is
-    /// selected.
+    /// Get the range of physical item indices to copy. In visual mode: the
+    /// visual selection range.
     pub fn copy_range(&self) -> Option<Range<usize>> {
         if self.visual_mode {
             self.multi_range.clone()
@@ -120,8 +119,8 @@ impl ListPaneState {
             .map(|m| ListFilter { matcher: m.clone() })
     }
 
-    /// Map a visible index to a physical index. When no filter is active, returns `vi` unchanged
-    /// (identity). When filtering, looks up the stored vis map.
+    /// Map a visible index to a physical index. When no filter is active,
+    /// returns `vi` unchanged (identity).
     #[inline]
     pub fn to_physical(&self, vi: usize) -> usize {
         match &self.vis_map {
@@ -138,8 +137,8 @@ impl ListPaneState {
         }
     }
 
-    /// Resolve a visible index to an item. Returns `None` when layout/`vis_map` is stale relative to
-    /// `items`. (model cleared or shrunk between `prepare_layout` and a key/mouse handler).
+    /// Resolve a visible index to an item. Returns `None` when
+    /// layout/`vis_map` is stale relative to `items`.
     #[inline]
     fn item_at<'a, T: ListItem>(&self, vi: usize, items: &'a [T]) -> Option<&'a T> {
         let pi = match &self.vis_map {
@@ -194,7 +193,6 @@ impl ListPaneState {
     }
 
     /// Number of items matching the current search/filter query.
-    /// Returns 0 when no matcher is active.
     pub fn match_count(&self) -> usize {
         self.matcher.as_ref().map(|m| m.match_count()).unwrap_or(0)
     }
@@ -282,9 +280,8 @@ impl ListPaneState {
         }
     }
 
-    /// Screen position of the input bar cursor, if the input bar is active. Returns `Some((x, y))`
-    /// after rendering. The caller can pass this to `Frame::set_cursor_position()` for a hardware
-    /// blinking cursor. Returns `None` when the input bar is closed or before the first render.
+    /// Screen position of the input bar cursor, if the input bar is active.
+    /// Returns `Some((x, y))` after rendering.
     pub fn cursor_position(&self) -> Option<(u16, u16)> {
         if self.input_mode.is_some() {
             self.input_cursor_screen_pos
@@ -306,7 +303,6 @@ impl ListPaneState {
         if let Some(sid) = self.selected_id {
             self.visual_mode = true;
             self.visual_anchor_id = Some(sid);
-            // multi_selected_ids will be set in prepare_layout.
         }
     }
 
@@ -330,16 +326,15 @@ impl ListPaneState {
         self.clipboard = provider;
     }
 
-    /// Disable follow mode permanently (sets `follow_enabled = false`). After this, `G` selects the
-    /// last item instead of engaging follow. Use when the data source is no longer streaming.
+    /// Disable follow mode permanently (sets `follow_enabled = false`). After
+    /// this, `G` selects the last item instead of engaging follow.
     pub fn disable_follow_permanently(&mut self) {
         self.config.follow_enabled = false;
         self.follow_mode = false;
     }
 
-    /// Set a scroll anchor: after the next layout rebuild, the selected item will be placed at this screen-y offset.
-    ///
-    /// Use this before operations that change item content/count (e.g., raw mode toggle) to keep the selected item at the same screen position.
+    /// Set a scroll anchor: after the next layout rebuild, the selected item
+    /// will be placed at this screen-y offset.
     pub fn set_scroll_anchor(&mut self) {
         if let Some(vi) = self.selected_index {
             let item_y = self.layout.virtual_y(vi);
@@ -348,9 +343,8 @@ impl ListPaneState {
         }
     }
 
-    /// Invalidate the layout cache, forcing a full rebuild on the next `prepare_layout` call. Use this
-    /// when the item content has changed without changing the item count. For example, streaming
-    /// updates replace existing items with different content and heights.
+    /// Invalidate the layout cache, forcing a full rebuild on the next
+    /// `prepare_layout` call.
     pub fn invalidate_layout(&mut self) {
         self.last_stamp = None;
         self.height_cache.clear();
@@ -470,7 +464,6 @@ impl ListPaneState {
     /// Set wrap mode explicitly.
     pub fn set_wrap_mode(&mut self, mode: WrapMode) {
         self.wrap_mode = mode;
-        // Wrap mode change forces full rebuild on next prepare_layout.
     }
 
     /// Set or clear the matcher (filter or search).
@@ -547,13 +540,12 @@ impl ListPaneState {
         }
     }
 
-    // prepare_layout: the ONE generic entry point
+    // prepare_layout: the generic entry point
 
     /// Recompute layout, resolve the stable-ID selection to indices, and clamp scroll. Uses dirty
     /// tracking to avoid redundant work. Append only (same width, no filter change, count grew, Wrap
     /// mode): only new items get `desired_height`, growing the prefix-sum cache.
     pub fn prepare_layout<T: ListItem>(&mut self, items: &[T], width: u16, viewport_height: u16) {
-        // Reserve 1 row for the bottom bar when the input bar is open or a matcher is accepted (showing status)
         self.viewport_height = if self.input_mode.is_some() || self.matcher.is_some() {
             viewport_height.saturating_sub(1)
         } else {
@@ -565,8 +557,7 @@ impl ListPaneState {
             self.filter_dirty = false;
         }
 
-        // Reuse the cached vis_map when the filter hasn't changed and the item count is unchanged
-        // This avoids re-running the filter predicate on every frame (expensive for 100K+ items)
+        // Reuse the cached vis_map when the filter hasn't changed and the item count is unchanged This avoids re-running the filter predicate.
         let items_len_changed = items.len() != self.last_item_count;
         let need_refilter = filter_changed || items_len_changed;
         self.last_item_count = items.len();
@@ -602,9 +593,8 @@ impl ListPaneState {
             }
         };
 
-        // SCROLLBAR WIDTH FIX: Determine effective width for layout. Otherwise, compute at full width,
-        // check the total, and recompute if wrong. Phase 2 only triggers when the guess is wrong (rare:
-        // few items that wrap heavily enough to exceed the viewport).
+        // SCROLLBAR WIDTH FIX: Determine effective width for layout. Otherwise, compute at full width, check the total,
+        // and recompute if wrong.
         let definitely_needs_scrollbar =
             self.wrap_mode == WrapMode::Wrap && vis_count > self.viewport_height as usize;
         let mut effective_width = if definitely_needs_scrollbar {
@@ -649,8 +639,7 @@ impl ListPaneState {
         };
         let count_same = vis_count == old_count;
 
-        // A refilter can keep the same vis_count while remapping visible rows to different physical items
-        // Heights would go stale without a rebuild
+        // A refilter can keep the same vis_count while remapping visible rows.
         let filter_refiltered = need_refilter && vis.is_some();
         let needs_full_rebuild =
             !width_same || !mode_same || filter_changed || !count_grew || filter_refiltered;
@@ -686,9 +675,9 @@ impl ListPaneState {
         }
         // else: count, width, mode, and filter unchanged, so the cache is still valid
 
-        // SCROLLBAR WIDTH FIX Phase 2: Check if we guessed wrong. If heights were computed at full width
-        // but total_height > viewport (the scrollbar will actually show), recompute at the narrower width.
-        // This only happens with Wrap mode and few items that wrap a lot.
+        // If heights were computed at full width but total_height > viewport
+        // (the scrollbar will show), recompute at the narrower width. This
+        // only happens with Wrap mode and few items that wrap a lot.
         if self.wrap_mode == WrapMode::Wrap
             && !definitely_needs_scrollbar
             && self.layout.total_height() > self.viewport_height as usize
@@ -798,17 +787,15 @@ impl ListPaneState {
 
         self.clamp_scroll();
 
-        // Only when items SHRINK (eviction from the front), which shifts indices and can push the selection off-screen
-        // NOT on append (which just extends below); that would fight the user's click/scroll position via the margin
+        // Only when items SHRINK (eviction from the front), which shifts indices and can push the selection off-screen NOT on append.
         let items_shrunk = vis_count < old_count;
         if !self.follow_mode && items_shrunk {
             self.ensure_selected_visible();
         }
     }
 
-    /// Scroll down by `n` visual lines (viewport only, no follow logic). This is a low-level primitive.
-    /// Higher-level methods (`half_page_down`, `scroll_lines`, etc.) call this and then handle
-    /// follow-mode transitions.
+    /// Scroll down by `n` visual lines (viewport only, no follow logic). This
+    /// is a low-level primitive.
     fn scroll_down_raw(&mut self, n: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(n);
         self.clamp_scroll();
@@ -858,7 +845,7 @@ impl ListPaneState {
             }),
         };
 
-        // Record scroll offset before clamping so we can detect how much was actually consumed
+        // Record scroll offset before clamping so we can detect how much was consumed
         let offset_before = self.scroll_offset;
 
         // Scroll (raw, no follow logic)
@@ -942,7 +929,6 @@ impl ListPaneState {
                 return;
             }
         }
-        // No selectable item in viewport; leave selection unchanged
     }
 
     /// Scroll down by half a page, keeping selection at same screen-y.
@@ -1018,8 +1004,8 @@ impl ListPaneState {
 
         let actual_scroll = self.scroll_offset as isize - offset_before as isize;
 
-        // Only move selection if the viewport actually scrolled.
-        // Unlike ctrl-d/u, the mouse wheel does NOT apply leftover; if the viewport is clamped (top/bottom), the selection stays put
+        // Only move selection if the viewport scrolled. Unlike ctrl-d/u, the mouse wheel does NOT apply leftover; if the viewport is clamped
+        // (top/bottom), the selection stays put
         if actual_scroll != 0
             && let Some(sy) = screen_y
         {
@@ -1043,7 +1029,7 @@ impl ListPaneState {
         }
     }
 
-    /// Jump to the top.  Used internally; callers typically use `select_first`.
+    /// Jump to the top. Used internally; callers typically use `select_first`.
     pub fn goto_top(&mut self) {
         self.follow_mode = false;
         self.reset_edge_state();
@@ -1087,9 +1073,8 @@ impl ListPaneState {
         }
     }
 
-    /// Check if the viewport is at the bottom of the content.
-    ///
-    /// Returns `true` when `scroll_offset + viewport_height >= total_height`, i.e. there are no more lines below the viewport.
+    /// Check if the viewport is at the bottom of the content. Returns `true` when `scroll_offset + viewport_height >= total_height`, i.e. there are no
+    /// more lines below the viewport.
     fn is_at_bottom(&self) -> bool {
         let total = self.layout.total_height();
         let vp = self.viewport_height as usize;
@@ -1184,15 +1169,13 @@ impl ListPaneState {
         }
     }
 
-    /// Select the previous selectable item (upward): `k`/`↑`. In FOLLOW: exit follow, cursor at last
-    /// visible, then move up 1. In NAV: move up. Resets edge state.
+    /// Select the previous selectable item (upward): `k`/`↑`. In NAV: move up. Resets edge state.
     pub fn select_prev<T: ListItem>(&mut self, items: &[T]) {
         if items.is_empty() {
             return;
         }
         if self.follow_mode {
             self.exit_follow(items);
-            // Now move up one from the newly placed cursor
         }
 
         self.reset_edge_state();
@@ -1244,7 +1227,7 @@ impl ListPaneState {
             return;
         }
 
-        // Follow disabled or visual mode: just select the last selectable item
+        // Follow disabled or visual mode: select the last selectable item
         self.reset_edge_state();
         self.scroll_screen_y = None;
         let count = self.layout.item_count();
@@ -1300,7 +1283,6 @@ impl ListPaneState {
         let item_h = self.layout.item_height(vi) as usize;
         let vp = self.viewport_height as usize;
         // Adaptive margin: shrink when viewport is too small for full margin.
-        // Need at least 1 row for the item itself + 2×margin, so margin ≤ (vp-1)/2.
         let margin = (self.scroll_margin as usize).min(vp.saturating_sub(1) / 2);
 
         // If item top is above viewport (with margin), scroll up.
@@ -1429,8 +1411,8 @@ impl ListPaneState {
 
             // Comment/Feedback mode: bare Enter and Esc are not consumed; the caller manages save/cancel. Shift+Enter inserts a newline.
             if mode == InputBarMode::Comment {
-                // Apple Terminal: Shift+Enter arrives as bare Enter (no Kitty protocol)
-                // Poll CoreGraphics for the real modifier state and insert a newline instead of returning to the caller
+                // Apple Terminal: Shift+Enter arrives as bare Enter (no Kitty
+                // protocol) Poll CoreGraphics for the real modifier state.
                 if key!(Enter).matches(event)
                     && crate::input::is_apple_terminal_newline_modifier_held()
                 {
@@ -1727,8 +1709,7 @@ impl ListPaneState {
             self.matcher.as_ref().map(|m| m.mode),
             Some(MatchMode::Filter)
         );
-        // In Filter mode every visible line matches, so suppress highlights
-        // In Search mode highlights help find matches, so keep them
+        // In Filter mode every visible line matches, so suppress highlights In Search mode highlights help find matches.
         self.show_highlights = !is_filter;
         if self.input_textarea.text().is_empty() {
             // An empty query cancels
@@ -1807,8 +1788,6 @@ impl ListPaneState {
         };
 
         // Resolve a user-typed line number to an item index.
-        // If any item implements goto_line_number(), find the first item whose source line number matches
-        // Otherwise fall back to the 0-based index (line - 1)
         let has_line_numbers = items.iter().any(|i| i.goto_line_number().is_some());
         let resolve_line = |line: usize| -> usize {
             if has_line_numbers {
@@ -1846,7 +1825,7 @@ impl ListPaneState {
                     }
                     self.selected_index = None;
                 } else {
-                    // Just jump (no visual).
+                    // Jump (no visual).
                     self.exit_visual_mode();
                     if let Some(item) = items.get(idx) {
                         self.selected_id = Some(item.stable_id());
@@ -1908,14 +1887,11 @@ impl ListPaneState {
         self.goto_line_had_visual = false;
     }
 
-    /// Close the input bar if it's open, but preserve any accepted matcher. Use when hiding a pane: the
-    /// user's committed search/filter should persist across show/hide cycles. Only the mid-typing input
-    /// bar state is discarded.
+    /// Close the input bar if it's open, but preserve any accepted matcher.
     pub fn close_input_bar(&mut self) {
         if self.input_mode.is_some() {
             self.input_mode = None;
             self.input_textarea.set_text("");
-            // Don't clear the matcher; it was already accepted
         }
     }
 
@@ -1953,7 +1929,6 @@ impl ListPaneState {
                 m.rebuild_matches(items);
             }
             // Only jump if the current selection is NOT already a match.
-            // This prevents the viewport from shifting on every keystroke when the user is already looking at matching content
             let current_pi = self
                 .selected_index
                 .map(|vi| self.to_physical(vi))
@@ -1978,9 +1953,9 @@ impl ListPaneState {
         }
     }
 
-    /// Toggle follow mode (explicit pause/resume). In FOLLOW: exit to NAV, cursor at last visible
-    /// (pause). In NAV: engage follow immediately (resume from anywhere). No-op when `follow_enabled`
-    /// is false in config.
+    /// Toggle follow mode (explicit pause/resume). In FOLLOW: exit to NAV,
+    /// cursor at last visible (pause). In NAV: engage follow immediately
+    /// (resume from anywhere).
     pub fn toggle_follow<T: ListItem>(&mut self, items: &[T]) {
         if !self.config.follow_enabled {
             return;
@@ -2033,8 +2008,7 @@ impl ListPaneState {
                     self.scrollbar_dragging = true;
                     return self.apply_scrollbar_click(row, items);
                 }
-                // A new press elsewhere ends any stale thumb drag (the Up was lost to terminal coalescing, SSH, or focus loss)
-                // Callers that treat `is_scrollbar_dragging()` after this dispatch as "this Down hit the track" rely on that
+                // A new press elsewhere ends any stale thumb drag (the Up was lost to terminal coalescing, SSH, or focus loss) Callers.
                 self.scrollbar_dragging = false;
                 // A content click selects an item
                 if pane_area.width > 0 && pane_area.height > 0 && row >= pane_area.y {

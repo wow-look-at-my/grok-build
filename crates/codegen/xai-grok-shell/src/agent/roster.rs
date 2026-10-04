@@ -1,21 +1,11 @@
 //! Roster types for the multi-client FleetView dashboard.
-//!
-//! The roster is a list of dashboard-sized summaries of every session the leader hosts (resident actors).
-//! It also carries recently-touched on-disk (`Dormant`) sessions.
-//! Clients read it two ways:
-//!
-//!   - request/response `x.ai/sessions/list` returns `{ "sessions": [RosterEntry, …] }`
-//!   - broadcast notification `x.ai/sessions/changed` carries `{ "upserted": [RosterEntry, …], "removed": ["sess-abc", …] }`
-//!
-//! The wire shape is intentionally small and current-state only; no event fold or materialized snapshot is required (the snapshot is deferred).
 
 use serde::{Deserialize, Serialize};
 use xai_grok_sampling_types::ReasoningEffort;
 
 use crate::session::persistence::Summary;
 
-/// Coarse activity of a session as rendered in the dashboard's status column. Mirrors the design's `SessionActivity` at dashboard granularity.
-/// A full background-work breakdown (bg tasks / monitors / scheduler / subagents) lands with a richer `SessionActivity`. The dashboard only needs this coarse signal to pick a status glyph.
+/// Coarse activity of a session as rendered in the dashboard's status column.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RosterActivity {
@@ -52,22 +42,17 @@ pub struct RosterEntry {
     pub title: Option<String>,
     pub cwd: String,
     pub is_worktree: bool,
-    /// Set only on rows the leader synthesizes outside the agent; rows a local agent owns
-    /// leave it `None`. Its value set is disjoint from the persisted `Summary.session_kind`
-    /// (`worktree`, `subagent`, ...), which `merge_roster` only folds into `is_worktree`.
+    /// Set only on rows the leader synthesizes outside the agent; rows a local agent owns leave it `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_kind: Option<String>,
     #[serde(default)]
     pub model_id: Option<String>,
     /// Per-session reasoning effort for `model_id`.
-    /// Carried alongside the model so clients can render the session's effort in the roster without a separate `model_state` fetch.
-    /// `None` means "use the model/global default" (or the session predates per-session effort persistence).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
     pub yolo: bool,
     pub activity: RosterActivity,
     /// Ultra-short summary of the session's most recent turn, for the row's secondary line.
-    /// From `summary.json`; absent until the first turn ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_turn_summary: Option<String>,
     /// `true` while a resident actor hosts the session (vs. read from disk).
@@ -123,8 +108,7 @@ pub(crate) fn merge_roster(
         if let Some(title) = summary.display_title_opt() {
             entry.title = Some(title);
         }
-        // Copied through even when `None`: disk is authoritative
-        // A rewind-cleared summary.json also clears a resident row whose cache still holds the old value
+        // Copied through even when `None`: disk is authoritative A rewind-cleared summary.json also clears a resident row whose cache still holds.
         entry.last_turn_summary = summary.last_turn_summary.clone();
         if entry.activity != RosterActivity::Working {
             entry.last_change_unix_ms = summary.last_change_unix_ms();

@@ -1,20 +1,4 @@
 //! Offline benchmark harness for comparing anchor schemes.
-//!
-//! This module implements the Phase 1 (non-LLM microbenchmarks) and Phase 2
-//! (deterministic edit-trace simulation) for the hashline anchor schemes.
-//!
-//! ## Usage
-//!
-//! ```rust,ignore
-//! use xai_grok_tools::implementations::grok_build_hashline::benchmark::*;
-//!
-//! let corpus = vec![
-//!     ("small.rs", "fn main() {}\n"),
-//!     ("medium.rs", include_str!("fixtures/medium.rs.txt")),
-//! ];
-//! let report = run_benchmark(&corpus, &BenchmarkConfig::default());
-//! println!("{report}");
-//! ```
 
 use std::fmt;
 use std::time::Instant;
@@ -29,16 +13,12 @@ use super::scheme::{
 /// Configuration for the benchmark harness.
 #[derive(Debug, Clone)]
 pub struct BenchmarkConfig {
-    /// Hash lengths to test (default: [2, 3]).
     pub hash_lengths: Vec<usize>,
 
-    /// Chunk sizes to test for Candidate B (default: [8, 16, 32]).
     pub chunk_sizes: Vec<usize>,
 
-    /// Checkpoint intervals to test for Candidate C (default: [16, 32, 64]).
     pub checkpoint_intervals: Vec<usize>,
 
-    /// Search radius for shifted-anchor recovery (default: 15).
     pub search_radius: usize,
 }
 
@@ -90,8 +70,7 @@ pub struct SchemeMetrics {
     /// Shifted-anchor recovery: not found.
     pub recovery_not_found: usize,
 
-    /// Collision count: distinct lines that produced the same anchor in the
-    /// same file (local hash only).
+    /// Collision count: distinct lines that produced the same anchor in the same file (local hash only).
     pub collision_count: usize,
 
     /// Total lines across all corpus files.
@@ -109,9 +88,7 @@ pub struct SchemeMetrics {
     /// Edit-trace: steps that required re-read (anchor stale after edit).
     pub trace_reread_required: usize,
 
-    /// Estimated total read-amplification lines across all validations. Candidate A: 1 line per
-    /// validation. Candidate B: chunk_size lines per validation. Candidate C: (line_idx -
-    /// checkpoint_start + 1) lines per validation.
+    /// Estimated total read-amplification lines across all validations.
     pub read_amp_lines: usize,
 }
 
@@ -295,7 +272,6 @@ fn build_scheme_configs(config: &BenchmarkConfig) -> Vec<(String, Box<dyn Anchor
     let mut schemes: Vec<(String, Box<dyn AnchorScheme>)> = Vec::new();
 
     for &hl in &config.hash_lengths {
-        // Candidate A
         schemes.push((
             format!("content_only h={hl}"),
             Box::new(ContentOnly::with_hash_len(hl)),
@@ -358,7 +334,6 @@ fn estimate_read_amp_lines(scheme: &dyn AnchorScheme, line_count: usize, line_id
     scheme.validation_window_lines(line_idx, line_count)
 }
 
-/// Run Phase 1 (single-mutation microbenchmarks) for one file.
 fn run_phase1_for_file(
     scheme: &dyn AnchorScheme,
     _file_name: &str,
@@ -399,9 +374,7 @@ fn run_phase1_for_file(
                 context: anchor.context.clone(),
             };
 
-            // Ground truth: determine expected validity based on LineOutcome. An anchor should be Valid if the line is Unchanged
-            // or Reindented (whitespace-normalized hashing preserves anchors across indentation changes). Shifted, Modified, and
-            // Deleted anchors should all be detected as invalid (Stale or OutOfRange).
+            // Ground truth: determine expected validity based on LineOutcome.
             let Some(outcome) = mutation_result.outcomes.get(orig_idx) else {
                 continue;
             };
@@ -465,7 +438,6 @@ fn standard_traces(line_count: usize) -> Vec<Vec<TraceStep>> {
     let mid = line_count / 2;
 
     vec![
-        // Trace 1: point edit followed by nearby point edit
         vec![
             TraceStep {
                 mutation: mutate::gen_token_edit(mid, "// step1 edit"),
@@ -476,7 +448,6 @@ fn standard_traces(line_count: usize) -> Vec<Vec<TraceStep>> {
                 probe_anchor_idx: mid + 2,
             },
         ],
-        // Trace 2: insert above then probe below
         vec![
             TraceStep {
                 mutation: mutate::gen_insert_above(mid, 2),
@@ -487,7 +458,6 @@ fn standard_traces(line_count: usize) -> Vec<Vec<TraceStep>> {
                 probe_anchor_idx: mid + 4,
             },
         ],
-        // Trace 3: reindent (formatter pass) then edit
         vec![
             TraceStep {
                 mutation: mutate::gen_reindent(mid, "        "),
@@ -501,9 +471,9 @@ fn standard_traces(line_count: usize) -> Vec<Vec<TraceStep>> {
     ]
 }
 
-/// Run Phase 2 (edit-trace simulation) for one file. The simulation keeps using the existing anchor set as long as the
-/// probed anchor survives. Anchors are only regenerated (simulating a re-read) when the probed anchor is stale. This
-/// measures how often each scheme forces a re-read in sequential editing workflows.
+/// The simulation keeps using the existing anchor set as long as the probed anchor survives. Anchors are only
+/// regenerated (simulating a re-read) when the probed anchor is stale. This measures how often each scheme forces a
+/// re-read in sequential editing workflows.
 fn run_phase2_for_file(
     scheme: &dyn AnchorScheme,
     _file_name: &str,
@@ -517,13 +487,13 @@ fn run_phase2_for_file(
     let traces = standard_traces(line_count);
 
     for trace in &traces {
-        // Start with the original file and its anchors.
+        // Start with the file and its anchors.
         let mut current_lines: Vec<String> = original_lines.iter().map(|s| s.to_string()).collect();
         let mut current_anchors = scheme.generate_anchors(&original_lines);
         let mut needs_refresh = false;
 
         for step in trace {
-            // If the previous step required a re-read, regenerate anchors now.
+            // If the step required a re-read, regenerate anchors now.
             if needs_refresh {
                 let refs: Vec<&str> = current_lines.iter().map(|s| s.as_str()).collect();
                 current_anchors = scheme.generate_anchors(&refs);
@@ -552,7 +522,6 @@ fn run_phase2_for_file(
             metrics.trace_steps += 1;
             if result == ValidationResult::Valid {
                 metrics.trace_anchors_survived += 1;
-                // Keep using existing anchors — no refresh needed.
             } else {
                 metrics.trace_reread_required += 1;
                 // Mark for refresh at the start of the next step.
@@ -646,7 +615,6 @@ struct Config3 {
         let config = BenchmarkConfig::default();
         let report = run_benchmark(&corpus, &config);
 
-        // Expected: hash_lengths.len() * (1 + chunk_sizes.len() + checkpoint_intervals.len())
         let expected = config.hash_lengths.len()
             * (1 + config.chunk_sizes.len() + config.checkpoint_intervals.len());
         assert_eq!(report.schemes.len(), expected);
@@ -659,9 +627,7 @@ struct Config3 {
 
     #[test]
     fn content_only_has_zero_false_stale() {
-        // With proper ground truth (Unchanged = should be Valid, Shifted = should be Stale),
-        // Candidate A should have zero false_stale: it never reports Stale for a truly
-        // unchanged-at-same-position line because it has no contextual component.
+        // With proper ground truth (Unchanged = should be Valid, Shifted = should be Stale), Candidate A should have zero false_stale.
         let corpus = test_corpus();
         let config = BenchmarkConfig {
             hash_lengths: vec![3],
@@ -682,9 +648,7 @@ struct Config3 {
 
     #[test]
     fn chunk_has_nonzero_false_stale() {
-        // Candidate B reports Stale for unchanged lines when a nearby line in the same chunk
-        // changed (chunk context invalidation). These are false_stale: the line is unchanged but
-        // the scheme conservatively rejects it.
+        // Candidate B reports Stale for unchanged lines when a nearby line in the same chunk changed.
         let corpus = test_corpus();
         let config = BenchmarkConfig {
             hash_lengths: vec![3],
@@ -705,8 +669,7 @@ struct Config3 {
 
     #[test]
     fn chunk_has_higher_stale_recall_than_content_only() {
-        // Candidate B should detect more staleness than A because it also
-        // invalidates when the chunk changes.
+        // Candidate B should detect more staleness than A because it also invalidates when the chunk changes.
         let corpus = test_corpus();
         let config = BenchmarkConfig {
             hash_lengths: vec![3],
@@ -844,7 +807,6 @@ struct Config3 {
         let Some(a) = report.schemes.first() else {
             panic!("expected a scheme: {:?}", report.schemes);
         };
-        // Content-only reads 1 line per validation → avg should be 1.0.
         let avg = a.avg_read_amp_lines();
         assert!(
             (avg - 1.0).abs() < f64::EPSILON,
@@ -875,8 +837,7 @@ struct Config3 {
 
     #[test]
     fn recovery_correctness_tracked() {
-        // Verify that recovery_correct + recovery_wrong + recovery_ambiguous
-        // + recovery_not_found == recovery_attempts.
+        // Verify that recovery_correct + recovery_wrong + recovery_ambiguous + recovery_not_found == recovery_attempts.
         let corpus = test_corpus();
         let config = BenchmarkConfig {
             hash_lengths: vec![3],

@@ -1,13 +1,11 @@
 //! Worktree execution planning.
-//!
-//! `WorktreePlan` makes the worktree creation pipeline explicit and testable.
 use crate::{BtrfsDelegate, CreationMode, IgnoredFilesMode, NfsWorktreeOpts, WorkingTreeMode};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 /// Same scheme as [`crate::db::id_from_path`]: `<basename>-<hash of full path>`.
-/// Derived pre-dispatch as the NFS IPC idempotency key. Lexical hash (no
-/// symlink follow); macOS `/tmp` `/var` rewrite so the two names stay one id.
+/// Derived pre-dispatch as the NFS IPC idempotency key. Lexical hash (no symlink
+/// follow); macOS `/tmp` `/var` rewrite so both names stay one id.
 pub(crate) fn worktree_id_from_path(path: &Path) -> String {
     let path = canonicalize_for_id(path);
     let name = path
@@ -120,9 +118,7 @@ pub(crate) struct WorktreePlan {
     pub creation_mode: CreationMode,
     /// Cancellation token for aborting file copy mid-flight.
     pub cancellation_token: CancellationToken,
-    /// Optional delegate for privileged btrfs operations (used when the caller
-    /// lacks CAP_SYS_ADMIN, e.g., inside a bwrap sandbox).
-    /// Only read on Linux (in `try_btrfs_delegate`).
+    /// Optional delegate for privileged btrfs operations.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub btrfs_delegate: Option<Arc<dyn BtrfsDelegate>>,
     /// Idempotency key (and worktrees.db id). Always set before dispatch.

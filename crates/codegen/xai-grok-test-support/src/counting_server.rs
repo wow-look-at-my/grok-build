@@ -1,7 +1,4 @@
-//! Minimal HTTP/1.1 servers for wire-level tests, sharing one request-framing
-//! loop: a connection-counting server for asserting TCP reuse (e.g.
-//! shared-client pooling) and a scriptable responder that maps each request's
-//! header block to raw response bytes.
+//! Minimal HTTP/1.1 servers for wire-level tests, sharing one request-framing loop.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

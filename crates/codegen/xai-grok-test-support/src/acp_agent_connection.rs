@@ -1,7 +1,4 @@
-//! The typed `agent-client-protocol` connection a test client holds to an agent child: the pipes, the
-//! [`ScriptedClient`] that answers the agent, and the reader, io, and request handler tasks, which stop with
-//! the connection. Every request shape a test client sends lives here once, untimed; [`timed`] and
-//! [`timed_ok`] are the budget each client puts on top.
+//! The typed `agent-client-protocol` connection a test client holds to an agent child: the pipes.
 
 use std::future::Future;
 use std::path::Path;
@@ -21,8 +18,7 @@ use crate::process::TestProcess;
 use crate::scaled;
 
 const API_KEY_AUTH_METHOD: &str = "xai.api_key";
-/// The non-interactive session-login method the agent advertises when a cached `auth.json` login is
-/// present and no first-party env key is set.
+/// The non-interactive session-login method the agent advertises when a cached `auth.json` login is present.
 const CACHED_TOKEN_AUTH_METHOD: &str = "cached_token";
 
 /// Prefer the env-key method, then the cached login; both authenticate without a browser. Returns
@@ -52,8 +48,7 @@ pub(crate) struct AgentConnection {
     handler: ScriptedClient,
     /// Aborted on drop so the connection loop and the pipe writer stop with the connection.
     _io_task: AbortOnDropHandle<acp::Result<()>>,
-    /// Cancels, on drop, the line reader and every request handler spawned through the connection's spawn
-    /// callback, so a handler still waiting on a hold stops with the connection.
+    /// Cancels, on drop, the line reader and every request handler spawned through the connection's spawn callback.
     _stop_spawned_tasks: DropGuard,
 }
 

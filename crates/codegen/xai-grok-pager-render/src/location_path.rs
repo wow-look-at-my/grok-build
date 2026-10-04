@@ -3,12 +3,11 @@ use std::borrow::Cow;
 /// Display-only middle-component shortener for already-abbreviated location paths.
 ///
 /// After a `~` / `$GROK_HOME` prefix (or a leading `/` / drive letter / UNC
-/// `\\server\share` / `//host/share` / `\\?\UNC\server\share`), the last two
-/// components stay full and earlier ones become one letter. Leading dots are
-/// kept plus the first non-dot character (`.grok` → `.g`, `..cache` → `..c`).
-/// Literal `.` / `..` stay as-is. Drive-relative `C:foo\bar` does not gain a
-/// root separator; rooted `\foo\bar` keeps one. Paths with 0–2 components
-/// after the prefix are unchanged.
+/// `\\server\share` / `//host/share` / `\\?\UNC\server\share`), the last
+/// components stay full and earlier ones become one letter. Leading dots are kept
+/// plus the first non-dot character (`.grok` → `.g`, `..cache` → `..c`).
+/// Literal `.` / `..` stay as-is. Drive-relative `C:foo\bar` does not gain a root
+/// separator; rooted `\foo\bar` keeps one.
 pub(crate) fn shorten_location_path(path: &str) -> Cow<'_, str> {
     const KEEP_FULL: usize = 2;
     const GROK_HOME_PREFIX: &str = "$GROK_HOME";
@@ -66,8 +65,8 @@ pub(crate) fn shorten_location_path(path: &str) -> Cow<'_, str> {
             false,
         )
     } else if unc_style {
-        // `\\?\UNC\` is the verbatim marker; server\share start after it, not at `?`/`UNC`.
-        // `\\` / `//` / `\\?\UNC\` already end in the separator; the first component attaches.
+        // `\\?\UNC\` is the verbatim marker; server\share start after it, not
+        // at `?`/`UNC`.
         let verbatim_unc = path
             .get(..VERBATIM_UNC_PREFIX.len())
             .is_some_and(|head| head.eq_ignore_ascii_case(VERBATIM_UNC_PREFIX));
@@ -104,7 +103,7 @@ pub(crate) fn shorten_location_path(path: &str) -> Cow<'_, str> {
         return Cow::Borrowed(path);
     }
 
-    // UNC: first two components are `server\share` and stay full in the same loop.
+    // UNC: first components are `server\share` and stay full in the same loop.
     let keep_unc_root = if unc_style { 2 } else { 0 };
 
     let mut out = String::with_capacity(path.len());

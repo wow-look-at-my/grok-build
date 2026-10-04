@@ -129,9 +129,8 @@ fn overlay_narrows_toolset_to_soft_leaves() {
 
 #[test]
 fn overlay_shell_env_policy_keeps_tightening_fields_and_drops_set() {
-    // `[shell_environment_policy]` cannot inject an env value into a subprocess.
-    // The overlay is driven through the real resolve path: the filter fields survive, while `set` is dropped
-    // `set` injects env values like LD_PRELOAD into tool subprocesses, an indirect way to run code there
+    // `[shell_environment_policy]` cannot inject an env value into a
+    // subprocess.
     let inline = r#"{
         "shell_environment_policy": {
             "inherit": "none",
@@ -152,9 +151,9 @@ fn overlay_shell_env_policy_keeps_tightening_fields_and_drops_set() {
 
 #[test]
 fn version_overrides_cannot_reinject_non_allowlisted_tables() {
-    // A valid `[[version_overrides]]` whose patch carries non-allowlisted code-exec/auth/egress tables alongside a legit soft key
-    // It is driven through the real resolution path
-    // The allowlist runs after `version_overrides` in `finalize_overlay`, so the applied patch cannot smuggle a dropped table back in Only the soft key survives
+    // A valid `[[version_overrides]]` whose patch carries non-allowlisted
+    // code-exec/auth/egress tables alongside a legit soft key It is driven
+    // through.
     let inline = r#"{
         "version_overrides": [
             {

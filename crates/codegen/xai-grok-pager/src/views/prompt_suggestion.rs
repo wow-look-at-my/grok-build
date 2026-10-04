@@ -1,20 +1,6 @@
 //! Next-prompt suggestion controller (tab autocomplete ghost text).
-//!
-//! After a turn completes, the pager asks the shell (`suggestPrompt`) to predict the user's likely next prompt.
-//! The prediction renders as dim ghost text in the (empty) prompt input:
-//!
-//! - **Tab** or **Right arrow** accepts it.
-//!   The ghost only shows with the cursor at end-of-text, where Right is otherwise a no-op (the fish/zsh autosuggestion convention).
-//! - Typing a matching prefix *shrinks* the ghost; typing it out fully consumes it; any divergent text hides it.
-//!   It comes back if the user clears the input, matching common agent-CLI autosuggest behavior.
-//! - **Esc** on an empty prompt dismisses it for the rest of the turn.
-//!
-//! Visibility is *derived* from the current prompt text each frame ([`PromptSuggestionController::ghost_for`]) rather than mutated on each keystroke.
-//! There is no per-keystroke state machine to drift.
-//! Stale responses are discarded via a generation counter, mirroring `SuggestionController` (shell command suggestions).
 
 /// Env override for the whole feature: `GROK_PROMPT_SUGGESTIONS=0/1`.
-/// When unset, the persisted `prompt_suggestions` setting applies.
 pub const PROMPT_SUGGESTIONS_ENV: &str = "GROK_PROMPT_SUGGESTIONS";
 
 /// Env override for the model used by the suggestion call: `GROK_PROMPT_SUGGESTIONS_MODEL=<model-id>`.
@@ -25,15 +11,13 @@ pub const PROMPT_SUGGESTIONS_MODEL_ENV: &str = "GROK_PROMPT_SUGGESTIONS_MODEL";
 pub struct PromptSuggestionController {
     /// Full suggestion text from the model. Empty means no suggestion.
     full_text: String,
-    /// Request generation counter; responses carrying a stale generation are discarded (a newer turn ended, or the suggestion was invalidated).
+    /// Request generation counter; responses carrying a stale generation are discarded.
     generation: u64,
     /// Set when the user dismissed the current suggestion (Esc). Cleared by the next loaded suggestion.
     dismissed: bool,
-    /// Set once the `shown` telemetry impression for the current suggestion has been logged. This latch
-    /// makes the impression fire exactly once per installed suggestion, at first visibility (divergent
-    /// draft cleared, gate re-opened).
+    /// Set once the `shown` telemetry impression for the current suggestion has been logged.
     shown_logged: bool,
-    /// Whether the feature is enabled. Resolved from `GROK_PROMPT_SUGGESTIONS`, falling back to the persisted `prompt_suggestions` setting.
+    /// Whether the feature is enabled.
     pub enabled: bool,
 }
 
@@ -106,14 +90,14 @@ impl PromptSuggestionController {
         self.enabled && !self.dismissed && !self.full_text.is_empty()
     }
 
-    /// Latch the `shown` impression for the current suggestion: returns `true` exactly once per
-    /// installed suggestion. This only guards against double-logging when visibility (re-derived per
-    /// frame) recurs or is re-checked on a later path.
+    /// Latch the `shown` impression for the current suggestion: returns
+    /// `true` exactly once per installed suggestion.
     pub fn mark_shown_logged(&mut self) -> bool {
         !std::mem::replace(&mut self.shown_logged, true)
     }
 
-    /// Whether the `shown` impression for the current suggestion has been logged already (read-only companion to [`Self::mark_shown_logged`]).
+    /// Whether the `shown` impression for the current suggestion has been
+    /// logged already.
     #[cfg(test)]
     pub(crate) fn shown_logged(&self) -> bool {
         self.shown_logged

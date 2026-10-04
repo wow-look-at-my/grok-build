@@ -22,12 +22,10 @@ fn register_kind(db: &WorktreeDb, id: &str, path: &std::path::Path, kind: Worktr
 
 #[test]
 fn register_worktree_writes_correct_fields() {
-    // Isolate GROK_HOME so register_worktree's open_default write lands
-    // in our own DB (lock + private tmp + restore via the fixture).
+    // Isolate GROK_HOME so register_worktree's open_default write lands in our own DB.
     let fx = crate::db::GrokHomeFixture::new();
 
-    // Unique basename → unique id, so a concurrent open_default writer
-    // (GROK_HOME is process-global) can't INSERT-OR-REPLACE our row.
+    // Unique basename → unique id, so a concurrent open_default writer (GROK_HOME is process-global).
     let wt_path = fx.home.join("register-fields-wt");
     std::fs::create_dir(&wt_path).unwrap();
     // register_worktree stores the canonical path (/var → /private/var on macOS).
@@ -47,7 +45,6 @@ fn register_worktree_writes_correct_fields() {
     );
 
     // register_worktree wrote to open_default, which resolves to fx.home.
-    // Filter to OUR record by path: concurrent tests may add rows here.
     let db = WorktreeDb::open(&fx.home).unwrap();
     let mine: Vec<_> = db
         .list(&ListFilter::default())
@@ -118,8 +115,7 @@ fn gc_skips_alive_pids() {
     };
     db.register(&record).unwrap();
 
-    // A missing path is swept to dead; use a real dir to exercise the
-    // liveness skip on an alive record.
+    // A missing path is swept to dead; use a real dir to exercise the liveness skip on an alive record.
     let dir = deletable_linked_worktree(tmp.path(), "real-wt");
     let mut record2 = record.clone();
     record2.id = "alive-wt2".to_string();
@@ -199,9 +195,8 @@ fn gc_clamps_extreme_max_age_without_overflow() {
         ..crate::test_support::worktree_record("fresh-1", dir.clone())
     };
     db.register(&record).unwrap();
-    // `now - i64::MIN` would overflow/wrap the cutoff into the future and
-    // reclaim everything; the clamp treats any negative age as 0 so the
-    // cutoff is `now` and nothing fresh is reclaimed (and no panic).
+    // `now - i64::MIN` will overflow/wrap the cutoff into the future and
+    // reclaim everything.
     let report = gc::gc_worktrees(
         &db,
         &gc::GcOptions {
@@ -222,8 +217,7 @@ fn gc_honors_last_accessed_time() {
     let db = db_at(&tmp);
     let fresh = deletable_linked_worktree(tmp.path(), "fresh-access");
     let stale = deletable_linked_worktree(tmp.path(), "stale-access");
-    // creator_pid None ⇒ no liveness guard: isolate the age logic;
-    // created_at 1 (helper default) ⇒ both are old by creation time.
+    // creator_pid None ⇒ no liveness guard: isolate the age logic.
     let base = crate::test_support::worktree_record("", std::path::PathBuf::new());
     db.register(&crate::db::WorktreeRecord {
         id: "fresh".to_string(),
@@ -324,8 +318,7 @@ fn gc_cwd_guard_skips_then_reclaims_expired_worktree() {
 
 #[test]
 fn gc_dry_run_with_max_age_does_not_remove_expired() {
-    // An expired worktree whose dir exists must be previewed (counted)
-    // but never removed under dry_run.
+    // An expired worktree whose dir exists must be previewed (counted) but never removed under dry_run.
     let tmp = tempfile::TempDir::new().unwrap();
     let db = db_at(&tmp);
 
@@ -359,9 +352,7 @@ fn gc_dry_run_with_max_age_does_not_remove_expired() {
 
 #[test]
 fn gc_dry_run_missing_and_expired_counted_once() {
-    // A record that is Alive, has a MISSING path, AND is expired must be
-    // counted EXACTLY once (a real run sweeps it to dead and unregisters
-    // it before the expired loop). It belongs to dead_removed, not both.
+    // A record that is Alive, has a MISSING path.
     let tmp = tempfile::TempDir::new().unwrap();
     let db = db_at(&tmp);
 
@@ -394,8 +385,7 @@ fn gc_dry_run_missing_and_expired_counted_once() {
 fn expired_path_that_will_not_remove_loses_its_record_and_keeps_its_bytes() {
     let fx = crate::db::GrokHomeFixture::new();
     let db = WorktreeDb::open(&fx.home).unwrap();
-    // A file, so the directory removal fails with ENOTDIR whoever runs
-    // this, root included.
+    // A file, so the directory removal fails with ENOTDIR whoever runs this, root included.
     let path = fx.home.join("not-a-directory");
     std::fs::write(&path, b"bytes nobody asked about").unwrap();
 
@@ -419,9 +409,7 @@ fn expired_path_that_will_not_remove_loses_its_record_and_keeps_its_bytes() {
 
 #[test]
 fn gc_removes_an_expired_path_with_no_repo_and_counts_it_apart() {
-    // An overlay mount or btrfs snapshot needs no `.git`, and only
-    // `remove_worktree` reclaims either. GROK_HOME is the gc DB dir so
-    // its unregister hits the DB holding the record.
+    // An overlay mount or btrfs snapshot needs no `.git`, and only `remove_worktree` reclaims either.
     let fx = crate::db::GrokHomeFixture::new();
     let db = WorktreeDb::open(&fx.home).unwrap();
 
@@ -561,8 +549,7 @@ fn gc_asks_the_source_repository_about_a_standalone_worktree() {
     );
 
     xai_test_utils::git::run_git(&dir, &["push", "origin", "HEAD:refs/heads/main"]);
-    // The gate asks the source repository, not the remote, so the source
-    // is what has to hold the commit.
+    // The gate asks the source repository, not the remote, so the source is what has to hold the commit.
     xai_test_utils::git::run_git(&source, &["fetch", "origin"]);
 
     let report = gc::gc_worktrees(&db, &opts).unwrap();
@@ -584,9 +571,7 @@ fn record_present(db: &WorktreeDb, path: &std::path::Path) -> bool {
 
 #[test]
 fn db_record_survives_failed_removal() {
-    // remove_worktree must keep the DB record when the on-disk removal
-    // fails, so the worktree isn't lost from tracking while leaking on
-    // disk (unregister only after a successful removal).
+    // remove_worktree must keep the DB record when the on-disk removal fails.
     let fx = crate::db::GrokHomeFixture::new();
 
     // A regular file makes remove_dir_all fail (ENOTDIR) deterministically.
@@ -625,9 +610,7 @@ fn db_record_survives_failed_removal() {
 
 #[test]
 fn db_record_removed_after_successful_removal() {
-    // The success direction: a removable worktree must still be
-    // unregistered from the DB (catches a regression dropping the
-    // unregister).
+    // The success direction: a removable worktree must still be unregistered from the DB.
     xai_test_utils::require_git!();
     use xai_test_utils::git::{git_commit_all, init_git_repo};
 
@@ -676,7 +659,7 @@ fn registry_home_registers_the_worktree_in_the_given_home_only() {
     xai_test_utils::require_git!();
     use xai_test_utils::git::{git_commit_all, init_git_repo};
 
-    // The default DB is the fixture's home; the builder is pointed at another one.
+    // The default DB is the fixture's home; the builder is pointed at another.
     let fx = crate::db::GrokHomeFixture::new();
     let other_home = fx.home.join("other-home");
     let repo = fx.home.join("repo");
@@ -710,13 +693,10 @@ fn db_at_home(home: &std::path::Path) -> WorktreeDb {
 
 #[test]
 fn gc_with_delegate_removes_expired_and_unregisters() {
-    // Delegate is threaded through the expired path; a successful removal
-    // counts and drops the record. Btrfs fallback needs a real delete failure,
-    // so the mock's delete_snapshot is not called on this plain-dir path.
+    // Delegate is threaded through the expired path; a successful removal counts and drops the record.
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // GROK_HOME == the gc DB dir so remove_worktree's open_default
-    // unregister hits the same DB the gc record lives in.
+    // GROK_HOME == the gc DB dir so remove_worktree's open_default unregister hits the same DB the gc record lives in.
     let fx = crate::db::GrokHomeFixture::new();
     let db = WorktreeDb::open(&fx.home).unwrap();
 
@@ -782,8 +762,7 @@ fn gc_report_serde_round_trip() {
     assert_eq!(deser.remove_failed, 4);
     assert_eq!(deser.unnamed, 2);
 
-    // An older agent's report still deserializes, and its count stays
-    // where it was.
+    // An older agent's report still deserializes, and its count stays where it was.
     let older = r#"{"dead_removed":0,"expired_removed":0,"skipped_alive":7}"#;
     let deser: gc::GcReport = serde_json::from_str(older).unwrap();
     assert_eq!(deser.skipped_alive, 7);
@@ -1139,7 +1118,6 @@ fn dry_run_counts_per_kind_cutoffs() {
     );
     assert!(sub_dir.exists() && sess_dir.exists() && man_dir.exists());
 
-    // max_age_secs=0: session+subagent would-expire; manual never → skipped.
     let dry0 = gc::gc_worktrees(
         &db,
         &gc::GcOptions {

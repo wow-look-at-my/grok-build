@@ -52,7 +52,6 @@ fn checkpoint_update(id: &str, prompt_index_at_compaction: usize) -> SessionUpda
     }))
 }
 
-/// Writes the shared cross-compaction fixture into `session_dir`: a checkpoint file with compacted `[SYS, SUMMARY]` at prompt 5.
 /// It also writes an `updates.jsonl` with prompts P0..P6 and the checkpoint record between P4 and P5.
 fn write_compacted_session_fixture(session_dir: &std::path::Path, ckpt_id: &str) {
     std::fs::create_dir_all(session_dir.join("compaction_checkpoints")).unwrap();
@@ -95,7 +94,6 @@ fn write_compacted_session_fixture(session_dir: &std::path::Path, ckpt_id: &str)
     std::fs::write(session_dir.join("updates.jsonl"), content).unwrap();
 }
 
-/// Actor over the `ckpt5` fixture, live at prompt 7 with the compaction marker set.
 async fn actor_with_compacted_fixture(tag: &str) -> (SessionActor, PathBuf) {
     let (gateway_tx, _gateway_rx) = tokio::sync::mpsc::unbounded_channel();
     let (persistence_tx, _persistence_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -173,9 +171,8 @@ async fn run_rewind_scenario() {
     );
 }
 
-/// `FilesOnly` is exempt from the chat-state prompt-index bound; its real bound is the on-disk snapshot index.
-/// It therefore no-ops to success when out of range, the property the bridge relies on when the chat-state index is empty.
-/// `ConversationOnly` is not exempt and still rejects an out-of-range target.
+/// `FilesOnly` is exempt from the chat-state prompt-index bound; its real
+/// bound is the on-disk snapshot index.
 #[tokio::test(flavor = "current_thread")]
 async fn files_only_rewind_is_exempt_from_chat_state_bound() {
     let local = tokio::task::LocalSet::new();
@@ -256,7 +253,6 @@ async fn run_file_counts_scenario() {
     let actor = create_test_actor(0, 200_000, 80, gateway_tx, persistence_tx).await;
 
     let cwd = Path::new("/tmp");
-    // Prompt 0 has two distinct file snapshots; prompt 1 has one.
     actor
         .file_state_tracker
         .add_before_snapshot_for_prompt(0, Path::new("/tmp/a.rs"), cwd, Some("a".into()))
@@ -276,9 +272,9 @@ async fn run_file_counts_scenario() {
     assert_eq!(counts.get(&2).copied(), None);
 }
 
-/// A cross-compaction rewind to before the compaction point rebuilds the conversation without a summary.
-/// The stale `last_compaction_prompt_index` must then be cleared.
-/// Otherwise the per-model `x-compactions-remaining` header would wrongly report `0` for a session that no longer holds a summary.
+/// A cross-compaction rewind to before the compaction point rebuilds the
+/// conversation without a summary. The stale `last_compaction_prompt_index`
+/// must then be cleared.
 #[tokio::test(flavor = "current_thread")]
 async fn rewind_before_compaction_clears_stale_compaction_marker() {
     let local = tokio::task::LocalSet::new();
@@ -289,7 +285,6 @@ async fn run_clears_marker_scenario() {
     use xai_grok_sampling_types::CompactionsRemaining;
     let (actor, session_dir) = actor_with_compacted_fixture("marker").await;
 
-    // Rewind to prompt 3, before the compaction point (5), so the summary is dropped from the rebuilt conversation and the marker must be cleared
     let resp = actor
         .handle_rewind(RewindRequest {
             target_prompt_index: 3,
@@ -305,8 +300,8 @@ async fn run_clears_marker_scenario() {
         .get_last_compaction_prompt_index()
         .await;
 
-    // End-to-end: advertise support so the gate runs, then read the header off the reconstructed config
-    // It must report a fresh "1", not the stale "0"
+    // End-to-end: advertise support so the gate runs, then read the header
+    // off the reconstructed config It must report a fresh "1".
     actor
         .compactions_remaining
         .set(Some(CompactionsRemaining::Dynamic(true)));

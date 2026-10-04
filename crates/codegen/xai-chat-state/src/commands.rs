@@ -19,8 +19,7 @@ pub struct ModelMetadata {
     pub model_fingerprint: Option<String>,
 }
 
-/// Refusal reply for [`ChatStateCommand::RepairHistory`]: a turn was in
-/// flight, and in-flight tool calls must not be treated as dangling.
+/// Refusal reply for [`ChatStateCommand::RepairHistory`]: a turn was in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RepairHistoryBlocked;
 
@@ -54,8 +53,7 @@ pub enum StrictAppendError {
 
 /// Commands sent to the ChatStateActor via mpsc channel.
 pub enum ChatStateCommand {
-    // ═══ Mutations (fire-and-forget) ═══
-    /// Push a user message into the conversation.
+    // ═══ Mutations (fire-and-forget) ═══ Push a user message into the conversation.
     PushUserMessage { item: ConversationItem },
 
     /// Push an ordered batch of user messages into the conversation.
@@ -103,8 +101,7 @@ pub enum ChatStateCommand {
     /// Record accumulated token usage from a streaming response.
     RecordTokenUsage { total_tokens: u64 },
 
-    /// Stash the per-turn `TokenUsage` from the most recent model response.
-    /// Overwrites any previously stashed value.
+    /// Stash the per-turn `TokenUsage` from the most recent model response. Overwrites any stashed value.
     RecordLastTurnUsage { usage: TokenUsage },
 
     RecordModelCallUsage {
@@ -162,16 +159,15 @@ pub enum ChatStateCommand {
         >,
     },
 
-    /// Persist a URL-scoped strip. In-actor so it serializes with turn pushes.
-    /// Replies with [`crate::StripOutcome`] after the disk ack: `Applied` means backup and rewrite both landed.
+    /// Persist a URL-scoped strip. In-actor so it serializes with turn
+    /// pushes.
     StripConversationImages {
         urls: Vec<std::sync::Arc<str>>,
         reply: tokio::sync::oneshot::Sender<crate::StripOutcome>,
     },
 
-    /// Atomically align the leading `System` message with `prompt`, persisting inside the actor.
-    /// Serializes with turn pushes so a mid-turn reconnect cannot lose updates the way RMW would.
-    /// A changed head re-bases `total_tokens`; acceptable because it invalidates the KV prefix anyway.
+    /// Atomically align the leading `System` message with `prompt`,
+    /// persisting inside the actor.
     ReplaceSystemHead {
         prompt: String,
         reply: oneshot::Sender<bool>,
@@ -196,12 +192,9 @@ pub enum ChatStateCommand {
     BeginTurnCapture,
 
     /// Append synthetic `task` pairs for a harness-spawned subagent to the in-progress trace phase.
-    /// Accumulated independently of the live `conversation` and of `turn_capture`.
     AppendHarnessTraceItems { items: Vec<ConversationItem> },
 
-    /// Seal the harness items accumulated since the last flush into one
-    /// standalone trace turn. Issued once per harness phase (after the planner,
-    /// after each verifier panel). No-op when nothing was recorded.
+    /// Seal the harness items accumulated since the last flush into one standalone trace turn.
     FlushHarnessTraceTurn,
 
     /// Repair dangling tool calls after a harness-initiated halt. `answers` are
@@ -211,9 +204,7 @@ pub enum ChatStateCommand {
         answers: HashMap<String, String>,
     },
 
-    /// Drop a trailing continue reminder whose continuation will never
-    /// sample (the turn is completing truncated after a failed
-    /// continuation), so the dead cue does not persist into later turns.
+    /// Drop a trailing continue reminder whose continuation will never sample (the turn is completing truncated after a failed continuation).
     PopStrandedContinueReminder,
 
     /// Build a ConversationRequest ready to send to the API.
@@ -245,8 +236,7 @@ pub enum ChatStateCommand {
     /// Get total accumulated tokens.
     GetTotalTokens { reply: oneshot::Sender<u64> },
 
-    /// Retrieve the most recent stashed per-turn `TokenUsage`. Returns
-    /// `None` until at least one `RecordLastTurnUsage` has been processed.
+    /// Retrieve the most recent stashed per-turn `TokenUsage`.
     GetLastTurnUsage {
         reply: oneshot::Sender<Option<TokenUsage>>,
     },
@@ -317,65 +307,55 @@ pub enum ChatStateCommand {
     },
 
     /// Drain the sealed harness trace turns (goal planner + verifier panels).
-    /// Each `Vec` is one turn's synthetic `task` pairs. Seals a trailing un-flushed accumulator first.
+    /// Each `Vec` is one turn's synthetic `task` pairs.
     TakeHarnessTraceTurns {
         reply: oneshot::Sender<Vec<Vec<ConversationItem>>>,
     },
 
-    // ═══ Narrow targeted queries (avoid full-conversation clone) ═══
-    /// Get the number of items in the conversation.
-    /// Cheaper than `GetConversation` when only the length is needed.
+    // ═══ Narrow targeted queries (avoid full-conversation clone) ═══ Get the number of items.
     GetConversationLen { reply: oneshot::Sender<usize> },
 
-    /// Whether any assistant tool call lacks a matching `ToolResult` (i.e. the
-    /// dangling-tool-call repair would fire on the next request build).
-    /// Cheaper than `GetConversation` when only this predicate is needed.
+    /// Whether any assistant tool call lacks a matching `ToolResult`.
     HasDanglingToolCalls { reply: oneshot::Sender<bool> },
 
-    /// Get the text content of the last assistant message with non-empty text.
-    /// Returns `None` if no such message exists.
-    /// Cheaper than `GetConversation` when only the final assistant response is needed.
+    /// Get the text content of the last assistant message with non-empty
+    /// text. Returns `None` if no such message exists.
     GetLastAssistantText {
         reply: oneshot::Sender<Option<String>>,
     },
 
     /// Like `GetLastAssistantText`, but joins trailing assistant segments
-    /// separated only by `SyntheticReason::LengthContinue` user items (any
-    /// other user item is a hard boundary). `None` when no trailing text.
+    /// separated only.
     GetTrailingAssistantReport {
         reply: oneshot::Sender<Option<String>>,
     },
 
-    /// Like `GetLastAssistantText`, but bounded to the current prompt turn:
-    /// returns `None` when the turn produced no assistant text (the walk stops
-    /// at the first turn-starting user item).
+    /// Like `GetLastAssistantText`, but bounded to the current prompt turn.
     GetLastAssistantTextInTurn {
         reply: oneshot::Sender<Option<String>>,
     },
 
     /// Concatenate every non-empty assistant message in the current prompt
-    /// turn (`"\n"`-joined). Same turn boundary as `GetLastAssistantTextInTurn`.
+    /// turn (`"\n"`-joined).
     GetAssistantTextInTurn {
         reply: oneshot::Sender<Option<String>>,
     },
 
     /// Get the text of the first `Text` part in the first `User` message.
     /// `None` if there is no user message or that message has no text part.
-    /// Cheaper than `GetConversation` when only the initial query is needed.
     GetFirstUserText {
         reply: oneshot::Sender<Option<String>>,
     },
 
-    /// Get a single conversation item by index (0-based).
-    /// Returns `None` if the index is out of bounds.
-    /// Cheaper than `GetConversation` when only one item is needed.
+    /// Get a single conversation item by index (0-based). Returns `None` if
+    /// the index is out of bounds.
     GetConversationItemAt {
         index: usize,
         reply: oneshot::Sender<Option<ConversationItem>>,
     },
 
-    /// Get the processed text of the last user query (metadata tags stripped).
-    /// Equivalent to `extract_last_user_query` without cloning the full conversation.
+    /// Get the processed text of the last user query (metadata tags
+    /// stripped).
     GetLastUserQueryText {
         reply: oneshot::Sender<Option<String>>,
     },

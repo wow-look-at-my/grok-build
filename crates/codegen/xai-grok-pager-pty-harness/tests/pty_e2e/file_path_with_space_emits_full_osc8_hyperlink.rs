@@ -2,8 +2,6 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Plain-text file paths with spaces used to only partially linkify: OSC 8 / click / underline stopped at the first space (`Demo` vs `Demo App.app`).
-/// Prove the full path is on screen AND the PTY stream carries an OSC 8 hyperlink whose `file://` URL encodes the space (`%20`).
 /// The click target then spans the whole filename, not a truncated prefix.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
@@ -11,7 +9,6 @@ async fn file_path_with_space_emits_full_osc8_hyperlink() {
     // Synthetic macOS app-bundle path with a space in the final segment.
     const PATH_PREFIX: &str = "/Users/alice/src/app/release/mac-arm64/Demo";
     const FULL_PATH: &str = "/Users/alice/src/app/release/mac-arm64/Demo App.app";
-    // file:// URL percent-encodes the space; this is what OSC 8 must carry.
     const FILE_URL_MARKER: &str = "Demo%20App.app";
 
     let content = ContentController::start().await.expect("start content");
@@ -20,9 +17,6 @@ async fn file_path_with_space_emits_full_osc8_hyperlink() {
     ));
 
     let binary = pager_binary().expect("resolve pager binary");
-    // OSC 8 emission is gated on a Native-capable brand (`hyperlink_route`).
-    // The default harness PTY only sets `TERM=xterm-256color`, so the brand is `Unknown` and the pager deliberately skips OSC 8
-    // Pin WezTerm so the byte-level proof below is meaningful (same override as `pty_xtversion`)
     let overrides: Vec<(String, String)> = vec![("TERM_PROGRAM".into(), "WezTerm".into())];
     let env_refs: Vec<(&str, &str)> = overrides
         .iter()
@@ -45,7 +39,6 @@ async fn file_path_with_space_emits_full_osc8_hyperlink() {
     harness
         .wait_for_text(PATH_PREFIX, Duration::from_secs(30))
         .expect("path prefix on screen");
-    // Give the frame a beat to flush OSC 8 for the completed line.
     harness.update(Duration::from_millis(400));
 
     let screen = harness.screen_contents();
@@ -61,8 +54,6 @@ async fn file_path_with_space_emits_full_osc8_hyperlink() {
         "filename suffix after the space must be visible"
     );
 
-    // Strongest proof: OSC 8 in the raw PTY stream targets the FULL path
-    // A scanner that stops at the space would end the hyperlink URL at `…/Demo` with no `%20App.app`
     let raw = String::from_utf8_lossy(harness.raw_output());
     assert!(
         raw.contains("\x1b]8;"),
@@ -76,8 +67,8 @@ async fn file_path_with_space_emits_full_osc8_hyperlink() {
          OSC 8 snippets: {}",
         osc8_snippets(&raw)
     );
-    // Guard against a partial link AND a full one: the truncated form must not be the only match
-    // A naive prefix link would use `…/Demo` with no following `%20`
+    // Guard against a partial link AND a full one: the truncated form must
+    // not be the only match A naive prefix link will use `…/Demo`.
     let has_truncated_only =
         raw.contains("mac-arm64/Demo\x07") || raw.contains("mac-arm64/Demo\x1b\\");
     assert!(

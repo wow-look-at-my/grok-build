@@ -1,10 +1,4 @@
 //! Recognizes `send_subagent_message` tool calls and maps them to scrollback blocks.
-//!
-//! The block takes the subagent id and text straight from the deserialized input, with no re-validation.
-//! A rejected send therefore still shows the exact destination and text that was attempted.
-//! The input is read through a pager-local lenient view rather than the tool's own type, so a
-//! `delivery` value this pager predates still renders the destination and text.
-//! The id is resolved to a display label through the tracker's registry; an unknown id falls back to the raw id.
 
 use agent_client_protocol as acp;
 use serde::Deserialize;
@@ -22,8 +16,7 @@ use crate::scrollback::blocks::tool::{
     SentMessageToolCallBlock, ToolCallBlock,
 };
 
-/// The wire alias a child-depth sender uses for its parent; matched on the untrimmed value, as the shell does,
-/// before any registry lookup.
+/// The wire alias a child-depth sender uses for its parent.
 const PARENT_TARGET: &str = "parent";
 
 /// Unknown fields are ignored, so the direct input and the `variant`-tagged `ToolInput`

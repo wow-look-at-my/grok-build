@@ -1,10 +1,4 @@
 //! Records startup AGENTS.md paths for a session.
-//!
-//! `seed` stores the cwd-to-git-root files discovered at agent build.
-//! `check_path` can walk from a later file toward the git root and return
-//! nested instruction files that were not in that set. No production
-//! caller invokes `check_path`. Nested files below cwd reach the model
-//! only through `read_file`.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -13,9 +7,7 @@ use ignore::gitignore::Gitignore;
 
 use crate::types::compat::CompatConfig;
 
-/// Filenames (and relative paths) recognized as project instruction files. The runtime list is produced by
-/// `CompatConfig::agent_filenames()`; this constant is retained only as the all-on reference that the pinning test
-/// `compat_default_matches_legacy_constants` asserts parity against.
+/// Filenames (and relative paths) recognized as project instruction files.
 #[cfg(test)]
 pub(crate) const AGENT_FILENAMES: &[&str] = &[
     "Agents.md",
@@ -28,57 +20,39 @@ pub(crate) const AGENT_FILENAMES: &[&str] = &[
     ".claude/CLAUDE.local.md",
 ];
 
-/// Subdirectories to scan for `*.md` rules files. The runtime list is produced by
-/// `CompatConfig::rules_dirs()`; this constant is retained only as the all-on reference for the
-/// pinning test.
+/// Subdirectories to scan for `*.md` rules files.
 #[cfg(test)]
 pub(crate) const RULES_DIRS: &[&str] = &[".grok/rules", ".claude/rules", ".cursor/rules"];
 
-/// Maximum number of parent directories to walk upward per call. In very deep repos, this prevents doing many stat calls on a single tool
-/// invocation. Directories beyond this depth are silently skipped — they'll be checked on future accesses closer to them. 10 levels covers deep
-/// nested project paths like `packages/app/src/lib/types/file.rs` (6 levels from `packages/`).
+/// Maximum number of parent directories to walk upward per call.
 const MAX_WALK_DEPTH: usize = 10;
 
-/// Canonicalize a path for consistent HashSet lookups. `read_file` returns **canonicalized** paths (dunce-simplified, via `util::fs`)
-/// `search_replace` returns `cwd.join(input)` — NOT canonicalized Uses [`crate::util::fs::canonicalize_with_timeout`] (dunce-simplified, runs
-/// on the blocking thread pool) so a slow/overlayfs-backed filesystem cannot hang the async executor.
+/// Canonicalize a path for consistent HashSet lookups.
 async fn normalize(path: &Path) -> PathBuf {
     crate::util::fs::canonicalize_with_timeout(path.to_path_buf()).await
 }
 
-/// Tracks which AGENTS.md files have been discovered and reported to the agent during the session. This is a plain struct on ToolState — no
-/// Arc, no Mutex. **Path normalization**: All paths stored in `checked_dirs`, `initial_discovery`, `reminded`, and `git_root` are canonicalized
-/// via [`normalize()`] on insertion. All paths passed to `check_path()` are canonicalized before lookup.
+/// Tracks which AGENTS.md files have been discovered and reported to the
+/// agent during the session. This is a plain struct on ToolState — no Arc,
+/// no Mutex.
 #[derive(Debug, Default)]
 pub struct AgentsMdTracker {
     /// Directories we've already scanned for AGENTS.md.
-    /// Prevents redundant stat() calls on repeated accesses to the same subtree.
-    /// All entries are canonicalized via `normalize()`.
     checked_dirs: HashSet<PathBuf>,
 
-    /// AGENTS.md file paths that were part of the initial system prompt injection (seeded by
-    /// AgentBuilder at session start from agents_md.rs discovery). We never remind about these —
-    /// the agent already has them. All entries are canonicalized via `normalize()`.
+    /// AGENTS.md file paths that were part of the initial system prompt injection.
     initial_discovery: HashSet<PathBuf>,
 
     /// AGENTS.md file paths we've already reminded the agent about.
-    /// Each file gets at most one reminder per session (or compaction cycle).
-    /// All entries are canonicalized via `normalize()`.
     reminded: HashSet<PathBuf>,
 
-    /// Upper bound for walking. We never walk above the git root.
-    /// If None, walking is disabled (no git repo found).
-    /// Canonicalized via `normalize()` on insertion.
+    /// Upper bound for walking. We never walk above the git root. If None, walking is disabled (no git repo found).
     git_root: Option<PathBuf>,
 
-    /// Gitignore rules for the repo. Discovered AGENTS.md files that match
-    /// .gitignore are silently skipped, matching the behavior of the initial
-    /// discovery in agents_md.rs.
+    /// Gitignore rules for the repo.
     gitignore: Option<Gitignore>,
 
-    /// Resolved vendor-compat config governing which rules dirs and agent
-    /// filenames are scanned. Defaults to all-on (historical behavior).
-    /// Set by the bridge at seed time.
+    /// Resolved vendor-compat config governing which rules dirs and agent filenames are scanned.
     compat: CompatConfig,
 }
 
@@ -87,9 +61,8 @@ impl AgentsMdTracker {
         Self::default()
     }
 
-    /// Set the resolved vendor-compat config used by runtime AGENTS.md / rules
-    /// discovery. Must be called at session start (alongside `seed`) so
-    /// `check_path` gates vendor surfaces correctly.
+    /// Set the resolved vendor-compat config used by runtime AGENTS.md /
+    /// rules discovery.
     pub fn set_compat(&mut self, compat: CompatConfig) {
         self.compat = compat;
     }
@@ -132,9 +105,11 @@ impl AgentsMdTracker {
             None => return vec![], // No git repo → no discovery
         };
 
-        // If target is a directory, start from it If target is a file, start from its parent We check the raw path first (before normalization)
-        // because normalize() on a non-existent file returns it as-is, making is_dir() return false for existing directories passed with a
-        // non-existent child. By checking the raw path, then normalizing the starting directory, we get correct canonical paths.
+        // If target is a directory, start from it If target is a file, start
+        // from its parent We check the raw path first (before normalization)
+        // because normalize() on a non-existent file returns it as-is, making
+        // is_dir() return false for existing directories passed with a
+        // non-existent child.
         let is_dir = match tokio::time::timeout(
             FS_SYSCALL_TIMEOUT,
             tokio::fs::metadata(target_path),
@@ -162,9 +137,7 @@ impl AgentsMdTracker {
             }
         };
 
-        // Canonicalize the starting directory. This resolves symlinks and ensures consistent matching against
-        // checked_dirs/initial_discovery. The starting directory should exist on disk (it's the parent of a file the agent
-        // just accessed successfully), so canonicalize should succeed.
+        // Canonicalize the starting directory.
         let start_dir = normalize(&raw_start_dir).await;
 
         // Verify the start dir is within the git root
@@ -174,9 +147,7 @@ impl AgentsMdTracker {
 
         let mut discoveries = Vec::new();
 
-        // Compute the gated filename / rules-dir lists once per call (they are constant across the
-        // walk). The vendor-gated entries drop when the matching compat cell is off; all-on
-        // reproduces `AGENT_FILENAMES` / `RULES_DIRS` exactly.
+        // Compute the gated filename / rules-dir lists once per call (they are constant across the walk).
         let agent_filenames = self.compat.agent_filenames();
         let rules_dirs = self.compat.rules_dirs();
 
@@ -200,9 +171,12 @@ impl AgentsMdTracker {
             if !self.checked_dirs.contains(&dir_buf) {
                 self.checked_dirs.insert(dir_buf.clone());
 
-                // Check for AGENTS.md files in this directory. Each exists() check goes through the tokio blocking pool with a
-                // timeout. On the first timeout we abort the entire walk — a single hung stat means the filesystem is unresponsive and
-                // continuing would just pile up timeouts. `agent_filenames` is computed once above the walk.
+                // Check for AGENTS.md files in this directory. Each exists()
+                // check goes through the tokio blocking pool with a timeout.
+                // On the first timeout we abort the entire walk — a single
+                // hung stat means the filesystem is unresponsive and
+                // continuing would pile up timeouts. `agent_filenames` is
+                // computed once above the walk.
                 for filename in &agent_filenames {
                     let agents_path = dir.join(filename);
                     let stat_result =
@@ -313,17 +287,14 @@ impl AgentsMdTracker {
         discoveries
     }
 
-    /// Reset discovery state so that reminders re-fire after compaction. Called by the compaction flow to ensure the agent is re-notified about
-    /// AGENTS.md files it may have lost context on. Without clearing `checked_dirs`, `check_path()` would skip directories it already visited and
-    /// never re-discover the AGENTS.md files in them — making the `reminded.clear()` useless.
+    /// Reset discovery state so that reminders re-fire after compaction.
     pub fn on_compaction(&mut self) {
         self.reminded.clear();
         self.checked_dirs.clear();
     }
 
-    /// Get the set of AGENTS.md paths that were discovered at runtime
-    /// and reminded about. Used by compaction to surface them in the
-    /// compaction context.
+    /// Get the set of AGENTS.md paths that were discovered at runtime and
+    /// reminded about.
     pub fn reminded_paths(&self) -> &HashSet<PathBuf> {
         &self.reminded
     }

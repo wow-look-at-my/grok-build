@@ -1,7 +1,4 @@
 //! Host-provided policy hook for ordinary file tools accessing memory v2.
-//!
-//! The tools crate owns only this narrow interface. The memory crate implements
-//! containment, optimistic concurrency, atomic writes, and manifest refreshes.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,10 +20,7 @@ pub trait MemoryV2Access: std::fmt::Debug + Send + Sync {
     /// Record the full content observed by a successful ordinary file read.
     fn record_read(&self, path: &Path, contents: &[u8]) -> Result<(), String>;
 
-    /// Validate a create/replace without persisting it.
-    ///
-    /// Returns whether the path belongs to memory v2. Implementations must
-    /// perform the same deterministic policy checks as [`Self::write_file`].
+    /// Validate a create/replace without persisting it. Returns whether the path belongs to memory v2.
     fn preflight_write(&self, path: &Path, contents: &[u8]) -> Result<bool, String>;
 
     /// Atomically create or replace a permitted memory v2 file.

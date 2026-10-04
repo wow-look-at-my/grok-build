@@ -22,8 +22,8 @@ struct ReportCadence {
     last: Option<Report>,
 }
 
-// The gauges describe the process, so the cadence that rate-limits them belongs to the process, not to any one agent
-// This is a `//` comment because `///` above `thread_local!` trips `clippy::unused_doc_comments`
+// The gauges describe the process, so the cadence that rate-limits them
+// belongs to the process, not to any one agent.
 thread_local! {
     static CADENCE: RefCell<ReportCadence> = RefCell::new(ReportCadence::default());
 }
@@ -79,9 +79,10 @@ impl MvpAgent {
         );
     }
 
-    /// Called from the heap monitor's poll loop, which runs whether or not profiling is on, so a session that never closes still reports.
-    /// Every tick pays one memory read (`/proc/self/status` on Linux, one `proc_pidinfo` on macOS), which also carries the thread count.
-    /// Only a tick that reports pays for the descriptor scan.
+    /// Called from the heap monitor's poll loop, which runs whether profiling
+    /// is on, so a session that never closes still reports. Every tick pays
+    /// one memory read (`/proc/self/status` on Linux, one `proc_pidinfo` on
+    /// macOS), which also carries the thread count.
     pub(super) fn report_resource_usage_if_due(&self) {
         let memory = xai_tty_utils::sample_process_memory();
         let due = CADENCE.with_borrow(|cadence| cadence.is_due(Instant::now(), memory.rss_bytes));

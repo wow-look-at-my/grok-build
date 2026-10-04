@@ -1,12 +1,10 @@
-//! `EventLag` is a wire-format payload: it appears in the `EventEnvelope.payload.lag` oneof over the gRPC `Events` stream.
-//! The canonical Rust definition therefore belongs in this crate.
-//! The runtime `EventStream<T>` wrapper (in the workspace crate) will report lag to consumers as `Result<T, EventLag>`.
+//! `EventLag` is a wire-format payload.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Backpressure signal when the event-bus subscriber lags and events are dropped. Tagged with `tag = "type"` like every wire enum.
-/// `Lagged(u64)` is the count dropped since the previous successful receive.
+/// Backpressure signal when the event-bus subscriber lags and events are
+/// dropped. Tagged with `tag = "type"` like every wire enum.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Error)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum EventLag {

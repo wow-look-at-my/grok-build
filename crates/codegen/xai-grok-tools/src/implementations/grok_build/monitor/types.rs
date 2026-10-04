@@ -5,7 +5,7 @@ pub const LINE_TRUNCATION_LIMIT: usize = 500;
 pub const BATCH_TRUNCATION_LIMIT: usize = 3_000;
 
 /// Raw stdout buffer cap in bytes.
-pub const BUFFER_CAP_BYTES: usize = 1_048_576; // 1 MB
+pub const BUFFER_CAP_BYTES: usize = 1_048_576;
 
 /// Debounce window for batching concurrent stdout lines (ms).
 pub const DEBOUNCE_MS: u64 = 200;
@@ -19,12 +19,11 @@ pub const RATE_LIMIT_REFILL_MS: u64 = 2_000;
 /// Auto-kill after this many ms of continuous rate-limit violations.
 pub const AUTO_KILL_THRESHOLD_MS: u64 = 30_000;
 
-/// Default monitor timeout (non-persistent). 10 hours to avoid short
-/// unexpected cutoffs for monitors the model starts without an explicit deadline.
-pub const DEFAULT_TIMEOUT_MS: u64 = 36_000_000; // 10 hours
+/// Default monitor timeout (non-persistent).
+pub const DEFAULT_TIMEOUT_MS: u64 = 36_000_000; // Several
 
 /// Maximum monitor timeout.
-pub const MAX_TIMEOUT_MS: u64 = 36_000_000; // 10 hours
+pub const MAX_TIMEOUT_MS: u64 = 36_000_000; // Several
 
 /// Max result size for the tool_result response.
 pub const MAX_RESULT_SIZE_CHARS: usize = 10_000;
@@ -48,7 +47,6 @@ pub struct MonitorInput {
     pub description: String,
 
     /// Kill the monitor after this deadline (ms). Ignored when persistent is true.
-    /// Default: 36000000 (10 hr). Max: 36000000 (10 hr).
     #[serde(default = "default_timeout_ms")]
     #[schemars(
         description = "Kill the monitor after this deadline (ms). Default: 36000000 (10 hr). Max: 36000000 (10 hr).",
@@ -57,7 +55,6 @@ pub struct MonitorInput {
     pub timeout_ms: Option<u64>,
 
     /// Run for the lifetime of the session (no timeout). Use for session-length watches.
-    /// Stop with kill_command_or_subagent.
     #[serde(
         default,
         deserialize_with = "crate::types::schema::deserialize_lenient_bool"
@@ -73,7 +70,7 @@ pub struct MonitorInput {
 pub struct MonitorOutput {
     /// ID of the background monitor task (used with kill_command_or_subagent to cancel).
     pub task_id: String,
-    /// Timeout deadline in milliseconds. 0 when persistent.
+    /// Timeout deadline in milliseconds.
     pub timeout_ms: u64,
     /// Whether the monitor runs until kill_command_or_subagent or session end.
     pub persistent: bool,
@@ -100,7 +97,6 @@ impl MonitorInput {
         Ok(())
     }
 
-    /// Resolved timeout in milliseconds (0 for persistent / no-deadline monitors).
     pub fn resolved_timeout_ms(&self) -> u64 {
         if self.persistent {
             0
@@ -117,16 +113,13 @@ impl MonitorInput {
 pub struct MonitorEventNotification {
     pub task_id: String,
     pub event_text: String,
-    /// Session that owns the monitor which produced this event. In leader mode every session shares one [`MonitorEventBuffer`], so the drain sites
-    /// filter on this to avoid surfacing one session's monitor events inside another session's turn. `None` for legacy / non-grok-build backends,
-    /// which any session drains for backwards compatibility.
+    /// Session that owns the monitor which produced this event.
     pub owner_session_id: Option<String>,
 }
 
 impl MonitorEventNotification {
-    /// Whether this buffered event should surface in the session whose owner id is `my_owner`. Mirrors
-    /// `task_owned_by_session`: an event surfaces only when it has no recorded owner (legacy) or its owner matches the
-    /// draining session. Foreign events stay buffered for their own session to drain.
+    /// Whether this buffered event should surface in the session whose owner
+    /// id is `my_owner`.
     pub fn owned_by_session(&self, my_owner: Option<&str>) -> bool {
         match (my_owner, self.owner_session_id.as_deref()) {
             (Some(me), Some(owner)) => me == owner,
@@ -135,9 +128,7 @@ impl MonitorEventNotification {
     }
 }
 
-/// Shared buffer for mid-turn monitor event notifications: an [`EventQueue`] of
-/// [`MonitorEventNotification`]. Producers `push_capped`; the turn loop drains its session's events
-/// via [`drain_owned`]. [`EventQueue`]: xai_interjection_core::EventQueue
+/// Shared buffer for mid-turn monitor event notifications: an [`EventQueue`] of [`MonitorEventNotification`].
 pub type MonitorEventBuffer = xai_interjection_core::EventQueue<MonitorEventNotification>;
 
 crate::register_resource!("grok_build", "MonitorEventBuffer", MonitorEventBuffer);

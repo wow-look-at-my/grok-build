@@ -1,9 +1,4 @@
 //! Plugin system: discover, load, and manage plugins (including compat layouts).
-//!
-//! A plugin is a self-contained directory that bundles skills, agents,
-//! MCP server configs, and hooks into a namespaced unit.  Plugins can
-//! live under `~/.grok/plugins/`, `.grok/plugins/` (project-level),
-//! or be passed via `--plugin-dir` on the CLI.
 
 pub mod discovery;
 pub mod git_install;

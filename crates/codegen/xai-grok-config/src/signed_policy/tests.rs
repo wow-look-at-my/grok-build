@@ -943,7 +943,7 @@ fn signed_cache_compromised_expired_reads_compromised() {
         SignedVerdict::Compromised,
         "an expired authentic sidecar must read compromised (anti-rollback TTL)"
     );
-    // Just inside the window it holds
+    // Inside the window it holds
     assert_eq!(
         signed_cache_compromised_with_keys(home, &keyset("v1", &pubkey), Some("team-007"), 999),
         SignedVerdict::Trusted
@@ -1122,8 +1122,7 @@ fn rotation_selects_the_trusted_key_by_signed_key_id() {
     );
 }
 
-// The is-managed claim tests live in a sibling child module because this file is at the 1k-line mark
-// The #[path] include below keeps the same private access
+// The is-managed claim tests live in a sibling child module.
 #[path = "claim_tests.rs"]
 mod claim_tests;
 

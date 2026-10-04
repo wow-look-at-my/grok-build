@@ -1,9 +1,4 @@
 //! `ToolDyn` blanket impl + `ToolFamily` lookup.
-//!
-//! Covers the JSON-erased object-safe surface (`ToolDyn`) and the
-//! variant-keyed family lookup (`ToolFamily`). Mirrors the toolbox
-//! `GrokToolDyn` / `GrokToolFamily` tests but against the runtime's
-//! typed `Tool` trait.
 
 use std::sync::Arc;
 
@@ -34,8 +29,7 @@ struct EchoOutput {
 }
 
 impl ToolOutput for EchoOutput {}
-/// Blocking tool — exercises the default `Tool::execute` wrap-with-`run`
-/// path through the `ToolDyn` blanket.
+/// Blocking tool — exercises the default `Tool::execute` wrap-with-`run` path through the `ToolDyn` blanket.
 struct BlockingEcho;
 
 impl Tool for BlockingEcho {
@@ -96,8 +90,7 @@ impl Tool for StreamingEcho {
     }
 }
 
-/// Output type that always fails to serialize. Drives the `Tool::Output ->
-/// Value` re-encoding error path through the `ToolDyn` blanket.
+/// Output type that always fails to serialize.
 struct Unencodable;
 
 impl ToolOutput for Unencodable {}
@@ -132,8 +125,7 @@ impl Tool for UnencodableTool {
 
 // ── Tool with custom ToolOutput (non-empty) ──────────────────
 
-/// Output that provides its own model-facing content blocks. The blanket
-/// impl must forward these as-is rather than filling in the JSON fallback.
+/// Output that provides its own model-facing content blocks.
 #[derive(Debug, Serialize)]
 struct RichOutput {
     value: u32,
@@ -238,8 +230,7 @@ async fn tool_dyn_blanket_encodes_terminal_output() {
         ToolStreamItem::Terminal(Ok(typed)) => {
             assert_eq!(typed.tool_id, tid("blocking_echo"));
             assert_eq!(typed.value, json!({"text": "hi"}));
-            // EchoOutput uses the default ToolOutput which
-            // serialises self to a JSON text block (MCP-compliant).
+            // EchoOutput uses the default ToolOutput which serialises self to a JSON text block (MCP-compliant).
             assert_eq!(typed.model_output.len(), 1);
             assert_eq!(
                 typed.model_output[0],
@@ -315,12 +306,9 @@ async fn tool_dyn_unencodable_output_becomes_execution_terminal() {
 }
 
 // ---------------------------------------------------------------------------
-// ToolFamily
-// ---------------------------------------------------------------------------
+// ToolFamily.
 
-/// Backend-flavoured echo. Two variants share the `echo` tool id and only
-/// differ in the prefix attached to the output text — enough to assert
-/// the family routes lookups to distinct implementations.
+/// Backend-flavoured echo.
 struct PrefixedEcho {
     prefix: &'static str,
 }
@@ -419,8 +407,7 @@ async fn tool_family_default_variant_name_defaults_to_none() {
 }
 
 // ---------------------------------------------------------------------------
-// Object safety / ergonomic checks
-// ---------------------------------------------------------------------------
+// Object safety / ergonomic checks.
 
 #[test]
 fn tool_dyn_is_object_safe_in_arc_and_box() {
@@ -434,9 +421,7 @@ fn tool_family_is_object_safe_in_arc_and_box() {
     let _boxed: Box<dyn ToolFamily> = Box::new(EchoFamily);
 }
 
-/// The blanket impl is what makes `ToolDyn` ergonomic. This compile-time
-/// check makes sure a fresh `Tool` impl can be passed where `&dyn ToolDyn`
-/// is expected without an explicit upcast.
+/// The blanket impl is what makes `ToolDyn` ergonomic.
 fn _accepts_dyn(_: &dyn ToolDyn) {}
 
 #[allow(dead_code)]
@@ -446,8 +431,7 @@ fn _compile_time_blanket_check() {
     let tool = StreamingEcho;
     _accepts_dyn(&tool);
 
-    // The trait objects themselves must be `Send + Sync` so they can be
-    // shared across tasks without further bounds at the call site.
+    // The trait objects themselves must be `Send + Sync` so they can be shared across tasks without further bounds.
     fn _is_send_sync<T: Send + Sync + ?Sized>() {}
     _is_send_sync::<dyn ToolDyn>();
     _is_send_sync::<dyn ToolFamily>();

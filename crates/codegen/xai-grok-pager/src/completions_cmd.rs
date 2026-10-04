@@ -1,6 +1,4 @@
 //! `grok completions <shell>`: generate shell completion scripts.
-//!
-//! Used by the installers and npm postinstall; must stay side-effect free (no network, auth, tracing, or tokio).
 
 use clap::CommandFactory as _;
 use clap_complete::{Shell, generate};
@@ -20,8 +18,7 @@ pub fn run(shell: Shell) {
     generate(shell, &mut cmd, "grok", &mut buf);
     match String::from_utf8(buf) {
         Ok(script) => print!("{}", fix_zsh_root_prompt_positional(&script)),
-        // clap_complete output is generated from Rust strings, so this arm is unreachable in practice
-        // But the installers run this command, so emit the unmodified script rather than panic
+        // clap_complete output is generated from Rust strings.
         Err(e) => {
             use std::io::Write as _;
             let _ = std::io::stdout().write_all(e.as_bytes());
@@ -70,13 +67,10 @@ mod tests {
         String::from_utf8(buf).expect("completion script is UTF-8")
     }
 
-    // The optional `[PROMPT]` positional (app/cli.rs) makes clap_complete emit a `::prompt` slot before the subcommand slot
-    // Dispatch happens on `$line[2]`, so `grok worktree <TAB>` re-offered every top-level command (upstream clap-rs/clap#6282)
     #[test]
     fn zsh_completions_drop_prompt_slot_and_dispatch_on_line_1() {
         let raw = zsh_script();
-        // Preconditions: the workaround is still needed
-        // If these start failing, clap_complete fixed the positional handling; delete `fix_zsh_root_prompt_positional` instead of updating the test
+        // Preconditions: the workaround is still needed If these start failing, clap_complete fixed the positional handling.
         assert!(raw.contains("'::prompt -- "), "raw script has prompt slot");
         assert!(
             raw.contains("case $line[2] in"),
@@ -96,7 +90,6 @@ mod tests {
             fixed.contains(r#"curcontext="${curcontext%:*:*}:grok-command-$line[1]:""#),
             "root dispatch context must use $line[1]"
         );
-        // Subcommand dispatch blocks (already on $line[1]) must survive.
         assert!(
             fixed.contains("grok-worktree-command-$line[1]"),
             "nested subcommand dispatch must be untouched"

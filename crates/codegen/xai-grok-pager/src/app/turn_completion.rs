@@ -1,10 +1,4 @@
 //! Finalizing a turn from a terminal turn signal.
-//!
-//! The pager learns a turn reached its terminal outcome from two rails.
-//! One is the fire-and-forget `x.ai/session/prompt_complete` broadcast, kept for one release so leaders that have not yet upgraded still work.
-//! The other is the durable `XaiSessionUpdate::TurnCompleted`, which is persisted and replayed.
-//! Both converge on [`finalize_turn_from_terminal`] so the turn-finalize behavior lives in one place.
-//! A viewer that re-attaches mid-turn can then finalize the turn from replay instead of staying stuck on "Waiting…".
 
 use crate::app::error_display::WireErrorType;
 use crate::scrollback::blocks::SessionEvent;
@@ -14,7 +8,8 @@ use super::agent_view::AgentView;
 use super::app_view::AppView;
 use super::cancel_latency::TurnEnd;
 
-/// `_meta.cancellationCategory` of a hook-denied turn end: renders the "blocked by a hook" marker instead of "cancelled by user" on every rail.
+/// `_meta.cancellationCategory` of a hook-denied turn end: renders the
+/// "blocked by a hook" marker instead of "cancelled by user".
 pub(crate) const HOOK_DENIED_CATEGORY: &str =
     xai_grok_shell::session::commands::HOOK_DENIED_CATEGORY;
 
@@ -23,7 +18,6 @@ pub(crate) const CANCEL_TRIGGER_KEY: &str = "cancelTrigger";
 /// `_meta` key of a terminal's cancellation category (e.g. [`HOOK_DENIED_CATEGORY`]).
 pub(crate) const CANCELLATION_CATEGORY_KEY: &str = "cancellationCategory";
 /// `_meta` key of a cancelled terminal's structured detail (hook name, reason).
-/// It is stamped beside the category; absent on older shells.
 pub(crate) const CANCELLATION_CONTEXT_KEY: &str = "cancellationContext";
 /// `_meta` key distinguishing a queued prompt that never ran from a real cancel.
 pub(crate) const COMPLETION_KIND_KEY: &str = xai_grok_shell::session::commands::COMPLETION_KIND_KEY;
@@ -169,12 +163,9 @@ pub(super) fn note_hook_blocked_turn(
         return;
     }
     agent.session.hook_block_hold = true;
-    // A blocked turn never broadcasts its user echo
-    // Consume the armed skip so it cannot swallow the next live user message (another client's prompt)
+    // A blocked turn never broadcasts its user echo Consume the armed skip so it cannot swallow the next live user message.
     agent.session.tracker.clear_user_echo_skip();
-    // The scrollback bubble stays: the live session keeps showing what the user typed, even though a blocked prompt is stored nowhere
-    // Adopting another client's turn also stashes a text-only prompt, so rewind can restore it
-    // Only the originating client may requeue the prompt and own the card
+    // The scrollback bubble stays: the live session keeps showing what the user typed.
     let foreign = prompt_id.is_some_and(|p| !agent.is_self_originated_prompt(p));
     let mut requeued = None;
     let mut was_combined = false;
@@ -196,8 +187,8 @@ pub(super) fn note_hook_blocked_turn(
     );
     match requeued {
         Some((row_id, text)) => {
-            // One parse point for the wire context
-            // The shell serializes `CancellationContext` (camelCase); this deserializes into the same shared type instead of reading keys by string
+            // One parse point for the wire context The shell serializes
+            // `CancellationContext` (camelCase).
             let ctx: Option<xai_grok_shell::session::commands::CancellationContext> =
                 cancellation_context.and_then(|v| serde_json::from_value(v.clone()).ok());
             let blocked = crate::app::agent::BlockedPromptContext {
@@ -253,9 +244,7 @@ fn open_prompt_blocked_card(
             crate::app::queue_edit::PromptMode::EditingQueued { .. }
         )
     {
-        // Modal collision or a composer busy with a queue edit
-        // The hold, the requeued row, and the stored context (for a later reopen) already protect the queue
-        // Leave a plain toast so the parked state isn't silent
+        // Modal collision or a composer busy with a queue edit The hold, the requeued row, and the stored context (for a later reopen).
         agent.show_toast("Prompt blocked by a hook — it is held at the front of the queue");
         return;
     }
@@ -270,8 +259,7 @@ fn open_prompt_blocked_card(
     let short_hook_name = xai_grok_hooks::config::hook_display_name(hook_name);
     let reason = blocked.reason.as_deref().unwrap_or_default();
 
-    // `\n\n` splits the card header into a bold label plus dimmed description lines (one per paragraph)
-    // The paragraphs: framing, hook reason verbatim, queue context
+    // `\n\n` splits the card header into a bold label plus dimmed description lines (one per paragraph) The paragraphs: framing.
     let mut question = format!("Prompt blocked by {short_hook_name}");
     if !reason.is_empty() {
         question.push_str("\n\n");
@@ -328,8 +316,8 @@ fn open_prompt_blocked_card(
     agent.prompt.set_text("");
 }
 
-/// Push a turn-terminal marker ("Turn completed/cancelled/failed"); every marker rail routes through here, wake turns
-/// via `finish_wake_turn`. `event == None` (bash turns, rate-limit / re-auth UX that replaces the marker) pushes nothing.
+/// Push a turn-terminal marker ("Turn completed/cancelled/failed"); every
+/// marker rail routes through here, wake turns via `finish_wake_turn`.
 pub(super) fn push_turn_terminal_marker(agent: &mut AgentView, event: Option<SessionEvent>) {
     if let Some(event) = event {
         agent.push_end_marker_block(event);
@@ -348,14 +336,11 @@ pub(super) struct TerminalSignal<'a> {
     pub stop_reason: Option<&'a str>,
     /// `agentResult` detail (error text, when present).
     pub agent_result: Option<&'a str>,
-    /// `_meta.cancelTrigger`: `"send_now"` is the silent half of a cancel-and-send, so the `TurnCancelled` marker is suppressed.
-    /// Absent meta means a normal cancel, unless this client dispatched the send-now (`AgentView::expect_send_now_cancel`, older-shell fallback).
+    /// `_meta.cancelTrigger`: `"send_now"` is the silent half of a cancel-and-send.
     pub cancel_trigger: Option<&'a str>,
     /// `_meta.cancellationCategory`: `"HookDenied"` picks the blocked-by-a-hook marker.
-    /// Absent on older shells and plain user cancels.
     pub cancellation_category: Option<&'a str>,
-    /// `_meta.cancellationContext`: structured detail of a hook-denied end (hook name, reason), shown on the blocked-prompt card.
-    /// Absent on older shells and non-hook cancels.
+    /// `_meta.cancellationContext`: structured detail of a hook-denied end (hook name, reason), shown.
     pub cancellation_context: Option<&'a serde_json::Value>,
     /// Typed kind of a failed stop, parsed at the wire ingress (`wire_error_kind`: absent maps to `None`, unknown to `Some(Other)`).
     pub error_kind: Option<WireErrorType>,
@@ -365,11 +350,9 @@ pub(super) struct TerminalSignal<'a> {
 pub(super) enum TerminalApply {
     /// No change: a driver turn the signal does not provably match, or a duplicate/stale terminal for an already-finished viewer turn.
     Ignored,
-    /// Driver: the lost-RPC reconcile was armed. The turn is NOT finished; the `PromptResponse` RPC owns the driver's lifecycle.
-    /// Reported as a state change so the reconcile sweep's animation tick stays scheduled.
+    /// Driver: the lost-RPC reconcile was armed.
     ReconcileArmed,
     /// Viewer: the turn was finished and (for non-rate-limit reasons) a terminal marker pushed.
-    /// The caller drops any stale running-prompt adoption.
     ViewerFinalized,
 }
 
@@ -472,8 +455,8 @@ fn arm_driver_turn_end_reconcile(
 
 fn driver_mid_active_work(agent: &AgentView) -> bool {
     use crate::acp::tracker::TurnActivity;
-    // A stale tool-call write means the delta stream died
-    // Whatever shows through it (an open thinking block, an earlier tool) must not block lost-response recovery
+    // A stale tool-call write means the delta stream died Whatever shows
+    // through it (an open thinking block, an earlier tool).
     if agent.session.tracker.has_stale_tool_call_write() {
         return false;
     }
@@ -513,16 +496,13 @@ pub(super) fn finalize_turn_from_terminal(
         return TerminalApply::Ignored;
     }
 
-    // Viewer: the driver's turn ended, exit TurnRunning
-    // Only act when a turn is actually in progress so a stray/duplicate signal is harmless
-    // A duplicate finds the turn already finished here and pushes no marker
+    // Viewer: the driver's turn ended, exit TurnRunning Only act when a turn
+    // is in progress.
     if !agent.session.state.is_busy() && agent.session.current_prompt_id.is_none() {
         return TerminalApply::Ignored;
     }
 
-    // Capture elapsed BEFORE `mark_turn_finished()` clears `turn_started_at`
-    // The anchor was back-dated from the authoritative `turnStartMs` on adoption, so this reads the same wall-clock duration the driver shows
-    // Missing clock stays `None` (same as the live driver) so we render "Turn completed." rather than "Worked for 0.0s"
+    // Capture elapsed BEFORE `mark_turn_finished()` clears `turn_started_at` The anchor was back-dated.
     let elapsed_ms = duration_to_elapsed_ms(agent.turn_elapsed());
 
     // Before `finish_turn`: the blocked-prompt requeue reads `in_flight_prompt`, which finish_turn clears
@@ -535,7 +515,6 @@ pub(super) fn finalize_turn_from_terminal(
     agent.session.finish_turn(&mut agent.scrollback);
 
     // Wire meta wins; else the client-side expectation (older-shell fallback).
-    // Taken at every viewer finalize so it can't go stale.
     let expected_send_now = agent.expect_send_now_cancel.take();
     let send_now_cancel = match cancel_trigger {
         Some(trigger) => trigger == "send_now",
@@ -575,8 +554,8 @@ pub(super) fn finalize_child_view_turn(
         return false;
     }
     let signal_pid = signal.prompt_id.filter(|pid| !pid.is_empty());
-    // Nameless terminals still finish a TurnCancelling turn whose id a chunk adopted.
-    // A named follow-up that is already running is a stale duplicate and must not end.
+    // Nameless terminals still finish a TurnCancelling turn whose id a chunk
+    // adopted.
     if signal_pid.is_none()
         && child.session.current_prompt_id.is_some()
         && !child.session.state.is_cancelling()

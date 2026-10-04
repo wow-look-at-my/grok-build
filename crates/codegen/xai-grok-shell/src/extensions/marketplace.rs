@@ -1,5 +1,4 @@
 //! Marketplace browsing and install endpoints for the pager modal.
-//! Scanning and install logic live in the `xai-grok-plugin-marketplace` crate.
 
 use agent_client_protocol as acp;
 use xai_hooks_plugins_types::{
@@ -112,8 +111,7 @@ async fn handle_action(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 
     let outcome = match req.action {
         MarketplaceAction::Refresh { source_url_or_path } => {
-            // Force re-sync git caches (local sources are re-scanned on next
-            // list) on the blocking pool (LocalSet invariant: plugin/acquire.rs).
+            // Force re-sync git caches (local sources are re-scanned on next list) on the blocking pool.
             let sources = load_filtered_marketplace_sources();
             let filter = source_url_or_path;
             match tokio::task::spawn_blocking(move || refresh_sources(&sources, filter.as_deref()))
@@ -218,8 +216,7 @@ async fn handle_update(
     let updated = acquire::run_marketplace_update(
         xai_grok_agent::plugins::install_registry::MarketplaceProvenance {
             source_url_or_path: source_url_or_path.to_string(),
-            // Refreshed from the resolved source (the wire request carries no
-            // display name).
+            // Refreshed from the resolved source (the wire request carries no display name).
             source_display_name: String::new(),
             plugin_subdir: plugin_relative_path.to_string(),
         },
@@ -417,8 +414,7 @@ async fn handle_uninstall(
 ) -> xai_hooks_plugins_types::ActionOutcome {
     use xai_hooks_plugins_types::OutcomeStatus;
 
-    // Registry + fs work on the blocking pool under the registry flock
-    // (never block the LocalSet on fs or the flock poll).
+    // Registry + fs work on the blocking pool under the registry flock.
     let source = source_url_or_path.to_string();
     let path = plugin_relative_path.to_string();
     let outcome = match tokio::task::spawn_blocking(move || uninstall_locked(&source, &path)).await
@@ -705,8 +701,7 @@ async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome 
         };
     }
 
-    // Dedupe against the FULL unfiltered source list (config + settings
-    // extras + managed pins) by canonical git-URL identity.
+    // Dedupe against the FULL unfiltered source list (config + settings extras + managed pins).
     let existing = crate::plugin::load_marketplace_sources();
     let already_configured = match &input {
         MarketplaceAddInput::GitUrl(git_url) => {
@@ -774,8 +769,7 @@ async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome 
         }
     };
 
-    // Run the write under the config write guard (SAVE_LOCK + init flock), off the reactor; an
-    // unguarded add is exactly the read-modify-write race the guard prevents.
+    // Run the write under the config write guard (SAVE_LOCK + init flock), off the reactor.
     let config_path = xai_grok_config::grok_home().join("config.toml");
     let save_guard = match crate::util::config::lock_config_writes().await {
         Ok(guard) => guard,
@@ -981,8 +975,7 @@ pub(crate) fn purge_default_skills_installs(grok_home: &std::path::Path) {
     });
 }
 
-/// Short registry-lock wait for the startup purge: contention means another
-/// plugin operation is live, and the unset sticky flag retries next startup.
+/// Short registry-lock wait for the startup purge: contention means another plugin operation is live.
 const PURGE_REGISTRY_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 fn purge_default_skills_installs_impl(
@@ -1087,8 +1080,10 @@ fn purge_default_skills_installs_impl(
     }
 }
 
-/// Auto-register the official xAI marketplace source on first run. Gated by the caller (`init_process`); see `Config::resolve_official_marketplace_auto_register`. No-op once `official_marketplace_auto_installed` is set.
-/// Under a process-wide flock it adds the source (or just sets the flag if it's already present in config.toml or a JSON store). Best-effort: errors are logged and never block startup.
+/// Auto-register the official xAI marketplace source on first run. Gated by
+/// the caller (`init_process`); see
+/// `Config::resolve_official_marketplace_auto_register`. No-op once
+/// `official_marketplace_auto_installed` is set.
 pub(crate) fn ensure_official_marketplace_source(grok_home: &std::path::Path) {
     ensure_official_marketplace_source_with(
         grok_home,
@@ -1158,9 +1153,7 @@ fn ensure_official_marketplace_source_with(
         }
     };
 
-    // "Already present" means the official URL is in the config.toml sources or in a JSON store (settings.json, known_marketplaces.json) under grok_home
-    // The scan is scoped to grok_home only (not ~/.claude) to keep tests hermetic
-    // A user with the URL solely in ~/.claude gets one duplicate entry that the UI dedupes by URL
+    // "Already present" means the official URL is in the config.toml sources or in a JSON store (settings.json, known_marketplaces.json).
     let toml_sources = xai_grok_plugin_marketplace::load_sources(&parsed);
     let json_sources = xai_grok_plugin_marketplace::load_extra_sources_from_settings_in(
         &toml_sources,
@@ -1172,7 +1165,7 @@ fn ensure_official_marketplace_source_with(
     });
 
     let write_result = if already_present {
-        // Already present: just set the flag.
+        // Already present: set the flag.
         set_official_marketplace_auto_installed(&config_path)
     } else {
         add_marketplace_source(
@@ -1294,7 +1287,7 @@ mod official_source_tests {
 
     #[test]
     fn removing_last_nonofficial_source_preserves_flag_and_blocks_readd() {
-        // Regression: removing the last (non-official) source must not wipe the sticky flag, or a gated startup would re-add the removed official source
+        // Regression: removing the last (non-official) source must not wipe the sticky flag.
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
         let config_path = home.join("config.toml");

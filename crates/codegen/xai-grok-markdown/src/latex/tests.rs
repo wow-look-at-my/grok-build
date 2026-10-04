@@ -38,19 +38,17 @@ fn script_fallback_uses_parens() {
 
 #[test]
 fn wordlike_scripts_fall_back_to_parens() {
-    // Text-family commands mark the atom as a word, so it is not rendered as a modifier-letter run
-    // `pₜₒᵣₛₒ` is unreadable and gappy in many terminal fonts
+    // Text-family commands mark the atom as a word.
     assert_eq!(inline("p_{\\text{torso}}"), "p_(torso)");
     assert_eq!(inline("z_{\\mathrm{draft}}"), "z_(draft)");
     assert_eq!(inline("x^{\\text{opt}}"), "x^(opt)");
-    // 3+ letter runs read as words even without \text.
     assert_eq!(inline("x_{max}"), "x_(max)");
     assert_eq!(inline("z_{torso}"), "z_(torso)");
 }
 
 #[test]
 fn indexlike_scripts_keep_unicode_forms() {
-    // Runs of one or two letters are index juxtapositions, not words
+    // Runs of one or letters are index juxtapositions, not words
     assert_eq!(inline("x_{ij}"), "xᵢⱼ");
     assert_eq!(inline("T_{i+1}"), "Tᵢ₊₁");
     assert_eq!(inline("n^{th}"), "nᵗʰ");

@@ -1,7 +1,4 @@
 //! Interactive modal for selectively importing Claude settings.
-//!
-//! Shown when the user runs `/import-claude` (in-session) or presses `i` on the welcome screen with new Claude settings detected.
-//! Users review each discovered item, toggle which to import, and confirm. Only checked items are written to `.grok/config.toml`.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
@@ -40,8 +37,7 @@ pub struct ImportClaudeModalState {
     pub focus: usize,
     /// Top of visible scroll window.
     pub scroll_offset: usize,
-    /// Screen rect where rows are rendered; populated by the renderer so `handle_mouse` can map click coordinates back to row indices.
-    /// `None` until the first draw.
+    /// Screen rect where rows are rendered.
     pub content_area: Option<ratatui::layout::Rect>,
     /// Shared modal window chrome state (close button, shortcuts, hover).
     pub window: ModalWindowState,
@@ -213,7 +209,6 @@ impl ImportClaudeModalState {
                 return ImportClaudeModalOutcome::Changed;
             }
             _ => {
-                // Mouse handler never returns fold outcomes; fall through to content handling
             }
         }
 
@@ -222,9 +217,8 @@ impl ImportClaudeModalState {
         };
         match kind {
             MouseEventKind::Moved => {
-                // Move focus to the selectable row under the cursor for hover feedback
-                // Clicks outside the content area, header gaps, or blank spacers don't move focus
-                // A hover-state transition recorded above must still be honoured
+                // Move focus to the selectable row under the cursor for hover
+                // feedback Clicks outside the content area.
                 if column < area.x
                     || column >= area.x + area.width
                     || row < area.y
@@ -292,8 +286,8 @@ impl ImportClaudeModalState {
                 };
                 self.focus = row_index;
 
-                // Check if the click landed on the fold indicator (▶/▼).
-                // ScopeHeaders have indent=0, TypeHeaders indent=2. The indicator is 2 chars wide starting at content_area.x + indent.
+                // Check if the click landed on the fold indicator (▶/▼). The indicator is chars wide starting at content_area.x +
+                // indent.
                 let fold_clicked = match target {
                     Row::ScopeHeader { section_key, .. } => {
                         let indicator_start = area.x;
@@ -766,9 +760,7 @@ fn push_grouped_items(
     collapsed: &std::collections::HashSet<String>,
     scope_collapsed: bool,
 ) {
-    // The `selected` Vec is indexed by ORIGINAL item position, so `filtered_plan` can check `selected[scope_offset + i]` in source-vec order
-    // Sorting items into display groups here must therefore use `scope_offset + item_idx` as the flat_index, not a monotonic counter
-    // Otherwise toggling a displayed row would mark the wrong slot and unrelated items would import (or fail to import)
+    // The `selected` Vec is indexed by ORIGINAL item position.
     let scope_offset = *flat_index;
     let mut indexed: Vec<(usize, ItemKind)> = items
         .iter()
@@ -970,8 +962,8 @@ fn render_item_line<'a>(
     let mark_style = with_bg(mark_base, focused, theme);
     let label = format_item_label(item);
     let label_style = with_bg(Style::default().fg(theme.text_primary), focused, theme);
-    // Items live under TypeHeaders (indent 2) under ScopeHeaders (indent 0).
-    // Indent items at 4 spaces total so they visually nest below their group.
+    // Indent items at multiple spaces total so they visually nest below their
+    // group.
     Line::from(vec![
         Span::raw("      "),
         Span::styled("[", bracket_style),
@@ -982,9 +974,7 @@ fn render_item_line<'a>(
     ])
 }
 
-/// Conditionally apply the row-hover background to a span style. When a row is focused the renderer
-/// pre-fills the row's cells with `bg_highlight`. Setting bg explicitly on each span too keeps the
-/// highlight when a span resets its background and makes hovering read as a continuous bar.
+/// Conditionally apply the row-hover background to a span style.
 fn with_bg(style: Style, focused: bool, theme: &Theme) -> Style {
     if focused {
         style.bg(theme.bg_highlight)
@@ -1170,14 +1160,13 @@ mod tests {
             project_items: vec![],
         };
         let mut m = ImportClaudeModalState::new(plan, PathBuf::from("/tmp"));
-        // Deselect every MCP server. They are at original indices 0, 2, 4.
+        // Deselect every MCP server.
         for idx in [0, 2, 4] {
             if let Some(slot) = m.selected.get_mut(idx) {
                 *slot = false;
             }
         }
         let filtered = m.filtered_plan();
-        // Exactly the Permission (idx 1) and EnvVar (idx 3) remain; none of alpha/beta/gamma
         assert_eq!(filtered.global_items.len(), 2);
         for item in &filtered.global_items {
             assert!(
@@ -1210,7 +1199,7 @@ mod tests {
         m.handle_key(&down);
         assert!(m.focus > initial, "focus should advance");
         let rows = build_rows(&m.plan, &m.cwd, &m.collapsed);
-        // Headers are selectable too; just verify it's not a Blank
+        // Headers are selectable too; verify it's not a Blank
         assert!(matches!(
             rows.get(m.focus),
             Some(Row::Item { .. } | Row::ScopeHeader { .. } | Row::TypeHeader { .. })
@@ -1274,10 +1263,8 @@ mod tests {
         let click_x = m.content_area.unwrap().x + 5;
         assert!(m.selected.iter().all(|&s| s));
         m.handle_mouse(MouseEventKind::Down(MouseButton::Left), click_x, click_y);
-        // Global scope items (indices 0, 1) are now deselected
         assert_eq!(m.selected.first().copied(), Some(false));
         assert_eq!(m.selected.get(1).copied(), Some(false));
-        // Project item (index 2) untouched.
         assert_eq!(m.selected.get(2).copied(), Some(true));
     }
 
@@ -1291,7 +1278,6 @@ mod tests {
         // Initially all selected. Space deselects everything in Global scope.
         let space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE);
         m.handle_key(&space);
-        // Global has 2 items (indices 0, 1). Project has 1 (index 2).
         assert_eq!(m.selected.first().copied(), Some(false));
         assert_eq!(m.selected.get(1).copied(), Some(false));
         assert_eq!(

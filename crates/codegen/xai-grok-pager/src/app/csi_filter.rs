@@ -1,14 +1,11 @@
 //! CSI fragment filter for the input event channel.
-//! Sibling of [`super::xt_filter`], which does the same reassembly for the XTVERSION DCS reply.
-//! See [`CsiFragmentFilter`].
 
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use super::event_loop::{TimedInputEvent, is_bare_esc_press};
 
-/// Carries state across `drain_and_process` calls so a mouse report split across batches is caught (its `\x1b` in batch N, `[<…M` in batch N+1).
-/// A fragmented focus report becomes `Event::FocusGained`/`Event::FocusLost` only when its bare `\e` and `[I`/`[O` arrive in the same batch.
-/// A lone `\e` can't be held across batches (a lone `[` must render at once), so a focus report whose `\e` was isolated in a prior batch still leaks.
+/// Carries state across `drain_and_process` calls so a mouse report split
+/// across batches is caught.
 pub(super) struct CsiFragmentFilter {
     state: CsiFragmentState,
     tentative: Vec<TimedInputEvent>,
@@ -56,13 +53,12 @@ impl CsiFragmentFilter {
                     }
                     CsiAdvance::CompleteFocus => {
                         if esc_before_run {
-                            // Bare \e then [I/[O in one drain batch is treated as a focus report
-                            // A typed pair rarely lands in one batch (same assumption as the mouse Complete arm)
+                            // Bare \e.
                             filtered_count += 1;
                             self.tentative.clear();
                             result.pop(); // retract the bare Esc
-                            // Translate the reassembled report into its focus event
-                            // Focus-driven features (prompt refocus, recap away-timer, /gboom key-release) then still fire over SSH
+                            // Translate the reassembled report into its focus event Focus-driven features (prompt
+                            // refocus, recap away-timer, /gboom key-release).
                             result.push(TimedInputEvent {
                                 event: if ch == 'I' {
                                     Event::FocusGained
@@ -106,9 +102,8 @@ impl CsiFragmentFilter {
             tracing::debug!(filtered_count, "filtered CSI fragments");
         }
 
-        // User input must render immediately
-        // Carrying only `Bracket` across batches is therefore unnecessary and holds the key until the next keystroke
-        // Deeper partial states (`[<…`) still persist for cross-batch continuation
+        // User input must render immediately Carrying only `Bracket` across
+        // batches is therefore unnecessary.
         if matches!(self.state, CsiFragmentState::Bracket) {
             result.append(&mut self.tentative);
             self.state = CsiFragmentState::Idle;
@@ -276,7 +271,7 @@ mod tests {
 
     #[test]
     fn csi_filter_partial_fragment_held() {
-        // Partial SGR fragment (no terminating M/m) is held in the persistent filter's tentative buffer, not emitted yet
+        // Partial SGR fragment (no terminating M/m) is held in the persistent filter's tentative buffer.
         let events = vec![
             press(KeyCode::Char('[')),
             press(KeyCode::Char('<')),
@@ -293,7 +288,7 @@ mod tests {
         assert!(result.is_empty(), "partial fragment should be held");
         // A follow-up non-SGR event flushes the held events.
         let result2 = f.filter(vec![press(KeyCode::Enter)]);
-        assert_eq!(result2.len(), 10); // 9 held + 1 new
+        assert_eq!(result2.len(), 10);
     }
 
     #[test]
@@ -368,7 +363,7 @@ mod tests {
         ];
         events.extend(sgr_fragment("0", "0", "0", 'M'));
         let result = CsiFragmentFilter::new().filter(events);
-        assert_eq!(result.len(), 4); // [, <, 3, 5 preserved
+        assert_eq!(result.len(), 4);
     }
 
     /// A typed `[` must be emitted in the same batch, not held until the next keystroke (which made the cursor look stuck / "laggy").
@@ -402,7 +397,6 @@ mod tests {
 
     #[test]
     fn csi_filter_empty_digit_field_kept() {
-        // [<;1;1M: missing button digits, not a valid SGR fragment
         let events = vec![
             press(KeyCode::Char('[')),
             press(KeyCode::Char('<')),
@@ -415,8 +409,6 @@ mod tests {
         let mut f = CsiFragmentFilter::new();
         let result = f.filter(events);
         // The `[` starts a potential SGR match but `;` rejects at LessThan.
-        // After rejection, `;` doesn't restart, so it and remaining chars pass through
-        // The leading `[<` is flushed on reject; `[` was held in tentative while matching
         let result2 = f.filter(vec![]);
         let total = result.len() + result2.len();
         assert_eq!(total, 7);
@@ -426,15 +418,12 @@ mod tests {
 
     #[test]
     fn csi_filter_cross_batch_esc_then_fragment() {
-        // Esc arrives in batch 1, SGR fragment chars in batch 2.
         let mut f = CsiFragmentFilter::new();
 
-        // Batch 1: just the Esc
         let r1 = f.filter(vec![press(KeyCode::Esc)]);
         // Esc is emitted (can't be retracted across batches)
         assert_eq!(r1.as_slice(), [press(KeyCode::Esc)]);
 
-        // Batch 2: the remaining SGR fragment chars
         let r2 = f.filter(sgr_fragment("64", "91", "51", 'M'));
         // Fragment is filtered; no garbage in the prompt
         assert!(r2.is_empty(), "SGR fragment chars should be filtered");
@@ -442,10 +431,9 @@ mod tests {
 
     #[test]
     fn csi_filter_cross_batch_partial_then_rest() {
-        // Fragment split mid-sequence across two batches.
+        // Fragment split mid-sequence across batches.
         let mut f = CsiFragmentFilter::new();
 
-        // Batch 1: partial fragment [<64;
         let r1 = f.filter(vec![
             press(KeyCode::Char('[')),
             press(KeyCode::Char('<')),
@@ -455,7 +443,6 @@ mod tests {
         ]);
         assert!(r1.is_empty(), "partial fragment should be held");
 
-        // Batch 2: remaining 91;51M; uppercase M arrives with SHIFT (crossterm legacy parser sets SHIFT for uppercase chars)
         let r2 = f.filter(vec![
             press(KeyCode::Char('9')),
             press(KeyCode::Char('1')),
@@ -511,10 +498,8 @@ mod tests {
 
     #[test]
     fn csi_filter_cross_batch_partial_then_reject() {
-        // Partial fragment in batch 1, rejected in batch 2.
         let mut f = CsiFragmentFilter::new();
 
-        // Batch 1: [<6
         let r1 = f.filter(vec![
             press(KeyCode::Char('[')),
             press(KeyCode::Char('<')),
@@ -522,10 +507,9 @@ mod tests {
         ]);
         assert!(r1.is_empty(), "partial should be held");
 
-        // Batch 2: starts with 'a' which rejects the match
         let r2 = f.filter(vec![press(KeyCode::Char('a'))]);
         // Held events and the new event are all emitted
-        assert_eq!(r2.len(), 4); // [, <, 6, a
+        assert_eq!(r2.len(), 4);
     }
 
     #[test]
@@ -533,11 +517,9 @@ mod tests {
         // Multiple rapid scroll events split across batches (the exact bug scenario: scrolling during worktree creation)
         let mut f = CsiFragmentFilter::new();
 
-        // Batch 1: Esc from first scroll
         let r1 = f.filter(vec![press(KeyCode::Esc)]);
         assert_eq!(r1.len(), 1); // Esc emitted
 
-        // Batch 2: fragment, Esc, fragment (two scroll events)
         let mut batch2 = sgr_fragment("64", "91", "51", 'M');
         batch2.push(press(KeyCode::Esc));
         batch2.extend(sgr_fragment("64", "91", "51", 'M'));
@@ -547,8 +529,7 @@ mod tests {
 
     #[test]
     fn csi_filter_cross_batch_one_event_at_a_time() {
-        // A lone typed `[` must not be held across batches, so one-event-per-batch delivery of `[` alone is emitted (not filtered)
-        // Real leaked fragments deliver `[<…` in the same read/batch; verify that shape still filters when split only after `[<` is established
+        // A lone typed `[` must not be held across batches.
         let mut f = CsiFragmentFilter::new();
 
         let r = f.filter(vec![press(KeyCode::Esc)]);
@@ -712,13 +693,10 @@ mod tests {
 
     #[test]
     fn csi_filter_cross_batch_focus_not_retracted() {
-        // Known limitation: only a same-batch report is reassembled (and translated)
-        // One split across drain batches still leaks, since a lone Esc can't be held across batches
+        // Known limitation: only a same-batch report is reassembled (and translated) One split across drain batches still leaks.
         let mut f = CsiFragmentFilter::new();
-        // Batch 1: lone Esc is emitted (a lone Esc can't be held across batches).
         let r1 = f.filter(vec![press(KeyCode::Esc)]);
         assert_eq!(r1, vec![press(KeyCode::Esc)]);
-        // Batch 2: `[` then SHIFT-I come through; the focus report is not retracted
         let r2 = f.filter(vec![
             press(KeyCode::Char('[')),
             press_shift(KeyCode::Char('I')),

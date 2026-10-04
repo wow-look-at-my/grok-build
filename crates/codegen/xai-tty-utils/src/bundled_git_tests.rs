@@ -4,8 +4,7 @@ use std::process::Command;
 
 use super::{PathBase, bundled_git_at, bundled_git_in, prepend_child_path, version_key};
 
-/// Unique scratch root under the OS temp dir, removed on drop (no tempfile
-/// dev-dep for this crate).
+/// Unique scratch root under the OS temp dir, removed on drop (no tempfile dev-dep for this crate).
 struct TempRoot(PathBuf);
 
 impl TempRoot {
@@ -100,7 +99,7 @@ fn complete_older_payload_beats_launcher_only_newer_one() {
         git.helper_dir,
         Some(tmp.path().join("2.50.0").join("mingw64").join("bin"))
     );
-    // Two launcher-only trees: the newest, as before (nothing better exists).
+    // Launcher-only trees: the newest, as before (nothing better exists).
     let tmp = TempRoot::new("launcher-only");
     install(tmp.path(), "2.47.1", true);
     install(tmp.path(), "2.50.0", true);
@@ -111,7 +110,7 @@ fn complete_older_payload_beats_launcher_only_newer_one() {
 
 /// Helpers alone do not make a payload usable: `git-upload-pack.exe` under
 /// `libexec\git-core` with no `<tree>\bin` beside it cannot start (no DLLs).
-/// Such a newer tree must lose to an older one that has both, since the
+/// Such a newer tree must lose to an older one that has both.
 #[test]
 fn usable_older_payload_beats_newer_one_with_helpers_but_no_dlls() {
     let tmp = TempRoot::new("usable");

@@ -49,7 +49,7 @@ Nothing else is bound. Your home directory, other checkouts, and `/data` are abs
 
 macOS confines writes only. The Seatbelt profile allows reads and denies every write. It then gives back the `--rw` paths, `~/.grok` and a dedicated temp directory. `--ro` means "not writable" there. Linux confines both reads and writes. A `--rn` path is hidden on both.
 
-A bare `--sandbox` with no value is **invalid** — use `--sandbox=pathbox` (or a path flag) for the jail, or `--sandbox <profile>` for a profile. Nor can you mix the two on one command line: `--sandbox <profile>` plus any `--ro`/`--rw`/`--rn` is rejected. One spelling to still avoid: the profile form `--sandbox <profile>` takes the next word as its value when that word is not a flag, so `grok --sandbox "fix the bug"` reads the prompt as a profile name. Put another flag after it, or put the prompt first.
+A bare `--sandbox` with no value is **invalid** — use `--sandbox=pathbox` (or a path flag) for the jail, or `--sandbox <profile>` for a profile. Nor can you mix the two on one command line: `--sandbox <profile>` plus any `--ro`/`--rw`/`--rn` is rejected. One spelling to still avoid: the profile form `--sandbox <profile>` takes the next word as its value when that word is not a flag. As a result, `grok --sandbox "fix the bug"` reads the prompt as a profile name. Put another flag after it, or put the prompt first.
 
 The pathbox jail and the profiles below are separate features. `--sandbox <profile>` selects a profile and builds no jail. Pass a profile name to get the `deny` lists and the child-network rules.
 
@@ -67,7 +67,7 @@ The pathbox jail and the profiles below are separate features. `--sandbox <profi
 
 ¹ Child-network blocking is enforced on **Linux only** (via seccomp). On macOS it is a no-op — these profiles do not restrict child-process network there.
 
-To block specific files (e.g. `.env` or credential paths) on top of a profile, define a [custom profile](#custom-profiles) with a `deny` list — it is kernel-enforced (read + write/rename) and supports glob patterns like `**/*.pem`.
+To block specific files (e.g. `.env` or credential paths) on top of a profile, define a [custom profile](#custom-profiles) with a `deny` list — it is kernel-enforced (read + write/rename). It supports glob patterns like `**/*.pem`.
 
 ### Profile Details
 
@@ -81,16 +81,16 @@ To block specific files (e.g. `.env` or credential paths) on top of a profile, d
 
 ### Direct global write protection
 
-Under `workspace`, `read-only`, and `strict` (and custom profiles that extend those bases), the kernel **write-denies** the Grok-owned direct disk paths used as user-global hook sources, plus its configuration and trust files (they stay readable when granted). Built-in `strict` can read `~/.grok` (they stay readable); writes are CWD + `~/.grok/sessions` + temp, not the whole tree. Write-deny still applies where the profile grants write:
+Under `workspace`, `read-only`, and `strict` (and custom profiles that extend those bases), the kernel **write-denies** the Grok-owned direct disk paths used as user-global hook sources, plus its configuration. Trust files (they stay readable when granted). Built-in `strict` can read `~/.grok` (they stay readable). Writes are CWD + `~/.grok/sessions` + temp, not the whole tree. Write-deny still applies where the profile grants write:
 
 - `~/.grok/hooks/` (hook directory)
-- `~/.grok/hooks-paths` (registry file; not loaded as hook JSON — only its absolute targets are)
-- Absolute targets listed in `hooks-paths` (relative lines are ignored; missing targets refuse sandbox start)
+- `~/.grok/hooks-paths` (registry file. Not loaded as hook JSON — only its absolute targets are)
+- Absolute targets listed in `hooks-paths` (relative lines are ignored. Missing targets refuse sandbox start)
 - `~/.grok/config.toml`, `~/.grok/trusted_folders.toml`, `~/.grok/managed_config.toml`, `~/.grok/requirements.toml`, `~/.grok/sandbox.toml` (settings, folder trust, managed policy, requirements, and sandbox profiles)
 
-Because these files are read-only under these profiles, a change that would be saved to them applies to the current session only. Accepting a folder-trust prompt, switching the model with `/model`, and changing the permission mode (`/auto` or Shift+Tab) take effect for the session but are not saved. To save folder trust, run `grok --trust` in the directory before starting the sandbox. To change the default model or permission mode, edit `~/.grok/config.toml` directly.
+Because these files are read-only under these profiles, a change that will be saved to them applies to the current session only. Accepting a folder-trust prompt, switching the model with `/model`, and changing the permission mode (`/auto` or Shift+Tab) take effect for the session but are not saved. To save folder trust, run `grok --trust` in the directory before starting the sandbox. To change the default model or permission mode, edit `~/.grok/config.toml` directly.
 
-On first launch under these profiles, Grok creates a real empty `hooks/` directory and empty `hooks-paths` file when they are missing (never symlinks or wrong types). Claude/Cursor global settings are **not** covered by this write-deny; discovery of those vendors remains separately gated by compatibility settings.
+On first launch under these profiles, Grok creates a real empty `hooks/` directory and empty `hooks-paths` file when they are missing (never symlinks or wrong types). Claude/Cursor global settings are **not** covered by this write-deny. Discovery of those vendors remains separately gated by compatibility settings.
 
 A symlinked `$GROK_HOME` or a `hooks-paths` entry with a symlink component is refused at sandbox start (prevents retargeting). Existing parent directories of protected paths are pinned so they cannot be renamed out from under the deny (siblings remain writable). On Linux, nested user namespaces are disabled inside bubblewrap so mount binds cannot be rearranged. Project hooks remain gated by folder trust. The `devbox` profile does not apply this protection (disposable VMs). Profiles that require it refuse to start if the kernel policy cannot be applied (including Linux without verified read-only mounts).
 
@@ -122,7 +122,7 @@ Use the custom profile:
 grok --sandbox project
 ```
 
-A custom profile can't reuse a built-in name. `--sandbox devbox` always runs the built-in `devbox` profile, shadowing any `[profiles.devbox]` you define.
+A custom profile cannot reuse a built-in name. `--sandbox devbox` always runs the built-in `devbox` profile, shadowing any `[profiles.devbox]` you define.
 
 If the user and project files define the same custom profile differently, Grok uses the user profile and shows a startup warning. Run `/doctor` to see both file locations and how to resolve the conflict. Identical definitions do not produce a warning.
 
@@ -205,13 +205,13 @@ The sandbox is applied to the **entire grok process** at startup using kernel pr
 
 - `read_file`, `search_replace`, `list_dir` -- restricted by Landlock/Seatbelt in-process
 - `bash` commands, `grep` (rg) -- child processes inherit FS restrictions automatically
-- Network -- on Linux, child processes can be blocked via seccomp; on macOS this is a no-op
+- Network -- on Linux, child processes can be blocked via seccomp. On macOS this is a no-op
 
 When a non-`off` sandbox profile is **requested** (CLI, `GROK_SANDBOX`, config, or a managed requirement):
 
-- The agent runs **in-process**, not through the shared leader, so tool calls stay in this process when the profile is enforced. If leader mode would otherwise have been on, a one-line note at startup says so
-- If a built-in profile fails to apply, Grok warns and continues without enforcement (see [Platform Support](#platform-support)), but still refuses the leader so tools are not delegated elsewhere
-- `grok workspace start`, `restart`, and `resume` are unavailable; `pause`, `stop`, and `status` still work
+- The agent runs **in-process**, not through the shared leader, so tool calls stay in this process when the profile is enforced. If leader mode
+- If a built-in profile fails to apply, Grok warns. Grok continues without enforcement (see [Platform Support](#platform-support)), but still refuses the leader so tools are not delegated elsewhere
+- `grok workspace start`, `restart`, and `resume` are unavailable. `pause`, `stop`, and `status` still work
 
 Disable the profile at the source that selected it to use the refused commands.
 
@@ -221,21 +221,13 @@ The sandbox is **irreversible** once applied. The agent cannot relax restriction
 
 ## Resuming Sessions
 
-The profile a session was started with is saved with the session and is **fixed
-for the life of the session**. When you resume it (`grok --resume <id>`,
-`grok --continue`, or `grok -r`), Grok restores that same profile automatically —
-so a session started with `--sandbox workspace` won't silently come back under a
-stricter default and break commands that previously worked.
+The profile a session was started with is saved with the session and is **fixed for the life of the session**. When you resume it (`grok --resume <id>`, `grok --continue`, or `grok -r`), Grok restores that same profile automatically. So a session started with `--sandbox workspace` will not silently come back under a stricter default and break commands that previously worked.
 
 Resuming will **not** change a session's sandbox:
 
 - Omitting `--sandbox` on resume uses the session's saved profile.
 - Passing `--sandbox <profile>` that **matches** the saved profile is allowed.
-- Passing `--sandbox <profile>` that **differs** from the saved profile is
-  **refused with an error** — changing a resumed session's sandbox is a safety
-  footgun (it could widen access the session was meant to be confined to, or
-  break a session that relied on broader access). Start a new session to use a
-  different profile.
+- Passing `--sandbox <profile>` that **differs** from the saved profile is **refused with an error** — changing a resumed session's sandbox is a safety footgun (it can widen access the session was meant to be confined to, or break a session that relied on broader access). Start a new session to use a different profile.
 
 Profile resolution order for a **new** session:
 
@@ -252,7 +244,7 @@ Profile resolution order for a **new** session:
 | Linux    | Landlock  | Kernel 5.13 or later   |
 | macOS    | Seatbelt  | macOS (all versions)   |
 
-If the sandbox cannot be applied (e.g., unsupported kernel, missing entitlements), Grok logs a warning and continues without enforcement. The exception is an explicitly-requested **custom profile**: on **both macOS and Linux**, if it cannot be applied (unknown profile, malformed `sandbox.toml`, or — on Linux — `bubblewrap` unavailable for a non-empty `deny`), Grok refuses to start rather than run with its denied paths exposed.
+If the sandbox cannot be applied (e.g., unsupported kernel, missing entitlements), Grok logs a warning and continues without enforcement. The exception is an explicitly-requested **custom profile**: on **both macOS and Linux**, if it cannot be applied (unknown profile, malformed `sandbox.toml`, or — on Linux — `bubblewrap` unavailable for a non-empty `deny`). Grok refuses to start rather than run with its denied paths exposed.
 
 ---
 
@@ -269,7 +261,7 @@ In practice, on Linux this means:
 
 ## Shell Environment Policy
 
-The sandbox controls which files and network a subprocess can reach. The top-level `[shell_environment_policy]` table controls which environment variables it inherits, so a tool command the model runs cannot read a secret that happens to sit in your shell environment.
+The sandbox controls which files and network a subprocess can reach. The top-level `[shell_environment_policy]` table controls which environment variables it inherits, so a tool command. The model runs cannot read a secret that happens to sit in your shell environment.
 
 ```toml
 [shell_environment_policy]
@@ -280,9 +272,9 @@ include_only = ["PATH", "HOME"]  # if set, keep only these names
 set = { MY_FLAG = "1" }          # force these values
 ```
 
-Grok builds the child environment in order: it starts from `inherit` (`all` keeps everything, `core` keeps a small platform set such as `PATH` and `HOME`, `none` starts empty); drops the built-in secret patterns `*KEY*`, `*SECRET*`, and `*TOKEN*` unless `ignore_default_excludes = true`; drops any `exclude` matches; applies `set`; and, when `include_only` is non-empty, keeps only the matching names. Patterns are case-insensitive globs (`*`, `?`).
+Grok builds the child environment in order: it starts from `inherit` (`all` keeps everything, `core` keeps a small platform set such as `PATH` and `HOME`, `none` starts empty). Drops the built-in secret patterns `*KEY*`, `*SECRET*`, and `*TOKEN*` unless `ignore_default_excludes = true`. Drops any `exclude` matches. Applies `set`. And, when `include_only` is non-empty, keeps only the matching names. Patterns are case-insensitive globs (`*`, `?`).
 
-The default (`inherit = "all"`, `ignore_default_excludes = true`) leaves the environment untouched, so nothing changes until you configure a policy. On the non-persistent backend the policy also filters variables captured from your login shell, so an `.rc` file export cannot slip a secret past `exclude` or `include_only`. The persistent shell is one exception: it applies the policy to its base environment, but variables that an `.rc` file exports during login are replayed from a snapshot and are not re-filtered, so keep secrets out of shell startup files there. Enforcement covers the bash tool and terminals on macOS, Linux, and Windows.
+The default (`inherit = "all"`, `ignore_default_excludes = true`) leaves the environment untouched, so nothing changes until you configure a policy. On the non-persistent backend the policy also filters variables captured from your login shell. As a result, this is an `.rc` file export cannot slip a secret past `exclude` or `include_only`. The persistent shell is one exception. It applies the policy to its base environment, but variables that an `.rc` file exports during login are replayed from a snapshot. It are not re-filtered, so keep secrets out of shell startup files there. Enforcement covers the bash tool and terminals on macOS, Linux, and Windows.
 
 ---
 

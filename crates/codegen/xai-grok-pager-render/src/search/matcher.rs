@@ -7,7 +7,6 @@ pub enum QueryKind {
 }
 
 /// Both substring and regex queries compile to a `regex::Regex`.
-/// Matching is smart-case: case-insensitive unless the query contains an uppercase character (Vim `smartcase` / ripgrep `--smart-case`).
 #[derive(Debug, Clone)]
 pub struct TextMatcher {
     regex: regex::Regex,

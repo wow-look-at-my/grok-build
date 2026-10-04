@@ -1,16 +1,15 @@
 //! Anchor convenience helpers and re-exports.
 //!
-//! This module re-exports the core types from [`super::scheme`] and provides
-//! helper functions for common anchor operations.
+//! This module re-exports the core types from [`super::scheme`] and provides helper functions for common anchor operations.
 
 pub use super::scheme::{
     Anchor, AnchorScheme, CheckpointChain, ChunkFingerprint, ContentOnly, DEFAULT_SEARCH_RADIUS,
     ParsedAnchor, ShiftResult, ValidationResult,
 };
 
-/// Split file content into lines suitable for anchor generation. Strips trailing newlines from each
-/// line (matching the convention used by `AnchorScheme::generate_anchors`). The returned
-/// `Vec<&str>` has one entry per logical line.
+/// Split file content into lines suitable for anchor generation. Strips
+/// trailing newlines from each line (matching the convention used by
+/// `AnchorScheme::generate_anchors`).
 pub fn split_lines(content: &str) -> Vec<&str> {
     if content.is_empty() {
         return vec![""];
@@ -19,8 +18,7 @@ pub fn split_lines(content: &str) -> Vec<&str> {
     let mut lines: Vec<&str> = content.lines().collect();
 
     // `str::lines()` does not yield a trailing empty entry for content ending
-    // with '\n'. Add one to match the 1-based line numbering convention where
-    // "hello\n" has 2 lines (line 1 = "hello", line 2 = "").
+    // with '\n'.
     if content.ends_with('\n') {
         lines.push("");
     }
@@ -87,7 +85,7 @@ mod tests {
         let content = "line one\nline two\nline three\n";
         let scheme = ContentOnly::new();
         let anchors = generate_for_content(&scheme, content);
-        assert_eq!(anchors.len(), 4); // 3 content lines + trailing empty
+        assert_eq!(anchors.len(), 4);
         let Some(first) = anchors.first() else {
             panic!("expected anchors: {anchors:?}");
         };
@@ -145,13 +143,12 @@ mod tests {
         let scheme = ContentOnly::new();
         let anchors = generate_for_content(&scheme, original);
 
-        // Insert a line at the top → "b" shifts from line 2 to line 3.
         let modified = "new\na\nb\nc\n";
         let Some(anchor) = anchors.get(1) else {
             panic!("expected line-2 anchor: {anchors:?}");
         };
         let parsed = ParsedAnchor {
-            line: anchor.line, // originally line 2 ("b")
+            line: anchor.line,
             local: anchor.local.clone(),
             context: None,
         };

@@ -1,8 +1,4 @@
 //! `GrokBuildConcise` namespace — concise variants of core GrokBuild tools.
-//!
-//! These tools share implementation with `grok_build` via `pub(crate)` helpers
-//! but produce concise output (compact line numbers, shorter messages,
-//! concise bash formatting).
 
 pub mod bash;
 pub mod read_file;

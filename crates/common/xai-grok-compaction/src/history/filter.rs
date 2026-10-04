@@ -1,20 +1,11 @@
-//! Item filtering and user-query extraction for history compaction —
-//! generic over [`CompactionItem`] / [`CompactionItemBuilder`].
-//!
-//! Behavior is byte-for-byte identical for Grok chat (`T = Arc<GrokTurn>`).
+//! Item filtering and user-query extraction for history compaction — generic.
 
 use tracing::info;
 
 use crate::item::{CompactionItem, CompactionItemBuilder, CompactionRole};
 
 /// Filter items for **basic** history compaction (both inter-compaction's
-/// `Basic` strategy and intra-compaction's `history` target):
-///
-/// - Drop `System` items (the compaction LLM has its own system prompt).
-/// - Drop `Developer` items that are not prior compaction summaries
-///   (per-agent developer prompts shouldn't bleed into the summary; prior
-///   compaction summaries must be preserved so they get re-summarised).
-/// - Keep `User`, `Assistant`, and `Tool` items as-is.
+/// `Basic` strategy and intra-compaction's `history` target).
 pub fn filter_turns_for_basic<T: CompactionItem + Clone>(turns: &[T]) -> Vec<T> {
     turns
         .iter()
@@ -34,16 +25,11 @@ pub fn keep_turn_for_basic_compaction<T: CompactionItem + ?Sized>(turn: &T) -> b
 }
 
 /// Filter items for inter-compaction (used by both `Basic` and
-/// `DivideAndConquer` — Basic is just a single-chunk run of the same
-/// pipeline):
-///
-/// - Drop `Tool` items entirely (tool request/response).
-/// - For `Assistant` items: drop tool-request contents; keep channels that
+/// `DivideAndConquer` — Basic is a single-chunk run of the same pipeline):
+/// - Drop `Tool` items entirely (tool request/response). - For `Assistant`
+/// items: drop tool-request contents.
 ///   have visible user content (via
 ///   [`CompactionItemBuilder::strip_tool_content`]).
-/// - Keep `User` items as-is (separation happens later).
-/// - Drop `System` and non-summary `Developer` items; keep prior compaction
-///   summaries so their `<grok_user_queries>` sections can be split out.
 pub fn filter_turns_for_inter_compaction<T: CompactionItemBuilder>(turns: &[T]) -> Vec<T> {
     turns
         .iter()
@@ -70,27 +56,6 @@ pub fn filter_turns_for_inter_compaction<T: CompactionItemBuilder>(turns: &[T]) 
 }
 
 /// Split prior compaction text into user_messages and the rest.
-///
-/// A prior compaction from DnC has the format:
-/// ```text
-/// <grok_user_queries>
-/// ...user messages...
-/// </grok_user_queries>
-///
-/// <chunk_summary index="0">
-/// ...
-/// </chunk_summary>
-/// ```
-///
-/// Returns `(all_user_messages_sections, rest)`.
-/// Extracts **all** `<grok_user_queries>...</grok_user_queries>` blocks
-/// (there may be multiple after chained compactions) and concatenates them.
-/// `text[from..to]` for the block scan below.
-///
-/// Every index is an offset at which `<grok_user_queries>` or
-/// `</grok_user_queries>` was matched, or the running cursor set to such an
-/// offset plus the literal's byte length. Both tags are pure ASCII, and an
-/// ASCII byte is always a char boundary, so both ends align.
 #[allow(clippy::string_slice)] // both ends are ASCII tag offsets
 fn span(text: &str, from: usize, to: usize) -> &str {
     &text[from..to]
@@ -231,16 +196,7 @@ pub fn extract_user_queries_from_turns<T: CompactionItem>(
 }
 
 /// Walk `turns`, find any prior compaction summary items, extract their
-/// `<grok_user_queries>` blocks via [`split_prior_compaction_text`], and
-/// concatenate them.
-///
-/// Returns `None` if no prior compaction items are present or none
-/// contain a user-queries block.
-///
-/// Prefer [`separate_prior_user_queries`] when you also need the
-/// compaction-stripped item list to feed to the LLM (i.e. both
-/// inter-compaction and intra-compaction's `History` sampling) — it does
-/// both jobs in one pass.
+/// `<grok_user_queries>` blocks via [`split_prior_compaction_text`].
 pub fn extract_prior_user_queries<T: CompactionItemBuilder>(turns: &[T]) -> Option<String> {
     separate_prior_user_queries(turns).prior_user_queries
 }
@@ -248,33 +204,21 @@ pub fn extract_prior_user_queries<T: CompactionItemBuilder>(turns: &[T]) -> Opti
 /// Output of [`separate_prior_user_queries`].
 #[derive(Debug, Clone)]
 pub struct SeparatedHistoryTurns<T> {
-    /// `turns` with the `<grok_user_queries>` block stripped from every
-    /// prior compaction summary item. Safe to feed to the compaction LLM —
-    /// it will not re-emit the user-queries metadata.
-    /// A prior compaction item whose `rest` is empty after stripping is
-    /// dropped entirely.
+    /// `turns` with the `<grok_user_queries>` block stripped from every prior compaction summary item.
     pub turns_for_llm: Vec<T>,
-    /// Concatenation of every `<grok_user_queries>` block found (in
-    /// document order, joined by `\n`). `None` if no prior compaction
-    /// item contained a user-queries block. Preserved verbatim so it
-    /// can be passed to [`assemble_user_queries_preamble`].
+    /// Concatenation of every `<grok_user_queries>` block found (in document order, joined by `\n`).
     pub prior_user_queries: Option<String>,
-    /// `true` if at least one prior compaction summary item was observed,
-    /// regardless of whether it contained a `<grok_user_queries>` block.
-    /// Used by inter-compaction to record the
-    /// `ConversationCompactionCount{status="recompaction"}` metric.
+    /// `true` if at least one prior compaction summary item was observed.
     pub has_prior_compaction: bool,
 }
 
 /// Walk `turns`, split every prior compaction summary item into (a) its
-/// `<grok_user_queries>` block (preserved verbatim for the next summary)
-/// and (b) the rest of the summary content (rebuilt as a new summary item
-/// and forwarded to the LLM). Non-compaction items are forwarded unchanged.
-///
-/// Shared by both compaction pipelines so inter and intra `History`
-/// handle prior compactions identically:
-///
-/// - **inter** calls this on the filtered item list before its chunking
+/// `<grok_user_queries>` block (preserved verbatim for the next summary) and
+/// (b) the rest of the summary content (rebuilt as a new summary item and
+/// forwarded to the LLM). Non-compaction items are forwarded unchanged.
+/// Shared by both compaction pipelines so inter and intra `History` handle
+/// prior compactions identically: - **inter** calls this on the filtered item
+/// list before its chunking
 ///   loop, so the LLM never sees `<grok_user_queries>` from earlier rounds.
 /// - **intra** calls this on `turns_to_compact` for the `History` target
 ///   before sampling, for the same reason. Without this stripping, the LLM
@@ -302,10 +246,8 @@ pub fn separate_prior_user_queries<T: CompactionItemBuilder>(
                     None => prior_user_queries = Some(user_sec),
                 }
             }
-            // Matches inter's previous inline behavior (`if !rest.is_empty()`):
-            // a prior compaction item whose entire content was the
-            // `<grok_user_queries>` block (and therefore stripped to an empty
-            // `rest`) contributes nothing for the LLM and is dropped here.
+            // Matches inter's previous inline behavior (`if
+            // !rest.is_empty()`).
             if !rest.is_empty() {
                 turns_for_llm.push(T::compaction_summary_item(rest));
             }
@@ -324,12 +266,6 @@ pub fn separate_prior_user_queries<T: CompactionItemBuilder>(
 /// Assemble the final user-queries preamble that gets prepended to the
 /// compaction summary: `prior\n\ncurrent\n\n`. Either side may be `None`;
 /// when both are `None` an empty string is returned.
-///
-/// Used by both pipelines:
-/// - inter passes `current = extract_original_user_messages(raw_request, …)`
-/// - intra passes `current = extract_user_queries_from_turns(turns, …)`
-///
-/// `prior` is always [`separate_prior_user_queries`]`.prior_user_queries`.
 pub fn assemble_user_queries_preamble(prior: Option<String>, current: Option<String>) -> String {
     let mut preamble = String::new();
     if let Some(p) = &prior {
@@ -344,13 +280,8 @@ pub fn assemble_user_queries_preamble(prior: Option<String>, current: Option<Str
 }
 
 /// Convenience wrapper around [`extract_prior_user_queries`] +
-/// [`assemble_user_queries_preamble`].
-///
-/// Used by callers that don't separately need the
-/// compaction-stripped item list (e.g. tests). Both production pipelines
-/// instead call [`separate_prior_user_queries`] once and reuse both its
-/// outputs (the stripped item list goes to the LLM, the prior queries
-/// go to [`assemble_user_queries_preamble`]).
+/// [`assemble_user_queries_preamble`]. Used by callers that don't separately
+/// need the compaction-stripped item list (e.g. tests).
 pub fn build_user_queries_preamble<T: CompactionItemBuilder>(
     turns: &[T],
     current_user_queries: Option<String>,

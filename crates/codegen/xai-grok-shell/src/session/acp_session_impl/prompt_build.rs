@@ -1,16 +1,13 @@
 //! User-message construction for `SessionActor`.
-//! Covers the templated prefix, rules partitioning, and image payload preparation; large-prompt offload lives in `prompt_offload`.
 #![allow(clippy::items_after_test_module)]
 use super::*;
-/// Replaces anything outside `[A-Za-z0-9._-]` with `_` so the result is a portable directory name on macOS/Linux.
-/// Whether `url` is an `http://` or `https://` URL, one the upstream API can fetch directly.
-/// `file://` and other local schemes are rejected by the API and must be inlined as a `data:` URL instead.
+/// Replaces anything outside `[A-Za-z0-9._-]` with `_` so the result is a
+/// portable directory name on macOS/Linux.
 pub(super) fn is_remote_image_url(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("https://")
 }
-/// The remote API accepts only a base64 `data:` URL or an HTTP(S) URL; `file://` and other local schemes return 400.
-/// Inline bytes win when present (the canonical payload); `uri` is forwarded directly only when it is a remote URL with no inline bytes.
-/// Extracted so production and the regression tests assert against the same selector, and a rule change cannot drift past the tests.
+/// Inline bytes win when present (the canonical payload); `uri` is forwarded
+/// directly only when it is a remote URL with no inline bytes.
 pub(super) fn pick_user_image_url(image: &agent_client_protocol::ImageContent) -> String {
     if let Some(uri) = image.uri.as_deref()
         && image.data.is_empty()
@@ -287,8 +284,8 @@ mod partition_rules_by_scope_tests {
         assert_eq!(paths(&user), vec!["/home/user/.grok/AGENTS.md"]);
     }
 }
-/// True iff `conversation` already contains a project-instructions reminder (see [`is_project_instructions`]).
-/// `spawn_session_actor` uses this for idempotent AGENTS.md injection, so resumed sessions and forks don't duplicate the message.
+/// True iff `conversation` already contains a project-instructions reminder
+/// (see [`is_project_instructions`]).
 pub(super) fn conversation_has_project_instructions(conversation: &[ConversationItem]) -> bool {
     conversation.iter().any(is_project_instructions)
 }
@@ -490,9 +487,8 @@ mod install_system_prompt_tests {
     }
 }
 impl SessionActor {
-    /// Rewrite the user-message prefix at conversation index 1.
-    /// Caller must guarantee zero turns.
-    /// When `drop_startup_skill_reminder` is true, also strips the synthetic `<system-reminder>` user item.
+    /// Caller must guarantee zero turns. When `drop_startup_skill_reminder` is true, also strips the
+    /// synthetic `<system-reminder>` user item.
     pub(super) fn rewrite_zero_turn_prefix(
         conversation: &mut Vec<ConversationItem>,
         new_prefix: String,
@@ -793,9 +789,9 @@ impl SessionActor {
             })
             .collect()
     }
-    /// Build a `PathRewriter` for sanitizing overlay paths in model-facing text.
-    /// Returns `None` when `display_cwd` is unset (no rewriting needed).
-    /// Tool-result handlers use it to rewrite prompt_text, error messages, and any other model-visible content that may embed the real worktree cwd.
+    /// Build a `PathRewriter` for sanitizing overlay paths in model-facing
+    /// text. Returns `None` when `display_cwd` is unset (no rewriting
+    /// needed).
     pub(super) fn path_rewriter(&self) -> Option<crate::session::acp_conversion::PathRewriter> {
         crate::session::acp_conversion::PathRewriter::new(
             &self.session_info.cwd,
@@ -848,8 +844,7 @@ impl SessionActor {
         let resolved_describe = self
             .resolve_aux_sampler_config(&self.image_description_model)
             .await
-            // The compiled default lives on the first-party endpoint. A session
-            // on another endpoint describes images with its own model.
+            // The compiled default lives on the first-party endpoint.
             .filter(|cfg| {
                 self.image_description_model != crate::models::default_image_description_model()
                     || cfg.base_url == active_session_config.base_url

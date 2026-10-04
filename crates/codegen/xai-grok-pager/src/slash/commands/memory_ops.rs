@@ -1,8 +1,4 @@
 //! `/flush` and `/dream`: run a memory operation as a tracked agent command.
-//!
-//! Both shadow the shell builtin of the same name so they go through `x.ai/memory/flush` and
-//! `x.ai/memory/dream` like `/compact`, with a start line, a spinner, and a typed outcome, instead
-//! of a silent prompt turn. The registry hides them until the shell advertises its own builtins.
 
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 

@@ -1,12 +1,6 @@
-#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_truncation)]
 
 //! xAI Computer Hub — transport + registry + resolver core.
-//!
-//! Object-safe abstractions used by every router build: a [`Transport`]
-//! that authorises and dispatches calls, a [`ToolRegistry`] trait shared
-//! by both storage planes, a [`CompoundResolver`] that applies the
-//! local-shadows-remote rule, and the local + remote transports plus
-//! inner-dispatch glue that sit on top.
 
 #![forbid(unsafe_code)]
 

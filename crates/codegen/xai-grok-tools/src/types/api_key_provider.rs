@@ -25,10 +25,8 @@ pub trait ApiKeyProvider: Send + Sync + 'static {
         Box::pin(std::future::ready(self.current_api_key()))
     }
 
-    /// Bearer for a direct call to an xAI host (Imagine, voice), or why there is none.
-    ///
-    /// The default refuses: a provider that cannot say whose credential it holds must not have it
-    /// sent to `api.x.ai`. A provider that can classify its credential overrides this.
+    /// Bearer for a direct call to an xAI host (Imagine, voice), or why there is none. The default refuses: a provider that cannot say whose credential it holds
+    /// must not have it sent to `api.x.ai`.
     fn side_call_bearer(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<String, SideCallBearerError>> + Send + '_>> {

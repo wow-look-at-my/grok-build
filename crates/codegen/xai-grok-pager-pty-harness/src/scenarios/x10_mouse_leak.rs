@@ -1,11 +1,4 @@
 //! Relay-mangled X10 mouse reports must not type into the composer, and refocus must re-assert mouse capture.
-//!
-//! This is a regression test for the ConPTY/WSL right-margin leak.
-//! A relay that converts the byte stream char-wise to UTF-8 expands X10 coordinate bytes >= 0x80 (columns >= 95) into two bytes.
-//! Crossterm mis-parses the report into an impossible mouse event plus the displaced row byte as a plain typed character.
-//! Vertical mouse motion at the right margin typed ramping ASCII into the prompt.
-//! The pager's `X10ReassemblyFilter` recombines the pair into the true mouse event.
-//! `Event::FocusGained` re-asserts the mouse DECSETs so relays that strip DEC private modes are nudged back to SGR reporting.
 
 use std::time::Duration;
 
@@ -17,10 +10,9 @@ use crate::{ContentController, PtyHarness, pager_binary};
 const DEFAULT_ROWS: u16 = 50;
 const DEFAULT_COLS: u16 = 120;
 
-/// The ASCII ramp the unfixed parser leaks into the composer: one row byte per any-motion report, rows 47..=57 (bytes 0x50..=0x5A).
 const LEAKED_RAMP: &str = "PQRSTUVWXYZ";
 
-/// `EnableMouseCapture`'s any-motion DECSET; startup emits it once, so the refocus assertion must only search output produced after the focus-in.
+/// `EnableMouseCapture`'s any-motion DECSET; startup emits it once.
 const ANY_MOTION_ENABLE: &[u8] = b"\x1b[?1003h";
 
 /// Drive both X10-leak defenses in one pager session: mangled reports parse as mouse events (nothing typed), and focus-in re-emits the mouse DECSETs.
@@ -41,8 +33,6 @@ pub async fn assert_x10_leak_defenses() -> Result<()> {
         .wait_for_text("abc", Duration::from_secs(10))
         .context("control text visible in composer")?;
 
-    // A vertical mouse sweep at column 100 as a UTF-8-converting relay delivers it:
-    // CB 0x43 (any-motion, no button), Cx 0x84 expanded to C2 84, Cy ramping 0x50..=0x5A
     let mut sweep = Vec::new();
     for row_byte in LEAKED_RAMP.bytes() {
         sweep.extend_from_slice(b"\x1b[MC\xC2\x84");
@@ -52,9 +42,7 @@ pub async fn assert_x10_leak_defenses() -> Result<()> {
         .inject_keys(&sweep)
         .context("inject mangled X10 sweep")?;
 
-    // Ordering sentinel: input is processed in order
-    // Once the trailing "xyz" renders, any characters the sweep leaked would be rendered too (between "abc" and "xyz")
-    // Waiting for the ramp to be *absent* alone would pass vacuously before the leak renders
+    // Ordering sentinel: input is processed in order Once the trailing "xyz" renders.
     harness.inject_keys(b"xyz").context("type sentinel text")?;
     harness
         .wait_for_text("xyz", Duration::from_secs(10))

@@ -1,5 +1,4 @@
-//! `WebFetchClient` - shared HTTP client with cache, HTML-to-markdown
-//! conversion, URL validation, and SSRF protection.
+//! `WebFetchClient` - shared HTTP client with cache, HTML-to-markdown conversion, URL validation, and SSRF protection.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -311,8 +310,7 @@ fn validate_url(raw: &str) -> Result<Url, WebFetchError> {
 
     if let Some(host) = parsed.host_str()
         && host.split('.').count() < 2
-        // `localhost` is a single-label name; SSRF still requires
-        // allow_local for explicit local hosts.
+        // `localhost` is a single-label name; SSRF still requires allow_local for explicit local hosts.
         && !ssrf::is_explicit_local_host(host)
     {
         return Err(WebFetchError::SingleLabelHost {
@@ -323,9 +321,7 @@ fn validate_url(raw: &str) -> Result<Url, WebFetchError> {
     Ok(parsed)
 }
 
-/// Upgrade `http://` to `https://`, except for explicit loopback hosts. Local dev servers almost
-/// always speak plain HTTP; forcing TLS would break `http://127.0.0.1` / `http://localhost` when
-/// local binding is opted in.
+/// Upgrade `http://` to `https://`, except for explicit loopback hosts.
 fn upgrade_to_https(url: &mut Url) {
     if url.scheme() != "http" {
         return;
@@ -339,8 +335,7 @@ fn upgrade_to_https(url: &mut Url) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// HTTP Fetching
-// ───────────────────────────────────────────────────────────────────────────
+// HTTP Fetching.
 
 enum FetchResult {
     Content {
@@ -369,8 +364,7 @@ async fn fetch_url(
 
     // Loop to follow redirects under the same host.
     loop {
-        // Re-check on every hop (including the first) so a rebinding name that
-        // was public at the pre-fetch check cannot become loopback/private here.
+        // Re-check on every hop (including the first) so a rebinding name that was public.
         ssrf::check_ssrf(&current_url, allow_local).await?;
 
         let resp = client
@@ -399,9 +393,7 @@ async fn fetch_url(
                     .join(location_str)
                     .map_err(|e| WebFetchError::InvalidRedirect(format!("{e}")))?;
                 if is_same_host(&current_url, &next_url) {
-                    // Re-apply https upgrade on every hop: Location may be
-                    // absolute `http://…` and would otherwise silently
-                    // downgrade an https fetch. Local hosts still skip TLS.
+                    // Re-apply https upgrade on every hop: Location may be absolute `http://…`.
                     upgrade_to_https(&mut next_url);
                     // check_ssrf runs at the top of the next loop iteration.
                     current_url = next_url;
@@ -440,9 +432,7 @@ async fn fetch_url(
     }
 }
 
-/// Exact host equality — no `www.` stripping. Distinct DNS labels (even when
-/// one is a `www` subdomain of the other) have independent A records and must
-/// surface as cross-host redirects rather than auto-follow.
+/// Exact host equality — no `www.` stripping.
 fn is_same_host(a: &Url, b: &Url) -> bool {
     a.host_str() == b.host_str()
 }
@@ -716,9 +706,8 @@ fn html_to_markdown(converter: &htmd::HtmlToMarkdown, html: &str) -> String {
 fn clean_html(html: &str) -> String {
     let mut document = Html::parse_document(html);
 
-    // Never detach the root element itself - the broad selectors below can match
-    // attributes on <html> (e.g. class="...advert..."), which would leave the
-    // tree with no root element. Looked up fallibly so we never assume one exists.
+    // Never detach the root element itself - the broad selectors below can
+    // match attributes on <html> (e.g. class="...advert...").
     let root_id = document
         .tree
         .root()
@@ -759,18 +748,16 @@ fn clean_html(html: &str) -> String {
             });
     });
 
-    // Serialize the whole document rather than `root_element()`, which panics if
-    // the tree somehow has no root element.
+    // Serialize the whole document rather than `root_element()`, which panics if the tree somehow has no root element.
     document.html()
 }
 
 /// Strip base64 data URIs from content to prevent token bloat. Uses manual scanning (`find` + byte
 /// matching) instead of regex for lower overhead — no compilation cost and O(n) linear scanning.
 fn strip_base64_data_uris(content: String) -> String {
-    // A valid base64 quantum is 4 characters; anything shorter is noise.
+    // A valid base64 quantum is a few characters; anything shorter is noise.
     const MIN_BASE64_PAYLOAD: usize = 4;
-    // RFC 2397 headers are short (MIME + parameters); reject oversized ones
-    // to avoid echoing attacker-controlled megabyte strings into the output.
+    // RFC 2397 headers are short (MIME + parameters).
     const MAX_HEADER_LEN: usize = 120;
 
     if !content.contains("data:") {
@@ -926,8 +913,7 @@ mod tests {
 
     #[test]
     fn validate_url_rejects_single_label_hosts() {
-        // localhost is an explicit local host; SSRF still blocks it unless
-        // allow_local is set on tool params.
+        // localhost is an explicit local host; SSRF still blocks it unless allow_local is set on tool params.
         assert!(validate_url("http://localhost:8080/foo").is_ok());
         assert!(validate_url("http://intranet/foo").is_err());
         assert!(validate_url("http://metadata/computeMetadata").is_err());
@@ -1013,8 +999,7 @@ mod tests {
 
     #[test]
     fn same_host_redirect_location_reupgrades_http() {
-        // Absolute http Location on an https origin must not stay http when
-        // followed as a same-host hop (upgrade_to_https reapplied each hop).
+        // Absolute http Location on an https origin must not stay http when followed as a same-host hop.
         let origin = Url::parse("https://example.com/start").unwrap();
         let mut next = origin.join("http://example.com/next").unwrap();
         assert_eq!(next.scheme(), "http");

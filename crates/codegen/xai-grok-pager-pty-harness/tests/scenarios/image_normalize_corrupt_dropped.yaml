@@ -28,13 +28,11 @@ steps:
     text: SCRIPTED_IMAGE_RESPONSE
     timeout_ms: 30000
   - action: assert_chat_completion
-  # Fix 2: integrity check failed → image dropped before send.
   - action: assert_request_image_count
     min: 0
   - action: assert_inline_images
     min: 0
     mime_type: image/png
-  # Fix 5: <image_dropped_notice> system-reminder reaches the model.
   - action: assert_request_contains
     text: "<image_dropped_notice>"
   - action: screenshot

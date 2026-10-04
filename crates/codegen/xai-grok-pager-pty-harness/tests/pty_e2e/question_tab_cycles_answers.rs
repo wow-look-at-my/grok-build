@@ -1,7 +1,4 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
-//
-// Regression pin: Tab inside the `ask_user_question` card used to hand focus to the scrollback
-// The card stayed drawn and the shortcuts bar kept advertising card keys
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -304,7 +301,8 @@ async fn question_tab_cycles_answers() {
     assert_question_tab_contract(false).await;
 }
 
-/// Same contract under `[ui].vim_mode = true`: focused j/k walk answers, Esc parks, parked j/k stay on the scrollback, Tab returns, wrap and submit.
+/// Same contract under `[ui].vim_mode = true`: focused j/k walk answers, Esc
+/// parks, parked j/k stay on the scrollback, Tab returns.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn question_tab_cycles_answers_in_vim_mode() {

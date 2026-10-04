@@ -1,9 +1,4 @@
 //! Proactive, jittered OIDC token refresh owned by the workspace server.
-//!
-//! [`ProactiveOidcAuthProvider::current`] is a lock-free snapshot read and never performs I/O.
-//! The background task refreshes ahead of expiry when remaining lifetime exceeds `safety_margin`.
-//! `min_refresh_interval` floors the gap after a successful refresh so a short TTL cannot hammer the IdP.
-//! It does not delay a cold-start refresh that is already due.
 
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,7 +28,6 @@ const RETRY_BASE: Duration = Duration::from_secs(1);
 /// Failure-retry ceiling. Not applied to the success-path schedule.
 const RETRY_CAP: Duration = Duration::from_secs(30);
 /// Upper bound on `Retry-After` so a malicious header cannot park the loop.
-/// A zero or past value is treated as absent (see [`parse_retry_after_value`]) and [`bound_retry_after`] still floors at [`RETRY_BASE`].
 const RETRY_AFTER_CAP: Duration = Duration::from_secs(24 * 3600);
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -70,7 +64,6 @@ static REFRESH_LEAD: LazyLock<Histogram> = LazyLock::new(|| {
         "Remaining lifetime of the token being replaced (old expires_at − now) \
          at a successful background refresh; negative means the refresh landed \
          after expiry",
-        // Negative/zero bounds keep a post-expiry refresh out of the first positive bucket (Prometheus treats the first bound as starting at 0)
         vec![
             -1440.0, -720.0, -360.0, -180.0, -60.0, -30.0, 0.0, 10.0, 30.0, 60.0, 120.0, 300.0,
             600.0, 900.0, 1200.0, 1800.0, 2400.0, 3600.0, 7200.0,
@@ -151,8 +144,7 @@ struct RefreshOutcome {
 struct RefreshError {
     error: anyhow::Error,
     new_refresh_token: Option<String>,
-    /// The token endpoint answered `400` (`invalid_grant`), `401`, or `403`: the refresh token is
-    /// refused for good, so stop the loop for the process life.
+    /// The token endpoint answered `400` (`invalid_grant`), `401`, or `403`: the refresh token is refused for good.
     terminal: bool,
     /// Honored on retryable errors (`429` `Retry-After`, etc.).
     retry_after: Option<Duration>,
@@ -250,10 +242,10 @@ impl ProactiveOidcAuthProvider {
         }
     }
 
-    /// Resolves, with the IdP's answer as the cause, once a refresh has been rejected for good
-    /// (`invalid_grant`, `401`, `403`): from then on `current()` serves a token that will expire
-    /// and never be replaced, so a long-lived host should end rather than retry the hub forever.
-    /// Pending for the process life otherwise, and forever when refresh is disabled.
+    /// Resolves, with the IdP's answer as the cause, once a refresh has been
+    /// rejected for good (`invalid_grant`, `401`, `403`): from then on
+    /// `current()` serves a token that will expire and never be replaced, so
+    /// a long-lived host should end rather than retry the hub forever.
     pub fn refresh_ended(&self) -> impl Future<Output = String> + Send + 'static {
         let mut ended = self.inner.terminal.subscribe();
         async move {
@@ -302,8 +294,8 @@ impl AuthProvider for ProactiveOidcAuthProvider {
     }
 
     fn principal_key(&self) -> PrincipalKey {
-        // Match the SDK's `oidc:{issuer}:{client_id}:{user_id}` (empty user_id still gets the trailing colon)
-        // Swapping this provider in for the SDK's must not fragment the connection pool
+        // Match the SDK's `oidc:{issuer}:{client_id}:{user_id}` (empty
+        // user_id still gets the trailing colon) Swapping this provider.
         PrincipalKey::opaque(format!(
             "oidc:{}:{}:{}",
             self.inner.issuer, self.inner.client_id, self.inner.identity.user_id
@@ -691,13 +683,10 @@ fn bound_retry_after(after: Duration, inner: &Inner) -> Duration {
         Some(_) => after.min(RETRY_CAP),
         None => after,
     };
-    // `remaining_std` is zero at/after expiry; never replace backoff with 0.
     bounded.max(RETRY_BASE)
 }
 
-/// Which request of a refresh a status answered. Only the token endpoint judges the refresh token,
-/// so only its `400`/`401`/`403` are terminal; the same statuses from the unauthenticated discovery
-/// document are a proxy or an outage, and the loop retries them like any other failure.
+/// Which request of a refresh a status answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Exchange {
     Discovery,
@@ -733,8 +722,7 @@ async fn require_success(
     })
 }
 
-/// The IdP's body has one line of the error to itself and the error is a daemon's `cause` and its
-/// last log line; a proxy's HTML page is neither.
+/// The IdP's body has one line of the error to itself and the error is a daemon's `cause` and its last log line.
 const BODY_EXCERPT_CHARS: usize = 500;
 
 fn body_excerpt(body: &str) -> String {

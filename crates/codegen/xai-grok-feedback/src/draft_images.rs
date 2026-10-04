@@ -1,5 +1,4 @@
 //! Composer images copied onto one local feedback draft: `feedback_draft_images/<id>/{N.<ext>, metadata.json}`.
-//! The manifest is the only index; caps and the mime allow-list are the caller's [`DraftImagePolicy`].
 
 use std::fs::File;
 use std::io::{self, Write as _};

@@ -1,6 +1,4 @@
-//! The OTLP transports `xai_grok_test_support::MockOtelServer` does not serve: gRPC, gRPC over TLS
-//! and mutual TLS, and HTTP over mutual TLS. Each runs on its own thread and runtime, so a sync
-//! test can block on `flush` and `shutdown`, and records into the `OtelRecorder` it started with.
+//! The OTLP transports `xai_grok_test_support::MockOtelServer` does not serve: gRPC, gRPC over TLS and mutual TLS.
 #![allow(
     dead_code,
     reason = "each test binary includes this module and calls a different subset"
@@ -177,8 +175,7 @@ fn start_grpc_tls_collector_inner(
     use opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsServiceServer;
     use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsServiceServer;
 
-    // The test binary links both ring and aws-lc-rs, so rustls cannot pick a process default on its own; the server-side acceptor needs one pinned
-    // (The production client is unaffected: tonic passes a provider explicitly.)
+    // The test binary links both ring and aws-lc-rs, so rustls cannot pick a process default on its own; the server-side acceptor needs one pinned.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let (addr_tx, addr_rx) = std::sync::mpsc::channel::<SocketAddr>();
@@ -230,8 +227,7 @@ pub fn start_http_mtls_collector(
     use rustls::server::WebPkiClientVerifier;
     use std::sync::Arc;
 
-    // Same process-level CryptoProvider pin as gRPC mTLS tests: the binary links both ring and aws-lc-rs, so rustls will not auto-pick
-    // Prefer aws-lc to match the workspace `rustls` feature set and tonic path
+    // Same process-level CryptoProvider pin as gRPC mTLS tests: the binary links both ring and aws-lc-rs.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let (addr_tx, addr_rx) = std::sync::mpsc::channel::<SocketAddr>();
@@ -295,6 +291,5 @@ pub fn start_http_mtls_collector(
     let addr = addr_rx
         .recv_timeout(std::time::Duration::from_secs(10))
         .expect("collector must start");
-    // Prefer localhost so the server cert SAN (localhost and 127.0.0.1) matches whatever the client/rustls hostname check uses
     format!("https://localhost:{}", addr.port())
 }

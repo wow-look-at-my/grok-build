@@ -1,9 +1,4 @@
 //! LOC (Lines of Code) tracking — hunk-level attribution records.
-//!
-//! This module provides:
-//! - [`HunkRecord`]: a serializable attribution record derived from a [`Hunk`].
-//! - [`HunkRecordWriter`] / [`JsonlHunkRecordWriter`]: append-only JSONL persistence.
-//! - [`run_loc_sink`]: an async task that consumes [`HunkEvent`]s and writes records.
 
 #[cfg(test)]
 mod tests;
@@ -61,8 +56,7 @@ pub enum EventType {
     Added,
     /// An existing hunk's content changed in place.
     Updated,
-    /// A hunk was removed. `lines_added` / `lines_removed` are negated
-    /// so that `SUM` zeroes out the hunk's accumulated contribution.
+    /// A hunk.
     Removed,
 }
 
@@ -89,12 +83,9 @@ pub struct HunkRecord {
     pub hunk_start: usize,
     /// End line of the hunk in the new file (inclusive).
     pub hunk_end: usize,
-    /// Lines added. For [`EventType::Added`] this is the full count (≥ 0).
-    /// For [`EventType::Updated`] this is the delta from the previous state
-    /// and may be negative (hunk shrank).
+    /// Lines added.
     pub lines_added: i64,
-    /// Lines removed. For [`EventType::Added`] this is the full count (≥ 0).
-    /// For [`EventType::Updated`] this is the delta and may be negative.
+    /// Lines removed.
     pub lines_removed: i64,
     /// Who authored this change. `None` for [`EventType::Removed`] records.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -249,9 +240,8 @@ impl HunkRecordWriter for JsonlHunkRecordWriter {
     }
 }
 
-/// Lightweight aggregate update emitted by the LOC sink for consumption by an external bridge (e.g., the signals system
-/// in `xai-grok-shell`). The sink sends one of these per processed `HunkEvent` that affects LOC. The bridge task
-/// translates them into `SignalEvent` variants.
+/// Lightweight aggregate update emitted by the LOC sink for consumption by an
+/// external bridge (e.g., the signals system in `xai-grok-shell`).
 #[derive(Debug, Clone)]
 pub enum LocAggregate {
     /// Lines were added or changed (from HunkAdded or HunkContentChanged).
@@ -277,8 +267,7 @@ pub struct LocSinkContext {
     pub agent_id: String,
     /// Authenticated user id (if available). Used for human-attributed records.
     pub user_id: Option<String>,
-    /// Optional channel for emitting LOC aggregates to an external consumer
-    /// (e.g., the session signals system). When `None`, only JSONL is written.
+    /// Optional channel for emitting LOC aggregates to an external consumer (e.g., the session signals system).
     pub aggregate_tx: Option<mpsc::UnboundedSender<LocAggregate>>,
 }
 
@@ -292,7 +281,6 @@ pub async fn run_loc_sink(
     cancellation_token: tokio_util::sync::CancellationToken,
 ) {
     // Accumulated (lines_added, lines_removed) per hunk_id.
-    // Used to emit negating records when hunks are rejected/superseded.
     let mut acc: HashMap<HunkId, (i64, i64)> = HashMap::new();
 
     loop {
@@ -360,7 +348,7 @@ async fn handle_event(
         } => {
             // For in-place changes, use the trigger source for attribution
             // and record only the delta (new - prev) so LOC totals can be
-            // computed with a simple SUM grouped by author_type.
+            // computed.
             let mut record = HunkRecord::from_hunk(
                 hunk,
                 &ctx.session_id,
@@ -369,9 +357,6 @@ async fn handle_event(
                 EventType::Updated,
                 &trigger_source,
             );
-            // Replace full counts with signed deltas so shrinking hunks
-            // (e.g., human deletes 3 of 10 agent lines) produce negative
-            // values that correctly reduce the total on SUM.
             record.lines_added = hunk.line_info.new_count as i64 - prev_lines_added as i64;
             record.lines_removed = hunk.line_info.old_count as i64 - prev_lines_removed as i64;
             let entry = acc.entry(hunk.id.clone()).or_insert((0, 0));
@@ -394,9 +379,7 @@ async fn handle_event(
         } => {
             match reason {
                 HunkRemovalReason::Accepted => {
-                    // Accepted hunks keep their LOC contribution — just
-                    // clear the accumulated state without writing a
-                    // negating record.
+                    // Accepted hunks keep their LOC contribution.
                     acc.remove(&hunk_id);
                 }
                 HunkRemovalReason::Rejected | HunkRemovalReason::Superseded => {

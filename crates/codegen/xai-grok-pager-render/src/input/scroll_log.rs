@@ -1,17 +1,4 @@
 //! `GROK_SCROLL_LOG` enables a JSONL log of scroll-stream transitions for offline analysis of real gestures.
-//!
-//! The pager's scroll-debug HUD (`views::scroll_debug_hud`) samples state per frame; this recorder logs every state-machine transition.
-//! It writes one line per stream start, per flush that delivers lines, and per finalize (see [`super::mouse`]).
-//! Flush attempts that deliver nothing are not logged; their spacing shows up in `ms_since_prev_flush`.
-//! Records are flat JSON objects, one per line, and the writer flushes on finalize records so `tail -f` and `jq` work mid-session.
-//!
-//! Enablement: `GROK_SCROLL_LOG=1` (or set-but-empty) logs to
-//! `~/.grok/logs/scroll-log-<timestamp>.jsonl`; any other non-`0` value is
-//! used as the target path.
-//! Unset (or `0`, matching `GROK_SCROLL_DEBUG`) disables: [`super::mouse::MouseScrollState`] holds `None` and each emission point costs one branch.
-//!
-//! Invariant (same contract as the HUD): pure observation; the recorder never feeds back into scroll behavior.
-//! IO failures drop the record and disable the recorder with a single `tracing::warn!` (never stderr; that is the TUI's terminal), and never panic.
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -29,8 +16,6 @@ pub(crate) enum ScrollLogEvt {
     /// A flush delivered lines mid-stream.
     Flush,
     /// The stream ended (80ms gap or direction flip).
-    /// `flushed` is the tapered catch-up flush (0 once the post-gap drain ran dry).
-    /// `dropped` is the whole-line backlog discarded with the stream (flip cancellations and coast-budget write-offs).
     Finalize,
 }
 
@@ -45,14 +30,10 @@ pub(crate) enum ScrollLogTrigger {
     /// Immediate flush when Auto-mode wheel promotion fired.
     Promotion,
     /// The capped flush inside stream finalize.
-    /// A finalize followed at the same `ts_ms` by a `stream_start` came from the event path (flip/regrasp).
-    /// One with no successor came from the tick path (fingers stopped).
     Finalize,
 }
 
 /// Config echo carried by `stream_start` records only.
-/// It attributes the gesture to a playground variant offline (speed/lines are otherwise confounded inside `desired`/`accel`).
-/// `ept`/`lpt` abbreviate events/lines per tick; `mode` is the [`super::mouse::ScrollInputMode`] label in effect.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub(crate) struct ScrollLogConfigEcho {
     pub mode: &'static str,
@@ -73,7 +54,7 @@ pub(crate) struct ScrollLogEvent {
     pub kind: &'static str,
     /// Events accumulated in the stream so far.
     pub events_total: usize,
-    /// Rolling average inter-event interval (ms); `None` until two accel-countable events arrived.
+    /// Rolling average inter-event interval (ms); `None` until accel-countable events arrived.
     pub avg_interval_ms: Option<f32>,
     /// Acceleration multiplier in effect.
     pub accel: f32,
@@ -81,7 +62,6 @@ pub(crate) struct ScrollLogEvent {
     pub desired: f32,
     /// Whole lines delivered for this stream so far (post-flush).
     pub applied_total: i32,
-    /// Lines this record's flush delivered (0 on stream_start).
     pub flushed: i32,
     /// Whole-line backlog remaining after this record's flush.
     pub backlog_after: i32,
@@ -130,13 +110,11 @@ enum Sink {
     Disabled,
 }
 
-/// Appends [`ScrollLogRecord`]s to the `GROK_SCROLL_LOG` file.
-/// Owned as `Option<Self>` by [`super::mouse::MouseScrollState`].
-/// Construction reads the env once; the file opens on the first record so an enabled-but-idle session creates nothing.
+/// Appends [`ScrollLogRecord`]s to the `GROK_SCROLL_LOG` file. Owned as
+/// `Option<Self>` by [`super::mouse::MouseScrollState`].
 #[derive(Debug)]
 pub(crate) struct ScrollLogRecorder {
-    /// Time origin for `ts_ms`: the state machine's construction instant (tests: the synthetic timeline), or the instant `/debug log` enabled it.
-    /// Either origin keeps the log self-consistent.
+    /// Time origin for `ts_ms`: the state machine's construction instant (tests: the synthetic timeline).
     base: Instant,
     sink: Sink,
     /// Emission time of the previous flush-bearing record.
@@ -250,7 +228,6 @@ fn open_writer(path: &Path) -> std::io::Result<BufWriter<File>> {
 
 /// `~/.grok/logs/scroll-log-<utc-ts>.jsonl` — the input-debug dump's dir
 /// and timestamp conventions ([`crate::input_log`]).
-/// It is also the target of the `/debug log` runtime toggle ([`super::mouse::MouseScrollState`]).
 pub(crate) fn default_log_path() -> PathBuf {
     let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     xai_grok_tools::util::grok_home::grok_home()

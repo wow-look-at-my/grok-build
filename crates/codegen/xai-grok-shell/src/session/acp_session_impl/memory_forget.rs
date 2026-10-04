@@ -1,6 +1,4 @@
 //! `x.ai/memory/forget`: delete one note from the `/memory` modal.
-//! v2 goes through `V2MaintenanceStore::forget` (tombstone, index, manifest); legacy session
-//! logs have no ledger and are unlinked directly.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -123,8 +121,8 @@ fn map_v2_error(error: xai_grok_memory::V2MaintenanceError) -> MemoryForgetRespo
 
 /// Legacy stores have no ledger; only per-session logs are deletable, and only if unchanged.
 fn forget_legacy(storage: &MemoryStorage, path: &Path, hash: &str) -> MemoryForgetResponse {
-    // `classify_source` labels every path outside the store "session", so it cannot gate deletion.
-    // Canonicalize both sides so `..` and symlinks cannot point outside the sessions directory.
+    // `classify_source` labels every path outside the store "session", so it
+    // cannot gate deletion.
     let not_deletable = || {
         rejected(
             MemoryForgetRejection::NotDeletable,

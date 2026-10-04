@@ -1,8 +1,4 @@
 //! Git operations for the HunkTrackerActor.
-//!
-//! Uses `gix` (pure-Rust) instead of `git2` (libgit2 C bindings) to avoid
-//! global lock contention in libiconv on macOS when multiple sessions run
-//! parallel git operations.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -47,8 +43,7 @@ fn open_or_discover(
                 .ok()?
                 .to_path_buf();
 
-            // Convert to ThreadSafeRepository for caching, then get a
-            // thread-local handle for this call.
+            // Convert to ThreadSafeRepository for caching, then get a thread-local handle for this call.
             let sync_repo = Arc::new(repo.into_sync());
             let thread_local = sync_repo.to_thread_local();
 
@@ -107,9 +102,7 @@ impl HunkTrackerActor {
                 };
             };
 
-            // Guard against empty index files — gix-index panics when the file
-            // is 0 bytes because it tries to slice the trailing hash from an
-            // empty mmap (integer underflow in the slice range).
+            // Guard against empty index files — gix-index panics when the file is a couple of bytes because it tries to slice the trailing hash.
             let index_path = repo.git_dir().join("index");
             if index_path.metadata().map_or(true, |m| m.len() == 0) {
                 tracing::debug!("index file is empty or missing, skipping git status");
@@ -334,8 +327,7 @@ impl HunkTrackerActor {
                 };
             };
 
-            // Convert absolute path to working_dir-relative, then to repo-root-relative
-            // Canonicalize to handle symlinks (e.g., /var -> /private/var on macOS).
+            // Convert absolute path to working_dir-relative, then to repo-root-relative Canonicalize to handle symlinks.
             let canonical_abs_path = canonicalize_or_parent(&abs_path);
             let canonical_working_dir =
                 dunce::canonicalize(&working_dir_for_strip).unwrap_or(working_dir_for_strip);
@@ -360,7 +352,6 @@ impl HunkTrackerActor {
                 let entry = tree
                     .lookup_entry_by_path(repo_relative_path.to_string_lossy().as_ref())
                     .ok()??;
-                // Symlinks in git have mode 120000; return Symlink before reading blob.
                 if entry.mode().is_link() {
                     return Some(FileContentState::Symlink);
                 }

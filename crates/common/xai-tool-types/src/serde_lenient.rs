@@ -1,16 +1,4 @@
-//! Lenient deserializers for tool arguments whose wire shape models get
-//! wrong in predictable ways.
-//!
-//! Booleans may arrive as a JSON string (`"true"`) or number (`1`) when a
-//! client doesn't coerce args against the tool schema. Accepted forms
-//! (strings case-insensitive, trimmed; `null` is `false`):
-//!
-//! | Truthy                                | Falsy                                          |
-//! |---------------------------------------|------------------------------------------------|
-//! | `true`, `"true"`, `"yes"`, `"1"`, `1` | `false`, `"false"`, `"no"`, `"0"`, `0`, `null` |
-//!
-//! String lists (e.g. `task_ids`) may arrive as a bare string or number
-//! instead of an array; see [`lenient_string_list_from_json`].
+//! Lenient deserializers for tool arguments whose wire shape models get wrong in predictable ways.
 
 use serde::Deserialize;
 
@@ -391,9 +379,7 @@ mod tests {
             lenient_string_list_from_json(&json!("abc")),
             Some(vec!["abc".to_string()])
         );
-        // A bare OS-PID-style number becomes a one-element string list so the
-        // tool can answer with a clean "Task 228 not found" instead of a
-        // deserialize error.
+        // A bare OS-PID-style number becomes a one-element string list.
         assert_eq!(
             lenient_string_list_from_json(&json!(228)),
             Some(vec!["228".to_string()])

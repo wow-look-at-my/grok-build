@@ -1,10 +1,4 @@
 //! Manages ghost text state, progressive matching, and ACP integration for shell command suggestions.
-//!
-//! Ghost text is rendered as dimmed italic text after the cursor.
-//! Progressive matching trims the ghost when the user types a character that matches the ghost's prefix, avoiding unnecessary network requests.
-//!
-//! On a text change (after debounce), the controller sends an `x.ai/suggest` request through the Effect pipeline.
-//! Stale responses are discarded via generation tracking.
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SuggestionSource {
@@ -57,13 +51,10 @@ pub struct CompletionItemParsed {
     pub source: SuggestionSource,
     pub priority: i32,
     /// Byte range in the REQUEST text the completion targets.
-    /// `None` (older shells, whole-line items, or malformed wire data) keeps the whole-line accept behavior.
-    /// Parsed atomically with `token_text`: present only as a pair.
     pub replace_range: Option<std::ops::Range<usize>>,
     /// Replacement for `replace_range` (path/file token completions); `Some` exactly when `replace_range` is.
     pub token_text: Option<String>,
-    /// The provider capped its scan or results, so the set may be incomplete and Tab must not insta-accept or fill from it, only open the dropdown.
-    /// Absent on the wire (older shells) parses as `false`.
+    /// The provider capped its scan or results, so the set may be incomplete.
     pub truncated: bool,
 }
 
@@ -117,7 +108,8 @@ impl SuggestResponseParsed {
                         let source_str = item.get("source").and_then(|s| s.as_str()).unwrap_or("");
                         let priority =
                             item.get("priority").and_then(|p| p.as_i64()).unwrap_or(0) as i32;
-                        // Optional `[start, end]`; anything malformed degrades to the legacy whole-line accept
+                        // Optional `[start, end]`; anything malformed
+                        // degrades to the whole-line accept
                         let replace_range = item.get("replaceRange").and_then(|r| {
                             let arr = r.as_array()?;
                             let (start, end) = match arr.as_slice() {
@@ -130,9 +122,8 @@ impl SuggestResponseParsed {
                             .get("tokenText")
                             .and_then(|t| t.as_str())
                             .map(str::to_owned);
-                        // The pair is atomic
-                        // A range without its token splices the whole-line `insertText` into a token span (`cat no` becomes `cat cat notes.md`)
-                        // A token without its range has nowhere to go, so half pairs degrade to the rangeless whole-line accept
+                        // The pair is atomic A range without its token splices the whole-line `insertText` into a token
+                        // span (`cat no` becomes `cat cat notes.md`).
                         let (replace_range, token_text) = match (replace_range, token_text) {
                             (Some(r), Some(t)) => (Some(r), Some(t)),
                             _ => (None, None),
@@ -180,12 +171,11 @@ pub enum SuggestionAction {
     Debounce { generation: u64 },
 }
 
-/// Wire `limit` for `x.ai/suggest` fetches. Both fetch sites (Tab and the as-you-type debounce)
-/// must send the same value or their candidate sets diverge.
+/// Wire `limit` for `x.ai/suggest` fetches.
 pub const SHELL_SUGGEST_WIRE_LIMIT: usize = 50;
 
-/// Terminal-Tab decision over the current dropdown items, computed by [`SuggestionController::tab_decision`] and executed by the view.
-/// Owning the whole policy here (staleness, source shape, single-candidate, LCP) keeps the view from reading item internals.
+/// Terminal-Tab decision over the current dropdown items, computed by
+/// [`SuggestionController::tab_decision`] and executed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum TabAction {
     /// Exactly one token candidate: accept it immediately, no dropdown flash.
@@ -195,13 +185,11 @@ pub enum TabAction {
     /// Ambiguous (or whole-line/mixed sources): open the dropdown.
     Open,
     /// No usable candidates: none fetched, or outdated by an edit or a cursor move.
-    /// The key path fetches on this; the landing path does nothing.
     Nothing,
 }
 
-/// A resolved dropdown accept: what to write, decided against the draft BEFORE the dropdown closed.
-/// Nothing therefore depends on state surviving `close()`.
-/// Produced by [`SuggestionController::accept_completion`], applied by `PromptWidget::apply_completion_splice`.
+/// A resolved dropdown accept: what to write, decided against the draft
+/// BEFORE the dropdown closed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompletionSplice {
     /// Rangeless (legacy-shell) item: replace the whole line; safe because wire `insert_text` is always a full line by protocol contract.
@@ -220,11 +208,8 @@ pub struct CompletionDropdownState {
     pub hovered: Option<usize>,
     pub generation: u64,
     /// The request text `items` were computed for, set atomically with the items when a response lands.
-    /// Item `replace_range` offsets therefore always validate against the text they actually index into.
     pub request_text: String,
     /// Cursor position the request was built at. Items target the token AT this cursor.
-    /// [`SuggestionController::tab_decision`] refuses items when the live cursor has moved anywhere
-    /// else (e.g. a mouse click). The only tolerated drift is typing at the end.
     pub request_cursor: usize,
 }
 
@@ -251,9 +236,8 @@ impl CompletionDropdownState {
         self.selected = new;
     }
 
-    /// Accept the currently selected item, or `None` when there are no items.
-    /// Moves the item out to avoid cloning and closes the dropdown.
-    /// Deliberately independent of [`open`](Self::open) (a render flag): the single-candidate insta-accept consumes an item never rendered.
+    /// Accept the selected item, or `None` when there are no items. Moves the
+    /// item out to avoid cloning and closes the dropdown.
     pub fn accept(&mut self) -> Option<CompletionItemParsed> {
         if self.items.is_empty() {
             return None;
@@ -264,8 +248,7 @@ impl CompletionDropdownState {
         Some(item)
     }
 
-    // The `request_text`/`request_cursor` anchor stays in place; it has no effect without items
-    // A landing response overwrites it atomically with the items
+    // The `request_text`/`request_cursor` anchor stays in place.
     pub fn close(&mut self) {
         self.open = false;
         self.selected = 0;
@@ -280,19 +263,14 @@ pub struct SuggestionController {
     generation: u64,
     last_request_text: String,
     /// Generation of a Tab-triggered fetch whose landing should run the terminal Tab decision.
-    /// Armed by [`Self::begin_tab_completion`], consumed by [`Self::take_pending_tab`].
     tab_pending: Option<u64>,
     /// Whether the as-you-type suggestion pipeline (debounced fetches and ghost rendering) is enabled.
-    /// Resolved at construction from the `GROK_SUGGESTIONS` env var.
-    /// Tab-triggered completion in bash mode deliberately does NOT consult this; it is always on.
     pub enabled: bool,
     /// Completion dropdown state (populated from `SuggestResponse.completions`).
     pub dropdown: CompletionDropdownState,
-    /// Whether AI-powered suggestions are enabled.
-    /// Resolved at construction from `GROK_SUGGESTIONS_AI` env var.
+    /// Whether AI-powered suggestions are enabled. Resolved at construction from `GROK_SUGGESTIONS_AI` env var.
     pub ai_enabled: bool,
     /// Model to use for AI suggestions. Sent in the `x.ai/suggest` request.
-    /// Resolved at construction from `GROK_SUGGESTIONS_AI_MODEL` env var.
     pub ai_model: Option<String>,
 }
 
@@ -335,8 +313,6 @@ impl SuggestionController {
     }
 
     /// Wholesale suggestion-state discard (prompt emptied, `set_text` swap).
-    /// The ghost and the dropdown items belonged to the OLD draft, and any in-flight fetch was for it.
-    /// Clear both, disarm a pending Tab, and bump the generation so late responses are discarded instead of resurrecting stale state.
     pub fn invalidate_draft(&mut self) {
         self.clear_ghost();
         self.last_request_text.clear();
@@ -392,9 +368,9 @@ impl SuggestionController {
         }
     }
 
-    /// Resolve what accepting the selected item WOULD write, without consuming it or touching any state.
-    /// The view probes this before an insta-accept: a splice into an atomic prompt element must open the dropdown, not consume the candidate.
-    /// [`Self::accept_completion`] delegates here so the two can never resolve differently.
+    /// Resolve what accepting the selected item WOULD write, without consuming it or touching any state. The view probes this before an
+    /// insta-accept: a splice into an atomic prompt element must open the dropdown, not consume the candidate. [`Self::accept_completion`]
+    /// delegates here so both can never resolve differently.
     pub fn peek_completion_splice(&self, current_text: &str) -> Option<CompletionSplice> {
         if self.dropdown.generation != self.generation || self.dropdown.items.is_empty() {
             return None;
@@ -468,8 +444,7 @@ impl SuggestionController {
         true
     }
 
-    /// Update the progressive-match anchor: the text the on-screen ghost is relative to (reset to the CURRENT text whenever a response lands).
-    /// Distinct from [`CompletionDropdownState::request_text`], which pins the fetch-time text the dropdown items' ranges index into.
+    /// Update the progressive-match anchor.
     pub fn set_last_request_text(&mut self, text: &str) {
         self.last_request_text.clear();
         self.last_request_text.push_str(text);
@@ -482,18 +457,16 @@ impl SuggestionController {
         if self.dropdown.generation != self.generation || self.dropdown.items.is_empty() {
             return TabAction::Nothing;
         }
-        // Items target the token at the FETCH-time cursor. The only tolerated drift is typing at the end
-        // (the same growth the range stretch rule accepts). Tab must then fetch for the token actually
-        // under the cursor.
+        // Items target the token at the FETCH-time cursor.
         let grown = current_text
             .len()
             .saturating_sub(self.dropdown.request_text.len());
         if current_cursor != self.dropdown.request_cursor + grown {
             return TabAction::Nothing;
         }
-        // Source alone is not enough
-        // Old shells send rangeless `path` rows whose whole-line fallback would clobber the draft on insta-accept (`ls | gr` becomes `grep`)
-        // A truncated (capped) scan may hide the row that disproves a sole match or an LCP
+        // Source alone is not enough Old shells send rangeless `path` rows
+        // whose whole-line fallback will clobber the draft on insta-accept
+        // (`ls | gr` becomes `grep`) A truncated.
         let token_shaped = self.dropdown.items.iter().all(|i| {
             matches!(
                 i.source,
@@ -540,9 +513,8 @@ impl SuggestionController {
                 return None;
             }
         }
-        // Token texts are rendered shell literals (`a b`/`a$c` arrive as `a\ b`/`a\$c`), so their byte LCP can end mid-escape (`a\`)
-        // Filling that would write a dangling backslash (line continuation)
-        // Trim the incomplete escape; the strict-extension check below then decides whether anything is left to fill
+        // Token texts are rendered shell literals (`a b`/`a$c` arrive as `a\
+        // b`/`a\$c`).
         if lcp.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 1 {
             let n = lcp.len().checked_sub(1)?;
             lcp = lcp.get(..n)?;
@@ -586,23 +558,21 @@ impl SuggestionController {
             .then_some(range.start..end)
     }
 
-    /// Arm a Tab-triggered deterministic completion fetch; the generation bump discards any in-flight
-    /// response. Deliberately independent of [`enabled`](Self::enabled): Tab in bash mode always
-    /// completes.
+    /// Arm a Tab-triggered deterministic completion fetch; the generation
+    /// bump discards any in-flight response.
     pub fn begin_tab_completion(&mut self, run_tab_on_load: bool) -> u64 {
         self.generation += 1;
         self.tab_pending = run_tab_on_load.then_some(self.generation);
         self.generation
     }
 
-    /// A Tab-armed fetch is still in flight for the current draft (nothing invalidated it since arming).
-    /// A repeat Tab keeps the marker and lets that landing run the Tab decision once, with no second RPC.
+    /// A Tab-armed fetch is still in flight for the current draft (nothing
+    /// invalidated it since arming).
     pub fn tab_fetch_pending(&self) -> bool {
         self.tab_pending == Some(self.generation)
     }
 
     /// Consume the pending-Tab mark when the response for `generation` lands.
-    /// `true` only when this is the fetch Tab armed AND it is still current (an edit since the Tab makes it stale).
     pub fn take_pending_tab(&mut self, generation: u64) -> bool {
         if self.tab_pending == Some(generation) {
             self.tab_pending = None;
@@ -626,15 +596,13 @@ impl SuggestionController {
         slash_has_inline_ghost: bool,
     ) -> Option<SuggestionAction> {
         if !self.enabled {
-            // No as-you-type pipeline, but what a Tab fetch populated belongs to the old text
-            // This edit outdates the dropdown items and any in-flight Tab fetch; the generation bump makes them stale
+            // No as-you-type pipeline, but what a Tab fetch populated belongs to the text This edit outdates the dropdown items.
             self.invalidate_draft();
             return None;
         }
 
         if slash_active || slash_has_inline_ghost {
-            // Suppression must invalidate, not just hide
-            // An already-armed debounce or pending Tab landing would otherwise repopulate suggestion state behind the slash UI
+            // Suppression must invalidate.
             self.invalidate_draft();
             return None;
         }
@@ -648,9 +616,7 @@ impl SuggestionController {
             return Some(SuggestionAction::Matched);
         }
 
-        // `try_progressive_match` clears the ghost and dropdown on a ghost mismatch
-        // A ghost-less dropdown (pure path/file items) would leak through its empty-ghost early return
-        // This edit outdated those items, so tear the dropdown down here
+        // `try_progressive_match` clears the ghost and dropdown on a ghost mismatch A ghost-less dropdown (pure path/file items).
         self.dropdown.close();
         self.generation += 1;
         Some(SuggestionAction::Debounce {
@@ -678,8 +644,7 @@ impl SuggestionController {
         }
 
         match response.ghost {
-            // The ghost renders only when the env var enables the as-you-type pipeline
-            // Tab-triggered (always-on) fetches feed only the dropdown items
+            // The ghost renders only when the env var enables the as-you-type pipeline Tab-triggered (always-on).
             Some(ghost) if self.enabled => self.set_ghost_fields(ghost.suffix, ghost.source),
             _ => self.clear_ghost(),
         }
@@ -690,12 +655,11 @@ impl SuggestionController {
         self.dropdown.request_text.clear();
         self.dropdown.request_text.push_str(request_text);
         self.dropdown.request_cursor = request_cursor;
-        // Don't auto-open; Tab opens it whenever items exist.
     }
 }
 
-/// Longest common prefix of two strings, trimmed to a char boundary.
-#[allow(clippy::string_slice)] // `n` ends at 0 or at an `is_char_boundary` offset
+/// Longest common prefix of strings, trimmed to a char boundary.
+#[allow(clippy::string_slice)]
 fn common_str_prefix<'a>(a: &'a str, b: &str) -> &'a str {
     let mut n = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     while n > 0 && !a.is_char_boundary(n) {

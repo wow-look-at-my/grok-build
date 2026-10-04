@@ -1,10 +1,5 @@
 #!/usr/bin/env node
-// Tests for the versioned-binary + symlink installation logic used by
-// postinstall.js and bin/grok-bootstrap.js.
-//
-// Run with:  node scripts/test-postinstall.js
-//
-// Uses only Node.js built-in modules (no test framework needed).
+// Tests for the versioned-binary + symlink installation logic used by postinstall.js and bin/grok-bootstrap.js.
 
 const fs = require('fs');
 const path = require('path');
@@ -166,9 +161,7 @@ function bootstrapCanonical(vendoredBinPath, version, canonicalDir) {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Install + Symlink Tests
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════ Install + Symlink Tests.
 
 console.log('install + symlink tests\n');
 
@@ -243,7 +236,7 @@ test('idempotent: reinstalling same version does not re-copy', () => {
         // Re-run postinstall with same version
         installVersionedBinary(vendored, '0.1.140', binDir);
 
-        // Versioned binary should NOT have been replaced (existsSync guard)
+        // Versioned binary should NOT
         const versionedPath = path.join(binDir, 'grok-0.1.140');
         assert.strictEqual(fs.readFileSync(versionedPath, 'utf8'), 'original');
     } finally {
@@ -341,7 +334,6 @@ test('three sequential upgrades: v1 -> v2 -> v3 all coexist', () => {
         // Symlink points to latest
         assert.strictEqual(fs.readlinkSync(path.join(binDir, 'grok')), 'grok-0.1.3');
 
-        // All three versioned binaries still exist (no cleanup yet)
         assert.ok(fs.existsSync(path.join(binDir, 'grok-0.1.1')));
         assert.ok(fs.existsSync(path.join(binDir, 'grok-0.1.2')));
         assert.ok(fs.existsSync(path.join(binDir, 'grok-0.1.3')));
@@ -366,9 +358,7 @@ test('file permissions are preserved (0o755)', () => {
     }
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// Cleanup / Semver Sort Tests
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════ Cleanup / Semver Sort Tests.
 
 console.log('\ncleanup + semver sort tests\n');
 
@@ -378,7 +368,7 @@ test('cleanup keeps N-1 version and removes older ones', () => {
         const binDir = path.join(dir, 'bin');
         fs.mkdirSync(binDir, { recursive: true });
 
-        // Create three old versioned binaries
+        // Create old versioned binaries
         fs.writeFileSync(path.join(binDir, 'grok-0.1.138'), 'v138');
         fs.writeFileSync(path.join(binDir, 'grok-0.1.139'), 'v139');
         fs.writeFileSync(path.join(binDir, 'grok-0.1.140'), 'v140');
@@ -455,7 +445,6 @@ test('cleanup ignores .tmp. and .link. files', () => {
 });
 
 test('semver sort: 0.1.9 vs 0.1.10 (digit boundary)', () => {
-    // Regression test: lexical sort puts '0.1.9' after '0.1.10' because '9' > '1'
     const dir = makeTmpDir();
     try {
         const binDir = path.join(dir, 'bin');
@@ -527,9 +516,7 @@ test('byVersionDescending: unit test comparator directly', () => {
     ]);
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// Bootstrap Tests
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════ Bootstrap Tests.
 
 console.log('\nbootstrap tests\n');
 
@@ -577,8 +564,7 @@ test('bootstrapCanonical is idempotent', () => {
 });
 
 test('bootstrapCanonical returns vendored path on failure', () => {
-    // If the canonical dir can't be created (e.g. permission denied),
-    // bootstrap should gracefully fall back to the vendored binary.
+    // If the canonical dir can't be created (e.g. permission denied).
     const dir = makeTmpDir();
     try {
         const vendored = path.join(dir, 'vendored');
@@ -622,9 +608,7 @@ test('bootstrapCanonical works when canonical already exists (different version)
     }
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// End-to-end Scenario Tests
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════ End-to-end Scenario Tests.
 
 console.log('\nend-to-end scenario tests\n');
 
@@ -709,9 +693,7 @@ test('non-grok files in bin dir are not touched by cleanup', () => {
     }
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// grok vs grok-pager Isolation Tests
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════ grok vs grok-pager Isolation Tests.
 
 console.log('\ngrok vs grok-pager isolation tests\n');
 
@@ -904,9 +886,7 @@ test('full dual-binary lifecycle: install, upgrade, cleanup both', () => {
     }
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// macOS-only Pager Platform Split Tests
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════ macOS-only Pager Platform Split Tests.
 
 console.log('\nmacOS-only pager platform split tests\n');
 
@@ -977,7 +957,7 @@ test('skipping pager install on Linux does not affect grok cleanup', () => {
         const binDir = path.join(dir, 'bin');
         const vendored = path.join(dir, 'vendored');
 
-        // Install grok across two versions
+        // Install grok across a couple of versions
         fs.writeFileSync(vendored, 'grok-v1');
         installNamedBinary(vendored, 'grok', '0.1.149', binDir);
         fs.writeFileSync(vendored, 'grok-v2');
@@ -1121,8 +1101,7 @@ if (process.platform !== 'win32') {
             assert.strictEqual(res.status, 0, `launch failed: ${res.stderr}`);
             assert.strictEqual(res.stdout.trim(), 'REAL|hello a b');
 
-            // Entry and binary share one lifetime: deleting unrelated state
-            // (the grok home) cannot dangle the entry.
+            // Entry and binary share one lifetime: deleting unrelated state (the grok home) cannot dangle the entry.
             const res2 = spawnSync(pathEntry, ['x'], { encoding: 'utf8' });
             assert.strictEqual(res2.stdout.trim(), 'REAL|x');
         } finally {

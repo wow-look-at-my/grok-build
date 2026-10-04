@@ -1,13 +1,8 @@
-//! After each turn the shell generates an ultra-short one-line summary of the agent's reply for that turn (not a meta activity log).
-//! The dashboard row shows it as its secondary line.
-//! Like recap, it is display-only and never mutates the conversation.
-//! The request is the conversation prefix verbatim plus one instruction turn.
-//! That shape is shared with recap via [`super::session_recap::budget_instruction_items`].
+//! After each turn the shell generates an ultra-short one-line summary of the agent's reply for that turn.
 
 use crate::sampling::ConversationItem;
 use crate::session::helpers::chat::floor_char_boundary;
 
-/// The instruction targets 5-12 words; this only guards against runaway output.
 /// Rows truncate to width on render.
 pub(crate) const TURN_SUMMARY_MAX_CHARS: usize = 200;
 

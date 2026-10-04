@@ -26,9 +26,8 @@ pub struct CollectedSamplingResult {
     pub doom_loop_recovery_attempts: Vec<DoomLoopRecoveryAttempt>,
 }
 
-/// Cheaply-cloneable handle to the sampler actor.
-/// Internally just an `mpsc::UnboundedSender<SamplerCommand>`.
-/// All methods are non-blocking (fire-and-forget) except for the `*_async` queries which return a future awaiting an `oneshot::Receiver`.
+/// Cheaply-cloneable handle to the sampler actor. Internally an
+/// `mpsc::UnboundedSender<SamplerCommand>`.
 #[derive(Clone)]
 pub struct SamplerHandle {
     cmd_tx: mpsc::UnboundedSender<SamplerCommand>,
@@ -41,8 +40,6 @@ impl SamplerHandle {
     }
 
     /// Create a no-op handle that discards all commands.
-    ///
-    /// Useful for tests and callers that need a `SamplerHandle` field before the actor is wired up.
     pub fn noop() -> Self {
         let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
         // Receiver is dropped immediately; sends will fail but every send-site uses `let _ = ...` so that is fine
@@ -114,7 +111,6 @@ impl SamplerHandle {
     }
 
     /// Query the number of in-flight requests.
-    /// Returns 0 if the actor has been shut down.
     pub async fn active_count(&self) -> usize {
         let (reply_tx, reply_rx) = oneshot::channel();
         let _ = self
@@ -123,9 +119,8 @@ impl SamplerHandle {
         reply_rx.await.unwrap_or(0)
     }
 
-    /// Submit a request and await its completion. Events still flow to the shared channel for live UI updates.
-    /// This method also awaits the per-request completion oneshot so the caller gets a clean `Result` without filtering events.
-    /// Sequential callers (compaction, summary, `/btw` side questions) use this.
+    /// Submit a request and await its completion. Events still flow to the
+    /// shared channel for live UI updates.
     pub async fn submit_and_collect(
         &self,
         request_id: RequestId,
@@ -142,8 +137,8 @@ impl SamplerHandle {
         request_id: RequestId,
         request: ConversationRequest,
     ) -> CollectedSamplingResult {
-        // RAII guard: when this future is dropped (cancel, panic, or normal return), tell the sampler actor to cancel the in-flight request_id
-        // No-op if the actor already finished and removed it from its active set
+        // RAII guard: when this future is dropped (cancel, panic, or normal
+        // return).
         struct CancelOnDrop {
             cmd_tx: mpsc::UnboundedSender<SamplerCommand>,
             request_id: RequestId,
@@ -159,7 +154,7 @@ impl SamplerHandle {
         let (completion_tx, completion_rx) = oneshot::channel();
         let cancel_id = request_id.clone();
 
-        // Only create the guard if Submit actually reached the actor
+        // Only create the guard if Submit reached the actor
         let _guard = self
             .cmd_tx
             .send(SamplerCommand::Submit {

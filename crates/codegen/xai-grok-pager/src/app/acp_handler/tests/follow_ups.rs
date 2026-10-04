@@ -149,8 +149,8 @@
     #[test]
     fn follow_ups_strips_bidi_and_zero_width() {
         let mut app = make_app_with_agent("sess-1");
-        // U+202E RIGHT-TO-LEFT OVERRIDE and U+200B ZERO WIDTH SPACE are stripped
-        // Stripping them stops server text visually disguising a leading `/` (Trojan Source)
+        // U+202E RIGHT-TO-LEFT OVERRIDE and U+200B ZERO WIDTH SPACE are stripped Stripping them stops server text
+        // visually disguising a leading.
         handle_ext_notification(
             &follow_ups_ext("resp-1", &["\u{202e}/rm\u{200b}-rf"]),
             &mut app,
@@ -270,8 +270,7 @@
 
     #[test]
     fn follow_ups_viewer_turn_transition_renders_newer_chips() {
-        // A viewer holding resp-1's chips adopts the driver's NEXT turn via a live delta, which clears the prior chips
-        // resp-2's follow_ups then render; the held resp-1 must not suppress them
+        // A viewer holding resp-1's chips adopts the driver's NEXT turn via a live delta.
         let mut app = make_app_with_agent("sess-1");
         let id = AgentId(0);
         {

@@ -1,7 +1,4 @@
 //! Reconstructs a client-side terminal's log file from its `terminal/output` snapshots.
-//! The truncation `read_file` path and the monitor file tail read that file.
-//!
-//! TODO: this is a fallback until clients push exact output via an `x.ai/terminal/output_delta` notification.
 
 use std::path::PathBuf;
 
@@ -291,7 +288,6 @@ mod tests {
     async fn read_log_tail_drops_leading_partial_char() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lead.log");
-        // "€ab" is [E2 82 AC 61 62]; a 3-byte limit cuts inside the euro sign.
         tokio::fs::write(&path, "€ab").await.unwrap();
         let tail = read_log_tail(&path, 3).await.unwrap();
         assert_eq!(tail.text, "ab");
@@ -302,7 +298,7 @@ mod tests {
     async fn read_log_tail_drops_trailing_partial_char() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("trail.log");
-        // File ends mid-character: "ab" then the first two bytes of the euro sign.
+        // File ends mid-character: "ab" then the first a couple of bytes of the euro sign.
         tokio::fs::write(&path, [b'a', b'b', 0xE2, 0x82])
             .await
             .unwrap();

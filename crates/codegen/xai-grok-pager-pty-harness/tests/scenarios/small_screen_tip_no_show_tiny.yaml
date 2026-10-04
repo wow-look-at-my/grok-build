@@ -14,7 +14,7 @@ environment:
 mock:
   response: "unused"
 steps:
-  # The welcome menu may be trimmed at 14 rows; the prompt marker always paints.
+  # The welcome menu may be trimmed at several rows; the prompt marker always paints.
   - action: wait_for_text
     text: "❯"
     timeout_ms: 20000

@@ -1,9 +1,4 @@
 //! PTY: the `send_subagent_message` rows of a parent transcript against a live background child.
-//! The parent spawns "sleeper", whose first model call is a flag-gated foreground command, then steers, queues,
-//! interjects, and sends to a bogus id. Asserted: each collapsed row is the bare header (no text, no reason, no raw
-//! id); expanding the steer row shows ` · steer` and the full text; expanding the rejected row shows the shell's
-//! reason and the raw `Subagent ID:`.
-// Unix only: the child's hold is a `/bin/sleep` loop.
 #![cfg(unix)]
 #[allow(unused_imports)]
 use super::common::*;
@@ -26,8 +21,8 @@ const LEFT: &[u8] = b"\x1b[D";
 /// Scripted turns run with no model; the budget covers a loaded CI host, not the flow itself.
 pub(crate) const ROW_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The parent and child scripts plus the spawned pager, driven to the point where every send row has settled.
-/// The child keeps polling `hold_flag` until the caller writes it, so the sends land on an active child.
+/// The parent and child scripts plus the spawned pager, driven to the point
+/// where every send row has settled.
 pub(crate) struct SendMessageScenario {
     content: ContentController,
     pub(crate) harness: PtyHarness,
@@ -45,8 +40,7 @@ impl SendMessageScenario {
             }
             MockToolCall::new(Tool::SendMessage, args)
         };
-        // Conversations are keyed by session id, so the child's first call is conversation 2 whatever the arrival
-        // order. The wake the child's completion triggers is the parent's second, call-free turn.
+        // The wake the child's completion triggers is the parent's second, call-free turn.
         content.server().set_conversations(vec![
             Conversation::nth(1)
                 .calls([
@@ -217,8 +211,7 @@ async fn send_subagent_message_row() {
             "{absent:?} must not render while collapsed\nscreen:\n{screen}"
         );
     }
-    // The `sending to` row is not asserted: admission is in-memory, so the Pending and Completed updates usually
-    // land in one pager frame; that grammar is pinned by the block's unit tests instead.
+    // The `sending to` row is not asserted: admission is in-memory, so the Pending and Completed updates usually land in one pager frame.
 
     // Right expands the steer row: the delivery suffix, then the full text without captions.
     scenario.focus_scrollback();

@@ -1,9 +1,4 @@
 //! Terminal teardown shared by the post-loop restore, the panic hook and the signal path.
-//!
-//! [`emit_terminal_teardown_sequences`] defines the on-wire teardown byte order exactly once; the kitty keyboard pop
-//! inside it happens at most once per push. The panic hook and a restore whose writer join timed out run it through
-//! [`run_bounded_teardown`]; the signal path calls it directly, without draining the writer.
-//! The post-loop restore alone joins the stdin reader first and fences the pop with a DA1 round trip before raw mode ends.
 
 use std::io::{self, Write};
 use std::panic;
@@ -22,8 +17,7 @@ use crate::app::{
 };
 use crate::render::draw::{PagerTerminal, WriterJoin, WriterThread};
 
-/// How long teardown waits for the writer thread to drain before detaching it. Same order as the panic hook's grace: a terminal that stopped reading must not turn `/quit` into a hang.
-/// the panic hook's grace: a terminal that stopped reading must not turn `/quit` into a hang.
+/// How long teardown waits for the writer thread to drain before detaching it.
 const WRITER_JOIN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Drop the terminal (closing the writer mpsc channel) and join the writer thread within
@@ -45,9 +39,8 @@ fn drain_writer_thread_before_teardown(
     Ok(join)
 }
 
-/// Write raw CSI sequences to disable mouse tracking and bracketed paste.
-///
-/// Best-effort: failures are silently ignored since this runs on teardown and panic paths where stderr may already be broken.
+/// Write raw CSI sequences to disable mouse tracking and bracketed paste. Best-effort: failures are silently ignored since this runs on teardown and panic paths where
+/// stderr may already be broken.
 fn disable_mouse_paste_raw() {
     xai_grok_shell::util::with_locked_stderr(|stderr| {
         let _ = stderr.write_all(xai_crash_handler::terminal::MOUSE_PASTE_RESET);
@@ -62,9 +55,6 @@ pub(super) fn emit_terminal_teardown_sequences(mode: ScreenMode, inline_cursor_r
     #[cfg(windows)]
     use crate::app::win_native_selection;
 
-    // Clear the OSC 9;4 progress bar unconditionally
-    // Emitting a no-op clear to terminals that don't support it is harmless
-    // This path runs from signal/panic handlers that cannot access NotificationService
     xai_grok_shell::util::with_locked_stderr(|stderr| {
         let _ = stderr.write_all(crate::notifications::progress::OSC_CLEAR.as_bytes());
         let _ = stderr.flush();
@@ -78,9 +68,8 @@ pub(super) fn emit_terminal_teardown_sequences(mode: ScreenMode, inline_cursor_r
     // https://github.com/helix-editor/helix/issues/6638
     disable_mouse_paste_raw();
     if MOUSE_CAPTURE_ENABLED.swap(false, Ordering::AcqRel) {
-        // On Windows the enable was a winapi SetConsoleMode replace (crossterm never emits the ?100x escapes there)
-        // Conhost keeps console modes across process exit
-        // Restore via crossterm's winapi path so a fullscreen/inline run doesn't leave the window with QuickEdit off
+        // On Windows the enable was a winapi SetConsoleMode replace
+        // (crossterm never emits the ?100x escapes there).
         #[cfg(windows)]
         xai_grok_shell::util::with_locked_stderr(|stderr| {
             let _ = execute!(stderr, event::DisableMouseCapture);
@@ -90,9 +79,7 @@ pub(super) fn emit_terminal_teardown_sequences(mode: ScreenMode, inline_cursor_r
         let _ = execute!(stderr, event::DisableFocusChange);
     });
 
-    // Per the kitty spec the pop must happen at most once per push and on the same screen
-    // Use swap so concurrent teardown paths (panic hook, restore_terminal) cannot both pop
-    // Pop the /gboom layer first (it sits on top of the base layer) if the game was still open
+    // Per the kitty spec the pop must happen at most once per push and on the same screen Use swap so concurrent teardown paths.
     pop_gboom_keyboard_flags_inline();
     if crate::terminal::take_kitty_flags_pushed() {
         xai_grok_shell::util::with_locked_stderr(|stderr| {
@@ -100,7 +87,7 @@ pub(super) fn emit_terminal_teardown_sequences(mode: ScreenMode, inline_cursor_r
         });
     }
 
-    // Reset the cursor style only if startup forced one (`CURSOR_STYLE_FORCED`); under inherit a `0 q` would clobber a style the pager never touched
+    // Reset the cursor style only if startup forced one (`CURSOR_STYLE_FORCED`).
     let restore_style = CURSOR_STYLE_FORCED.load(Ordering::Acquire);
     if mode.is_fullscreen() {
         xai_grok_shell::util::with_locked_stderr(|stderr| {
@@ -112,9 +99,7 @@ pub(super) fn emit_terminal_teardown_sequences(mode: ScreenMode, inline_cursor_r
     } else {
         let rows = crossterm::terminal::size().map(|(_, r)| r).unwrap_or(24);
         let last = rows.saturating_sub(1);
-        // In minimal mode the viewport is not bottom-pinned, so moving to the screen bottom would strand the shell prompt / resume hint
-        // They would sit far below the pager's last line with a screen of blank space between
-        // `inline_cursor_row` (the live viewport's bottom) lands it directly under the prompt instead
+        // In minimal mode the viewport is not bottom-pinned.
         let target = inline_cursor_row.unwrap_or(last).min(last);
         xai_grok_shell::util::with_locked_stderr(|stderr| {
             if restore_style {
@@ -126,15 +111,12 @@ pub(super) fn emit_terminal_teardown_sequences(mode: ScreenMode, inline_cursor_r
         });
     }
 
-    // Restore the stdin console mode changed by minimal-mode's native-selection setup (no-op if it never ran)
-    // Last on purpose: it is the outermost snapshot
-    // On the minimal-to-inline downgrade path the crossterm DisableMouseCapture above restores to the mode *including* our QuickEdit assert
+    // Restore the stdin console mode changed by minimal-mode's native-selection setup (no-op if it never ran) Last on purpose.
     #[cfg(windows)]
     win_native_selection::restore_stdin_mode();
 }
 
-/// Bound on teardown writes when the stderr lock may be wedged: the panic hook, and a restore
-/// whose writer thread is still parked in its tty write after a timed-out join.
+/// Bound on teardown writes when the stderr lock may be wedged: the panic hook.
 const TEARDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Teardown still runs if draining fails, so terminal state is restored before returning that error.
@@ -158,27 +140,22 @@ fn restore_terminal_with(
             let _ = terminal.backend_mut().flush();
         }
     }
-    // Capture the live viewport's bottom row before dropping the terminal
-    // Teardown can then place the cursor directly below the (non-bottom-pinned) live region rather than at the screen bottom
+    // Capture the live viewport's bottom row.
     let inline_cursor_row = (!mode.is_fullscreen()).then(|| terminal.viewport_area().bottom());
     let drain_result = drain(terminal, writer_thread);
     let writer_timed_out = matches!(drain_result, Ok(WriterJoin::TimedOut));
     if writer_timed_out {
-        // The detached writer thread may still hold the stderr lock inside its tty write; an unbounded teardown here would turn a terminal that stopped reading into a /quit hang.
-        // unbounded teardown here would turn a terminal that stopped reading into a /quit hang.
+        // The detached writer thread may still hold the stderr lock inside its tty write.
         run_bounded_teardown(move || teardown(mode, inline_cursor_row), TEARDOWN_GRACE);
     } else {
         teardown(mode, inline_cursor_row);
     }
-    // Release events the terminal emitted before applying the pop may still be in flight; left alone they reach the shell as keystrokes
-    // Still in raw mode: the fence reads the raw fd, and `disable_raw_mode` must follow the last read
+    // Release events the terminal emitted before applying the pop may still be in flight.
     let report = fence(reader, writer_timed_out);
     let _ = terminal::disable_raw_mode();
-    // Tell the signal handlers that the user's shell now owns the terminal
-    // A SIGPIPE arriving on a late stderr write must not paint escape sequences into the user's prompt
+    // Tell the signal handlers that the user's shell now owns the terminal A SIGPIPE arriving.
     signal_handler::mark_restored();
     xai_crash_handler::disable_terminal_escape_restore();
-    // Restore fd 2 to the real terminal so any post-TUI output (tracing flushes, Sentry flush, etc.) is visible
     xai_tty_utils::restore_native_stderr();
     report.record();
     drain_result

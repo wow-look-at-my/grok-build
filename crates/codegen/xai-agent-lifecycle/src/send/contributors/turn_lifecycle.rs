@@ -77,8 +77,6 @@ pub enum ShutdownPolicy {
 }
 
 /// Who may treat a leading `/` as a command.
-/// Independent of [`InputAuthority`]: human parent text stays path-closed
-/// and still slash-inert.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlashAuthority {
     HumanCatalog,

@@ -1,5 +1,4 @@
-//! Extract base64-encoded images from tool result text so they can be
-//! sent as multimodal vision tokens instead of raw text.
+//! Extract base64-encoded images from tool result text so they can be sent as multimodal vision tokens instead.
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
@@ -20,8 +19,7 @@ pub struct ExtractionResult {
     pub images: Vec<ExtractedImage>,
 }
 
-/// In-text stand-in for a captured data-URI image. Keep in lockstep with
-/// extract and tool-layer writers.
+/// In-text stand-in for a captured data-URI image. Keep in lockstep with extract and tool-layer writers.
 pub const IMAGE_CONTENT_PLACEHOLDER: &str = "[image content will be provided separately]";
 
 /// Skip tiny decorative icons (favicons, spacer GIFs).
@@ -33,9 +31,9 @@ const MAX_PAYLOAD_LEN: usize = 10 * 1024 * 1024;
 /// Cap per tool result to avoid flooding the context with vision tokens.
 const MAX_IMAGES: usize = 5;
 
-/// Prefix regex for `data:<mime>;base64,`. The payload is scanned manually from prefix end so line-wrapped producers (Python
-/// `base64.encodebytes`, OpenSSL, Perl `MIME::Base64`) round-trip byte-equal. The leading `(?:[^a-zA-Z0-9]|^)` rejects word-internal matches
-/// like `metadata:image/...`. Only raster MIME types `image_normalize` can decode are matched. Groups: (1) full prefix, (2) MIME type.
+/// Prefix regex for `data:<mime>;base64,`. The payload is scanned manually
+/// from prefix end so line-wrapped producers (Python `base64.encodebytes`,
+/// OpenSSL, Perl `MIME::Base64`) round-trip byte-equal.
 static IMAGE_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"(?i)(?:[^a-zA-Z0-9]|^)",
@@ -115,8 +113,7 @@ fn strip_b64_whitespace(s: &str) -> Cow<'_, str> {
     Cow::Owned(s.chars().filter(|c| !c.is_ascii_whitespace()).collect())
 }
 
-/// Pre-cap before stripping so a malicious oversize payload doesn't force
-/// a large allocation just to be rejected. 2× headroom for line-wrap.
+/// Pre-cap before stripping so a malicious oversize payload doesn't force a large allocation to be rejected.
 const GROSS_PAYLOAD_PRE_CAP: usize = MAX_PAYLOAD_LEN * 2;
 
 fn collect_prefix_positions(text: &str) -> Vec<usize> {
@@ -241,9 +238,9 @@ fn scan_and_extract(s: &str) -> Option<(String, Vec<ExtractedImage>)> {
     Some((result, images))
 }
 
-/// Extract image data URIs from `text`, replacing each with a placeholder. Small payloads and non-image data URIs
-/// survive; PDF data URIs are stripped first. Owned-input convenience over [`try_extract_base64_images`] — when nothing
-/// matched, the original `text` is returned unmodified.
+/// Extract image data URIs from `text`, replacing each with a placeholder.
+/// Small payloads and non-image data URIs survive; PDF data URIs are stripped
+/// first.
 pub fn extract_base64_images(text: String) -> ExtractionResult {
     try_extract_base64_images(&text).unwrap_or_else(|| ExtractionResult {
         text,
@@ -559,7 +556,7 @@ mod tests {
 
     #[test]
     fn strip_pdf_size_calculation() {
-        let pdf_b64 = payload(12288); // 12288 * 3/4 / 1024 = 9 KB
+        let pdf_b64 = payload(12288);
         let input = format!("data:application/pdf;base64,{pdf_b64} end");
         let result = strip_pdf_data_uris(&input).unwrap();
         assert!(result.contains("[PDF attachment removed \u{2014} 9 KB]"));
@@ -700,14 +697,13 @@ mod tests {
         let input = format!("data:image/png;base64,{p}\nComments: ok");
         let result = extract_base64_images(input);
         assert_eq!(result.images.len(), 1);
-        // 2000 + 8 ("Comments") = 2008 (mod 4 == 0). ": ok" stays in text.
+        // ": ok" stays in text.
         assert_eq!(img(&result, 0).data.len(), 2008);
         assert!(result.text.contains(": ok"));
     }
 
     #[test]
     fn payload_aligned_after_strip_admitted_whole() {
-        // 257 * 4 = 1028 — exact mod-4 boundary kept whole (no spurious trim).
         let chunk = "A".repeat(257);
         let wrapped = format!("{chunk}\n{chunk}\n{chunk}\n{chunk}");
         let input = format!("data:image/png;base64,{wrapped} end");

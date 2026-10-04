@@ -1,9 +1,4 @@
 //! Lightweight Mixpanel HTTP tracking client.
-//!
-//! This is a minimal replacement for `mixpanel-rs` that uses `reqwest 0.12`
-//! instead of `reqwest 0.11`, avoiding a duplicate HTTP stack in the binary.
-//!
-//! Only the `track` API is implemented since that's all we use.
 
 #![deny(clippy::indexing_slicing)]
 

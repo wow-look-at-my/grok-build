@@ -1,5 +1,4 @@
-//! Emits the raw Messages API `stream_event` lines for `streaming-messages-json` when `--include-partial-messages` is on.
-//! [`PartialFraming`] tracks which message and content block are open.
+//! Emits the raw Messages API `stream_event` lines for `streaming-messages-json`.
 
 use serde_json::{Value, json};
 

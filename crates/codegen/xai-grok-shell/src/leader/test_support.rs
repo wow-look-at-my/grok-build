@@ -1,8 +1,5 @@
-//! In-crate fake leaders for exercising how the client handles a misbehaving leader (hung, half-framed, wrong-versioned).
-//! These are wire shapes the real `spawn_leader_server` can never produce.
-//!
-//! All stalls wait on `cancel.cancelled().await`, never on a timer.
-//! `#[tokio::test(start_paused = true)]` auto-advance can therefore jump the client-side timeouts under test without waking the fake.
+//! In-crate fake leaders for exercising how the client handles a misbehaving
+//! leader (hung, half-framed, wrong-versioned).
 use super::protocol::{
     ClientMessage, LEADER_PROTOCOL_VERSION, LeaderCapabilities, ServerMessage, read_message,
     write_message,
@@ -38,9 +35,8 @@ pub(crate) fn fake_caps(control_v1: bool) -> LeaderCapabilities {
 }
 /// Wire behavior of a [`spawn_fake_leader`] instance.
 pub(crate) enum FakeLeaderBehavior {
-    /// Well-formed: `Registered { ready: true }` with the given metadata, then idle until cancelled.
-    /// Backs the discovery and adopt/evict tests.
-    /// Skewed metadata (wrong protocol version, stale binary version) comes from passing an explicit [`FakeVersions`]; there is no dedicated variant.
+    /// Well-formed: `Registered { ready: true }` with the given metadata,
+    /// then idle until cancelled.
     Normal {
         versions: FakeVersions,
         caps: LeaderCapabilities,

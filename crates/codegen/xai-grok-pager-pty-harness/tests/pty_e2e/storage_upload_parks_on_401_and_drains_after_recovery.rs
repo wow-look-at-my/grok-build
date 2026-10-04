@@ -2,9 +2,8 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// 2a-park. Upload queue parks on storage 401 and drains after recovery. The trace artifact must
-/// survive the outage (parked, without spamming retries) and land once storage accepts the bearer
-/// again.
+/// 2a-park. The trace artifact must survive the outage (parked, without spamming retries) and
+/// land once storage accepts the bearer again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn storage_upload_parks_on_401_and_drains_after_recovery() {
@@ -13,9 +12,7 @@ async fn storage_upload_parks_on_401_and_drains_after_recovery() {
     // Storage auth is down from the start; chat endpoints stay healthy
     content.set_storage_unauthorized(true);
 
-    // Trace uploads are gated on first-party xAI OAuth (`is_xai_auth()` means AuthMode::Oidc with the xAI issuer)
-    // The harness's XAI_API_KEY is ApiKey mode and never uploads, so seed a fake OAuth entry instead
-    // The mock accepts any bearer, and the entry's failing refresh_token is exactly the parked state under test
+    // Trace uploads are gated on first-party xAI OAuth (`is_xai_auth()` means AuthMode::Oidc with the xAI issuer).
     seed_fake_oauth(&content, "pty-park-e2e");
 
     // Explicit overrides win over the sandbox defaults

@@ -1,6 +1,4 @@
 //! `SessionHandle`: the `Clone + Send` proxy for interacting with a session actor.
-//!
-//! Callers hold a `SessionHandle` and send `SessionCommand` messages via the internal channel.
 use super::commands::SessionCommand;
 use super::persistence::{LocalFeedbackEntry, PersistenceMsg};
 use agent_client_protocol as acp;
@@ -12,8 +10,6 @@ use xai_hunk_tracker::HunkTrackerHandle;
 /// `None` = unrestricted, `Some([])` = blocked, `Some(types)` = only those.
 pub type SharedAllowedSubagentTypes = std::sync::Arc<parking_lot::Mutex<Option<Vec<String>>>>;
 /// Coarse lifecycle state of a session as known to the leader/agent.
-/// A grok session is a resumable log on disk with no terminal status field of its own, so "liveness" is residency plus turn state, not a pid.
-/// The agent's join-handle supervisor tracks this per session so a panicked actor is demoted to `Dormant` instead of lingering in the roster.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SessionLiveState {
     /// Resident actor, a turn is currently running.
@@ -25,7 +21,6 @@ pub(crate) enum SessionLiveState {
     /// Finished and resumable (terminal marker on disk).
     Completed,
     /// Actor panicked / load failed: the `JoinHandle` ended with no terminal marker.
-    /// Harmless to reap; the conversation persists and demotes to `Dormant` on the next disk scan.
     DeadFailed,
     /// A load or resume is building the actor.
     Attaching,
@@ -71,69 +66,44 @@ pub struct SessionHandle {
     /// Handle to session signals (used for completion tracking)
     pub signals_handle: super::signals::SessionSignalsHandle,
     /// Shared gate controlling whether the session actor forwards notifications to the client via the gateway.
-    /// See [`SessionActor::gateway_enabled`] for details.
     pub gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// When `false`, suppress local `background_tasks` snapshot emits.
-    /// Shared with the notification bridge and session actor; flipped off for
-    /// gateway-backed sessions so an empty local registry cannot clear remote Running.
     pub emit_local_background_tasks: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Status-line and live user-echo gates. Shared with [`super::notifications::NotificationSender`].
     pub(crate) client_caps: super::notifications::SessionClientCaps,
     /// Admitted MCP servers (disk, client, and the current agent.md overlay).
-    /// Shared with the actor's `McpState`: config commits publish here, and forks
-    /// snapshot the cell so they see the current seat's servers and headers.
     pub mcp_servers: super::mcp_servers::AdmittedMcpServers,
-    /// Client-provided MCP servers as admitted by the vendor `mcps` kill-switch, before merging with disk/plugin/managed servers.
-    /// Writers assign this through `with_resident_mut` before enqueue. The actor keeps its own copy, updated from `UpdateMcpServers.client_seed`.
+    /// Client-provided MCP servers as admitted by the vendor `mcps` kill-switch.
     pub initial_client_mcp_servers: Vec<acp::McpServer>,
     /// Stable display path for forked sessions (original project path).
-    /// When set, the hunk tracker extension handler rewrites worktree paths in API responses to this path.
-    /// The client UI then shows the original project path, not the worktree path.
     pub display_cwd: Option<String>,
     /// Feedback manager for periodic signal sync.
-    /// Exposed so callers can attach GCS upload queue stats for snapshotting into signals.
     pub feedback_manager: std::sync::Arc<crate::session::feedback_manager::FeedbackManager>,
     /// Session-scoped upload queue. Lazily initialized on the first turn that enables trace uploads.
-    /// `Arc<OnceLock<_>>` ensures all `SessionHandle` clones share the same underlying queue instance.
     pub(crate) upload_queue: std::sync::Arc<std::sync::OnceLock<UploadQueue>>,
-    /// Consecutive upload failures with no confirmed upload in between, driving this session's upload-failure log suppression.
-    /// Shared across handle clones but per-session, so one session's bucket outage cannot mute another session's first-failure log.
-    /// Each session's unified_log artifact must carry evidence of its own failures.
+    /// Consecutive upload failures with no confirmed upload in between.
     pub(crate) upload_failures_since_success: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Session context captured at spawn time so callers can inherit shared runtime state.
     pub tool_context: crate::tools::ToolContext,
     /// The model this session was created with (or switched to via setModel).
-    /// Per-session tracking prevents cross-client contamination in leader mode where `MvpAgent.current_model_id` is shared mutable state.
     pub model_id: acp::ModelId,
     pub reasoning_effort: Option<ReasoningEffort>,
     /// YOLO (auto-approve) mode for this session.
-    /// Per-session tracking prevents cross-client contamination in leader mode where one client enabling YOLO could affect another client's sessions.
     pub yolo_mode: bool,
     /// Explicit origin client metadata captured when the session was created.
-    /// Used for per-session User-Agent rendering and for scoping leader-mode client behaviors like yolo broadcasts.
     pub origin_client: Option<crate::http::OriginClientInfo>,
     /// Whether the client that created this session advertised `x.ai/codeNavigation.enabled`.
-    /// Stored per-session for leader mode.
-    /// A later `initialize()` from a different client cannot retroactively change code-nav eligibility for already-running sessions.
     pub code_nav_enabled: bool,
     /// Whether the `ask_user_question` tool is exposed for this session.
-    /// The gates are `_meta.askUserQuestion` / `--no-ask-user` and the remote settings / config / env gate.
-    /// Subagents deliberately do not inherit it.
     pub ask_user_question_enabled: bool,
     /// Whether this session was spawned non-interactive (`startupHints.nonInteractive`, e.g. headless `-p` / SDK).
-    /// Stored per-session so subagents inherit it at spawn.
     pub non_interactive: bool,
     /// Plan mode tracker, shared with the session actor via Arc.
-    /// Exposed so the `x.ai/toggle_plan_mode` handler can toggle plan mode without going through the session command channel.
     pub plan_mode: std::sync::Arc<parking_lot::Mutex<crate::session::plan_mode::PlanModeTracker>>,
-    /// Debug flag: when set to `true`, the next turn unconditionally triggers auto-compaction regardless of context window usage.
-    /// Consumed (reset to `false`) atomically on use via `compare_exchange`.
-    /// Set via `x.ai/debug/arm_auto_compact`.
+    /// Debug flag: when set to `true`, the next turn unconditionally triggers auto-compaction regardless.
     pub force_compact: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub permission_handle: xai_grok_workspace::permission::PermissionHandle,
     /// The parent SessionActor's live `Auth401AttributionCallback` (if any).
-    /// Exposed on the handle so `MvpAgent::build_subagent_spawn_context` can copy it into the spawn context.
-    /// Subagents then inherit the parent's callback rather than getting a fresh one, preserving the parent's session_id on the child's emits.
     pub attribution_callback: Option<xai_grok_sampler::SharedAttributionCallback>,
     /// The agent definition name for this session.
     pub agent_name: String,
@@ -149,7 +119,6 @@ pub struct SessionHandle {
     pub terminal_backend:
         Option<std::sync::Arc<dyn xai_grok_tools::computer::types::TerminalBackend>>,
     /// Notification handle for this session's tool bridge.
-    /// Subagents use this to reparent surviving tasks' notification handles on exit so events route to the parent's notification bridge.
     pub tools_notification_handle:
         Option<xai_grok_tools::notification::types::ToolNotificationHandle>,
     /// Subagents inherit the parent's handle so scheduled tasks survive the subagent's exit.
@@ -506,7 +475,6 @@ impl SessionHandle {
     }
     /// Record whether the client now on this session draws a status row.
     /// Assigned rather than raised and lowered from separate events.
-    /// An attach that only raised the flag would leave the previous client's row enabled, and the session would keep building payloads nobody draws.
     pub(crate) fn set_status_line_wanted(&self, wanted: bool) {
         self.client_caps
             .status_line
@@ -518,9 +486,8 @@ impl SessionHandle {
             .user_message_echo
             .store(wanted, std::sync::atomic::Ordering::Relaxed);
     }
-    /// Ask for a fresh status-line snapshot.
-    /// Used when a client attaches: the notification is transient, so there is nothing to replay.
-    /// The emitter re-reads the capability when the wake lands, so [`Self::set_status_line_wanted`] has to be stored before this is sent.
+    /// Ask for a fresh status-line snapshot. Used when a client attaches: the
+    /// notification is transient, so there is nothing to replay.
     pub(crate) fn request_status_snapshot(&self) {
         let _ = self.cmd_tx.send(SessionCommand::EmitStatusSnapshot);
     }

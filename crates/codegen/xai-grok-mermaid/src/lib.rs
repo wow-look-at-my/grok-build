@@ -1,42 +1,10 @@
-#![allow(clippy::cast_lossless)] // 5 hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // 5 hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
-#![allow(clippy::cast_precision_loss)] // 5 hits predate the gate
-#![allow(clippy::cast_sign_loss)] // 3 hits predate the gate
-#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
+#![allow(clippy::cast_sign_loss)] // Hits predate the gate
+#![allow(clippy::expect_used)]
 //! Render [Mermaid](https://mermaid.js.org/) diagram source to a rasterized PNG, behind a swappable [`MermaidEngine`] trait.
-//!
-//! The crate turns Mermaid text into PNG bytes with no Node, no headless browser, and no network.
-//! The trait boundary lets the rest of the CLI swap engines or fall back to a code block without caring how a diagram is produced.
-//!
-//! # Pipeline
-//!
-//! 1. A [`MermaidEngine`] turns Mermaid source into an SVG and rasterizes it.
-//!    The default engine ([`PureRustEngine`]) uses the vendored, dagre-based `mermaid-to-svg` for layout, then [`rasterize`].
-//! 2. [`rasterize`] converts SVG to PNG with `resvg`/`usvg`/`tiny-skia`.
-//!    It resolves no remote or file references and bundles its font, so it is safe over untrusted input and deterministic across machines.
-//!
-//! # Untrusted input and crash isolation
-//!
-//! Mermaid source is untrusted model or tool output, so call [`render_checked`] rather than [`MermaidEngine::render`] directly.
-//! It enforces a source-size limit and converts an engine panic into a [`MermaidError`].
-//! `catch_unwind` only intercepts panics under `panic = "unwind"`.
-//! The shipped CLI profiles build with `panic = "abort"`, where a panicking engine aborts the process.
-//! The real crash isolation is out of process: the pager's `mermaid_worker` renders each diagram in a short-lived child via [`run_with_timeout`].
-//! A panic or runaway render is contained to the child, and the wall-clock timeout is a real process kill.
-//! This crate provides both the in-process engine and the subprocess spawn/timeout/reap building blocks that child uses.
-//!
-//! # Example
-//!
-//! ```
-//! use xai_grok_mermaid::{default_engine, render_checked, RenderLimits, RenderParams};
-//!
-//! let engine = default_engine();
-//! let params = RenderParams::default();
-//! let result = render_checked(engine.as_ref(), "flowchart LR\nA-->B", &params, &RenderLimits::default());
-//! let diagram = result.expect("a simple flowchart renders");
-//! assert!(diagram.width_px > 0 && diagram.height_px > 0);
-//! ```
 
 #![warn(missing_docs)]
 #![deny(clippy::indexing_slicing)]
@@ -56,8 +24,6 @@ pub use subprocess::{SubprocessError, run_with_timeout};
 use std::sync::Arc;
 
 /// Which color scheme a diagram should be rendered for.
-///
-/// Mapped from the pager's theme by the caller; only the light/dark split is relevant to diagram rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MermaidTheme {
     /// Light surfaces with dark text (e.g. `GrokDay`).
@@ -68,14 +34,11 @@ pub enum MermaidTheme {
 }
 
 /// Default opaque surface colors.
-/// Shared by the raster background ([`MermaidTheme::surface_background`]) and the vendored engine's theme background (`pure::theme_for`).
 pub(crate) const LIGHT_SURFACE: Rgba = Rgba::new(0xFA, 0xFA, 0xFA, 0xFF);
 pub(crate) const DARK_SURFACE: Rgba = Rgba::new(0x18, 0x18, 0x1B, 0xFF);
 
 impl MermaidTheme {
     /// The default opaque surface color a diagram blends into for this theme.
-    /// Used as the raster background when the caller supplies no explicit [`RenderParams::background`].
-    /// The color approximates a typical terminal scrollback surface so the PNG sits flush with the grid.
     pub fn surface_background(self) -> Rgba {
         match self {
             MermaidTheme::Light => LIGHT_SURFACE,
@@ -87,18 +50,14 @@ impl MermaidTheme {
 /// A straight 8-bit-per-channel, non-premultiplied RGBA color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgba {
-    /// Red channel, 0 to 255.
     pub r: u8,
-    /// Green channel, 0 to 255.
     pub g: u8,
-    /// Blue channel, 0 to 255.
     pub b: u8,
-    /// Alpha channel, 0 (transparent) to 255 (opaque).
     pub a: u8,
 }
 
 impl Rgba {
-    /// Construct an [`Rgba`] from its four channels.
+    /// Construct an [`Rgba`] from its channels.
     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
     }
@@ -110,28 +69,19 @@ impl Rgba {
 }
 
 /// Parameters controlling a single diagram render.
-///
-/// [`target_width_px`](Self::target_width_px) is the primary size driver and arrives already HiDPI-oversampled by the caller.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderParams {
     /// Color scheme to render for.
     pub theme: MermaidTheme,
     /// Target output width in pixels.
-    /// When non-zero this drives the output size (the SVG is scaled so its width matches).
-    /// `0` falls back to [`scale`](Self::scale).
     pub target_width_px: u32,
     /// Hard ceiling on output height in pixels; the render is scaled down to fit.
-    /// `0` disables the height clamp (output area is still bounded by [`MAX_OUTPUT_MEGAPIXELS`]).
     pub max_height_px: u32,
     /// Oversample factor applied **only** when `target_width_px == 0`.
-    /// The default `target_width_px` is non-zero, so this field is inert by default.
     pub scale: f32,
     /// Minimum output width in pixels; `0` disables.
-    /// When non-zero, scale is raised so the raster is at least this wide (before the height and megapixel clamps).
-    /// Useful when a small diagram is opened in an OS image viewer.
     pub min_width_px: u32,
-    /// Opaque background fill.
-    /// `None` renders on a transparent background so the terminal cell color shows through.
+    /// Opaque background fill. `None` renders on a transparent background so the terminal cell color shows through.
     pub background: Option<Rgba>,
 }
 
@@ -141,7 +91,6 @@ impl Default for RenderParams {
             theme: MermaidTheme::Light,
             target_width_px: 1024,
             max_height_px: 4096,
-            // Inert by default (target_width_px drives sizing); 1.0 so a caller that zeroes target_width_px without touching scale gets 1:1
             scale: 1.0,
             min_width_px: 0,
             background: None,
@@ -150,9 +99,10 @@ impl Default for RenderParams {
 }
 
 impl RenderParams {
-    /// Sizing tuned for opening a PNG in an OS image viewer.
-    /// Prefers 2x the SVG's intrinsic size, raises small diagrams to at least `min_width_px`, and allows a taller canvas than the in-terminal sizing.
-    /// Height and the crate-wide megapixel/axis caps still apply.
+    /// Sizing tuned for opening a PNG in an OS image viewer. Prefers 2x the
+    /// SVG's intrinsic size, raises small diagrams to at least
+    /// `min_width_px`, and allows a taller canvas than the in-terminal
+    /// sizing.
     pub fn for_os_viewer(theme: MermaidTheme, min_width_px: u32, max_height_px: u32) -> Self {
         Self {
             theme,
@@ -178,8 +128,6 @@ pub struct RenderedDiagram {
 }
 
 /// Construct the default engine: the offline, pure-Rust [`PureRustEngine`].
-///
-/// `mmdc` is never selected automatically; construct [`MmdcEngine`] explicitly to opt in.
 pub fn default_engine() -> Arc<dyn MermaidEngine> {
     Arc::new(PureRustEngine::new())
 }
@@ -210,8 +158,6 @@ mod tests {
 
     #[test]
     fn default_params_are_target_width_driven() {
-        // Exercises the real default path: target_width_px (1024) drives output width regardless of `scale`
-        // No engine is involved; rasterize is called directly
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50" viewBox="0 0 100 50"><rect width="10" height="10" fill="#0000ff"/></svg>"##;
         let out = rasterize(svg, &RenderParams::default()).expect("render");
         assert_eq!(

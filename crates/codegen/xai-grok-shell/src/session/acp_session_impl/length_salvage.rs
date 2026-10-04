@@ -13,9 +13,10 @@ pub(super) const LENGTH_CONTINUE_REMINDER_BODY: &str = "Your previous response e
      limit and was cut off. Continue from exactly where it stopped — or if a newer user \
      message follows this note, answer that instead.";
 
-/// Pure form of [`SessionActor::length_salvage_budget`].
-/// Kill switches are absolute and outrank every tier, including the always-on cursor one: an explicit `GROK_LENGTH_SALVAGE=0` locally, and the remote `length_salvage_budget = 0` fleet-wide.
-/// Otherwise the precedence is cursor, then env opt-in, then remote budget, then off.
+/// Pure form of [`SessionActor::length_salvage_budget`]. Kill switches are
+/// absolute and outrank every tier, including the always-on cursor one: an
+/// explicit `GROK_LENGTH_SALVAGE=0` locally, and the remote
+/// `length_salvage_budget = 0` fleet-wide.
 pub(super) fn resolve_length_salvage_budget(
     is_cursor: bool,
     env: Option<bool>,
@@ -34,8 +35,8 @@ pub(super) fn resolve_length_salvage_budget(
 }
 
 impl SessionActor {
-    /// `Some(budget)` salvages Length truncations (partial commit and bounded continues); `None` hard-fails.
-    /// Always on when [`SessionActor::is_cursor_agent`]; otherwise the `GROK_LENGTH_SALVAGE` env var (debug override), then the `length_salvage_budget` remote setting.
+    /// `Some(budget)` salvages Length truncations (partial commit and bounded
+    /// continues); `None` hard-fails.
     pub(super) fn length_salvage_budget(&self) -> Option<u32> {
         resolve_length_salvage_budget(
             self.is_cursor_agent(),
@@ -61,12 +62,9 @@ pub(super) struct LengthSalvage {
     continues: u32,
     /// True while the next sample is a salvage continuation; cleared when its response arrives.
     awaiting_continuation: bool,
-    /// Set while the next continue should inject the reminder; cleared on injection (the reminder stays in context for the rest of the run).
-    /// Set again at an answer boundary so a second truncation run in the same prompt gets its own cue.
+    /// Set while the next continue must inject the reminder.
     reminder_armed: bool,
     /// The latest answer is known to be cut off, so the turn reports `MaxTokens` and the TodoGate disengages.
-    /// Cleared at a round boundary (stop-hook feedback, goal directive, recovery prompt).
-    /// A fresh round that finishes the cut work cleanly reports `EndTurn`.
     truncated: bool,
     /// Sticky for the whole prompt: the exhaustion event fires once even when later rounds spend the already-empty budget again.
     exhaustion_reported: bool,
@@ -116,15 +114,14 @@ impl LengthSalvage {
         self.awaiting_continuation = false;
     }
 
-    /// An answer boundary (a tool step or a failed continuation) ended the current run.
-    /// A later truncation starts a new run and gets its own reminder; the previous one is stale or fell out of context.
+    /// An answer boundary (a tool step or a failed continuation) ended the
+    /// current run.
     pub(super) fn step_boundary(&mut self) {
         self.reminder_armed = true;
     }
 
-    /// A round boundary (stop-hook feedback, goal directive, recovery prompt, drained interjection) starts a fresh answer.
-    /// Clearing the mark lets a round that finishes the cut work cleanly report `EndTurn` and re-engage the TodoGate.
-    /// The budget stays spent and `exhaustion_reported` stays set.
+    /// A round boundary (stop-hook feedback, goal directive, recovery prompt,
+    /// drained interjection) starts a fresh answer.
     pub(super) fn round_boundary(&mut self) {
         self.step_boundary();
         self.truncated = false;

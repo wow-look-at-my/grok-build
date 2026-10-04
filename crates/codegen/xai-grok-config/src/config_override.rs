@@ -73,7 +73,6 @@ pub fn patch_touches_any(patch: &toml::Table, paths: &[PatchPath]) -> bool {
 }
 
 /// Keys stripped from every applied patch.
-/// An override cannot re-inject nested `version_overrides`/`campaigns` or define `[auth_provider.*]` / `[model_providers.*]` command tables.
 pub const PATCH_STRIP_KEYS: &[&str] = &[
     "version_overrides",
     "campaigns",
@@ -81,13 +80,13 @@ pub const PATCH_STRIP_KEYS: &[&str] = &[
     "model_providers",
 ];
 
-/// Stripped like [`PATCH_STRIP_KEYS`]: these carry a command the client would execute.
-/// The whole table goes, so a new key in it needs no second edit.
+/// Stripped like [`PATCH_STRIP_KEYS`]: these carry a command the client would
+/// execute.
 pub const PATCH_STRIP_PATHS: &[PatchPath] =
     &[&["ui", "status_line"], &["ui", "notifications", "hooks"]];
 
-/// Additionally stripped from campaign and remote patches: those patches cannot set auth policy tables, while trusted version_overrides may.
-/// The stripped tables carry `preferred_method`, `force_login_team_uuid`, and `disable_api_key_auth`.
+/// Additionally stripped from campaign and remote patches: those patches
+/// cannot set auth policy tables, while trusted version_overrides may.
 pub const CAMPAIGN_STRIP_KEYS: &[&str] = &[
     "version_overrides",
     "campaigns",
@@ -101,18 +100,14 @@ pub const CAMPAIGN_STRIP_KEYS: &[&str] = &[
 /// No entry is a prefix of another: a top-level key is either a whole-subtree keep or deeper-only, never both.
 /// Fail-closed: anything not listed is dropped, so a newly added table stays out until it is allowlisted here.
 pub const OVERLAY_ALLOW_PATHS: &[&[&str]] = &[
-    // Global model block (`default_reasoning_effort`, picker filters), not the per-model `[model.<id>]` block; and the soft `[features]` toggles
+    // Global model block (`default_reasoning_effort`, picker filters), not the per-model `[model.<id>]` block.
     &["models"],
     &["features"],
-    // `[toolset]` is not soft wholesale: its sinks (`web_search` base_url / api_key, `web_fetch` proxy_endpoint, `bash` cmd_prefix) stay out
-    // Only `login_shell_capture` (runs the user's own `$SHELL`) and the web-search domain lists survive
-    // The domain lists widen or narrow the user's own allowlist and are capped and requirements-clamped downstream
+    // `[toolset]` is not soft wholesale.
     &["toolset", "bash", "login_shell_capture"],
     &["toolset", "web_search", "allowed_domains"],
     &["toolset", "web_search", "excluded_domains"],
-    // `[shell_environment_policy]` cannot inject an env value
-    // Relative to a lower layer they may loosen or tighten what a subprocess inherits but never introduce a value
-    // A launcher that must add an env var sets it on the process directly
+    // `[shell_environment_policy]` cannot inject an env value Relative to a lower layer they may loosen or tighten what a subprocess inherits.
     &["shell_environment_policy", "inherit"],
     &["shell_environment_policy", "ignore_default_excludes"],
     &["shell_environment_policy", "exclude"],
@@ -174,8 +169,7 @@ pub fn apply_patches(
                     .and_then(toml::Value::as_table)
                     .is_some_and(|model| model.contains_key("mtls_cert_dir"));
                 if let Some(patch_model) = patch_model.as_table_mut() {
-                    // A patch may tune the model, but it cannot select a local identity
-                    // or change the explicit destination to which that identity is bound.
+                    // A patch may tune the model.
                     patch_model.remove("mtls_cert_dir");
                     if has_mtls_identity {
                         patch_model.remove("base_url");

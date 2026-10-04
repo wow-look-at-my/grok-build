@@ -1,6 +1,4 @@
-//! The `<image_files>` envelope and the image state carried across compaction: the last real user
-//! turn's image parts and block, and the on-disk paths of images attached earlier in the session.
-//! Pure text and data transforms; the existence check on the paths belongs to the shell.
+//! The `<image_files>` envelope and the image state carried across compaction: the last real user turn's image parts and block.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -13,13 +11,10 @@ use crate::compaction_utils::wrap_user_query;
 #[derive(Debug, Clone, Default)]
 pub struct CompactionImageContext {
     /// `ContentPart::Image` parts of the item `last_user_query` came from, in order.
-    /// `url` is `Arc<str>`, so clones are cheap.
     pub last_turn_image_parts: Vec<ContentPart>,
     /// Verbatim `<image_files>…</image_files>` block from that item's text.
     pub last_turn_image_files: Option<String>,
-    /// Paths from every `<image_files>` block in the summarized conversation: chronological, deduped,
-    /// excluding the last turn's own block. Harvested text is untrusted; the shell verifies each path
-    /// against the session `assets/` dir and caps the list.
+    /// Paths from every `<image_files>` block in the summarized conversation: chronological, deduped.
     pub attached_paths: Vec<String>,
 }
 
@@ -168,9 +163,9 @@ fn image_files_block(lead: &str, paths: &[String], trailer: &str) -> String {
     out
 }
 
-/// Sanitize a single-line string before interpolating it into a structured envelope.
-/// Replaces `<` / `>` with the typographic look-alikes `‹` / `›` so envelope-close tags cannot be forged.
-/// Trade-off: model output sees `‹` instead of `<` in the scrubbed region; these are envelope fillers, not source code.
+/// Sanitize a single-line string before interpolating it into a structured
+/// envelope. Replaces `<` / `>` with the typographic look-alikes `‹` /
+/// `›` so envelope-close tags cannot be forged.
 fn scrub_for_envelope(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

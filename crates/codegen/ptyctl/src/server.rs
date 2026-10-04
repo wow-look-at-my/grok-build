@@ -49,7 +49,6 @@ pub struct ResizeRequest {
 /// Query parameters for scrollback endpoint.
 #[derive(Debug, serde::Deserialize, Default)]
 pub struct ScrollbackParams {
-    /// Number of scrollback lines to return (default: 100).
     pub lines: Option<usize>,
 }
 
@@ -69,7 +68,6 @@ pub struct WaitParams {
     pub gone: Option<String>,
     /// Wait until the grid has been unchanged for this many milliseconds.
     pub stable_ms: Option<u64>,
-    /// Timeout in milliseconds (default 10000, capped at 120000).
     pub timeout_ms: Option<u64>,
 }
 
@@ -211,7 +209,6 @@ async fn handle_resize(
 }
 
 /// Long-poll until a screen condition is met or the timeout elapses.
-/// Timeout is a normal outcome (200 with `matched: false`), not an error.
 async fn handle_wait(
     State(state): State<AppState>,
     Query(params): Query<WaitParams>,

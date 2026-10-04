@@ -78,8 +78,7 @@ fn effort_only_resolves_remapped_menu_id() {
 
 #[test]
 fn effort_only_unsupported_canonical_token_is_unsupported() {
-    // The support check runs first: a canonical token on a non-reasoning model reports Unsupported (matching `/effort` and headless)
-    // The alternative would silently apply an effort the server would drop
+    // The support check runs first: a canonical token on a non-reasoning model reports Unsupported (matching `/effort` and headless).
     let models = models_with_current(false);
     assert_eq!(
         take_deferred_model_switch(None, &models, Some("high")),

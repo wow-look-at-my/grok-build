@@ -1,16 +1,4 @@
 //! PCM16 mono capture via cpal for streaming STT.
-//!
-//! Prefers a device input config that natively supports the target rate (16 kHz) so no resampling is needed.
-//! Otherwise it uses the device default (typically 48 kHz stereo F32 on macOS) and downmixes and resamples to 16 kHz mono for the STT API.
-//! cpal streams are not `Send` on all platforms; capture runs on a dedicated std thread and forwards PCM chunks through a sync channel.
-//!
-//! # Two roles: in-process backend and `__mic-capture` child
-//!
-//! On Windows this module is the capture backend itself (WASAPI's in-process memory cost is modest).
-//! On macOS, opening CoreAudio in-process permanently dirties several MB that the OS never returns after the stream drops.
-//! [`super::capture_subprocess`] therefore re-execs the binary as a short-lived `__mic-capture` helper.
-//! This module provides that child ([`run_capture_child_cli`]) and the in-process fallback.
-//! The fallback covers self-exec being unavailable (e.g. the on-disk binary was replaced by an update).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -32,23 +20,19 @@ pub struct CaptureHandle {
 }
 
 impl CaptureHandle {
-    /// Stop capture and wait for the thread to exit.
-    /// Dropping a `CaptureHandle` also stops capture (see the `Drop` impl), but without joining.
-    /// Call `stop()` when you need to be sure the device is released before continuing.
+    /// Stop capture and wait for the thread to exit. Dropping a `CaptureHandle` also stops capture (see the `Drop`
+    /// impl), but without joining.
     pub fn stop(mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        // `Drop` runs next and aborts the bridge task.
     }
 }
 
 impl Drop for CaptureHandle {
     fn drop(&mut self) {
-        // Always signal the capture thread to exit so the mic is released even when `stop()` was never called. That covers the
-        // STT session ending on its own (server close or error) and the pipeline shutting down mid-utterance. We deliberately do
-        // not join here so `Drop` never blocks (it may run on an async executor)
+        // Always signal the capture thread to exit so the mic is released even when `stop()` was never called.
         self.stop.store(true, Ordering::Release);
         self.bridge.abort();
     }
@@ -60,9 +44,8 @@ pub fn spawn_pcm_capture(
     pcm_tx: async_mpsc::Sender<Vec<u8>>,
 ) -> Result<CaptureHandle, VoiceError> {
     let (sync_tx, sync_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(64);
-    // The `recv()` blocks between audio chunks for the whole session, so it runs on the blocking pool (`spawn_blocking` and
-    // `blocking_send`). The loop exits on its own when capture stops (sync_tx is dropped) or the STT consumer goes away
-    // (`blocking_send` errors). The `abort()` in `CaptureHandle`'s teardown is only a backstop
+    // The `recv()` blocks between audio chunks for the whole session, so it
+    // runs on the blocking pool (`spawn_blocking` and `blocking_send`).
     let bridge = tokio::task::spawn_blocking(move || {
         while let Ok(bytes) = sync_rx.recv() {
             if pcm_tx.blocking_send(bytes).is_err() {
@@ -78,8 +61,10 @@ pub fn spawn_pcm_capture(
         run_capture_loop(sample_rate, sync_tx, stop_flag, ready_tx);
     });
 
-    // Wait briefly for the device to actually open (mirrors the STT `wait_ready` handshake)
-    // Device/permission failures then reach the caller and its `VoiceEvent::Error` toast instead of leaving the session "listening" with no audio
+    // Wait briefly for the device to open (mirrors the STT `wait_ready`
+    // handshake) Device/permission failures then reach the caller and its
+    // `VoiceEvent::Error` toast instead of leaving the session "listening"
+    // with no audio
     match ready_rx.recv_timeout(Duration::from_secs(5)) {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
@@ -228,8 +213,6 @@ pub(super) fn open_capture_stream(
         ))
     })?;
 
-    // Prefer a device-native `sample_rate` (e.g. a mic that supports 16 kHz directly) so we can skip resampling entirely.
-    // Fall back to the device default and the linear resampler when no native config matches
     let supported = native_rate_config(&device, sample_rate).unwrap_or(default_config);
 
     let stream_rate = supported.sample_rate().0;
@@ -296,7 +279,7 @@ fn run_capture_poll_loop(
     while !stop.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(50));
         ticks += 1;
-        // Report roughly once per second (20 ticks of 50 ms)
+        // Report roughly once per second (ticks of multiple ms)
         if ticks.is_multiple_of(20) {
             let total = dropped.load(Ordering::Relaxed);
             if total > last_reported {
@@ -465,9 +448,8 @@ fn resample_mono_i16(samples: &[i16], input_rate: u32, output_rate: u32) -> Vec<
 /// line, then raw PCM. The child exits when its stdout write fails (parent closed the pipe or died) or when the parent
 /// kills it; it never outlives the capture session.
 pub(crate) fn run_capture_child_cli(args: Vec<String>) -> i32 {
-    // Route the child's tracing (device open info, cpal warnings) to stderr, which the parent drains into its debug log
-    // The output is plain text, since the reader is a pipe, not a terminal
-    // Stdout is the protocol channel and must stay clean
+    // Route the child's tracing (device open info, cpal warnings) to stderr,
+    // which the parent drains into its debug log The output is plain text.
     let _ = tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(false)
@@ -559,7 +541,6 @@ fn run_capture_child(rate: u32) -> i32 {
     };
 
     let mut out = std::io::stdout().lock();
-    // Flush per chunk: chunks are small (~10 ms of PCM) and streaming STT wants them promptly, not batched by the stdout buffer
     loop {
         match sync_rx.recv_timeout(Duration::from_secs(2)) {
             Ok(chunk) => {
@@ -567,8 +548,8 @@ fn run_capture_child(rate: u32) -> i32 {
                     break; // parent closed the pipe or died; stop capturing
                 }
             }
-            // A silent device produces no writes, so parent death would go unnoticed and orphan this child; poll for reparenting
-            // (The parent normally kills us long before this fires.)
+            // A silent device produces no writes, so parent death will go
+            // unnoticed and orphan this child.
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 #[cfg(unix)]
                 if std::os::unix::process::parent_id() == 1 {

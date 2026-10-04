@@ -1,5 +1,4 @@
 //! Defines the `MarkdownStyle` used by agent message and thinking blocks.
-//! Colors come from the `md_*` fields on the current [`Theme`], which are already quantized to the terminal's color capability level.
 
 use anstyle::{Ansi256Color, AnsiColor, Color, Style};
 use xai_grok_markdown::MarkdownStyle;
@@ -92,7 +91,6 @@ fn heading_outer_styles(colors: [ratatui::style::Color; 6]) -> [Style; 6] {
 }
 
 /// The style is built fresh from [`Theme::current()`] on each call.
-/// Both the theme construction and style mapping are trivial struct copies.
 pub fn style() -> MarkdownStyle {
     build_style()
 }
@@ -128,8 +126,7 @@ fn build_style() -> MarkdownStyle {
         strikethrough_outer: Style::new().dimmed().hidden(),
         inline_code_inner: fg(theme.md_code).bold(),
         inline_code_outer: fg(theme.md_code).dimmed().hidden(),
-        // The selection-side bar detection in xai-grok-pager (scrollback/blocks/quote_bar.rs, `quote_bar_style`) mirrors this exact style
-        // Its end-to-end tests fail if this line changes
+        // The selection-side bar detection in xai-grok-pager (scrollback/blocks/quote_bar.rs, `quote_bar_style`).
         blockquote_outer: fg(theme.md_muted).dimmed(),
         task_checked: fg(theme.md_task_checked),
         task_unchecked: fg(theme.md_task_unchecked).dimmed(),

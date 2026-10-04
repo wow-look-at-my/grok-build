@@ -1,6 +1,4 @@
 //! Search extension API layer (fuzzy file search, content search).
-//!
-//! Routing: prefers explicit `cwd`, falls back to session lookup via `sessionId`.
 
 use crate::extensions::agent_runtime::AgentRuntime;
 use crate::session::ExtMethodResult;

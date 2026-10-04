@@ -1,18 +1,4 @@
 //! E2E: the coding-data privacy upsell banner.
-//! It shows on the welcome screen for an opted-out OAuth user under the `privacy_notice_rollout` flag and persists into the agent view.
-//! Both buttons write the choice through the shell's `PUT /privacy/coding-data-retention` round trip and stamp
-//! `[privacy].privacy_banner_acked` only once that succeeds. The banner hides as soon as the write is pending, so
-//! hiding and acknowledging are separate steps.
-//! `[Opt out]` runs as a personal account, whose capability `/user` never resolves; `[Opt in]` as a member the server says
-//! can administer the team.
-//!
-//! Drives the real pager binary through a PTY against the shared mock inference server (isolated `$HOME`).
-//! A seeded opted-out OAuth entry is the active auth (`XAI_API_KEY` removed) and the rollout is forced on via `GROK_PRIVACY_NOTICE_ROLLOUT=1`.
-//!
-//! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test privacy_banner_e2e \
-//!   -- --ignored --nocapture
-//! ```
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -42,9 +28,9 @@ async fn privacy_banner_persists_into_agent_view_and_opt_in_shares() {
     run_opt_in().await.expect("privacy banner opt-in e2e");
 }
 
-/// The banner's env preconditions: force the rollout flag on (the env override beats remote settings) and remove the sandbox's fake `XAI_API_KEY`.
-/// Removing the key makes the seeded opted-out OAuth entry the active auth.
-/// The `[Opt in]` team principal would otherwise start a managed-config fetch the mock does not serve.
+/// The banner's env preconditions: force the rollout flag on (the env
+/// override beats remote settings) and remove the sandbox's fake
+/// `XAI_API_KEY`.
 fn banner_env_ops() -> [EnvOp<'static>; 3] {
     [
         EnvOp::set("GROK_PRIVACY_NOTICE_ROLLOUT", "1"),
@@ -102,8 +88,6 @@ async fn run_opt_out() -> Result<()> {
     drop(pager);
 
     // Relaunch with the same sandbox: the acked banner must not re-show.
-    // Sync on "New worktree", which renders only on the authenticated welcome menu
-    // "Quit" also appears while auth is still pending, where the banner is gated off regardless of the ack
     let mut relaunched =
         spawn_pager(&binary, &content, project.path()).context("relaunch pager")?;
     relaunched
@@ -189,8 +173,6 @@ fn wait_for_banner(pager: &mut PtyHarness) -> Result<()> {
         .context("privacy banner on screen")
 }
 
-/// Click `needle` by injecting an SGR (DECSET 1006) press and release at its first character.
-/// The wire encoding is 1-based `col;row` (`screen_contents` line 0 is row 1).
 /// The banner region is ASCII-only, so the byte offset within the line is the column.
 fn click_text(pager: &mut PtyHarness, needle: &str) -> Result<()> {
     let screen = pager.screen_contents();

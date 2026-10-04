@@ -2,12 +2,9 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-// Auto-compact: the top padding row disappears on tiny terminals. Growing the terminal back
-// restores the padding; the user's persisted compact setting never changes. A YAML scenario cannot
-// assert on-screen positions, so this test reads the first non-blank screen row directly.
+// Auto-compact: the top padding row disappears on tiny terminals.
 
 /// A height short enough to engage auto-compact.
-/// It is above `SHORT_TERMINAL_ROWS` (16) but at most `AUTO_COMPACT_MAX_ROWS` (20), so it pins the auto-compact derivation, not the layout trims.
 const SHORT_ROWS: u16 = 18;
 
 /// Index of the first screen row with any non-whitespace content, panicking with the screen when the whole screen is blank.
@@ -19,9 +16,7 @@ fn first_content_row(harness: &PtyHarness, when: &str) -> u16 {
         .unwrap_or_else(|| panic!("{when}: screen is entirely blank\nscreen:\n{screen}")) as u16
 }
 
-/// Auto-compact drops the top padding row on tiny terminals. Tall: row 0 is the blank top padding
-/// row (first content below it). At `SHORT_ROWS`: auto-compact removes the padding and the status
-/// bar lands on row 0. Back tall: the padding (and the blank row 0) comes back.
+/// Auto-compact drops the top padding row on tiny terminals.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn auto_compact_top_row() {
@@ -94,9 +89,8 @@ async fn auto_compact_top_row() {
     harness.quit().expect("clean quit");
 }
 
-/// **Auto-compact engages at startup, with no resize event.**
-/// Spawning already tiny (no resize event ever fires) must still land the status bar on row 0.
-/// Only the startup read of `crossterm::terminal::size()` into the initial appearance can have derived the compact flag.
+/// **Auto-compact engages at startup, with no resize event.** Only the startup read of `crossterm::terminal::size()`
+/// into the initial appearance can have derived the compact flag.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn auto_compact_at_startup() {

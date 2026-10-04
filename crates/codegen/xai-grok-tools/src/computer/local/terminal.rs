@@ -1,6 +1,4 @@
 //! Actor-based terminal backend for foreground and background execution.
-//! `LocalTerminalBackend` is a channel handle; `LocalTerminalActor` runs in a
-//! spawned task and owns all mutable state, so no locks are needed.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -30,7 +28,6 @@ use super::shell_state;
 struct SpawnResult {
     child: tokio::process::Child,
     process_group: crate::util::ProcessGroup,
-    /// Handle for reading the state dump from fd 4 (persistent shell only).
     state_dump_handle: Option<tokio::task::JoinHandle<std::io::Result<String>>>,
 }
 
@@ -41,10 +38,9 @@ const COMMAND_CHANNEL_SIZE: usize = 32;
 const COMPLETED_TASK_TTL: Duration = Duration::from_secs(300);
 /// SIGTERM → SIGKILL grace period.
 const SIGTERM_GRACE: Duration = Duration::from_secs(1);
-/// Max background task lifetime; 10 hours to support long monitor and bash runs.
+/// Max background task lifetime; several hours to support long monitor and bash runs.
 pub(crate) const BACKGROUND_MAX_RUNTIME: Duration = Duration::from_secs(36_000);
-/// Max time an auto-backgroundable foreground command blocks the turn before it is
-/// backgrounded (never killed), independent of `timeout`. Env: `GROK_FOREGROUND_BLOCK_BUDGET_MS`.
+/// Max time an auto-backgroundable foreground command blocks the turn before it is backgrounded (never killed).
 pub(crate) const FOREGROUND_BLOCK_BUDGET: Duration = Duration::from_secs(15);
 
 pub(crate) fn foreground_block_budget_from_env() -> Duration {
@@ -55,8 +51,7 @@ pub(crate) fn foreground_block_budget_from_env() -> Duration {
         .unwrap_or(FOREGROUND_BLOCK_BUDGET)
 }
 
-/// Output-file size at which the actor kills the command, stopping an unbounded
-/// writer from filling the disk. Env override: `GROK_MAX_OUTPUT_FILE_BYTES`.
+/// Output-file size at which the actor kills the command, stopping an unbounded writer from filling the disk.
 const MAX_OUTPUT_FILE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 
 fn output_file_cap_from_env() -> u64 {
@@ -65,15 +60,12 @@ fn output_file_cap_from_env() -> u64 {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(MAX_OUTPUT_FILE_BYTES)
 }
-/// Post-exit drain cap: an inherited pipe (`cmd &`, no redirect) would
-/// otherwise block the actor loop forever.
+/// Post-exit drain cap: an inherited pipe (`cmd &`, no redirect) would otherwise block the actor loop forever.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
-/// How long a kill waits for the reap before taking the output there is: a
-/// process that never dies must not hold its task open forever.
+/// How long a kill waits for the reap before taking the output there is: a process.
 const REAP_GRACE: Duration = Duration::from_secs(5);
 /// Post-exit output-file retention cap so snapshots don't materialize huge strings.
 const MAX_RETAINED_OUTPUT_FILE_BYTES: u64 = 64 * 1024 * 1024;
-/// Tombstones are metadata-only, so 100 entries is ~10 KB.
 const MAX_COMPLETED_TASK_SNAPSHOTS: usize = 100;
 
 fn notification_interval() -> Duration {
@@ -152,8 +144,7 @@ impl ChildExitWake {
                 INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
             };
             // SAFETY: the handle is opened by pid at spawn time (the child is
-            // alive), used only for a synchronize wait, and closed here; an
-            // open failure falls back to the tick as the only trigger.
+            // alive), used only for a synchronize wait, and closed here.
             unsafe {
                 if let Ok(handle) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
                     WaitForSingleObject(handle, INFINITE);
@@ -269,8 +260,7 @@ enum TerminalCommand {
 }
 
 // ============================================================================
-// Per-process state (for each running command)
-// ============================================================================
+// Per-process state (for each running command).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BackgroundStatus {
@@ -305,8 +295,7 @@ impl BackgroundReason {
 
 struct ProcessState {
     child: tokio::process::Child,
-    /// Unix: dropped to `None` at reap — kept through the completed-task TTL,
-    /// `kill_all` could `killpg` a recycled pid. Windows JobObjects have no such hazard.
+    /// Unix: dropped to `None` at reap — kept through the completed-task TTL.
     process_group: Option<std::sync::Arc<crate::util::ProcessGroup>>,
     /// Tail of the output; the front is frozen in `front_buffer` once truncation fires.
     output_buffer: Vec<u8>,
@@ -339,8 +328,7 @@ struct ProcessState {
     notification_handle: ToolNotificationHandle,
     tool_call_id: String,
     kind: crate::computer::types::TaskKind,
-    /// Chunk gate keyed off monotonic `total_bytes`, not `output_buffer.len()`:
-    /// the truncated tail shrinks, so a length gate would go (and stay) false.
+    /// Chunk gate keyed off monotonic `total_bytes`, not `output_buffer.len()`: the truncated tail shrinks.
     last_notified_total: usize,
     /// Set when a `block=true` waiter consumed this task's result.
     block_waited: bool,
@@ -348,8 +336,7 @@ struct ProcessState {
     explicitly_killed: bool,
     kill_result_delivered: bool,
 
-    /// fd-4 state dump reader (persistent shell only); collected on exit to
-    /// update the canonical `ShellState`.
+    /// fd-4 state dump reader (persistent shell only); collected on exit to update the canonical `ShellState`.
     state_dump_handle: Option<tokio::task::JoinHandle<std::io::Result<String>>>,
 
     /// Scopes kill operations so subagent teardown only kills its own tasks.
@@ -534,11 +521,10 @@ impl ProcessState {
 }
 
 // ============================================================================
-// Actor
-// ============================================================================
+// Actor.
 
 /// Stored instead of blocking the actor loop; the sweep fires it on child
-/// exit, at its deadline, or on the safety tick, whichever comes first.
+/// exit, at its deadline, or on the safety tick.
 struct CompletionWaiter {
     reply: oneshot::Sender<Option<TaskSnapshot>>,
     deadline: Instant,
@@ -549,12 +535,10 @@ struct LocalTerminalActor {
 
     cancel_token: CancellationToken,
 
-    /// Spawned children enroll here so the TUI exit paths can `kill_all()`
-    /// setsid-detached trees. Tests inject their own to avoid latching the global.
+    /// Spawned children enroll here so the TUI exit paths can `kill_all()` setsid-detached trees.
     scope: crate::util::ProcessScope,
 
-    /// Owning session's scope, enrolled additionally so closing the session reaps
-    /// its commands; whichever reaper fires first wins, the other finds a dead group.
+    /// Owning session's scope, enrolled additionally so closing the session reaps its commands; whichever reaper fires first wins.
     session_scope: Option<crate::util::ProcessScope>,
 
     processes: HashMap<String, ProcessState>,
@@ -565,8 +549,7 @@ struct LocalTerminalActor {
 
     completion_waiters: HashMap<String, Vec<CompletionWaiter>>,
 
-    /// Metadata-only tombstones so `get_task` still answers after the process
-    /// eviction TTL; retained for the session lifetime.
+    /// Metadata-only tombstones so `get_task` still answers after the process eviction TTL; retained.
     completed_task_snapshots: HashMap<String, TaskSnapshot>,
 
     completed_task_ttl: Duration,
@@ -589,8 +572,7 @@ struct LocalTerminalActor {
 
     login_shell_capture: bool,
 
-    /// Baked in at construction, not read from a process-global, so a subagent
-    /// reusing this backend can't clobber the parent's search shadows.
+    /// Baked in at construction, not read from a process-global.
     search_shadows: SearchShadowConfig,
 
     /// Baked in at construction; `None` inherits the full environment.
@@ -630,8 +612,7 @@ impl LocalTerminalActor {
         } = settings;
         Self {
             cmd_rx,
-            // Weak: a strong sender would keep the channel open and the actor
-            // alive after every backend handle is dropped.
+            // Weak: a strong sender would keep the channel open and the actor alive.
             self_tx,
             cancel_token,
             scope,
@@ -781,11 +762,6 @@ impl LocalTerminalActor {
         }
 
         let snapshot = static_shell.snapshot.clone();
-        // The write end of the snapshot pipe is owned by this task alone, so a
-        // failure to drain it has to be reported: the child blocks on fd 3
-        // either way and the caller cannot tell a slow write from a dead task.
-        // `fire_and_forget` is that report: it logs the panic under the task's
-        // own name, so the dropped handle has nothing left to lose.
         #[allow(clippy::disallowed_methods)]
         tokio::spawn(crate::util::detached::fire_and_forget(
             "static shell snapshot writer",
@@ -825,8 +801,6 @@ impl LocalTerminalActor {
         }
     }
 
-    /// Spawn a command with persistent shell state: restore the prior snapshot
-    /// via fd 3, run the user command, dump the new state to fd 4.
     #[cfg(unix)]
     async fn spawn_persistent_command(
         &mut self,
@@ -881,8 +855,7 @@ impl LocalTerminalActor {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        // The persistent backend restores login state from its snapshot, so no
-        // login-env layering here.
+        // The persistent backend restores login state from its snapshot, so no login-env layering here.
         apply_child_env(&mut cmd, self.shell_env_policy.as_ref(), None, env);
 
         cmd.fd_mappings(prep.fd_mappings)
@@ -901,8 +874,7 @@ impl LocalTerminalActor {
                 e.kind(),
             )
         })?;
-        // Releases the FdMapping OwnedFds: otherwise the parent keeps the state-out
-        // pipe's write end open and the dump reader never sees EOF.
+        // Releases the FdMapping OwnedFds: otherwise the parent keeps the state-out pipe's write end open.
         drop(cmd);
 
         let mut process_group = crate::util::ProcessGroup::new()
@@ -912,8 +884,6 @@ impl LocalTerminalActor {
         }
 
         let snapshot = shell_state.snapshot.clone();
-        // The child blocks reading fd 3 until this drains, so the task failing
-        // is not something the caller can see from the pipe: it has to say so.
         // `fire_and_forget` logs a panic under the task's own name, so the
         // dropped handle has nothing left to lose.
         #[allow(clippy::disallowed_methods)]
@@ -957,8 +927,7 @@ impl LocalTerminalActor {
         loop {
             let waiter_deadline = self.next_waiter_deadline();
             tokio::select! {
-                // Bias commands (cancel, kill) over ticking so kills are handled
-                // promptly even when poll_all_processes was slow (drain timeouts).
+                // Bias commands (cancel, kill) over ticking so kills are handled promptly even when poll_all_processes was slow.
                 biased;
 
                 _ = self.cancel_token.cancelled() => {
@@ -976,20 +945,17 @@ impl LocalTerminalActor {
                     }
                 }
 
-                // Deadline outranks the exit wake: a due timeout must not queue
-                // behind another child's sweep work.
+                // Deadline outranks the exit wake: a due timeout must not queue behind another child's sweep work.
                 _ = sleep_until_deadline(waiter_deadline) => {
                     self.poll_all_processes().await;
                 }
 
-                // Gated like the ticker: every actor in the process shares SIGCHLD,
-                // so idle sessions must not wake on exits of unrelated children.
+                // Gated like the ticker: every actor in the process shares SIGCHLD.
                 _ = self.child_exit.recv(), if !self.processes.is_empty() => {
                     self.poll_all_processes().await;
                 }
 
-                // Gated on live processes: one actor per open session/tab must not
-                // wake 10x/sec to poll an empty map; the next spawn re-enables the arm.
+                // Gated on live processes: one actor per open session/tab must not wake 10x/sec to poll an empty map.
                 _ = ticker.tick(), if !self.processes.is_empty() => {
                     self.poll_all_processes().await;
                 }
@@ -1016,8 +982,7 @@ impl LocalTerminalActor {
                     process.maybe_truncate();
                 }
                 process.draining = false;
-                // An exit recorded first (kill, timeout sweep) wins: keep its
-                // status and the reply its waiters already got.
+                // An exit recorded first (kill, timeout sweep) wins: keep its status.
                 let already_exited = process.lifecycle.has_exited();
                 if !already_exited {
                     process.mark_exited(status);
@@ -1033,8 +998,7 @@ impl LocalTerminalActor {
                     let result = Ok(process.to_result());
                     process.notify_waiters(result);
                 }
-                // Background waits register in completion_waiters, not the
-                // foreground oneshot; deliver them now, not on the next sweep.
+                // Background waits register in completion_waiters, not the foreground oneshot; deliver them now.
                 self.notify_completion_waiters().await;
                 if !already_exited {
                     self.evict_if_foreground(&task_id);
@@ -1109,8 +1073,6 @@ impl LocalTerminalActor {
             TerminalCommand::WarmShell { cwd } => {
                 #[cfg(unix)]
                 if self.persistent_shell {
-                    // Cursor's persistent shell initializes lazily on first
-                    // command; warming is only for the static capture path.
                 } else if self.login_shell_capture && login_env_capture_enabled() {
                     self.ensure_static_shell_initialized(&cwd).await;
                 } else if self.login_env.is_none() {
@@ -1175,8 +1137,7 @@ impl LocalTerminalActor {
         let group = std::sync::Arc::new(group);
         self.scope.register(&group);
         if let Some(session_scope) = &self.session_scope {
-            // A closed session scope kills the group here, which is the point:
-            // a command racing session teardown must not survive it.
+            // A closed session scope kills the group here, which is the point.
             session_scope.register(&group);
         }
         group
@@ -1404,8 +1365,8 @@ impl LocalTerminalActor {
             block_waited: false,
             explicitly_killed: false,
             kill_result_delivered: false,
-            // Spawned with the state wrapping so bg commands inherit the session env,
-            // but the dump reader is discarded: hours-long tasks must not leak env mutations.
+            // Spawned with the state wrapping so bg commands inherit the
+            // session env.
             state_dump_handle: if self.persistent_shell {
                 drop(state_dump_handle);
                 None
@@ -1437,8 +1398,8 @@ impl LocalTerminalActor {
         reply: oneshot::Sender<Option<TaskSnapshot>>,
     ) {
         let Some(process) = self.processes.get_mut(&task_id) else {
-            // Imprint block_waited on the tombstone in place, but only when the reply
-            // is delivered: a dropped receiver (cancelled turn) means the model never saw it.
+            // Imprint block_waited on the tombstone in place, but only when
+            // the reply is delivered.
             let snapshot = self.completed_task_snapshots.get(&task_id).map(|s| {
                 let mut s = s.clone();
                 s.block_waited = true;
@@ -1455,8 +1416,7 @@ impl LocalTerminalActor {
             return;
         };
 
-        // block_waited makes the notification bridge skip auto-wake; cleared again
-        // in `poll_all_processes` (steps 1-2) if the waiter is cancelled undelivered.
+        // block_waited makes the notification bridge skip auto-wake.
         let prev_block_waited = process.block_waited;
         process.block_waited = true;
 
@@ -1587,8 +1547,7 @@ impl LocalTerminalActor {
                 });
                 process.end_wall_time = Some(std::time::SystemTime::now());
                 process.flush_and_truncate_output_file().await;
-                // Unlike the bg-only max-runtime sweep this may be a foreground
-                // command, so notify waiters now (mirrors OOM).
+                // Unlike the bg-only max-runtime sweep this may be a foreground command.
                 let result = Ok(process.to_result());
                 process.notify_waiters(result);
             }
@@ -1654,8 +1613,6 @@ impl LocalTerminalActor {
                         any_delivered = true;
                     }
                 }
-                // Every receiver dropped (turns cancelled): clear block_waited so the
-                // auto-wake fires; must run before step 3 snapshots the completion.
                 if !any_delivered && let Some(process) = self.processes.get_mut(&task_id) {
                     process.block_waited = false;
                 }
@@ -1841,16 +1798,14 @@ impl LocalTerminalActor {
                     send_sigkill_to_group(process);
                     let gave_up = waiting_since.is_some_and(|since| since.elapsed() >= REAP_GRACE);
                     if gave_up {
-                        // Not dying: take the output there is so the task can report
-                        // completion instead of waiting forever.
+                        // Not dying: take the output there is so the task can report completion instead.
                         take_available_output(process).await;
                         process.flush_and_truncate_output_file().await;
                         process.finish_output(Collection::ABANDONED);
                     }
                 }
                 Ok(Some(_)) | Err(_) => {
-                    // Off-actor like fresh exits: the handler keeps the recorded
-                    // status and this drain only contributes the output tail.
+                    // Off-actor like fresh exits: the handler keeps the recorded status.
                     process.draining = true;
                     spawn_detached_drain(
                         self.self_tx.clone(),
@@ -1995,7 +1950,6 @@ impl LocalTerminalActor {
                 );
             }
             Ok(None) if process_done => {
-                // Streams closed but the process hasn't exited yet.
             }
             Ok(None) => {}
             // An erroring `try_wait` is no proof the child was collected; keep polling.
@@ -2028,8 +1982,8 @@ impl LocalTerminalActor {
 
     /// Shared by auto-timeout and user Ctrl+G. Re-keys the entry to `tool_call_id`.
     fn transition_to_background(&mut self, old_key: &str, reason: BackgroundReason) -> bool {
-        // A draining task keeps its key: the in-flight DrainedOutput resolves by
-        // this key, and the exit it carries completes the task within DRAIN_TIMEOUT.
+        // A draining task keeps its key: the in-flight DrainedOutput resolves
+        // by this key.
         if self.processes.get(old_key).is_none_or(|p| p.draining) {
             return false;
         }
@@ -2116,7 +2070,6 @@ impl LocalTerminalActor {
                         .display_command
                         .clone()
                         .unwrap_or_else(|| process.command.clone()),
-                    // The shell drops these three before the wire; copying the buffer would be waste.
                     output: Vec::new(),
                     total_bytes: 0,
                     truncated: false,
@@ -2148,8 +2101,6 @@ impl LocalTerminalActor {
                     tokio::time::timeout(std::time::Duration::from_secs(5), process.child.wait())
                         .await;
 
-                // Abort the dump reader: a grandchild that inherited fd 4 and escaped
-                // the group keeps the pipe open, hanging the blocking read forever.
                 if let Some(handle) = process.state_dump_handle.take() {
                     handle.abort();
                 }
@@ -2241,13 +2192,11 @@ impl LocalTerminalActor {
                 && process.bg_status.is_backgrounded()
                 && !process.lifecycle.has_exited()
             {
-                // Foreground processes keep their owner so the follow-up
-                // kill_foreground_commands_by_owner can still reap them.
+                // Foreground processes keep their owner.
                 process.owner_session_id = Some(new_owner_session_id.to_string());
                 process.notification_handle = new_handle.clone();
 
-                // Recover the monitor label from the baked "[monitor] <desc>" display
-                // command so the pager renders a Monitor row, not bash-highlighted text.
+                // Recover the monitor label from the baked "[monitor] <desc>" display command so the pager renders a Monitor row.
                 let is_monitor = process.kind == crate::computer::types::TaskKind::Monitor;
                 // Filter blank recoveries like spawn does, else Some("") blocks the
                 // command fallback for the re-spawned pipeline label.
@@ -2289,7 +2238,8 @@ impl LocalTerminalActor {
                     description: effective_description.clone(),
                 });
 
-                // The old monitor pipeline died with the child session; re-spawn it.
+                // The monitor pipeline died with the child session; re-spawn
+                // it.
                 if process.kind == crate::computer::types::TaskKind::Monitor {
                     let pipeline_task_id = task_id.clone();
                     let pipeline_description =
@@ -2332,8 +2282,7 @@ impl LocalTerminalActor {
 }
 
 // ============================================================================
-// Handle (public API)
-// ============================================================================
+// Handle (public API).
 
 /// Channel handle to the terminal actor; the public `TerminalBackend` API.
 #[derive(Clone)]
@@ -2540,18 +2489,13 @@ impl LocalTerminalBackend {
             actor.run().await;
         };
 
-        // The actor answers every command the handle sends, so its death is the
-        // death of the terminal for this session. Guarded so the unwind is
-        // attributed to the actor rather than leaving later sends to report an
-        // unexplained closed channel.
+        // The actor answers every command the handle sends, so its death is the death of the terminal for this session.
         let actor_fut = crate::util::detached::fire_and_forget("local terminal actor", actor_fut);
 
         if use_spawn_local {
             tokio::task::spawn_local(actor_fut);
         } else {
-            // `actor_fut` is already wrapped in `fire_and_forget`, which logs the
-            // panic under the actor's own name; the dropped handle adds nothing to
-            // lose.
+            // `actor_fut` is already wrapped in `fire_and_forget`, which logs the panic under the actor's own name.
             #[allow(clippy::disallowed_methods)]
             tokio::spawn(actor_fut);
         }
@@ -2775,8 +2719,7 @@ impl TerminalBackend for LocalTerminalBackend {
         {
             return;
         }
-        // Block until the actor processed the reparent: the caller shuts down
-        // the old session right after, which would drop notifications.
+        // Block until the actor processed the reparent: the caller shuts down the session right after.
         let _ = reply_rx.await;
     }
 
@@ -2821,7 +2764,7 @@ impl TerminalBackend for LocalTerminalBackend {
 // ============================================================================
 
 /// `Waker::noop()` is safe: the actor polls periodically and needs no pipe
-/// wake-ups. Avoids a timeout-per-read costing O(N × 20 ms) per tick.
+/// wake-ups.
 fn try_read_nonblocking(
     reader: &mut (impl tokio::io::AsyncRead + Unpin),
     buf: &mut [u8],
@@ -3000,8 +2943,6 @@ fn read_available(reader: &mut (impl tokio::io::AsyncRead + Unpin), out: &mut Ve
     }
 }
 
-/// Synchronous two-phase kill for the explicit kill_task path; every await is
-/// bounded so the actor loop never blocks indefinitely.
 async fn graceful_kill_and_wait(process: &mut ProcessState) {
     send_sigterm_to_group(process);
 
@@ -3015,8 +2956,7 @@ async fn graceful_kill_and_wait(process: &mut ProcessState) {
 
     send_sigkill_to_group(process);
 
-    // SIGKILL almost always reaps instantly; the cap protects against D-state
-    // (uninterruptible kernel I/O). On timeout, abandon — poll_process retries.
+    // SIGKILL almost always reaps instantly; the cap protects against D-state (uninterruptible kernel I/O).
     const SIGKILL_REAP_TIMEOUT: Duration = Duration::from_secs(5);
     if tokio::time::timeout(SIGKILL_REAP_TIMEOUT, process.child.wait())
         .await
@@ -3060,8 +3000,8 @@ async fn kill_and_finalize(process: &mut ProcessState) -> KillOutcome {
 
     graceful_kill_and_wait(process).await;
 
-    // Drop the scope handle now (not at the next sweep) so a racing kill_all()
-    // can't killpg the recycled pid; kept if the reap was abandoned (id still Some).
+    // Drop the scope handle now (not at the next sweep) so a racing
+    // kill_all() cannot killpg the recycled pid.
     #[cfg(unix)]
     if process.child.id().is_none() {
         process.process_group = None;
@@ -3342,14 +3282,12 @@ fn spawn_shell_command(
             .stdin(xai_tty_utils::null_stdio())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            // Do NOT set .process_group(0): std runs setpgid() before pre_exec
-            // hooks, so setsid() in the detach hook would fail with EPERM.
+            // Do NOT set .process_group(0): std runs setpgid() before pre_exec hooks.
             .kill_on_drop(true);
 
         apply_child_env(&mut cmd, shell_env_policy, login_env, env);
 
-        // Detach from the controlling terminal so subprocesses cannot open
-        // /dev/tty and compete with the TUI for terminal input.
+        // Detach from the controlling terminal so subprocesses cannot open /dev/tty and compete with the TUI.
         crate::util::detach_command(&mut cmd);
 
         xai_grok_sandbox::child_net::restrict_child_network(&mut cmd);
@@ -3371,17 +3309,14 @@ fn spawn_shell_command(
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        // Mirrors the unix `apply_child_env` order; `inv.env` is grok's trusted
-        // shell setup, so it is not filtered.
+        // Mirrors the unix `apply_child_env` order; `inv.env` is grok's trusted shell setup, so it is not filtered.
         let active_policy = shell_env_policy.filter(|p| !p.is_noop());
         crate::util::shell_env_policy::install_policy_base_env(&mut cmd, active_policy);
         cmd.envs(inv.env);
         layer_request_env(&mut cmd, env, active_policy);
         cmd.envs(crate::util::pager_env());
         crate::util::apply_grok_agent_marker(&mut cmd);
-        // After the env layers so a policy PATH is prepended, not replaced. A
-        // policy base env replaced the inherited one; grok's own PATH must not
-        // come back through the prepend (`inherit = none`, an excluded PATH).
+        // After the env layers so a policy PATH is prepended, not replaced.
         let path_base = if active_policy.is_some() {
             xai_tty_utils::PathBase::ExplicitOnly
         } else {
@@ -3389,9 +3324,7 @@ fn spawn_shell_command(
         };
         xai_tty_utils::prepend_bundled_git_path(cmd.as_std_mut(), path_base);
 
-        // Flags set inline: tokio's creation_flags is a SET, not OR, so the detach
-        // helpers don't compose. CREATE_BREAKAWAY_FROM_JOB fails with os error 5 when
-        // the parent's job lacks JOB_OBJECT_LIMIT_BREAKAWAY_OK; the caller retries without it.
+        // Flags set inline: tokio's creation_flags is a SET, not OR, so the detach helpers don't compose.
         let mut flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
         if with_breakaway {
             flags |= CREATE_BREAKAWAY_FROM_JOB;
@@ -3984,7 +3917,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_output_size_guard_kills_runaway() {
-        // Tiny cap so `yes` trips it within a tick or two.
         let backend = LocalTerminalBackend::new_with_output_cap(2_000);
 
         let output_file =
@@ -4175,7 +4107,6 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
 
         let request = TerminalRunRequest {
-            // ~1.8 KB against a 200-char limit: truncation fires early and keeps firing.
             command: "for i in $(seq 1 60); do printf 'LINE%03d-XXXXXXXXXXXXXXXXXXXX\\n' \"$i\"; sleep 0.03; done".to_string(),
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
@@ -4259,7 +4190,6 @@ mod tests {
         assert_eq!(result.signal.as_deref(), Some("output_limit"));
 
         let file_size = tokio::fs::metadata(&output_file).await.unwrap().len();
-        // The guard fires on a 100ms tick, so allow overshoot (~512 KB seen on arm64 CI).
         assert!(
             file_size < output_amount / 2,
             "output file should be bounded by size guard, got {file_size} bytes (cap={cap})"
@@ -4324,7 +4254,6 @@ mod tests {
 
         let result = backend.run(request).await.unwrap();
         assert_eq!(result.exit_code, Some(0));
-        // noop() drops the receiver; the test passes if nothing panics.
     }
 
     #[tokio::test]
@@ -4438,8 +4367,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_output_preserved_on_timeout() {
-        // 2s timeout so the poll loop gets enough ticks to read the echo
-        // before the timeout handler snapshots the buffer.
+        // 2s timeout so the poll loop gets enough ticks to read the echo.
         let backend = LocalTerminalBackend::new();
         let tmp = tempfile::TempDir::new().unwrap();
 
@@ -4689,8 +4617,7 @@ mod tests {
                 None,
             );
 
-            // A brief sleep, not `true`: the first poll tick fires right after
-            // spawn and could reap `true` before the live_count == 1 read.
+            // A brief sleep, not `true`: the first poll tick fires right after spawn and could reap `true`.
             let mut bg_req = make_request("sleep 1");
             bg_req.tool_call_id = "bg-reap-1".to_string();
             let bg = backend
@@ -5037,8 +4964,7 @@ mod tests {
         let ttl = Duration::from_millis(100);
         let backend = LocalTerminalBackend::new_with_completed_task_ttl(ttl);
 
-        // No wait_for_completion before eviction: the tombstone must be born with
-        // block_waited=false or the late-wait assertions below pass trivially.
+        // No wait_for_completion before eviction: the tombstone must be born with block_waited=false.
         let mut req = make_request("echo evict_and_wait");
         req.tool_call_id = "evict-wait".to_string();
         let bg = backend
@@ -5220,8 +5146,7 @@ mod tests {
     #[tokio::test]
     async fn completion_mid_wait_wakes_waiter_before_tick() {
         let backend = LocalTerminalBackend::new_with_tick_interval(Duration::from_secs(30));
-        // Let the interval's immediate first tick pass so the wake below can
-        // only come from the child-exit signal.
+        // Let the interval's immediate first tick pass so the wake below can only come from the child-exit signal.
         tokio::time::sleep(Duration::from_millis(100)).await;
         let bg = backend
             .run_background(make_request("sleep 0.3; echo done"))

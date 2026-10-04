@@ -1,7 +1,4 @@
 //! ScopeGraph module for per-file symbol tracking.
-//!
-//! A ScopeGraph represents the symbols (definitions, references, imports) and their
-//! relationships within a single source file.
 
 pub mod edges;
 pub mod graph;

@@ -1,13 +1,10 @@
-//! Each `/goal` role (planner, strategist, skeptics/verifier) can run on a different toolset, so its prompt must name that role's OWN tools.
-//! This module owns the cross-role naming machinery so it does not couple a role-specific module (e.g. `goal_planner`) to its siblings.
-//!
-//! The per-spawn model override [`RoleSpawnOverride`] and the spawn-and-retry-once wrapper live in [`goal_planner`](crate::session::goal_planner).
+//! Each `/goal` role (planner, strategist, skeptics/verifier) can run on a different toolset.
 
 use xai_grok_tools::types::tool::ToolKind;
 
-/// Resolved client-facing tool names for a role's prompt placeholders.
-/// Built parent-side from the role's resolved toolset, with one literal fallback per placeholder.
-/// Every resolved name is run through [`sanitized_tool_name`] before it is stored; an unsafe name falls back to the literal default.
+/// Resolved client-facing tool names for a role's prompt placeholders. Built
+/// parent-side from the role's resolved toolset, with one literal fallback
+/// per placeholder.
 #[derive(Debug, Clone)]
 pub(crate) struct RoleToolNames {
     /// `{READ_TOOL}`: `ToolKind::Read`.
@@ -16,8 +13,7 @@ pub(crate) struct RoleToolNames {
     pub list: String,
     /// `{SEARCH_TOOL}`: `ToolKind::Search` (grep maps here).
     pub search: String,
-    /// `{WRITE_TOOL}`: `ToolKind::Write`, falling back to `ToolKind::Edit` when `Write` is absent from the describe summary.
-    /// `ToolKind::Edit` is the default grok-build host's `search_replace` mutator.
+    /// `{WRITE_TOOL}`: `ToolKind::Write`, falling back to `ToolKind::Edit` when `Write` is absent.
     pub write: String,
     /// `{EXECUTE_TOOL}`: `ToolKind::Execute` (terminal/bash maps here).
     pub execute: String,
@@ -25,12 +21,9 @@ pub(crate) struct RoleToolNames {
     pub web_search: String,
     /// `{WEB_FETCH_TOOL}`: `ToolKind::WebFetch` (planner template only).
     pub web_fetch: String,
-    /// `{TODO_TOOL}` — `ToolKind::Plan`. The planner template names it because
-    /// the planner builds its OWN todo list with that tool as it writes the
-    /// plan; the parent then merges the child's list into the session's.
+    /// `{TODO_TOOL}` — `ToolKind::Plan`.
     pub todo: String,
-    /// `{TOOLSET_TOOLS}` block (verifier-only placeholder; the planner and
-    /// strategist templates do not reference it). Empty on the inherit path.
+    /// `{TOOLSET_TOOLS}` block (verifier-only placeholder; the planner and strategist templates do not reference it).
     pub toolset_tools: String,
 }
 
@@ -111,10 +104,6 @@ impl RoleToolNames {
     }
 
     /// Set `{TODO_TOOL}` from the parent bridge's `Plan`-kind tool name.
-    ///
-    /// A builder rather than another `from_parent` argument: the planner's
-    /// prompt is the only one that names the todo tool, so the other roles'
-    /// call sites (and their tests) keep the literal default.
     pub(crate) fn with_todo(mut self, todo: Option<String>) -> Self {
         self.todo = sanitized_or_default(todo, Self::TODO_FALLBACK);
         self
@@ -131,14 +120,12 @@ impl RoleToolNames {
             get(ToolKind::Read),
             get(ToolKind::ListDir),
             get(ToolKind::Search),
-            // The default grok-build host's pre-spawn describe probe exposes only `Edit` (`search_replace`) as the file mutator
-            // The injection-only `write`/`Write` tool is absent there
+            // The default grok-build host's pre-spawn describe probe exposes only `Edit` (`search_replace`).
             first_safe_tool_name(get(ToolKind::Write), get(ToolKind::Edit)),
             get(ToolKind::Execute),
             get(ToolKind::WebSearch),
             get(ToolKind::WebFetch),
-            // The planner builds its own list with the todo tool, so the
-            // explicit-harness render must name THAT harness's todo tool.
+            // The planner builds its own list with the todo tool.
             get(ToolKind::Plan),
             enumerate_toolset_tools(&summary.tool_names),
         )
@@ -193,8 +180,6 @@ impl RoleToolNames {
 }
 
 /// `true` when `name` is safe to splice verbatim into an LLM prompt.
-/// This rejects newlines, control chars, backticks, `{`/`}`, spaces, and markdown.
-/// A `name_override` is registry-validated for uniqueness only, so its content is untrusted text that ends up in the prompt.
 fn is_safe_tool_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -212,9 +197,8 @@ fn sanitized_or_default(name: Option<String>, fallback: &str) -> String {
     sanitized_tool_name(name).unwrap_or_else(|| fallback.to_string())
 }
 
-/// The first of `primary`/`fallback` that passes the safe-charset gate, else `None`.
-/// A present-but-unsafe `primary` (e.g. a bad `Write` `name_override`) cannot shadow a usable `fallback` (`Edit`, i.e. `search_replace`).
-/// Both [`RoleToolNames::from_summary`] and [`RoleToolNames::from_parent`] resolve `{WRITE_TOOL}` through this, so the two renders stay consistent.
+/// The first of `primary`/`fallback` that passes the safe-charset gate, else
+/// `None`.
 fn first_safe_tool_name(primary: Option<String>, fallback: Option<String>) -> Option<String> {
     sanitized_tool_name(primary).or_else(|| sanitized_tool_name(fallback))
 }
@@ -266,9 +250,10 @@ pub(crate) mod tests {
         }
     }
 
-    /// Shared guard: a regex scan that fails on ANY surviving `{*_TOOL}` / `{TOOLSET_TOOLS}` token (robust to new tool placeholders).
-    /// Scoped to the tool-placeholder family, so it does NOT false-positive on render-time placeholders resolved elsewhere.
-    /// `{KIND_LENS}`, `{SCRATCH}`, `{PLAN_FILE}`, … survive a template rendered with only `tool_names` applied.
+    /// Shared guard: a regex scan that fails on ANY surviving `{*_TOOL}` /
+    /// `{TOOLSET_TOOLS}` token (robust to new tool placeholders). Scoped to
+    /// the tool-placeholder family, so it does NOT false-positive on
+    /// render-time placeholders resolved elsewhere.
     pub(crate) fn assert_no_tool_placeholders(rendered: &str) {
         let re = regex::Regex::new(r"\{[A-Z_]+_TOOL\}|\{TOOLSET_TOOLS\}").unwrap();
         if let Some(m) = re.find(rendered) {
@@ -349,8 +334,8 @@ pub(crate) mod tests {
 
     #[test]
     fn from_summary_resolves_cursor_web_search_name() {
-        // The alternate planner toolset exposes WebSearch/WebFetch under the client names "WebSearch"/"WebFetch"
-        // This is the case that left the alternate planner blind to the web tool and over-scoping from memory alone
+        // The alternate planner toolset exposes WebSearch/WebFetch under the
+        // client names "WebSearch"/"WebFetch" This is the case.
         let tn = RoleToolNames::from_summary(&summary_with(&[
             (ToolKind::WebSearch, "WebSearch"),
             (ToolKind::WebFetch, "WebFetch"),
@@ -378,8 +363,7 @@ pub(crate) mod tests {
 
     #[test]
     fn web_tools_fall_back_when_absent_from_the_toolset() {
-        // Without WebSearch/WebFetch in a summary / parent bridge, both resolve to the stock client names
-        // So the planner prompt still names a real tool on the default grok-build host (the stock `web_search`/`web_fetch`)
+        // Without WebSearch/WebFetch in a summary / parent bridge, both resolve to the stock client names.
         let summary = RoleToolNames::from_summary(&summary_with(&[(ToolKind::Read, "rd")]));
         assert_eq!(summary.web_search, "web_search");
         assert_eq!(summary.web_fetch, "web_fetch");
@@ -390,8 +374,8 @@ pub(crate) mod tests {
 
     #[test]
     fn from_summary_write_falls_back_to_edit_on_default_grok_build_host() {
-        // Default grok-build host: the pre-spawn describe probe exposes only `Edit` (`search_replace`); `Write` is injection-only and absent
-        // The planner gate accepts this toolset, so `{WRITE_TOOL}` must name the real mutator (`search_replace`), not the literal `write` default
+        // Default grok-build host: the pre-spawn describe probe exposes only
+        // `Edit` (`search_replace`).
         let tn = RoleToolNames::from_summary(&summary_with(&[
             (ToolKind::Read, "read_file"),
             (ToolKind::Search, "grep"),
@@ -496,9 +480,7 @@ pub(crate) mod tests {
 
     #[test]
     fn parent_and_summary_renders_agree_on_default_grok_build_mutator() {
-        // The explicit-pair `primary` render comes from `from_summary`; the inherit/fail-open `fallback` render comes from `from_parent`
-        // Both must name the SAME mutator on the default grok-build host (Edit-only toolset)
-        // So a fail-open retry can never disagree with the first attempt's `{WRITE_TOOL}`
+        // The explicit-pair `primary` render comes from `from_summary`.
         let primary = RoleToolNames::from_summary(&summary_with(&[
             (ToolKind::Read, "read_file"),
             (ToolKind::Search, "grep"),
@@ -577,9 +559,8 @@ pub(crate) mod tests {
 
     #[test]
     fn apply_is_single_pass_a_name_equal_to_a_token_is_not_re_expanded() {
-        // Sanitization rejects `{`/`}`, so a name can never *be* a token
-        // But even a sanitized name that collides with a later token's TEXT must not be re-expanded by a second pass
-        // Use `EXECUTE_TOOL`-shaped names that are themselves safe (no braces) to prove single-pass behavior
+        // Sanitization rejects `{`/`}`, so a name can never *be* a token But
+        // even a sanitized name that collides.
         let tn = RoleToolNames::from_summary(&summary_with(&[
             (ToolKind::Read, "EXECUTE_TOOL"),
             (ToolKind::Execute, "real_exec"),
@@ -627,7 +608,7 @@ pub(crate) mod tests {
             "an unsafe name_override must not appear in the toolset block: {:?}",
             tn.toolset_tools,
         );
-        // The Search kind was dropped, so its fallback name `grep` is NOT listed either (only safe names actually in the summary appear)
+        // The Search kind.
         assert!(!tn.toolset_tools.contains("`grep`"));
     }
 }

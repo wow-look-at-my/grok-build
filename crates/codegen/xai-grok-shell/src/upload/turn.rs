@@ -18,7 +18,6 @@ pub(crate) enum UploadOutcome {
     #[allow(dead_code)]
     Confirmed,
     /// Not confirmed within the flush deadline; the upload continues in the live queue worker.
-    /// Cloud restorability is unobserved, so `restorable_turn_number` must not advance on it.
     #[allow(dead_code)]
     Deferred,
     Failed {
@@ -35,9 +34,8 @@ impl UploadOutcome {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum UploadWait {
     /// Await per-artifact cloud confirmation.
-    /// Detached background upload tasks use this mode, where a slow bucket delays nothing the user sees.
     Confirm,
-    /// Durable-accept into the upload queue; `complete_prompt_trace` then flushes the queue with one bounded, non-terminal wait before the prompt response. Each accept/upload/confirmation wait is bounded: by `deadline` directly (the flush; the queue-backed session-state confirm) or by the floored per-attempt budget derived from it (`blocking_attempt_budget`: the session-copy handoff, non-durable- accept direct uploads, the queue-less session-state confirm, the manifest write). Only the `spawn_blocking` archive build precedes the bound.
+    /// Durable-accept into the upload queue.
     Defer { deadline: tokio::time::Instant },
 }
 /// Whether turn-end uploads hold the prompt response or run after it.
@@ -60,11 +58,9 @@ pub(crate) enum TurnMessages {
 pub(crate) enum MissingTurnMessages {
     /// The actor answered: the turn genuinely captured nothing.
     Empty,
-    /// The actor never answered `TakeTurnMessages` within the bound (wedged
-    /// child teardown): a real miss, recorded as a failure.
+    /// The actor never answered `TakeTurnMessages` within the bound (wedged child teardown): a real miss.
     TakeTimedOut,
-    /// The actor is gone: the command channel or the responder dropped
-    /// without an answer — a real miss, recorded as a failure.
+    /// The actor is gone: the command channel or the responder dropped without an answer — a real miss.
     ChannelDropped,
 }
 impl From<Option<xai_chat_state::TurnCapture>> for TurnMessages {
@@ -436,9 +432,8 @@ pub(crate) fn parse_agent_profile_from_meta(
     );
     None
 }
-/// Parse `_meta.askUserQuestion` as a boolean. `Some(false)` means the pager set `--no-ask-user`.
-/// The shell passes it to `AgentBuilder::with_ask_user_question_enabled(false)` so the tool is stripped from the model's advertised tool list. `Some(true)` explicitly enables the tool for this session.
-/// `None` means the field is absent; the caller falls back to the `ask_user_question` feature (default ON).
+/// Parse `_meta.askUserQuestion` as a boolean. `Some(false)` means the pager set `--no-ask-user`. The shell passes it to `AgentBuilder::with_ask_user_question_enabled(false)` so the tool is stripped from the model's advertised tool list. `Some(true)` explicitly enables
+/// the tool for this session.
 pub(crate) fn parse_ask_user_question_from_meta(
     meta: Option<&agent_client_protocol::Meta>,
 ) -> Option<bool> {

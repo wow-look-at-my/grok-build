@@ -1,6 +1,4 @@
 //! Some cases are written in TOML rather than JSON.
-//! `#[serde(untagged)]` replays a buffered value through a fresh deserializer, and that replay behaves differently in TOML than in JSON.
-//! The format a user writes therefore needs its own coverage.
 
 use serde_json::json;
 
@@ -138,8 +136,7 @@ fn common_spellings_of_off_all_disable_the_row() {
         );
     }
 
-    // Trimming and case-insensitive matching also reach the modes that are not `disabled`
-    // Matching only the alias list would leave `builtin` and `command` parsing strictly
+    // Trimming and case-insensitive matching also reach the modes that are not `disabled` Matching only the alias list would leave `builtin`.
     let padded = ui(r#"{"type": " Builtin "}"#).status_line;
     assert_eq!(padded.declared_kind(), Some(StatusLineType::Builtin));
 

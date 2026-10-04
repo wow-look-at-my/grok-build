@@ -1,5 +1,4 @@
 //! E2E path-deny and Grok hook write-deny (subprocess; arm64-tagged).
-//! Soft-skips when enforcement is unavailable; only `SANDBOX_E2E_REQUIRE_ENFORCEMENT` hard-requires a usable backend.
 #![cfg(all(unix, feature = "enforce"))]
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +12,6 @@ const TARGETS_ENV: &str = "SANDBOX_E2E_TARGETS";
 const CONTROLS_ENV: &str = "SANDBOX_E2E_CONTROLS";
 const POSTLAUNCH_ENV: &str = "SANDBOX_E2E_POSTLAUNCH";
 /// Set when the spoof parent leaves `/data` on a read-only ancestor mount.
-/// The subprocess then knows exact-mountpoint verification must reject the forgery.
 const DATA_STAGED_ENV: &str = "SANDBOX_E2E_DATA_STAGED";
 const MARKER: &str = "deny-paths-e2e-marker-9f3c1a";
 const REQUIRE_ENV: &str = "SANDBOX_E2E_REQUIRE_ENFORCEMENT";
@@ -136,7 +134,8 @@ fn is_permission_denied(e: &std::io::Error) -> bool {
         Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EROFS)
     )
 }
-/// On Linux bubblewrap, unlink of a read-only bind-mounted leaf can return EBUSY (ResourceBusy) rather than EACCES/EPERM; that is still a denial.
+/// On Linux bubblewrap, unlink of a read-only bind-mounted leaf can return
+/// EBUSY (ResourceBusy) rather than EACCES/EPERM.
 fn is_unlink_denied(e: &std::io::Error) -> bool {
     is_permission_denied(e) || e.raw_os_error() == Some(libc::EBUSY)
 }

@@ -1,13 +1,4 @@
 //! Interactive-pager external login that runs on the real TTY before raw mode.
-//!
-//! `auth_provider_command` already works via `grok login` because stderr is inherited.
-//! The TUI path instead pipes that stderr into the welcome copy-link overlay.
-//! That overlay is unusable in Docker (no host browser, mouse capture, wrapped URLs).
-//! This module is the first-launch equivalent of `grok login`.
-//! It prints the provider URL on the real terminal, persists the token, then lets the pager start already authenticated.
-//!
-//! Deliberately does **not** call [`super::flow::run_auth_flow`]: on provider failure that falls through to browser OIDC.
-//! The fallthrough (`Signing in with browser instead...`) would re-enter the TUI splash this path exists to skip.
 
 use std::sync::Arc;
 
@@ -16,8 +7,6 @@ use super::{AuthManager, GrokAuth, GrokComConfig, try_ensure_fresh_auth};
 use xai_grok_shell_base::util::grok_home;
 
 /// Whether the pager should attempt a pre-TUI provider login.
-/// Fresh-credential and `--force-login` checks are async and live in [`maybe_run_pre_tui_external_login`].
-/// This is the sync half so tests can assert the TTY and provider gate without spawning a binary.
 pub fn should_attempt_pre_tui_external_login(has_provider: bool, stdin_is_tty: bool) -> bool {
     has_provider && stdin_is_tty
 }

@@ -13,15 +13,14 @@ pub struct ExampleAnchors {
 }
 
 /// Configurable parameters for the hashline anchor scheme. Stored as a resource
-/// (`Params<HashlineSchemeParams>`) so all three hashline tools use the same scheme within a
-/// session.
+/// (`Params<HashlineSchemeParams>`) so all of them hashline tools use the same scheme within
+/// a session.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct HashlineSchemeParams {
     /// Active scheme: `"chunk"` (default) or `"content_only"`.
     #[serde(default = "default_scheme_name")]
     pub scheme: String,
-    /// Anchor hash length in characters (1–4).
     #[serde(default = "default_hash_len")]
     pub hash_len: usize,
     /// Chunk size for the chunk scheme.
@@ -114,8 +113,6 @@ impl HashlineSchemeParams {
     /// Returns `(anchor, read_line1, read_line2, grep_match, grep_context)`.
     pub fn example_anchors(&self) -> ExampleAnchors {
         let len = self.hash_len.clamp(1, 4);
-        // `"abcd"` and `"rstu"` are ASCII literals and `len` is clamped to
-        // 1..=4, so every byte offset up to `len` is a char boundary.
         #[allow(clippy::string_slice)]
         let hash = &"abcd"[..len];
         #[allow(clippy::string_slice)]
@@ -150,8 +147,6 @@ impl HashlineSchemeParams {
     }
 
     /// Build a `ToolDefinition` with scheme-aware description rendering.
-    ///
-    /// Shared by all 3 hashline tools' `versioned_definition` overrides.
     pub fn build_tool_definition(
         &self,
         template: &str,
@@ -327,7 +322,7 @@ mod tests {
             chunk_size: 8,
         };
         let rendered = params.render_description("{example_anchor}");
-        assert_eq!(rendered, "22:abcd:rstu"); // clamped to 4
+        assert_eq!(rendered, "22:abcd:rstu");
     }
 
     #[test]
@@ -338,7 +333,7 @@ mod tests {
             chunk_size: 8,
         };
         let rendered = params.render_description("{example_anchor}");
-        assert_eq!(rendered, "22:a:r"); // clamped to 1
+        assert_eq!(rendered, "22:a:r");
     }
 
     #[test]

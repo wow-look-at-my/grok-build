@@ -1,6 +1,4 @@
 //! `/timeline`: toggle the timeline sidebar (per-turn tick rail).
-//!
-//! Computes the new value itself and dispatches the typed `Action::SetTimeline(bool)`, mirroring `/timestamps`.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

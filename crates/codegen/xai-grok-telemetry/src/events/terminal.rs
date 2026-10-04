@@ -12,9 +12,8 @@ pub struct EventLoopStall {
     pub stall_mcp_servers_connected: u32,
 }
 
-/// The terminal writer thread made no progress on queued payloads past the blocked threshold: the terminal stopped
-/// reading the pty (screen frozen, loop responsive). Emitted once per episode at onset, so it survives the user killing
-/// the frozen tab; `blocked_ms` is the zero-progress time at emit.
+/// The terminal writer thread made no progress on queued payloads past the
+/// blocked threshold.
 #[derive(Serialize)]
 pub struct TermWriterBlocked {
     pub blocked_ms: u64,
@@ -32,12 +31,9 @@ pub struct TerminalTelemetry {
     pub tmux_version: String,
     pub xtversion: String,
     /// Raw, as its source reported it; shapes vary (`"3.5.6"`, `"20240203-110809-5046fc22"`, `"7402"`).
-    /// Empty when unknown.
     pub term_version: String,
     pub term_version_source: String,
     /// The Kitty protocol was negotiated *without* `REPORT_EVENT_TYPES`.
-    /// `term_version` identified a build that mis-encodes key releases (Alacritty 0.14.x and earlier).
-    /// A field rather than its own event so the affected population always has a denominator.
     pub kitty_event_types_withheld: bool,
     pub host_os: String,
     pub display_server: String,
@@ -103,7 +99,6 @@ pub struct ClipboardImagePaste {
     pub image_mime: String,
     /// Blake3 hex of the raster bytes, keyed per process (comparable within one run only); "" unless outcome == "image".
     pub image_hash: String,
-    /// Encoded raster size; 0 unless outcome == "image".
     pub image_bytes: u64,
     /// Wall-clock duration of the clipboard read in milliseconds.
     pub duration_ms: u64,
@@ -118,8 +113,7 @@ pub enum ClipboardProbeDropReason {
     PasteboardChangedAfterRead,
     /// The bracketed payload did not match the clipboard text.
     BracketedPayloadMismatch,
-    /// Bracketed paste whose clipboard-origin text could not be read. Fail-closed and silent:
-    /// the text already landed, so this is not a user-facing clipboard error.
+    /// Bracketed paste whose clipboard-origin text could not be read.
     BracketedOriginReadFailed,
     ReadFailed,
     Timeout,
@@ -128,8 +122,8 @@ pub enum ClipboardProbeDropReason {
     Panicked,
 }
 
-/// The pager's paste-time probe dropped the attachment; completion-side discards and the `grok wrap` host read are not counted.
-/// `clipboard_image_paste` may still report `outcome == "image"` for the raster this drop discards; join on `image_hash`.
+/// The pager's paste-time probe dropped the attachment; completion-side
+/// discards and the `grok wrap` host read are not counted.
 #[derive(Serialize)]
 pub struct ClipboardPasteProbeDropped {
     #[serde(flatten)]
@@ -140,9 +134,8 @@ pub struct ClipboardPasteProbeDropped {
     pub duration_ms: u64,
 }
 
-/// Emitted when Ctrl/Cmd+V (paste key) is handled but the **host** process clipboard has no pasteable text/image/file URLs.
-/// Diagnoses silent no-ops on remote/ETX sessions.
-/// Does not change paste behavior.
+/// Emitted when Ctrl/Cmd+V (paste key) is handled but the **host** process
+/// clipboard has no pasteable text/image/file URLs.
 #[derive(Serialize)]
 pub struct PasteKeyEmptyHostClipboard {
     #[serde(flatten)]
@@ -170,21 +163,16 @@ pub struct ClipboardCopy {
     pub route_label: String,
     /// CLI tools actually invoked, `+`-joined (e.g. `wl-copy+xclip`); empty if none.
     pub cli_tools_tried: String,
-    /// CLI tools that returned Ok, `+`-joined; empty if none succeeded. On Wayland, wl-copy is read-back-verified only when
-    /// `data_control` is false. With `data_control && arboard_ok` its exit-0 is credited unverified (the arboard write is
-    /// authoritative). Condition wl-copy success rates on `data_control`.
+    /// CLI tools that returned Ok, `+`-joined; empty if none succeeded.
     pub cli_ok_tools: String,
     pub cli_ok: bool,
     pub arboard_ok: bool,
-    /// The Wayland data-control protocol was available for this write (the environment probe, NOT proof the arboard write landed).
-    /// A focus-free authoritative write additionally requires `arboard_ok`.
-    /// Always false off-Wayland.
+    /// The Wayland data-control protocol was available for this write.
     pub data_control: bool,
     pub tmux_ok: bool,
     pub osc52_ok: bool,
     /// Evidence classification: `confirmed` | `unverified` | `failed`.
     pub delivery: &'static str,
-    /// An explicit `grok wrap` OSC 52 sink was active.
     pub osc52_sink: bool,
     /// The process was inside a container without a display server.
     pub container_no_display: bool,
@@ -209,8 +197,8 @@ pub struct BackspaceNoEffect {
     pub has_selection: bool,
 }
 
-/// Emitted each time a terminal notification is actually sent (not filtered by condition or event kind).
-/// Used for protocol distribution analysis.
+/// Emitted each time a terminal notification is sent (not filtered by
+/// condition or event kind). Used for protocol distribution analysis.
 #[derive(Serialize)]
 pub struct NotificationEmitted {
     pub protocol: &'static str,

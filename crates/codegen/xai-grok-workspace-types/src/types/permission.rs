@@ -1,10 +1,4 @@
 //! Permission flow shapes used by [`ToolChunk::NeedPermission`](crate::chunks::ToolChunk::NeedPermission).
-//! They also appear in [`ToolResponse::Permission`](crate::chunks::ToolResponse::Permission).
-//!
-//! These feed the bidirectional tool-stream flow that consumes these types.
-//!
-//! TODO(workspace): align with the canonical permission types in
-//! `xai-grok-shell` once the wire surface is firm.
 
 use serde::{Deserialize, Serialize};
 
@@ -24,8 +18,8 @@ pub struct PermissionRequest {
     pub destructive: bool,
 }
 
-/// User decision delivered via [`ToolResponse::Permission`](crate::chunks::ToolResponse::Permission) on the tool's bidi sender.
-/// Adjacent tagging is the only form uniform across struct, newtype, and unit variants, and avoids the nested-`decision` hazard.
+/// User decision delivered via
+/// [`ToolResponse::Permission`](crate::chunks::ToolResponse::Permission).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum PermissionDecision {

@@ -151,9 +151,10 @@ fn render_script(
 }
 
 /// `true` if a script atom is a word-like label rather than indices.
-/// the source routes through a text-family command (`\text{…}`, `\mathrm{…}`, `\operatorname{…}`, …): the author marked the content as a word; the rendered form contains a run of 3+ ASCII letters: multi-letter runs read as words (`max`, `torso`). Oneor two-letter runs read as indices (`ij`, `th`) and stay compact.
 fn script_atom_is_wordlike(atom: &str, rendered: &str) -> bool {
-    // `\text` also catches `\textrm`/`\textbf`/`\textit`/`\textsf`/`\texttt`/`\textnormal` by prefix; `\math…` variants and box commands likewise
+    // `\text` also catches
+    // `\textrm`/`\textbf`/`\textit`/`\textsf`/`\texttt`/`\textnormal` by
+    // prefix.
     const TEXT_MARKERS: [&str; 8] = [
         "\\text",
         "\\mathrm",

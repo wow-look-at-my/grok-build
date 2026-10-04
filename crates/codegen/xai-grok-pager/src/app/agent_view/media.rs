@@ -10,8 +10,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 
-/// Identity of a media file's contents at load time, keying the negative cache of failed loads.
-/// On Unix, inode and ctime also catch a same-length in-place rewrite whose mtime is too coarse to move.
+/// Identity of a media file's contents at load time, keying the negative
+/// cache of failed loads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MediaFileStamp {
     len: u64,
@@ -90,8 +90,7 @@ impl AgentView {
                 });
                 self.image_viewer = None;
                 self.image_load_rx = None;
-                // The viewer's decoded/re-encoded overlay image (tens of MB for screenshots/renders) just dropped
-                // This is the input path, so a synchronous purge lands between interactions
+                // The viewer's decoded/re-encoded overlay image (tens of MB for screenshots/renders) dropped This is the input path.
                 crate::memory_release::release_retained_memory("image-viewer-close");
             }
             _ => {}
@@ -133,19 +132,14 @@ impl AgentView {
         }
 
         // Static image or video poster frame.
-        // Allocate the Kitty id only *after* bytes are in hand: a not-yet-written path (or a failed read) must return `None` without recording an id
-        // The next time the path is seen, `needs_transmit` would be false and only `place` (no `transmit`) would emit, leaving a blank image
         let needs_transmit = !self.inline_media_ids.contains_key(path);
 
-        // Cache bytes before any id allocation
-        // Place-only frames after an eviction (id kept, cache dropped) must reload or they dead-end on a permanent spinner
+        // Cache bytes before any id allocation Place-only frames after an eviction (id kept, cache dropped) must reload or they dead-end.
         let mut oversized: Option<Vec<u8>> = None;
         if !self.inline_media_cache.contains_key(path) {
             // A missing file keeps polling cheaply (generation may still be writing it) and never reaches the decode/ffmpeg work below
             let meta = std::fs::metadata(path).ok()?;
-            // A failure is retried only when the file changed since
-            // A file caught mid-write self-heals; a genuinely broken one doesn't re-run decode/extraction every frame
-            // No stamp (no mtime) means no change signal: never negative-cache, keep retrying
+            // A failure is retried only when the file changed since A file caught mid-write self-heals.
             let stamp = MediaFileStamp::from_metadata(&meta);
             if let Some(stamp) = stamp
                 && self.inline_media_load_failed.get(path) == Some(&stamp)
@@ -173,9 +167,7 @@ impl AgentView {
                 return None;
             };
             self.inline_media_load_failed.remove(path);
-            // Bound the cache: a long image-heavy session must not pin every encoded image for its lifetime
-            // Evicting drops only CPU-side bytes; Kitty placements already transmitted stay valid on the GPU (`inline_media_ids` is kept)
-            // An evicted path re-reads from disk if it needs a re-transmit
+            // Bound the cache: a long image-heavy session must not pin every encoded image for its lifetime Evicting drops only CPU-side bytes.
             const INLINE_MEDIA_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
             oversized = cache_inline_media_bytes(
                 &mut self.inline_media_cache,
@@ -245,8 +237,8 @@ impl AgentView {
             // The transient `rendering…` hint shows only while an on-click render for this diagram is in flight
             let rendering = self.diagram_is_rendering(&source);
             let row = affordance_row(rendering);
-            // A segment is drawn only if it fits wholly within the row width (which already excludes the timestamp reserve)
-            // Labels never spill past the content area and hit-rects stay inside the row
+            // A segment is drawn only if it fits wholly within the row width
+            // (which already excludes the timestamp reserve).
             let fits =
                 |col: u16, label: &str| col + UnicodeWidthStr::width(label) as u16 <= rect.width;
 
@@ -346,9 +338,8 @@ impl AgentView {
     /// The parent's images must be deleted, but the child is about to draw and manages its own placements.
     /// Draining it too would just force a re-transmit.
     pub(super) fn take_own_inline_media_clear_escapes(&mut self) -> Option<String> {
-        // Also proceed when only playback state remains (`inline_video` Some with no active placements)
-        // That happens when frames finish loading after the media scrolled off
-        // The drain must still stop the ticking video, or it keeps holding the animation gate open invisibly and its eventual drop is never purged
+        // Also proceed when only playback state remains (`inline_video` Some
+        // with no active placements) That happens when frames finish loading.
         if !self.inline_media_active
             && self.inline_media_ids.is_empty()
             && self.inline_video.is_none()
@@ -378,9 +369,7 @@ impl AgentView {
         }
     }
 
-    /// Stop inline video playback, dropping the pre-extracted frame set (~50-300 MB), and request a post-draw purge for it.
-    /// Returns whether a video was actually playing.
-    /// Draw-path callers rely on the deferred request (never a synchronous mid-frame purge); image-only paths must not purge at all.
+    /// Returns whether a video was playing.
     pub(super) fn stop_inline_playback(&mut self) -> bool {
         let had_video = self.inline_video.take().is_some();
         if had_video {
@@ -393,7 +382,7 @@ impl AgentView {
     /// The tick path calls this when the background extraction completes.
     pub(crate) fn replace_inline_video(&mut self, video: crate::app::agent_view::InlineVideoState) {
         if self.inline_video.replace(video).is_some() {
-            // Switching videos: the previous frame set just dropped.
+            // Switching videos: the frame set dropped.
             crate::memory_release::request_release_after_draw("inline-video-replace");
         }
     }
@@ -538,8 +527,8 @@ impl AgentView {
             return Some(InputOutcome::Changed);
         }
 
-        // Mermaid affordance row: render-on-click (Open/Copy path) or copy source
-        // Resolve the kind and source index first so the `mermaid_buttons` borrow ends before the `&mut self` dispatch below
+        // Mermaid affordance row: render-on-click (Open/Copy path) or copy
+        // source Resolve the kind and source index first.
         let mermaid_hit = self
             .inline_media_hits
             .mermaid_buttons
@@ -608,7 +597,6 @@ impl AgentView {
                     let _ = clear.write_to(stderr);
                 });
                 self.video_viewer = None;
-                // The viewer's pre-extracted frame set (~50-300 MB for a typical clip) just dropped; return the pages to the OS
                 crate::memory_release::release_retained_memory("video-viewer-close");
             }
             KeyCode::Char(' ') => {
@@ -752,8 +740,7 @@ mod tests {
             "the post-draw drain must purge the dropped frame set"
         );
 
-        // Orphaned playback: frames finished loading after the media scrolled off (no active flag, no placements)
-        // The drain must still stop the video and request its purge
+        // Orphaned playback: frames finished loading after the media scrolled off (no active flag, no placements).
         agent.inline_media_active = false;
         agent.inline_video = Some(stub_inline_video());
         let before = test_support::calls();
@@ -795,7 +782,7 @@ mod tests {
             "first frame-set install drops nothing and must not purge"
         );
 
-        // Replacement: the old frame set drops, so a deferred purge
+        // Replacement: the frame set drops, so a deferred purge
         let before = test_support::calls();
         agent.replace_inline_video(stub_inline_video());
         assert_eq!(

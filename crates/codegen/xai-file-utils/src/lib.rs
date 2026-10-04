@@ -1,9 +1,9 @@
-#![allow(clippy::cast_lossless)] // 6 hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // 14 hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // 3 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 10 hits predate the gate
-#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
-#![allow(clippy::expect_used)] // 2 hits predate the gate
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
+#![allow(clippy::cast_sign_loss)] // Hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -14,7 +14,6 @@
 //! Local data collection: upload queueing and S3-compatible blob storage.
 #![deny(clippy::indexing_slicing)]
 pub(crate) mod circuit_breaker_observer;
-/// Wrap a raw client with [`xai_grok_auth::AuthRetryMiddleware`] for automatic 401 retry.
 pub fn with_auth_retry(
     client: reqwest::Client,
     credentials: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider>,

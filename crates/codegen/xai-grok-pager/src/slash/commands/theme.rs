@@ -1,11 +1,4 @@
 //! `/theme` (alias `/t`): switch the color theme.
-//!
-//! Toggles between available themes or switches to a named theme.
-//! Selecting `auto` makes the theme follow the system appearance.
-//! Selecting an explicit theme turns auto mode off.
-//!
-//! `run` dispatches `Action::SetTheme(<canonical>)`; the dispatcher handles the state change, persistence, and the toast.
-//! `preview_arg` and `cancel_preview` call `Theme::apply_kind` directly so a preview never persists: no toast or disk write per keystroke.
 
 use crate::app::actions::Action;
 use crate::slash::command::{
@@ -426,14 +419,14 @@ mod tests {
         });
     }
 
-    /// `/theme` (no args) toggles by dispatching `Action::SetTheme(<next>)`.
-    /// Asserts first that `ThemeKind::available()` has at least 2 entries so a broken invariant fails loudly instead of being masked.
+    /// `/theme` (no args) toggles by dispatching `Action::SetTheme(<next>)`. Asserts first that `ThemeKind::available()` has a couple
+    /// of entries so a broken invariant fails loudly instead of being masked.
     #[test]
     fn run_toggle_dispatches_set_theme_action() {
         with_test_env(|| {
             theme_cache::set(ThemeKind::GrokNight);
-            // Hard-fail with a clear message if the precondition breaks
-            // `(0 + 1) % 0` in `run` would otherwise panic with `attempt to calculate the remainder with a divisor of zero`, a worse message
+            // Hard-fail with a clear message if the precondition breaks `(0 +
+            // 1) % 0` in `run` would otherwise panic.
             assert!(
                 ThemeKind::available().len() >= 2,
                 "toggle test requires ≥2 available themes, got {}",
@@ -457,7 +450,6 @@ mod tests {
             let result = cmd.run(&mut ctx, "");
             match result {
                 CommandResult::Action(Action::SetTheme(name)) => {
-                    // available[0] is GrokNight; next is available[1]
                     let Some(expected) = ThemeKind::available().get(1).map(|k| k.display_name())
                     else {
                         panic!("expected at least two themes");

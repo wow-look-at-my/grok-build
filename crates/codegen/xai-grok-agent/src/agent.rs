@@ -15,8 +15,7 @@ pub struct Agent {
     /// The definition this agent was built from.
     definition: AgentDefinition,
 
-    /// The context that produced the current system prompt.
-    /// Stored for inspection, re-rendering, and serialization.
+    /// The context that produced the current system prompt. Stored for inspection, re-rendering, and serialization.
     prompt_context: PromptContext,
 
     /// The rendered system prompt (cached from prompt_context.render()).
@@ -30,11 +29,9 @@ pub struct Agent {
     compaction_policy: CompactionPolicy,
 
     /// Backend-hosted tools to include in API requests.
-    /// These are sent as native Responses API types (e.g., `WebSearch`) and executed server-side by the agentic sampler.
     hosted_tools: Vec<HostedTool>,
 
     /// Build-time toggle for server-side search tools.
-    /// ANDed at request time with the per-model `SessionActor::supports_backend_search`.
     backend_search_enabled: bool,
 }
 
@@ -114,12 +111,14 @@ impl Agent {
         self.prompt_context.format_agents_md_section()
     }
 
-    /// Returns the AGENTS.md `<system-reminder>` block to prepend as a user message, respecting audience (compacted for subagents) and template.
+    /// Returns the AGENTS.md `<system-reminder>` block to prepend as a user
+    /// message.
     pub fn agents_md_user_reminder(&self) -> Option<String> {
         self.prompt_context.agents_md_user_reminder()
     }
 
-    /// Returns the personas `<system-reminder>` block to prepend as a user message, respecting audience (suppressed for subagents) and template.
+    /// Returns the personas `<system-reminder>` block to prepend as a user
+    /// message.
     pub fn personas_user_reminder(&self) -> Option<String> {
         self.prompt_context.personas_user_reminder()
     }
@@ -130,8 +129,6 @@ impl Agent {
     }
 
     /// Audience this agent's prompt was rendered for (Primary or Subagent).
-    /// Read by the runtime TodoGate with [`crate::AgentDefinition::carries_task_completion_discipline`]
-    /// to decide whether the active prompt actually carries the rules the reminder invokes.
     pub fn prompt_audience(&self) -> crate::prompt::context::PromptAudience {
         self.prompt_context.audience
     }
@@ -142,14 +139,11 @@ impl Agent {
     }
 
     /// Backend-hosted tools that should be included in API requests.
-    /// These are sent as native types (e.g., `rs::Tool::WebSearch`) and executed server-side by the agentic sampler.
     pub fn hosted_tools(&self) -> &[HostedTool] {
         &self.hosted_tools
     }
 
     /// Build-time toggle for server-side search tools.
-    /// Callers should AND this with the per-model `supports_backend_search` flag to decide whether to ship `hosted_tools` on a request.
-    /// Do not use `hosted_tools().is_empty()` as a proxy; the list also depends on web-search config.
     pub fn backend_search_enabled(&self) -> bool {
         self.backend_search_enabled
     }
@@ -175,11 +169,9 @@ impl Agent {
         )
     }
 
-    /// Update completion and retry policies from a new definition.
-    /// Does not rebuild the tool registry or re-render prompts. Used for mid-session mode switching.
+    /// Update completion and retry policies from a new definition. Does not
+    /// rebuild the tool registry or re-render prompts.
     pub async fn update_policies_from_definition(&self, _def: &AgentDefinition) {
-        // TODO: completion requirements and retry configs are now part of ToolServerConfig and handled at registry finalization time
-        // Mid-session policy updates are not yet supported in the new architecture.
     }
 
     /// Re-render the system prompt from current ToolBridge state (tool name overrides, disabled tools).

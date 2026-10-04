@@ -1,7 +1,4 @@
 //! `x.ai/interject` extension handler.
-//!
-//! Queues a mid-turn interjection into the active session's pending interjection buffer.
-//! The session actor drains it at the next safe point in `process_conversation_turn`.
 
 use agent_client_protocol as acp;
 
@@ -19,7 +16,6 @@ pub struct InterjectRequest {
     #[serde(default)]
     pub interjection_id: Option<String>,
     /// Optional structured blocks (text and images) from image-capable clients.
-    /// Absent means the legacy text-only wire shape (empty after default).
     #[serde(default)]
     pub content: Vec<acp::ContentBlock>,
 }

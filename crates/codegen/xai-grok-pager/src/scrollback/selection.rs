@@ -1,6 +1,4 @@
 //! Selection box rendering for v3 pager.
-//!
-//! The `SelectionBox` is computed by components (like ScrollbackPane) and rendered by the frame, allowing selection boxes to span component boundaries.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -21,9 +19,9 @@ mod border_chars {
     pub const VERTICAL_DASHED: char = '┆';
 }
 
-/// A selection box that can be drawn around a selected block. Side borders (│) on the left and right edges of
-/// `inner_area`. Top corners (┌┐) one row above `inner_area` (if `!top_clipped`). Bottom corners (└┘) one row below
-/// `inner_area` (if `!bottom_clipped`).
+/// A selection box that can be drawn around a selected block. Side borders
+/// (│) on the left and right edges of `inner_area`. Top corners (┌┐)
+/// one row above `inner_area` (if `!top_clipped`).
 #[derive(Debug, Clone)]
 pub struct SelectionBox {
     /// The inner area surrounded by the selection border.
@@ -48,25 +46,19 @@ pub struct SelectionBox {
 #[derive(Debug, Clone, Default)]
 pub struct RenderOutput {
     /// Selection box to render around the selected entry.
-    /// Rendered after main content so it can span component boundaries.
     pub selection_box: Option<SelectionBox>,
-    /// Scroll info for scrollbar rendering.
-    /// Viewport uses this to render the scrollbar at the correct position.
+    /// Scroll info for scrollbar rendering. Viewport uses this to render the scrollbar at the correct position.
     pub scroll_info: Option<ScrollInfo>,
     /// Screen area of the individual selected entry (within a group).
-    /// Used by agent_view to position inline buttons on the correct row.
     pub selected_entry_area: Option<Rect>,
     /// Per-frame resolved selection metadata for visible content.
     pub selection_model: ResolvedSelectionModel,
-    /// OSC 8 link overlay for post-flush emission.
     pub link_overlay: LinkOverlay,
     /// Inline media to render via post-flush escape sequences.
     pub inline_media: Vec<crate::scrollback::render::InlineMediaPlacement>,
     /// Mermaid diagram affordance rows to paint + register click hit-rects for.
     pub diagram_affordances: Vec<crate::scrollback::render::DiagramAffordancePlacement>,
-    /// Screen row (relative to the scrollback area top) of the sticky header's gap row, when this frame drew a pinned header.
-    /// The ▲ response-top indicator renders here.
-    /// Publishing the row the pane actually used keeps the indicator from re-deriving (and possibly disagreeing with) the frame's layout.
+    /// Screen row (relative to the scrollback area top) of the sticky header's gap row.
     pub sticky_gap_row: Option<u16>,
 }
 
@@ -128,9 +120,8 @@ impl SelectionBox {
         self
     }
 
-    /// Enable a close control replacing the top-right corner `┐` (default: `✗`).
-    ///
-    /// Normal state: same color as the border. Hovered: bright white.
+    /// Enable a close control replacing the top-right corner `┐` (default:
+    /// `✗`). Normal state: same color as the border.
     pub fn with_closable(mut self, closable: bool, hovered: bool) -> Self {
         self.closable = closable;
         self.close_hovered = hovered;
@@ -168,9 +159,8 @@ impl SelectionBox {
         })
     }
 
-    /// Render the selection box to the buffer. Side borders (│) on left and right edges of inner_area. Top corners (┌┐)
-    /// at inner_area.y - 1 if !top_clipped and y > 0. Bottom corners (└┘) at inner_area.y + height if !bottom_clipped.
-    /// Close button (✗) left of ┐ if enabled.
+    /// Render the selection box to the buffer. Side borders (│) on left and right edges of inner_area. Bottom corners
+    /// (└┘) at inner_area.y + height if !bottom_clipped. Close button (✗) left of ┐ if enabled.
     pub fn render(&self, buf: &mut Buffer) {
         let area = self.inner_area;
         if area.width == 0 || area.height == 0 {
@@ -254,11 +244,9 @@ mod tests {
 
         selection.render(&mut buf);
 
-        // Check top corners at y=1 (inner_area.y - 1)
         assert_eq!(buf.cell((0, 1)).unwrap().symbol(), "┌");
         assert_eq!(buf.cell((9, 1)).unwrap().symbol(), "┐");
 
-        // Check side borders at y=2..=5 (all solid, not clipped)
         for y in 2..=5 {
             assert_eq!(buf.cell((0, y)).unwrap().symbol(), "│");
             assert_eq!(buf.cell((9, y)).unwrap().symbol(), "│");
@@ -355,7 +343,6 @@ mod tests {
 
     #[test]
     fn test_selection_box_single_row_both_clipped() {
-        // Edge case: only 1 row visible, both ends clipped
         let mut buf = Buffer::empty(Rect::new(0, 0, 10, 10));
 
         let selection = SelectionBox::new(Rect::new(0, 3, 10, 1), Style::default())
@@ -364,7 +351,7 @@ mod tests {
 
         selection.render(&mut buf);
 
-        // The single row should have DASHED borders (first row = last row, both clipped)
+        // The row should have DASHED borders (first row = last row, both clipped)
         assert_eq!(buf.cell((0, 3)).unwrap().symbol(), "┆");
         assert_eq!(buf.cell((9, 3)).unwrap().symbol(), "┆");
 
@@ -375,7 +362,6 @@ mod tests {
 
     #[test]
     fn test_selection_box_single_row_top_clipped_only() {
-        // Edge case: only 1 row visible, only top clipped
         let mut buf = Buffer::empty(Rect::new(0, 0, 10, 10));
 
         let selection =
@@ -383,7 +369,7 @@ mod tests {
 
         selection.render(&mut buf);
 
-        // The single row should have DASHED borders (it's first row and top_clipped)
+        // The row should have DASHED borders (it's first row and top_clipped)
         assert_eq!(buf.cell((0, 3)).unwrap().symbol(), "┆");
         assert_eq!(buf.cell((9, 3)).unwrap().symbol(), "┆");
 
@@ -401,7 +387,6 @@ mod tests {
 
         selection.render(&mut buf);
 
-        // Side borders at y=0..=3 (all solid, not clipped)
         for y in 0..=3 {
             assert_eq!(buf.cell((0, y)).unwrap().symbol(), "│");
         }

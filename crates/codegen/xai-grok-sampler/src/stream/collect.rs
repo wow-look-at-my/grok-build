@@ -1,7 +1,4 @@
 //! Buffered consumer for [`SamplingEvent`] streams.
-//!
-//! Drains a Layer-2 event stream into the final `(ConversationResponse, InferenceLatencyStats)` pair.
-//! Used by callers that don't need streaming UI updates (e.g., compaction, `/btw`, dream-model calls).
 
 use futures_util::StreamExt;
 use futures_util::stream::Stream;

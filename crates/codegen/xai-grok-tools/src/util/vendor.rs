@@ -7,8 +7,7 @@ pub(crate) enum InstallError {
     /// The bundled bytes failed verification; the binary must not be run.
     #[error("{0}")]
     Integrity(String),
-    /// Installation could not complete for an operational reason; a `PATH`
-    /// binary may be used instead.
+    /// Installation could not complete for an operational reason; a `PATH` binary may be used instead.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -56,8 +55,7 @@ fn install(
     }
 
     std::fs::create_dir_all(dir)?;
-    // Stage in the destination directory and rename atomically, so an
-    // interrupted or concurrent first use never publishes a partial binary.
+    // Stage in the destination directory and rename atomically, so an interrupted.
     let mut staged = tempfile::NamedTempFile::new_in(dir)?;
     staged.write_all(&decoded)?;
     #[cfg(unix)]

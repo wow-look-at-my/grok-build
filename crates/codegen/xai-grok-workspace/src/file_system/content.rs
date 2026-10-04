@@ -266,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn dropping_spawned_search_child_kills_rg() {
         let tmp = tempfile::TempDir::new().unwrap();
-        // Overflow the stdout pipe (rg caps 50 matches/file, so use many files) so rg blocks on write and stays alive until killed
+        // Overflow the stdout pipe (rg caps multiple matches/file, so use many files) so rg blocks on write and stays alive until killed
         let line = format!("needle {}\n", "x".repeat(120));
         for i in 0..200 {
             std::fs::write(tmp.path().join(format!("f{i}.txt")), line.repeat(50)).unwrap();

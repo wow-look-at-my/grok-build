@@ -1,27 +1,4 @@
 //! In-process multi-client leader cluster: a REAL leader IPC server fronting a REAL `MvpAgent`.
-//! Each test client is a full pager view-model (`AppView`) wired through the production leader bridge.
-//! Deterministically exercises what the PTY `LeaderCluster` covers, one layer down: no subprocesses, no terminals, no screen scraping.
-//!
-//! Per client: `LeaderClient::connect(sock).into_channels()`, then [`bridge_channels`], then one `AppView`.
-//! Inbound ACP is pumped through `acp_handler::handle` and user intent is driven through `dispatch`.
-//! Effects run through the real `effects::execute` (the same loop `event_loop::run` performs, minus the terminal).
-//!
-//! Env sandboxing follows this crate's `serial(GROK_HOME)` idiom.
-//! `grok_home()` is process-cached (OnceLock), so disk assertions always go through [`effective_grok_home`] rather than assuming the temp dir won.
-//!
-//! The scenarios are `#[ignore]`d in the shared lib test binary.
-//! The harness mutates process-global env (proxy URLs, `XAI_API_KEY`, `GROK_LEADER_SOCKET`, `GROK_HOME`) for a real agent's whole lifetime.
-//! In a several-thousand-test process that mutation poisons concurrently-running tests; `grok_home()`'s OnceLock is usually already pinned too.
-//! Run on demand:
-//!
-//! ```bash
-//! cargo test -p xai-grok-pager --lib -- app::leader_cluster --ignored --test-threads=1
-//! ```
-//!
-//! To un-ignore them, move the scenarios to a dedicated test binary where env is set before any process-global's first touch.
-//! That gives single-process isolation via a test-harness feature over the pub(crate) internals.
-//!
-//! Unix-only: the leader transport here is a unix socket.
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -58,8 +35,6 @@ const PUMP_TICK: Duration = Duration::from_millis(10);
 const TURN_BUDGET: Duration = Duration::from_secs(60);
 
 /// Every agent the cluster ever spawned, killed generations included.
-/// `MvpAgent`'s background tasks hold raw `LocalRef` self-pointers and stay on the `LocalSet` after the agent's
-/// connection is aborted, so the agents must be freed only after the `LocalSet` is (`InProcessAgent::keepalive`).
 type AgentKeepalives = Rc<RefCell<Vec<Rc<MvpAgent>>>>;
 
 /// Run one scenario on a current-thread runtime and `LocalSet`, then tear down in the order the agents' `LocalRef`
@@ -172,9 +147,8 @@ impl ClusterClient {
         self.process_effects(effs);
     }
 
-    /// Pump until `pred(app)` holds, within [`TURN_BUDGET`].
-    /// No fixed sleeps beyond the pump tick; panics with `what` on expiry.
-    /// Single-client sugar over [`pump_clients_until`] so there is exactly one pump loop.
+    /// Pump until `pred(app)` holds, within [`TURN_BUDGET`]. No fixed sleeps
+    /// beyond the pump tick; panics with `what` on expiry.
     async fn pump_until(&mut self, what: &str, pred: impl Fn(&AppView) -> bool) {
         pump_clients_until(&mut [self], what, |clients| {
             clients.first().is_some_and(|c| pred(&c.app))
@@ -284,21 +258,15 @@ struct PagerLeaderCluster {
     server: MockInferenceServer,
     server_cancel: CancellationToken,
     /// The current generation's server/agent/bridge tasks.
-    /// `kill_leader` aborts and drains them so a respawn can never race a still-running old agent on the same GROK_HOME.
-    /// (Two agents writing one updates.jsonl is the corruption the real leader's flock exists to prevent.)
     generation_tasks: Vec<tokio::task::JoinHandle<()>>,
-    /// Owned by [`run_cluster_scenario`], which frees the agents only after the `LocalSet`; a killed generation's
-    /// agent stays allocated (I/O tasks gone, background tasks idling against a live agent) rather than freed under them.
+    /// Owned by [`run_cluster_scenario`], which frees the agents only after the `LocalSet`.
     agent_keepalives: AgentKeepalives,
     client_count: Arc<AtomicUsize>,
     workdir: TempDir,
     authenticated: bool,
-    /// Held for the cluster's lifetime so a `LeaderReconnector`-driven `connect_or_spawn` can never win the flock and spawn a subprocess.
-    /// It always takes the wait-for-socket path onto our in-process server.
+    /// Held for the cluster's lifetime so a `LeaderReconnector`-driven `connect_or_spawn` can never win the flock.
     _flock: LeaderLock,
     /// Restored on drop, INCLUDING panic unwinds.
-    /// Field order matters: `_flock` drops first, removing its lock/sock files while the env still points at the sandbox.
-    /// Then the guards restore the env, then the temp home is deleted.
     _env: Vec<crate::test_util::EnvVarGuard>,
     _grok_home: TempDir,
 }
@@ -368,8 +336,7 @@ impl PagerLeaderCluster {
             socket_path: self.sock_path.clone(),
             lock_path: self.sock_path.with_extension("lock"),
             ws_url_suffix: String::new(),
-            // MUST be the client-side comparison source (xai_grok_version), not this crate's version
-            // A reconnecting client evicts strictly-older leaders, and "evict" here would signal THIS test process
+            // MUST be the client-side comparison source (xai_grok_version).
             leader_binary_version: xai_grok_version::version().to_string(),
         });
         let sock_for_server = self.sock_path.clone();
@@ -414,16 +381,13 @@ impl PagerLeaderCluster {
         while self.sock_path.exists() && tokio::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        // Fail HERE if the old generation never released the socket
-        // Its late shutdown cleanup would otherwise delete the respawned generation's fresh socket from under it (same-path race)
-        // That shows up downstream as a confusing reconnect-budget expiry
+        // Fail HERE if the generation never released the socket Its late shutdown cleanup would otherwise delete the respawned generation's fresh.
         assert!(
             !self.sock_path.exists(),
             "old leader generation never released the socket"
         );
-        // Abort and drain the generation's agent/bridge tasks (the server task has already run its socket cleanup above)
-        // Channel-closure teardown is only eventual
-        // Without the drain an old agent task could still run against the same GROK_HOME when the next generation's agent starts
+        // Abort and drain the generation's agent/bridge tasks (the server
+        // task has already run its socket cleanup above).
         for task in self.generation_tasks.drain(..) {
             task.abort();
             let _ = task.await;

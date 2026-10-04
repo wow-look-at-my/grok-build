@@ -2,9 +2,9 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Per-session cap: the 4th show is gated. Re-showing a tip that is still visible under the same
-/// key only refreshes its TTL and does not re-count. The slot must therefore clear via TTL expiry
-/// between shows, so each fresh show increments the in-memory count.
+/// Re-showing a tip that is still visible under the same key only refreshes its TTL and does not
+/// re-count. The slot must therefore clear via TTL expiry between shows, so each fresh show
+/// increments the in-memory count.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn undo_tip_session_cap_blocks_fourth_show() {
@@ -25,7 +25,7 @@ async fn undo_tip_session_cap_blocks_fourth_show() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
 
-    // Three fresh shows: wipe, wait for the tip, then wait out the TTL so the slot clears
+    // Fresh shows: wipe, wait for the tip, then wait out the TTL so the slot clears
     for i in 1..=3 {
         wipe_substantial_draft(&mut harness);
         harness
@@ -41,7 +41,6 @@ async fn undo_tip_session_cap_blocks_fourth_show() {
         );
     }
 
-    // Fourth wipe: the in-memory count is at the cap (3), so no banner shows
     wipe_substantial_draft(&mut harness);
     harness.update(Duration::from_millis(1000));
     assert!(

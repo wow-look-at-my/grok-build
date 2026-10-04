@@ -9,22 +9,12 @@ pub const PREVIEW_SIZE: usize = 2_000;
 /// Marker appended by `truncate_str_with_marker` when content is cut.
 pub(crate) const TRUNCATION_MARKER: &str = "…";
 
-/// Truncate a line to at most `max_chars` characters, respecting UTF-8 boundaries.
-/// Content beyond `max_chars` is **discarded** and replaced with a marker.
-///
-/// Returns `Cow::Borrowed` if the line is already within the limit (zero-copy fast path).
-/// Returns `Cow::Owned` with a truncation marker appended if the line was cut.
-///
-/// Use this for tools where content beyond the limit is genuinely not useful
-/// to the model (e.g., grep match context) — clipped bytes are unrecoverable
-/// by the caller. For tools where all content matters (bash, task_output),
-/// use `soft_wrap_line` instead.
+/// Truncate a line to at most `max_chars` characters, respecting UTF-8
+/// boundaries. Content beyond `max_chars` is **discarded** and replaced with
+/// a marker. Returns `Cow::Borrowed` if the line is already within the limit
+/// (zero-copy fast path). Returns `Cow::Owned` with a truncation marker
+/// appended if the line was cut.
 pub fn truncate_line(line: &str, max_chars: usize) -> Cow<'_, str> {
-    // Fast path: if byte length ≤ max_chars, then char count ≤ max_chars
-    // (every char is ≥1 byte). This avoids the O(n) chars().count() for
-    // ASCII-only strings. For multi-byte UTF-8 this may false-negative
-    // (byte_len > max_chars but char_count ≤ max_chars), falling through
-    // to the slow path — that's a perf miss, not a correctness bug.
     if line.len() <= max_chars {
         return Cow::Borrowed(line);
     }
@@ -75,20 +65,6 @@ pub fn soft_wrap_line(line: &str, wrap_width: usize) -> Cow<'_, str> {
 }
 
 /// The longest prefix of `s` that fits in `max_bytes`, cut at a char boundary.
-///
-/// This is the entry point for capping text whose bytes the program did not
-/// produce — model output, tool output, subprocess output, commit messages,
-/// prompt text. It never panics and never returns a slice that splits a
-/// multi-byte character: an offset landing inside one moves down to the
-/// boundary before it. Every edge case is handled here so the call site just
-/// passes the budget it has: `max_bytes == 0` yields `""`, a budget at or past
-/// `s.len()` yields all of `s`, and a budget past the end is clamped rather
-/// than rejected.
-///
-/// The budget counts bytes. For a character budget, see [`truncate_line`]; for
-/// a display-cell budget, see the pager's width-aware helpers.
-///
-/// [`truncate_line`]: crate::util::truncate_line
 #[allow(clippy::string_slice)] // the index is `floor_char_boundary`'s output
 pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
     let end = s.floor_char_boundary(max_bytes);
@@ -96,30 +72,19 @@ pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
 }
 
 /// Truncate a string to at most `max_bytes` bytes at a valid UTF-8 boundary.
-/// Returns the original string if it fits. No truncation marker is added.
-///
-/// Delegates to [`truncate_bytes`], which owns the boundary math.
+/// Returns the string if it fits. No truncation marker is added.
 pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
     truncate_bytes(s, max_bytes)
 }
 
 /// The longest suffix of `s` that fits in `max_bytes`, cut at a char boundary.
-///
-/// The mirror of [`truncate_bytes`] for the sites that keep the END of an
-/// output — the tail of a log, the last lines of a subprocess. Same contract:
-/// never panics, never splits a character, no special-casing at the call site.
-/// An offset landing inside a character moves UP to the boundary after it, so
-/// the returned suffix is never larger than the budget. A budget of `0` yields
-/// `""`, a budget at or past `s.len()` yields all of `s`.
 #[allow(clippy::string_slice)] // the index is `ceil_char_boundary`'s output
 pub fn tail_bytes(s: &str, max_bytes: usize) -> &str {
     let start = s.ceil_char_boundary(s.len().saturating_sub(max_bytes));
     &s[start..]
 }
 
-/// Text on hand, and the size of the output it came from. The two differ when
-/// the caller holds only part of a larger output and the reader still needs
-/// the real size.
+/// Text on hand, and the size of the output it came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PartialOutput<'a> {
     text: &'a str,
@@ -183,24 +148,12 @@ pub fn truncate_with_preview(
 }
 
 /// Truncate a string to at most `max_bytes` bytes at a valid UTF-8 boundary,
-/// appending `TRUNCATION_MARKER` when truncation actually happens.
-///
-/// Total byte length of the returned string is always `<= max_bytes`.
-///
-/// Returns `Cow::Borrowed` when the input already fits (no marker added --
-/// only signal truncation when truncation actually happened). Returns
-/// `Cow::Owned` with the marker appended when content was cut. When
-/// `max_bytes == TRUNCATION_MARKER.len()`, returns just the marker so the
-/// truncation signal is preserved. When `max_bytes < TRUNCATION_MARKER.len()`,
-/// the marker cannot fit and we fall back to the marker-free `truncate_str`
-/// behavior to honor the byte budget; this branch is only reachable when the
-/// caller passes a pathologically tiny budget and is not exercised by any
-/// production caller (`MIN_DESC_LENGTH` and other call-site minimums keep
-/// the budget well above the marker size).
-///
-/// Use this when the reader needs to distinguish a natural string ending
-/// from a truncation (e.g., model-visible listings). For purely visual
-/// width-based truncation in the TUI, see `xai_grok_pager`'s own helpers.
+/// appending `TRUNCATION_MARKER` when truncation happens. Total byte length
+/// of the returned string is always `<= max_bytes`. Returns `Cow::Borrowed`
+/// when the input already fits (no marker added -- only signal truncation
+/// when truncation happened). Returns `Cow::Owned` with the marker appended
+/// when content was cut. When `max_bytes == TRUNCATION_MARKER.len()`, returns
+/// the marker so the truncation signal is preserved.
 pub fn truncate_str_with_marker(s: &str, max_bytes: usize) -> Cow<'_, str> {
     if s.len() <= max_bytes {
         return Cow::Borrowed(s);
@@ -217,40 +170,29 @@ pub fn truncate_str_with_marker(s: &str, max_bytes: usize) -> Cow<'_, str> {
     Cow::Owned(format!("{head}{TRUNCATION_MARKER}"))
 }
 
-/// Find the largest byte index `<= index` that is a char boundary in `s`.
-///
-/// An `index` past the end of `s` returns `s.len()`. Alias for
-/// [`str::floor_char_boundary`] (stable since Rust 1.91) so every call site in
-/// the workspace names one helper.
+/// Find the largest byte index `<= index` that is a char boundary in `s`. An
+/// `index` past the end of `s` returns `s.len()`.
 pub fn floor_char_boundary(s: &str, index: usize) -> usize {
     s.floor_char_boundary(index)
 }
 
-/// Find the smallest byte index `>= index` that is a char boundary in `s`.
-///
-/// An `index` past the end of `s` returns `s.len()`. Alias for
-/// [`str::ceil_char_boundary`] (stable since Rust 1.91) so every call site in
-/// the workspace names one helper.
+/// Find the smallest byte index `>= index` that is a char boundary in `s`. An
+/// `index` past the end of `s` returns `s.len()`.
 pub fn ceil_char_boundary(s: &str, index: usize) -> usize {
     s.ceil_char_boundary(index)
 }
 
 /// Estimate the number of tokens in a string using the bytes/4 heuristic.
-/// Thin wrapper around [`xai_token_estimation::estimate_tokens`] preserving
-/// the historical `usize` return type used by tool-side callers
-/// (`read_file`, `attach_file`, `inspect`, `compaction` file gates).
 pub fn estimate_tokens(s: &str) -> usize {
     xai_token_estimation::estimate_tokens(s) as usize
 }
 
 /// Estimate the number of chars per token using the bytes/4 heuristic.
-/// Thin wrapper around [`xai_token_estimation::estimate_chars`].
 pub fn estimate_chars(s: u64) -> u64 {
     xai_token_estimation::estimate_chars(s)
 }
 
-/// Human-readable size in powers of 1024: integral bytes (`512 B`), one
-/// decimal above (`1.5 MB`). Every output fits nine columns.
+/// Every output fits several columns.
 pub fn format_bytes(bytes: u64) -> String {
     if bytes < 1024 {
         return format!("{bytes} B");
@@ -339,9 +281,7 @@ pub fn truncate_middle(s: &str, max_chars: usize) -> String {
     if char_count <= max_chars {
         return s.to_string();
     }
-    // The marker counts against the budget so the total never exceeds
-    // `max_chars`.  When the budget is too small even for the marker we
-    // fall back to a plain head-truncation.
+    // The marker counts against the budget so the total never exceeds `max_chars`.
     let remaining = max_chars.saturating_sub(MARKER_LEN);
     let front_count = remaining / 2;
     let back_count = remaining - front_count;
@@ -380,8 +320,7 @@ pub fn truncate_lines_to_char_budget(content: &str, budget: usize) -> (String, b
     if trimmed.len() <= budget {
         return (trimmed.to_string(), false);
     }
-    // Cut the budget down to a char boundary before looking for the last
-    // complete line, so a multi-byte char at the edge is never split.
+    // Cut the budget down to a char boundary before looking for the last complete line.
     let truncated = truncate_bytes(trimmed, budget);
     let last_nl = truncated.rfind('\n');
     match last_nl {
@@ -474,7 +413,7 @@ mod tests {
 
     #[test]
     fn truncate_multibyte_char_count_under() {
-        let line = "é".repeat(1_999); // 2 bytes each, 1 char each
+        let line = "é".repeat(1_999);
         assert!(matches!(truncate_line(&line, 2_000), Cow::Borrowed(_)));
     }
 
@@ -499,7 +438,7 @@ mod tests {
         let line = "a".repeat(5_000);
         let r = soft_wrap_line(&line, 2_000);
         let lines: Vec<&str> = r.split('\n').collect();
-        assert_eq!(lines.len(), 3); // 2000 + 2000 + 1000
+        assert_eq!(lines.len(), 3);
         assert_eq!(lines[0].len(), 2_000);
         assert_eq!(lines[1].len(), 2_000);
         assert_eq!(lines[2].len(), 1_000);
@@ -529,7 +468,7 @@ mod tests {
 
     #[test]
     fn truncate_str_does_not_split_cjk() {
-        // "日" is 3 bytes (0xE6 0x97 0xA5). Truncating at 2 must give "".
+        // "日" is a few bytes (0xE6 0x97 0xA5).
         assert_eq!(truncate_str("日本語", 2), "");
         assert_eq!(truncate_str("日本語", 3), "日");
         assert_eq!(truncate_str("日本語", 5), "日");
@@ -538,7 +477,7 @@ mod tests {
 
     #[test]
     fn truncate_str_does_not_split_emoji() {
-        // 🚀 is 4 bytes. Truncating at 1,2,3 must give "".
+        // 🚀 is a few bytes.
         assert_eq!(truncate_str("🚀🦀", 3), "");
         assert_eq!(truncate_str("🚀🦀", 4), "🚀");
         assert_eq!(truncate_str("🚀🦀", 7), "🚀");
@@ -564,7 +503,6 @@ mod tests {
     #[test]
     fn truncate_with_marker_appends_marker_when_cut() {
         let r = truncate_str_with_marker("hello world", 10);
-        // 10 bytes total: 7 content + 3 marker bytes.
         assert_eq!(r, "hello w…");
         assert!(r.len() <= 10);
         assert!(matches!(r, Cow::Owned(_)));
@@ -572,13 +510,11 @@ mod tests {
 
     #[test]
     fn truncate_with_marker_respects_utf8_boundary() {
-        // "日" is 3 bytes. With max_bytes=10 and the 3-byte marker,
-        // target byte index is 7, which falls mid-char; walk back to 6
-        // -> "日本" + marker.
+        // "日" is a few bytes.
         let r = truncate_str_with_marker("日本語abc", 10);
         assert_eq!(r, "日本…");
         assert!(r.len() <= 10);
-        // Result is valid UTF-8 (3 chars: 日, 本, …).
+        // Result is valid UTF-8 (chars: 日, 本, …).
         assert_eq!(r.chars().count(), 3);
     }
 
@@ -702,8 +638,8 @@ mod tests {
         let s = "a".repeat(100);
         let (result, truncated) = truncate_front_and_back(&s, 20);
         assert!(truncated);
-        assert!(result.starts_with("aaaaaaaaaa")); // first 10
-        assert!(result.ends_with("aaaaaaaaaa")); // last 10
+        assert!(result.starts_with("aaaaaaaaaa"));
+        assert!(result.ends_with("aaaaaaaaaa"));
         assert!(result.contains("... (output truncated) ..."));
     }
 
@@ -744,14 +680,10 @@ mod tests {
 
     // ---- truncate_bytes ----
 
-    /// The crash this function exists to prevent: `&msg[..200]` where byte 200
-    /// is the middle of an em dash in a commit message. The budget lands inside
-    /// the character; the prefix must stop before it.
+    /// The budget lands inside the character; the prefix must stop before it.
     #[test]
     fn truncate_bytes_em_dash_straddling_the_offset() {
         let msg = format!("{}—{}", "a".repeat(199), "b".repeat(20));
-        // "—" is 3 bytes (E2 80 94) at bytes 199..202, so 200 is mid-character:
-        // the raw `&msg[..200]` this replaces panicked here.
         assert!(!msg.is_char_boundary(200), "budget must land mid-em-dash");
 
         let prefix = truncate_bytes(&msg, 200);
@@ -806,8 +738,6 @@ mod tests {
         }
     }
 
-    /// Offsets from 0 past the end, including well past it: none may panic, and
-    /// each result must be a real prefix ending on a boundary.
     #[test]
     fn truncate_bytes_never_panics_for_any_offset() {
         let s = "a—b日🚀c".repeat(20);
@@ -837,12 +767,11 @@ mod tests {
 
     // ---- tail_bytes ----
 
-    /// The same crash seen from the other end: the last 20 bytes of a string
-    /// whose character straddles the cut.
+    /// The same crash seen from the other end: the last several bytes of a
+    /// string whose character straddles the cut.
     #[test]
     fn tail_bytes_em_dash_straddling_the_offset() {
         let text = format!("{}—{}", "a".repeat(20), "b".repeat(20));
-        // `—` occupies bytes 20..23; the last 22 bytes start inside it.
         assert!(
             !text.is_char_boundary(text.len() - 22),
             "cut lands mid-em-dash"
@@ -858,7 +787,6 @@ mod tests {
     #[test]
     fn tail_bytes_cjk_straddling_the_offset() {
         let text = format!("{}日本{}", "a".repeat(10), "b".repeat(4));
-        // 日 spans bytes 10..13, so the last 9 bytes start inside it.
         assert!(!text.is_char_boundary(text.len() - 9), "cut lands mid-日");
 
         let suffix = tail_bytes(&text, 9);
@@ -889,8 +817,7 @@ mod tests {
         assert_eq!(tail_bytes("hello", 2), "lo");
         assert_eq!(tail_bytes("日本", 3), "本");
         assert_eq!(tail_bytes("日本", 1), "");
-        // 🚀 is 4 bytes: it does not fit a 3-byte tail, and the boundary snaps
-        // past it rather than over the budget.
+        // 🚀 is a few bytes: it does not fit a 3-byte tail, and the boundary snaps past it rather than over the budget.
         assert_eq!(tail_bytes("a🚀", 3), "");
         assert_eq!(tail_bytes("a🚀", 4), "🚀");
     }
@@ -904,7 +831,7 @@ mod tests {
 
     #[test]
     fn floor_boundary_mid_cjk() {
-        // "日" = 3 bytes. Index 1 or 2 should snap back to 0.
+        // "日" = 3 bytes.
         assert_eq!(floor_char_boundary("日本", 1), 0);
         assert_eq!(floor_char_boundary("日本", 2), 0);
         assert_eq!(floor_char_boundary("日本", 3), 3);
@@ -922,7 +849,7 @@ mod tests {
 
     #[test]
     fn ceil_boundary_mid_cjk() {
-        // "日" = 3 bytes. Index 1 or 2 should snap forward to 3.
+        // "日" = 3 bytes.
         assert_eq!(ceil_char_boundary("日本", 1), 3);
         assert_eq!(ceil_char_boundary("日本", 2), 3);
         assert_eq!(ceil_char_boundary("日本", 3), 3);
@@ -948,7 +875,6 @@ mod tests {
 
     #[test]
     fn truncate_middle_keeps_both_ends() {
-        // 26 chars, budget 10 → remaining=7, front=3, back=4
         let s = "abcdefghijklmnopqrstuvwxyz";
         let result = truncate_middle(s, 10);
         assert!(result.starts_with("abc"));
@@ -964,7 +890,6 @@ mod tests {
 
     #[test]
     fn truncate_middle_respects_budget() {
-        // Example: 50_000 chars at 12_000 limit.
         let s = "a".repeat(50_000);
         let result = truncate_middle(&s, 12_000);
         assert_eq!(
@@ -979,7 +904,6 @@ mod tests {
     fn truncate_middle_utf8_safe() {
         let s = "😀".repeat(100);
         let result = truncate_middle(&s, 10);
-        // remaining=7, front=3, back=4 → 3 emoji + "..." + 4 emoji = 10
         assert_eq!(result.chars().count(), 10);
         assert!(result.contains("..."));
     }

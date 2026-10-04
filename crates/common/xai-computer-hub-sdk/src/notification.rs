@@ -1,11 +1,4 @@
 //! Parsed server notification events.
-//!
-//! [`HubNotification`] is the typed representation of server-pushed
-//! notification frames that arrive on a session inbox. The
-//! [`HubNotification::parse`] constructor classifies a raw JSON value
-//! by its `method` field and deserializes the known shapes; anything
-//! unrecognised lands in [`HubNotification::Unknown`] so callers never
-//! lose data.
 
 use serde_json::Value;
 use tracing::warn;

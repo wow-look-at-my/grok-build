@@ -40,8 +40,7 @@
 
     #[test]
     fn handle_routes_tokens_to_root_when_session_id_not_yet_set() {
-        // Regression: a notification racing ahead of TaskResult::SessionCreated (session_id still None) must update the active agent,
-        // not be dropped into the empty subagent_views path
+        // Regression: a notification racing ahead of TaskResult::SessionCreated (session_id still None) must update the active agent.
         let mut app = make_app_with_agent("sess-1");
         app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
 
@@ -60,9 +59,7 @@
 
     #[test]
     fn duplicate_event_id_is_dropped_and_highwater_advances() {
-        // A client that receives an event twice must render it once
-        // Per-session events arrive in increasing order, so the pager keeps a highwater and drops anything at or below it
-        // Updates without an eventId still apply (back-compat)
+        // A client that receives an event twice must render it once Per-session events arrive in increasing order.
         let mut app = make_app_with_agent("sess-dedup");
         let id = AgentId(0);
 
@@ -119,7 +116,6 @@
         // Replay arrives inside a `session/load` window.
         app.agents.get_mut(&id).unwrap().session.loading_replay = true;
 
-        // eventIds climb (5, 9) then reset below the peak (2, 4): resumed twice.
         for (text, eid) in [
             ("r1-a", "sess-resume-5"),
             ("r1-b", "sess-resume-9"),
@@ -370,9 +366,7 @@
             "running entries from the pre-outage turn are finished on merge"
         );
 
-        // Live streaming continues against the merged transcript
-        // Finalize force-idled the turn (open streams are deliberately closed, "tools were lost")
-        // The next delta opens exactly one new entry below the tail and keeps advancing the dedup highwater
+        // Live streaming continues against the merged transcript Finalize force-idled the turn.
         let len_before = app.agents.get(&id).unwrap_or_else(|| panic!("missing map entry")).scrollback.len();
         assert!(handle(
             make_agent_chunk_with_event("sess-rc", "next turn", "p2", Some("sess-rc-5")),
@@ -403,8 +397,7 @@
 
         {
             let agent = app.agents.get_mut(&id).unwrap();
-            // Second reconnect before the first window finalized
-            // The event loop normally finalizes first; this exercises the defensive path in begin_session_reload
+            // Second reconnect before the first window finalized The event loop normally finalizes first.
             agent.begin_session_reload(2);
             assert_eq!(
                 agent.scrollback.len(),
@@ -416,7 +409,7 @@
             assert!(agent.session.loading_replay);
         }
 
-        // Gen-2 load fails; the ORIGINAL transcript comes back
+        // Gen-2 load fails; the transcript comes back
         let agent = app.agents.get_mut(&id).unwrap();
         assert!(agent.finish_session_reload(2, false));
         assert!(scrollback_has_system_text(agent, "pre-outage content"));
@@ -572,7 +565,7 @@
         assert_eq!(app.agents.get(&id).unwrap_or_else(|| panic!("missing map entry")).last_applied_event_seq, Some(6));
     }
 
-    /// Todo-pane stash behavior across the three reload outcomes.
+    /// Todo-pane stash behavior across those reload outcomes.
     #[test]
     fn reload_todo_stash_restores_on_failure() {
         let mut app = make_app_with_agent("sess-todo");
@@ -681,8 +674,8 @@
         assert_eq!(app.agents.get(&id).unwrap_or_else(|| panic!("missing map entry")).scrollback.len(), 2);
         assert_eq!(app.agents.get(&id).unwrap_or_else(|| panic!("missing map entry")).last_applied_xai_event_seq, Some(11));
 
-        // Lower-stale re-delivery (an already-applied lower id re-sent by the cursor tail, e.g. goal mode) is dropped too.
-        // The check is `<=`, not just equality
+        // Lower-stale re-delivery (an already-applied lower id re-sent by the
+        // cursor tail, e.g. goal mode) is dropped too.
         assert!(!handle_ext_notification(
             &xai_model_switch_notif("sess-xdup", "sess-xdup-9"),
             &mut app
@@ -1015,9 +1008,7 @@
 
     #[test]
     fn deduped_stale_event_does_not_regress_context_used() {
-        // Regression: the context bar must not drop when a stale, already-passed replay delta arrives after a fresher live one
-        // In leader / reconnect / replay-live-overlap, a historical delta (LOWER eventId, LOWER totalTokens) is deduped for rendering
-        // `refresh_context_used` must respect the dedup too, otherwise the bar regresses below the real usage
+        // Regression: the context bar must not drop when a stale.
         let mut app = make_app_with_agent("sess-ctx");
         let id = AgentId(0);
 

@@ -1,8 +1,4 @@
 //! Minimal serializable git/VCS shapes referenced from `WorkspaceOpsRequest` and `OpsChunk`.
-//!
-//! TODO: align with the canonical git types in
-//! `xai_grok_shell::session::git` and `xai_grok_shell::extensions::git`
-//! when the VCS subsystem moves into the workspace crate.
 
 use serde::{Deserialize, Serialize};
 

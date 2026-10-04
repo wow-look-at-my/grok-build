@@ -1,5 +1,4 @@
 //! Renders with a golden accent line.
-//! Collapsed (default) shows a single `/btw <question>` header line; expanded shows the full markdown response below the header.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};

@@ -1,5 +1,4 @@
 //! Records sandbox events (profile applied, violations, bypasses) for telemetry and debugging.
-//! Events are kept in memory and can be flushed to a JSONL file under the sessions directory.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -37,10 +36,8 @@ impl SandboxLogger {
             "sandbox event"
         );
 
-        // Recording a violation must not panic on the way in, and the counters
-        // above already moved by the time this runs: the `Err` arm costs one
-        // buffered event, where a `unwrap_or_else(into_inner)` would keep a lock
-        // held by whatever panicked. `parking_lot::Mutex` is not a dependency here.
+        // Recording a violation must not panic on the way in, and the
+        // counters above already moved by the time this runs.
         #[allow(clippy::disallowed_methods)]
         if let Ok(mut events) = self.events.lock() {
             events.push(event);

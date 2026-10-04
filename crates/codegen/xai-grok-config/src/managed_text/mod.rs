@@ -1,6 +1,4 @@
 //! Item-addressable edits for marked blocks in line-comment config files.
-//!
-//! Structured formats such as TOML keep their native editors.
 
 use std::path::{Path, PathBuf};
 
@@ -116,8 +114,6 @@ impl ManagedConfigPlan {
     }
 
     /// Proposed backup path shown during confirmation.
-    /// Apply first tries this exact path, then atomically retries nearby names if it was claimed in the meantime.
-    /// [`ManagedConfigOutcome::backup_path`] is authoritative.
     pub fn backup_path_hint(&self) -> Option<&Path> {
         self.backup_path_hint.as_deref()
     }
@@ -271,8 +267,8 @@ impl ManagedConfig {
         transaction::apply(plan, &transaction::NoopObserver)
     }
 
-    /// Verify that the exact source path, parent identities, symlink target, bytes, mode, and file identity captured by `plan` are unchanged.
-    /// The proposed update is not published.
+    /// Verify that the exact source path, parent identities, symlink target,
+    /// bytes, mode.
     pub fn verify_unchanged(plan: &ManagedConfigPlan) -> Result<(), ManagedConfigError> {
         source::revalidate(plan)
     }

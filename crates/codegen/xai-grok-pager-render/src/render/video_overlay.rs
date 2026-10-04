@@ -1,6 +1,4 @@
 //! Video playback overlay chrome (border, title, progress bar).
-//!
-//! The video frame itself is rendered via post-flush escape sequences by the caller, matching the image viewer pattern.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -27,7 +25,6 @@ pub fn render_video_overlay(
 
     crate::render::color::dim_area(buf, area, bg, 0.5);
 
-    // 90% centered popup.
     let popup_width = ((area.width as u32 * 90) / 100)
         .max(28)
         .min(area.width as u32) as u16;

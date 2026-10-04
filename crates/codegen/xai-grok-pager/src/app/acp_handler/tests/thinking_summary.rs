@@ -1,10 +1,4 @@
 //! The summary a long thinking block gains from the shell's side call.
-//!
-//! Every case here enters through the shipped notification handlers: an ACP
-//! thought chunk builds the row, and an `x.ai/session/update` carrying
-//! `thinking_summary` is what must decorate it. The block's own setter is
-//! covered in `scrollback::blocks::thinking`; what these tests pin is the join
-//! between the two halves, which no unit test of either half can see.
 
 #![cfg_attr(rustfmt, rustfmt::skip)]
 
@@ -197,9 +191,7 @@ fn a_subagent_summary_lands_in_the_subagent_view() {
 
 #[test]
 fn a_summary_arriving_after_its_row_finished_still_repaints_it() {
-    // The summary is written by a side call, so it lands after the thinking row
-    // stopped running and after the turn may have ended. A row that only
-    // refreshed on frames it drew would keep showing the bare header here.
+    // The summary is written by a side call.
     let mut app = make_app_with_agent("sess-think-late");
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -254,9 +246,6 @@ fn a_summary_arriving_after_its_row_finished_still_repaints_it() {
 #[test]
 fn each_model_call_keeps_its_own_summary() {
     // A turn's tool loop is several model calls, each with its own thinking row.
-    // A summary names the call that produced it, so the later call's summary
-    // must not land on the first row, and one arriving out of order still has
-    // to find its own.
     let mut app = make_app_with_agent("sess-think-two");
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -283,9 +272,7 @@ fn each_model_call_keeps_its_own_summary() {
 
 #[test]
 fn a_summary_naming_no_thinking_row_changes_nothing() {
-    // The call streamed no thinking, or its row was removed by a rewind. There
-    // is no block this summary describes, so attaching it to the one on screen
-    // would put words under the wrong reasoning.
+    // The call streamed no thinking, or its row was removed by a rewind.
     let mut app = make_app_with_agent("sess-think-none");
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -313,9 +300,7 @@ fn a_summary_naming_no_thinking_row_changes_nothing() {
 
 #[test]
 fn a_reloaded_transcript_puts_each_summary_back_under_its_row() {
-    // `thinking_summary` is persisted, so a reload replays it behind its own
-    // call's persisted chunks. `streamStartMs` rides in those chunks' `_meta`
-    // unchanged, which is what lets the replayed join reproduce itself.
+    // `thinking_summary` is persisted, so a reload replays it behind its own call's persisted chunks.
     let mut app = make_app_with_agent("sess-think-reload");
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -341,8 +326,7 @@ fn a_reloaded_transcript_puts_each_summary_back_under_its_row() {
         "the replay must re-attach the summary: {rows:?}"
     );
 
-    // The replay flag is what admits this update: with no load in flight the
-    // same payload is dropped rather than appended under the live transcript.
+    // The replay flag is what admits this update.
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
         agent.session.loading_replay = false;

@@ -58,26 +58,24 @@ impl AgentView {
             .and_then(|idx| self.visible_link_map.links().get(idx))
             .map(|link| &link.target)
     }
-    /// Return the current OSC 8 URL for the highlighted link preview.
     pub fn highlighted_link_url(&self) -> Option<std::sync::Arc<str>> {
         self.highlighted_link_target()
             .and_then(crate::render::osc8::resolve_link_target)
             .and_then(|resolved| resolved.osc8_url)
     }
-    /// True when `(x, y)` lies inside an overlay drawn over the scrollback this frame (dropdown, goal detail).
-    /// Such positions belong to the overlay rather than any scrollback link beneath it, so link hover/click must ignore them.
+    /// True when `(x, y)` lies inside an overlay drawn over the scrollback
+    /// this frame (dropdown, goal detail).
     pub(in crate::app) fn pos_occluded(&self, x: u16, y: u16) -> bool {
         let pos = ratatui::layout::Position { x, y };
         self.frame_occluder_rects.iter().any(|r| r.contains(pos))
     }
-    /// Rect form of [`Self::pos_occluded`]: any overlay intersecting `rect` counts as covering it whole.
-    /// The CTA OSC 8 spans and the impression funnel share this conservative rule, dropping an overlapped rect entirely rather than clipping it.
+    /// Rect form of [`Self::pos_occluded`]: any overlay intersecting `rect`
+    /// counts as covering it whole.
     pub(in crate::app) fn rect_occluded(&self, rect: ratatui::layout::Rect) -> bool {
         self.frame_occluder_rects
             .iter()
             .any(|r| rect.intersects(*r))
     }
-    /// Append the promo banner [label] button's OSC 8 span when the CTA rect is armed, no frame occluder covers it, and a CTA target resolves.
     /// Split from `draw`'s emit-gated block so the guards are unit-testable; the caller owns the `hyperlink_route().emit_osc8` check.
     pub(super) fn push_promo_cta_link_span(
         &self,
@@ -92,7 +90,6 @@ impl AgentView {
             self.push_cta_link_span(link_spans_out, self.hit_announcement_cta.rect, url);
         }
     }
-    /// OSC 8 twin for the in-session header upgrade CTA (`hit_upgrade_cta`), so hyperlink-capable terminals can open the promo from the header.
     /// It shares the banner CTA's url resolution and occluder rule.
     pub(super) fn push_upgrade_cta_link_span(
         &self,
@@ -107,9 +104,8 @@ impl AgentView {
             self.push_cta_link_span(link_spans_out, self.hit_upgrade_cta.rect, url);
         }
     }
-    /// Append one OSC 8 span per painted row of the connectors URL inside the extensions modal's wait
-    /// overlay. The overlay is the topmost paint in that frame, so no occluder check applies; the
-    /// active-wait accessor already withholds rects while a message or pending action covers it.
+    /// The overlay is the topmost paint in that frame, so no occluder check applies; the active-wait
+    /// accessor already withholds rects while a message or pending action covers it.
     pub(super) fn push_managed_connectors_wait_link_spans(
         link_spans_out: &mut Vec<xai_ratatui_inline::LinkSpan>,
         modal_state: &crate::views::extensions_modal::ExtensionsModalState,
@@ -129,7 +125,6 @@ impl AgentView {
                 }),
         );
     }
-    /// Append the OSC 8 spans a `command` status row opened, in the screen columns the row was painted at, under the same occluder rule as the CTAs.
     pub(super) fn push_status_line_link_spans(
         &self,
         link_spans_out: &mut Vec<xai_ratatui_inline::LinkSpan>,
@@ -143,7 +138,6 @@ impl AgentView {
             }
         }
     }
-    /// Emit an OSC 8 hyperlink span over a CTA button `rect` when it is armed and no frame occluder covers it.
     /// Draw already suppressed the rect under prompt dropdowns; the goal-detail overlay can reach the top/bottom rows on short terminals.
     fn push_cta_link_span(
         &self,
@@ -206,8 +200,6 @@ impl AgentView {
         }
     }
     /// How long after the last pointer movement the Cmd link-hover poll keeps running.
-    /// After the window the poll (and the animation tick loop it holds) parks, so a pointer merely resting over the window costs zero CPU.
-    /// Any pointer movement, including the reflexive nudge people make before Cmd+clicking, restarts the window via the mouse event.
     #[cfg(target_os = "macos")]
     const LINK_MODIFIER_POLL_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
     /// Covers scrollback (`hovered_entry`) and `/btw` panel links: releasing Cmd over the panel must not leave a stuck highlight.
@@ -237,9 +229,8 @@ impl AgentView {
                 .last_btw_area
                 .contains((self.last_mouse_pos.0, self.last_mouse_pos.1).into())
     }
-    /// Poll macOS modifier state for link hover; returns `true` when `hovered_link_idx` changed and a redraw is needed.
-    /// Crossterm's Kitty protocol does not report modifier-only key events, so a bare Cmd press or release never reaches the input handler.
-    /// The animation tick loop calls this to poll CoreGraphics directly; on non-macOS it is a no-op (Ctrl key events are reported normally).
+    /// Poll macOS modifier state for link hover; returns `true` when
+    /// `hovered_link_idx` changed and a redraw is needed.
     pub fn poll_link_modifier(&mut self) -> bool {
         #[cfg(target_os = "macos")]
         if self.needs_link_modifier_poll() {
@@ -352,7 +343,6 @@ mod link_click_tests {
             modifiers: crossterm::event::KeyModifiers::empty(),
         }
     }
-    /// One selectable line on screen row 5, cols 0..40, in an 80x24 scrollback pane, shared by the drag-latch tests.
     fn install_selectable_line(agent: &mut AgentView) {
         setup_scrollback_area(agent, Rect::new(0, 0, 80, 24));
         let mut model = ResolvedSelectionModel::default();
@@ -1292,9 +1282,8 @@ mod link_click_tests {
             "pinned promo must arm no [hide] target"
         );
     }
-    /// Second suppression layer: a frame occluder covering the banner row must swallow both button clicks and drop the promo OSC 8 span whole.
-    /// (Goal-detail overlays register in `frame_occluder_rects`, not as dropdowns, so the banner rects stay armed.)
-    /// `draw` only reaches it behind the process-global `hyperlink_route().emit_osc8` gate, which is brand-dependent and unforceable per-test.
+    /// (Goal-detail overlays register in `frame_occluder_rects`, not as dropdowns, so the banner rects stay armed.) `draw` only reaches it
+    /// behind the process-global `hyperlink_route().emit_osc8` gate, which is brand-dependent and unforceable per-test.
     #[test]
     fn frame_occluder_over_banner_swallows_clicks_and_drops_cta_link_span() {
         let reg = ActionRegistry::defaults();
@@ -2097,9 +2086,9 @@ mod link_click_tests {
             press(agent, reg, KeyCode::Char(c));
         }
     }
-    /// Wait for the daemon to publish the result of the most recent keystroke.
-    /// One keystroke is one atomic `Update`, so it bumps the snapshot exactly once; break on the first `poll` that observes it.
-    /// Panics if the daemon never responds so a wedged daemon fails here rather than in a confusing downstream assertion.
+    /// Wait for the daemon to publish the result of the most recent
+    /// keystroke. One keystroke is one atomic `Update`, so it bumps the
+    /// snapshot exactly once; break on the first `poll` that observes it.
     fn settle_search(agent: &mut AgentView) {
         for _ in 0..1000 {
             if agent.poll_scrollback_search() {
@@ -2109,9 +2098,8 @@ mod link_click_tests {
         }
         panic!("scrollback search daemon did not publish a result");
     }
-    /// Type a query one keystroke at a time, settling after each so the daemon processes one query per bump.
-    /// Settling keeps each `poll` aligned to a single keystroke, with no coalescing across keystrokes.
-    /// The final assertions then see the result for the complete query.
+    /// Type a query one keystroke at a time, settling after each so the
+    /// daemon processes one query per bump.
     fn type_query_and_settle(agent: &mut AgentView, reg: &ActionRegistry, query: &str) {
         for c in query.chars() {
             press(agent, reg, KeyCode::Char(c));

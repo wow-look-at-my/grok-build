@@ -1,9 +1,5 @@
 #!/bin/sh
-# session-log.sh — append session events to an audit log
-#
-# Reads the hook envelope from stdin and appends a one-line JSON entry
-# to ~/.grok/session-audit.log with event name, session ID, cwd, and
-# timestamp.
+# session-log.sh — append session events to an audit log Reads the hook envelope from stdin and appends a one-line JSON entry.
 
 INPUT=$(cat)
 

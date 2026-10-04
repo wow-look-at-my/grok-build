@@ -7,8 +7,8 @@ use xai_grok_status_line::{ResolvedStatusLine, StatusLineConfig, StatusLineItem,
 
 use super::draws_a_row;
 
-/// Process-wide counters, since a run records from a detached task and both health-reporting paths run with no view in scope.
-/// One row per process: `kind` latches once.
+/// Process-wide counters, since a run records from a detached task and both
+/// health-reporting paths run with no view in scope.
 pub(crate) fn global() -> &'static StatusLineMetrics {
     static METRICS: StatusLineMetrics = StatusLineMetrics::new();
     &METRICS
@@ -49,8 +49,7 @@ impl StatusLineMetrics {
 
     /// Called once per session at the config boundary, row or not: the sessions that never touched the feature are adoption's denominator.
     pub(crate) fn report_config(&self, cfg: &StatusLineConfig) {
-        // The label is `unset` rather than `disabled`: the mode is unreadable whether the section named none or its `type` was rejected
-        // `row_shows_a_problem` separates those
+        // The label is `unset` rather than `disabled`.
         let kind = cfg.declared_kind().map_or("unset", StatusLineType::as_str);
         if self.kind.set(kind).is_err() {
             return;

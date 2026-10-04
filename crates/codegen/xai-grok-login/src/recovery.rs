@@ -1,12 +1,3 @@
-//! Unauthorized (401) recovery state machine.
-//!
-//! When the server rejects a token, `UnauthorizedRecovery` walks through a sequence of recovery steps before giving up:
-//!
-//! 1. **ReloadFromDisk**: re-read `auth.json` under a file lock.
-//!    If the on-disk token differs from the rejected one, accept it (another process may have refreshed).
-//! 2. **RefreshFromAuthority**: run the appropriate refresh chain (OIDC token refresh, external binary, etc.) based on `TokenType`.
-//!    Skipped when the live token was minted moments ago (fresh-mint guard).
-//! 3. **Done**: all recovery strategies exhausted.
 use crate::error::{AuthError, RefreshTokenError, RefreshTokenFailedReason};
 use crate::manager::AuthManager;
 use crate::model::GrokAuth;
@@ -36,8 +27,8 @@ pub fn manual_auth_reason(err: &AuthError) -> Option<ManualAuthReason> {
         }
     })
 }
-/// Whether the relay should stop reconnecting on this recovery error.
-/// Exhaustive and independent of `manual_auth_reason`, which buckets errors for the `manual_auth` KPI: a telemetry reclassification must not change how long a relay lives. The two differ in both directions: `ApiKeyAuthDisabled` cancels but is outside the KPI, and a non-sticky permanent verdict (`ProviderInteractiveRequired`) counts toward the KPI but does not cancel. Non-sticky verdicts age out via `PERMANENT_FAILURE_TTL`, and the relay runs on a child cancellation token, so cancelling on one would leave a headless leader alive but unreachable for its whole lifetime.
+/// Whether the relay should stop reconnecting on this recovery error. Exhaustive and independent of `manual_auth_reason`, which buckets errors for the `manual_auth` KPI: a telemetry reclassification must not change how long a relay lives. Both differ in both directions: `ApiKeyAuthDisabled` cancels but is outside the KPI, and a non-sticky permanent verdict
+/// (`ProviderInteractiveRequired`) counts toward the KPI but does not cancel.
 pub fn relay_should_cancel(err: &AuthError) -> bool {
     match err {
         AuthError::NotLoggedIn | AuthError::Refresh(RefreshTokenError::Transient(_)) => false,
@@ -50,11 +41,7 @@ pub fn relay_should_cancel(err: &AuthError) -> bool {
     }
 }
 /// Fresh-mint guard window (±) for `ServerRejected` refreshes ([`UnauthorizedRecovery::fresh_mint_guard`]).
-/// 120s outlasts in-flight requests sent with a previous key plus validation lag (observed stale 401s land ~20s after mint). `current()`'s 300s early-invalidation buffer keeps any guard-returned token wire-valid.
-/// A genuinely-dead fresh token waits at most this long to re-mint; the symmetric bound caps that delay when the clock stepped back.
 const FRESH_MINT_GUARD_SECS: i64 = 120;
-/// Where a 401 recovery was initiated; drives the `manual_auth` KPI.
-/// Required at every call site so suppressing the KPI is explicit, not default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoverySource {
     /// A chat/inference turn; surfaces the `ReAuthRequired` banner.
@@ -74,13 +61,11 @@ impl RecoverySource {
     }
 }
 /// Identity of the rejected credential for `manual_auth`.
-/// Captured from the rejected bearer (not live `inner`) so attribution is correct even after a `WrongTeam`/cleared-credential failure.
 pub struct RejectedAuth {
     /// `user_id`, when known (empty ids collapse to `None`).
     principal: Option<String>,
     token_kind: AuthTokenKind,
     /// Full rejected bearer; the debounce key.
-    /// Uses the whole token (not a suffix) so it matches the credential identity the permanent-failure verdict is scoped to; never logged.
     rejected_token_id: String,
 }
 impl RejectedAuth {
@@ -111,7 +96,6 @@ struct ManualAuthEmit {
 #[derive(Default)]
 pub struct ManualAuthTracker {
     /// Id of the rejected credential we last emitted for (single slot: only the most recent).
-    /// Repeats on the same bearer debounce; a new credential has a new id and emits again.
     last_token: parking_lot::Mutex<Option<String>>,
     /// Test-only: the last emitted event, so a test can assert what was emitted, not just that something fired.
     #[cfg(test)]
@@ -122,7 +106,6 @@ pub struct ManualAuthTracker {
 }
 impl ManualAuthTracker {
     /// Emit a terminal manual-auth event, debounced against the most-recent credential (single slot).
-    /// No-op for transient failures (`manual_auth_reason` is `None`) and for API keys (a 401 there means rotate the key, not `/login`).
     pub fn record(&self, snapshot: &RejectedAuth, err: &AuthError, trigger: ManualAuthSurface) {
         if snapshot.token_kind == AuthTokenKind::ApiKey {
             return;
@@ -174,7 +157,6 @@ enum RecoveryStep {
     /// All strategies exhausted.
     Done,
 }
-/// State machine that walks through recovery strategies after a 401.
 pub struct UnauthorizedRecovery {
     auth_manager: Arc<AuthManager>,
     /// The token that was rejected by the server.
@@ -184,7 +166,6 @@ pub struct UnauthorizedRecovery {
     /// Error from `RefreshFromAuthority`, propagated as fallback when devbox recovery doesn't apply.
     authority_error: Option<AuthError>,
     /// Whether the last authority failure was transient.
-    /// Kept after `authority_error` is taken so exhaustion preserves the transient/permanent axis (see the `Done` arm).
     authority_was_transient: bool,
     /// `Some` iff this recovery is user-facing, so a terminal failure emits.
     emit: Option<ManualAuthEmit>,
@@ -329,9 +310,9 @@ impl UnauthorizedRecovery {
             None
         }
     }
-    /// Return the live token instead of refreshing when its mint age is within ±[`FRESH_MINT_GUARD_SECS`]. Anything outside (including a clock that stepped far back) falls through to a normal refresh.
-    /// A 401 moments after a successful mint is a stale rejection or validation lag on the new key. A stale rejection was sent with the previous key and mis-attributed; see `is_stale_snapshot`.
-    /// Re-minting fixes neither, and a crash between the IdP grant and persisting the response orphans the replacement RT (forced re-login). Lives here, not in `refresh_chain`, so paywall claims re-mints that call `refresh_chain(ServerRejected)` directly are unaffected.
+    /// Return the live token instead of refreshing when its mint age is within ±[`FRESH_MINT_GUARD_SECS`]. Anything outside (including a clock that stepped far back) falls through to a normal refresh. A moments after a successful mint is a stale rejection or validation
+    /// lag on the new key. A stale rejection was sent with the previous key and mis-attributed; see `is_stale_snapshot`. Re-minting fixes neither, and a crash between the IdP grant and persisting the response orphans the replacement RT (forced re-login). Lives here, not
+    /// in `refresh_chain`, so paywall claims re-mints that call `refresh_chain(ServerRejected)` directly are unaffected.
     fn fresh_mint_guard(&self) -> Option<GrokAuth> {
         let auth = self.auth_manager.current()?;
         let mint_age_seconds = auth.mint_age_seconds();
@@ -354,9 +335,9 @@ impl UnauthorizedRecovery {
         );
         Some(auth)
     }
-    /// Dispatch to the correct refresh chain based on the current `TokenType`. Per-variant outcome: **OidcSession / ExternalBinary**: full refresh chain via the authority.
-    /// Skipped when the live token is inside the fresh-mint guard window ([`Self::fresh_mint_guard`]). **LegacySession / ApiKey**: no refresh authority for these types.
-    /// We've already tried `ReloadFromDisk` (the previous recovery step), so the server's 401 stands. Surface [`AuthError::ServerRejectedNoRecovery`], *not* `TokenExpiredNoRefresh`. The trigger here is the server rejecting the token; it may not have aged past any local TTL (ApiKey in particular has no expiry).
+    /// Dispatch to the correct refresh chain based on the current `TokenType`. Per-variant outcome: **OidcSession / ExternalBinary**: full refresh chain via the authority. Skipped when the live token is inside the fresh-mint guard window ([`Self::fresh_mint_guard`]). **LegacySession / ApiKey**: no refresh
+    /// authority for these types. We've already tried `ReloadFromDisk` (the previous recovery step), so the server's stands. Surface [`AuthError::ServerRejectedNoRecovery`], *not* `TokenExpiredNoRefresh`. The trigger here is the server rejecting the token; it may not have aged past any local TTL (ApiKey in
+    /// particular has no expiry).
     async fn try_refresh_from_authority(&self) -> Result<GrokAuth, AuthError> {
         let tt = self.auth_manager.token_type();
         match tt {
@@ -411,9 +392,7 @@ impl UnauthorizedRecovery {
 }
 #[cfg(test)]
 mod tests {
-    //! State-machine matrix tests for `UnauthorizedRecovery`. Coverage targets: All 5 `TokenType` variants crossed with dispatch in `try_refresh_from_authority`. `try_reload_from_disk`: same/different/no token on disk.
-    //! `next()` exhaustion (`Done` surfaces `RecoveryExhausted`). Fresh-mint guard: ±window bounds, ExternalBinary, verdict grace, policy-hidden fall-through (fail closed).
-    //! These tests use the same in-process `AuthManager` that production does. They inject a counting refresher so we can observe whether the authority was consulted.
+    //! State-machine matrix tests for `UnauthorizedRecovery`.
     use super::*;
     use crate::config::GrokComConfig;
     use crate::error::{RefreshTokenError, RefreshTokenFailedReason};
@@ -597,8 +576,7 @@ mod tests {
     #[tokio::test]
     async fn fresh_mint_guard_never_returns_policy_hidden_token() {
         ensure_crypto_provider();
-        // Wrong-team fresh token: `current()` hides it (vet_cached), so the
-        // guard must fall through to a normal refresh — fail closed.
+        // Wrong-team fresh token: `current()` hides it (vet_cached).
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
             force_login_team_uuid: Some(crate::config::ForceLoginTeam::Single("team-good".into())),
@@ -866,7 +844,6 @@ mod tests {
         );
     }
     /// Regression: disk holds a different but expired token.
-    /// Recovery must skip it and fall through to RefreshFromAuthority, not return it for the caller to send on the wire (instant 401).
     #[tokio::test]
     async fn reload_from_disk_rejects_expired_different_token() {
         let (dir, m) = mgr();
@@ -943,7 +920,6 @@ mod tests {
         )
         .unwrap()
     }
-    /// A sibling writes a wrong-team token to disk; 401 recovery (relay path) must reject and clear it at `next()`, not hand it back as a bearer.
     #[tokio::test]
     async fn recovery_rejects_wrong_team_adopted_disk_token() {
         ensure_crypto_provider();

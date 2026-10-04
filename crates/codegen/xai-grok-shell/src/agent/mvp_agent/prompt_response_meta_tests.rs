@@ -83,9 +83,6 @@ fn enriches_meta_with_camelcase_token_keys() {
 
 #[test]
 fn preserves_zero_token_values() {
-    // Responses API hits with no cache return a cached_prompt_tokens of 0
-    // The key is still emitted as 0 so the bot can tell "no cache hit" from "no usage data"
-    // The bot's _merge_meta_usage requires the key to be present and integer-typed
     let usage = TokenUsage {
         prompt_tokens: 100,
         completion_tokens: 10,
