@@ -4,6 +4,9 @@ use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::tool::{ToolKind, ToolNamespace};
 use xai_grok_sandbox::ci_state::{self, CiStatus};
 
+mod wait;
+use wait::start_background_wait;
+
 pub const CI_TOOL_NAME: &str = "ci";
 
 /// How long a background `wait` watches before it reports what it last saw.
@@ -432,9 +435,12 @@ impl xai_tool_runtime::Tool for CiTool {
             let query = resolve_query(&cwd, &input)?;
             let output = match input.action {
                 CiAction::Status | CiAction::Runs | CiAction::Wait => query.status()?,
-                CiAction::Logs => {
-                    logs_output(&query.cwd, &query.branch, query.repo(), input.run_id.as_deref())?
-                }
+                CiAction::Logs => logs_output(
+                    &query.cwd,
+                    &query.branch,
+                    query.repo(),
+                    input.run_id.as_deref(),
+                )?,
                 CiAction::Checks => checks_output(&query.cwd, &query.branch, query.repo()),
             };
             Ok((query, output))
@@ -523,41 +529,9 @@ fn status_output(
         runs: summarize(&runs),
         text: None,
         truncated: false,
+        task_id: None,
         summary: state_summary(state, branch, repo),
     })
-}
-
-/// Poll until the branch's runs settle or the budget runs out.
-///
-/// A timeout is not a failure: it answers with the state it last saw, so the
-/// caller learns the branch is still moving rather than that the tool broke.
-fn wait_output(
-    cwd: &std::path::Path,
-    branch: &str,
-    limit: u32,
-    repo: Option<&str>,
-    timeout_secs: Option<u64>,
-) -> Result<CiOutput, xai_tool_runtime::ToolError> {
-    let budget = std::time::Duration::from_secs(
-        timeout_secs.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS),
-    );
-    let deadline = std::time::Instant::now() + budget;
-    loop {
-        let output = status_output(cwd, branch, limit, repo)?;
-        if output.settled || std::time::Instant::now() >= deadline {
-            if !output.settled {
-                return Ok(CiOutput {
-                    summary: format!(
-                        "Waited {}s and CI is still running on {branch}. Do other work and ask again.",
-                        budget.as_secs()
-                    ),
-                    ..output
-                });
-            }
-            return Ok(output);
-        }
-        std::thread::sleep(std::time::Duration::from_secs(WAIT_POLL_SECS));
-    }
 }
 
 fn logs_output(
@@ -607,6 +581,7 @@ fn logs_output(
         runs: summarize(&runs),
         text: Some(text),
         truncated: cut || response.truncated,
+        task_id: None,
         summary: format!("Failing-step logs for run {run_id} on {branch}."),
     })
 }
@@ -641,6 +616,7 @@ fn checks_output(cwd: &std::path::Path, branch: &str, repo: Option<&str>) -> CiO
         runs: Vec::new(),
         text: Some(text),
         truncated: cut || response.truncated,
+        task_id: None,
         summary: format!("Pull-request checks for {branch}."),
     }
 }
