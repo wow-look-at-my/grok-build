@@ -904,6 +904,7 @@ pub struct RawEditBlockConfig {
     pub expanded_by_default: Option<bool>,
     /// Separator between diff hunks. Options: "…" (default), "───", "⋯", "" (none).
     pub hunk_separator: Option<String>,
+    /// Default: false.
     pub dual_line_numbers: bool,
 }
 
