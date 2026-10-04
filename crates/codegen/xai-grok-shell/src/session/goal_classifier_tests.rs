@@ -2542,19 +2542,19 @@ async fn verification_stage_skeptic0_medium_refute_does_not_short_circuit() {
     )
     .await
     .outcome;
-    let GoalClassifierOutcome::Achieved { details_path } = outcome else {
-        panic!("expected Achieved on 1-of-3 minority refute after full panel");
+    let GoalClassifierOutcome::NotAchieved { details_path, .. } = outcome else {
+        panic!("a medium-confidence skeptic-0 refute must go back to the implementer");
     };
     let _ = tokio::fs::remove_file(&details_path).await;
     assert_eq!(
         observed
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
-        3,
-        "medium-confidence refute must NOT short-circuit the panel",
+        1,
+        "a medium-confidence refute must short-circuit the panel",
     );
     let log = log.lock().unwrap();
-    assert!(log.iter().any(|t| t == "agg:1/3:true"));
+    assert!(log.iter().any(|t| t == "agg:1/1:false"), "{log:?}");
 }
 
 #[tokio::test]
@@ -2759,8 +2759,8 @@ async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
 }
 
 #[tokio::test]
-async fn verification_stage_skeptic0_low_refute_does_not_short_circuit() {
-    // A LOW-confidence refute is not decisive, so the panel fans out
+async fn verification_stage_skeptic0_low_refute_short_circuits() {
+    // A LOW-confidence refute is decisive too. The cold skeptic must never run.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("low", None),
         MockResponse::not_refuted(),
@@ -2781,10 +2781,13 @@ async fn verification_stage_skeptic0_low_refute_does_not_short_circuit() {
         observed
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
-        2,
-        "a low-confidence refute must NOT short-circuit the panel",
+        1,
+        "a low-confidence refute must short-circuit the panel",
     );
-    assert!(matches!(outcome, GoalClassifierOutcome::Achieved { .. }));
+    let GoalClassifierOutcome::NotAchieved { details_path, .. } = outcome else {
+        panic!("a low-confidence skeptic-0 refute must go back to the implementer");
+    };
+    let _ = tokio::fs::remove_file(&details_path).await;
 }
 
 #[tokio::test]

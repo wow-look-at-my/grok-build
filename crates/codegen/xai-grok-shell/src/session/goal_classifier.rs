@@ -1824,8 +1824,9 @@ pub(crate) async fn run_verification_stage(
             inputs.inherit_tool_names,
         )
         .await;
-        let high_refute = first.refuted && first.confidence == SkepticConfidence::High;
-        if high_refute && !first.blocking.is_blocking() {
+        // Any refute with a verdict is decisive, whatever its confidence. Only a failed skeptic defers to the cold panel.
+        let decisive = first.refuted && !first.has_no_verdict();
+        if decisive && !first.blocking.is_blocking() {
             (vec![first], true, Some(skeptic0_id))
         } else {
             let cold_ids: Vec<String> = (1..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
@@ -1848,7 +1849,7 @@ pub(crate) async fn run_verification_stage(
                     .into_iter()
                     .map(|(r, _)| r),
             );
-            (all, high_refute, Some(skeptic0_id))
+            (all, decisive, Some(skeptic0_id))
         }
     } else {
         let cold_ids: Vec<String> = (0..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
