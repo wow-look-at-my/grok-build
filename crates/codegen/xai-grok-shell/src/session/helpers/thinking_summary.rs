@@ -80,6 +80,10 @@ pub(crate) fn select_prior_summaries(
 pub(crate) struct ThinkingSummaryHistory {
     window_secs: u32,
     min_count: u32,
+    /// At least [`THINKING_SUMMARY_HISTORY_CAPACITY`], and never under the
+    /// configured count floor, so a raised `min_count` is honored in full
+    /// instead of being silently trimmed.
+    capacity: usize,
     entries: parking_lot::Mutex<VecDeque<(i64, String)>>,
 }
 
@@ -97,6 +101,7 @@ impl ThinkingSummaryHistory {
         Self {
             window_secs,
             min_count,
+            capacity: (min_count as usize).max(THINKING_SUMMARY_HISTORY_CAPACITY),
             entries: parking_lot::Mutex::new(VecDeque::new()),
         }
     }
@@ -115,7 +120,7 @@ impl ThinkingSummaryHistory {
     pub(crate) fn record(&self, stream_start_ms: i64, summary: String) {
         let mut entries = self.entries.lock();
         entries.push_back((stream_start_ms, summary));
-        while entries.len() > THINKING_SUMMARY_HISTORY_CAPACITY {
+        while entries.len() > self.capacity {
             entries.pop_front();
         }
     }
@@ -300,6 +305,22 @@ mod tests {
             selected,
             vec!["summary 1".to_string(), "summary 2".to_string()]
         );
+    }
+
+    #[test]
+    fn a_count_floor_above_the_default_capacity_is_kept_in_full() {
+        let requested = THINKING_SUMMARY_HISTORY_CAPACITY + 10;
+        let history = ThinkingSummaryHistory::new(0, requested as u32);
+        for i in 0..(requested + 5) {
+            history.record(1_000 * i as i64, format!("summary {i}"));
+        }
+        let all = history.prior_for((requested + 4) as i64 * 1_000);
+        assert_eq!(
+            all.len(),
+            requested,
+            "a raised min-count must not be silently trimmed to the default capacity"
+        );
+        assert_eq!(all.last().unwrap(), &format!("summary {}", requested + 4));
     }
 
     #[test]
