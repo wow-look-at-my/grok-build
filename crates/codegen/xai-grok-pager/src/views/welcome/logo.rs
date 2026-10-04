@@ -1,4 +1,4 @@
-//! The logo is hidden entirely on legacy Windows consoles: the ConHost raster fonts do not cover the U+2800 braille block.
+//! The logo is hidden entirely on legacy Windows consoles: the ConHost raster fonts do not cover the U+2800 braille block, so it renders as tofu.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};
@@ -18,6 +18,7 @@ const SMALL_LOGO_MIN_HEIGHT: u16 = 22;
 const FULL_LOGO_MIN_HEIGHT: u16 = 26;
 
 /// Which logo art the stacked column shows.
+/// The terminal height picks the tier; the stacked layout steps it down only while the column would not fit beside the draft.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogoTier {
     Full,
@@ -101,9 +102,12 @@ fn anim_phase_secs() -> f32 {
 }
 
 /// Shimmer redraw cadence in frames per second.
+/// The sweep is slow, so a few fps looks smooth while sparing the long-lived welcome screen from full-rate repaints.
 const SHIMMER_FPS: f32 = 12.0;
 
 /// Quantized shimmer frame for the current wall-clock phase.
+/// The welcome screen redraws only when this advances, throttling the animation to ~`SHIMMER_FPS` rather than the full event-loop tick rate.
+/// The frame is pinned to 0 when the logo is hidden.
 pub fn shimmer_frame() -> u64 {
     if logo_hidden() {
         return 0;
@@ -111,7 +115,9 @@ pub fn shimmer_frame() -> u64 {
     (anim_phase_secs() * SHIMMER_FPS) as u64
 }
 
+/// Per-glyph shine opacity in `[0, 1]` at normalized diagonal position `diag` (0 is bottom-left, 1 is top-right) and animation time `secs`.
 /// A raised-cosine band sweeps from bottom-left to top-right and parks off-screen between sweeps; a gentle global pulse breathes underneath it.
+/// 0 keeps the resting gray, 1 is full bright.
 fn shine_opacity(diag: f32, secs: f32) -> f32 {
     const BAND: f32 = 0.38; // half-width of the shine band; wider means a more gradual falloff
     const CYCLE: f32 = 4.0; // seconds for one sweep plus its rest
@@ -145,7 +151,8 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
         .max(1) as f32;
     let secs = anim_phase_secs();
 
-    // Blend each glyph from the resting gray toward the bright text color by its shine opacity.
+    // Blend each glyph from the resting gray toward the bright text color by its shine opacity, so a sheen sweeps across the braille art
+    // Adjacent glyphs that land on the same blended color share one Span to hold down the per-frame allocation
     let base = theme.gray;
     let hilite = theme.text_primary;
     let logo_lines: Vec<Line> = lines
@@ -200,8 +207,9 @@ pub fn render_logo_tier(area: Rect, buf: &mut Buffer, theme: &Theme, tier: LogoT
     }
 }
 
-/// The hero box always shows the full logo: it is laid out beside the menu,
-/// so it fits whenever the box does.
+/// The hero box always shows the full logo: it is laid out beside the menu, so it fits whenever the box does.
+/// These report and render that logo directly, independent of the height-based [`pick_logo`] tiers used by the stacked layout.
+/// When [`logo_hidden`], they report 0 and render nothing.
 pub fn full_logo_line_count() -> u16 {
     full_logo_line_count_for(logo_hidden())
 }
@@ -224,6 +232,7 @@ pub fn render_full_logo(area: Rect, buf: &mut Buffer, theme: &Theme) {
     }
 }
 
+/// Line count of the small logo used in minimal's committed welcome card (0 on a legacy Windows console, where the braille art is suppressed).
 pub fn compact_logo_line_count() -> u16 {
     if logo_hidden() {
         0
@@ -332,7 +341,7 @@ mod tests {
     #[test]
     fn shine_rests_dim_between_sweeps() {
         // During the rest phase the band is parked off-screen, so an interior glyph falls back to at most the gentle pulse, never full bright
-        let op = shine_opacity(0.5, 6.0);
+        let op = shine_opacity(0.5, 6.0); // secs % 4.0 = 2.0, past SWEEP_FRAC, in the rest phase
         assert!(op < 0.2, "resting opacity {op} should stay dim");
     }
 }

@@ -1,4 +1,15 @@
 //! Supporting structs/enums referenced from requests, chunks, and events.
+//!
+//! Every type in this module is a **placeholder**: the canonical
+//! implementations live in other crates today (`xai-hunk-tracker`,
+//! `xai-grok-shell`, `xai-grok-tools`, ...). We define minimal
+//! serializable shapes here so the wire-types crate's API surface
+//! compiles end-to-end. Each type carries a
+//! `// TODO(workspace): align with <canonical type>` comment naming the
+//! crate it should eventually be reconciled against.
+//!
+//! Until those subsystems are extracted, the only contract these types must satisfy is `Debug + Clone + Serialize + Deserialize`.
+//! The field shapes need only be sensible for the wire-format walkthrough.
 
 pub mod config;
 pub mod files;

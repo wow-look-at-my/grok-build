@@ -1,4 +1,7 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
+//
+// A plain prompt with a mid-text `/skill` token must keep the composer's teal token highlight in the scrollback echo
+// This runs live, with the real shell advertising the skill from an on-disk SKILL.md
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -75,7 +78,8 @@ async fn mid_text_skill_token_echo_styled_pty() {
         .wait_for_text(TYPED, Duration::from_secs(10))
         .expect("typed prompt echoed in the composer");
 
-    // Wait for the shell to advertise the skill Once the registry syncs.
+    // Wait for the shell to advertise the skill
+    // Once the registry syncs, the composer restyles the token and its fg diverges from the body word's fg
     let composer_deadline = Instant::now() + Duration::from_secs(30);
     let composer_token_fg = loop {
         harness.update(Duration::from_millis(100));
@@ -99,7 +103,8 @@ async fn mid_text_skill_token_echo_styled_pty() {
         .wait_for_text(DONE_SENTINEL, Duration::from_secs(30))
         .expect("mock response rendered (turn finished)");
 
-    // The composer cleared on submit, so the only row with the full typed text is the scrollback echo It may take a paint.
+    // The composer cleared on submit, so the only row with the full typed text is the scrollback echo
+    // It may take a paint to settle
     let echo_deadline = Instant::now() + Duration::from_secs(10);
     let (echo_token_fg, echo_body_fg) = loop {
         harness.update(Duration::from_millis(100));

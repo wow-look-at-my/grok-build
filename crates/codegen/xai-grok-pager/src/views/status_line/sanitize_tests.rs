@@ -98,6 +98,7 @@ fn link_on_the_second_line_is_measured_from_that_line() {
     };
 
     assert_eq!(text.line_count(), 2);
+    // Column 4 of the second line, not column 10 of the whole text.
     assert_eq!(
         (link.line, link.col_start, link.col_end, &*link.url),
         (1, 4, 8, "https://x.ai")

@@ -1,4 +1,13 @@
 //! macOS system sleep/wake via IOKit `IORegisterForSystemPower`.
+//!
+//! IOKit delivers power notifications through a `CFRunLoop` source, so we run a
+//! dedicated thread whose run loop receives the callbacks. The thread owns all
+//! IOKit resources for their full lifetime and tears them down after the run
+//! loop is stopped (from `Drop`).
+//!
+//! FFI is declared directly (CoreFoundation + IOKit frameworks) to avoid a
+//! `core-foundation` crate dependency for this tiny surface. The opaque CF
+//! types (`CFRunLoopRef`, `CFRunLoopSourceRef`, `CFRunLoopMode`) are pointers.
 
 use std::os::raw::c_void;
 use std::sync::Arc;
@@ -18,7 +27,9 @@ const K_IO_MESSAGE_SYSTEM_WILL_SLEEP: u32 = 0xe000_0280;
 const K_IO_MESSAGE_SYSTEM_WILL_NOT_SLEEP: u32 = 0xe000_0290;
 const K_IO_MESSAGE_SYSTEM_HAS_POWERED_ON: u32 = 0xe000_0300;
 
-// These constants and the `IOPMConnectionGetSystemCapabilities` query below are SPI.
+// These constants and the `IOPMConnectionGetSystemCapabilities` query below are SPI: declared in the *private*
+// `IOPMLibPrivate.h` (IOKitUser), not the public `IOPMLib.h` that ships in the SDK. A dark wake has CPU (and usually
+// network/disk) but *not* video: the system is up for background maintenance with the display off.
 const K_IOPM_CAPABILITY_CPU: u32 = 0x1;
 const K_IOPM_CAPABILITY_VIDEO: u32 = 0x2;
 
@@ -56,11 +67,14 @@ unsafe extern "C" {
     fn IONotificationPortDestroy(port: *mut c_void);
     fn IOAllowPowerChange(kern_port: MachPort, notification_id: isize) -> i32;
     fn IOServiceClose(connect: MachPort) -> i32;
-    // `IOPMCapabilityBits IOPMConnectionGetSystemCapabilities(void)` — an undeclared SPI symbol: exported by IOKit but prototyped only.
+    // `IOPMCapabilityBits IOPMConnectionGetSystemCapabilities(void)` — an undeclared SPI symbol: exported by IOKit but
+    // prototyped only in the private `IOPMLibPrivate.h`, not the public SDK.
     fn IOPMConnectionGetSystemCapabilities() -> u32;
 }
 
-/// Classify raw IOPM capability bits into a coarse [`PowerState`].
+/// Classify raw IOPM capability bits into a coarse [`PowerState`]. Note an idle *display sleep* while the system is
+/// otherwise fully awake keeps the system-level video capability set (the system can drive graphics on demand), so it
+/// classifies as `FullWake`, not `DarkWake` — only a real dark wake from sleep drops the video capability.
 fn classify_capabilities(caps: u32) -> PowerState {
     if caps & K_IOPM_CAPABILITY_CPU == 0 {
         return PowerState::Unknown;
@@ -75,11 +89,14 @@ fn classify_capabilities(caps: u32) -> PowerState {
 pub(crate) fn current_power_state() -> PowerState {
     // Safe: the C function takes no arguments and returns a plain bitfield.
     let caps = unsafe { IOPMConnectionGetSystemCapabilities() };
-    // We classify them ourselves so the mapping stays a pure.
+    // We classify them ourselves so the mapping stays a pure, unit-tested function (`classify_capabilities`) and so we
+    // control the fail-open-to-`Unknown` behavior on a missing CPU bit, which those predicates don't express.
     classify_capabilities(caps)
 }
 
 /// Lives for the duration of the run loop; pointed to by the IOKit `refcon`.
+/// Only touched from the run-loop thread (registration sets `root_port`
+/// before the loop runs; the callback reads both fields on that same thread).
 struct Context {
     callback: PowerCallback,
     root_port: MachPort,
@@ -123,7 +140,9 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        // Signal stop, then wake the run loop so the thread exits promptly and tears down IOKit resources.
+        // Signal stop, then wake the run loop so the thread exits promptly and tears down IOKit resources. The stop flag also
+        // covers the race where `CFRunLoopStop` arrives before the loop starts (the timed `CFRunLoopRunInMode` re-checks the
+        // flag).
         self.stop.store(true, Ordering::SeqCst);
         unsafe { CFRunLoopStop(self.runloop.0) };
         if let Some(handle) = self.handle.take() {
@@ -174,7 +193,9 @@ fn run_thread(
         return;
     }
 
-    // `Drop` calls `CFRunLoopStop`, which wakes this immediately.
+    // `Drop` calls `CFRunLoopStop`, which wakes this immediately; the finite (rather than infinite) timeout only exists to
+    // cover the rare race where `CFRunLoopStop` arrives before the loop starts. A long interval keeps idle wakeups
+    // negligible without delaying normal teardown.
     while !stop.load(Ordering::SeqCst) {
         unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 5.0, 0) };
     }
@@ -211,7 +232,9 @@ extern "C" fn power_callback(
     let ctx = unsafe { &*(refcon as *const Context) };
     let (event, needs_ack) = map_power_message(message_type);
     if let Some(event) = event {
-        // For sleep-bound messages the ack is sent only *after* the callback returns.
+        // For sleep-bound messages the ack is sent only *after* the callback returns: a `WillSleep` handler may block (bounded)
+        // waiting for an in-flight token refresh to finish, which intentionally delays the `IOAllowPowerChange` and holds off
+        // the suspend. IOKit allows ~30 s per phase before forcing sleep, so a bounded wait is safe.
         (ctx.callback)(event);
     }
     if needs_ack {
@@ -221,13 +244,15 @@ extern "C" fn power_callback(
 
 // ── Power assertions ────────────────────────────────────────────────
 
-// `IOPMAssertionID` is a `uint32_t`.
+// `IOPMAssertionID` is a `uint32_t`; `kIOPMAssertionLevelOn` is 255 and
+// `kIOReturnSuccess` is 0 (IOPMLib.h / IOReturn.h).
 type IoPmAssertionId = u32;
 const K_IOPM_ASSERTION_LEVEL_ON: u32 = 255;
 const K_IO_RETURN_SUCCESS: i32 = 0;
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 
-/// Spelled out because `kIOPMAssertionTypePreventSystemSleep` is a `CFSTR(...)` macro.
+/// Spelled out because `kIOPMAssertionTypePreventSystemSleep` is a `CFSTR(...)` macro, not an exported symbol — an
+/// `extern static` links and then aborts at load ("symbol not found in flat namespace"), which Linux CI can never catch.
 const ASSERTION_TYPE_PREVENT_SYSTEM_SLEEP: &str = "PreventSystemSleep";
 
 #[link(name = "IOKit", kind = "framework")]
@@ -259,7 +284,8 @@ pub(crate) struct Assertion(IoPmAssertionId);
 
 impl Drop for Assertion {
     fn drop(&mut self) {
-        // SAFETY: the id came from a successful `IOPMAssertionCreateWithName`, this type is not `Clone`.
+        // SAFETY: the id came from a successful `IOPMAssertionCreateWithName`, this type is not `Clone`, and `drop` runs once —
+        // so the assertion is released exactly once. Releasing is what keeps a leaked assertion from pinning the machine awake.
         unsafe { IOPMAssertionRelease(self.0) };
     }
 }
@@ -292,7 +318,8 @@ pub(crate) fn hold_awake(reason: &str) -> Option<Assertion> {
     }
 
     let mut id: IoPmAssertionId = 0;
-    // SAFETY: both strings are live CFStringRefs and `id` is a valid out-pointer for the duration of the call.
+    // SAFETY: both strings are live CFStringRefs and `id` is a valid
+    // out-pointer for the duration of the call.
     let rc = unsafe { IOPMAssertionCreateWithName(kind, K_IOPM_ASSERTION_LEVEL_ON, name, &mut id) };
     // The assertion retains what it needs; drop our references either way.
     // SAFETY: we created both and have not released them yet.
@@ -307,7 +334,9 @@ pub(crate) fn hold_awake(reason: &str) -> Option<Assertion> {
 mod tests {
     use super::*;
 
-    // Network (0x8) + disk (0x10): the `kIOPMCapabilityNetwork` / `kIOPMCapabilityDisk` bits a real dark/full wake typically also.
+    // Network (0x8) + disk (0x10): the `kIOPMCapabilityNetwork` / `kIOPMCapabilityDisk` bits a real dark/full wake typically
+    // also carries. Named here so the classifier inputs mirror real `IOPMConnectionGetSystemCapabilities` samples, not just
+    // the CPU/video bits `classify_capabilities` keys on.
     const K_IOPM_CAPABILITY_NETWORK: u32 = 0x8;
     const K_IOPM_CAPABILITY_DISK: u32 = 0x10;
 
@@ -339,7 +368,8 @@ mod tests {
 
     #[test]
     fn classify_unknown_without_cpu() {
-        // No CPU bit while we are running is a bogus/transitional sample.
+        // No CPU bit while we are running is a bogus/transitional sample: fail
+        // open to Unknown so callers keep their existing behavior.
         assert_eq!(classify_capabilities(0), PowerState::Unknown);
         assert_eq!(
             classify_capabilities(K_IOPM_CAPABILITY_VIDEO),
@@ -366,7 +396,8 @@ mod tests {
             map_power_message(K_IO_MESSAGE_SYSTEM_HAS_POWERED_ON),
             (Some(PowerEvent::DidWake), false)
         );
-        // Unrelated messages (e.g. kIOMessageSystemWillPowerOn 0xe0000320) deliver nothing and need no ack.
+        // Unrelated messages (e.g. kIOMessageSystemWillPowerOn 0xe0000320)
+        // deliver nothing and need no ack.
         assert_eq!(map_power_message(0xe000_0320), (None, false));
     }
 }

@@ -1,4 +1,7 @@
 //! Skill tool implementation - allows the agent to invoke user-defined skills.
+//!
+//! Skills are user-defined prompts stored as Markdown files that can be invoked
+//! by the user via slash commands (e.g., /commit) or by the model via this tool.
 
 use crate::implementations::grok_build::read_file::{
     READ_FILE_MAX_BYTES, READ_FILE_MAX_TOKENS, exceeds_read_cap,
@@ -34,8 +37,9 @@ pub struct SkillOutput {
     pub error: Option<String>,
 }
 
-/// Build the formatted skill message shown to the model. Canonical formatter
-/// for skill content injection.
+/// Build the formatted skill message shown to the model. Canonical formatter for skill content injection. Used by the
+/// skill tool (invocation path), TUI slash commands, the pager, and agent definition preloading — every path that
+/// surfaces a skill to the model routes through this function so the presentation stays consistent.
 pub fn build_skill_message(skill: &SkillInfo, content: &str) -> String {
     format!(
         "<skill name=\"{}\" description=\"{}\" path=\"{}\">\n{}\n</skill>",
@@ -43,9 +47,9 @@ pub fn build_skill_message(skill: &SkillInfo, content: &str) -> String {
     )
 }
 
-/// Build a `<skill>` block for user-invoked skill expansion. Used in the
-/// `<skill_information>` envelope when skills are expanded at prompt-assembly
-/// time (the new zero-round-trip path).
+/// Build a `<skill>` block for user-invoked skill expansion. Used in the `<skill_information>`
+/// envelope when skills are expanded at prompt-assembly time (the new zero-round-trip path).
+/// Includes the `args` attribute so the model knows what arguments were provided.
 pub fn build_skill_block(name: &str, args: &str, content: &str) -> String {
     if args.is_empty() {
         format!("<skill name=\"{name}\">\n{content}\n</skill>")
@@ -95,8 +99,8 @@ pub fn build_skill_information(skill_blocks: &[String], refs: &[SkillRef<'_>]) -
     }
     let mut out = String::from("<skill_information>\n");
 
-    // Index of referenced skills with their paths, deduplicated by (name,
-    // path) while preserving the insertion order.
+    // Index of referenced skills with their paths, deduplicated by (name, path)
+    // while preserving the original insertion order.
     if !refs.is_empty() {
         let mut seen = Vec::new();
         let deduped: Vec<_> = refs
@@ -131,7 +135,7 @@ pub fn build_skill_information(skill_blocks: &[String], refs: &[SkillRef<'_>]) -
 /// Format a skill name with its scope prefix (e.g. `"user:commit"`).
 pub fn format_skill_name(skill: &SkillInfo) -> String {
     // Plugin skills use "plugin-name:skill-name" so skills from different
-    // plugins don't collide. Other scopes use "scope:skill-name".
+    // plugins don't collide.  Other scopes use "scope:skill-name".
     if let Some(ref pn) = skill.plugin_name {
         return format!("{pn}:{}", skill.name);
     }
@@ -170,6 +174,7 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
     }
 
     // Fallback: derive "/NAME" from <command-name>NAME</command-name>.
+    // As above, both offsets are ASCII `<command-name>` tag boundaries.
     let inner = text.find(name_open)? + name_open.len();
     let end = inner + text.get(inner..)?.find(name_close)?;
     let name = text.get(inner..end)?;
@@ -189,7 +194,8 @@ pub fn extract_skill_display_text(text: &str) -> Option<String> {
 fn extract_command_args(text: &str) -> Option<&str> {
     let open = "<command-args>";
     let close = "</command-args>";
-    // `start` follows an ASCII `<command-args>` open tag and `end` is either an ASCII `</command-args>` offset or `text.len()`.
+    // `start` follows an ASCII `<command-args>` open tag and `end` is either an
+    // ASCII `</command-args>` offset or `text.len()`, so both are boundaries.
     let start = text.find(open)? + open.len();
     let end = text
         .get(start..)
@@ -208,7 +214,9 @@ fn escape_xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// Non-argument substitution inputs for `apply_substitutions`.
+/// Non-argument substitution inputs for `apply_substitutions`. Bundles the four same-typed
+/// `Option<&str>` context values so callers name each field by hand and cannot transpose them
+/// positionally.
 #[derive(Default)]
 pub struct SubstitutionContext<'a> {
     pub skill_dir: Option<&'a str>,
@@ -228,10 +236,14 @@ pub fn apply_substitutions(content: &mut String, args: Option<&str>, ctx: &Subst
         args_str.split_whitespace().collect()
     };
 
-    // Track whether an *argument* token consumed the args.
+    // Track whether an *argument* token consumed the args. Only that suppresses the **ARGUMENTS:**
+    // fallback; path/metadata tokens (SKILL_DIR, SESSION_ID, plugin root/data) expand without
+    // suppressing it, so a body that uses only a path token still receives its arguments.
     let mut args_substituted = false;
 
     // $ARGUMENTS[N] first (before $ARGUMENTS to avoid partial match).
+    // Scan up to the actual argument count + a buffer to handle
+    // out-of-range refs that should become empty.
     let max_idx = argv.len().max(1);
     for i in (0..max_idx + 20).rev() {
         let pattern = format!("$ARGUMENTS[{i}]");
@@ -294,14 +306,16 @@ pub fn apply_substitutions(content: &mut String, args: Option<&str>, ctx: &Subst
         }
     }
 
-    // Expand plugin-path tokens via the shared helper (single source of
-    // truth).
+    // Expand plugin-path tokens via the shared helper (single source of truth).
+    // Note: these do NOT set `args_substituted`, so they never suppress the
+    // **ARGUMENTS:** suffix below.
     if ctx.plugin_root.is_some() || ctx.plugin_data.is_some() {
         *content = crate::util::substitute_plugin_tokens(content, ctx.plugin_root, ctx.plugin_data);
     }
 
-    // Append the **ARGUMENTS:** suffix only when no argument token consumed
-    // the args (the path/metadata tokens above do not count).
+    // Append the **ARGUMENTS:** suffix only when no argument token consumed the
+    // args (the path/metadata tokens above do not count), preserving args for
+    // bodies that reference only a path token.
     if !args_substituted
         && let Some(a) = args
         && !a.is_empty()
@@ -436,7 +450,8 @@ pub fn extract_skill_body(content: &str) -> String {
 /// crate to load skill content at prompt-assembly time (the new zero-round-trip path). The private
 /// `load_skill_content` in `opencode/skill/mod.rs` is a duplicate of this.
 pub async fn load_skill_content(skill: &SkillInfo) -> Result<String, String> {
-    // Producers strip frontmatter before setting `body`.
+    // Producers strip frontmatter before setting `body`. Re-strip would drop a
+    // leading Markdown HR (`---`) and skip link resolution for disk skills.
     if let Some(body) = skill.body.as_ref().filter(|b| !b.is_empty()) {
         return Ok(body.clone());
     }
@@ -1032,7 +1047,8 @@ Step 2: Check for bugs.
 
     #[test]
     fn test_plugin_token_with_args_appends_suffix() {
-        // A path token expands, but with no argument token the args must still be appended via the **ARGUMENTS:** suffix.
+        // A path token expands, but with no argument token the args must still
+        // be appended via the **ARGUMENTS:** suffix (not silently dropped).
         let mut content = "Run ${CLAUDE_PLUGIN_ROOT}/tool.py".to_string();
         apply_substitutions(
             &mut content,
@@ -1065,7 +1081,8 @@ Step 2: Check for bugs.
 
     #[test]
     fn test_argument_token_with_path_token_no_suffix() {
-        // When an argument token IS present, args expand inline and the path token also expands.
+        // When an argument token IS present, args expand inline and the path
+        // token also expands; no **ARGUMENTS:** suffix is appended.
         let mut content = "Run ${CLAUDE_PLUGIN_ROOT}/tool.py $ARGUMENTS".to_string();
         apply_substitutions(
             &mut content,
@@ -1120,7 +1137,8 @@ Step 2: Check for bugs.
 
     #[test]
     fn test_dollar_amount_does_not_suppress_suffix() {
-        // $100 should NOT trigger substitution mode — args should still be appended as **ARGUMENTS:** suffix.
+        // $100 should NOT trigger substitution mode — args should still
+        // be appended as **ARGUMENTS:** suffix.
         let mut content = "Price: $100 per unit.".to_string();
         apply_substitutions(
             &mut content,
@@ -1135,7 +1153,8 @@ Step 2: Check for bugs.
 
     #[test]
     fn test_real_substitution_suppresses_suffix() {
-        // When $ARGUMENTS is present, args are expanded inline and **ARGUMENTS:** suffix is NOT appended.
+        // When $ARGUMENTS is present, args are expanded inline
+        // and **ARGUMENTS:** suffix is NOT appended.
         let mut content = "Run: $ARGUMENTS (cost: $100)".to_string();
         apply_substitutions(
             &mut content,

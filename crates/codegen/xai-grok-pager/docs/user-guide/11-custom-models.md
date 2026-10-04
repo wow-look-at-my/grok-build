@@ -54,7 +54,7 @@ default = "grok-4.5"
 allowed_models = ["grok-4.5", "grok-4*"]
 ```
 
-A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `[model.<name>]` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator. The list is not user-editable.
+A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `[model.<name>]` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator; the list is not user-editable.
 
 ### Config Default
 
@@ -69,7 +69,7 @@ default = "grok-4.5"
 
 ## Supported API Backends
 
-Grok supports API backends. Set `api_backend` in your `[model.*]` config to choose which protocol the model uses:
+Grok supports three API backends. Set `api_backend` in your `[model.*]` config to choose which protocol the model uses:
 
 | Value | API | Default |
 |-------|-----|---------|
@@ -113,7 +113,7 @@ Grok resolves the API key in this order:
 1. The `api_key` field in the model config
 2. The environment variable(s) named by `env_key` — a single string or an array of names. The first set, non-empty value wins (for example `env_key = ["ANTHROPIC_AUTH_TOKEN", "LC_ANTHROPIC_AUTH_TOKEN"]` for SSH `LC_*` forwarding)
 3. Your signed-in session token (from `grok login`), for a model with no `api_key`/`env_key` of its own
-4. The `XAI_API_KEY` environment variable (global fallback. Grok also accepts `GROK_CODE_XAI_API_KEY` for backward compatibility)
+4. The `XAI_API_KEY` environment variable (global fallback; Grok also accepts `GROK_CODE_XAI_API_KEY` for backward compatibility)
 
 ### Context Window
 
@@ -123,7 +123,7 @@ The `context_window` value tells Grok when to trigger auto-compaction. When you 
 
 `max_request_bytes` is the largest request body your endpoint accepts. Grok evicts older inline images from the conversation to stay under it, so a session with many screenshots keeps working instead of being rejected. When you omit it, Grok picks the default for the `api_backend`: 30 MB for `messages`, and 50 MiB for `chat_completions` and `responses`. Set it only when your host enforces a different cap.
 
-The cap is a property of the endpoint. As a result, it also works on a shared `[model_providers.<id>]` block, where every model pointing at that provider inherits it. A `max_request_bytes` on the model itself overrides the provider's value.
+The cap is a property of the endpoint, so it also works on a shared `[model_providers.<id>]` block, where every model pointing at that provider inherits it; a `max_request_bytes` on the model itself overrides the provider's value.
 
 ```toml
 [model_providers.messages-gateway]
@@ -143,18 +143,18 @@ max_request_bytes = 20000000   # per-model override
 
 ### Global Default Headers
 
-To apply the same headers to *every* model in the catalog -- built-in. This is prefetched from `/v1/models`, or custom -- set them once under the global `[models]` section instead of repeating them per model:
+To apply the same headers to *every* model in the catalog -- built-in, prefetched from `/v1/models`, or custom -- set them once under the global `[models]` section instead of repeating them per model:
 
 ```toml
 [models]
 extra_headers = { "X-Request-Tags" = "team=example,env=prod" }
 ```
 
-These act as a base for each model's inference requests. A per-model `[model.<id>].extra_headers` entry overrides the global default **per key** (matched case-insensitively). A key set on the model wins, while any global-only keys are still inherited by that model. Like the per-model field, they ride on that model's inference calls -- not on separate services such as image generation or video generation. This makes them handy for attribution tags (for example, cost tracking) without re-declaring them whenever a new model appears.
+These act as a base for each model's inference requests. A per-model `[model.<id>].extra_headers` entry overrides the global default **per key** (matched case-insensitively): a key set on the model wins, while any global-only keys are still inherited by that model. Like the per-model field, they ride on that model's inference calls -- not on separate services such as image generation or video generation -- which makes them handy for attribution tags (for example, cost tracking) without re-declaring them whenever a new model appears.
 
 ### Global Default Values
 
-A few common per-model settings can also be set once under `[models]` as a default for *every* model. A per-model `[model.<id>]` value always wins. The global only fills in where a model (or the server's model list) left the field unset:
+A few common per-model settings can also be set once under `[models]` as a default for *every* model. A per-model `[model.<id>]` value always wins; the global only fills in where a model (or the server's model list) left the field unset:
 
 ```toml
 [models]
@@ -168,9 +168,9 @@ subagent_rate_limit_max_attempts = 8
 stream_tool_calls           = true
 ```
 
-This is a small, fixed set of environment-wide knobs. Settings that identify a specific model (`model`, `base_url`, `api_key`, `context_window`, ...) cannot be defaulted this way, and a few settings with their own dedicated configuration -- auto-compaction (`[session]`). This is the system-prompt label (`[agent]`), and reasoning effort (`[models].default_reasoning_effort`) -- keep their existing homes.
+This is a small, fixed set of environment-wide knobs. Settings that identify a specific model (`model`, `base_url`, `api_key`, `context_window`, ...) cannot be defaulted this way, and a few settings with their own dedicated configuration -- auto-compaction (`[session]`), the system-prompt label (`[agent]`), and reasoning effort (`[models].default_reasoning_effort`) -- keep their existing homes.
 
-`rate_limit_retry_threshold` and `subagent_rate_limit_max_attempts` select different retry paths for subagents. Configuring `rate_limit_retry_threshold` makes the sampler own those retries and disables the separate subagent wait loop, including its 150-second cumulative wait budget and wait telemetry. `subagent_rate_limit_max_attempts` applies only when the sampler threshold is unset.
+`rate_limit_retry_threshold` and `subagent_rate_limit_max_attempts` select different 429 retry paths for subagents. Configuring `rate_limit_retry_threshold` makes the sampler own those retries and disables the separate subagent wait loop, including its 150-second cumulative wait budget and wait telemetry. `subagent_rate_limit_max_attempts` applies only when the sampler threshold is unset.
 
 > **Note on `stream_tool_calls`:** this one affects request *shape*, not just sampling. A few endpoints (some BYOK providers) expect it left unset; if a global `stream_tool_calls = true` causes problems for such a model, opt that model out with `stream_tool_calls = false` in its `[model.<id>]` block.
 
@@ -191,7 +191,7 @@ A key that also appears in the `base_url` query string is overridden (last value
 
 ### Environment-Variable Headers
 
-`env_http_headers` maps a request header to the name of an environment variable that supplies its value. As a result, a per-request secret never has to be written into `config.toml`:
+`env_http_headers` maps a request header to the name of an environment variable that supplies its value, so a per-request secret never has to be written into `config.toml`:
 
 ```toml
 [model.gateway]
@@ -200,7 +200,7 @@ base_url = "https://gateway.example/v1"
 env_http_headers = { "X-Tenant-Token" = "GATEWAY_TENANT_TOKEN" }
 ```
 
-Grok reads each variable when it builds the client for a session and places the value in the request headers only, not on disk. A header is skipped when its variable is unset or blank, and a resolved value overrides an `extra_headers` entry of the same name. Use `extra_headers` for a static value and `env_http_headers` for one that comes from the environment.
+Grok reads each variable when it builds the client for a session and places the value in the request headers only, never on disk. A header is skipped when its variable is unset or blank, and a resolved value overrides an `extra_headers` entry of the same name. Use `extra_headers` for a static value and `env_http_headers` for one that comes from the environment.
 
 Both fields also work on a shared `[model_providers.<id>]` block -- see [Provider Defaults](#provider-defaults).
 
@@ -403,7 +403,7 @@ name = "GPT-4o"
 env_key = "OPENAI_API_KEY"
 ```
 
-`api_backend` defaults to `"chat_completions"`. As a result, you do not need to set it explicitly for OpenAI.
+`api_backend` defaults to `"chat_completions"`, so you don't need to set it explicitly for OpenAI.
 
 ### OpenAI (Responses API)
 
@@ -418,11 +418,11 @@ api_backend = "responses"
 env_key = "OPENAI_API_KEY"
 ```
 
-On the Responses API, Grok asks for a `concise` reasoning summary by default. That is what the reasoning text shown in the UI comes from. `reasoning_summary` changes the request: `detailed` or `auto` for a fuller summary, or `none` to omit the field for gateways that reject it.
+On the Responses API, Grok asks for a `concise` reasoning summary by default; that is what the reasoning text shown in the UI comes from. `reasoning_summary` changes the request: `detailed` or `auto` for a fuller summary, or `none` to omit the field for gateways that reject it.
 
 ### AWS Bedrock (Mantle)
 
-Bedrock's OpenAI-compatible gateway rejects `reasoning.summary`, so set `reasoning_summary = "none"`. It authenticates with a Bedrock API key as a bearer token. The example below mints a short-lived one through a named auth provider:
+Bedrock's OpenAI-compatible gateway rejects `reasoning.summary`, so set `reasoning_summary = "none"`. It authenticates with a Bedrock API key as a bearer token; the example below mints a short-lived one through a named auth provider:
 
 ```toml
 [auth_provider.bedrock]
@@ -441,13 +441,17 @@ context_window = 500000
 
 ### Ollama and LM Studio (local models)
 
-Declare the provider and every model it serves shows up in `/model`, with its real context window. This is its capabilities and a dot showing whether it is loaded in VRAM right now:
+Declare the provider and every model it serves shows up in `/model`, with its
+real context window, its capabilities and a dot showing whether it is loaded in
+VRAM right now:
 
 ```toml
 [model_providers.ollama]
 ```
 
-That is the whole configuration. The provider id fills in the endpoint (`http://localhost:11434/v1`), the listing dialect and the pricing switch. LM Studio is the same:
+That is the whole configuration. The provider id fills in the endpoint
+(`http://localhost:11434/v1`), the listing dialect and the pricing switch. LM
+Studio is the same:
 
 ```toml
 [model_providers.lmstudio]
@@ -462,13 +466,25 @@ context_window_source = "loaded"   # "loaded" (default) or "max"
 favorite_models = ["qwen3-coder*"]
 ```
 
-**Why this matters.** Asked through the OpenAI-compatible `/v1/models`, a local runtime reports an id and nothing else, so every model gets the client's default 256k window. Ollama actually loads a runner at whatever your VRAM allowed — often 4k — and then silently drops the oldest messages once the prompt overflows. The harness never compacts, and the conversation loses its head with no error. Reading the runtime's own listing is what makes the number true.
+**Why this matters.** Asked through the OpenAI-compatible `/v1/models`, a local
+runtime reports an id and nothing else, so every model gets the client's
+default 256k window. Ollama actually loads a runner at whatever your VRAM
+allowed — often 4k — and then silently drops the oldest messages once the
+prompt overflows. The harness never compacts, and the conversation loses its
+head with no error. Reading the runtime's own listing is what makes the
+number true.
 
-The green dot beside a model in `/model` means it is resident in VRAM. A dim dot means it is on disk and will have to load first. Models that are not from a local runtime have no dot at all. The dot keeps up with the runtime on its own: a model that loads on its first request, or that LM Studio's idle TTL unloads. Changes colour within a few seconds without a restart.
+The green dot beside a model in `/model` means it is resident in VRAM. A dim
+dot means it is on disk and would have to load first. Models that are not from
+a local runtime have no dot at all. The dot keeps up with the runtime on its
+own: a model that loads on its first request, or that LM Studio's idle TTL
+unloads, changes colour within a few seconds without a restart.
 
 #### Pinning the window and keeping the model warm
 
-Ollama's OpenAI-compatible endpoint cannot carry `num_ctx`, `keep_alive` or `truncate` at all — they are not fields on that request. To set them, use the native backend:
+Ollama's OpenAI-compatible endpoint cannot carry `num_ctx`, `keep_alive` or
+`truncate` at all — they are not fields on that request. To set them, use the
+native backend:
 
 ```toml
 [model_providers.ollama]
@@ -481,16 +497,19 @@ keep_alive = "30m"          # stay resident between turns
 truncate = false            # error instead of silently dropping history
 ```
 
-LM Studio's compatible endpoint does accept extra body fields. As a result, it needs no backend change:
+LM Studio's compatible endpoint does accept extra body fields, so it needs no
+backend change:
 
 ```toml
 [model_providers.lmstudio.extra_body]
 ttl = 1800   # unload after 30 idle minutes
 ```
 
-`extra_body` also works on a single `[model.<id>]` block, and a model's own value wins over its provider's key by key.
+`extra_body` also works on a single `[model.<id>]` block, and a model's own
+value wins over its provider's key by key.
 
-Make sure the runtime is running (`ollama serve`, or LM Studio's server tab) and the model is pulled (`ollama pull qwen3-coder:30b`).
+Make sure the runtime is running (`ollama serve`, or LM Studio's server tab)
+and the model is pulled (`ollama pull qwen3-coder:30b`).
 
 ### Together AI
 
@@ -547,7 +566,7 @@ models_base_url = "https://api.acme.com/v1"
 api_key = "my-api-key"
 ```
 
-When you use `[endpoints]` with partial model overrides, Grok inherits the `base_url` from the endpoints config. As a result, you do not need to specify it in each `[model.*]` section.
+When you use `[endpoints]` with partial model overrides, Grok inherits the `base_url` from the endpoints config, so you do not need to specify it in each `[model.*]` section.
 
 ### Auth Behavior
 
@@ -570,7 +589,7 @@ Or via environment variable:
 export GROK_WEB_SEARCH_MODEL="grok-4.5"
 ```
 
-If you point web search at a custom model, you also need a `[model.*]` entry so Grok can reach it. Server-side ("backend") web search runs only when the model sets `supports_backend_search = true` (and the build enables backend search). It does not depend on `api_backend`:
+If you point web search at a custom model, you also need a `[model.*]` entry so Grok can reach it. Server-side ("backend") web search runs only when the model sets `supports_backend_search = true` (and the build enables backend search); it does not depend on `api_backend`:
 
 ```toml
 [models]

@@ -1,4 +1,8 @@
 //! `/btw` side question inline panel.
+//!
+//! Renders as a compact bordered panel above the prompt input box, below the scrollback.
+//! Shows the question and a loading indicator until the response arrives.
+//! The panel then stays on screen until the user presses Esc, at which point the content is persisted to scrollback as a collapsed `BtwBlock`.
 
 use crate::render::SafeBuf;
 use ratatui::buffer::Buffer;
@@ -27,6 +31,7 @@ pub enum BtwOverlayState {
     Done {
         question: String,
         /// Rendered markdown content (same renderer as regular agent messages).
+        /// Boxed to keep the enum small (`MarkdownContent` is large).
         content: Box<MarkdownContent>,
         /// Line offset for scrolling through long responses.
         scroll_offset: usize,
@@ -36,8 +41,8 @@ pub enum BtwOverlayState {
 }
 
 impl BtwOverlayState {
-    /// Build a `Done` state, rendering `response` as markdown via the same
-    /// [`MarkdownContent`] renderer used for regular agent messages.
+    /// Build a `Done` state, rendering `response` as markdown via the same [`MarkdownContent`] renderer used for regular agent messages.
+    /// The inline panel thus shows formatted tables, headings, lists, etc.
     pub fn done(question: String, response: String) -> Self {
         Self::Done {
             question,
@@ -68,6 +73,7 @@ impl BtwOverlayState {
         }
     }
 
+    /// Current scroll offset (0 for non-Done states).
     pub fn scroll_offset(&self) -> usize {
         match self {
             Self::Done { scroll_offset, .. } => *scroll_offset,
@@ -76,6 +82,7 @@ impl BtwOverlayState {
     }
 
     /// Max scroll offset for the Done response at `content_width`.
+    /// Returns 0 if the response fits within `max_body_lines`.
     pub fn max_scroll_offset(&self, content_width: usize, max_body_lines: usize) -> usize {
         match self {
             Self::Done { content, .. } => {
@@ -98,6 +105,7 @@ impl BtwOverlayState {
             return model;
         }
         // Same wrap + quote-bar strip as linear copy (`MarkdownContent::output`).
+        // Hit columns must index the selectable region, not the painted `│ ` prefix.
         let output = content.output(content_width);
         for (idx, line) in output.lines.iter().enumerate() {
             let joiner_to_previous = if idx == 0 { None } else { line.joiner.clone() };
@@ -170,6 +178,7 @@ fn wrapped_error_lines(error: &str, content_width: usize, max_lines: usize) -> V
     lines
 }
 
+/// Returns 0 when there is nothing to show (state is `None`).
 pub fn btw_panel_height(state: Option<&BtwOverlayState>, panel_width: u16) -> u16 {
     let cw = panel_width.saturating_sub(4) as usize; // border and pad
     match state {
@@ -219,6 +228,8 @@ pub fn render_btw_panel(
         return;
     }
 
+    // Only show focus (accent ring and the ↑↓ hint) when there is something to scroll
+    // `max_scroll_offset` is 0 for non-Done states and answers that fit
     let max_body = area.height.saturating_sub(2) as usize;
     let focus_active = focused && state.max_scroll_offset(content_width, max_body) > 0;
 
@@ -268,18 +279,19 @@ pub fn render_btw_panel(
     let title_x = area.x + 2;
     let mut hint_text = format!(" {hint} ");
     let mut hint_w = hint_text.width() as u16;
-    // Right-align the hint inside the right border, without underflowing on narrow panels
+    // Right-align the hint just inside the right border, without underflowing on very narrow panels
     let mut hint_x = (area.x + area.width).saturating_sub(1 + hint_w);
-    // On a narrow panel the Done-state hint (scroll position, ↑↓, and
-    // [Esc]) can leave no room for the title (hint_x < title_x) Fall back to
-    // a bare "[Esc]".
+    // On a narrow panel the Done-state hint (scroll position, ↑↓, and [Esc]) can leave no room for the title (hint_x < title_x)
+    // Fall back to a bare "[Esc]" so the close control and its mouse hit target always survive
+    // At 7 columns it fits at the minimum panel width (12), and the title regains room too
     if hint_x < title_x {
         hint_text = " [Esc] ".to_string();
         hint_w = hint_text.width() as u16;
         hint_x = (area.x + area.width).saturating_sub(1 + hint_w);
     }
 
-    // Reserve the hint's columns so a long question truncates instead of hiding the hint The title may use everything left of `hint_x`.
+    // Reserve the hint's columns so a long question truncates instead of hiding the hint
+    // The title may use everything left of `hint_x`, minus its own two padding spaces
     let question = state.question();
     let title_prefix = "/btw ";
     let max_title = hint_x.saturating_sub(title_x).saturating_sub(2) as usize;
@@ -363,8 +375,8 @@ pub fn render_btw_panel(
                 let Some(bl) = block_output.lines.get(idx) else {
                     continue;
                 };
-                // Content paints bidi-aware (when rtl_bidi is on) so the
-                // shared selection code, which maps visual columns.
+                // Content paints bidi-aware (when rtl_bidi is on) so the shared selection code, which maps visual columns, agrees with the drawn cells
+                // This matches scrollback/list content
                 buf.set_line_safe_bidi(
                     content_x,
                     body_y + row as u16,
@@ -436,8 +448,8 @@ pub fn render_btw_panel(
         }
         BtwOverlayState::Error { error, .. } => {
             let error_style = Style::default().fg(theme.accent_error).bg(bg);
-            // Cap at the rows this rect can paint: the minimal renderer routinely hands the panel a shorter rect than
-            // it asked for The ellipsis must land.
+            // Cap at the rows this rect can paint: the minimal renderer routinely hands the panel a shorter rect than it asked for
+            // The ellipsis must land on a row the user can see
             let max_rows =
                 (area.height.saturating_sub(2) as usize).min(DONE_MAX_BODY_LINES as usize);
             for (i, text) in wrapped_error_lines(error, content_width, max_rows)
@@ -545,6 +557,7 @@ mod tests {
         state
     }
 
+    /// `n` distinct rendered lines via CommonMark hard breaks (two trailing spaces), so each `lineNN` maps 1:1 to a rendered line.
     fn hard_break_lines(n: usize) -> String {
         (0..n)
             .map(|i| format!("line{i:02}"))
@@ -568,7 +581,7 @@ mod tests {
         assert!(!range.lines.is_empty());
         for (i, line) in range.lines.iter().enumerate() {
             assert_eq!(line.block_line_idx, i);
-            assert_eq!(line.screen_y, 1 + i as u16);
+            assert_eq!(line.screen_y, 1 + i as u16); // body_y = area.y + 1
         }
         assert!(
             !model.visible_blocks.is_empty(),
@@ -606,6 +619,7 @@ mod tests {
             question: "q".to_string(),
             error: error.to_string(),
         };
+        // Width 40 gives content_width 36; the message needs 4 rows
         let height = btw_panel_height(Some(&state), 40);
         assert!(height > 3, "long error must grow the panel, got {height}");
 
@@ -675,7 +689,7 @@ mod tests {
             question: "q".to_string(),
             error,
         };
-        // Desired height is far taller than the rows given.
+        // Desired height is far taller than the 5 rows given.
         assert!(btw_panel_height(Some(&state), 40) > 5);
         let buf = render_to_buffer(&state, 40, 5);
         let last_body = row_text(&buf, 40, 3);
@@ -692,9 +706,11 @@ mod tests {
 
     #[test]
     fn scroll_offset_shifts_block_line_idx() {
+        // 10 short lines, each on its own rendered line (hard breaks).
         let response = hard_break_lines(10);
         let state_0 = done_with_scroll(&response, 0);
         let state_2 = done_with_scroll(&response, 2);
+        // Height 6 gives max_body 4; with 10 lines, offset 2 is valid
         let model_0 = render_with_model(&state_0, 40, 6);
         let model_2 = render_with_model(&state_2, 40, 6);
         assert!(!model_0.ranges.is_empty());
@@ -853,6 +869,7 @@ mod tests {
         );
     }
 
+    /// Regression: the Done overlay must expose markdown hyperlinks as overlay links (OSC 8 / click-to-open), not only paint styled text.
     #[test]
     fn done_state_maps_markdown_links_to_overlay() {
         let url = "https://example.com/btw-link";
@@ -947,6 +964,8 @@ mod tests {
             scroll_offset: so, ..
         } = &mut state
         {
+            // 20 lineNN lines plus 1 link make 21 lines; height 6 gives max_body 4
+            // The offset clamps to total minus max_body, 17, so indices 17..20 are visible and the link (idx 20) is the last visible row
             *so = 18;
         }
         let (_model, overlay) = render_with_links(&state, 60, 6);
@@ -961,6 +980,7 @@ mod tests {
                     == url
             })
             .expect("scrolled link should still map when visible");
+        // Body starts at row 1; with clamped offset 17 and 4 visible rows, the link sits at visible index 3, so screen_row = 1 + 3 = 4
         assert_eq!(
             link.screen_row, 4,
             "link should be on last visible body row"
@@ -1010,7 +1030,7 @@ mod tests {
     /// The close control never disappears; the wide scroll indicator is dropped rather than hiding [Esc].
     #[test]
     fn done_narrow_panel_falls_back_to_bare_esc() {
-        // Many lines overflow, so the hint gains a "1-4/50" scroll prefix that is far too wide for a 14-col panel
+        // 50 lines overflow, so the hint gains a "1-4/50" scroll prefix that is far too wide for a 14-col panel
         let response = hard_break_lines(50);
         let state = done_with_scroll(&response, 0);
         let width = 14; // below the full-hint width, above the 12-col minimum

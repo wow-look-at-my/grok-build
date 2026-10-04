@@ -41,7 +41,8 @@ pub fn resolve_crash_handler_enabled(
     )
 }
 
-/// Process-global cache of the remote tier, read by [`load_crash_handler_enabled_sync`] before Tokio starts.
+/// Process-global cache of the remote tier, read by [`load_crash_handler_enabled_sync`] before Tokio starts, when no live `RemoteSettings` exists.
+/// Fail-safe to `None` on lock poisoning.
 static REMOTE_CRASH_HANDLER_ENABLED: std::sync::RwLock<Option<bool>> = std::sync::RwLock::new(None);
 
 /// Called when the agent applies `RemoteSettings`.
@@ -90,7 +91,8 @@ mod crash_handler_gate_tests {
     use super::*;
     use crate::agent::config::ConfigSource;
 
-    // `GROK_CRASH_HANDLER` is process-global Serialize and force it unset at the top of each test.
+    // `GROK_CRASH_HANDLER` is process-global
+    // Serialize and force it unset at the top of each test so a developer's shell value can't make these flaky
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     fn guard() -> std::sync::MutexGuard<'static, ()> {
         let g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());

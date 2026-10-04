@@ -1,4 +1,9 @@
 //! Turn-boundary fan-out for the workspace.
+//!
+//! [`WorkspaceHandle::on_turn_boundary`] is the single internal entry point for turn/prompt boundaries.
+//!
+//! A rewind checkpoint is keyed by `prompt_index` and bundles the filesystem [`RewindPoint`], an optional hunk delta, and optional git HEAD/index.
+//! Restore reverts all enabled domains together.
 use crate::handle::WorkspaceHandle;
 use crate::session::WorkspaceSession;
 use crate::session::file_state::{FileRewindResponse, RewindPoint, rewind_files};
@@ -7,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use xai_hunk_tracker::{HunkId, HunkTrackerSnapshot, HunkTurnDelta};
 use xai_tool_protocol::turn_hook::TurnHookOutcome;
-/// A turn/prompt boundary routed through [`WorkspaceHandle::on_turn_boundary`]. `prompt_index` `None`
-/// is a turn hook; `Some` is a rewind RPC arm. Both effect sets stay disjoint.
+/// A turn/prompt boundary routed through [`WorkspaceHandle::on_turn_boundary`].
+/// `prompt_index` `None` is a turn hook; `Some` is a rewind RPC arm. The two effect sets stay disjoint.
 pub(crate) enum TurnBoundary {
     Start {
         prompt_index: Option<usize>,
@@ -45,6 +50,7 @@ impl TurnBoundary {
         }
     }
     /// Rewind begin from `begin_prompt`: FS-rewind only.
+    /// The RPC has no turn metadata, so `turn_number` mirrors `prompt_index`; the dispatcher ignores it here.
     pub(crate) fn rewind_begin(prompt_index: usize) -> Self {
         Self::Start {
             prompt_index: Some(prompt_index),
@@ -64,15 +70,16 @@ impl TurnBoundary {
         }
     }
 }
-/// Per-prompt rewind checkpoint: FS rewind point plus the hunk delta for the
-/// same `prompt_index`.
+/// Per-prompt rewind checkpoint: FS rewind point plus the hunk delta for the same `prompt_index`.
+/// Optional domain fields use `#[serde(default)]` so an older blob still deserializes; a missing field is `None`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RewindCheckpoint {
     /// The prompt this checkpoint belongs to.
     pub prompt_index: usize,
     /// Filesystem before/after snapshots for the prompt.
     pub fs: RewindPoint,
-    /// Incremental hunk delta. `None` when capture was off or the turn touched no tracked files.
+    /// Incremental hunk delta.
+    /// `None` when capture was off or the turn touched no tracked files.
     #[serde(default)]
     pub hunks: Option<HunkTurnDelta>,
 }
@@ -80,8 +87,8 @@ pub struct RewindCheckpoint {
 pub(crate) fn rewind_hunks_enabled() -> bool {
     xai_grok_config::env_bool("GROK_WORKSPACE_REWIND_HUNKS").unwrap_or(false)
 }
-/// Resolve `workspace_rewind_durable` from `GROK_WORKSPACE_REWIND_DURABLE`
-/// (default off).
+/// Resolve `workspace_rewind_durable` from `GROK_WORKSPACE_REWIND_DURABLE` (default off).
+/// Off keeps the legacy in-memory-only path with no disk I/O.
 pub(crate) fn rewind_durable_enabled() -> bool {
     xai_grok_config::env_bool("GROK_WORKSPACE_REWIND_DURABLE").unwrap_or(false)
 }
@@ -178,8 +185,9 @@ impl WorkspaceSession {
             hunks,
         })
     }
-    /// Assemble the checkpoint for `prompt_index` and mirror it to the
-    /// [`CheckpointStore`](crate::session::checkpoint_store::CheckpointStore).
+    /// Assemble the checkpoint for `prompt_index` and mirror it to the [`CheckpointStore`](crate::session::checkpoint_store::CheckpointStore).
+    /// Last-write-wins (idempotent across repeated finalizes); no-op when no checkpoint exists.
+    /// The store is a durability mirror only; restore stays in-process.
     pub(crate) async fn persist_checkpoint(&self, prompt_index: usize) {
         let Some(checkpoint) = self.get_checkpoint(prompt_index).await else {
             return;
@@ -636,7 +644,7 @@ mod tests {
             "Completed turns must never increment the non-Completed finalize canary"
         );
     }
-    /// Capture turns, then rewind: the earlier turn survives; the target and later turns are dropped and truncated.
+    /// Capture two turns, then rewind: the earlier turn survives; the target and later turns are dropped and truncated.
     #[tokio::test]
     async fn capture_then_restore_round_trips_turn_delta() {
         let handle = make_handle();
@@ -744,6 +752,7 @@ mod tests {
             "the store is left untouched when restore cannot reconstruct"
         );
     }
+    /// Rewind to 0: re-seed to the empty start-of-session state.
     #[tokio::test]
     async fn restore_to_zero_clears_all_hunk_state() {
         let handle = make_handle();

@@ -1,4 +1,5 @@
-//! Chooses the directories a watcher arms, and turns events into changes to that choice.
+//! Chooses the directories a watcher arms, and turns events into changes to
+//! that choice.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -109,13 +110,15 @@ pub(crate) fn passes_custom_globs(
 }
 
 /// What selection refuses to descend into: VCS metadata, watched surgically
-/// instead, and checkouts owned by another workspace.
+/// instead, and checkouts owned by another workspace. Never asked about the
+/// workspace root, which holds the `.git` that would make it a checkout.
 pub(crate) fn skip_selection(dir: &Path) -> bool {
     dir_named(dir, ".git") || dir_named(dir, ".sl") || is_another_workspace(dir)
 }
 
 /// [`skip_selection`] applied to `dir` and to every directory between it and
-/// `root`.
+/// `root`. `git worktree add` writes its marker last, so a directory can be
+/// queued as an add before the checkout above it is recognizable.
 pub(crate) fn skip_selection_below(root: &Path, dir: &Path) -> bool {
     dir.ancestors()
         .take_while(|d| *d != root && d.starts_with(root))

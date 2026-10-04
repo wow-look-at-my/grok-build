@@ -1,10 +1,24 @@
 //! Client-side `workspace/didChangeWatchedFiles`.
+//!
+//! Servers that do not see this capability create one OS `FileSystemWatcher`
+//! per subdirectory of caches such as `~/.nuget/packages`. On Linux that is
+//! one inotify watch per directory — tens or hundreds of thousands on a real
+//! NuGet cache
+//! ([dotnet/roslyn#82857](https://github.com/dotnet/roslyn/issues/82857)).
+//!
+//! We advertise the capability and accept `client/registerCapability` so the
+//! server disables its own watchers. We do **not** arm OS watches. Out-of-
+//! workspace globs (the NuGet cache, `dotnet/packs`) are accepted and then
+//! ignored for delivery. Workspace mutations we already know about are
+//! forwarded only when they match a live registration's glob and `WatchKind`.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Edits that arrive before any in-workspace registration.
+/// Edits that arrive before any in-workspace registration. Bootstrap replay
+/// happens right after initialize, and `client/registerCapability` usually
+/// follows; without this queue those first `.csproj` events disappear.
 const MAX_PENDING_BEFORE_REGISTER: usize = 256;
 
 use async_lsp::LanguageServer;
@@ -31,6 +45,7 @@ struct Watcher {
     /// `None` means the glob is outside the workspace and must never match.
     matcher: Option<GlobSet>,
     /// `Some` = match `path` relative to this base (must be under it).
+    /// `None` = match the absolute path against the glob as given.
     base: Option<PathBuf>,
     kind: WatchKind,
 }
@@ -67,8 +82,9 @@ struct Inner {
     pending: VecDeque<PendingChange>,
 }
 
-/// Live `workspace/didChangeWatchedFiles` registrations for one server. Keyed
-/// by registration id so unregister is exact.
+/// Live `workspace/didChangeWatchedFiles` registrations for one server. Keyed by registration id so
+/// unregister is exact. Delivery consults the stored globs and `WatchKind`; we never turn a
+/// registration into an OS watch.
 #[derive(Clone)]
 pub(crate) struct WatchedFiles {
     workspace_root: Arc<PathBuf>,
@@ -152,7 +168,9 @@ impl WatchedFiles {
         let Ok(parsed) =
             serde_json::from_value::<DidChangeWatchedFilesRegistrationOptions>(options.clone())
         else {
-            // Unparseable options still have to be accepted or the server falls back to its own FileSystemWatcher.
+            // Unparseable options still have to be accepted or the server
+            // falls back to its own FileSystemWatcher. Deliver every
+            // workspace event rather than go silent.
             return vec![self.workspace_catch_all()];
         };
         if parsed.watchers.is_empty() {
@@ -172,6 +190,8 @@ impl WatchedFiles {
                 if Path::new(&pattern).is_absolute() {
                     let in_workspace = is_under(&self.workspace_root, Path::new(&pattern));
                     // Match the absolute path against the glob as written.
+                    // Stripping a "/" base would drop the leading slash and
+                    // the glob would never hit.
                     (None, pattern, in_workspace)
                 } else {
                     (
@@ -287,7 +307,8 @@ fn drain_matching_pending(inner: &mut Inner) -> Vec<(PathBuf, FileChangeType)> {
         if watchers_match(inner, &event.path, event.typ) {
             matched.push((event.path, event.typ));
         } else {
-            // A first `**/*.cs` must not drop a held `.csproj`.
+            // A first `**/*.cs` must not drop a held `.csproj`; later
+            // registrations still get a chance, until the cap evicts.
             kept.push_back(event);
         }
     }

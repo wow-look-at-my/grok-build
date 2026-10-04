@@ -1,4 +1,13 @@
 //! Onboarding tutorial overlay (`/tutorial`).
+//!
+//! A top-level modal (works over both the welcome screen and an agent session) with two screens:
+//!
+//! - **List**: the tutorial topics from [`crate::tutorial_docs`] with ✓ marks for explored topics. Enter opens a topic; Esc closes.
+//! - **Topic**: a scrollable markdown page (same chrome as the release-notes viewer).
+//!   `→`/`←` flow through the topics in order; Esc returns to the list.
+//!
+//! Opened on demand via `/tutorial` (also listed in the command palette).
+//! Never auto-shows.
 
 use std::collections::HashSet;
 
@@ -107,6 +116,7 @@ pub enum TutorialOutcome {
     Closed,
 }
 
+/// Search is disabled: six fixed topics don't need filtering, and letter keys would otherwise start a query.
 fn list_picker_config() -> PickerConfig<'static> {
     PickerConfig {
         title: None,
@@ -266,7 +276,8 @@ fn handle_list_input(ev: &Event, st: &mut TutorialState) -> TutorialOutcome {
     {
         return TutorialOutcome::Consumed;
     }
-    // Search is disabled on the fixed topic list.
+    // Search is disabled on the fixed topic list, but the picker's paste path fills the query regardless of `disable_search`
+    // Swallow paste here so it can't start an invisible filter
     if matches!(ev, Event::Paste(_)) {
         return TutorialOutcome::Consumed;
     }

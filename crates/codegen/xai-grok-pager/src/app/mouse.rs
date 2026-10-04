@@ -1,4 +1,7 @@
 //! Mouse input handling for [`AgentView`]: the `handle_mouse` event handler and the scrollbar click helper.
+//! `handle_mouse` covers click-to-focus, hit-testing of cached click rects, and per-pane click dispatch.
+//!
+//! Hit-tests here assume the cached rects come from the last rendered frame.
 use super::actions::Action;
 use super::agent_view::{
     AgentPane, AgentView, CONTEXT_CLICK_DEBOUNCE_MS, CtaPhase, MULTI_CLICK_TIMEOUT_MS, PromptMode,

@@ -1,4 +1,5 @@
 //! Live-work chips collapse before dashboard titles truncate; right-hand controls stay reserved.
+//! Chips use the dock's gray text, with no brackets: `Subagents 2 · Tasks 3`.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

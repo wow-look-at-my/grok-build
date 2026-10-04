@@ -1,4 +1,6 @@
-//! Mock OTLP/HTTP server for the external stream, recording every post in an [`OtelRecorder`].
+//! Mock OTLP/HTTP server for the external stream, recording every post in an [`OtelRecorder`]. An
+//! undecodable body is kept as an [`OtelFault`] and still answered 200, so the exporter does not
+//! retry it.
 
 use std::collections::HashMap;
 

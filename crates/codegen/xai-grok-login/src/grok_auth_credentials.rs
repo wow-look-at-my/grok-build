@@ -35,6 +35,7 @@ impl GrokAuthCredentials {
         }
     }
     /// Live credentials backed by an `AuthManager`.
+    /// `resolve_async()` refreshes from memory, then disk, then OIDC; `resolve()` reads the in-memory cache for sync contexts.
     pub fn with_auth_manager(mut self, am: Arc<crate::AuthManager>) -> Self {
         self.auth_manager = Some(am);
         self
@@ -42,7 +43,7 @@ impl GrokAuthCredentials {
     pub fn auth_manager(&self) -> Option<&Arc<crate::AuthManager>> {
         self.auth_manager.as_ref()
     }
-    /// Error hint for multiple responses.
+    /// Error hint for 401 responses.
     pub fn auth_error_hint(&self) -> &'static str {
         if self.user_token.is_some() {
             "Your auth token is invalid or expired. Run `grok login` to re-authenticate."
@@ -50,8 +51,9 @@ impl GrokAuthCredentials {
             "Not authenticated."
         }
     }
-    /// Return a snapshot with the live token from the internal `AuthManager`
-    /// if available, falling back to the static `user_token`.
+    /// Return a snapshot with the live token from the internal `AuthManager` if available, falling back to the static `user_token`.
+    /// Uses `current_or_expired()` instead of `current()` so a token in the early-invalidation refresh window is still returned.
+    /// Such a token is expired for proactive refresh but still accepted by the server.
     pub fn resolve(&self) -> GrokAuthCredentials {
         if let Some(ref am) = self.auth_manager
             && let Some(auth) = am.current_or_expired()

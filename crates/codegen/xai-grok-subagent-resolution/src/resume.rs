@@ -1,4 +1,9 @@
 //! Resume identity validation: ensures that a resumed subagent matches the source's identity fields (type, persona).
+//!
+//! Model is not an identity gate on resume.
+//! The shell always inherits and pins the source model, and any caller-provided model override is silently ignored.
+//!
+//! Extracted from `xai-grok-shell/src/agent/subagent/` resume validation block.
 
 use crate::types::ResumeSourceData;
 

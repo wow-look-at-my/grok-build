@@ -1,4 +1,7 @@
 //! Shared connection-borrow lifecycle for `ToolServer` and `ToolHarness`.
+//!
+//! Wraps a pooled [`HubConnection`] with a [`CancellationToken`] for
+//! shutdown coordination and an at-most-once `torn_down` guard.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,8 +18,10 @@ use crate::connection::{
 use crate::error::ClientError;
 use crate::pool::HubConnectionPool;
 
-/// Borrowed slice of a pooled [`HubConnection`] plus the refcount of session
-/// bindings the borrower owns.
+/// Borrowed slice of a pooled [`HubConnection`] plus the refcount of
+/// session bindings the borrower owns. Drop guard lives here so the
+/// teardown sequence is at-most-once across explicit `shutdown` and
+/// the `Drop` fallback.
 pub(crate) struct ConnectionBorrow {
     connection: Arc<HubConnection>,
     shutdown: CancellationToken,
@@ -149,6 +154,8 @@ mod tests {
         });
         let _ = socket.send(Message::Text(ack.to_string().into())).await;
         // Keep the WebSocket alive until the client disconnects.
+        // These tests only exercise borrow lifecycle (teardown
+        // atomicity), not protocol frames.
         while let Some(Ok(_msg)) = socket.recv().await {}
     }
 

@@ -45,10 +45,12 @@ enum WorktreeCommand {
         /// Report what would be removed without removing it.
         #[arg(long)]
         dry_run: bool,
-        /// Expire worktrees idle longer than this, e.g. `7d`. Without it, nothing expires.
+        /// Expire worktrees idle longer than this, e.g. `7d`.
+        /// Without it, nothing expires.
         #[arg(long)]
         max_age: Option<String>,
         /// Skip the live-process and protected-path guards.
+        /// This does not override the safety check; use `grok worktree rm` for that.
         #[arg(short, long)]
         force: bool,
     },

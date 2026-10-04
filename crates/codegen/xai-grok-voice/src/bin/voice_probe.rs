@@ -1,4 +1,9 @@
 //! Standalone voice debug harness: capture the mic, stream to STT, print the transcript.
+//!
+//! ```bash
+//! export XAI_API_KEY=...
+//! cargo run -p xai-grok-voice --bin voice-probe -- --seconds 5
+//! ```
 
 #![deny(clippy::indexing_slicing)]
 
@@ -9,8 +14,8 @@ use xai_grok_voice::{
 };
 
 fn main() -> anyhow::Result<()> {
-    // Hidden mic-capture helper intercept (macOS): the capture backend
-    // re-execs the current binary, here voice-probe itself It runs.
+    // Hidden mic-capture helper intercept (macOS): the capture backend re-execs the current binary, here voice-probe itself
+    // It runs before any runtime/TLS init so the capture child stays minimal
     if let Some(code) = xai_grok_voice::maybe_run_capture_subprocess() {
         std::process::exit(code);
     }

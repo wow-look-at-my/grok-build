@@ -10,8 +10,12 @@ pub struct NotificationConfig {
     pub sleep_prevention: bool,
     pub progress_bar: bool,
     /// Show an automatic "where was I" session recap when you return to the terminal after being away.
+    /// Only applies when the shell has rolled out session recap (`sessionRecap` on ACP initialize or remote settings).
+    /// Manual `/recap` is gated by the shell flag alone, not this toggle.
     pub session_recap: bool,
     /// Minimum seconds the terminal must be unfocused ("stepped away") before the client requests an automatic recap.
+    /// This is a short debounce against quick tab blips.
+    /// The authoritative timing (at least 3 minutes since the last completed turn) is enforced agent-side.
     pub session_recap_threshold_secs: u64,
     pub title: TitleConfig,
     pub hooks: Vec<NotificationHook>,

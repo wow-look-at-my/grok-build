@@ -4,8 +4,9 @@ use super::*;
 fn layout_assigns_disjoint_areas() {
     let area = Rect::new(0, 0, 80, 30);
     let layout = compute_layout(area, true);
-    // Blank gap rows sit between the content rects: header_gap,
-    // actions_gap, dispatch_gap, and shortcuts_gap.
+    // Four blank gap rows sit between the content rects: header_gap, actions_gap, dispatch_gap, and shortcuts_gap
+    // The bottom_margin is a real rect painted bg_base, so it counts inside the total
+    // The gaps are intentional blank breathing-room rows that the area-wide bg fill paints without any dedicated sub-renderer
     let total = layout.top_margin.height
         + layout.header.height
         + layout.actions.height
@@ -13,7 +14,7 @@ fn layout_assigns_disjoint_areas() {
         + layout.dispatch.height
         + layout.footer.height
         + layout.bottom_margin.height;
-    // The rows absorbed by the gaps: header_gap, actions_gap, dispatch_gap, and shortcuts_gap
+    // The 4 rows absorbed by the gaps: header_gap, actions_gap, dispatch_gap, and shortcuts_gap
     assert_eq!(total + 4, area.height);
 }
 
@@ -40,6 +41,7 @@ fn layout_places_actions_row_between_header_and_list() {
 }
 
 /// On short terminals the gaps around the actions row collapse, but the row itself stays as long as the header does.
+/// The four gaps switch on one height apart, bottom to top: dispatch gap at 11, shortcuts gap at 12, header gap at 13, actions gap at 14.
 #[test]
 fn layout_actions_row_follows_header_on_short_terminals() {
     for h in [10u16, 11, 12] {
@@ -71,6 +73,8 @@ fn layout_actions_row_follows_header_on_short_terminals() {
     assert_eq!(tiny.actions.height, 0);
 }
 
+/// Growing the terminal must never hide list content: with the default one-row draft the list keeps at least two rows from height 9
+/// up, and its height is non-decreasing in the terminal height, including across every gap threshold and the bottom-margin step.
 #[test]
 fn layout_list_height_never_shrinks_as_terminal_grows() {
     let list_h = |h: u16| {
@@ -134,11 +138,13 @@ fn layout_never_overflows_area_for_any_dispatch_rows() {
     }
 }
 
+/// Multiline dispatch: the box grows by exactly one row per extra text row (2 border rows plus N text rows).
 /// The row list gives up the space so the totals still tile the area.
 #[test]
 fn dispatch_box_grows_for_multiline_input() {
     let area = Rect::new(0, 0, 80, 30);
     let single = compute_layout(area, false);
+    // The single-line default is 3 rows: top border, 1 text row, bottom border
     assert_eq!(single.dispatch.height, 3);
 
     let three = compute_layout_with_dispatch(area, false, 3);
@@ -146,6 +152,7 @@ fn dispatch_box_grows_for_multiline_input() {
         three.dispatch.height, 5,
         "3 text rows → 2 border + 3 text = 5 rows",
     );
+    // The list absorbs the extra two rows the dispatch box took.
     assert_eq!(
         three.list.height + 2,
         single.list.height,
@@ -155,6 +162,7 @@ fn dispatch_box_grows_for_multiline_input() {
     assert_eq!(three.footer.y, three.dispatch.y + three.dispatch.height + 1);
 }
 
+/// A `dispatch_text_rows` of 0 is floored to a single text row so the box never collapses below its single-line chrome.
 #[test]
 fn dispatch_box_floors_at_single_text_row() {
     let area = Rect::new(0, 0, 80, 30);
@@ -162,7 +170,9 @@ fn dispatch_box_floors_at_single_text_row() {
     assert_eq!(zero.dispatch.height, 3, "0 text rows floors to 1 (3 total)");
 }
 
+/// The dashboard reserves 1 row of bottom margin below the shortcuts bar on tall enough terminals.
 /// Without it the shortcuts sit flush against the alt-screen's bottom edge.
+/// Mirrors the agent view's `bottom_vpad` (`outer_vpad = 1`, dropped to 0 at `area.height <= 16`).
 #[test]
 fn layout_reserves_bottom_margin_on_tall_terminals() {
     let area = Rect::new(0, 0, 80, 30);
@@ -183,6 +193,7 @@ fn layout_reserves_bottom_margin_on_tall_terminals() {
     );
 }
 
+/// Bottom margin collapses to 0 on short terminals (`area.height <= 16`, matching the agent view's threshold) so the row list isn't starved.
 #[test]
 fn layout_drops_bottom_margin_on_short_terminals() {
     let area = Rect::new(0, 0, 80, 16);
@@ -287,6 +298,8 @@ fn layout_reserves_dispatch_and_shortcuts_gaps() {
     );
 }
 
+/// Gaps collapse to 0 on short terminals so the row list isn't starved.
+/// The dispatch gap switches on at `height > 10` and the shortcuts gap at `height > 11`; at 10 both are still off.
 #[test]
 fn layout_drops_gaps_on_short_terminals() {
     let area = Rect::new(0, 0, 80, 10);
@@ -328,6 +341,7 @@ fn layout_reserves_header_gap_on_tall_terminals() {
     );
 }
 
+/// The header gap collapses to 0 on short terminals (`area.height <= 12`; it is the third of the four gaps to switch on).
 /// This keeps the row list from being starved.
 #[test]
 fn layout_drops_header_gap_on_short_terminals() {
@@ -345,6 +359,7 @@ fn layout_drops_header_gap_on_short_terminals() {
 }
 
 /// The dashboard reserves one row of top margin on terminals tall enough to spare it, mirroring the welcome view's `v_margin`.
+/// Below the height threshold the margin collapses to 0 so the row list isn't starved.
 #[test]
 fn layout_reserves_top_margin_on_tall_terminals() {
     let area = Rect::new(0, 0, 80, 30);
@@ -360,6 +375,7 @@ fn layout_reserves_top_margin_on_tall_terminals() {
     );
 }
 
+/// Short terminals collapse the top margin to 0 so the row list still gets visible space.
 /// The threshold matches the dispatch chrome's threshold (`area.height > 6`).
 #[test]
 fn layout_drops_top_margin_on_short_terminals() {
@@ -372,6 +388,7 @@ fn layout_drops_top_margin_on_short_terminals() {
 fn layout_at_minimum_width_returns_valid_rect() {
     let area = Rect::new(0, 0, MIN_DASHBOARD_WIDTH, 30);
     let layout = compute_layout(area, false);
+    // The list is inset by LIST_OUTER_HPAD on each side even at the minimum dashboard width (40 cols, 38 usable for content)
     assert_eq!(layout.list.width, MIN_DASHBOARD_WIDTH - LIST_OUTER_HPAD * 2);
 }
 
@@ -394,6 +411,7 @@ fn allocate_peek_refuses_when_remainder_below_min() {
     let area = Rect::new(0, 0, 80, 24);
     let fixed = chrome_overhead(area);
     let alloc = allocate_peek(area.height, fixed, 20, PEEK_MIN_BOX_LIVE_TAIL);
+    // Chrome takes 9 rows, leaving 15; the list floor of 12 leaves 3, below the peek min of 8, so no peek opens
     assert!(
         !alloc.show_peek,
         "h=24 should not fit list floor + peek min"
@@ -455,6 +473,7 @@ fn max_peek_content_rows_zero_on_short_terminal() {
     assert_eq!(max_peek_content_rows(Rect::new(0, 0, 80, 1)), 0);
 }
 
+/// `h=29` is the shortest terminal that fits the 9 chrome rows, the 12-row list floor, and the 8-row peek minimum.
 #[test]
 fn allocate_peek_list_floor_and_max_fraction() {
     assert!(
@@ -491,7 +510,7 @@ fn allocate_peek_list_floor_and_max_fraction() {
 
 #[test]
 fn allocate_peek_respects_three_eighths_cap() {
-    assert_eq!(peek_max_box_rows(40), 15);
+    assert_eq!(peek_max_box_rows(40), 15); // floor(40*3/8)
     assert_eq!(peek_max_box_rows(60), 22);
     assert_eq!(peek_max_box_rows(8), 3);
 }
@@ -529,6 +548,7 @@ fn peek_live_tail_desired_empty_uses_one_body_row() {
 
 #[test]
 fn peek_live_tail_desired_tight_pin_skips_blank() {
+    // fixed is status + reply3 + pin = 5; max_content is fixed + 1, so body 1 and no blank
     let d = peek_live_tail_desired_content(6, 3, 1, true);
     assert!(!d.blank_row);
     assert_eq!(d.live_tail, 1);
@@ -559,7 +579,8 @@ fn peek_live_tail_desired_long_body_hits_live_tail_cap() {
 
 #[test]
 fn peek_live_tail_desired_pin_fits_in_measured_body_budget() {
-    // A body that fits without the pin must not force an ellipsis solely due to the pin The desired size grows by the pin row.
+    // A body that fits without the pin must not force an ellipsis solely due to the pin
+    // The desired size grows by the pin row, so the paint body_budget still covers the body
     let body = 4u16;
     let d = peek_live_tail_desired_content(40, 1, body, true);
     assert_eq!(d.live_tail, body);

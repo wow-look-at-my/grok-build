@@ -58,8 +58,9 @@ pub enum WebFetchError {
     ContentTypeMismatch { content_type: String, url: String },
 }
 
-/// Extra recovery guidance appended to an [`WebFetchError::SsrfBlocked`]
-/// message.
+/// Extra recovery guidance appended to an [`WebFetchError::SsrfBlocked`] message. `web_fetch` can't reach internal/private hosts, but GitHub /
+/// GitHub Enterprise hosts (including internal GHE hostnames) are reachable via the authenticated `gh` CLI. When the blocked host looks like
+/// GitHub **and `gh` is actually installed**, point the agent at `gh` instead of letting it conclude the resource is inaccessible and give up.
 fn ssrf_recovery_hint(host: &str) -> &'static str {
     if is_github_host(host) && gh_available() {
         ". Use the `gh` CLI instead (e.g. `gh pr view` or `gh api`)."
@@ -74,7 +75,8 @@ fn is_github_host(host: &str) -> bool {
     h == "github.com" || h.ends_with(".github.com") || h.contains("github")
 }
 
-/// Whether the `gh` CLI is available on `PATH`.
+/// Whether the `gh` CLI is available on `PATH`, via the same `which` lookup the
+/// rest of the codebase uses for binary discovery (e.g. `xai-grok-mcp`).
 fn gh_available() -> bool {
     which::which("gh").is_ok()
 }
@@ -95,7 +97,8 @@ mod tests {
 
     #[test]
     fn which_detects_gh_in_dir() {
-        // Exercises the same `which` lookup `gh_available` uses.
+        // Exercises the same `which` lookup `gh_available` uses, with a
+        // controlled search dir so it doesn't depend on the test host's PATH.
         let dir = tempfile::tempdir().unwrap();
         // No gh in this dir yet.
         assert!(which::which_in("gh", Some(dir.path()), dir.path()).is_err());

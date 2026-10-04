@@ -1,4 +1,11 @@
 //! Cross-ecosystem error type for tool execution.
+//!
+//! `ToolError` is a struct with a `kind` discriminator and a tool-provided
+//! `detail` string. The `detail` is the model-facing message — tools MUST
+//! provide a human-readable explanation of what went wrong, since this text
+//! is sent back to the model to inform its next action.
+//!
+//! The wire boundary is bridged by `From<ToolError> for ToolErrorWire`.
 
 use std::fmt;
 
@@ -26,22 +33,45 @@ pub enum ToolErrorKind {
     Cancelled,
     /// Rate limit exceeded.
     RateLimited,
-    /// The caller's usage pool / billing balance is exhausted (out of credits).
+    /// The caller's usage pool / billing balance is exhausted (out
+    /// of credits). Payment-required-shaped; distinct from
+    /// `RateLimited` so the surface can show "out of credits"
+    /// rather than "try again later".
     UsagePoolExhausted,
-    /// The caller hit a usage limit with no balance verdict behind it.
+    /// The caller hit a usage limit with no balance verdict behind it
+    /// (the balance gate was skipped/dormant and the non-billable
+    /// allowance ran out). Payment-required-shaped, but distinct from
+    /// `UsagePoolExhausted` (an explicit out-of-balance verdict) so the
+    /// surface can show a "usage limit reached" message.
     UsageLimitReached,
-    /// A shared-capacity limiter shed this request (transient load shed): the billing global rate limiter.
+    /// A shared-capacity limiter shed this request (transient load
+    /// shed): the billing global rate limiter, or the sandbox fleet's
+    /// tenancy cap. Distinct from `RateLimited` (per-user / per-message
+    /// quota) so the surface can render a capacity-specific
+    /// "try again later" with a retry hint; the `retry_after_secs`
+    /// hint, when known, rides in `ToolError::details`. Named to match
+    /// the chat surface's `global_rate_limit` typed error.
     GlobalRateLimit,
-    /// The caller hit their per-user concurrency cap (too many media generations or sandboxes already in flight).
+    /// The caller hit their per-user concurrency cap (too many media
+    /// generations or sandboxes already in flight). Transient — retry
+    /// once one finishes. Distinct from `GlobalRateLimit` (a
+    /// shared-backend load shed) so the surface can tailor a "too many
+    /// in progress" message. Named to match the chat surface's
+    /// `concurrency_limit` typed error.
     ConcurrencyLimit,
     /// Upstream service unavailable.
     ServiceUnavailable,
     /// Network-level failure.
     NetworkError,
+    /// Tool body returned an error.
     Execution,
+    /// Requested behavior version not supported.
     BehaviorVersionUnsupported,
+    /// Render-card budget exceeded.
     RenderLimited,
+    /// Terminal subprocess failure.
     TerminalError,
+    /// Forward-compat catch-all.
     Custom,
 }
 
@@ -73,15 +103,25 @@ impl ToolErrorKind {
 }
 
 /// Cross-ecosystem error type for tool execution.
+///
+/// Every error carries:
+/// - `kind` — the machine-readable discriminator
+/// - `detail` — the model/user-facing message that tools MUST provide
+/// - `source` — optional causal chain for debugging (not sent to the model)
+/// - `details` — optional structured metadata (JSON Schema validation
+///   report, retry_after hints, etc.)
 #[derive(Serialize, Deserialize)]
 pub struct ToolError {
     pub kind: ToolErrorKind,
-    /// Human-readable message provided by the tool.
+    /// Human-readable message provided by the tool. This is sent back to
+    /// the model so it can understand what went wrong and adjust its next
+    /// action. Tools MUST make this specific and actionable.
     pub detail: String,
     /// Optional causal chain for developer debugging. NOT sent to the model.
     #[serde(skip)]
     source: Option<anyhow::Error>,
-    /// Optional structured metadata (e.g. per-field validation errors, `retry_after` hints, `tool_id`, `card_id`).
+    /// Optional structured metadata (e.g. per-field validation errors,
+    /// `retry_after` hints, `tool_id`, `card_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
 }
@@ -222,7 +262,8 @@ impl ToolError {
 }
 
 // ---------------------------------------------------------------------------
-// From impls.
+// From impls
+// ---------------------------------------------------------------------------
 
 impl From<serde_json::Error> for ToolError {
     fn from(value: serde_json::Error) -> Self {
@@ -235,7 +276,11 @@ impl From<serde_json::Error> for ToolError {
 // ---------------------------------------------------------------------------
 
 /// Carry a [`ToolError`]'s structured `details` onto a `Custom` wire variant
-/// while keeping the round-trip recognizable.
+/// while keeping the round-trip recognizable: the decoder
+/// (`tool_error_from_wire`) replaces the `{"code": <subcode>}` object that
+/// `ToolError::custom` installs with the wire `details` verbatim, so the
+/// subcode is merged into object-shaped details (without clobbering an
+/// existing `code` key). Non-object details pass through unchanged.
 fn custom_details_with_code(details: Option<Value>, code: &str) -> Option<Value> {
     match details {
         Some(Value::Object(mut map)) => {
@@ -249,7 +294,8 @@ fn custom_details_with_code(details: Option<Value>, code: &str) -> Option<Value>
 
 impl From<ToolError> for ToolErrorWire {
     fn from(err: ToolError) -> Self {
-        // Extract structured fields from `details` when the wire shape needs them.
+        // Extract structured fields from `details` when the wire shape needs
+        // them. The `detail` string is always the model-facing message.
         let details_val = err.details.as_ref();
 
         match err.kind {
@@ -408,7 +454,8 @@ mod wire_bridge_tests {
     #[test]
     fn service_unavailable_details_survive_wire_projection() {
         // Structured details used to be dropped (`details: None`) for the
-        // Custom-mapped kinds.
+        // Custom-mapped kinds; they must now ride the wire with the subcode
+        // merged in so recognizers keying on `details.code` keep working.
         let err = ToolError::service_unavailable("sandbox not ready")
             .with_details(serde_json::json!({ "retry_after_ms": 1500 }));
         let wire = ToolErrorWire::from(err);

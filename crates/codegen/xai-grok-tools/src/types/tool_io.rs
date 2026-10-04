@@ -1,4 +1,15 @@
 //! New tool I/O types for the spec architecture.
+//!
+//! These types exist alongside the old `tool_input::ToolInput` and
+//! `output::ToolOutput`. They will replace the old types once all tool
+//! implementations are migrated to the new `Tool` trait.
+//!
+//! ## Design
+//!
+//! - `ToolInput` — one variant per built-in tool + `Dynamic(Value)`.
+//!   `TryInto` derive generates `TryFrom<ToolInput>` for each inner type.
+//! - `ToolOutput` — one variant per built-in tool + `Dynamic(Value)`.
+//!   `From` derive generates `From<TypedOutput>` for each inner type.
 use crate::implementations::BashToolInput;
 use crate::implementations::grok_build::ask_user_question::AskUserQuestionInput;
 use crate::implementations::grok_build::copy_move::CopyMoveInput;
@@ -84,8 +95,9 @@ pub enum ToolInput {
     Dynamic(serde_json::Value),
 }
 impl ToolInput {
-    /// The real target tool for *meta-dispatch* tools whose wire
-    /// `function.name` is only the wrapper (`use_tool`).
+    /// The real target tool for *meta-dispatch* tools whose wire `function.name` is only the wrapper (`use_tool`), or
+    /// `None` for ordinary tools (already named by `function.name`). Single source of truth for hook matching / telemetry;
+    /// callers fall back to `function.name` on `None`. Add any new dispatcher here.
     pub fn dispatch_target_name(&self) -> Option<String> {
         match self {
             ToolInput::UseTool(input) => input.target_name().map(str::to_owned),

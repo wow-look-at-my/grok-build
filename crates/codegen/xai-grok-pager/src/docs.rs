@@ -1,4 +1,7 @@
 //! In-app how-to documentation data (embedded markdown).
+//!
+//! Single source of truth: two static arrays (`USER_GUIDE`, `REFERENCE_DOCS`) hold every doc.
+//! All lookups are zero-allocation; `DocEntry` exists only for backward compatibility with the TUI doc picker.
 
 /// A compile-time document entry. All fields are `&'static str`.
 #[derive(Debug)]

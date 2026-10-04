@@ -54,7 +54,8 @@ pub struct SendSubagentMessageInput {
     /// Delivery operation; omitted means `steer`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery: Option<SendSubagentMessageDelivery>,
-    /// Legacy `queue: true`; accepted on the wire, hidden from the schema, ignored when `delivery` is present.
+    /// Legacy `queue: true`; accepted on the wire, hidden from the schema,
+    /// ignored when `delivery` is present.
     #[serde(default)]
     #[schemars(skip)]
     pub queue: bool,

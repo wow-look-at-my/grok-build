@@ -1,4 +1,7 @@
 //! `/find` opens an incremental search over the conversation scrollback.
+//!
+//! In simple mode a bare `/` goes to the prompt, so simple-mode users can't reach the vim `/` scrollback search.
+//! `/find` focuses the scrollback pane and opens the same search from either mode.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
@@ -90,7 +93,8 @@ mod tests {
 
     #[test]
     fn find_advertises_optional_text_arg() {
-        // Pins the slash-arg contract so completion-accept appends a trailing space and the `[text]` placeholder shows.
+        // Pins the slash-arg contract so completion-accept appends a trailing space and the `[text]` placeholder shows while typing
+        // Bare `/find` stays valid (args not required)
         let cmd = FindCommand;
         assert!(cmd.takes_args());
         assert!(!cmd.args_required());

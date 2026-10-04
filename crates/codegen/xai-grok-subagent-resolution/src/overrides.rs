@@ -1,4 +1,6 @@
 //! Runtime override resolution: merges explicit, role, and persona defaults.
+//!
+//! Extracted from `xai-grok-shell/src/agent/subagent/` `resolve_effective_overrides()`.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -11,6 +13,8 @@ use crate::config::{SubagentPersona, SubagentRole};
 use crate::types::EffectiveRuntimeConfig;
 
 /// Parse a serde-deserializable enum from a plain string value.
+///
+/// `SubagentCapabilityMode` and `SubagentIsolationMode` accept kebab-case string variants via `#[serde(rename_all = "kebab-case")]`.
 fn parse_enum_from_str<T: DeserializeOwned>(s: &str) -> Option<T> {
     serde_json::from_value::<T>(serde_json::Value::String(s.to_string())).ok()
 }
@@ -73,12 +77,14 @@ pub fn resolve_effective_overrides(
     let reasoning_effort = reasoning_from_override_or_role
         .or_else(|| resolved_persona.and_then(|p| p.reasoning_effort.clone()));
 
-    // ── Persona instructions loading
-    // ─────────────────────────────.
+    // ── Persona instructions loading ─────────────────────────────. Fail-closed: if persona resolution produces an error
+    // (file unreadable, not found, empty), return early with only persona and error populated. All other fields are
+    // defaulted. This matches the shell's behavior where persona errors abort spawn before wiring model/isolation
     let (persona_instructions, persona_error, persona_fatal) =
         resolve_persona_instructions(persona.as_deref(), personas, cwd);
-    // File I/O errors are fatal: return early with defaults so the caller can
-    // abort the spawn Config-level errors.
+    // File I/O errors are fatal: return early with defaults so the caller can abort the spawn
+    // Config-level errors ("not found", "no instructions") are non-fatal: they set `persona_error` but other fields still resolve
+    // This matches the shell's original behavior, where only the file-read error path did `return EffectiveRuntimeConfig { ..Default::default() }`
     if persona_fatal {
         return EffectiveRuntimeConfig {
             persona,

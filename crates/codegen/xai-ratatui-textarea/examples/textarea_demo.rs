@@ -1,4 +1,14 @@
 //! Demo for TextArea with @-file-search completion and atomic text elements.
+//!
+//! Run with: cargo run -p xai-ratatui-textarea --example textarea_demo
+//!
+//! Features demonstrated:
+//! - Type `@` to trigger fuzzy file search (real files from current directory)
+//! - Tab or Enter confirms selection → creates an atomic text element
+//! - Up/Down to navigate results, Esc to dismiss
+//! - Bracketed paste → creates paste elements
+//! - Elements render as styled chips, cursor skips over them atomically
+//! - Display projection: cursor column accounts for display width, not buffer width
 
 use std::collections::HashMap;
 use std::io::{self, stdout};
@@ -54,7 +64,8 @@ impl ClipboardProvider for ArboardClipboard {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// File search.
+// File search
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// A single fuzzy-matched file result.
 struct SearchResult {
@@ -153,10 +164,12 @@ impl FileSearch {
         }
     }
 
+    /// Height needed for the dropdown (0 when hidden).
     fn dropdown_height(&self) -> u16 {
         if self.results.is_empty() {
             0
         } else {
+            // results + 2 for the border
             (self.results.len() as u16 + 2).min(MAX_RESULTS as u16 + 2)
         }
     }
@@ -227,7 +240,8 @@ fn compute_file_search_context(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Line select mode.
+// Line select mode (file preview + line range picking)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[derive(Clone, Copy, PartialEq)]
 enum SelectionState {
@@ -415,7 +429,8 @@ fn build_file_ref_display(path: &str, range: Option<&RangeInclusive<usize>>) -> 
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// App.
+// App
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Result of processing an input event.
 enum EventResult {
@@ -555,7 +570,9 @@ impl DemoApp {
             return EventResult::Unchanged;
         }
 
-        // If the click lands on the "❯ " prompt char (cols left of textarea).
+        // If the click lands on the "❯ " prompt char (2 cols left of textarea),
+        // remap it to column 0 of the textarea so it places the cursor at the
+        // start of that visual line.
         let mut mouse = mouse;
         let ta = self.textarea_area;
         if ta.width > 0
@@ -1093,6 +1110,7 @@ impl DemoApp {
                     Action::Noop
                 }
 
+                // j / Down: down 1
                 KeyEvent {
                     code: KeyCode::Char('j'),
                     modifiers: KeyModifiers::NONE,
@@ -1106,6 +1124,7 @@ impl DemoApp {
                     mode.move_cursor(1);
                     Action::Noop
                 }
+                // k / Up: up 1
                 KeyEvent {
                     code: KeyCode::Char('k'),
                     modifiers: KeyModifiers::NONE,
@@ -1220,7 +1239,8 @@ impl DemoApp {
             return;
         };
 
-        // Cancel the undo group — restores textarea to pre-line-select state. No manual element revert needed.
+        // Cancel the undo group — restores textarea to pre-line-select state.
+        // No manual element revert needed.
         self.textarea.cancel_undo_group();
 
         self.status = "Line select cancelled.".into();
@@ -1275,6 +1295,7 @@ impl DemoApp {
             self.status = format!("Confirmed: {desc}");
         }
 
+        // Close the undo group — all line-select mutations become 1 undo step.
         self.textarea.end_undo_group();
     }
 
@@ -1357,7 +1378,7 @@ impl DemoApp {
 
                 // Update viewport height in the mode so scrolling works correctly.
                 if let Some(mode) = self.line_select.as_mut() {
-                    // Reserve a couple of rows for border.
+                    // Reserve 2 rows for border.
                     mode.viewport_height = preview_area.height.saturating_sub(2) as usize;
                 }
 
@@ -1378,6 +1399,7 @@ impl DemoApp {
                 } else {
                     0
                 };
+                // Ensure the prompt gets at least 5 rows (3 inner + border).
                 let min_prompt: u16 = 5;
                 let fixed = info_rows + 1 + fs_rows + 1;
                 let remaining = area.height.saturating_sub(fixed);
@@ -1416,9 +1438,9 @@ impl DemoApp {
                 status.render(status_area, f.buffer_mut());
             }
 
-            // By calling set_cursor_position inside the draw closure, ratatui
-            // emits show_cursor + set_cursor_position WITHOUT the hide_cursor
-            // that happens.
+            // By calling set_cursor_position inside the draw closure, ratatui emits show_cursor + set_cursor_position WITHOUT the
+            // hide_cursor that happens when no cursor is set. This avoids the hide→show cycle that resets the terminal's blink timer
+            // every frame.
             let want_cursor = if self.line_select.is_none() {
                 self.textarea
                     .cursor_pos_with_state(self.textarea_area, self.textarea_state)
@@ -1831,7 +1853,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
 
     loop {
         // The textarea tells us when it needs a timer tick (e.g. for
-        // continuous drag-scrolling).
+        // continuous drag-scrolling).  Use its timeout for poll, falling
+        // back to a generous default that lets the cursor blink.
         let timeout = app
             .textarea
             .poll_timeout_ms()

@@ -1,9 +1,12 @@
 //! Fault injection for tests of the attach and recovery paths.
+//! Environment-driven hooks ship in the binary and are inert unless their variable is set (one env
+//! read at the hook site). `#[cfg(test)]` pause points compile out: a task-local slot parks the
+//! attach future.
 
 use agent_client_protocol as acp;
 
-/// Where a cold attach parks for a test: with its actor's init result in hand
-/// but not yet installed.
+/// Where a cold attach parks for a test: with its actor's init result in hand but not yet installed,
+/// installed and bound, or after a failed stamp drained its actor.
 #[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AttachPause {

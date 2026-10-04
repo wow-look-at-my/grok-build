@@ -15,6 +15,8 @@ use xai_grok_tools::implementations::search_tool;
 use xai_grok_tools::implementations::use_tool;
 use xai_grok_tools::registry::types::{ToolConfig, ToolServerConfig};
 /// Process-global registry of externally-provided toolset presets.
+/// Public presets are enumerated; internal presets resolve only via [`toolset_for_preset`] and never appear in the manifest.
+/// Register before the first preset resolution — earlier-resolved configs will not see later registrations.
 pub type ToolsetPresetBuilder = fn() -> ToolServerConfig;
 /// Whether a registered preset is enumerated publicly or resolved by name only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -27,7 +29,10 @@ enum PresetVisibility {
 static TOOLSET_PRESETS: OnceLock<Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>>> =
     OnceLock::new();
 /// Every caller of this registry recovers the map from a poison rather than
-/// panicking on one: the sections here are `HashMap` insert / get / iter.
+/// panicking on one: the sections here are `HashMap` insert / get / iter, so a
+/// poison can only arrive from unrelated code, and panicking on one would turn
+/// that into a process that can no longer resolve any toolset preset.
+/// `parking_lot::Mutex` is the structural fix and is not a dependency here.
 fn toolset_preset_registry()
 -> &'static Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>> {
     TOOLSET_PRESETS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -40,7 +45,8 @@ pub fn register_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(name.to_string(), (builder, PresetVisibility::Public));
 }
-/// Register an out-of-tree **internal** toolset preset by name.
+/// Register an out-of-tree **internal** toolset preset by name; the shell / orchestrator spawn path resolves it via [`toolset_for_preset`].
+/// See [`TOOLSET_PRESETS`].
 #[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 pub fn register_internal_toolset_preset(name: &str, builder: ToolsetPresetBuilder) {
     toolset_preset_registry()
@@ -49,6 +55,7 @@ pub fn register_internal_toolset_preset(name: &str, builder: ToolsetPresetBuilde
         .insert(name.to_string(), (builder, PresetVisibility::Internal));
 }
 /// Look up an externally-registered toolset preset by (already-normalized) name.
+/// Resolves BOTH public and internal presets.
 #[allow(clippy::disallowed_methods)] // Recovers the map; see toolset_preset_registry.
 fn registered_toolset_preset(name: &str) -> Option<ToolServerConfig> {
     toolset_preset_registry()
@@ -249,6 +256,7 @@ fn default_agent_toolset() -> ToolServerConfig {
     grok_build_core_toolset(true)
 }
 /// Same as the parent grok-build list, without `workflow`.
+/// The usual `general-purpose` spawn path must not add that tool and then strip it.
 fn general_purpose_toolset() -> ToolServerConfig {
     grok_build_core_toolset(false)
 }
@@ -319,6 +327,7 @@ fn grok_build_concise_toolset() -> ToolServerConfig {
     }
 }
 /// Hashline toolset: anchor-based read/edit/search and standard utilities.
+/// `hashline_tools` should be the 3 hashline `ToolConfig` entries; they carry the scheme parameters as tool params.
 pub fn grok_build_hashline_toolset(
     hashline_tools: Vec<xai_grok_tools::registry::types::ToolConfig>,
 ) -> ToolServerConfig {
@@ -350,11 +359,17 @@ pub fn grok_build_hashline_toolset(
         behavior_preset: None,
     }
 }
-/// Read-only toolset for the **explore** subagent. Genuinely read-only over
-/// the workspace: `read_file` (Read), `list_dir` (Glob), `grep` (Grep).
-/// `run_terminal_command` (Bash) is intentionally omitted so exploration
-/// cannot mutate the workspace — the read-only guarantee is enforced by the
-/// toolset, not merely by the prompt.
+/// Read-only toolset for the **explore** subagent.
+///
+/// Genuinely read-only over the workspace: `read_file` (Read), `list_dir`
+/// (Glob), `grep` (Grep).
+/// `run_terminal_command` (Bash) is intentionally omitted so exploration cannot
+/// mutate the workspace — the read-only guarantee is enforced by the toolset,
+/// not merely by the prompt.
+/// `send_message` mutates nothing here, and without it an explorer cannot
+/// answer the session that spawned it until its whole run ends.
+/// The subagent tools are here so explore mode can fan a search out.
+/// [`EXPLORE_SUBAGENT_TYPES`] keeps every child read-only.
 fn explore_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
@@ -384,6 +399,7 @@ fn plan_toolset() -> ToolServerConfig {
             // (&grok_build::SkillTool).into(),
             (&grok_build::TodoWriteTool).into(),
             (&grok_build::SendMessageTool).into(),
+            // search_replace + run_terminal_command intentionally omitted (read-only)
         ],
         behavior_preset: None,
     }
@@ -465,6 +481,10 @@ fn orchestrator_toolset() -> ToolServerConfig {
             // Memory
             (&memory::MemorySearchImpl).into(),
             (&memory::MemoryGetImpl).into(),
+            // Intentionally excluded:
+            // - SearchReplaceTool (no file editing — delegate to subagents)
+            // - CopyFileTool / MoveFileTool (no relocating — delegate to subagents)
+            // - OpenCodeWriteTool (no file writing — delegate to subagents)
         ],
         behavior_preset: None,
     }
@@ -474,7 +494,8 @@ fn orchestrator_toolset() -> ToolServerConfig {
 fn grok_build_plan_no_subagents_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
-            // Standard grok-build tools, minus TaskTool only KillTaskTool and TaskOutputTool are kept.
+            // Standard grok-build tools, minus TaskTool only
+            // KillTaskTool and TaskOutputTool are kept because BashTool's background mode requires them
             bash_tool_config(),
             (&grok_build::ReadFileTool).into(),
             (&grok_build::SearchReplaceTool).into(),
@@ -551,8 +572,8 @@ fn opencode_toolset() -> ToolServerConfig {
         behavior_preset: None,
     }
 }
-/// Model override for an agent definition. An `Override` ID is resolved
-/// against available models at subagent spawn.
+/// Model override for an agent definition. An `Override` ID is resolved against available models at subagent spawn.
+/// `model: inherit` or omitted → `Inherit`; a concrete id → `Override`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ModelOverride {
     /// Use the parent session's model.
@@ -600,6 +621,7 @@ pub static AGENT_TASK_TOKENIZER_RE: std::sync::LazyLock<regex::Regex> =
         regex::Regex::new(&format!(r"(?i:{AGENT_TASK_KEYWORDS})\([^)]*\)|[^,]+"))
             .expect("valid regex")
     });
+/// Matches `"Agent(a, b)"` and captures `"a, b"` in group 1; the group is `None` for bare `Agent`.
 pub static AGENT_TASK_CLASSIFIER_RE: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| {
         regex::Regex::new(&format!(r"^(?i:{AGENT_TASK_KEYWORDS})(?:\(([^)]*)\))?$"))
@@ -640,7 +662,7 @@ where
     }
     deserializer.deserialize_any(StringOrVec)
 }
-/// Accepts a positive u32 or null/absent.
+/// Accepts a positive u32 or null/absent. Rejects 0.
 fn deserialize_nonzero_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -651,10 +673,15 @@ where
     }
     Ok(opt)
 }
-/// All built-in agent names as a typed enum. Eliminates string matching in
-/// discovery and ensures built-in names are defined in exactly one place. The
-/// enum covers all built-in agents for centralized name management and
-/// `by_name()` dispatch.
+/// All built-in agent names as a typed enum.
+///
+/// Eliminates string matching in discovery and ensures built-in names
+/// are defined in exactly one place. The enum covers all built-in
+/// agents for centralized name management and `by_name()` dispatch.
+///
+/// `subagent_variants()` returns the subset exposed to the LLM via the
+/// `TaskTool` description. Every other variant is a top-level agent
+/// profile, resolvable by name but not advertised as a subagent type.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumString, EnumIter, AsRefStr, IntoStaticStr,
 )]
@@ -673,9 +700,9 @@ pub enum BuiltinAgentName {
     #[strum(serialize = "grok-build-orchestrator")]
     GrokBuildOrchestrator,
 }
-/// Resolves via `BuiltinAgentName` and delegates to
-/// [`AgentDefinition::is_strict_harness`]. Unknown names return `false`:
-/// never enforce a harness we can't verify.
+/// Resolves via `BuiltinAgentName` and delegates to [`AgentDefinition::is_strict_harness`].
+/// Unknown names return `false`: never enforce a harness we can't verify.
+/// Callers that already hold an `AgentDefinition` should call that method directly so project-level shadowing is honored.
 pub fn is_strict_harness_agent_type(name: &str) -> bool {
     use std::str::FromStr;
     BuiltinAgentName::from_str(name)
@@ -702,8 +729,10 @@ impl BuiltinAgentName {
     pub fn subagent_variants() -> &'static [Self] {
         &[Self::GeneralPurpose, Self::Explore, Self::Plan]
     }
-    /// Built-in agent identities the pager's Shift+Tab ring can cycle through
-    /// live, in ring order.
+    /// Built-in agent identities the pager's Shift+Tab ring can cycle
+    /// through live, in ring order. Selecting one triggers a full agent
+    /// rebuild (tool registry + prompt), not just a prompt swap — see
+    /// `SessionActor::handle_session_mode`.
     pub fn shift_tab_variants() -> &'static [Self] {
         &[Self::GrokBuildOrchestrator, Self::Explore]
     }
@@ -726,13 +755,15 @@ pub struct AgentDefinition {
     #[serde(default = "default_agent_toolset")]
     pub tool_config: ToolServerConfig,
     /// Runtime capability mode that constrains which tool kinds the agent can use.
+    /// Applied during subagent spawn in `handle_subagent_request` by filtering the definition's `tool_config` before session creation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capability_mode: Option<xai_tool_types::SubagentCapabilityMode>,
     #[serde(default)]
     pub permission_mode: PermissionMode,
     #[serde(default)]
     pub skills: Vec<String>,
-    /// When true (the default), the AgentBuilder discovers skills from CWD at build time.
+    /// When true (the default), the AgentBuilder discovers skills from CWD at build time and seeds mid-session skill discovery.
+    /// When false, skill discovery is suppressed and the agent gets an empty skill list with no CWD-based runtime discovery.
     #[serde(default = "default_true")]
     pub discover_skills: bool,
     /// Whether to inherit the parent session's discovered skills when spawned as a subagent. Ignored for primary sessions.
@@ -741,6 +772,8 @@ pub struct AgentDefinition {
     #[serde(default = "default_true")]
     pub agents_md: bool,
     /// When true (the default), the AgentBuilder layers session-level optional tools on the declared `tool_config`.
+    /// Set false for harnesses that need an exact, minimal toolset matching a trained schema.
+    /// The agent's `tool_config` is then used verbatim with only the subagent strip applied.
     #[serde(default = "default_true")]
     pub inject_default_tools: bool,
     /// Tool allowlist. Empty means inherit all. Also carries `Agent(type)` directives.
@@ -776,9 +809,12 @@ pub struct AgentDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_overrides: Option<xai_grok_sampling_types::ToolOverrides>,
     /// Subagent types this agent can spawn (derived by builder from `tools`).
+    /// `None` is unrestricted, `Some([t1])` restricts to those types, and `Some([])` blocks spawning.
     #[serde(skip)]
     pub allowed_subagent_types: Option<Vec<String>>,
     /// Session-operator tool restrictions (`--tools` / `--disallowed-tools`), distinct from the author's own filters.
+    /// Applied as a final clamp over the fully-assembled toolset; compose with the agent's filters by intersection.
+    /// `None` means no session restriction.
     #[serde(skip)]
     pub session_tools_allowlist: Option<Vec<String>>,
     #[serde(skip)]
@@ -788,6 +824,8 @@ pub struct AgentDefinition {
     #[serde(skip)]
     pub system_prompt: TemplateOverride,
     /// First-user-message template selector.
+    /// `Default` (the default) lets the shell layer build the legacy `<user_info>` prefix.
+    /// `Custom` uses a caller-supplied template string.
     #[serde(default)]
     pub user_message_template: UserMessageTemplate,
     /// Where this definition was loaded from; `None` for built-in definitions
@@ -875,6 +913,8 @@ impl std::fmt::Display for AgentScope {
     }
 }
 /// Controls which parent MCP servers a subagent inherits.
+/// Custom `Deserialize` because `serde_yaml` 0.9 uses YAML tags for externally-tagged enums.
+/// Frontmatter uses the mapping style that JSON also expects.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum McpInheritance {
@@ -1335,9 +1375,9 @@ impl AgentDefinition {
             .as_deref()
             .is_none_or(|a| tool_id_matches(a, id))
     }
-    /// Whether a hosted/server-side tool `id` survives the agent's own
-    /// `disallowed_tools`/`tools` and the session clamp. Hosted tools aren't
-    /// in `tool_config`, so they're gated by name here.
+    /// Whether a hosted/server-side tool `id` survives the agent's own `disallowed_tools`/`tools` and the session clamp.
+    /// Hosted tools aren't in `tool_config`, so they're gated by name here.
+    /// The gate is strict: no compat-name mapping or unresolved-entry fallback like the function path.
     pub(crate) fn hosted_tool_allowed(&self, id: &str) -> bool {
         if tool_id_matches(&self.disallowed_tools, id) {
             return false;
@@ -1347,8 +1387,9 @@ impl AgentDefinition {
         }
         self.session_tools_allowed(id)
     }
-    /// True iff the active system prompt template for `audience` carries the
-    /// `<task_completion_discipline>` block.
+    /// True iff the active system prompt template for `audience` carries the `<task_completion_discipline>` block.
+    /// Used by the TodoGate so it only fires when the prompt actually references those rules.
+    /// The block was removed from every built-in template, so this returns `false`; kept so the call-site stays stable.
     pub fn carries_task_completion_discipline(
         &self,
         _audience: crate::prompt::context::PromptAudience,
@@ -1841,9 +1882,9 @@ mod tests {
             }
         }
     }
-    /// The grok-computer preset must ship a full-file write tool (legacy
-    /// `write_file` parity), the same OpenCode `write` tool grok-build uses.
+    /// The grok-computer preset must ship a full-file write tool (legacy `write_file` parity), the same OpenCode `write` tool grok-build uses.
     /// Guards against `search_replace` being the only file-mutation path.
+    /// With the empty-old_string overwrite guard enabled, that path has no single-tool full rewrite.
     #[test]
     fn grok_computer_preset_includes_write_tool() {
         let gc = toolset_for_preset("grok-computer").unwrap();

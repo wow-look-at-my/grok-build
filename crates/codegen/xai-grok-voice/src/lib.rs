@@ -1,9 +1,14 @@
-#![allow(clippy::cast_lossless)] // Hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::cast_precision_loss)] // Hits predate the gate
-#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_lossless)] // 13 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 5 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
+#![allow(clippy::cast_precision_loss)] // 3 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
 //! Voice input for Grok Build CLI: an xAI streaming STT client and the [`run_voice_pipeline`] task that emits [`VoiceEvent`]s for the pager.
+//!
+//! Voice is dictation only: the mic streams to STT and the transcript lands in the prompt box.
+//!
+//! On macOS and Linux the mic is opened in a short-lived subprocess, so the long-lived TUI never pays the audio stack's permanent memory cost.
+//! See [`audio`] and [`maybe_run_capture_subprocess`].
 
 #![deny(clippy::indexing_slicing)]
 
@@ -34,10 +39,14 @@ pub use probe::{
     run_streaming_probe,
 };
 
-/// Linux shells out to a system recorder (`pw-record`/`parec`/`arecord`).
+/// Linux shells out to a system recorder (`pw-record`/`parec`/`arecord`) so the static-musl binary links no audio
+/// library. On Linux a `true` value means capture is *compiled in*; whether a recorder is actually installed is reported
+/// when a session starts. Consumers gate voice on this so a no-audio build never advertises a mic it can't open.
 pub const AUDIO_SUPPORTED: bool = cfg!(feature = "audio");
 
-/// Hidden subcommand consumers re-exec themselves with to capture microphone audio in a short-lived helper process.
+/// Hidden subcommand consumers re-exec themselves with to capture microphone audio in a short-lived helper process on macOS.
+/// See [`audio::capture_subprocess`](audio) for why capture is out of process.
+/// Intercepted via [`maybe_run_capture_subprocess`] at the very top of `main`, before any TUI/agent/tokio init, so the child stays minimal.
 pub const MIC_CAPTURE_SUBCOMMAND: &str = "__mic-capture";
 
 /// If this process was re-exec'd as the hidden mic-capture helper, run it and return `Some(exit_code)`; otherwise `None` (a normal invocation).
@@ -50,6 +59,7 @@ pub fn maybe_run_capture_subprocess() -> Option<i32> {
     }
     #[cfg(all(feature = "audio", not(target_os = "linux")))]
     {
+        // Skip argv[0] (binary) and argv[1] (subcommand); the rest are flags.
         let args: Vec<String> = argv
             .into_iter()
             .skip(2)
@@ -59,7 +69,9 @@ pub fn maybe_run_capture_subprocess() -> Option<i32> {
     }
     #[cfg(not(all(feature = "audio", not(target_os = "linux"))))]
     {
-        // This build's own parent backend never spawns the helper (Linux uses system recorders; no-audio builds have no capture).
+        // This build's own parent backend never spawns the helper (Linux uses system recorders; no-audio builds have no capture)
+        // Only a hand-typed invocation reaches here
+        // `write!` instead of `println!` so a closed pipe never panics
         use std::io::Write;
         let _ = writeln!(
             std::io::stdout(),
@@ -69,6 +81,8 @@ pub fn maybe_run_capture_subprocess() -> Option<i32> {
     }
 }
 
+/// Whether `argv` (the full process argv, including argv[0]) invokes the hidden mic-capture helper, i.e. argv[1] is [`MIC_CAPTURE_SUBCOMMAND`].
+/// Pure so the dispatch decision is unit-testable without mutating the process's real args.
 fn is_capture_subcommand(argv: &[std::ffi::OsString]) -> bool {
     argv.get(1).and_then(|a| a.to_str()) == Some(MIC_CAPTURE_SUBCOMMAND)
 }

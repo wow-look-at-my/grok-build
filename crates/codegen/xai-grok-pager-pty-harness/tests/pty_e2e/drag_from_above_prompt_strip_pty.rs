@@ -55,8 +55,8 @@ async fn drag_from_above_prompt_strip_pty() {
     let screen = harness.screen_contents();
     let (entry_row, entry_col) = locate_screen_text(&screen, ENTRY_WORD)
         .unwrap_or_else(|| panic!("could not locate {ENTRY_WORD:?}; screen:\n{screen}"));
-    // The strip row sits a couple of rows above the prompt placeholder
-    // Counting up: the placeholder, then the box's top border.
+    // The strip row sits two rows above the prompt placeholder
+    // Counting up: the placeholder, then the box's top border, then the gap row between the scrollback pane and the prompt box
     let (placeholder_row, _) = locate_screen_text(&screen, "Build anything")
         .unwrap_or_else(|| panic!("could not locate the prompt placeholder; screen:\n{screen}"));
     let border_row = placeholder_row - 1;

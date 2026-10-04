@@ -1,15 +1,31 @@
 //! Canonical partial-result streaming contract shared by every streaming tool.
+//!
+//! A tool declares a [`StreamingSpec`] in its [`ToolCapabilities`] and emits
+//! deltas from `execute` via [`stream_chunk`], which materializes the spec into
+//! a [`PartialResultPayload`] carried by [`ToolProgress::Custom`]. Downstream
+//! layers dispatch on the envelope's `subkind` rather than on the tool's
+//! identity.
 
 use serde::{Deserialize, Serialize};
 use xai_tool_protocol::StreamingSpec;
 
 use crate::tool::ToolProgress;
 
-/// Per-frame `delta` byte cap used when [`StreamingSpec::max_delta_bytes`] is unset.
+/// Per-frame `delta` byte cap used when [`StreamingSpec::max_delta_bytes`] is
+/// unset. Guards against a single oversized tick flooding the harness in one
+/// frame. Deliberately independent of `ToolCapabilities::max_frame_bytes`,
+/// which caps whole frames (16 MiB ceiling), not deltas.
 const DEFAULT_MAX_DELTA_BYTES: usize = 16 * 1024;
 
 /// Canonical payload carried by a streaming tool's [`ToolProgress::Custom`].
-/// Downstream layers dispatch on the envelope's `subkind`.
+///
+/// Downstream layers dispatch on the envelope's `subkind`. Deltas are
+/// append-only and lossless (see [`stream_chunk`]).
+///
+/// Parsed strictly (`deny_unknown_fields`): an unexpected field is a hard
+/// deserialize error rather than being silently ignored, so producer/consumer
+/// schema drift (e.g. a stale field from an un-updated producer) is caught and
+/// the frame is dropped with a warning instead of misinterpreted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PartialResultPayload {
@@ -19,25 +35,53 @@ pub struct PartialResultPayload {
     /// Monotonic total bytes produced so far (NOT the current buffer length).
     pub total_bytes: u64,
 
-    /// Cumulative content was lost upstream and will never be delivered (distinct from a single-tick `gap`).
+    /// Cumulative content was lost upstream and will never be delivered
+    /// (distinct from a single-tick `gap`).
     #[serde(default)]
     pub truncated: bool,
 
-    /// This delta has a gap: a single oversized tick overflowed the tail buffer and its middle was dropped.
+    /// This delta has a gap: a single oversized tick overflowed the tail
+    /// buffer and its middle was dropped.
     #[serde(default)]
     pub gap: bool,
 }
 
+/// Byte count of an incomplete (still-arriving) UTF-8 sequence at the very end
+/// of `bytes`, or 0 when the slice ends on a complete sequence or in invalid
+/// bytes that can never become valid (those are surfaced lossily instead of
+/// held forever).
 fn incomplete_utf8_suffix_len(bytes: &[u8]) -> usize {
     match std::str::from_utf8(bytes) {
         Ok(_) => 0,
-        // `error_len() == None` means the error is an incomplete sequence at the end of the input.
+        // `error_len() == None` means the error is an incomplete sequence at
+        // the end of the input — the only case worth holding back.
         Err(e) if e.error_len().is_none() => bytes.len() - e.valid_up_to(),
         Err(_) => 0,
     }
 }
 
-/// Build at most one [`ToolProgress::Custom`] delta from a monotonic byte source, with UTF-8-safe slicing at both the tick boundary and the per-frame cap. `tail` is the source's (possibly truncated) tail buffer — the newest bytes are always at its end. `total` is the monotonic count of bytes produced so far; `last_total` records how much has already been surfaced and is advanced in place. Returns `None` when `total` has not advanced (no new bytes). Concatenated deltas are therefore always valid UTF-8 and lossless. `truncated` is the caller's cumulative upstream-truncation flag (e.g. a source that hit a hard output cap and will never deliver the elided bytes). It is copied into the payload verbatim and is intentionally distinct from the per-tick `gap` (a single oversized tick overflowed the tail buffer and its middle was dropped upstream).
+/// Build at most one [`ToolProgress::Custom`] delta from a monotonic byte
+/// source, with UTF-8-safe slicing at both the tick boundary and the per-frame
+/// cap.
+///
+/// `tail` is the source's (possibly truncated) tail buffer — the newest bytes
+/// are always at its end. `total` is the monotonic count of bytes produced so
+/// far; `last_total` records how much has already been surfaced and is advanced
+/// in place. Returns `None` when `total` has not advanced (no new bytes).
+///
+/// Deltas are **append-only and lossless**: when a delta would end mid-way
+/// through a multi-byte UTF-8 sequence, or exceeds the per-frame cap
+/// ([`StreamingSpec::max_delta_bytes`], default 16 KiB), the excess bytes are
+/// *held back* — `last_total` advances only past the emitted bytes, so the next
+/// call re-slices the remainder from the (still-growing) tail. Concatenated
+/// deltas are therefore always valid UTF-8 and lossless.
+///
+/// `truncated` is the caller's cumulative upstream-truncation flag (e.g. a
+/// source that hit a hard output cap and will never deliver the elided bytes).
+/// It is copied into the payload verbatim and is intentionally distinct from
+/// the per-tick `gap` (a single oversized tick overflowed the tail buffer and
+/// its middle was dropped upstream). Sources with no cumulative-truncation
+/// notion pass `false`.
 pub fn stream_chunk(
     spec: &StreamingSpec,
     tail: &[u8],
@@ -51,7 +95,9 @@ pub fn stream_chunk(
     let new = total - *last_total;
     let tail_len = tail.len() as u64;
     // Deltas are keyed off the monotonic `total`, not the buffer length: when
-    // all genuinely-new bytes still fit in the tail we slice its suffix.
+    // all genuinely-new bytes still fit in the tail we slice its suffix; when a
+    // single tick's burst exceeded the buffer the middle was dropped upstream,
+    // so we emit what survived plus a `gap` marker.
     let (delta_bytes, gap) = if new <= tail_len {
         (&tail[(tail_len - new) as usize..], false)
     } else {
@@ -62,7 +108,10 @@ pub fn stream_chunk(
         .max_delta_bytes
         .map_or(DEFAULT_MAX_DELTA_BYTES, |c| c as usize);
 
-    // Defer: emit the longest prefix that fits the cap AND ends on a complete UTF-8 sequence.
+    // Defer: emit the longest prefix that fits the cap AND ends on a complete
+    // UTF-8 sequence; hold the rest back for the next call (the tail still
+    // contains it, since `last_total` only advances past the emitted bytes).
+    // Nothing is dropped.
     let mut cut = delta_bytes.len().min(cap);
     while cut > 0 && incomplete_utf8_suffix_len(&delta_bytes[..cut]) > 0 {
         cut -= 1;
@@ -93,13 +142,15 @@ pub fn stream_chunk(
     let payload = PartialResultPayload {
         delta,
         total_bytes: total,
-        // The caller's cumulative upstream-loss flag passes through verbatim.
+        // The caller's cumulative upstream-loss flag passes through verbatim;
+        // the per-tick `gap` is reported separately.
         truncated,
         gap,
     };
     Some(ToolProgress::Custom {
         subkind: spec.subkind.clone(),
-        // Infallible: a struct of String/u64/bool/Copy-enums has no map keys or floats that could make `to_value` fail.
+        // Infallible: a struct of String/u64/bool/Copy-enums has no map keys
+        // or floats that could make `to_value` fail.
         payload: serde_json::to_value(&payload).expect("PartialResultPayload always serializes"),
     })
 }
@@ -148,6 +199,7 @@ mod tests {
     fn emits_suffix_delta_and_advances_last_total() {
         let spec = spec_with(None);
         let mut last = 2;
+        // total 2 -> 5: 3 genuinely-new bytes, all present in the tail suffix.
         let p = run(&spec, b"abcde", 5, &mut last, false);
         assert_eq!(p.delta, "cde");
         assert_eq!(p.total_bytes, 5);
@@ -158,6 +210,8 @@ mod tests {
 
     #[test]
     fn gap_set_when_new_exceeds_surviving_tail() {
+        // 100 new bytes but only a 4-byte tail survived upstream: the middle
+        // was dropped, so the whole tail is emitted with gap = true.
         let spec = spec_with(None);
         let mut last = 0;
         let p = run(&spec, b"tail", 100, &mut last, false);
@@ -186,13 +240,16 @@ mod tests {
 
     #[test]
     fn append_multibyte_split_across_ticks_is_held_back_and_reassembled() {
-        // Tick multiple delivers "aé" cut mid-'é' (0xC3 without 0xA9).
+        // Tick 1 delivers "aé" cut mid-'é' (0xC3 without 0xA9). The lone lead
+        // byte is held back, NOT emitted as U+FFFD.
         let spec = spec_with(None);
         let mut last = 0;
         let p = run(&spec, b"a\xC3", 2, &mut last, false);
         assert_eq!(p.delta, "a", "incomplete UTF-8 suffix held back");
         assert_eq!(last, 1, "last_total advances only past emitted bytes");
 
+        // Tick 2: the continuation byte arrives; the held bytes re-slice from
+        // the tail and the char comes out whole.
         let p = run(&spec, "aé".as_bytes(), 3, &mut last, false);
         assert_eq!(p.delta, "é", "held bytes reassemble into a whole char");
         assert_eq!(last, 3);
@@ -200,6 +257,8 @@ mod tests {
 
     #[test]
     fn append_over_cap_defers_remainder_to_next_call_without_loss() {
+        // Cap 4: a 9-byte burst is paced out over capped frames; nothing is
+        // dropped and the concatenation is lossless.
         let spec = spec_with(Some(4));
         let mut last = 0;
         let mut out = String::new();
@@ -214,6 +273,8 @@ mod tests {
 
     #[test]
     fn append_cap_cut_respects_utf8_boundaries() {
+        // 7 ASCII bytes + 'é' (2 bytes) = 9 bytes. A cap of 8 would split the
+        // 'é'; the cut backs off and the 'é' is deferred whole.
         let tail = "aaaaaaaé".as_bytes();
         let spec = spec_with(Some(8));
         let mut last = 0;
@@ -238,9 +299,9 @@ mod tests {
 
     #[test]
     fn payload_rejects_unknown_field() {
-        // Strict (`deny_unknown_fields`): a stale/typo'd field — e.g. a
-        // removed `accumulation` from an un-updated producer — is a hard
-        // error, not silently ignored.
+        // Strict (`deny_unknown_fields`): a stale/typo'd field — e.g. a removed
+        // `accumulation` from an un-updated producer — is a hard error, not
+        // silently ignored, so schema drift never decodes into a partial frame.
         let decoded = serde_json::from_value::<PartialResultPayload>(serde_json::json!({
             "delta": "x",
             "total_bytes": 1,
@@ -319,9 +380,10 @@ mod tests {
         assert_eq!(last, 2, "and makes forward progress");
     }
 
+    /// UTF-8 backoff loses at most 3 bytes, so frames stay within 3 of the cap.
     #[test]
     fn utf8_backoff_stays_within_three_bytes_of_cap() {
-        let cap = 7usize;
+        let cap = 7usize; // splits a 4-byte char -> backs off to 4 (cap - 3)
         let spec = spec_with(Some(cap as u32));
         let data = "😀😀😀😀".as_bytes();
         let total = data.len() as u64;
@@ -346,7 +408,7 @@ mod tests {
     fn gap_with_cap_paces_surviving_tail_and_terminates() {
         let spec = spec_with(Some(4));
         let tail = b"abcdefgh";
-        let total = 1000u64;
+        let total = 1000u64; // only 8 of 1000 bytes survived in the tail
         let mut last = 0;
         let mut ticks = 0usize;
         let mut emitted = 0usize;

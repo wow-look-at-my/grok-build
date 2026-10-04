@@ -1,4 +1,5 @@
-//! Regression: settings saves must serialize against config-init-flock writers.
+//! Regression: settings saves must serialize against config-init-flock writers, or the two
+//! domains interleave read-modify-writes and the last atomic rename drops the other side's edit.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -42,7 +43,8 @@ fn saver_has_opened_init_lock(lock_path: &Path) -> bool {
 
 #[test]
 fn settings_save_serializes_against_init_flock_writer() {
-    // One #[test] per binary: the env is process-global (same rule as acp_harness::run_agent_test).
+    // One #[test] per binary: the env is process-global (same rule as
+    // acp_harness::run_agent_test).
     let grok_home = tempfile::tempdir().expect("grok home");
     // SAFETY: no other threads are running yet.
     unsafe { std::env::set_var("GROK_HOME", grok_home.path()) };
@@ -67,7 +69,8 @@ fn settings_save_serializes_against_init_flock_writer() {
             }))
     });
 
-    // The saver fails closed after 1s of `try_lock` retries.
+    // The saver fails closed after 1s of `try_lock` retries. A fixed sleep spends
+    // that budget before this thread is scheduled to drop the flock.
     let lock_path = grok_home.path().join(".config-init.lock");
     assert!(
         wait_for(Instant::now() + Duration::from_secs(10), || {

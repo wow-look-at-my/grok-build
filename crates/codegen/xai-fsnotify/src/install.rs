@@ -48,10 +48,13 @@ pub(crate) fn reconcile_top_level_watches(
 /// Bounds the paths per synthetic event when a huge tree appears at once.
 pub(crate) const BACKFILL_BATCH: usize = 512;
 
-/// Watches armed per loop iteration.
+/// Watches armed per loop iteration. Each `watch()` is a 100 to 300µs round trip
+/// into notify's thread, so this bounds command latency to about 0.1s a chunk
+/// while a 50k directory backlog still arms in seconds.
 pub(crate) const ARM_CHUNK: usize = 512;
 
-/// Largest backlog armed before signaling ready.
+/// Largest backlog armed before signaling ready, which keeps that wait under a
+/// second while leaving a typical repository no startup blind window.
 pub(crate) const ARM_SYNC_MAX: usize = 4096;
 
 /// Arms up to [`ARM_CHUNK`] pending watches, tolerating entries that vanished

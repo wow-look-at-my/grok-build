@@ -4,9 +4,11 @@ use super::common::*;
 
 /// **`/model` rows must be readable when every model id is long.**
 ///
-/// The dropdown sized its label column from the widest label under a 40-column
-/// cap while DISCARDING the ones above it, so a catalog where every id is long
-/// left nothing to take a max over: a zero-width column, and rows that draw,
+/// Gateway catalogs name models `provider/vendor:family:size`, which runs past
+/// 40 columns on its own, and the current row adds " (current)". The dropdown
+/// sized its label column from the widest label under a 40-column cap while
+/// DISCARDING the ones above it, so a catalog where every id is long left
+/// nothing to take a max over: a zero-width column, and rows that draw,
 /// highlight and switch models with nothing written in them.
 ///
 /// Unit tests over the width function did not catch it, and could not have

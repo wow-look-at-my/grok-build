@@ -1,8 +1,10 @@
 //! User-facing formatting for terminal request / API errors.
+//!
+//! Turns raw ACP / `RetryState` dumps (`API error (status 500): {"error":…}`) into the same kind of short warning banner used for 401 re-auth.
 
-/// Wire `RetryState::Failed.error_type` values the pager understands. The
-/// vocabulary is the shell's `SamplingErrorKind::as_str` tags plus its
-/// special-cased tags (`context_length`, `legacy_auth`, …).
+/// Wire `RetryState::Failed.error_type` values the pager understands.
+/// The vocabulary is the shell's `SamplingErrorKind::as_str` tags plus its special-cased tags (`context_length`, `legacy_auth`, …).
+/// Unknown strings map to [`WireErrorType::Other`] rather than being matched as raw `&str` at call sites.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WireErrorType {
     Auth,
@@ -46,12 +48,13 @@ impl WireErrorType {
     }
 }
 
-/// Absent stays `None`, which keeps the untyped-text recovery available;
-/// every place a kind comes off the wire uses this mapping.
+/// Absent stays `None`, which keeps the untyped-text recovery available; every place a kind comes off the wire uses this mapping.
+/// An unknown kind (a newer shell's) parses to `Some(Other)`, so it is never text-sniffed into a different classification.
 pub(crate) fn wire_error_kind(raw: Option<&str>) -> Option<WireErrorType> {
     raw.map(|s| WireErrorType::parse(Some(s)))
 }
 
+/// The shared vocabulary maps 1:1 onto the pager's wire types; kinds without their own copy render as [`Self::Other`].
 impl From<xai_grok_shell::sampling::error::SamplingErrorKind> for WireErrorType {
     fn from(kind: xai_grok_shell::sampling::error::SamplingErrorKind) -> Self {
         use xai_grok_shell::sampling::error::SamplingErrorKind as K;
@@ -78,8 +81,8 @@ pub(crate) struct FormattedRequestFailure {
     pub(crate) wire: WireErrorType,
 }
 
-/// `Headline: detail` (headline alone when there is no detail). Shared
-/// with the scrollback block so both renderings can't drift.
+/// `Headline: detail` (headline alone when there is no detail).
+/// Shared with the scrollback block so the two renderings can't drift.
 pub(crate) fn banner_message(headline: &str, detail: &str) -> String {
     if detail.is_empty() {
         headline.to_string()
@@ -162,7 +165,8 @@ pub(crate) fn format_request_failure(
     } else {
         error_type.unwrap_or(WireErrorType::Other)
     };
-    // A sniffed status must not demote a dedicated wire-type headline.
+    // A sniffed status must not demote a dedicated wire-type headline to generic status copy
+    // An `auth_transient` message contains "Unauthorized (401)", so only `Api` and `Other` recover a status from the text
     let status = status.or_else(|| {
         matches!(wire, WireErrorType::Api | WireErrorType::Other)
             .then(|| parse_http_status(raw))
@@ -183,10 +187,9 @@ pub(crate) fn format_request_failure(
     }
 }
 
-/// A present-but-unknown error type is a newer shell's kind and is never
-/// reclassified. TODO: error-kind-fallback-removal — this recovery is a
-/// version shim for terminals that predate the typed `errorKind`/`error_kind`
-/// fields.
+/// A present-but-unknown error type is a newer shell's kind and is never reclassified.
+/// TODO: error-kind-fallback-removal — this recovery is a version shim for terminals that predate the typed `errorKind`/`error_kind` fields.
+/// It is also the only truncation classifier for the exhausted-retry path, which passes no error type at all.
 fn truncation_recovered_from_untyped_raw(error_type: Option<WireErrorType>, raw: &str) -> bool {
     error_type.is_none()
         && parse_http_status(raw).is_none()
@@ -359,8 +362,8 @@ fn compose_detail(why: Option<&str>, action: Option<&str>) -> String {
     }
 }
 
-/// Server-fault responses (5xx and their wire equivalents) carry internal
-/// detail ("upstream exploded") users can't act on, so always use our copy.
+/// Server-fault responses (5xx and their wire equivalents) carry internal detail ("upstream exploded") users can't act on, so always use our copy.
+/// 429 stays client-side: its body may explain plan limits.
 fn is_server_fault(status: Option<u16>, wire: WireErrorType) -> bool {
     match status {
         Some(code) => code >= 500,
@@ -369,6 +372,7 @@ fn is_server_fault(status: Option<u16>, wire: WireErrorType) -> bool {
     }
 }
 
+/// The server body restates the headline (e.g. "Not Found" under a 404).
 fn is_headline_echo(detail: &str, headline: &str) -> bool {
     let detail = normalize_phrase(detail);
     let headline = normalize_phrase(headline);
@@ -436,7 +440,7 @@ pub(crate) fn parse_http_status(raw: &str) -> Option<u16> {
     None
 }
 
-/// `require_close_paren` for the `"… ("` markers, so prose like "merge conflict (300 files" can't match.
+/// Exactly three digits in 400..600. `require_close_paren` for the `"… ("` markers, so prose like "merge conflict (300 files" can't match.
 fn parse_status_digits(s: &str, require_close_paren: bool) -> Option<u16> {
     let bytes = s.as_bytes();
     if !bytes
@@ -708,7 +712,8 @@ mod tests {
 
     #[test]
     fn untyped_unknown_kind_is_not_sniff_reclassified() {
-        // A genuinely unknown kind (a newer shell's) enters as `Some(Other)` via `wire_error_kind`.
+        // A genuinely unknown kind (a newer shell's) enters as `Some(Other)` via `wire_error_kind`, not `None`
+        // Quoting the truncation phrase must not steal its classification
         let kind = wire_error_kind(Some("a_future_kind"));
         assert_eq!(kind, Some(WireErrorType::Other));
         let formatted = format_request_failure(
@@ -817,8 +822,8 @@ mod tests {
 
     #[test]
     fn typed_headline_survives_status_in_message_text() {
-        // `auth_transient` copy routinely embeds "Unauthorized (401)" The
-        // sniffed status must not demote the dedicated headline.
+        // `auth_transient` copy routinely embeds "Unauthorized (401)"
+        // The sniffed status must not demote the dedicated headline to generic "Request failed (401)" copy
         let formatted = format_request_failure(
             None,
             Some(WireErrorType::AuthTransient),
@@ -878,6 +883,8 @@ mod tests {
 
     #[test]
     fn recovers_status_from_own_banner_text() {
+        // PromptResponse race fallbacks (401 re-auth, 402 credit limit) sniff the already-formatted error text when http_status is absent
+        // Our own headlines must parse
         assert_eq!(
             parse_http_status("Request failed (402): usage balance exhausted"),
             Some(402)

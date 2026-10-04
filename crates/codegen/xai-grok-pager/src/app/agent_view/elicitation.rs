@@ -1,4 +1,5 @@
-//! The MCP elicitation card (`x.ai/mcp/elicit`): routes key, mouse, and paste input and resolves accept, decline.
+//! The MCP elicitation card (`x.ai/mcp/elicit`): routes key, mouse, and paste input and resolves accept, decline, and cancel.
+//! Also promotes the next pending request when a card closes, and stashes and restores the composer draft.
 
 use super::AgentView;
 use crate::app::app_view::InputOutcome;
@@ -347,8 +348,7 @@ impl AgentView {
         };
 
         if is_url_consent {
-            // The URL was validated when the request arrived (http(s),
-            // parseable, no credentials) or Accept
+            // The URL was validated when the request arrived (http(s), parseable, no credentials) or Accept would have been disabled
             let (delivered, url) = {
                 let Some(ev) = self.elicitation_view.as_mut() else {
                     return InputOutcome::Changed;
@@ -359,7 +359,8 @@ impl AgentView {
                     ev.begin_url_waiting();
                     (true, url)
                 } else {
-                    // The MCP side already abandoned the request (server cancel or teardown) Nothing heard the accept.
+                    // The MCP side already abandoned the request (server cancel or teardown)
+                    // Nothing heard the accept, so do not navigate and do not enter the waiting stage
                     (false, None)
                 }
             };

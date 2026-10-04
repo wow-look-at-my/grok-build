@@ -1,4 +1,10 @@
 //! Bearer resolution for voice STT requests.
+//! The voice clients are long-lived: a single voice session opens many STT WebSocket connections over its lifetime.
+//! An OAuth/session bearer rotates (~15 min), so capturing a token once at startup would 401 mid-session.
+//! Instead of a static `String`, the clients hold a [`SharedVoiceAuth`] and resolve a fresh bearer at the point of each connection.
+//!
+//! This crate stays dependency-light: it defines its own minimal async trait instead of the shell's `AuthManager` or tools' `ApiKeyProvider`.
+//! The pager adapts the shell's refreshing provider onto this trait.
 
 use std::future::{Future, ready};
 use std::pin::Pin;
@@ -33,6 +39,7 @@ pub(crate) async fn require_bearer(auth: &SharedVoiceAuth) -> Result<String, Voi
 }
 
 /// A fixed bearer that never refreshes.
+/// Used by the standalone `voice-probe` binary and tests, where there is no `AuthManager`, only a raw `XAI_API_KEY`.
 pub struct StaticVoiceAuth(pub String);
 
 impl std::fmt::Debug for StaticVoiceAuth {

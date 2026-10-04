@@ -1,4 +1,11 @@
 //! Telling a server which solution or projects to load.
+//!
+//! Most servers work out what to analyze from `rootUri`. A few load their
+//! workspace through a protocol extension instead — Roslyn is the notable one:
+//! left alone it treats every file as a loose "miscellaneous file" and reports
+//! no project-level diagnostics at all. These notifications are vendor
+//! extensions, not LSP, which is why they are modelled here rather than coming
+//! from `lsp_types`.
 
 use std::path::Path;
 
@@ -121,7 +128,8 @@ mod tests {
     #[test]
     fn a_missing_path_still_resolves() {
         let root = tempfile::tempdir().unwrap();
-        // Warns, but the server is still told — we are not the authority on what it can load.
+        // Warns, but the server is still told — we are not the authority on
+        // what it can load.
         assert!(resolve("test", root.path(), "Nope.sln").is_some());
     }
 }

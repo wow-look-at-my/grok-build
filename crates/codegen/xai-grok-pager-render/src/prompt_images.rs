@@ -1,4 +1,6 @@
 //! Shared prompt-side image types and helpers.
+//!
+//! Both the view layer ([`crate::views::prompt_widget`]) and the app/dispatch layer ([`crate::app::dispatch`]) use these types, so they live here.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -8,6 +10,8 @@ use std::time::Instant;
 use xai_ratatui_textarea::ElementId;
 
 /// Tracing target for image-pipeline diagnostics.
+///
+/// Filter with `RUST_LOG=prompt_images=debug` to see logs from `insert_image`, `sync_images_with_textarea`, and `try_read_dropped_paths`.
 pub const PROMPT_IMAGES_TRACING_TARGET: &str = "prompt_images";
 
 // -------------------------------------------------------------------------
@@ -202,7 +206,9 @@ pub fn load_image_data(path: &std::path::Path) -> ImageLoadResult {
     })
 }
 
-// ------------------------------------------------------------------------- Video viewer state.
+// -------------------------------------------------------------------------
+// Video viewer state
+// -------------------------------------------------------------------------
 
 /// Target frames per second for terminal video playback.
 const VIDEO_FPS: f64 = 10.0;
@@ -234,9 +240,9 @@ pub struct VideoViewerState {
 }
 
 impl VideoViewerState {
-    /// Minimal viewer for pager and render unit tests. The real
-    /// `open_from_path` needs ffmpeg and a graphics-capable terminal, neither
-    /// available under `cargo test`.
+    /// Minimal viewer for pager and render unit tests.
+    /// The real `open_from_path` needs ffmpeg and a graphics-capable terminal, neither available under `cargo test`.
+    /// Public so dependent crates can construct a viewer without pulling in decode/graphics.
     pub fn test_stub() -> Self {
         Self {
             frames: vec![Vec::new()],
@@ -252,6 +258,8 @@ impl VideoViewerState {
     }
 
     /// Open a video file for playback. Returns `None` if ffmpeg is unavailable or the video cannot be decoded.
+    ///
+    /// Extracts all frames upfront: for short videos (5-15s at 10fps) this is 50-150 frames and takes about 1-3 seconds.
     pub fn open_from_path(path: &std::path::Path) -> Option<Self> {
         use crate::terminal::image::{GraphicsProtocol, detect_graphics_protocol};
 
@@ -345,12 +353,14 @@ impl VideoViewerState {
         }
     }
 
+    /// Seek forward by about 1 second.
     pub fn seek_forward(&mut self) {
         let skip = self.fps.round() as usize;
         self.current_frame = (self.current_frame + skip).min(self.frames.len().saturating_sub(1));
         self.last_frame_time = Instant::now();
     }
 
+    /// Seek backward by about 1 second.
     pub fn seek_backward(&mut self) {
         let skip = self.fps.round() as usize;
         self.current_frame = self.current_frame.saturating_sub(skip);
@@ -373,6 +383,7 @@ impl VideoViewerState {
         self.current_frame as f64 / self.fps
     }
 
+    /// Playback progress fraction (0.0-1.0).
     pub fn progress(&self) -> f64 {
         if self.frames.len() <= 1 {
             return 0.0;
@@ -476,7 +487,8 @@ fn ffprobe_metadata(path: &std::path::Path) -> Option<(u32, u32, f64, f64)> {
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
-    // Stream line: width,height,r_frame_rate[,duration] Format line: duration
+    // Stream line: width,height,r_frame_rate[,duration]
+    // Format line: duration
     let lines: Vec<&str> = text.trim().lines().collect();
     let parts: Vec<&str> = lines.first()?.split(',').collect();
     if parts.len() < 3 {
@@ -512,7 +524,8 @@ fn parse_fraction(s: &str) -> Option<f64> {
 }
 
 // -------------------------------------------------------------------------
-// Inline media info.
+// Inline media info (for scrollback inline rendering)
+// -------------------------------------------------------------------------
 
 /// Metadata for inline media rendering in the scrollback.
 /// Returned by blocks that want to display media inline.
@@ -536,7 +549,7 @@ use xai_grok_shared::clipboard::mime_to_extension;
 /// Tracks everything needed for display, preview, persistence, and eventual submission as a `ContentBlock::Image`.
 #[derive(Debug, Clone)]
 pub struct PastedImage {
-    /// The [`ElementId`] of the corresponding `KIND_IMAGE` element in the `TextArea` buffer.
+    /// The [`ElementId`] of the corresponding `KIND_IMAGE` element in the `TextArea` buffer. Used to reconcile live elements against stored images.
     pub element_id: ElementId,
 
     /// 1-based display number for the current prompt (e.g. the `1` in `[Image #1]`). Reset when the prompt is cleared.
@@ -552,15 +565,19 @@ pub struct PastedImage {
     pub byte_len: usize,
 
     /// Encoded image bytes kept in memory.
+    /// Set to `None` once the image is durably written to [`session_image_path`](Self::session_image_path), to avoid holding large buffers.
     pub encoded_bytes: Option<Arc<[u8]>>,
 
     /// Original user-visible path for file-path pastes.
+    ///
+    /// This remains stable after persistence so previews show the path the user pasted. Model/send loading uses `session_image_path` first.
     pub source_path: Option<PathBuf>,
 
     /// Temporary staging path before the image is finalized into the session directory. Cleaned up when the chip is removed or on send.
     pub staged_temp_path: Option<PathBuf>,
 
     /// Final durable path under `session_dir(info)/images/`.
+    /// Once set, this is the canonical on-disk location and [`encoded_bytes`](Self::encoded_bytes) may be released.
     pub session_image_path: Option<PathBuf>,
 
     /// Shared preview preparation state; draw only reads its resolved result.
@@ -719,9 +736,12 @@ impl PromptImagePreviewPreparation {
 }
 
 // -------------------------------------------------------------------------
-// Display helpers.
+// Display helpers
+// -------------------------------------------------------------------------
 
-/// Build the buffer text for an image chip. Always path-free: `[Image #1]`.
+/// Build the buffer text for an image chip.
+///
+/// Always path-free: `[Image #1]`. Filepaths live on the [`PastedImage`] record and appear only in the hover/cursor preview overlay.
 pub fn display_text(display_number: usize) -> String {
     format!("[Image #{display_number}]")
 }
@@ -731,7 +751,8 @@ pub fn extension_for_mime(mime: &str) -> &'static str {
 }
 
 // -------------------------------------------------------------------------
-// Reconciliation.
+// Reconciliation
+// -------------------------------------------------------------------------
 
 /// Whether cleanup may delete a durable copy in the session image directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -763,6 +784,8 @@ pub fn drain_and_cleanup(session_path_policy: SessionPathPolicy, images: &mut Ve
     }
 }
 
+/// Reset the monotonic image counter to 0.
+/// Pair with [`drain_and_cleanup`] when a prompt is fully reset (Ctrl+C, `set_text("")`, successful send).
 pub fn reset_counter(image_counter: &mut usize) {
     *image_counter = 0;
 }
@@ -786,7 +809,9 @@ pub fn cleanup_image(session_path_policy: SessionPathPolicy, image: &PastedImage
     }
 }
 
-// ------------------------------------------------------------------------- Construction.
+// -------------------------------------------------------------------------
+// Construction from file path
+// -------------------------------------------------------------------------
 
 /// HEIC/HEIF/AVIF/ICO/SVG are omitted: the overlay cannot render them, so a chip would falsely promise display.
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"];
@@ -1019,8 +1044,8 @@ fn try_read_dropped_path(token: &str) -> Option<DroppedPath> {
     if path.as_os_str().is_empty() || path == std::path::Path::new("/") {
         return None;
     }
-    // Reject the bytes that corrupt the terminal/text-paste pipeline (NUL,
-    // CR, LF).
+    // Reject the bytes that corrupt the terminal/text-paste pipeline (NUL, CR, LF), produced by pathological encodings like `file:///path%00.png`
+    // TAB and other low-control bytes are legal in Unix filenames and tolerated by the TUI text rendering, so they pass through
     if path
         .as_os_str()
         .as_encoded_bytes()
@@ -1029,17 +1054,18 @@ fn try_read_dropped_path(token: &str) -> Option<DroppedPath> {
     {
         return None;
     }
-    // The image branch wins when extension and magic bytes both match This
-    // keeps the established `[Image #N]` behaviour for image drops.
+    // The image branch wins when extension and magic bytes both match
+    // This keeps the established `[Image #N]` behaviour for image drops that already passed the anchor and `file://` gate
     if let Some(img) = read_image_at_path(&path) {
         return Some(DroppedPath::Image(img));
     }
-    // `file://` is an unambiguous drop URI even when the file is missing
-    // (stale links, network mounts) Bare anchored paths require the target.
+    // `file://` is an unambiguous drop URI even when the file is missing (stale links, network mounts)
+    // Bare anchored paths require the target to exist (file or directory), so prose like `/tmp is a dir on Unix` falls through to plain text paste
     if !is_file_url && !path.exists() {
         return None;
     }
-    // Canonicalise when possible so the inserted text matches what other code paths see.
+    // Canonicalise when possible so the inserted text matches what other code paths see (e.g. cwd-relative comparisons).
+    // Fall back to the raw decoded path when canonicalisation fails (broken symlinks, permission issues, network mounts, missing files)
     let resolved = dunce::canonicalize(&path).unwrap_or(path);
     Some(DroppedPath::NonImage(resolved))
 }
@@ -1145,7 +1171,7 @@ pub fn from_clipboard_data(data: &crate::clipboard::ImageData) -> PastedImage {
 // Session image persistence
 // -------------------------------------------------------------------------
 
-/// UUID filename so pastes of the same image stay independent. Keeps `source_path` for display and drops encoded bytes.
+/// UUID filename so two pastes of the same image stay independent. Keeps `source_path` for display and drops encoded bytes.
 pub fn persist_to_session(
     img: &mut PastedImage,
     session_images_dir: &std::path::Path,
@@ -1209,9 +1235,11 @@ pub fn session_mermaid_dir(
     Some(xai_grok_shared::session::session_dir(&info).join("mermaid"))
 }
 
-// ------------------------------------------------------------------------- Image loading.
+// -------------------------------------------------------------------------
+// Image loading for send
+// -------------------------------------------------------------------------
 
-const MAX_SEND_BYTES: usize = 50_000_000;
+const MAX_SEND_BYTES: usize = 50_000_000; // 50 MB
 
 /// Load image bytes from a `PastedImage` (in-memory or from disk).
 /// Returns `None` if the image cannot be loaded or exceeds [`MAX_SEND_BYTES`].
@@ -1259,10 +1287,11 @@ pub fn load_for_send(img: &PastedImage) -> Option<(Vec<u8>, String)> {
 }
 
 // -------------------------------------------------------------------------
-// ACP content block construction.
+// ACP content block construction
+// -------------------------------------------------------------------------
 
-/// Wire blocks plus the display numbers of attached images whose bytes could
-/// not be loaded (`load_for_send` returned `None`).
+/// Wire blocks plus the display numbers of attached images whose bytes could not be loaded
+/// (`load_for_send` returned `None`). Their `[Image #N]` text stays in the text block.
 #[derive(Debug, Default)]
 pub struct ContentBlocksBuild {
     pub blocks: Vec<agent_client_protocol::ContentBlock>,
@@ -1349,10 +1378,12 @@ fn build_content_blocks_with_prefixes_and_caps_ref(
     use agent_client_protocol::{ContentBlock, ImageContent, TextContent};
     use base64::Engine as _;
 
+    // Phase 1: rewrite the text to strip failed-load placeholders and collect successfully-loaded orphan images
+    // PastedImage-backed placeholders (display_number present in `images`) are left alone
     let (rewritten_text, orphan_images) =
         resolve_orphan_placeholders(text, images, allowed_prefixes, aggregate_max);
 
-    // The path tempts the model into a redundant `Read` on its own attachment.
+    // Phase 2: rewrite `[Image #N: <path>]` to `[Image #N]`. The path tempts the model into a redundant `Read` on its own attachment.
     let rewritten_text =
         xai_grok_shared::placeholder_images::strip_paths_from_image_placeholders(rewritten_text);
 
@@ -1481,7 +1512,9 @@ fn resolve_orphan_placeholders(
         return (text, recovered);
     }
 
-    // Splice out the failed-load spans in reverse order so earlier indices stay valid Only collapse the whitespace seam created.
+    // Splice out the failed-load spans in reverse order so earlier indices stay valid
+    // Only collapse the single whitespace seam created by the strip itself
+    // Collapsing every run of two or more spaces would mangle code blocks, indentation-sensitive markdown, and double-space punctuation
     let mut rewritten = text;
     strip_spans.sort_by_key(|(s, _)| *s);
     for (start, end) in strip_spans.into_iter().rev() {
@@ -1494,7 +1527,8 @@ fn resolve_orphan_placeholders(
 /// Newlines are preserved (treated as non-collapsible boundaries).
 fn collapse_strip_seam(text: &mut String, start: usize, end: usize) {
     text.replace_range(start..end, "");
-    // After removal `start` is the seam position Walk left/right over the immediate space chars only.
+    // After removal `start` is the seam position
+    // Walk left/right over the immediate space chars only; do not cross newlines or non-space whitespace (tab/CR)
     let bytes = text.as_bytes();
     let mut left = start;
     while left > 0 && bytes.get(left - 1) == Some(&b' ') {
@@ -1518,10 +1552,11 @@ fn collapse_strip_seam(text: &mut String, start: usize, end: usize) {
 }
 
 // -------------------------------------------------------------------------
-// Scrollback image references.
+// Scrollback image references
+// -------------------------------------------------------------------------
 
-/// An image file referenced in scrollback content via `![alt](path)` markdown
-/// or a bare absolute path.
+/// An image file referenced in scrollback content via `![alt](path)` markdown or a bare absolute path.
+/// Validated on construction: the path must exist, have a recognized image extension, and decode successfully.
 #[derive(Debug, Clone)]
 pub struct ScrollbackImageRef {
     /// Absolute path to the image file on disk.
@@ -1534,6 +1569,7 @@ pub struct ScrollbackImageRef {
 
 impl ScrollbackImageRef {
     /// Construct from a file path.
+    /// Returns `None` if the path doesn't exist, isn't a file, lacks a recognized image extension, or can't be decoded as an image.
     pub fn from_path(path: impl Into<PathBuf>) -> Option<Self> {
         Self::from_path_with_alt(path, String::new())
     }
@@ -1561,6 +1597,7 @@ impl ScrollbackImageRef {
     }
 }
 
+/// Regex pattern for `![alt](path)`: captures alt text (group 1) and path (group 2).
 const MARKDOWN_IMAGE_REF_PATTERN: &str = r"!\[([^\]]*)\]\(([^)\s]+)\)";
 
 /// Unresolved or undecodable paths are not counted, so a broken ref cannot look media-only.
@@ -1637,12 +1674,14 @@ pub fn extract_image_refs(text: &str) -> Vec<ScrollbackImageRef> {
     refs
 }
 
-// ------------------------------------------------------------------------- Scrollback video references.
+// -------------------------------------------------------------------------
+// Scrollback video references
+// -------------------------------------------------------------------------
 
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "mov", "avi", "mkv"];
 
-/// A video file referenced in scrollback content via `![alt](path.mp4)`
-/// markdown or a bare absolute path.
+/// A video file referenced in scrollback content via `![alt](path.mp4)` markdown or a bare absolute path.
+/// Validated on construction: the path must exist and have a recognized video extension.
 #[derive(Debug, Clone)]
 pub struct ScrollbackVideoRef {
     /// Absolute path to the video file on disk.
@@ -1688,6 +1727,7 @@ pub fn extract_video_refs(text: &str) -> Vec<ScrollbackVideoRef> {
     let mut refs = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
+    // MD_RE captures the alt text (group 1) and the path (group 2)
     for cap in MD_RE.captures_iter(text) {
         if let Some(m) = cap.get(2) {
             let path_str = m.as_str();
@@ -1703,6 +1743,7 @@ pub fn extract_video_refs(text: &str) -> Vec<ScrollbackVideoRef> {
         }
     }
 
+    // VIDEO_PATH_RE captures only the path (group 1); there is no alt text
     for cap in VIDEO_PATH_RE.captures_iter(text) {
         if let Some(m) = cap.get(1) {
             let path_str = m.as_str();
@@ -1988,7 +2029,8 @@ mod tests {
 
     #[test]
     fn token_to_path_round_trips_quoted_windows_path() {
-        // Windows Terminal wraps paths-with-spaces in double quotes Stripping the quotes and skipping shell_unescape must leave the path intact.
+        // Windows Terminal wraps paths-with-spaces in double quotes
+        // Stripping the quotes and skipping shell_unescape must leave the path intact for downstream `is_file()`
         let path = token_to_path("\"C:\\Users\\Alice\\My Folder\\image.png\"").unwrap();
         assert_eq!(
             path,
@@ -2034,7 +2076,7 @@ mod tests {
     }
 
     // ----- single-file resilience (drop with trailing whitespace / quotes /
-    // file:// URLs).
+    //       file:// URLs) ---------------------------------------------------
 
     /// Writes a real PNG at `path`.
     fn write_png(path: &std::path::Path, w: u32, h: u32) {
@@ -2113,6 +2155,7 @@ mod tests {
         let p = dir.path().join("has space.png");
         write_png(&p, 2, 2);
 
+        // Build a file:// URL with %20 in place of the literal space.
         let url = format!(
             "file://{}/has%20space.png",
             dir.path().display().to_string().replace(' ', "%20")
@@ -2236,6 +2279,7 @@ mod tests {
     }
 
     /// A non-image file in the middle is a valid drop (becomes `NonImage`).
+    /// The batch still produces 2 images plus 1 NonImage path; nothing is silently lost.
     #[test]
     fn multi_file_non_image_middle_still_emits_all_entries() {
         let dir = tempfile::tempdir().unwrap();
@@ -2249,8 +2293,9 @@ mod tests {
         let pasted = format!("{}\n{}\n{}", a.display(), txt.display(), c.display());
         let entries = dropped_paths(&pasted);
         assert_eq!(entries.len(), 3);
-        // Pin the source order of the variants, not the counts The drop
-        // classifier inserts in source order.
+        // Pin the source order of the variants, not just the counts
+        // The drop classifier inserts in source order, and order determines the final prompt layout
+        // A regression that scrambled the order would still pass a count-only assertion
         assert!(
             matches!(nth(&entries, 0), DroppedPath::Image(_)),
             "nth(&entries, 0) must be Image; got {:?}",
@@ -2312,7 +2357,8 @@ mod tests {
         let p = dir.path().join("foo.png");
         write_png(&p, 2, 2);
 
-        // "! /tmp/foo.png" is a bash-mode prefix paste.
+        // "! /tmp/foo.png" is a bash-mode prefix paste, not a 2-token file drop
+        // The all-parts-anchored gate must reject the split and leave the whole payload as one (invalid) token so the caller can detect `! `
         let pasted = format!("! {}", p.display());
         assert!(try_read_images_from_paste(&pasted).is_empty());
     }
@@ -2325,7 +2371,8 @@ mod tests {
         write_png(&foo, 2, 2);
         write_png(&bar, 2, 2);
 
-        // Prose that *ends* with an image extension is easy to mis-attach With the all-parts-anchored gate.
+        // Prose that *ends* with an image extension is easy to mis-attach
+        // With the all-parts-anchored gate, the first part "see" doesn't anchor and we fall back to a single token that fails validation as a path
         let pasted = format!("see {} referenced in {}", foo.display(), bar.display());
         assert!(try_read_images_from_paste(&pasted).is_empty());
     }
@@ -2336,7 +2383,8 @@ mod tests {
         let p = dir.path().join("foo.png");
         write_png(&p, 2, 2);
 
-        // A leading space followed by a path splits into an empty part and the path After trim and filter the parts collapse to a single token.
+        // A leading space followed by a path splits into an empty part and the path
+        // After trim and filter the parts collapse to a single token and the path still attaches
         let pasted = format!(" {}", p.display());
         assert!(try_read_image_from_path(&pasted).is_some());
     }
@@ -2351,7 +2399,8 @@ mod tests {
         write_png(&bc, 2, 2);
         write_png(&other, 2, 2);
 
-        // Mixed payload: newline-split wins.
+        // Mixed payload: newline-split wins; the second line is NOT further space-split, so "b.png c.png" is one filename
+        // Pins down the "newline wins, space is only a single-line fallback" rule
         let pasted = format!("{}\n{}\n{}", a.display(), bc.display(), other.display());
         let images = try_read_images_from_paste(&pasted);
         assert_eq!(
@@ -2364,7 +2413,9 @@ mod tests {
     #[test]
     fn quoted_path_with_internal_backslash_escape() {
         let dir = tempfile::tempdir().unwrap();
-        // Inside the quotes the user supplied a backslash escape.
+        // Inside the quotes the user supplied a backslash escape. Our code still runs `shell_unescape` after stripping quotes.
+        // This diverges from POSIX shells, where backslash inside double quotes is mostly literal
+        // It matches the pre-existing single-image wrapper and the common drag-and-drop flow. The test pins down the actual behavior.
         let p = dir.path().join("my file.png");
         write_png(&p, 2, 2);
         let pasted = format!("\"{}/my\\ file.png\"", dir.path().display());
@@ -2390,7 +2441,8 @@ mod tests {
         let p = dir.path().join("foo.png");
         write_png(&p, 2, 2);
 
-        // `url::Url::to_file_path()` on `file:///…/foo.png?q=1` strips the query.
+        // `url::Url::to_file_path()` on `file:///…/foo.png?q=1` strips the query, so the file is found and the image attaches
+        // Pins the current `url` crate contract; a change that started including the query in the path component would trip this assertion
         let pasted = format!("file://{}?q=1", p.display());
         assert!(try_read_image_from_path(&pasted).is_some());
     }
@@ -2512,7 +2564,8 @@ mod tests {
 
     #[test]
     fn file_url_lookalike_scheme_rejected() {
-        // `file_url://` does NOT start with the literal `file://`.
+        // `file_url://` does NOT start with the literal `file://`, so the URL branch is skipped and the bare-path branch runs
+        // The resulting "path" can't be on disk, so the result is `None`
         let pasted = "file_url:///tmp/foo.png";
         assert!(try_read_image_from_path(pasted).is_none());
     }
@@ -2563,7 +2616,8 @@ mod tests {
 
     #[test]
     fn dropped_path_non_image_file_url_returns_decoded_path() {
-        // A `file://` URL pointing at a non-image file produces a NonImage entry with the decoded absolute path It must not be silently ignored.
+        // A `file://` URL pointing at a non-image file produces a NonImage entry with the decoded absolute path
+        // It must not be silently ignored or routed to an image chip
         let dir = tempfile::tempdir().unwrap();
         let txt = dir.path().join("notes.txt");
         std::fs::write(&txt, b"hello").unwrap();
@@ -2597,7 +2651,7 @@ mod tests {
         );
         assert_eq!(paste_anchor_kind("hello world"), "none");
         assert_eq!(paste_anchor_kind(""), "none");
-        // ~ without slash is prose, not a tilde anchor.
+        // ~ without slash is just prose, not a tilde anchor.
         assert_eq!(paste_anchor_kind("~lonely"), "none");
         // Lowercase Windows drive letters are also accepted
         assert_eq!(paste_anchor_kind("d:\\path"), "windows_drive");
@@ -2688,7 +2742,8 @@ mod tests {
 
     #[test]
     fn dropped_path_multi_file_mixed_image_and_non_image() {
-        // Drop one image and one text file The image becomes an image chip and the non-image a decoded path.
+        // Drop one image and one text file
+        // The image becomes an image chip and the non-image a decoded path; *neither* is silently dropped on the floor
         let dir = tempfile::tempdir().unwrap();
         let png = dir.path().join("a.png");
         let txt = dir.path().join("b.txt");
@@ -2728,7 +2783,8 @@ mod tests {
         let pasted = format!("file://{} file://{}", png.display(), txt.display());
         let entries = dropped_paths(&pasted);
         assert_eq!(entries.len(), 2);
-        // Pin the variant of each token A regression that collapses both into Image (or both into NonImage) would otherwise be missed.
+        // Pin the variant of each token
+        // A regression that collapses both into Image (or both into NonImage) would otherwise be missed by a bare `len() == 2` assertion
         let mut saw_image = false;
         let mut saw_non_image = false;
         for entry in entries {
@@ -2748,7 +2804,7 @@ mod tests {
 
     #[test]
     fn dropped_path_two_non_image_file_urls_both_intercepted() {
-        // The most likely real-world Finder multi-select drop pattern for source code review: drag text files into the TUI
+        // The most likely real-world Finder multi-select drop pattern for source code review: drag two text files into the TUI
         let dir = tempfile::tempdir().unwrap();
         let a = dir.path().join("a.md");
         let b = dir.path().join("b.md");
@@ -2771,7 +2827,8 @@ mod tests {
 
     #[test]
     fn dropped_path_plus_sign_not_decoded_as_space() {
-        // RFC 3986 path-style decoding preserves `+`.
+        // RFC 3986 path-style decoding preserves `+`; only application/x-www-form-urlencoded decoding maps `+` to a space
+        // Filenames with `+` are common (`C++ Source.cpp`, `5+5.txt`).
         let dir = tempfile::tempdir().unwrap();
         let txt = dir.path().join("c++ source.cpp");
         std::fs::write(&txt, b"int main() {}").unwrap();
@@ -2806,7 +2863,8 @@ mod tests {
 
     #[test]
     fn dropped_path_multibyte_utf8_percent_encoded_round_trips() {
-        // macOS Finder emits `%XX` triplets for each UTF-8 byte of non-ASCII filename characters.
+        // macOS Finder emits `%XX` triplets for each UTF-8 byte of non-ASCII filename characters. `…` (U+2026) encodes as `%E2%80%A6`.
+        // The full triplet sequence must decode to the original codepoint, not be partially decoded or dropped
         let dir = tempfile::tempdir().unwrap();
         let txt = dir.path().join("ellipsis…file.md");
         std::fs::write(&txt, b"# hi").unwrap();
@@ -2820,6 +2878,9 @@ mod tests {
 
     #[test]
     fn dropped_path_mixed_case_percent_hex_equivalent() {
+        // RFC 3986 section 2.1: `%2F` and `%2f` are equivalent
+        // Some producers emit lowercase, some uppercase; both must round-trip to the same decoded path
+        // Uses the ellipsis codepoint `…` (UTF-8 bytes `E2 80 A6`) so the percent triplets contain letters and case actually matters
         let dir = tempfile::tempdir().unwrap();
         let ellipsis_file = dir.path().join("e…e.txt");
         std::fs::write(&ellipsis_file, b"x").unwrap();
@@ -2837,6 +2898,7 @@ mod tests {
     #[test]
     fn dropped_path_invalid_percent_sequence_tolerated_outcome() {
         // Invalid `%ZZ` may be kept literal or rejected to empty (plain-text fallthrough). Any other outcome fails.
+        // Tempfile so a leftover hostile path cannot change the variant.
         let dir = tempfile::tempdir().unwrap();
         let base = url::Url::from_file_path(dir.path()).unwrap();
         let url = format!("{}/bad%ZZname.txt", base.as_str().trim_end_matches('/'));
@@ -2852,7 +2914,8 @@ mod tests {
 
     #[test]
     fn dropped_path_extension_says_image_bytes_say_no_falls_to_non_image() {
-        // `.png` extension but garbage bytes.
+        // `.png` extension but garbage bytes: `read_image_at_path` rejects via `mime_from_bytes` returning octet-stream
+        // The NonImage gate fires and the user gets the path text instead of a chip
         let dir = tempfile::tempdir().unwrap();
         let fake = dir.path().join("corrupt.png");
         std::fs::write(&fake, b"this is not a PNG").unwrap();
@@ -2871,7 +2934,8 @@ mod tests {
     /// The contrast case, an absolute `file://` URL to the same content, is intercepted.
     #[test]
     fn dropped_path_bare_cwd_relative_image_name_not_intercepted() {
-        // Create a real PNG at <tempdir>/foo.png The bare name `foo.png` must NOT be intercepted.
+        // Create a real PNG at <tempdir>/foo.png
+        // The bare name `foo.png` must NOT be intercepted: the anchor gate short-circuits before `read_image_at_path` runs
         let dir = tempfile::tempdir().unwrap();
         let abs = dir.path().join("foo.png");
         write_png(&abs, 2, 2);
@@ -3003,6 +3067,8 @@ mod tests {
 
     #[test]
     fn dropped_path_empty_line_between_file_urls_tolerated() {
+        // Double newline between two `file://` URLs
+        // `tokenize_paste` is supposed to filter the empty intermediate token; pin that for the `DroppedPath` flow
         let dir = tempfile::tempdir().unwrap();
         let a = dir.path().join("blank1.txt");
         let b = dir.path().join("blank2.txt");
@@ -3033,7 +3099,8 @@ mod tests {
 
     #[test]
     fn dropped_path_directory_via_file_url_intercepted_as_non_image() {
-        // A directory dropped as a `file://` URL is intercepted as NonImage (the NonImage branch uses `path.exists()`, not `is_file()`) Useful.
+        // A directory dropped as a `file://` URL is intercepted as NonImage (the NonImage branch uses `path.exists()`, not `is_file()`)
+        // Useful when the user drags a folder into the TUI
         let dir = tempfile::tempdir().unwrap();
         let sub = dir.path().join("a_folder");
         std::fs::create_dir_all(&sub).unwrap();
@@ -3057,7 +3124,9 @@ mod tests {
 
     #[test]
     fn dropped_path_prose_with_embedded_existing_path_not_truncated() {
-        // /etc/hosts exists on every Unix-y machine.
+        // /etc/hosts exists on every Unix-y machine. A sentence that mentions it must NOT be truncated to just the path token.
+        // The full sentence isn't a valid file, so the all-anchored tokenizer gate falls back to a single-token line
+        // That token doesn't exist on disk and is rejected
         let entries = dropped_paths("I read /etc/passwd and got confused");
         assert!(
             entries.is_empty(),
@@ -3073,7 +3142,8 @@ mod tests {
 
     #[test]
     fn try_read_images_from_paste_equals_image_filtered_dropped_paths() {
-        // `try_read_images_from_paste` is a thin filter over `try_read_dropped_paths` Lock in the delegation for several input shapes.
+        // `try_read_images_from_paste` is a thin filter over `try_read_dropped_paths`
+        // Lock in the delegation for several input shapes so a regression that diverges in one shape (e.g. empty paste) breaks visibly.
         let dir = tempfile::tempdir().unwrap();
         let png1 = dir.path().join("img1.png");
         let png2 = dir.path().join("img2.png");
@@ -3131,10 +3201,13 @@ mod tests {
         std::fs::create_dir_all(&real).unwrap();
 
         // Build a line that space-splits to [bogus_anchored, real_dir].
+        // `bogus_anchored` is `<tmpdir>/nope nope nope`: anchored (starts with `/`) so the all-anchored gate keeps it, but not on disk
         let bogus = dir.path().join("nope nope nope");
         let pasted = format!("{} {}", bogus.display(), real.display());
 
-        // bogus.exists() is false; real.exists() is true After the per-line all-or-nothing gate the line should emit *nothing*.
+        // bogus.exists() is false; real.exists() is true
+        // After the per-line all-or-nothing gate the line should emit *nothing* so the caller falls through to plain text paste
+        // The user then sees the verbatim string in the prompt rather than only `real_dir`
         let entries = dropped_paths(&pasted);
         assert!(
             entries.is_empty(),
@@ -3180,7 +3253,8 @@ mod tests {
 
     #[test]
     fn dropped_path_single_token_existing_bare_path_intercepted() {
-        // The flip side of the prose test: a single bare anchored path that exists IS a drop Use a hermetic tempfile-backed directory.
+        // The flip side of the prose test: a single bare anchored path that exists IS a drop
+        // Use a hermetic tempfile-backed directory so the test doesn't depend on `/tmp` existing or its contents in a CI sandbox
         let dir = tempfile::tempdir().unwrap();
         let entries = dropped_paths(&dir.path().display().to_string());
         // The directory exists; the NonImage gate uses `path.exists()` (not `is_file()`), so directories qualify
@@ -3222,7 +3296,8 @@ mod tests {
 
     #[test]
     fn dropped_path_nonexistent_bare_path_not_intercepted() {
-        // A bare path to a non-existent file is NOT intercepted.
+        // A bare path to a non-existent file is NOT intercepted: the user might just have typed `/etc/passwd` as part of prose
+        // (The image branch already filters on file existence; this mirrors that for the non-image branch.)
         let entries = dropped_paths("/tmp/definitely_does_not_exist_xyz_grok_pager.txt");
         assert!(
             entries.is_empty(),
@@ -3235,7 +3310,8 @@ mod tests {
     /// `canonicalize()` returns `Err` for missing targets; the fallback must emit the raw decoded path as `NonImage` so the user gets a usable path.
     #[test]
     fn dropped_path_nonexistent_file_url_still_intercepted() {
-        // Use a tempdir-rooted nonexistent path so a developer's.
+        // Use a tempdir-rooted nonexistent path so a developer's or CI sandbox's filesystem can't accidentally make the path resolve
+        // A `/tmp/definitely_does_not_exist...` path could be present on a noisy machine
         let dir = tempfile::tempdir().unwrap();
         let nonexistent = dir.path().join("does/not/exist/at/all.txt");
         let url = format!("file://{}", nonexistent.display());
@@ -3388,7 +3464,8 @@ mod tests {
 
     #[test]
     fn persist_clipboard_image_keeps_source_path_none() {
-        // Clipboard paste (Copy Image in browser/Slack): source_path starts as None It should stay None after persistence.
+        // Clipboard paste (Copy Image in browser/Slack): source_path starts as None
+        // It should stay None after persistence so the chip shows `[Image #1]` without an internal session path
         let dir = tempfile::tempdir().unwrap();
         let images_dir = dir.path().join("images");
 
@@ -3646,8 +3723,9 @@ mod tests {
         assert_eq!(blocks.len(), 2);
         if let agent_client_protocol::ContentBlock::Image(ic) = &nth(&blocks, 1) {
             assert!(!ic.data.is_empty());
-            // The durable session copy goes out through `uri` even for
-            // clipboard pastes (no `source_path`).
+            // The durable session copy goes out through `uri` even for clipboard pastes (no `source_path`)
+            // This is the reference `image_edit` resolves `[Image #N]` against
+            // Vision is unaffected because `pick_user_image_url` never forwards a `file://` URI to the model
             assert_eq!(
                 ic.uri.as_deref(),
                 Some(format!("file://{}", path.display()).as_str()),
@@ -3742,6 +3820,7 @@ mod tests {
         let bad = make_image(1, 1); // no bytes
         let good = make_real_image(50, 50);
         let blocks = build_blocks_no_workspace("text".into(), vec![bad, good]);
+        // Text plus 1 good image; the bad image was skipped
         assert_eq!(blocks.len(), 2);
     }
 
@@ -3763,6 +3842,7 @@ mod tests {
         let allowed = [dunce::canonicalize(dir.path()).unwrap()];
         let blocks = build_content_blocks_with_prefixes(text, vec![], Some(&allowed));
 
+        // Text block plus 1 recovered image
         assert_eq!(blocks.len(), 2);
         let agent_client_protocol::ContentBlock::Image(ic) = &nth(&blocks, 1) else {
             panic!("expected recovered Image block");
@@ -3775,13 +3855,14 @@ mod tests {
             ic.uri
         );
         // Base64-encoded `data` must round-trip back to the on-disk PNG bytes
-        // A regression emitting raw bytes.
+        // A regression emitting raw bytes or double-encoding would fail this assertion
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&ic.data)
             .expect("data must be valid base64");
         assert_eq!(decoded, on_disk);
-        // Placeholder anchor stays but the path is now stripped The image is
-        // already attached inline.
+        // Placeholder anchor stays but the path is now stripped
+        // The image is already attached inline, so the model has no reason to call `Read` on the path (and the path component would tempt it to)
+        // The bracketed `[Image #N]` form preserves the positional anchor inside the prose
         let agent_client_protocol::ContentBlock::Text(t) = &nth(&blocks, 0) else {
             panic!("first block must be text");
         };
@@ -3863,7 +3944,7 @@ mod tests {
         );
 
         assert_eq!(build.skipped_display_numbers, vec![2]);
-        // Text plus the loadable image; the unloadable one contributes no block
+        // Text plus the one loadable image; the unloadable one contributes no block
         assert_eq!(build.blocks.len(), 2);
         let agent_client_protocol::ContentBlock::Text(t) = &nth(&build.blocks, 0) else {
             panic!("first block must be text");
@@ -3877,10 +3958,12 @@ mod tests {
 
     #[test]
     fn collapse_strip_seam_preserves_code_block_indentation() {
+        // A naive implementation could collapse ALL 2+-space runs in the text after a single strip
+        // Indented code further down the text must survive intact
         let mut text = String::from("hello [Image #1: /tmp/x.png] world\n    fn foo() {}\n");
         let span = (text.find("[Image").unwrap(), text.find("]").unwrap() + 1);
         collapse_strip_seam(&mut text, span.0, span.1);
-        // The strip seam (spaces) collapses to one space, while the 4-space code indentation further down is untouched
+        // The strip seam (two spaces) collapses to one space, while the 4-space code indentation further down is untouched
         assert_eq!(text, "hello world\n    fn foo() {}\n");
     }
 
@@ -3895,6 +3978,7 @@ mod tests {
 
     #[test]
     fn build_blocks_orphan_skipped_when_pasted_image_present() {
+        // A PastedImage with display_number 1 is attached; the matching placeholder must NOT trigger an on-disk load even when its path is missing
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("does-not-exist.png");
         let img = make_real_image(40, 40);
@@ -3907,6 +3991,9 @@ mod tests {
         let agent_client_protocol::ContentBlock::Text(t) = &nth(&blocks, 0) else {
             panic!("first block must be text");
         };
+        // Phase 2 universal strip: the anchor `[Image #1]` survives so the model can place the inline image
+        // The path is gone even though no orphan recovery loaded it (a PastedImage already provided the bytes)
+        // This avoids the model calling `Read` on the path even though the image is attached
         assert!(
             t.text.contains("[Image #1]"),
             "anchor must survive when a PastedImage backs the placeholder, got: {}",
@@ -3921,6 +4008,9 @@ mod tests {
 
     #[test]
     fn build_blocks_no_workspace_falls_back_to_legacy_behavior() {
+        // Without a workspace cwd, orphan placeholders are not loaded from disk (legacy behaviour preserved)
+        // The Phase 2 path strip still runs (it is independent of the allowlist)
+        // The model-facing prompt should never contain the path-bearing form regardless of whether the load happened
         let text = "look at [Image #2: /nowhere/missing.png]";
         let blocks = build_content_blocks_with_workspace(text.into(), vec![], None);
         // Text block only; no recovery without a workspace
@@ -3942,8 +4032,8 @@ mod tests {
 
     // Pins the TUI cap loop against the server: moving the add before the check, or `continue` instead of `break`, fails here.
 
-    /// Orphan placeholders, aggregate cap admits exactly one. Asserts the second placeholder did NOT load
-    /// (only one image block in the output) and the first one did.
+    /// Two orphan placeholders, aggregate cap admits exactly one.
+    /// Asserts the second placeholder did NOT load (only one image block in the output) and the first one did.
     #[test]
     fn build_blocks_orphan_aggregate_cap_breaks_loop() {
         let dir = tempfile::tempdir().unwrap();
@@ -3959,6 +4049,7 @@ mod tests {
         // Cap admits the first image but not the cumulative second.
         let blocks =
             build_content_blocks_with_prefixes_and_caps(text, vec![], Some(&allowed), png.len());
+        // Text plus 1 recovered image (not 2)
         assert_eq!(blocks.len(), 2);
         let agent_client_protocol::ContentBlock::Image(ic) = &nth(&blocks, 1) else {
             panic!("expected recovered Image block");
@@ -4000,7 +4091,7 @@ mod tests {
             build_content_blocks_with_prefixes_and_caps(text, vec![], Some(&allowed), png.len());
         assert_eq!(blocks.len(), 2);
         // Symmetric to `build_blocks_orphan_placeholder_loaded_from_disk`
-        // Decode the base64 data.
+        // Decode the base64 data and assert byte-for-byte equality with the on-disk PNG so wrong bytes at the inclusive boundary are caught
         let agent_client_protocol::ContentBlock::Image(ic) = &nth(&blocks, 1) else {
             panic!("expected recovered Image block");
         };
@@ -4116,6 +4207,7 @@ mod tests {
             preview: PromptImagePreview::default(),
         }];
 
+        // Element 42 is no longer live.
         let live: HashSet<ElementId> = HashSet::new();
         reconcile(SessionPathPolicy::Preserve, &mut images, &live);
 

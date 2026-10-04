@@ -1,4 +1,7 @@
-//! The child-view policy under the fullscreen takeover.
+//! The child-view policy under the fullscreen takeover. Session, composer, and settings dispatchers resolve
+//! the ROOT agent, while view-targeted actions resolve the child through `with_active_agent`; the allowlist
+//! admits only the latter, and unknown actions are denied by default. The chords a child must never start
+//! (three open a root-only modal locally) are listed here too, gated in the child's own key funnel.
 
 use crate::actions::ActionId;
 use crate::app::actions::Action;
@@ -87,7 +90,7 @@ pub(crate) fn filter_child_outcome(outcome: InputOutcome) -> InputOutcome {
 }
 
 impl ViewSurface {
-    /// Chords the child surface must not run: open a root-only modal locally (ModelPicker, CommandPalette,
+    /// Chords the child surface must not run: three open a root-only modal locally (ModelPicker, CommandPalette,
     /// OpenSessions); the rest emit an `Action` the filter denies but are listed so the child's handler never starts
     /// them. `ShortcutsHelp` stays: the read-only cheatsheet shows the child's own keys.
     pub(crate) fn hides_chord(self, id: ActionId) -> bool {

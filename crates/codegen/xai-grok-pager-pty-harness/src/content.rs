@@ -1,3 +1,11 @@
+//! Layer 3: Content controller.
+//!
+//! An idle pager only renders a splash screen, which is useless for scroll, stream, or resize scenarios.
+//! [`ContentController`] wraps the shared [`MockInferenceServer`] from `xai-grok-test-support`.
+//! It provides the env vars that point the bundled shell agent at the mock, so the pager ends up rendering real agent output.
+//!
+//! The caller controls the response text via [`ContentController::set_response`].
+//! The mock server streams the set response to every inference request.
 
 use std::path::Path;
 
@@ -110,6 +118,8 @@ impl ContentController {
         let server = MockInferenceServer::start_with_models(models)
             .await
             .context("start mock inference server")?;
+        // Two defaults PTY tests depend on: settings must be 200 `{"allow_access": true}`, and the response must be a fixed text
+        // The shared server defaults to 404-until-set settings (which strands the pager on the upsell screen) and echo responses
         server.preset_allow_access();
         server.set_response(default_response_text());
 
@@ -143,6 +153,7 @@ impl ContentController {
     }
 
     /// Queue a compatibility response for the next request on `path`.
+    /// Inference callers should use a matched expectation; this remains for non-inference one-shots such as `"/v1/settings"`.
     pub fn enqueue_response(&self, path: impl Into<String>, response: ScriptedResponse) {
         self.server.enqueue_response(path, response);
     }
@@ -154,6 +165,7 @@ impl ContentController {
 
     /// Pace the mocked SSE streams: each event is emitted after `delay`.
     /// `None` restores instant streaming.
+    /// Use to hold a turn visibly "streaming" long enough to interact with it (e.g. Esc-cancel tests).
     pub fn set_chunk_delay(&self, delay: Option<std::time::Duration>) {
         self.server.set_chunk_delay(delay);
     }
@@ -275,6 +287,7 @@ impl ContentController {
 
     // ── Mock storage controls (park-on-401 e2e) ────────────────────────────
 
+    /// Flip the mock `/v1/storage` 401 gate (the auth-outage window).
     pub fn set_storage_unauthorized(&self, unauthorized: bool) {
         self.server.set_storage_unauthorized(unauthorized);
     }
@@ -289,6 +302,7 @@ impl ContentController {
         self.server.storage_uploads()
     }
 
+    /// While set, every `POST /v1/feedback` answers 500 (still recorded).
     pub fn set_feedback_failure(&self, fail: bool) {
         self.server.set_feedback_failure(fail);
     }
@@ -350,6 +364,8 @@ mod tests {
             .expect("read direct foreground response")
     }
 
+    /// This harness's old private mock always served 200 `{"allow_access": true}`; the shared server defaults to 404-until-set.
+    /// A 404 strands the pager on the SuperGrok upsell screen and breaks every PTY test.
     #[tokio::test]
     async fn settings_endpoint_allows_access_by_default() {
         let content = ContentController::start().await.unwrap();

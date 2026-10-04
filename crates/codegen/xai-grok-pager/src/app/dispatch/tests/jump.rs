@@ -72,7 +72,8 @@ fn show_picker_refused_while_rewind_open() {
 
 #[test]
 fn show_picker_refused_while_input_overlay_pending() {
-    // A pending permission / question / cancel-turn / plan-approval overlay suppresses the picker's rendering Opening one would be invisible.
+    // A pending permission / question / cancel-turn / plan-approval overlay suppresses the picker's rendering
+    // Opening one would be invisible but still eat wheel/keys, so `/jump` must refuse
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     push_turns(&mut app, id, 3);
@@ -91,7 +92,8 @@ fn show_picker_refused_while_input_overlay_pending() {
 
 #[test]
 fn scroll_drops_hidden_jump_picker_behind_input_overlay() {
-    // If an input overlay arrives (async) after the picker opened.
+    // If an input overlay arrives (async) after the picker opened, the picker is hidden but `jump_state` lingers
+    // A wheel event must drop it instead of scrolling a cursor the user can't see (and shifting the transcript)
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     push_turns(&mut app, id, 3);
@@ -120,7 +122,8 @@ fn scroll_drops_hidden_jump_picker_behind_input_overlay() {
 
 #[test]
 fn key_drops_hidden_jump_picker_behind_input_overlay() {
-    // Mirrors the scroll test on the key path: with an input overlay pending, a key must drop the hidden picker instead.
+    // Mirrors the scroll test on the key path: with an input overlay pending, a key must drop the hidden picker instead of the picker handling it
+    // The scrollback pane is focused here so the cancel-turn panel, which is gated on pane focus, is skipped
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -237,7 +240,8 @@ fn picker_select_jumps_and_closes() {
 
 #[test]
 fn picker_select_uses_stable_id_across_removal() {
-    // The picker carries a stable EntryId, so removing an earlier entry (shifting every positional index) still lands the jump.
+    // The picker carries a stable EntryId, so removing an earlier entry (shifting every positional index) still lands the jump on the intended prompt
+    // A positional turn index would target the wrong block
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     push_turns(&mut app, id, 4);
@@ -277,7 +281,8 @@ fn picker_select_uses_stable_id_across_removal() {
 
 #[test]
 fn picker_select_restores_viewport_on_out_of_range_turn() {
-    // A turn index can go stale if the turn list shrank (async clear/rewind).
+    // A turn index can go stale if the turn list shrank (async clear/rewind) while the picker was open
+    // Selecting it must restore the captured viewport instead of stranding the transcript at the last preview
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     push_turns(&mut app, id, 3);
@@ -318,7 +323,8 @@ fn picker_select_restores_viewport_on_out_of_range_turn() {
 
 #[test]
 fn rewind_dismisses_open_jump_picker() {
-    // The mirror of `show_picker_refused_while_rewind_open`: starting rewind while the picker is open must dismiss it.
+    // The mirror of `show_picker_refused_while_rewind_open`: starting rewind while the picker is open must dismiss it (and restore its viewport)
+    // A picker left open would sit shadowed from input behind rewind and reappear stale once rewind closes
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     push_turns(&mut app, id, 3);
@@ -326,7 +332,7 @@ fn rewind_dismisses_open_jump_picker() {
     let before_offset = test_agent(&app, id).scrollback.scroll_offset();
 
     dispatch(Action::JumpShowPicker, &mut app);
-    // Preview a far turn so the viewport moved under the picker.
+    // Preview a far turn so the viewport actually moved under the picker.
     {
         let agent = app.agents.get_mut(&id).unwrap();
         let Some(first_id) = agent
@@ -374,7 +380,7 @@ fn dismiss_restores_viewport() {
     let before_selected = test_agent(&app, id).scrollback.selected();
 
     dispatch(Action::JumpShowPicker, &mut app);
-    // Preview a far-away turn so the transcript moved.
+    // Preview a far-away turn so the transcript actually moved.
     {
         let agent = app.agents.get_mut(&id).unwrap();
         let Some(first_id) = agent

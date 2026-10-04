@@ -1,4 +1,10 @@
 //! Checks that the CLI config-reference page matches the live registries.
+//!
+//! The page `crates/codegen/xai-grok-pager/docs/user-guide/26-config-reference.md` is the source; edit that file.
+//! CI fails when a registered key has no row, or an MCP or `features.*` row names an unknown key.
+//! It also fails when a Requirements or Managed cell disagrees with the resolver metadata.
+//! The pager extracts the file to
+//! `~/.grok/docs/user-guide/` on launch.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

@@ -1,4 +1,7 @@
 //! `copy_file` and `move_file` — first-class relocate tools.
+//!
+//! Relocating code is `cp` / `git mv` plus a small edit, never a full
+//! rewrite of an existing file through `write` / `search_replace`.
 use crate::notification::types::FileWritten;
 use crate::types::output::{TextOutput, ToolOutput};
 use crate::types::requirements::{Expr, ToolRequirement};

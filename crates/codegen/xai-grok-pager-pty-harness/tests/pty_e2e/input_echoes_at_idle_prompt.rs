@@ -27,7 +27,8 @@ async fn input_echoes_at_idle_prompt() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("response on screen");
 
-    // Let the turn finish and post-turn animation settle so the loop goes fully idle (needs_animation() == false).
+    // Let the turn finish and post-turn animation settle so the loop goes fully idle (needs_animation() == false) and parks
+    // 3s reliably reaches true idle here; the echo check below flipped from failing to passing at this settle time
     harness.update(Duration::from_secs(3));
 
     // Type a distinctive marker at the idle prompt (no Enter): it must echo.

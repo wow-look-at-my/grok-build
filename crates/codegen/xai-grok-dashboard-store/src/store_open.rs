@@ -21,7 +21,9 @@ impl WorkspaceStore {
         }
         let mode = JournalMode::for_db_path(db_path);
         let effective = mode.effective_db_path(db_path);
-        // O_CREAT|O_EXCL with mode 0o600 runs before SQLite's first open.
+        // O_CREAT|O_EXCL with mode 0o600 runs before SQLite's first open, so the file is never visible at umask defaults
+        // SQLite accepts a zero-length file as a fresh database
+        // Existing paths are validated without following symlinks
         create_owner_only(&effective)?;
         let opened_at = Instant::now();
         let mut conn = mode
@@ -29,10 +31,12 @@ impl WorkspaceStore {
             .map_err(|error| classify_open_error(error.into(), opened_at, &effective))?;
         tighten_owner_only(&effective)?;
         for suffix in ["-wal", "-shm", "-journal"] {
+            // Newly created siblings inherit 0600 from the file; this covers ones an earlier binary created while the database was loose
             tighten_owner_only(&sibling_path(&effective, suffix))?;
         }
 
-        // Autocommit fast-path read: a file already known to be newer is gated without ever taking the write lock The authoritative re-read happens.
+        // Autocommit fast-path read: a file already known to be newer is gated without ever taking the write lock
+        // The authoritative re-read happens inside init_schema's transaction
         let found = read_user_version(&conn)
             .map_err(|error| classify_open_error(error, opened_at, &effective))?;
         if found > USER_VERSION {

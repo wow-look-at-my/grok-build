@@ -1,4 +1,6 @@
-//! Mid-turn plan-mode toggle: `handle_session_mode("plan")` while a turn is running must activate the tracker.
+//! Mid-turn plan-mode toggle: `handle_session_mode("plan")` while a turn is running must activate the tracker immediately.
+//! It must also buffer the activation reminder for the running turn.
+//! Previously, toggling plan mode while the model is thinking was ignored until the next prompt, so the model jumped straight into implementation.
 use super::support::*;
 use super::*;
 
@@ -62,7 +64,8 @@ async fn midturn_plan_toggle_activates_and_buffers_reminder() {
                 assert!(!tracker.should_use_full_reminder());
             }
 
-            // Exactly-once: the turn flushes at multiple safe points (loop top, after each tool batch, cancel/idle).
+            // Exactly-once: the turn flushes at multiple safe points (loop top, after each tool batch, cancel/idle)
+            // Later flushes must not deliver the reminder again
             actor.flush_pending_skill_reminders().await;
             actor.flush_pending_skill_reminders().await;
             assert_eq!(

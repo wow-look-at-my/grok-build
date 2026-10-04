@@ -1,4 +1,10 @@
-//! Inter-compaction — the chunked summarisation pipeline shared by both `Basic` and `DivideAndConquer` strategies.
+//! Inter-compaction — the chunked summarisation pipeline shared by both
+//! `Basic` and `DivideAndConquer` strategies, generic over
+//! [`CompactionItemBuilder`](crate::CompactionItemBuilder).
+//!
+//! Harness wiring (turn selection from the conversation store, raw-request
+//! user-query extraction, summary-message assembly, persistence) stays
+//! per-harness; the Grok chat host wraps this pipeline.
 
 pub mod compact;
 pub mod config;

@@ -14,7 +14,7 @@ async fn bracketed_ime_paste_skips_clipboard_image_macos() {
 
     const IME_PAYLOAD: &str = "中文";
 
-    // Guard FIRST: the roundtrip check overwrites the clipboard.
+    // Guard FIRST: the roundtrip check overwrites the clipboard, and a guard taken after it would restore the nonce instead of the user's clipboard
     let _restore = HostClipboardTextGuard::save();
     if !clipboard_roundtrip_works() {
         eprintln!(

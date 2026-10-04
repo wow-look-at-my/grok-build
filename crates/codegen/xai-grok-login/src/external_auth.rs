@@ -41,12 +41,14 @@ pub fn parse_output(output: &std::process::Output) -> anyhow::Result<GrokAuth> {
 }
 
 /// Short timeout for a mid-session refresh: it must not hang the session.
+/// One run in `ExternalBinaryRefresher` gets this whole budget.
 const EXTERNAL_AUTH_REFRESH_TIMEOUT: Duration = Duration::from_secs(7);
 
-/// Why a headless refresh run produced no token.
+/// Why a headless refresh run produced no token. The refresher's verdict hangs on this split: a timeout is the contract's "needs interactive sign-in" signal, while every other failure (spawn error, non-zero exit, bad output) proves nothing about the credential and stays retryable.
 #[derive(Debug, thiserror::Error)]
 pub enum ExternalRefreshError {
-    /// The run outlived `EXTERNAL_AUTH_REFRESH_TIMEOUT` — the documented shape of a provider blocking.
+    /// The run outlived `EXTERNAL_AUTH_REFRESH_TIMEOUT` — the documented
+    /// shape of a provider blocking on interactive sign-in.
     #[error("external auth provider timed out")]
     TimedOut,
     /// The run failed without timing out; the message is diagnostic only.

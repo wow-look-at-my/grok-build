@@ -1,4 +1,5 @@
-//! Round-trip every `ToolNotification` variant through serde_json and assert the wire shape is what consumers expect.
+//! Round-trip every `ToolNotification` variant through serde_json and
+//! assert the wire shape is what consumers expect.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};

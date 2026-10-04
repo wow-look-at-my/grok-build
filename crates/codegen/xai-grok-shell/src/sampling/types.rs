@@ -1,7 +1,8 @@
 // This re-export keeps all existing `crate::sampling::types::*` imports working
 pub use xai_grok_sampling_types::types::*;
 
-// `CreateResponseWrapper` and `MessagesRequestWrapper` live in `xai-grok-sampling-types::types`.
+// `CreateResponseWrapper` and `MessagesRequestWrapper` live in `xai-grok-sampling-types::types`, re-exported above via the wildcard
+// That placement lets the `xai-grok-sampler` crate reference them without a circular dep on `xai-grok-shell`
 
 // Tests for the types live in the xai-grok-sampling-types crate
 
@@ -17,9 +18,9 @@ pub(crate) enum EffortTarget {
     SummaryClient,
 }
 
-/// Render an `ImageContent` produced by the read-file tool as a URL string
-/// suitable for an `image_url` content block. Passes the explicit `uri`
-/// through if present, otherwise builds a `data:<mime>;base64,<data>` URI.
+/// Render an `ImageContent` produced by the read-file tool as a URL string suitable for an `image_url` content block.
+/// Passes the explicit `uri` through if present, otherwise builds a `data:<mime>;base64,<data>` URI.
+/// Lives in the shell (rather than `xai-grok-sampling-types` or `xai-grok-tools`) so neither crate needs a dep on `agent-client-protocol`.
 pub fn get_image_content_url(image_content: &ToolsImageContent) -> String {
     if let Some(uri) = &image_content.uri {
         uri.clone()

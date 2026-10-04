@@ -36,7 +36,8 @@ async fn drag_autoscroll_no_bounce_pty() {
     let hold_row = placeholder_row - 2;
     assert!(hold_row > press_row, "setup: hold point below the press");
 
-    // Motion samples, as any real drag emits: the first promotes the pending drag.
+    // Two motion samples, as any real drag emits: the first promotes the pending drag, the second (at the held position) starts the autoscroll
+    // Promotion by itself deliberately starts nothing
     let mut drag = String::new();
     drag.push_str(&sgr_mouse(0, press_row, press_col, 'M'));
     drag.push_str(&sgr_mouse(32, press_row + 1, press_col, 'M'));

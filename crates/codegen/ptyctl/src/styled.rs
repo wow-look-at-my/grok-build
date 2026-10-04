@@ -1,4 +1,7 @@
 //! Styled output formatters — styled JSON and HTML rendering.
+//!
+//! Converts the terminal grid into structured representations that preserve
+//! color and text attribute information for LLM consumption.
 
 use alacritty_terminal::grid::Row;
 use alacritty_terminal::index::Column;
@@ -280,6 +283,7 @@ fn indexed_color_to_css(idx: u8) -> String {
         13 => "#ff00ff".into(),
         14 => "#00ffff".into(),
         15 => "#ffffff".into(),
+        // 216 color cube (indices 16-231).
         16..=231 => {
             let idx = idx - 16;
             let r = idx / 36;
@@ -288,6 +292,7 @@ fn indexed_color_to_css(idx: u8) -> String {
             let to_rgb = |v: u8| if v == 0 { 0u8 } else { 55 + 40 * v };
             format!("#{:02x}{:02x}{:02x}", to_rgb(r), to_rgb(g), to_rgb(b))
         }
+        // Grayscale ramp (indices 232-255).
         232..=255 => {
             let v = 8 + 10 * (idx - 232);
             format!("#{:02x}{:02x}{:02x}", v, v, v)

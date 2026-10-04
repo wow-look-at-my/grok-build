@@ -1,4 +1,7 @@
 //! SQLite-backed metadata database for tracking worktrees.
+//!
+//! Gated behind the `metadata` cargo feature. When disabled, all DB operations
+//! compile away to no-ops.
 
 mod queries;
 mod schema;
@@ -222,8 +225,9 @@ impl WorktreeDb {
             .with_context(|| format!("failed to set journal mode {}", mode.as_ref()))
     }
 
-    /// Open `~/.grok/worktrees.db` via `resolve_grok_home` (`$GROK_HOME`,
-    /// else `<home>/.grok`).
+    /// Open `~/.grok/worktrees.db` via `resolve_grok_home` (`$GROK_HOME`, else
+    /// `<home>/.grok`). Resolved fresh each call for test overrides. Each call
+    /// opens its own connection — hot paths should cache the instance.
     pub fn open_default() -> Result<Self> {
         Self::open(&resolve_grok_home()?)
     }
@@ -447,7 +451,9 @@ pub fn resolve_grok_home() -> Result<PathBuf> {
         .context("neither $GROK_HOME nor a home directory could be resolved")
 }
 
-/// Serializes tests that mutate the process-global `GROK_HOME` env var so they don't clobber each other under `cargo test`.
+/// Serializes tests that mutate the process-global `GROK_HOME` env var so they
+/// don't clobber each other under `cargo test`, where tests share one process
+/// (nextest isolates per-process, but the suite must also pass under `cargo test`).
 #[cfg(test)]
 static GROK_HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -462,7 +468,8 @@ pub(crate) struct GrokHomeFixture {
     prev_grove_data_dir: Option<std::ffi::OsString>,
     prev_home: Option<std::ffi::OsString>,
     touched_grove_env: bool,
-    /// The isolated grok home; pass to `WorktreeDb::open` to read the same DB `open_default()` writes to.
+    /// The isolated grok home; pass to `WorktreeDb::open` to read the same DB
+    /// `open_default()` writes to.
     pub home: PathBuf,
     _tmp: tempfile::TempDir,
 }
@@ -474,10 +481,13 @@ impl GrokHomeFixture {
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path().join("grok-home");
         std::fs::create_dir_all(&home).unwrap();
-        // Warm journal-mode + schema before GROK_HOME is visible, so the hot loop skips retry sleeps.
+        // Warm journal-mode + schema before GROK_HOME is visible, so the hot
+        // loop skips retry sleeps. This open is exclusive; the retry is the
+        // actual race fix.
         let _ = WorktreeDb::open(&home);
         let prev = std::env::var_os("GROK_HOME");
-        // SAFETY: the fixture holds the GROK_HOME env lock for its whole lifetime.
+        // SAFETY: the fixture holds the GROK_HOME env lock for its whole
+        // lifetime, so no other test thread reads or writes the environment.
         unsafe { std::env::set_var("GROK_HOME", &home) };
         Self {
             _lock: lock,

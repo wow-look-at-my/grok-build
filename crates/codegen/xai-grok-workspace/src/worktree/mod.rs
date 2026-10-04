@@ -1,4 +1,9 @@
 //! Git worktree operations: create, list, remove, apply.
+//!
+//! Lives in the workspace crate so the remote workspace-server can run these operations without pulling in the full shell.
+//!
+//! Session-aware operations (`resume_session_in_worktree`, `rehydrate_session_in_worktree`, `resolve_session_repo_wide`) stay in the shell.
+//! Persistence, auth, and the session registry are client-side; those operations call into this module for the worktree and git parts.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -72,6 +77,8 @@ fn unescape_mountinfo_field(s: &str) -> String {
         return s.to_string();
     }
     let bytes = s.as_bytes();
+    // Accumulate raw bytes, not `as char`: that mis-maps bytes >= 0x80 to U+0080..U+00FF and splits multi-byte UTF-8
+    // Copying verbatim and reassembling once keeps non-ASCII mount points intact for the longest-prefix compare
     let mut out: Vec<u8> = Vec::with_capacity(s.len());
     let mut i = 0;
     while i < bytes.len() {
@@ -284,7 +291,8 @@ pub(crate) fn enabled_grove_opts() -> xai_fast_worktree::NfsWorktreeOpts {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CreationTypeRewrite {
     pub resolved: WorktreeType,
-    /// Set only when the source overrode the caller: the arms never ran, so this is the only account of what happened.
+    /// Set only when the source overrode the caller: the arms never ran, so
+    /// this is the only account of what happened.
     pub reason: Option<&'static str>,
 }
 
@@ -344,7 +352,8 @@ fn resolve_grove_fuse_creation_type_for(
     );
     CreationTypeRewrite {
         resolved: WorktreeType::Git,
-        // Same condition the Grove arm reports when it does get to run.
+        // Same condition the Grove arm reports when it does get to run, so the
+        // two paths give the user the same account.
         reason: Some(xai_fast_worktree::SKIP_SOURCE_IS_GROVE_MOUNT),
     }
 }
@@ -358,7 +367,7 @@ pub(crate) fn to_creation_mode(t: WorktreeType) -> xai_fast_worktree::CreationMo
     }
 }
 
-/// Process-global factory producing the btrfs delegate, if any.
+/// Process-global factory producing the btrfs delegate, if any. Binaries that never register a factory use direct btrfs and, failing that, fall through to the copy path.
 type BtrfsDelegateFactory = Box<dyn Fn() -> Option<Arc<dyn BtrfsDelegate>> + Send + Sync>;
 
 static BTRFS_DELEGATE_FACTORY: OnceLock<BtrfsDelegateFactory> = OnceLock::new();
@@ -370,7 +379,7 @@ pub fn set_btrfs_delegate_factory(factory: BtrfsDelegateFactory) {
     }
 }
 
-/// Build an `Arc<dyn BtrfsDelegate>` from the registered factory.
+/// Build an `Arc<dyn BtrfsDelegate>` from the registered factory. Returns `Some` on rootless hosts (no `CAP_SYS_ADMIN`) when a factory is registered, `None` otherwise.
 pub fn btrfs_delegate_from_env() -> Option<Arc<dyn BtrfsDelegate>> {
     BTRFS_DELEGATE_FACTORY.get().and_then(|f| f())
 }
@@ -381,7 +390,8 @@ fn get_head_commit(repo: &Repository) -> Result<String> {
     Ok(commit.id().to_string())
 }
 
-// Best-effort dedup of duplicate async spawns within one process NOT a cross-process lock.
+// Best-effort dedup of duplicate async spawns within one process
+// NOT a cross-process lock: in proxy mode `prepare` (hub) and creation (shell) are different processes, so correctness does not depend on it
 static WORKTREE_IN_PROGRESS: OnceLock<TokioMutex<HashSet<String>>> = OnceLock::new();
 
 fn worktree_registry() -> &'static TokioMutex<HashSet<String>> {
@@ -392,7 +402,8 @@ pub async fn is_worktree_in_progress(session_id: &str) -> bool {
     worktree_registry().lock().await.contains(session_id)
 }
 
-/// Atomically claim `session_id` for an in-flight creation.
+/// Atomically claim `session_id` for an in-flight creation. `prepare_*` deliberately only *reads* the marker: a marker set in prepare would never clear in proxy mode, wedging retries.
+/// A `prepare` race can therefore spawn two async creators for one session; doing contains and insert under one lock here lets the loser bail.
 pub async fn claim_worktree_in_progress(session_id: &str) -> bool {
     worktree_registry()
         .lock()
@@ -627,6 +638,7 @@ pub enum WorktreeStatus {
         worktree_path: String,
         commit: String,
         /// Working directory root of the source repo/worktree (via `workdir()`).
+        /// Clients strip this prefix from `source_path` to compute the subdirectory offset inside the new worktree.
         #[serde(rename = "sourceGitRoot", skip_serializing_if = "Option::is_none")]
         source_git_root: Option<String>,
         /// Only present when dirty copying is used.
@@ -842,32 +854,41 @@ pub fn resolve_label_collision(base_dir: &Path, label: &str) -> String {
     auto_label()
 }
 
-/// Grok home for worktree paths: the same resolver as `worktrees.db`, with a
-/// `temp_dir()/.grok` last resort.
+/// Grok home for worktree paths: the same resolver as `worktrees.db`, with a `temp_dir()/.grok` last resort.
+/// This is not grok-config's cwd-relative `.grok`: worktree paths need an absolute, always-writable anchor that does not move with the process cwd.
 fn grok_home() -> std::path::PathBuf {
     xai_fast_worktree::resolve_grok_home().unwrap_or_else(|_| std::env::temp_dir().join(".grok"))
 }
 
 /// Returns `<main checkout root>/.grok/worktrees`, the directory a repository
 /// keeps its own grok-managed checkouts in.
+///
+/// The destination is per repository rather than per machine.
+/// a sibling of the checkout it was made from and travels with the repository.
 pub fn worktree_base_dir(git_root: &Path) -> std::path::PathBuf {
     xai_fast_worktree::repo_worktrees_root(git_root)
 }
 
 /// The legacy `<grok home>/worktrees` root, where checkouts lived before they
-/// moved into their repository.
+/// moved into their repository. Read-only: worktrees already there keep working
+/// and nothing new is created under it.
 fn legacy_worktrees_root_in(grok_home: &Path) -> std::path::PathBuf {
     grok_home.join(xai_fast_worktree::WORKTREES_DIR)
 }
 
 /// The managed worktrees boundary containing `path`, if it is under one.
+///
+/// The single answer to "is this a path grok manages?", shared by label lookup,
+/// the gc liveness touch.
+/// folder-trust collapse, so those cannot drift apart on which locations count.
 fn managed_worktrees_boundary_in(grok_home: &Path, path: &Path) -> Option<std::path::PathBuf> {
     xai_fast_worktree::managed_worktrees_boundary(path, &legacy_worktrees_root_in(grok_home))
 }
 
-/// Resolves the worktree base directory (`<main checkout
-/// root>/.grok/worktrees`) for a given source path. managed root that holds
-/// it, so a worktree made.
+/// Resolves the worktree base directory (`<main checkout root>/.grok/worktrees`)
+/// for a given source path.
+/// managed root that holds it, so a worktree made from a worktree is a sibling.
+/// Other paths fall back to `find_main_repo_root_from_path` + `worktree_base_dir`.
 pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::PathBuf> {
     worktree_base_dir_for_source_in(&grok_home(), source_path)
 }
@@ -893,12 +914,16 @@ fn managed_base_dir_for_source_in(
     let legacy_dir = legacy_worktrees_root_in(grok_home);
     if let Ok(suffix) = source_path.strip_prefix(&legacy_dir) {
         let Some(first) = suffix.components().next() else {
-            // The root itself.
+            // The legacy root itself.
             return Some(legacy_dir.join("repo"));
         };
         let first = legacy_dir.join(first);
         // `<legacy>/<checkout>...` is the shape an unforked grok build left
-        // behind: the first component is the checkout itself.
+        // behind: the first component is the checkout itself, so its siblings
+        // go directly under the legacy root. The `.git` entry decides it, not
+        // the component count, because `source_path` is often a cwd somewhere
+        // inside the checkout. Otherwise the first component is a
+        // per-repository bucket, and the new checkout joins it there.
         if xai_fast_worktree::is_worktree_dir(&first) {
             return Some(legacy_dir);
         }
@@ -925,8 +950,8 @@ fn resolve_worktree_path(grok_home: &Path, req: &CreateWorktreeRequest, git_root
         return path.clone();
     }
 
-    // Resolve off the source path, not the git root: a session already in a
-    // managed checkout must get a sibling, never a tree nested inside it.
+    // Resolve off the source path, not just the git root: a session already in
+    // a managed checkout must get a sibling, never a tree nested inside it.
     let base = managed_base_dir_for_source_in(grok_home, Path::new(&req.source_path))
         .unwrap_or_else(|| worktree_base_dir(git_root));
     let label = derive_worktree_label(req.label.as_deref());
@@ -950,8 +975,10 @@ pub fn label_from_path(worktree_path: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Walk up from `cwd` (staying within the managed worktrees root that
-/// contains it) to its registered worktree record.
+/// Walk up from `cwd` (staying within the managed worktrees root that contains it) to its registered worktree record. Shared resolver for [`lookup_worktree_label`] and [`touch_worktree_for_cwd`].
+/// Returns the open DB alongside the record so callers can issue follow-up queries.
+/// A cwd under neither a repository's own `.grok/worktrees/` nor the legacy
+/// `~/.grok/worktrees/` returns `None` without opening the DB.
 fn worktree_record_for_cwd(cwd: &str) -> Option<(WorktreeDb, WorktreeRecord)> {
     worktree_record_for_cwd_in(&grok_home(), cwd)
 }
@@ -977,20 +1004,19 @@ fn worktree_record_for_cwd_in(grok_home: &Path, cwd: &str) -> Option<(WorktreeDb
     None
 }
 
-/// The recorded source repo of the grok-managed worktree containing `cwd`, if
-/// any.
+/// The recorded source repo of the grok-managed worktree containing `cwd`, if any. Thin wrapper over [`worktree_record_for_cwd`] that drops the DB handle; returns `None` (without DB I/O) for paths under neither managed root.
 pub(crate) fn source_repo_for_cwd(cwd: &str) -> Option<std::path::PathBuf> {
     worktree_record_for_cwd(cwd).map(|(_db, rec)| rec.source_repo)
 }
 
-/// Look up the worktree label for a cwd by querying the worktree DB.
+/// Look up the worktree label for a cwd by querying the worktree DB. Resolves the containing worktree via [`worktree_record_for_cwd`], then extracts the `"label"` key from its metadata.
+/// Returns `None` for non-worktree paths or when the DB is unavailable.
 pub fn lookup_worktree_label(cwd: &str) -> Option<String> {
     let (_db, record) = worktree_record_for_cwd(cwd)?;
     record.label().map(String::from)
 }
 
-/// Record activity on the worktree containing `cwd` (best-effort,
-/// infallible).
+/// Record activity on the worktree containing `cwd` (best-effort, infallible). Updates `last_accessed_at` in the worktree DB so `gc` expires worktrees by last use rather than creation time.
 pub fn touch_worktree_for_cwd(cwd: &str) {
     touch_worktree_for_cwd_in(&grok_home(), cwd);
 }
@@ -1071,8 +1097,9 @@ pub async fn prepare_worktree_creation(req: &CreateWorktreeRequest) -> PrepareWo
         };
     }
 
-    // Do not set the marker here: in proxy mode the shell never spawns
-    // `create_worktree_async`.
+    // Don't set the marker here: in proxy mode the shell never spawns `create_worktree_async`, so a marker set here would never clear
+    // A stuck marker wedges every retry in `Creating`
+    // The async entrypoint owns it; `prepare` only reads it
     PrepareWorktreeResult {
         response: Ok(CreateWorktreeResponse::Creating {
             session_id: req.session_id.clone(),
@@ -1089,8 +1116,9 @@ pub async fn create_worktree_async<N: WorktreeNotificationSender + Clone + 'stat
     copy_context: BackgroundCopyContext,
 ) {
     let session_id = req.session_id.clone();
-    // A `prepare` race can spawn creators for one session (prepare only
-    // reads the marker) The loser bails before any work.
+    // A `prepare` race can spawn two creators for one session (prepare only reads the marker)
+    // The loser bails before any work and must not clear the winner's marker
+    // The winner's terminal status is keyed by session_id, so a silent return yields exactly one creation and one client notification
     if !claim_worktree_in_progress(&session_id).await {
         return;
     }
@@ -1216,9 +1244,11 @@ pub async fn create_worktree_streaming_in<N: WorktreeNotificationSender>(
     let source_path = req.source_path.clone();
     let dest_path = worktree_path_str.clone();
     let git_ref = req.git_ref.clone();
-    // Determine worktree type; Standalone mode requires the source's .git to be a directory A linked worktree has a `.git` *file* pointing.
+    // Determine worktree type; Standalone mode requires the source's .git to be a directory
+    // A linked worktree has a `.git` *file* pointing to the main repo; a real repo has a `.git` *directory*.
     let requested_type = req.worktree_type.unwrap_or(WorktreeType::Linked);
-    // Status RPC must not run on the async runtime.
+    // Status RPC must not run on the async runtime. The rewrite decides
+    // before dispatch, so the arms never run and never record a skip.
     let source_for_rewrite = req.source_path.clone();
     let sid_for_rewrite = session_id.clone();
     let rewrite = match blocking_copy_on_write(move || {
@@ -1665,9 +1695,9 @@ pub async fn remove_subagent_worktree(worktree_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Test-only thin wrapper: snapshot then remove. NOT for production use: the completion path drives
-/// [`snapshot_subagent_worktree`] and [`remove_subagent_worktree`] separately. It persists the ref between both steps; removing
-/// without persisting first is a crash-safety footgun.
+/// Test-only thin wrapper: snapshot then remove.
+/// NOT for production use: the completion path drives [`snapshot_subagent_worktree`] and [`remove_subagent_worktree`] separately.
+/// It persists the ref between the two steps; removing without persisting first is a crash-safety footgun.
 #[cfg(test)]
 async fn snapshot_and_remove_subagent_worktree(
     worktree_path: &Path,
@@ -1693,12 +1723,15 @@ pub struct CreateWorktreeFromWorktreeRequest {
     #[serde(default = "default_copy_mode")]
     pub copy_mode: WorktreeCopyMode,
     /// Git ref (branch, tag, or commit SHA) to checkout in the worktree.
+    /// If not specified, defaults to HEAD of the source worktree.
     #[serde(default)]
     pub git_ref: Option<String>,
     /// Worktree creation type: "linked", "standalone", or "git".
+    /// If not specified, the agent's config default will be used.
     #[serde(default)]
     pub worktree_type: Option<WorktreeType>,
     /// Human-readable label for the worktree directory name.
+    /// When absent, an automatic `YYYY-MM-DD-<uuid>` label is generated.
     #[serde(default)]
     pub label: Option<String>,
     #[serde(default)]
@@ -1841,9 +1874,9 @@ pub async fn prepare_worktree_from_worktree(
         };
     }
 
-    // Do not set the marker here: in proxy mode the shell never spawns
-    // `create_worktree_from_worktree_async`, so a marker set here will never
-    // clear.
+    // Don't set the marker here: in proxy mode the shell never spawns `create_worktree_from_worktree_async`, so a marker set here would never clear
+    // A stuck marker wedges the session
+    // The async entrypoint owns it; `prepare` only reads it
     PrepareWorktreeResult {
         response: Ok(CreateWorktreeResponse::Creating {
             session_id: req.new_session_id.clone(),
@@ -2786,9 +2819,11 @@ pub struct ResumeSessionInWorktreeRequest {
     #[serde(default)]
     pub restore_code: Option<bool>,
     /// Branch, tag, or commit to base the worktree on (CLI `--ref` / `--worktree-ref`).
+    /// When set, the worktree is a clean checkout of this ref (dirty overlay is ignored).
     #[serde(default)]
     pub git_ref: Option<String>,
-    /// Carry the source session's still-running subagents into the forked session (`/fork --worktree --agents`).
+    /// Carry the source session's still-running subagents into the forked
+    /// session (`/fork --worktree --agents`). Default `false`.
     #[serde(default)]
     pub include_agents: bool,
 }
@@ -2813,6 +2848,8 @@ pub struct ResumeSessionInWorktreeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_summary: Option<String>,
     /// Restoration depth: `Full` restores HEAD plus staged, unstaged, and untracked; `HeadOnly` checks out HEAD only.
+    /// `None` means no restore was attempted.
+    /// Serialises as `"full"` / `"head_only"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_degree: Option<crate::session::git::RestoreDegree>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2912,7 +2949,8 @@ pub fn gc_worktrees_mgmt(
 }
 
 fn resolve_mgmt_path(id_or_path: &str) -> Result<std::path::PathBuf> {
-    // DB lookup only: resolve_worktree_by_id_or_path canonicalizes and calls exists() on path misses That hangs on a wedged NFS dest.
+    // DB lookup only: resolve_worktree_by_id_or_path canonicalizes and calls exists() on path misses
+    // That hangs on a wedged NFS dest before salvage/clean/detach can run
     let db = open_db()?;
     if let Some(rec) = db.get(id_or_path)? {
         return Ok(rec.path);
@@ -3010,11 +3048,12 @@ pub fn worktree_auto_gc_layer_from_settings(
     }
 }
 
-/// Load `$GROK_HOME/config.toml` through the shell's config pipeline and pull
-/// out `[worktree.auto_gc]`. `xai_grok_config::load_config_file` is the same
-/// reader the shell uses (`$VAR` expansion, `[[version_overrides]]`, redacted
-/// parse-error logging), so a table that the shell honors is honored here
-/// too.
+/// Load `$GROK_HOME/config.toml` through the shell's config pipeline and pull out `[worktree.auto_gc]`.
+///
+/// `xai_grok_config::load_config_file` is the same reader the shell uses (`$VAR` expansion, `[[version_overrides]]`,
+/// redacted parse-error logging), so a table that the shell honors is honored here too.
+/// Returns `None` when the file is unreadable or malformed, or the table is absent or fails to deserialize.
+/// Takes `home` so the document-to-settings path is testable without touching `$GROK_HOME`.
 fn load_local_worktree_auto_gc_settings(
     home: &Path,
 ) -> Option<xai_grok_config_types::WorktreeAutoGcSettings> {
@@ -3045,8 +3084,12 @@ fn worktree_auto_gc_settings_from_config(
         .ok()
 }
 
-/// Remote-blind (env and `$GROK_HOME/config.toml` only): opts in only when
-/// local `[worktree.auto_gc] enabled = true`, else returns `None`.
+/// Remote-blind (env and `$GROK_HOME/config.toml` only): opts in only when local `[worktree.auto_gc] enabled = true`, else returns `None`.
+/// A forced dry-run would stamp the shared throttle and block the shell agent's remote-aware pass over the same DB, so skip instead.
+///
+/// An explicit local opt-in makes the local layer (over built-in defaults) win for this pass: remote `worktree_auto_gc`
+/// knobs are not consulted, and a successful pass stamps the shared throttle, so the shell's remote-aware pass over the
+/// same DB is skipped until `min_interval_secs` elapses. Users who opt in locally are choosing their local knobs over remote ones.
 fn resolve_worktree_auto_gc_local_in(
     grok_home: &Path,
 ) -> Option<xai_fast_worktree::ResolvedWorktreeAutoGc> {
@@ -3150,7 +3193,7 @@ fn scan_worktree_dirs_on_disk(main_repo_root: &std::path::Path) -> Vec<String> {
     let mut paths: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        // The same test the scanner over the location asks.
+        // The same test the scanner over the old location asks.
         .filter(|e| xai_fast_worktree::is_worktree_dir(&e.path()))
         .filter_map(|e| {
             dunce::canonicalize(e.path())
@@ -3468,11 +3511,12 @@ mod tests {
         );
     }
 
-    // Crate-shared env lock and env guards bundled as ONE value Struct field order (see lib.rs) restores the env before the lock releases.
+    // Crate-shared env lock and env guards bundled as ONE value
+    // Struct field order (see lib.rs) restores the env before the lock releases, regardless of how the caller binds the fixture's return
     use crate::LockedTestEnv;
 
-    /// Point `GROK_HOME` at an isolated tempdir (`resolve_grok_home` re-reads
-    /// the env per call by design).
+    /// Point `GROK_HOME` at an isolated tempdir (`resolve_grok_home` re-reads the env per call by design). Register one worktree record at `<home>/worktrees/repo/wt` with no `last_accessed_at`.
+    /// Returns `(env, home, worktree dir)`.
     fn worktree_db_fixture(
         temp: &tempfile::TempDir,
     ) -> (LockedTestEnv, std::path::PathBuf, std::path::PathBuf) {
@@ -3881,13 +3925,17 @@ mod tests {
             "the gc liveness touch must reach a repo-local worktree"
         );
 
-        // Nothing about widening the predicate makes an ordinary checkout look managed.
+        // Nothing about widening the predicate makes an ordinary checkout look
+        // managed: a directory outside both roots still resolves to no label.
         let plain = root.join("somewhere-else");
         std::fs::create_dir_all(&plain).unwrap();
         assert_eq!(lookup_worktree_label(&plain.to_string_lossy()), None);
         drop(env);
     }
 
+    /// Criterion 6: worktrees already living under the legacy
+    /// `<grok home>/worktrees/<repo>/<label>` layout keep resolving: the base
+    /// directory stays the one they are in, so a fork lands beside them.
     #[test]
     fn legacy_grok_home_worktree_still_resolves() {
         let temp = tempfile::TempDir::new().unwrap();
@@ -3917,7 +3965,8 @@ mod tests {
         std::fs::write(repo.join("tracked.txt"), "original").unwrap();
         git_commit_all(&repo, "initial");
 
-        // A unique basename gives a unique DB id.
+        // A unique basename gives a unique DB id, so a concurrent open_default writer can't clobber this row
+        // (GrokHomeFixture is not visible across crates.)
         let wt = temp.path().join("fork-cancel-wt");
         WorktreeBuilder::new(&repo, &wt).create().unwrap();
 
@@ -4045,8 +4094,7 @@ mod tests {
         assert!(!text.contains("/no/such"), "{text}");
     }
 
-    /// Records whether the in-progress marker was set at each status
-    /// notification.
+    /// Records whether the in-progress marker was set at each status notification, so the test can inspect what the notifier observed mid-creation.
     #[derive(Clone)]
     struct MarkerProbeNotifier {
         session_id: String,
@@ -4180,8 +4228,8 @@ mod tests {
         }
     }
 
-    /// Concurrent `create_worktree_async` calls for one session must dedup to a single creator. The loser bails (no second
-    /// creation, no spurious terminal status) and the marker is cleared once the winner finishes.
+    /// Two concurrent `create_worktree_async` calls for one session must dedup to a single creator.
+    /// The loser bails (no second creation, no spurious terminal status) and the marker is cleared once the winner finishes.
     #[tokio::test]
     async fn concurrent_create_worktree_async_dedups_to_single_creator() {
         xai_test_utils::require_git!();
@@ -4241,7 +4289,8 @@ mod tests {
         let _inject = create_root::lock_grove_parent_inject();
 
         let temp = tempfile::TempDir::new().unwrap();
-        // tempfile `.../.tmp*/repo` slugs to shared ~/.grok/worktrees/tmp-repo.
+        // tempfile `.../.tmp*/repo` slugs to shared ~/.grok/worktrees/tmp-repo; shards
+        // then race `git worktree add` on label `strategy-wt-N`.
         let unique = uuid::Uuid::new_v4().simple().to_string();
         let repo = temp.path().join(format!("src-{unique}"));
         std::fs::create_dir(&repo).unwrap();

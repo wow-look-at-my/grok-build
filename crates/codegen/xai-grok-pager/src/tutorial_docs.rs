@@ -1,4 +1,7 @@
 //! Onboarding tutorial content (embedded markdown).
+//!
+//! Short, curated topics shown by the `/tutorial` overlay (strictly opt-in; nothing auto-shows).
+//! Deliberately separate from [`crate::docs`] (the full how-to guides): these pages are bite-size intros that point at the guides for depth.
 
 /// A compile-time tutorial topic. All fields are `&'static str`.
 #[derive(Debug)]

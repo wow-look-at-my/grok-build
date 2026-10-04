@@ -2,12 +2,16 @@
 #[allow(unused_imports)]
 use super::common::*;
 
+/// Two seeded files sharing the typed prefix (equal length, so ranking ties break on name and `AAA` is deterministically the top row).
+/// Both reach the screen only through the Tab-opened dropdown.
 const FILE_AAA: &str = "SUGGESTAAA.txt";
 const FILE_BBB: &str = "SUGGESTBBB.txt";
 /// A seeded shell-history line sharing the same typed prefix.
+/// Tab fetches are token-only: this row must NEVER appear on a Tab (a mixed set would break the terminal-style Tab completion of the file rows).
 const HISTORY_LINE: &str = "cat SUGGESTHISTROW-42";
 const HISTORY_SENTINEL: &str = "SUGGESTHISTROW";
 /// What the mocked user types: `!` flips into bash mode (consumed by the prompt), then the shared prefix of both files.
+/// That prefix is exactly their LCP, so the first Tab opens the dropdown instead of prefix-filling.
 const TYPED_PREFIX: &str = "!cat SUGGEST";
 
 /// Env: NO suggestion flag; Tab completion in bash mode is always on, and this test is the

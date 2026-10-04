@@ -1,4 +1,4 @@
-//! The tip shown after a double-click on scrollback while text-selection mode is fold/nav.
+//! The tip shown after a double-click on scrollback while text-selection mode is fold/nav; it advertises Settings → Text selection → Word select.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -16,9 +16,13 @@ pub(crate) const WORD_SELECT_TIP_SEEN_KEY: &str = "word_select_tip_shown_count";
 const WORD_SELECT_TIP_SEEN_CAP: u32 = 3;
 
 /// Tip lifetime: ~20s at the 30fps animation cadence (vs the ~3s default).
+/// This tip is a call to action (read it, decide, press the chord), so it gets a much longer window than a glanceable notice.
+/// The window stays bounded: ambient pauses it while occluded, and any prompt edit retires it the moment the user starts doing something else.
 pub(crate) const WORD_SELECT_TIP_TICKS: u16 = 600;
 
-/// Pressing this chord while the tip is on screen flips `keep_text_selection` to `word_select`.
+/// Pressing this chord while the tip is on screen flips `keep_text_selection` to `word_select` (see `Action::AcceptWordSelectTip`).
+/// Outside the tip's TTL the chord keeps its normal meaning (prompt yank).
+/// Any prompt edit retires the tip, so the long TTL cannot shadow a kill-then-yank sequence.
 pub(crate) const WORD_SELECT_ACCEPT_CHORD: &str = "Ctrl+Y";
 
 /// Build "Want double-click to select? Shows are capped at [`WORD_SELECT_TIP_SEEN_CAP`] per session, counted in
@@ -42,7 +46,8 @@ pub fn word_select_tip() -> EphemeralTip {
             ]),
         )
         .with_session_seen_cap(WORD_SELECT_TIP_SEEN_KEY, WORD_SELECT_TIP_SEEN_CAP)
-        // Ambient: the tip is not about the draft being edited.
+        // Ambient: the tip is not about the draft being edited, so an unrelated submit keeps it
+        // Occlusion (permission ask, modal) pauses the TTL instead of burning the decision window off-screen
         .ambient()
     }
 }

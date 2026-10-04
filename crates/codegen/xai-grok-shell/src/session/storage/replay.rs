@@ -1,4 +1,9 @@
 //! Session transcript replay: line peeks, rewind-aware prepare, and bounded streaming load.
+//!
+//! Invariants:
+//! - InProgress `tool_call_update` peeks are typed serde (unknown fields ignored) so `content` / `rawOutput` are not allocated.
+//! - Production child/fork replay streams one typed ACP update at a time ([`stream_replay_updates_at`]).
+//!   [`load_updates_for_replay_at`] stays a typed materialize-all reference for tests.
 
 use std::collections::HashMap;
 use std::io;
@@ -18,6 +23,7 @@ use crate::session::wire_tags::{
 };
 
 /// `_meta` key holding the running token count.
+/// The serde `rename` below must match it by hand (serde attrs can't reference a const).
 const TOTAL_TOKENS_KEY: &str = "totalTokens";
 /// `_meta` key holding the per-event id used for cursor-based reconnect.
 const EVENT_ID_KEY: &str = "eventId";
@@ -37,6 +43,7 @@ pub struct ReplayPathHint<'a> {
     /// Parent session working directory; tried as `<sessions>/<encoded_cwd>/<child_id>/updates.jsonl`.
     pub parent_cwd: Option<&'a Path>,
     /// Child working directory when it differs from the parent (worktree / custom cwd).
+    /// Tried before [`Self::parent_cwd`].
     pub child_cwd: Option<&'a Path>,
     /// When cwd hints miss: scan via [`RelocationView`], or return None.
     pub fallback: ReplayLookupFallback,
@@ -56,14 +63,17 @@ pub struct PreparedReplay<'a> {
     pub(crate) mark_replay: bool,
     pub(crate) last_tokens: u64,
     /// Highest `eventId` counter across all live (rewind-filtered) lines.
+    /// It re-seeds the process-global event counter on resume so post-load live events keep monotonically increasing ids.
+    /// `None` when no line carried a parseable `eventId` (older shell).
     pub(crate) max_event_seq: Option<u64>,
     pub(crate) total_live: usize,
     /// Replayed spawns with no matching finish (a rewind can drop the finish), reconciled on load.
     pub(crate) unfinished_subagents: Vec<UnfinishedSubagent>,
 }
 
-/// Gates the caller's post-replay memory purge (`Empty` means nothing was
-/// reclaimable).
+/// Gates the caller's post-replay memory purge (`Empty` means nothing was reclaimable).
+/// For child hydrate it also gates whether disk proved it can rebuild the transcript.
+/// xAI events alone never count as `Emitted`, so an eviction decision can't settle on a file the client cannot rebuild content from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
 pub enum ReplayEmission {
@@ -72,15 +82,20 @@ pub enum ReplayEmission {
 }
 
 /// One update forwarded by the streaming child replay.
+/// The stream carries ACP transcript updates plus persisted xAI child events (compaction, retry, memory lifecycle) in file order.
+/// The file order lets a rebuilt view keep its non-ACP markers.
 #[derive(Debug)]
 pub enum ReplayedUpdate {
     /// The second field is the persisted line's `_meta` (original `agentTimestampMs`/`turnStartMs`).
+    /// That is how rebuilt entries keep their run-time timestamps.
+    /// For a collapsed ToolCall it is the completing line's meta; `None` for start-only tools flushed at EOF.
     Acp(acp::SessionUpdate, Option<acp::Meta>),
     Xai(XaiUpdate),
 }
 
-/// Collapses a ToolCall and its ToolCallUpdates into one ToolCall during
-/// replay.
+/// Collapses a ToolCall and its ToolCallUpdates into one ToolCall during replay.
+/// Parent forward never flushes leftovers (cursor/`_meta.eventId` contract).
+/// Child stream EOF calls [`Self::take_pending`] so start-only tools still hydrate.
 pub(crate) struct ReplayToolCollapser {
     pending: HashMap<acp::ToolCallId, acp::ToolCall>,
 }
@@ -262,8 +277,9 @@ pub fn replay_would_emit(
         let Ok(SessionUpdate::Acp(notif)) = SessionUpdateEnvelope::from_str(line) else {
             continue;
         };
-        // Mirrors [`ReplayToolCollapser`] Every parsed ACP line reaches the stream (directly, merged into its
-        // ToolCall.
+        // Mirrors [`ReplayToolCollapser`]
+        // Every parsed ACP line reaches the stream (directly, merged into its ToolCall, or via the EOF pending flush)
+        // The exceptions are a command catalog and a ToolCallUpdate that never completes and has no base to merge into
         match notif.update {
             acp::SessionUpdate::AvailableCommandsUpdate(_) => {}
             acp::SessionUpdate::ToolCallUpdate(u) => {
@@ -532,9 +548,9 @@ pub fn prepare_replay_lines<'a>(contents: &'a str, cursor: Option<&str>) -> Prep
     }
 }
 
-/// Blank-strip, drop redundant command catalogs and InProgress tool updates,
-/// and rewind-filter a raw `updates.jsonl` segment. Shared by the
-/// delta-replay path (which has no reconnect cursor).
+/// Blank-strip, drop redundant command catalogs and InProgress tool updates, and rewind-filter a raw `updates.jsonl` segment.
+/// Shared by the delta-replay path (which has no reconnect cursor).
+/// The initial replay path is [`prepare_replay_lines`].
 pub(crate) fn filter_delta_replay_lines(contents: &str) -> Vec<&str> {
     let live: Vec<&str> = contents
         .lines()

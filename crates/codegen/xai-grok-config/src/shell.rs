@@ -1,4 +1,12 @@
 //! Windows shell detection for terminal command execution.
+//!
+//! Default cascade: pwsh, then powershell.exe, then Git Bash, then powershell.exe as the fallback.
+//!
+//! PowerShell is preferred over Git Bash: MSYS2 path translation mangles every flag starting with `/` (e.g. MSBuild `/t:Build`, cl.exe `/nologo`).
+//! This breaks native Windows C++/C#/.NET builds.
+//!
+//! Set `GROK_SHELL` to override auto-detection: `pwsh`, `powershell`, `bash`, or `cmd`.
+//! The result is cached for the process lifetime.
 
 /// Detected Windows shell and how to invoke it.
 #[cfg(not(unix))]
@@ -58,6 +66,7 @@ pub fn detect_windows_shell() -> &'static WindowsShell {
         // Auto-detect: prefer PowerShell over Git Bash
         // PowerShell passes `/flag` arguments through unchanged, which is required for native Windows toolchains (MSBuild, cl.exe, dotnet)
 
+        // pwsh (PowerShell 7+).
         if let Ok(output) = {
             let mut cmd = std::process::Command::new("where");
             xai_tty_utils::detach_std_command(&mut cmd);
@@ -70,6 +79,7 @@ pub fn detect_windows_shell() -> &'static WindowsShell {
             }
         }
 
+        // powershell.exe (Windows PowerShell 5.1).
         if std::path::Path::new("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
             .exists()
         {
@@ -139,14 +149,15 @@ impl WindowsShell {
         }
     }
 
-    /// Whether this shell supports the `&&` pipeline chain operator for
-    /// error-propagating command chaining.
+    /// Whether this shell supports the `&&` pipeline chain operator for error-propagating command chaining.
+    /// True for pwsh (`&&` arrived in PS 7.0) and Git Bash; powershell.exe 5.1 has no `&&`.
+    /// `cmd.exe` has `&&` but we use `;` there for uniformity with the `-Command` invocation style used elsewhere.
     pub fn supports_chain_operator(&self) -> bool {
         matches!(self, Self::Pwsh | Self::GitBash(_))
     }
 
-    /// Whether `grep`, `head`, `tail`, `sed`, `awk`, `find` are usable from
-    /// this shell.
+    /// Whether `grep`, `head`, `tail`, `sed`, `awk`, `find` are usable from this shell.
+    /// True only for Git Bash, where MSYS2 bundles them inside the bash subprocess.
     pub fn has_unix_utilities(&self) -> bool {
         matches!(self, Self::GitBash(_))
     }
@@ -163,6 +174,7 @@ impl WindowsShell {
     }
 }
 
+/// Unix: always `"&&"` (bash/zsh); Windows with pwsh or Git Bash: `"&&"` (both support pipeline chain operators); Windows with powershell.exe (5.1) or cmd.exe: `";"`.
 pub fn chain_separator() -> &'static str {
     #[cfg(unix)]
     {
@@ -178,8 +190,9 @@ pub fn chain_separator() -> &'static str {
     }
 }
 
-/// Whether `grep`, `head`, `tail`, `sed`, `awk`, `find` are usable from the
-/// active shell.
+/// Whether `grep`, `head`, `tail`, `sed`, `awk`, `find` are usable from the active shell.
+/// True on Unix and on Windows with Git Bash; false on Windows with PowerShell or `cmd.exe`.
+/// Tool descriptions branch on this to swap Unix-centric guidance for shell-aware guidance and avoid `'grep' is not recognized` failures.
 pub fn has_unix_utilities() -> bool {
     #[cfg(unix)]
     {
@@ -192,16 +205,20 @@ pub fn has_unix_utilities() -> bool {
 }
 
 /// Whether `name` resolves to an executable on the current `$PATH`.
+/// The truncated-MCP steer uses this to name only tools present on the tool server's `$PATH`, with no "if available" hedge.
 pub fn is_command_available(name: &str) -> bool {
     which::which(name).is_ok()
 }
 
 /// How a shell interprets a bare `&` token.
+/// Drives `run_terminal_cmd` background-operator detection and remediation, which must differ per shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AmpersandSemantics {
     /// Bash/POSIX: a bare `&` backgrounds the command (Unix shells, Git Bash).
     PosixBackground,
+    /// PowerShell 7+ (`pwsh`): a *leading* `&` is the call/invocation operator; a *trailing* `&` starts a background job.
     PowerShellCore,
+    /// Windows PowerShell 5.1 (`powershell.exe`): a *leading* `&` is the call operator; a *trailing* `&` is a parse error.
     WindowsPowerShell,
     /// `cmd.exe`: `&` is an unconditional sequential command separator.
     CmdSeparator,
@@ -238,8 +255,8 @@ pub fn shell_command_argv(command: &str) -> ShellInvocation {
 /// Pure builder split out of `shell_command_argv` so tests can exercise every `WindowsShell` variant, not just the one installed on the test host.
 #[cfg(not(unix))]
 fn invocation_for(shell: &WindowsShell, command: &str) -> ShellInvocation {
-    // Windows' legacy ANSI codepage (cp1252) makes locale-sensitive children
-    // mis-decode UTF-8 subprocess output Applied.
+    // Windows' legacy ANSI codepage (cp1252) makes locale-sensitive children mis-decode UTF-8 subprocess output
+    // Applied before the per-request env, so an explicit caller value still overrides these defaults
     let utf8_env = [
         ("PYTHONUTF8", "1"),
         ("PYTHONIOENCODING", "utf-8:surrogateescape"),
@@ -284,11 +301,11 @@ fn invocation_for(shell: &WindowsShell, command: &str) -> ShellInvocation {
     }
 }
 
-// `$GROK_SHELL` override, if it names the requested kind and is runnable;
-// `$SHELL`, if it names the requested kind and is runnable.
+// `$GROK_SHELL` override, if it names the requested kind and is runnable; `$SHELL`, if it names the requested kind and is runnable. Covers most NixOS / Homebrew / `nix-darwin` setups There the user's login shell already lives at the resolved path; `which::which(name)` walks `$PATH`. Catches NixOS profile shells in `/nix/store/...` or `/etc/profiles/per-user/<u>/bin/` when `/bin/bash` is absent; A fixed candidate list: `{/bin, /usr/bin, /usr/local/bin, /opt/homebrew/bin} × {bash,zsh}`; Hardcoded `/bin/<name>`: historical behavior, only reached when every earlier step has failed.
+// The result is cached per kind in a process-wide `OnceLock`, so the cascade is run at most once per shell kind per process
 
-/// Bash and zsh are the only kinds supported by the persistent shell-state
-/// backend (the dump scripts are bash/zsh-specific).
+/// Bash and zsh are the only kinds supported by the persistent shell-state backend (the dump scripts are bash/zsh-specific).
+/// Fish / dash / ksh users fall through to bash.
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnixShellKind {
@@ -396,7 +413,9 @@ fn is_executable(path: &std::path::Path) -> bool {
         return true;
     }
 
-    // Nix fallback.
+    // Nix fallback. Detach from the controlling TTY via xai_tty_utils so the probe cannot leak escapes onto the parent's terminal.
+    // The resolver may run this during interactive TUI/pager startup; a misbehaving shell could otherwise spew garbage onto the pager screen
+    // See `codegen-conventions` SKILL.md for the workspace-wide subprocess rule
     let mut cmd = std::process::Command::new(path);
     cmd.arg("--version")
         .stdin(std::process::Stdio::null())
@@ -437,8 +456,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn is_executable_recognizes_bin_sh() {
-        // /bin/sh is the path POSIX promises across every Unix variant we
-        // care about.
+        // /bin/sh is the one path POSIX promises across every Unix variant we care about; on macOS and Linux distros it's always executable
+        // (Pure NixOS images may lack it, in which case this test is skipped.)
         if !std::path::Path::new("/bin/sh").exists() {
             return;
         }
@@ -490,8 +509,8 @@ mod tests {
         );
     }
 
-    /// Every Windows shell variant injects the UTF-8 env defaults. Builds all variants
-    /// directly so it doesn't depend on the test host's shell.
+    /// Every Windows shell variant injects the UTF-8 env defaults.
+    /// Builds all four variants directly so it doesn't depend on the test host's shell.
     #[cfg(not(unix))]
     #[test]
     fn invocation_for_sets_utf8_env_on_every_variant() {

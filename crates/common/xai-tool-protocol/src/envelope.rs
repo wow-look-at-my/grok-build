@@ -1,3 +1,14 @@
+//! JSON-RPC 2.0 envelope types with the Grok `session_id` / `seq`
+//! extensions.
+//!
+//! Two distinct id concepts coexist in this crate:
+//!
+//! - [`JsonRpcId`] (this module) is the JSON-RPC envelope `id` field —
+//!   string OR number on the wire, per-connection, sender-allocated.
+//! - [`crate::RequestId`] is an opaque newtype wrapping a string, used
+//!   internally as a correlator (e.g. to key in-flight maps). Convert
+//!   between them via [`JsonRpcId::from_request_id`] /
+//!   [`JsonRpcId::as_request_id`].
 
 use std::fmt;
 
@@ -5,6 +16,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::{FrameSeq, IdError, RequestId, SessionId};
 
+/// JSON-RPC 2.0 protocol version marker.
+///
+/// Serializes as the literal string `"2.0"` and rejects any other value on
+/// deserialize.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct JsonRpcVersion;
 
@@ -47,7 +62,11 @@ impl<'de> Deserialize<'de> for JsonRpcVersion {
     }
 }
 
-/// Per the spec the `id` MAY be a string, a number, or null.
+/// JSON-RPC 2.0 envelope `id` field.
+///
+/// Per the spec the `id` MAY be a string, a number, or null. We accept the
+/// first two on deserialize and emit a string ourselves. Null ids are not
+/// produced and not modelled on the receive path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum JsonRpcId {
@@ -88,6 +107,7 @@ impl fmt::Display for JsonRpcId {
     }
 }
 
+/// JSON-RPC 2.0 request envelope.
 ///
 /// Generic over `params` so callers can pin a concrete schema (e.g.
 /// [`crate::frames::ToolCallParams`]) without losing the envelope's
@@ -103,6 +123,7 @@ pub struct JsonRpcRequest<P = serde_json::Value> {
     pub params: P,
 }
 
+/// JSON-RPC 2.0 notification envelope.
 ///
 /// No `id` (notifications do not produce a response). `seq` is an
 /// optional per-connection monotonic counter so receivers can dedup and
@@ -119,6 +140,10 @@ pub struct JsonRpcNotification<P = serde_json::Value> {
 }
 
 /// JSON-RPC error object.
+///
+/// `code` is the numeric envelope code; `data` typically carries a
+/// serialized [`crate::error_wire::ToolErrorWire`] so receivers can switch
+/// on the stable string code rather than the numeric.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JsonRpcError {
     pub code: i32,
@@ -127,7 +152,11 @@ pub struct JsonRpcError {
     pub data: Option<serde_json::Value>,
 }
 
-/// Per the spec exactly one of `result` / `error` is present.
+/// JSON-RPC 2.0 response envelope.
+///
+/// Per the spec exactly one of `result` / `error` is present. The custom
+/// `Serialize` / `Deserialize` impls enforce that invariant: a payload
+/// containing both keys, or neither, fails to deserialize.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonRpcResponse<R = serde_json::Value> {
     pub jsonrpc: JsonRpcVersion,
@@ -167,7 +196,8 @@ impl<R: Serialize> Serialize for JsonRpcResponse<R> {
 impl<'de, R: Deserialize<'de>> Deserialize<'de> for JsonRpcResponse<R> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         // `Option<...>` deserialises to `None` when missing without
-        // `#[serde(default)]`.
+        // `#[serde(default)]`, avoiding a `R: Default` bound on the
+        // result type parameter.
         #[derive(Deserialize)]
         struct Flat<R> {
             jsonrpc: JsonRpcVersion,

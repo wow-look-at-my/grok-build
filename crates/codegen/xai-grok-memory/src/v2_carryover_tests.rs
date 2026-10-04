@@ -403,7 +403,8 @@ fn oversized_non_ascii_section_is_truncated_on_a_char_boundary() {
 fn write_failure_leaves_the_hash_unrecorded_so_the_next_start_retries() {
     let fixture = Fixture::new();
     fixture.write_legacy(DREAM_SHAPED);
-    // A directory where the topic file belongs fails the read and the write for any user, unlike a permission bit.
+    // A directory where the topic file belongs fails the read and the write
+    // for any user, unlike a permission bit, which root ignores.
     let blocker = fixture.workspace.join("topics/build-test.md");
     fs::create_dir(&blocker).unwrap();
 

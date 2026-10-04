@@ -2,8 +2,9 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// On a macOS dev machine an incidental host-clipboard image chip may attach, so the asserts only
-/// look for unique sentinel substrings.
+/// A bracketed paste of 4 or more lines renders as a compact `[Pasted: N lines]` chip instead of
+/// inline text. On a macOS dev machine an incidental host-clipboard image chip may attach, so the
+/// asserts only look for unique sentinel substrings.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn paste_bracketed_chip_text_sends_full_payload() {
@@ -22,7 +23,7 @@ async fn paste_bracketed_chip_text_sends_full_payload() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
 
-    // Several lines: sentinel first line, filler lines, sentinel last line.
+    // 12 lines: sentinel first line, ten filler lines, sentinel last line.
     let mut lines = vec![FIRST.to_owned()];
     for i in 0..10 {
         lines.push(format!("chip filler line {i} keeps the payload multi-line"));

@@ -2,13 +2,18 @@
 
 Agent builder, definition parsing, and system prompt assembly.
 
-This crate extracts a first-class `Agent` type from `xai-grok-shell`. An `Agent` bundles tools, system prompt, system-reminder policy, compaction policy, and model configuration into a single, portable object that any host can consume. This is whether that host is `xai-grok-shell`, another in-process host, or a headless batch runner.
+This crate extracts a first-class `Agent` type from `xai-grok-shell`.
+An `Agent` bundles tools, system prompt, system-reminder policy,
+compaction policy, and model configuration into a single, portable
+object that any host can consume — whether that host is
+`xai-grok-shell`, another in-process host, or a headless batch runner.
 
 ## Quick Start
 
 ### From a definition file
 
-Agent definitions are **Markdown files with YAML frontmatter**, stored in `.grok/agents/` (project-level) or `~/.grok/agents/` (user-level).
+Agent definitions are **Markdown files with YAML frontmatter**, stored
+in `.grok/agents/` (project-level) or `~/.grok/agents/` (user-level).
 
 ```rust
 use xai_grok_agent::{AgentDefinition, AgentBuilder};
@@ -69,7 +74,8 @@ description: What this agent does
 System prompt body goes here...
 ```
 
-The **frontmatter** (between `---` delimiters) is YAML configuration. The **body** (after the closing `---`) is the system prompt content.
+The **frontmatter** (between `---` delimiters) is YAML configuration.
+The **body** (after the closing `---`) is the system prompt content.
 
 ### Minimal example (extends base template)
 
@@ -88,7 +94,9 @@ You are a senior code reviewer. Analyze code and provide
 actionable feedback organized by severity.
 ```
 
-With `promptMode: extend` (the default), the body is appended to the base template which includes work policy, formatting rules, and user info. The author only writes persona-specific content.
+With `promptMode: extend` (the default), the body is appended to the
+base template which includes work policy, formatting
+rules, and user info. The author only writes persona-specific content.
 
 ### Full prompt override
 
@@ -120,7 +128,9 @@ Date: ${{ current_date }}
 </user_info>
 ```
 
-With `promptMode: full`, the body IS the complete system prompt, rendered through MiniJinja with custom `${{ }}`/`${% %}` delimiters (to avoid collisions with literal `{{ }}` in prose).
+With `promptMode: full`, the body IS the complete system prompt,
+rendered through MiniJinja with custom `${{ }}`/`${% %}` delimiters
+(to avoid collisions with literal `{{ }}` in prose).
 
 ### With completion requirement (orchestrated mode)
 
@@ -209,24 +219,35 @@ promptMode: extend                     promptMode: full
 | `${{ working_directory }}` | Workspace path |
 | `${{ current_date }}` | Current date in the user's local timezone (`YYYY-MM-DD`) |
 
-Conditionals: `${%- if tools.by_kind.plan %}...${%- endif %}`. The block is omitted when that kind is disabled. Canonical keys such as `${{ tools.read_file }}` are not in the render context.
+Conditionals: `${%- if tools.by_kind.plan %}...${%- endif %}`.
+The block is omitted when that kind is disabled. Canonical keys such as
+`${{ tools.read_file }}` are not in the render context.
 
 ## Discovery Rules
 
 Agent definitions are discovered from multiple locations with priority:
 
-1. **Project-level** (highest priority): `.grok/agents/*.md` — walk from `cwd` up to the git repository root. Files found closer to `cwd` take priority.
+1. **Project-level** (highest priority): `.grok/agents/*.md` — walk
+   from `cwd` up to the git repository root. Files found closer to
+   `cwd` take priority.
 2. **User-level**: `~/.grok/agents/*.md`
-3. **Compat paths** (lowest priority): additional vendor agent directories under the user home (when enabled)
+3. **Compat paths** (lowest priority): additional vendor agent
+   directories under the user home (when enabled)
 4. **Built-in**: `default_grok_build()`, `browser_use()`
 
-Name-based dedup ensures the highest-priority definition wins. For example, a project `.grok/agents/code-reviewer.md` shadows a user-level definition with the same name.
+Name-based dedup ensures the highest-priority definition wins. For
+example, a project `.grok/agents/code-reviewer.md` shadows a
+user-level definition with the same name.
 
 ## Crate Relationships
 
-This crate uses `xai-grok-tools`. `xai-grok-tools` provides `ToolBridge` and `Resources`. Session tool state is in `Resources`. There is no `ToolState`.
+This crate uses `xai-grok-tools`.
+`xai-grok-tools` provides `ToolBridge` and `Resources`.
+Session tool state is in `Resources`.
+There is no `ToolState`.
 
-`xai-grok-shell` is the session host. It uses `AgentBuilder` to construct an `Agent` at session setup.
+`xai-grok-shell` is the session host.
+It uses `AgentBuilder` to construct an `Agent` at session setup.
 
 ## Built-in Agents
 
@@ -247,7 +268,9 @@ This crate uses `xai-grok-tools`. `xai-grok-tools` provides `ToolBridge` and `Re
 | `IoError` | File read error during AGENTS.md/skills discovery |
 | `MiniJinjaError` | Template rendering failure |
 
-Unknown frontmatter fields are **silently ignored** for forward compatibility — definitions written for newer versions work on older ones.
+Unknown frontmatter fields are **silently ignored** for forward
+compatibility — definitions written for newer versions work on older
+ones.
 
 ## Development
 

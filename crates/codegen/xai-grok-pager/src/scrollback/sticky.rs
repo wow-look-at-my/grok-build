@@ -1,6 +1,24 @@
 //! Sticky header computation for AllTurns view.
+//!
+//! This module handles the "iOS-style" sticky section headers where prompts stick to the top of the viewport when scrolled past.
+//! They get pushed off when the next prompt approaches.
+//!
+//! The algorithm is purely computational (1D coordinate math) and can be tested independently of any rendering logic.
+//!
+//! # Layout Model
+//!
+//! The layout works entirely with **total heights**: it doesn't know or care about internal block structure (vpads, content lines, ellipsis, etc.).
+//!
+//! Each prompt has:
+//! - `full_height`: Total rows when rendered inline in the timeline
+//! - `min_height`: Minimum rows when fully collapsed as sticky header
+//!
+//! The layout computes `render_height` (between min and full) and `clip_top`.
+//! The block renderer receives this height budget and decides internally how to allocate it (vpads, content, truncation indicators, etc.).
 
 /// Describes a prompt entry for sticky header computation.
+///
+/// Prompts are "section headers" in the conversation: they mark the start of each turn and can be pinned to the top when scrolled past.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PromptDescriptor {
     /// Index of the prompt entry in the entries list.
@@ -10,12 +28,17 @@ pub struct PromptDescriptor {
     pub y_virtual: usize,
 
     /// Total height when rendered inline in the timeline.
+    /// This is the FULL height including all padding, borders, content, etc.
     pub full_height: u16,
 
-    /// Minimum height when fully collapsed as a sticky header. The block should still be recognizable at this size.
+    /// Minimum height when fully collapsed as a sticky header.
+    /// The block should still be recognizable at this size.
+    /// Typically 3-4 rows (enough for padding + 1-2 content lines + ellipsis).
     pub min_height: u16,
 
     /// Whether this prompt should stick when scrolled past.
+    /// Non-sticky prompts still participate in push calculations but never become pinned themselves.
+    /// (They push the previous sticky prompt off screen.)
     pub sticky: bool,
 }
 
@@ -27,7 +50,9 @@ pub struct RenderedPrompt {
     /// Entry index of the prompt.
     pub entry_idx: usize,
 
-    /// Total height budget for rendering this prompt.
+    /// Total height budget for rendering this prompt. This is the FULL height the block should render to, including any
+    /// internal padding, content, ellipsis, etc. The block decides how to allocate this space internally. Range:
+    /// `min_height <= render_height <= full_height`.
     pub render_height: u16,
 
     /// Rows clipped from the TOP (for push effect ONLY).
@@ -49,13 +74,17 @@ impl RenderedPrompt {
     }
 }
 
-/// Result of computing sticky header layout for AllTurns view.
+/// Result of computing sticky header layout for AllTurns view. This describes what should be rendered in the sticky
+/// header area at the top of the viewport. The content area starts after `header_screen_rows()` rows. All 1D layout
+/// math is encapsulated here; the renderer just asks for screen positions and scroll offsets.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickyHeaderLayout {
     /// The prompt being pushed off screen (clipped at top).
+    /// Only present during push transition when next prompt is approaching.
     pub pushed: Option<RenderedPrompt>,
 
     /// The main pinned prompt (rendered fully unless viewport is tiny).
+    /// None only at the very start of timeline (no prompts scrolled past).
     pub pinned: Option<RenderedPrompt>,
 }
 
@@ -106,8 +135,8 @@ impl StickyHeaderLayout {
         viewport_height.saturating_sub(self.header_screen_rows())
     }
 
-    /// Each c-j/c-k must move the bottom line by exactly one row:
-    /// `bottom_line = scroll_offset + viewport_height - 1`.
+    /// Each c-j/c-k must move the bottom line by exactly one row: `bottom_line = scroll_offset + viewport_height - 1`.
+    /// With a sticky header of height H, content scroll is `scroll_offset + H`, so a 1-row header shrink cancels a 1-row scroll and the bottom line still advances by one.
     #[inline]
     pub fn scroll_for_content(&self, scroll_offset: usize) -> usize {
         scroll_offset + self.header_screen_rows() as usize
@@ -135,13 +164,15 @@ impl StickyHeaderLayout {
         Some(pushed_visible + gap_after_pushed)
     }
 
-    /// Screen row of the gap after a pinned header (selection corners, the
-    /// ▲ response-top indicator). `None` without a pinned header.
+    /// Screen row of the gap after a pinned header (selection corners, the ▲ response-top indicator).
+    /// `None` without a pinned header.
+    /// A push-only header renders no gap after it (see [`Self::header_screen_rows`]), so this row would point at content.
     pub fn gap_row(&self) -> Option<u16> {
         self.pinned?;
         Some(self.header_content_height())
     }
 
+    /// Screen row where pushed header starts (always 0 if present).
     pub fn pushed_screen_row(&self) -> Option<u16> {
         self.pushed.as_ref().map(|_| 0)
     }
@@ -163,6 +194,7 @@ impl StickyHeaderLayout {
             return None;
         }
 
+        // Check pushed prompt area (always starts at row 0)
         if let Some(ref pushed) = self.pushed
             && row < pushed.visible_height()
         {
@@ -219,14 +251,15 @@ pub fn compute_sticky_layout(
         return StickyHeaderLayout::default();
     }
 
-    // Find the last sticky prompt that's been scrolled past (y_virtual <
-    // scroll_offset).
+    // Find the last sticky prompt that's been scrolled past (y_virtual < scroll_offset).
+    // Non-sticky prompts (e.g. expanded user prompts) are skipped for pinning but still participate in push calculations below.
     let pinned_idx = match prompts
         .iter()
         .rposition(|p| p.sticky && p.y_virtual < scroll_offset)
     {
         Some(idx) => idx,
         None => {
+            // No sticky prompts have been scrolled past yet
             return StickyHeaderLayout::default();
         }
     };
@@ -257,10 +290,13 @@ pub fn compute_sticky_layout(
         Some((_next_prompt, next_naive_row)) => {
             // During push transition: the next prompt is approaching from below
             if next_naive_row == 0 {
+                // Next prompt is at row 0 (its inline position); no header needed
+                // The next prompt takes over the sticky position.
                 return StickyHeaderLayout::default();
             }
 
-            // The current (pinned) header is being pushed off as the next prompt approaches.
+            // The current (pinned) header is being pushed off as the next prompt approaches. If next_naive_row == 1, that
+            // means only the gap row is visible (row 0).
             let pushed_visible = (next_naive_row as u16).saturating_sub(1);
 
             if pushed_visible == 0 {
@@ -268,7 +304,9 @@ pub fn compute_sticky_layout(
                 return StickyHeaderLayout::default();
             }
 
-            // For pushed headers, use min(full_height, render_height): - If full_height < render_height: use full_height.
+            // For pushed headers, use min(full_height, render_height):
+            // - If full_height < render_height: use full_height (don't inflate small prompts with empty padding that we'd then clip into)
+            // - If full_height >= render_height: use render_height (keep the collapsed view with proper truncation/ellipsis)
             let pushed_render_height = pinned_prompt.full_height.min(render_height);
             let push_clip = pushed_render_height.saturating_sub(pushed_visible);
 
@@ -295,21 +333,27 @@ pub fn compute_sticky_layout(
     }
 }
 
-/// Calculate render height for a prompt in sticky header.
+/// Calculate render height for a prompt in sticky header. The shrinking rate matches the scroll rate (1 row per
+/// scroll), maintaining bottom line continuity. render_height decreases by 1. header shrinks by 1 row. content_area
+/// height increases by 1 row. So bottom_line increases by 1.
 fn calculate_render_height(
     prompt: &PromptDescriptor,
     scroll_offset: usize,
     viewport_height: u16,
 ) -> u16 {
-    // How many rows have scrolled past the prompt's top `scroll_offset` is a
-    // cumulative usize position (can exceed u16 in long sessions).
+    // How many rows have scrolled past the prompt's top
+    // `scroll_offset` is a cumulative usize position (can exceed u16 in long sessions), so clamp before narrowing
+    // This only feeds `full_height.saturating_sub(..)` (a u16), so any value past u16::MAX collapses the header to min height anyway
     let scroll_past = scroll_offset
         .saturating_sub(prompt.y_virtual)
         .min(u16::MAX as usize) as u16;
 
+    // Height shrinks 1:1 with scroll_past until we hit minimum
     let height = prompt.full_height.saturating_sub(scroll_past);
 
-    // A collapsed sticky header can never be taller than the prompt rendered inline.
+    // A collapsed sticky header can never be taller than the prompt rendered inline. A lazily-estimated prompt can
+    // keep the `MAX_TRUNCATED_HEADER_HEIGHT` seed, never measured because it sits above the viewport when pinned.
+    // Without this clamp it would pad a short pinned prompt with empty rows instead of collapsing to its real height.
     let min_height = prompt.min_height.max(1).min(prompt.full_height.max(1));
 
     height.max(min_height).min(viewport_height)
@@ -320,8 +364,8 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
-    /// Helper to create prompt descriptors from (y_virtual, full_height)
-    /// tuples.
+    /// Helper to create prompt descriptors from (y_virtual, full_height) tuples.
+    /// Uses a default min_height of 4 (2 content + 2 vpad) for all prompts.
     fn make_prompts(specs: &[(usize, u16)]) -> Vec<PromptDescriptor> {
         make_prompts_with_min(specs, 4)
     }
@@ -361,58 +405,71 @@ mod tests {
 
     #[test]
     fn test_gradual_collapse_just_scrolled_past() {
+        // Prompt at y=0 with full_height=8
+        // scroll_offset=1 means we just scrolled past by 1 row
+        // render_height = 8 - 1 = 7
         let prompts = make_prompts(&[(0, 8)]);
         let layout = compute_sticky_layout(1, 24, &prompts);
 
         let pinned = layout.pinned.unwrap();
         assert_eq!(pinned.render_height, 7);
+        // header_screen_rows = render_height + gap = 7 + 1 = 8
         assert_eq!(layout.header_screen_rows(), 8);
     }
 
     #[test]
     fn test_gradual_collapse_more_scrolled() {
+        // scroll_offset=3: render_height = 8 - 3 = 5
         let prompts = make_prompts(&[(0, 8)]);
         let layout = compute_sticky_layout(3, 24, &prompts);
 
         let pinned = layout.pinned.unwrap();
         assert_eq!(pinned.render_height, 5);
+        // header_screen_rows = 5 + 1 = 6
         assert_eq!(layout.header_screen_rows(), 6);
     }
 
     #[test]
     fn test_gradual_collapse_reaches_minimum() {
+        // scroll_offset=6: render_height = 8 - 6 = 2, but min is 4
         let prompts = make_prompts(&[(0, 8)]);
         let layout = compute_sticky_layout(6, 24, &prompts);
 
         let pinned = layout.pinned.unwrap();
         assert_eq!(pinned.render_height, 4); // clamped to min
+        // header_screen_rows = 4 + 1 = 5
         assert_eq!(layout.header_screen_rows(), 5);
     }
 
     #[test]
     fn test_gradual_collapse_stays_at_minimum() {
+        // scroll_offset=10: well past the prompt, stays at minimum (4)
         let prompts = make_prompts(&[(0, 8)]);
         let layout = compute_sticky_layout(10, 24, &prompts);
 
         let pinned = layout.pinned.unwrap();
         assert_eq!(pinned.render_height, 4); // stays at min
+        // header_screen_rows = 4 + 1 = 5
         assert_eq!(layout.header_screen_rows(), 5);
     }
 
     #[test]
     fn test_custom_min_height_small() {
+        // With vpad=false, min_lines=2: min_height should be 2
+        // This tests that we respect the user's configured min_height, not the old MIN_PINNED_HEIGHT constant
         let prompts = make_prompts_with_min(&[(0, 8)], 2);
         let layout = compute_sticky_layout(10, 24, &prompts);
 
         let pinned = layout.pinned.unwrap();
         assert_eq!(pinned.render_height, 2); // respects custom min_height
-        assert_eq!(layout.header_screen_rows(), 3);
+        assert_eq!(layout.header_screen_rows(), 3); // 2 + 1 gap
     }
 
     #[test]
     fn test_min_height_clamped_to_full_height() {
-        // Regression: a lazily-estimated prompt can carry a `min_height`
-        // (truncated-header seed) LARGER than its real `full_height`.
+        // Regression: a lazily-estimated prompt can carry a `min_height` (truncated-header seed) LARGER than its real `full_height`
+        // That happens when it was never measured (it sits above the viewport when pinned)
+        // The collapsed sticky header must never exceed the full inline height; otherwise a 1-row prompt is padded out to the seed with empty rows
         let prompts = vec![PromptDescriptor {
             entry_idx: 0,
             y_virtual: 0,
@@ -435,19 +492,22 @@ mod tests {
 
     #[test]
     fn test_custom_min_height_zero_floor() {
+        // min_height of 0 should be floored to 1
         let prompts = make_prompts_with_min(&[(0, 8)], 0);
         let layout = compute_sticky_layout(10, 24, &prompts);
 
         let pinned = layout.pinned.unwrap();
-        assert_eq!(pinned.render_height, 1);
-        assert_eq!(layout.header_screen_rows(), 2);
+        assert_eq!(pinned.render_height, 1); // floored to 1
+        assert_eq!(layout.header_screen_rows(), 2); // 1 + 1 gap
     }
 
     // Bottom Line Continuity Tests
 
     #[test]
     fn test_bottom_line_continuity() {
-        // Verify that scroll_for_content produces the correct bottom line for each scroll step during gradual collapse Invariant.
+        // Verify that scroll_for_content produces the correct bottom line for each scroll step during gradual collapse
+        //
+        // Invariant: bottom_line = scroll_offset + viewport_height - 1
 
         let viewport = 20u16;
         let prompts = make_prompts(&[(0, 8)]);
@@ -481,24 +541,33 @@ mod tests {
 
         let prompts = make_prompts(&[(0, 8)]);
 
-        // Prompt at y=0, full_height=8 (content ends at y=8 with gap) Next entry would start.
+        // Prompt at y=0, full_height=8 (content ends at y=8 with gap)
+        // Next entry would start at y=9
+        // scroll_for_content should equal 9 during gradual collapse
 
+        // At scroll=1: header=8 (7+1gap), scroll_for_content = 1 + 8 = 9
         let layout1 = compute_sticky_layout(1, 24, &prompts);
         assert_eq!(layout1.scroll_for_content(1), 9);
 
+        // At scroll=2: header=7 (6+1gap), scroll_for_content = 2 + 7 = 9
         let layout2 = compute_sticky_layout(2, 24, &prompts);
         assert_eq!(layout2.scroll_for_content(2), 9);
 
+        // At scroll=3: header=6 (5+1gap), scroll_for_content = 3 + 6 = 9
         let layout3 = compute_sticky_layout(3, 24, &prompts);
         assert_eq!(layout3.scroll_for_content(3), 9);
 
+        // At scroll=4: header=5 (4+1gap), scroll_for_content = 4 + 5 = 9
         let layout4 = compute_sticky_layout(4, 24, &prompts);
         assert_eq!(layout4.scroll_for_content(4), 9);
 
+        // At scroll=5: header stays at 5 (min 4 + 1gap), scroll_for_content = 5 + 5 = 10
+        // NOW it starts increasing because we hit minimum!
         let layout5 = compute_sticky_layout(5, 24, &prompts);
-        assert_eq!(layout5.header_screen_rows(), 5);
+        assert_eq!(layout5.header_screen_rows(), 5); // min 4 + 1 gap
         assert_eq!(layout5.scroll_for_content(5), 10);
 
+        // At scroll=6: header stays at 5 (min), scroll_for_content = 6 + 5 = 11
         let layout6 = compute_sticky_layout(6, 24, &prompts);
         assert_eq!(layout6.scroll_for_content(6), 11);
     }
@@ -507,14 +576,18 @@ mod tests {
 
     #[test]
     fn test_push_effect() {
+        // Two prompts: 0 at y=0 (full=8), 1 at y=9 (after gap at y=8)
         let prompts = make_prompts(&[(0, 8), (9, 8)]);
 
+        // At scroll=8: gap is at row 0, prompt 1 at row 1. No prompt 0 visible, so no header
         let layout8 = compute_sticky_layout(8, 24, &prompts);
         assert!(
             !layout8.has_header(),
             "scroll=8: only gap visible, no header"
         );
 
+        // At scroll=7: prompt 0's bottom (y=7) is at row 0, gap at row 1, prompt 1 at row 2
+        // pushed_visible = 2 - 1 = 1
         let layout7 = compute_sticky_layout(7, 24, &prompts);
         assert!(layout7.pushed.is_some());
         let pushed = layout7.pushed.unwrap();
@@ -523,6 +596,8 @@ mod tests {
         assert!(layout7.pinned.is_none(), "prompt 1 stays inline");
         assert_eq!(layout7.header_screen_rows(), 1);
 
+        // At scroll=6: prompt 0's rows y=6,7 visible at rows 0,1. Gap at row 2, prompt 1 at row 3.
+        // pushed_visible = 3 - 1 = 2
         let layout6 = compute_sticky_layout(6, 24, &prompts);
         assert!(layout6.pushed.is_some());
         assert_eq!(layout6.pushed.unwrap().visible_height(), 2);
@@ -531,11 +606,14 @@ mod tests {
 
     #[test]
     fn test_next_prompt_becomes_pinned() {
+        // scroll_offset=13: prompt 1 (at y=12) is scrolled past by 1
         let prompts = make_prompts(&[(0, 8), (12, 8)]);
         let layout = compute_sticky_layout(13, 24, &prompts);
 
+        // Prompt 1 is now pinned (prompt 0 is no longer relevant)
         let pinned = layout.pinned.unwrap();
         assert_eq!(pinned.entry_idx, 1);
+        // Gradual collapse: 8 - 1 = 7
         assert_eq!(pinned.render_height, 7);
     }
 
@@ -565,13 +643,16 @@ mod tests {
 
         assert!(layout.has_header());
         assert_eq!(layout.pinned_entry_idx(), Some(0));
-        assert_eq!(layout.pinned_screen_row(), Some(0));
+        assert_eq!(layout.pinned_screen_row(), Some(0)); // No pushed, so pinned starts at 0
+        // min render_height=4, gap is at row 4
         assert_eq!(layout.gap_row(), Some(4));
-        assert_eq!(layout.content_height(24), 24 - 5);
+        assert_eq!(layout.content_height(24), 24 - 5); // viewport - header_screen_rows (4+1gap=5)
     }
 
     #[test]
     fn test_gradual_collapse_trace() {
+        // Prompt with full_height=8 at y=0
+        // As we scroll past, render_height decreases: 8, 7, 6, 5, then 4 (min)
 
         let prompts = vec![PromptDescriptor {
             entry_idx: 0,
@@ -581,31 +662,40 @@ mod tests {
             sticky: true,
         }];
 
+        // scroll=0: No header (prompt not scrolled past yet)
         let layout0 = compute_sticky_layout(0, 24, &prompts);
         assert!(!layout0.has_header(), "scroll=0: should have no header");
 
+        // scroll=1: Header appears, render_height = 8 - 1 = 7
         let layout1 = compute_sticky_layout(1, 24, &prompts);
         assert!(layout1.has_header(), "scroll=1: should have header");
         assert_eq!(layout1.pinned.unwrap().render_height, 7);
 
+        // scroll=2: render_height = 8 - 2 = 6
         let layout2 = compute_sticky_layout(2, 24, &prompts);
         assert_eq!(layout2.pinned.unwrap().render_height, 6);
 
+        // scroll=3: render_height = 8 - 3 = 5
         let layout3 = compute_sticky_layout(3, 24, &prompts);
         assert_eq!(layout3.pinned.unwrap().render_height, 5);
 
+        // scroll=4: render_height = 8 - 4 = 4 (min)
         let layout4 = compute_sticky_layout(4, 24, &prompts);
         assert_eq!(layout4.pinned.unwrap().render_height, 4);
 
+        // scroll=5: render_height = 8 - 5 = 3, clamped to 4 (min)
         let layout5 = compute_sticky_layout(5, 24, &prompts);
         assert_eq!(layout5.pinned.unwrap().render_height, 4);
 
+        // scroll=10: still at min
         let layout10 = compute_sticky_layout(10, 24, &prompts);
         assert_eq!(layout10.pinned.unwrap().render_height, 4);
     }
 
     #[test]
     fn test_two_prompt_scenario() {
+        // Prompt 0 at y=0, height=4
+        // Prompt 1 at y=5 (after prompt 0 + gap), height=8
         let prompts = vec![
             PromptDescriptor {
                 entry_idx: 0,
@@ -623,14 +713,17 @@ mod tests {
             },
         ];
 
+        // scroll=5: prompt 1 exactly at top, no header
         let layout5 = compute_sticky_layout(5, 24, &prompts);
         assert!(!layout5.has_header());
 
+        // scroll=6: prompt 1 scrolled past by 1
         let layout6 = compute_sticky_layout(6, 24, &prompts);
         assert!(layout6.has_header());
         assert_eq!(layout6.pinned.unwrap().entry_idx, 1);
         assert_eq!(layout6.pinned.unwrap().render_height, 7);
 
+        // scroll=9: prompt 1 at min height
         let layout9 = compute_sticky_layout(9, 24, &prompts);
         assert_eq!(layout9.pinned.unwrap().render_height, 4);
     }
@@ -640,6 +733,9 @@ mod tests {
     /// Test c-k behavior: scrolling up from gll position.
     #[test]
     fn test_ck_from_gll() {
+        // Prompt A at y=0, height=6 (spans y=0-5)
+        // Gap at y=6
+        // Prompt B at y=7, height=8 (spans y=7-14)
         let prompts = vec![
             PromptDescriptor {
                 entry_idx: 0,
@@ -661,24 +757,30 @@ mod tests {
         let layout_gll = compute_sticky_layout(7, 24, &prompts);
         assert!(!layout_gll.has_header());
 
+        // c-k to scroll=6: only gap visible, no header
         let layout_ck1 = compute_sticky_layout(6, 24, &prompts);
         assert!(!layout_ck1.has_header());
 
+        // c-k to scroll=5: A's bottom row visible, pushed header appears
         let layout_ck2 = compute_sticky_layout(5, 24, &prompts);
         assert!(layout_ck2.pushed.is_some());
         assert_eq!(layout_ck2.pushed.unwrap().visible_height(), 1);
         assert_eq!(layout_ck2.header_screen_rows(), 1);
 
+        // c-k to scroll=4: 2 rows of A visible
         let layout_ck3 = compute_sticky_layout(4, 24, &prompts);
         assert_eq!(layout_ck3.pushed.unwrap().visible_height(), 2);
         assert_eq!(layout_ck3.header_screen_rows(), 2);
 
+        // c-k to scroll=3: 3 rows visible
         let layout_ck4 = compute_sticky_layout(3, 24, &prompts);
         assert_eq!(layout_ck4.pushed.unwrap().visible_height(), 3);
 
+        // c-k to scroll=2: 4 rows visible
         let layout_ck5 = compute_sticky_layout(2, 24, &prompts);
         assert_eq!(layout_ck5.pushed.unwrap().visible_height(), 4);
 
+        // c-k to scroll=1: 5 rows visible, scroll_for_content stays constant
         let layout_ck6 = compute_sticky_layout(1, 24, &prompts);
         assert_eq!(layout_ck6.pushed.unwrap().visible_height(), 5);
         assert_eq!(layout_ck6.scroll_for_content(1), 6);
@@ -806,6 +908,7 @@ mod tests {
             },
         ];
 
+        // At scroll=5: pushed_visible = 1 (excluding gap)
         let layout = compute_sticky_layout(5, 20, &prompts);
         assert!(layout.pushed.is_some());
         assert_eq!(layout.pushed.unwrap().visible_height(), 1);
@@ -841,15 +944,18 @@ mod tests {
             },
         ];
 
+        // At scroll=2: B is at row 2, pushed_visible = 1
         let layout = compute_sticky_layout(2, 20, &prompts);
         assert!(layout.pushed.is_some());
         let pushed = layout.pushed.unwrap();
 
+        // If render_height were 4, clip_top would be 3, which clips into empty padding
         assert_eq!(
             pushed.render_height, 3,
             "Pushed header should use full_height for small prompts, not inflated min_height"
         );
         assert_eq!(pushed.visible_height(), 1);
+        // clip_top = 3 - 1 = 2 (clips 2 rows, shows bottom 1 row of actual content)
         assert_eq!(pushed.clip_top, 2);
     }
 
@@ -877,6 +983,8 @@ mod tests {
             },
         ];
 
+        // At scroll=19: A is scrolled past by 19, render_height = max(20-19, 4) = max(1, 4) = 4
+        // B is at row 2, pushed_visible = 1
         let layout = compute_sticky_layout(19, 20, &prompts);
         assert!(layout.pushed.is_some());
         let pushed = layout.pushed.unwrap();
@@ -895,6 +1003,8 @@ mod tests {
     fn test_pushed_header_render_height_invariant() {
         // Test various combinations of full_height and scroll positions
 
+        // Case 1: full_height=3, scroll just past: render_height would be max(2, 4)=4
+        // pushed should use min(3, 4) = 3
         let prompts1 = vec![
             PromptDescriptor {
                 entry_idx: 0,
@@ -912,8 +1022,10 @@ mod tests {
             },
         ];
         let layout1 = compute_sticky_layout(2, 20, &prompts1);
-        assert_eq!(layout1.pushed.unwrap().render_height, 3);
+        assert_eq!(layout1.pushed.unwrap().render_height, 3); // min(3, 4)
 
+        // Case 2: full_height=6, scroll=2 → render_height would be max(4, 4)=4
+        // pushed should use min(6, 4) = 4
         let prompts2 = vec![
             PromptDescriptor {
                 entry_idx: 0,
@@ -931,8 +1043,9 @@ mod tests {
             },
         ];
         let layout2 = compute_sticky_layout(5, 20, &prompts2);
-        assert_eq!(layout2.pushed.unwrap().render_height, 4);
+        assert_eq!(layout2.pushed.unwrap().render_height, 4); // min(6, 4)
 
+        // Case 3: full_height=4, render_height=4: equal, should be 4
         let prompts3 = vec![
             PromptDescriptor {
                 entry_idx: 0,
@@ -950,7 +1063,7 @@ mod tests {
             },
         ];
         let layout3 = compute_sticky_layout(3, 20, &prompts3);
-        assert_eq!(layout3.pushed.unwrap().render_height, 4);
+        assert_eq!(layout3.pushed.unwrap().render_height, 4); // min(4, 4)
     }
 
     /// Test smooth scrolling with adjacent small prompts (the original bug scenario).
@@ -958,7 +1071,7 @@ mod tests {
     /// With 1-line prompts (full_height=3), scrolling up should reveal actual content, not empty padding rows.
     #[test]
     fn test_adjacent_small_prompts_smooth_scroll() {
-        // Adjacent 1-line prompts (full_height=3 each).
+        // Three adjacent 1-line prompts (full_height=3 each). A: y=0-2, gap at y=3. B: y=4-6, gap at y=7. C: y=8-10.
         let prompts = vec![
             PromptDescriptor {
                 entry_idx: 0,
@@ -983,12 +1096,15 @@ mod tests {
             },
         ];
 
+        // scroll=4: B at top, no header
         let layout4 = compute_sticky_layout(4, 7, &prompts);
         assert!(!layout4.has_header());
 
+        // scroll=3: gap at top, no header (pushed_visible=0)
         let layout3 = compute_sticky_layout(3, 7, &prompts);
         assert!(!layout3.has_header());
 
+        // scroll=2: A's bottom row visible as pushed header
         let layout2 = compute_sticky_layout(2, 7, &prompts);
         assert!(layout2.pushed.is_some());
         let pushed2 = layout2.pushed.unwrap();
@@ -997,14 +1113,15 @@ mod tests {
             "Should use full_height=3, not inflated 4"
         );
         assert_eq!(pushed2.visible_height(), 1);
-        assert_eq!(pushed2.clip_top, 2);
+        assert_eq!(pushed2.clip_top, 2); // Show bottom 1 row of 3-row content
 
+        // scroll=1: A's bottom 2 rows visible
         let layout1 = compute_sticky_layout(1, 7, &prompts);
         assert!(layout1.pushed.is_some());
         let pushed1 = layout1.pushed.unwrap();
         assert_eq!(pushed1.render_height, 3);
         assert_eq!(pushed1.visible_height(), 2);
-        assert_eq!(pushed1.clip_top, 1);
+        assert_eq!(pushed1.clip_top, 1); // Show bottom 2 rows of 3-row content
     }
 
     #[test]
@@ -1022,7 +1139,8 @@ mod tests {
         assert!(layout.pushed.is_none());
 
         let header_rows = layout.header_screen_rows();
-        // Pinned prompt occupies rows 0..pinned.visible_height() Gap row after pinned is NOT a prompt
+        // Pinned prompt occupies rows 0..pinned.visible_height()
+        // Gap row after pinned is NOT a prompt
         let pinned = layout.pinned.unwrap();
         for row in 0..pinned.visible_height() {
             assert_eq!(
@@ -1045,7 +1163,7 @@ mod tests {
 
     #[test]
     fn test_entry_at_header_row_pushed_and_pinned() {
-        // Prompts, scroll so first is being pushed off by second
+        // Two prompts, scroll so first is being pushed off by second
         let prompts = vec![
             PromptDescriptor {
                 entry_idx: 0,
@@ -1068,6 +1186,7 @@ mod tests {
         for scroll in 0..20 {
             let layout = compute_sticky_layout(scroll, 20, &prompts);
             if let (Some(pushed), Some(pinned)) = (&layout.pushed, &layout.pinned) {
+                // Pushed rows resolve to entry 0
                 for row in 0..pushed.visible_height() {
                     assert_eq!(layout.entry_at_header_row(row), Some(0));
                 }
@@ -1076,6 +1195,7 @@ mod tests {
                 let gap_row = pushed.visible_height();
                 assert_eq!(layout.entry_at_header_row(gap_row), None);
 
+                // Pinned rows resolve to entry 5
                 let pinned_start = layout.pinned_screen_row().unwrap();
                 for row in pinned_start..pinned_start + pinned.visible_height() {
                     assert_eq!(layout.entry_at_header_row(row), Some(5));
@@ -1083,6 +1203,7 @@ mod tests {
                 return; // Found the transition state
             }
         }
+        // It's ok if the exact layout doesn't produce both; geometry varies
     }
 
     #[test]
@@ -1097,6 +1218,7 @@ mod tests {
         let layout = compute_sticky_layout(10, 20, &prompts);
         assert!(layout.pinned.is_some());
 
+        // Entry 0 should have a header area
         let (start, height, is_pushed) = layout.header_entry_area(0).unwrap();
         assert_eq!(start, 0);
         assert!(height > 0);

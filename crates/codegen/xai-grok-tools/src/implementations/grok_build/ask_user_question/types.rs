@@ -1,4 +1,14 @@
 //! Shared protocol and channel types for the AskUserQuestion blocking flow.
+//!
+//! These types define the request/response contract between three crates:
+//!
+//! - **`xai-grok-tools`** — tool blocks on a oneshot, formats the result.
+//! - **`xai-grok-shell`** — coordinator receives requests over mpsc, calls the
+//!   client via ACP `ext_method`, sends results back over the oneshot.
+//! - **`xai-grok-pager`** — handles the `ExtMethod`, renders UI, returns a
+//!   typed response.
+//!
+//! All three crates import these types from `xai-grok-tools`.
 
 use std::collections::HashMap;
 
@@ -11,8 +21,9 @@ use crate::register_resource;
 
 // ── ACP wire-format types ────────────────────────────────────────────────
 
-/// Annotation on a single question's answer. Carried inside the `accepted`
-/// response alongside the selected label.
+/// Annotation on a single question's answer. Carried inside the `accepted` response alongside the
+/// selected label. `preview`: verbatim `Option.preview` of the selected option (single-select
+/// only). `notes`: free-text the user typed in the freeform input.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QuestionAnnotation {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21,7 +32,8 @@ pub struct QuestionAnnotation {
     pub notes: Option<String>,
 }
 
-/// Mode context for the question UI.
+/// Mode context for the question UI. Sent as part of the ACP `ext_method` request so the pager
+/// knows whether to show plan-mode-only actions (Chat about this / Skip interview).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AskUserQuestionMode {
@@ -78,6 +90,8 @@ pub enum AskUserQuestionExtResponse {
     /// User accepted and submitted answers (Path A).
     Accepted {
         /// Answered questions in original order; unanswered omitted.
+        /// One element per selected option; freeform-only is `["Other"]`
+        /// with typed text in `annotations[q].notes`.
         #[serde(deserialize_with = "deserialize_string_or_vec_answers")]
         answers: IndexMap<String, Vec<String>>,
         /// Per-question annotations (preview, notes). Absent when empty.
@@ -87,6 +101,7 @@ pub enum AskUserQuestionExtResponse {
     /// User chose "Chat about this" (Path B, plan mode only).
     ChatAboutThis {
         /// Partial answers: answered questions only, label only (no notes).
+        /// Freeform-only => `"Other"` (notes dropped in plan-mode paths).
         #[serde(default)]
         partial_answers: HashMap<String, String>,
     },
@@ -102,11 +117,13 @@ pub enum AskUserQuestionExtResponse {
 
 // ── In-process types (coordinator <-> tool) ──────────────────────────────
 
-/// In-process result: coordinator -> tool.
+/// In-process result: coordinator -> tool. `Ok(UserQuestionResponse)` for all 4 user paths
+/// (accepted, chat, skip, cancel). `Err(UserQuestionError)` for transport failures or malformed
+/// responses.
 pub type UserQuestionResult = Result<UserQuestionResponse, UserQuestionError>;
 
-/// Every variant here produces `Ok(UserAnswered { message })` at the tool level with
-/// `ToolCall` status `Completed`.
+/// Successful user response (all 4 user paths). Every variant here produces `Ok(UserAnswered {
+/// message })` at the tool level with `ToolCall` status `Completed`.
 #[derive(Debug, Clone)]
 pub enum UserQuestionResponse {
     /// User accepted and submitted answers (Path A).
@@ -131,17 +148,20 @@ pub enum UserQuestionResponse {
     Cancelled,
 }
 
-/// Infrastructure failure (NOT a user action).
+/// Infrastructure failure (NOT a user action). These produce `Err(ToolError::ExecutionError { ..
+/// })` at the tool level with `ToolCall` status `Failed`.
 #[derive(Debug, Clone)]
 pub enum UserQuestionError {
     /// ACP `ext_method` call failed (client disconnect, timeout, etc.).
     TransportError(String),
-    /// Client returned JSON that could not be deserialized into `AskUserQuestionExtResponse`.
+    /// Client returned JSON that could not be deserialized into
+    /// `AskUserQuestionExtResponse`.
     MalformedResponse(String),
 }
 
-/// In-process request: tool -> coordinator (carries oneshot for reply). Sent
-/// over the `mpsc` channel.
+/// In-process request: tool -> coordinator (carries oneshot for reply). Sent over the `mpsc`
+/// channel. The coordinator receives this, performs the ACP `ext_method` round-trip, and sends the
+/// result back on `result_tx`.
 #[derive(Educe)]
 #[educe(Debug)]
 pub struct UserQuestionRequest {
@@ -153,8 +173,9 @@ pub struct UserQuestionRequest {
 
 // ── Resource type ────────────────────────────────────────────────────────
 
-/// Resource: `mpsc` sender injected into `SharedResources`. Same injection
-/// pattern as `SubagentEventSender`.
+/// Resource: `mpsc` sender injected into `SharedResources`. Same injection pattern as
+/// `SubagentEventSender`. Cloned into each session so that any `AskUserQuestionTool` invocation can
+/// emit a `UserQuestionRequest` to the session's coordinator.
 #[derive(Clone, Educe)]
 #[educe(Debug)]
 pub struct UserQuestionSender(

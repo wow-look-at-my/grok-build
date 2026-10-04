@@ -1,4 +1,12 @@
 //! Curated scroll-matrix tier: one test per curated cell, exact-filterable by cell id.
+//! Example: `cargo test --test scroll_matrix_curated c5_tmux_g9a -- --exact`.
+//!
+//! Each test drives `scroll_matrix::run_cell` against the real pager binary (PAGER_BINARY / a local debug build).
+//! That is the same contract as `scroll_correctness_ptyctl.rs`, and like it these tests are NOT `#[ignore]`d.
+//! Cells are host-paced PTY sessions, so a process-wide lock serializes them.
+//! The default in-process test parallelism would stretch gesture gaps and stack eight pagers onto one machine.
+//!
+//! Artifacts (recorder captures and per-cell report.json rows) land under `$TMPDIR/scroll-matrix-curated/` and are kept for post-mortems.
 
 use std::path::PathBuf;
 
@@ -10,8 +18,9 @@ use xai_grok_pager_pty_harness::scroll_matrix::{
 /// Serializes cells across the in-process test threads (tokio mutex: held across awaits; no poisoning, so one failed cell doesn't cascade).
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Per-cell captures land here: Bazel's `TEST_TMPDIR` (unique per test
-/// action), or the system temp dir for plain `cargo test`.
+/// Per-cell captures land here: Bazel's `TEST_TMPDIR` (unique per test action), or the system temp dir for plain `cargo test`.
+/// This target is `tags = ["local"]`, so concurrent executions on a CI host would otherwise share `/tmp/scroll-matrix-curated/<cell_id>.jsonl`.
+/// A second run's stale-capture `remove_file` (and its pager's `GROK_SCROLL_LOG` writer) then corrupts the first run's in-flight capture.
 fn artifacts_dir() -> PathBuf {
     std::env::var_os("TEST_TMPDIR")
         .map(PathBuf::from)
@@ -81,8 +90,9 @@ async fn c1_auto_g8_midstream() {
     assert_cell_passes("c1_auto_g8_midstream").await;
 }
 
-/// The formerly-declared bug: the finalize-decel fix landed, so the G4 jerk
-/// cell passes outright.
+/// The formerly-declared bug: the finalize-decel fix landed, so the G4 jerk cell passes outright.
+/// I-SMOOTH-COAST (post-input motion at most one tapered cap) and I-NO-DROP (finalize discards nothing) moved from the xfail set to pass rows.
+/// The cell id keeps its historical name for artifact continuity.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn c1_auto_g4_jerk_xfail() {
     assert_cell_passes("c1_auto_g4_jerk_xfail").await;

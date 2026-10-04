@@ -21,12 +21,13 @@ impl SlashCommand for RenameCommand {
     }
 
     fn suggest_args(&self, ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
-        // The ghost row is offered only while the args are empty A row that
-        // survives typed input (including `--auto`) steals Enter.
+        // The ghost row is offered only while the args are empty
+        // A row that survives typed input (including `--auto`) steals Enter: `accept_slash_completion` replaces the args range
         if !args_query.trim().is_empty() {
             return None;
         }
-        // The prefill is `rename_source_title`, not `entry_title` (see that helper) `current_title` is already sanitized.
+        // The prefill is `rename_source_title`, not `entry_title` (see that helper)
+        // `current_title` is already sanitized at sync time
         let title = ctx.current_title?.trim();
         if title.is_empty() || title == "--auto" {
             return None;
@@ -45,7 +46,9 @@ impl SlashCommand for RenameCommand {
             return CommandResult::Error("No active session".to_string());
         }
 
-        // Strip so `/rename --auto<BEL>` is still the reserved verb.
+        // Strip so `/rename --auto<BEL>` is still the reserved verb, not a literal title
+        // Also check the raw trim so `--auto\tmore` keeps the trailing-text error (tab is a control and would otherwise concatenate)
+        // `--automatic` stays a normal rename
         let title = sanitize_rename_title(args);
         if is_auto_verb(&title) || is_auto_verb(args) {
             return CommandResult::Action(Action::ResetSessionTitleToAuto);
@@ -159,7 +162,8 @@ mod tests {
             Some("Fix Login Bug")
         );
 
-        // A title change alone does not rebuild the snapshot (render used to stop at set_current_title) A refresh.
+        // A title change alone does not rebuild the snapshot (render used to stop at set_current_title)
+        // A refresh after the update is what offers the new ghost while `/rename ` is already open
         ctrl.set_current_title(Some("Late Title".into()));
         assert_eq!(
             state

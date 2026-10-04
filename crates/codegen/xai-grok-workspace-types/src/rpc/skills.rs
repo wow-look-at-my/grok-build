@@ -1,4 +1,9 @@
 //! Discovery methods (`workspace.discover_skills`).
+//!
+//! SYNC: [`SkillInfo`] / [`SkillScope`] mirror the serde shape the server serializes in `xai-grok-tools/src/implementations/skills/types.rs`.
+//! The fixture tests below pin the contract.
+//!
+//! Not to be confused with the event/chunk `SkillInfo` in `crate::types::skills` (`source`-keyed), which is **not** this RPC's wire shape.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,6 +20,7 @@ impl WorkspaceRpc for DiscoverSkillsReq {
 }
 
 /// `workspace.discover_plugins` returns the plugins discovered at the workspace root.
+/// Each element is the raw serialized plugin object.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DiscoverPluginsReq {}
 
@@ -24,8 +30,8 @@ impl WorkspaceRpc for DiscoverPluginsReq {
     type Response = Vec<Value>;
 }
 
-/// Scope/priority of a skill based on where it was discovered. Lower values
-/// have higher priority.
+/// Scope/priority of a skill based on where it was discovered. Lower values have higher priority.
+/// Manual serde so [`Unknown`](Self::Unknown) round-trips a newer server's original string.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SkillScope {
     /// cwd/.grok/skills

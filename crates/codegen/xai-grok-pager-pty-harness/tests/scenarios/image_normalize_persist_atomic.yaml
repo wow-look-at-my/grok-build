@@ -45,6 +45,7 @@ steps:
   - action: assert_chat_completion
   - action: assert_request_image_count
     min: 3
+  # Fix 4: persist_to_session is atomic — no leftover *.tmp files.
   - action: assert_no_temp_artifacts
   - action: screenshot
     name: persist-atomic

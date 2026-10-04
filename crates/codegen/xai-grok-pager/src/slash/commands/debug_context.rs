@@ -1,13 +1,25 @@
 //! The execution-context snapshot `/debug` hands the model.
+//!
+//! `/debug` is a skill whose subject is grok itself, so the injected prompt has
+//! to answer "what am I, where do I live, and what did I write down" without a
+//! round trip. Everything here is either a pure resolver or a thin `fs`/`env`
+//! read, kept out of [`super::debug`] so the text is unit-testable with explicit
+//! inputs.
 
 use std::path::{Path, PathBuf};
 
 /// Where the running process stands relative to the installed binary.
+///
+/// `current_exe()` resolves through the `$GROK_HOME/bin/grok` symlink to the
+/// versioned target it pointed at *at exec time*, so an update that re-points
+/// the symlink leaves the two disagreeing — the one observable difference
+/// between "the code you are reading" and "the code that is running".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryFreshness {
     /// The process is running the installed binary.
     Current,
-    /// The installed binary is a different file — an update swapped the symlink after exec.
+    /// The installed binary is a different file — an update swapped the symlink
+    /// after exec, or this process came from another install.
     Stale { installed: PathBuf },
     /// No binary at `$GROK_HOME/bin/grok` — a dev build or a vendored install.
     Unmanaged,
@@ -135,7 +147,8 @@ pub fn is_secret_name(name: &str) -> bool {
     MARKERS.iter().any(|m| upper.contains(m))
 }
 
-/// Longest value printed verbatim.
+/// Longest value printed verbatim; anything longer is truncated with a marker
+/// so one huge variable cannot swamp the block.
 const MAX_ENV_VALUE: usize = 200;
 
 /// Select and redact the grok-relevant variables from an environment.
@@ -558,7 +571,7 @@ mod tests {
             "/h/.grok/debug/sid.txt", // the log to read
             "/h/.grok/config.toml",   // the config to read
             "262144",                 // the number the user is asking about
-            "grok-4.5",
+            "grok-4.5",               // the model it belongs to
             "GROK_DEBUG_LOG=1",       // how this process was launched
             "0.2.7",                  // what is running
         ] {

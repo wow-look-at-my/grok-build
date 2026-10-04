@@ -1920,7 +1920,8 @@ mod tests {
         bytes.extend(b" last");
         assert_eq!(truncate_output(&bytes), "first\u{fffd}\u{fffd} last");
 
-        // A multi-byte character cut by the limit loses its tail and keeps its head.
+        // A multi-byte character cut by the limit loses its tail and keeps its
+        // head, rather than the whole buffer becoming undecodable.
         let mut large = vec![b'a'; MAX_OUTPUT_BYTES - 1];
         large.extend("\u{e9}nd".as_bytes());
         let cut = truncate_output(&large);
@@ -1937,7 +1938,8 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn a_gate_hooks_stderr_survives_undecodable_bytes() {
-        // A literal byte string, so no shell quoting is needed for the raw bytes; the whole argument is one token.
+        // A literal byte string, so no shell quoting is needed for the raw bytes;
+        // the whole argument is one token, so this takes the direct-exec path.
         let spec = make_shell_spec("printf '\\377\\376nope\\377done' >&2; exit 2");
         let envelope = make_envelope();
         let ctx = make_ctx();

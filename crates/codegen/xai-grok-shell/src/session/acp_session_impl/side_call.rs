@@ -1,9 +1,16 @@
-//! Shared cache-aligned side-call plumbing for recap-style auxiliary model calls (recap, turn summary).
+//! Shared cache-aligned side-call plumbing for recap-style auxiliary model
+//! calls (recap, turn summary). `/btw` and `/todo` reuse the request skeleton
+//! and the transient-failure retry policy.
 
 use super::*;
 
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
 
+/// Retry policy for a one-shot auxiliary model call (`/btw`, `/todo`): 3
+/// attempts total (1 try + 2 retries), 500ms → 1s jittered backoff.
+/// Deliberately short — nothing like the sampler actor's budget — so a
+/// fleet-wide capacity event can't multiply side-call traffic into a retry
+/// storm.
 pub(crate) fn aux_retry_policy() -> backon::ExponentialBuilder {
     backon::ExponentialBuilder::default()
         .with_max_times(2)
@@ -13,7 +20,9 @@ pub(crate) fn aux_retry_policy() -> backon::ExponentialBuilder {
 }
 
 /// Retry transient failures per the canonical [`SamplingError::is_retryable`]
-/// rule (5xx incl.
+/// rule (5xx incl. Cloudflare 52x, stream/connect glitches), minus the shared
+/// vetoes (`x-should-retry: false`, context length) and rate limits — a 429
+/// needs `Retry-After`-scale waits, not this sub-second budget.
 pub(crate) fn should_retry_aux_call(e: &xai_grok_sampling_types::SamplingError) -> bool {
     e.is_retryable() && !e.is_rate_limited() && !e.is_retry_vetoed()
 }
@@ -128,7 +137,7 @@ pub(crate) fn log_prompt_cache_usage(
     );
 }
 
-/// What differs between both calls that reuse the parent's prompt cache.
+/// What differs between the two calls that reuse the parent's prompt cache.
 /// The shared parts live in [`SessionActor::parent_cached_request`].
 pub(crate) struct AuxCall {
     pub(crate) items: Vec<ConversationItem>,
@@ -165,10 +174,12 @@ pub(super) fn should_strip_side_call_reasoning(
 
 impl SessionActor {
     /// Request skeleton for an auxiliary call that replays the parent conversation under the parent's `prompt_cache_key`.
+    /// Temperature stays unset: cli-chat-proxy may inject a `thinking` config, and the Messages API then requires temperature == 1.
     pub(crate) fn parent_cached_request(&self, call: AuxCall) -> ConversationRequest {
         let session_id = self.session_info.id.to_string();
-        // Only the Responses mapping sends the cache key On the other
-        // backends the conv id is what ties a call to its conversation.
+        // Only the Responses mapping sends the cache key
+        // On the other backends the conv id is what ties a call to its conversation, so it has to stay the parent session id
+        // The `btw-`/`recap-` label still shows up in `x_grok_req_id`
         let conv_id = if call.backend.forwards_prompt_cache_key() {
             call.conv_id
         } else {
@@ -188,7 +199,8 @@ impl SessionActor {
             x_grok_session_id: Some(session_id.clone()),
             x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
             prompt_cache_key: Some(session_id),
-            // Side calls persist text and never execute tools (the attached tools only align the prompt-cache prefix) A Length sample must fail.
+            // Side calls persist text and never execute tools (the attached tools only align the prompt-cache prefix)
+            // A Length sample must fail rather than salvage
             length_policy: xai_grok_sampling_types::LengthPolicy::Fail,
             ..Default::default()
         }
@@ -266,11 +278,15 @@ impl SessionActor {
         })
     }
 
-    /// Invalidate in-flight recap-style side-calls when a real user prompt is
-    /// accepted (at queue time or turn start).
+    /// Invalidate in-flight recap-style side-calls when a real user prompt is accepted (at queue time or turn start).
+    /// Bumps the recap epoch so a finishing recap cannot commit, and aborts an in-flight turn summary.
+    /// Idempotent under the queue-accept and turn-start double bump.
     pub(crate) fn invalidate_side_calls_for_new_prompt(&self) {
         self.recap_epoch.set(self.recap_epoch.get().wrapping_add(1));
         self.abort_turn_summary();
+        // The title refresh is deliberately NOT aborted here.
+        // It describes the whole conversation, so completing against the pre-prompt snapshot is still valid.
+        // Aborting on every prompt would leave the checkpoint unconsumed and re-spawn a call each turn.
     }
 }
 
@@ -336,9 +352,10 @@ mod aux_retry_tests {
         }
     }
 
-    /// Serve HTTP/1.1 keep-alive. Any other connection gets a one-chunk
-    /// completion. Returns the base URL and the number of requests the first
-    /// connection took.
+    /// Serve HTTP/1.1 keep-alive. Every request on the FIRST connection gets a
+    /// 503, like a pooled connection that has gone bad. Any other connection
+    /// gets a one-chunk completion. Returns the base URL and the number of
+    /// requests the first connection took.
     async fn spawn_bad_first_connection_server()
     -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
         use std::sync::Arc;
@@ -447,6 +464,8 @@ mod aux_retry_tests {
 
     #[test]
     fn aux_calls_retry_transient_failures_only() {
+        // Transient: overload (stream + proxy-wrapped 500 + 529), generic
+        // 5xx, and Cloudflare edge 52x (SEV-576: /btw died on a 522).
         assert!(should_retry_aux_call(&SamplingError::StreamError {
             error_type: "overloaded_error".into(),
             message: "Overloaded".into(),
@@ -466,6 +485,7 @@ mod aux_retry_tests {
 
         // Server veto (`x-should-retry: false`) wins over any retryable status.
         assert!(!should_retry_aux_call(&api(522, "timed out", Some(false))));
+        // Deterministic context-length failures never retry, even on 529.
         assert!(!should_retry_aux_call(&api(
             529,
             "invalid_request_error: prompt is too long: 300000 tokens > 200000 maximum",
@@ -481,7 +501,7 @@ mod aux_retry_tests {
         }
     }
 
-    /// The wired policy: attempts total, backoff within the configured
+    /// The wired policy: 3 attempts total, backoff within the configured
     /// bounds (500ms + 1s base, jitter adds up to the current delay), and a
     /// fresh request id stamped per attempt.
     #[tokio::test(start_paused = true)]
@@ -504,6 +524,7 @@ mod aux_retry_tests {
 
         assert!(result.is_err());
         assert_eq!(calls.get(), 3, "1 try + 2 retries");
+        // Base delays 500ms + 1s; jitter adds (0, delay) per sleep.
         let elapsed = start.elapsed();
         assert!(
             elapsed >= std::time::Duration::from_millis(1_500),

@@ -1,4 +1,16 @@
-//! `image_edit` tool — edits or transforms images via the xAI Imagine `/images/edits` endpoint using one.
+//! `image_edit` tool — edits or transforms images via the xAI Imagine
+//! `/images/edits` endpoint using one or more reference images.
+//!
+//! Use cases include likeness preservation, style transfer, subject lock,
+//! remixing, and general image-to-image editing. The model chooses this
+//! tool (instead of `image_gen`) when the user provides reference photos.
+//!
+//! Reference images are specified as filesystem paths or
+//! `data:image/...;base64,...` URLs. The tool reads the bytes, compresses
+//! them to fit API limits, and POSTs to the edit endpoint.
+//!
+//! Shares the same [`ImageGenClient`] and session credentials as
+//! `image_gen` — no additional configuration is needed.
 
 use std::io::Cursor;
 
@@ -16,6 +28,7 @@ use crate::util::image_compress::{FilterType, ReEncodeParams, re_encode_under_li
 pub(crate) const XAI_IMAGINE_EDIT_MODEL: &str = "grok-imagine-image-quality";
 
 /// Size/dimension limits for reference images sent to the Imagine API.
+/// Tighter than the vision path; the backend returns 400 when exceeded.
 const MAX_REF_RAW_BYTES: usize = 400 * 1024;
 const MAX_REF_DIMENSION: u32 = 768;
 const MIN_REF_DIMENSION: u32 = 256;
@@ -99,7 +112,8 @@ fn compress_reference(
 /// into a compressed data URL for the Imagine API.
 async fn resolve_to_data_url(value: &str) -> Result<String, xai_tool_runtime::ToolError> {
     let value = value.trim();
-    // Accept `file://` URIs (e.g. an attachment's durable URI) by reading the underlying path.
+    // Accept `file://` URIs (e.g. an attachment's durable URI) by reading
+    // the underlying path. Data URLs and bare paths are untouched.
     let value = value.strip_prefix("file://").unwrap_or(value);
 
     let raw_bytes = if value.starts_with("data:image/") {
@@ -162,7 +176,10 @@ fn parse_attachment_token(value: &str) -> Option<usize> {
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(trimmed)
         .trim();
-    // Strip an optional leading `image` label (case-insensitive).
+    // Strip an optional leading `image` label (case-insensitive). The
+    // 5-byte prefix is ASCII, so slicing at byte 5 stays on a boundary —
+    // `get(..5)` above is what proves it, since it returns `None` for an
+    // offset that splits a character.
     let rest = match inner.get(..5).map(str::to_ascii_lowercase).as_deref() {
         Some("image") => {
             let rest = inner.get(5..)?;
@@ -238,7 +255,9 @@ fn default_aspect_ratio() -> String {
     "auto".to_owned()
 }
 
-// --------------------------------------------------------------------------- Tool implementation.
+// ---------------------------------------------------------------------------
+// Tool implementation
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
 pub struct ImageEditTool;
@@ -312,7 +331,9 @@ impl xai_tool_runtime::Tool for ImageEditTool {
             res.require::<ImageGenClient>()?.clone()
         };
 
-        // Free / X Basic users are zero-limited on Imagine server-side.
+        // Free / X Basic users are zero-limited on Imagine server-side; return
+        // the upsell prose instead of a doomed request (shares `image_gen`'s
+        // message and short-circuits before resolving any attachments).
         if client.is_tier_restricted() {
             return Ok(ToolOutput::Text(
                 super::image_gen::TIER_RESTRICTED_UPSELL.into(),
@@ -323,7 +344,7 @@ impl xai_tool_runtime::Tool for ImageEditTool {
         let sent_bearer = client.current_bearer().await?;
 
         // Snapshot the per-turn attachment registry so `[Image #N]` tokens
-        // resolve to the real attachment.
+        // resolve to the real attachment (see `resolve_attachment_reference`).
         let attached_images = {
             let res = resources.lock().await;
             res.get::<crate::types::resources::AttachedImages>()
@@ -349,7 +370,9 @@ impl xai_tool_runtime::Tool for ImageEditTool {
             "response_format": "b64_json",
         });
 
-        // API: single ref → "image" object; multiple → "images" array.
+        // API: single ref → "image" object; multiple → "images" array. For single-image edits the
+        // API auto-detects aspect ratio from the input image and ignores the `aspect_ratio` field.
+        // Only send it for multi-image edits where the API needs an explicit ratio.
         let mut imgs: Vec<serde_json::Value> = data_urls
             .iter()
             .map(|u| serde_json::json!({ "url": u }))
@@ -661,8 +684,9 @@ mod tests {
 
     #[test]
     fn resolve_reference_maps_by_number_not_position() {
-        // After a mid-compose chip removal the surviving numbers are
-        // non-contiguous (`#1`, `#3`).
+        // After a mid-compose chip removal the surviving numbers are non-contiguous (`#1`, `#3`).
+        // Resolution must key on the number, not the list position, or `[Image #3]` would resolve
+        // to the wrong file (or wrongly error).
         let attached = crate::types::resources::AttachedImages(vec![
             (1, "/tmp/first.png".to_owned()),
             (3, "/tmp/third.png".to_owned()),
@@ -671,7 +695,7 @@ mod tests {
             resolve_attachment_reference("[Image #3]", Some(&attached)).unwrap(),
             "/tmp/third.png"
         );
-        // `[Image #2]`.
+        // `[Image #2]` was removed → no match.
         assert!(resolve_attachment_reference("[Image #2]", Some(&attached)).is_err());
     }
 

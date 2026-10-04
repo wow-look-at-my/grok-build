@@ -1,4 +1,11 @@
 //! Test fixture for the orphan-reap regression test (`tests/orphan_reap.rs`).
+//!
+//! Spawns one long-lived child under a [`PtyController`] — exactly the way
+//! every PTY e2e test spawns the pager — prints the child PID, then blocks
+//! forever. The regression test kills *this process* ungracefully
+//! (SIGKILL/SIGTERM, so no Drop runs) and asserts the PTY child does not
+//! survive it. `main` (a thread that lives as long as the process) does the
+//! spawning, satisfying the pdeathsig spawning-thread requirement.
 
 use std::io::Write as _;
 use std::path::Path;

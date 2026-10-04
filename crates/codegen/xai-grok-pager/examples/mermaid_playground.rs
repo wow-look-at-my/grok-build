@@ -1,4 +1,8 @@
 //! Builds a [`ScrollbackState`] containing an agent message whose markdown holds a mermaid code block.
+//! Renders it through the production [`ScrollbackPane`] so the diagram can be eyeballed exactly as the TUI draws it (including word-wrapping).
+//! Pick a sample with `MERMAID_SAMPLE=<n>`.
+//!
+//! Controls: arrows / PageUp / PageDown scroll, `q` / `Esc` / `Ctrl-Q` quit.
 
 use std::io::{self, stdout};
 use std::time::Duration;

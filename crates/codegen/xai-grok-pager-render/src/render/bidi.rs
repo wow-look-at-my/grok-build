@@ -1,3 +1,12 @@
+//! Optional Unicode Bidirectional Algorithm (UAX #9) for LTR terminal painting.
+//!
+//! **Off by default.** Many terminals already run implicit bidi; reordering in the app double-flips text on those hosts.
+//! Enable only when the terminal does not (`[scrollback.display] rtl_bidi = true`).
+//!
+//! When enabled, [`set_line_safe_bidi`](super::SafeBuf::set_line_safe_bidi) applies the reorder to scrollback and list content.
+//! It strips bidi override/isolate controls, reorders full display rows, reverses RTL runs by grapheme cluster, and mirrors paired punctuation.
+//! Table rows stay logical so columns align.
+//! Base direction is resolved per painted row: a soft-wrapped continuation that starts with Latin may differ from the paragraph's first row.
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -50,7 +59,7 @@ fn strip_bidi_controls(text: &str) -> Cow<'_, str> {
     Cow::Owned(text.chars().filter(|c| !is_bidi_control(*c)).collect())
 }
 
-/// Paragraph base level for a logical string (auto per UAX #P2/P3).
+/// Paragraph base level for a logical string (auto per UAX #9 P2/P3).
 pub(crate) fn paragraph_level(text: &str) -> Level {
     let cleaned = strip_bidi_controls(text);
     let bidi = BidiInfo::new(cleaned.as_ref(), None);
@@ -194,7 +203,8 @@ pub fn logical_slice_for_visual_cols(text: &str, vis_start: usize, vis_end: usiz
     if !is_enabled() {
         return slice_display_cols(text, vis_start, vis_end);
     }
-    // Classify on the stripped string so table/needs_bidi decisions match paint (which strips first).
+    // Classify on the stripped string so table/needs_bidi decisions match paint (which strips first)
+    // A leading bidi control must not flip the decision
     let cleaned = strip_bidi_controls(text);
     let text = cleaned
         .as_ref()
@@ -288,6 +298,7 @@ pub fn visual_col_to_logical_col(text: &str, visual_col: usize) -> usize {
     let Some(body) = text.get(prefix..) else {
         return visual_col.min(prefix_cols);
     };
+    // Chrome is painted logically (not reordered), so columns there are 1:1.
     if visual_col < prefix_cols || !needs_bidi(body) {
         return visual_col.min(prefix_cols + str_cells(body));
     }
@@ -404,7 +415,8 @@ fn is_table_row(text: &str) -> bool {
 }
 
 fn chrome_prefix_len(text: &str) -> usize {
-    // Peel the blockquote bar, then a single list marker on the remainder (`│ • …`, `│ 1. …`), so both stay left-anchored. If only the bar were peeled.
+    // Peel the blockquote bar, then a single list marker on the remainder (`│ • …`, `│ 1. …`), so both stay left-anchored.
+    // If only the bar were peeled, the marker would join the reordered body and move under RTL, and the region map would disagree with paint
     let bq = blockquote_prefix_len(text);
     match text.get(bq..) {
         Some(rest) => bq + marker_prefix_len(rest),
@@ -533,7 +545,7 @@ fn append_graphemes_styled(
         } else {
             g
         };
-        // `rel` is the byte offset within the slice (grapheme_indices).
+        // `rel` is the original byte offset within the slice (grapheme_indices).
         append_str_styled(text, abs_byte_start + rel, span_bounds, out);
     }
 }
@@ -649,8 +661,8 @@ fn slice_display_cols(text: &str, start: usize, end: usize) -> String {
     out
 }
 
-/// Painted cell width: sum of per-grapheme widths, matching what the renderer
-/// draws and the rest of the column math.
+/// Painted cell width: sum of per-grapheme widths, matching what the renderer draws and the rest of the column math.
+/// A width-collapsed cluster such as a ZWJ emoji occupies its cluster width, not the sum of its code points'.
 fn str_cells(s: &str) -> usize {
     s.graphemes(true).map(UnicodeWidthStr::width).sum()
 }
@@ -825,10 +837,12 @@ mod tests {
     #[test]
     fn logical_cols_map_to_visual_cells() {
         with_enabled(|| {
+            // Logical cols 3..7 are the Arabic run
             let mixed = format!("Hi {AR}");
             assert_eq!(logical_cols_to_visual(&mixed, 3, 7), vec![(3, 7)]);
+            // Full pure RTL: logical 0..4 maps to the same visual span (reversed glyphs).
             assert_eq!(logical_cols_to_visual(AR, 0, 4), vec![(0, 4)]);
-            // The logical letter at the start of AR lands in the rightmost visual cell
+            // The single logical letter at the start of AR lands in the rightmost visual cell
             assert_eq!(logical_cols_to_visual(AR, 0, 1), vec![(3, 4)]);
         });
     }
@@ -878,7 +892,8 @@ mod tests {
     #[test]
     fn keeps_zwnj() {
         with_enabled(|| {
-            // ZWNJ must survive the strip and travel with its cluster Each joiner clusters with its preceding letter, so the reorder reverses beh+ZWNJ.
+            // ZWNJ must survive the strip and travel with its cluster
+            // Each joiner clusters with its preceding letter, so the reorder reverses beh+ZWNJ, jeem+ZWNJ, dal into dal, jeem+ZWNJ, beh+ZWNJ
             let with_zwnj = "ب\u{200C}ج\u{200C}د";
             assert_eq!(visual_text(with_zwnj).as_ref(), "دج\u{200C}ب\u{200C}");
         });
@@ -903,6 +918,8 @@ mod tests {
     #[test]
     fn nested_quote_and_list_marker_stay_left() {
         with_enabled(|| {
+            // The blockquote bar and the list marker are both chrome: only the body reorders
+            // Paint keeps `│ • ` / `│ 1. ` left-anchored, and the column maps (which drop the quote prefix) agree with the body.
             assert_eq!(
                 visual_text(&format!("│ • {FA}")).as_ref(),
                 format!("│ • {FA_V}")
@@ -923,7 +940,8 @@ mod tests {
     #[test]
     fn control_prefixed_table_row_maps_identity() {
         with_enabled(|| {
-            // A leading bidi control must not flip the table classification Paint strips first and leaves the table logical.
+            // A leading bidi control must not flip the table classification
+            // Paint strips first and leaves the table logical, so the column maps must classify on the stripped string and stay identity
             let row = "\u{200F}| x | بت |";
             assert_eq!(visual_col_to_logical_col(row, 4), 4);
             assert_eq!(logical_cols_to_visual(row, 2, 6), vec![(2, 6)]);

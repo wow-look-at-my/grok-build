@@ -385,8 +385,12 @@ mod inner {
         CALL_ID_COLLISIONS_TOTAL.inc();
     }
 
-    /// Record a harness connection attempt. `sampler` identifies the caller
-    /// (`"chat"` or `"shell"`).
+    /// Record a harness connection attempt.
+    ///
+    /// `sampler` identifies the caller (`"chat"` or `"shell"`).
+    /// `status` is `"ok"`, `"error"`, or `"fallback"` (fallback is
+    /// emitted by the caller in `AgentBuilder::build_harness()`, not
+    /// by the SDK).
     pub fn harness_connect(status: &str, sampler: &str) {
         HARNESS_CONNECT_TOTAL
             .with_label_values(&[status, sampler])
@@ -702,5 +706,8 @@ pub(crate) use inner::tool_call_inflight_inc;
 pub(crate) use inner::tool_call_rejected_overloaded;
 pub(crate) use inner::writer_sink_send_error;
 
-/// Record a harness connection attempt.
+/// Record a harness connection attempt. Public so callers outside
+/// the SDK (e.g. `AgentBuilder::build_harness()` in the agentic sampler)
+/// can emit `status="fallback"` when the server connection fails and the
+/// builder falls back to a local-only harness.
 pub use inner::harness_connect;

@@ -1,4 +1,4 @@
-//! The server-signed is-managed claim: verifiers, domain separation, and the impose/defer signal.
+//! The server-signed is-managed claim: verifiers, domain separation, and the impose/defer signal that closes the sidecar-removal downgrade.
 
 use super::super::*;
 use super::{keyset, payload, sign, test_keypair};
@@ -50,8 +50,8 @@ fn domain_separation_rejects_cross_type_substitution() {
         "an identity claim must be rejected by the policy verifier"
     );
 
-    // End-to-end: the authentic claim copied over the policy sidecar (policy
-    // files deleted) must read NoAuthenticSidecar.
+    // End-to-end: the authentic claim copied over the policy sidecar (policy files deleted) must read NoAuthenticSidecar, never Trusted
+    // Substituting the claim used to start such a fail_closed principal unmanaged
     std::fs::write(
         sidecar_path(home),
         serde_json::to_string(&claim_sidecar).unwrap(),

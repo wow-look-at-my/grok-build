@@ -1,4 +1,6 @@
-//! A stand in for the trace upload endpoint that holds every request until opened.
+//! A stand in for the trace upload endpoint that holds every request until opened, then forwards
+//! it to the upstream mock over a raw one shot HTTP/1.1 roundtrip, so "uploads still pending" is
+//! an ordering fact rather than a timing one.
 
 use std::sync::Arc;
 
@@ -52,7 +54,7 @@ async fn hold_then_forward(
 ) -> Response {
     let mut open_rx = state.open_rx.clone();
     while !*open_rx.borrow() {
-        // The proxy.
+        // The proxy was dropped with this request still held.
         if open_rx.changed().await.is_err() {
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
         }

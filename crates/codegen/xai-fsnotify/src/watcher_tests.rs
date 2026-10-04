@@ -160,6 +160,7 @@ mod integration {
         let _ = collect_events(&mut rx); // drain startup stragglers
 
         // Drop joins the watcher thread, which drops the debouncer and the event sender.
+        // Run it on a watchdog thread so a hung join fails fast instead of hanging CI.
         let dropper = std::thread::spawn(move || drop(handle));
         let drop_deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !dropper.is_finished() {
@@ -171,7 +172,8 @@ mod integration {
         }
         dropper.join().unwrap();
 
-        // The receiver must observe disconnection within a bounded time — this is what proves the watcher stopped.
+        // The receiver must observe disconnection within a bounded time —
+        // this is what proves the watcher actually stopped.
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         let disconnected = loop {
             match rx.try_recv() {
@@ -190,7 +192,8 @@ mod integration {
             "event channel must disconnect after the handle is dropped"
         );
 
-        // And a post-drop write must not surface (watcher is gone) — this would still arrive.
+        // And a post-drop write must not surface (watcher is gone) — this
+        // would still arrive if shutdown had not torn down the watch.
         fs::write(watch_path.join("after_drop.txt"), "test").unwrap();
         std::thread::sleep(Duration::from_millis(EVENT_WAIT_MS));
         let after = collect_events_smart(
@@ -319,7 +322,8 @@ mod integration {
         )
         .unwrap();
 
-        // root(1) + crates, crates/core(2) + .harness, .harness/worktrees(2) + worktrees(1) + .git, .git/refs.
+        // root(1) + crates, crates/core(2) + .harness, .harness/worktrees(2)
+        // + worktrees(1) + .git, .git/refs, .git/refs/heads(3).
         const EXPECTED_WATCHES: usize = 9;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while handle.watch_count() != EXPECTED_WATCHES && std::time::Instant::now() < deadline {
@@ -358,6 +362,9 @@ mod integration {
         )
         .unwrap();
 
+        // root(1) + web + web/src (2) + .git,.git/refs,.git/refs/heads (3).
+        // The 40 node_modules dirs and .git/objects contribute nothing.
+        // Depth≥2 dirs arm asynchronously after `ready`, so poll briefly.
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while handle.watch_count() != 6 && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -729,7 +736,8 @@ mod build_globsets_tests {
         assert!(ignore.is_some());
         let ignore_set = ignore.unwrap();
 
-        // Note: The pattern /root_only.txt matches paths ending with /root_only.txt This is slightly different from gitignore semantics.
+        // Note: The pattern /root_only.txt matches paths ending with /root_only.txt
+        // This is slightly different from gitignore semantics but works for our use case
         assert!(ignore_set.is_match("/root_only.txt"));
     }
 
@@ -790,13 +798,15 @@ mod config_tests {
     #[test]
     fn gitignore_cache_is_ignored_handles_sl_like_git() {
         let mut cache = GitignoreCache::default();
-        // Only `.sl/wlock` reaches the source.
+        // Only `.sl/wlock` reaches the source; everything else under `.sl`
+        // (notably `dirstate`, read on demand) stays ignored.
         assert!(!cache.is_ignored(Path::new("/ws/.sl/wlock"), true, true));
         assert!(cache.is_ignored(Path::new("/ws/.sl/dirstate"), true, true));
         assert!(cache.is_ignored(Path::new("/ws/.sl/store/lock"), true, true));
         // With watch_vcs off, even wlock is ignored (mirrors `.git`).
         assert!(cache.is_ignored(Path::new("/ws/.sl/wlock"), false, true));
-        // Kill-switch off: the `.sl` arm is skipped.
+        // Kill-switch off: the `.sl` arm is skipped, so `.sl/*` is no longer
+        // specially ignored here (it is dropped structurally in the source).
         assert!(!cache.is_ignored(Path::new("/ws/.sl/dirstate"), true, false));
     }
 
@@ -899,7 +909,8 @@ mod select_top_level_watch_dirs_tests {
 
     #[test]
     fn excludes_sl_directory() {
-        // `.sl` is watched separately (non-recursively).
+        // `.sl` is watched separately (non-recursively), never as a
+        // recursive workspace child — same treatment as `.git`.
         let temp = TempDir::new().unwrap();
         let root = temp.path();
         fs::create_dir_all(root.join(".sl/store")).unwrap();
@@ -1020,7 +1031,8 @@ mod select_top_level_watch_dirs_tests {
 
     #[test]
     fn watches_children_even_when_root_is_under_a_gitignored_path() {
-        // The user explicitly chose a cwd that an ancestor .gitignore marks ignored.
+        // The user explicitly chose a cwd that an ancestor .gitignore marks
+        // ignored; its children must still be watched.
         let temp = TempDir::new().unwrap();
         let repo = temp.path();
         fs::create_dir_all(repo.join(".git")).unwrap();
@@ -1047,7 +1059,8 @@ mod select_top_level_watch_dirs_tests {
         let temp = TempDir::new().unwrap();
         let root = temp.path();
         fs::create_dir_all(root.join("real")).unwrap();
-        // A symlinked dir would, if recursively watched, leave the workspace; it must be skipped.
+        // A symlinked dir would, if recursively watched, leave the
+        // workspace; it must be skipped.
         std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
 
         let dirs = select_top_level_watch_dirs(root, &None, &None);
@@ -1061,7 +1074,9 @@ mod select_top_level_watch_dirs_tests {
 
     #[test]
     fn excludes_dir_ignored_only_by_git_info_exclude() {
-        // `.git/info/exclude` is honored at the watch level (WalkBuilder) but NOT by the per-event GitignoreCache —.
+        // `.git/info/exclude` is honored at the watch level (WalkBuilder)
+        // but NOT by the per-event GitignoreCache — so this exercises the
+        // stronger watch-level coverage specifically.
         let temp = TempDir::new().unwrap();
         let root = temp.path();
         fs::create_dir_all(root.join(".git/info")).unwrap();
@@ -1080,7 +1095,8 @@ mod select_top_level_watch_dirs_tests {
 
     #[test]
     fn gitignore_wins_over_custom_include_at_watch_level() {
-        // WalkBuilder never yields a gitignored child.
+        // WalkBuilder never yields a gitignored child, so a negation cannot
+        // re-add a gitignored top-level dir at the watch level.
         let temp = TempDir::new().unwrap();
         let root = temp.path();
         fs::create_dir_all(root.join(".git")).unwrap();
@@ -1282,7 +1298,9 @@ mod per_dir_tests {
             &mut added,
         );
         assert_eq!(added, vec![dir.clone()], "only dirs become subtree adds");
-        // Structural event on an existing dir also prunes (re-arm for the delete+recreate-within-one-debounce case).
+        // Structural event on an existing dir also prunes (re-arm for the
+        // delete+recreate-within-one-debounce case); the file prune
+        // candidate is rejected O(1) by the watcher thread.
         assert_eq!(pruned, vec![dir, file]);
     }
 
@@ -1446,7 +1464,8 @@ mod helper_tests {
             &nested,
             root
         ));
-        // Any top-level child in the batch is enough (drives the one-reconcile-per-batch coalescing in the callback).
+        // Any top-level child in the batch is enough (drives the
+        // one-reconcile-per-batch coalescing in the callback).
         let mixed = [PathBuf::from("/r/pkg/sub"), PathBuf::from("/r/newpkg")];
         assert!(event_triggers_reconcile(FsEventKind::Created, &mixed, root));
     }
@@ -1471,7 +1490,8 @@ mod helper_tests {
 
     #[test]
     fn find_git_dir_none_when_no_repo() {
-        // Hermetic: we create no `.git`.
+        // Hermetic: we create no `.git`, so `find_git_dir` must not return one
+        // inside our tree (an ancestor repo's `.git`, outside it, is fine).
         let temp = TempDir::new().unwrap();
         let root = dunce::canonicalize(temp.path()).unwrap();
         let deep = root.join("no/git/here");
@@ -1485,7 +1505,8 @@ mod helper_tests {
 
     #[test]
     fn find_git_dir_rejects_bogus_gitlink() {
-        // A planted `.git` file pointing at a non-git dir must NOT be resolved/watched — git validation rejects it.
+        // A planted `.git` file pointing at a non-git dir must NOT be
+        // resolved/watched — git validation rejects it.
         let external = TempDir::new().unwrap();
         let proj = TempDir::new().unwrap();
         fs::write(
@@ -1505,7 +1526,9 @@ mod helper_tests {
     #[cfg(unix)]
     #[test]
     fn find_git_dir_rejects_symlinked_git_to_external_dir() {
-        // A `.git` SYMLINK to an external (non-git) dir must NOT be followed and watched: the cheap dir branch is gated on a real (non-symlink) dir.
+        // A `.git` SYMLINK to an external (non-git) dir must NOT be followed
+        // and watched: the cheap dir branch is gated on a real (non-symlink)
+        // dir, and git validation rejects the target.
         let external = TempDir::new().unwrap(); // stands in for ~/.ssh, /etc
         let proj = TempDir::new().unwrap();
         std::os::unix::fs::symlink(external.path(), proj.path().join(".git")).unwrap();
@@ -1520,7 +1543,8 @@ mod helper_tests {
 
     #[test]
     fn find_git_dir_resolves_legitimate_gitlink() {
-        // A `.git` FILE pointing at a real git dir (the worktree / submodule layout) must resolve to that gitdir.
+        // A `.git` FILE pointing at a real git dir (the worktree / submodule
+        // layout) must resolve to that gitdir.
         let temp = TempDir::new().unwrap();
         let main = temp.path().join("main");
         fs::create_dir_all(&main).unwrap();
@@ -1576,7 +1600,8 @@ mod helper_tests {
     #[cfg(unix)]
     #[test]
     fn find_sl_dir_rejects_symlinked_sl_to_external_dir() {
-        // A `.sl` SYMLINK to an external dir must not be followed/watched.
+        // A `.sl` SYMLINK to an external dir must not be followed/watched:
+        // the dir branch is gated on a real (non-symlink) dir.
         let external = TempDir::new().unwrap();
         let proj = TempDir::new().unwrap();
         std::os::unix::fs::symlink(external.path(), proj.path().join(".sl")).unwrap();
@@ -1597,15 +1622,19 @@ mod helper_tests {
         // Fan-out: the root is non-recursive, so always watch separately.
         assert!(should_watch_separate_vcs_dir(true, internal, watch));
         assert!(should_watch_separate_vcs_dir(true, external, watch));
-        // Recursive root: an internal dir is already covered — must NOT be re-watched.
+        // Recursive root: an internal dir is already covered — must NOT be
+        // re-watched (the double-watch the design warns against)...
         assert!(!should_watch_separate_vcs_dir(false, internal, watch));
-        // ...but an external ancestor (subdir cwd) must still be watched, or suppression silently breaks.
+        // ...but an external ancestor (subdir cwd) must still be watched, or
+        // suppression silently breaks.
         assert!(should_watch_separate_vcs_dir(false, external, watch));
     }
 
     #[test]
     fn external_ancestor_sl_arms_in_recursive_root_mode() {
-        // Subdir cwd whose `.sl` lives in an ancestor *outside* watch_path (e.g. `grok` run in `crates/codegen`).
+        // Subdir cwd whose `.sl` lives in an ancestor *outside* watch_path
+        // (e.g. `grok` run in `crates/codegen`): the production guard must
+        // still attach the watch under a recursive root (fanout=false).
         let temp = TempDir::new().unwrap();
         let repo = dunce::canonicalize(temp.path()).unwrap();
         fs::create_dir(repo.join(".sl")).unwrap();
@@ -1677,6 +1706,7 @@ mod helper_tests {
         for i in 0..5 {
             fs::create_dir_all(root.join(format!("ignored_{i}"))).unwrap();
         }
+        // 7 total dirs, 5 ignored: with a cap of 2 the 2 non-ignored fit.
         let result = select_top_level_watch_dirs_capped(root, &None, &None, 2);
         assert_eq!(
             result.map(|v| v.len()),

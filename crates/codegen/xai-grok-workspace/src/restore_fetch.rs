@@ -1,4 +1,13 @@
 //! Targeted fetch of specific commit object ids for session restore.
+//!
+//! Unbounded `git fetch origin` on a shallow monorepo clone unshallows millions of objects.
+//! Restore fetches only the snapshot HEAD and public base: `git fetch --no-tags [--depth=1] origin <full-sha>`.
+//! `--depth=1` is used only when the destination is already shallow, so a full clone (or a linked worktree sharing one) never becomes shallow.
+//!
+//! Head and base share [`RESTORE_FETCH_BUDGET`].
+//! Head is capped so at least [`RESTORE_FETCH_BASE_RESERVE`] remains for a distinct missing public base.
+//! The cap allows for head's wait timeout and TERM/KILL/stderr teardown.
+//! The child process group gets SIGTERM, then SIGKILL, then a bounded wait, so a detached `setsid` fetch cannot outlive the restore attempt.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -25,8 +34,8 @@ const FETCH_KILL_WAIT: Duration = Duration::from_secs(2);
 const FETCH_ABANDON_REAP_WAIT: Duration = Duration::from_secs(5);
 const STDERR_JOIN_WAIT: Duration = Duration::from_secs(2);
 
-/// Wall-clock time `wait_success` may still spend after a timed-out
-/// `wait_timeout` (TERM grace + KILL wait + stderr join + scheduling slack).
+/// Wall-clock time `wait_success` may still spend after a timed-out `wait_timeout` (TERM grace + KILL wait + stderr join + scheduling slack).
+/// It is subtracted from the head slice so a hung head fetch cannot eat the base reserve.
 pub(crate) const RESTORE_FETCH_TEARDOWN_RESERVE: Duration = Duration::from_secs(
     FETCH_TERM_GRACE.as_secs() + FETCH_KILL_WAIT.as_secs() + STDERR_JOIN_WAIT.as_secs() + 2,
 );
@@ -105,6 +114,8 @@ pub(crate) fn origin_fetch_spec_for_checkout_target(target: &str) -> Option<&str
 }
 
 /// Local git object lookup and origin fetch used by restore.
+///
+/// Implementors must only fetch a caller-supplied full object id, never a bare `origin` fetch or `--unshallow`.
 pub(crate) trait RestoreGit {
     fn has_object(&self, repo: &Path, oid: &str) -> bool;
     fn fetch_oid(&self, repo: &Path, oid: &str, timeout: Duration) -> Result<()>;
@@ -146,8 +157,8 @@ pub(crate) fn ensure_commits_reachable_with<G: RestoreGit>(
     git: &G,
     deadline: Instant,
 ) -> Result<EnsureCommitsOutcome> {
-    // Reserve only when a later base fetch is expected A present or identical
-    // base would otherwise shrink the head attempt (the common case)
+    // Reserve only when a later base fetch is actually expected
+    // A present or identical base would otherwise shrink the head attempt (the common case)
     let reserve_for_base =
         is_full_object_id(public_base) && public_base != head && !git.has_object(repo, public_base);
     let head_timeout = if reserve_for_base {
@@ -454,7 +465,9 @@ fn escalate_and_reap(child: &mut Child, group: &ProcessGroup) -> EscalateResult 
         }
     }
     // `has_running_members`, not `has_live_members`: the kill leaves the
-    // descendants as orphaned zombies until init reaps them.
+    // descendants as orphaned zombies until init reaps them, and those count as
+    // live. Asking the live question here appended "still has live members" to
+    // EVERY timeout error, describing a teardown that had in fact worked.
     #[cfg(unix)]
     if group.has_running_members() != Some(false) {
         errors.push("fetch process group still has running members after teardown".to_owned());

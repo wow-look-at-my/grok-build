@@ -1,4 +1,7 @@
 //! `SessionActor` methods that start, abort, and commit the per-turn dashboard summary.
+//!
+//! Pure prompt helpers live in [`crate::session::helpers::turn_summary`].
+//! Shared sampling setup is in [`super::side_call`].
 
 use super::*;
 
@@ -10,8 +13,8 @@ impl SessionActor {
         if !self.turn_summary_enabled || self.startup_hints.is_subagent {
             return;
         }
-        // A queued follow-up promoted by `maybe_start_running_task` is
-        // already running when this fires from the completion arm A snapshot.
+        // A queued follow-up promoted by `maybe_start_running_task` is already running when this fires from the completion arm
+        // A snapshot taken now would contain that turn's user message, so bail; the running turn's own completion re-fires
         if self
             .current_prompt_id
             .lock()
@@ -35,9 +38,9 @@ impl SessionActor {
         *self.turn_summary_task.borrow_mut() = Some(task);
     }
 
-    /// Abort a running turn-summary generation. Callers: real prompt accept
-    /// ([`Self::invalidate_side_calls_for_new_prompt`]), conversation rewind,
-    /// and session shutdown.
+    /// Abort a running turn-summary generation.
+    /// Callers: real prompt accept ([`Self::invalidate_side_calls_for_new_prompt`]), conversation rewind, and session shutdown.
+    /// Cancel is not one of them: a running summary describes a prior successful turn, so it finishes and shows until the next one replaces it.
     pub(crate) fn abort_turn_summary(&self) {
         // Invalidate so a finishing aborted task cannot clear a later spawn or pass the pre-commit generation gate.
         self.turn_summary_generation

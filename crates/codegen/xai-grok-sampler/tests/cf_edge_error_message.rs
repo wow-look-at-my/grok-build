@@ -1,4 +1,7 @@
 //! Wire e2e and pure tests for user-facing API error sanitization.
+//!
+//! Edge proxies return non-JSON bodies (HTML).
+//! Those must never reach TUI scrollback; only structured JSON error envelopes and status-based copy.
 
 use std::sync::Arc;
 
@@ -75,6 +78,7 @@ async fn stream_524_html_uses_status_copy() {
     assert!(s.contains("524"));
 }
 
+/// The edge once served a 522 HTML page while the origin was gone and the turn died.
 /// The status has to survive the HTML body so retry can see it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stream_522_html_is_a_retryable_api_error() {

@@ -69,8 +69,9 @@ pub fn unregister_session(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Check whether a registered session's ptyctl server is reachable. Not PID-based: the recorded PID
-/// is the child, which may exit while a `--linger` server is up.
+/// Check whether a registered session's ptyctl server is reachable.
+/// Requires a 200 with the ptyctl status body — a bare TCP connect would misread a recycled port.
+/// Not PID-based: the recorded PID is the child, which may exit while a `--linger` server is up.
 pub async fn server_alive(port: u16) -> bool {
     let Ok(client) = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(500))
@@ -83,6 +84,7 @@ pub async fn server_alive(port: u16) -> bool {
         .send()
         .await
     {
+        // Require the status body shape, not just a 200, so wildcard-200 servers read dead.
         Ok(resp) if resp.status() == reqwest::StatusCode::OK => resp
             .json::<serde_json::Value>()
             .await

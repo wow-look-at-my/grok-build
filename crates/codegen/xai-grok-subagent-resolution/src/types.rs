@@ -7,7 +7,9 @@ use crate::resume::ResumeValidationError;
 pub enum ContextSource {
     /// Fresh session with no inherited history.
     New,
-    /// Resumed from a completed peer subagent. The child inherits the source's raw transcript, tool state, and model.
+    /// Resumed from a previously completed peer subagent.
+    /// The child inherits the source's raw transcript, tool state, and model.
+    /// System prompt and prompt context are freshly rendered.
     Resumed,
 }
 
@@ -19,6 +21,8 @@ pub struct EffectiveRuntimeConfig {
     /// Resolved model ID override (if any).
     pub model: Option<String>,
     /// Resolved reasoning effort (e.g. "low", "medium", "high").
+    // TODO: consider a typed `ReasoningEffort` enum to prevent typos
+    // It stays a plain string for compatibility with the shell's existing API
     pub reasoning_effort: Option<String>,
     /// Resolved capability mode controlling tool access.
     pub capability_mode: Option<xai_tool_types::SubagentCapabilityMode>,
@@ -33,6 +37,7 @@ pub struct EffectiveRuntimeConfig {
     /// Resolved role name (the key that matched in subagent_roles lookup).
     pub role_name: Option<String>,
     /// Error from persona resolution (file unreadable, not found, empty).
+    /// Unlike role prompts, persona errors are fatal: spawn is aborted.
     pub persona_error: Option<String>,
     /// Isolation mode for the child execution environment.
     pub isolation: xai_tool_types::SubagentIsolationMode,
@@ -44,18 +49,25 @@ pub struct ResumeSourceData {
     /// Source subagent ID.
     pub subagent_id: String,
     /// Source subagent type (e.g. "general-purpose", "explore").
+    /// Used by `validate_resume_identity` to check type match.
     pub subagent_type: String,
-    /// Source subagent persona, if any. Used by `validate_resume_identity` to check persona match.
+    /// Source subagent persona, if any.
+    /// Used by `validate_resume_identity` to check persona match.
     pub persona: Option<String>,
     /// Effective model ID used by the source child session.
+    /// The shell pins this model on resume; a model override on resume is silently ignored rather than rejected.
     pub model_id: Option<String>,
     /// Effective cwd the source child used.
+    /// The shell uses it to reconstruct `SessionInfo` so the raw transcript continues and the worktree can be reused.
     pub child_cwd: String,
     /// Worktree path if the source used `isolation=worktree`.
+    /// The shell reuses this directory when resuming a worktree-isolated child.
     pub worktree_path: Option<PathBuf>,
-    /// Durable git ref holding a snapshot of the source worktree's working state, set when the worktree was snapshotted.
+    /// Durable git ref holding a snapshot of the source worktree's working state, set when the worktree was snapshotted at completion.
+    /// The shell uses it to recreate a deleted worktree directory on resume.
     pub snapshot_ref: Option<String>,
     /// The child session ID of the source subagent.
+    /// The shell uses it to locate the source's session directory and copy the raw transcript (`copy_session_data_sync`).
     pub child_session_id: String,
 }
 

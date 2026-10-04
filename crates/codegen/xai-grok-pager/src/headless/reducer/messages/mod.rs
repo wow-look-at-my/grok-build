@@ -1,4 +1,6 @@
 //! The `streaming-messages-json` reducer (Anthropic Messages API wire format).
+//! This module is the coordinator: it owns [`MessagesReducer`] and its [`Reducer`] impl.
+//! The rest lives in the `wire`/`state`/`partial`/`usage`/`web_search` submodules.
 
 use agent_client_protocol as acp;
 use serde_json::{Value, json};
@@ -49,12 +51,15 @@ pub(crate) struct MessagesReducer {
     /// In-order signature for the currently-open thinking block, so each block keeps its own.
     open_signature: Option<String>,
     /// Terminal tool results buffered for one grouped `user` message.
+    /// Each is tagged with its `tool_use`'s emission order so the group flushes in `tool_use` order.
     pending_tool_results: Vec<(u64, ToolResultBlock)>,
     /// Monotonic order stamped on each `tool_use` so a later `tool_result` sorts back into place.
     next_tool_use_order: u64,
     /// Unmatched client `tool_use` blocks, keyed by id with their emission order.
+    /// Leftovers at turn end get an `is_error` `tool_result` to keep the transcript valid.
     pending_client_tool_uses: std::collections::HashMap<String, u64>,
     /// Backend `web_search` calls still running, keyed by id with their order and call.
+    /// The query and results arrive only at completion, so the `ToolCall` defers here.
     backend_web_search_calls: std::collections::HashMap<String, (u64, ToolCallEvent)>,
     /// Count of successful inline backend `web_search` invocations; errored ones are not billed, so they are excluded.
     web_search_requests: u64,
@@ -204,6 +209,7 @@ impl MessagesReducer {
         }
     }
 
+    // The frame and its partial `message_delta` both resolve stop reason, usage, and stop sequence through these three, so they never disagree
 
     /// Reported reason, else `default`; a `None` default forces null so a failed turn is not mislabeled.
     fn resolved_stop_reason(&self, default: Option<&str>) -> Option<String> {
@@ -214,6 +220,7 @@ impl MessagesReducer {
             .or_else(|| Some(default.to_string()))
     }
 
+    /// Reported usage, else the identity's input-side usage (`output_tokens` 0).
     fn resolved_usage(&self) -> MessageUsage {
         self.response
             .pending()

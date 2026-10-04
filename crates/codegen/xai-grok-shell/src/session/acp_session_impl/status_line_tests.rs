@@ -25,7 +25,7 @@ fn session_usage_splits_fresh_input_from_the_cache_buckets() {
     };
     let window = build_context_window(100_000, Some(42_000), Some(&totals), 80);
 
-    // The wire's 30k `input_tokens` already contains both cache buckets, so 17k is what was fresh and the fields must not overlap
+    // The wire's 30k `input_tokens` already contains both cache buckets, so 17k is what was fresh and the three fields must not overlap
     let usage = window.session_usage.unwrap();
     assert_eq!(usage.input_tokens, 17_000);
     assert_eq!(usage.cache_creation_input_tokens, 5_000);

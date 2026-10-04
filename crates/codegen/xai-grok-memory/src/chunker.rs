@@ -1,4 +1,7 @@
 //! Splits markdown content into chunks suitable for embedding and search.
+//!
+//! Chunks respect markdown structure (headers, paragraphs, code blocks) and include ancestor headers so each chunk stands alone.
+//! Character counts stand in for token counts, at about 4 characters per token.
 
 use xai_grok_config_types::MemoryIndexConfig;
 
@@ -190,7 +193,7 @@ fn split_section_by_paragraphs(
     chunks
 }
 
-/// Returns `None` if not a header.
+/// Detect markdown header level (1 for `#`, 2 for `##`, etc.). Returns `None` if not a header.
 pub(crate) fn header_level(line: &str) -> Option<usize> {
     let trimmed = line.trim_start();
     if !trimmed.starts_with('#') {
@@ -241,7 +244,7 @@ mod tests {
         let h1 = chunk_hash("hello world");
         let h2 = chunk_hash("hello world");
         assert_eq!(h1, h2);
-        assert_eq!(h1.len(), 64);
+        assert_eq!(h1.len(), 64); // A blake3 hash is 32 bytes, so 64 hex chars.
     }
 
     #[test]

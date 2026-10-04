@@ -66,6 +66,7 @@ fn drop_after_in_handle_reap_is_a_no_op() {
     let status = guard.wait().expect("in-handle reap through the guard");
     assert!(status.success(), "true exits 0");
 
-    // Drop after the in-handle reap must not panic and must not signal a recycled PID.
+    // Drop after the in-handle reap must not panic and must not signal a
+    // recycled PID (std's Child::kill refuses already-waited children).
     drop(guard);
 }

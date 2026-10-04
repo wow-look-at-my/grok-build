@@ -1,4 +1,9 @@
 //! `/always-approve`: toggle auto-approve (YOLO / `permission_mode`).
+//!
+//! Dispatches `Action::SetYoloMode(!current)`.
+//! The dispatcher handles state mutation, permission_queue drain, persistence (with rollback on disk-write failure), and toast.
+//!
+//! No scrollback turn; visible effects are the prompt-line chip and a toast (destructive-styled when enabling).
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

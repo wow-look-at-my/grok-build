@@ -5,6 +5,7 @@ use crate::app::app_view::SessionPickerEntry;
 use crate::theme::Theme;
 
 /// Which surface a picker fetch was issued for.
+/// Results route back to the requesting host's storage only; a live picker on another host never absorbs them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionPickerHost {
     /// Welcome-screen picker (`session_picker_*` fields on `AppView`).
@@ -31,7 +32,7 @@ pub struct SessionPickerSurface {
     pub lanes: crate::views::session_picker::SessionPickerLanes,
     pub content_results: Option<Vec<xai_grok_shell::extensions::session_search::SearchSessionHit>>,
     pub content_loading: bool,
-    /// Per-surface counters; the dashboard host does not share the welcome picker's `session_picker_list_seq` /.
+    /// Per-surface counters; the dashboard host does not share the welcome picker's `session_picker_list_seq` / `session_picker_deep_search_seq`.
     pub list_seq: u64,
     pub deep_search_seq: u64,
     /// Invalidates in-flight card-detail reads when this surface's rows or filters change.

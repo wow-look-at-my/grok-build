@@ -46,7 +46,9 @@ pub(crate) fn resolve_prefetch_inputs_from_parts(
     })
 }
 
-/// Joinable initial catalog prefetch.
+/// Joinable initial catalog prefetch. Runs on its own OS thread and reports
+/// through a `oneshot`; a timeout or cancel drops the receiver while the thread
+/// still lands its monotonic cache write for the next boot.
 #[must_use]
 pub(crate) struct InitialModelsLoad(
     tokio::sync::oneshot::Receiver<Option<IndexMap<String, ModelEntry>>>,
@@ -75,7 +77,9 @@ impl InitialModelsLoad {
     }
 }
 
-/// Catalog from the async pre-resolve.
+/// Catalog from the async pre-resolve. Outer `Option`: whether pre-resolve ran;
+/// inner: the catalog, or `None` on a failed or skipped fetch. Carried by value
+/// in `BootstrapPrefetch` from the boot's settings resolve to sync bootstrap.
 pub(crate) type ResolvedModels = Option<IndexMap<String, ModelEntry>>;
 
 /// Resolved inputs for a models prefetch, or `None` when none would run.
@@ -91,7 +95,8 @@ fn models_prefetch_inputs(
         return None;
     }
     let remote = crate::util::config::resolve_remote_fetch_enabled();
-    // Prefer the live in-memory session so a just-refreshed or just-logged-in credential drives the catalog fetch.
+    // Prefer the live in-memory session so a just-refreshed or just-logged-in
+    // credential drives the catalog fetch, not a stale or absent disk token.
     let auth = warmed_auth.or_else(|| resolve_disk_auth(grok_com_config.clone()));
     let endpoints = resolve_startup_endpoints();
     let env = resolve_prefetch_inputs_from_parts(auth.clone(), endpoints, remote)?;
@@ -131,7 +136,9 @@ fn run_models_prefetch(
     ) {
         ModelsPrefetch::Cached(models) => Some(models),
         ModelsPrefetch::Fetched(write) => {
-            // Re-resolve the live scope under the fetch-time mode (stable origin) but with live disk auth for identity, so an alpha flip, key rotation.
+            // Re-resolve the live scope under the fetch-time mode (stable origin) but with live disk
+            // auth for identity, so an alpha flip, key rotation, or account switch is caught without
+            // abandoning the catalog when disk auth is briefly absent.
             let live = ModelsCacheScope::resolve_live(env.model_fetch_auth, commit_config.as_ref());
             match evaluate_models_commit(&expected, &live) {
                 Commit::CacheAndServe => Some(write.commit()),

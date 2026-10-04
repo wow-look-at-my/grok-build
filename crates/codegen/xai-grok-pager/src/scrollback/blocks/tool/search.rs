@@ -67,7 +67,8 @@ pub struct SearchToolCallBlock {
     pub match_count: usize,
     /// Matches grouped by file (line-level matches).
     pub file_matches: Vec<SearchFileMatch>,
-    /// File paths only (for `files_with_matches` output mode). Used when `file_matches` is empty but results exist.
+    /// File paths only (for `files_with_matches` output mode).
+    /// Used when `file_matches` is empty but results exist.
     pub file_paths: Vec<String>,
     /// Error message if the tool call failed (`None` means success).
     pub error: Option<String>,
@@ -126,8 +127,9 @@ impl SearchToolCallBlock {
         self.error = error;
     }
 
-    /// Finalize elapsed time from `started_at`. Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set
-    /// (already finalized).
+    /// Finalize elapsed time from `started_at`.
+    ///
+    /// Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set (already finalized).
     pub fn finish(&mut self) {
         if self.elapsed_ms.is_some() {
             return;
@@ -233,10 +235,13 @@ impl SearchToolCallBlock {
         if self.is_trivial_pattern()
             && let Some(ref glob) = self.meta.glob
         {
+            // Case 1: the glob IS the search term; no quotes, string-styled
             spans.push(Span::styled(glob.to_string(), pattern_style));
         } else {
+            // Cases 2 and 3: the quoted regex pattern
             spans.push(Span::styled(format!("{:?}", self.pattern), pattern_style));
 
+            // Case 2: glob shown as the first "in" scope (string-styled, not path-styled)
             if let Some(ref glob) = self.meta.glob {
                 spans.push(Span::styled(" in ".to_string(), text_style));
                 spans.push(Span::styled(glob.to_string(), pattern_style));
@@ -262,7 +267,8 @@ impl SearchToolCallBlock {
             }
         }
 
-        // The match summary always comes last When width is constrained, only include it if there's room
+        // The match summary always comes last
+        // When width is constrained, only include it if there's room
         let summary = format!(" {}", self.match_summary());
         if let Some(w) = width {
             let used: usize = spans
@@ -296,6 +302,7 @@ impl SearchToolCallBlock {
     }
 
     /// Header line with only the search term span selectable (exclude "Search " prefix).
+    /// Span 0 is always the label; span 1 is the pattern/glob.
     /// Later "in path" and summary spans stay non-selectable so copy yields the search term.
     fn header_block_line(&self, line: Line<'static>) -> BlockLine {
         let term_end = 2.min(line.spans.len()).max(1);
@@ -316,6 +323,7 @@ impl SearchToolCallBlock {
 
         let mut parts: Vec<Vec<Span<'static>>> = Vec::new();
 
+        // Mode comes first so the user sees what kind of search this is
         let mode_str = match self.meta.output_mode {
             SearchOutputMode::Content => "pattern",
             SearchOutputMode::FilesWithMatches => "files",
@@ -382,7 +390,8 @@ impl BlockContent for SearchToolCallBlock {
                     None,
                 ))];
 
-                // Metadata line (mode and non-default input fields, comma-separated) Blank line separates header.
+                // Metadata line (mode and non-default input fields, comma-separated)
+                // Blank line separates header from metadata.
                 lines.push(BlockLine::separator(Line::from("")));
                 lines.push(BlockLine::separator(self.metadata_line(&theme)));
 
@@ -412,6 +421,7 @@ impl BlockContent for SearchToolCallBlock {
 
                 if !self.file_matches.is_empty() {
                     // Line-level matches (content mode).
+                    // Each file group is a separate bg_dark block, separated by a blank line
                     let indent = "  ";
                     let match_indent = "    ";
 
@@ -429,7 +439,7 @@ impl BlockContent for SearchToolCallBlock {
                             .with_panel_background(theme.bg_dark),
                         );
 
-                        // Match lines: " 42 content..."
+                        // Match lines: "    42  content..."
                         for m in &file_match.matches {
                             let line_num_str = format!("{:>4}", m.line_number);
                             let content_trimmed = m.content.trim_end();

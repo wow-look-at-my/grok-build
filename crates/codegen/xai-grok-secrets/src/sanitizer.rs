@@ -6,6 +6,7 @@ const REDACTED: &str = "[REDACTED_SECRET]";
 const REDACTED_URL_VALUE: &str = "redacted";
 
 /// Vendor API keys with `sk-`/`sk_` prefixes and xAI (`xai-`) keys.
+/// The `\b` anchor keeps the `sk-` inside `task-`/`disk-`/`risk-` from matching.
 static API_KEY_PREFIX_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"\b(?:sk[-_]|xai-)[A-Za-z0-9_-]{20,}"));
 /// AWS long-term (`AKIA`) and temporary (`ASIA`) access-key IDs.
@@ -17,7 +18,7 @@ static GITHUB_TOKEN_REGEX: LazyLock<Regex> =
 /// GitLab (`glpat-`) and Slack (`xoxa-`/`xoxb-`/`xoxp-`/`xapp-`) tokens.
 static VENDOR_TOKEN_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"\b(?:glpat-|xox[abp]-|xapp-)[A-Za-z0-9-]{10,}"));
-/// Google API keys (`AIza` + chars).
+/// Google API keys (`AIza` + 35 chars).
 static GOOGLE_API_KEY_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"\bAIza[0-9A-Za-z_-]{35}"));
 /// PEM private-key block (any key type), base64 body included.
@@ -166,12 +167,15 @@ static USERNAMES: LazyLock<Vec<String>> = LazyLock::new(|| {
     names
 });
 
-/// True for any char that can't continue a path/username segment.
+/// True for any char that can't continue a path/username segment: alphanumerics
+/// and `_`/`-`/`.` continue one (`/Users/bob` won't fold into `/Users/bobby`),
+/// everything else ends it (so `/Users/bob: denied` still collapses).
 fn is_segment_boundary(c: char) -> bool {
     !(c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
 }
 
 /// Backstop for headless contexts where `$HOME`/`$USER` are unset.
+/// The match is case-sensitive (`/Users`, `/home`, `\Users`) so it won't mangle REST `/users/` paths.
 static HOME_ROOT_USER_REGEX: LazyLock<Regex> =
     LazyLock::new(|| compile(r"([/\\](?:Users|home)[/\\])([^/\\]+)"));
 
@@ -186,8 +190,8 @@ fn redact_user_paths_with_backstop<'a>(
     usernames: &[String],
 ) -> Cow<'a, str> {
     let env_scrubbed = redact_user_paths_env(input, home, usernames);
-    // The regex backstop runs ONLY when env is unavailable Otherwise the pass
-    // above is authoritative and the regex would over-redact.
+    // The regex backstop runs ONLY when env is unavailable
+    // Otherwise the pass above is authoritative and the regex would over-redact (`/Users/Shared`, REST `/users/<id>`, etc.)
     if home.is_some() || !usernames.is_empty() {
         return env_scrubbed;
     }
@@ -333,8 +337,8 @@ mod tests {
         assert!(matches!(redact_secrets("model=grok-3"), Cow::Borrowed(_)));
     }
 
-    /// Joins fixture fragments at runtime so realistic-looking fake tokens
-    /// never appear whole in the source text.
+    /// Joins fixture fragments at runtime so realistic-looking fake tokens never appear whole in the source text.
+    /// Secret scanners (e.g. GitHub push protection) would otherwise flag them.
     fn fixture(parts: &[&str]) -> String {
         parts.concat()
     }
@@ -522,8 +526,8 @@ mod tests {
 
     #[test]
     fn redact_user_paths_backstop_skipped_when_env_known() {
-        // Regression guard: when env is known the regex backstop must NOT
-        // run.
+        // Regression guard: when env is known the regex backstop must NOT run.
+        // The backstop *would* collapse `/Users/Shared`, so it must survive here.
         let out = redact_user_paths_with_backstop(
             "/Users/Shared/cfg",
             Some("/Users/alice"),

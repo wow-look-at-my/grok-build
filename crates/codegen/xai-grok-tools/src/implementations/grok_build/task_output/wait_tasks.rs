@@ -1,4 +1,11 @@
 //! `wait_tasks` tool — blocks until multiple background tasks complete.
+//!
+//! Prefer `get_task_output` / `get_command_or_subagent_output` with `task_ids`
+//! and a positive `timeout_ms` (wait-all). This tool remains as a thin alias
+//! for older prompts that still emit `wait_tasks` / `wait_commands_or_subagents`.
+//!
+//! `mode: wait_any` is still honored here for compatibility; the unified get
+//! tool only supports wait-all for multi-id waits.
 
 use crate::DEFAULT_TOOL_OUTPUT_BYTES;
 use crate::implementations::grok_build::task::backend::SubagentBackendResource;
@@ -145,6 +152,7 @@ impl xai_tool_runtime::Tool for WaitTasksTool {
         // wait_all (the common case) shares the unified multi path on get_task_output.
         if matches!(input.mode, WaitMode::WaitAll) {
             use super::DEFAULT_WAIT_TIMEOUT;
+            // Legacy wait always blocks: omit or 0 => default budget (not a snapshot).
             let ms = input
                 .timeout_ms
                 .filter(|ms| *ms > 0)

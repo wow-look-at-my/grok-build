@@ -396,6 +396,7 @@ fn resize_below_threshold_derives_compact_without_touching_user_setting() {
     );
     assert!(!app.current_ui.compact_mode);
 }
+/// Threshold boundary: 20 rows engages auto-compact, 21 does not, and the deeper `SHORT_TERMINAL_ROWS` degradation zone stays compact too.
 #[test]
 fn auto_compact_threshold_boundary() {
     use crossterm::event::Event;
@@ -1831,6 +1832,7 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
             );
         }
         // Both setters clamp, so the value has to be in range to move at all.
+        // Each value differs from its default: 25 vs 15, 30 vs 10, 4 vs 2.
         "min_output_tokens_per_sec" => {
             let _ = dispatch(Action::SetMinOutputTokensPerSec(25), app);
         }
@@ -2008,8 +2010,8 @@ fn set_x_propagates_to_thread_local_cache() {
     .join()
     .unwrap();
 }
-/// In debug builds, dispatching `Action::OpenSettings` twice in a row panics
-/// on the `debug_assert!` (input-routing bug guard).
+/// In debug builds, dispatching `Action::OpenSettings` twice in a row panics on the `debug_assert!` (input-routing bug guard).
+/// Pairs with `dispatch_open_settings_opens_then_close_on_reentry` (which exercises the release-mode silent-close path).
 #[test]
 #[should_panic(expected = "OpenSettings dispatched while settings modal is already open")]
 #[cfg(debug_assertions)]
@@ -2141,7 +2143,7 @@ fn set_multiline_mode_on_dashboard_toggles_dashboard_not_agents() {
 }
 /// Multi-agent fan-out: `set_multiline_mode` mutates only the ACTIVE agent's `multiline_mode`, never other agents in the registry.
 /// A refactor that loops over `app.agents.values_mut()` or touches SHARED `app.current_ui` would silently regress this contract.
-/// Only a multi-agent test catches that regression before a user opens agents.
+/// Only a multi-agent test catches that regression before a user opens two agents.
 #[test]
 fn set_multiline_mode_mutates_only_active_agent_not_others() {
     let mut app = test_app_with_agent();
@@ -2369,7 +2371,9 @@ fn set_show_thinking_blocks_applies_persists_and_rolls_back() {
 }
 #[test]
 fn set_thinking_summaries_persists_the_ui_key_and_rolls_back() {
-    // The row's only state is `[ui].thinking_summaries`: the shell resolves it when a session spawns.
+    // The row's only state is `[ui].thinking_summaries`: the shell resolves it
+    // when a session spawns, so there is no live cache to update and nothing to
+    // re-render. What must be right is the persisted value and the rollback.
     let mut app = test_app_with_agent();
     let shipped = app.current_ui.thinking_summaries_enabled();
     assert!(shipped, "the feature ships ON");
@@ -2714,6 +2718,7 @@ fn set_show_thinking_blocks_off_preserves_tool_group_header() {
     crate::appearance::cache::set_show_thinking_blocks(false);
 }
 /// Hidden thinking interspersed in a collapsed tool run stays transparent.
+/// The run must still truncate to `group_max_visible` instead of splitting in two and over-rendering the group.
 #[test]
 fn set_show_thinking_blocks_off_truncates_across_interspersed_thinking() {
     use crate::appearance::AppearanceConfig;

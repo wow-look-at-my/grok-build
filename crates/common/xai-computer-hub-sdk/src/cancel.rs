@@ -1,4 +1,14 @@
 //! Per-session strict-cancellation registry.
+//!
+//! Maps each in-flight `tool_call_id` to its [`CancellationToken`] so a
+//! `Cancel` hook (or session teardown) can hard-cancel the running call
+//! by dropping its future. A small `pending` tombstone set covers the
+//! race where a `Cancel` arrives *before* the dispatcher registered the
+//! token (the symmetric window to pre-spawn registration): the id is
+//! tombstoned and the dispatcher cancels it at registration time.
+//!
+//! One registry per session, tied to the session-loop lifetime alongside
+//! the inbox and the per-session admission semaphore.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -6,7 +16,13 @@ use dashmap::{DashMap, DashSet};
 use tokio_util::sync::CancellationToken;
 use xai_tool_protocol::ToolCallId;
 
-/// Upper bound on outstanding pre-registration tombstones.
+/// Upper bound on outstanding pre-registration tombstones. Tombstones
+/// cover the microscopic window between a `Cancel` hook and the matching
+/// `register`, so in steady state the set holds a handful of entries. A
+/// `Cancel` whose call never registers (e.g. one racing call completion,
+/// after `deregister` already removed the live token) leaves a tombstone
+/// that no `register` ever consumes; this cap reclaims such stragglers so
+/// a single long-lived session cannot grow `pending` without bound.
 const MAX_PENDING_TOMBSTONES: usize = 8192;
 
 /// Per-session `tool_call_id -> CancellationToken` map plus a pending
@@ -15,7 +31,9 @@ const MAX_PENDING_TOMBSTONES: usize = 8192;
 pub(crate) struct CancelRegistry {
     map: DashMap<ToolCallId, CancellationToken>,
     pending: DashSet<ToolCallId>,
-    /// Set once by [`Self::cancel_all`] (teardown).
+    /// Set once by [`Self::cancel_all`] (teardown). After this, every new
+    /// `register` starts cancelled so a request dispatched in the teardown
+    /// window cannot escape as an orphaned, uncancellable task.
     closed: AtomicBool,
 }
 
@@ -35,8 +53,11 @@ impl CancelRegistry {
             token.cancel();
         }
         self.map.insert(call_id.clone(), token.clone());
-        // Re-check after the insert: if `cancel_all` drained the map between
-        // our closed-check and the insert, our entry would be missed.
+        // Re-check after the insert: if `cancel_all` drained the map
+        // between our closed-check and the insert, our entry would be
+        // missed. The DashMap shard lock orders the insert against the
+        // drain, so observing `closed` here guarantees we cancel + drop
+        // any entry the drain could not reach (closes the teardown race).
         if self.closed.load(Ordering::Acquire) {
             if let Some((_, missed)) = self.map.remove(&call_id) {
                 missed.cancel();
@@ -55,7 +76,10 @@ impl CancelRegistry {
             true
         } else {
             if self.pending.len() >= MAX_PENDING_TOMBSTONES {
-                // Evict one straggler tombstone (a cancel whose call never registered) before inserting so the set stays bounded. Collect the key first.
+                // Evict one straggler tombstone (a cancel whose call never
+                // registered) before inserting so the set stays bounded.
+                // Collect the key first, then remove, so we never hold a
+                // shard iterator across the removal.
                 let stale = self.pending.iter().next().map(|e| e.key().clone());
                 if let Some(stale) = stale {
                     self.pending.remove(&stale);
@@ -71,14 +95,24 @@ impl CancelRegistry {
         self.map.remove(call_id);
     }
 
-    /// Whether [`Self::cancel_all`] has closed this registry.
+    /// Whether [`Self::cancel_all`] has closed this registry. A closed
+    /// registry marks a session whose loop is (or is about to be) torn
+    /// down — used by the soft-rebind liveness gate.
     pub(crate) fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
 
-    /// Drain-and-cancel every live token and close the registry.
+    /// Drain-and-cancel every live token and close the registry. Used on
+    /// session teardown (`unbind_session` / `shutdown` / full rebind of a
+    /// dead loop — a soft rebind of a live session keeps its registry) so
+    /// detached `execute_call` tasks wind down promptly AND any call
+    /// dispatched in
+    /// the teardown window starts cancelled (see [`Self::register`]).
+    /// Returns the number of tokens cancelled.
     pub(crate) fn cancel_all(&self) -> usize {
-        // Mark closed BEFORE draining so a concurrent `register` either observes the close (and self-cancels) or has its entry drained here.
+        // Mark closed BEFORE draining so a concurrent `register` either
+        // observes the close (and self-cancels) or has its entry drained
+        // here — never both-miss.
         self.closed.store(true, Ordering::Release);
         let mut cancelled = 0;
         self.map.retain(|_, token| {
@@ -86,7 +120,9 @@ impl CancelRegistry {
             cancelled += 1;
             false
         });
-        // Drop tombstones too: teardown closes the registry, so no future `register` will consume them.
+        // Drop tombstones too: teardown closes the registry, so no future
+        // `register` will consume them. Leaving them would let a stale
+        // straggler set survive to the end of the (already-done) session.
         self.pending.clear();
         cancelled
     }
@@ -198,7 +234,9 @@ mod tests {
 
     #[test]
     fn register_after_cancel_all_starts_cancelled() {
-        // Teardown race regression: once `cancel_all` has closed the registry.
+        // Teardown race regression: once `cancel_all` has closed the
+        // registry, a call dispatched in the teardown window must start
+        // cancelled and must NOT linger as a live, uncancellable entry.
         let reg = CancelRegistry::default();
         assert_eq!(reg.cancel_all(), 0, "empty teardown cancels nothing");
 
@@ -247,7 +285,9 @@ mod tests {
 
     #[test]
     fn pending_tombstones_stay_bounded_under_spurious_cancels() {
-        // A long-lived session that keeps receiving cancels for call_ids that never register (e.g. cancels racing call completion).
+        // A long-lived session that keeps receiving cancels for call_ids
+        // that never register (e.g. cancels racing call completion) must
+        // not grow `pending` without bound.
         let reg = CancelRegistry::default();
         for _ in 0..(MAX_PENDING_TOMBSTONES + 256) {
             assert!(!reg.cancel(&cid()), "never-registered id is a miss");

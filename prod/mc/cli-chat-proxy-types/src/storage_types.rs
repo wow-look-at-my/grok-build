@@ -14,6 +14,12 @@ pub struct BatchExistsResponse {
 }
 
 /// Response from the signed upload URL endpoint.
+/// `POST /v1/storage/signed-upload-url`
+///
+/// The client uses the returned `signed_url` to PUT the object directly to GCS,
+/// completely bypassing the proxy for the data transfer.  This avoids nginx /
+/// Cloudflare body-size limits that would otherwise cause 413 errors on large
+/// payloads (e.g. session share data).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignedUploadUrlResponse {
@@ -23,7 +29,8 @@ pub struct SignedUploadUrlResponse {
     pub bucket: String,
     /// Object path within the bucket.
     pub path: String,
-    /// Content-Type that was baked into the signed URL. The PUT request **must** use this exact Content-Type header.
+    /// Content-Type that was baked into the signed URL.
+    /// The PUT request **must** use this exact Content-Type header.
     pub content_type: String,
     /// Validity window in seconds.
     pub expires_in_secs: u64,
@@ -56,20 +63,26 @@ pub struct BatchUploadResponse {
     pub results: Vec<BatchUploadResult>,
 }
 
-/// JSON request body for `POST /v1/storage/batch_upload_json`. Each file's
-/// content is base64-encoded.
+/// JSON request body for `POST /v1/storage/batch_upload_json`.
+///
+/// Each file's content is base64-encoded. The request is typically sent with
+/// `Content-Encoding: zstd` so the JSON body is compressed on the wire.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BatchUploadRequest {
     pub files: Vec<BatchUploadFile>,
 }
 
-/// A single file entry in a [`BatchUploadRequest`]. All fields are
-/// required on the wire.
+/// A single file entry in a [`BatchUploadRequest`].
+///
+/// All three fields are required on the wire. The server treats an empty
+/// `content_type` as `"application/octet-stream"`, but the field itself
+/// must be present in the JSON object.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BatchUploadFile {
     /// GCS destination path.
     pub path: String,
-    /// MIME type of the file content.
+    /// MIME type of the file content. Required on the wire; the server
+    /// defaults empty values to `"application/octet-stream"`.
     pub content_type: String,
     /// Base64-encoded file content (standard alphabet, with padding).
     pub data: String,

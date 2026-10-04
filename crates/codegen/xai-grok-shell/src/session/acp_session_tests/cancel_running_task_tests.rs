@@ -1951,8 +1951,9 @@ async fn cancel_running_task_interactive_preserves_queued_work() {
         })
         .await;
 }
-/// The sweep must leave the running turn's own front slot alone. The message never runs and, since user messages are only
-/// persisted when their turn starts, it is silently lost from history.
+/// The sweep must leave the running turn's own front slot alone.
+/// If the sweep deletes the front, the user prompt shifts to index 0 and the cancel destroys it instead.
+/// The message never runs and, since user messages are only persisted when their turn starts, it is silently lost from history.
 #[tokio::test(flavor = "current_thread")]
 async fn cancel_after_own_completion_sweep_preserves_queued_user_prompt() {
     use tokio::sync::oneshot::error::TryRecvError;

@@ -1,4 +1,5 @@
-//! The background MCP init pass: parallel handshakes, one committed outcome per server.
+//! The background MCP init pass: parallel handshakes, one committed outcome per server, and the snapshot refreshes
+//! they queue. A server-set change cancels it; `Drop` releases what it built.
 
 use super::*;
 use crate::session::mcp_servers::{SharedMcpState, Superseded};

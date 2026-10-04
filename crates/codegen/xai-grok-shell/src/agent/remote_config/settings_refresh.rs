@@ -1,4 +1,8 @@
 //! Mid-session settings refresh coalescer.
+//!
+//! Concurrent live refreshes for one credential share a single in-flight fetch;
+//! nothing is cached here (cross-launch reuse is the disk cache's job, see
+//! `settings_cache`).
 
 use tokio::sync::watch;
 use xai_grok_login::GrokAuth;
@@ -26,7 +30,8 @@ impl From<&GrokAuth> for CredentialIdentity {
 
 #[derive(Default)]
 struct RefreshState {
-    /// Bumped on every credential switch and never reset, so an A->B->A churn gives a new epoch and a stale leader cannot be taken.
+    /// Bumped on every credential switch and never reset, so an A->B->A churn
+    /// gives a new epoch and a stale leader cannot be taken for the live flight.
     epoch: u64,
     identity: Option<CredentialIdentity>,
     in_flight: Option<watch::Receiver<Option<crate::remote::SettingsFetch>>>,

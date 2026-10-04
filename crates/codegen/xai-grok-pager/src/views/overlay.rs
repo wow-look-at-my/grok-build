@@ -1,4 +1,25 @@
 //! Shared overlay pane state machine.
+//!
+//! [`OverlayState`] holds the three-state visibility/focus/fullscreen logic shared by all toggleable panes (tracing, todo, bg tasks).
+//!
+//! [`handle_overlay_key`] processes structural keys (Tab, Esc, q, Space,
+//! Ctrl-F) consistently across all overlay panes, so each pane only needs
+//! to implement its content-specific `handle_key()`.
+//!
+//! ## State model
+//!
+//! ```text
+//!   ┌────────┐  shortcut  ┌──────────────────┐  shortcut  ┌────────┐
+//!   │ Hidden │ ─────────► │ Visible + Focused │ ─────────► │ Hidden │
+//!   └────────┘            └──────────────────┘            └────────┘
+//!                           │  Tab/Space  ▲                    ▲
+//!                           ▼             │ shortcut           │ Esc/q
+//!                     ┌──────────────────┐                    │
+//!                     │ Visible+Unfocused│ ───────────────────┘
+//!                     └──────────────────┘   (Esc/q from unfocused
+//!                                             shouldn't happen —
+//!                                             keys go to agent view)
+//! ```
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -22,8 +43,9 @@ impl OverlayAction {
     }
 }
 
-/// Shared visibility / focus / fullscreen state for overlay panes. Embedded
-/// in each toggleable pane (TracingPane, TodoPane, etc.).
+/// Shared visibility / focus / fullscreen state for overlay panes. Embedded in each toggleable pane
+/// (TracingPane, TodoPane, etc.). The pane's shortcut handler calls [`toggle()`], and the shared
+/// [`handle_overlay_key()`] handles Tab/Esc/q/Space/Ctrl-F.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OverlayState {
     pub visible: bool,
@@ -46,8 +68,8 @@ impl OverlayState {
         Self::default()
     }
 
-    /// When hidden: show and focus. When visible but unfocused: focus. When visible and focused:
-    /// hide.
+    /// Pane shortcut: three-state toggle. When hidden: show and focus. When visible but unfocused:
+    /// focus. When visible and focused: hide.
     pub fn toggle(&mut self) -> OverlayAction {
         if !self.visible {
             self.visible = true;

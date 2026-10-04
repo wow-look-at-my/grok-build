@@ -47,7 +47,7 @@ use request_classification::{
     RequestClassification, permission_mode_artifact_str,
 };
 
-/// Increments the in-flight permission-request counter on construction and decrements it on drop.
+/// Increments the in-flight permission-request counter on construction and decrements it on drop, so every `request()` return path stays balanced.
 struct InFlightGuard(Arc<AtomicUsize>);
 
 impl InFlightGuard {
@@ -71,12 +71,15 @@ pub enum PermissionHandle {
         /// Auto mode (LLM classifier), mutually exclusive with yolo at runtime.
         auto_state: Arc<AtomicBool>,
         /// True when the installed auto classifier has a live `ClassifyTextFn` (session sampling side-query).
+        /// False for heuristic-only fallbacks.
         side_query_wired: Arc<AtomicBool>,
         /// Managed-policy pin cached at spawn.
+        /// When `Some`, the agent re-clamps every client-supplied yolo to non-yolo; `None` means no pin.
         yolo_pin: Option<&'static str>,
         /// Grep Read-deny globs, carried so subagents inherit the parent's excludes.
         deny_read_globs: Arc<Vec<String>>,
         /// Concurrent in-flight permission requests.
+        /// Shared across handle clones (subagents), so the actor can gauge overlapping requests for telemetry.
         in_flight: Arc<AtomicUsize>,
         /// Prompt-start only; auto-allow paths never send.
         user_prompt_notify: Arc<Mutex<Option<mpsc::UnboundedSender<()>>>>,
@@ -98,7 +101,8 @@ impl PermissionHandle {
             ..
         } = self
         {
-            // Clamp the Arc synchronously so `is_yolo_mode()` is correct immediately (no optimistic-true window) The raw request is still forwarded.
+            // Clamp the Arc synchronously so `is_yolo_mode()` is correct immediately (no optimistic-true window)
+            // The raw request is still forwarded so the actor logs the refusal once and re-clamps
             let clamped = clamp_yolo(enabled, *yolo_pin);
             yolo_state.store(clamped, Ordering::Relaxed);
             if clamped {
@@ -325,14 +329,15 @@ fn prompted_decision_approved(decision: &Decision, outcome_str: &str) -> Option<
     }
 }
 
-/// Whether an auto-forced prompt must neutralize a pre-decided `Allow`; true
-/// for every non-bash access.
+/// Whether an auto-forced prompt must neutralize a pre-decided `Allow`; true for every non-bash access.
+/// Session grants short-circuit before classify, so this is defense-in-depth for leftover non-grant Allows.
+/// Bash is carved out: its post-classify grant path is gated on `!auto_forced_prompt` upstream.
 fn auto_prompt_blocks_allow(access: &AccessKind) -> bool {
     !matches!(access, AccessKind::Bash(_))
 }
 
-/// A request has no static-analysis findings at all: the only case where a
-/// broad configured policy Allow may bypass the classifier.
+/// A request has no static-analysis findings at all: the only case where a broad configured policy Allow may bypass the classifier.
+/// Non-Bash access has no Bash findings and is always clear here.
 fn bash_assessment_is_clear(evaluation: Option<&BashEvaluation>) -> bool {
     evaluation.is_none_or(|e| e.assessment.is_empty())
 }
@@ -380,7 +385,8 @@ pub fn spawn_permission_manager(
         web_fetch_allowed_domains,
         initial_yolo,
         client_identifier,
-        // Legacy/test entry point: preserve the full option set Production uses `spawn_permission_manager_with_hub`.
+        // Legacy/test entry point: preserve the full option set
+        // Production uses `spawn_permission_manager_with_hub` with the resolved gate
         true,
         None,
     )
@@ -399,7 +405,8 @@ pub fn spawn_permission_manager_with_hub(
     web_fetch_allowed_domains: Vec<String>,
     initial_yolo: bool,
     client_identifier: Option<String>,
-    // Resolved `remember_tool_approvals` gate Shows the per-tool always-allow options and lets an explicit grant satisfy an `ask` rule.
+    // Resolved `remember_tool_approvals` gate
+    // Shows the per-tool always-allow options and lets an explicit grant satisfy an `ask` rule (ask once, remember)
     remember_tool_approvals: bool,
     hub_permission: Option<Arc<dyn crate::permission::PermissionHookTransport>>,
 ) -> (PermissionHandle, mpsc::UnboundedReceiver<PermissionEvent>) {
@@ -2435,11 +2442,12 @@ mod tests {
             .await;
     }
 
-    // ── Prompt-loop regression: a managed `Ask Bash(...)` rule on an
-    // auto-allowed command must reach the user prompt.
+    // ── Prompt-loop regression: a managed `Ask Bash(...)` rule on an auto-allowed command must reach the user prompt, never silently auto-allow ── The `Ask` helpers above wire a
+    // *dropped* gateway receiver and only infer "a prompt was attempted" from a non-`Allow` decision These tests instead drive the real request loop end to end through a live
+    // `acp_gateway` receiver and a mock client that RECORDS each prompt That lets us positively assert whether the user was prompted, the exact behavior the segment loop's `!policy_forced_prompt` guard protects
 
-    /// Mock ACP client that records every permission prompt and answers
-    /// `reject-once`.
+    /// Mock ACP client that records every permission prompt and answers `reject-once`.
+    /// The `Decision::Reject` it produces is unmistakably distinct from a silent auto-allow (`Decision::Allow`).
     #[derive(Default)]
     struct RecordingClient {
         prompts: std::rc::Rc<std::cell::RefCell<Vec<acp::RequestPermissionRequest>>>,
@@ -2510,8 +2518,8 @@ mod tests {
         }
     }
 
-    /// A client that answers every prompt by selecting the first allow-once
-    /// (when `allow`) or reject-once option.
+    /// A client that answers every prompt by selecting the first allow-once (when `allow`) or reject-once option.
+    /// Exercises human Allow vs Reject at a denial-limit escalation prompt.
     struct SelectingClient {
         allow: bool,
     }
@@ -5476,8 +5484,7 @@ mod tests {
             .await;
     }
 
-    /// A gating ACP client whose FIRST permission prompt blocks until
-    /// released.
+    /// A gating ACP client whose FIRST permission prompt blocks until released, so a concurrent second request can overlap it while it is in-flight.
     struct GatingClient {
         seen: Arc<AtomicUsize>,
         gate: Arc<tokio::sync::Notify>,
@@ -5550,7 +5557,13 @@ mod tests {
                     )
                     .await
                 });
-                // Deadline in wall-clock time, not in yield iterations.
+                // Deadline in wall-clock time, not in yield iterations: A can't
+                // reach its prompt until a `tokio::fs` read of the permission
+                // state completes on the blocking pool, and a yield-only loop
+                // spends no wall clock waiting for it (measured: 1000 yields
+                // burn ~2.6ms total, while the read alone takes ~0.5ms and the
+                // prompt has arrived as late as 4ms in). The bound still fails
+                // cleanly on a regression that never prompts.
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
                 while seen.load(Ordering::Relaxed) == 0 {
                     assert!(
@@ -5573,8 +5586,10 @@ mod tests {
                     )
                     .await
                 });
-                // Wait for B to register in flight before releasing A, so A's
-                // emit-time snapshot sees both.
+                // Wait for B to actually register in flight before releasing A,
+                // so A's emit-time snapshot sees both. The counter the actor
+                // reads is the condition itself — a fixed number of yields only
+                // guesses at when B's task gets its turn.
                 let in_flight = match &mgr {
                     PermissionHandle::Actor { in_flight, .. } => in_flight.clone(),
                     PermissionHandle::AllowAll => panic!("spawned manager must be an actor handle"),

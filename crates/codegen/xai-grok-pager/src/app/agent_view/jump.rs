@@ -8,8 +8,8 @@ use crate::views::jump::{
 use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 impl AgentView {
-    /// Close the `/jump` picker (if open) and restore the viewport it opened
-    /// from.
+    /// Close the `/jump` picker (if open) and restore the viewport it opened from.
+    /// Shared by the `Esc` dismiss path and the rewind entry points, so a shadowed picker can't reappear stale.
     pub(crate) fn dismiss_jump_picker(&mut self) {
         if let Some(js) = self.jump_state.take() {
             self.restore_jump_viewport(js.restore);
@@ -28,14 +28,16 @@ impl AgentView {
         }
     }
 
-    /// True when another prompt overlay owns the input slot, so the `/jump`
-    /// picker must not open and an open one must be dismissed.
+    /// True when another prompt overlay owns the input slot, so the `/jump` picker must not open and an open one must be dismissed.
+    /// The owners: rewind, the `/btw` panel, or a pending permission / question / cancel-turn / plan-approval overlay.
+    /// One predicate keeps dispatch, key, mouse, and scroll routing from disagreeing on the owner.
     pub(crate) fn jump_slot_taken(&self) -> bool {
         self.rewind_state.is_some() || self.btw_state.is_some() || !self.no_input_overlay_pending()
     }
 
-    /// Drop the picker when another overlay owns the input slot
-    /// ([`Self::jump_slot_taken`]), so it can't eat wheel/keys while hidden.
+    /// Drop the picker when another overlay owns the input slot ([`Self::jump_slot_taken`]), so it can't eat wheel/keys while hidden.
+    /// Returns whether it dropped one, so an `Esc` caller can spend that key here.
+    /// Otherwise `Esc` would also dismiss the overlay shadowing the picker (e.g. the `/btw` panel).
     pub(super) fn dismiss_jump_picker_if_suppressed(&mut self) -> bool {
         if self.jump_state.is_some() && self.jump_slot_taken() {
             self.dismiss_jump_picker();
@@ -56,8 +58,7 @@ impl AgentView {
         else {
             return;
         };
-        // Resolve the stable id at the boundary; a removal since capture
-        // means no preview scroll rather than landing on the wrong block
+        // Resolve the stable id at the boundary; a removal since capture just means no preview scroll rather than landing on the wrong block
         if let Some(idx) = self.scrollback.index_of_id(prompt_id) {
             self.scrollback.scroll_to_entry_top(idx);
         }

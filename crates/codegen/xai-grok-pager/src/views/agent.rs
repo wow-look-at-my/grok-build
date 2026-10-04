@@ -1,4 +1,13 @@
 //! Agent view layout and rendering helpers.
+//!
+//! This module provides:
+//! - [`AgentViewLayout`]: pure layout computation (screen area to pane rects)
+//! - [`ActivePane`] / [`PaneAreas`]: pane identity and hit-testing
+//! - Overlay helpers: small focused functions for selection/hover chrome
+//! - [`build_hints`]: shortcuts bar hint generation
+//!
+//! The drawing itself happens in [`AgentView::draw()`](crate::app::agent_view::AgentView::draw).
+//! It renders the shared widgets (StatusBar, ScrollbackPane, PromptWidget, ShortcutsBar) and uses these helpers for the agent-specific glue.
 use crate::actions::{ActionId, ActionRegistry, When};
 use crate::app::agent_view::ViewSurface;
 use crate::appearance::{LayoutConfig, ScrollbarConfig};
@@ -43,7 +52,8 @@ pub struct PaneAreas {
     pub queue: Rect,
     pub prompt: Rect,
     pub tasks: Rect,
-    /// Consolidated panel dock (remote `dock_enabled`).
+    /// Consolidated panel dock (remote `dock_enabled`); the embedded
+    /// queue body inside it hit-tests as `Queue` (checked first).
     pub dock: Rect,
 }
 impl PaneAreas {
@@ -72,14 +82,18 @@ impl PaneAreas {
     }
 }
 /// Terminals at or below this height suppress the optional rows above the prompt (plugin CTA, follow-ups, banner/tip).
+/// This keeps the prompt and the scrollback from being starved.
 pub const SHORT_TERMINAL_ROWS: u16 = 16;
 /// The scrollback's floor, pushed as the layout's only `Min`.
+/// The solver ranks it above every `Length`, so an over-committed layout shrinks another row.
 pub const SCROLLBACK_MIN_ROWS: u16 = 5;
 /// Auto-compact threshold: at or below this height the compact flag handed to rendering is forced on.
+/// Deliberately above [`SHORT_TERMINAL_ROWS`], which still gates the harder cuts (tip-row rendering, dropping the CTA and follow-up rows).
 pub const AUTO_COMPACT_MAX_ROWS: u16 = 20;
 const _: () = assert!(SHORT_TERMINAL_ROWS < AUTO_COMPACT_MAX_ROWS);
-/// The result is never written back to `current_ui.compact_mode`, the render
-/// cache, or disk. Growing the window therefore restores the user's choice.
+/// The result is never written back to `current_ui.compact_mode`, the render cache, or disk.
+/// Growing the window therefore restores the user's choice. `terminal_rows == 0` means "not yet
+/// measured" and never forces compact.
 pub fn effective_compact(user_compact: bool, terminal_rows: u16) -> bool {
     user_compact || (terminal_rows > 0 && terminal_rows <= AUTO_COMPACT_MAX_ROWS)
 }
@@ -90,6 +104,8 @@ pub struct AgentViewLayoutParams {
     pub area: Rect,
     pub layout_cfg: LayoutConfig,
     pub scrollbar_cfg: ScrollbarConfig,
+    /// Rail columns taken in place of the scrollbar (0 means hidden).
+    /// The rail needs the scrollbar's gutter geometry, so a disabled scrollbar forces this to 0.
     pub timeline_width: u16,
     pub prompt_height: u16,
     pub tasks_height: u16,
@@ -98,15 +114,19 @@ pub struct AgentViewLayoutParams {
     pub btw_height: u16,
     pub turn_status_height: u16,
     pub banner_height: u16,
+    /// Forced to 0 on short terminals (`area.height <= SHORT_TERMINAL_ROWS`) so the prompt and scrollback are never starved.
     pub cta_height: u16,
     /// Force-suppressed on short terminals on the same rule as `cta_height`.
     pub follow_ups_height: u16,
-    /// Consolidated panel dock (Subagents/Tasks/Watchers/Queued) directly above the prompt.
+    /// Consolidated panel dock (Subagents/Tasks/Watchers/Queued) directly
+    /// above the prompt. 0 = hidden (the default; remote `dock_enabled`).
     pub dock_height: u16,
+    /// 0 or 1: the gap row between turn status (or scrollback) and the prompt.
     pub prompt_gap: u16,
     pub voice_recording_height: u16,
     pub shortcuts_height: u16,
     /// Clamped to the rows left over once every other row and the scrollback minimum are counted.
+    /// A tall script loses its own rows rather than the prompt or the shortcuts bar losing theirs.
     pub status_line_height: u16,
     pub compact: bool,
 }
@@ -127,7 +147,8 @@ pub struct AgentViewLayout {
     pub plugin_cta: Rect,
     /// Follow-up suggestion chips row (below the plugin CTA, above the prompt).
     pub follow_ups: Rect,
-    /// Consolidated panel dock (Subagents/Tasks/Watchers/Queued) directly above the prompt; zero-area when hidden.
+    /// Consolidated panel dock (Subagents/Tasks/Watchers/Queued) directly
+    /// above the prompt; zero-area when hidden.
     pub dock: Rect,
     /// Single-row record indicator ("◉ Recording") directly above the prompt, shown only while voice capture is active.
     pub voice_recording: Rect,
@@ -140,7 +161,10 @@ pub struct AgentViewLayout {
     /// Scrollbar track position (x coordinate).
     pub scrollbar_x: u16,
     /// Timeline rail left edge, only meaningful when `timeline_width > 0`.
+    /// The rail's right edge lands on the scrollbar column, which the rail replaces.
     pub timeline_x: u16,
+    /// Columns reserved for the timeline rail (0 means the rail is hidden).
+    /// Non-zero also means the scrollbar does not render this frame.
     pub timeline_width: u16,
 }
 impl AgentViewLayout {
@@ -1170,7 +1194,7 @@ mod tests {
             None,
         )
     }
-    /// The child surface adds `q/Esc back` and drops the demote chip and the `BackTab mode` hint; the root keeps all of them.
+    /// The child surface adds `q/Esc back` and drops the demote chip and the `BackTab mode` hint; the root keeps all three.
     #[test]
     fn build_hints_child_surface_adds_back_and_hides_demote_and_mode() {
         let has = |hints: &[HintItem], label: &str| hints.iter().any(|h| h.label == label);
@@ -1678,7 +1702,8 @@ mod tests {
         }
     }
     /// Running turn with an open scrollback search: the search's own `Esc cancel` hint stays the only Esc hint.
-    /// The CancelTurn hint keeps Ctrl+C. The bar therefore never shows different `Esc cancel` meanings at once.
+    /// The CancelTurn hint keeps Ctrl+C.
+    /// The bar therefore never shows two different `Esc cancel` meanings at once.
     #[test]
     fn running_turn_with_scrollback_search_keeps_ctrl_c_cancel_hint() {
         let registry = ActionRegistry::defaults();
@@ -1727,7 +1752,8 @@ mod tests {
         );
     }
     /// Running turn while editing a queued prompt: the edit's own `Esc cancel` (discard) hint is the only Esc-keyed row.
-    /// The CancelTurn hint keeps Ctrl+C. The bar therefore never shows contradictory `Esc cancel` rows.
+    /// The CancelTurn hint keeps Ctrl+C.
+    /// The bar therefore never shows two contradictory `Esc cancel` rows.
     #[test]
     fn running_turn_editing_queued_keeps_ctrl_c_cancel_hint() {
         let registry = ActionRegistry::defaults();
@@ -2170,7 +2196,7 @@ mod tests {
         assert_eq!(layout.plugin_cta, Rect::default());
         assert!(layout.scrollback.height >= 5);
     }
-    /// Banner row (mode banner / ephemeral tip slot): height reserves a one-row rect directly above the prompt (gap row in between).
+    /// Banner row (mode banner / ephemeral tip slot): height 1 reserves a one-row rect directly above the prompt (gap row in between).
     #[test]
     fn banner_row_present_above_prompt() {
         let area = Rect::new(0, 0, 80, 40);

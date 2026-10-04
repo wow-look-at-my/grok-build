@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+// Resolves the grok binary and runs it, in order of preference:
+//   1. $GROK_HOME/bin/grok, the versioned symlink postinstall.js installs
+//   2. bootstrap it from the per-platform @xai-official/grok-<platform>
+//      package, decompressing the compressed binary into $GROK_HOME/bin
+//   3. decompress in place under node_modules (no resolvable version, or
+//      an unwritable home)
+//
+// Binaries ship brotli-compressed to stay under npm's tarball size limit.
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');

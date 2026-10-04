@@ -1,4 +1,6 @@
 //! MCP integration for the workspace server.
+//!
+//! Bridges [`McpClient`] to the server's [`McpTransport`] trait.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -29,8 +31,8 @@ use crate::session::{SessionMcpServer, WorkspaceMcpBinding, WorkspaceSession};
 /// The slice of the hub's per-session tool surface that MCP reconfiguration drives: what a session currently advertises, plus dynamic registration in both directions.
 /// The seam exists so the reload tests can substitute an in-memory hub — a real `ToolServer` cannot be built without a live hub connection.
 pub(crate) trait HubToolRegistry: Send + Sync {
-    /// `life` is the session's MCP life epoch. The hub ledger is life-tagged,
-    /// so a stale unregister cannot remove a newer life's registration.
+    /// `life` is the session's MCP life epoch. The hub ledger is life-tagged, so a stale unregister cannot remove a newer life's registration.
+    /// An unregister never touches a non-dynamic handler, including a resolver-installed native sharing the id.
     fn register_tool_dynamic(
         &self,
         handler: Arc<dyn ToolServerHandler>,
@@ -173,7 +175,8 @@ impl McpTransport for McpClientTransportAdapter {
     }
 
     async fn close(&self) -> Result<(), xai_computer_hub_mcp_adapter::McpError> {
-        // Letting go of the client is what ends a stdio child, once no in-flight call still holds its service.
+        // Letting go of the client is what ends a stdio child, once no in-flight call still holds its
+        // service; a call routed in afterwards fails here.
         self.client.store(None);
         Ok(())
     }
@@ -301,11 +304,9 @@ async fn record_bridge_outcome(
             bridge,
         }) => {
             remaining_names.remove(&server_name);
-            // Commit gate, life-coherent by construction: the binding lock is
-            // HELD across the `owned_clients` write (lock order binding →
-            // mcp_state, the same order teardown's in-critical-section sweep
-            // uses), and the gate compares the LIFE — not merely
-            // not-`Closed`.
+            // Commit gate, life-coherent by construction: the binding lock is HELD across the `owned_clients` write (lock order binding → mcp_state, the same order teardown's in-critical-section sweep uses), and the gate compares the LIFE — not merely not-`Closed`.
+            // A teardown-then-revive during the server's start leaves the binding `Active` again, but for a NEW life; a state-only gate would commit this stale client into it (and publish the outcome to the drive's consumer).
+            // Epoch equality subsumes the `Closed` check: teardown bumps before flipping.
             let stale = {
                 let _binding = session.mcp_binding.lock().await;
                 let stale = session.mcp_epoch.load(std::sync::atomic::Ordering::SeqCst) != life;
@@ -334,7 +335,9 @@ async fn record_bridge_outcome(
         Err(failure) => {
             remaining_names.remove(&failure.name);
             {
-                // Same nesting and life gate as the Ok arm, so a failure's bookkeeping cannot race a teardown's sweep or land.
+                // Same nesting and life gate as the Ok arm, so a failure's
+                // bookkeeping cannot race a teardown's sweep or land in a
+                // revived life's state.
                 let _binding = session.mcp_binding.lock().await;
                 if session.mcp_epoch.load(std::sync::atomic::Ordering::SeqCst) == life {
                     let mut state = session.mcp_state.lock().await;
@@ -353,7 +356,7 @@ async fn record_bridge_outcome(
     }
 }
 
-/// Hard bound on the MCP tools one session advertises, across all of its servers.
+/// Hard bound on the MCP tools one session advertises, across all of its servers. Tool lists come from external servers and every advertised tool is model-visible, so the fan-in carries an explicit cap; tools past it are dropped deterministically (first-party servers first, then name order, tools in server order) and stay unowned, so a later removal cannot unregister a tool that was never advertised.
 pub(crate) const MAX_ADVERTISED_MCP_TOOLS: usize = 256;
 
 /// Decide what each of a session's servers may advertise, record it on the server, and return the flat list. The configured path's only writer of `tool_ids`, which is what keeps a removal unregistering exactly what its server contributed.
@@ -362,7 +365,9 @@ pub(crate) async fn claim_tools(
     native: &HashSet<ToolId>,
 ) -> (Vec<Arc<dyn ToolServerHandler>>, u64) {
     let mut binding = session.mcp_binding.lock().await;
-    // The life these claims belong to, observed under the same lock that recorded them.
+    // The life these claims belong to, observed under the same lock that
+    // recorded them; `settle_registrations` re-checks it so registrations
+    // made for this life are never committed to (or left registered under) a newer one.
     let life = session.mcp_epoch.load(std::sync::atomic::Ordering::SeqCst);
     let Some(active) = binding.active_mut() else {
         return (Vec::new(), life);
@@ -418,9 +423,9 @@ pub(crate) async fn claim_tools(
     (advertised, life)
 }
 
-/// Open a drive scope for a session's MCP life: fail closed on a torn-down
-/// binding and — inside the same critical section — snapshot the life's
-/// cancel token AND epoch.
+/// Open a drive scope for a session's MCP life: fail closed on a torn-down binding and — inside the same critical section — snapshot the life's cancel token AND epoch.
+/// Teardown cancels that token (captured under this same lock) to drop in-flight start futures, and every downstream commit ([`record_bridge_outcome`], [`install_servers`], `settle_registrations`) gates on the epoch — so a teardown+revive during a start can neither leave the drive uncancellable nor let its outcomes commit into the new life.
+/// The CALLER holds the scope so the install half of a convergence gates on the same life the drive verified.
 pub(crate) async fn begin_mcp_drive(
     session: &WorkspaceSession,
 ) -> WorkspaceResult<(tokio_util::sync::CancellationToken, u64)> {
@@ -473,7 +478,8 @@ pub(crate) async fn drive_server_starts(
             None
         }
     };
-    // Per-server startup watchdog sized so the WHOLE handshake (the server/discover probe phase plus the phase running on this startup budget).
+    // Per-server startup watchdog sized so the WHOLE handshake (the server/discover probe phase plus the legacy phase running on this startup budget) fits the shared deadline, keeping the invariant that a hung handshake fails on its own before the deadline has to cancel it.
+    // Sizing to the raw deadline would let a swallowed probe burn the legacy phase's window and convert per-server errors into the generic discovery-timeout failure.
     let deadline_secs = discovery_timeout
         .as_secs()
         .saturating_add(u64::from(discovery_timeout.subsec_nanos() != 0));
@@ -483,7 +489,8 @@ pub(crate) async fn drive_server_starts(
         startup_timeout_sec: Some(startup_timeout_sec),
         ..Default::default()
     };
-    // Spawn contexts, chosen PER SERVER.
+    // Two spawn contexts, chosen PER SERVER: only first-party app endpoints get the agent-id header (which carries the bound session id and flips the transport to the local-agent posture — no OAuth probe, no proxy, no redirects).
+    // A per-drive flag here would leak the session id to every user-configured third-party server in the bind config and break their auth.
     let ctx_plain = McpSpawnCtx::for_session(
         session_id,
         &event_writer,
@@ -530,7 +537,9 @@ pub(crate) async fn drive_server_starts(
                     Arc::new(McpClientTransportAdapter::new(Arc::clone(&client)));
                 let config = McpBridgeConfig {
                     session_id: bridge_session_id,
-                    // The bridge namespaces every tool by server name.
+                    // The bridge namespaces every tool by server name;
+                    // `claim_tools` relies on that to tell siblings'
+                    // same-named tools apart.
                     namespace: Some(server_name.clone()),
                 };
                 let bridge = McpBridge::connect(transport, &config)
@@ -578,7 +587,8 @@ pub(crate) async fn drive_server_starts(
         }
     }
     if cancelled || receiver_gone {
-        // Teardown or caller abort: drop the pending starts (killing their children) and report nothing further.
+        // Teardown or caller abort: drop the pending starts (killing their
+        // children) and report nothing further.
         drop(pending);
         finish_init_if_life(session, life, init_claim).await;
         return if cancelled {
@@ -600,7 +610,9 @@ pub(crate) async fn drive_server_starts(
         drop(pending);
         for name in remaining_names.drain() {
             {
-                // Life-gated like every state write: a straggler timing out.
+                // Life-gated like every state write: a straggler timing out
+                // after a teardown+revive must not smear failures onto the
+                // new life's state.
                 let _binding = session.mcp_binding.lock().await;
                 if session.mcp_epoch.load(std::sync::atomic::Ordering::SeqCst) == life {
                     let mut state = session.mcp_state.lock().await;
@@ -646,13 +658,13 @@ async fn finish_init_if_life(session: &WorkspaceSession, life: u64, claim: Optio
     }
 }
 
-/// Dedupe MCP server configs by name, LAST definition wins (JSON-object semantics — name-keyed sources can only produce duplicates through list-shaped construction). One helper for BOTH
-/// config chokepoints — `BindMcpConfig::new` (machine-owned) and `start_session_mcp_servers` (client-driven `workspace.configure_mcp`) — so both paths cannot drift.
+/// Dedupe MCP server configs by name, LAST definition wins (JSON-object semantics — name-keyed sources can only produce duplicates through list-shaped construction).
+/// One helper for BOTH config chokepoints — `BindMcpConfig::new` (machine-owned) and `start_session_mcp_servers` (client-driven `workspace.configure_mcp`) — so the two paths cannot drift.
 pub(crate) fn dedupe_servers_last_wins(servers: &mut Vec<agent_client_protocol::McpServer>) {
     let mut seen = std::collections::HashSet::new();
     let mut dropped = 0usize;
-    // Iterate from the back so the LAST occurrence of each name is the kept,
-    // preserving its position.
+    // Iterate from the back so the LAST occurrence of each name is the one
+    // kept, preserving its position.
     for index in (0..servers.len()).rev() {
         let Some(server) = servers.get(index) else {
             continue;
@@ -693,8 +705,8 @@ pub fn compose_built_in(
     composed
 }
 
-/// Cap a server-config list at [`crate::config::BindMcpConfig::MAX_SERVERS`],
-/// keeping the first entries in config order.
+/// Cap a server-config list at [`crate::config::BindMcpConfig::MAX_SERVERS`], keeping the first entries in config order.
+/// Shared by BOTH config chokepoints — `BindMcpConfig::new` (machine-owned) and `start_session_mcp_servers` (client-driven `workspace.configure_mcp`) — so every entry ends up costing bounded resources (process, connection, discovery work) no matter which path configured it.
 pub(crate) fn cap_servers(servers: &mut Vec<agent_client_protocol::McpServer>) {
     if servers.len() > crate::config::BindMcpConfig::MAX_SERVERS {
         tracing::warn!(
@@ -719,7 +731,9 @@ pub(crate) async fn connect_servers(
 ) -> WorkspaceResult<(StartedMcp, u64)> {
     let drive_scope = begin_mcp_drive(session).await?;
     let life = drive_scope.1;
-    // One outcome per config entry, and the entry count is capped at MAX_SERVERS by both config chokepoints — so this named capacity can never fill.
+    // One outcome per config entry, and the entry count is capped at
+    // MAX_SERVERS by both config chokepoints — so this named capacity can
+    // never fill and a send never blocks.
     let (tx, mut rx) = tokio::sync::mpsc::channel(crate::config::BindMcpConfig::MAX_SERVERS);
     let drive = drive_server_starts(
         session,
@@ -762,9 +776,9 @@ pub(crate) async fn install_servers(
 ) -> WorkspaceResult<Vec<String>> {
     let (installed, stopped) = {
         let mut binding = session.mcp_binding.lock().await;
-        // Life-gated, not merely state-gated: a server recorded under an
-        // older life can still be IN FLIGHT through a convergence's publish
-        // channel.
+        // Life-gated, not merely state-gated: a server recorded under an older life can still be IN FLIGHT through
+        // a convergence's publish channel when a teardown+revive opens a new life — a bare `join()` would insert it
+        // into that new life, which would then treat the stale client as already running and never start a fresh one.
         if session.mcp_epoch.load(std::sync::atomic::Ordering::SeqCst) != expected_life {
             return Err(WorkspaceError::SessionNotFound(session.session_id.clone()));
         }
@@ -811,7 +825,9 @@ pub(crate) async fn install_servers(
 pub(crate) enum Restart {
     /// As soon as a publish wants it again: the stop was the configuration's own.
     OnReconfigured,
-    /// Not before the session's next bind, however many reloads want it meanwhile: a host that has gone must not have it started again.
+    /// Not before the session's next bind, however many reloads want it meanwhile: a host that
+    /// has gone must not have it started again, and a start already in flight ends at its
+    /// commit ([`install_servers`]).
     OnNextBind,
 }
 
@@ -827,7 +843,9 @@ pub(crate) async fn stop_servers(
 ) -> Vec<String> {
     let (stopped, life) = {
         let mut binding = session.mcp_binding.lock().await;
-        // The life whose registrations this stop removes, observed under the same lock the extraction holds.
+        // The life whose registrations this stop removes, observed under
+        // the same lock the extraction holds: a stale post-CS unregister
+        // can then never hit a newer life's same-id registration.
         let life = session.mcp_epoch.load(std::sync::atomic::Ordering::SeqCst);
         let Some(active) = binding.active_mut() else {
             return Vec::new();
@@ -841,7 +859,8 @@ pub(crate) async fn stop_servers(
             .iter()
             .filter_map(|name| active.servers.remove_entry(name))
             .collect();
-        // Same binding → mcp_state nesting as `record_bridge_outcome`, so a drive committing this life's client cannot interleave.
+        // Same binding → mcp_state nesting as `record_bridge_outcome`, so a
+        // drive committing this life's client cannot interleave with its removal.
         let mut state = session.mcp_state.lock().await;
         for (name, _) in &stopped {
             state.owned_clients.remove(name);
@@ -850,8 +869,8 @@ pub(crate) async fn stop_servers(
     };
     let mut names = Vec::with_capacity(stopped.len());
     for (name, server) in stopped {
-        // Bridge first: its close drops the client's last owner, so a child holding host-side state (the computer-use helper's
-        // remote-control lease) ends.
+        // Bridge first: its close drops the client's last owner, so a child holding host-side state
+        // (the computer-use helper's remote-control lease) ends before the hub round trips below.
         if let Err(error) = server.bridge.bridge.shutdown().await {
             tracing::warn!(%session_id, server = %name, %error, "MCP bridge shutdown failed");
         }
@@ -870,8 +889,8 @@ pub(crate) async fn stop_servers(
     names
 }
 
-/// Install `started` and advertise its tools under the legacy qualified `server__tool` names — `workspace.configure_mcp`'s wire contract. The second `tool_ids` writer besides [`claim_tools`]: the qualified names are pre-namespaced per server, so there is nothing to disambiguate, and
-/// both writers are mutually exclusive by construction — this RPC is refused on a workspace whose servers come from local configuration.
+/// Install `started` and advertise its tools under the legacy qualified `server__tool` names — `workspace.configure_mcp`'s wire contract.
+/// The second `tool_ids` writer besides [`claim_tools`]: the qualified names are pre-namespaced per server, so there is nothing to disambiguate, and the two writers are mutually exclusive by construction — this RPC is refused on a workspace whose servers come from local configuration.
 pub(crate) async fn install_and_advertise_qualified(
     session: &WorkspaceSession,
     session_id: &SessionId,
@@ -879,7 +898,9 @@ pub(crate) async fn install_and_advertise_qualified(
     started: Vec<StartedMcpServer>,
     life: u64,
 ) -> WorkspaceResult<()> {
-    // Same per-session advertisement cap as the bind path's `claim_tools`: the path REPLACES the session's servers (`stop_servers` ran).
+    // Same per-session advertisement cap as the bind path's `claim_tools`:
+    // the legacy path REPLACES the session's servers (`stop_servers` ran),
+    // so the count starts from zero. First tools in server order win.
     let mut total = 0usize;
     let mut over_cap = 0usize;
     let advertised: Vec<(String, Vec<Arc<dyn ToolServerHandler>>)> = started
@@ -935,7 +956,9 @@ pub(crate) async fn install_and_advertise_qualified(
                 ),
             }
         }
-        // Records this server's contribution, or — when a teardown interleaved with the registrations above — unregisters them again.
+        // Records this server's contribution, or — when a teardown
+        // interleaved with the registrations above — unregisters them again
+        // so the hub does not keep routing into dropped bridges.
         let recorded = owned.clone();
         settle_registrations(
             session,
@@ -971,8 +994,8 @@ impl SessionMcpDelta {
     }
 }
 
-/// Whether a convergence with an unchanged server plan still re-claims tool
-/// ownership and reconciles the hub.
+/// Whether a convergence with an unchanged server plan still re-claims tool ownership and reconciles the hub. A reload converges every session and skips the untouched ones (`IfChanged`); a bind must reconcile even when no server starts or stops, because its *native* tool set may have changed and a claimed MCP id could newly collide with it (`Always`).
+/// Only a bind (`Always`) starts a server stopped [`Restart::OnNextBind`]; a reload leaves it stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum McpReclaim {
     IfChanged,
@@ -987,10 +1010,8 @@ pub(crate) struct ConvergencePlan {
     pub(crate) start: Vec<String>,
 }
 
-/// Decide the plan from what a session runs (`live`), what the configuration
-/// asks for (`wanted`, in config order), which live names must not be kept as
-/// they are (`restart`: the configuration redefined them, or their transport
-/// closed), and which are stopped until the session's next bind (`stopped`).
+/// Decide the plan from what a session runs (`live`), what the configuration asks for (`wanted`, in config order), which live names must not be kept as they are (`restart`: the configuration redefined them, or their transport closed), and which are stopped until the session's next bind (`stopped`).
+/// Anything wanted that is then not running starts — which covers new servers, restarted ones just stopped, and servers whose previous start failed, since a failed server never entered `live` — except what is `stopped`.
 pub(crate) fn plan_convergence(
     live: &HashSet<String>,
     wanted: &[String],
@@ -1070,7 +1091,9 @@ pub(crate) async fn converge_session(
         .await,
         ..Default::default()
     };
-    // The bind recorded which ids are native; the hub snapshot cannot be used for this.
+    // The bind recorded which ids are native; the hub snapshot cannot be used
+    // for this, because it also holds already-advertised MCP tools and counting
+    // those as taken would make a surviving server lose the very ids it is serving.
     let native = session.mcp_native_tool_ids.lock().clone();
     if !plan.start.is_empty() {
         let starting: HashSet<&str> = plan.start.iter().map(String::as_str).collect();
@@ -1100,7 +1123,9 @@ pub(crate) async fn converge_session(
             while let Some(outcome) = rx.recv().await {
                 match outcome {
                     Ok(server) => {
-                        // Life-gated on the DRIVE's life: the outcome was recorded under it.
+                        // Life-gated on the DRIVE's life: the outcome was recorded under it, but this
+                        // publish half runs concurrently — a teardown+revive between the record and this
+                        // install must refuse the stale server, or the revived life would treat it as already running.
                         let installed = install_servers(session, vec![server], drive_life).await?;
                         if !installed.is_empty() {
                             delta.added.extend(installed);
@@ -1116,7 +1141,8 @@ pub(crate) async fn converge_session(
         driven?;
         published?;
     }
-    // Reconciliation also runs when the convergence started nothing.
+    // Reconciliation also runs when the convergence started nothing: stopping a
+    // clashing server frees its tool id for a survivor to re-claim.
     reconcile_session_tools(session, &sid, tool_server, &native).await;
     Ok(delta)
 }
@@ -1136,9 +1162,9 @@ async fn reconcile_session_tools(
         if owners_after.get(tool_id) == Some(owner) {
             continue;
         }
-        // Life-tagged: if this id is no longer a THIS-life dynamic
-        // registration (a resolver-installed native now holds it, or a newer
-        // life re-registered it).
+        // Life-tagged: if this id is no longer a THIS-life dynamic registration (a
+        // resolver-installed native now holds it, or a newer life re-registered
+        // it), the unregister is a no-op rather than stripping the other owner's handler.
         if let Err(error) = tool_server
             .unregister_tool_dynamic(tool_id, sid, life)
             .await
@@ -1150,8 +1176,9 @@ async fn reconcile_session_tools(
     let mut registered = Vec::new();
     for handler in claimed {
         let tool_id = handler.tool_id();
-        // No is-it-already-on-the-hub skip: the hub's life-tagged ledger
-        // makes a same-life re-register an idempotent no-op.
+        // No is-it-already-on-the-hub skip: the hub's life-tagged ledger makes a same-life re-register an
+        // idempotent no-op, an older life's stale registration is SUPERSEDED (an is-on-hub skip here would leave
+        // the id routing into the closed life's dropped bridge), and a native's id was already excluded by `claim_tools`.
         match tool_server
             .register_tool_dynamic(handler, vec![sid.clone()], life)
             .await
@@ -1162,17 +1189,13 @@ async fn reconcile_session_tools(
             }
         }
     }
-    // Ownership was already recorded by `claim_tools`.
+    // Ownership was already recorded by `claim_tools`; the gate only has to
+    // catch a teardown that landed while the ids above were registering.
     settle_registrations(session, sid, tool_server, registered, life, |_active| {}).await;
 }
 
-/// Settle hub tool registrations made outside the binding lock: either the
-/// life they were claimed under is still current (run `commit` under the
-/// binding lock — the qualified path records ownership there; the
-/// configured path has nothing left to record, `claim_tools` already did) or
-/// that life is gone (unregister the just-registered ids again). The GATE is
-/// the point; the closure is only what a caller still needs made atomic with
-/// it.
+/// Settle hub tool registrations made outside the binding lock: either the life they were claimed under is still current (run `commit` under the binding lock — the qualified path records ownership there; the configured path has nothing left to record, `claim_tools` already did) or that life is gone (unregister the just-registered ids again).
+/// The GATE is the point; the closure is only what a caller still needs made atomic with it. `expected_life` is the `mcp_epoch` the caller observed under the lock when it claimed/installed (see [`claim_tools`] / [`install_servers`]): a bare is-Active check would let registrations made for a closed life commit into a REVIVED life — recorded on the wrong life's servers, or left registered on the hub routing into dropped bridges.
 pub(crate) async fn settle_registrations(
     session: &WorkspaceSession,
     session_id: &SessionId,
@@ -1207,7 +1230,7 @@ pub(crate) async fn settle_registrations(
 
 /// Every id the session's MCP servers currently own, keyed to the owning
 /// server's configured name. Ids are unique across servers by construction
-/// (`claim_tools` never lets servers own one id).
+/// (`claim_tools` never lets two servers own one id).
 async fn owned_tool_owners(session: &WorkspaceSession) -> HashMap<ToolId, String> {
     session
         .mcp_binding
@@ -1396,8 +1419,8 @@ mod tests {
     }
 
     /// The shared dedupe both config chokepoints run — `BindMcpConfig::new` AND the client-driven
-    /// `start_session_mcp_servers` list before `connect_servers`: one slot per name, LAST definition wins at its
-    /// position, so a duplicate can never start clients and drop the first bridge handle without shutdown.
+    /// `start_session_mcp_servers` list before `connect_servers`: one slot per name, LAST definition wins
+    /// at its position, so a duplicate can never start two clients and drop the first bridge handle without shutdown.
     #[test]
     fn dedupe_servers_last_wins_keeps_last_definition_in_place() {
         let http = |name: &str, url: &str| {

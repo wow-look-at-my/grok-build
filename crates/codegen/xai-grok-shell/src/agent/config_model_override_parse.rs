@@ -1,4 +1,16 @@
 //! Resilient parsing for `[model.<id>]` TOML overrides.
+//!
+//! It also defines [`ConfigWarning`] and [`WarningTarget`], the shared warning vocabulary.
+//! The `[auth_provider.*]` parser in `config.rs` emits them too.
+//!
+//! A model entry must survive a bad field: warn and skip the field, never drop the model (managed configs must not lose catalog entries).
+//!
+//! Every table is deserialized through `serde_ignored`, so unknown fields warn on every path.
+//! [`ConfigModelOverride`] thus stays the single source of truth for the field set.
+//! When the whole-table parse fails, fields that fail to parse on their own are pruned (one warning each) and the table is parsed again.
+//! Non-table values are dropped with a warning.
+//!
+//! Warnings are retained on `Config::config_warnings` and surfaced by `grok inspect`.
 
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -228,7 +240,7 @@ pub(crate) fn log_config_warnings(warnings: &[ConfigWarning]) {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static LAST_LOGGED: AtomicU64 = AtomicU64::new(0);
-    // Means "no warnings"; real hashes are clamped to nonzero.
+    // 0 means "no warnings"; real hashes are clamped to nonzero.
     let hash = if warnings.is_empty() {
         0
     } else {
@@ -308,7 +320,8 @@ fn parse_model_override_table(
     }
 
     if entry.auth_provider.is_some() {
-        // A non-empty `api_key` always shadows.
+        // A non-empty `api_key` always shadows; an `env_key` only shadows when its variable resolves at runtime, which parse time can't know
+        // Warn accordingly so the message matches what actually happens
         let has_static_api_key = entry
             .api_key
             .as_deref()
@@ -345,6 +358,7 @@ fn parse_model_override_table(
 }
 
 /// `(canonical, legacy)` key pairs that serde rejects as duplicate fields when both appear in one table.
+/// Keep in sync with the `#[serde(alias)]` attributes on [`ConfigModelOverride`].
 const ALIASES: &[(&str, &str)] = &[("compactions_remaining", "send_compactions_remaining")];
 
 /// Removes one key of each [`ALIASES`] pair that appears twice in `table`.
@@ -858,8 +872,8 @@ mod tests {
     fn fully_populated_override_round_trips_with_only_the_shadowing_warning() {
         let serialized = toml::Value::try_from(fully_populated_override()).unwrap();
         let (models, warnings) = parse_single_entry(serialized.as_table().unwrap().clone());
-        // The exhaustive literal deliberately sets `api_key`, `env_key`, AND
-        // `auth_provider`.
+        // The exhaustive literal deliberately sets `api_key`, `env_key`, AND `auth_provider`: the one legal-but-warned combination
+        // Any other warning (skipped/unknown field) still fails the guard
         let unexpected: Vec<_> = warnings
             .iter()
             .filter(|w| w.kind != ConfigWarningKind::ConflictingFields)
@@ -1049,13 +1063,40 @@ mod tests {
         }
     }
 
-    /// Drift guard across both user-facing model structs. A `[model.<id>]` table in `config.toml` is parsed into [`ConfigModelOverride`], not into `ModelEntryConfig`. When a field exists on `ModelEntryConfig` but not on `ConfigModelOverride`, the key parses as an **unknown field** and is silently discarded: the setting appears to work but has no effect. That is exactly how `strict_message_schema` shipped broken — a Cerebras entry could set it and the resolved profile still came out permissive, so the provider rejected every replayed message. The field list is read from the `ModelEntryConfig` declaration in the source itself, so it cannot drift from the struct the way a hand-kept list would. Each name is then fed through the real parser — the same `parse_model_overrides` the config loader calls — and must not come back as an unknown field. It deliberately does NOT compare serialized JSON: most of these fields carry `skip_serializing_if`, so a `false`/`None` value vanishes from a serialized comparison and hides the gap being checked. (An earlier draft of
-    /// this test did exactly that and passed against a struct with the field removed.) Driving the parser cannot be fooled that way.
+    /// Drift guard across the two user-facing model structs.
+    ///
+    /// A `[model.<id>]` table in `config.toml` is parsed into
+    /// [`ConfigModelOverride`], not into `ModelEntryConfig`. When a field
+    /// exists on `ModelEntryConfig` but not on `ConfigModelOverride`, the key
+    /// parses as an **unknown field** and is silently discarded: the setting
+    /// appears to work but has no effect. That is exactly how
+    /// `strict_message_schema` shipped broken — a Cerebras entry could set it
+    /// and the resolved profile still came out permissive, so the provider
+    /// rejected every replayed message.
+    ///
+    /// The field list is read from the `ModelEntryConfig` declaration in the
+    /// source itself, so it cannot drift from the struct the way a hand-kept
+    /// list would. Each name is then fed through the real parser — the same
+    /// `parse_model_overrides` the config loader calls — and must not come
+    /// back as an unknown field.
+    ///
+    /// It deliberately does NOT compare serialized JSON: most of these fields
+    /// carry `skip_serializing_if`, so a `false`/`None` value vanishes from a
+    /// serialized comparison and hides the very gap being checked. (An earlier
+    /// draft of this test did exactly that and passed against a struct with
+    /// the field removed.) Driving the parser cannot be fooled that way.
+    ///
+    /// The three exclusions are deliberate and are not user config:
+    /// - `id` is the `[model.<id>]` table key itself, not an inner field.
+    /// - `auth_scheme` comes from credentials, never from the config file.
+    /// - `laziness_detector` is not exposed to `config.toml` (no docs, no
+    ///   parse path); it is set from the remote catalog.
     #[test]
     fn every_user_settable_model_entry_field_is_accepted_by_the_override() {
         // `loaded_in_vram` is runtime state, not config: the local-runtime
         // discovery fills it from `/api/ps` (or LM Studio's listing) at
-        // catalog build.
+        // catalog build and re-reads it on a poll. A user-written value would
+        // claim a residency nobody observed, and the next poll overwrites it.
         const NOT_USER_CONFIG: &[&str] = &[
             "id",
             "auth_scheme",
@@ -1075,11 +1116,15 @@ mod tests {
             candidates.len()
         );
 
-        // Every candidate must be recognized as a real field by the parser.
+        // Every candidate must be recognized as a real field by the parser —
+        // an unknown key is what makes a config.toml setting silently inert.
         let mut unknown: Vec<String> = Vec::new();
         for field in &candidates {
             let mut entry_table = toml::map::Map::new();
-            // Any TOML value will do: the parser reports unknown *names* before it judges values.
+            // Any TOML value will do: the parser reports unknown *names*
+            // before it judges values, and a value that fails to parse is
+            // pruned separately (see `prune_invalid_fields`), so a name that
+            // is genuinely accepted never surfaces as unknown here.
             entry_table.insert(field.clone(), toml::Value::Boolean(true));
             let (_, warnings) = parse_single_entry(entry_table);
             if warnings

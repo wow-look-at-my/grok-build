@@ -21,7 +21,8 @@ struct AdmissionGate {
 #[derive(Clone)]
 struct TestControl {
     cancellation: CancellationToken,
-    /// Every mid-turn message the coordinator delivered to this child, in order (`SubagentEvent::Interject`).
+    /// Every mid-turn message the coordinator delivered to this child, in
+    /// order (`SubagentEvent::Interject`).
     interjections: mpsc::UnboundedSender<String>,
     admission_gate: Option<AdmissionGate>,
     admitted_messages: Option<mpsc::UnboundedSender<(ActiveAgentMessageOperation, String)>>,
@@ -535,7 +536,9 @@ pub(in crate::implementations::grok_build::task::coordinator) fn harness_with_op
         .run(),
     );
     Harness {
-        // Unbound by default so tests can set request.parent_session_id freely (e.g. nested reparent).
+        // Unbound by default so tests can set request.parent_session_id
+        // freely (e.g. nested reparent). ParentSession APIs must use
+        // `parent_backend` so they stay session-scoped.
         backend: ChannelBackend::from_coordinator(command_tx),
         start,
         finish,
@@ -743,7 +746,8 @@ async fn interject_reaches_the_active_child_named_by_id() {
             text: CONTEXT.to_owned(),
         })
         .expect("actor command channel open");
-    // Commands are handled in channel order.
+    // Commands are handled in channel order, so a round trip on the same
+    // channel is the barrier that proves the interjection was handled.
     let _ = loop_unit_active(&harness.backend, "unrelated").await;
     assert_eq!(
         harness
@@ -1328,7 +1332,9 @@ async fn drain_resolves_when_child_backgrounds_at_deadline() {
 
 #[tokio::test(start_paused = true)]
 async fn drain_resolves_when_caller_goes_away() {
-    // The foreground deadline (600s) sits far past the shell drain budget (120s), so a parked drain must resolve on the abandonment itself.
+    // The foreground deadline (600s) sits far past the shell drain budget (120s), so a parked drain must resolve on the
+    // abandonment itself rather than by the clock advancing to that deadline. No command is sent after the caller drops,
+    // so only the abandonment wake can trigger the reap that resolves the drain.
     let harness = harness(false, std::time::Duration::from_secs(600));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
@@ -1566,7 +1572,8 @@ async fn two_parked_drains_on_one_scope_both_fire() {
 
 #[tokio::test]
 async fn abandoned_foreground_caller_clears_outstanding() {
-    // ParentGone parity: dropping the spawn await must leave Outstanding (turn-freeze) without waiting.
+    // ParentGone parity: dropping the spawn await must leave Outstanding
+    // (turn-freeze) without waiting for the foreground budget.
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let spawn = tokio::spawn({
         let backend = harness.backend.clone();
@@ -1872,11 +1879,13 @@ async fn spawn_session_child(
 async fn teardown_session_children_spares_other_sessions() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
 
-    // Children under "parent" (one active, one pending) plus one under a different session that must survive.
+    // Two children under "parent" (one active, one pending) plus one under a
+    // different session that must survive.
     let keep = spawn_session_child(&mut harness, "keep-active", "other").await;
     let kill_active = spawn_session_child(&mut harness, "kill-active", "parent").await;
 
-    // Start the children spawned so far.
+    // Start the children spawned so far; kill-pending subscribes after start, so
+    // it never receives it and stays pending.
     let _ = harness.start.send(());
     let mut started = std::collections::HashSet::new();
     started.insert(harness.started.recv().await.unwrap());
@@ -2035,7 +2044,8 @@ async fn teardown_drain_deadline_reopens_spawns() {
         "spawn must be refused while the teardown drains"
     );
 
-    // Past the backstop: the hold force-clears and the ack resolves even though the child is still stuck.
+    // Past the backstop: the hold force-clears and the ack resolves even
+    // though the child is still stuck.
     tokio::time::advance(TEARDOWN_DRAIN_MAX + std::time::Duration::from_secs(1)).await;
     tokio::time::timeout(std::time::Duration::from_secs(2), rx)
         .await
@@ -2473,7 +2483,8 @@ async fn teardown_cancels_background_child_without_rebuffering() {
         },
     );
 
-    // A background subagent that outlives its parent is the production case that rebuffers a completion for a later resume.
+    // A background subagent that outlives its parent is the production case that
+    // rebuffers a completion for a later resume of the same session id.
     let mut req = request("bg", true);
     req.parent_session_id = "parent".to_owned();
     let spawn = tokio::spawn({
@@ -2548,7 +2559,8 @@ async fn teardown_rejects_spawn_from_cancelled_parent() {
         })
         .expect("actor command channel open");
 
-    // A nested Spawn from the now-cancelled parent (parent_session_id = its child_session_id) must be rejected.
+    // A nested Spawn from the now-cancelled parent (parent_session_id = its
+    // child_session_id) must be rejected, not reparented and left running.
     let mut nested = request("B", false);
     nested.await_to_completion = true;
     nested.parent_session_id = "A".to_owned();
@@ -2855,6 +2867,7 @@ async fn cancel_parent_session_rejects_late_spawn_until_admission_reopens() {
 #[tokio::test]
 async fn cancel_parent_session_spares_nested_workflow_children() {
     // wait_before_start only: keep one child in pending through ParentSession.
+    // (wait_after_cancel not needed — workflow lineage is not cancelled.)
     let mut harness = harness(true, std::time::Duration::from_secs(60));
 
     // Workflow-owned parent child (child_session_id = "wf-child").
@@ -2929,7 +2942,8 @@ async fn cancel_parent_session_spares_nested_workflow_children() {
         SubagentCancelOutcome::Cancelled
     ));
 
-    // Promote pending → active, then finish all of them.
+    // Promote pending → active, then finish all three (must wait until each is
+    // subscribed on finish; broadcast does not buffer for late receivers).
     let _ = harness.start.send(());
     assert_eq!(
         harness.started.recv().await.as_deref(),
@@ -4128,7 +4142,8 @@ async fn fail_mode_rejects_at_the_limit_and_recovers_when_a_slot_frees() {
         "unexpected error: {:?}",
         rejected.error
     );
-    // The rejection surfaces like any failed background child and leaves a failed record.
+    // The rejection surfaces like any failed background child and leaves a
+    // failed record, so the id the model holds does not vanish.
     let disposition = harness.completions.recv().await.expect("disposition");
     assert!(disposition.should_surface);
     let snapshot = harness
@@ -4573,7 +4588,8 @@ async fn an_out_of_band_token_cancel_resolves_without_other_actor_traffic() {
     });
     await_queued(&harness.backend, 1).await;
 
-    // Send nothing after the cancel: the periodic queue sweep must resolve it alone.
+    // Send nothing after the cancel: the periodic queue sweep must resolve
+    // it alone.
     cancel.cancel();
     tokio::time::advance(std::time::Duration::from_secs(2)).await;
     for _ in 0..20 {

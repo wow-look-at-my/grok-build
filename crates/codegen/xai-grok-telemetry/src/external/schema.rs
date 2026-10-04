@@ -1,4 +1,11 @@
 //! External OTEL schema v1: event names, attribute keys, typed records, and the per-event mapping functions.
+//! The mapping functions are wired through the `telemetry_event!` macro's `external = …` arm.
+//!
+//! `ExternalRecord` is a **closed, typed structure**: attribute keys are the [`ExternalKey`] enum, not strings.
+//! The compiler therefore enumerates every attribute that can possibly reach the wire.
+//! Three independent mechanisms must be defeated to leak a new attribute.
+//! They are this enum, the pinned [`EXTERNAL_ALLOWED_KEYS`] test, and the export-time validators in [`super::redact`].
+//! Telemetry-owner review gates this file (CODEOWNERS).
 
 use std::str::FromStr;
 
@@ -6,6 +13,7 @@ use super::config::ContentGates;
 use crate::events;
 
 /// Wire schema version, exported as resource attr `grok_code.schema.version`.
+/// Additive changes (new events/attrs) do not bump it; renames/removals do.
 pub const SCHEMA_VERSION: &str = "v1";
 
 /// Meter/logger instrumentation scope name.
@@ -184,7 +192,7 @@ pub enum ExternalKey {
     Tip,
     Action,
 }
-/// Every [`ExternalKey`] variant, in declaration order.
+/// Every [`ExternalKey`] variant, in declaration order; the pinned `external_allowed_keys_are_pinned` test guards the wire names against drift.
 pub(crate) const ALL_KEYS: &[ExternalKey] = <ExternalKey as strum::VariantArray>::VARIANTS;
 
 /// The runtime allowlist the export-time validators enforce: exactly the wire names of every [`ExternalKey`].
@@ -240,7 +248,8 @@ pub(crate) fn gate_for_key(key: &str) -> Option<Gate> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Record structure.
+// Record structure
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// No nested/array variants: the external schema is flat.
 #[derive(Debug, Clone, PartialEq)]
@@ -315,6 +324,7 @@ impl Gate {
 }
 
 /// An attribute emitted only when its gate is on.
+/// When a gated attr shares a key with a default attr (e.g. verbatim vs. sanitized `tool_name`), the gated value replaces the default at emit time.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GatedAttr {
     pub key: ExternalKey,
@@ -384,10 +394,9 @@ impl ExternalRecord {
 // Metric instrument schema (pinned attr keys)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Every attribute key that may appear on a metric data point: the
-/// instrument-specific keys plus the per-increment identity/cardinality keys.
-/// `prompt.id` is deliberately absent: its cardinality is unbounded, so it
-/// appears on events only.
+/// Every attribute key that may appear on a metric data point: the instrument-specific keys plus the per-increment identity/cardinality keys.
+/// `prompt.id` is deliberately absent: its cardinality is unbounded, so it appears on events only.
+/// Enforced fail-closed by `ValidatingMetricExporter` (drops the export on violation) and pinned by test.
 pub(crate) const METRIC_ALLOWED_ATTR_KEYS: &[&str] = &[
     "type",
     "model",
@@ -409,11 +418,12 @@ pub(crate) const METRIC_ALLOWED_ATTR_KEYS: &[&str] = &[
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sanitizers.
+// Sanitizers
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// First-party `client_identifier` allowlist (pinned by test). The underlying
-/// field is externally controlled free text from ACP client metadata, so it
-/// must never pass verbatim.
+/// First-party `client_identifier` allowlist (pinned by test).
+/// The underlying field is externally controlled free text from ACP client metadata, so it must never pass verbatim.
+/// Unknown values collapse to `"other"`.
 pub(crate) const KNOWN_CLIENT_IDENTIFIERS: &[&str] = &[
     "grok-pager",
     "grok-tui",
@@ -435,6 +445,8 @@ pub(crate) fn sanitize_client_identifier(raw: &str) -> &'static str {
 }
 
 /// `screen_mode` allowlist (pinned by test).
+/// Like `client_identifier`, the underlying value is externally controlled free text from ACP prompt metadata (`_meta.screenMode`).
+/// It must never pass verbatim; unknown values collapse to `"other"`.
 pub(crate) const KNOWN_SCREEN_MODES: &[&str] = &["fullscreen", "inline", "minimal", "headless"];
 
 pub(crate) fn sanitize_screen_mode(raw: &str) -> &'static str {
@@ -492,8 +504,9 @@ pub(crate) const BUILTIN_TOOL_NAMES: &[&str] = &[
     "update_goal",
 ];
 
-/// Default `tool_name` reduction: built-ins pass verbatim, MCP-qualified
-/// names (`server__tool`) collapse to `"mcp_tool"`.
+/// Default `tool_name` reduction: built-ins pass verbatim, MCP-qualified names (`server__tool`) collapse to `"mcp_tool"`.
+/// Anything else collapses to `"custom_tool"` (fail-closed; never export an unknown free-text name).
+/// The verbatim name rides the `ToolDetails` gate.
 pub(crate) fn sanitize_tool_name(raw: &str) -> &'static str {
     if let Some(known) = BUILTIN_TOOL_NAMES.iter().find(|n| **n == raw) {
         return known;
@@ -568,7 +581,9 @@ pub fn map_session_end(ev: &events::SessionEnded) -> Option<ExternalRecord> {
     )
 }
 
-/// Pull the bash/command string from raw tool args.
+/// Pull the bash/command string from raw tool args. First-class `full_command`
+/// uses this *before* `reduce_tool_input` so a command longer than 512 chars
+/// is not collapsed to 128.
 pub(crate) fn extract_full_command(params: &serde_json::Value) -> Option<&str> {
     ["command", "cmd", "bash_command"]
         .iter()
@@ -619,8 +634,9 @@ fn attach_tool_input(
     rec
 }
 
-/// `PromptSubmitted` maps to `grok_code.user_prompt`. `command_name` is
-/// always-on slash/skill metadata, never the user prompt body.
+/// `PromptSubmitted` maps to `grok_code.user_prompt`.
+/// Prompt text rides the `UserPrompts` gate (60 KB cap applied at emit time).
+/// `command_name` is always-on slash/skill metadata, never the user prompt body.
 pub fn map_user_prompt(ev: &events::PromptSubmitted) -> Option<ExternalRecord> {
     let mut rec = ExternalRecord::event(ExternalEventName::UserPrompt)
         .attr(ExternalKey::PromptLength, ev.prompt_length)
@@ -727,10 +743,9 @@ pub fn map_api_request(ev: &events::ModelResponseReceived) -> Option<ExternalRec
     Some(rec)
 }
 
-/// `RateLimitHit` maps to `grok_code.api_error` (`error_category =
-/// rate_limit`). No `error.count` increment: a rate-limited turn (retries
-/// exhausted) also ends in `TurnCompleted{outcome: Error}`, the increment
-/// source.
+/// `RateLimitHit` maps to `grok_code.api_error` (`error_category = rate_limit`).
+/// No `error.count` increment: a rate-limited turn (retries exhausted) also ends in `TurnCompleted{outcome: Error}`, the single increment source.
+/// Incrementing here too would double-count the failure.
 pub fn map_rate_limit_hit(ev: &events::RateLimitHit) -> Option<ExternalRecord> {
     Some(
         ExternalRecord::event(ExternalEventName::ApiError)

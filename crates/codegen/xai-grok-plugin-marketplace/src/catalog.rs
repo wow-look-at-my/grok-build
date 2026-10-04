@@ -1,4 +1,10 @@
 //! Parse the CI-generated `plugin-index.json` component catalog.
+//!
+//! Directory precedence mirrors `index::load_index`: `.grok-plugin/plugin-index.json` is preferred, then `.claude-plugin/plugin-index.json`.
+//! Unlike `load_index`, only that one filename is probed per directory.
+//! A preferred catalog that is present but unreadable or unparseable does not fall back to the other directory.
+//! Falling back when the authoritative file is broken could serve stale data.
+//! The catalog only adds display detail: failures degrade to `None` and never fail a marketplace listing.
 
 use std::collections::HashMap;
 use std::path::Path;

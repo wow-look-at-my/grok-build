@@ -1,4 +1,5 @@
-//! The watcher thread: it builds the debouncer.
+//! The watcher thread: it builds the debouncer, arms the watch set selection
+//! asked for, then serves commands until shutdown.
 
 use std::collections::{HashSet, VecDeque};
 use std::error::Error;
@@ -229,7 +230,8 @@ impl Watcher {
             },
         )?;
 
-        // Per-dir arms the top level now and the rest in chunks.
+        // Per-dir arms the top level now and the rest in chunks, so a session
+        // sees its own directory immediately however deep the tree goes.
         let mut pending = VecDeque::new();
         let mut watched = HashSet::new();
         if let Some(dirs) = initial {
@@ -415,7 +417,8 @@ impl Watcher {
     }
 }
 
-// watcher_tests.rs was written against the pre-split module.
+// watcher_tests.rs was written against the pre-split module. Import the
+// relocated items so those tests compile unchanged via `use super::*`.
 #[cfg(test)]
 #[allow(unused_imports)]
 use crate::event::FsEventKind;

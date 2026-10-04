@@ -16,7 +16,7 @@ environment:
       value: "0"
 mock:
   # Blank-line-separated paragraphs render one row each (no soft-wrap merge),
-  # so the transcript is many rows tall and the question scrolls off on every
+  # so the transcript is ~40 rows tall and the question scrolls off on every
   # terminal size this scenario uses — the sticky header is the only place
   # the prompt text can appear.
   response: |

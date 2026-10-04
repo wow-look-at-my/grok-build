@@ -1,10 +1,15 @@
 //! Build a `memory.tar.gz` archive containing session logs and MEMORY.md files.
+//!
+//! The archive is uploaded to GCS at session finalize time.
+//! The reconstruct pipeline injects these files into the Docker image so a replayed session sees the same memory.
 
 use anyhow::{Context, Result};
 
 use super::MemoryStorage;
 
-/// Per-file cap.
+/// Per-file cap. Memory notes are markdown of at most tens of KB; anything
+/// larger is not legitimate memory content and a growing file (e.g. a
+/// planted `/dev/zero` symlink) must not balloon the process.
 const MAX_MEMORY_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Open `path` without following a final-component symlink, without blocking on a FIFO, and only if it is a regular file. The memory dir is writable to sandboxed agents, so a planted symlink must not smuggle sandbox-denied files (`~/.ssh/id_rsa`, …) into the uploaded archive, and a special file must not hang or grow the non-abortable build.
@@ -271,7 +276,7 @@ mod tests {
             *b = seed as u8;
         }
         let growing = sessions.join("2026-01-01-growing.md");
-        std::fs::write(&growing, chunk.repeat(128)).unwrap();
+        std::fs::write(&growing, chunk.repeat(128)).unwrap(); // 8 MiB
         // Appended after the sessions entries: desync garbles or drops it.
         std::fs::write(storage.global_memory_file(), "# global sentinel").unwrap();
 

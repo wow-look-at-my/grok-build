@@ -1,4 +1,5 @@
-//! Runs the full session flow in one temp directory: register, clean unregister.
+//! Runs the full session flow in one temp directory: register, clean unregister, then a register
+//! that drops the entry whose PID is dead and keeps the live one.
 
 use chrono::Utc;
 use tempfile::TempDir;

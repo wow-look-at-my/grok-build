@@ -1883,7 +1883,8 @@ async fn renew_ttl_does_not_shadow_a_newer_content_write() {
     );
     // A TTL renewal bumps only the freshness clock to now.
     cache.renew_ttl(&scope).await;
-    // Content B was fetched after A but before the renewal.
+    // Content B was fetched after A but before the renewal: it is genuinely
+    // newer content and must win despite the renewal's fresh timestamp.
     let b_fetched = Utc::now() - ChronoDuration::seconds(30);
     cache.persist(
         &make_prefetched(&["grok-b"]),
@@ -2159,7 +2160,9 @@ fn models_commit_gate_detects_account_switch() {
 #[serial]
 fn resolve_live_keeps_fetch_origin_when_disk_auth_absent() {
     let _no_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    // Session fetch, then disk auth is gone at commit while XAI_API_KEY is set (the just-logged-in / sign-out window).
+    // Session fetch, then disk auth is gone at commit while XAI_API_KEY is set
+    // (the just-logged-in / sign-out window). The live scope must stay on the
+    // fetch-time Session origin so a good catalog is served, not abandoned.
     let _key = EnvGuard::set("XAI_API_KEY", "boot-window-key");
     let session_auth = GrokAuth {
         user_id: "session-user".to_string(),
@@ -2787,7 +2790,9 @@ fn entry_with_cw(catalog_key: &str, slug: &str, cw: u64) -> ModelEntry {
 
 #[test]
 fn resolve_context_window_returns_each_models_own_window_from_multi_model_listing() {
-    // A multi-model `/v1/models` listing where each entry carries a distinct context window.
+    // A multi-model `/v1/models` listing where each entry carries a distinct
+    // context window. Per-exact-slug lookup must yield each model's own value —
+    // never a max or first-match value.
     let mut listing = IndexMap::new();
     listing.insert(
         "openai-foo".to_owned(),
@@ -2818,7 +2823,8 @@ fn resolve_context_window_returns_each_models_own_window_from_multi_model_listin
 
 #[test]
 fn resolve_context_window_matches_by_routing_slug_even_when_key_differs() {
-    // The model is requested by its routing slug, which may differ from its catalog key.
+    // The model is requested by its routing slug, which may differ from its
+    // catalog key; the resolver must still return that model's own window.
     let mut listing = IndexMap::new();
     listing.insert(
         "remote-grok-4".to_owned(),
@@ -2862,7 +2868,9 @@ fn resolve_context_window_empty_listing_falls_back_to_documented_default() {
 fn listing_json_context_window_lands_in_model_info() {
     // Drive the REAL shipped parse path: a representative `/v1/models` JSON
     // listing where each entry carries its own context window (camelCase,
-    // snake_case, and meta.totalContextTokens all appear in the wild).
+    // snake_case, and meta.totalContextTokens all appear in the wild). Each
+    // entry must yield its OWN window on the `ModelEntryConfig` → `ModelInfo`
+    // chain, never a shared max/first value.
     let cases = [
         (r#"{"model":"m1","context_window":131072}"#, 131_072u64),
         (r#"{"model":"m2","contextWindow":262144}"#, 262_144u64),
@@ -2933,10 +2941,18 @@ fn resolve_context_window_drives_auto_compaction_threshold() {
 
 #[test]
 fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
-    // Drive the SHIPPED catalog choke point — `config::resolve_model_list`.
+    // Drive the SHIPPED catalog choke point — `config::resolve_model_list`, the
+    // single production call site of `resolve_context_window` — with a
+    // representative prefetched `/v1/models` listing (one entry resolving its
+    // own window via the API parser) plus a `[models.X]` config entry that was
+    // left at the silent hardcoded DEFAULT. The backfill must resolve the
+    // defaulted entry per its EXACT routing slug from the listing sibling, land
+    // it in `ModelInfo.context_window`, and from there flow all the way into
+    // the auto-compaction threshold.
     use xai_grok_sampling_types::CompactionAtTokens;
 
-    // Prefetched listing: `preview-big` knows its own 1M window (as it would from the provider API).
+    // Prefetched listing: `preview-big` knows its own 1M window (as it would
+    // from the provider API). `grok-4` is a config entry that did not carry one.
     let mut prefetched = IndexMap::new();
     let mut listing_big = make_model_entry("big-preview");
     listing_big.info.context_window = std::num::NonZeroU64::new(1_000_000).unwrap();
@@ -2946,14 +2962,17 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
     cfg.config_models.insert(
         "grok-4".to_string(),
         crate::agent::config::ConfigModelOverride {
-            // Same routing slug as the listing entry, different catalog key — resolution must match by slug, not key.
+            // Same routing slug as the listing entry, different catalog key —
+            // resolution must match by slug, not key.
             ..Default::default()
         },
     );
 
     let resolved = crate::agent::config::resolve_model_list(&cfg, Some(prefetched));
 
-    // The config sibling that was left at DEFAULT answers for its own window because a listing sibling with the same routing slug (`grok-4`).
+    // The config sibling that was left at DEFAULT answers for its own window
+    // because a listing sibling with the same routing slug (`grok-4`) carries
+    // the real one, resolved per exact slug.
     let default_cw = crate::remote::DEFAULT_CONTEXT_WINDOW;
     let sibling_has_real_window = resolved
         .values()
@@ -2975,7 +2994,8 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
         "catalog must carry the API-resolved per-slug window"
     );
 
-    // The resolved window lands in `ModelInfo.context_window` on the ACP wire.
+    // The resolved window lands in `ModelInfo.context_window` on the ACP wire
+    // (exposed as `meta.totalContextTokens`, matching the listing shape).
     let acp = crate::agent::config::to_acp_model_info(&resolved);
     let acp_entry = &acp[&acp::ModelId::new("big-preview")];
     let total = acp_entry
@@ -3031,7 +3051,8 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
 async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base() {
     use axum::routing::get;
 
-    // Host an OpenAI-compatible `/v1/models` listing on a loopback mock.
+    // Host an OpenAI-compatible `/v1/models` listing on a loopback mock. The
+    // BYOK model answers with its own real 1M window.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = axum::Router::new().route(
@@ -3080,7 +3101,7 @@ async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base(
 /// The wire `name` is what every row renders, and it is the only thing that
 /// distinguishes one row from another. Nothing in config.toml is required to
 /// set it, so it has to fall back to something non-empty -- otherwise the
-/// picker draws blank rows that each select a different model.
+/// picker draws four blank rows that each select a different model.
 #[test]
 fn config_declared_models_reach_the_picker_with_a_visible_label() {
     let cfg = config_from_toml(

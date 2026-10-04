@@ -1,4 +1,5 @@
-//! Tracks open TUI sessions in `~/.grok/active_sessions.json`.
+//! Tracks open TUI sessions in `~/.grok/active_sessions.json`. A clean exit removes the entry,
+//! a crash leaves it behind, and the next [`register`] prunes entries whose PID is dead.
 
 #![deny(clippy::indexing_slicing)]
 
@@ -23,12 +24,14 @@ const DATA_FILENAME: &str = "active_sessions.json";
 const LOCK_FILENAME: &str = "active_sessions.lock";
 const TMP_FILENAME: &str = "active_sessions.json.tmp";
 
-/// On an NFS home `flock` is a network-lock-manager lock with no lease.
+/// On an NFS home `flock` is a network-lock-manager lock with no lease: a holder killed at the
+/// wrong moment strands it forever, so never wait unbounded. A live holder only does one small
+/// read-modify-write, so anything held this long is stranded.
 const LOCK_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(2);
 const LOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Register a session as active (idempotent by session_id) and prune entries
-/// whose PID is dead.
+/// Register a session as active (idempotent by session_id) and prune entries whose PID is dead.
+/// Fails with [`io::ErrorKind::TimedOut`] if the lock is still held after `LOCK_ACQUIRE_TIMEOUT`.
 pub fn register(session: ActiveSession) -> io::Result<()> {
     register_in(&xai_grok_config::grok_home(), session)
 }

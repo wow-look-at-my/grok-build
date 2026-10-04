@@ -1,4 +1,5 @@
-//! Frozen v1 feedback taxonomy: the serde snake_case spellings are the wire values downstream consumers allowlist.
+//! Frozen v1 feedback taxonomy: the serde snake_case spellings are the wire values downstream
+//! consumers allowlist, so a variant rename must keep its spelling via `#[serde(rename)]`.
 
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
@@ -265,7 +266,8 @@ pub fn structured_feedback(
     })
 }
 
-/// The read side of [`structured_feedback`].
+/// The read side of [`structured_feedback`]. Each field is parsed on its own, so an unknown value
+/// from a newer client drops that field rather than the whole envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StructuredFeedback {
     pub source: Option<FeedbackSource>,

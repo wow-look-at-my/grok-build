@@ -135,7 +135,7 @@ fn shorten_location_path_windows_drive_relative_vs_rooted() {
     );
 }
 
-/// `/work/team\notes/repo` is Unix components; last-keeps `team\notes`.
+/// `/work/team\notes/repo` is three Unix components; last-two keeps `team\notes`.
 #[cfg(not(windows))]
 #[test]
 fn shorten_location_path_unix_backslash_stays_in_component() {
@@ -183,7 +183,7 @@ fn shorten_location_path_keeps_unc_share_root() {
         shorten_location_path("///foo/bar/baz/qux").as_ref(),
         "/f/b/baz/qux"
     );
-    // Extra separators are dropped by the split, not a second remainder scan.
+    // Extra separators are dropped by the one split, not a second remainder scan.
     assert_eq!(
         shorten_location_path(r"\\fileserver\\projects\archive\\backup\folder\xai").as_ref(),
         r"\\fileserver\projects\a\b\folder\xai"

@@ -1,4 +1,5 @@
-//! The requests from the agent that a `HoldUntilCancel` decision keeps open, keyed by session.
+//! The requests from the agent that a `HoldUntilCancel` decision keeps open, keyed by session. Each hold is
+//! registered by a guard, so a handler dropped mid hold leaves no entry.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 

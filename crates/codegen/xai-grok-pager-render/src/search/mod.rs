@@ -1,4 +1,5 @@
-//! [`TextMatcher`] compiles a substring or regex query (smart-case) once and answers match queries.
+//! [`TextMatcher`] compiles a substring or regex query (smart-case) once and answers match queries; it owns no corpus and no UI state.
+//! [`next_index_after`] and [`prev_index_before`] step through a sorted slice of match positions for `n`/`N` traversal, wrapping at the ends.
 
 pub mod matcher;
 

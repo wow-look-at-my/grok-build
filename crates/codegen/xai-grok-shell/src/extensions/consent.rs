@@ -1,4 +1,5 @@
 //! POSTs an accepted consent notice to the configured proxy.
+//! The client has already accepted it locally, so a failure here loses the server-side record but does not block the user.
 
 use agent_client_protocol as acp;
 use serde::Deserialize;
@@ -27,6 +28,7 @@ async fn handle_record(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 
     let params: Params = parse_params(args)?;
 
+    // Checked before the POST so a logged-out caller is told to log in instead of getting a 401.
     agent.auth_manager.auth().await.map_err(|e| {
         tracing::warn!(error = %e, "consent: auth resolution failed");
         acp::Error::auth_required()
@@ -70,7 +72,7 @@ async fn handle_record(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        // A answers with an HTML page, so take the server's own message when there is one.
+        // A 502 answers with an HTML page, so take the server's own message when there is one.
         let message = serde_json::from_str::<serde_json::Value>(&body)
             .ok()
             .and_then(|v| {

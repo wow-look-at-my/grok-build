@@ -1,9 +1,12 @@
 //! Source mapping for rendered markdown back to original source.
+//!
+//! Used for copy-paste operations: when the user selects rendered text, we can look up the corresponding original markdown source.
 
 use std::ops::Range;
 
-/// Maps rendered byte positions back to source byte positions. The direction
-/// is from rendered (new) positions to source (old) positions.
+/// Maps rendered byte positions back to source byte positions.
+///
+/// The direction is from rendered (new) positions to source (old) positions.
 #[derive(Debug, Clone, Default)]
 pub struct SourceMap {
     /// Each segment is a (rendered_range, source_range) pair.
@@ -99,3 +102,6 @@ impl SourceMap {
     }
 }
 
+// The ratatui rendering path currently only tracks line-level source mapping (`line_source_map`), which is sufficient for copy/selection operations
+// Byte-level `SourceMap` was removed for simplicity and ~6% speedup.
+// Add field to MarkdownRenderOutput and MarkdownRenderView:; In render_ratatui(), add tracking variables:; For each text segment emitted, record the mapping:; In streaming.rs, update FrozenState to track:; Use SourceMap::extend_with_offsets() to merge tail source maps.

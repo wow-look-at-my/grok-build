@@ -1,4 +1,10 @@
 //! OpenCode `read` tool — reads files, directories, images, and PDFs.
+//!
+//! Follows the opencode parameter naming conventions (`filePath`, `offset`,
+//! `limit`) and wraps output in XML tags (`<path>`, `<type>`, `<content>`).
+//!
+//! Reuses `ReadFileOutput` from `crate::types::output` as the output type
+//! so the existing `ToolOutput::ReadFile` variant handles prompt rendering.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -23,6 +29,7 @@ const DEFAULT_READ_LIMIT: u32 = 2000;
 /// Maximum character length per line before truncation.
 const MAX_LINE_LENGTH: usize = 2000;
 
+/// Maximum bytes of text content returned per read (50 KB).
 const MAX_BYTES: usize = 50 * 1024;
 
 // ─── Description ────────────────────────────────────────────────────
@@ -56,6 +63,7 @@ pub struct ReadInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<u32>,
 
+    /// Maximum number of lines to return (default 2000).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
 }
@@ -140,7 +148,8 @@ impl xai_tool_runtime::Tool for ReadTool {
     ) -> Result<ReadFileOutput, xai_tool_runtime::ToolError> {
         use crate::types::tool_metadata::{invoking_param_names, resolve_cwd, shared_resources};
         let resources = shared_resources(&ctx)?;
-        // Client-facing `offset` name for runtime "read beyond…" hints.
+        // Client-facing `offset` name for runtime "read beyond…" hints; a
+        // rename must not tell the model to pass a key its schema lacks.
         let invoking = invoking_param_names(&ctx);
         let offset_param = invoking.resolve("offset");
 
@@ -185,13 +194,15 @@ impl xai_tool_runtime::Tool for ReadTool {
         };
 
         // ═══════════════════════════════════════════════════════════
-        // BRANCH A: DIRECTORY.
+        // BRANCH A: DIRECTORY
+        // ═══════════════════════════════════════════════════════════
         if metadata.is_dir() {
             return Ok(read_directory(&path, input.offset, input.limit, offset_param).await);
         }
 
         // ═══════════════════════════════════════════════════════════
-        // BRANCH B.
+        // BRANCH B: IMAGE / PDF
+        // ═══════════════════════════════════════════════════════════
         let extension = path
             .extension()
             .and_then(|e| e.to_str())
@@ -252,7 +263,9 @@ impl xai_tool_runtime::Tool for ReadTool {
             )));
         }
 
-        // ═══════════════════════════════════════════════════════════ BRANCH D.
+        // ═══════════════════════════════════════════════════════════
+        // BRANCH D: TEXT FILE
+        // ═══════════════════════════════════════════════════════════
         let file_content = String::from_utf8_lossy(&file_bytes).into_owned();
         let total_lines = if file_content.is_empty() {
             0
@@ -455,6 +468,7 @@ async fn read_directory(
     })
 }
 
+/// Generate a file-not-found error, suggesting up to 3 similar files.
 async fn not_found_with_suggestions(path: &std::path::Path) -> ReadFileOutput {
     let dir = path.parent().unwrap_or(path);
     let base = path
@@ -619,7 +633,8 @@ mod tests {
     #[tokio::test]
     async fn read_text_file_basic() {
         let tmp = TempDir::new().unwrap();
-        // Canonicalize the tmp path to match what the tool will store in the tracker.
+        // Canonicalize the tmp path to match what the tool will store in the tracker
+        // (on macOS /tmp is a symlink to /private/tmp).
         let canonical_tmp = dunce::canonicalize(tmp.path()).unwrap();
         let file_path = canonical_tmp.join("test.txt");
         std::fs::write(&file_path, "line1\nline2\nline3\n").unwrap();
@@ -909,7 +924,7 @@ mod tests {
         let canonical_tmp = dunce::canonicalize(tmp.path()).unwrap();
         let file_path = canonical_tmp.join("long.txt");
 
-        // Create a line well beyond MAX_LINE_LENGTH (chars).
+        // Create a line well beyond MAX_LINE_LENGTH (2000 chars).
         let long_line = "X".repeat(3000);
         std::fs::write(&file_path, &long_line).unwrap();
 
@@ -943,9 +958,9 @@ mod tests {
         let canonical_tmp = dunce::canonicalize(tmp.path()).unwrap();
         let file_path = canonical_tmp.join("big.txt");
 
-        // Each line is many bytes; we need >50 KB = 51200 bytes total.
-        let line = "A".repeat(99); // Chars + newline = 100 bytes per line
-        let num_lines = 600;
+        // Each line is ~100 bytes; we need >50 KB = 51200 bytes total.
+        let line = "A".repeat(99); // 99 chars + newline = 100 bytes per line
+        let num_lines = 600; // 600 * 100 = 60_000 bytes, well over 50KB
         let content: String = (0..num_lines)
             .map(|_| line.as_str())
             .collect::<Vec<_>>()
@@ -1192,7 +1207,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let canonical_tmp = dunce::canonicalize(tmp.path()).unwrap();
 
-        // Create multiple files named a01.txt. a20.txt.
+        // Create 20 files named a01.txt .. a20.txt.
         for i in 1..=20 {
             std::fs::write(canonical_tmp.join(format!("a{:02}.txt", i)), "").unwrap();
         }
@@ -1216,7 +1231,8 @@ mod tests {
                     "Expected 'Showing 3 of 20' in output, got: {}",
                     fc.content,
                 );
-                // Entries are sorted: a01..a20.
+                // Entries are sorted: a01..a20. Offset=5 (1-indexed), limit=3 → entries 5,6,7.
+                // That's a05.txt, a06.txt, a07.txt.
                 assert!(fc.content.contains("a05.txt"), "Expected a05.txt");
                 assert!(fc.content.contains("a06.txt"), "Expected a06.txt");
                 assert!(fc.content.contains("a07.txt"), "Expected a07.txt");
@@ -1246,7 +1262,7 @@ mod tests {
         let resources = test_resources(&canonical_tmp);
 
         // Request "test" (without extension) — the suggestion logic checks
-        // name.contains(base) || base.contains(name).
+        // name.contains(base) || base.contains(name), so "test.txt".contains("test") == true.
         let input = ReadInput {
             file_path: canonical_tmp.join("test").to_string_lossy().to_string(),
             offset: None,
@@ -1275,6 +1291,7 @@ mod tests {
 
     #[test]
     fn is_binary_30_percent_threshold() {
+        // Exactly 30 non-printable out of 100 bytes → ratio = 0.30, NOT > 0.3 → not binary.
         let mut at_threshold: Vec<u8> = vec![0x01; 30]; // non-printable (< 9)
         at_threshold.extend(vec![b'A'; 70]); // printable
         assert_eq!(at_threshold.len(), 100);
@@ -1283,6 +1300,7 @@ mod tests {
             "30/100 = 0.30 should NOT be binary (threshold is >0.3)",
         );
 
+        // 31 non-printable out of 100 bytes → ratio = 0.31, > 0.3 → binary.
         let mut above_threshold: Vec<u8> = vec![0x01; 31];
         above_threshold.extend(vec![b'A'; 69]);
         assert_eq!(above_threshold.len(), 100);

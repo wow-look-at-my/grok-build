@@ -8,12 +8,17 @@ use thiserror::Error;
 use super::config::{IntraCompactionConfig, IntraCompactionMode};
 
 /// Information about why intra-compaction was triggered.
+///
+/// Constructed by [`should_compact`] and threaded through to
+/// [`crate::compact`] and the agent's event stream.
 #[derive(Debug, Clone)]
 pub struct IntraCompactionTrigger {
     /// Token count of the prompt most recently sent to the model.
     pub last_prompt_tokens: u32,
     /// Context window of the agent's current sampler (`max_len`).
     pub context_window: u32,
+    /// `last_prompt_tokens / context_window` as an integer percentage,
+    /// clamped to [0, 100].
     pub percent: u8,
     /// Step index (0-based) at which the trigger fired.
     pub step: u32,
@@ -30,17 +35,26 @@ pub struct IntraCompactionResult {
     pub turns_compacted: u32,
     /// End-to-end elapsed time (decision → apply).
     pub elapsed: Duration,
-    /// The summary text the LLM produced — the developer-turn content that replaced the compacted turns.
+    /// The summary text the LLM produced — the developer-turn content that
+    /// replaced the compacted turns (for `HistoryThenSteps`, both passes'
+    /// summaries joined). Carried so callers can record the actual result
+    /// (e.g. as a developer turn in the thinking trace). `Arc<str>` because the
+    /// summary can be large and is cloned along with the event downstream.
     pub summary: Arc<str>,
 }
 
 /// Errors that can occur during intra-compaction.
 ///
 /// All errors are non-fatal — the caller should log and continue without
-/// compaction.
+/// compaction. Worst case the next sampling call may fail with 400, which
+/// is the same as today (no compaction support at all).
 #[derive(Debug, Error)]
 pub enum IntraCompactionError {
     /// The accumulated turn list has nothing meaningful to compact.
+    /// Triggered when:
+    /// - `get_accumulated_turns_for_compaction()` returns empty
+    /// - `select_turns_to_compact()` finds nothing reducible (below
+    ///   `min_compactable_tokens` or no safe split point)
     #[error("nothing to compact")]
     NothingToCompact,
 
@@ -60,7 +74,9 @@ pub enum IntraCompactionError {
         tokens_after: u32,
     },
 
-    /// `apply_steps_compaction` received an invalid `n_turns_to_remove`.
+    /// `apply_steps_compaction` received an invalid `n_turns_to_remove`
+    /// (greater than the current accumulated-turn count). Parser state is
+    /// left unchanged.
     #[error("invalid split: requested {requested}, only {available} available")]
     InvalidSplit { requested: usize, available: usize },
 
@@ -80,11 +96,13 @@ pub enum IntraCompactionError {
     #[error("compaction sampler error: {0}")]
     SamplerStream(String),
 
-    /// Size overflow of the compaction input. Deterministic and terminal — intra has no input ladder.
+    /// Size overflow of the compaction input. Deterministic and terminal —
+    /// intra has no input ladder.
     #[error("compaction input exceeds size limits: {0}")]
     ContextOverflow(String),
 
-    /// `apply_steps_compaction` failed for a parser-specific reason (e.g. SglangEngine rebuild error).
+    /// `apply_steps_compaction` failed for a parser-specific reason
+    /// (e.g. SglangEngine rebuild error).
     #[error("apply failed: {0}")]
     Apply(String),
 }
@@ -167,6 +185,7 @@ mod tests {
     #[test]
     fn returns_none_when_below_threshold() {
         let p = enabled_policy();
+        // 84% of 100K = 84_000, threshold 85% = 85_000.
         assert!(should_compact(&p, 84_000, 100_000, 10).is_none());
     }
 
@@ -185,7 +204,8 @@ mod tests {
         let p = enabled_policy();
         assert_eq!(p.mode, IntraCompactionMode::FullReplace);
         assert_eq!(p.min_steps_before_compact, 3);
-        // Field is present; FullReplace only uses the token threshold (parity with grok-build auto-compact).
+        // Field is present; FullReplace only uses the token threshold
+        // (parity with grok-build auto-compact).
         let t = should_compact(&p, 90_000, 100_000, 0).expect("should trigger");
         assert_eq!(t.step, 0);
         assert!(should_compact(&p, 90_000, 100_000, 2).is_some());

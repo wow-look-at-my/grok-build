@@ -42,7 +42,8 @@ fn function_tool_colliding_with_hosted_web_search_is_dropped() {
     let responses_req: rs::CreateResponse = (&req).into();
     let tools = responses_req.tools.expect("tools should be set");
 
-    // web_search is emitted as a raw-JSON `extra_tool_entries` entry.
+    // web_search is emitted as a raw-JSON `extra_tool_entries` entry, so it never appears as a native `rs::Tool::WebSearch`
+    // The raw entry can carry `excluded_domains`, which async_openai's typed filter omits
     let web_search_count = tools
         .iter()
         .filter(|t| matches!(t, rs::Tool::WebSearch(_)))
@@ -1382,7 +1383,7 @@ fn patch_reasoning_text_types_preserves_existing_type() {
                     { "type": "reasoning_text", "text": "already tagged" },
                     // A hypothetical different discriminator must NOT be clobbered.
                     { "type": "some_future_variant", "text": "future shape" },
-                    // Current gap.
+                    // Current gap: missing type gets filled in
                     { "text": "needs tag" }
                 ]
             }
@@ -1483,6 +1484,8 @@ fn build_responses_input_multi_turn_reasoning_ordering() {
     let input = input_items_json(&req);
     let summary = summarise_input(&input);
 
+    // INVARIANT 1: There must be exactly N reasoning items for N siblings
+    // The pre-refactor bug produced only 1
     let reasoning_count = summary
         .iter()
         .filter(|s| s.starts_with("reasoning:"))
@@ -1492,6 +1495,8 @@ fn build_responses_input_multi_turn_reasoning_ordering() {
         "must have 3 reasoning items, got {reasoning_count}. Items: {summary:?}"
     );
 
+    // INVARIANT 2: Each reasoning must be BETWEEN its corresponding user message and the NEXT user message
+    // Without this check, all reasoning items bunched at the end would still pass count
     let user_positions: Vec<usize> = summary
         .iter()
         .enumerate()
@@ -1527,6 +1532,7 @@ fn build_responses_input_multi_turn_reasoning_ordering() {
         }
     }
 
+    // INVARIANT 3: encrypted_content per item is preserved 1:1.
     let mut enc_seen: Vec<&str> = Vec::new();
     for v in &input {
         if v.get("type").and_then(|t| t.as_str()) == Some("reasoning")
@@ -1614,6 +1620,8 @@ fn empty_content_assistant_with_tool_calls_and_reasoning() {
     let input = input_items_json(&req);
     let summary = summarise_input(&input);
 
+    // (assistant message DROPPED because content is empty -- per conversation_item_to_input_items, lines 1718-1724) function_call_output (tool result)
+    // No spurious extra reasoning items, no placeholder.
     let reasoning_count = summary
         .iter()
         .filter(|s| s.starts_with("reasoning:"))

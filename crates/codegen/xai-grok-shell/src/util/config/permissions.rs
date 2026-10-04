@@ -15,6 +15,8 @@ pub fn parse_permission_mode_canonical(mode_str: &str) -> PermissionMode {
 }
 
 /// Canonical `[ui] permission_mode` string for a resolved [`PermissionMode`].
+///
+/// Inverse of [`parse_permission_mode_canonical`] for the real variants, so `parse_permission_mode_canonical(permission_mode_canonical_str(m)) == m`.
 pub(crate) fn permission_mode_canonical_str(mode: PermissionMode) -> &'static str {
     match mode {
         PermissionMode::AlwaysApprove => "always-approve",
@@ -92,6 +94,7 @@ pub(crate) fn resolve_permission_mode(
 }
 
 /// Display string for a selected mode that did NOT win yolo/auto enforcement.
+/// AlwaysApprove (policy pin) and Auto (feature gate off) show as Ask so the UI never claims more than enforcement grants.
 pub fn clamped_display_permission_mode(mode: PermissionMode) -> &'static str {
     if mode.is_always_approve() || mode.is_auto() {
         "ask"
@@ -187,8 +190,8 @@ pub fn effective_auto_for_launch(
     remote_permission_mode: Option<&str>,
     unset_default: PermissionMode,
 ) -> bool {
-    // Feature gate (default ON): when the auto permission-mode feature is
-    // disabled.
+    // Feature gate (default ON): when the auto permission-mode feature is disabled, Auto is inert regardless of CLI/config
+    // Never launching into auto means the classifier never wires. See `resolve_auto_permission_mode_enabled`.
     if !crate::util::config::auto_permission_mode_enabled_from_disk() {
         return false;
     }
@@ -216,8 +219,9 @@ pub fn effective_auto_for_launch(
         .is_auto()
 }
 
-/// Auto can be requested via CLI, config, `default_auto_mode`, or a client's
-/// `_meta.autoMode`.
+/// Auto can be requested via CLI, config, `default_auto_mode`, or a client's `_meta.autoMode`.
+/// It is pure so both activation call sites (session spawn and runtime `SetAutoMode`) are unit-testable without a live session.
+/// This is the authoritative agent-side gate: when it returns `false`, the permission manager never flips to auto and the classifier never wires.
 pub(crate) fn auto_mode_session_active(
     gate_enabled: bool,
     requested_auto: bool,
@@ -233,7 +237,7 @@ fn resolve_effective_yolo(
     config_is_always_approve: bool,
 ) -> bool {
     if let Some(mode) = cli_permission_mode {
-        // Only both "always approve everything" variants produce YOLO.
+        // Only the two "always approve everything" variants produce YOLO.
         matches!(mode, "bypassPermissions" | "always-approve")
     } else if cli_always_approve {
         true
@@ -264,8 +268,8 @@ fn require_plan_approval_from_layers(layers: &crate::config::ConfigLayers) -> bo
         .unwrap_or(false)
 }
 
-/// Load `[ui] require_plan_approval` from the merged config layers
-/// (overlay-free).
+/// Load `[ui] require_plan_approval` from the merged config layers (overlay-free).
+/// When `true`, the plan viewer always opens for explicit user approval when the agent calls `exit_plan_mode`, even in always-approve (YOLO) mode.
 pub fn load_require_plan_approval() -> bool {
     let layers = match crate::config::ConfigLayers::load() {
         Ok(l) => l,
@@ -575,7 +579,9 @@ mod tests {
 
     #[test]
     fn effective_yolo_for_launch_wrapper_calls_resolve() {
-        // Cover the deterministic CLI precedence paths only.
+        // Cover the deterministic CLI precedence paths only; the pure-config fallback isn't controllable here
+        // Pin composition is proven by `resolve_launch_yolo_policy_pin_neutralizes_requested_bypass`
+        // Comparing the wrapper against `yolo_disabled_by_policy()` would pass even if the wrapper dropped the pin, so that check is omitted
         assert!(!effective_yolo_for_launch(false, Some("plan"), None).yolo);
         assert!(!effective_yolo_for_launch(false, Some("dontAsk"), None).yolo);
     }

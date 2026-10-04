@@ -1,4 +1,7 @@
 //! Shared session picker helpers.
+//!
+//! Centralises data types, entry building, and index-mapping logic used by both the welcome-screen session picker
+//! (`welcome/mod.rs` and `app_view.rs`) and the modal session picker (`ActiveModal::SessionPicker` in `agent_view.rs`).
 use crate::app::app_view::SessionPickerEntry;
 use crate::views::picker::{PickerEntry, PickerField, PickerRow, PickerState};
 use indexmap::IndexMap;
@@ -6,6 +9,8 @@ use std::collections::HashSet;
 /// Offset added to content-hit indices in the picker `expanded` set so they don't collide with fuzzy-entry indices.
 pub const CONTENT_EXPAND_OFFSET: usize = 100_000;
 /// Session id for free-text Enter (`SubmitQuery` with no selectable rows).
+///
+/// Only a trimmed UUID is loadable; pasted garbage must not call `LoadSession` (that left the TUI stuck mid-load).
 pub fn session_id_for_direct_load(query: &str) -> Option<&str> {
     let q = query.trim();
     uuid::Uuid::try_parse(q).ok()?;
@@ -33,8 +38,8 @@ pub(crate) fn repo_name_from_cwd(cwd: &str) -> String {
     let tail = components.get(start..).unwrap_or(&[]);
     tail.join("-")
 }
-/// Order repo groups alphabetically, then pin the current working directory's
-/// repo group (if present) to the front.
+/// Order repo groups alphabetically, then pin the current working directory's repo group (if present) to the front.
+/// Shared by [`build_entry_map`] and [`build_grouped_picker_entries`] so the index-mapping and rendering paths stay in lock-step.
 fn order_repo_groups(groups: &mut IndexMap<&str, Vec<usize>>, current_repo: Option<&str>) {
     groups.sort_keys();
     if let Some(cur) = current_repo
@@ -49,8 +54,8 @@ pub enum PickerItem {
     Fuzzy { original_index: usize },
     Content { hit_index: usize },
 }
-/// A session armed for deletion, captured on `d` so the `y` confirm keeps a
-/// valid `(source, session_id, cwd)` even if the lists shift.
+/// A session armed for deletion, captured on `d` so the `y` confirm keeps a valid `(source, session_id, cwd)` even if the lists shift.
+/// Shared by the welcome and modal `/resume` pickers so they can't drift apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingDelete {
     pub source: String,
@@ -125,8 +130,8 @@ pub(crate) fn handle_pending_delete_key(
         }
     }
 }
-/// Owned data for a single session picker row. Built once per frame and then
-/// borrowed by `PickerEntry` / `PickerField` slices.
+/// Owned data for a single session picker row. Built once per frame and then borrowed by `PickerEntry` / `PickerField` slices.
+/// Shared between the welcome-screen `render_session_picker` and the `ActiveModal::SessionPicker` rendering in `agent_view.rs`.
 pub struct SessionEntryData {
     pub summary: String,
     pub right_text: String,
@@ -159,7 +164,7 @@ impl SessionPickerLanes {
     }
 }
 /// Loading gate for a session picker's spinner. The empty state must wait until both lanes settle.
-/// Shared by rendering, redraw forcing, and tick demand so those cannot drift. A spinner that
+/// Shared by rendering, redraw forcing, and tick demand so the three cannot drift. A spinner that
 /// renders without demanding ticks parks on its first frame.
 pub(crate) fn loading_spinner_active(
     entries: Option<&[SessionPickerEntry]>,
@@ -186,7 +191,8 @@ pub(crate) fn loading_spinner_active(
             })
         })
 }
-/// Filter session entries by native, headless, remote, or external source.
+/// Filter session entries by native, headless, remote, or external source. Default is
+/// [`Self::Grok`]: native Grok sessions only (local / remote / conversation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SourceFilter {
     /// Native Grok sessions only; excludes Claude/Cursor foreign rows.
@@ -225,8 +231,8 @@ impl SourceFilter {
     pub fn is_active(self) -> bool {
         self != Self::Grok
     }
-    /// Whether the deep content search is unavailable on this page: foreign
-    /// stores are not FTS-indexed.
+    /// Whether the deep content search is unavailable on this page: foreign stores are not FTS-indexed.
+    /// The Headless page searches like every native page; the server filters hits by the page's headless policy.
     pub fn is_content_search_disabled(self) -> bool {
         self == Self::External
     }
@@ -377,13 +383,15 @@ fn selectable_fallback<T>(map: &[Option<T>], preferred: usize) -> Option<usize> 
                 .find(|&index| map.get(index).is_some_and(Option::is_some))
         })
 }
-/// Case-insensitive substring match (callers pass a pre-lowercased query).
-/// Deliberately not an ordered-chars subsequence match.
+/// Case-insensitive substring match (callers pass a pre-lowercased query). Deliberately not an
+/// ordered-chars subsequence match. That matched so loosely (e.g. "rc" hitting "rust-check") that
+/// spurious title rows drowned out the results users actually searched for.
 pub(crate) fn fuzzy_matches_session(name: &str, query: &str) -> bool {
     query.is_empty() || name.to_lowercase().contains(query)
 }
-/// The query the picker's local fuzzy filter should apply on top of the
-/// current entries.
+/// The query the picker's local fuzzy filter should apply on top of the current entries. The server
+/// matches message content as well as title, so the local fuzzy match is skipped: re-applying it
+/// would hide content-only hits.
 pub(crate) fn effective_filter_query<'a>(
     live_query: &'a str,
     entries_query: Option<&str>,

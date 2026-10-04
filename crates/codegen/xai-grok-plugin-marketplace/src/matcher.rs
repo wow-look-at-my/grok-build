@@ -1,4 +1,5 @@
 //! The matches live as data in the marketplace index (`keywords` and `domains`), augmented by the plugin's `name`.
+//! There is no `regex` dependency; matching is substring search guarded by ASCII word boundaries.
 
 use std::cmp::Reverse;
 

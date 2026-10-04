@@ -1,4 +1,12 @@
 //! Reusable non-blocking file-logging tracing layers for the `--debug` firehose.
+//!
+//! Two install modes, chosen by env precedence (see `resolve_debug_target_inner`):
+//! - PerSession (`GROK_DEBUG_LOG=1`): a routing layer fans each session's
+//!   firehose to `~/.grok/debug/<session_id>.txt` (one file per session), with a
+//!   `<role>-<pid>.txt` catch-all for events fired outside any session span, and
+//!   a `latest.txt` symlink pointing at the most-recently-opened session file.
+//! - SingleFile (explicit path via `GROK_LOG_FILE` or `GROK_DEBUG_LOG=<path>`): one flat `fmt` file, routing bypassed.
+//!   Disk IO stays off the tracing hot path via `tracing_appender`'s non-blocking writer in both modes.
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -34,15 +42,23 @@ impl DebugSource {
     }
 }
 
-/// Target for the pager's always-on compact ACP update summary line (kind, ids, status, payload sizes).
+/// Target for the pager's always-on compact ACP update summary line (kind, ids, status, payload sizes). Lives here (not
+/// in `xai-grok-pager`) so the firehose directives below and the pager's own filter are built from the same constants. A
+/// rename can't silently turn the directive into a no-op.
 pub const ACP_UPDATE_TARGET: &str = "acp_update";
 
-/// Target for the pager's full ACP update payload dump (plain JSON). Off in the pager's release filter.
+/// Target for the pager's full ACP update payload dump (plain JSON). Off in the pager's release filter. The firehose is
+/// the always-available subscriber for full payloads, and it writes to disk, where the volume is safe. See
+/// `xai-grok-pager/src/tracing.rs` for the consumer side.
 pub const ACP_UPDATE_PAYLOAD_TARGET: &str = "acp_update_payload";
 
+/// Module path of rmcp 2.1's per-reconnect SSE warn (`sse stream error: ...`), which subscribers demote to `error` to drop the flood.
+/// Re-check on rmcp bump.
 pub const RMCP_SSE_NOISE_TARGET: &str = "rmcp::transport::common::client_side_sse";
 
-// Broad firehose filter for the routing and GROK_DEBUG_LOG sources Capture our crates at debug regardless of a narrowing RUST_LOG, with deps at info so they don't flood Curated first-party allowlist: new grok crates default to `info` until added here
+// Broad firehose filter for the routing and GROK_DEBUG_LOG sources
+// Capture our crates at debug regardless of a narrowing RUST_LOG, with deps at info so they don't flood
+// Curated first-party allowlist: new grok crates default to `info` until added here
 const FIREHOSE_BASE_DIRECTIVES: &str = "info,xai_grok_pager=debug,xai_grok_shell=debug,xai_grok_gateway=debug,xai_grok_login=debug,xai_grok_tools=debug,xai_grok_telemetry=debug,xai_grok_agent=debug,xai_grok_mcp=debug,xai_grok_session_search=debug,xai_acp_lib=debug,sampling_log=off";
 
 // Full firehose directives: the curated crate list plus the pager's ACP update target (built from the constant above, not a literal)
@@ -84,11 +100,15 @@ where
 
 // ── Per-session routing layer ───────────────────────────────────────────────
 
-/// Filesystem-safe session key. Sanitized once at capture (`on_new_span`) and stashed in the span's tracing extensions.
+/// Filesystem-safe session key.
+/// Sanitized once at capture (`on_new_span`) and stashed in the span's tracing extensions.
+/// Events fired anywhere under the span route to the right file without re-sanitizing on the hot path.
 #[derive(Clone)]
 struct SessionId(String);
 
 /// Visits span attributes to pull out the `session_id` field.
+/// Production records it via `%` (Display goes through `record_debug`, no quotes).
+/// Like `EventVisitor`, the single `record_debug` impl captures every field type (the other recorders default to it).
 #[derive(Default)]
 struct SessionIdVisitor(Option<String>);
 
@@ -101,6 +121,7 @@ impl Visit for SessionIdVisitor {
 }
 
 /// Renders an event's message and remaining fields into plain strings.
+/// All field types funnel through `record_debug` (the trait's other recorders default to it), so this one impl captures everything.
 #[derive(Default)]
 struct EventVisitor {
     message: String,
@@ -128,7 +149,8 @@ fn format_event(event: &tracing::Event<'_>) -> String {
     let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
     let level = meta.level();
     let target = meta.target();
-    // Skip the message gap when there is no `message` field.
+    // Skip the message gap when there's no `message` field; each field already carries a leading space
+    // A field-only event then renders "target: k=v" rather than "target:  k=v" with a dangling double space
     if visitor.message.is_empty() {
         format!("{ts} {level} {target}:{}\n", visitor.fields)
     } else {
@@ -152,7 +174,8 @@ fn sanitize_key(id: &str) -> String {
             }
         })
         .collect();
-    // Map empty or dot-only keys ("", ".", "..", "...") to a constant.
+    // Map empty or dot-only keys ("", ".", "..", "...") to a constant: those are filesystem-special
+    // Relying on the `.txt` suffix to neutralize them is incidental; make the safety explicit instead
     if safe.is_empty() || safe.bytes().all(|b| b == b'.') {
         return "_".to_owned();
     }
@@ -164,7 +187,9 @@ pub fn session_log_path(dir: &Path, session_id: &str) -> PathBuf {
     dir.join(format!("{}.txt", sanitize_key(session_id)))
 }
 
-// `latest.txt` link and swap-temp name parts Both `update_latest_symlink` (create/rename) and `prune_old_logs`.
+// `latest.txt` link and swap-temp name parts
+// Both `update_latest_symlink` (create/rename) and `prune_old_logs` (spare rule and orphan cleanup) use them, so the sites can never drift
+// Tests pin the literals on purpose: orphans created by already-shipped binaries must stay reapable across a rename of these consts
 const LATEST_LINK_NAME: &str = "latest.txt";
 const LATEST_TMP_PREFIX: &str = ".latest.";
 const LATEST_TMP_SUFFIX: &str = ".tmp";
@@ -176,8 +201,9 @@ fn update_latest_symlink(dir: &Path, target: &Path) {
     let Some(name) = target.file_name() else {
         return;
     };
-    // Atomic swap: symlink a unique temp then rename it over latest.txt
-    // (rename is atomic on POSIX).
+    // Atomic swap: symlink a unique temp then rename it over latest.txt (rename is atomic on POSIX)
+    // A racing `tail -f` thus never sees latest.txt missing
+    // The temp name is keyed by the target file so concurrent opens of different sessions don't collide on it
     let tmp = dir.join(format!(
         "{LATEST_TMP_PREFIX}{}{LATEST_TMP_SUFFIX}",
         name.to_string_lossy()
@@ -194,8 +220,12 @@ fn update_latest_symlink(dir: &Path, target: &Path) {
 #[cfg(not(unix))]
 fn update_latest_symlink(_dir: &Path, _target: &Path) {}
 
-/// Default per-file cap on a firehose sink (session or fallback file).
-const DEFAULT_MAX_SINK_BYTES: u64 = 100 * 1024 * 1024;
+/// Default per-file cap on a firehose sink (session or fallback file). A
+/// session with `GROK_DEBUG_LOG` on for a long time and a tool call that dumps
+/// a huge result (e.g. `grep` over a multi-GB file) has no other bound on this
+/// file's growth otherwise. Env-overridable via [`debug_log_max_bytes`], same
+/// convention as `GROK_MAX_FOREGROUND_BLOCK_MS`.
+const DEFAULT_MAX_SINK_BYTES: u64 = 100 * 1024 * 1024; // 100 MiB
 
 /// Resolve the per-file cap: `GROK_DEBUG_LOG_MAX_BYTES` env override, or
 /// [`DEFAULT_MAX_SINK_BYTES`].
@@ -212,7 +242,9 @@ fn debug_log_max_bytes() -> u64 {
 struct Sink {
     writer: NonBlocking,
     bytes_written: u64,
-    /// Set once [`RoutingLayer::max_bytes`] is hit, so the one-line notice is written exactly once and every later line is a silent no-op.
+    /// Set once [`RoutingLayer::max_bytes`] is hit, so the one-line notice is
+    /// written exactly once and every later line is a silent no-op rather than
+    /// growing the file further.
     capped: bool,
 }
 
@@ -226,23 +258,35 @@ impl Sink {
     }
 }
 
-/// Per-session sinks plus a single fallback sink, all behind the routing
-/// layer's mutex.
+/// Per-session sinks plus a single fallback sink, all behind the routing layer's
+/// mutex. There is no cap on the NUMBER of sinks: each distinct session id opens
+/// one file + non-blocking worker + parked guard that persist for the process
+/// lifetime (reclaimed only when the process/leader restarts). That is
+/// acceptable for an opt-in, debug-only firehose; a long-lived `--debug` leader
+/// holds one fd per session it logs. The central guard parking (`appender`) is
+/// what lets `flush()` drain these at exit, so we do not reclaim per session.
+/// Each sink's own BYTE size is bounded — see [`RoutingLayer::max_bytes`].
 #[derive(Default)]
 struct SinkMap {
     sessions: HashMap<String, Sink>,
     fallback: Option<Sink>,
 }
 
-/// Routes the firehose per session: events under a `session` span go to
-/// `<dir>/<session_id>.txt`.
+/// Routes the firehose per session: events under a `session` span go to `<dir>/<session_id>.txt`; everything else to `<dir>/<role>-<pid>.txt`.
 struct RoutingLayer {
     dir: PathBuf,
     role: String,
     pid: u32,
     /// Hard per-file byte cap (see [`Sink`]); resolved once at construction.
     max_bytes: u64,
-    // The lock is scoped to map access ONLY.
+    // The lock is scoped to map access ONLY — file opens (fs + a worker-thread
+    // spawn + the appender's own mutex) run OUTSIDE it, so a tracing event
+    // emitted on the open path can't re-enter and deadlock this non-reentrant
+    // Mutex. Lock-on-write is otherwise fine: the firehose is opt-in/debug-only.
+    //
+    // This layer's `on_event` runs for every subscriber callback, so the lock is
+    // one that cannot poison: a panic inside one write must not turn every later
+    // log line into a panic too.
     sinks: parking_lot::Mutex<SinkMap>,
 }
 
@@ -311,7 +355,8 @@ impl RoutingLayer {
         let mut sink = Sink::new(writer);
         self.write_capped(&mut sink, line);
         let mut map = self.lock();
-        // If a concurrent event opened it first.
+        // If a concurrent event opened it first, keep that one and drop ours (the
+        // line we wrote already reached the file via our worker).
         map.sessions.entry(key.to_owned()).or_insert(sink);
     }
 
@@ -586,8 +631,8 @@ fn is_blank(v: &OsStr) -> bool {
     v.to_str().is_some_and(|s| s.trim().is_empty())
 }
 
-// Build a path from an env value: trim surrounding whitespace when it is
-// valid UTF-8.
+// Build a path from an env value: trim surrounding whitespace when it is valid UTF-8, and preserve the raw bytes otherwise
+// Non-UTF-8 paths must survive
 fn os_path(v: &OsStr) -> PathBuf {
     match v.to_str() {
         Some(s) => PathBuf::from(s.trim()),
@@ -629,7 +674,8 @@ fn resolve_debug_target_inner(
 const LOG_RETENTION: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Prune `*.txt` firehose files (and orphaned `latest.txt` swap temps) under
-/// `~/.grok/debug` older than [`LOG_RETENTION`].
+/// `~/.grok/debug` older than [`LOG_RETENTION`] so the dir doesn't grow
+/// unbounded. Age-based (not count-based) so a still-open log from a concurrent process is never unlinked mid-write; best-effort, ignore errors.
 pub(crate) fn sweep_old_logs() {
     prune_old_logs(&grok_home().join("debug"), LOG_RETENTION);
 }
@@ -689,7 +735,8 @@ mod tests {
             writer.join().is_err(),
             "the writer thread is expected to panic while holding the sink map"
         );
-        // A later acquisition succeeds and sees the map as it was: no half-applied insert.
+        // A later acquisition succeeds and sees the map as it was: no half-applied
+        // insert, and no panic carrying over from the thread that died holding it.
         let map = layer.lock();
         assert!(
             map.sessions.is_empty(),
@@ -906,8 +953,9 @@ mod tests {
 
         let _lock = flush_test_lock();
         let dir = tempfile::tempdir().unwrap();
-        // Exactly the production wrapper: routing layer behind
-        // FIREHOSE_DIRECTIVES.
+        // Exactly the production wrapper: routing layer behind FIREHOSE_DIRECTIVES.
+        // Pins at the unit level that the `session` span (INFO, target `xai_grok_telemetry::session_ctx`) survives the real filter
+        // `event_scope` can only find the session id if the filter keeps that span
         let layer = RoutingLayer::new(dir.path().to_path_buf(), "agent".to_owned(), 7)
             .with_filter(firehose_filter());
         let subscriber = tracing_subscriber::registry().with(layer);
@@ -946,7 +994,7 @@ mod tests {
 
         tracing::subscriber::with_default(subscriber, || {
             tracing::info_span!("session", session_id = %"sid-one").in_scope(|| {
-                // Events in one session also prove within-session accumulation.
+                // Two events in one session also prove within-session accumulation.
                 tracing::info!(target: "xai_grok_shell", "one first");
                 tracing::info!(target: "xai_grok_shell", "one second");
             });
@@ -1027,14 +1075,19 @@ mod tests {
 
     #[test]
     fn write_session_caps_file_size_and_stops_growing() {
-        // Regression: a session's firehose file used to have no size bound at all (only age-based pruning), so a long `GROK_DEBUG_LOG` session.
+        // Regression: a session's firehose file used to have no size bound at
+        // all (only age-based pruning), so a long `GROK_DEBUG_LOG` session with
+        // one huge tool result could grow a single file to gigabytes. With a
+        // small cap, writing far more than the cap must land a file only
+        // moderately larger than the cap (one notice line over), never
+        // unboundedly larger.
         let _lock = flush_test_lock();
         let dir = tempfile::tempdir().unwrap();
         let layer = RoutingLayer::new(dir.path().to_path_buf(), "agent".to_owned(), 1)
             .with_max_bytes(1_000);
 
         let line = "x".repeat(100) + "\n";
-        // Several lines of many bytes each = 2020 bytes, well past the 1000-byte cap.
+        // 20 lines of 101 bytes each = 2020 bytes, well past the 1000-byte cap.
         for _ in 0..20 {
             layer.write_session("capped-session", line.as_bytes());
         }
@@ -1050,7 +1103,8 @@ mod tests {
             contents.contains("debug log capped at 1000 bytes"),
             "expected the one-time capped notice: {contents:?}"
         );
-        // The notice must appear exactly once — later writes are silent no-ops.
+        // The notice must appear exactly once — later writes are silent no-ops,
+        // not repeated notices that would themselves grow the file.
         assert_eq!(contents.matches("debug log capped").count(), 1);
     }
 
@@ -1095,8 +1149,8 @@ mod tests {
         latest
             .set_modified(now - Duration::from_secs(30 * 24 * 60 * 60))
             .unwrap();
-        // Orphaned `latest.txt` swap temps follow the same age rule: old
-        // reaped.
+        // Orphaned `latest.txt` swap temps follow the same age rule: old reaped, recent spared
+        // Regular files here so mtimes are settable cross-platform; the symlink-specific path is covered by the Unix-gated test below
         let old_tmp =
             std::fs::File::create(dir.path().join(".latest.old-session.txt.tmp")).unwrap();
         old_tmp
@@ -1121,7 +1175,9 @@ mod tests {
     fn prune_old_logs_reaps_dangling_orphaned_latest_tmp_symlink() {
         use std::time::{Duration, SystemTime};
 
-        // Models the real orphan: a crash between `update_latest_symlink`'s create.
+        // Models the real orphan: a crash between `update_latest_symlink`'s create and rename leaves the temp symlink
+        // Its target session file may itself be pruned later, so the link is dangling
+        // Literal name (not the consts) so renaming the scheme can't silently strand orphans created by already-shipped binaries
         let dir = tempfile::tempdir().unwrap();
         let max_age = Duration::from_secs(7 * 24 * 60 * 60);
         // `filetime` ages the link itself; std's `set_modified` follows it (and a dangling link can't even be opened)
@@ -1160,7 +1216,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn update_latest_symlink_failed_rename_removes_temp() {
-        // Sanity: prove the temp symlink is creatable here.
+        // Sanity: prove the temp symlink is creatable here, so the helper's symlink step must succeed
+        // The post-call absence below can then only come from the rename-failure cleanup branch
         let dir = tempfile::tempdir().unwrap();
         let tmp = dir.path().join(".latest.sess.txt.tmp");
         std::os::unix::fs::symlink("sess.txt", &tmp).unwrap();

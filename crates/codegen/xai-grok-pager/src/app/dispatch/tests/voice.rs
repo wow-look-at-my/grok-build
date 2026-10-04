@@ -43,7 +43,8 @@ fn voice_slash_submit_starts_recording_in_plan_mode() {
 
 #[test]
 fn voice_on_welcome_noop_when_startup_gated() {
-    // Auth or folder trust unresolved: voice must not create a session (that would bypass the startup gate) It stays a silent no-op.
+    // Auth or folder trust unresolved: voice must not create a session (that would bypass the startup gate)
+    // It stays a silent no-op on welcome
     let mut app = test_app();
     app.auth_state = AuthState::Pending { error: None };
     app.voice_mode_enabled = true;
@@ -104,7 +105,7 @@ fn voice_final_inserts_at_mid_text_cursor() {
     // Text should be inserted at cursor position with smart spacing
     assert_eq!(p.text(), "hello again world");
     // Cursor should be after the inserted text (" again")
-    assert_eq!(p.cursor(), 5 + " again".len());
+    assert_eq!(p.cursor(), 5 + " again".len()); // 11
     assert!(app.voice_listening());
     assert!(app.voice_interim().is_none());
 }
@@ -229,6 +230,7 @@ fn voice_final_replaces_mid_word_selection_with_spacing() {
     };
     let p = &mut app.agents.get_mut(&id).unwrap().prompt;
     p.set_text("hello world");
+    // Select "worl" (positions 6-10)
     p.set_cursor(6);
     p.textarea.set_selection(6, 10);
 
@@ -470,7 +472,8 @@ fn voice_interim_preview_at_mid_prompt_cursor() {
         assert_eq!(p.cursor(), 5, "interim must not move the caret");
     }
 
-    // Render the bound prompt and assert the interim previews AT the caret (in the italic overlay style) while the text.
+    // Render the bound prompt and assert the interim previews AT the caret (in the italic overlay
+    // style) while the text after the caret stays visible — shifted right, not overwritten.
     let interim_text = app.voice_interim().unwrap().to_string();
     let style = PromptStyle {
         focused: true,
@@ -499,6 +502,7 @@ fn voice_interim_preview_at_mid_prompt_cursor() {
         "hello there world",
         "interim must insert at the caret and keep the trailing text visible"
     );
+    // The ghost fragment carries the italic interim style; 't' of "there" sits at column 6.
     let ghost = buf.cell((6, 0)).unwrap();
     assert_eq!(ghost.symbol(), "t");
     assert!(
@@ -513,7 +517,8 @@ fn voice_interim_preview_at_mid_prompt_cursor() {
 
 #[test]
 fn voice_interim_preview_replaces_active_selection() {
-    // Dictating over a highlight must preview a replace of that span (same as the live insert).
+    // Dictating over a highlight must preview a replace of that span (same as the live insert),
+    // not an insert at the caret into the selected text.
     use crate::views::prompt_widget::{PromptStyle, VoicePromptOverlay};
     use ratatui::style::{Color, Modifier};
     use ratatui::{buffer::Buffer, layout::Rect};
@@ -586,7 +591,8 @@ fn voice_interim_preview_replaces_active_selection() {
 
 #[test]
 fn commit_interim_replaces_active_selection() {
-    // Leftover-interim submit records the selection span.
+    // Leftover-interim submit records the selection span so merge_voice_fragment
+    // drops the highlighted text the same way the live insert does.
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.voice_state = VoiceState::Recording {
@@ -861,8 +867,8 @@ fn voice_mode_on_requests_lazy_pipeline_when_missing() {
 
 #[test]
 fn voice_toggle_while_spawn_pending_keeps_start_armed() {
-    // A second Ctrl+Space while the pipeline is still spawning re-affirms the
-    // queued start.
+    // A second Ctrl+Space while the pipeline is still spawning re-affirms the queued start rather than cancelling it
+    // There's no visible recording yet to toggle off
     if !xai_grok_voice::AUDIO_SUPPORTED {
         return;
     }
@@ -883,8 +889,9 @@ fn voice_toggle_while_spawn_pending_keeps_start_armed() {
 
 #[test]
 fn voice_toggle_preserves_pending_ctrl_space_hold_cancel() {
-    // A Ctrl+Space quick-tap queues a hold-owned cold-start A Ctrl+Space
-    // toggle arriving before the pipeline spawns must re-affirm it.
+    // A Ctrl+Space quick-tap queues a hold-owned cold-start
+    // A Ctrl+Space toggle arriving before the pipeline spawns must re-affirm it without clearing hold-ownership
+    // The matching Ctrl+Space release then still cancels the tap
     if !xai_grok_voice::AUDIO_SUPPORTED {
         return;
     }
@@ -935,7 +942,8 @@ fn voice_toggle_can_always_stop_even_with_flag_disabled() {
 
 #[test]
 fn voice_stop_stops_and_drops_pending_cold_start() {
-    // The Ctrl+Space hold release stops capture and cancels a queued cold-start A release that arrives.
+    // The Ctrl+Space hold release stops capture and cancels a queued cold-start
+    // A release that arrives while the pipeline is still spawning can't leave a hot mic running after the key is up
     let mut app = test_app_with_agent();
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     app.voice_cmd_tx = Some(tx);
@@ -1051,7 +1059,8 @@ fn voice_stt_language_noop_keeps_pipeline() {
     assert!(app.voice_cmd_tx.is_some(), "pipeline must survive a no-op");
     assert!(rx.try_recv().is_err());
 
-    // An unset UI key with a matching live value still commits (pins the choice) The language is unchanged.
+    // An unset UI key with a matching live value still commits (pins the choice)
+    // The language is unchanged, so the pipeline must NOT be recycled
     app.current_ui.voice_stt_language = None;
     let effects = dispatch(Action::SetVoiceSttLanguage("es".to_string()), &mut app);
     assert!(!effects.is_empty(), "explicit pick must persist when unset");
@@ -1065,7 +1074,8 @@ fn voice_stt_language_noop_keeps_pipeline() {
         "no Shutdown when language is unchanged"
     );
 
-    // A non-canonical stored value (hand-edited or invalid on disk) re-commits so the clean canonical is rewritten Still no language change.
+    // A non-canonical stored value (hand-edited or invalid on disk) re-commits so the clean canonical is rewritten
+    // Still no language change, so the pipeline survives
     app.current_ui.voice_stt_language = Some("ES!".to_string());
     let effects = dispatch(Action::SetVoiceSttLanguage("es".to_string()), &mut app);
     assert!(
@@ -1125,8 +1135,8 @@ fn voice_submit_includes_interim() {
 
 #[test]
 fn voice_merge_replaces_selection_range() {
-    // Submit-time merge with a selection replaces the selected span (matching
-    // the live insert).
+    // Submit-time merge with a selection replaces the selected span (matching the live insert),
+    // rather than keeping the selected text and inserting at the caret.
     assert_eq!(
         crate::voice::merge_voice_fragment("hello world", Some(0..5), "hi"),
         "hi world"

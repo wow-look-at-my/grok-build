@@ -1,4 +1,12 @@
 //! HTTP CONNECT proxy support for WebSocket connections.
+//!
+//! Behind a corporate egress proxy, `tokio-tungstenite`'s `connect_async` cannot reach external hosts directly.
+//! It does not read the standard `HTTPS_PROXY` / `HTTP_PROXY` environment variables.
+//!
+//! This module provides:
+//! - [`resolve_proxy_for_host`]: reads proxy env vars and `NO_PROXY` and returns the proxy URL for a given target host, or `None` for direct.
+//! - [`connect_via_proxy`]: opens TCP to the proxy, sends an HTTP CONNECT request to create a tunnel, and wraps the result in TLS.
+//!   The returned stream is suitable for `tokio_tungstenite::client_async`.
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -6,10 +14,12 @@ use tokio_tungstenite::MaybeTlsStream;
 use tracing::debug;
 
 // ---------------------------------------------------------------------------
-// Environment-variable resolution.
+// Environment-variable resolution
+// ---------------------------------------------------------------------------
 
-/// Read proxy configuration from the environment and decide whether
-/// `target_host` should be connected through a proxy.
+/// Read proxy configuration from the environment and decide whether `target_host` should be connected through a proxy.
+/// Resolution order (matches `curl` / `reqwest` behaviour): If `NO_PROXY` contains `target_host` (or a matching domain suffix / CIDR), return `None`. If `HTTPS_PROXY` (or `https_proxy`) is set, return its value.
+/// If `HTTP_PROXY` (or `http_proxy`) is set, return its value. Otherwise return `None`.
 pub(crate) fn resolve_proxy_for_host(target_host: &str) -> Option<String> {
     resolve_proxy_for_host_with(target_host, |key| std::env::var(key))
 }
@@ -82,6 +92,8 @@ fn is_host_bypassed(host: &str, no_proxy: &str) -> bool {
         if matches_suffix {
             return true;
         }
+        // CIDR / IP matching is intentionally omitted: our target host is always a DNS name, not an IP literal
+        // Skipping it avoids a CIDR parsing dependency
     }
     false
 }
@@ -149,7 +161,8 @@ async fn open_connect_tunnel(
         }
     }
 
-    // Assert the BufReader's internal buffer is empty before reuniting.
+    // Assert the BufReader's internal buffer is empty before reuniting. BufReader::read_line may have read ahead into its buffer
+    // A proxy that eagerly forwards data, or coalesced TCP segments, can leave bytes beyond the HTTP headers there Dropping them would corrupt the subsequent TLS handshake
     let remaining = reader.buffer();
     if !remaining.is_empty() {
         anyhow::bail!(
@@ -197,6 +210,7 @@ fn parse_proxy_url(url: &str) -> anyhow::Result<(String, u16)> {
             .map_err(|_| anyhow::anyhow!("Invalid proxy port in '{url}'"))?;
         Ok((host.to_string(), port))
     } else {
+        // No port: default to 80 for HTTP proxies
         Ok((authority.to_string(), 80))
     }
 }
@@ -477,6 +491,7 @@ mod tests {
         addr
     }
 
+    /// Tests that `open_connect_tunnel` sends a correct CONNECT request, parses the proxy's 200 response, and returns a usable tunnel stream.
     #[tokio::test]
     async fn test_open_connect_tunnel_success() {
         let addr =

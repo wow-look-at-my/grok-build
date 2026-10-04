@@ -1,13 +1,20 @@
 //! Compaction result validation (text-level, harness-agnostic).
+//!
+//! The Grok chat's `validate_compaction_result(GrokMessage, …)` wrapper in
+//! the harness crate extracts the message text and delegates here.
 
 use super::types::CompactionStrategy;
 
 /// Errors from validating a compaction result before persisting.
 #[derive(Debug)]
 pub enum CompactionValidationError {
-    /// The compaction output has no text content.
+    /// The compaction output has no text content. Persisting an empty
+    /// summary would be silently skipped on hydration while blocking
+    /// future compaction triggers.
     EmptyContent,
-    /// DivideAndConquer `<chunk_summary>` XML tags are not balanced.
+    /// DivideAndConquer `<chunk_summary>` XML tags are not balanced, indicating
+    /// the LLM output was truncated or malformed. The content may be partially
+    /// usable but signals an incomplete compaction.
     UnbalancedChunkTags { open: usize, close: usize },
 }
 
@@ -28,7 +35,8 @@ impl std::fmt::Display for CompactionValidationError {
 
 /// Validate compaction output text before persisting.
 ///
-/// Non-empty text content — an empty compaction would be silently skipped
+/// Checks:
+/// 1. Non-empty text content — an empty compaction would be silently skipped
 ///    on hydration while blocking future compaction triggers.
 /// 2. DivideAndConquer: balanced `<chunk_summary>` tags — unbalanced tags
 ///    indicate truncated LLM output.

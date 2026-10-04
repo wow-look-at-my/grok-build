@@ -1,4 +1,15 @@
 //! Runtime XTVERSION probe (query `CSI > 0 q`, reply `DCS > | text ST`).
+//! It runs when env-based brand detection yields Unknown (SSH, plain xterm) or an allowlisted brand validated by hand (see [`gate_allows_probe`]).
+//!
+//! Fire-and-forget, as in helix and similar TUIs: the query is written once at startup with no timed read.
+//! The event loop's `XtversionFilter` recognizes and swallows the reply whenever it arrives.
+//!
+//! Safety invariants:
+//! - Query write must happen after `enable_raw_mode()` and before the `EventStream` filter is constructed.
+//! - Accepted residuals: SSH *from* JediTerm still probes (its env marker doesn't cross SSH) and leaks the query there.
+//!   A reply whose first event arrives only after the filter's 5s arm window types as Alt+Shift+P followed by literal text.
+//!   On a silent, fully idle session the `OnceLock` stays unset: `record_no_reply` only runs from the filter, which only runs on input.
+//!   `detected()` is None either way, so both consumers are unaffected.
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,6 +28,7 @@ static XTVERSION: OnceLock<ProbeResult> = OnceLock::new();
 static QUERY_SENT: AtomicBool = AtomicBool::new(false);
 
 /// The query is sent alone, without a DA1 sentinel: nothing here waits on reply ordering.
+/// A stale unsolicited DA1 reply could mis-answer a future crossterm probe that waits on DA1.
 #[cfg(unix)]
 const QUERY: &[u8] = b"\x1b[>0q";
 
@@ -44,6 +56,7 @@ pub fn record_reply(payload: &str) {
 }
 
 /// Record that the filter disarmed without seeing a reply.
+/// It is only invoked from the filter on input, so a fully idle session can leave the `OnceLock` unset (benign; see module doc).
 pub fn record_no_reply() {
     if XTVERSION.set(ProbeResult::NoReply).is_ok() {
         tracing::info!("XTVERSION probe: no reply");

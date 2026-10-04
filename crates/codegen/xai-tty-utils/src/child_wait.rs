@@ -5,7 +5,7 @@ use std::process::{Child, ExitStatus};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-// Many milliseconds balances responsive exit detection against polling load.
+// Forty milliseconds balances responsive exit detection against polling load.
 const CHILD_EXIT_POLL_QUANTUM: Duration = Duration::from_millis(40);
 
 /// Poll `child` for up to one monotonic `timeout`, reaping it on exit. `Some` means reaped; `None` leaves the child
@@ -14,6 +14,7 @@ const CHILD_EXIT_POLL_QUANTUM: Duration = Duration::from_millis(40);
 pub fn wait_child_bounded(child: &mut Child, timeout: Duration) -> io::Result<Option<ExitStatus>> {
     let started = Instant::now();
     // Not thread::sleep: a foreign SIGCHLD handler can overwrite EINTR and trip its errno assert (GB-5008).
+    // Not park_timeout: that would consume this thread's park token.
     let mutex = Mutex::new(());
     let condvar = Condvar::new();
     wait_child_bounded_with(

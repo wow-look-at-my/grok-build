@@ -1,4 +1,13 @@
 //! Filesystem helpers backing the client-facing `workspace.client_fs_*` RPCs.
+//! The grok.com conversation-files UI and the chat backend call them, tunneled through the server.
+//!
+//! Deliberately separate from the shell-facing ext ops in [`ext_fs`](super::ext_fs).
+//! Every path is relative to the client-fs base (`WorkspaceHandle::client_fs_base`) and resolves through the root-confinement helper.
+//! The list walk excludes symlinks that resolve outside the base and never descends into them.
+//! Listings paginate with stable post-sort slices, and reads are binary-safe (base64 chunks).
+//! Writes stage base64 chunks in a temp file beside the target and rename it into place on finalize; the target and `overwrite` are pinned by the first chunk.
+//!
+//! Wire types live in `xai_grok_workspace_types::rpc::fs` (the `ClientFs*` types), shared with the backend caller.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -26,7 +35,8 @@ const MAX_LIST_COLLECT: usize = super::walk::MAX_LIST_COLLECT;
 /// Server-side cap on `FsListReq::limit`.
 const MAX_LIST_LIMIT: u32 = 1000;
 
-/// Server-side cap on a single read's effective byte budget.
+/// Server-side cap on a single read's effective byte budget (shared across all fs surfaces; see [`super::walk::MAX_READ_BYTES`]).
+/// Only referenced by tests now that the clamp lives in `walk::clamp_read_length`.
 #[cfg(test)]
 const MAX_READ_BYTES: u64 = super::walk::MAX_READ_BYTES;
 
@@ -40,8 +50,8 @@ struct MemoEntry {
     hash: String,
 }
 
-/// Memo of full-content SHA-256 digests keyed by absolute path and validated
-/// against `(size, mtime_ms)`.
+/// Memo of full-content SHA-256 digests keyed by absolute path and validated against `(size, mtime_ms)`.
+/// Unchanged files hash once instead of on every `client_fs_stat`; on a mismatch the caller re-hashes, so mtime never stands in for the content hash.
 #[derive(Debug, Default)]
 pub(crate) struct FileHashMemo {
     entries: parking_lot::Mutex<HashMap<PathBuf, MemoEntry>>,
@@ -152,6 +162,7 @@ fn list_blocking(
             mtime_ms: e.modified.map(system_time_ms),
             is_symlink: e.is_symlink.then_some(true),
             // Base-relative path (divergent from the shell's absolute path).
+            // A walk under a symlinked base yields entries spelled with the canonical path, so strip either spelling
             path: e
                 .abs_path
                 .strip_prefix(base)
@@ -315,7 +326,7 @@ const ORPHAN_SWEEP_MAX_ENTRIES: usize = 500_000;
 /// Directories the orphan sweep never descends into: dependency and build trees that would spend the entry budget before user directories.
 const ORPHAN_SWEEP_SKIP_DIRS: &[&str] = &[".git", "node_modules", "target"];
 
-/// Base64 text length that can decode to at most [`MAX_CLIENT_FS_WRITE_CHUNK_BYTES`] (padded, chars every few bytes).
+/// Base64 text length that can decode to at most [`MAX_CLIENT_FS_WRITE_CHUNK_BYTES`] (padded, 4 chars per 3 bytes).
 const MAX_CHUNK_BASE64_LEN: usize = MAX_CLIENT_FS_WRITE_CHUNK_BYTES.div_ceil(3) * 4;
 
 /// Longest file name most filesystems accept (`NAME_MAX`); the staging name must fit it.
@@ -325,10 +336,11 @@ const MAX_FILE_NAME_BYTES: usize = 255;
 pub(crate) const MAX_STAGED_UPLOADS_PER_SESSION: usize = 16;
 
 /// Ceiling on bytes staged per session across all its uploads.
+/// Checked against a snapshot taken at chunk start, so concurrent chunks of other ids may overshoot it by at most one chunk each.
 pub(crate) const MAX_STAGED_BYTES_PER_SESSION: u64 = 512 * 1024 * 1024;
 
-/// One in-progress `client_fs_write_file` upload: the temp file beside its
-/// target plus the running length and digest.
+/// One in-progress `client_fs_write_file` upload: the temp file beside its target plus the running length and digest.
+/// Dropping it deletes the temp file (`NamedTempFile`), so every abandonment path cleans up by dropping.
 struct StagedUpload {
     target: PathBuf,
     /// Final absolute path, validated as UTF-8 before any byte is staged.
@@ -343,6 +355,7 @@ struct StagedUpload {
 
 enum UploadSlot {
     /// A chunk for this id is being written; a concurrent chunk is a protocol error.
+    /// Carries the bytes staged at checkout so the session byte ceiling still counts the upload.
     Busy(u64),
     Idle(Box<StagedUpload>),
 }
@@ -1105,6 +1118,7 @@ mod tests {
             limit: u32::MAX,
             ..list_req("")
         };
+        // Must not panic or overflow; the page is everything (fewer than 1000)
         let res = list_dir(dir.path(), &req, MAX_LIST_COLLECT);
         assert_eq!(res.nodes.len(), 5);
     }
@@ -1180,7 +1194,8 @@ mod tests {
         assert_eq!(first.size, Some(11));
         let real_hash = first.hash.clone().expect("hash for files");
 
-        // Plant a sentinel hash for the file's current (size, mtime) A second stat must return the sentinel.
+        // Plant a sentinel hash for the file's current (size, mtime)
+        // A second stat must return the sentinel, proof it did not re-hash
         let abs = root.join("data.txt");
         let md = std::fs::metadata(&abs).unwrap();
         let mtime = system_time_ms(md.modified().unwrap());
@@ -1245,6 +1260,7 @@ mod tests {
 
         let req = FsReadFileReq {
             path: "blob.bin".into(),
+            // Bytes 200..210 are bare continuation bytes, never valid UTF-8
             offset: Some(200),
             length: Some(50),
             max_bytes: 10, // cap below the requested length
@@ -1517,8 +1533,8 @@ mod tests {
         }
     }
 
-    /// Unusable session cwds fall back to the root base instead of failing every op. Both cases here are a directory missing
-    /// on disk (an artifacts mount not yet established) and a cwd containing `..`.
+    /// Unusable session cwds fall back to the root base instead of failing every op.
+    /// The two cases here are a directory missing on disk (an artifacts mount not yet established) and a cwd containing `..`.
     #[tokio::test]
     async fn unusable_session_cwds_fall_back_to_root_base() {
         let ws = make_handle();
@@ -1949,7 +1965,7 @@ mod tests {
         assert!(!root.join("o.bin").exists());
     }
 
-    /// The ids are per session: sessions may stage the same id for different targets.
+    /// The ids are per session: two sessions may stage the same id for different targets.
     #[tokio::test]
     async fn write_file_upload_ids_are_session_scoped() {
         let ws = make_handle();
@@ -2163,7 +2179,7 @@ mod tests {
         std::fs::create_dir(root.join("sub")).unwrap();
         ws.create_session_with_cwd("other", Some(root.join("sub")))
             .unwrap();
-        // Live uploads in sessions, one of them checked out (in flight) while the sweep runs.
+        // Live uploads in two sessions, one of them checked out (in flight) while the sweep runs.
         write_file(
             &ws,
             Some("main"),
@@ -2476,7 +2492,7 @@ mod tests {
         session.staged_uploads().abandon_all();
         other.staged_uploads().abandon_all();
 
-        // Byte ceiling across uploads: uploads at the per-file cap already fill the session.
+        // Byte ceiling across uploads: two uploads at the per-file cap already fill the session.
         for id in ["big-a", "big-b"] {
             write_file(
                 &ws,
@@ -2529,6 +2545,7 @@ mod tests {
         let ws = make_handle();
         let root = ws.root_cwd().unwrap();
         let session = ws.session("main").unwrap();
+        // 200-byte name + 1 + 13 + 64 = 278 > 255; a 100-byte name fits.
         let long = "n".repeat(200);
         let fits = "n".repeat(100);
         let upload_id = "i".repeat(MAX_UPLOAD_ID_LEN);

@@ -1,4 +1,5 @@
 //! Black-box check that `McpHttpClient` is invisible to a healthy streamable-HTTP MCP server.
+//! The handshake and tools/list succeed and the standing GET opens exactly once.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -4,7 +4,7 @@ This file ships with the CLI and is extracted to `~/.grok/docs/user-guide/26-con
 
 ## How to configure
 
-Files configure Grok Build. They are written by different people.
+Three files configure Grok Build, and they are written by different people.
 
 | File | Who writes it | Where it lives | Use it to |
 | --- | --- | --- | --- |
@@ -17,11 +17,11 @@ Choose `managed_config.toml` for defaults you want people to be able to adjust, 
 Grok Build also reads these layers, later rows winning except where a requirements pin or the Managed column says otherwise.
 
 1. Compiled defaults.
-2. `/etc/grok/managed_config.toml`, then `$GROK_HOME/managed_config.toml` (fleet defaults. Console-synced).
-3. `$GROK_HOME/config.toml` (your settings. `/settings` writes here). Default `$GROK_HOME` is `~/.grok`.
+2. `/etc/grok/managed_config.toml`, then `$GROK_HOME/managed_config.toml` (fleet defaults; console-synced).
+3. `$GROK_HOME/config.toml` (your settings; `/settings` writes here). Default `$GROK_HOME` is `~/.grok`.
 4. Project `.grok/config.toml`: only `[mcp_servers]`, `[plugins]`, `[permission]`, and `[mcp] max_output_bytes`.
 5. `GROK_CONFIG` (inline JSON) or `GROK_CONFIG_PATH` (JSON or TOML file). Allowlisted keys only.
-6. `$GROK_HOME/requirements.toml`, then `/etc/grok/requirements.toml`, then macOS MDM `ai.x.grok`. Admin layer. Keys marked `pin` in the table cannot be overridden. Keys marked `yes` are also valid in this file.
+6. `$GROK_HOME/requirements.toml`, then `/etc/grok/requirements.toml`, then macOS MDM `ai.x.grok`. Admin layer. Keys marked `pin` in the table cannot be overridden; keys marked `yes` are also valid in this file.
 7. `GROK_*` environment variables.
 8. CLI flags such as `--model`, `--sandbox`, `--yolo`.
 
@@ -29,9 +29,9 @@ Run `grok inspect` or `grok inspect --json` to see which files and values won.
 
 ## config.toml
 
-User-level configuration lives in `$GROK_HOME/config.toml` (default `~/.grok/config.toml`. Windows `%USERPROFILE%\.grok\config.toml`). Project-scoped overrides live in `.grok/config.toml` and only contribute `[mcp_servers]`, `[plugins]`, `[permission]`, and `[mcp] max_output_bytes`.
+User-level configuration lives in `$GROK_HOME/config.toml` (default `~/.grok/config.toml`; Windows `%USERPROFILE%\.grok\config.toml`). Project-scoped overrides live in `.grok/config.toml` and only contribute `[mcp_servers]`, `[plugins]`, `[permission]`, and `[mcp] max_output_bytes`.
 
-**Requirements** marks whether the same key can be set in `requirements.toml`: `pin` cannot be overridden (including env and CLI where the resolver honors the pin). `yes` is accepted in that file. `—` is not read from `requirements.toml`. **Managed** marks whether a fleet `managed_config.toml` value stands (`fleet`) or the user's file wins (`user`).
+**Requirements** marks whether the same key can be set in `requirements.toml`: `pin` cannot be overridden (including env and CLI where the resolver honors the pin); `yes` is accepted in that file; `—` is not read from `requirements.toml`. **Managed** marks whether a fleet `managed_config.toml` value stands (`fleet`) or the user's file wins (`user`).
 
 ### `agent`
 
@@ -680,7 +680,7 @@ One exception to that rule:
 
 Grok Build reads `/etc/grok/managed_config.toml` first, then `$GROK_HOME/managed_config.toml`, which the console keeps in sync. Values in the second replace values in the first.
 
-The **Managed** column on the tables above is the per-key answer: `fleet` means the fleet value stands, `user` means the user's file wins. `—` means this file is ignored.
+The **Managed** column on the tables above is the per-key answer: `fleet` means the fleet value stands, `user` means the user's file wins, `—` means this file is ignored.
 
 ## requirements.toml
 
@@ -696,7 +696,7 @@ These keys exist only in `requirements.toml`:
 
 Policy pins such as `allow_managed_hooks_only` (see [Hooks](10-hooks.md#allow-only-managed-hooks)) and the MCP and marketplace lists (see [Plugins](09-plugins.md#restrict-which-mcp-servers-can-run)) are accepted in `requirements.toml` and `managed_config.toml` alike and only ever tighten.
 
-`[[hooks.<Event>]]` tables are accepted in every config file. Hooks from the signed requirements cache and the root-owned `/etc/grok` files are enforced. See [Hooks](10-hooks.md#enforced-hooks).
+`[[hooks.<Event>]]` tables are accepted in every config file. Hooks from the signed requirements cache and the root-owned `/etc/grok` files are enforced; see [Hooks](10-hooks.md#enforced-hooks).
 
 ## What happens when a setting is refused
 

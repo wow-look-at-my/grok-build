@@ -1,4 +1,12 @@
 //! Integration tests for xai-crash-handler.
+//!
+//! These tests verify that installing the crash handler does not interfere
+//! with normal program operation (tokio runtime, signal handling),
+//! and that it correctly captures crash data when a fatal signal fires.
+//!
+//! Tests that send fatal signals use subprocess isolation: the test process
+//! re-executes itself with an env var that selects the crash scenario, so
+//! the parent can verify outcomes without dying.
 
 #![cfg(unix)]
 
@@ -48,6 +56,7 @@ fn subprocess_entry() {
     xai_crash_handler::install(config);
 
     match scenario.as_str() {
+        // Scenario 1: install handler, run tokio runtime with concurrent work, exit cleanly.
         "tokio_normal" => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -78,6 +87,7 @@ fn subprocess_entry() {
             });
         }
 
+        // Scenario 2: install handler, do sync file I/O and computation, exit cleanly.
         "sync_normal" => {
             let tmp = tempfile::tempdir().expect("tempdir");
             for i in 0..50 {
@@ -89,21 +99,24 @@ fn subprocess_entry() {
             eprintln!("sync_normal: 50 files written and read back");
         }
 
+        // Scenario 3: install handler, send ourselves SIGBUS, verify crash file written.
         "sigbus" => {
             // Give the handler a moment to be fully installed, then crash.
             unsafe { libc::raise(libc::SIGBUS) };
         }
 
+        // Scenario 4: install handler, send ourselves SIGSEGV.
         "sigsegv" => {
             unsafe { libc::raise(libc::SIGSEGV) };
         }
 
-        // This is the path every Rust panic takes in release builds
-        // (panic = "abort" → SIGABRT).
+        // Scenario 6: install handler, abort. This is the path every Rust
+        // panic takes in release builds (panic = "abort" → SIGABRT).
         "sigabrt" => {
             std::process::abort();
         }
 
+        // Scenario 5: tokio runtime + signal coexistence, then clean shutdown.
         "tokio_signals" => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -113,7 +126,8 @@ fn subprocess_entry() {
                 use tokio::signal::unix::{SignalKind, signal};
                 let mut usr1 = signal(SignalKind::user_defined1()).expect("SIGUSR1 handler");
 
-                // Send ourselves SIGUSR1 and verify tokio receives it.
+                // Send ourselves SIGUSR1 and verify tokio receives it
+                // (proves our SIGBUS/SIGSEGV handler doesn't clobber other signals).
                 unsafe { libc::raise(libc::SIGUSR1) };
                 tokio::time::timeout(std::time::Duration::from_secs(2), usr1.recv())
                     .await

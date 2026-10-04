@@ -509,6 +509,7 @@ fn resolve_loop_without_args_uses_bare_command_display_text() {
 #[test]
 fn resolve_passthrough_preserves_original_blocks() {
     // External-harness agents: blocks are passed through verbatim.
+    // The prompt assembly layer decides how to format them.
     let skills = vec![make_skill("commit", true)];
     let outcome = resolve(
         vec![text_block("/commit fix typo")],
@@ -734,6 +735,7 @@ fn goal_does_not_resolve_when_host_capability_is_off() {
 
 #[test]
 fn loop_does_not_resolve_when_scheduler_unavailable() {
+    // Routing /loop without the scheduler would produce a "call scheduler_create" prompt the model can't act on
     let availability = CommandAvailability {
         scheduler: false,
         ..CommandAvailability::all_enabled()
@@ -806,8 +808,8 @@ fn build_tools_meta_serialises_tool_names() {
 
 #[test]
 fn pre_session_builtin_commands_excludes_gated_entries() {
-    // The pre-session list (advertised in InitializeResponse._meta) with a
-    // default (fail-closed).
+    // The pre-session list (advertised in InitializeResponse._meta) with a default (fail-closed) availability must not include any gated command
+    // We don't know the toolset yet at that point
     let names: Vec<String> = builtin_commands(CommandAvailability::default())
         .into_iter()
         .map(|c| c.name)
@@ -838,8 +840,8 @@ fn pre_session_builtin_commands_excludes_gated_entries() {
 
 #[test]
 fn pre_session_builtin_commands_advertises_goal_when_flag_enabled() {
-    // `/goal` is gated on a config feature flag known at initialize time (not
-    // a live toolset).
+    // `/goal` is gated on a config feature flag known at initialize time (not a live toolset)
+    // Without pre-session advertising it would only show up after the first user turn created a session
     let availability = CommandAvailability {
         goal: true,
         ..CommandAvailability::default()
@@ -1990,7 +1992,8 @@ fn workflow_manage_parses_both_orders_and_optional_id() {
 
 #[test]
 fn workflow_named_runs_is_shadowed_by_the_runs_op() {
-    // `/workflow runs` is always the overview op.
+    // `/workflow runs` is always the overview op, even with a workflow named `runs` installed
+    // That workflow still launches via its advertised bare `/runs` command or `/workflow runs <args>`
     let workflows = vec![listing("runs")];
     assert!(matches!(
         resolve(
@@ -2295,6 +2298,7 @@ fn goal_tracker_account_elapsed_flushes_delta() {
     use crate::session::goal_tracker::GoalTracker;
     let mut tracker = GoalTracker::new(std::path::PathBuf::from("/tmp/test"));
     tracker.create_goal("g1".into(), "obj".into(), None, 0, "now".into(), None);
+    // After create_goal, elapsed_ms is 0 but active_since is set.
     let before = tracker.snapshot().unwrap().elapsed_ms;
     assert_eq!(before, 0);
     // account_elapsed flushes pending wall-clock time.

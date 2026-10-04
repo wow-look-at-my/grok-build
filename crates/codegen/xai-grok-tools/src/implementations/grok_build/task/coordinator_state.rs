@@ -46,7 +46,8 @@ pub const MAX_ACTIVE_MESSAGE_ADMISSIONS: usize = 64;
 pub const ACTIVE_MESSAGE_ADMISSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Maximum wait for an owned spawning child to become active before a parked
-/// agent send is released.
+/// agent send is released. Session bootstrap routinely exceeds the admission
+/// timeout, so this backstop is separate and much longer.
 pub const ACTIVE_MESSAGE_SPAWN_READY_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(120);
 
@@ -60,9 +61,9 @@ pub trait ChildControl: 'static {
 
     fn progress(&self) -> Self::ProgressFuture;
 
-    /// Admit a coordinator-authorized message to this child. `Admitted` is
-    /// valid only when protected-row insertion succeeds inside
-    /// [`ActiveAgentMessageDelivery::commit_admission`].
+    /// Admit a coordinator-authorized message to this child. `Admitted` is valid only when
+    /// protected-row insertion succeeds inside [`ActiveAgentMessageDelivery::commit_admission`].
+    /// The returned future must be `Send` so multithreaded hosts can spawn the coordinator.
     fn send_active_message(
         &self,
         _delivery: ActiveAgentMessageDelivery,
@@ -72,7 +73,10 @@ pub trait ChildControl: 'static {
 
     fn cancel(&self);
 
-    /// Deliver `text` into the running child as a mid-turn user message (the coordinator's `SubagentEvent::Interject`).
+    /// Deliver `text` into the running child as a mid-turn user message
+    /// (the coordinator's `SubagentEvent::Interject`). A runtime whose child
+    /// cannot take input mid-turn states so here rather than silently
+    /// swallowing the text.
     fn interject(&self, text: &str);
 }
 
@@ -84,7 +88,9 @@ pub struct StartedChild<C> {
     pub child_cwd: String,
     pub worktree_path: Option<String>,
     pub effective_model_id: String,
-    /// The resolved agent definition declares `background: true`.
+    /// The resolved agent definition declares `background: true`. Folded into `Outstanding`
+    /// accounting (background, never turn-blocking) while the foreground await budget stays gated
+    /// on the tool's own `run_in_background` flag.
     pub definition_background: bool,
     pub control: C,
 }
@@ -107,11 +113,14 @@ pub struct ChildRunRequest<C> {
     pub wake_origin: Option<WakeOrigin>,
     /// Time parked in the admission queue; `None` if admitted immediately.
     pub queued_for: Option<std::time::Duration>,
-    /// The session's running non-workflow children when this spawn started, including itself when it is one of them.
+    /// The session's running non-workflow children when this spawn started,
+    /// including itself when it is one of them.
     pub session_running: usize,
-    /// Coordinator-minted address for this generation.
+    /// Coordinator-minted address for this generation. Advertised at spawn
+    /// and resolvable on the pending record before promotion.
     pub agent_address: Option<AgentAddress>,
-    /// Pre-reparent spawner session, when the live address must also be advertised there.
+    /// Pre-reparent spawner session, when the live address must also be
+    /// advertised there. Cleared if that session cannot be targeted.
     pub spawner_session_id: Option<String>,
 }
 
@@ -231,7 +240,8 @@ pub struct SubagentLimitNotice {
     pub decision: SubagentLimitDecision,
     /// Session children running against the limit at decision time.
     pub running: usize,
-    /// The session's queue depth after the decision applies: a queued spawn counts itself, a rejected spawn does not.
+    /// The session's queue depth after the decision applies: a queued spawn
+    /// counts itself, a rejected spawn does not.
     pub queue_depth: usize,
     pub origin: LimitedSpawnOrigin,
 }
@@ -249,7 +259,9 @@ pub struct CoordinatorConfig {
     pub limit_sink: Option<SubagentLimitSink>,
     /// Whether the host drains completion summaries between turns.
     pub buffer_completions: bool,
-    /// Extra cap applied to BUFFERED summary outputs only.
+    /// Extra cap applied to BUFFERED summary outputs only (the request's own `completion_output_cap` still applies first).
+    /// Buffered entries pin the child's output `Arc` until drained; hosts whose reminder rendering never inlines the output
+    /// (a polling tool exists, e.g. the callback tools-server) should bound it.
     pub buffered_completion_output_cap: Option<usize>,
 }
 
@@ -296,7 +308,9 @@ impl<C> Clone for ChildReporter<C> {
 }
 
 impl<C: 'static> ChildReporter<C> {
-    /// Promote the pending child to active.
+    /// Promote the pending child to active. The acknowledgement closes the
+    /// cancel-at-promote race: `false` means cancellation won and the adapter
+    /// must tear down the half-initialized runtime.
     pub async fn started(&self, child: StartedChild<C>) -> bool {
         self.started_with_deferred_admission(child, false).await
     }
@@ -460,6 +474,8 @@ pub(super) enum InternalEvent<C> {
 }
 
 /// Prior terminal record removed while a wake is pending or queued.
+/// The pending/queued wake owns restoration on every exit before `Started`;
+/// promotion permanently replaces this record, so restoration is no longer legal.
 pub(super) struct DisplacedCompletedChild {
     pub(super) completed: Box<CompletedChild>,
 }
@@ -482,12 +498,14 @@ pub(super) struct PendingChild {
     pub(super) handle_only: bool,
     pub(super) explicitly_killed: bool,
     pub(super) disposition: PendingDisposition,
-    /// False when the record was synthesized for a spawn that never reached the runner.
+    /// False when the record was synthesized for a spawn that never reached
+    /// the runner (admission reject, cancelled while queued).
     pub(super) launched: bool,
     pub(super) attempt_id: xai_message_delivery_core::AttemptId,
     pub(super) generation: ActiveChildGeneration,
     pub(super) agent_address: Option<AgentAddress>,
-    /// Pre-reparent spawner session for a nested spawn.
+    /// Pre-reparent spawner session for a nested spawn. Human sends from it
+    /// stay owned only while that session can be given the live address.
     pub(super) spawner_session_id: Option<String>,
     pub(super) wake_of: Option<DisplacedCompletedChild>,
 }
@@ -499,7 +517,8 @@ pub(super) struct ActiveChild<C> {
     pub(super) spawn_reply: Option<oneshot::Sender<SubagentResult>>,
     pub(super) foreground_deadline: Option<tokio::time::Instant>,
     pub(super) handle_only: bool,
-    /// Definition-declared background (see [`StartedChild`]): background for `Outstanding` accounting even.
+    /// Definition-declared background (see [`StartedChild`]): background for
+    /// `Outstanding` accounting even while the spawn caller block-awaits.
     pub(super) definition_background: bool,
     pub(super) explicitly_killed: bool,
     pub(super) disposition: PendingDisposition,
@@ -697,7 +716,8 @@ pub(super) trait ForegroundChild {
     fn request(&self) -> &SubagentRequest;
     fn child_session_id(&self) -> &str;
     fn deadline(&self) -> Option<tokio::time::Instant>;
-    /// True when the spawn caller dropped its result receiver while this child was still treated as turn-blocking.
+    /// True when the spawn caller dropped its result receiver while this
+    /// child was still treated as turn-blocking (old shell `ParentGone`).
     fn caller_gone(&self) -> bool;
     fn is_workflow(&self) -> bool;
     fn take_reply(&mut self) -> Option<oneshot::Sender<SubagentResult>>;
@@ -799,7 +819,9 @@ pub(super) fn background_at_deadline(
         "foreground subagent exceeded await budget; auto-backgrounding (child keeps running)",
     );
     if let Some(respond_to) = child.take_reply() {
-        // Interim handoff, not a completion: keep `success: false` (default).
+        // Interim handoff, not a completion: keep `success: false` (default)
+        // so `SubagentResult::status()` consumers cannot record a completed
+        // status for a still-running child. Callers branch on `backgrounded`.
         let _ = respond_to.send(SubagentResult::backgrounded(
             child.id(),
             child.child_session_id(),
@@ -943,7 +965,8 @@ pub(super) fn queued_snapshot(
         description: request.description.clone(),
         subagent_type: request.subagent_type.clone(),
         status: SubagentSnapshotStatus::Initializing,
-        // Stable across polls: the enqueue time, with the duration showing how long the spawn has waited for a slot.
+        // Stable across polls: the enqueue time, with the duration showing
+        // how long the spawn has waited for a slot.
         started_at_epoch_ms: instant_to_epoch_ms(queued_at),
         duration_ms: queued_at.elapsed().as_millis() as u64,
         persona: request.runtime_overrides.persona.clone(),

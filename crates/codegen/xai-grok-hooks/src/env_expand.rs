@@ -1,21 +1,49 @@
 //! Environment variable expansion helper for hook config strings.
+//!
+//! Expands `${VAR}` / `$VAR`, consulting a per-hook `extra_env` map before the process environment.
+//! [`crate::config::parse_hook_file`] uses it on `command` and `url` fields at config-load time.
+//! [`crate::runner::http`] uses it on `spec.url` once more right before SSRF validation.
+//!
+//! Unset plain references (e.g. `${UNSET}/x`) are preserved verbatim.
+//! So is every parameter-expansion-modifier form (`:-`, `-`, `:=`, `:?`, `:+`, `%`, `#`, `/`, `:N`, `:N:M`, e.g. `${VAR:-default}`).
+//! Preserving them keeps config-load-time expansion idempotent: re-running it on an already expanded string is a no-op.
+//! Vars deferred to runtime (set later by the shell, the dispatcher, or `extra_env`) survive the load-time pass.
+//! The pre-flight check in [`crate::runner::command`] catches any that remain unset at execution.
+//! Modifier forms have shell-specific behaviour (notably `:-` on a set-but-empty value differs between `sh` and shellexpand).
+//! The user wrote the modifier form because they wanted the shell's interpretation, so the runtime `sh -c` branch resolves it.
+//! [`crate::runner::command::find_unresolved_env_vars`] mirrors the modifier-skip behaviour, keeping the two layers in sync.
+//!
+//! The engine is `shellexpand::env_with_context_no_errors`, shared with `xai_grok_config::expand_env_vars_in_string`.
+//! This version adds the per-hook `extra` map and the modifier-form preservation.
+//!
+//! ## Asymmetry between `command` and `url`
+//!
+//! Load-time expansion in [`crate::config::parse_hook_file`] runs once, using a snapshot of process env at parse time.
+//! The HTTP runner does a second pass at runtime so plugin-injected vars arriving in `extra_env` after parsing (e.g. `CLAUDE_PLUGIN_ROOT`) resolve.
+//! The second pass also picks up mid-session changes to process env for URLs.
+//! Command paths are not value-expanded at spawn.
+//! Unix `sh -c` expands `$VAR` from the child env; Windows PowerShell rewrites known `$VAR` to `$env:VAR`.
 
 use std::collections::HashMap;
 
 /// Sentinel prefix for the per-call mask sentinel; see [`make_sentinel`].
+///
+/// A Unicode Private Use Area code point (`U+F8FF`) plus a long magic ASCII prefix.
 const SENTINEL_PREFIX: &str = "\u{f8ff}__GROK_HOOKS_MASK_";
 const SENTINEL_SUFFIX: &str = "__\u{f8ff}";
 
-/// Build the per-call sentinel that hides modifier-form `${...}` substrings
-/// from `shellexpand::env_with_context_no_errors`.
+/// Build the per-call sentinel that hides modifier-form `${...}` substrings from `shellexpand::env_with_context_no_errors`.
+/// The sentinel is restored to `${` after shellexpand runs, so the modifier form survives expansion verbatim.
+/// With per-call randomization the chance of a natural collision is ~2^-128.
 fn make_sentinel() -> String {
     let hi: u64 = fastrand::u64(..);
     let lo: u64 = fastrand::u64(..);
     format!("{SENTINEL_PREFIX}{hi:016x}{lo:016x}{SENTINEL_SUFFIX}")
 }
 
-/// Expand `${VAR}` / `$VAR` references in `input`. Unresolved references are preserved verbatim, so the function is idempotent on
-/// already-expanded strings.
+/// Expand `${VAR}` / `$VAR` references in `input`.
+/// Unresolved references are preserved verbatim, so the function is idempotent on already-expanded strings.
+/// References resolved only at runtime survive the load-time pass.
 pub(crate) fn expand_env_vars_with_extra(input: &str, extra: &HashMap<String, String>) -> String {
     expand_env_vars_with_process_skip(input, extra, &[])
 }
@@ -27,15 +55,19 @@ pub(crate) fn expand_env_vars_with_process_skip(
 ) -> String {
     let sentinel = make_sentinel();
 
-    // Defence in depth: a collision between the fresh sentinel and the input
-    // or an extra-env value will require predicting our PRNG output Panic.
+    // Defence in depth: a collision between the fresh sentinel and the input or an extra-env value would require predicting our PRNG output
+    // Panic in debug builds and fall through to legacy behaviour in release
+    // Returning the input unchanged is safer than rewriting a legitimate substring to `${`
     debug_assert!(
         !input.contains(&sentinel) && !extra.values().any(|v| v.contains(&sentinel)),
         "per-call sentinel collided with input or extra-env value"
     );
 
+    // Step 1: hide any `${VAR<modifier>...}` substring from shellexpand by replacing the leading `${` with the per-call sentinel
+    // shellexpand needs a `$` before the brace to recognize the form, so the masked body reads as literal text
     let masked = mask_modifier_forms(input, &sentinel);
 
+    // Step 2: run shellexpand on the (possibly) masked input.
     let context = |name: &str| -> Option<String> {
         if let Some(v) = extra.get(name) {
             return Some(v.clone());
@@ -47,6 +79,8 @@ pub(crate) fn expand_env_vars_with_process_skip(
     };
     let expanded = shellexpand::env_with_context_no_errors(&masked, context).into_owned();
 
+    // Step 3: restore the sentinels back to `${`
+    // The sentinel is freshly randomized per call, so it appears in `expanded` only where `mask_modifier_forms` put it
     if expanded.contains(&sentinel) {
         expanded.replace(&sentinel, "${")
     } else {
@@ -61,8 +95,7 @@ fn mask_modifier_forms(input: &str, sentinel: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut cursor: usize = 0;
     for r in iter_env_var_references(input) {
-        // Copy any literal text between the reference (or start of string)
-        // and this verbatim
+        // Copy any literal text between the previous reference (or start of string) and this one verbatim
         if cursor < r.start
             && let Some(lit) = input.get(cursor..r.start)
         {
@@ -95,16 +128,21 @@ pub(crate) struct EnvVarRef<'a> {
     /// Byte offset where the leading `$` starts.
     pub start: usize,
     /// Byte offset one past the end of the reference.
+    /// For braced forms this is one past the closing `}`; for bare forms it is one past the last identifier character.
     pub end: usize,
     /// Identifier name.
+    /// For `${VAR...}` and `$VAR` this is `"VAR"`; for invalid forms (e.g. `${:-foo}`, `${}`) it is empty.
     pub name: &'a str,
     /// True for `${...}` (braced); false for `$NAME` (bare).
     pub braced: bool,
-    /// True if the braced form has a modifier (`:`, `-`, `=`, `?`, `+`, `%`, `#`, `/`, digit suffix, etc.) between the identifier.
+    /// True if the braced form has a modifier (`:`, `-`, `=`, `?`, `+`, `%`, `#`, `/`, digit suffix, etc.) between the identifier and closing `}`.
+    /// Always false for bare references and for invalid braced forms.
     pub has_modifier: bool,
 }
 
 /// Walk `input` and yield every `$VAR` / `${...}` reference.
+/// Skips shell positional / special params (`$1`, `$$`, `$?`, `$#`, `$(...)`, `$@`, etc.) since none of those are env-var references.
+/// Unterminated braced forms (`${VAR:-no-close`) are skipped: the `$` is consumed and scanning continues at the next byte. This matches `shellexpand`, which treats unterminated forms as literal text; Nested braces inside a modifier body (`${A:-${B}}`) match the FIRST `}`, so the inner `${B}` becomes part of the outer modifier body. The runtime `sh -c` branch handles real nesting natively when the form reaches the shell; Empty / invalid identifier (`${}`, `${:-foo}`) is yielded with an empty `name`, so callers can decide whether to mask it.
 pub(crate) fn iter_env_var_references(input: &str) -> EnvVarRefIter<'_> {
     EnvVarRefIter { input, pos: 0 }
 }
@@ -256,8 +294,8 @@ mod tests {
 
     #[test]
     fn preserves_unresolved_references() {
-        // shellexpand's no-errors variant returns the original `${VAR}` text
-        // when the var is unset in both `extra` and the process env.
+        // shellexpand's no-errors variant returns the original `${VAR}` text when the var is unset in both `extra` and the process env
+        // This makes load-time expansion idempotent and lets runtime-only vars survive the pass to be caught by `find_unresolved_env_vars`
         with_env_var("GROK_HOOKS_ENV_EXPAND_NEVER_SET", None, || {
             let extra = HashMap::new();
             let input = "${GROK_HOOKS_ENV_EXPAND_NEVER_SET}/x.sh";
@@ -437,6 +475,7 @@ mod tests {
     // ── mask_modifier_forms helper unit tests ────────────────────
 
     /// A fixed test-only sentinel that makes the masked-output assertions deterministic.
+    /// Production code uses the per-call randomized [`make_sentinel`]; the sentinel collision regression tests below exercise the random path.
     const TEST_SENTINEL: &str = "<<TEST_SENTINEL>>";
 
     #[test]
@@ -473,7 +512,7 @@ mod tests {
 
     // ── Nested / interleaved edge cases ─────────────────────────
 
-    /// Consecutive modifier forms with no intervening text must both be masked independently.
+    /// Two consecutive modifier forms with no intervening text must both be masked independently.
     #[test]
     fn mask_helper_consecutive_modifier_forms() {
         let masked = mask_modifier_forms("${A:-x}${B:-y}", TEST_SENTINEL);
@@ -483,9 +522,9 @@ mod tests {
         );
     }
 
-    /// Nested braces inside a modifier body: the walker matches the FIRST
-    /// closing `}`, so the inner `${B}` becomes part of the outer modifier
-    /// body.
+    /// Nested braces inside a modifier body: the walker matches the FIRST closing `}`, so the inner `${B}` becomes part of the outer modifier body.
+    /// The literal `${B}` survives inside the masked body for the runtime `sh -c` branch, which handles nesting natively.
+    /// The trailing extra `}` has no matching `${` and is left as-is; complex nested expansions are deferred to runtime.
     #[test]
     fn mask_helper_nested_braces_in_modifier_body() {
         let masked = mask_modifier_forms("${A:-${B}}", TEST_SENTINEL);
@@ -512,7 +551,7 @@ mod tests {
     #[test]
     fn expand_preserves_pre_existing_old_nul_sentinel_in_extra() {
         let mut extra = HashMap::new();
-        // Value contains the 2-NUL sentinel followed by what would parse as an identifier and closing brace
+        // Value contains the legacy 2-NUL sentinel followed by what would parse as an identifier and closing brace
         extra.insert("VAL".to_string(), "\u{0}\u{0}OLD}".to_string());
         let out = expand_env_vars_with_extra("prefix${VAL}suffix", &extra);
         assert_eq!(out, "prefix\u{0}\u{0}OLD}suffix");
@@ -529,8 +568,7 @@ mod tests {
     fn expand_preserves_pre_existing_legacy_fixed_sentinel_in_extra() {
         let legacy_sentinel = "\u{f8ff}__GROK_HOOKS_MASK__\u{f8ff}";
         let mut extra = HashMap::new();
-        // Value embeds the sentinel followed by what would parse as an
-        // identifier and closing brace if the unmask replace had collided
+        // Value embeds the legacy sentinel followed by what would parse as an identifier and closing brace if the unmask replace had collided
         extra.insert(
             "VAL".to_string(),
             format!("payload-{legacy_sentinel}OLD}}-tail"),
@@ -652,6 +690,8 @@ mod tests {
     /// Nested braces are matched at the FIRST `}`; see `mask_helper_nested_braces_in_modifier_body`.
     #[test]
     fn iter_matches_first_closing_brace_for_nested() {
+        // The walker reads `A`, sees `:` as the first non-identifier byte, then stops at the FIRST `}`, the inner one at index 8, so end is 9
+        // The trailing `}` at index 9 is literal text
         let refs: Vec<_> = iter_env_var_references("${A:-${B}}").collect();
         let [r] = refs.as_slice() else {
             panic!("expected one ref: {refs:?}");

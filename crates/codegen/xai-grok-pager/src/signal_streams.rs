@@ -1,3 +1,5 @@
+/// The signals the 130/143/129 exit-code map covers, claimed from construction for as long as this
+/// lives: without a live stream a signal takes its default action and kills the process.
 #[cfg(unix)]
 pub struct SignalStreams {
     interrupt: Option<tokio::signal::unix::Signal>,

@@ -1,4 +1,10 @@
 //! Criterion benchmarks for scrollback search.
+//!
+//! - `scan` measures the raw regex scan over a large corpus.
+//!   That work ran synchronously on the input thread on every keystroke before the background daemon, and now runs off-thread.
+//! - `query_steady` / `query_cold` measure the UI-thread cost of `update_query` after the daemon change.
+//!   A steady keystroke only compiles the matcher and enqueues the query (the scan is off-thread).
+//!   The cold path also rebuilds and ships the corpus on a content change.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -13,6 +19,7 @@ use xai_grok_pager::search::{QueryKind, TextMatcher};
 /// Roughly the entry count of a long working session.
 const CORPUS_ENTRIES: usize = 30_000;
 
+/// Each measured iteration scans (or rebuilds) the whole corpus, so cap the sample count; criterion's default 100 would run for minutes.
 const SAMPLE_SIZE: usize = 10;
 
 /// One paragraph of body text per entry, so the whole corpus is on the order of a long session's searchable text.

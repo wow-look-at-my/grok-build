@@ -203,6 +203,7 @@ pub(crate) fn prompt_suggest_sampling_defaults(
         .temperature
         .unwrap_or(PROMPT_SUGGEST_TEMPERATURE_DEFAULT);
     // Pass through. Unset stays None so the non-reasoning model pin still applies.
+    // Low is chosen later, and only if the selected model supports reasoning.
     (max_output_tokens, temperature, cfg.reasoning_effort)
 }
 

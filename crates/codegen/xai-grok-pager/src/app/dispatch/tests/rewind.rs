@@ -199,7 +199,7 @@ fn set_confirm_before_rewind_updates_live_value() {
     );
 }
 
-/// Multi-turn fixture with user prompts for the picker and non-zero-target tests.
+/// Multi-turn fixture with two user prompts for the picker and non-zero-target tests.
 fn app_with_two_turns() -> AppView {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -289,6 +289,7 @@ fn picker_select_nonzero_target_opens_confirm_when_setting_on() {
     ));
 }
 
+/// Picking any target (including 0) opens confirm when the setting is on.
 #[test]
 fn picker_select_target_zero_opens_confirm() {
     let mut app = app_with_two_turns();
@@ -414,7 +415,7 @@ fn confirm_never_ask_persists_setting_off_and_executes() {
     ));
 }
 
-/// With confirm off, target executes immediately (same as non-zero targets).
+/// With confirm off, target 0 executes immediately (same as non-zero targets).
 #[test]
 fn picker_select_target_zero_executes_immediately_when_confirm_off() {
     let mut app = app_with_two_turns();
@@ -537,6 +538,8 @@ fn classic_points_loaded_target_zero_executes_when_confirm_off() {
 
 #[test]
 fn stacked_rewinds_each_get_their_own_pid_and_orphans_drop_independently() {
+    // Two rewinds leave two cancelled PromptResponses to drain
+    // Each carries its own promptId; both fail to match current_prompt_id (None) and are silently discarded with no banner
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -718,6 +721,7 @@ fn shell_prompt_index_at_resolves_interjection_to_enclosing_turn() {
 
     let ij_idx = sb.index_of_id(ij).unwrap();
     assert_eq!(shell_prompt_index_at(&sb, ij_idx), Some(0));
+    // A block after the interjection but before the next prompt still belongs to turn 0
     assert_eq!(shell_prompt_index_at(&sb, ij_idx + 1), Some(0));
 }
 

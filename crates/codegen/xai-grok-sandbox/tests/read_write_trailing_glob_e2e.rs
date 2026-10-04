@@ -1,4 +1,13 @@
-//! E2E: a `read_write` config entry with a trailing `/**` must grant the parent directory.
+//! E2E: a `read_write` config entry with a trailing `/**` must grant the parent directory, not create and grant a directory literally named `**`.
+//!
+//! The subprocess applies a custom profile whose only extra grant is `<cache>/**`.
+//! It probes writes inside the cache tree (must succeed) and outside any grant (must fail, proving enforcement was active).
+//!
+//! Soft-skips when kernel enforcement is unavailable; `SANDBOX_E2E_REQUIRE_ENFORCEMENT=1` hard-requires it.
+//!
+//! ```text
+//! cargo test -p xai-grok-sandbox --test read_write_trailing_glob_e2e -- --nocapture
+//! ```
 
 #![cfg(all(unix, feature = "enforce"))]
 

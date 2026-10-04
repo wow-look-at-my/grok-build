@@ -46,8 +46,9 @@ impl StreamingSttSession {
                 .map_err(|e| VoiceError::WebSocket(format!("auth header: {e}")))?,
         );
 
-        // These headers identify the client so the backend can attribute and
-        // meter voice usage, mirroring the sampler and imagine request paths.
+        // These headers identify the client so the backend can attribute and meter voice usage, mirroring the sampler and
+        // imagine request paths. Billing itself follows the `Authorization` bearer (per-user for OAuth, BYOK key owner
+        // otherwise); these only enrich attribution. A skip is never fatal: the connection is fully authorized without them
         insert_optional_header(
             &mut request,
             "x-grok-client-identifier",
@@ -124,11 +125,12 @@ impl StreamingSttSession {
                             break;
                         }
                     }
-                    // Non-text frames (Close/Binary/Ping/Pong): ignore and let a subsequent `None` terminate the loop A graceful close is treated.
+                    // Non-text frames (Close/Binary/Ping/Pong): ignore and let a subsequent `None` terminate the loop
+                    // A graceful close is treated as a normal end, not an error
                     Some(Ok(_)) => continue,
-                    // Transport-level failure: report it so the pager can
-                    // render the error and stop listening The exception is an
-                    // abrupt reset.
+                    // Transport-level failure: report it so the pager can render the error and stop listening
+                    // The exception is an abrupt reset, which is also what we see when the socket is torn down at the end of a turn (ours included)
+                    // Reporting that would produce a spurious "connection lost" toast
                     Some(Err(e)) => {
                         if !is_benign_disconnect(&e) {
                             let _ = event_tx
@@ -192,7 +194,9 @@ impl StreamingSttSession {
 
 impl Drop for StreamingSttSession {
     fn drop(&mut self) {
-        // Abort both halves so an abandoned setup tears the socket down immediately.
+        // Abort both halves so an abandoned setup tears the socket down immediately (`connect` can return `Err` after
+        // `wait_ready` fails, or the caller can fail to open the mic after a successful connect.). Otherwise the writer would
+        // emit a stray `audio.done` and the reader would linger on an idle connection.
         self._writer_task.abort();
         self._reader_task.abort();
     }

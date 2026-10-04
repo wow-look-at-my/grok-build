@@ -1,4 +1,7 @@
 //! Layer-2 stream transform for the Chat Completions API.
+//!
+//! Consumes a raw `ChatCompletionChunk` stream and produces [`SamplingEvent`]s.
+//! Pure: no I/O, no shell coupling.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -60,7 +63,10 @@ pub fn stream_chat_completions<'a>(
 
         let mut content_acc = String::new();
         let mut reasoning_acc = String::new();
-        // Tool call deltas keyed by positional index.
+        // Tool call deltas keyed by positional index. Each entry is
+        // (id, name, arguments_buffer, vendor fields); the first chunk for an
+        // index carries id+name and starts the arguments buffer, subsequent
+        // chunks append to arguments only.
         let mut tool_call_acc: BTreeMap<
             u32,
             (String, String, String, BTreeMap<String, serde_json::Value>),
@@ -68,10 +74,13 @@ pub fn stream_chat_completions<'a>(
 
         // Index counter spanning text and reasoning chunks (matches the shell's chunk_index used for notification correlation)
         let mut chunk_index: u64 = 0;
-        // Separate counter for AgentMessageChunk (text-only) emissions Mirrored onto ConversationResponse.message_chunks_emitted.
+        // Separate counter for AgentMessageChunk (text-only) emissions
+        // Mirrored onto ConversationResponse.message_chunks_emitted so downstream can detect lost streaming events
         let mut message_chunk_count: u64 = 0;
 
-        // The outer `tokio::time::timeout(idle_timeout, stream.next())` already catches a transport.
+        // The outer `tokio::time::timeout(idle_timeout, stream.next())` already catches a transport that stops yielding chunks
+        // This second timer catches the model emitting keepalive or empty-delta SSE events: they satisfy the outer timer but make no real progress
+        // Some inference engines do exactly that
         let mut last_content_chunk_at = Instant::now();
 
         let mut stream = raw_stream;
@@ -112,6 +121,10 @@ pub fn stream_chat_completions<'a>(
 
             if let Some(u) = chunk.usage.clone() {
                 // Wire cost is cumulative for the response, so last-write-wins.
+                // Never clobber a known cost with missing/unreported. Two wire
+                // forms are supported: xAI `cost_in_usd_ticks` (integer ticks)
+                // and the standard `usage.cost` USD float (OpenRouter, etc.).
+                // `cost_in_usd_ticks` is authoritative when present.
                 let chunk_cost = xai_grok_sampling_types::reported_cost_ticks(u.cost_in_usd_ticks)
                     .or_else(|| {
                         xai_grok_sampling_types::usd_float_to_ticks(
@@ -133,7 +146,8 @@ pub fn stream_chat_completions<'a>(
                 usage = Some(u.into());
             }
 
-            // Track whether this chunk carried meaningful content. Set inside the choices loop and checked at the end.
+            // Track whether this chunk carried meaningful content.
+            // Set inside the choices loop and checked at the end.
             let mut chunk_has_content = false;
 
             for choice in chunk.choices.into_iter() {
@@ -196,7 +210,9 @@ pub fn stream_chat_completions<'a>(
                             (String::new(), String::new(), String::new(), BTreeMap::new())
                         });
 
-                    // Gemini's thought signature rides the chunk that opens the call.
+                    // Gemini's thought signature rides the chunk that opens the
+                    // call, and replaying the call without it is a 400 on every
+                    // turn after it.
                     entry.3.extend(tool_call_vendor_fields(&tc_delta.vendor));
 
                     let mut id_for_event: Option<String> = None;
@@ -254,6 +270,8 @@ pub fn stream_chat_completions<'a>(
             .collect();
 
         // Tool calls override the stop reason, even an explicit `length`.
+        // NOTE: the Messages backend has the opposite precedence: Length wins there
+        // Load-bearing; don't "fix" here
         if !tool_calls.is_empty() {
             if finish_reason == Some(StopReason::Length) {
                 tracing::warn!(
@@ -434,7 +452,7 @@ mod tests {
         ))
         .await;
 
-        // Expected sequence: StreamStarted, FirstToken, ChannelToken(Text), Completed
+        // Expected sequence: StreamStarted, FirstToken, two ChannelToken(Text), Completed
         assert!(matches!(
             nth(&events, 0),
             SamplingEvent::StreamStarted { .. }
@@ -586,11 +604,14 @@ mod tests {
             response.items
         );
 
-        // (b) shell turn-loop commit order — Reasoning rides the push_tool_result arm, Assistant rides push_assistant_response.
+        // (b) shell turn-loop commit order — Reasoning rides the push_tool_result
+        // arm, Assistant rides push_assistant_response; both land in flat history.
         let mut items = response.items.clone();
 
+        // Turn N+1: user follows up; previous turn's items are the request prefix.
         items.push(ConversationItem::user("continue"));
 
+        // (c) real wire conversion for turn N+1.
         let req = ConversationRequest::from_items(items);
         let msgs = conversation_to_chat_messages(req.items.clone());
 
@@ -677,7 +698,9 @@ mod tests {
             "delta.reasoning must be captured into a Reasoning sibling; got: {reasoning_text:?}"
         );
 
-        // b) Round-trip: shell commit order + real wire conversion for turn N+1 places it on the follower assistant's reasoning_content (the shape.
+        // (b) Round-trip: shell commit order + real wire conversion for turn N+1
+        // places it on the follower assistant's reasoning_content (the shape
+        // synthetic.new accepts and feeds back, verified live).
         let mut items = response.items.clone();
         items.push(ConversationItem::user("continue"));
         let req = ConversationRequest::from_items(items);
@@ -1080,6 +1103,7 @@ mod tests {
         .await;
         match events.last().unwrap() {
             SamplingEvent::Completed { response, .. } => {
+                // round(0.0000416 * 1e10) = 416_000
                 assert_eq!(response.cost_usd_ticks, Some(416_000));
             }
             other => panic!("expected Completed, got {other:?}"),

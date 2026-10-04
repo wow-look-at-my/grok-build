@@ -1,13 +1,14 @@
 //! Scenario tests driving [`PagerLeaderCluster`] (the harness lives in `mod.rs`).
+//! New multi-client scenarios land here so the harness and its consumers grow independently.
 
 use super::*;
 
 const T1: &str = "CLUSTER_SENTINEL_T1";
 const T2: &str = "CLUSTER_SENTINEL_T2";
 
-/// Clients share one session: the driver's turn streams into the attached viewer live, and replay renders exactly once. The
-/// driver and viewer roles flip for the next turn. This is an in-process port of the `leader_two_clients_shared_session`
-/// PTY case.
+/// Two clients share one session: the driver's turn streams into the attached viewer live, and replay renders exactly once.
+/// The driver and viewer roles flip for the next turn.
+/// This is an in-process port of the `leader_two_clients_shared_session` PTY case.
 #[test]
 #[ignore = "leader-cluster: needs single-process isolation (process-global env + grok_home OnceLock in the shared lib test binary); run: cargo test -p xai-grok-pager --lib -- app::leader_cluster --ignored --test-threads=1"]
 #[serial_test::serial(GROK_HOME)]
@@ -35,6 +36,7 @@ fn two_clients_share_session_and_stream_both_ways() {
             "replayed turn must render exactly once in the viewer"
         );
 
+        // Turn 2, driven from the driver, streams into the viewer live
         cluster.server.set_response(format!("{T2} second turn."));
         a.act(Action::SendPrompt("again".to_string()));
         pump_clients_until(&mut [&mut a, &mut b], "turn 2 fans out", |clients| {
@@ -62,7 +64,8 @@ fn two_clients_share_session_and_stream_both_ways() {
     });
 }
 
-/// N-client fan-out: one driver, viewers. Live turns broadcast to every subscriber exactly once.
+/// N-client fan-out: one driver, three viewers.
+/// Live turns broadcast to every subscriber exactly once.
 /// Each viewer's attach replay is unicast; it never duplicates into the already-attached clients.
 #[test]
 #[ignore = "leader-cluster: needs single-process isolation (process-global env + grok_home OnceLock in the shared lib test binary); run: cargo test -p xai-grok-pager --lib -- app::leader_cluster --ignored --test-threads=1"]
@@ -102,7 +105,7 @@ fn n_client_fan_out_without_replay_duplication() {
             "attach replays must be unicast — never duplicated into the driver"
         );
 
-        // A live turn reaches all clients exactly once each.
+        // A live turn reaches all four clients exactly once each.
         cluster.server.set_response(format!("{T2} fan-out live."));
         driver.act(Action::SendPrompt("again".to_string()));
         let mut all: Vec<&mut ClusterClient> = Vec::new();
@@ -155,7 +158,8 @@ fn reattach_completion_roundtrips_durable_log() {
         let mut keep = cluster.client("cluster-keepalive", false).await;
         keep.load_session(&sid).await;
 
-        // The completed turn is durable on disk before the reattach The write is async relative to the PromptResponse.
+        // The completed turn is durable on disk before the reattach
+        // The write is async relative to the PromptResponse, so poll briefly (the PTY port does the same via wait_for_turn_completed)
         let durable_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
             let recorded = find_session_updates_file(&sid).is_some_and(|updates| {

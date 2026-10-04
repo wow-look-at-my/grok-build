@@ -109,30 +109,43 @@ impl ListToolsContext {
     }
 }
 
-// Runtime-blessed per-concept extensions.
+// Runtime-blessed per-concept extensions. One type per concept so
+// dispatchers install exactly what they have and tools depend on
+// exactly what they need.
 
 /// Working directory for relative path resolution.
 #[derive(Clone, Debug)]
 pub struct Cwd(pub PathBuf);
 
-/// Opaque behaviour version. Tools that branch on this MUST treat unknown values as a hard error.
+/// Opaque behaviour version. Tools that branch on this MUST treat
+/// unknown values as a hard error.
 #[derive(Clone, Debug)]
 pub struct BehaviorVersion(pub String);
 
 /// Distributed-trace correlation context (e.g. W3C `traceparent`).
+///
+/// Receive-side carrier only: stamped from the inbound wire value for
+/// tool impls to read, never serialized back out.
 #[derive(Clone, Debug)]
 pub struct TraceContext(pub String);
 
 /// Session ID context — identifies which hub session this call belongs to.
+/// Used by multi-session tool servers to dispatch to the correct
+/// per-session state.
 #[derive(Clone, Debug)]
 pub struct SessionContext(pub String);
 
-/// Cooperative-cancellation handle for the current tool call.
+/// Cooperative-cancellation handle for the current tool call. Tools MAY
+/// poll/await this for graceful shutdown; the dispatcher also hard-cancels
+/// by dropping the call future when it fires.
 #[derive(Clone, Debug)]
 pub struct Cancellation(pub tokio_util::sync::CancellationToken);
 
 /// Per-user feature-flag bag attached as a [`ToolCallContext`] extension.
-/// Dispatcher resolves; tools read.
+/// Dispatcher resolves; tools read. Default = "off" for every field so an
+/// absent extension never accidentally opts a feature in. Extend by
+/// adding fields with safe defaults; new fields need `#[serde(default)]`
+/// so older `session.bind` payloads stay deserializable.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct WorkspaceViewerContext {
     /// When `true`, `BashTool` emits `bash_output_chunk` Progress frames.
@@ -142,7 +155,7 @@ pub struct WorkspaceViewerContext {
 
 /// Wire shape of the Computer Hub `session.bind` metadata — one definition
 /// shared by the emitter (serializes) and the workspace consumer
-/// (deserializes), so both can't drift on field names/types.
+/// (deserializes), so the two can't drift on field names/types.
 ///
 /// Excludes anything not meant for the workspace (cached tool definitions,
 /// and terminal-provisioning inputs like image/fuse/isolation) so they can
@@ -178,14 +191,21 @@ pub struct WorkspaceBindMetadata {
         skip_serializing_if = "Option::is_none"
     )]
     pub viewer_ctx: Option<WorkspaceViewerContext>,
-    /// Initial auto-approve (YOLO) state for the bound session.
+    /// Initial auto-approve (YOLO) state for the bound session. Omitted when
+    /// unset (legacy emitters / wire compat with older workspace servers);
+    /// consumers fail closed on `None`.
     #[serde(
         default,
         deserialize_with = "ok_or_default",
         skip_serializing_if = "Option::is_none"
     )]
     pub yolo_mode: Option<bool>,
-    /// The tenant's attended-execution ceiling for the server's host kind, set by the hub (never the harness).
+    /// The tenant's attended-execution ceiling for the server's host kind, set by the hub
+    /// (never the harness). `None` when omitted or `null` (legacy emitters, or a host kind the
+    /// hub does not stamp); `Some(Ok(_))` when the wire token parses; `Some(Err(raw))` when the
+    /// field is present but unparseable, carrying the raw wire value for the consumer's log.
+    /// The workspace maps omitted → [`ToolApprovalPolicy::GrantsAllowed`] and malformed →
+    /// [`ToolApprovalPolicy::AlwaysPrompt`].
     #[serde(
         default,
         deserialize_with = "tool_approval_policy_ok_or_err",
@@ -219,7 +239,8 @@ pub struct WorkspaceBindMetadata {
         skip_serializing_if = "std::ops::Not::not"
     )]
     pub rpc_only: bool,
-    /// Real guest session root (`/workspace/<conversation_id>`).
+    /// Real guest session root (`/workspace/<conversation_id>`). When set,
+    /// the workspace virtualizes that tree as `/workspace`.
     #[serde(
         default,
         deserialize_with = "ok_or_default",
@@ -228,8 +249,9 @@ pub struct WorkspaceBindMetadata {
     pub session_root: Option<String>,
 }
 
-/// How far a bound session may go without the session owner answering a
-/// prompt.
+/// How far a bound session may go without the session owner answering a prompt. The hub's
+/// per-host-kind `tool_approval` ceiling (`desktop` / `container` / `sandbox`) reaches the
+/// workspace as one of these; reads never prompt under any value.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolApprovalPolicy {

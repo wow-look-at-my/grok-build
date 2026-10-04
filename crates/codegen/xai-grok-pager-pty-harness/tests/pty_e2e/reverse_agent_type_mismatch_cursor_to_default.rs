@@ -33,6 +33,7 @@ async fn reverse_agent_type_mismatch_cursor_to_default() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
 
+    // Send a prompt to establish turn_count > 0.
     harness
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit prompt");

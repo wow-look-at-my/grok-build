@@ -1,4 +1,12 @@
 //! Numeric ↔ string error-code mapping.
+//!
+//! Receivers SHOULD switch on `data.code` (the snake_case string) rather
+//! than the numeric JSON-RPC `error.code`. The numeric is the JSON-RPC
+//! envelope code; the string is the Grok stable identifier.
+//!
+//! Implemented as a `&'static [(i32, &'static str)]` table; the table is
+//! a small fixed set so a linear scan is faster than any
+//! `HashMap`/`OnceLock`-shaped alternative.
 
 use serde::{Deserialize, Serialize};
 
@@ -74,23 +82,31 @@ pub fn from_tool_error_wire(err: &ToolErrorWire) -> i32 {
     }
 }
 
-/// Stable identifier for "this session's workspace (tool) server is gone.
+/// Stable identifier for "this session's workspace (tool) server is gone;
+/// re-provision and retry", used as both the [`ToolErrorWire::Custom`] subcode
+/// and the `details["code"]` value. Reusing `Custom` (not a new variant) keeps
+/// the frame deserializable on older peers.
 pub const WORKSPACE_UNAVAILABLE_SUBCODE: &str = "workspace_unavailable";
 
 /// Generic, tenant-data-free message paired with the workspace-gone error.
 pub const WORKSPACE_UNAVAILABLE_MESSAGE: &str = "workspace server gone; re-provision and retry";
 
-/// JSON-RPC envelope code paired with the workspace-unavailable error.
+/// JSON-RPC envelope code paired with the workspace-unavailable error. Shares
+/// the canonical `tool_server_gone` numeric; recognizers key on `data.subcode`,
+/// not this companion.
 pub const WORKSPACE_UNAVAILABLE_JSONRPC_CODE: i32 = -32005;
 
-/// Why the workspace (tool) server went away.
+/// Why the workspace (tool) server went away. `Unknown` absorbs values a newer
+/// peer may add, so the typed parse never fails across independently-deployed
+/// hub/SDK versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceGoneReason {
     IdleTimeout,
     Disconnect,
     Shutdown,
-    /// No owner has bound a tool-server for the session yet (an attach-time miss).
+    /// No owner has bound a tool-server for the session yet (an attach-time
+    /// miss), as opposed to a workspace that was bound and then lost.
     NotBound,
     /// Target hub liveness key absent (origin reaper or forward-time check).
     InstanceGone,
@@ -112,7 +128,9 @@ pub enum WorkspaceGonePhase {
     Unknown,
 }
 
-/// Structured payload placed in the wire `details` object.
+/// Structured payload placed in the wire `details` object. `code` mirrors the
+/// `Custom` subcode (the `ToolError::custom` convention), so it survives a
+/// `Wire → ToolError → Wire` round-trip and is the field recognizers read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceUnavailableDetails {
     pub code: String,
@@ -138,7 +156,8 @@ pub fn workspace_unavailable_wire(
         phase,
         retryable,
     });
-    // This plain struct serializes infallibly; a missing `details` would make the error unrecognizable.
+    // This plain struct serializes infallibly; a missing `details` would make
+    // the error unrecognizable, so guard the invariant in debug builds.
     debug_assert!(details.is_ok(), "workspace details must serialize");
     ToolErrorWire::Custom {
         subcode: WORKSPACE_UNAVAILABLE_SUBCODE.to_owned(),
@@ -258,8 +277,10 @@ mod tests {
 
     #[test]
     fn unknown_reason_serializes_and_round_trips() {
-        // The route-missing classifier emits `Unknown` ("cause not
-        // observed").
+        // The route-missing classifier emits `Unknown` ("cause not observed"),
+        // so — despite `Unknown` being the `#[serde(other)]` deserialize
+        // catch-all — it must serialize to a stable `"unknown"` label and parse
+        // back, both in the wire payload and as the bare enum.
         assert_eq!(
             serde_json::to_value(WorkspaceGoneReason::Unknown).unwrap(),
             json!("unknown"),

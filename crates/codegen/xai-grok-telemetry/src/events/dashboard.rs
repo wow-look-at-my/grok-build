@@ -9,8 +9,9 @@ pub struct DashboardOpened {
     pub leader_mode: bool,
 }
 
-/// Intent-only telemetry for the bindings that can own Ctrl+L. Allowlist:
-/// `interject_prompt` and `open_extensions`.
+/// Intent-only telemetry for the bindings that can own Ctrl+L. Allowlist: `interject_prompt` and `open_extensions`.
+/// Absence of other actions is not “unused.”. Expand the allowlist deliberately; this is not full-registry coverage.
+/// `key` is a platform-stable encoding (`Ctrl+L`, not locale-specific `Cmd`/`Opt` or mixed case).
 #[derive(Serialize)]
 pub struct ShortcutUsed {
     /// Stable chord encoding (`Ctrl+L`, `Ctrl+Enter`, …).

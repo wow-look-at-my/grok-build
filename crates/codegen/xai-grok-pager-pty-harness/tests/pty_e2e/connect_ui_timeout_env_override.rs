@@ -5,7 +5,8 @@ use super::common::*;
 /// Env var under test; the TestSandbox `env_clear` guarantees it is unset unless a case sets it explicitly.
 const CONNECT_UI_TIMEOUT_ENV: &str = "GROK_CONNECT_UI_TIMEOUT_SECS";
 
-/// Unified-log message the pager writes directly (pre-connect, bypassing the ACP forwarder).
+/// Unified-log message the pager writes directly (pre-connect, bypassing the ACP forwarder) whenever the env var is set.
+/// Rejected values log too, so the resolution is observable on the startups that fail inside it.
 const ENV_BUDGET_LOG_MSG: &str = "startup connect budget from env";
 
 /// Poll the sandbox unified log until it contains `needle` or `timeout` elapses, returning the last read.

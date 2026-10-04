@@ -1,4 +1,12 @@
 //! Query expansion for FTS-only search mode.
+//!
+//! FTS5 matches every word of a conversational query like *"that thing we discussed about the API"* equally.
+//! Articles, pronouns, and vague references dilute precision, so this module strips them as stop words to leave the meaningful keywords.
+//!
+//! The pipeline:
+//! ```text
+//! query → lowercase → split on non-alphanumeric → remove stop words → dedup → keywords
+//! ```
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -184,7 +192,7 @@ mod tests {
     #[test]
     fn test_filters_single_char_words() {
         let kw = extract_keywords("I a x language");
-        // "i", "a", and "x" are each char, so the length filter removes them all
+        // "i", "a", and "x" are each one char, so the length filter removes them all
         assert_eq!(kw, vec!["language"]);
     }
 

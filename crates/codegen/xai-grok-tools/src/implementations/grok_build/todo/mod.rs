@@ -1,4 +1,9 @@
 //! TodoWrite — new-architecture implementation.
+//!
+//! Reuses the core logic (`validate_no_duplicate_ids`, `apply_replace`,
+//! `apply_merge`, `summarize_todo_state`) from the old `implementations::todo`
+//! module. State is stored as `State<TodoState>` in Resources instead of
+//! `ToolState.todo_state`.
 
 use std::fmt::Write;
 
@@ -29,14 +34,21 @@ pub(crate) fn validate_no_duplicate_ids(updates: &[TodoUpdate]) -> Result<(), To
     Ok(())
 }
 
-/// Every write is a merge: updates are folded into the existing state. -
-/// **Existing items**: `content` is optional — if omitted the previous
+/// Every write is a merge: updates are folded into the existing state.
+/// - **Existing items**: `content` is optional — if omitted the previous
 ///   value is kept. This lets the model mark an item from `in_progress` →
 ///   `completed` without echoing the content back.
 /// - **New items** (id not yet in state): if `content` is omitted the `id`
 ///   is used as a fallback so the tool never errors on a merge call. This
 ///   makes the tool resilient to state being lost between calls.
+///
 /// `prepend` puts new items at the FRONT of the list, in the order given.
+/// Existing items keep their place either way, so a prepend still cannot
+/// reorder or rewrite work already on the list.
+///
+/// An id already on the list is never dropped by a write that omits it. An
+/// item leaves the actionable set only by becoming `Completed` or
+/// `Cancelled`, which is a status the caller has to ask for by id.
 pub(crate) fn apply_merge(
     state: &mut TodoState,
     updates: &[TodoUpdate],
@@ -271,7 +283,16 @@ const fn default_merge() -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TodoWriteInput {
-    /// When true (the default), merge the provided todos into the existing list by id.
+    /// When true (the default), merge the provided todos into the existing
+    /// list by id (partial updates are allowed — leave unchanged fields
+    /// undefined). When explicitly set to false, the provided todos replace
+    /// the existing list entirely.
+    /// Accepted for wire compatibility and ignored: every write merges.
+    ///
+    /// Absent from the advertised schema because both values now behave the
+    /// same. It used to select a wholesale replace, which cleared the list and
+    /// dropped every item the call did not resend — the one way the tool could
+    /// destroy work the user put there.
     #[serde(
         default = "default_merge",
         deserialize_with = "crate::types::schema::deserialize_lenient_bool"
@@ -285,12 +306,19 @@ pub struct TodoWriteInput {
     pub todos: Vec<TodoUpdate>,
 
     /// Put new merged items at the front of the list instead of the end.
+    ///
+    /// Deliberately absent from the advertised schema: the only caller is the
+    /// `/TODO` capture path, and a knob the model can reach would let it
+    /// reorder the list the user is watching. Keeping it out also leaves the
+    /// serialized tool list byte-identical, so the conversation's prompt cache
+    /// survives this field.
     #[serde(default)]
     #[schemars(skip)]
     pub prepend: bool,
 }
 
-/// New-architecture `TodoWrite` tool. State: `State<TodoState>` — persisted across calls via Resources serde.
+/// New-architecture `TodoWrite` tool. State: `State<TodoState>` — persisted across calls via
+/// Resources serde. Params: `()` — no per-tool configuration.
 #[derive(Debug, Default)]
 pub struct TodoWriteTool;
 
@@ -370,7 +398,8 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
 
-            // Always a merge.
+            // Always a merge. The list belongs to the user, so a write adds
+            // and updates by id and never drops what it leaves out.
             apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
 
             summary_for_prompt = summarize_todo_state(&todo_state.0);
@@ -522,6 +551,7 @@ mod tests {
             .await
             .unwrap();
 
+        // Merge: mark item 1 completed (no content), add item 3
         let input2 = TodoWriteInput {
             merge: true,
             prepend: false,
@@ -537,6 +567,7 @@ mod tests {
         );
         assert_eq!(output.todos.len(), 3);
 
+        // Item 1 content preserved, status updated
         let item1 = output
             .todos
             .iter()
@@ -842,8 +873,8 @@ mod tests {
         assert_eq!(get_item(&state, "new").content, "New task");
     }
 
-    /// The ways work is allowed to change, and the fact that none of them
-    /// shortens the list.
+    /// The three ways work is allowed to change, and the fact that none of
+    /// them shortens the list.
     #[test]
     fn completing_cancelling_and_rewording_all_keep_the_item() {
         let mut state = seed_state(&[
@@ -919,7 +950,8 @@ mod tests {
 
     #[test]
     fn merge_new_item_without_content_uses_id_fallback() {
-        // When state is empty (e.g. lost between calls) and content is None.
+        // When state is empty (e.g. lost between calls) and content is None,
+        // the id is used as fallback content instead of erroring.
         let mut state = TodoState::default();
         let updates = vec![make_update(
             "explore_codebase",
@@ -1024,7 +1056,7 @@ mod tests {
     fn merge_mixed_existing_and_new() {
         let mut state = seed_state(&[("exist", "Existing task", TodoStatus::InProgress)]);
         let updates = vec![
-            // Update existing — content omitted, flip status.
+            // Update existing — content omitted, just flip status.
             make_update("exist", None, Some(TodoStatus::Completed)),
             // Brand-new item — content required.
             make_update("fresh", Some("New task"), Some(TodoStatus::Pending)),
@@ -1116,8 +1148,12 @@ mod tests {
 
     #[test]
     fn merge_after_replace_status_update_with_null_content() {
+        // Reproduces the exact scenario from the bug report:
+        // 1. Replace creates 3 items
+        // 2. Merge updates 2 items with content=null, status changed
         let mut state = TodoState::default();
 
+        // Step 1: replace (merge=false)
         let initial = vec![
             make_update(
                 "explore_codebase",
@@ -1137,12 +1173,14 @@ mod tests {
         ];
         apply_merge(&mut state, &initial, false).unwrap();
 
+        // Step 2: content=null, just status changes
         let updates = vec![
             make_update("explore_codebase", None, Some(TodoStatus::Completed)),
             make_update("analyze_and_propose", None, Some(TodoStatus::InProgress)),
         ];
         apply_merge(&mut state, &updates, false).unwrap();
 
+        // Statuses flipped, content preserved from step 1.
         assert_eq!(
             get_item(&state, "explore_codebase").status,
             TodoStatus::Completed
@@ -1192,6 +1230,7 @@ mod tests {
     #[test]
     fn merge_with_null_content_and_lost_state() {
         // Same scenario but state was lost between calls (empty state).
+        // The tool should still not error — falls back to id as content.
         let mut state = TodoState::default();
 
         let updates = vec![

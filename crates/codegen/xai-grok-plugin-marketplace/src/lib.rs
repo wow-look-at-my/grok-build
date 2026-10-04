@@ -1,4 +1,5 @@
 //! Provides marketplace source configuration and plugin discovery, indexed with a filesystem fallback.
+//! Install integration goes through the existing `InstallRegistry` pipeline.
 
 #![deny(clippy::indexing_slicing)]
 
@@ -28,6 +29,7 @@ pub const OFFICIAL_SOURCE_NAME: &str = "xAI Official";
 pub const OFFICIAL_SOURCE_GIT_URL: &str = "https://github.com/xai-org/plugin-marketplace.git";
 
 /// Whether `url` is the official xAI marketplace source.
+/// Case, a `www.` prefix, a trailing `/` or `.git`, and HTTPS/SSH forms are normalized before comparing.
 pub fn is_official_source_url(url: &str) -> bool {
     canonical_github_owner_repo(url).as_deref() == Some("xai-org/plugin-marketplace")
 }

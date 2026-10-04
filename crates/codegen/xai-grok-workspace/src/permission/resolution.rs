@@ -1,4 +1,5 @@
-//! Merges native `.grok/config.toml`, managed/enterprise settings.
+//! Merges native `.grok/config.toml`, managed/enterprise settings, and `.claude` settings into the effective `PermissionConfig`.
+//! Also holds the MCP-server and marketplace allowlists and the always-approve policy pin.
 
 use crate::permission::claude_settings::*;
 use crate::permission::rules::*;
@@ -262,9 +263,8 @@ fn managed_config_permissions(
 // Fallback Resolver
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Resolve permission config, merging native Grok and Claude sources.
-/// Evaluation is deny > ask > allow; merge order is provenance only. Claude
-/// `acceptEdits` appends a synthetic `Allow Edit`.
+/// Resolve permission config, merging native Grok and Claude sources. Evaluation is deny > ask > allow; merge order is provenance only.
+/// Claude `acceptEdits` appends a synthetic `Allow Edit`. `project_trusted` gates project-tier rules; global/user/admin always load. Hub/cloud defaults trusted.
 pub async fn resolve_permission_config_with_fallback(
     cwd: &Path,
     project_trusted: bool,
@@ -275,10 +275,9 @@ pub async fn resolve_permission_config_with_fallback(
         .map(|r| r.config)
 }
 
-/// [`resolve_permission_config_with_fallback`] with the always-approve pin
-/// supplied by the caller. A session spawn reads the pin once and feeds that
-/// read here and to its other pin consumers (CLI catch-all drop, mode hint,
-/// manager clamp).
+/// [`resolve_permission_config_with_fallback`] with the always-approve pin supplied by the caller.
+/// A session spawn reads the pin once and feeds that read here and to its other pin consumers (CLI catch-all drop, mode hint, manager clamp).
+/// A requirements.toml edit landing between independent reads could otherwise leave those consumers disagreeing about the lock.
 pub async fn resolve_permission_config_with_fallback_pinned(
     cwd: &Path,
     project_trusted: bool,
@@ -292,7 +291,9 @@ pub async fn resolve_permission_config_with_fallback_pinned(
     .map(|r| r.config)
 }
 
-/// Client `startupHints.permissionMode` pre-declares an allow for headless agent-initiated turns.
+/// Client `startupHints.permissionMode` pre-declares an allow for headless agent-initiated turns after the client hangs up.
+/// Any session-creating client may stamp it; it grants nothing a connected allow-all client could not, and never weakens deny or pre-prompt rejection.
+/// The always-approve pin kills it fleet-wide, and an explicit `defaultMode` outranks it.
 pub const PERMISSION_MODE_ALWAYS_ALLOW: &str = "alwaysAllow";
 
 /// Apply `startupHints.permissionMode`. Only [`PERMISSION_MODE_ALWAYS_ALLOW`] is honored, and only if bypass is not pinned off.
@@ -345,7 +346,8 @@ pub fn deny_read_globs_from_config(config: &PermissionConfig) -> Vec<String> {
 }
 
 /// Outcome of [`resolve_permissions_with_provenance`]: the rule resolution
-/// plus the single always-approve pin read it used.
+/// plus the single always-approve pin read it used. The pin is carried even
+/// when nothing resolves, so callers never re-read it for their own reporting.
 pub struct ProvenanceResolution {
     /// The pin read this resolution used ([`yolo_policy_lock`]).
     pub yolo_lock: Option<YoloPolicyLock>,
@@ -439,11 +441,13 @@ fn drop_untrusted_catchall_allows(
 }
 
 /// Inputs to [`resolve_permissions_with_provenance_inner`].
+/// Production uses [`ResolveInputs::live`]; tests construct the fields directly so they never read the host's real managed files.
 struct ResolveInputs<'a> {
     yolo_lock: Option<YoloPolicyLock>,
     managed: &'a ManagedSettings,
     managed_config_rules: Vec<Sourced<PermissionRule>>,
     /// Folder-trust verdict for `cwd`.
+    /// When false, project-tier `.claude/settings.json` / `.grok/config.toml` permission rules are dropped (global/user/admin tiers still load).
     project_trusted: bool,
 }
 
@@ -462,11 +466,9 @@ impl ResolveInputs<'static> {
     }
 }
 
-/// Collect rules from every source with origin. Deny beats ask beats allow
-/// regardless of file; source order is display only. Read at session start.
-/// Managed `defaultMode` outranks user/project/local. Always-approve is
-/// independent and outranks `dontAsk` unless `requirements.toml` pins bypass
-/// off.
+/// Collect rules from every source with origin. Deny beats ask beats allow regardless of file; source order is display only. Read at session start.
+/// Managed `defaultMode` outranks user/project/local. Always-approve is independent and outranks `dontAsk` unless `requirements.toml` pins bypass off.
+/// `project_trusted` gates project-tier rules so an untrusted clone cannot disable prompts. The outcome always carries the pin used.
 pub async fn resolve_permissions_with_provenance(
     cwd: &Path,
     project_trusted: bool,
@@ -496,7 +498,7 @@ async fn resolve_permissions_with_provenance_inner(
     let policy_block = yolo_lock.as_ref().map(|lock| lock.reason.message());
     let config_toml_rules = load_config_toml_permissions(cwd, project_trusted);
 
-    // Managed defaultMode wins.
+    // Managed defaultMode wins; skip user-tier defaultMode application so a project acceptEdits cannot loosen a managed dontAsk/auto/default
     let managed_mode = managed.default_mode;
     let user_mode_load = if managed_mode.is_some() {
         UserDefaultModeLoad::SkipManagedOwns
@@ -504,6 +506,8 @@ async fn resolve_permissions_with_provenance_inner(
         UserDefaultModeLoad::Apply
     };
 
+    // Phase 2 cutoff: skip the .claude/ fallback once the user has imported.
+    // Native config-derived permissions still apply.
     let skip_claude = is_claude_import_marked_with_log("resolve_permissions_with_provenance");
     let settings_json = if skip_claude {
         None
@@ -555,11 +559,12 @@ async fn resolve_permissions_with_provenance_inner(
         );
     }
 
-    // Must run while provenance is in scope (discarded by the unzip below) CLI `--allow '*'` is filtered at its own merge site.
+    // Must run while provenance is in scope (discarded by the unzip below)
+    // CLI `--allow '*'` is filtered at its own merge site (acp_session)
     let all_rules = drop_untrusted_catchall_allows(all_rules, policy_block, &mut skipped);
 
-    // Keep skip-only resolutions alive so the drop reaches `grok inspect` A
-    // rule-less explicit defaultMode must survive.
+    // Keep skip-only resolutions alive so the drop reaches `grok inspect`
+    // A rule-less explicit defaultMode must survive: dropping it to `None` erases `default_mode_configured` and lets the alwaysAllow hint upgrade it
     if all_rules.is_empty()
         && prompt_policy == PromptPolicy::Ask
         && skipped.is_empty()
@@ -598,6 +603,7 @@ fn resolve_claude_settings_inner(
     let mut all_skipped = Vec::new();
     let mut primary_source_path: Option<PathBuf> = None;
     // Track defaultMode from the most specific file (paths are most-specific-first).
+    // Also track its source path so synthetic rules have provenance even when no explicit permissions block exists
     let mut default_mode_source: Option<PathBuf> = None;
     let mut applied_mode: Option<DefaultPermissionMode> = None;
     let mut prompt_policy = PromptPolicy::default();
@@ -634,7 +640,8 @@ fn resolve_claude_settings_inner(
             for w in &warnings {
                 warn!(path = %path.display(), "{}", w);
             }
-            // Rules *or* skip-only parse failures still own provenance.
+            // Rules *or* skip-only parse failures still own provenance for `grok inspect`
+            // All-invalid allow/deny/ask must not leave primary_source_path unset and panic below
             if (!cfg.rules.is_empty() || !warnings.is_empty()) && primary_source_path.is_none() {
                 primary_source_path = Some(path.clone());
             }
@@ -669,8 +676,8 @@ fn resolve_claude_settings_inner(
         all_rules.extend(syn_rules);
     }
 
-    // A blocked bypass, a claimed defaultMode (incl. a typo treated as
-    // default), or skip records still resolve (possibly zero rules).
+    // A blocked bypass, a claimed defaultMode (incl. a typo treated as default), or skip records still resolve (possibly zero rules).
+    // Provenance then reaches `grok inspect` via the outer resolver
     if all_rules.is_empty()
         && prompt_policy == PromptPolicy::Ask
         && !bypass_blocked
@@ -828,7 +835,8 @@ fn parse_disable_bypass_permissions(json: &serde_json::Value) -> Option<bool> {
     Some(val.as_str() == Some("disable"))
 }
 
-/// Whether vendor `managed-settings.json` requests Claude's bypass lock.
+/// Whether vendor `managed-settings.json` requests Claude's bypass lock. Advisory only: the resolver ignores it so grok does not inherit a host-wide lockdown.
+/// Render as `claudeBypassLockAdvisory`, never as enforced policy.
 pub fn claude_bypass_lock_request(features: &ManagedSettingsFeatures) -> bool {
     features.source_path.is_some() && features.disable_yolo == Some(true)
 }
@@ -858,15 +866,16 @@ impl YoloPinReason {
     }
 }
 
-/// The active always-approve hard lock: the pin reason plus the label of the
-/// requirements layer that set it.
+/// The active always-approve hard lock: the pin reason plus the label of the requirements layer that set it.
+/// The label is a file path, or the diskless macOS MDM source id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YoloPolicyLock {
     pub source_label: String,
     pub reason: YoloPinReason,
 }
 
-/// Hard-lock predicate.
+/// Hard-lock predicate. `Some(reason)` iff a requirements layer sets `[ui] disable_bypass_permissions_mode` (or legacy `[ui] yolo = false`).
+/// Vendor `disableBypassPermissionsMode` is not consulted, so grok does not inherit a host-wide lockdown; use root-owned `requirements.toml`. Fails open on user-writable layers.
 pub fn yolo_disabled_by_policy() -> Option<&'static str> {
     yolo_policy_lock().map(|lock| lock.reason.message())
 }
@@ -915,8 +924,8 @@ fn resolve_yolo_policy_block<'a>(
         if requirements_lock_bool(ui, "disable_bypass_permissions_mode", path) == Some(true) {
             return lock(path, YoloPinReason::DisableBypassPermissionsMode);
         }
-        // Back-compat alias: `[ui] yolo = false` in requirements.toml still
-        // pins (pre-rename configs) A config.toml `yolo` is unaffected.
+        // Back-compat alias: `[ui] yolo = false` in requirements.toml still pins (pre-rename configs)
+        // A config.toml `yolo` is unaffected (not read here)
         if requirements_lock_bool(ui, "yolo", path) == Some(false) {
             return lock(path, YoloPinReason::LegacyYoloFalse);
         }

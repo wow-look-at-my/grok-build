@@ -1,4 +1,6 @@
-//! Templates are XOR-obfuscated by `scripts/encrypt_templates.py` so they don't appear as obvious plaintext.
+//! Templates are XOR-obfuscated by `scripts/encrypt_templates.py` so they don't appear as obvious plaintext in `strings` output.
+//! This is obfuscation, not security; the seeds live in-repo.
+//! They are decrypted on demand and the returned `Zeroizing<String>` wipes the plaintext from memory on drop.
 
 use zeroize::Zeroizing;
 
@@ -337,7 +339,9 @@ mod tests {
 
     #[test]
     fn test_memory_enabled_does_not_render_memory_section() {
-        // The <memory> section.
+        // The <memory> section was removed from the minimal base prompt.
+        // Even when the memory tools are registered AND memory_enabled=true, the trimmed template must not render a memory section
+        // (Complements test_memory_disabled_omits_memory_section, which covers the default.)
         let tools: HashMap<ToolKind, String> = [
             (ToolKind::Read, "read_file".to_string()),
             (ToolKind::MemorySearch, "memory_search".to_string()),
@@ -412,9 +416,8 @@ mod tests {
         assert_eq!(a, b, "Subagent template rendering must be deterministic");
     }
 
-    // The `<task_completion_discipline>` block. These tests pin the deletion
-    // so it does not come back, and so TodoGate does not remind about a
-    // missing block.
+    // The `<task_completion_discipline>` block was removed from both templates.
+    // These tests pin the deletion so it does not come back, and so TodoGate does not remind about a missing block.
 
     #[test]
     fn task_completion_discipline_block_is_not_rendered() {
@@ -431,6 +434,7 @@ mod tests {
     }
 
     /// Soft byte ceiling shared by both prompt-size budget tests.
+    /// This is a guard against runaway growth, not a tight target.
     const PROMPT_SIZE_SOFT_CEILING_BYTES: usize = 16384;
 
     fn assert_template_size_under(prompt: &str, label: &str) {
@@ -551,11 +555,9 @@ mod tests {
         assert_guards(&subagent_template(), "subagent_prompt.md");
     }
 
-    // ── Combination sweep
-    // ───────────────────────────────────────────
-    // Renders the base template across tool-kind subsets and asserts no raw
-    // template tokens leak The static guard test above is the authoritative
-    // check; this catches syntax drift
+    // ── Combination sweep ───────────────────────────────────────────
+    // Renders the base template across tool-kind subsets and asserts no raw template tokens leak
+    // The static guard test above is the authoritative check; this one catches syntax drift
 
     // Headless / SDK / stdio sessions have no human typing into a TUI prompt.
     // The shell-prefix tip and `<user_guide>` pointer are noise there.
@@ -563,7 +565,8 @@ mod tests {
 
     #[test]
     fn interactive_renders_shell_prefix_tip_and_user_guide() {
-        // The `! <command>` shell-prefix tip
+        // The `! <command>` shell-prefix tip was removed from the minimal prompt
+        // The <user_guide> block still renders for interactive sessions only, so that's what we assert here
         let mut p = default_placeholders();
         jset(&mut p, "is_non_interactive", serde_json::json!(false));
         let prompt = render_base(&default_renderer(), &p);

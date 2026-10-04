@@ -1,10 +1,15 @@
-//! Provisioned-repo listing (`workspace.repos_list`) and the on-disk in-sandbox manifest contract.
+//! Provisioned-repo listing (`workspace.repos_list`) and the on-disk in-sandbox manifest contract (`{workspace}/.grok/repos.json`).
+//!
+//! The sandbox provisioner writes this manifest; the workspace list op reads it.
+//! Field names are the frontend/integration API: add optional fields with `#[serde(default)]` rather than renaming existing ones.
 
 use serde::{Deserialize, Serialize};
 
 use super::{RpcActivityClass, WorkspaceRpc};
 
-/// Relative path of the provisioner manifest from the **sandbox** `workspace_directory`.
+/// Relative path of the provisioner manifest from the **sandbox** `workspace_directory` (init root, usually `/workspace`).
+/// It is not relative to the agent / workspace-server `--cwd` after a single-repo rewrite (`/workspace/app`).
+/// Writers and `workspace.repos_list` must join this to that sandbox root.
 pub const REPOS_MANIFEST_RELATIVE_PATH: &str = ".grok/repos.json";
 
 /// Current on-disk / wire manifest version.
@@ -29,6 +34,7 @@ pub struct ReposListResponse {
 }
 
 /// How a provisioned repo was materialized into the sandbox.
+/// Absent on older manifests; unknown values must not fail parse of a snapshot-preserved `repos.json`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RepoBackend {
@@ -49,7 +55,8 @@ pub struct ProvisionedRepo {
     pub repository: String,
     /// Absolute in-sandbox (or workspace-relative absolute) mount path.
     pub mount_path: String,
-    /// Fork-from ref. Empty means unset (missing session branch is fatal). `"HEAD"` means the remote default.
+    /// Fork-from ref. Empty means unset (missing session branch is fatal).
+    /// `"HEAD"` means the remote default. Do not treat empty as HEAD.
     pub base_branch: String,
     /// Session working branch created at provision time.
     pub session_branch: String,
@@ -92,8 +99,8 @@ impl RepoManifest {
                 continue;
             }
             let mount = std::path::PathBuf::from(raw);
-            // Confine to the workspace: a malicious `.grok/repos.json` must
-            // not point walks outside it Reject `..` and any mount not.
+            // Confine to the workspace: a malicious `.grok/repos.json` must not point walks outside it
+            // Reject `..` and any mount not under `workspace_root`, matching `unnamed_cwd` / `confine_mount_under_workspace`
             if mount
                 .components()
                 .any(|c| matches!(c, std::path::Component::ParentDir))

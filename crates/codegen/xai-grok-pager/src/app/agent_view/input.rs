@@ -1,4 +1,4 @@
-//! Top-level input routing for [`AgentView`]: `handle_input` fans events out to the active pane/overlay handlers.
+//! Top-level input routing for [`AgentView`]: `handle_input` fans events out to the active pane/overlay handlers, plus the pane and input-mode setters.
 #[cfg(test)]
 use super::paste::paste_key_tests;
 #[cfg(test)]
@@ -67,10 +67,9 @@ impl AgentView {
             || self.persona_detail.is_some()
             || self.block_viewer.is_some()
     }
-    /// The dropdown is only open while the draft holds an `@` token, so
-    /// `text().is_empty()` already covers it. An open modal or media view
-    /// ([`Self::modal_owns_input`]) also fails the guard, so those own
-    /// Esc/Left instead of the overlay back-out stealing them.
+    /// The dropdown is only open while the draft holds an `@` token, so `text().is_empty()` already covers it.
+    /// An open modal or media view ([`Self::modal_owns_input`]) also fails the guard, so those own Esc/Left instead of the overlay back-out stealing them.
+    /// An open `/jump` picker fails it too, so the picker owns Esc/Left instead of being left latent.
     pub(crate) fn is_empty_focused_prompt(&self) -> bool {
         self.active_pane == AgentPane::Prompt
             && self.prompt.text().is_empty()
@@ -85,10 +84,9 @@ impl AgentView {
     ) -> Vec<&crate::views::workflows::WorkflowRunSnapshot> {
         self.workflow_runs.iter().rev().collect()
     }
-    /// No per-pane `Esc` consumer is pending (text selection, link highlight,
-    /// goal detail, rewind overlay, open `/btw` panel, or open `/jump`
-    /// picker). `Esc` is then free to back out of the dashboard overlay
-    /// rather than clear or dismiss one of them first.
+    /// No per-pane `Esc` consumer is pending (text selection, link highlight, goal detail, rewind overlay, open `/btw` panel, or open `/jump` picker).
+    /// `Esc` is then free to back out of the dashboard overlay rather than clear or dismiss one of them first.
+    /// Shared by both overlay back-out guards so a future Esc consumer is added once here.
     pub(crate) fn no_esc_consumer_pending(&self) -> bool {
         self.persistent_text_selection.is_none()
             && self.highlighted_link_idx.is_none()
@@ -98,10 +96,9 @@ impl AgentView {
             && self.btw_state.is_none()
             && self.jump_state.is_none()
     }
-    /// It only applies to an empty, Normal-mode composer with no per-pane Esc
-    /// consumer pending. Used only in the overlay cascade; the full-screen
-    /// Esc policy (clear / rewind while idle; mid-turn cancel or swallow) is
-    /// untouched.
+    /// It only applies to an empty, Normal-mode composer with no per-pane Esc consumer pending.
+    /// Used only in the overlay cascade; the full-screen Esc policy (clear / rewind while idle; mid-turn cancel or swallow) is untouched.
+    /// While one is in flight, Esc must fall through to [`Self::try_handle_esc_policy`], not detach to the dashboard.
     pub(crate) fn overlay_esc_backs_out_from_prompt(&self) -> bool {
         self.is_empty_focused_prompt()
             && self.prompt_input_mode == PromptInputMode::Normal
@@ -185,6 +182,8 @@ impl AgentView {
         false
     }
     /// Handle a terminal event when this agent view is active.
+    /// Pane-specific (prompt widget or scrollback navigation)
+    /// Agent-level (cancel, yolo; checked if the pane didn't consume)
     pub fn handle_input(&mut self, ev: &Event, registry: &ActionRegistry) -> InputOutcome {
         self.handle_input_inner(ev, registry, false)
     }
@@ -1121,7 +1120,10 @@ impl AgentView {
                     if let Some(items) = cmd.suggest_args(&ctx, "")
                         && !items.is_empty()
                     {
-                        // The picker opens on `items` and searches `original_items`.
+                        // The picker opens on `items` and searches
+                        // `original_items`, so the wider set goes in the
+                        // second slot or the rows it opened without are
+                        // unreachable.
                         let searchable = cmd.search_args(&ctx, "").unwrap_or_else(|| items.clone());
                         self.active_modal = Some(crate::views::modal::ActiveModal::ArgPicker {
                             command: command.to_string(),
@@ -1222,8 +1224,9 @@ impl AgentView {
             let _switched = self.set_active_pane(AgentPane::Scrollback, false);
         }
     }
-    /// Propagate a vim-mode change to this view and every nested subagent
-    /// view.
+    /// Propagate a vim-mode change to this view and every nested subagent view.
+    /// `ToggleVimMode` / `SetVimMode` only walk the top-level `app.agents`, so without this an already-open subagent view keeps its stale `vim_mode`.
+    /// `j`/`k` then forward to the prompt (the vim-off fallback) instead of navigating, because the subagent view never saw the toggle.
     pub(crate) fn set_vim_mode_recursive(&mut self, enabled: bool) {
         self.vim_mode = enabled;
         for child in self.subagent_views.values_mut() {
@@ -1458,9 +1461,9 @@ mod btw_focus_tests {
         Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
     use ratatui::layout::Rect;
-    /// Idle agent focused on the prompt (the realistic state while `/btw` is
-    /// open). `make_agent` starts in scrollback focus (vim default), and
-    /// these tests don't render.
+    /// Idle agent focused on the prompt (the realistic state while `/btw` is open).
+    /// `make_agent` starts in scrollback focus (vim default), and these tests don't render.
+    /// So focus the prompt and seed `last_btw_area`; keyboard scrollability reads from it.
     fn prompt_focused_agent() -> AgentView {
         let mut agent = make_agent();
         agent.set_active_pane(AgentPane::Prompt, true);

@@ -1,5 +1,14 @@
 #!/usr/bin/env node
-// Runs once after npm install/update.
+// Runs once after npm install/update. Reads the grok binary from the
+// matching per-platform optional dependency (@xai-official/grok-<platform>)
+// and installs it to ~/.grok/bin/ using versioned filenames:
+//
+//   Unix:    grok-<version>  +  grok  (symlink)
+//   Windows: grok-<version>.exe  +  grok.exe  (copy)
+//
+// Versioned files ensure running processes are never disrupted on macOS
+// (replacing a binary that a running process has mmap'd causes SIGKILL
+// because the kernel can no longer verify the code signature).
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -7,8 +16,9 @@ const zlib = require('zlib');
 const { execSync } = require('child_process');
 const TOML = require('@iarna/toml');
 
-// $GROK_HOME (else ~/.grok), matching the Rust grok_home(): a symlinked $HOME
-// resolves the same way.
+// $GROK_HOME (else ~/.grok), matching the Rust grok_home(): a symlinked
+// $HOME resolves the same way. Lets fleets relocate the binary off a slow $HOME
+// (NFS); old code hardcoded os.homedir().
 function defaultGrokHome() {
     const home = os.homedir();
     try { return path.join(fs.realpathSync(home), '.grok'); } catch { return path.join(home, '.grok'); }
@@ -32,7 +42,8 @@ if (!SUPPORTED.has(key)) {
 
 // Resolve the per-platform sibling package's directory. The matching
 // optionalDependency is installed by npm based on `os`/`cpu` filters; the
-// others are silently skipped.
+// other five are silently skipped. If the matching one is missing, npm was
+// likely invoked with --no-optional or the platform is unsupported.
 function resolvePlatformPackageDir() {
     const platformPkg = `@xai-official/grok-${key}`;
     try {
@@ -90,7 +101,8 @@ function installBinary(binName, sourceDir, vendorSubpath) {
     }
 
     if (IS_WINDOWS) {
-        // Symlinks need elevation on Windows; copy instead.
+        // Symlinks need elevation on Windows; copy instead. If the exe is
+        // locked by a running process, rename it aside then retry.
         const oldPath = canonicalPath + '.old';
         try { fs.unlinkSync(oldPath); } catch {} // stale backup from prior update
         try {
@@ -102,7 +114,7 @@ function installBinary(binName, sourceDir, vendorSubpath) {
                 try {
                     fs.copyFileSync(versionedPath, canonicalPath);
                 } catch (copyErr) {
-                    // Rollback: restore the binary so the install isn't broken.
+                    // Rollback: restore the old binary so the install isn't broken.
                     try { fs.renameSync(oldPath, canonicalPath); } catch {}
                     throw copyErr;
                 }
@@ -143,9 +155,9 @@ function byVersionDescending(prefix) {
 }
 
 // Best-effort cleanup of old versioned binaries for a given binary name.
-// Keeps the current version and the one (in case a process is still running
-// the binary and hasn't fully loaded all pages yet). Uses an exact prefix
-// match + hyphen + digit to avoid grok-* matching grok-pager-*.
+// Keeps the current version and the previous one (in case a process is still
+// running the old binary and hasn't fully loaded all pages yet).
+// Uses an exact prefix match + hyphen + digit to avoid grok-* matching grok-pager-*.
 function cleanupOldVersions(binName) {
     try {
         const prefix = `${binName}-`;
@@ -234,6 +246,7 @@ if (npmRegistry) {
 fs.writeFileSync(configPath, TOML.stringify(obj), 'utf8');
 
 // Shell completions: print setup hints (no silent shell config mutation).
+// Set GROK_INSTALL_COMPLETIONS=1 to auto-generate to ~/.grok/completions.
 const GROK_PATH = path.join(CANONICAL_DIR, `grok${EXE}`);
 if (process.env.GROK_INSTALL_COMPLETIONS === '1' && !IS_WINDOWS) {
     try {

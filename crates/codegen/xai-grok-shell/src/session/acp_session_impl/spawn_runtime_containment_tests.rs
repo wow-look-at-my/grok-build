@@ -1,4 +1,7 @@
 //! Containment tests for [`super::build_session_runtime`].
+//!
+//! Cases run in a re-exec'd child (the `xai-gix-status` pattern) so parallel tests are unaffected.
+//! Stdout markers distinguish skip (unenforceable environment) from pass/fail.
 
 use super::build_session_runtime;
 use xai_tty_utils::runtime::MAX_BLOCKING_THREADS;

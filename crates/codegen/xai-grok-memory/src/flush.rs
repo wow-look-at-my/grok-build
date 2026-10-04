@@ -35,7 +35,7 @@ pub fn should_flush(
         compact_threshold_percent,
         flush_config.soft_threshold_tokens,
     );
-    // This threshold is only for the log; the decision above uses scaled arithmetic and may differ by multiple token at non-round windows
+    // This threshold is only for the log; the decision above uses scaled arithmetic and may differ by 1 token at non-round windows
     let flush_threshold = context_window
         .saturating_mul(compact_threshold_percent as u64)
         .saturating_sub(flush_config.soft_threshold_tokens.saturating_mul(100))
@@ -117,6 +117,7 @@ pub enum FlushResult {
     /// Model indicated nothing to store (empty response or NO_REPLY).
     NothingToStore,
     /// Response was accepted after quality checks. Contains the content to write.
+    /// The caller should run [`is_semantically_duplicate()`] before writing.
     Accepted(String),
     /// Response was rejected by quality controls.
     Rejected(String),
@@ -171,22 +172,26 @@ pub fn process_flush_response(response: &str, config: &MemoryFlushConfig) -> Flu
 }
 
 /// Cosine similarity above which flush content counts as a semantic duplicate of an existing memory chunk.
+/// 0.92 is conservative: it catches near-identical rephrasings while letting content with meaningful new information through.
+/// This is the fallback when no config override is set.
 pub const SEMANTIC_DEDUP_SIMILARITY_THRESHOLD: f64 = 0.92;
 
-/// Maximum L2 distance between unit-norm embedding vectors (used to convert sqlite-vec L2 distances to cosine similarity).
+/// Maximum L2 distance between two unit-norm embedding vectors (used to convert sqlite-vec L2 distances to cosine similarity).
 const MAX_L2_DISTANCE: f64 = 2.0;
 
 /// Number of nearest neighbors to check during semantic dedup.
 const SEMANTIC_DEDUP_KNN_LIMIT: usize = 3;
 
-/// Check if flush content is semantically similar to existing memory chunks. The sync/async/sync phasing means `&MemoryIndex` is
-/// never held across an `.await`; it contains a `!Send` `rusqlite::Connection`.
+/// Check if flush content is semantically similar to existing memory chunks.
+/// `threshold` is the cosine similarity cutoff (0.0 to 1.0); a KNN neighbor above it makes the content a duplicate.
+/// The sync/async/sync phasing means `&MemoryIndex` is never held across an `.await`; it contains a `!Send` `rusqlite::Connection`.
 pub async fn is_semantically_duplicate(
     content: &str,
     index: &MemoryIndex,
     embedding_provider: Option<&dyn EmbeddingProvider>,
     threshold: f64,
 ) -> bool {
+    // Phase 1 (sync): check prerequisites; borrows index, no .await
     let provider = match embedding_provider {
         Some(p) => p,
         None => {
@@ -202,6 +207,7 @@ pub async fn is_semantically_duplicate(
         return false;
     }
 
+    // Phase 2 (async): embed; no &index borrow across this .await
     let embedding = match provider.embed_batch(&[content]).await {
         Ok(mut vecs) if !vecs.is_empty() => vecs.swap_remove(0),
         Ok(_) => {
@@ -216,6 +222,7 @@ pub async fn is_semantically_duplicate(
         }
     };
 
+    // Phase 3 (sync): vector search + threshold check; borrows index, no .await
     let neighbors = match index.vector_search(&embedding, SEMANTIC_DEDUP_KNN_LIMIT) {
         Ok(n) => n,
         Err(e) => {
@@ -273,12 +280,14 @@ mod tests {
     #[test]
     fn test_should_flush_below_threshold() {
         let config = default_flush_config();
+        // 85% of the 100K window is 85K; minus the default 4K soft threshold, the flush point is 81K
         assert!(!should_flush(50_000, 100_000, 85, &config, 0, 1));
     }
 
     #[test]
     fn test_should_flush_at_threshold() {
         let config = default_flush_config();
+        // 85% of the 100K window is 85K; minus the default 4K soft threshold, the flush point is 81K
         assert!(should_flush(81_000, 100_000, 85, &config, 0, 1));
     }
 
@@ -294,6 +303,7 @@ mod tests {
             soft_threshold_tokens: 10_000,
             ..default_flush_config()
         };
+        // 85% of the 100K window is 85K; minus the 10K soft threshold, the flush point is 75K
         assert!(!should_flush(74_000, 100_000, 85, &config, 0, 1));
         assert!(should_flush(75_000, 100_000, 85, &config, 0, 1));
     }
@@ -301,6 +311,7 @@ mod tests {
     #[test]
     fn test_should_flush_different_compaction_cycles() {
         let config = default_flush_config();
+        // The counter is pre-incremented to 1 in run_compact, so the first cycle sees (0, 1)
         assert!(should_flush(82_000, 100_000, 85, &config, 0, 1));
         // After the flush the counters match, blocking a second flush this cycle
         assert!(!should_flush(82_000, 100_000, 85, &config, 1, 1));
@@ -310,6 +321,7 @@ mod tests {
 
     #[test]
     fn test_should_flush_non_round_window() {
+        // With cw=10_001, pct=85, soft=4_000, the scaled boundary is used*100 >= 10_001*85 - 4_000*100 = 450_085, so the flush starts at used 4_501
         let config = MemoryFlushConfig {
             soft_threshold_tokens: 4_000,
             ..default_flush_config()
@@ -322,6 +334,8 @@ mod tests {
     #[test]
     fn test_should_flush_same_counter_values_blocks() {
         let config = default_flush_config();
+        // Equal counters fire the "already flushed this cycle" guard
+        // Both at 0 is the initial state; the pre-increment in maybe_pre_compaction_flush() keeps this from blocking the first flush
         assert!(!should_flush(82_000, 100_000, 85, &config, 0, 0));
         assert!(!should_flush(82_000, 100_000, 85, &config, 5, 5));
     }
@@ -500,6 +514,7 @@ mod tests {
         };
         index.upsert_embedding(&chunk_id, emb0).unwrap();
 
+        // Identical content embeds to the same vector, so the similarity is 1.0
         let result = is_semantically_duplicate(
             content,
             &index,

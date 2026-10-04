@@ -1,4 +1,11 @@
 //! Stateless range-size policy for hashline edit safety.
+//!
+//! Classifies edit ranges by size and produces tiered warnings:
+//! - Small (≤5 lines): no warning
+//! - Medium (6–20 lines): caution
+//! - Large (>20 lines): stronger caution
+//!
+//! No session state — purely a function of the requested range.
 
 const SMALL_MAX: usize = 5;
 const MEDIUM_MAX: usize = 20;

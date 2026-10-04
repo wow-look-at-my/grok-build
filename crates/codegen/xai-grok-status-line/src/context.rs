@@ -1,8 +1,16 @@
 //! `StatusLineContext` is the payload clients receive.
+//! What each field means is documented once, in `xai-grok-pager/docs/user-guide/25-status-line.md`, and a test holds that guide to this type.
+//! The comments here record only what that guide cannot.
+//!
+//! Two rules hold it together.
+//! A value Grok cannot source is `None` rather than zero.
+//! Fields are snake_case, the one exception to the camelCase rule in `xai-grok-pager/docs/internal/28-extension-methods.md`.
+//! They stay that way because renaming one silently breaks every script that reads it.
 
 use serde::{Deserialize, Serialize};
 
 /// This number names the payload's shape, which a script branches on instead of the release in `version`.
+/// Adding a field never bumps it; removing or retyping one does.
 pub const STATUS_LINE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,6 +23,7 @@ pub struct StatusLineContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     /// The client fills this, not the agent, since the name is renameable locally.
+    /// It is absent from the notification and present on a command row's stdin.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,7 +170,7 @@ pub struct StatusLineContextWindow {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StatusLineSessionUsage {
-    /// This count is disjoint from the cache buckets, so those sum without overlap.
+    /// This count is disjoint from the cache buckets, so the three sum without overlap.
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_creation_input_tokens: u64,

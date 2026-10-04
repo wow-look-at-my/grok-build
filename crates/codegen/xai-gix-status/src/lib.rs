@@ -1,14 +1,22 @@
 //! Shared helpers for `gix` status scans.
+//!
+//! `gix-features` `in_parallel` does `spawn_scoped(...).expect("valid name")`.
+//! Under `panic=abort` and a tight `RLIMIT_NPROC`, a failed spawn aborts the
+//! whole process instead of becoming a recoverable `JoinError`. Cap
+//! `index_worktree_options.thread_limit` so produce workers stay within
+//! headroom. `Some(0)` means unlimited in gix — never pass 0.
 
 #![deny(clippy::indexing_slicing)]
 
+/// Past 8 produce workers a status scan gains no speed, only spawn pressure.
 const HARD_CAP: usize = 8;
 /// Reserve for non-gix threads; nproc tests use `used + OUTER_RESERVE - 2`.
 pub(crate) const OUTER_RESERVE: usize = 8;
 
 const ENV_THREADS: &str = "GROK_GIX_STATUS_THREADS";
 
-/// Pure produce-worker budget. Always `n >= 1`.
+/// Pure produce-worker budget. Always `n >= 1`. Caps at 8; shrinks under tight
+/// soft nproc headroom (`headroom < 2` → 1).
 pub fn compute_gix_status_thread_limit_from(
     cores: usize,
     soft_nproc: Option<usize>,
@@ -224,8 +232,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let root = tmp.path().to_path_buf();
         run_git(&root, &["init"]);
-        // Sequential index decode: with threads gix-index hard-expects an extension-load spawn.
+        // Sequential index decode: with threads gix-index hard-expects an
+        // extension-load spawn, which would skew the nproc children's slot budget.
         run_git(&root, &["config", "index.threads", "1"]);
+        // 64 entries keeps gix's computed status worker count >= 2 on any
+        // 2+ core host, so the uncapped child reaches the in_parallel workers.
         for i in 0..64 {
             let rel = format!("f{i:02}.txt");
             std::fs::write(root.join(&rel), format!("base {i}\n")).unwrap();
@@ -271,6 +282,7 @@ mod nproc_tests {
     const CHILD_ENV: &str = "XAI_GIX_STATUS_NPROC_CHILD";
     const REPO_ENV: &str = "XAI_GIX_STATUS_NPROC_REPO";
 
+    /// Child exit protocol; 0 means the scan survived and saw the dirty file.
     const EXIT_SKIP: i32 = 2;
     const EXIT_BAD_MODE: i32 = 3;
     const EXIT_MISSED_DIRTY: i32 = 4;
@@ -279,11 +291,15 @@ mod nproc_tests {
     const SKIP_MARK: &str = "skip-child:";
     const NPROC_HIT_MARK: &str = "nproc-hit:";
     const SCAN_ERROR_MARK: &str = "scan-error:";
-    /// Ceiling headroom above the child's own threads.
+    /// Ceiling headroom above the child's own threads; must exceed
+    /// `SCAFFOLD_SLOTS` so the fill proves enforcement before refunding.
     const HOLDER_SLACK: u64 = 32;
-    /// Fill-loop bound; filling this far past `HOLDER_SLACK` without EAGAIN means the rlimit is not enforced.
+    /// Fill-loop bound; filling this far past `HOLDER_SLACK` without EAGAIN
+    /// means the rlimit is not enforced (CAP_SYS_RESOURCE, macOS semantics).
     const MAX_HOLDERS: usize = 512;
-    /// Soft `map_err(SpawnThread)` scaffolding spawns between the fill and the first hard `expect("valid name")` spawn.
+    /// Soft `map_err(SpawnThread)` scaffolding spawns between the fill and the
+    /// first hard `expect("valid name")` spawn; see refund comments below.
+    /// Verified against vendored gix 0.77.0 / gix-status 0.24.0.
     const SCAFFOLD_SLOTS: usize = 3;
 
     /// Parked thread pinning one RLIMIT_NPROC slot until released.
@@ -360,6 +376,7 @@ mod nproc_tests {
                     std::process::exit(EXIT_SKIP);
                 }
                 // Fill empirically: the kernel checks RLIMIT_NPROC against the real UID's total task count.
+                // No arithmetic on this process's own thread count can find the ceiling.
                 let mut holders = Vec::new();
                 let mut hit_limit = false;
                 for _ in 0..MAX_HOLDERS {
@@ -383,8 +400,9 @@ mod nproc_tests {
                     );
                     std::process::exit(EXIT_SKIP);
                 }
-                // Refund one slot per soft scaffolding spawn so those succeed
-                // and the next failure is `produce.N`.
+                // Refund one slot per soft scaffolding spawn so those succeed and the next failure is `produce.N`.
+                // That expect panics on `gix_status::index_as_worktree`. Same-UID churn may eat refunds first.
+                // The parent then insists the resulting scan error is itself a spawn failure.
                 for _ in 0..SCAFFOLD_SLOTS {
                     if let Some(holder) = holders.pop() {
                         holder.release();
@@ -392,6 +410,7 @@ mod nproc_tests {
                 }
                 (None, holders)
             }
+            // soft = used + OUTER_RESERVE - 2 ⇒ headroom < 2 ⇒ budgeted shrinks to 1.
             "serial" | "budgeted" => {
                 let limit = used.saturating_add((OUTER_RESERVE as u64).saturating_sub(2));
                 if let Err(e) = set_nproc_limit(limit) {
@@ -449,6 +468,8 @@ mod nproc_tests {
             .expect("spawn child")
     }
 
+    /// Parent-side boilerplate: guard re-entry, require 2+ cores, build the
+    /// repo, run the child, and turn child-side skips into parent-side skips.
     fn spawn_child_or_skip(mode: &str) -> Option<std::process::Output> {
         if std::env::var_os(CHILD_ENV).is_some() {
             // Never fork further children from inside a child.
@@ -507,12 +528,13 @@ mod nproc_tests {
             "uncapped status must not complete under tight nproc; \
              code={code:?} signal={signal:?}\nstdout={stdout}\nstderr={stderr}"
         );
-        // cargo builds test targets with panic=unwind, so the expect panic
-        // surfaces as stderr plus a nonzero exit.
+        // cargo builds test targets with panic=unwind, so the expect panic surfaces as stderr plus a nonzero exit.
+        // The SIGABRT arm covers abort-configured harnesses.
         let aborted = signal == Some(libc::SIGABRT)
             || stderr.contains("gix_status::index_as_worktree")
             || stderr.contains("valid name");
-        // Refund race: same-UID processes may consume the refunded slots, so a soft scaffolding spawn fails first — accept only if the printed gix
+        // Refund race: same-UID processes may consume the refunded slots, so a
+        // soft scaffolding spawn fails first — accept only if the printed gix
         // error is itself a thread-spawn failure.
         let soft_spawn_failure = code == Some(EXIT_SCAN_ERROR)
             && stderr.contains(SCAN_ERROR_MARK)

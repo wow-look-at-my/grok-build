@@ -1,4 +1,13 @@
-//! Builds the Imagine tool configs (`image_gen`, `image_edit`, and the video tools) from the resolved agent config.
+//! Builds the Imagine tool configs (`image_gen`, `image_edit`, and the video tools) from the
+//! resolved agent config.
+//!
+//! Every host that runs these tools goes through here: the embedded agent and the pager's tool
+//! bridge for the daemon backend. The base URL, the client headers that attribute Build traffic
+//! server-side, and the feature gates come from one place so the two hosts cannot drift.
+//!
+//! The configured `api_key` is the side-call bearer at build time, never `sampling_config.api_key`:
+//! on a foreign-issuer login that field holds the foreign session token, which must not reach a
+//! client that posts to `api.x.ai`. The per-request provider still decides what goes on the wire.
 
 use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
 use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;

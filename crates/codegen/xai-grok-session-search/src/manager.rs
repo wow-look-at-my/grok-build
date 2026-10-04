@@ -1,4 +1,8 @@
 //! Answers session search queries and keeps the index updated in the background.
+//!
+//! The FTS index is bootstrapped on first search and updated per session via [`SearchIndexManager::enqueue`].
+//! The SQLite DB is shared with other grok processes (older binaries may wipe or downgrade it on open).
+//! So every search re-verifies the on-disk completed-bootstrap marker, and the bootstrap itself is cross-process single-flight.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -46,6 +50,7 @@ pub struct SessionSearchResponse {
     pub next_offset: Option<usize>,
     pub total_estimate: Option<usize>,
     /// True while the index is still bootstrapping; callers should re-query.
+    /// Also true when a live claim exists without a completion marker, so a peer mid-rebuild or a dead claimant within its lease is visible.
     pub bootstrapping: bool,
 }
 
@@ -107,8 +112,9 @@ impl WorkerContext {
     }
 }
 
-/// Manages background session indexing for every grok home this process
-/// touches.
+/// Manages background session indexing for every grok home this process touches.
+///
+/// Requires an active tokio runtime on construction (spawns tasks).
 pub struct SearchIndexManager {
     tx: mpsc::UnboundedSender<SearchManagerCmd>,
     progress: Arc<BootstrapProgress>,
@@ -174,8 +180,8 @@ impl SearchIndexManager {
         Self { tx, progress }
     }
 
-    /// Queue a bootstrap of all sessions (idempotent per root; repeat calls
-    /// re-verify the on-disk marker).
+    /// Queue a bootstrap of all sessions (idempotent per root; repeat calls re-verify the on-disk marker).
+    /// Sets `bootstrapping` eagerly so pollers see `true` before the background task starts.
     #[tracing::instrument(name = "session_search.bootstrap", skip_all)]
     pub fn bootstrap_once(&self, root: PathBuf) {
         self.progress.begin_bootstrapping();
@@ -563,7 +569,8 @@ mod tests {
 
     #[test]
     fn test_execute_search_returns_empty_on_fresh_db() {
-        // Query the index directly instead of via `execute_search()` The manager's bootstrap worker opens the same SQLite DB concurrently.
+        // Query the index directly instead of via `execute_search()`
+        // The manager's bootstrap worker opens the same SQLite DB concurrently, which made this flaky with "database is locked"
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = search_db_path(tmp.path());
         let index = SessionSearchIndex::open_or_create(&db_path).expect("open fresh DB");
@@ -654,7 +661,8 @@ mod tests {
             Duration::from_millis(1),
         )
         .await;
-        // The cache epoch is process-global A sibling heal withholds this run's completion marker.
+        // The cache epoch is process-global
+        // A sibling heal withholds this run's completion marker ("cache healed during bootstrap")
         let healed = recovery::current_epoch() != epoch_before;
         assert!(
             healed || has_completed_bootstrap_marker(root).await == Some(true),

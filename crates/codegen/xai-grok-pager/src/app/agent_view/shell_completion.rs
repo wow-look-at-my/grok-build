@@ -1,4 +1,5 @@
-//! Bash-mode shell completion: the always-on Tab surface, which arms the deterministic fetch.
+//! Bash-mode shell completion: the always-on Tab surface, which arms the deterministic fetch and runs the terminal Tab semantics.
+//! The dropdown accept path shared by Tab/Enter/mouse lives here too.
 
 #[cfg(test)]
 use super::test_fixtures;
@@ -11,12 +12,14 @@ impl AgentView {
     pub(in crate::app) fn accept_completion_dropdown_item(&mut self) -> bool {
         let had_items = !self.prompt.suggestions.dropdown.items.is_empty();
         // The SELECTED splice would clip an atomic element (paste chip)
-        // Committing would consume the candidates and then be declined.
+        // Committing would consume the candidates and then be declined by the write path
+        // Honest no-op instead: nothing safe to write, and the dropdown stays up so another selection can still accept
         if self.prompt.completion_accept_would_clip_element() {
             return true;
         }
         let Some(splice) = self.prompt.completion_dropdown_accept() else {
-            // Stale-generation refusal closed the dropdown Swallow the key (the refreshed fetch is in flight) instead of falling through.
+            // Stale-generation refusal closed the dropdown
+            // Swallow the key (the refreshed fetch is in flight) instead of falling through to focus-cycling or send
             return had_items;
         };
         if self.prompt.apply_completion_splice(splice) {
@@ -27,8 +30,8 @@ impl AgentView {
         true
     }
 
-    /// Terminal-like Tab over a closed dropdown's completion items: decide
-    /// via `SuggestionController::tab_decision`, then execute.
+    /// Terminal-like Tab over a closed dropdown's completion items: decide via `SuggestionController::tab_decision`, then execute.
+    /// Used by the pending-Tab landing, where `Nothing` (stale/empty items) must do nothing rather than fetch again.
     pub(in crate::app) fn shell_completion_tab(&mut self) {
         let action = self
             .prompt
@@ -93,9 +96,9 @@ impl AgentView {
             });
     }
 
-    /// Refresh the candidate set after an accept or a prefix fill changed the
-    /// draft. It goes through the debounced as-you-type pipeline when that is
-    /// enabled, and otherwise fires a direct deterministic fetch.
+    /// Refresh the candidate set after an accept or a prefix fill changed the draft.
+    /// It goes through the debounced as-you-type pipeline when that is enabled, and otherwise fires a direct deterministic fetch.
+    /// Either way the refreshed items land silently and the NEXT Tab consumes them.
     fn kick_shell_suggest_refetch(&mut self) {
         if self.prompt.suggestions.enabled {
             if let Some(eff) = self.notify_suggestion_text_changed() {
@@ -174,8 +177,8 @@ mod shell_suggestion_key_tests {
         }
     }
 
-    /// Bash-mode agent with the env-gated as-you-type pipeline ON and `text`
-    /// typed, the dropdown's request-text anchor pinned to it.
+    /// Bash-mode agent with the env-gated as-you-type pipeline ON and `text` typed, the dropdown's request-text anchor pinned to it.
+    /// This is the state right after a suggest response landed for the draft.
     fn bash_agent(text: &str) -> AgentView {
         let mut agent = bash_agent_always_on(text);
         agent.prompt.suggestions.enabled = true;
@@ -241,7 +244,8 @@ mod shell_suggestion_key_tests {
         agent.prompt.set_text("totally different");
         agent.prompt.suggestions.dropdown.open = true;
         agent.prompt.suggestions.dropdown.items = vec![token_item("ls | grep", "grep", 5..7)];
-        // Pass the generation gate (`set_text` bumped it) so this pins the range-validation no-op.
+        // Pass the generation gate (`set_text` bumped it) so this pins the range-validation no-op, not the staleness gate
+        // The "ls | gr" anchor from `bash_agent` survives the swap (close() keeps it)
         agent.prompt.suggestions.dropdown.generation = agent.prompt.suggestions.generation();
 
         let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
@@ -282,8 +286,8 @@ mod shell_suggestion_key_tests {
     }
 
     /// Tab opens the dropdown whenever items exist; a ghost is NOT required (pure path/file completions never carry one).
-    /// Candidates with no shared prefix beyond the typed token take the plain-open path. A single candidate insta-accepts
-    /// instead; see the terminal-Tab tests below.
+    /// Two candidates with no shared prefix beyond the typed token take the plain-open path.
+    /// A single candidate insta-accepts instead; see the terminal-Tab tests below.
     #[test]
     fn tab_opens_dropdown_without_ghost() {
         let mut agent = bash_agent("ls | gr");
@@ -609,6 +613,7 @@ mod shell_suggestion_key_tests {
     /// The declined fill now degrades to opening the dropdown: candidates visible, nothing fetched, chip intact.
     #[test]
     fn tab_fill_clipping_paste_chip_opens_dropdown_without_refetch() {
+        // Two candidates whose shared range (chip bytes 0..2, "li") fills to "lima_", a valid Fill decision over an unwritable span
         let (mut agent, text) = chip_agent(vec![
             file_item("lima_one.txt", "lima_one.txt", 0..2),
             file_item("lima_two.txt", "lima_two.txt", 0..2),

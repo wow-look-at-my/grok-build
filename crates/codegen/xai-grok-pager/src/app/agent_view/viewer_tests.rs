@@ -1,5 +1,6 @@
-//! Mouse-routing tests for the line viewer's plan preview: the scrollbar must
-//! own a click-and-drag gesture end-to-end.
+//! Mouse-routing tests for the line viewer's plan preview: the scrollbar must own a click-and-drag gesture end-to-end.
+//! A press on the track was previously also treated as a comment-gutter anchor (the hit test was row-only).
+//! Dragging the thumb then selected plan lines for a comment instead of scrolling.
 
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -76,6 +77,7 @@ fn agent_with_scrollable_plan() -> AgentView {
 }
 
 /// Presses on the modal border column next to the track used to fall into the click-outside-modal path instead of grabbing the thumb.
+/// Users read the thumb and the border as one two-column scrollbar.
 #[test]
 fn border_column_press_grabs_scrollbar() {
     let mut agent = agent_with_scrollable_plan();

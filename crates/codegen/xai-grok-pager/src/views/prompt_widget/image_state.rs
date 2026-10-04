@@ -1,4 +1,10 @@
 //! Re-binding of `[Image #N]` placeholder text to the image records the composer holds.
+//!
+//! A chip's text can come back as plain text (yank, undo, plain paste, restore) while its
+//! `PastedImage` record still lives in `images` or the undo stash. The functions here re-register
+//! the chip element over that text and report the placeholders no record backs. They never edit
+//! text, never exceed [`PromptWidget::IMAGE_CAP`], never overlap an element of any kind, and never
+//! reorder `images`: a recovered stash record is appended, so a drain keeps insertion order.
 
 use std::collections::HashSet;
 
@@ -25,10 +31,12 @@ impl PromptWidget {
             return rechipped;
         }
         let mut live = self.live_image_element_ids();
-        // Live chips count against the cap whether a record backs them.
+        // Live chips count against the cap whether or not a record backs them yet (undo can restore
+        // ten recordless chips whose records are all in the stash).
         let mut budget = Self::IMAGE_CAP.saturating_sub(live.len());
-        // A number a live chip already carries must not pull a second (stale)
-        // record for a later duplicate placeholder.
+        // A number a live chip already carries must not pull a second (stale) record for a later
+        // duplicate placeholder. Chip text counts as well as bound records: after kill-line and undo
+        // the chips are back before their records re-bind from the stash.
         let mut claimed: HashSet<usize> = self
             .textarea
             .elements()
@@ -121,8 +129,8 @@ impl PromptWidget {
         rechipped
     }
 
-    /// Re-chip orphan placeholders so `images` reflects the buffer before a
-    /// send-route decision or a drain reads it.
+    /// Re-chip orphan placeholders so `images` reflects the buffer before a send-route decision or
+    /// a drain reads it. Binds only; it does not resync, so `images` keeps its insertion order.
     pub(crate) fn rebind_image_placeholders(&mut self) {
         self.rechip_orphan_image_placeholders();
     }

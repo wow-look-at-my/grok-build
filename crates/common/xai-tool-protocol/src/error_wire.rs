@@ -52,7 +52,9 @@ pub enum ToolErrorWire {
     #[error("behavior_version unsupported")]
     BehaviorVersionUnsupported { tool_id: ToolId, requested: String },
 
-    /// Render-card budget exceeded for the current session.
+    /// Render-card budget exceeded for the current session. `card_id`
+    /// carries the offending render-card identifier when known; `reason`
+    /// is a free-form human-readable explanation.
     #[error("render limited for {tool_id}: {reason}")]
     RenderLimited {
         tool_id: ToolId,
@@ -61,7 +63,9 @@ pub enum ToolErrorWire {
         reason: String,
     },
 
-    /// Terminal-tool subprocess sub-call failed.
+    /// Terminal-tool subprocess sub-call failed. Distinct from
+    /// `Execution` because terminal sub-call failures have a known,
+    /// retry-eligible shape.
     #[error("terminal subprocess error in {tool_id}: {message}")]
     TerminalError { tool_id: ToolId, message: String },
 
@@ -70,12 +74,18 @@ pub enum ToolErrorWire {
     Internal {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         request_id: Option<RequestId>,
-        /// Bounded, human-readable cause of the internal error.
+        /// Bounded, human-readable cause of the internal error. Optional for
+        /// wire compatibility with older peers; producers SHOULD populate it
+        /// (truncated at the producer) so receivers can distinguish failure
+        /// modes without correlating server logs.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
     },
 
-    /// Free-form forward-compat error.
+    /// Free-form forward-compat error. The outer `code` discriminator is
+    /// always the literal `"custom"`; the producer-supplied subcode lives
+    /// in `subcode` (the field can't be named `code` because it would
+    /// collide with the serde discriminator).
     #[error("custom: {subcode} — {message}")]
     Custom {
         subcode: String,

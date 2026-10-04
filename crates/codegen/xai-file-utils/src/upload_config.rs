@@ -1,4 +1,5 @@
-//! Upload destination config and archive-restore metadata shared by the always-on upload queue.
+//! Upload destination config and archive-restore metadata shared by the
+//! always-on upload queue and session restore paths.
 
 use std::collections::HashMap;
 

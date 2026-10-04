@@ -1,4 +1,7 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
+//
+// The Plugins-tab footer shows contextual Space enable/disable (not "toggle") and freeform `a install` (not `a add`)
+// Run with `--nocapture` to dump screen contents when debugging failures
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -79,6 +82,7 @@ async fn extensions_modal_copy_hints_pty() {
         .expect("extensions modal Plugins tab chrome");
 
     // Both fixture plugins share one source group, seeded collapsed on load.
+    // Expand it (selection starts on the header row) so the rows are visible.
     harness
         .wait_for_text("(2 plugins)", Duration::from_secs(20))
         .expect("plugin source group header");
@@ -124,6 +128,7 @@ async fn extensions_modal_copy_hints_pty() {
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("commit search");
     harness.update(Duration::from_millis(400));
+    // Search results keep the group header as row 0; step onto the plugin row.
     harness.inject_keys(b"j").expect("move to plugin row");
     harness.update(Duration::from_millis(200));
     wait_for_space_verb(&mut harness, "enable");

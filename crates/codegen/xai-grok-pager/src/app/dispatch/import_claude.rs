@@ -69,7 +69,8 @@ pub(super) fn dispatch_import_claude_confirm(app: &mut AppView) -> Vec<Effect> {
         }
     }
 
-    // Mark the current Claude state as seen so the startup warning won't re-fire for the same content Skipped items remain importable.
+    // Mark the current Claude state as seen so the startup warning won't re-fire for the same content
+    // Skipped items remain importable via re-running the slash command
     xai_grok_shell::claude_import_state::mark_imported(&cwd);
     if let Err(e) = xai_grok_shell::claude_import::mark_claude_imported() {
         tracing::warn!(error = %e, "Failed to write Claude import marker");
@@ -95,12 +96,14 @@ pub(super) fn dispatch_import_claude_cancel(app: &mut AppView) -> Vec<Effect> {
 pub(super) fn dispatch_dismiss_claude_import(app: &mut AppView) -> Vec<Effect> {
     let cwd = app.cwd.clone();
     xai_grok_shell::claude_import_state::mark_dismissed(&cwd);
-    // The imported = true marker also stops the runtime fallbacks (perms,
-    // env, MCP servers, hooks, plugins) reading .claude/.
+    // The imported = true marker also stops the runtime fallbacks (perms, env, MCP servers, hooks, plugins) reading .claude/ and ~/.claude.json
+    // Dismiss means "I've decided I want nothing from .claude/", so don't keep silently reading it at runtime
     if let Err(e) = xai_grok_shell::claude_import::mark_claude_imported() {
         tracing::warn!(error = %e, "Failed to write Claude import marker on dismiss");
     }
     app.has_claude_import = false;
+    // Reset the welcome menu selection: removing a row shifts indices
+    // A stale selection (e.g. `Worktree mode` highlighted at index 1) would now point to a different row.
     app.welcome_menu_index = None;
     app.startup_warnings
         .retain(|w| !w.message.contains("Claude settings"));

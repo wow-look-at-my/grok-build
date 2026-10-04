@@ -1,4 +1,15 @@
 //! Requirements pin + destination lock for the external OTEL stream.
+//!
+//! Every present `[telemetry] otel_*` key in merged `requirements.toml` is a
+//! pin (managed-env model). `managed_config.toml` is not a lock.
+//! Collector tokens never live in TOML — keys containing `header` are ignored.
+//!
+//! [`resolve_external_otel_config_with`] overlays pins onto an injected getenv
+//! and **must not** mutate process env. The production path
+//! ([`apply_process_env_strip`]) `remove_var`s conflicting developer `OTEL_*`
+//! so children cannot inherit a decoy endpoint. The same strip matrix also
+//! hides unlisted user/managed file siblings — env-only hide would let
+//! `otel_logs_endpoint` in `config.toml` retarget a pinned generic endpoint.
 
 use std::collections::{HashMap, HashSet};
 
@@ -55,8 +66,8 @@ const PROTOCOL_FAMILY: GenericSignalFamily = GenericSignalFamily {
 
 const GENERIC_SIGNAL_FAMILIES: &[GenericSignalFamily] = &[ENDPOINT_FAMILY, PROTOCOL_FAMILY];
 
-/// Client identity (cert/key): pin any member → strip unlisted siblings
-/// *and* unlisted endpoint family members.
+/// Client identity (cert/key): pin any member → strip unlisted siblings *and* unlisted endpoint family members.
+/// CA is a sibling-only family: pin any CA member → strip unlisted CA env names. Does **not** strip endpoints (a fleet can pin a trust store without locking destination).
 struct ClientIdentityFamily {
     members: &'static [(&'static str, &'static str)],
 }
@@ -342,8 +353,9 @@ pub fn getenv_with_pins<'a>(
     }
 }
 
-/// Strip conflicting developer `OTEL_*` from process env. # Safety `remove_var` is unsound beside concurrent `getenv`. Call once from pager-bin `main`, after clap/version/doctor, before `memory_trace::start`, Sentry, Tokio, `build_otel_layer`, or `external::init`. Not from `run()`,
-/// `init_tracing`, or `init_tracing_simple`.
+/// Strip conflicting developer `OTEL_*` from process env.
+/// # Safety
+/// `remove_var` is unsound beside concurrent `getenv`. Call once from pager-bin `main`, after clap/version/doctor, before `memory_trace::start`, Sentry, Tokio, `build_otel_layer`, or `external::init`. Not from `run()`, `init_tracing`, or `init_tracing_simple`.
 pub unsafe fn strip_conflicting_process_env() {
     let Some(req) = xai_grok_config::load_merged_requirements() else {
         return;

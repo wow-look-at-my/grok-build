@@ -54,6 +54,7 @@ fn multiline_ansi_paints_each_line() {
 #[test]
 fn tabs_are_drawn_as_spaces_rather_than_deleted() {
     let (buf, _) = render("a\tb", Rect::new(0, 0, 10, 1), 0);
+    // The pager's default tab width is four.
     assert_eq!(buffer_line(&buf, 0).trim_end(), "a    b");
 }
 
@@ -124,7 +125,7 @@ fn row_holds_its_height_before_the_first_result() {
 
 #[test]
 fn elide_never_exceeds_the_width_it_was_given() {
-    // One case per way both width models disagree, ASCII being the control: under `Line::width` some of these cases fit and would assert nothing
+    // One case per way the two width models disagree, ASCII being the control: under `Line::width` two of these cases fit and would assert nothing
     for (name, cluster) in [
         ("ascii", "hello world "),
         ("variation selector", "\u{26a0}\u{fe0f}"),
@@ -173,6 +174,7 @@ fn render_ansi_emits_absolute_link_spans() {
     let Some(span) = spans.first() else {
         panic!("expected a link span: {spans:?}");
     };
+    // Area x 3, plus 2 columns of padding, plus the 7 of `[Grok] `.
     assert_eq!((span.row, span.col_start, span.col_end), (5, 12, 16));
     assert_eq!(span.url.as_ref(), "https://example.com/repo");
 }

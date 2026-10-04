@@ -1,4 +1,19 @@
 //! `EnterPlanMode` tool — new architecture (`Tool` trait).
+//!
+//! Gateway tool that the agent calls when it decides a task is complex enough
+//! to warrant a planning phase before writing code. This is the
+//! **agent-initiated** entry path into plan mode.
+//!
+//! On success it notifies orchestration (`PlanModeEntered`) and seeds an empty
+//! session plan file if missing (never truncating existing content), so the
+//! model can read it before writing. Read-only enforcement and plan-file gating
+//! stay in orchestration.
+//!
+//! ## User Consent
+//!
+//! This tool requires user approval before executing. The UI should present a
+//! confirmation dialog. If the user declines, the tool result is rejected and
+//! the model receives `"User declined to enter plan mode."`.
 
 use crate::computer::types::AsyncFileSystem;
 use crate::notification::types::PlanModeEntered;
@@ -12,11 +27,14 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 use std::path::Path;
 use std::sync::Arc;
 
-/// Input for the `EnterPlanMode` tool. Empty object — no parameters.
+/// Input for the `EnterPlanMode` tool. Empty object — no parameters. The decision to enter plan
+/// mode is a binary gate. All configuration (workflow variant, explore agent count, etc.) comes
+/// from feature flags and environment variables, not from the tool call.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct EnterPlanModeInput {}
 
-/// `EnterPlanMode` tool: signals plan mode entry and seeds the session plan file, returning a [`PlanFileSeedStatus`].
+/// `EnterPlanMode` tool: signals plan mode entry and seeds the session plan file, returning a
+/// [`PlanFileSeedStatus`]. Params: `()` — no per-tool configuration.
 #[derive(Debug, Default)]
 pub struct EnterPlanModeTool;
 
@@ -38,7 +56,8 @@ impl crate::types::tool_metadata::ToolMetadata for EnterPlanModeTool {
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
-        // EnterPlanMode can only exist if ExitPlanMode is also registered — entering plan mode without the ability.
+        // EnterPlanMode can only exist if ExitPlanMode is also registered —
+        // entering plan mode without the ability to exit would be a dead-end.
         use crate::implementations::grok_build::exit_plan_mode::ExitPlanModeTool;
         Expr::Value(ToolRequirement::Tool {
             namespace: crate::types::tool_metadata::ToolMetadata::tool_namespace(&ExitPlanModeTool)

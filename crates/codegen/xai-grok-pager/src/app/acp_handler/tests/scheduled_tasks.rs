@@ -82,7 +82,8 @@
 
     #[test]
     fn fired_unknown_task_with_none_next_fire_skips_insert() {
-        // Mirrors handle_missed_tasks output: a missed one-shot fires with next_fire_at.
+        // Mirrors handle_missed_tasks output: a missed one-shot fires with next_fire_at: None and is immediately removed
+        // The pane must not flicker an entry that the Removed will instantly drop
         let mut app = make_app_with_agent("sess-1");
         let notif = make_fired_notif(
             "sess-1",
@@ -130,6 +131,7 @@
     #[test]
     fn fired_updates_correct_agent_when_active_view_differs() {
         let mut app = make_app_two_agents();
+        // Seed a known task on agent 0.
         {
             let agent0 = app.agents.get_mut(&AgentId(0)).unwrap();
             agent0.session.scheduled_tasks.insert(
@@ -146,6 +148,8 @@
             );
         }
 
+        // The fire notification targets agent 0's session, but active_view points to agent 1
+        // The return value is "needs redraw"; false is correct when the mutated agent is not the active view
         let notif = make_fired_notif(
             "sess-owner",
             "task-owner",
@@ -159,6 +163,7 @@
             "non-active agent mutation should not trigger redraw"
         );
 
+        // Agent 0's next_fire_at must be updated.
         let agent0 = app.agents.get(&AgentId(0)).unwrap();
         let info = agent0.session.scheduled_tasks.get("task-owner").unwrap();
         assert_eq!(
@@ -167,6 +172,7 @@
             "next_fire_at must update on the owning agent, not the active one"
         );
 
+        // Agent 1 must be completely untouched.
         let agent1 = app.agents.get(&AgentId(1)).unwrap();
         assert!(
             agent1.session.scheduled_tasks.is_empty(),
@@ -285,6 +291,7 @@
     #[test]
     fn deleted_removes_from_correct_agent_when_active_view_differs() {
         let mut app = make_app_two_agents();
+        // Seed task on agent 0.
         {
             let agent0 = app.agents.get_mut(&AgentId(0)).unwrap();
             agent0.session.scheduled_tasks.insert(
@@ -372,7 +379,8 @@
             other => panic!("expected System block, got {other:?}"),
         }
 
-        // Re-delivering the same tombstone (a reconnect tail replaying an event already applied live).
+        // Re-delivering the same tombstone (a reconnect tail replaying an event already applied live) must not stack a second notice
+        // The chip is already gone, so the push is skipped
         assert!(handle_scheduled_task_deleted(&notif, &mut app));
         let agent = app.agents.get(&AgentId(0)).unwrap();
         assert_eq!(agent.scrollback.len(), 1, "duplicate delivery is a no-op");
@@ -473,9 +481,9 @@
         assert_eq!(notices, 1, "reconnect replay must not duplicate the notice");
     }
 
-    /// Distinct loops can share a prompt and schedule, producing byte-identical expiry notices. The reconnect dedupe must
-    /// drop only as many staged copies as the stash already shows: one for the task expired live. The second task's notice
-    /// must survive.
+    /// Two distinct loops can share a prompt and schedule, producing byte-identical expiry notices.
+    /// The reconnect dedupe must drop only as many staged copies as the stash already shows: one for the task expired live.
+    /// The second task's notice must survive.
     #[test]
     fn reconnect_dedupe_keeps_notice_for_second_task_with_identical_copy() {
         use xai_grok_tools::notification::ScheduledTaskRemovedReason;

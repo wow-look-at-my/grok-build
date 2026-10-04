@@ -1,17 +1,20 @@
 use super::*;
 
 /// Result of looking up which view a notification's `session_id` targets.
+///
+/// The matched view's mutation must happen on the agent identified here, regardless of which view the user is currently looking at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SessionMatch {
     /// The session_id matches the root session of this agent.
     Root(AgentId),
     /// The session_id matches a subagent view child of this agent (i.e. an entry in `agent.subagent_views`).
+    /// The child's key is the notification's `session_id.0.as_ref()`; the caller re-derives it to avoid an extra allocation.
     Child(AgentId),
 }
 
 impl SessionMatch {
-    /// The owning agent's id: the matched agent for `Root`, the parent that
-    /// owns the `subagent_views` entry for `Child`.
+    /// The owning agent's id: the matched agent for `Root`, the parent that owns the `subagent_views` entry for `Child`.
+    /// Callers that do not care about root vs child should use this instead of duplicating the `match { Root(id) | Child(id) => id }` pattern.
     pub(super) fn agent_id(self) -> AgentId {
         match self {
             SessionMatch::Root(id) | SessionMatch::Child(id) => id,
@@ -97,7 +100,8 @@ pub(super) fn resolve_target_view<'a>(
     &'a mut crate::scrollback::state::ScrollbackState,
 )> {
     if matches!(matched, SessionMatch::Child(_)) {
-        // A `TaskBackgrounded` / `TaskCompleted` block for a resumed child always follows the funneled tool_call.
+        // A `TaskBackgrounded` / `TaskCompleted` block for a resumed child always follows the funneled tool_call that spawned the task
+        // The child is therefore never still both empty and NeedsReplay here, so it is precedence-exempt from the hydrate funnel
         let child_view = agent.subagent_views.get_mut(child_sid)?;
         Some((&mut child_view.session, &mut child_view.scrollback))
     } else {
@@ -112,7 +116,9 @@ pub(super) fn find_session_match(
     app: &AppView,
     session_id: &acp::SessionId,
 ) -> Option<SessionMatch> {
-    // An exact root match returns immediately (root wins when both could match).
+    // An exact root match returns immediately (root wins when both could match); the first child match seen is the fallback after the full scan
+    // Comparing `Option<&SessionId>` to `Some(&session_id)` borrows both sides, so no SessionId clone
+    // The HashMap lookup uses the inner `&str` directly via the `Borrow<str>` impl on `String`, so no allocation either
     let child_key: &str = session_id.0.as_ref();
     let mut child_match: Option<AgentId> = None;
     for (id, agent) in &app.agents {
@@ -126,6 +132,9 @@ pub(super) fn find_session_match(
     if let Some(id) = child_match {
         return Some(SessionMatch::Child(id));
     }
+    // Pass 3: race-window fallback for notifications that arrive before the root session_id has been assigned
+    // Only the active agent is eligible, and only when its `session_id` is still `None`
+    // Otherwise we would misroute a stranger's notification to whichever agent happens to be foregrounded
     if let ActiveView::Agent(active_id) = app.active_view
         && let Some(agent) = app.agents.get(&active_id)
         && agent.session.session_id.is_none()
@@ -147,8 +156,9 @@ pub(super) fn is_matched_agent_active(app: &AppView, matched_agent: AgentId) -> 
     matches!(app.active_view, ActiveView::Agent(id) if id == matched_agent)
 }
 
-/// Routes by the request's session id via [`find_session_match`] (exactly like `session/update` notifications), not gated on `app.active_view`. A modal raised by a **background** session thus lands on its own view even when the user is on the
-/// dashboard or a different session.
+/// Routes by the request's session id via [`find_session_match`] (exactly like `session/update` notifications), not gated on `app.active_view`.
+/// A modal raised by a **background** session thus lands on its own view even when the user is on the dashboard or a different session.
+/// The caller must then leave the reverse-request unanswered (drop, do NOT error) and rely on the leader's replay-on-attach.
 pub(super) fn interaction_target_agent(app: &AppView, session_id: &str) -> Option<AgentId> {
     let sid = acp::SessionId::new(session_id.to_owned());
     match find_session_match(app, &sid) {

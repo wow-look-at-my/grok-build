@@ -1,4 +1,10 @@
 //! Builds the snapshots of parent state that `crate::agent::subagent::spawn` hands to a child.
+//!
+//! These builders live inside `mvp_agent` (`use super::*`) so they can read `MvpAgent`'s private state directly.
+//! `crate::agent::subagent::spawn` drives the child's lifecycle and reaches back in only through the `pub(crate)` functions below.
+//!
+//! - `start_subagent_coordinator`: takes the event receiver and presentation state and starts the coordinator via `spawn_subagent_coordinator`.
+//! - `build_subagent_validation_context` and `try_build_subagent_spawn_context`: snapshot config and the parent handle for the child.
 use super::*;
 use crate::session::repo_changes::UploadMethod;
 impl MvpAgent {

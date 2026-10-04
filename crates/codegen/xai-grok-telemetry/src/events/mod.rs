@@ -1,4 +1,7 @@
 //! Telemetry event structs. Every struct needs a `telemetry_event!` binding.
+//! `log_event` auto-injects `session_id`/`turn_number` and reserves every key in `client::RESERVED_EVENT_KEYS`.
+//!
+//! Extracted from `xai-grok-shell` so binaries (TUI, sampler) can reuse them without the shell's HTTP product-analytics client.
 
 use serde::Serialize;
 
@@ -80,8 +83,9 @@ pub use yolo::*;
 pub trait TelemetryEvent: Serialize + Send + 'static {
     const NAME: &'static str;
 
-    /// Curated external-OTEL representation (see [`crate::external`]).
-    /// Default: not exported externally.
+    /// Curated external-OTEL representation (see [`crate::external`]). Default: not exported externally. Override via the
+    /// macro's `external = …` arm. The mapping functions live together in `external/schema.rs` so the whole wire schema is
+    /// one reviewable file.
     fn external_record(&self) -> Option<crate::external::schema::ExternalRecord> {
         None
     }
@@ -104,7 +108,9 @@ macro_rules! telemetry_event {
     };
 }
 
-// ───────────────────────────────────────────────────────────────────────────── Event name bindings.
+// ─────────────────────────────────────────────────────────────────────────────
+// Event name bindings
+// ─────────────────────────────────────────────────────────────────────────────
 
 telemetry_event!(ManualAuth, "manual_auth");
 telemetry_event!(AuthLockWait, "auth_lock_wait");
@@ -1601,7 +1607,7 @@ mod tests {
         );
     }
 
-    /// Serde renames the payload field, strum renders the external label: snake_case implementations, so pin that they agree on every variant.
+    /// Serde renames the payload field, strum renders the external label: two snake_case implementations, so pin that they agree on every variant.
     #[test]
     fn skill_trigger_serializes_the_same_string_strum_yields() {
         for trigger in [

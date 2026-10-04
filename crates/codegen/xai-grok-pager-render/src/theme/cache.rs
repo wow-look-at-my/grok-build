@@ -1,4 +1,10 @@
 //! In-memory theme cache and resolution.
+//!
+//! The pager reads the active `ThemeKind` on every render frame, so the
+//! lookup must be cheaper than re-loading from `~/.grok/config.toml`.
+//! [`current_kind`] returns the in-memory value, lazily seeding from the shell's layered effective config on first call.
+//!
+//! Disk writes live in `xai_grok_shell::util::config::set_theme()` (and friends), invoked via `Effect::PersistSetting` from the dispatcher.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -8,18 +14,21 @@ use super::ThemeKind;
 use super::system_appearance;
 
 /// In-memory theme kind, encoded as a `u8` matching the `ThemeKind` discriminants.
+/// Loaded from disk once at startup via `load_from_disk()`, then kept in sync by `set()`.
 static CURRENT: AtomicU8 = AtomicU8::new(ThemeKind::GrokNight as u8);
 static LOADED: AtomicBool = AtomicBool::new(false);
 #[cfg(any(test, feature = "test-support"))]
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Whether auto-switching mode is active. Set when the config file contains `theme = "auto"`.
+/// Checked by the event loop to decide whether the `SystemAppearanceWatcher` should run.
 static AUTO_MODE: AtomicBool = AtomicBool::new(false);
 
 /// Whether the theme is locked to `Theme::terminal_default` for the whole session (minimal mode, no theming).
 static TERMINAL_NATIVE_LOCK: AtomicBool = AtomicBool::new(false);
 
-/// Fail-closed until seeded.
+/// Fail-closed until seeded. Off: names stop parsing and catalogs drop it, so `theme = "terminal"` resolves to the default.
+/// Independent of minimal mode's `TERMINAL_NATIVE_LOCK`.
 static TERMINAL_THEME_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Decode the u8 stored in `CURRENT` back to a `ThemeKind`.
@@ -38,9 +47,12 @@ fn theme_kind_from_u8(byte: u8) -> ThemeKind {
 }
 
 /// Cached auto-theme configuration (which themes map to dark/light).
+///
+/// Uses `Mutex<Option<_>>` rather than `OnceLock` so the settings modal and the `/theme auto` command can invalidate it after changing mappings.
 static AUTO_THEME_CONFIG: Mutex<Option<AutoThemeConfig>> = Mutex::new(None);
 
-/// `dark_theme` and `light_theme` are the user-configured overrides read from `[ui].auto_dark_theme` and `[ui].auto_light_theme`.
+/// `dark_theme` and `light_theme` are the user-configured overrides read from `[ui].auto_dark_theme` and `[ui].auto_light_theme` in `config.toml`.
+/// When `None`, `to_theme_kind()` defaults to `GrokNight` / `GrokDay`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AutoThemeConfig {
     pub dark_theme: Option<ThemeKind>,
@@ -49,6 +61,7 @@ pub struct AutoThemeConfig {
 
 /// On the first call, reads from `~/.grok/config.toml` (via the shell's
 /// `load_effective_config`).
+/// After that, returns the in-memory value (updated by [`set`]).
 pub fn current_kind() -> ThemeKind {
     // Locked: return a constant nominal kind without seeding from disk.
     if terminal_native_locked() {
@@ -57,12 +70,13 @@ pub fn current_kind() -> ThemeKind {
     selected_kind()
 }
 
-/// The stored theme selection, ignoring the minimal-mode lock's masking
-/// (seeding from disk on first use like [`current_kind`]).
+/// The stored theme selection, ignoring the minimal-mode lock's masking (seeding from disk on first use like [`current_kind`]).
+/// The rollout kill switch checks the real selection: under the lock `current_kind()` reports a nominal GrokNight even when the stored kind is `Terminal`, which would let a gated-off theme resurface when the lock lifts.
 #[must_use]
 pub fn selected_kind() -> ThemeKind {
     if !LOADED.load(Ordering::Acquire) {
-        // Threads racing into the seed path is harmless.
+        // Two threads racing into the seed path is harmless: the disk read is idempotent and `store` is atomic
+        // Worst case both threads call `load_from_disk` once
         if let Some(kind) = load_from_disk() {
             store_kind(kind);
         }
@@ -78,6 +92,8 @@ pub fn set(kind: ThemeKind) {
 }
 
 /// Store `kind` and re-derive everything keyed off terminal-nativeness.
+/// Every write to `CURRENT` goes through here so the markdown renderer
+/// can never drift from the selected theme.
 fn store_kind(kind: ThemeKind) {
     CURRENT.store(kind as u8, Ordering::Relaxed);
     sync_markdown_polarity();
@@ -110,6 +126,7 @@ pub fn terminal_theme_enabled() -> bool {
 }
 
 /// Seed the `terminal` theme rollout gate from the resolved feature flag.
+/// A flip re-reads the auto dark/light overrides: they were parsed under the old gate, so a cached `Terminal` must neither survive the kill switch nor stay dropped after a reveal.
 pub fn set_terminal_theme_enabled(enabled: bool) {
     let was = TERMINAL_THEME_ENABLED.swap(enabled, Ordering::Relaxed);
     if was != enabled {
@@ -140,6 +157,8 @@ pub fn set_auto_mode(enabled: bool) {
 }
 
 /// Get the cached auto-theme configuration, loading from config on first access.
+///
+/// The cache can be invalidated via [`invalidate_auto_theme_config`] so subsequent lookups re-read from disk.
 #[must_use]
 #[allow(clippy::disallowed_methods)] // Poison takes the cache back; it re-reads disk.
 pub fn auto_theme_config() -> AutoThemeConfig {
@@ -147,8 +166,8 @@ pub fn auto_theme_config() -> AutoThemeConfig {
     *guard.get_or_insert_with(load_auto_theme_config)
 }
 
-/// Call after updating `auto_dark_theme` or `auto_light_theme` in config so
-/// subsequent lookups see the new values.
+/// Call after updating `auto_dark_theme` or `auto_light_theme` in config so subsequent lookups see the new values.
+/// Used by the settings modal and the `/theme auto` slash command.
 pub fn invalidate_auto_theme_config() {
     *AUTO_THEME_CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
@@ -161,6 +180,7 @@ pub fn resolve_initial_theme() -> ThemeKind {
     resolve_initial_theme_from(env_theme_name().as_deref(), load_from_disk(), true)
 }
 
+/// Variant of [`resolve_initial_theme`] without the OSC 11 startup fallback, for resolution after the terminal is initialized.
 #[must_use]
 pub fn resolve_initial_theme_no_osc11() -> ThemeKind {
     resolve_initial_theme_from(env_theme_name().as_deref(), load_from_disk(), false)
@@ -222,7 +242,7 @@ fn resolve_from_appearance(appearance: Option<system_appearance::SystemAppearanc
         .unwrap_or(ThemeKind::GrokNight)
 }
 
-/// Detection failure is `GrokNight`.
+/// Desktop APIs and env hints only (no OSC 11), so it is safe while `EventStream` is active. Detection failure is `GrokNight`.
 #[must_use]
 pub fn resolve_auto() -> ThemeKind {
     resolve_from_appearance(system_appearance::detect())
@@ -280,15 +300,18 @@ pub fn reset_for_test() {
     set_terminal_native_lock(false);
     // The test-build default; a prior gating test may have turned it off.
     set_terminal_theme_enabled(true);
-    // Deterministic level regardless of the ambient environment (see pin_theme).
+    // Deterministic level regardless of the ambient environment (see
+    // pin_theme).
     super::color_support::set_level_for_test(super::color_support::ColorLevel::TrueColor);
-    // A test that painted an RGB cursor must not leak the latch into the next test's zero-cursor-escape assertions.
+    // A test that painted an RGB cursor must not leak the latch into the
+    // next test's zero-cursor-escape assertions.
     super::set_cursor_color_applied_for_test(false);
     *AUTO_THEME_CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
-/// Seed `AUTO_THEME_CONFIG` with explicit defaults so `auto_theme_config()`
-/// never falls through to `load_auto_theme_config()`.
+/// Seed `AUTO_THEME_CONFIG` with explicit defaults so `auto_theme_config()` never falls through to `load_auto_theme_config()`.
+/// That fallback reads the user's real `config.toml`.
+/// Call from test setup after `reset_for_test()`.
 #[cfg(any(test, feature = "test-support"))]
 pub fn seed_auto_theme_defaults_for_test() {
     *AUTO_THEME_CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = Some(AutoThemeConfig::default());
@@ -304,7 +327,7 @@ pub fn test_lock() -> &'static Mutex<()> {
 pub fn pin_theme() -> std::sync::MutexGuard<'static, ()> {
     let guard = test_lock().lock().unwrap_or_else(|e| e.into_inner());
     set(ThemeKind::GrokNight);
-    // Deterministic level regardless of the ambient environment.
+    // Deterministic level regardless of the ambient environment (agent shells export NO_COLOR, which would otherwise win the write-once detection by scheduling)
     super::color_support::set_level_for_test(super::color_support::ColorLevel::TrueColor);
     // A prior gating test may have turned the rollout gate off.
     set_terminal_theme_enabled(true);
@@ -338,8 +361,8 @@ mod tests {
     #[test]
     fn apply_kind_never_takes_the_stderr_lock() {
         with_test_env(|| {
-            // Best-effort TrueColor pin (as in pin_theme): under NO_COLOR the
-            // accent resolves to no RGB.
+            // Best-effort TrueColor pin (as in pin_theme): under NO_COLOR the accent resolves
+            // to no RGB and even a regressed apply_kind would skip its cursor-color write.
             let _ = super::super::color_support::set(
                 super::super::color_support::ColorLevel::TrueColor,
             );
@@ -475,6 +498,8 @@ mod tests {
         });
     }
 
+    /// A test that painted an RGB cursor must not leak the OSC 12 latch into
+    /// the next test's zero-cursor-escape assertions.
     #[test]
     fn reset_for_test_clears_cursor_color_latch() {
         with_test_env(|| {
@@ -882,6 +907,7 @@ mod tests {
     #[test]
     fn auto_theme_config_filter_rejects_auto_value() {
         // Simulates the .filter(|k| !k.is_auto()) guard in load_auto_theme_config().
+        // When config contains auto_dark_theme = "auto", from_name returns Some(Auto), but the filter discards it to prevent circular reference
         let parsed = ThemeKind::from_name("auto").filter(|k| !k.is_auto());
         assert!(parsed.is_none(), "Auto must be filtered out");
     }

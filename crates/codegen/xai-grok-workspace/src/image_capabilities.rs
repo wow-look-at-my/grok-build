@@ -1,4 +1,8 @@
 //! Advisory image capability tokens, declared by the sandbox image as marker files under `/usr/share/grok/capabilities.d/<token>`.
+//!
+//! ADVISORY ONLY: never an authorization input.
+//! Guest processes run as root and can create files here at will.
+//! The directory deliberately sits outside `/etc/grok`, the root-owned permission-policy tier.
 
 use std::sync::OnceLock;
 
@@ -21,8 +25,10 @@ const MAX_LOGGED_REJECTIONS: usize = 8;
 #[derive(Debug, Clone, Default)]
 pub struct ImageCapabilities {
     /// Sorted, deduped, validated tokens.
+    /// Independent of `declared`: a child image built on a parent that predates the scheme declares its own tokens but no `capabilities.v1`.
     tokens: Vec<String>,
     /// `true` iff the directory was read in full and declared `capabilities.v1`.
+    /// Gates [`ImageCapabilities::state`] only, not [`ImageCapabilities::wire`].
     declared: bool,
 }
 
@@ -45,8 +51,8 @@ impl ImageCapabilities {
         self.declared
     }
 
-    /// Sorted validated tokens, returned even when `!declared` so the caller
-    /// can re-derive UNKNOWN from the missing self-token.
+    /// Sorted validated tokens, returned even when `!declared` so the caller can re-derive UNKNOWN from the missing self-token.
+    /// Values are guest-forgeable and unbounded across sessions: fine in logs, Mongo arrays, or rendered text, never as a metric label or map key.
     pub fn wire(&self) -> &[String] {
         &self.tokens
     }
@@ -69,7 +75,8 @@ pub fn image_capabilities() -> &'static ImageCapabilities {
             info!(dir = ?dir,
                 "no image capability declaration found; capabilities UNKNOWN, gated features off");
         } else {
-            // Tokens were read but cannot answer "token X is absent".
+            // Tokens were read but cannot answer "token X is absent": either the set went over the cap or `capabilities.v1` is missing
+            // The preceding `warn!` says which
             info!(dir = ?dir, tokens = caps.tokens.len(), capabilities = ?caps.tokens,
                 "image capability tokens read but not authoritative; capabilities UNKNOWN, \
                  gated features off");
@@ -113,9 +120,8 @@ fn load_from_dir(dir: &str) -> ImageCapabilities {
                  capabilities UNKNOWN");
             return ImageCapabilities::default();
         }
-        // `file_type()` deliberately does not follow symlinks: markers are
-        // regular files created by `:` redirection in the image build An
-        // error here means the entry could not be classified.
+        // `file_type()` deliberately does not follow symlinks: markers are regular files created by `:` redirection in the image build
+        // An error here means the entry could not be classified, which is an incomplete read rather than a non-marker, so it discards the scan
         let Ok(file_type) = entry.file_type() else {
             warn!(dir = ?dir,
                 "image capability marker could not be classified; tokens discarded, \
@@ -167,8 +173,8 @@ fn load_from_dir(dir: &str) -> ImageCapabilities {
     ImageCapabilities { tokens, declared }
 }
 
-/// Dotfiles and dot-less names are stray editor/OS junk, never botched
-/// tokens.
+/// Dotfiles and dot-less names are stray editor/OS junk, never botched tokens.
+/// Warning on them would fire every session and stop meaning anything.
 fn is_rejection_noteworthy(name: &str) -> bool {
     !name.starts_with('.') && name.contains('.')
 }

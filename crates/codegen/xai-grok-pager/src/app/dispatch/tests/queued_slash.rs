@@ -1,4 +1,10 @@
-//! A slash command submitted while the agent cannot run it immediately — a turn is running.
+//! A slash command submitted while the agent cannot run it immediately — a turn
+//! is running, or rows are already queued — must still execute as a command.
+//!
+//! Every test here drives the shipped dispatch entry points from the state the
+//! user actually reaches (`Action::SendPrompt` on a running turn, the bare-Enter
+//! interrupt, the send-now chord, the queue-pane send-now and the local drain)
+//! and asserts on the effects those entries produce.
 
 use super::*;
 use crate::app::agent::{QueueEntryKind, QueuedPrompt};
@@ -39,7 +45,8 @@ fn server_row(id: &str, text: &str, position: usize) -> QueueEntryWire {
 fn running_agent_with_a_queued_message(app: &mut AppView, id: AgentId) {
     let agent = app.agents.get_mut(&id).unwrap();
     agent.session.state = AgentState::TurnRunning;
-    // The report's precondition: something is already queued, so the command cannot be sent immediately.
+    // The report's precondition: something is already queued, so the command
+    // cannot be sent immediately.
     agent.shared_queue = vec![server_row("srv-1", "an earlier message", 0)];
 }
 
@@ -152,10 +159,11 @@ fn server_rows_carry_the_same_rule() {
 
 // ── the delivery routes ───────────────────────────────────────────────────
 
-/// Handing it to the shell as a plain prompt is what put the literal
-/// `/pr-cleanup fix the branch` in front of the model: the running turn harvests
-/// queued rows into itself as text, and the shell resolves a command only when
-/// the prompt's own turn starts.
+/// Gating (1): a shell command submitted while a turn is running and a message
+/// is already queued stays in the LOCAL queue. Handing it to the shell as a
+/// plain prompt is what put the literal `/pr-cleanup fix the branch` in front of
+/// the model: the running turn harvests queued rows into itself as text, and the
+/// shell resolves a command only when the prompt's own turn starts.
 #[test]
 fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
     let mut app = test_app_with_agent();
@@ -178,7 +186,8 @@ fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
         "the command waits in the local queue for its own turn"
     );
 
-    // Any later submit (an inbound update does the same) runs the migration that hands leading plain rows to the shell.
+    // Any later submit (an inbound update does the same) runs the migration
+    // that hands leading plain rows to the shell.
     let later = dispatch(Action::SendPrompt("and one more".into()), &mut app);
     assert!(
         model_bound_payloads(&later).is_empty(),
@@ -193,7 +202,10 @@ fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
         "both rows stay local"
     );
 
-    // Once the turn ends the command runs as its own turn's prompt, where the shell resolves it — alone.
+    // Once the turn ends the command runs as its own turn's prompt, where the
+    // shell resolves it — alone. Merging it into a neighbour's turn would put
+    // the command line mid-body, where `resolve` never looks (`combine` merely
+    // joins the texts), so the row behind it must be untouched too.
     let agent = app.agents.get_mut(&id).unwrap();
     agent.session.state = AgentState::Idle;
     agent.session.current_prompt_id = None;
@@ -213,6 +225,8 @@ fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
     );
 }
 
+/// Gating (2), the objective's literal case: `/plan <description>` submitted
+/// mid-turn enters plan mode AND keeps the description for the following turn.
 /// Neither the description nor `/plan <description>` may be folded into the
 /// running turn as steering text — the plan mode this submit switched on
 /// belongs to the NEXT turn.
@@ -242,7 +256,8 @@ fn plan_description_submitted_mid_turn_waits_for_the_next_turn() {
         "the description is queued, not dropped"
     );
 
-    // Nothing may hoist it into the running turn.
+    // Nothing may hoist it into the running turn: neither the migration a later
+    // submit triggers nor the interrupt-with-queue gesture.
     let migrated = dispatch(Action::SendPrompt("and one more".into()), &mut app);
     assert_eq!(
         model_bound_payloads(&migrated),
@@ -364,7 +379,9 @@ fn send_now_of_a_queued_pager_command_runs_the_command() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     running_agent_with_a_queued_message(&mut app, id);
-    // A row can hold command text this client did not resolve: queued before the registry synced, edited into a command.
+    // A row can hold command text this client did not resolve: queued before the
+    // registry synced, edited into a command, or left by an older client. The
+    // delivery rule must hold whatever the provenance.
     enqueue_local(&mut app, id, "/plan implement the auth flow");
     let row = app.agents[&id].session.pending_prompts[0].id;
 
@@ -464,10 +481,10 @@ fn send_now_on_a_shell_command_keeps_the_immediate_route() {
     );
 }
 
-/// `/plan <desc>` on an idle session bundles the mode switch with the prompt;
-/// `/compact` queues as a command row and is never interjected; a plain prompt
-/// sends immediately; a plain prompt typed mid-turn is still delivered to the
-/// running turn.
+/// Regression (4): the unaffected paths keep their behavior. `/plan <desc>` on
+/// an idle session bundles the mode switch with the prompt; `/compact` queues as
+/// a command row and is never interjected; a plain prompt sends immediately; a
+/// plain prompt typed mid-turn is still delivered to the running turn.
 #[test]
 fn unaffected_paths_keep_their_routing() {
     // Idle `/plan <desc>`: mode switch + prompt in one ordered effect.

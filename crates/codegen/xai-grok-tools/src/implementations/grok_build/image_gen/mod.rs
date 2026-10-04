@@ -1,4 +1,19 @@
-//! `image_gen` tool — generates images via the xAI Imagine API and saves them to the local filesystem so the model can reference them in code.
+//! `image_gen` tool — generates images via the xAI Imagine API and saves
+//! them to the local filesystem so the model can reference them in code
+//! (e.g. `<img src="images/hero.jpg">`).
+//!
+//! Architecture follows the same pattern as `web_search`:
+//!
+//! - [`ImageGenConfig`] is built from session credentials by the host and
+//!   injected into the tool registry.
+//! - When `Enabled`, an [`ImageGenClient`] is constructed once and injected
+//!   into `Resources`. The tool reads it at runtime via `resources.require()`.
+//! - When `Disabled`, the tool is not registered so the model never sees it.
+//!
+//! The generated image is written to `<session_folder>/images/<n>.jpg`
+//! where `<n>` is a session-scoped counter (1, 2, 3, ... — 1 token each).
+//! The tool returns the absolute path so the model can copy or move the
+//! image into the project working directory when it needs a persistent asset.
 
 use base64::Engine as _;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
@@ -13,9 +28,12 @@ use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::resources::SessionFolder;
 use crate::types::tool::{ToolKind, ToolNamespace};
 
-/// Default Imagine model for `image_gen`.
+/// Default Imagine model for `image_gen`. Used unless an explicit
+/// `model_override` is supplied via `ImageGenConfig::Enabled`.
 const XAI_IMAGINE_MODEL: &str = "grok-imagine-image-quality";
-// Some Imagine models (e.g. `grok-imagine-image`, selectable via `model_override`) expand the prompt then generate.
+// Some Imagine models (e.g. `grok-imagine-image`, selectable via `model_override`) expand the prompt then generate,
+// and the proxy buffers the whole image before sending any bytes — so the client may receive nothing for well over a
+// minute. Keep these generous so a slow-but-progressing generation isn't cut off.
 const IMAGE_GEN_TIMEOUT_SECS: u64 = 300;
 const IMAGE_GEN_READ_TIMEOUT_SECS: u64 = 240;
 const DEFAULT_IMAGE_DIR: &str = "images";
@@ -24,7 +42,9 @@ pub use xai_grok_tools_api::slash_commands::{
     IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, imagine_instruction, imagine_usage_message,
 };
 
-/// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user calls `image_gen` or `image_edit`. The model relays it to the user.
+/// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user calls `image_gen` or
+/// `image_edit`. The model relays it to the user. The deliberate `/imagine` slash command shows the richer SuperGrok
+/// upsell modal instead; this covers the natural-language path.
 pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://grok.com/supergrok?referrer=grok-build. Do not retry this tool.";
 
 /// HTTP client for xAI Imagine API. Cloned per-request; shares `Arc` state.
@@ -32,16 +52,23 @@ pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation is a SuperGrok
 pub struct ImageGenClient {
     http: reqwest::Client,
     base_url: String,
-    /// Imagine model slug used by `generate()`.
+    /// Imagine model slug used by `generate()`. Selected at construction from
+    /// `ImageGenConfig::model_override` (falling back to [`XAI_IMAGINE_MODEL`]). `image_edit` uses
+    /// its own model and is unaffected.
     model: String,
     edit_model: String,
     writer: super::storage::SessionFileWriter,
     bearer: MediaBearer,
-    /// Optional 401-attribution hook.
+    /// Optional 401-attribution hook. Hosts wire this so a 401 from the
+    /// Imagine API emits an `auth_401_attribution` event with
+    /// `consumer == "ImageGen"` for unified auth-failure telemetry.
     attribution_callback: Option<SharedAttributionCallback>,
     /// When `true`, the user is on a tier the Imagine server zero-limits (free / X Basic).
+    /// `image_gen` / `image_edit` short-circuit before any HTTP call and return the SuperGrok
+    /// upsell prose instead. See [`ImageGenClient::is_tier_restricted`].
     tier_restricted: bool,
-    /// Per-request [`SESSION_ID_HEADER`]; kept off `default_headers` so the transport stays session-independent.
+    /// Per-request [`SESSION_ID_HEADER`]; kept off `default_headers` so the
+    /// transport stays session-independent and cacheable.
     session_header: Option<HeaderValue>,
     defaults_have_session_header: bool,
 }
@@ -93,7 +120,8 @@ impl ImageGenClient {
             Ok::<(), xai_tool_runtime::ToolError>(())
         })?;
 
-        // Process-cached: timeouts are constants, so the headers key suffices; the session id is attached per request.
+        // Process-cached: timeouts are constants, so the headers key
+        // suffices; the session id is attached per request, not here.
         let defaults_have_session_header = headers.contains_key(SESSION_ID_HEADER);
         let key = crate::util::shared_http::cache_key("image_gen", &headers);
         let http = crate::util::shared_http::cached_client(key, || {
@@ -136,13 +164,15 @@ impl ImageGenClient {
     }
 
     /// Whether the current user's tier (free / X Basic) is zero-limited on
-    /// Imagine server-side.
+    /// Imagine server-side. `image_gen` / `image_edit` use this to short-circuit
+    /// with the SuperGrok upsell instead of issuing a doomed request.
     pub(crate) fn is_tier_restricted(&self) -> bool {
         self.tier_restricted
     }
 
-    /// Wire a 401-attribution callback into this client. Idempotent; safe to
-    /// call before or after the first request.
+    /// Wire a 401-attribution callback into this client. Idempotent;
+    /// safe to call before or after the first request. Builder-style
+    /// so `new()` callers that don't care can ignore it.
     pub fn with_attribution_callback(
         mut self,
         callback: Option<SharedAttributionCallback>,
@@ -208,7 +238,9 @@ impl ImageGenClient {
             "response_format": "b64_json",
         });
 
-        // Capture the bearer once so the request and the 401-attribution emit see the same value.
+        // Capture the bearer once so the request and the 401-attribution
+        // emit see the same value (even if the provider rotates between
+        // the send and the response handling).
         let sent_bearer = self.current_bearer().await?;
         let req = self.post_json(&url, &payload, &sent_bearer);
 
@@ -277,15 +309,20 @@ pub enum ImageGenConfig {
         extra_headers: indexmap::IndexMap<String, String>,
         image_gen_enabled: bool,
         image_edit_enabled: bool,
-        /// Optional Imagine model override for `image_gen`.
+        /// Optional Imagine model override for `image_gen`. When `Some(non-empty)`, `image_gen`
+        /// calls that model instead of the default quality model ([`XAI_IMAGINE_MODEL`]). Driven by
+        /// the remote `image_gen_model_override` config flag. `image_edit` is unaffected.
         model_override: Option<String>,
         edit_model_override: Option<String>,
-        /// `true` when the user is on a tier the Imagine server zero-limits (free / X Basic).
+        /// `true` when the user is on a tier the Imagine server zero-limits (free / X Basic). The tools stay advertised to the
+        /// model, but `image_gen` / `image_edit` short-circuit at call time with the SuperGrok upsell prose instead of a doomed
+        /// request. Set by the host from the subscription tier; always `false` for team / API-key / workspace callers.
         tier_restricted: bool,
     },
 }
 
-/// Session-id header attached to imagine API requests; matches the header chat requests already carry.
+/// Session-id header attached to imagine API requests; matches the header
+/// chat requests already carry.
 pub const SESSION_ID_HEADER: &str = "x-grok-session-id";
 
 impl ImageGenConfig {
@@ -424,7 +461,9 @@ impl xai_tool_runtime::Tool for ImageGenTool {
             res.require::<ImageGenClient>()?.clone()
         };
 
-        // Free / X Basic users are zero-limited on Imagine server-side.
+        // Free / X Basic users are zero-limited on Imagine server-side; return
+        // the upsell prose instead of a doomed request (the tool stays
+        // advertised so the model can surface the nudge in-conversation).
         if client.is_tier_restricted() {
             return Ok(ToolOutput::Text(TIER_RESTRICTED_UPSELL.into()));
         }

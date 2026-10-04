@@ -28,9 +28,8 @@ pub(super) fn failed_hook_line(
         format!("{subject} failed, ignored: {error}")
     })
 }
-/// A batch stamped with another turn's prompt id: a late `stop_cancelled` /
-/// `stop_failure` report can land after the next queued prompt started and
-/// must not touch its phase.
+/// A batch stamped with another turn's prompt id: a late `stop_cancelled` / `stop_failure` report can land after the next
+/// queued prompt started and must not touch its phase. Unstamped batches always belong to the running turn.
 fn is_foreign_hook_batch(agent: &AgentView, batch_prompt_id: Option<&str>) -> bool {
     matches!(
         (batch_prompt_id, agent.session.current_prompt_id.as_deref()),
@@ -92,6 +91,8 @@ pub(crate) fn drop_unexpected_replay(
     true
 }
 /// Advance the reconnect cursor to an applied update's eventId.
+/// Called from every applied arm (Plan, bg-stdout, tracker); dropped updates (dedup, promptId gate, unexpected replay) deliberately don't move it.
+/// Forward-only via [`AgentView::advance_last_seen_event_id`].
 pub(super) fn advance_reconnect_cursor(agent: &mut AgentView, meta: &mut NotificationMeta) {
     if let Some(id) = meta.event_id.take() {
         agent.advance_last_seen_event_id(id, meta.event_seq);
@@ -175,8 +176,8 @@ fn synthesize_replay_turn_marker(
     })
 }
 /// Handle `x.ai/session_notification` and replay-path `x.ai/session/update`.
-/// Routes by `session_id` so events for an inactive agent still mutate that
-/// agent's state.
+/// Routes by `session_id` so events for an inactive agent still mutate that agent's state.
+/// The redraw decision is gated on whether the matched agent is the currently visible one.
 pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     handle_session_notification_with_origin(notif, app, LifecycleOrigin::Stream)
 }
@@ -357,17 +358,28 @@ pub(super) fn handle_session_notification_with_origin(
             ..
         } => {
             let error_kind = crate::app::error_display::wire_error_kind(error_kind.as_deref());
-            // The ACP text chunk rail never carries cost.
+            // The ACP text chunk rail never carries cost; the durable
+            // `TurnCompleted` notification carries the per-turn usage (incl.
+            // exact `cost_usd_ticks`, already scrubbed when partial/incomplete)
+            // alongside the terminal outcome. Attribute that reported cost to
+            // the agent-message block this turn rendered — unless
+            // `ResponseCompleted` already priced this turn's messages one by
+            // one, which `set_last_turn_cost` checks for.
             let reported_cost = usage.as_ref().and_then(|u| u.totals.cost_usd_ticks);
             // Terminal refresh of the session total: a subagent fold can land
-            // after this turn's last model call.
+            // after this turn's last model call, so this is the last chance to
+            // be exact before the session goes idle. Skipped on replay — that
+            // total belongs to the run that wrote it, and the agent's ledger
+            // starts fresh on reload.
             if !meta.is_replay {
                 agent
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
             }
-            // Snapshot the run in flight *before* any turn-finish path clears it.
+            // Snapshot the run currently in flight *before* any turn-finish
+            // path clears it, so cost attribution can decide whether this
+            // `TurnCompleted` (keyed by `prompt_id`) belongs to the live block.
             let running_prompt_id = agent.session.current_prompt_id.clone();
             let result: bool = if agent.session.loading_replay {
                 let first = agent.replayed_terminal_prompts.insert(prompt_id.clone());
@@ -485,7 +497,8 @@ pub(super) fn handle_session_notification_with_origin(
                 false
             };
             // Attribute this turn's reported cost to the agent block it
-            // rendered.
+            // rendered, keyed by prompt so out-of-order notifications land on
+            // the correct turn (and a stale one never corrupts a newer turn).
             agent.session.tracker.set_last_turn_cost(
                 &mut agent.scrollback,
                 Some(&prompt_id),
@@ -542,6 +555,12 @@ pub(super) fn handle_session_notification_with_origin(
             let persona_display = persona.clone();
             let role_display = role.clone();
             // The `model` field carries the subagent's *model id* string.
+            // Resolve it to its friendly display name through the parent
+            // session's model catalog (`ModelId -> ModelInfo.name`) so every
+            // downstream surface (scrollback subagent block, subagent title
+            // bar, tasks pane) shows the same friendly name the dashboard
+            // peek resolves. Models unknown to the catalog fall back to the
+            // raw id via `display_name_for`.
             let model_display = model.as_deref().map(|m| {
                 agent
                     .session
@@ -1139,7 +1158,9 @@ pub(super) fn handle_session_notification_with_origin(
                     task.append_stdout(&text);
                     true
                 }
-                // A capture whose row is already gone (finished, or replaced by a newer one) has nowhere to put this.
+                // A capture whose row is already gone (finished, or replaced
+                // by a newer one) has nowhere to put this. The run's own
+                // `todo-captures/*.jsonl` is still the durable copy.
                 None => false,
             }
         }
@@ -1375,7 +1396,11 @@ pub(super) fn handle_session_notification_with_origin(
             session_cost_usd_ticks,
             ..
         } => {
-            // One model call closed.
+            // One model call just closed. It rides the buffered chunk rail, so
+            // it arrives after that call's own agent-message chunks and before
+            // the next call's — which is exactly the block its cost belongs to.
+            // On replay the same ordering holds against the replayed chunks, so
+            // a reloaded transcript keeps its per-message costs.
             let running_prompt_id = agent.session.current_prompt_id.clone();
             let priced = agent.session.tracker.set_response_cost(
                 &mut agent.scrollback,
@@ -1392,13 +1417,21 @@ pub(super) fn handle_session_notification_with_origin(
                     .session
                     .tracker
                     .note_cache_usage(usage.as_ref(), std::time::Instant::now());
-            // A REPLAYED total belongs to the run that wrote it.
+            // A REPLAYED total belongs to the run that wrote it. The agent's
+            // ledger is in-memory and starts fresh on reload, so adopting the
+            // old run's total would make the indicator jump BACKWARD at the
+            // first live call. The indicator counts this run's spend; a
+            // replayed message still shows what it cost when it ran.
             let total_changed = !meta.is_replay
                 && agent
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            // The call that was streaming is over.
+            // The call that was streaming is over. Whatever it last measured is
+            // not a rate anything is producing now, and carrying it into the
+            // gap before the next call (a client tool, a retry backoff, the
+            // pre-first-token wait) puts a stale number under a row that says
+            // it is waiting.
             let rate_cleared = agent.session.tracker.clear_output_rate();
             priced || cache_hit_set || cache_invalidated || total_changed || rate_cleared
         }
@@ -1482,7 +1515,9 @@ pub(super) fn handle_session_notification_with_origin(
         } => {
             // Written by a side call that starts when its model call ends, so
             // this arrives after the thinking block it describes has stopped
-            // running.
+            // running, and on a reload it is replayed right behind that block's
+            // own persisted chunks. It finds its block by the call's stream
+            // start, which is why it is not attached to whatever is current.
             agent.session.tracker.set_thinking_summary(
                 &mut agent.scrollback,
                 stream_start_ms,
@@ -1640,8 +1675,9 @@ pub(super) fn handle_child_session_notification(
             session_cost_usd_ticks,
             ..
         } => {
-            // A subagent's transcript is read the same way as the parent's,
-            // so its messages carry their own costs.
+            // A subagent's transcript is read the same way as the parent's, so
+            // its messages carry their own costs, priced off the child's own
+            // session ledger.
             let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
                 return false;
             };
@@ -1804,9 +1840,9 @@ pub(super) fn handle_child_session_notification(
         _ => false,
     }
 }
-/// Apply one xAI session event to a child view. The live child routing above
-/// and the from-disk child replay
-/// (`crate::app::subagent::replay_inherited_updates`) share this rendering.
+/// Apply one xAI session event to a child view.
+/// The live child routing above and the from-disk child replay (`crate::app::subagent::replay_inherited_updates`) share this rendering.
+/// A rebuilt transcript therefore keeps the same compaction/retry markers the live one had.
 pub(crate) fn apply_child_view_session_event(
     child_view: &mut AgentView,
     update: &XaiSessionUpdate,
@@ -1859,10 +1895,9 @@ fn apply_compaction_or_retry_update(
     }
     changed
 }
-/// Apply a compaction or retry event to a session's activity state and
-/// scrollback. Test-only shim so dispatch tests can replay notification
-/// sequences (e.g. `RetryState::Retrying` then `Exhausted`) through the
-/// production handler.
+/// Apply a compaction or retry event to a session's activity state and scrollback.
+/// Test-only shim so dispatch tests can replay notification sequences (e.g. `RetryState::Retrying` then `Exhausted`) through the production handler.
+/// The Retrying arm clears the `in_flight_prompt` rewind stash, which a fixture setting fields directly would miss.
 #[cfg(test)]
 pub(crate) fn apply_session_event_for_test(
     update: &XaiSessionUpdate,
@@ -2044,7 +2079,9 @@ pub(super) fn apply_retry_state(
     scrollback: &mut crate::scrollback::state::ScrollbackState,
     is_api_key_auth: bool,
 ) {
-    // Every retry state means the attempt that was streaming has ended.
+    // Every retry state means the attempt that was streaming has ended, so the
+    // reading it last reported describes a stream nothing is producing. The
+    // backoff that follows is a wait, not a slow response.
     session.tracker.clear_output_rate();
     session.tracker.clear_request_queued();
     let mut is_credit_limit = false;
@@ -2170,7 +2207,7 @@ pub(crate) enum PlanModeTransition {
     /// Also claims another attached client's `session/set_mode`: the wire has no trigger field, and that misattribution is accepted.
     EnteredByAgent,
     EnteredByUser,
-    /// No scrollback row here: exit rows carry the review verdict, which only the local `close_plan_review` knows.
+    /// No scrollback row here: exit rows carry the review verdict, which only the local `close_plan_review` knows; Shift+Tab and `/plan` exits already show a banner.
     Exited,
 }
 /// Do not be tempted to infer mode from tool-call titles.
@@ -2189,7 +2226,9 @@ pub(crate) fn detect_plan_mode_change_replayed(
     };
     let mode_id = cmu.current_mode_id.0.as_ref();
     // A press is applied optimistically, so its own confirmation is already
-    // reflected on screen.
+    // reflected on screen. A confirmation belonging to an EARLIER press is
+    // only arriving now, and applying it would step the mode back to where
+    // the ring stood before the newer press.
     if let Some(superseded) = agent.superseded_mode_request(mode_id) {
         tracing::info!(
             mode_id,
@@ -2198,7 +2237,8 @@ pub(crate) fn detect_plan_mode_change_replayed(
         );
         return Some(PlanModeTransition::Unchanged);
     }
-    // The shell is reporting where it stands, so nothing outstanding is left to attribute.
+    // The shell is reporting where it actually stands, so nothing outstanding
+    // is left to attribute.
     agent.clear_mode_requests();
     let mode = SessionMode::from_id(mode_id);
     let was_active = agent.plan_mode_active;

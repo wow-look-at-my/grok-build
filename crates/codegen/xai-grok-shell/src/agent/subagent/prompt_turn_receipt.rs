@@ -1,4 +1,6 @@
 //! Receipt settlement for protected parent-message turns.
+//!
+//! A clean turn waits indefinitely for its receipt; only unclean or cancel paths arm the grace deadline.
 
 use std::sync::Arc;
 
@@ -242,7 +244,7 @@ async fn drain_prompt_turn_receipts(
                         PromptTurnReceiptDisposition::AdmissionUncertain
                     }
                 };
-                // WHY: Completed deliberately arms no deadline (admitted work may run long).
+                // WHY: Completed deliberately arms no deadline (admitted work may run long); termination relies on the receipt sender always being dropped or sent when the turn ends.
                 if next_disposition != PromptTurnReceiptDisposition::Completed {
                     cancel_shell_child_turn(child_cmd_tx);
                     deadline = Some(

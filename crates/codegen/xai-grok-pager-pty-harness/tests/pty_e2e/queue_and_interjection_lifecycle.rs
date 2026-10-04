@@ -8,6 +8,8 @@ use super::common::*;
 #[ignore]
 async fn queue_and_interjection_lifecycle() {
     let content = ContentController::start().await.expect("start content");
+    // Gate turn 1's terminal event so the ENTIRE mid-turn setup provably lands while turn 1 is still the running turn, even under heavy suite load
+    // The setup: queue P1 and P2, remove P1, refocus the prompt, then type I1 and send it with the chord
     let mut turn_one = content.expect_agent_turn_blocked(
         "running turn before queue lifecycle send-now",
         slow_turn_text("STEPONE"),
@@ -73,10 +75,13 @@ async fn queue_and_interjection_lifecycle() {
         .expect("type send-now message");
     harness.inject_keys(CTRL_ENTER).expect("send-now chord");
     turn_one.release();
+    // Cancel-and-send: turn 1 is cancelled silently; I1 commits as a standard "❯ " prompt block and
+    // runs as its own turn.
     harness
         .wait_for_text("STEPTHREE", Duration::from_secs(90))
         .expect("steps 5-7: I1 then P2 drained through to the final reply");
 
+    // The send-now cancel of turn 1 is silent.
     assert!(
         !harness.contains_text("Turn cancelled by user"),
         "send-now cancel must not render a cancelled marker\nscreen:\n{}",

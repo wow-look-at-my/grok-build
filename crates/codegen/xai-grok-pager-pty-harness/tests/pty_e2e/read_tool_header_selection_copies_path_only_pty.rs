@@ -2,7 +2,9 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// PTY: drag-select on a `Read {path}` tool header copies only the path (not the `Read ` label).
+/// PTY: drag-select on a `Read {path}` tool header copies only the path (not the `Read ` label). On
+/// macOS the clipboard route only emits OSC 52 when it believes the session is remote (see
+/// `resolve_clipboard_route`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn read_tool_header_selection_copies_path_only_pty() {
@@ -27,7 +29,8 @@ async fn read_tool_header_selection_copies_path_only_pty() {
         .iter()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
-    // The invariant under test is the raw `Read {path}` header's selectable span With `group_tool_verbs` on (the default).
+    // The invariant under test is the raw `Read {path}` header's selectable span
+    // With `group_tool_verbs` on (the default), even a lone read folds into the aggregated "Read 1 file" label and the path row never renders
     seed_ui_config(&content, "group_tool_verbs = false");
 
     let mut harness = PtyHarness::spawn_with_content_env_in_dir(
@@ -60,7 +63,8 @@ async fn read_tool_header_selection_copies_path_only_pty() {
             )
         });
 
-    // Wait for the follow-up completion sentinel before selecting.
+    // Wait for the follow-up completion sentinel before selecting. The tool block isn't committed into
+    // the scrollback selection model yet, so the drag's hit-test misses and no OSC 52 is emitted.
     harness
         .wait_for_text(READ_HDR_SENTINEL, Duration::from_secs(45))
         .unwrap_or_else(|_| {
@@ -72,7 +76,9 @@ async fn read_tool_header_selection_copies_path_only_pty() {
 
     // Focus scrollback so mouse selection targets the tool header, not the prompt.
     harness.inject_keys(b"\t").expect("focus scrollback");
-    // Gate on the scrollback-focused footer instead of a fixed sleep The footer only appears once scrollback owns focus The drag below therefore.
+    // Gate on the scrollback-focused footer instead of a fixed sleep
+    // The footer only appears once scrollback actually owns focus
+    // The drag below therefore can't hit a frame where the prompt still has focus under host load
     harness
         .wait_for_text("Space:prompt", Duration::from_secs(10))
         .expect("scrollback focused (Space:prompt hint) after Tab");

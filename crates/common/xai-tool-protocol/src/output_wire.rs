@@ -1,4 +1,7 @@
 //! Wire-friendly tool-call output.
+//!
+//! Tool servers may emit `Text`, `Json`, or `Mcp` directly depending
+//! on the shape needed.
 
 use serde::{Deserialize, Serialize};
 
@@ -6,7 +9,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ToolOutputWire {
-    /// Pre-formatted prompt text — the in-process default via `ToolOutput::to_prompt_format`.
+    /// Pre-formatted prompt text — the in-process default via
+    /// `ToolOutput::to_prompt_format`.
     Text(String),
     /// Opaque JSON escape hatch — mirrors `ToolOutput::Dynamic`.
     Json(serde_json::Value),

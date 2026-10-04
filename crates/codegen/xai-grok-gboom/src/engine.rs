@@ -1,11 +1,21 @@
 //! Software renderer for the `/gboom` easter egg.
+//!
+//! Grid raycaster (Lodev-style DDA): textured walls, floor, and ceiling with distance fog, and billboard sprites with a 1D depth buffer.
+//! On top go a view-model gun and full-frame effects (muzzle light, damage flash, vignette).
+//! It also renders the title/end screens (animated fire and text).
+//!
+//! Everything draws into a plain RGB8 framebuffer the caller PNG-encodes for the kitty graphics protocol.
 
 use super::assets::{self, GunSprites, ImpSprites, Rgb, TEX_SIZE, Texture, XorShift64};
 use super::game::{Game, ImpVisual};
 
+/// Distance fog factor: shade = 1 / (1 + dist * FOG).
 const FOG: f32 = 0.16;
+/// Sprite height in world units (walls are 1.0 tall).
 const IMP_WORLD_HEIGHT: f32 = 0.72;
+/// Camera half-FOV tangent (0.66 gives the classic 66° FOV).
 const PLANE_LEN: f32 = 0.66;
+/// Corner-vignette strength (0 disables it); subtle, ~0.8 at the extreme corners.
 const VIGNETTE: f32 = 0.11;
 
 /// RGB framebuffer with reusable scratch buffers.
@@ -15,6 +25,7 @@ pub(super) struct FrameBuffer {
     pub pixels: Vec<u8>, // RGB8, row-major
     zbuf: Vec<f32>,      // per-column wall depth
     /// Per-column wall strip bounds `[top, bottom)` in screen rows.
+    /// `draw_walls` writes them; `draw_floor_ceiling` reads them to skip the pixels walls already cover.
     wall_top: Vec<i32>,
     wall_bottom: Vec<i32>,
     /// Scratch for painter's-order sprite sorting, reused across frames.
@@ -175,8 +186,8 @@ impl Renderer {
         fb.apply_vignette();
         self.draw_gun(fb, game);
 
-        // Damage flash: flat blend of the whole frame toward red, decaying
-        // with `damage_flash` It reads even at low resolutions
+        // Damage flash: flat blend of the whole frame toward red, decaying with `damage_flash`
+        // It reads clearly even at low resolutions
         if game.player.damage_flash > 0.0 {
             let t = (game.player.damage_flash * 0.45).min(0.45);
             for px in fb.pixels.chunks_exact_mut(3) {
@@ -232,8 +243,8 @@ impl Renderer {
                 world_x += step_x;
                 world_y += step_y;
 
-                // Skip pixels the wall strip already filled this column The
-                // texel coords are computed lazily, so the central wall band.
+                // Skip pixels the wall strip already filled this column
+                // The texel coords are computed lazily, so the central wall band (where both are covered) costs only the world-coord step
                 let Some(&wall_bottom) = fb.wall_bottom.get(x) else {
                     continue;
                 };
@@ -291,7 +302,8 @@ impl Renderer {
                 (1, (map_y as f32 + 1.0 - p.y) * delta_y)
             };
 
-            // DDA until a solid cell The map border is fully solid, but bound the loop anyway
+            // DDA until a solid cell
+            // The map border is fully solid, but bound the loop anyway
             let mut side = 0;
             let mut tex_id = 1u8;
             for _ in 0..256 {
@@ -371,6 +383,9 @@ impl Renderer {
         let (plane_x, plane_y) = (-dir_y * PLANE_LEN, dir_x * PLANE_LEN);
         let inv_det = 1.0 / (plane_x * dir_y - dir_x * plane_y);
 
+        // Painter's order: far to near
+        // The order buffer lives on the framebuffer so the 30 fps render loop stays allocation-free
+        // It is taken out for the duration of the draw because the loop body needs `fb` mutably
         let mut order = std::mem::take(&mut fb.sprite_order);
         order.clear();
         order.extend(game.imps.iter().enumerate().map(|(i, imp)| {
@@ -403,6 +418,7 @@ impl Renderer {
             };
 
             let screen_x = (w as f32 / 2.0) * (1.0 + tx / ty);
+            // Vertical span from world heights [0, IMP_WORLD_HEIGHT] with the camera eye at 0.5: y(world_z) = h/2 + (0.5 - z) * h / ty
             let y_feet = h as f32 / 2.0 + 0.5 * h as f32 / ty;
             let y_head = h as f32 / 2.0 + (0.5 - IMP_WORLD_HEIGHT) * h as f32 / ty;
             let sprite_h = (y_feet - y_head).max(1.0);
@@ -461,6 +477,7 @@ impl Renderer {
             &self.guns.idle
         };
 
+        // Gun occupies ~42% of frame height, bottom-center, with walk bob.
         let gun_h = (h as f32 * 0.42) as i32;
         let gun_w = gun_h * sprite.w as i32 / sprite.h as i32;
         let bob_x = (game.player.bob * 1.7).sin() * w as f32 * 0.012;
@@ -541,10 +558,11 @@ fn draw_contact_shadow(
 }
 
 // -------------------------------------------------------------------------
-// Title / end screens.
+// Title / end screens: animated fire + 5x7 pixel text
+// -------------------------------------------------------------------------
 
-/// The classic PSX-style fire effect: a cellular automaton on a coarse grid,
-/// upscaled at draw time.
+/// The classic PSX-style fire effect: a cellular automaton on a coarse grid, upscaled at draw time.
+/// Heat values 0..=36 index a fire palette.
 pub(super) struct FireSim {
     w: usize,
     h: usize,
@@ -578,8 +596,8 @@ impl FireSim {
             for x in 0..self.w {
                 let src = y * self.w + x;
                 let r = self.rng.next_u32();
-                let decay = (r & 1) as i32;
-                let drift = (r >> 2) % 3;
+                let decay = (r & 1) as i32; // cool by 0 or 1
+                let drift = (r >> 2) % 3; // 0, 1, 2: left, stay, right
                 let dst_x = (x as i32 + drift as i32 - 1).rem_euclid(self.w as i32) as usize;
                 let dst = (y - 1) * self.w + dst_x;
                 let Some(&src_h) = self.heat.get(src) else {

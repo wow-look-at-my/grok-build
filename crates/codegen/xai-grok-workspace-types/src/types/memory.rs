@@ -1,4 +1,8 @@
 //! Memory subsystem shapes referenced from `OpsChunk::MemoryChunks`.
+//!
+//! TODO(workspace): align with the canonical memory types (`MemoryChunk`,
+//! `MemorySearch*`) when the memory subsystem moves into the workspace
+//! crate.
 
 use serde::{Deserialize, Serialize};
 

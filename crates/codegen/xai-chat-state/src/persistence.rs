@@ -1,4 +1,9 @@
 //! Chat persistence trait and mock implementation.
+//!
+//! The actor owns persistence exclusively (`Box<dyn ChatPersistence>`), so the
+//! trait uses `&mut self` — no locks, no atomics, no shared state.
+//! The mock uses a channel to report records to the test, keeping everything
+//! in the actor / message-passing paradigm.
 
 use std::io;
 
@@ -22,8 +27,9 @@ pub trait ChatPersistence: Send + 'static {
     /// Replace the entire chat history (compaction / rewind).
     fn replace_history(&mut self, items: &[ConversationItem]);
 
-    /// Destructive image-strip rewrite: back up on-disk history, then replace
-    /// it, acking the disk outcome.
+    /// Destructive image-strip rewrite: back up on-disk history, then replace it, acking the disk outcome.
+    /// A failed backup gates off the rewrite so recoverability never silently evaporates.
+    /// Backends without a recoverable store may no-op the backup but must ack the write.
     fn replace_history_for_strip_and_ack(
         &mut self,
         items: &[ConversationItem],
@@ -37,18 +43,22 @@ pub trait ChatPersistence: Send + 'static {
 /// Typed so a dead actor can never masquerade as "stripped nothing".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StripOutcome {
-    /// Stripped and durably persisted.
+    /// Stripped and durably persisted; `stripped` counts the stored
+    /// occurrences replaced (a URL stored twice counts twice).
     Applied { stripped: usize },
     /// No stored image matched the requested URLs; nothing changed.
     NoMatch,
-    /// Stripped in memory, but the backup or disk write failed, or the acknowledgement was lost mid-flight.
+    /// Stripped in memory, but the backup or disk write failed, or the
+    /// acknowledgement was lost mid-flight. Treated as not persisted: the
+    /// stored file may still carry the images and the next load re-poisons.
     WriteFailed { stripped: usize },
     /// The chat-state actor is gone; the strip may not have happened at all.
     ActorUnavailable,
 }
 
 // ============================================================================
-// Mock (test double) — channel-based, no locks.
+// Mock (test double) — channel-based, no locks, no atomics
+// ============================================================================
 
 /// A record of a persistence call, sent over a channel to the test.
 #[derive(Debug, Clone)]
@@ -70,7 +80,8 @@ pub enum PersistenceRecord {
 /// the actor did. No locks, no atomics — just message passing.
 pub struct MockChatPersistence {
     tx: mpsc::UnboundedSender<PersistenceRecord>,
-    /// When set, strip rewrites ack an I/O error instead of success.
+    /// When set, strip rewrites ack an I/O error instead of success:
+    /// pins the honest-failure half of the [`StripOutcome`] contract.
     fail_strip_writes: bool,
     persistence_ack_tx:
         Option<mpsc::UnboundedSender<oneshot::Sender<Result<StrictAppendAck, StrictAppendError>>>>,
@@ -230,7 +241,9 @@ impl ChatPersistence for MockChatPersistence {
     }
 }
 
-// ============================================================================ Null (noop) — for benchmarks / scenarios.
+// ============================================================================
+// Null (noop) — for benchmarks / scenarios where persistence is unwanted
+// ============================================================================
 
 /// No-op implementation: discards everything (for benchmarks / noop scenarios).
 pub struct NullChatPersistence;

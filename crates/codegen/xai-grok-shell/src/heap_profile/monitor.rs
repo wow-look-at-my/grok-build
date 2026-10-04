@@ -16,6 +16,7 @@ pub const HARD_DUMP_SIZE_CAP_BYTES: u64 = 128 * 1024 * 1024;
 pub(super) const DUMP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Wall budget for the GCS heap and meta upload.
+/// A stalled proxy must not pin `upload_in_flight` for the process lifetime; that blocks later threshold dumps.
 pub(super) const UPLOAD_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// Scoped kill-switch poll cadence while profiling is enabled.
@@ -115,6 +116,7 @@ pub fn normalize_thresholds(thresholds: impl IntoIterator<Item = u64>) -> Vec<u6
     t
 }
 
+/// Clamp poll interval seconds to `5..=300`, default 30 when absent.
 pub fn clamp_poll_interval_secs(secs: Option<u64>) -> u64 {
     secs.unwrap_or(DEFAULT_POLL_INTERVAL_SECS)
         .clamp(MIN_POLL_INTERVAL_SECS, MAX_POLL_INTERVAL_SECS)
@@ -394,6 +396,7 @@ impl PendingDump {
                 threshold_bytes: threshold,
                 resident_bytes: stats.resident,
                 allocated_bytes: stats.allocated,
+                // The sampler reports 0 when the platform has no cheap read.
                 rss_peak_bytes: (rss_peak > 0).then_some(rss_peak),
             },
         );
@@ -591,7 +594,9 @@ async fn upload_pair(
         return false;
     };
 
-    // Telemetry hard-disabled in this build: local heap profiling still runs, but the GCS upload egress is neutralized.
+    // Telemetry hard-disabled in this build: local heap profiling still runs,
+    // but the GCS upload egress is neutralized. The in-process test hook above
+    // is kept for unit tests; the real network upload never happens.
     let _ = (handles, heap_path, heap_ct, meta_object, meta_path, meta_ct);
     log_upload_result(heap_object, file_size, false, Some("telemetry_disabled"))
 }

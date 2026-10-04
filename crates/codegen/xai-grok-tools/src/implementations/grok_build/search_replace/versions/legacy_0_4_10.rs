@@ -1,3 +1,8 @@
+//! Legacy (0.4.10) error downgrade for `search_replace`.
+//!
+//! Restores exact historical 0.4.10 wording by collapsing structured error
+//! variants (`FileNotFound`, `MultipleMatchesFound`, etc.) to generic
+//! `InvalidInput`.
 
 use crate::types::output::SearchReplaceOutput;
 use crate::types::resources::SharedResources;
@@ -65,6 +70,8 @@ async fn build_render_context(
     })
 }
 
+/// Downgrade structured error variants to generic `InvalidInput` for legacy,
+/// restoring exact historical 0.4.10 wording.
 pub(crate) async fn downgrade_structured_errors(
     output: SearchReplaceOutput,
     resources: &SharedResources,

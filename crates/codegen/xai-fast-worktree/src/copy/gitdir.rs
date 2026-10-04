@@ -1,4 +1,10 @@
 //! Selective CoW copy of `.git/` directory for standalone repository cloning.
+//!
+//! Copies essential git internal files using reflink (CoW) when supported,
+//! skipping transient state, lock files, and stale worktree registrations.
+//!
+//! The `objects/` directory (often the largest subtree) is copied in parallel
+//! using a thread pool for better throughput on SSDs.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -23,7 +29,8 @@ pub(crate) struct GitDirCopyStats {
 const SKIP_TOP_LEVEL: &[&str] = &[
     // Linked worktree registrations — stale in a standalone copy
     "worktrees",
-    // The source's reflog is stale in a fresh copy and is usually the bulk of .git on a long-lived checkout.
+    // The source's reflog is stale in a fresh copy and is usually the bulk of
+    // .git on a long-lived checkout. Git recreates logs/ on the first ref update.
     "logs",
     // Transient HEAD-like state files
     "FETCH_HEAD",
@@ -40,7 +47,9 @@ const SKIP_TOP_LEVEL: &[&str] = &[
     "rebase-apply",
     // GC state
     "gc.log",
-    // fsmonitor daemon state: a host-local IPC socket (cannot be copied) plus its transient `cookies/` dir.
+    // fsmonitor daemon state: a host-local IPC socket (cannot be copied) plus
+    // its transient `cookies/` dir. Runtime state of the source daemon; a
+    // standalone copy must never inherit it.
     "fsmonitor--daemon",
     "fsmonitor--daemon.ipc",
 ];
@@ -52,7 +61,8 @@ struct CopyWork {
 }
 
 /// Standalone `.git/` via reflink (or copy). `objects/` is parallel; other
-/// top-level entries are sequential.
+/// top-level entries are sequential. Skips locks, stale worktree metadata,
+/// in-progress merge/rebase state, extra origin tips, and unused shallow grafts.
 #[cfg(test)]
 pub(crate) fn copy_git_dir(source_git: &Path, dest_git: &Path) -> Result<GitDirCopyStats> {
     copy_git_dir_keeping_origin(source_git, dest_git, &HashSet::new())
@@ -90,6 +100,7 @@ fn copy_git_dir_with_workers(
     let filter = StandaloneCopyFilter::from_git_dir_keeping(source_git, extra_origin);
 
     // First pass: collect work items for parallel copy.
+    // We collect all (source, dest) pairs, then process them in parallel.
     let mut work_items: Vec<CopyWork> = Vec::new();
     collect_work_recursive(
         source_git,
@@ -110,7 +121,9 @@ fn copy_git_dir_with_workers(
             copy_single_entry(&item.source, &item.dest, &files_copied, &symlinks_copied)?;
         }
     } else {
-        // Each thread returns its first copy error.
+        // Each thread returns its first copy error; this branch must propagate
+        // like the sequential `?` path, or a failed index/pack copy yields a
+        // silently-corrupt standalone repo.
         let chunk_size = work_items.len().div_ceil(num_workers);
         let first_error = crossbeam::scope(|scope| {
             let handles: Vec<_> = work_items
@@ -231,7 +244,9 @@ fn collect_work_recursive(
                 dest: dest_path,
             });
         } else {
-            // Non-regular file (socket, FIFO, device) cannot be copied and is host-local state.
+            // Non-regular file (socket, FIFO, device) cannot be copied and is
+            // host-local state. Skip it instead of failing the whole `.git/`
+            // copy.
             entries_skipped.fetch_add(1, Ordering::Relaxed);
             tracing::debug!(entry = %name_str, rel = %child_rel.display(), "skipping non-regular .git/ entry");
         }
@@ -446,7 +461,9 @@ mod tests {
 
     #[test]
     fn test_copy_git_dir_skips_fsmonitor_daemon_state() {
-        // git's fsmonitor leaves a `fsmonitor--daemon/` dir (and an `.ipc` socket) of host-local runtime state.
+        // git's fsmonitor leaves a `fsmonitor--daemon/` dir (and an `.ipc`
+        // socket) of host-local runtime state. It must not be inherited by a
+        // standalone copy.
         let temp = TempDir::new().unwrap();
         let source_git = temp.path().join("source/.git");
         let dest_git = temp.path().join("dest/.git");
@@ -464,7 +481,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_copy_git_dir_skips_non_regular_files() {
-        // A leftover Unix socket cannot be copied and must be skipped, not fail the whole `.git/` copy.
+        // A leftover Unix socket cannot be copied and must be skipped, not fail
+        // the whole `.git/` copy. Non-fsmonitor name so this hits the type-based
+        // skip, not the SKIP_TOP_LEVEL name match.
         use std::os::unix::net::UnixListener;
 
         let temp = TempDir::new().unwrap();
@@ -507,7 +526,9 @@ mod tests {
 
     #[test]
     fn test_copy_git_dir_preserves_worktree_source_marker() {
-        // A worktree-from-worktree (standalone) must inherit the source's `grok-worktree-source` marker so it still points.
+        // A worktree-from-worktree (standalone) must inherit the source's
+        // `grok-worktree-source` marker so it still points at the ultimate
+        // main repo rather than the intermediate worktree.
         let temp = TempDir::new().unwrap();
         let source_git = temp.path().join("source/.git");
         let dest_git = temp.path().join("dest/.git");
@@ -526,7 +547,9 @@ mod tests {
 
     #[test]
     fn test_copy_git_dir_propagates_entry_copy_error() {
-        // A failed entry copy must surface as an error, not a silently-corrupt "success".
+        // A failed entry copy must surface as an error, not a silently-corrupt
+        // "success". `max_workers = 4` + >= 64 items forces the PARALLEL branch
+        // deterministically (independent of num_cpus).
         let temp = TempDir::new().unwrap();
         let source_git = temp.path().join("source/.git");
         let dest_git = temp.path().join("dest/.git");
@@ -537,7 +560,8 @@ mod tests {
             std::fs::write(source_git.join(format!("obj{i}")), "data").unwrap();
         }
 
-        // Pre-create the dest entry for `obj0` as a DIRECTORY so the file copy onto it fails (EISDIR) deterministically.
+        // Pre-create the dest entry for `obj0` as a DIRECTORY so the file copy
+        // onto it fails (EISDIR) deterministically, even as root.
         std::fs::create_dir_all(dest_git.join("obj0")).unwrap();
 
         let err = copy_git_dir_with_workers(&source_git, &dest_git, 4, &HashSet::new())

@@ -628,6 +628,7 @@ async fn estimated_tokens_tracks_tool_result_delta() {
     let h = TestHarness::new();
     h.handle.record_token_usage(100_000);
 
+    // Push a tool result with 4000 chars → ~1000 estimated tokens
     h.handle
         .push_tool_result(ConversationItem::tool_result("call-1", "x".repeat(4000)));
 
@@ -683,6 +684,7 @@ async fn estimated_tokens_tracks_real_user_message_and_resets_on_response() {
     let h = TestHarness::new();
     h.handle.record_token_usage(100_000);
 
+    // Real user turn — 4000 chars / 4 = ~1000 tokens.
     h.handle
         .push_user_message(ConversationItem::user("u".repeat(4000)));
 
@@ -692,7 +694,8 @@ async fn estimated_tokens_tracks_real_user_message_and_resets_on_response() {
         "expected ~101K after user push, got {pre}",
     );
 
-    // Model responds; the API's `usage.total_tokens` already includes the new user message. Delta must reset to zero.
+    // Model responds; the API's `usage.total_tokens` already includes
+    // the new user message. Delta must reset to zero.
     h.handle.record_token_usage(103_000);
     assert_eq!(h.handle.get_estimated_total_tokens().await, 103_000);
     assert_eq!(h.handle.get_total_tokens().await, 103_000);
@@ -772,7 +775,7 @@ async fn replace_conversation_persists_and_emits_reset() {
     h.handle.push_user_message(ConversationItem::user("a"));
     h.handle.push_user_message(ConversationItem::user("b"));
 
-    // Drain both Message records
+    // Drain the two Message records
     let _ = h.handle.get_conversation().await; // sync point
     h.drain_persistence();
 
@@ -844,8 +847,8 @@ async fn strip_conversation_images_replaces_only_listed_urls_and_persists() {
     );
 
     let records = h.drain_persistence();
-    // The recoverability contract: strip rewrites go through the backup-gated
-    // flavor, never the plain, unguarded ReplaceHistory.
+    // The recoverability contract: strip rewrites go through the single
+    // backup-gated flavor, never the plain, unguarded ReplaceHistory.
     assert!(
         records
             .iter()
@@ -1027,7 +1030,7 @@ async fn compaction_reseed_excludes_post_response_deltas_from_overhead() {
 async fn compaction_overhead_unaffected_by_pruning_after_last_response() {
     let h = TestHarness::new();
 
-    // Turns of large tool results so default pruning (10-turn age) fires.
+    // 12 turns of large tool results so default pruning (10-turn age) fires.
     let mut conv = Vec::new();
     for i in 0..12 {
         conv.push(ConversationItem::user(format!("q{i}")));
@@ -1107,6 +1110,7 @@ async fn restore_snapshot_without_frozen_estimate_falls_back_to_recompute() {
     let provider_total = 31_000;
     h.handle.record_token_usage(provider_total);
 
+    // Pre-field snapshot (serde default): estimate_at_last_response == 0.
     let mut snap = h.handle.snapshot().await.unwrap();
     snap.estimate_at_last_response = 0;
     h.handle.restore_snapshot(snap);
@@ -1142,11 +1146,14 @@ async fn compaction_reseed_without_provider_count_matches_plain_estimate() {
 
 #[tokio::test]
 async fn non_compaction_replace_carries_confirmed_total() {
-    // Estimates run high vs the provider count (retained reasoning never reaches the wire).
+    // Estimates run high vs the provider count (retained reasoning never
+    // reaches the wire): a rewind/mode-switch/goal-prune replace must scale
+    // from the confirmed count, not reseed to the raw estimate.
     let h = TestHarness::new();
     h.handle
         .push_user_message(ConversationItem::user("x".repeat(4000)));
     h.handle.record_token_usage(500);
+    // Estimate at last response = 1_000, confirmed = 500 → ratio 0.5.
 
     h.handle
         .replace_conversation(vec![ConversationItem::user("q".repeat(4000))]);
@@ -1160,7 +1167,8 @@ async fn non_compaction_replace_carries_confirmed_total() {
 
 #[tokio::test]
 async fn replace_never_increases_total_tokens() {
-    // A growing replace (harness rebuild injecting AGENTS.md) is capped at the confirmed total.
+    // A growing replace (harness rebuild injecting AGENTS.md) is capped at the
+    // confirmed total; the brief under-count self-heals on the next usage.
     let h = TestHarness::new();
     h.handle
         .push_user_message(ConversationItem::user("x".repeat(4000)));
@@ -1174,7 +1182,8 @@ async fn replace_never_increases_total_tokens() {
 
 #[tokio::test]
 async fn truncate_scales_from_confirmed_total() {
-    // Rewind sibling path: `TruncateToPromptIndex` must use the same carry as `replace_conversation`.
+    // Rewind sibling path: `TruncateToPromptIndex` must use the same carry as
+    // `replace_conversation`.
     let h = TestHarness::new();
     h.handle
         .push_user_message(ConversationItem::user("x".repeat(4000)));
@@ -1183,9 +1192,11 @@ async fn truncate_scales_from_confirmed_total() {
         .push_user_message(ConversationItem::user("y".repeat(4000)));
     h.handle.increment_prompt_index();
     h.handle.record_token_usage(1_000);
+    // Estimate at last response = 2_000, confirmed = 1_000 → ratio 0.5.
 
     h.handle.truncate_to_prompt_index(1).await;
 
+    // Keeps the first user item (raw estimate 1_000) → scaled to 500.
     assert_eq!(h.handle.get_total_tokens().await, 500);
 }
 
@@ -1440,22 +1451,22 @@ async fn record_compaction_at_is_reflected_in_snapshot() {
 async fn truncate_removes_items_after_target_prompt_index() {
     let mut h = TestHarness::new();
 
-    // Build turns: system + 3x (user + assistant)
+    // Build 3 turns: system + 3x (user + assistant)
     h.handle.push_user_message(ConversationItem::system("sys"));
     h.handle.push_user_message(ConversationItem::user("q1"));
-    h.handle.increment_prompt_index();
+    h.handle.increment_prompt_index(); // 1
     h.handle.cache_prompt_text("q1".to_string());
     h.handle
         .push_assistant_response(ConversationItem::assistant("a1"));
 
     h.handle.push_user_message(ConversationItem::user("q2"));
-    h.handle.increment_prompt_index();
+    h.handle.increment_prompt_index(); // 2
     h.handle.cache_prompt_text("q2".to_string());
     h.handle
         .push_assistant_response(ConversationItem::assistant("a2"));
 
     h.handle.push_user_message(ConversationItem::user("q3"));
-    h.handle.increment_prompt_index();
+    h.handle.increment_prompt_index(); // 3
     h.handle.cache_prompt_text("q3".to_string());
     h.handle
         .push_assistant_response(ConversationItem::assistant("a3"));
@@ -1465,6 +1476,7 @@ async fn truncate_removes_items_after_target_prompt_index() {
     h.drain_events();
     h.drain_persistence();
 
+    // Truncate to prompt_index 1 → keep sys, q1, a1 (stop before q2)
     h.handle.truncate_to_prompt_index(1).await;
 
     let conv = h.handle.get_conversation().await;
@@ -1508,7 +1520,7 @@ async fn truncate_to_zero_keeps_only_system() {
 #[tokio::test]
 async fn truncate_is_noop_when_already_at_target() {
     let mut h = TestHarness::new();
-    h.handle.increment_prompt_index();
+    h.handle.increment_prompt_index(); // 1
 
     let _ = h.handle.get_prompt_index().await;
     h.drain_events();
@@ -1755,6 +1767,7 @@ async fn build_request_repairs_dangling_tool_calls() {
             arguments: "{}".into(),
             vendor: Default::default(),
         }]),
+        // No ToolResult for call_1 — repaired by ChatState::new() before any command.
     ]);
 
     let request = h
@@ -1824,7 +1837,11 @@ async fn build_request_uses_sampling_config() {
     assert_eq!(request.top_p, Some(0.9));
 }
 
-/// The budget that goes out has to be the one the window has room for.
+/// The provider charges the requested output against the same window as the
+/// prompt, so a conversation that fits on its own can still make the REQUEST
+/// too big: 737_857 input tokens plus a 262_144 output budget is 1_000_001
+/// against a 1_000_000 window, and the server rejects it. The budget that goes
+/// out has to be the one the window has room for.
 #[tokio::test]
 async fn build_request_fits_the_output_budget_into_the_context_window() {
     let config = SamplingConfig {
@@ -1995,6 +2012,7 @@ async fn parallel_tool_calls_accept_first_reject_second_skip_third() {
 
     h.handle.increment_prompt_index();
 
+    // Model response: one assistant message holding all 3 parallel tool calls.
     // In production this is built from the stream and pushed via `push_assistant_response`.
     let assistant_with_tools =
         ConversationItem::Assistant(xai_grok_sampling_types::AssistantItem {
@@ -2027,16 +2045,23 @@ async fn parallel_tool_calls_accept_first_reject_second_skip_third() {
 
     // ── Tool execution results (simulating execute_tool_calls) ──────────
 
+    // Tool #1: read_file — user accepted, tool executed successfully
     h.handle.push_tool_result(ConversationItem::tool_result(
         "call_1",
         "fn main() {\n    println!(\"hello wrold\");\n}",
     ));
 
+    // Tool #2: edit_file — user rejected via permission prompt
+    // In the shell, `handle_tool_not_executed` pushes a ToolResult with the
+    // rejection reason and returns ToolLoop::PermissionReject.
     h.handle.push_tool_result(ConversationItem::tool_result(
         "call_2",
         "User rejected: permission denied for tool `edit_file`",
     ));
 
+    // Tool #3: run_terminal_cmd — skipped because tool #2 was rejected.
+    // In `execute_tool_calls`, when `final_result` is set, remaining tools
+    // get a synthetic cancellation message.
     h.handle.push_tool_result(ConversationItem::tool_result(
         "call_3",
         "Tool execution cancelled due to earlier permission rejection for tool `run_terminal_cmd`",
@@ -2045,6 +2070,7 @@ async fn parallel_tool_calls_accept_first_reject_second_skip_third() {
     // ── Verify the conversation state ───────────────────────────────────
     let conv = h.handle.get_conversation().await;
 
+    // Expected: System + User + Assistant(3 calls) + 3 ToolResults = 6 items
     assert_eq!(
         conv.len(),
         6,
@@ -2052,16 +2078,19 @@ async fn parallel_tool_calls_accept_first_reject_second_skip_third() {
         conv.len()
     );
 
+    // [0] System
     assert!(
         matches!(conv.first(), Some(ConversationItem::System(s)) if s.content.as_ref() == "You are a helpful coding assistant."),
         "item[0] should be the system prompt"
     );
 
+    // [1] User
     assert!(
         matches!(conv.get(1), Some(ConversationItem::User(_))),
         "item[1] should be the user message"
     );
 
+    // [2] Assistant with 3 tool calls
     match conv.get(2) {
         Some(ConversationItem::Assistant(a)) => {
             assert_eq!(a.tool_calls.len(), 3, "assistant should have 3 tool calls");
@@ -2082,6 +2111,7 @@ async fn parallel_tool_calls_accept_first_reject_second_skip_third() {
         other => panic!("item[2] should be Assistant, got {:?}", other),
     }
 
+    // [3] ToolResult for call_1 — success
     match conv.get(3) {
         Some(ConversationItem::ToolResult(tr)) => {
             assert_eq!(tr.tool_call_id, "call_1");
@@ -2093,6 +2123,7 @@ async fn parallel_tool_calls_accept_first_reject_second_skip_third() {
         other => panic!("item[3] should be ToolResult, got {:?}", other),
     }
 
+    // [4] ToolResult for call_2 — rejected
     match conv.get(4) {
         Some(ConversationItem::ToolResult(tr)) => {
             assert_eq!(tr.tool_call_id, "call_2");
@@ -2105,6 +2136,7 @@ async fn parallel_tool_calls_accept_first_reject_second_skip_third() {
         other => panic!("item[4] should be ToolResult, got {:?}", other),
     }
 
+    // [5] ToolResult for call_3 — cancelled due to earlier rejection
     match conv.get(5) {
         Some(ConversationItem::ToolResult(tr)) => {
             assert_eq!(tr.tool_call_id, "call_3");
@@ -2131,6 +2163,7 @@ async fn parallel_tool_calls_with_rejection_has_no_dangling_calls() {
     h.handle
         .push_user_message(ConversationItem::user("do things"));
 
+    // Assistant with 3 parallel tool calls
     h.handle
         .push_assistant_response(ConversationItem::assistant_tool_calls(vec![
             ToolCall {
@@ -2153,6 +2186,7 @@ async fn parallel_tool_calls_with_rejection_has_no_dangling_calls() {
             },
         ]));
 
+    // All 3 get ToolResults (accept, reject, skip)
     h.handle
         .push_tool_result(ConversationItem::tool_result("call_1", "file contents"));
     h.handle
@@ -2169,6 +2203,7 @@ async fn parallel_tool_calls_with_rejection_has_no_dangling_calls() {
         .await
         .unwrap();
 
+    // 2 (sys+user) + 1 (assistant) + 3 (tool results) = 6
     assert_eq!(
         request.items.len(),
         6,
@@ -2200,6 +2235,8 @@ async fn parallel_tool_calls_with_rejection_has_no_dangling_calls() {
     assert!(tr2.content.contains("cancelled"));
 }
 
+/// Verify that persistence records all 5 pushes (assistant + 3 tool results)
+/// correctly for the parallel tool call scenario.
 #[tokio::test]
 async fn parallel_tool_calls_with_rejection_persists_all_items() {
     use xai_grok_sampling_types::ToolCall;
@@ -2240,7 +2277,7 @@ async fn parallel_tool_calls_with_rejection_persists_all_items() {
     // Sync point
     let _ = h.handle.get_conversation().await;
 
-    // All items should have been persisted as Message records
+    // All 6 items should have been persisted as Message records
     let records = h.drain_persistence();
     let message_count = records
         .iter()
@@ -2264,6 +2301,9 @@ async fn parallel_tool_calls_with_rejection_persists_all_items() {
 async fn dangling_tool_calls_after_crash_are_repaired_on_load() {
     use xai_grok_sampling_types::ToolCall;
 
+    // Simulate what chat_history.jsonl looks like after a crash:
+    // The assistant message (with 3 tool calls) was persisted, and only
+    // tool #1's result was persisted before the process died.
     let crashed_conversation = vec![
         ConversationItem::system("You are a helpful assistant."),
         ConversationItem::user("Read, edit, and test"),
@@ -2295,11 +2335,14 @@ async fn dangling_tool_calls_after_crash_are_repaired_on_load() {
         }),
         // Only call_1 got persisted before the crash
         ConversationItem::tool_result("call_1", "fn main() { ... }"),
+        // call_2 and call_3 are MISSING — this is the dangling state
     ];
 
     // "Reload" the session by creating an actor with the crashed conversation.
+    // ChatState::new repairs dangling tool calls eagerly.
     let h = TestHarness::with_conversation(crashed_conversation);
 
+    // The actor's conversation should already be repaired (6 items, not 4)
     let conv = h.handle.get_conversation().await;
     assert_eq!(
         conv.len(),
@@ -2358,7 +2401,7 @@ async fn dangling_tool_calls_after_crash_are_repaired_on_load() {
         tr2.content
     );
 
-    // build_request should also see items (no double-repair)
+    // build_request should also see 6 items (no double-repair)
     let request = h
         .handle
         .build_request(vec![], None, false, None, "c".into(), "r".into())
@@ -2400,7 +2443,7 @@ async fn dangling_tool_calls_repair_is_consistent_between_state_and_request() {
 
     let h = TestHarness::with_conversation(crashed_conversation);
 
-    // Actor state should have items (repaired on load)
+    // Actor state should have 5 items (repaired on load)
     let conv = h.handle.get_conversation().await;
     assert_eq!(
         conv.len(),
@@ -2422,7 +2465,8 @@ async fn dangling_tool_calls_repair_is_consistent_between_state_and_request() {
 }
 
 /// Worst case: crash happens right after the assistant message is persisted
-/// but BEFORE any tool results.
+/// but BEFORE any tool results. All 3 tool calls are dangling.
+/// ChatState::new should repair all 3 eagerly.
 #[tokio::test]
 async fn all_tool_calls_dangling_after_crash() {
     use xai_grok_sampling_types::ToolCall;
@@ -2450,10 +2494,12 @@ async fn all_tool_calls_dangling_after_crash() {
                 vendor: Default::default(),
             },
         ]),
+        // NO tool results at all — complete crash right after assistant was persisted
     ];
 
     let h = TestHarness::with_conversation(crashed_conversation);
 
+    // Actor state should be repaired: sys + user + assistant + 3 synthetic results = 6
     let conv = h.handle.get_conversation().await;
     assert_eq!(
         conv.len(),
@@ -2485,7 +2531,7 @@ async fn all_tool_calls_dangling_after_crash() {
         );
     }
 
-    // build_request should also see items — no double-repair
+    // build_request should also see 6 items — no double-repair
     let request = h
         .handle
         .build_request(vec![], None, false, None, "c".into(), "r".into())
@@ -2506,15 +2552,18 @@ async fn live_cancel_before_any_tool_execution_repairs_on_next_user_message() {
 
     let h = TestHarness::new();
 
+    // ── Turn 1: normal conversation ─────────────────────────────────────
     h.handle
         .push_user_message(ConversationItem::system("You are a helpful assistant."));
     h.handle.push_user_message(ConversationItem::user("Hello"));
     h.handle
         .push_assistant_response(ConversationItem::assistant("Hi! How can I help?"));
 
+    // ── Turn 2: model wants 3 tool calls, user cancels immediately ──────
     h.handle
         .push_user_message(ConversationItem::user("Read, edit, and test everything"));
 
+    // Model streams its response → assistant with 3 tool calls is pushed
     h.handle
         .push_assistant_response(ConversationItem::assistant_tool_calls(vec![
             ToolCall {
@@ -2537,11 +2586,14 @@ async fn live_cancel_before_any_tool_execution_repairs_on_next_user_message() {
             },
         ]));
 
-    // *** USER CANCELS HERE (Ctrl+C) *** The tokio task is aborted. execute_tool_calls never ran.
+    // *** USER CANCELS HERE (Ctrl+C) ***
+    // The tokio task is aborted. execute_tool_calls never ran.
+    // Zero ToolResult items pushed. The conversation has dangling calls.
 
     // get_conversation() and snapshot() are pure reads — they do NOT repair.
+    // The dangling calls are visible in the raw state until the next write boundary.
     let conv_before = h.handle.get_conversation().await;
-    // sys + user("Hello") + assistant("Hi!") + user("Read...") + assistant(calls) = 5
+    // sys + user("Hello") + assistant("Hi!") + user("Read...") + assistant(3 calls) = 5
     assert_eq!(
         conv_before.len(),
         5,
@@ -2556,11 +2608,13 @@ async fn live_cancel_before_any_tool_execution_repairs_on_next_user_message() {
         "snapshot() should be a pure read (no repair)"
     );
 
+    // ── Turn 3: push_user_message() is the write boundary; repairs here.
     h.handle
         .push_user_message(ConversationItem::user("Actually, just read the file"));
 
     let conv = h.handle.get_conversation().await;
 
+    // sys + user + assistant + user + assistant(3 calls) + 3 repairs + user = 9
     assert_eq!(conv.len(), 9);
 
     // Verify the synthetic repairs are in the right place
@@ -2598,7 +2652,8 @@ async fn live_cancel_before_any_tool_execution_repairs_on_next_user_message() {
     assert_eq!(request.items.len(), 9);
 }
 
-/// Next user message should repair only those.
+/// Partial cancellation: tool #1 result was pushed, then user cancelled.
+/// Tools #2 and #3 are dangling. Next user message should repair only those.
 #[tokio::test]
 async fn live_cancel_after_partial_tool_results_repairs_remaining() {
     use xai_grok_sampling_types::ToolCall;
@@ -2609,6 +2664,7 @@ async fn live_cancel_after_partial_tool_results_repairs_remaining() {
     h.handle
         .push_user_message(ConversationItem::user("do everything"));
 
+    // Model returns 3 parallel tool calls
     h.handle
         .push_assistant_response(ConversationItem::assistant_tool_calls(vec![
             ToolCall {
@@ -2631,11 +2687,13 @@ async fn live_cancel_after_partial_tool_results_repairs_remaining() {
             },
         ]));
 
+    // Tool #1 executed and result was pushed before abort
     h.handle.push_tool_result(ConversationItem::tool_result(
         "call_1",
         "file contents here",
     ));
 
+    // *** USER CANCELS HERE — tool #2 and #3 never executed ***
 
     // User types a new prompt
     h.handle.push_user_message(ConversationItem::user(
@@ -2644,6 +2702,7 @@ async fn live_cancel_after_partial_tool_results_repairs_remaining() {
 
     let conv = h.handle.get_conversation().await;
 
+    // sys + user + assistant(3 calls) + result(call_1) + repair(call_2) + repair(call_3) + user(new) = 7
     assert_eq!(
         conv.len(),
         7,
@@ -2817,7 +2876,8 @@ async fn harness_trace_recorded_before_capture_seals_into_own_turn() {
         .await
         .expect("capture was active");
 
-    // The main capture holds only the live turn items — the planner pair does not lead it.
+    // The main capture holds only the live turn items — the planner pair does
+    // not lead it.
     assert_eq!(capture.messages.len(), 2);
     assert!(matches!(
         capture.messages.first(),
@@ -2859,7 +2919,8 @@ async fn harness_trace_turns_separate_per_flush_and_drain_clears() {
         ]
     };
 
-    // Verifier panels (rounds) each seal into their own turn.
+    // Two verifier panels (rounds) each seal into their own turn; an
+    // un-flushed third accumulator is sealed defensively on take.
     h.handle.append_harness_trace_items(pair("round-1"));
     h.handle.flush_harness_trace_turn();
     h.handle.append_harness_trace_items(pair("round-2"));
@@ -2874,7 +2935,8 @@ async fn harness_trace_turns_separate_per_flush_and_drain_clears() {
     let second = h.handle.take_harness_trace_turns().await;
     assert!(second.is_empty());
 
-    // The buffers are reusable across user turns: a fresh append + flush after the drain produces a new turn.
+    // The buffers are reusable across user turns: a fresh append + flush after
+    // the drain produces a new turn, not a leftover from the cleared batch.
     h.handle.append_harness_trace_items(pair("turn-2"));
     h.handle.flush_harness_trace_turn();
     let reused = h.handle.take_harness_trace_turns().await;
@@ -3040,7 +3102,8 @@ async fn turn_capture_survives_integrity_repair_prefix_shrink() {
     use xai_grok_sampling_types::ToolCall;
     let h = TestHarness::new();
 
-    // Prefix holds removable duplicate ToolResults, one per tool call.
+    // Prefix holds three removable duplicate ToolResults, one per tool call.
+    // Dedup keeps the last result per id, shrinking the prefix by three when repair runs.
     let call = |id: &'static str| ToolCall {
         id: id.into(),
         name: "t".into(),
@@ -3066,14 +3129,15 @@ async fn turn_capture_survives_integrity_repair_prefix_shrink() {
     h.handle
         .push_tool_result(ConversationItem::tool_result("call-3", "real-3"));
 
+    // Capture starts after the 7-item prefix: turn_start_offset == 7.
     h.handle.begin_turn_capture();
 
     // First turn item lands while the prefix duplicates are still present.
     h.handle
         .push_assistant_response(ConversationItem::assistant("turn-1"));
 
-    // Integrity repair shrinks the conversation below the un-rebased capture
-    // offset.
+    // Integrity repair shrinks the conversation below the un-rebased capture offset.
+    // Without the fix the later slice is out of range, panics the actor, and the query returns None.
     h.handle
         .repair_dangling_after_harness_halt("test-halt", HashMap::new());
 
@@ -3087,7 +3151,8 @@ async fn turn_capture_survives_integrity_repair_prefix_shrink() {
         .await
         .expect("capture survived the in-place integrity repair (no actor panic)");
 
-    // turn-1 via the pre-repair snapshot, turn-2 via the rebased offset; none of the deduped prefix items leak in.
+    // turn-1 via the pre-repair snapshot, turn-2 via the rebased offset; none of
+    // the deduped prefix items leak in.
     assert_eq!(capture.messages.len(), 2);
     assert!(matches!(
         capture.messages.first(),
@@ -3109,7 +3174,7 @@ async fn integrity_repair_does_not_flag_compaction() {
         .push_assistant_response(ConversationItem::assistant("a1"));
 
     // An in-place integrity repair goes through `snapshot_turn_slice` like
-    // compaction does.
+    // compaction does, but it is NOT compaction — the flag must stay unset.
     h.handle
         .repair_dangling_after_harness_halt("test-halt", HashMap::new());
 
@@ -3125,7 +3190,8 @@ async fn integrity_repair_does_not_flag_compaction() {
 
 #[tokio::test]
 async fn turn_capture_survives_persisted_memory_reminder_prepend() {
-    // No leading System item, so the persisted memory inject prepends one via `items.insert(0, ..)`.
+    // No leading System item, so the persisted memory inject prepends one via
+    // `items.insert(0, ..)`, shifting every index by one under an active capture.
     let h = TestHarness::with_conversation(vec![ConversationItem::user("hi")]);
 
     h.handle.begin_turn_capture();
@@ -3133,7 +3199,9 @@ async fn turn_capture_survives_persisted_memory_reminder_prepend() {
     h.handle
         .push_assistant_response(ConversationItem::assistant("turn-a"));
 
-    // Persist path injects into the LIVE conversation.
+    // Persist path injects into the LIVE conversation; without the snapshot +
+    // rebase the prepend shifts every index but not the offset, so the off-by-one
+    // tail over-reads past the turn boundary (the len check below catches it).
     let request = h
         .handle
         .build_request(
@@ -3157,7 +3225,7 @@ async fn turn_capture_survives_persisted_memory_reminder_prepend() {
         .await
         .expect("capture was active");
 
-    // Exactly both turn items, in order.
+    // Exactly the two turn items, in order.
     assert_eq!(capture.messages.len(), 2);
     assert!(matches!(
         capture.messages.first(),
@@ -3242,7 +3310,7 @@ async fn get_last_assistant_text_skips_whitespace_only() {
         .push_assistant_response(ConversationItem::assistant("   \n  "));
 
     let text = h.handle.get_last_assistant_text().await;
-    // Must skip the whitespace-only entry and return the one
+    // Must skip the whitespace-only entry and return the previous one
     assert_eq!(text.as_deref(), Some("real answer"));
 }
 
@@ -3372,7 +3440,8 @@ async fn get_trailing_assistant_report_skips_reasoning_between_segments() {
         .push_assistant_response(ConversationItem::assistant("seg1"));
     h.handle
         .push_user_message(ConversationItem::length_continue_reminder("continue"));
-    // Reasoning models commit a reasoning sibling before each segment.
+    // Reasoning models commit a reasoning sibling before each segment; the
+    // turn loop pushes it via the same non-Assistant commit path used here.
     h.handle.push_tool_result(ConversationItem::Reasoning(
         xai_grok_sampling_types::synthesized_reasoning_item("r2"),
     ));
@@ -3392,7 +3461,7 @@ async fn get_trailing_assistant_report_stops_at_non_salvage_reminder() {
     h.handle.push_user_message(ConversationItem::user("q"));
     h.handle
         .push_assistant_response(ConversationItem::assistant("Analysis done."));
-    // A todo-gate style nudge separates DISTINCT answers; joining them
+    // A todo-gate style nudge separates two DISTINCT answers; joining them
     // with no separator would garble the report.
     h.handle
         .push_user_message(ConversationItem::system_reminder("finish your todos"));
@@ -3591,6 +3660,8 @@ async fn drained_interjection_drops_stranded_continue_reminder() {
     let h = TestHarness::new();
     seed_stranded_reminder(&h);
     // The continuation failed empty; the turn drains a queued interjection.
+    // Drains are deferred while a continuation is in flight, so a trailing
+    // reminder at this push is always dead.
     h.handle
         .push_user_message(ConversationItem::interjection("also do this"));
     assert_no_continue_reminder(&h, "drained interjection").await;
@@ -3622,7 +3693,8 @@ async fn working_directory_switch_append_drops_stranded_continue_reminder() {
         .await
         .expect("append acked");
     assert_no_continue_reminder(&h, "directory-switch append").await;
-    // The pop's history rewrite must precede the acked append.
+    // The pop's history rewrite must precede the acked append; a rewrite
+    // after it would erase the durably-acknowledged switch item from disk.
     let records = h.drain_persistence();
     let append_at = records
         .iter()
@@ -3721,8 +3793,8 @@ async fn get_trailing_assistant_report_survives_trailing_tool_results() {
             arguments: "{}".into(),
             vendor: Default::default(),
         }]));
-    // Stationarity-style tail: the turn ends right after tool results with no
-    // further assistant text.
+    // Stationarity-style tail: the turn ends right after tool results with
+    // no further assistant text. The last commentary must survive, unjoined.
     h.handle
         .push_tool_result(ConversationItem::tool_result("call_1", "ok"));
 
@@ -3803,6 +3875,7 @@ async fn get_conversation_item_at_does_not_mutate_state() {
     h.handle.push_user_message(ConversationItem::system("sys"));
     h.handle.push_user_message(ConversationItem::user("q"));
 
+    // Fetching item[1] should not change what get_conversation returns
     let _ = h.handle.get_conversation_item_at(1).await;
 
     let conv = h.handle.get_conversation().await;
@@ -3960,6 +4033,7 @@ async fn fresh_subagent_bootstrap_has_system_message_after_replace() {
     // At this point the actor has no system message, mirroring the bug.
     assert!(h.handle.get_system_message().await.is_none());
 
+    // Build the system prompt and inject it (mirrors acp_session.rs lines 1287-1295).
     let system_prompt = "You are a helpful subagent.".to_string();
     let conversation = vec![ConversationItem::system(system_prompt.clone())];
     h.handle.replace_conversation(conversation);
@@ -3989,6 +4063,8 @@ async fn forked_subagent_bootstrap_replaces_parent_system_message() {
     let sys = h.handle.get_system_message().await.unwrap();
     assert!(matches!(&sys, ConversationItem::System(s) if s.content.as_ref() == parent_prompt));
 
+    // Build the child's system prompt and replace the first System item
+    // (mirrors acp_session.rs lines 1287-1295).
     let mut conversation = vec![
         ConversationItem::system(parent_prompt),
         ConversationItem::user("hello"),
@@ -4055,6 +4131,7 @@ async fn prune_retained_no_op_when_session_is_young() {
         token,
     );
 
+    // Push 5 turns — below the hard_clear_age_turns threshold of 10.
     push_turns(&handle, 5, 10_000).await;
 
     // All tool results must be untouched.
@@ -4095,9 +4172,12 @@ async fn prune_retained_hard_clears_old_tool_results() {
         token,
     );
 
+    // Push 8 turns — turns 0..2 will be older than hard_clear_age_turns=5.
     push_turns(&handle, 8, 5_000).await;
 
     let conv = handle.get_conversation().await;
+    // Turns are laid out as [User, Assistant, ToolResult] * 8.
+    // ToolResult for turn 0 is at index 2.
     let oldest_tr = match conv.get(2) {
         Some(ConversationItem::ToolResult(tr)) => tr.content.clone(),
         other => panic!("expected ToolResult at index 2, got {other:?}"),
@@ -4108,6 +4188,7 @@ async fn prune_retained_hard_clears_old_tool_results() {
         "oldest tool result must be hard-cleared"
     );
 
+    // Recent turns (6, 7) must be untouched.
     let recent_tr_6 = match conv.get(6 * 3 + 2) {
         Some(ConversationItem::ToolResult(tr)) => tr.content.clone(),
         other => panic!("expected ToolResult, got {other:?}"),
@@ -4262,7 +4343,7 @@ async fn prune_retained_bounds_long_session_footprint() {
     use crate::types::PruningConfig;
 
     const TURNS: usize = 50; // enough turns to clear many old tool results
-    const CONTENT_LEN: usize = 50_000;
+    const CONTENT_LEN: usize = 50_000; // 50 KB per tool result
     const PLACEHOLDER_LEN: usize = "[Tool result omitted — too old]".len();
 
     let (mock, _rx) = MockChatPersistence::new();
@@ -4299,8 +4380,7 @@ async fn prune_retained_bounds_long_session_footprint() {
         }
     });
 
-    // Most tool results must be cleared; only the recent ones (≤
-    // keep_last_n_turns) are kept.
+    // Most tool results must be cleared; only the very recent ones (≤ keep_last_n_turns) are kept.
     assert!(
         cleared > full,
         "majority of old tool results must be hard-cleared (cleared={cleared}, full={full})"
@@ -4351,8 +4431,10 @@ async fn prune_retained_rewind_still_correct() {
         token,
     );
 
+    // Push 6 turns: [User, Assistant, ToolResult] * 6 = 18 items.
     push_turns(&handle, 6, 1_000).await;
 
+    // Rewind to prompt index 3 (keep turns 0..3 = 9 items).
     handle.truncate_to_prompt_index(3).await;
 
     let conv = handle.get_conversation().await;
@@ -4364,6 +4446,7 @@ async fn prune_retained_rewind_still_correct() {
     let idx = handle.get_prompt_index().await;
     assert_eq!(idx, 3);
 
+    // Verify we have the right item types: (User, Assistant, ToolResult) * 3.
     for turn in 0..3 {
         assert!(
             matches!(conv.get(turn * 3), Some(ConversationItem::User(_))),
@@ -4411,7 +4494,7 @@ async fn prune_retained_synthetic_user_does_not_advance_age() {
         token,
     );
 
-    // Real turns, each with a large tool result.
+    // Three real turns, each with a large tool result.
     for i in 0..3usize {
         handle.push_user_message(ConversationItem::user(format!("real q{i}")));
         handle.increment_prompt_index(); // prompt_index = i+1
@@ -4422,19 +4505,20 @@ async fn prune_retained_synthetic_user_does_not_advance_age() {
         ));
     }
 
-    // Synthetic User items injected mid-turn (e.g. doom-loop warnings).
+    // Two synthetic User items injected mid-turn (e.g. doom-loop warnings).
+    // These do NOT call increment_prompt_index — prompt_index stays at 3.
     handle.push_user_message(ConversationItem::user("⚠️ doom-loop warning 1"));
     handle.push_user_message(ConversationItem::user("⚠️ doom-loop warning 2"));
 
+    // Fourth real turn starts: prompt_index → 4, pruning fires inside push_user_message.
     handle.push_user_message(ConversationItem::user("real q3"));
     handle.increment_prompt_index(); // prompt_index = 4
 
     // Sync
     let conv = handle.get_conversation().await;
 
-    // None of the tool results should be cleared: oldest real age is under
-    // the threshold. Without synthetic-count compensation the extra User
-    // items would cause a premature clear.
+    // None of the original tool results should be cleared: oldest real age is under the threshold.
+    // Without synthetic-count compensation the extra User items would cause a premature clear.
     for item in &conv {
         if let ConversationItem::ToolResult(tr) = item {
             assert_ne!(
@@ -4548,6 +4632,7 @@ async fn sampling_config_survives_compaction_replacement() {
     );
 
     // Post-compaction: model metadata is LOST (no AssistantItem in compacted history).
+    // This is the visible symptom -- fingerprint/hash disappears from /session-info.
     let post_meta = h.handle.get_last_model_metadata().await;
     assert!(
         post_meta.resolved_model_id.is_none(),
@@ -4648,6 +4733,7 @@ async fn context_window_downgrade_triggers_auto_compact() {
 
     let h = TestHarness::with_config(vec![], config);
 
+    // Simulate 217k tokens of conversation (matching turn 587's total_tokens)
     h.handle.record_token_usage(217_000);
 
     // Pre-downgrade: 217k / 500k = 43% — well under auto-compact threshold
@@ -4660,7 +4746,8 @@ async fn context_window_downgrade_triggers_auto_compact() {
         "should NOT trigger auto-compact at 43% (217k/500k)"
     );
 
-    // Simulate a context_window downgrade.
+    // Simulate a context_window downgrade (e.g. model switch, response
+    // header from cli-chat-proxy, or stale prefetched model list).
     let mut downgraded = pre.clone();
     downgraded.context_window = NonZeroU64::new(128_000).unwrap();
     h.handle.update_sampling_config(downgraded);
@@ -4688,6 +4775,7 @@ async fn context_window_downgrade_triggers_auto_compact() {
     let info = trigger.unwrap();
     assert_eq!(info.context_window, NonZeroU64::new(128_000).unwrap());
     assert_eq!(info.total_tokens, 217_000);
+    // utilization_percent is u8 so it caps at 255, but we just need >85
     assert!(
         info.utilization_percent > 85,
         "utilization should be well above threshold but got {}%",
@@ -4708,7 +4796,9 @@ fn serialize_via_public_api(
     let create_response: rs::CreateResponse = req.into();
     let mut body = serde_json::to_value(&create_response).unwrap();
     xai_grok_sampling_types::patch_reasoning_text_types(&mut body);
-    // Sanity guard: the placeholder string from the pre-refactor design must never appear in the serialized output.
+    // Sanity guard: the placeholder string from the pre-refactor design
+    // must never appear in the serialized output. If a future change
+    // re-introduces a stringly-typed splice, this catches it.
     let body_str = serde_json::to_string(&body).unwrap();
     assert!(
         !body_str.contains("__RAW_OUTPUT_PLACEHOLDER_"),
@@ -4769,6 +4859,8 @@ fn reasoning_sibling(id: &str, encrypted: Option<&str>) -> ConversationItem {
 }
 
 /// Basic multi-turn prefix stability through build_request().
+/// Each turn adds a user message + assistant response; the serialized
+/// input from turn N must be a prefix of turn N+1.
 #[tokio::test]
 async fn prefix_stable_across_user_assistant_turns() {
     let h = TestHarness::with_conversation(vec![
@@ -4823,7 +4915,9 @@ async fn reasoning_roundtrip_through_actor_reaches_next_messages_wire() {
 
     let thinking_text = "Let me weigh the token budget in between turns.";
 
-    // Turn N: the Messages stream synthesized `[Reasoning, Assistant]`.
+    // Turn N: the Messages stream synthesized `[Reasoning, Assistant]`; the
+    // shell turn loop commits the Reasoning via `push_tool_result` and the
+    // Assistant via `push_assistant_response`.
     let h = TestHarness::with_conversation(vec![
         ConversationItem::system("You are a coding assistant."),
         ConversationItem::user("q1"),
@@ -4840,10 +4934,11 @@ async fn reasoning_roundtrip_through_actor_reaches_next_messages_wire() {
         }));
     h.handle
         .push_assistant_response(ConversationItem::assistant("The answer."));
+    // Turn N+1: user asks a follow-up.
     h.handle.push_user_message(ConversationItem::user("q2"));
 
-    // `build_request` runs `ensure_conversation_integrity`
-    // (dangling-tool-call repair) then the prune/memory pass.
+    // `build_request` runs `ensure_conversation_integrity` (dangling-tool-call
+    // repair) then the prune/memory pass, then returns the request.
     let request = h
         .handle
         .build_request(vec![], None, false, None, "c".into(), "r".into())
@@ -5101,6 +5196,7 @@ async fn prefix_stable_with_synthetic_user_messages() {
     assert_prefix_stable_pair(&req1, &req2, "with synthetic user messages");
 }
 
+/// Prefix stability after size-gated image eviction near the 50 MB ceiling.
 /// Text items before the evicted region must stay prefix-stable in relative order.
 #[tokio::test]
 async fn prefix_stable_after_image_pruning() {
@@ -5158,7 +5254,8 @@ async fn prefix_stable_after_image_pruning() {
         .await
         .unwrap();
 
-    // Image stripping mutates the user turn, so full byte-level prefix stability cannot hold there.
+    // Image stripping mutates the old user turn, so full byte-level prefix stability cannot hold there.
+    // Verify system prompt preserved, items grew, and text items keep relative order.
     let body1 = serialize_via_public_api(&req1);
     let body2 = serialize_via_public_api(&req2);
 
@@ -5200,6 +5297,7 @@ async fn prefix_stable_after_image_pruning() {
     }
 }
 
+/// Regression: small images under the 50 MB ceiling must be preserved across turns.
 /// Rewriting old images every turn busted the KV-cache prefix (the behavior this size-gate replaces).
 #[tokio::test]
 async fn build_request_preserves_small_old_images() {
@@ -5229,6 +5327,8 @@ async fn build_request_preserves_small_old_images() {
         .await
         .unwrap();
 
+    // The old user turn's image must survive (small payload, far under 50 MB),
+    // so the KV-cache prefix stays byte-stable instead of being rewritten.
     let image_retained = req.items.iter().any(|item| {
         matches!(item, ConversationItem::User(u)
             if u.content.iter().any(|p| matches!(p, ContentPart::Image { .. })))
@@ -5309,6 +5409,7 @@ async fn build_request_budgets_tool_images_on_request_copy_only() {
     assert_eq!(canonical_result.content.as_ref(), "tool text");
 }
 
+/// Prefix stability after tool result pruning above 50% utilization.
 /// Pruning happens on a clone — items outside the pruned region must remain identical.
 #[tokio::test]
 async fn prefix_stable_after_tool_result_pruning() {
@@ -5674,7 +5775,8 @@ async fn a_panicking_command_leaves_the_actor_serving_later_commands() {
         tokio_util::sync::CancellationToken::new(),
     );
 
-    // The first push unwinds inside the actor's command round.
+    // The first push unwinds inside the actor's command round. Its own ack is
+    // the dropped half of a oneshot, so the caller sees the round fail.
     handle.push_user_message(ConversationItem::user("first"));
 
     // Commands after it are served, which is the whole point of the guard: a

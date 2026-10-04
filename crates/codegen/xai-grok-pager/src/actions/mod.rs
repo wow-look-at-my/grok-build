@@ -1,4 +1,18 @@
 //! Action registry: single source of truth for all actions, key bindings, and hints.
+//!
+//! Three consumers:
+//! - **Shortcuts bar**: `registry.hints(contexts)` returns filtered, prioritized hints
+//! - **Command palette**: `registry.all()` returns the fuzzy searchable list
+//! - **Key dispatch**: `registry.lookup(key, context)` returns the action to execute
+//!
+//! ## Input bubbling
+//!
+//! Each layer in the input chain does an **exact context match**:
+//! 1. Pane level: `lookup(key, ScrollbackFocused)` or `lookup(key, PromptFocused)`
+//! 2. Agent level: `lookup(key, AgentScreen)`
+//! 3. Global level: `lookup(key, Always)`
+//!
+//! The bubbling is explicit in code, not hidden in `context_matches`.
 
 mod defaults;
 
@@ -23,8 +37,10 @@ pub enum ActionId {
     /// Stash the composer draft; on an empty composer, pop the newest stash.
     StashPrompt,
     /// Enable voice mode and start recording (`/voice`).
+    /// Not a toggle: it never turns voice mode off; capture is controlled by [`Self::VoiceToggle`].
     EnableVoiceMode,
     /// Start/stop mic capture (Ctrl+Space / Esc).
+    /// Starting also enables voice mode and spawns the pipeline if needed; `/voice` is not a prerequisite.
     VoiceToggle,
 
     // Navigation
@@ -123,8 +139,9 @@ pub enum ActionId {
     DashboardOpenLocationPicker,
     DashboardToggleWorktree,
 }
-/// When an action is available / visible. Used for **exact** matching in
-/// `registry.lookup()`.
+/// When an action is available / visible.
+/// Used for **exact** matching in `registry.lookup()`.
+/// Each layer in the input chain queries its own context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum When {
     /// Global; checked at the app level after all views.
@@ -140,6 +157,8 @@ pub enum When {
     /// Only when the Agent Dashboard view is focused.
     DashboardFocused,
     /// Only inside the dashboard's session overlay (a dashboard-spawned agent rendered fullscreen).
+    /// Distinguishes the detail-view shortcuts (back to dashboard, prev/next session) from the dashboard LIST shortcuts.
+    /// The cheatsheet can then dim whichever set isn't applicable to the current view.
     DashboardOverlay,
 }
 
@@ -179,6 +198,7 @@ pub struct ActionDef {
     /// Longer description for command palette
     pub description: &'static str,
     /// Optional man-style help for the shortcuts cheatsheet detail/expand UI.
+    /// Consumers should fall back to `description` when this is `None`.
     pub long_help: Option<&'static str>,
     pub default_key: KeyShortcut,
     /// Optional second key binding (e.g., j/k both shown as "j/k:nav")
@@ -189,13 +209,17 @@ pub struct ActionDef {
     /// Priority for shortcuts bar. `None` means don't show; `Some(0)` is the highest priority.
     pub hint_priority: Option<u8>,
     /// Combined display for shortcuts bar (e.g., "j/k" for the SelectNext/SelectPrev pair).
+    /// If set, overrides default_key.display().
     pub hint_key_display: Option<&'static str>,
     /// If true, requires double-press (1000ms TTL) to execute.
+    /// The first press sets a `PendingAction`; the second press confirms.
     pub requires_confirmation: bool,
 }
 
 impl ActionDef {
-    /// Convert this action def into a [`HintItem`] for the shortcuts bar. Uses `default_key` only.
+    /// Convert this action def into a [`HintItem`] for the shortcuts bar.
+    /// Uses `default_key` only.
+    /// For paired hints (j/k, h/l), the view should use [`HintItem::paired`] with keys from two related action defs.
     pub fn hint(&self) -> HintItem {
         let mut item = HintItem::new(self.default_key, self.label);
         item.custom_display = self.hint_key_display;
@@ -251,8 +275,9 @@ impl ActionRegistry {
         def.default_key.matches(event) || def.alt_keys.iter().any(|k| k.matches(event))
     }
 
-    /// True when the send-now (interject) chord should act or be advertised:
-    /// a turn is running and there is something to send.
+    /// True when the send-now (interject) chord should act or be advertised: a turn is running and there is something
+    /// to send. The last case is the empty-composer force-send from the prompt. Idle or no payload remains a no-op (not
+    /// send-like-Enter).
     pub fn interjection_possible(turn_running: bool, has_payload: bool) -> bool {
         turn_running && has_payload
     }
@@ -324,7 +349,8 @@ impl ActionRegistry {
         context: When,
         vim_mode: bool,
     ) -> Option<ActionId> {
-        // Contexts where a bare letter is also a typeable input key.
+        // Contexts where a bare letter is also a typeable input key, so the vim-off suppression applies
+        // Both views own a text prompt that `j`/`k` must reach when vim-mode is off
         let letter_gated = matches!(context, When::ScrollbackFocused | When::DashboardFocused);
         for def in &self.actions {
             if def.context != context {
@@ -335,8 +361,9 @@ impl ActionRegistry {
             if !suppress_default && def.default_key.matches(event) {
                 return Some(def.id);
             }
-            // When vim_mode is off, also suppress any alt key that is itself
-            // a bare letter Example.
+            // When vim_mode is off, also suppress any alt key that is itself a bare letter
+            // Example: the `j`/`k` alts on the dashboard's SelectNext/SelectPrev
+            // Non-letter alts (arrows, Tab, Space) always match
             for alt in &def.alt_keys {
                 if !vim_mode && letter_gated && alt.is_letter_or_shift_letter() {
                     continue;
@@ -366,8 +393,9 @@ impl ActionRegistry {
         hints
     }
 
-    /// Get hint items for the shortcuts bar, filtered by contexts and sorted
-    /// by priority.
+    /// Get hint items for the shortcuts bar, filtered by contexts and sorted by priority.
+    ///
+    /// Convenience method that converts `ActionDef`s to `HintItem`s.
     pub fn hint_items(&self, contexts: &[When]) -> Vec<HintItem> {
         self.hints(contexts).iter().map(|def| def.hint()).collect()
     }
@@ -720,7 +748,9 @@ mod tests {
             None
         );
         assert_eq!(registry.lookup(&ctrl_shift_m, When::Always), None);
-        // Voice capture is bound to BOTH Ctrl+Space and F8.
+        // Voice capture is bound to BOTH Ctrl+Space and F8, and is global (`When::Always`)
+        // It resolves on the agent screen and the dashboard alike (distinct from the Ctrl+M model picker / multiline)
+        // It is not agent-scoped, so an exact AgentScreen lookup misses
         assert_eq!(
             registry.lookup(&ctrl_space, When::Always),
             Some(ActionId::VoiceToggle)
@@ -744,6 +774,7 @@ mod tests {
         def.default_key == ctrl_4 || def.alt_keys.contains(&ctrl_4)
     }
 
+    // Host-default registry: at most one of these two owns Ctrl+4.
     #[test]
     fn open_dashboard_and_toggle_queue_do_not_both_bind_ctrl_4() {
         let registry = ActionRegistry::defaults();
@@ -751,7 +782,7 @@ mod tests {
         let queue = registry.find(ActionId::ToggleQueue).unwrap();
         assert!(!(binds_ctrl_4(dashboard) && binds_ctrl_4(queue)));
         assert_eq!(dashboard.default_key, key!('\\', CONTROL));
-        // Exactly one of both binds Ctrl+4 under host defaults (legacy alt XOR queue primary).
+        // Exactly one of the two binds Ctrl+4 under host defaults (legacy alt XOR queue primary).
         assert!(
             binds_ctrl_4(dashboard) ^ binds_ctrl_4(queue),
             "exactly one of OpenDashboard/ToggleQueue must bind Ctrl+4 on this host"
@@ -829,6 +860,7 @@ mod tests {
         assert!(!def.requires_confirmation);
 
         // Both Ctrl+. and Ctrl+X should resolve to ShortcutsHelp.
+        // One is default_key and the other is alt_key; which is which depends on the terminal brand at runtime
         let ctrl_dot = KeyEvent::new(KeyCode::Char('.'), KeyModifiers::CONTROL);
         let ctrl_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
         assert_eq!(

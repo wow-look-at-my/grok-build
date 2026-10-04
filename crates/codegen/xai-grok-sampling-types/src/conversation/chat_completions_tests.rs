@@ -22,7 +22,8 @@ fn test_conversation_item_roundtrip() {
     let back: ConversationItem = chat_msg.into();
     assert_eq!(back.text_content(), "Hello!");
 
-    // Reasoning is a sibling item.
+    // Reasoning is a sibling item, so the single-item conversion leaves reasoning_content None
+    // The `conversation_to_chat_messages` helper carries reasoning through and is tested separately
     let assistant = ConversationItem::assistant_with_model("Hi there!", "grok-3");
     let chat_msg = conversation_item_to_chat_message(assistant);
     assert_eq!(chat_msg.reasoning_content, None);
@@ -403,6 +404,7 @@ fn test_user_with_multiple_images() {
 
 #[test]
 fn test_malformed_tool_arguments_sanitized_to_empty_object_in_chat_request() {
+    // Exactly the broken string from the real incident: the missing `"` before `new_string` makes the JSON parse fail at char 80
     let bad_args = r#"{"file_path": "/testbed/cxx_polynomial/include/emsr/remez.h", "old_string": "", new_string": "x"}"#;
     assert!(
         serde_json::from_str::<serde_json::Value>(bad_args).is_err(),
@@ -663,6 +665,7 @@ fn btw_cross_api_chat_completions_no_regressions() {
 #[test]
 fn test_sanitize_non_ascii_args_preview_does_not_panic() {
     // Build a string where the 200-byte boundary lands inside a CJK char.
+    // Each '文' is 3 bytes, so 67 × 3 = 201 bytes; byte 200 is inside the 67th char
     let filler = "文".repeat(70);
     let bad_args = format!("{{\"old_string\": \"{filler}\"}}");
     // The outer JSON is valid but contains non-ASCII; force the warning path by making the JSON invalid
@@ -735,8 +738,9 @@ fn test_tool_result_with_images_to_chat_completions() {
 
 #[test]
 fn conversation_to_chat_messages_drops_reasoning_when_user_intervenes() {
-    // Reasoning only folds onto the *immediately* following assistant A
-    // non-assistant item in between (here a User).
+    // Reasoning only folds onto the *immediately* following assistant
+    // A non-assistant item in between (here a User) clears pending reasoning
+    // `conversation_to_chat_messages_drops_trailing_reasoning` covers the trailing case
     let items = vec![
         reasoning_sibling("r1", "stale thinking", None),
         ConversationItem::user("actually, new question"),
@@ -760,8 +764,8 @@ fn conversation_to_chat_messages_drops_reasoning_when_user_intervenes() {
 
 #[test]
 fn upgrade_then_fold_through_conversation_to_chat_messages() {
-    // End-to-end: lift legacy `reasoning` to a sibling, then run the
-    // chat-completions wire path This mirrors what.
+    // End-to-end: lift legacy `reasoning` to a sibling, then run the chat-completions wire path
+    // This mirrors what the real load-then-replay flow does for a legacy session
     let raw = serde_json::json!({
         "type": "assistant",
         "content": "the answer",
@@ -815,7 +819,9 @@ fn todo_capture_loop_maps_to_assistant_call_and_tool_message() {
     );
 }
 
-/// Whatever spelling it arrived in has to go back out unchanged.
+/// Gemini 3 rejects a replayed function call whose thought signature is
+/// missing, and the signature only ever reaches an OpenAI-shaped client on the
+/// call itself. Whatever spelling it arrived in has to go back out unchanged.
 #[test]
 fn a_tool_calls_provider_fields_survive_the_round_trip() {
     for key in ["extra_content", "provider_specific_fields"] {
@@ -871,7 +877,21 @@ fn a_tool_call_without_provider_fields_replays_unchanged() {
     );
 }
 
+// ============================================================================
+// Strict-schema message profiles (Cerebras `wrong_api_format`)
+// ============================================================================
+//
+// Cerebras validates its Chat Completions message schema strictly: an
+// unrecognized property on any message is a hard 400, so a replayed
+// assistant message carrying `model_id` (which this crate writes into stored
+// history) bricks the conversation from turn 2 onward. These tests drive the
+// real serialized body — the observable the provider actually sees — and
+// assert that a strict target receives no unsupported property while a
+// tolerant target's body is byte-for-byte unchanged.
 
+/// A two-turn conversation whose assistant items carry both a recorded
+/// `model_id` and a replayed reasoning sibling — exactly the history shape
+/// that produced the Cerebras 400 on `messages.6.assistant`.
 fn history_with_model_id_and_reasoning() -> Vec<ConversationItem> {
     vec![
         ConversationItem::system("You are helpful."),
@@ -937,7 +957,10 @@ fn strict_profile_omits_model_id_and_reasoning_content_from_wire_body() {
         );
     }
 
-    // The conversation itself must survive: dropping both properties must not drop content or structure.
+    // The conversation itself must survive: dropping the two properties must
+    // not drop content or structure. The `Reasoning` sibling folds into the
+    // assistant, so it contributes no message of its own: system, user,
+    // assistant, user.
     assert_eq!(assistant["content"], serde_json::json!("a1"));
     assert_eq!(messages.len(), 4, "structure preserved: {messages:#?}");
     assert_eq!(messages[0]["role"], "system");
@@ -1065,7 +1088,8 @@ fn strict_profile_leaves_stored_history_untouched() {
     req.chat_message_profile = ChatMessageProfile::STRICT;
     let _wire: crate::types::ChatCompletionRequest = req.into();
 
-    // `req.items` is moved by the conversion; assert on a freshly built request instead, so the check is on stored state.
+    // `req.items` is moved by the conversion; assert on a freshly built
+    // request instead, so the check is on stored state, not the wire.
     let mut stored = ConversationRequest::from_items(before);
     stored.chat_message_profile = ChatMessageProfile::STRICT;
 
@@ -1092,7 +1116,7 @@ fn strict_profile_leaves_stored_history_untouched() {
 }
 
 /// `narrowed_by` can only narrow: a caller cannot re-widen a strict model,
-/// and permissive sides stay permissive.
+/// and two permissive sides stay permissive.
 #[test]
 fn profile_narrowing_is_monotonic() {
     let p = ChatMessageProfile::PERMISSIVE;
@@ -1195,7 +1219,7 @@ fn strip_then_serialize_omits_unsupported_properties() {
     let before = serde_json::to_value(&before).unwrap();
     assert!(before["messages"][2].get("model_id").is_some());
 
-    // The provider's names both; strip, then serialize again.
+    // The provider's 400 names both; strip, then serialize again.
     assert!(req.strip_unsupported_message_properties(true, true));
     let after: crate::types::ChatCompletionRequest = req.into();
     let after = serde_json::to_value(&after).unwrap();

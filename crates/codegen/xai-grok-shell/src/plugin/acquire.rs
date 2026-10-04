@@ -1,4 +1,5 @@
-//! The plugin acquisition pipeline: every code-fetching path resolves sources and gates here.
+//! The ONE plugin acquisition pipeline: every code-fetching path resolves sources and gates here.
+//! LocalSet invariant: acquisition blocks — hop via [`run_blocking`], never the session LocalSet.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,7 +26,8 @@ pub(crate) struct Installed {
 /// only the gate refusals (identical on every surface) are pre-formatted.
 #[derive(Debug)]
 pub(crate) enum InstallAcquireError {
-    /// An acquisition gate refused the source; `reason` is the full gate message ("Plugin install blocked: …").
+    /// An acquisition gate refused the source; `reason` is the full gate
+    /// message ("Plugin install blocked: …").
     Blocked { reason: String },
     /// The requested identity is not a configured, allowlist-surviving source.
     SourceNotFound { source: String },
@@ -40,9 +42,11 @@ pub(crate) enum InstallAcquireError {
 /// [`marketplace_update`] failure.
 #[derive(Debug)]
 pub(crate) enum UpdateAcquireError {
-    /// An acquisition gate refused the source; `reason` is the full gate message ("Plugin update blocked: …").
+    /// An acquisition gate refused the source; `reason` is the full gate
+    /// message ("Plugin update blocked: …").
     Blocked { reason: String },
-    /// Update provenance no longer resolves to a configured source.
+    /// Update provenance no longer resolves to a configured source. `message`
+    /// is [`ProvenanceUpdateError::NotConfigured`]'s text.
     NotConfigured { message: String },
     /// The (normalized) plugin path is missing from the synced scan.
     EntryNotFound { plugin_relative_path: String },
@@ -54,8 +58,8 @@ pub(crate) enum UpdateAcquireError {
     Install(InstallError),
 }
 
-/// Failure of an async [`run_marketplace_install`] /
-/// [`run_marketplace_update`] wrapper: the operation's own error.
+/// Failure of an async [`run_marketplace_install`] / [`run_marketplace_update`]
+/// wrapper: the operation's own error, or the lock/blocking-task plumbing.
 #[derive(Debug)]
 pub(crate) enum RunError<E> {
     Op(E),
@@ -74,11 +78,12 @@ pub(crate) struct InstallRegistryLock {
     _file: std::fs::File,
 }
 
-/// Deliberately 30s: a waiter can queue behind a full `update_plugins` sync loop.
+/// Deliberately 30s: a waiter can queue behind a full `update_plugins` sync
+/// loop, and a timeout reads as "another plugin operation is in progress".
 const REGISTRY_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// THE registry-mutation chokepoint: every writer holds this flock from load
-/// past save, or interleaved windows lose entries.
+/// THE registry-mutation chokepoint: every writer holds this flock from load past save, or
+/// interleaved windows lose entries. Lock order: config-init ⊃ registry ⊃ cache; never on the LocalSet.
 pub(crate) fn lock_install_registry() -> Result<InstallRegistryLock, String> {
     lock_install_registry_in(
         &InstallRegistry::resolve_install_dir(),
@@ -337,7 +342,8 @@ fn install_source_missing_error(
     }
 }
 
-/// Both marketplace source lists.
+/// Both marketplace source lists, loaded once per pipeline invocation (each load re-reads
+/// config.toml, managed pins, and the JSON stores).
 pub(crate) struct MarketplaceSourceLists {
     /// Allowlist-surviving sources (the resolvable set).
     filtered: Vec<MarketplaceSource>,
@@ -532,8 +538,8 @@ pub(crate) fn provenance_update_source(
 ) -> Result<MarketplaceSource, ProvenanceUpdateError> {
     use xai_grok_workspace::permission::resolution::normalize_git_url;
     let matches = |source: &MarketplaceSource| match &source.kind {
-        // Normalized comparison: provenance records the config spelling at
-        // install time.
+        // Normalized comparison: provenance records the config spelling at install time, which may
+        // drift (.git suffix, host case) from the current entry.
         SourceKind::Git { url, .. } => {
             normalize_git_url(url) == normalize_git_url(source_url_or_path)
         }
@@ -554,8 +560,8 @@ pub(crate) fn provenance_update_source(
     }
 }
 
-/// The require-sha pin for remote plugin code: disk config + env, both
-/// tighten-only, read from the overlay-free layer merge.
+/// The require-sha pin for remote plugin code: disk config + env, both tighten-only, read from
+/// the overlay-free layer merge so no `GROK_CONFIG` overlay can relax a disk-set `true`.
 pub(crate) fn marketplace_require_sha() -> bool {
     require_sha_policy(xai_grok_config::ConfigLayers::load())
 }
@@ -797,7 +803,7 @@ mod tests {
             .expect("lock re-acquirable after release");
     }
 
-    /// Update cache key: provenance spellings of one source share ONE entry — a raw key re-syncs and self-conflicts on the flock.
+    /// Update cache key: two provenance spellings of one source share ONE entry — a raw key re-syncs and self-conflicts on the flock.
     #[test]
     fn provenance_spellings_of_one_source_share_one_update_cache_entry() {
         use std::collections::HashMap;

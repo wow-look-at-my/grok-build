@@ -1,3 +1,4 @@
+//! Per-turn 429 waiting for subagent submissions; main sessions and models with an explicit sampler threshold never wait.
 
 use std::time::Duration;
 
@@ -22,10 +23,12 @@ impl Default for RateLimitWaitConfig {
 }
 
 impl RateLimitWaitConfig {
+    /// Default subagent 429 wait attempts; `0` disables waiting.
     pub(crate) const DEFAULT_MAX_ATTEMPTS: u32 = 8;
     /// Hard cap on a configured value.
     pub(crate) const MAX_ATTEMPTS_CAP: u32 = 32;
     /// Per-turn cumulative-wait budget (sum of backoffs); not a user knob.
+    /// Coupled to [`Self::DEFAULT_MAX_ATTEMPTS`] so both exhaust together (see the coupling test).
     pub(crate) const DEFAULT_MAX_TOTAL_WAIT: Duration = Duration::from_secs(150);
 
     /// Resolved attempts (clamped to the cap) with the fixed default budget.
@@ -74,8 +77,8 @@ enum WaitOutcome {
     Unresolved,
 }
 
-/// One `process_conversation_turn`'s rate-limit budget, shared across that
-/// turn's model round-trips.
+/// One `process_conversation_turn`'s rate-limit budget, shared across that turn's model round-trips.
+/// Bounds cumulative pause time, not wall-clock.
 pub(crate) struct RateLimitWaitBudget {
     state: Option<BudgetState>,
 }
@@ -208,7 +211,8 @@ impl BudgetState {
         }
         self.attempts = attempt;
         self.total_waited += wait;
-        // A fresh wait re-opens the turn: a submit accepted earlier flipped the outcome to Recovered A cancel during this wait is Unresolved.
+        // A fresh wait re-opens the turn: a submit accepted earlier flipped the outcome to Recovered
+        // A cancel during this wait is Unresolved, not Recovered
         self.outcome = WaitOutcome::Unresolved;
         RateLimitWaitDecision::Wait {
             attempt,

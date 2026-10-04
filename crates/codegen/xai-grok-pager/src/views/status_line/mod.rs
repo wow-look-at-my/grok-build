@@ -1,4 +1,6 @@
-//! Status row rendering: reserving the height, painting the lines, and handing back the link spans.
+//! Status row rendering: reserving the height, painting the lines, and handing
+//! back the link spans. [`sanitize`] turns a script's bytes into those lines;
+//! [`segments`] builds the `builtin` row's own text.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -106,11 +108,13 @@ pub enum StatusLineDisplay {
 }
 
 /// The space one frame gives the row, and what goes in it.
+/// Three states so the height and the paint cannot disagree about whether the row is there.
 #[derive(Debug, Clone, Default)]
 pub enum StatusLineFrame {
     #[default]
     Off,
-    /// The script has not answered yet. Holds a line so the first result does not shove the input box up.
+    /// The script has not answered yet.
+    /// Holds a line so the first result does not shove the input box up.
     Reserved { padding: u16 },
     On {
         display: Arc<StatusLineDisplay>,
@@ -191,6 +195,7 @@ pub fn render_status_line(
 }
 
 /// The row a `command` script is told it has, in `COLUMNS` and `LINES`.
+/// Named fields rather than a tuple: the pair crosses three modules, and a silent transposition sizes the script to one column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RowSize {
     pub cols: u16,
@@ -199,6 +204,7 @@ pub struct RowSize {
 
 impl RowSize {
     /// What a script is told when the row has never painted.
+    /// A script divides by its width, so this is a plausible terminal rather than zero.
     pub const FALLBACK: Self = Self { cols: 80, lines: 1 };
 }
 
@@ -241,7 +247,8 @@ fn styled_lines<'a>(
 }
 
 fn themed<'a>(line: &'a Line<'static>, theme: &Theme) -> Line<'a> {
-    // Muted, matching the `builtin` row: chrome reads below the conversation, but no quieter than the shortcut hints under it Text.
+    // Muted, matching the `builtin` row: chrome reads below the conversation, but no quieter than the shortcut hints under it
+    // Text that wants a colour carries one
     let base = theme.muted();
     let spans = line.spans.iter().map(|span| {
         let mut style = span.style;
@@ -254,7 +261,8 @@ fn themed<'a>(line: &'a Line<'static>, theme: &Theme) -> Line<'a> {
                 | ratatui::style::Modifier::RAPID_BLINK
                 | ratatui::style::Modifier::HIDDEN,
         );
-        // Quantized like every other ANSI-bearing output, so a script's colour obeys `NO_COLOR` and a terminal locked to multiple colours This runs.
+        // Quantized like every other ANSI-bearing output, so a script's colour obeys `NO_COLOR` and a terminal locked to 16 colours
+        // This runs before the background fallback, which supplies a theme colour that is already quantized
         style.fg = style.fg.map(xai_grok_pager_render::theme::quantize);
         style.bg = style.bg.map(xai_grok_pager_render::theme::quantize);
         // `\x1b[0m`, which every powerline script emits, parses to an explicit `Color::Reset` background that seams against the bar below
@@ -267,6 +275,7 @@ fn themed<'a>(line: &'a Line<'static>, theme: &Theme) -> Line<'a> {
 }
 
 /// The columns ratatui paints.
+/// `Line::width` counts 1 for a control character the painter drops, measuring CRLF output a column too wide.
 fn painted_line_width(line: &Line<'_>) -> usize {
     line.spans
         .iter()

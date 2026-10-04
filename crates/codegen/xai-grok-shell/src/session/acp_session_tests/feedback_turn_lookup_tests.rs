@@ -80,6 +80,8 @@ fn no_assistant_yet_returns_user_only() {
 
 #[test]
 fn does_not_bleed_assistant_into_next_turn() {
+    // Turn 0 (q1) has no assistant; turn 1 (q2) does
+    // The lookup for turn 0 must NOT pick up turn 1's assistant
     let conv = vec![
         user_turn("q1", 0),
         user_turn("q2", 1),

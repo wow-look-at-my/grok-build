@@ -5,6 +5,7 @@ terminal:
   cols: 100
 environment:
   env:
+    # Force the remote clipboard route so copies surface as OSC 52 (readback).
     - key: SSH_CONNECTION
       value: "scripted-test 1 127.0.0.1 2"
   # word_select persists highlights (no 150ms flash race) and enables the

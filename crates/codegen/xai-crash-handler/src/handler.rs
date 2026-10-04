@@ -26,8 +26,8 @@ mod imp {
     // The libc crate does not expose ucontext_t on macOS.
     // Minimal repr(C) types cover only the fields we need (PC and frame pointer).
 
-    /// Extract the crash instruction pointer and frame pointer from the signal context. Returns
-    /// `(instruction_pointer, frame_pointer)`.
+    /// Extract the crash instruction pointer and frame pointer from the signal context.
+    /// Returns `(instruction_pointer, frame_pointer)`. Both may be 0 if context is null or unsupported.
     unsafe fn extract_pc_and_fp(ctx: *mut libc::c_void) -> (usize, usize) {
         if ctx.is_null() {
             return (0, 0);
@@ -68,6 +68,7 @@ mod imp {
             struct MachMcontext {
                 _es: [u8; 16], // __darwin_arm_exception_state64 (far:u64 + esr:u32 + exception:u32)
                 ss: Arm64ThreadState,
+                // neon state follows but we don't need it
             }
             #[repr(C)]
             struct DarwinUcontext {
@@ -157,7 +158,9 @@ mod imp {
             if fp == 0 || fp < 4096 || !fp.is_multiple_of(core::mem::size_of::<usize>()) {
                 break;
             }
-            // On both x86_64 and aarch64, the frame layout is: [fp+0] = previous frame pointer [fp+8] = return.
+            // On both x86_64 and aarch64, the frame layout is:
+            //   [fp+0] = previous frame pointer
+            //   [fp+8] = return address
             let prev_fp = unsafe { *(fp as *const usize) };
             let ret_addr = unsafe { *((fp + core::mem::size_of::<usize>()) as *const usize) };
 
@@ -196,9 +199,11 @@ mod imp {
     /// Application version string, set at install time.
     static mut APP_VERSION: [u8; format::VERSION_STRING_LEN] = [0; format::VERSION_STRING_LEN];
 
+    /// Alternate signal stack memory (16 KiB via mmap).
     const ALT_STACK_SIZE: usize = 16 * 1024;
 
-    /// Guards against double-allocating the alternate signal stack when [`install_terminal_restore_only`] is followed.
+    /// Guards against double-allocating the alternate signal stack when
+    /// [`install_terminal_restore_only`] is followed by [`install`].
     static ALT_STACK_INSTALLED: AtomicBool = AtomicBool::new(false);
 
     /// Save the current terminal state for restoration in signal handlers.
@@ -332,7 +337,11 @@ mod imp {
                 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
                 let si_addr: u64 = 0;
 
-                // `getpid` never fails on the platforms this handler runs on.
+                // `getpid` never fails on the platforms this handler runs on, so
+                // the value is a positive `pid_t` and widening it to the u32 the
+                // record carries cannot lose anything. Kept as a cast rather than
+                // `try_from` because a signal handler may not branch on a
+                // conversion that has no failure case to serve.
                 #[allow(clippy::cast_sign_loss)] // getpid cannot return a negative pid
                 let pid = libc::getpid() as u32;
                 let timestamp = libc::time(std::ptr::null_mut()) as u64;
@@ -349,6 +358,8 @@ mod imp {
                 }
 
                 // Write the blob with the crash PC before walking frames.
+                // Frame walking dereferences arbitrary pointers and can fault;
+                // SA_RESETHAND would kill us without writing anything.
                 let mut offset = format::writer::write_header(
                     buf, sig as u8, si_code, si_addr, pid, timestamp, n_frames, version,
                 );
@@ -409,8 +420,9 @@ mod imp {
         }
     }
 
-    /// Install a minimal SIGSEGV/SIGBUS/SIGABRT handler that restores termios
-    /// on crash.
+    /// Install a minimal SIGSEGV/SIGBUS/SIGABRT handler that restores termios on crash.
+    /// Does NOT write terminal escape codes — call [`enable_terminal_escape_restore`] after TUI modes are enabled.
+    /// If [`install`] is called later, it replaces these handlers.
     pub fn install_terminal_restore_only() {
         save_termios();
         setup_alt_stack();
@@ -443,6 +455,7 @@ mod imp {
         if fd < 0 {
             return false;
         }
+        // open's mode is create-only; tighten upgrades of older 0644 blobs.
         if unsafe { libc::fchmod(fd, 0o600) } != 0 {
             unsafe {
                 libc::close(fd);
@@ -609,6 +622,7 @@ mod win {
             let signal = exception_to_signal(exception_code);
             let si_code = exception_code as i32;
 
+            // ExceptionInformation[1] holds the faulting address for ACCESS_VIOLATION.
             let si_addr = if exception_code == EXCEPTION_ACCESS_VIOLATION
                 && (*exception_record).NumberParameters >= 2
             {
@@ -625,6 +639,7 @@ mod win {
             };
             windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime(&mut ft);
             let win_ticks = (ft.dwHighDateTime as u64) << 32 | ft.dwLowDateTime as u64;
+            // FILETIME epoch (1601) → Unix epoch (1970): 116444736000000000 100ns ticks.
             let timestamp = win_ticks.saturating_sub(116_444_736_000_000_000) / 10_000_000;
 
             let mut frames: [usize; MAX_FRAMES] = [0; MAX_FRAMES];
@@ -637,7 +652,8 @@ mod win {
                 (*context_record).Rip as usize,
                 (*context_record).Rbp as usize,
             );
-            // ARM64 Windows: capture PC only.
+            // ARM64 Windows: capture PC only; frame-pointer walking is
+            // unreliable without verifying the exact windows-sys CONTEXT layout.
             #[cfg(not(target_arch = "x86_64"))]
             let (crash_pc, crash_fp) = (0usize, 0usize);
 
@@ -849,6 +865,7 @@ mod tests {
     use std::sync::Mutex;
 
     // SIGSEGV/SIGBUS/SIGABRT handlers are process-global; parallel tests that install them race.
+    // Serialize through this lock. Poison-tolerant: one assertion failure must not cascade.
     static SIGNAL_STATE_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -870,6 +887,7 @@ mod tests {
                 "SIGSEGV handler must use alternate signal stack"
             );
             // macOS XNU does not round-trip SA_RESETHAND through the sigaction query (returns 0x41).
+            // The flag is still honored for delivery. The integration test relies on it to re-raise with SIG_DFL.
 
             assert_eq!(libc::sigaction(libc::SIGBUS, std::ptr::null(), &mut sa), 0);
             assert_ne!(

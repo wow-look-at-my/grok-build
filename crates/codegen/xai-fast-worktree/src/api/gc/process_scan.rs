@@ -97,7 +97,8 @@ fn vip_path_to_pathbuf(path: &[[libc::c_char; 32]; 32]) -> Option<PathBuf> {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
 
-    // SAFETY: `path` is 32*32 contiguous `c_char`s.
+    // SAFETY: `path` is 32*32 contiguous `c_char`s, so reading exactly
+    // VIP_PATH_LEN (1024) bytes from its start stays within the array.
     let bytes = unsafe { std::slice::from_raw_parts(path.as_ptr().cast::<u8>(), VIP_PATH_LEN) };
     let nul = bytes.iter().position(|&b| b == 0)?;
     let s = bytes.get(..nul)?;
@@ -107,9 +108,9 @@ fn vip_path_to_pathbuf(path: &[[libc::c_char; 32]; 32]) -> Option<PathBuf> {
     Some(PathBuf::from(OsStr::from_bytes(s)))
 }
 
-// Hand-rolled `proc_pidinfo` FFI rather than `sysinfo`: `sysinfo` has no
-// batched per-process cwd read (its per-process `cwd()` is costly) and
-// pulling it in would add a mandatory dependency for this scan.
+// Hand-rolled `proc_pidinfo` FFI rather than `sysinfo`: `sysinfo` has no batched
+// per-process cwd read (its per-process `cwd()` is costly) and pulling it in would
+// add a mandatory dependency for this one scan.
 #[cfg(target_os = "macos")]
 fn macos_live_process_cwds() -> LiveCwdScan {
     let Some(pids) = macos_list_all_pids() else {
@@ -123,7 +124,8 @@ fn macos_live_process_cwds() -> LiveCwdScan {
         if pid <= 0 {
             continue;
         }
-        // SAFETY: proc_vnodepathinfo is a C POD struct with no niches, so an all-zero bit pattern is a valid value.
+        // SAFETY: proc_vnodepathinfo is a C POD struct with no niches, so an
+        // all-zero bit pattern is a valid value; the kernel overwrites it below.
         let mut info = unsafe { std::mem::zeroed::<libc::proc_vnodepathinfo>() };
         // SAFETY: `info` is the size `expected` declares, and the kernel writes
         // at most `expected` bytes into it.
@@ -149,11 +151,13 @@ fn macos_live_process_cwds() -> LiveCwdScan {
 #[cfg(target_os = "macos")]
 fn macos_list_all_pids() -> Option<Vec<i32>> {
     const PID_SIZE: usize = std::mem::size_of::<i32>();
+    // SAFETY: null + size 0 is the documented size probe (returns bytes needed).
     let bytes_needed = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     if bytes_needed < 1 {
         return None;
     }
-    // `proc_listallpids` reports a *byte* count, not a pid count, so divide by `size_of::<pid_t>()`.
+    // `proc_listallpids` reports a *byte* count, not a pid count, so divide by
+    // `size_of::<pid_t>()`.
     let mut capacity_pids = usize::try_from(bytes_needed).unwrap_or(0) / PID_SIZE;
     if capacity_pids < 1 {
         return None;

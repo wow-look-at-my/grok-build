@@ -1,4 +1,8 @@
 //! Mock `POST /v1/feedback`: records every submission and answers in cli-chat-proxy's `FeedbackResponse` shape.
+//!
+//! Every POST is recorded before the verdict is chosen, so a scripted failure still leaves the body a test can inspect.
+//! Bodies are kept as loose JSON: tests assert parsed values, never the shell's wire struct.
+//! A body over the capture cap keeps its text and metadata; only its `images` array is dropped.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,7 +19,8 @@ const FEEDBACK_BODY_CAPTURE_CAP: usize = 256 * 1024;
 /// One `POST /v1/feedback` the mock saw, accepted or scripted to fail.
 #[derive(Debug, Clone)]
 pub struct FeedbackPost {
-    /// Parsed JSON body (`{"unparsed_feedback_body": ..}` when it was not JSON).
+    /// Parsed JSON body (`{"unparsed_feedback_body": ..}` when it was not JSON); above the capture cap its
+    /// `images` is `Value::Null` and everything else is intact.
     pub body: Value,
     /// Raw `Authorization` header, if the client sent one.
     pub authorization: Option<String>,
@@ -63,6 +68,7 @@ impl FeedbackEndpointState {
             )
                 .into_response();
         }
+        // `createdAt` must parse as RFC 3339 or the shell reads a 200 as a decode failure.
         (
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/json")],

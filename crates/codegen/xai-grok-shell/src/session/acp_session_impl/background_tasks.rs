@@ -9,6 +9,8 @@ use crate::extensions::background_task::{
 };
 
 /// Overall budget for snapshot `list_tasks_metadata` on the session actor.
+/// Local ACP enumeration is sync, but other backends still go through an await;
+/// a hung client must not stall every later `SessionCommand`.
 pub(crate) const BACKGROUND_TASKS_LIST_BUDGET: Duration = Duration::from_secs(2);
 
 impl SessionActor {

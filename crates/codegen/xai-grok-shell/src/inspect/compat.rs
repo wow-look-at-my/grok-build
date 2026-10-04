@@ -1,4 +1,6 @@
 //! Vendor-compat resolution for `grok inspect`.
+//!
+//! Resolves the local env/config/default stack into a diagnostic report.
 
 use serde::Serialize;
 use xai_grok_tools::types::compat::{COMPAT_CELLS, CompatCell, CompatConfig};

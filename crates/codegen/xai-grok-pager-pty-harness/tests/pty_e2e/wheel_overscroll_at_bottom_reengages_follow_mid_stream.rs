@@ -4,15 +4,22 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-// A7: wheel overscroll at the bottom re-engages follow mode.
+// A7: wheel overscroll at the bottom re-engages follow mode. A scroll that merely lands at the
+// bottom (real rows moved) still never engages. Wheel back down past the bottom (the overscroll):
+// the viewport must follow the still-streaming tail.
 
+/// 240 one-row markers dwarf the 50-row PTY: the up-burst can never clamp at the transcript top, and markers stay visible above the streamed tail.
 const MARKER_COUNT: usize = 240;
 
+/// Rows wheeled up to exit follow (1 row per event under the forced env).
 const UP_EVENTS: usize = 8;
 
+/// Down-burst size: the 8 rows back, plus tail growth during the dance (2 to 3 rows per second at the 30ms word pacing), with a wide margin.
+/// The excess events arrive fully clamped at the bottom, which is the overscroll under test.
 const DOWN_EVENTS: usize = 60;
 
 /// Space-separated tail words streamed one per delta after the marker block.
+/// 240 words at the 30ms chunk delay is about 7s of paced streaming, so the tail is still arriving well after the wheel dance ends.
 const TAIL_WORDS: usize = 240;
 
 /// Per-SSE-event pacing so deltas keep arriving while the dance runs.
@@ -62,7 +69,7 @@ async fn wheel_overscroll_at_bottom_reengages_follow_mid_stream() {
         harness.screen_contents()
     );
 
-    // Deltas keep arriving but the parked viewport must not move: follow is off.
+    // Deltas keep arriving but the parked viewport must not move: follow really is off, so the re-engage below is a genuine transition
     harness.update(Duration::from_millis(500));
     assert_eq!(
         topmost_visible_marker(&harness),

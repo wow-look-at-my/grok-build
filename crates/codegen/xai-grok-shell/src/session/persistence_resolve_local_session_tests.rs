@@ -2,7 +2,7 @@ use super::{find_local_child_for_remote_in_root, session_exists_for_cwd_in_root}
 use std::fs;
 use tempfile::TempDir;
 
-// resolve_local_session reads grok_home().
+// resolve_local_session reads grok_home(), so these tests exercise the _in_root helpers it delegates to
 
 fn setup_session(root: &std::path::Path, cwd: &str, session_id: &str) {
     let encoded = crate::util::grok_home::encode_cwd_dirname(cwd);

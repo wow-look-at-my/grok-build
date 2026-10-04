@@ -1,4 +1,7 @@
 //! Extensions modal popup (Hooks, Plugins, Marketplace, Skills, Workflows, MCP Servers).
+//!
+//! A centered overlay using the shared [`ModalWindow`](super::modal_window) chrome, opened by the `/hooks` and `/plugins` slash commands.
+//! Blocks all input until closed with `Esc`.
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::buffer::Buffer;
@@ -1050,8 +1053,9 @@ pub struct ButtonArea {
     pub key: char,
 }
 
-/// Transient, non-covering feedback shown after an extensions action
-/// completes.
+/// Transient, non-covering feedback shown after an extensions action completes.
+/// The list, the thing that actually changed (a bumped version, a refreshed list), stays visible.
+/// Auto-expires via a per-tick countdown, mirroring `AgentView::toast`.
 #[derive(Debug, Clone)]
 pub struct ActionResultNotice {
     /// Full result text (used verbatim for the tab-wide status line).
@@ -1066,6 +1070,7 @@ pub struct ActionResultNotice {
 pub const RESULT_NOTICE_TICKS: u16 = 75;
 
 /// Single source of truth for the McpServers tab action keys.
+/// Consumed by the renderer (hint bar), the picker (`PickerConfig::action_keys`), and `resolve_key` (must have a matching arm for every entry).
 pub const MCP_SERVERS_ACTION_KEYS: &[(char, &str)] = &[
     (MCP_SERVERS_REFRESH_KEY, "refresh"),
     ('a', "add"),
@@ -1077,7 +1082,9 @@ pub const MCP_SERVERS_ACTION_KEYS: &[(char, &str)] = &[
 /// Footer label for the MCP tab Ctrl+O shortcut (not in [`MCP_SERVERS_ACTION_KEYS`]).
 pub const MCP_SERVERS_OPEN_CONNECTORS_FOOTER: &str = "ctrl-o open";
 
-/// Map an action key character to its display string for shortcut hints.
+/// Map an action key character to its display string for shortcut hints. Single source of truth
+/// shared by [`render_extensions_modal`] (footer shortcuts) and
+/// [`crate::views::picker::render_picker`] (hint bar). Returns `""` for unmapped characters.
 pub fn action_key_display(ch: char) -> &'static str {
     match ch {
         ' ' => "space",
@@ -1094,7 +1101,7 @@ pub fn action_key_display(ch: char) -> &'static str {
     }
 }
 
-/// Row-scoped action verbs shared by the footer labels and the row hints, so both cannot drift.
+/// Row-scoped action verbs shared by the footer labels and the row hints, so the two cannot drift.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionVerb {
     Install,
@@ -1818,7 +1825,9 @@ pub struct WorkflowInfo {
 pub struct ExtensionsModalState {
     /// Shared modal window chrome state (close button, tabs, footer shortcuts, popup area).
     pub window: ModalWindowState,
-    /// Active tab (source of truth).
+    /// Currently active tab (source of truth). `window.active_tab` (a `usize` index) is derived from
+    /// this in the render path via `ExtensionsTab::ALL.position()`. Only this field should be mutated
+    /// by input handlers; the window's copy is a rendering hint synced each frame.
     pub active_tab: ExtensionsTab,
     /// Session team principal for managed-connectors deep links in section copy.
     pub session_team_id: Option<String>,
@@ -1832,6 +1841,7 @@ pub struct ExtensionsModalState {
     /// Cached button hit areas from last render (for mouse click).
     pub button_areas: Vec<ButtonArea>,
     /// Active inline input (when the user is typing an argument for a command).
+    /// `None` means normal button mode, `Some` means input mode.
     pub input: Option<ModalInput>,
     pub mcp_setup: Option<McpSetupFormState>,
     /// Modal message state (error, confirmation prompt, etc.).
@@ -1839,12 +1849,16 @@ pub struct ExtensionsModalState {
     /// Description of an in-flight action (blocks buttons while set).
     pub pending_action: Option<String>,
     /// Picker entry index with an in-flight action (shown as inline badge).
+    /// Not invalidated on entry-list changes (filter/refresh/tab-switch).
+    /// Out-of-range is skipped at render time, but a stale-but-in-range index can decorate the wrong row.
     pub pending_entry_index: Option<usize>,
-    /// Transient result feedback shown after an action succeeds: a right-aligned badge on `entry_index`'s row.
+    /// Transient result feedback shown after an action succeeds: a right-aligned badge on `entry_index`'s row, or a tab-wide footer line when `None`.
     pub result_notice: Option<ActionResultNotice>,
     /// Last dispatched plugins action (for confirmation replay).
     pub last_plugins_action: Option<xai_hooks_plugins_types::PluginsAction>,
     /// Selected item index per tab (for j/k navigation).
+    /// Maps visible row offset (relative to content top) to hook index.
+    /// Rebuilt every render; used to resolve a mouse click to a hook selection.
     pub hooks_visible_map: Vec<Option<usize>>,
     pub hooks_selected: usize,
     pub plugins_selected: usize,
@@ -1854,6 +1868,8 @@ pub struct ExtensionsModalState {
     /// Marketplace tab state.
     pub marketplace_data: TabDataState<xai_hooks_plugins_types::MarketplaceListResponse>,
     /// A marketplace list fetch is in flight.
+    /// Overlapping list calls serialize on the shell's per-source cache lock and each re-scans every git source.
+    /// Duplicates therefore multiply the slowest source's latency.
     pub marketplace_fetch_inflight: bool,
     /// A refetch arrived while one was in flight; it runs when the current fetch lands so post-action results stay fresh.
     pub marketplace_refetch_queued: bool,
@@ -1867,6 +1883,7 @@ pub struct ExtensionsModalState {
     /// MCP servers tab state.
     pub mcps_data: TabDataState<Vec<crate::views::mcps_modal::McpServerInfo>>,
     /// Last selection that triggered auto-scroll.
+    /// Prevents mouse scroll from being overridden by auto-scroll on every render.
     pub mcps_scroll_pinned_selection: Option<usize>,
     pub mcps_scroll: usize,
     /// Expanded MCP server tool lists (by raw catalog `si`, not picker row index).
@@ -1900,14 +1917,21 @@ pub struct ExtensionsModalState {
     pub hooks_filter: StatusFilter,
     /// Status filter for the skills tab.
     pub skills_filter: StatusFilter,
-    /// Unified picker state for tabs managed by `render_picker_content`. Search query and search_active live here.
+    /// Unified picker state for tabs managed by `render_picker_content`.
+    /// Search query and search_active live here.
     pub picker_state: picker::PickerState,
-    /// Maps picker entry index to original data index (for action dispatch). Rebuilt every render.
+    /// Maps picker entry index to original data index (for action dispatch).
+    /// Rebuilt every render. `None` for headers or error entries.
     pub entry_data_indices: Vec<Option<usize>>,
     /// Cached entry labels from last render (for group header identification in input handler).
     pub entry_labels_cache: Vec<String>,
+    /// Maps picker entry index to group key for collapse/expand.
+    /// For hooks: the source_dir string. For plugins: the [`PluginGroup`] key. For marketplace: source index as string.
+    /// `None` for non-group entries.
     pub entry_group_keys: Vec<Option<String>>,
+    /// Per-entry keyboard/mouse selectability (rebuilt each render).
     pub entry_non_selectable: Vec<bool>,
+    /// MCP section labels: not selectable, but clickable to fold/unfold.
     pub entry_non_selectable_clickable: Vec<bool>,
 }
 
@@ -1952,7 +1976,8 @@ impl ExtensionsModalState {
             mcps_scroll_pinned_selection: None,
             mcps_scroll: 0,
             mcps_tools_expanded: std::collections::HashSet::new(),
-            // Plugin sections are seeded collapsed on first MCP load (Local stays expanded by default for a less noisy initial view).
+            // Plugin sections are seeded collapsed on first MCP load (Local stays expanded by default for a less noisy initial view)
+            // Section headers are keyboard-selectable so j/k lands on them and Enter / l / Right re-expands a collapsed section
             mcps_collapsed_sections: std::collections::HashSet::new(),
             mcps_section_collapse_initialized: false,
             skills_visible_map: Vec::new(),
@@ -2060,7 +2085,7 @@ impl ExtensionsModalState {
     /// (`picker_state.query()`) is intentionally preserved across tabs, matching the rest of the modal.
     pub fn switch_tab(&mut self, tab: ExtensionsTab) {
         self.active_tab = tab;
-        // Clear modal flow state from the tab.
+        // Clear modal flow state from the previous tab.
         self.input = None;
         self.mcp_setup = None;
         self.modal_message = None;
@@ -2069,6 +2094,8 @@ impl ExtensionsModalState {
         self.result_notice = None;
         self.clear_managed_connectors_wait();
         // Reset picker selection/scroll/expansion for the new tab.
+        // tabs_focused is *not* cleared here: it is orthogonal focus state for the tab bar itself
+        // L/R-driven tab switches want to keep the bar focused so the user can continue cycling with arrows
         self.picker_state.selected = 0;
         self.picker_state.scroll_offset = None;
         self.picker_state.expanded.clear();
@@ -2078,6 +2105,8 @@ impl ExtensionsModalState {
         self.window.tabs_focused = self.picker_state.tabs_focused;
     }
 
+    /// [`switch_tab`](Self::switch_tab) for a mouse-driven switch: the click lands in the new tab's list
+    /// (row 0 selected), so the tab bar drops focus rather than adding a second focus indicator.
     pub fn switch_tab_focus_list(&mut self, tab: ExtensionsTab) {
         self.picker_state.tabs_focused = false;
         self.switch_tab(tab);
@@ -2217,8 +2246,9 @@ impl ExtensionsModalState {
         )
     }
 
-    /// Resolve the picker selection to `(server_index, tool_index)` when the
-    /// cursor is on an MCP tool row.
+    /// Resolve the picker selection to `(server_index, tool_index)` when the cursor is on an MCP tool row.
+    /// Returns `None` on server rows, error/loading entries, or out-of-range.
+    /// Caller must be on the McpServers tab; the helper relies on no other tab using `"mcp-tools:"` as a group-key prefix.
     pub fn selected_mcp_tool(&self) -> Option<(usize, usize)> {
         selected_mcp_tool_at(
             &self.entry_data_indices,
@@ -2275,7 +2305,9 @@ pub(crate) fn parse_mcp_tools_server_index(group_key: &str) -> Option<usize> {
     group_key.strip_prefix("mcp-tools:")?.parse().ok()
 }
 
-/// Build the picker non-selectable mask (static headers).
+/// Build the picker non-selectable mask (static headers). MCP section labels (`mcp-section:*`) are
+/// keyboard-selectable so j/k can land on them and Enter / l / Right toggles their collapsed state.
+/// That toggle is the only way to expand a section once it has been collapsed.
 pub fn build_entry_non_selectable(
     entry_is_header: &[bool],
     _entry_group_keys: &[Option<String>],
@@ -2283,8 +2315,8 @@ pub fn build_entry_non_selectable(
     entry_is_header.to_vec()
 }
 
-/// MCP section labels are now keyboard-selectable, so no rows need the
-/// "non-selectable but clickable" treatment.
+/// MCP section labels are now keyboard-selectable, so no rows need the "non-selectable but clickable" treatment.
+/// Kept as a function so callers can continue to pass a slice to the picker without per-call allocation changes; the returned mask is all `false`.
 pub fn build_entry_non_selectable_clickable(entry_group_keys: &[Option<String>]) -> Vec<bool> {
     vec![false; entry_group_keys.len()]
 }
@@ -2426,8 +2458,9 @@ pub(crate) fn mcp_section_children_hidden(
     !searching && collapsed_sections.contains(section_key)
 }
 
-/// Derive a display label and whether the source is a custom (removable)
-/// path.
+/// Derive a display label and whether the source is a custom (removable) path.
+///
+/// Returns `(label, is_custom)` where `is_custom` means the source was added via hooks-paths and can be removed.
 pub fn derive_source_label(source_dir: &str) -> (String, bool) {
     let meta = classify_hook_source(source_dir);
     let is_custom = meta.is_custom();
@@ -2736,7 +2769,8 @@ pub fn render_extensions_modal(
 ) {
     let theme = Theme::current();
 
-    // Drop the wait overlay's hit rects before any early return below.
+    // Drop the wait overlay's hit rects before any early return below. A frame that cannot paint
+    // must not leave last-frame coordinates live for mouse input or OSC8 links.
     if let Some(ref mut wait) = state.managed_connectors_wait {
         wait.clear_hit_rects();
     }
@@ -2748,7 +2782,7 @@ pub fn render_extensions_modal(
     }
 
     // When switching into (or rendering) a tab while a search query is active, force-expand all items of that tab
-    // Search then shows every match.
+    // Search then shows every match, even inside groups that were collapsed before the user switched tabs
     if !state.picker_state.query().is_empty() {
         state.picker_state.expand_all_for_search(8192);
     }
@@ -2783,7 +2817,8 @@ pub fn render_extensions_modal(
     // Input mode hides the entry list (form overlay owns the content area).
     let in_input_mode = state.input.is_some() || state.mcp_setup.is_some();
 
-    // Rebuild the entry list before footer action labels so Space enable/disable can use this frame's mapping.
+    // Rebuild the entry list before footer action labels so Space enable/disable can use this frame's
+    // mapping, not last frame's filter/tab/query.
     let mut entry_labels: Vec<String> = Vec::new();
     let mut entry_right_labels: Vec<String> = Vec::new();
     let mut entry_desc_lines: Vec<Vec<String>> = Vec::new();
@@ -3464,12 +3499,15 @@ pub fn render_extensions_modal(
     let non_selectable = build_entry_non_selectable(&entry_is_header, &entry_group_keys);
     let non_selectable_clickable = build_entry_non_selectable_clickable(&entry_group_keys);
 
-    // Min-clamp and skip rows marked non-selectable for this frame's footer and highlight Do not write to `state` until.
+    // Min-clamp and skip rows marked non-selectable for this frame's footer and highlight
+    // Do not write to `state` until after `render_modal_window` succeeds
+    // An early return would desync `selected` from entry maps published only post-paint
     let entry_count = entry_labels.len();
     let selected =
         picker::first_selectable_index(state.picker_state.selected, entry_count, &non_selectable);
 
     // Build per-tab action keys for the footer shortcuts.
+    // Space enable/disable uses the freshly built entry-mapping locals (not `state.entry_*`, which are published once after paint below)
     let action_keys = extensions_action_keys(state.active_tab);
     let marketplace_row = marketplace_selected_row(
         state,
@@ -3559,8 +3597,13 @@ pub fn render_extensions_modal(
             id: WAIT_BACK_SHORTCUT_ID,
         });
     } else if modal_msg_kind.is_some() {
+        // Modal message overlay (error/confirmation) is rendered with its own dismissal hint in the footer below
+        // Leave the standard shortcuts list empty
     } else if state.picker_state.search_active && state.input.is_none() && state.mcp_setup.is_none()
     {
+        // Search bar has focus: hide the shortcuts footer entirely so it doesn't compete visually with the typing cursor
+        // Hiding also stops typed letters appearing to map to advertised actions (they go into the query, not shortcuts)
+        // Input-mode is handled below; it owns its own footer.
     } else if state.mcp_setup.is_some() {
         shortcuts.push(Shortcut {
             label: "Enter save and authenticate",
@@ -3578,8 +3621,8 @@ pub fn render_extensions_modal(
             id: 0,
         });
     } else if let Some(ref input) = state.input {
-        // "Add"/input mode: show the keys the input form handles Tab is either path completion (single-field) or field
-        // navigation (multi-field)
+        // "Add"/input mode: show the keys the input form actually handles
+        // Tab is either path completion (single-field) or field navigation (multi-field)
         shortcuts.push(Shortcut {
             label: "Enter submit",
             clickable: false,
@@ -3600,7 +3643,8 @@ pub fn render_extensions_modal(
             id: 0,
         });
     } else {
-        // Tab/Shift+Tab cycles tabs (handled in picker.rs).
+        // Tab/Shift+Tab cycles tabs (handled in picker.rs). Click on the hint cycles to the next tab only
+        // (sentinel id 98, dispatched in `handle_extensions_modal_mouse`).
         shortcuts.push(Shortcut {
             label: "Tab tabs",
             clickable: true,
@@ -3620,7 +3664,9 @@ pub fn render_extensions_modal(
                 id: 0,
             });
         }
-        // `e` / Shift+e / Enter still expands and collapses (handled by the picker's built-in expandable branch) The hint is omitted from the footer.
+        // `e` / Shift+e / Enter still expands and collapses (handled by the picker's built-in expandable branch)
+        // The hint is omitted from the footer to save space; the cheatsheet still lists it
+        // ID 99 is the close action, handled in the mouse handler
         shortcuts.push(Shortcut {
             label: "Esc close",
             clickable: true,
@@ -3669,10 +3715,11 @@ pub fn render_extensions_modal(
         return;
     };
 
-    // Commit the clamped selection now that paint will continue and entry maps
+    // Commit the clamped selection now that paint will continue and entry maps will be published later this frame
     state.picker_state.selected = selected;
 
-    // In input ("Add") mode the search bar, filter indicator.
+    // In input ("Add") mode the search bar, filter indicator, and divider are hidden so the bordered input form can own the full content area
+    // The search controls are irrelevant while the user is typing into a form, and the divider would float above the form awkwardly
 
     let search_width = content_area.width;
     if !in_input_mode {
@@ -3709,7 +3756,8 @@ pub fn render_extensions_modal(
         state.picker_state.filter_area = None;
     }
 
-    // Divider below search; spans full inner width (border to border) Suppressed in input mode.
+    // Divider below search; spans full inner width (border to border)
+    // Suppressed in input mode (no search bar above to divide from).
     let sep_y = content_area.y + 1;
     if !in_input_mode && sep_y < content_area.y + content_area.height {
         picker::render_divider(
@@ -3761,9 +3809,8 @@ pub fn render_extensions_modal(
             } else {
                 let group_key = entry_group_keys.get(i).and_then(|k| k.as_ref());
                 let is_collapsible = group_key.is_some();
-                // For collapsible group headers, `expanded` reflects whether
-                // the group's children are visible (not in the collapsed set)
-                // For regular items.
+                // For collapsible group headers, `expanded` reflects whether the group's children are visible (not in the collapsed set)
+                // For regular items, it reflects the picker's per-row detail expansion
                 let is_expanded = if is_collapsible {
                     state.is_group_expanded(i, group_key.unwrap())
                 } else {
@@ -3826,7 +3873,8 @@ pub fn render_extensions_modal(
         (content_hit.item_rects, content_hit.entry_indices)
     };
 
-    // Store hit areas for mouse handling Build a PickerHitAreas so handle_picker_input (used for content-level events).
+    // Store hit areas for mouse handling
+    // Build a PickerHitAreas so handle_picker_input (used for content-level events) works
     let filter_rect = state.picker_state.filter_area;
     state.picker_state.hit_areas = Some(picker::PickerHitAreas {
         close_button: Rect::default(), // handled by ModalWindow
@@ -3930,7 +3978,8 @@ pub fn render_extensions_modal(
     } else if let Some(ref n) = state.result_notice
         && footer_area.height > 0
     {
-        // Result status line (per-row and tab-wide): a non-covering success line in the footer so the list stays visible above it Auto-expires.
+        // Result status line (per-row and tab-wide): a non-covering success line in the footer so the list stays visible above it
+        // Auto-expires; the per-row case also gets a "✓" on its row
         let text = n.message.lines().next().unwrap_or(n.message.as_str());
         let avail = footer_area.width.saturating_sub(2) as usize;
         let shown: String = if UnicodeWidthStr::width(text) > avail {
@@ -3951,7 +4000,9 @@ pub fn render_extensions_modal(
             text.to_string()
         };
         let y = footer_area.y + footer_area.height.saturating_sub(1);
-        // The shortcuts bar renders underneath this row.
+        // The shortcuts bar renders underneath this row and its keys are BOLD
+        // `set_string` only *merges* style, so `Style::default()` would leave that bold on any cell the message overwrites (partial-bold bleed)
+        // `Style::reset()` clears all existing modifiers first.
         let clear_style = Style::reset().bg(theme.bg_base);
         let text_style = Style::reset().fg(theme.accent_success).bg(theme.bg_base);
         // Centered like the footer hint segments and the covering overlay.
@@ -4025,8 +4076,8 @@ fn render_mcp_setup_form(buf: &mut Buffer, area: Rect, setup: &McpSetupFormState
     }
 }
 
-/// Which full-window overlay owns the footer: a message (error/info/confirm)
-/// with its dismissal hint.
+/// Which full-window overlay owns the footer: a message (error/info/confirm) with its dismissal
+/// hint, or the connectors wait with its own shortcuts. Either one also suppresses the result notice.
 #[derive(Debug, Clone, Copy)]
 enum ModalMsgKind {
     Error,
@@ -4092,10 +4143,12 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
         return;
     }
 
+    // Per field: 1 label row + 3 rows for the bordered input (top border + content + bottom border)
     let field_count = input.fields().len() as u16;
     const ROWS_PER_FIELD: u16 = 4;
-    let separators = field_count.saturating_sub(1);
+    let separators = field_count.saturating_sub(1); // 1 blank row between fields
     let form_rows = field_count * ROWS_PER_FIELD + separators;
+    // Reserve room for an inline error row when present (1 spacer + 1 line).
     let error_rows: u16 = if input.error.is_some() { 2 } else { 0 };
     let total_rows = form_rows + error_rows;
 
@@ -4132,6 +4185,7 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
 
         let is_focused = fi == input.focused_index();
 
+        // Row 1: Label (sits above the bordered input, not inside).
         let ls = if is_focused {
             label_style
         } else {
@@ -4140,6 +4194,8 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
         buf.set_string(label_x, cur_y, field.label(), ls);
         cur_y += 1;
 
+        // Rows 2-4: Rounded border around the single-line input.
+        // Need at least 3 rows to fit top/content/bottom borders.
         let remaining = (area.y + area.height).saturating_sub(cur_y);
         if remaining < 3 {
             break;
@@ -4159,8 +4215,11 @@ fn render_input_form(buf: &mut Buffer, area: Rect, input: &ModalInput, theme: &T
         let inner = block.inner(box_rect);
         ratatui::widgets::Widget::render(block, box_rect, buf);
 
+        // Content row: the prompt prefix, then the input text or placeholder
+        // Pad 1 cell from the left side of the bordered inner area.
         let content_x = inner.x + 1;
         let content_y = inner.y;
+        // Available text width = inner width - left pad - prompt prefix - 1 right margin.
         let max_text_w = inner.width.saturating_sub(1 + prompt_w + 1).max(1) as usize;
 
         buf.set_string(content_x, content_y, prompt_prefix, prompt_style);
@@ -4220,7 +4279,8 @@ mod tests {
 
     #[test]
     fn derive_source_label_detects_project_scoped_plugins() {
-        // Regression: project-scoped `{cwd}/.grok/plugins/<name>/` must label as a (non-removable) plugin.
+        // Regression: project-scoped `{cwd}/.grok/plugins/<name>/` must label as a (non-removable) plugin, not a removable "Custom" source
+        // The user grok-home branch is GROK_HOME-aware; this covers the project fallback
         let (label, is_custom) = derive_source_label("/repo/work/.grok/plugins/my-plugin/hooks");
         assert_eq!(label, "Plugin: my-plugin");
         assert!(!is_custom);
@@ -4287,7 +4347,8 @@ mod tests {
             Some("mcp-tools:0".into()),
             None,
         ]);
-        // Sections are now keyboard-selectable, so clicks go through the normal Selected/toggle_fold path No row needs.
+        // Sections are now keyboard-selectable, so clicks go through the normal Selected/toggle_fold path
+        // No row needs the non-selectable-but-clickable treatment
         assert_eq!(mask, vec![false, false, false]);
     }
 
@@ -4378,6 +4439,8 @@ mod tests {
         }
     }
 
+    // Fixture layout (managed section, two servers with tools): 0 section header
+    // group_key=Some("mcp-section:managed") data=None.
     fn fixture_with_two_servers_and_tools() -> ExtensionsModalState {
         let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
         state.entry_data_indices = vec![None, Some(0), Some(0), Some(0), Some(1), Some(1)];
@@ -4640,6 +4703,7 @@ mod tests {
         let mut state = ExtensionsModalState::new(ExtensionsTab::McpServers);
         state.mcps_data = TabDataState::Loaded(vec![blocked, disabled]);
         let area = Rect::new(0, 0, 100, 40);
+        // Rows: 0 = Local section header, 1 = blocked, 2 = disabled.
         state.picker_state.selected = 1;
         let mut buf = Buffer::empty(area);
         render_extensions_modal(&mut buf, area, &mut state, None, false, 0);
@@ -4831,7 +4895,7 @@ mod tests {
             &servers,
             "alpha",
         );
-        // Managed AND Local are collapsed too (not other plugins).
+        // Managed AND Local are collapsed too (not just other plugins).
         assert!(
             state
                 .mcps_collapsed_sections
@@ -5065,7 +5129,7 @@ mod tests {
             make_plugin_skill("lint", "Run lint checks", "linter"),
         ];
         let result = filter_and_sort_skills(&skills, "", StatusFilter::All);
-        // All skills (native and plugin) should appear
+        // All three skills (native and plugin) should appear
         assert_eq!(result.matches.len(), 3);
     }
 
@@ -5083,6 +5147,7 @@ mod tests {
         let result = filter_and_sort_skills(&skills, "", StatusFilter::Enabled);
         // Only enabled skills: native and hello (lint is disabled)
         assert_eq!(result.matches.len(), 2);
+        // Verify the correct skills are returned: native (index 0) and hello (index 1).
         let indices: Vec<usize> = result.matches.iter().map(|m| m.skill_index).collect();
         assert!(indices.contains(&0), "native skill should be present");
         assert!(
@@ -5120,6 +5185,7 @@ mod tests {
 
     #[test]
     fn skills_selection_clamped_after_filter() {
+        // User had selected index 10, but after filtering only 3 match.
         let mut selected: usize = 10;
         let match_count = 3usize;
 
@@ -5389,6 +5455,8 @@ mod tests {
         let mut user = make_hook("user/b", "/home/u/.grok", false);
         user.removable = true;
 
+        // Entry maps as the picker builds them (headers carry a group key, no data index):
+        //   0: header /etc/grok, 1: pinned row, 2: header user, 3: user row
         let mut state = ExtensionsModalState::new(ExtensionsTab::Hooks);
         state.hooks_data = TabDataState::Loaded(xai_hooks_plugins_types::HooksListResponse {
             hooks: vec![pinned, user],
@@ -5467,6 +5535,7 @@ mod tests {
             project_trusted: true,
             load_errors: Vec::new(),
         });
+        // 0: header, 1: pinned row, 2: unpinned sibling row.
         let data_indices = vec![None, Some(0), Some(1)];
         let group_keys = vec![Some("/reg/policy".to_string()), None, None];
         for sel in 0..3 {
@@ -5485,7 +5554,8 @@ mod tests {
             make_hook("a", "/src1", false),
             make_hook("b", "/src2", false),
         ];
-        // An empty first delivery must not finish seeding.
+        // An empty first delivery must not finish seeding: sources arriving
+        // later would open expanded instead of getting the collapsed default.
         state.seed_hook_groups_once(&[]);
         state.seed_hook_groups_once(&hooks);
         assert!(state.hooks_collapsed_groups.contains("/src1"));
@@ -5532,6 +5602,8 @@ mod tests {
             "disable"
         );
 
+        // Filtered to the disabled plugin only: same selected *row* index 0, but it now maps to data index 1
+        // Stale [Some(0), Some(1)] would still report "disable"; the refreshed mapping must report "enable"
         let filtered = vec![Some(1)];
         assert_eq!(
             selected_item_enabled_at(&state, &filtered, &[], 0),
@@ -6232,7 +6304,7 @@ mod tests {
             make_hook("c", "/other", false), // enabled
         ];
         let groups = build_hook_groups(&hooks, StatusFilter::Enabled, "");
-        // Custom groups, ordered A–Z by display label: /other before /src.
+        // Two custom groups, ordered A–Z by display label: /other before /src.
         let [other, src] = groups.as_slice() else {
             panic!("expected two hook groups");
         };
@@ -6242,6 +6314,7 @@ mod tests {
         assert_eq!(src.indices, vec![0]);
 
         let groups_disabled = build_hook_groups(&hooks, StatusFilter::Disabled, "");
+        // One group: /src with [1].
         let [disabled] = groups_disabled.as_slice() else {
             panic!("expected one disabled hook group");
         };
@@ -6407,13 +6480,15 @@ mod tests {
             "systematic-debugging".into(),
             "subagent-driven-development".into(),
         ];
+        // Select "brainstorming" (picker index 2).
         state.picker_state.selected = 2;
         let result = state.resolve_marketplace_selection(&sources);
-        assert_eq!(result, Some((0, Some(1))));
+        assert_eq!(result, Some((0, Some(1)))); // source 0, plugin index 1
 
+        // Select "systematic-debugging" (picker index 4).
         state.picker_state.selected = 4;
         let result = state.resolve_marketplace_selection(&sources);
-        assert_eq!(result, Some((0, Some(3))));
+        assert_eq!(result, Some((0, Some(3)))); // source 0, plugin index 3
     }
 
     #[test]
@@ -6655,13 +6730,16 @@ mod tests {
             .filter(|label| buffer_count(&buf, label) > 0)
             .collect()
         };
+        // Row 0: the source header.
         assert_eq!(
             footer(&mut state, 0),
             vec!["a add source", "x remove source", "r refresh"]
         );
-        // Plugin rows are alphabetical.
+        // Plugin rows are alphabetical. Row 1: "brainstorming", installed.
         assert_eq!(footer(&mut state, 1), vec!["d uninstall", "r refresh"]);
+        // Row 2: "subagent-driven-development", not installed.
         assert_eq!(footer(&mut state, 2), vec!["i install", "r refresh"]);
+        // Row 4: "systematic-debugging", update available.
         assert_eq!(
             footer(&mut state, 4),
             vec!["u update", "d uninstall", "r refresh"]
@@ -7208,6 +7286,7 @@ mod tests {
                 None,
             ]
         );
+        // Within the shared marketplace group, children are A–Z by name: catalog-tool (1) before installed-tool (2)
         assert_eq!(
             state.entry_data_indices,
             vec![None, Some(0), None, Some(1), Some(2)],
@@ -7580,7 +7659,8 @@ mod tests {
         let wait = state.managed_connectors_wait.as_ref().expect("wait state");
         assert!(wait.copy_rect.is_some() && !wait.url_rects.is_empty());
 
-        // Below the 40x12 size guard the render returns before painting anything.
+        // Below the 40x12 size guard the render returns before painting anything. Last frame's
+        // rects must not survive, or mouse input and OSC8 links would target an empty screen.
         let tiny = Rect::new(0, 0, 30, 8);
         render_extensions_modal(&mut Buffer::empty(tiny), tiny, &mut state, None, false, 0);
         let wait = state.managed_connectors_wait.as_ref().expect("wait state");
@@ -7624,7 +7704,7 @@ mod tests {
 
     #[test]
     fn first_selectable_index_skips_headers() {
-        // Generic list with a non-selectable first row, then selectable rows.
+        // Generic list with a non-selectable first row, then two selectable rows.
         let non_sel = [true, false, false];
         assert_eq!(picker::first_selectable_index(0, 3, &non_sel), 1);
         assert_eq!(picker::first_selectable_index(1, 3, &non_sel), 1);

@@ -1,4 +1,5 @@
-//! `InnerDispatchForResolver` coverage.
+//! `InnerDispatchForResolver` coverage. Verifies the cycle-safe `Weak`
+//! resolver semantics and the session-bound resolution path.
 
 use std::sync::Arc;
 
@@ -232,7 +233,8 @@ async fn inner_dispatch_returns_not_found_when_tool_absent() {
 
 #[tokio::test]
 async fn inner_dispatch_uses_bound_session_not_context_session() {
-    // Even if the context were to carry a different session.
+    // Even if the context were to carry a different session, the inner
+    // dispatch handle resolves against its construction-time session.
     let registry = Arc::new(InMemRegistry::default());
     registry.install(
         sid("sess-A"),

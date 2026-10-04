@@ -697,7 +697,9 @@ impl SessionActor {
                 }
                 let pass = session.execute_v2_dream(&cancel, clock.clone()).await;
                 outcome = outcome.then(pass.outcome);
-                // Promotion can be deferred by the lease this Dream released.
+                // Promotion can be deferred by the lease this Dream just released.
+                // Retrying here makes rollout activation converge without requiring
+                // a session restart or another completed turn.
                 session
                     .promote_v2_hidden_observations(false, clock.clone())
                     .await;
@@ -983,7 +985,8 @@ impl SessionActor {
                 })) {
                     Ok(result) => result,
                     Err(payload) => {
-                        // A blocking-task panic must not strand the lease until expiry.
+                        // A blocking-task panic must not strand the lease until
+                        // expiry. Release it before preserving panic semantics.
                         let _ = store.fail_retryable(&lease, now, "shadow completion panicked");
                         std::panic::resume_unwind(payload);
                     }

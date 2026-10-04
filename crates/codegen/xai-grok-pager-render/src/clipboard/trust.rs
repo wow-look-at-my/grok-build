@@ -1,4 +1,6 @@
 //! Environment-based delivery and toast policy for clipboard writes.
+//!
+//! A copy still writes to every backend at once; this module classifies whether a successful leg is known to reach the destination named by the UI.
 
 use crate::host::{DisplayServer, HostOs};
 use crate::terminal::TerminalName;
@@ -11,6 +13,7 @@ use super::{ClipboardFeedback, ClipboardWriteLegs};
 pub enum ClipboardDelivery {
     /// A successful write leg has a destination trusted by the environment policy.
     Confirmed,
+    /// OSC 52 was emitted, but the outer terminal's clipboard support is unknown.
     Unverified,
     /// No usable write leg succeeded, or the destination is known not to support it.
     Failed,
@@ -48,6 +51,7 @@ pub struct ClipboardEnvironment {
     pub wl_copy_available: bool,
 }
 
+/// The terminal's advertised OSC 52 clipboard capability.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[doc(hidden)]
 pub enum Osc52Capability {
@@ -122,6 +126,7 @@ pub fn native_clipboard_preflight(
     }
 }
 
+/// Classify one emitted OSC 52 write.
 /// Unknown SSH/container boundaries strip brand markers, so missing capability evidence is Unverified rather than Failed.
 pub(crate) fn osc52_delivery(environment: ClipboardEnvironment) -> ClipboardDelivery {
     match environment.osc52_capability() {

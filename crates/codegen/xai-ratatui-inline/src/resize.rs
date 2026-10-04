@@ -12,12 +12,13 @@ pub fn resize_purge_rerender<T: TerminalLike>(terminal: &mut T, history: &str) -
     let viewport = terminal.viewport_area();
     let size = terminal.size()?;
 
-    // Clear current screen, clear scrollbackhistory and move the cursor to the top left corner note: we could've also used RIS (\x1bc) hard reset.
+    // Clear current screen, clear scrollbackhistory and move the cursor to the top left corner
+    // note: we could've also used RIS (\x1bc) hard reset, but it doesn't clear scrollback in iterm/terminal.app
     terminal.writer_mut().write_all(b"\x1b[2J\x1b[3J\x1b[H")?;
     terminal.writer_mut().flush()?;
 
-    // Count newlines in history as a quick check for whether we have enough
-    // content The +1 accounts for content on the first line.
+    // Count newlines in history as a quick check for whether we have enough content
+    // The +1 accounts for content on the first line (before any newlines)
     let num_newlines = 1 + history
         .as_bytes()
         .iter()
@@ -38,7 +39,8 @@ pub fn resize_purge_rerender<T: TerminalLike>(terminal: &mut T, history: &str) -
         // We have enough content to fill the screen, viewport goes at the bottom
         size.height.saturating_sub(viewport.height)
     } else {
-        // Not enough content to fill the screen, need to calculate exact position Use split_into_line_segments to account.
+        // Not enough content to fill the screen, need to calculate exact position
+        // Use split_into_line_segments to account for line wrapping
         let segments = split_into_line_segments(history, size.width.into());
         let num_visible_lines = segments.len().min(u16::MAX as _) as u16;
 
@@ -127,7 +129,7 @@ pub fn resize_viewport_height<T: TerminalLike>(
             terminal.writer_mut().flush()?;
         }
 
-        // Clear the viewport
+        // Clear the old viewport
         terminal.clear()?;
 
         // Set the new viewport area
@@ -155,13 +157,14 @@ mod tests {
     #[test]
     fn test_viewport_resize_shrink() {
         let mut terminal = MockTerminal::new(80, 25, 5);
-        let original_y = terminal.viewport_area.y;
+        let original_y = terminal.viewport_area.y; // Should be 20 (25-5)
 
+        // Shrink viewport from 5 to 3 (always anchors at top)
         resize_viewport_height(&mut terminal, 3).unwrap();
 
         // Check viewport was updated - y should stay the same
         assert_eq!(terminal.viewport_area.height, 3);
-        assert_eq!(terminal.viewport_area.y, original_y);
+        assert_eq!(terminal.viewport_area.y, original_y); // Should still be 20
 
         // Should have cleared once
         assert_eq!(terminal.clear_count, 1);
@@ -171,19 +174,21 @@ mod tests {
     fn test_viewport_resize_smart_expand() {
         let mut terminal = MockTerminal::new(80, 25, 3);
 
+        // Start at position 20 (not at bottom)
         terminal.viewport_area.y = 20;
 
+        // Expand viewport from 3 to 5 - should expand downward first
         resize_viewport_height(&mut terminal, 5).unwrap();
 
         // Check that it expanded down (kept same y)
         assert_eq!(terminal.viewport_area.height, 5);
-        assert_eq!(terminal.viewport_area.y, 20);
+        assert_eq!(terminal.viewport_area.y, 20); // Should stay at 20
         assert_eq!(terminal.clear_count, 1);
 
         // Now expand more - should hit bottom and push content up
         resize_viewport_height(&mut terminal, 6).unwrap();
         assert_eq!(terminal.viewport_area.height, 6);
-        assert_eq!(terminal.viewport_area.y, 19);
+        assert_eq!(terminal.viewport_area.y, 19); // Should move up to 19
         assert_eq!(terminal.clear_count, 2);
     }
 
@@ -232,11 +237,12 @@ mod tests {
         let mut terminal = MockTerminal::new(80, 25, 3);
         terminal.viewport_area.y = 22; // Bottom position
 
-        // Test with small history ( a few lines)
+        // Test with small history (just a few lines)
         let history = "Line 1\r\nLine 2\r\nLine 3\r\n";
         resize_purge_rerender(&mut terminal, history).unwrap();
 
-        // split_into_line_segments will count this as multiple segments (one per line) So viewport should be positioned at y=3
+        // split_into_line_segments will count this as 3 segments (one per line)
+        // So viewport should be positioned at y=3
         assert_eq!(terminal.viewport_area.y, 3);
         assert_eq!(terminal.viewport_area.height, 3);
         assert_eq!(terminal.clear_count, 1);

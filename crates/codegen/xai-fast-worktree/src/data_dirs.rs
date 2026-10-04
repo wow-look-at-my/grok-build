@@ -1,11 +1,12 @@
 //! Grove data directories production actually uses.
 use std::path::PathBuf;
 /// platform data dir, then grok-home/grove. Deduped. Grove does not read
-/// Grove's data dir is `$XDG_DATA_HOME/grove` when that variable is
-/// non-empty. Otherwise Windows uses `%LOCALAPPDATA%\grove` or
-/// `<home>\AppData\Local\grove`. Other platforms also keep
-/// `$HOME/.local/share/grove` so an XDG override does not hide the default
-/// location.
+///
+/// Grove's data dir is `$XDG_DATA_HOME/grove` when that variable is non-empty.
+/// Otherwise Windows uses `%LOCALAPPDATA%\grove` or `<home>\AppData\Local\grove`.
+/// Other platforms also keep `$HOME/.local/share/grove` so an XDG override does
+/// not hide the default location. A `data_dir` in grove's config replaces none
+/// of those candidates; it is the effective dir when set.
 #[must_use]
 #[allow(dead_code)]
 pub fn candidate_data_dirs() -> Vec<PathBuf> {

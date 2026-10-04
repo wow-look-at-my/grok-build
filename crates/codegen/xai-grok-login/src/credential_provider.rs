@@ -15,6 +15,8 @@ fn api_key_id_for(auth: Option<&crate::GrokAuth>) -> Option<String> {
 }
 
 /// Sampler [`BearerResolver`](xai_grok_sampler::BearerResolver) over a live [`AuthManager`].
+/// Wire-valid only: it never stamps a hard-expired access token (the client auth contract).
+/// Shared by the session sampler and subagent configs so the contract can't drift between them.
 pub struct WireValidBearerResolver(pub Arc<AuthManager>);
 
 impl WireValidBearerResolver {
@@ -31,6 +33,7 @@ impl std::fmt::Debug for WireValidBearerResolver {
 }
 
 /// Ceiling for the pre-send refresh wait.
+/// Long enough for one external-binary run (7 s) or a first-party token exchange; the exchange keeps going in the background if it overruns and hot-swaps the token when it lands.
 const PRE_SEND_REFRESH_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Time the send itself needs once the wait ends, reserved out of a still wire-valid bearer's remaining life.
@@ -45,16 +48,17 @@ fn pre_send_refresh_budget(remaining_wire_life: std::time::Duration) -> std::tim
 
 impl xai_grok_sampler::BearerResolver for WireValidBearerResolver {
     fn current_bearer(&self) -> Option<String> {
-        // The samplers attach this resolver whenever the endpoint is a
-        // first-party xAI URL.
+        // The samplers attach this resolver whenever the endpoint is a first-party xAI URL.
+        // A session minted by another authority would send its token there on every chat call.
         if !ActiveAuthBackend::default().is_xai_authority() {
             return None;
         }
         self.0.current_wire_valid().map(|a| a.key)
     }
 
-    /// Closes the pre-flight→send gap: the turn's pre-flight ran `auth()`, but the request can leave much later (a sampling-permit wait, a rate-limit sleep, a resubmit that skips the pre-flight). If the cached bearer is wire-valid now but would not survive the send, refresh here
-    /// instead of letting `current_bearer` strip it and send the request with no credential. Only that race is handled here.
+    /// Closes the pre-flight→send gap: the turn's pre-flight ran `auth()`, but the request can leave much later (a sampling-permit wait, a rate-limit sleep, a resubmit that skips the pre-flight).
+    /// If the cached bearer is wire-valid now but would not survive the send, refresh here instead of letting `current_bearer` strip it and send the request with no credential.
+    /// Only that race is handled here. With no wire-valid bearer at all the pre-flight has already made its refresh attempt and the 401 arm (recovery, parking) owns the outcome; a refresh per send would let every parked, deliberately credential-less resubmit drive the escalation budget.
     fn prepare_for_send(
         &self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
@@ -111,7 +115,8 @@ impl std::fmt::Debug for ShellAuthCredentialProvider {
 
 impl HttpAuth for ShellAuthCredentialProvider {
     fn apply(&self, builder: RequestBuilder, base_url: &str) -> RequestBuilder {
-        // This trait is sync, so no refresh happens here.
+        // This trait is sync, so no refresh happens here: the proactive task keeps the cache hot and `refresh_after_unauthorized()` handles 401s
+        // Wire-valid only: never stamp a hard-expired access token
         let mut creds = self.static_credentials.clone();
         // A session minted elsewhere must not reach an xAI host.
         if ActiveAuthBackend::default().is_xai_authority()
@@ -126,7 +131,8 @@ impl HttpAuth for ShellAuthCredentialProvider {
 #[async_trait::async_trait]
 impl AuthCredentialProvider for ShellAuthCredentialProvider {
     fn snapshot(&self) -> CredentialSnapshot {
-        // The token must match what `HttpAuth::apply` puts on the wire (wire-valid only) Identity fields may still come.
+        // The token must match what `HttpAuth::apply` puts on the wire (wire-valid only)
+        // Identity fields may still come from a soft-expired cache
         let identity = self.auth_manager.current_or_expired();
         let user_id = identity.as_ref().map(|a| a.user_id.clone());
         let team_id = identity.as_ref().and_then(|a| a.team_id.clone());
@@ -170,8 +176,8 @@ pub fn embedding_session_credentials(
     )
 }
 
-/// Lets `StorageClient` (in xai-file-utils) emit shell's 401-attribution
-/// event without xai-file-utils depending on shell.
+/// Lets `StorageClient` (in xai-file-utils) emit shell's 401-attribution event without xai-file-utils depending on shell.
+/// Holds the live `AuthManager` so attribution events carry the correct user_id.
 pub struct StorageClientAttributionBridge {
     auth_manager: Arc<AuthManager>,
     session_id: Option<String>,
@@ -205,11 +211,14 @@ impl xai_file_utils::storage_client::Auth401AttributionCallback for StorageClien
     }
 }
 
-/// Credential provider for the OTel layer's `RefreshableSpanExporter`.
+/// Credential provider for the OTel layer's `RefreshableSpanExporter`. Starts with a bootstrap `AuthManager` (disk-read-only, no refresher).
+/// [`Self::set_live`] upgrades it to the agent's live `Arc<AuthManager>` once the agent is initialized.
+/// After upgrade: `snapshot()` reads from the live manager's in-memory cache (kept hot by the proactive refresh task) instead of re-reading disk. `refresh_after_unauthorized()` routes through `unauthorized_recovery` for active OIDC or external-binary refresh. Before upgrade, the bootstrap manager only reads from disk.
 pub struct OtelAuthCredentialProvider {
     /// Bootstrap manager used before the live one is available.
     bootstrap: Arc<AuthManager>,
-    /// Swapped to the agent's live `AuthManager` via `set_live()`. `None` means still in bootstrap mode.
+    /// Swapped to the agent's live `AuthManager` via `set_live()`.
+    /// `None` means still in bootstrap mode.
     live: arc_swap::ArcSwap<Option<Arc<AuthManager>>>,
 }
 
@@ -222,6 +231,7 @@ impl OtelAuthCredentialProvider {
     }
 
     /// Upgrade to the agent's live `AuthManager`.
+    /// After this call, `snapshot()` reads from the live manager and `refresh_after_unauthorized()` drives the full recovery state machine.
     pub fn set_live(&self, auth_manager: Arc<AuthManager>) {
         self.live.store(Arc::new(Some(auth_manager)));
     }
@@ -314,7 +324,9 @@ impl AuthCredentialProvider for OtelAuthCredentialProvider {
     }
 }
 
-/// Process-wide OTel credential provider handle.
+/// Process-wide OTel credential provider handle. This is one of two acceptable process-wide statics in this crate (the other is `TRACER_PROVIDER` in `otel_layer.rs`).
+/// It is set once at tracing init, before any `AuthManager` exists, and holds a bootstrap-mode provider. The `ArcSwap` inside the provider handles the runtime auth state swap; the `OnceLock` itself is never re-written.
+/// A static beats passing a handle: `build_default_otel_layer_config` is called from 15+ `init_tracing*` sites across 3 binaries. Passing a handle from all of them to the agent init site, where the live `AuthManager` is constructed, would touch ~20 files.
 static OTEL_PROVIDER: std::sync::OnceLock<Arc<OtelAuthCredentialProvider>> =
     std::sync::OnceLock::new();
 
@@ -341,11 +353,9 @@ pub fn oauth_gateway_email_from_auth(auth: &crate::GrokAuth) -> Option<String> {
     }
 }
 
-/// Push the current identity attributes (never the token) to the external
-/// OTEL stream. Reads the same `CredentialSnapshot` the internal layer stamps
-/// per export, so both pipelines attribute identically. `user.id` is copied
-/// whenever the snapshot has a non-empty principal (including API-key
-/// sessions).
+/// Push the current identity attributes (never the token) to the external OTEL stream. Reads the same `CredentialSnapshot` the internal layer stamps per export, so both pipelines attribute identically.
+/// `user.id` is copied whenever the snapshot has a non-empty principal (including API-key sessions). OAuth/gateway email is attached when present; never from git or API-key.
+/// No-op when the OTel provider was never initialized or the external stream is dormant.
 pub fn sync_external_otel_identity() {
     if let Some(provider) = OTEL_PROVIDER.get() {
         let snapshot = provider.snapshot();
@@ -392,8 +402,8 @@ mod tests {
     /// Serializes tests that pin `GROK_AUTH_EARLY_INVALIDATION_SECS`, since env vars are process-global and parallel tests would race.
     static EARLY_INVALIDATION_LOCK: Mutex<()> = Mutex::new(());
 
-    /// RAII guard: pins `GROK_AUTH_EARLY_INVALIDATION_SECS` to the production
-    /// default (300s) while held, restoring the value on drop.
+    /// RAII guard: pins `GROK_AUTH_EARLY_INVALIDATION_SECS` to the production default (300s) while held, restoring the previous value on drop.
+    /// Acquires `EARLY_INVALIDATION_LOCK` so concurrent test runners can't observe a half-mutated env.
     struct EarlyInvalidationGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
         previous: Option<String>,
@@ -405,6 +415,9 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             let previous = std::env::var("GROK_AUTH_EARLY_INVALIDATION_SECS").ok();
+            // SAFETY: env var mutation is `unsafe` in edition 2024; the lock
+            // above ensures no other test in this module reads/writes the
+            // same key concurrently.
             unsafe { std::env::set_var("GROK_AUTH_EARLY_INVALIDATION_SECS", "300") };
             Self {
                 _lock: lock,
@@ -446,7 +459,7 @@ mod tests {
     }
 
     /// The shell half of the subagent-401 contract; the sampler half is pinned in xai-grok-sampler's resolver tests. Over a real `AuthManager` the resolver returns `None` when hard-expired (fail-closed).
-    /// It returns the token inside the early-invalidation buffer (still proxy-accepted), and the fresh token after a rotation. The same resolver serves all states without a client rebuild.
+    /// It returns the token inside the early-invalidation buffer (still proxy-accepted), and the fresh token after a rotation. The same resolver serves all three states without a client rebuild.
     #[test]
     fn wire_valid_resolver_tracks_manager_across_expiry_and_refresh() {
         use xai_grok_sampler::BearerResolver;
@@ -538,6 +551,7 @@ mod tests {
         );
     }
 
+    /// With no wire-valid bearer the hook does nothing: the pre-flight already refreshed and the 401 arm owns the tokenless case.
     /// A refresh per send here would let parked, deliberately credential-less resubmits drive the escalation budget.
     #[tokio::test]
     async fn prepare_for_send_is_a_no_op_without_a_wire_valid_bearer() {
@@ -654,7 +668,7 @@ mod tests {
     fn falls_back_to_expired_auth_during_buffer_window() {
         let _guard = EarlyInvalidationGuard::pin_to_default();
         let dir = tempfile::tempdir().unwrap();
-        // The token expires in a few minutes, inside the pinned 5-minute buffer, so `current()` returns None and `expired_auth()` returns Some
+        // The token expires in 4 minutes, inside the pinned 5-minute buffer, so `current()` returns None and `expired_auth()` returns Some
         let mgr = make_manager(
             &dir,
             Some(make_auth("buffer-token", ChronoDuration::minutes(4))),
@@ -690,6 +704,7 @@ mod tests {
         assert!(snap.user_id.is_none());
     }
 
+    /// 401 recovery routes through `unauthorized_recovery` and actually runs the configured refresher.
     #[tokio::test]
     async fn refresh_after_unauthorized_drives_recovery_state_machine() {
         let _guard = EarlyInvalidationGuard::pin_to_default();
@@ -963,7 +978,8 @@ mod tests {
             "absent token is not usable"
         );
 
-        // A refresh verdict must not make a still wire-valid access token unusable The gate keys on wire-validity, not the verdict.
+        // A refresh verdict must not make a still wire-valid access token unusable
+        // The gate keys on wire-validity, not the verdict, so a refresh failure doesn't pause uploads while the cached token is good
         let dir = tempfile::tempdir().unwrap();
         let mgr = make_manager(&dir, Some(make_auth("live", ChronoDuration::hours(1))));
         mgr.record_permanent_failure(

@@ -1,4 +1,8 @@
 //! Shell-side dispatch on [`CompactionMode`].
+//! Split into two methods so the write isn't hidden behind a text-producing name.
+//!
+//! Layering (do NOT collapse): the mode decision and hint text sit in [`CompactionMode`].
+//! The markdown render sits in `xai-compaction-transcript`, disk I/O in `StorageAdapter`.
 use super::SessionActor;
 use crate::extensions::notification::CompactionSegmentFile;
 use crate::session::persistence::PersistenceMsg;

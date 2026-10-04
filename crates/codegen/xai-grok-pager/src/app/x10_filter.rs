@@ -1,4 +1,6 @@
 //! X10 mouse reassembly filter for the input event channel.
+//! Sibling of [`super::csi_filter`], which reassembles SGR-format text fragments.
+//! See [`X10ReassemblyFilter`].
 
 use std::time::{Duration, Instant};
 
@@ -6,8 +8,9 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEvent};
 
 use super::event_loop::TimedInputEvent;
 
-/// These coordinates are fixed by the encoding and never reflect the true
-/// position.
+/// These coordinates are fixed by the encoding and never reflect the true position.
+/// Terminal bounds therefore cannot distinguish a mangled report from a genuine event on a large terminal.
+/// The pair decodes from contiguous bytes in a single terminal read, so the completion must arrive within [`MAX_COMPLETION_GAP`] of the candidate.
 pub(super) struct X10ReassemblyFilter {
     /// Candidate mangled report held awaiting its displaced row byte.
     held: Option<HeldReport>,
@@ -20,6 +23,8 @@ struct HeldReport {
 }
 
 /// Maximum arrival gap between the mangled mouse event and its displaced row byte.
+/// The pair is parsed from adjacent bytes of one read, so real pairs arrive effectively simultaneously.
+/// Human typing after a coincidentally magic-shaped genuine event is orders of magnitude slower.
 const MAX_COMPLETION_GAP: Duration = Duration::from_millis(50);
 
 impl X10ReassemblyFilter {
@@ -27,8 +32,8 @@ impl X10ReassemblyFilter {
         Self { held: None }
     }
 
-    /// Process a batch of events, reassembling mangled X10 reports. A held candidate persists across calls so a pair the
-    /// reader thread split across batches is still reconstructed.
+    /// Process a batch of events, reassembling mangled X10 reports.
+    /// A held candidate persists across calls so a pair the reader thread split across two batches is still reconstructed.
     pub(super) fn filter(&mut self, events: Vec<TimedInputEvent>) -> Vec<TimedInputEvent> {
         let mut result = Vec::with_capacity(events.len());
         let mut reassembled_count = 0usize;
@@ -70,12 +75,15 @@ impl X10ReassemblyFilter {
 }
 
 /// Whether this mouse event matches the mis-parse shape.
+/// The column is the UTF-8 lead byte (`0xC2`/`0xC3` minus 33) and the row is a continuation byte (`0x80..=0xBF` minus 33).
+/// The shape is independent of the true position.
 fn is_mangled_shape(m: &MouseEvent) -> bool {
     matches!(m.column, 161 | 162) && (95..=158).contains(&m.row)
 }
 
 /// The displaced row byte, if this event is one: a bare printable/Latin-1 `Char` press, or `Backspace` for row byte `0x7F`.
 /// Crossterm reports uppercase coordinate bytes with SHIFT.
+/// Coordinate bytes are always >= 33 (1-based coordinate + 32).
 fn displaced_row_byte(event: &Event) -> Option<u16> {
     let Event::Key(ke) = event else {
         return None;
@@ -154,12 +162,14 @@ mod tests {
         }))
     }
 
+    /// The mis-parse of a motion report at column 100 (byte 0x84, expanded to C2 84): column = 0xC2 - 33 = 161, row = 0x84 - 33 = 99.
     fn mangled_c2_col100() -> TimedInputEvent {
         mouse(MouseEventKind::Moved, 161, 99)
     }
 
     #[test]
     fn reconstructs_c2_report_in_one_batch() {
+        // Displaced row byte 'P' (0x50): true row 0x50 - 33 = 47.
         let out = X10ReassemblyFilter::new().filter(vec![
             mangled_c2_col100(),
             press_mods(KeyCode::Char('P'), KeyModifiers::SHIFT),
@@ -178,6 +188,8 @@ mod tests {
 
     #[test]
     fn reconstructs_c3_report() {
+        // 0xC3 lead (column byte 0xC0..=0xFF): mis-parse column 162
+        // With continuation 0x84 (row 99), the true column byte is (0x03 << 6) | 0x04 = 0xC4, so column 163
         let out = X10ReassemblyFilter::new().filter(vec![
             mouse(MouseEventKind::Moved, 162, 99),
             press_mods(KeyCode::Char('P'), KeyModifiers::SHIFT),
@@ -204,6 +216,9 @@ mod tests {
 
     #[test]
     fn reconstructs_shape_that_is_in_bounds_on_large_terminals() {
+        // On a 180x120 terminal the C3 mis-parse (162, 115) is inside the terminal's bounds
+        // The shape is decisive regardless: reassembly must not be skipped
+        // Regression test: the earlier bounds-check design let exactly this leak through
         let out = X10ReassemblyFilter::new().filter(vec![
             mouse(MouseEventKind::Moved, 162, 115),
             press_mods(KeyCode::Char('P'), KeyModifiers::SHIFT),
@@ -223,6 +238,7 @@ mod tests {
 
     #[test]
     fn reconstructs_latin1_row_byte() {
+        // Both coordinates expanded: the displaced row byte itself arrives as a Latin-1 char (0xA0 gives row 127)
         let out = X10ReassemblyFilter::new().filter(vec![
             mangled_c2_col100(),
             press_mods(KeyCode::Char('\u{A0}'), KeyModifiers::NONE),
@@ -233,6 +249,7 @@ mod tests {
 
     #[test]
     fn reconstructs_backspace_row_byte() {
+        // Row byte 0x7F parses as Backspace: true row 127 - 33 = 94.
         let out = X10ReassemblyFilter::new().filter(vec![
             mangled_c2_col100(),
             press_mods(KeyCode::Backspace, KeyModifiers::NONE),

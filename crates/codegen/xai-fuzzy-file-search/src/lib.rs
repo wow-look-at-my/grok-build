@@ -1,4 +1,11 @@
 //! Fuzzy file search over a directory tree.
+//!
+//! An `ignore` walk feeds paths into a `nucleo` matcher; [`FuzzyFileMatcher`]
+//! owns that pair and [`FuzzyFileMatcherDaemon`] drives it from a background
+//! thread so callers can poll for the current top-k. Every stage degrades
+//! rather than aborting when a thread cannot be spawned: an empty query still
+//! browses from a serial top-level walk, and a fully refused matcher returns
+//! empty results.
 
 #![deny(clippy::indexing_slicing)]
 #![allow(clippy::cast_possible_truncation)]
@@ -26,7 +33,9 @@ use serde::Serialize;
 const NUM_NUCLEO_THREADS: usize = 2;
 const NUM_IGNORE_THREADS: usize = 8;
 
-/// What a fuzzy matcher can serve.
+/// What a fuzzy matcher can serve. Browsing is a serial depth-1 walk that needs
+/// no thread pool; only keyed matching needs the nucleo pool, and only the
+/// daemon needs its worker thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MatcherMode {
     /// Nucleo pool up: keyed fuzzy queries and empty-query browsing.
@@ -169,7 +178,8 @@ fn choose_walk_mode(nucleo_enabled: bool, probe: impl Fn(usize) -> bool) -> Walk
 pub struct FuzzyFileMatcher {
     root: PathBuf,
     query: String,
-    /// `None` when the matcher pool cannot be spawned; keyed matching then degrades to `MatcherMode::BrowseOnly`.
+    /// `None` when the matcher pool cannot be spawned; keyed matching then
+    /// degrades to `MatcherMode::BrowseOnly`. See `mode`.
     nucleo: Option<Nucleo<MatchEntry>>,
     matcher: Matcher,
     walk_handle: Option<JoinHandle<()>>,
@@ -180,6 +190,8 @@ pub struct FuzzyFileMatcher {
 
 impl FuzzyFileMatcher {
     /// Create a matcher with default config focused on matching paths.
+    /// If the thread pool cannot spawn (cgroup pids / `RLIMIT_NPROC`), degrade to browse-only: keyed queries return no matches.
+    /// The probe reserves `NUM_NUCLEO_THREADS + 1` so the daemon browse spawn is not starved by the pool.
     pub fn new(root: &Path) -> Self {
         Self::new_inner(root, threads_spawnable(NUM_NUCLEO_THREADS + 1))
     }
@@ -241,7 +253,8 @@ impl FuzzyFileMatcher {
         &mut self,
         make_walker: impl FnOnce(&mut WalkBuilder) -> &mut WalkBuilder,
     ) {
-        // Join the walk first so the probe measures freed threads, not the outgoing walk's.
+        // Join the previous walk first so the probe measures freed threads, not
+        // the outgoing walk's.
         self.join_walk();
         let mode = choose_walk_mode(self.is_enabled(), threads_spawnable);
         self.restart_walk_inner(make_walker, mode);
@@ -328,7 +341,8 @@ impl FuzzyFileMatcher {
             injector
         });
         let Some(injector) = injector else {
-            // Disabled matcher: browsing still works from `top_entries`, but there is no background walk to feed.
+            // Disabled matcher: browsing still works from `top_entries`, but
+            // there is no background walk to feed.
             tracing::debug!("fuzzy walk skipped: matcher disabled");
             return;
         };
@@ -464,7 +478,8 @@ impl FuzzyFileMatcher {
                 .collect();
         }
 
-        // https://github.com/helix-editor/helix/blob/d79cce4e4bfc24dd204f1b294c899ed73f7e9453/helix-term/src/ui/completion.rs#L369.
+        // https://github.com/helix-editor/helix/blob/d79cce4e4bfc24dd204f1b294c899ed73f7e9453/helix-term/src/ui/completion.rs#L369
+        // suggested min score = 7 * len + 14
         let len = self.query.chars().count() as u32;
         let min_score = 7 + len * 14;
 
@@ -488,7 +503,8 @@ impl FuzzyFileMatcher {
                 matcher: &mut Matcher,
                 dirs_only: bool,
             ) -> Option<FuzzyMatchResult> {
-                // SAFETY: `m.idx` comes from this snapshot's own match list, so it is a valid index into the snapshot.
+                // SAFETY: `m.idx` comes from this snapshot's own match list, so
+                // it is a valid index into the snapshot.
                 let item = unsafe { snapshot.get_item_unchecked(m.idx) };
                 if dirs_only && !item.data.is_dir {
                     return None;
@@ -583,8 +599,10 @@ pub struct FuzzyFileMatcherDaemon {
     results: Arc<Mutex<FuzzyMatcherDaemonResults>>,
     tx: SyncSender<FuzzyMatcherDaemonMessage>,
     /// `None` when the daemon thread cannot be spawned; messages are dropped.
+    /// Joined in `Drop` for deterministic teardown.
     handle: Option<JoinHandle<()>>,
-    /// Served capability.
+    /// Served capability. `Disabled` means the worker thread was refused, so
+    /// `get` yields only empty results; `BrowseOnly` still returns browse hits.
     mode: MatcherMode,
 }
 
@@ -675,8 +693,8 @@ impl FuzzyFileMatcherDaemon {
     /// populated them, so this yields only empty results.
     pub fn get(&self) -> FuzzyMatcherDaemonResults {
         if self.mode == MatcherMode::Disabled {
-            // Terminal empty state. `generation` is MAX so it also clears the
-            // callers' `generation >= min_gen` gate.
+            // Terminal empty state. `generation` is MAX so it also clears the callers' `generation >= min_gen` gate.
+            // Otherwise a disabled search reads as perpetually pending once the first query bumps min_gen past zero.
             return FuzzyMatcherDaemonResults {
                 status: FuzzyMatcherStatus {
                     done: true,
@@ -716,7 +734,8 @@ impl Drop for FuzzyFileMatcherDaemon {
 
 #[cfg(test)]
 mod tests {
-    //! Regression guards: a refused thread degrades fuzzy search rather than aborting under `panic = "abort"`.
+    //! Regression guards: a refused thread degrades fuzzy search rather than
+    //! aborting under `panic = "abort"`.
 
     use super::*;
 
@@ -848,13 +867,16 @@ mod thread_exhaustion_tests {
             std::process::exit(0);
         }
         // Drive the disabled matcher end to end: restart_walk returns before spawning a walk thread.
+        // Every query call returns empty. A panic here would abort under panic=abort.
         matcher.restart_walk();
         matcher.set_query("alpha", false);
         let _ = matcher.tick(10);
         let _ = matcher.num_items();
         let _ = matcher.get_top_k(10);
 
-        // The daemon degrades too: its worker thread fails to spawn under the cap.
+        // The daemon degrades too: its worker thread fails to spawn under the
+        // cap, so set_query/get must return empty without panicking. Fail (not
+        // skip) if it somehow returns matches.
         let daemon = FuzzyFileMatcherDaemon::new(FuzzyFileMatcher::new(dir.path()), 10);
         daemon.set_query("alpha", false);
         if !daemon.get().topk.is_empty() {

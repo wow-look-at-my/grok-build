@@ -1,4 +1,5 @@
 //! Process-wide cache for normalized images.
+//! Byte-weighted eviction caps memory at [`CACHE_MAX_BYTES`]; TTL and TTI expire stale entries in long-running daemons.
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -310,6 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn byte_budget_evicts_lru() {
+        // The capacity is sized so exactly two 609-byte entries fit; a third insert forces LRU eviction of `a`
         let cache = enabled_cache(1500);
         let big_payload = Bytes::from(vec![0u8; 600]);
 

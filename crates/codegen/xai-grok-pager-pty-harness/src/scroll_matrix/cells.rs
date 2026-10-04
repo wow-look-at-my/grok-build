@@ -1,4 +1,21 @@
 //! The cell table: terminal-class × config × gesture rows the matrix runs.
+//!
+//! Classes are `ScrollConfig` equivalence classes, not brands: every brand sharing a profile is represented once.
+//! `from_terminal_context` in the pager's `mouse.rs` is the source of truth:
+//!
+//! | class | env                        | ept | wheel_lpt | trackpad_lpt |
+//! |-------|----------------------------|-----|-----------|--------------|
+//! | C1    | none (harness strips)      | 3   | 3         | 3            |
+//! | C2    | `TERM_PROGRAM=iTerm.app`   | 1   | 1         | 3            |
+//! | C3    | `TERM_PROGRAM=zed`         | 1   | 3         | 3            |
+//! | C4    | `TERM_PROGRAM=vscode`      | 1   | 3         | 15           |
+//! | C5    | `TMUX=…` (remuxed)         | 1   | 1         | 3            |
+//!
+//! C5's env only exercises profile *selection*: the pager can't tell a fake `TMUX` from a real one.
+//! Real tmux event-mangling is simulated by the G9 gesture shapes, and a real-tmux tier stays local.
+//!
+//! Trim note: the full tier is a representative subset, not the exhaustive cross product.
+//! Every class, every gesture, and every config knob appears in at least one row.
 
 use super::gestures::GestureId;
 use super::invariants::InvariantId;
@@ -13,6 +30,7 @@ pub struct ExpectedProfile {
     pub wheel_lpt: u16,
     pub trackpad_lpt: u16,
     pub invert: bool,
+    /// Speed multiplier (NOT the 1-100 setting): `GROK_SCROLL_SPEED=100` echoes 6.0 via the pager's `speed_to_multiplier`.
     pub speed: f32,
 }
 
@@ -29,6 +47,7 @@ pub struct MatrixCell {
     pub id: &'static str,
     pub tier: Tier,
     /// Pager env pairs (terminal-class markers and config vars).
+    /// The runner appends `GROK_SCROLL_LOG`; the harness's env strips guarantee the host terminal can't leak competing markers underneath these.
     pub env: &'static [(&'static str, &'static str)],
     pub expected: ExpectedProfile,
     pub gesture: GestureId,
@@ -36,6 +55,8 @@ pub struct MatrixCell {
     /// Invariants judged for this cell (harness-side ids included; the runner routes by `InvariantId::is_log_side`).
     pub invariants: &'static [InvariantId],
     /// Invariants expected to VIOLATE on current code (known bugs, e.g. the G4 jerk until the finalize-decel fix).
+    /// Must be a subset of `invariants`.
+    /// The runner fails a cell on any non-xfail violation AND on an xfail PASS (a fixed bug must be promoted out of xfail, not silently absorbed).
     pub xfail: &'static [InvariantId],
 }
 
@@ -87,7 +108,7 @@ const AUTO_MUX_NODROP: &[InvariantId] = &[
     Ord, Cap, DropEq, Cadence, ConsA, Accel, Carry, Cfg, NoDrop, MuxNoOver,
 ];
 const AUTO_SCREEN: &[InvariantId] = &[Ord, Cap, DropEq, Cadence, ConsA, Accel, Carry, Cfg, Screen];
-/// The jerk suite: core plus both smoothness invariants the finalize-decel fix made hold (formerly this cell's xfail set).
+/// The jerk suite: core plus the two smoothness invariants the finalize-decel fix made hold (formerly this cell's xfail set).
 const JERK: &[InvariantId] = &[
     Ord,
     Cap,
@@ -125,7 +146,7 @@ const fn cell(
 /// The matrix. Ids are `<class>_<config>_<gesture>[_qualifier]`.
 #[rustfmt::skip]
 pub const CELLS: &[MatrixCell] = &[
-    // ── Curated (CI tier, cells) ─────────────────────────────────────
+    // ── Curated (CI tier, 8 cells) ─────────────────────────────────────
     cell("c1_auto_g3_flood_speed100", Tier::Curated, &[SPEED100],
         ExpectedProfile { speed: 6.0, ..C1 }, GestureId::G3Flood, SessionKind::Settled, AUTO_QUIET),
     cell("c2_auto_g3_flood_speed100", Tier::Curated, &[ITERM, SPEED100],
@@ -141,8 +162,8 @@ pub const CELLS: &[MatrixCell] = &[
         C5, GestureId::G9bMuxBatch, SessionKind::Settled, AUTO_MUX_NODROP),
     cell("c1_auto_g8_midstream", Tier::Curated, &[],
         C1, GestureId::G8MidStreamTrain, SessionKind::Streaming, AUTO),
-    // Id kept for artifact/test continuity: the cell pinned the G4 jerk as
-    // xfail until the finalize-decel fix Its former xfail rows.
+    // Id kept for artifact/test continuity: the cell pinned the G4 jerk as xfail until the finalize-decel fix
+    // Its former xfail rows (I-SMOOTH-COAST, I-NO-DROP) are ordinary pass rows now
     cell("c1_auto_g4_jerk_xfail", Tier::Curated, &[],
         C1, GestureId::G4Jerk, SessionKind::Settled, JERK),
     // ── Full tier (local sweep; representative subset — see trim note) ─
@@ -253,8 +274,8 @@ mod tests {
                 );
             }
         }
-        // The finalize-decel fix promoted the jerk cell's xfail rows
-        // (I-SMOOTH-COAST, I-NO-DROP).
+        // The finalize-decel fix promoted the jerk cell's xfail rows (I-SMOOTH-COAST, I-NO-DROP) into ordinary pass rows
+        // The table must carry no xfail anywhere until the next pinned bug
         let jerk = CELLS
             .iter()
             .find(|c| c.id == "c1_auto_g4_jerk_xfail")

@@ -38,10 +38,13 @@ pub fn bytes_to_metadata(file_bytes: &[u8]) -> Result<FileMetadata, xai_tool_run
     })
 }
 
-/// Whether `read_file` may embed `bytes` as a conversation image. Adobe SVG
-/// often starts with a PNG thumbnail. `infer` sniffs that prefix as
-/// `image/png`, and a structurally incomplete thumbnail (no `IEND`) 400s
-/// later turns as `invalid_image`.
+/// Whether `read_file` may embed `bytes` as a conversation image.
+///
+/// Adobe SVG often starts with a PNG thumbnail. `infer` sniffs that prefix as
+/// `image/png`, and a structurally incomplete thumbnail (no `IEND`) 400s later
+/// turns as `invalid_image`. `.svg` / `image/svg+xml`, and an incomplete PNG
+/// prefix followed by SVG markup, stay on the text path. GIF, JPEG, and a
+/// complete PNG still embed even if their bytes contain `<svg`.
 pub fn should_embed_as_conversation_image(path: &Path, bytes: &[u8], mime: &str) -> bool {
     if !mime.starts_with("image/") {
         return false;
@@ -126,6 +129,7 @@ fn find_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window.eq_ignore_ascii_case(needle))
 }
 
+/// 1×1 PNG whose `IDAT` payload contains the literal `<svg` bytes (CRC-valid).
 #[cfg(test)]
 pub(crate) fn png_with_svg_bytes_in_idat() -> Vec<u8> {
     vec![

@@ -1,9 +1,14 @@
-//! Process-wide activity gauges.
+//! Process-wide activity gauges. Each gauge registers itself the first time it
+//! is entered, so [`ActivitySnapshot`] and [`work_is_idle`] enumerate the
+//! registry rather than naming any gauge — a gauge defined in any crate is
+//! picked up without this module referencing it.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, Once, PoisonError};
 
-/// Wire keys for the activity gauges; each domain crate builds its gauge from the matching const, so a rename here propagates to the gauge.
+/// Wire keys for the activity gauges; each domain crate builds its gauge from the
+/// matching const, so a rename here propagates to the gauge, the snapshot, the
+/// reserved-keys list, and every reader.
 pub const SESSIONS_ACTIVE_KEY: &str = "sessions_active";
 pub const SUBAGENTS_ACTIVE_KEY: &str = "subagents_active";
 pub const COMPACTIONS_ACTIVE_KEY: &str = "compaction_active";

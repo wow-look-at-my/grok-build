@@ -1,4 +1,10 @@
 //! Permissions, `ask_user_question`, and plan approval are **blocking ACP reverse-requests**.
+//! The agent parks a tool-loop future on an in-memory oneshot and waits for the driver to answer.
+//! While such a request is open we record it here, keyed by `tool_call_id` (stable, lives in the transcript, so it survives reconnect).
+//! This registry is the single source of truth for "what is pending right now".
+//! The roster reads it to report [`crate::agent::roster::RosterActivity::NeedsInput`].
+//!
+//! Pending interactions are **requests, not notifications**: they are never persisted.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -9,6 +15,8 @@ use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
 use crate::extensions::notification::{SessionNotification, SessionUpdate as XaiSessionUpdate};
 
 /// Shared per-session map of open reverse-requests, keyed by `tool_call_id`.
+/// Mirrors the `current_prompt_id` signal on [`crate::session::handle::SessionHandle`].
+/// The same `Arc` is shared between the session actor (which mutates it) and the handle (which the roster reads synchronously).
 pub(crate) type PendingInteractions = Arc<Mutex<HashMap<String, PendingKind>>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -47,8 +55,9 @@ fn broadcast(gateway: &GatewaySender, session_id: &acp::SessionId, update: XaiSe
     }
 }
 
-/// RAII guard registering an open reverse-request for the lifetime of the
-/// parked oneshot.
+/// RAII guard registering an open reverse-request for the lifetime of the parked oneshot.
+///
+/// Drop runs whether the await returns normally, is cancelled, or errors.
 pub(crate) struct PendingInteractionGuard {
     pending: PendingInteractions,
     gateway: GatewaySender,
@@ -92,8 +101,7 @@ impl Drop for PendingInteractionGuard {
             let mut map = self.pending.lock().unwrap_or_else(|e| e.into_inner());
             map.remove(&self.tool_call_id).is_some()
         };
-        // First-answer-wins: only announce resolution if this guard owned the
-        // live entry
+        // First-answer-wins: only announce resolution if this guard actually owned the live entry
         if removed {
             broadcast(
                 &self.gateway,

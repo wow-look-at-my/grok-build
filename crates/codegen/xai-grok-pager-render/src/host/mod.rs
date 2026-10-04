@@ -49,6 +49,8 @@ impl HostOs {
 }
 
 /// WSL detection.
+/// The implementation lives in `xai-tty-utils` (the shared low-level crate) so crates that must not depend on this UI crate can reuse it.
+/// The re-export keeps existing `host::is_wsl()` callers unchanged.
 pub use xai_tty_utils::is_wsl;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, strum::Display)]

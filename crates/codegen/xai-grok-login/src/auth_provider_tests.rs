@@ -1,4 +1,5 @@
-// Slot names are process-global, so every test uses a unique name and needs no #[serial] No test mutates the process env.
+// Slot names are process-global, so every test uses a unique name and needs no #[serial]
+// No test mutates the process env: the scrub test sets its leak values on the child command instead
 
 use super::test_counting_provider as counting_provider;
 use super::*;
@@ -632,6 +633,7 @@ async fn re_mint_hands_the_prior_token_back_to_the_command() {
     );
 }
 
+/// A 401 whose re-mint fails invalidates the rejected token, so it is not re-served next turn (fail closed) even while still locally unexpired.
 #[tokio::test]
 async fn failed_401_remint_invalidates_the_cached_token() {
     let dir = tempfile::tempdir().unwrap();
@@ -670,6 +672,7 @@ async fn failed_401_remint_invalidates_the_cached_token() {
 }
 
 /// A pre-turn re-mint that fails over a now-stale cached token leaves nothing servable: the stale token is never handed to the wire.
+/// This mirrors the 401 recovery path.
 #[tokio::test]
 async fn failed_pre_turn_mint_does_not_serve_the_stale_token() {
     let dir = tempfile::tempdir().unwrap();

@@ -1,3 +1,14 @@
+//! Canonical external-settings tool name ↔ Grok tool correspondence: one table
+//! replacing two that drifted apart.
+//!
+//! Two consumers read it independently. The hook matcher (`xai-grok-hooks`) needs the
+//! Grok tool **names** an external settings term maps to (and the reverse, for regex
+//! matchers); the agent builder (`xai-grok-agent`) needs the [`ToolKind`] a `tools:`
+//! allowlist entry resolves to. A row may carry a kind without names (`PowerShell`
+//! shares `Execute`, with no distinct tool) or names without a kind (e.g.
+//! `Agent`/`ExitPlanMode`/`Cron*` are matchable but not allowlist-resolvable).
+//!
+//! The `grok` names are test-checked against the live registry.
 
 use super::tool::ToolKind;
 use ToolKind::*;
@@ -5,9 +16,11 @@ use ToolKind::*;
 /// One Claude tool's correspondence to Grok, read via the accessor functions below.
 struct ClaudeTool {
     claude: &'static str,
-    /// Grok [`ToolKind`] for allowlist resolution.
+    /// Grok [`ToolKind`] for allowlist resolution; `None` for names that are matchable
+    /// (spawn/plan-mode directives) but must not resolve an allowlist.
     kind: Option<ToolKind>,
-    /// Grok tool names this Claude tool maps.
+    /// Grok tool names this Claude tool maps to (empty when there is no direct
+    /// Grok tool — the entry then only contributes a `kind`).
     grok: &'static [&'static str],
 }
 
@@ -110,7 +123,7 @@ mod tests {
 
     #[test]
     fn claude_names_are_unique() {
-        // The drift this registry exists to prevent: a couple of rows for one Claude name.
+        // The drift this registry exists to prevent: two rows for one Claude name.
         let mut seen = std::collections::HashSet::new();
         for t in CLAUDE_TOOLS {
             assert!(seen.insert(t.claude), "duplicate Claude name: {}", t.claude);

@@ -1,4 +1,10 @@
 //! Startup restart-recovery scan for the workspace upload queue.
+//!
+//! After a restart, not-yet-uploaded archives survive on disk as temp and `.meta.json` ([`QueueItemSidecar`]) pairs.
+//! The fresh [`UploadQueue`] worker only consumes its in-process channel and never rescans the spill dir.
+//! [`run_startup_recovery`] walks the sidecars once at startup, verifies each temp file against its recorded `sha256`, and re-enqueues survivors.
+//! Corrupt, orphaned, and expired pairs are deleted.
+//! It runs before the workspace registers with the server, so prior-life items drain before any new turn hook can race against the queue.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -63,8 +69,7 @@ pub(crate) fn init_metrics() {
     ORPHAN_EXPIRED.inc_by(0);
 }
 
-/// Summary of a single [`run_startup_recovery`] sweep, returned for
-/// structured logging.
+/// Summary of a single [`run_startup_recovery`] sweep, returned for structured logging; Prometheus counters are emitted inline per sidecar.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RecoveryReport {
     /// Total `*.meta.json` sidecars examined.
@@ -85,8 +90,7 @@ pub async fn run_startup_recovery(workspace_home: &Path, queue: &UploadQueue) ->
     let queue_dir = workspace_home.join("upload_queue");
     let mut report = RecoveryReport::default();
 
-    // Snapshot first: re-enqueueing writes new sidecars into this same dir,
-    // and we must never re-process one we created
+    // Snapshot first: re-enqueueing writes new sidecars into this same dir, and we must never re-process one we just created
     let sidecars: Vec<std::path::PathBuf> = match std::fs::read_dir(&queue_dir) {
         Ok(entries) => entries
             .flatten()
@@ -213,7 +217,7 @@ pub async fn run_startup_recovery(workspace_home: &Path, queue: &UploadQueue) ->
             | EnqueueOutcome::FellBackToInline
             | EnqueueOutcome::Deduplicated
             | EnqueueOutcome::Skipped { .. } => {
-                // The worker owns the pair from here: it deletes both files on every terminal outcome.
+                // The worker owns the original pair from here: it deletes both files on every terminal outcome, same as a normal enqueue
                 report.recovered += 1;
                 ORPHAN_RECOVERED
                     .with_label_values(&[sidecar.artifact_name.as_str()])
@@ -264,8 +268,8 @@ fn record_lost(report: &mut RecoveryReport, reason: &str) {
     ORPHAN_LOST.with_label_values(&[reason]).inc();
 }
 
-/// Delete a sidecar and (optionally) its temp file, tolerating already-absent
-/// files.
+/// Delete a sidecar and (optionally) its temp file, tolerating already-absent files.
+/// Returns `true` only when both are now gone, so callers can report a leaked pair that would otherwise be re-processed on the next restart.
 fn delete_pair(sidecar: &Path, temp: Option<&Path>) -> bool {
     let removed_sidecar = remove_if_present(sidecar);
     let removed_temp = temp.map(remove_if_present).unwrap_or(true);
@@ -308,9 +312,9 @@ fn validate_recovered_sidecar(sidecar: &QueueItemSidecar) -> Result<(), &'static
     if sidecar.gcs_path.contains("..") || sidecar.gcs_path.contains('\0') {
         return Err("unsafe_gcs_path");
     }
-    // Session binding: every workspace artifact is keyed under its session
-    // prefix A sidecar whose `gcs_path` escapes `<session_id>/` is either
-    // corrupt.
+    // Session binding: every workspace artifact is keyed under its session prefix
+    // A sidecar whose `gcs_path` escapes `<session_id>/` is either corrupt or tampered with
+    // Otherwise a manifest could keep a valid session_id while redirecting verified bytes to another prefix
     if !sidecar
         .gcs_path
         .strip_prefix(&sidecar.session_id)
@@ -409,7 +413,7 @@ mod tests {
     use xai_file_utils::queue::{TraceExportSource, UploadRetryPolicy, sidecar_path_for};
     use xai_file_utils::{TraceExportConfig, UploadMethod};
 
-    /// Resolver pointing at an unreachable proxy.
+    /// Resolver pointing at an unreachable proxy; these tests only assert on the synchronous re-enqueue/file-deletion path, never upload completion.
     struct UnreachableResolver;
     impl TraceExportSource for UnreachableResolver {
         fn resolve(&self) -> TraceExportConfig {
@@ -417,6 +421,7 @@ mod tests {
                 bucket_url: None,
                 service_account_key: None,
                 upload_method: UploadMethod::Proxy {
+                    // 127.0.0.1:1 is never listening.
                     proxy_base_url: "http://127.0.0.1:1/v1".to_string(),
                     user_token: String::new(),
                     alpha_test_key: None,
@@ -605,7 +610,7 @@ mod tests {
 
         let report = run_startup_recovery(home.path(), &queue).await;
 
-        // The re-enqueue happened: report, queue stat, and metric all moved
+        // The re-enqueue really happened: report, queue stat, and metric all moved
         assert_eq!(report.recovered, 1, "one orphan re-enqueued");
         assert_eq!(report.lost, 0);
         assert_eq!(report.expired, 0);
@@ -626,7 +631,9 @@ mod tests {
             "recovered counter moved"
         );
 
-        // The pair is handed to the worker unmodified `enqueued_at` stays anchored to the first spill.
+        // The ORIGINAL pair is handed to the worker unmodified
+        // `enqueued_at` stays anchored to the first spill so restarts cannot slide the max-age window
+        // The worker deletes the pair on its terminal outcome
         assert!(temp.exists(), "original temp reused in place");
         assert!(sidecar.exists(), "original sidecar reused in place");
     }
@@ -644,7 +651,7 @@ mod tests {
             "workspace_environment.json",
             now_rfc3339(),
         );
-        // Corrupt the temp file AFTER the sidecar recorded the sha256.
+        // Corrupt the temp file AFTER the sidecar recorded the original sha256.
         std::fs::write(&temp, b"TRUNCATED").unwrap();
 
         let queue = spawn_queue(home.path());

@@ -1,10 +1,18 @@
 //! Layout cache for the list pane.
+//!
+//! Tracks per-item heights and prefix sums so that conversions between scroll position and item index are fast.
+//! Two variants:
+//!
+//! - [`FixedHeight`]: all items have height 1 (NoWrap mode). Everything is O(1).
+//! - [`Variable`]: items have different heights (Wrap mode). Uses a prefix-sum vec for O(log n) position lookups.
 
 /// Wrap mode for the list pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WrapMode {
-    /// Soft-wrap lines at viewport width. Variable height per item. Requires full layout cache.
+    /// Soft-wrap lines at viewport width.  Variable height per item.
+    /// Requires full layout cache.
     Wrap,
+    /// No wrapping: each item is exactly 1 visual line, truncated with `…`.
     /// Layout is trivial O(1).
     NoWrap,
 }
@@ -12,7 +20,7 @@ pub enum WrapMode {
 /// Layout cache, an enum to support the fixed-height fast path.
 #[derive(Debug, Clone)]
 pub enum ListLayoutCache {
-    /// No allocation needed.
+    /// All items are height 1 (NoWrap mode).  No allocation needed.
     FixedHeight {
         /// Number of items, which is also the total height in visual lines.
         count: usize,
@@ -23,12 +31,14 @@ pub enum ListLayoutCache {
         width: u16,
         /// Per-item heights (indexed by *visible* index when filtered).
         heights: Vec<u16>,
-        /// Prefix sums: `prefix_sums[i]` = sum of `heights[0..i]`. Length is `heights.len() + 1`. `prefix_sums[0] = 0`.
+        /// Prefix sums: `prefix_sums[i]` = sum of `heights[0..i]`. Length is `heights.len() + 1`.
+        /// `prefix_sums[0] = 0`. `prefix_sums[n] = total_height`.
         prefix_sums: Vec<usize>,
     },
 }
 
 impl ListLayoutCache {
+    /// Create a fixed-height cache for `count` items (all height 1).
     pub fn fixed(count: usize) -> Self {
         Self::FixedHeight { count }
     }
@@ -122,6 +132,7 @@ impl ListLayoutCache {
                     return None; // empty
                 }
                 // Binary search: find the largest i such that prefix_sums[i] <= y.
+                // partition_point returns the first index where prefix_sums[i] > y, so we subtract 1
                 let pos = prefix_sums.partition_point(|&s| s <= y);
                 let idx = pos.saturating_sub(1);
                 // Clamp to valid item range
@@ -169,10 +180,12 @@ mod tests {
 
     #[test]
     fn variable_height_basics() {
+        // Items with heights: 3, 1, 2, 4
         let cache = ListLayoutCache::from_heights(80, vec![3, 1, 2, 4]);
         assert_eq!(cache.total_height(), 10);
         assert_eq!(cache.item_count(), 4);
 
+        // virtual_y positions: 0, 3, 4, 6
         assert_eq!(cache.virtual_y(0), 0);
         assert_eq!(cache.virtual_y(1), 3);
         assert_eq!(cache.virtual_y(2), 4);
@@ -186,16 +199,22 @@ mod tests {
 
     #[test]
     fn variable_height_item_at_y() {
+        // Items with heights: 3, 1, 2, 4; prefix_sums: [0, 3, 4, 6, 10]
         let cache = ListLayoutCache::from_heights(80, vec![3, 1, 2, 4]);
 
+        // y=0,1,2: item 0
         assert_eq!(cache.item_at_y(0), Some(0));
         assert_eq!(cache.item_at_y(1), Some(0));
         assert_eq!(cache.item_at_y(2), Some(0));
+        // y=3: item 1
         assert_eq!(cache.item_at_y(3), Some(1));
+        // y=4,5: item 2
         assert_eq!(cache.item_at_y(4), Some(2));
         assert_eq!(cache.item_at_y(5), Some(2));
+        // y=6,7,8,9: item 3
         assert_eq!(cache.item_at_y(6), Some(3));
         assert_eq!(cache.item_at_y(9), Some(3));
+        // y=10+: clamped to item 3
         assert_eq!(cache.item_at_y(10), Some(3));
         assert_eq!(cache.item_at_y(100), Some(3));
     }
@@ -238,6 +257,7 @@ mod tests {
         assert_eq!(cache.item_count(), 4);
         assert_eq!(cache.total_height(), 10);
 
+        // Prefix sums: [0, 3, 4, 6, 10]
         assert_eq!(cache.virtual_y(0), 0);
         assert_eq!(cache.virtual_y(1), 3);
         assert_eq!(cache.virtual_y(2), 4);

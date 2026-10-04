@@ -1,4 +1,7 @@
 //! Prompt construction for conversation history compaction.
+//!
+//! The developer and user prompts are intentionally identical so the model
+//! sees the instructions on both turns.
 
 use anyhow::Result;
 

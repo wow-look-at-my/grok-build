@@ -1,4 +1,12 @@
 //! Persistent shell state across command invocations.
+//!
+//! After each command, the shell's environment
+//! (env vars, cwd, functions, aliases, options) is serialized via a dump script,
+//! and replayed before the next command. Each invocation is still a fresh process,
+//! but the user observes a single continuous session.
+//!
+//! State is transported via extra file descriptors (fd 3 for input, fd 4 for output)
+//! so that dump traffic never pollutes stdout/stderr.
 
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
@@ -11,20 +19,25 @@ use command_fds::FdMapping;
 use nix::libc;
 use tokio::io::AsyncReadExt;
 
-// ============================================================================ Marker constants.
+// ============================================================================
+// Marker constants
+// ============================================================================
 
 const BASH_STATE_START_MARKER: &str = "__GROK_BASH_STATE_START__";
 const BASH_STATE_END_MARKER: &str = "__GROK_BASH_STATE_END__";
 const ZSH_STATE_START_MARKER: &str = "__GROK_ZSH_STATE_START__";
 const ZSH_STATE_END_MARKER: &str = "__GROK_ZSH_STATE_END__";
 
-/// Marker emitted by the init path to separate login-shell noise (MOTD, etc.) from the actual state dump on stdout.
+/// Marker emitted by the init path to separate login-shell noise (MOTD, etc.)
+/// from the actual state dump on stdout.
 const INIT_STATE_MARKER: &str = "__GROK_INIT_STATE_MARKER__";
 
 /// Maximum time to wait for a shell state init (login shell + rc files).
 const INIT_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Maximum time to wait for the dump reader task after the child process exits. Uses a 5s close timeout.
+/// Maximum time to wait for the dump reader task after the child process exits.
+/// Uses a 5s close timeout. If a background process inherits fd 4,
+/// the reader would hang forever without this.
 const DUMP_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Environment overrides applied to every agent terminal / persistent shell spawn.
@@ -44,6 +57,8 @@ pub fn shell_env_overrides() -> HashMap<String, String> {
 }
 
 /// Returns the sudo alias injection string if `SUDO_ASKPASS` is configured.
+/// When set, `alias sudo='sudo -A'` makes any `sudo` in the user's command
+/// use the askpass helper instead of blocking on tty input.
 fn sudo_alias_injection() -> String {
     match std::env::var("SUDO_ASKPASS") {
         Ok(val) if !val.is_empty() => "alias sudo='sudo -A'; ".to_string(),
@@ -198,7 +213,8 @@ function dump_zsh_state() {
 "##;
 
 // ============================================================================
-// Shell kind.
+// Shell kind
+// ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellKind {
@@ -215,10 +231,9 @@ impl ShellKind {
         }
     }
 
-    /// Resolved absolute path to the shell binary. Falls back from `$SHELL`
-    /// → `which` → common dirs → `/bin/<name>`. Result is cached
-    /// process-wide in `xai_grok_config::shell::unix_shell_path`. See that
-    /// function for the full cascade.
+    /// Resolved absolute path to the shell binary. Falls back from `$SHELL` → `which` → common dirs
+    /// → `/bin/<name>`. Result is cached process-wide in `xai_grok_config::shell::unix_shell_path`.
+    /// See that function for the full cascade. Returns `&'static str`.
     pub fn binary_path(&self) -> &'static str {
         let kind = match self {
             Self::Bash => xai_grok_config::shell::UnixShellKind::Bash,
@@ -265,10 +280,11 @@ impl ShellKind {
 }
 
 // ============================================================================
-// ShellState.
+// ShellState
+// ============================================================================
 
-/// Persistent shell state: a serialized snapshot that can be replayed to
-/// restore env vars, cwd, functions, aliases.
+/// Persistent shell state: a serialized snapshot that can be replayed to restore
+/// env vars, cwd, functions, aliases, and shell options in a fresh shell process.
 #[derive(Debug, Clone)]
 pub struct ShellState {
     /// Current working directory (from the dump's first line).
@@ -291,7 +307,8 @@ impl ShellState {
         let dump_script = shell.dump_script();
         let dump_fn = shell.dump_function_name();
 
-        // Build the one-liner: define the dump function, print a marker (to separate login noise from our output).
+        // Build the one-liner: define the dump function, print a marker (to separate
+        // login noise from our output), then call the dump function.
         let script = format!("{dump_script} builtin printf '{INIT_STATE_MARKER}\\n'; {dump_fn}");
 
         let args: Vec<&str> = match shell {
@@ -299,7 +316,9 @@ impl ShellState {
             ShellKind::Zsh => vec!["-o", "extendedglob", "-ilc", &script],
         };
 
-        // stderr is intentionally discarded (Stdio::null) — we never read it.
+        // stderr is intentionally discarded (Stdio::null) — we never read it, and piping it would
+        // risk a deadlock if the user's rc files write >64KB to stderr (fills the pipe buffer,
+        // child blocks on write, parent blocks on stdout read).
         let mut cmd = tokio::process::Command::new(shell.binary_path());
         cmd.args(&args)
             .current_dir(cwd)
@@ -309,9 +328,9 @@ impl ShellState {
             .kill_on_drop(true);
         crate::util::detach_command(&mut cmd);
         xai_grok_sandbox::child_net::restrict_child_network(&mut cmd);
-        // Apply the policy before the `export -p` snapshot so the replayed
-        // state is already filtered; otherwise the restore would undo it.
-        // No-op unless set. SECURITY: this filters the base env only.
+        // Apply the policy before the `export -p` snapshot so the replayed state is already filtered; otherwise the restore would undo it. No-op
+        // unless set. SECURITY: this filters the base env only. Variables an rc file exports during login are captured in the replay snapshot and are
+        // not re-filtered by `exclude`/`include_only` on the persistent backend, so warn when a policy is active.
         if shell_env_policy.is_some_and(|p| !p.is_noop()) {
             tracing::warn!(
                 "shell_environment_policy filters the persistent shell's base env only; \
@@ -369,7 +388,9 @@ impl ShellState {
         }
     }
 
-    /// Build the wrapper command and fd pipe pair for a persistent shell invocation.
+    /// Build the wrapper command and fd pipe pair for a persistent shell invocation. `state_in_fd` is a pipe the caller writes the prior snapshot
+    /// to (fd 3 in the child) `state_out_fd` is a pipe the caller reads the new dump from (fd 4 in the child) Write `self.snapshot` to
+    /// `state_in_fd` then close it Spawn the child with the returned args + fd_mappings Read `state_out_fd` after the child exits
     pub fn prepare_command(
         &self,
         user_command: &str,
@@ -382,15 +403,23 @@ impl ShellState {
         let sudo_inject = sudo_alias_injection();
         let search_inject = super::embedded_search_tools::search_injection(search_shadows);
 
+        // Create two OS pipes: one for state-in (fd 3), one for state-out (fd 4).
+        // os_pipe() creates fds with O_CLOEXEC (atomically on Linux,
+        // best-effort on macOS) so concurrent forks can't leak them.
         let (state_in_read, state_in_write) = os_pipe()?;
         let (state_out_read, state_out_write) = os_pipe()?;
 
-        // Ensure the parent-only ends have CLOEXEC.
+        // Ensure the parent-only ends have CLOEXEC (redundant on Linux
+        // where os_pipe uses pipe2, but needed as a safety net on macOS
+        // where pipe+fcntl has a small race window).
         set_cloexec(&state_in_write)?;
         set_cloexec(&state_out_read)?;
         // The child-bound ends (state_in_read, state_out_write) also have CLOEXEC from os_pipe().
-        // The originals are closed on exec by CLOEXEC.
+        // This is fine: fd_mappings uses dup2() which clears CLOEXEC on the target fd (3/4), so the
+        // child keeps them across exec. The originals are closed on exec by CLOEXEC.
 
+        // Read prior snapshot from fd 3, eval it (restores env/funcs/aliases/opts) Run the user's
+        // command (passed as $1) Dump new state to fd 4 Exit with the user command's exit code
         let wrapper = match self.shell {
             ShellKind::Bash => format!(
                 // Merge the user command's stderr into its stdout via `2>&1` so the captured byte stream preserves chronological write order. Shell-level
@@ -466,6 +495,7 @@ impl ShellState {
         })
     }
 
+    /// Update this state from a raw dump string (read from fd 4).
     /// Returns `true` if the state was successfully updated.
     pub fn update_from_dump(&mut self, raw: &str) -> bool {
         match parse_dump(self.shell, raw) {
@@ -486,7 +516,9 @@ impl ShellState {
 
 /// Everything needed to spawn a persistent shell command.
 pub struct PreparedCommand {
-    /// Resolved shell binary path.
+    /// Resolved shell binary path (e.g. `/bin/bash`, `/opt/homebrew/bin/bash`,
+    /// or `/run/current-system/sw/bin/bash` on NixOS). See
+    /// [`ShellKind::binary_path`] for the resolution cascade.
     pub binary: String,
     /// Full argument list for the shell.
     pub args: Vec<String>,
@@ -506,7 +538,7 @@ pub struct PreparedCommand {
 
 /// Create an OS pipe, returning `(read_end, write_end)` as `OwnedFd`. On Linux, uses `nix::unistd::pipe2(O_CLOEXEC)` to atomically set
 /// close-on-exec, eliminating the race window between `pipe()` and `fcntl(F_SETFD)` where a concurrent `fork()` could leak fds to an unrelated
-/// child.
+/// child. On macOS, `pipe2` is not exposed by `nix` 0.30 (the kernel added it in 10.15 but `nix`'s cfg gate hasn't caught up).
 fn os_pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
     // Linux: atomic O_CLOEXEC via pipe2.
     #[cfg(target_os = "linux")]
@@ -520,7 +552,8 @@ fn os_pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
     {
         let (read_fd, write_fd) =
             nix::unistd::pipe().map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
-        // Best-effort CLOEXEC — small race window on macOS between pipe() and these fcntl calls.
+        // Best-effort CLOEXEC — small race window on macOS between pipe()
+        // and these fcntl calls, but unavoidable without pipe2.
         let _ = set_cloexec(&read_fd);
         let _ = set_cloexec(&write_fd);
         Ok((read_fd, write_fd))
@@ -596,12 +629,13 @@ pub async fn write_snapshot_to_pipe(snapshot: &str, fd: OwnedFd) -> std::io::Res
     .map_err(std::io::Error::other)?
 }
 
-/// Read the full dump output from the state-out pipe with a timeout. The timeout (5s close timeout) prevents this from blocking the actor
-/// loop forever. On timeout, returns whatever was read so far (which is typically empty, so marker validation will fail and prior state is
-/// kept).
+/// Read the full dump output from the state-out pipe with a timeout. If a background process inherits fd 4, the pipe never closes and the
+/// reader hangs. The timeout (5s close timeout) prevents this from blocking the actor loop forever. On timeout, returns whatever was read so
+/// far (which is typically empty, so marker validation will fail and prior state is kept).
 pub async fn read_dump_from_pipe(fd: OwnedFd) -> std::io::Result<String> {
-    // Read until either of the END markers appears, *not* until EOF. The parent shell finishes its dump and exits, but the kernel doesn't close
-    // the read-end's EOF until every write-end holder closes theirs.
+    // Read until either of the END markers appears, *not* until EOF. When the user's command backgrounds a subprocess (`cmd &`), the bg shell
+    // inherits fd 4 (the dump pipe's write-end) and keeps it open until *it* exits. The parent shell finishes its dump and exits, but the kernel
+    // doesn't close the read-end's EOF until every write-end holder closes theirs.
     match tokio::time::timeout(
         DUMP_READ_TIMEOUT,
         tokio::task::spawn_blocking(move || {
@@ -613,6 +647,8 @@ pub async fn read_dump_from_pipe(fd: OwnedFd) -> std::io::Result<String> {
             loop {
                 let n = file.read(&mut chunk)?;
                 if n == 0 {
+                    // EOF: every write-end holder closed fd 4 (the
+                    // expected path when no bg subprocess was spawned).
                     break;
                 }
                 let Some(read) = chunk.get(..n) else { break };
@@ -726,21 +762,25 @@ mod tests {
         assert_eq!(result, output);
     }
 
-    /// Returns true iff a usable bash binary exists at the resolved path.
+    /// Returns true iff a usable bash binary exists at the resolved path. Used to gate integration tests so they're skipped
+    /// (rather than failing) on systems where bash isn't installed (e.g. minimal containers). On NixOS the resolver returns
+    /// the nix-store / profile path, so this guard works there too.
     fn bash_available() -> bool {
         std::path::Path::new(ShellKind::Bash.binary_path()).exists()
     }
 
     /// Returns true iff a usable zsh binary exists at the resolved path.
+    /// Mirrors [`bash_available`] so zsh integration tests skip (rather than
+    /// fail) on systems without zsh installed.
     fn zsh_available() -> bool {
         std::path::Path::new(ShellKind::Zsh.binary_path()).exists()
     }
 
     #[test]
     fn shell_kind_binary_path_resolves_to_correct_kind() {
-        // The resolver may pick any absolute path (e.g.
-        // `/opt/homebrew/bin/bash` on macOS+brew,
-        // `/run/current-system/sw/bin/bash` on NixOS).
+        // The resolver may pick any absolute path (e.g. `/opt/homebrew/bin/bash`
+        // on macOS+brew, `/run/current-system/sw/bin/bash` on NixOS), but the
+        // file name must match the requested kind.
         let bash = std::path::Path::new(ShellKind::Bash.binary_path())
             .file_name()
             .and_then(|n| n.to_str())
@@ -789,8 +829,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_init_bash() {
-        // Integration test: runs bash and captures state. Skip in
-        // environments without bash.
+        // Integration test: actually runs bash and captures state.
+        // Skip in environments without bash.
         if !bash_available() {
             return;
         }
@@ -842,14 +882,18 @@ mod tests {
         #[allow(clippy::disallowed_methods)] // test fixture; the test reaps it
         let child = cmd.spawn().unwrap();
         // Drop cmd to release the FdMapping OwnedFds held in its pre_exec closure.
+        // Without this, the parent keeps the write-end of the state-out pipe open,
+        // and the read task never sees EOF.
         drop(cmd);
 
+        // Write snapshot to fd 3
         let snapshot = state.snapshot.clone();
         let write_handle =
             tokio::spawn(
                 async move { write_snapshot_to_pipe(&snapshot, prep.state_in_write).await },
             );
 
+        // Read new dump from fd 4
         let read_handle =
             tokio::spawn(async move { read_dump_from_pipe(prep.state_out_read).await });
 
@@ -1099,12 +1143,14 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let mut state = ShellState::init(ShellKind::Bash, &cwd, None).await.unwrap();
 
-        // Turn on allexport; the option is captured by the dump and replayed into every subsequent command's shell.
+        // Turn on allexport; the option is captured by the dump and replayed
+        // into every subsequent command's shell.
         let (code, _) = run_command(&mut state, "set -a").await;
         assert_eq!(code, 0);
 
-        // This command's wrapper assigns __grok_user_cmd under allexport.
-        // printenv only sees exported vars — it must not see the temp var.
+        // This command's wrapper assigns __grok_user_cmd under allexport. printenv only sees
+        // exported vars — it must not see the temp var (neither from this command's own assignment
+        // nor re-exported from a previous command's state dump).
         let (code, stdout) = run_command(
             &mut state,
             "printenv __grok_user_cmd >/dev/null 2>&1 && echo LEAKED_TO_ENV || echo ENV_CLEAN",
@@ -1122,7 +1168,9 @@ mod tests {
     /// Under allexport every assignment is exported, which caught both the dump
     /// function's own locals (env_vars is a copy of the environment) and the
     /// snapshot's grok_snap_* carriers (FUNCTIONS_B64 is every function in the
-    /// shell).
+    /// shell). Either one leaves the environment big enough that the next exec
+    /// fails with E2BIG, which the shell reports as an unexplained 126 -- from a
+    /// command that has nothing wrong with it.
     ///
     /// Runs several commands after `set -a`, since the environment grew with
     /// each snapshot round-trip rather than all at once.
@@ -1151,7 +1199,7 @@ mod tests {
             assert!(stdout.contains("OK"), "round {round}: got {stdout:?}");
         }
 
-        // allexport must survive the round-trips it stopped breaking.
+        // allexport must survive the round-trips it just stopped breaking.
         let (code, stdout) = run_command(
             &mut state,
             "case $- in *a*) echo SET;; *) echo UNSET;; esac",
@@ -1216,8 +1264,9 @@ mod tests {
         let (code, _) = run_command(&mut state, "alias ll='ls -la'").await;
         assert_eq!(code, 0);
 
-        // Verify the alias survives by checking the dump itself
-        // (base64-encoded).
+        // Verify the alias survives by checking the dump itself (base64-encoded).
+        // We can't check plaintext in the snapshot since it's base64, but we can
+        // verify the snapshot is valid and non-empty (alias was captured in the dump).
         assert!(
             !state.snapshot.is_empty(),
             "snapshot should be non-empty after alias"
@@ -1257,8 +1306,8 @@ mod tests {
             "expected find and grep to both be shell functions, got: {stdout:?}"
         );
 
-        // Only assert the binary routes to ugrep when ugrep resolves on this
-        // host; otherwise the shadow correctly falls back to OS grep.
+        // Only assert the binary actually routes to ugrep when ugrep resolves on
+        // this host; otherwise the shadow correctly falls back to OS grep.
         if which::which("ugrep").is_ok() {
             let (code, stdout) = run_command(&mut state, "grep --version | head -3").await;
             assert_eq!(code, 0, "grep --version failed: {stdout}");

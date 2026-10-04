@@ -1,4 +1,10 @@
-//! Mirrors [`crate::session::goal_strategist`] in shape but fires on the OPPOSITE condition: exactly ONCE.
+//! Mirrors [`crate::session::goal_strategist`] in shape but fires on the OPPOSITE condition: exactly ONCE, after a goal is verified-ACHIEVED.
+//! It produces the closing user-facing summary, the last thing the user reads.
+//!
+//! Fail-OPEN: the goal is already complete before the summarizer runs, so completion is never blocked.
+//! Any failure (transport, runtime, cancel, empty output) is logged via `GoalSummarizerFailOpen` and ignored.
+//!
+//! Read-only: the summary IS the subagent's terminal output (no file read-back), and the spawn pins a read-only capability mode.
 
 use crate::session::events::{Event, GoalSummarizerFailReason};
 use crate::session::goal_planner::{
@@ -16,7 +22,8 @@ use xai_tool_types::SubagentCapabilityMode;
 
 // Constants
 
-/// Same general-purpose inventory the other goal roles use.
+/// Same general-purpose inventory the other goal roles use; the read-only capability mode (set on the spawn) narrows it to inspect-only tools.
+/// A configured `agent_type` selects the HARNESS, not this subagent type.
 const GOAL_SUMMARIZER_SUBAGENT_TYPE: &str = GOAL_ROLE_SUBAGENT_TYPE;
 
 /// Description shown in the pager subagent strip and matched by the e2e coordinator stub to distinguish summarizer spawns from other roles.
@@ -25,12 +32,13 @@ pub(crate) const GOAL_SUMMARIZER_SUBAGENT_DESCRIPTION: &str = "goal summarizer";
 const GOAL_SUMMARIZER_PROMPT_TEMPLATE: &str = include_str!("templates/goal_summarizer_prompt.md");
 
 /// Hard backstop on the surfaced summary length, in chars (`chars().take` is char-boundary-safe).
+/// Sits well above a compliant summary; it only clips a model that ignores the prompt's word cap.
 const GOAL_SUMMARIZER_SUMMARY_MAX_CHARS: usize = 1200;
 
 // Outcome and spawner abstraction
 
-/// `Summarized` carries the closing summary text the caller surfaces to the
-/// user.
+/// `Summarized` carries the closing summary text the caller surfaces to the user.
+/// `FailOpen` carries the reason; every variant is logged and ignored at the call site.
 #[derive(Debug, Clone)]
 #[expect(
     dead_code,
@@ -51,8 +59,9 @@ pub(crate) enum GoalSummarizerOutcome {
 /// `SpawnError` is reused from the planner module.
 #[async_trait::async_trait]
 pub(crate) trait GoalSummarizerSpawner: Send + Sync {
-    /// Spawn under `id` and return the terminal response (the summary) when
-    /// the subagent finishes.
+    /// Spawn under `id` and return the terminal response (the summary) when the subagent finishes.
+    /// `prompt` carries two renders: `primary` for the configured model and toolset, `fallback` for the retry with the default toolset.
+    /// The summarizer always inherits the parent's model and toolset, so only `primary` is used.
     async fn spawn_summarizer(
         &self,
         id: &str,
@@ -72,10 +81,13 @@ pub(crate) struct ChannelSpawner {
     pub(crate) parent_prompt_id: Option<String>,
     pub(crate) cwd: Option<String>,
     /// Trace-artifact sink and resolved `task` tool name; `None` disables recording.
+    /// See [`crate::session::goal_classifier::record_subagent_trace`].
     pub(crate) trace_sink: Option<(xai_chat_state::ChatStateHandle, String)>,
     /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
     pub(crate) fallback: RoleFallbackReporter,
-    /// Model from the `[models] goal_summarizer` slot. `None` inherits the session model.
+    /// Model from the `[models] goal_summarizer` slot. `None` inherits the
+    /// session model. The toolset is always the parent's, so this carries
+    /// no agent type.
     pub(crate) model_override: Option<String>,
 }
 
@@ -87,7 +99,9 @@ impl GoalSummarizerSpawner for ChannelSpawner {
         prompt: RoleRenderedPrompt,
     ) -> Result<String, SpawnError> {
         let trace_prompt = self.trace_sink.as_ref().map(|_| prompt.primary.clone());
-        // The summarizer keeps the parent toolset whatever its model is.
+        // The summarizer keeps the parent toolset whatever its model is, so
+        // the override carries no agent type and the wrapper's retry only
+        // ever has the model to drop.
         let override_ = RoleSpawnOverride {
             model: self.model_override.clone(),
             agent_type: None,
@@ -190,9 +204,12 @@ impl ChannelSpawner {
 
 pub(crate) struct GoalSummarizerInputs<'a> {
     pub objective: &'a str,
-    /// The verifier-judged plan (acceptance criteria); read for context. May not exist on disk (planner disabled).
+    /// The verifier-judged plan (acceptance criteria); read for context.
+    /// May not exist on disk (planner disabled).
     pub plan_file: &'a Path,
     /// Path string of the verifier's rescued final details file.
+    /// It is used only to substitute `{DETAILS_FILE}` in the prompt; the read-only subagent opens the file itself.
+    /// `None` renders the `(unavailable)` sentinel.
     pub details_file: Option<&'a str>,
     /// Absolute path to the session traces dir; the summarizer may skim `chat_history.jsonl` for intent.
     pub session_traces_dir: &'a Path,
@@ -279,8 +296,8 @@ pub(crate) async fn run_goal_summarizer(
         );
     }
 
-    // Backstop the prompt's word cap (a model can ignore it) A strict char
-    // prefix has fewer bytes than the whole.
+    // Backstop the prompt's word cap (a model can ignore it)
+    // A strict char prefix has fewer bytes than the whole, so the byte-length compare below detects a real cut
     let mut summary: String = trimmed
         .chars()
         .take(GOAL_SUMMARIZER_SUMMARY_MAX_CHARS)

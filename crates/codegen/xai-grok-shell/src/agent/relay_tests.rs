@@ -1,4 +1,5 @@
 //! Tests for [`super`] (the grok.com relay connection loop).
+//! Extracted from `relay.rs` so the implementation reads top-to-bottom; wired in via `#[path = "relay_tests.rs"] mod tests;`.
 use super::*;
 use serde_json::json;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -353,6 +354,7 @@ fn write_test_auth_to_disk(dir: &std::path::Path, scope: &str, auth: &GrokAuth) 
     std::fs::write(&path, json).unwrap();
 }
 /// Regression: `auth.json` vanishes (deleted, corrupt, or externally removed). The process still holds an expired access token and a valid refresh token in `AuthManager` memory.
+/// Relay 401 recovery must drive the full refresh chain (mint a fresh token via the refresher and REWRITE `auth.json`) instead of dead-ending.
 /// A relay holding a private, refresher-less `AuthManager` fails this: it can only adopt sibling disk tokens, and there are none.
 #[tokio::test]
 async fn auth_recovery_refreshes_and_heals_missing_auth_json() {
@@ -555,7 +557,8 @@ async fn test_auth_refresh_failure_continues_with_backoff() {
         connection_count.load(Ordering::SeqCst)
     );
 }
-/// A non-sticky auth verdict (`ProviderInteractiveRequired`) must neither cancel the relay nor reconnect-storm, and a recovered credential must start the backoff over. The mock relay accepts every WebSocket and rejects the bearer on the first frame, so the backoff must survive the connect. That key is rejected too; the following delay must be the base 2s again rather than the inherited 8s.
+/// A non-sticky auth verdict (`ProviderInteractiveRequired`) must neither cancel the relay nor reconnect-storm, and a recovered credential must start the backoff over.
+/// The mock relay accepts every WebSocket and rejects the bearer on the first frame, so the backoff must survive the connect. Connections 1–3 carry the rejected key: gaps grow 2s → 4s. Before connection 3 a new key lands on disk, so recovery adopts it and reconnects at once (connection 4). That key is rejected too; the following delay must be the base 2s again rather than the inherited 8s.
 #[tokio::test]
 async fn non_sticky_verdict_keeps_reconnecting_with_growing_backoff() {
     use std::sync::Mutex;

@@ -1,4 +1,14 @@
 //! Per-method `params` and `result` payload structs.
+//!
+//! These types ride inside a [`crate::JsonRpcRequest`] /
+//! [`crate::JsonRpcResponse`] / [`crate::JsonRpcNotification`].
+//!
+//! `session_id` belongs in the JSON-RPC envelope field — always.
+//! Request/notification params structs do NOT carry a `session_id`;
+//! the hub reads it from `request.session_id` on the envelope.
+//! Types that are NOT request params (e.g. `ToolsChanged` notification
+//! body, `ServerInfo` display struct) keep their own `session_id`
+//! because it is payload data, not routing.
 
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +52,9 @@ pub struct ToolCallResult {
     pub follow_ups: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reminders: Vec<serde_json::Value>,
-    /// Carried as opaque `Value` (not the runtime's typed frame) because this crate must not depend.
+    /// Carried as opaque `Value` (not the runtime's typed frame) because
+    /// this crate must not depend on `xai-tool-runtime`. Sampler-side wire
+    /// decoders reconstruct it into the typed frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_completion_output: Option<serde_json::Value>,
 }
@@ -55,36 +67,47 @@ pub const MAX_SPANS_PER_DONATION: usize = 512;
 /// Maximum decoded `ExportTraceServiceRequest` size the hub accepts.
 pub const MAX_DONATION_BYTES: usize = 1024 * 1024;
 
-/// `traces.donate` params (tool_server → service notification). Envelope
-/// `session_id` required.
+/// `traces.donate` params (tool_server → service notification).
+/// Envelope `session_id` required. `hub.*` span attributes are
+/// reserved — the hub strips them and stamps its own attribution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TracesDonateParams {
-    /// Base64 (standard alphabet, padded).
+    /// Base64 (standard alphabet, padded) protobuf-encoded
+    /// `opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest`.
     pub otlp_request: String,
 }
 
 // ── Log donation ──────────────────────────────────────────────────────────
 
 /// Hub rejects oversized batches wholesale; donors chunk before encoding.
+/// The 1 MiB [`MAX_DONATION_BYTES`] decoded-size cap is the real bound; this
+/// record cap is a secondary guard symmetric with [`MAX_SPANS_PER_DONATION`].
 pub const MAX_LOG_RECORDS_PER_DONATION: usize = 512;
 
-/// `logs.donate` params (tool_server → service notification). Envelope
-/// `session_id` required.
+/// `logs.donate` params (tool_server → service notification).
+/// Envelope `session_id` required. `hub.*` log attributes are reserved —
+/// the hub strips them and stamps its own attribution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogsDonateParams {
-    /// Base64 (standard alphabet, padded).
+    /// Base64 (standard alphabet, padded) protobuf-encoded
+    /// `opentelemetry.proto.collector.logs.v1.ExportLogsServiceRequest`.
     pub otlp_request: String,
 }
 
 // ── Metric donation ───────────────────────────────────────────────────────
 
 /// Hub rejects oversized batches wholesale; donors chunk before encoding.
+/// Secondary guard alongside the 1 MiB [`MAX_DONATION_BYTES`] decoded-size cap.
 pub const MAX_METRICS_PER_DONATION: usize = 512;
 
 /// `metrics.donate` params (tool_server → service notification).
+/// **No envelope `session_id`** — metrics are process-aggregate, not
+/// per-session (unlike [`LogsDonateParams`]). `hub.*` resource attributes
+/// are reserved — the hub strips them and stamps its own attribution.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetricsDonateParams {
-    /// Base64 (standard alphabet, padded).
+    /// Base64 (standard alphabet, padded) protobuf-encoded
+    /// `opentelemetry.proto.collector.metrics.v1.ExportMetricsServiceRequest`.
     pub otlp_request: String,
 }
 
@@ -95,7 +118,8 @@ pub struct ToolCallProgressFrame {
     /// Producer-defined kind, e.g. `"log_chunk"` or `"chunk"`.
     pub kind: String,
     pub body: serde_json::Value,
-    /// Drop-bookkeeping counter — non-zero when prior progress frames for this `tool_call_id`.
+    /// Drop-bookkeeping counter — non-zero when prior progress frames for
+    /// this `tool_call_id` were dropped under rate pressure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dropped_count: Option<u32>,
 }
@@ -128,8 +152,11 @@ impl ToolNotificationFrame {
         }
     }
 
-    /// Build a notification wrapping a typed ("known") notification value. The `notification` is serialized into the `WireToolNotification::Known` variant. Returns `Err` only if serialization fails, which should not happen for
-    /// well-formed `Serialize` types.
+    /// Build a notification wrapping a typed ("known") notification value.
+    ///
+    /// The `notification` is serialized into the `WireToolNotification::Known`
+    /// variant. Returns `Err` only if serialization fails, which should not
+    /// happen for well-formed `Serialize` types.
     pub fn known<N: Serialize>(
         tool_id: ToolId,
         notification: N,
@@ -146,7 +173,11 @@ impl ToolNotificationFrame {
 /// Maximum serialized size of a `system.notify` opaque payload.
 pub const MAX_SYSTEM_NOTIFY_PAYLOAD_BYTES: usize = 256 * 1024;
 
-/// How long the hub waits for a tool server to ack `session.bind` before failing the bind.
+/// How long the hub waits for a tool server to ack `session.bind` before
+/// failing the bind. Lives in the shared protocol crate so both sides of
+/// the contract reference one value: the hub's ws router uses it as its
+/// bind timeout, and tool servers size any work they do inside the bind
+/// (e.g. the workspace's MCP converge grace) to stay under it.
 pub const SESSION_BIND_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Body of a `system.notify` frame. `payload` is an opaque `SystemNotification`
@@ -180,7 +211,8 @@ pub struct RegisterServerParams {
 }
 
 /// Drop a tool entirely from the connection (across every session it was
-/// bound to).
+/// bound to). For per-session removal use
+/// [`crate::Method::UnbindToolSession`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UnregisterToolParams {
     pub tool_id: ToolId,
@@ -196,15 +228,41 @@ pub struct UnregisterServerParams {
 
 /// `bind_tool_session` params — add `session_id` to a registered tool's
 /// per-tool session set.
+///
+/// Both fields are SUBJECTS of the operation: `tool_id` names the
+/// tool whose session set is being mutated, and `session_id` names
+/// the session being added. Neither matches the envelope-level
+/// `session_id`, which is the calling-frame routing scope and is
+/// typically omitted on connection-control frames.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BindToolSessionParams {
     /// The tool whose session set is being mutated.
     pub tool_id: ToolId,
-    /// The session id to add to the tool's session set. Must already be in the connection's bound-session set.
+    /// The session id to add to the tool's session set. Must already
+    /// be in the connection's bound-session set.
     pub session_id: SessionId,
 }
 
 /// Outcome reported by [`BindToolSessionAck`].
+///
+/// This is intentionally a **strict subset** of the registry-side
+/// `xai_computer_hub_core::registry::ToolSessionBindOutcome`, with one
+/// extra wire-only variant. The asymmetry exists because the wire and
+/// registry layers have different failure vocabularies:
+///
+/// - The registry's `Conflict` variant (cross-connection race on the
+///   `(session_id, tool_id)` reverse-index slot) is NOT mirrored here.
+///   The router lifts `Conflict` into a top-level
+///   `ServerError::ToolBindingConflict` (-32600) so the contended caller
+///   sees a wire-level error frame with a dedicated code instead of a
+///   quietly-buried ack outcome — mirroring it would re-introduce the
+///   `UnknownTool`-overload ambiguity the dedicated code was added to fix.
+/// - `SessionNotBound` is router-injected by the per-frame envelope
+///   pre-check (the connection's bound-session set is router state, not
+///   registry state) and never originates from the registry call.
+///
+/// Adding a new variant here means adding a corresponding registry-side
+/// outcome OR documenting why the wire-only variant is router-injected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSessionBindOutcome {
@@ -214,7 +272,8 @@ pub enum ToolSessionBindOutcome {
     AlreadyBound,
     /// No tool with this id is registered against the calling connection.
     UnknownTool,
-    /// `session_id` is not in the connection's bound-session set; the caller must `register_session` first.
+    /// `session_id` is not in the connection's bound-session set; the caller
+    /// must `register_session` first.
     SessionNotBound,
 }
 
@@ -226,6 +285,11 @@ pub struct BindToolSessionAck {
 
 /// `unbind_tool_session` params — drop `session_id` from a registered
 /// tool's per-tool session set.
+///
+/// Same envelope-vs-payload distinction as
+/// [`BindToolSessionParams`]: `tool_id` and `session_id` are subjects
+/// of the unbind operation; the envelope `session_id` (if present) is
+/// the calling-frame routing scope and serves a different concept.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnbindToolSessionParams {
     /// The tool whose session set is being mutated.
@@ -254,7 +318,8 @@ pub struct UnbindToolSessionAck {
 
 // ── Server discovery + binding ────────────────────────────────────────────
 
-/// `servers.list` params — discover available tool servers for the authenticated user.
+/// `servers.list` params — discover available tool servers for the
+/// authenticated user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServersListParams {}
 
@@ -263,6 +328,7 @@ pub struct ServersListParams {}
 pub struct ServerInfo {
     pub server_id: ServerId,
     /// The tool server's own session ID (used internally for routing).
+    /// May be absent when the hub omits it from `servers.list` responses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     #[serde(default)]
@@ -273,16 +339,26 @@ pub struct ServerInfo {
     pub connected_since: String,
     /// Lifecycle status (Ready, Busy, Draining, etc.).
     pub status: ToolServerLifecycleStatus,
-    /// Milliseconds since epoch of the hub's last liveness observation: last inbound frame for locally connected servers.
+    /// Milliseconds since epoch of the hub's last liveness observation:
+    /// last inbound frame for locally connected servers, Redis
+    /// `last_refreshed_ms` for cross-instance entries. Additive; absent
+    /// from old hubs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_ms: Option<u64>,
-    /// What hosts the server, as the hub resolved it from the minter of the server's serve credential — never.
+    /// What hosts the server, as the hub resolved it from the minter of the
+    /// server's serve credential — never from the `host_kind` the server
+    /// declared in `metadata`, which a process anywhere can spell as it
+    /// likes. A picker groups and labels on this and falls back to the
+    /// declared value only when it is absent (a hub before this field, or a
+    /// minter the hub does not know). Additive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_kind: Option<HostKind>,
 }
 
 /// What hosts a tool server, resolved by the hub from the *minter* of its
-/// serve credential at upgrade — never.
+/// serve credential at upgrade — never from the client-declared `host_kind`
+/// in registration `metadata`. Bind-time policy keys on it, and
+/// `servers.list` carries it as [`ServerInfo::host_kind`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostKind {
@@ -304,25 +380,34 @@ impl std::fmt::Display for HostKind {
     }
 }
 
-/// Well-known values of the `host_kind` a server *declares* in its registration `metadata`.
+/// Well-known values of the `host_kind` a server *declares* in its
+/// registration `metadata` (display only; the hub's own resolution is
+/// [`ServerInfo::host_kind`]). Readers tolerate unknown strings and fall
+/// back to a plain per-server row.
 pub const HOST_KIND_DESKTOP: &str = "desktop";
 pub const HOST_KIND_DAEMON: &str = "daemon";
 pub const HOST_KIND_SANDBOX: &str = "sandbox";
 
-/// The catalog of well-known keys a workspace server embeds in its hub
-/// registration `metadata` JSON: machine identity keys announced by local/RC
-/// servers (`hostname`/`display_name`/`cwd`), device identity keys that let
-/// pickers group the N servers one machine exposes into one device
+/// The single catalog of well-known keys a workspace server embeds in its
+/// hub registration `metadata` JSON: machine identity keys announced by
+/// local/RC servers (`hostname`/`display_name`/`cwd`), device identity keys
+/// that let pickers group the N servers one machine exposes into one device
 /// (`device_id`/`host_kind`/`platform`), and sandbox provenance keys
 /// announced by the sandbox start path
 /// (`sandbox_id`/`session_id`/`provider_id`/`launch_id`). Producers merge
 /// these into the metadata blob they announce via
-/// [`ServerIdentityMetadata::merge_into`]; the hub stores metadata opaquely;
-/// readers parse leniently and field-wise via
-/// [`ServerIdentityMetadata::from_metadata`]. `cwd` is shared with the
-/// sandbox start-path metadata that every sandbox workspace server announces,
-/// so presence of `cwd` alone does not identify a local/RC workspace server
-/// — `hostname`/`display_name` are the convention-unique keys.
+/// [`ServerIdentityMetadata::merge_into`]; the hub stores metadata
+/// opaquely; readers parse leniently and field-wise via
+/// [`ServerIdentityMetadata::from_metadata`].
+///
+/// `cwd` is shared with the sandbox start-path metadata that every sandbox
+/// workspace server announces, so presence of `cwd` alone does not identify
+/// a local/RC workspace server — `hostname`/`display_name` are the
+/// convention-unique keys. Do not use "parses as this convention" or `cwd`
+/// presence as a local-vs-sandbox discriminator.
+///
+/// `device_id` is the grouping and "is this my device" key; `hostname` is
+/// display-only (it renames and goes stale) and must never stand in for it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerIdentityMetadata {
     /// Machine hostname (e.g. `gethostname()` at startup).
@@ -334,25 +419,33 @@ pub struct ServerIdentityMetadata {
     /// Workspace root the server exposes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// Stable per-install identifier of the machine hosting this server, shared by every server that machine exposes.
+    /// Stable per-install identifier of the machine hosting this server,
+    /// shared by every server that machine exposes. Opaque to the hub.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
-    /// What hosts the server: one of the `HOST_KIND_*` constants.
+    /// What hosts the server: one of the `HOST_KIND_*` constants. Unknown
+    /// values are preserved verbatim for forward compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_kind: Option<String>,
-    /// Host operating system (`std::env::consts::OS` spelling: `macos`, `linux`, `windows`).
+    /// Host operating system (`std::env::consts::OS` spelling: `macos`,
+    /// `linux`, `windows`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
     /// Sandbox that provisioned this server. Absent for local servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_id: Option<String>,
-    /// Logical sandbox-service session UUID (from `GROK_SESSION_ID` in the container). Absent for local servers.
+    /// Logical sandbox-service session UUID (from `GROK_SESSION_ID` in the
+    /// container). Absent for local servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// Provider that provisioned this server.
+    /// Provider that provisioned this server. Populated on the sandbox
+    /// start path only (no container-side source on restore); absent for
+    /// local servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
-    /// Per-spawn launch nonce minted by the sandbox orchestrator and echoed verbatim.
+    /// Per-spawn launch nonce minted by the sandbox orchestrator and echoed
+    /// verbatim on the diagnostics `/ready` endpoint. Absent for
+    /// local/legacy launches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_id: Option<String>,
 }
@@ -435,7 +528,10 @@ pub enum ServerBindOutcome {
     AlreadyBound,
     /// No server with this server_id found.
     ServerNotFound,
-    /// A server was located and the bind forwarded.
+    /// A server was located and the bind forwarded, but it did not complete:
+    /// the ack timed out, the transport send/delivery failed, or the ack was
+    /// malformed or an explicit error. Distinct from `ServerNotFound`, which
+    /// means no such server is registered.
     Unavailable,
 }
 
@@ -477,7 +573,9 @@ pub struct ToolsListParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolsListResult {
     pub tools: Vec<xai_tool_types::ToolDescription>,
-    /// Whether this session has invocable workspace tools (local registry or published remote routes).
+    /// Whether this session has invocable workspace tools (local registry
+    /// or published remote routes). Older hubs omit the field; clients
+    /// treat a missing value as unknown and fall back to the tool list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_bound: Option<bool>,
 }
@@ -512,7 +610,8 @@ pub struct ToolsSearchResultBody {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionOpenParams {
-    /// `true` when reconnecting an existing session within the grace window.
+    /// `true` when reconnecting an existing session within the grace
+    /// window; requires `last_seq` to dedup notifications.
     #[serde(default)]
     pub resume: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -546,10 +645,13 @@ pub struct SessionDetachParams {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionBindServerParams {
     pub server_id: ServerId,
-    /// Working directory for the session. The tool server creates a session rooted at this path.
+    /// Working directory for the session. The tool server creates a
+    /// session rooted at this path. When absent, the server's default
+    /// CWD is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// Opaque metadata passed through to the tool server (sandbox_id, agent config, user preferences).
+    /// Opaque metadata passed through to the tool server (sandbox_id,
+    /// agent config, user preferences). The hub does not interpret it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 }
@@ -581,11 +683,14 @@ pub struct SessionUnbindServerParams {
 }
 
 /// `session_attach_server` params (harness → hub). Attach this harness
-/// connection to an EXISTING session as an observer: verify a tool-server is
-/// bound for the envelope session and return the tool snapshot.
+/// connection to an EXISTING session as an observer: verify a tool-server
+/// is bound for the envelope session and return the tool snapshot.
+/// Hub-local: never forwarded to the tool server; never creates a
+/// workspace session; never mutates toolsets/handlers.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SessionAttachServerParams {
-    /// Optional expected server (diagnostics + directory cross-check).
+    /// Optional expected server (diagnostics + directory cross-check);
+    /// the authoritative key is the envelope `session_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_id: Option<ServerId>,
     /// Free-form caller label for metrics/logs ("fs_read", "deploy_app", …).
@@ -596,7 +701,8 @@ pub struct SessionAttachServerParams {
 /// Reply to [`SessionAttachServerParams`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SessionAttachServerResult {
-    /// Registry snapshot for the session (local + cross-instance), same shape as [`SessionBindServerResult::tools`].
+    /// Registry snapshot for the session (local + cross-instance), same
+    /// shape as [`SessionBindServerResult::tools`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<xai_tool_types::ToolDescription>,
     /// Where the session's tool-server was found.
@@ -604,7 +710,9 @@ pub struct SessionAttachServerResult {
     pub route: Option<AttachRoute>,
 }
 
-/// Where an attach found the session's tool-server.
+/// Where an attach found the session's tool-server. `Unknown` absorbs
+/// values a newer peer may add, so the typed parse never fails across
+/// independently-deployed hub/SDK versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachRoute {
@@ -619,6 +727,10 @@ pub enum AttachRoute {
 // ── Simplified lifecycle ─────────────────────────────────────────────────
 
 /// `serve` params (server → hub). Full tool snapshot for a session.
+///
+/// Idempotent: re-sending replaces the tool set for the envelope
+/// `session_id`. The hub diffs against the previous snapshot and
+/// emits `tools_changed` to subscribed harnesses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServeParams {
     pub tools: Vec<crate::ToolDescriptionWithSchema>,
@@ -638,7 +750,13 @@ pub struct ServeResult {
     pub removed: Vec<ToolId>,
 }
 
-/// `session.bind` params (hub → server). Hub requests the server to start serving a session.
+/// `session.bind` params (hub → server). Hub requests the server to
+/// start serving a session.
+///
+/// The session id is carried on the JSON-RPC envelope, not in params.
+/// The server responds with its tool snapshot (via the JSON-RPC
+/// response). On reconnect the server replays `serve{tools}` for
+/// every remembered session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionBindParams {}
 
@@ -647,21 +765,33 @@ pub struct SessionBindParams {}
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SessionBindResult {
     pub tools: Vec<xai_tool_types::ToolDescription>,
-    /// Version of the responding tool-server binary. `None` on servers predating the field.
+    /// Version of the responding tool-server binary. `None` on servers
+    /// predating the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binary_version: Option<String>,
     /// Pinned tool ids this binary could not serve (unknown to its registry).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unserved_tool_ids: Vec<String>,
-    /// Reason the server failed the toolset resolution closed.
+    /// Reason the server failed the toolset resolution closed (the bind then
+    /// advertises no model-facing tools by design). `None` on normal
+    /// resolutions and on servers predating the field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolve_error: Option<String>,
-    /// Advisory image capability tokens declared by the image the responding server runs in, sorted.
+    /// Advisory image capability tokens declared by the image the responding
+    /// server runs in, sorted, deduped and validated by that server. Empty
+    /// both on servers predating the field and on images predating the
+    /// declaration; [`IMAGE_CAPABILITIES_V1`] tells the two apart, not this
+    /// field's shape.
+    ///
+    /// Set membership only, never ordered comparison, and never an
+    /// authorization input — the tokens are guest-forgeable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub image_capabilities: Vec<String>,
 }
 
-/// Self-describing image capability token.
+/// Self-describing image capability token. Its presence in
+/// [`SessionBindResult::image_capabilities`] means the set is authoritative
+/// (a token not in it is genuinely absent); its absence means unknown.
 pub const IMAGE_CAPABILITIES_V1: &str = "capabilities.v1";
 
 /// Cap on the number of tokens in [`SessionBindResult::image_capabilities`].
@@ -670,9 +800,14 @@ pub const MAX_IMAGE_CAPABILITIES: usize = 128;
 pub const MAX_IMAGE_CAPABILITY_LEN: usize = 64;
 
 /// Charset/length gate for an image capability token: dot-separated
-/// `[a-z0-9-]` segments, at least some of them, no empty segment, no
+/// `[a-z0-9-]` segments, at least two of them, no empty segment, no
 /// leading/trailing dash, at most [`MAX_IMAGE_CAPABILITY_LEN`] bytes. So it
 /// rejects dotfiles, `..`, uppercase and overlong names.
+///
+/// Declared once here, beside [`IMAGE_CAPABILITIES_V1`], because the producing
+/// reader and every consumer that re-validates the guest-forgeable set must
+/// apply identical rules: a copy that drifts stricter silently drops tokens the
+/// image legitimately declared.
 pub fn is_image_capability_token(name: &str) -> bool {
     if name.is_empty() || name.len() > MAX_IMAGE_CAPABILITY_LEN {
         return false;
@@ -691,7 +826,11 @@ pub fn is_image_capability_token(name: &str) -> bool {
     segments >= 2
 }
 
-/// `session.unbind` params (hub → server). Hub tells the server to stop serving a session.
+/// `session.unbind` params (hub → server). Hub tells the server to
+/// stop serving a session. Sent as a JSON-RPC **notification** (no
+/// `id` field) — the hub does not expect or wait for a response.
+///
+/// The session id is carried on the JSON-RPC envelope, not in params.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionUnbindParams {}
 
@@ -708,15 +847,24 @@ pub struct SubscribeNotificationsParams {
 pub struct NotificationFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_id: Option<ToolId>,
-    /// Whitelist of accepted notification `kinds`. `None` means accept all kinds; an empty `Vec` means accept none.
+    /// Whitelist of accepted notification `kinds`. `None` means accept
+    /// all kinds; an empty `Vec` means accept none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kinds: Option<Vec<String>>,
 }
 
 /// Hub-produced custom `tool.notification` kind for async `bot_send_prompt`.
+/// Auto-subscribed harnesses do not receive this kind. A connection must
+/// list it in [`NotificationFilter::kinds`].
 pub const HUB_KIND_BOT_AGENT_TURN_COMPLETED: &str = "bot_agent_turn_completed";
 
 /// Reply outcome reported by [`SubscribeAck`].
+///
+/// `Subscribed` and `AlreadySubscribed` discriminate first-time binds
+/// from idempotent retries; `NotAuthorized` is reserved for the case
+/// where the subscriber's connection has not bound `session_id` via
+/// `register_session` — the same precondition that gates dispatch and
+/// hook frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscribeOutcome {
@@ -724,11 +872,18 @@ pub enum SubscribeOutcome {
     Subscribed,
     /// Subscription was already present; no-op.
     AlreadySubscribed,
-    /// Subscriber's connection has not bound `session_id`; the request is rejected without mutating any state.
+    /// Subscriber's connection has not bound `session_id`; the request
+    /// is rejected without mutating any state.
     NotAuthorized,
 }
 
 /// Reply to [`SubscribeNotificationsParams`].
+///
+/// `subscription_id` is the harness-facing handle that callers thread
+/// through subsequent [`UnsubscribeNotificationsParams`] requests; the
+/// service uses `(connection_id, session_id)` internally so the id is
+/// informational and a single value (`"default"`) is reused per
+/// `(connection, session)` pair.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SubscribeAck {
     pub outcome: SubscribeOutcome,
@@ -742,6 +897,12 @@ pub struct UnsubscribeNotificationsParams {
 }
 
 /// Reply outcome reported by [`UnsubscribeAck`].
+///
+/// `Evicted` is server-pushed: the service emits an unsubscribe ack
+/// with this outcome to a subscriber whose mpsc was dropped during
+/// fan-out (see slow-consumer eviction in the computer hub crate).
+/// Clients reading that frame on a connection they did not initiate
+/// an unsubscribe on should treat the subscription as gone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnsubscribeOutcome {
@@ -749,7 +910,8 @@ pub enum UnsubscribeOutcome {
     Unsubscribed,
     /// Subscription was not present; no-op.
     NotSubscribed,
-    /// Subscription.
+    /// Subscription was removed by the service because the subscriber's
+    /// outbound mpsc was full or dropped during fan-out.
     Evicted,
 }
 
@@ -770,13 +932,18 @@ pub struct UnsubscribeAck {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookFrame {
     pub session_id: SessionId,
-    /// Omit for session-wide hooks (broadcast); required for call-scoped hooks like `Cancel`.
+    /// Omit for session-wide hooks (broadcast); required for call-scoped
+    /// hooks like `Cancel`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_id: Option<ToolId>,
     /// Required for call-scoped hooks (`Cancel`); optional otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<ToolCallId>,
-    /// Correlation id for a request/response hook.
+    /// Correlation id for a request/response hook. The requester mints it and
+    /// the responder echoes it in the [`HookReplyFrame`], so the reply routes
+    /// back to the awaiting caller. Set in both directions (harness ↔
+    /// tool-server). `None` for fire-and-forget hooks such as `Cancel` and
+    /// `SessionEnded`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hook_id: Option<String>,
     pub event: HookEvent,
@@ -895,8 +1062,12 @@ pub struct ToolsChanged {
 
 // ── Tool server status lifecycle ──────────────────────────────────────
 
-/// Lifecycle status of a tool server connection. `starting` → `ready` →
-/// `busy` ↔ `ready` → `draining` → `shutting_down`.
+/// Lifecycle status of a tool server connection.
+///
+/// `starting` → `ready` → `busy` ↔ `ready` → `draining` → `shutting_down`.
+/// `disconnected` is set by the hub during disconnect cleanup, and sent by a
+/// tool server tearing down gracefully (`push_disconnect_status`) — the hub
+/// accepts it only for the sender's own connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolServerLifecycleStatus {
@@ -932,6 +1103,10 @@ pub struct ToolServerStatusPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     /// Dead connection on Disconnected (remote hubs scope in-flight cancel).
+    ///
+    /// A raw `String`, not a typed `ConnectionId`: a malformed id degrades
+    /// leniently on the consumer (re-parsed, logged, ignored) instead of failing
+    /// deserialization of the whole status frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_id: Option<String>,
     pub active_tool_calls: u32,
@@ -947,64 +1122,105 @@ pub struct ToolServerStatusPayload {
     /// `None` while busy; epoch ms of the last busy→ready transition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_since_ms: Option<u64>,
-    /// Items accepted by the durable upload queue but not yet uploaded (includes `upload_queue_inflight`).
+    /// Items accepted by the durable upload queue but not yet uploaded
+    /// (includes `upload_queue_inflight`). `0` when no queue is configured.
     #[serde(default)]
     pub upload_queue_pending: u32,
     /// Total bytes of the pending upload-queue spill files on disk.
     #[serde(default)]
     pub upload_queue_pending_bytes: u64,
-    /// Pending items the worker is actively uploading right now (a subset of `upload_queue_pending`).
+    /// Pending items the worker is actively uploading right now (a subset of
+    /// `upload_queue_pending`).
     #[serde(default)]
     pub upload_queue_inflight: u32,
-    /// `true` while the upload queue's circuit breaker is paused on a run of transient upload failures.
+    /// `true` while the upload queue's circuit breaker is paused on a run of
+    /// transient upload failures.
     #[serde(default)]
     pub upload_queue_circuit_breaker_tripped: bool,
-    /// Detached artifact-producer tasks (archive build, tool_state, tool definitions) still running — work not yet handed.
+    /// Detached artifact-producer tasks (archive build, tool_state, tool
+    /// definitions) still running — work not yet handed to the upload queue.
     #[serde(default)]
     pub artifact_producers_inflight: u32,
-    /// Epoch ms when a graceful drain began (SIGTERM or hub evict); `None` until draining starts.
+    /// Epoch ms when a graceful drain began (SIGTERM or hub evict); `None`
+    /// until draining starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drain_started_ms: Option<u64>,
-    /// Whether a turn is active.
+    /// Whether a turn is currently active. Per-session for a session-scoped
+    /// snapshot; "any session has an active turn" for the aggregate.
     #[serde(default)]
     pub turn_active: bool,
-    /// `true` when the reported idle verdict was computed ignoring background tasks.
+    /// `true` when the reported idle verdict was computed ignoring background
+    /// tasks.
     #[serde(default)]
     pub idle_ignores_background: bool,
-    /// Why `idle_since_ms` is being withheld, when it is.
+    /// Why `idle_since_ms` is being withheld, when it is. `None` ⇒ not withheld
+    /// (or the tool server is genuinely busy, which `active_tool_calls`
+    /// reports).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withhold_reason: Option<IdleWithholdReason>,
-    /// Epoch ms the current hold is measured from. Never `None` while `withhold_reason` is `Some`.
+    /// Epoch ms the current hold is measured from. Never `None` while
+    /// `withhold_reason` is `Some`.
+    ///
+    /// NOT the instant the withhold began, for the preview reasons. It is the
+    /// **real-use anchor**: the last routed request or tool call, floored at
+    /// process start. A status poll never moves it, which is the point — a
+    /// ceiling has to be measured from genuine use, or the pane could hold a
+    /// sandbox open forever by resetting the clock it is judged against. So
+    /// for a poll-pinned session this is *older* than the poll-only period,
+    /// and `now - withhold_since_ms` is time-since-real-use, not
+    /// time-spent-withholding. `Durability` is the exception: there it is the
+    /// true busy-since stamp.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withhold_since_ms: Option<u64>,
-    /// `true` once the current hold has crossed its effective ceiling.
+    /// `true` once the current hold has crossed its effective ceiling. The
+    /// verdict is published rather than re-derived because the ceiling is
+    /// per-session config only the sender can see. Always `false` today: no
+    /// ceilings are configured yet.
     #[serde(default)]
     pub withhold_capped: bool,
     /// Open WebSocket (HMR) tunnels through the in-sandbox preview proxy.
+    /// Nonzero ⇒ a client is attached even if the preview is otherwise silent.
     #[serde(default)]
     pub preview_ws_tunnels_open: u32,
 }
 
 /// Why a tool server is withholding `idle_since_ms`, ordered by strength of
-/// evidence that someone is using the sandbox.
+/// evidence that someone is really using the sandbox.
+///
+/// Carries an [`Unknown`](Self::Unknown) escape so adding a variant cannot
+/// break older readers: without it, one unrecognised string would fail
+/// deserialization of the **entire** status frame, taking the idle verdict down
+/// with it. Sandbox binaries are pinned per session, so old and new report side
+/// by side for at least a full session TTL.
+///
+/// Deliberately not `#[non_exhaustive]`: in-workspace matches should stay
+/// exhaustive so a new variant is a compile error at every decision site, which
+/// is a different problem from wire tolerance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IdleWithholdReason {
-    /// Artifact producers or queued uploads outstanding. Already bounded by the durability idle-hold cap.
+    /// Artifact producers or queued uploads outstanding. Already bounded by the
+    /// durability idle-hold cap.
     Durability,
-    /// An open WebSocket tunnel or a routed request in flight. Never a status poll, however long it is held.
+    /// An open WebSocket tunnel or a routed request in flight. Never a status
+    /// poll, however long it is held.
     PreviewAttached,
     /// Recent `Routed` preview traffic — a human loading the app.
     PreviewRouted,
     /// Only the preview pane's own `/__grok-preview/status` liveness poll.
     PreviewStatusOnly,
-    /// A recent client-driven mutation RPC (file write, git commit, …) — a human working on the workspace through its RPC surface.
+    /// A recent client-driven mutation RPC (file write, git commit, …) — a
+    /// human working on the workspace through its RPC surface rather than
+    /// through agent tool calls or the preview.
     ClientRpc,
-    /// A recent `workspace.presence.note`.
+    /// A recent `workspace.presence.note`. Like
+    /// [`PreviewStatusOnly`](Self::PreviewStatusOnly) it never advances the
+    /// withhold anchor, so the hub's hold ceiling genuinely caps it.
     ClientPresence,
     /// A live scheduled task (`/loop`) has a run coming soon; the workspace limits this hold itself.
     ScheduledTask,
-    /// A reason this build does not recognise — a newer sender.
+    /// A reason this build does not recognise — a newer sender. Never
+    /// constructed locally; only produced by deserialization.
     #[serde(other)]
     Unknown,
 }
@@ -1058,7 +1274,15 @@ pub enum ToolServerDisconnectReason {
     ConnectionLost,
 }
 
-// ── Heartbeat ──────────────────────────────────────────────────────────── PingFrame / PongFrame carry a `method` discriminator.
+// ── Heartbeat ────────────────────────────────────────────────────────────
+//
+// PingFrame / PongFrame carry a `method` discriminator on the wire so
+// any receiver (hub or SDK) can route them through a method-based demux.
+// The `method` value is baked into the Serialize impl — callers just set
+// `ts_ms` and the correct method string appears in the JSON output.
+//
+// Deserialization is lenient: the `method` field is accepted but ignored,
+// so frames produced by older builds (without `method`) still parse.
 
 /// Application-level heartbeat ping.
 ///
@@ -1359,7 +1583,7 @@ mod tests {
         assert_eq!(back.idle_since_ms, Some(1721234560000));
     }
 
-    /// Those queue/drain fields round-trip with real values on the wire.
+    /// The six queue/drain fields round-trip with real values on the wire.
     #[test]
     fn tool_server_status_payload_carries_queue_and_drain_fields() {
         let payload = super::ToolServerStatusPayload {
@@ -1508,6 +1732,8 @@ mod tests {
         assert_eq!(back.withhold_since_ms, None);
         assert!(!back.withhold_capped);
         assert_eq!(back.preview_ws_tunnels_open, 0);
+        // An absent reason is indistinguishable from "nothing is withheld" —
+        // what the field-coverage ratio exists to measure.
     }
 
     /// A legacy payload without the new fields deserializes with defaults.

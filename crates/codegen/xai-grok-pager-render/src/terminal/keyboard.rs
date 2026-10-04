@@ -1,4 +1,8 @@
 //! Per-terminal keyboard input capabilities.
+//!
+//! Input-handling code reads one [`KeyboardCapabilities`] struct instead of branching on brand.
+//! The classification depends on the host OS; today only macOS rows are populated.
+//! Extend [`KeyboardCapabilities`] with new fields (paste protocol, focus reporting, custom escapes) rather than adding `match self.brand` sites.
 
 use super::TerminalName;
 use crate::host::HostOs;
@@ -7,11 +11,12 @@ use crate::host::HostOs;
 #[strum(serialize_all = "snake_case")]
 #[non_exhaustive]
 pub enum ModifierFate {
-    /// Terminal delivers the modifier in the `KeyEvent` (KKP) or as a readline-equivalent byte sequence the textarea already handles.
+    /// Terminal delivers the modifier in the `KeyEvent` (KKP) or as a readline-equivalent byte sequence the textarea already handles (`^U`, `ESC ^?`).
     Native,
     /// Terminal drops the modifier; the OS-level rescue can recover it (CoreGraphics on macOS).
     Dropped,
     /// The chord is captured before reaching the PTY (Apple Terminal Cmd+Bsp).
+    /// No event arrives; not even an OS rescue helps.
     Unrecoverable,
     /// Behavior is unclassified; treated as no-rescue to avoid false positives on unknown brands.
     #[default]
@@ -53,6 +58,7 @@ impl ModifierDelivery {
 pub struct KeyboardCapabilities {
     pub modifier_delivery: ModifierDelivery,
     /// Fate of Shift/Opt/Cmd when modifying `Enter`.
+    /// Apple Terminal drops these and we recover them via the same OS poll used for Backspace/Delete.
     pub enter_modifier: ModifierFate,
 }
 
@@ -62,8 +68,8 @@ impl KeyboardCapabilities {
     }
 }
 
-/// Today the table is populated only for macOS; other OSes return the default
-/// (all-`Unknown`).
+/// Today the table is populated only for macOS; other OSes return the default (all-`Unknown`).
+/// When a Linux/Windows probe lands, add a per-OS arm here rather than forking the function.
 pub fn keyboard_capabilities(brand: TerminalName) -> KeyboardCapabilities {
     keyboard_capabilities_for_host(brand, HostOs::current())
 }
@@ -82,9 +88,8 @@ fn macos_capabilities(brand: TerminalName) -> KeyboardCapabilities {
         TerminalName::Ghostty | TerminalName::Kitty | TerminalName::Foot => {
             (Native, Native, Native)
         }
-        // iTerm2/VS Code translate Cmd+Bsp to ^U and Opt+Bsp to ESC ^?, both
-        // of which the textarea already handles natively VS Code-family
-        // embeds.
+        // iTerm2/VS Code translate Cmd+Bsp to ^U and Opt+Bsp to ESC ^?, both of which the textarea already handles natively
+        // VS Code-family embeds and Zed inherit the same keymap behavior as VS Code (including the Cmd+Bsp to ^U translation)
         TerminalName::Iterm2
         | TerminalName::VsCode
         | TerminalName::Cursor
@@ -94,12 +99,14 @@ fn macos_capabilities(brand: TerminalName) -> KeyboardCapabilities {
         // Alacritty's macOS keymap binds Cmd+Bsp to ^U (native readline); Opt+Bsp is a bare ^? without `option_as_alt` set
         TerminalName::Alacritty | TerminalName::Rio => (Native, Dropped, Native),
         TerminalName::WarpTerminal => (Dropped, Dropped, Native),
-        // Apple Terminal: Cmd+Bsp is captured by the window manager Opt+Bsp and modified Enter are dropped.
+        // Apple Terminal: Cmd+Bsp is captured by the window manager
+        // Opt+Bsp and modified Enter are dropped; CG can rescue both.
         TerminalName::AppleTerminal => (Unrecoverable, Dropped, Dropped),
         TerminalName::GrokDesktop => (Unknown, Unknown, Unknown),
         // VTE-based terminals (incl. Terminator) on macOS are unusual; classify when we have evidence rather than guessing.
         TerminalName::Vte | TerminalName::Terminator => (Unknown, Unknown, Unknown),
-        // JetBrains JediTerm: no KKP, no CG rescue, and no way to probe capabilities at runtime (no TERM_FEATURES, XTVERSION leaks).
+        // JetBrains JediTerm: no KKP, no CG rescue, and no way to probe capabilities at runtime (no TERM_FEATURES, XTVERSION leaks)
+        // Mouse reporting has known SGR bugs in the Classic engine (IJPL-232482); the reworked 2025 engine is better but indistinguishable via env vars
         TerminalName::JetBrains => (Unknown, Unknown, Unknown),
         TerminalName::WindowsTerminal | TerminalName::Otty | TerminalName::Unknown => {
             (Unknown, Unknown, Unknown)

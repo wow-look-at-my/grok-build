@@ -1,4 +1,8 @@
 //! Ed25519-signed, identity-bound managed-policy envelope.
+//!
+//! The server signs policy, principal, and expiry.
+//! The client verifies against a compiled-in key set (by signed `key_id`), binds the principal, and checks the on-disk bytes match.
+//! This build has the prod `v1` key compiled in; keyless (`&[]`) keeps the cache marker as authority.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -10,9 +14,9 @@ pub use prod_mc_cli_chat_proxy_types::{
     ManagedIdentityClaim, SignatureEnvelope, SignedPayload, is_server_nonce_shape, now_unix,
 };
 
-/// Compiled-in trusted keys `(key_id, raw 32 bytes)`. Prod `v1`. Empty means
-/// dark (no verification). The private signing key never lives in this crate
-/// or in client env flags.
+/// Compiled-in trusted keys `(key_id, raw 32 bytes)`. Prod `v1`. Empty means dark (no verification).
+/// The private signing key never lives in this crate or in client env flags.
+/// Ship only after the server is emitting valid envelopes for this key id.
 pub const EMBEDDED_DEPLOYMENT_CONFIG_PUBKEYS: &[(&str, &[u8])] = &[(
     "v1",
     &[
@@ -77,7 +81,7 @@ pub mod test_seam {
     pub(super) static GLOBAL_OVERRIDE: RwLock<KeyOverride> = RwLock::new(None);
 
     // Thread-local override (unit tests; avoids races on the global override)
-    // Outer `Option`: unset vs set on this thread.
+    // Outer `Option`: unset vs set on this thread. Inner is [`KeyOverride`].
     thread_local! {
         static LOCAL_OVERRIDE: RefCell<Option<KeyOverride>> = const { RefCell::new(None) };
     }
@@ -175,6 +179,7 @@ pub enum SigError {
     #[error("on-disk {0} does not match the signed policy")]
     ContentMismatch(&'static str),
     /// The file exists but can't be read (EACCES etc., never plain absence).
+    /// Not tamper evidence: callers refetch but don't refuse on a read blip.
     #[error("on-disk {0} cannot be read")]
     Unreadable(&'static str),
 }
@@ -216,6 +221,7 @@ pub fn apply_remote_managed_config_signature_verification(
 }
 
 /// Whether `key_id` names a trusted key.
+/// Only PICKS among served envelopes; verification re-selects the key from the signed bytes, so a lying hint at most causes a verification failure.
 pub fn embedded_key_id_trusted(key_id: &str) -> bool {
     with_embedded_keys(|keys| keys.iter().any(|(id, _)| *id == key_id))
 }
@@ -293,9 +299,9 @@ pub fn check_fetch_identity(
     Ok(())
 }
 
-/// Whether the payload's effective principal (`deployment_id`, else
-/// `team_id`) matches ours. This is the at-rest identity rule, so another
-/// tenant's cache reads foreign. Lenient when either side is unknown.
+/// Whether the payload's effective principal (`deployment_id`, else `team_id`) matches ours.
+/// This is the at-rest identity rule, so another tenant's cache reads foreign. Lenient when either side is unknown.
+/// Deliberately expiry-free: the gate orders identity BEFORE the `fail_closed` short-circuit and expiry after it (see [`SignedCacheFacts`]).
 fn signed_principal_matches(payload: &SignedPayload, expected_principal: Option<&str>) -> bool {
     let signed = payload
         .deployment_id
@@ -350,8 +356,8 @@ fn verify_fetched_with_keys(
     Ok(payload)
 }
 
-/// True when something occupies `path` that is not a regular file (directory,
-/// symlink, fifo, …).
+/// True when something occupies `path` that is not a regular file (directory, symlink, fifo, …).
+/// A squatter blocks or redirects reads/rewrites, which is tamper, never a blip.
 fn non_regular_file_at(path: &std::path::Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| !m.is_file())
 }
@@ -395,8 +401,10 @@ pub fn check_on_disk_matches(
     Ok(())
 }
 
-/// True when `content` is exactly the `requirements.toml` the server signed
-/// for this home, which makes hooks parsed from it admin-authored policy.
+/// True when `content` is exactly the `requirements.toml` the server signed for this home, which makes hooks parsed from it admin-authored policy.
+/// Callers pass the bytes they go on to parse, so classification and parse never see two different files.
+/// False in a dark build (no key verifies), without an authentic readable sidecar, or when the signed requirements are absent or differ; refusing a tampered cache is the fail-closed gate's job.
+/// Identity, expiry and the remote kill-switch are not consulted: they decide whether the gate refuses a session, and none changes who authored the bytes.
 pub fn signed_requirements_attest(home: &std::path::Path, content: &str) -> bool {
     with_embedded_keys(|keys| signed_requirements_attest_with_keys(home, keys, content))
 }
@@ -407,7 +415,7 @@ fn signed_requirements_attest_with_keys(
     trusted_keys: &[(&str, &[u8])],
     content: &str,
 ) -> bool {
-    // A missing sidecar is the common unmanaged case and stays silent; every other miss demotes enforced hooks to user-owned.
+    // A missing sidecar is the common unmanaged case and stays silent; every other miss demotes enforced hooks to user-owned, so say so
     let sidecar = match read_sidecar(home) {
         SidecarRead::Present(sidecar) => sidecar,
         SidecarRead::Absent => return false,
@@ -447,6 +455,7 @@ enum SidecarRead {
     /// NotFound, unparseable JSON, or a squatting non-regular file (directory, symlink, …): not an authentic sidecar.
     Absent,
     /// EACCES-style transient failure on a regular file, not tamper evidence.
+    /// The gate must not refuse on it, but the refetch trigger fires to self-heal.
     Unreadable,
 }
 
@@ -469,8 +478,8 @@ fn read_envelope_at(path: &std::path::Path) -> SidecarRead {
     }
 }
 
-/// Persist the sidecar atomically; a torn sidecar would fail the load-time
-/// gate.
+/// Persist the sidecar atomically; a torn sidecar would fail the load-time gate.
+/// Written 0600 on unix: a deployment-key principal's signed payload embeds the key, so the sidecar is a second at-rest copy of a bearer credential.
 pub fn write_sidecar(home: &std::path::Path, sidecar: &SignatureEnvelope) -> std::io::Result<()> {
     write_envelope_at(&sidecar_path(home), sidecar)
 }
@@ -479,6 +488,7 @@ pub(crate) fn managed_identity_sidecar_path(home: &std::path::Path) -> std::path
     home.join(MANAGED_IDENTITY_SIDECAR_FILE)
 }
 
+/// [`write_sidecar`] for the claim (0600 for uniformity; the claim has no secret).
 pub fn write_managed_identity_sidecar(
     home: &std::path::Path,
     sidecar: &SignatureEnvelope,
@@ -589,7 +599,8 @@ fn cloud_cache_signature_invalid_with_keys(
     }
     use SignedCacheEvaluation as Eval;
     match evaluate_signed_cache(home, trusted_keys, expected_principal, now_unix) {
-        // ANY deviation refetches, including read blips: self-heal what the gate stays lenient on A foreign-but-authentic cache also refetches.
+        // ANY deviation refetches, including read blips: self-heal what the gate stays lenient on
+        // A foreign-but-authentic cache also refetches; it would otherwise never rebind
         Eval::NoAuthenticSidecar | Eval::SidecarUnreadable => true,
         Eval::Facts(f) => !f.identity_ok || f.expired || f.disk != DiskStatus::Match,
     }
@@ -607,6 +618,7 @@ enum DiskStatus {
 }
 
 /// What one verification pass over the on-disk sidecar establishes.
+/// The two public checks are projections over the same facts: the refetch trigger flags ANY deviation; the gate applies the fail-closed rules.
 struct SignedCacheFacts {
     /// The payload's effective principal matches ours ([`signed_principal_matches`]).
     identity_ok: bool,
@@ -618,9 +630,9 @@ struct SignedCacheFacts {
 
 /// One evaluation of the on-disk sidecar; both public checks project from this.
 enum SignedCacheEvaluation {
-    /// No authentic sidecar: missing, corrupt, a squatting non-file, forged.
+    /// No authentic sidecar: missing, corrupt, a squatting non-file, forged, or keyed outside the trusted set; never facts from unverified bytes.
     NoAuthenticSidecar,
-    /// The sidecar exists but a transient IO error blocked the read ([`SidecarRead::Unreadable`]); nothing verified.
+    /// The sidecar exists but a transient IO error blocked the read ([`SidecarRead::Unreadable`]); nothing verified, nothing that looks like tamper.
     SidecarUnreadable,
     Facts(SignedCacheFacts),
 }
@@ -658,14 +670,21 @@ fn evaluate_signed_cache(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignedVerdict {
     /// Verification is not active (no embedded keys, the dark build): the marker is the only signal.
+    /// A distinct variant, not an `Option`, so a dark build can never be confused with [`Self::NoAuthenticSidecar`].
+    /// That variant's absence rule must never fire keyless.
     Inactive,
     /// No sidecar, or one whose signature doesn't verify: not an authentic verdict.
+    /// Under a fail-closed marker that recorded served policy, absence is itself tamper.
+    /// Stripping the sidecar must not downgrade enforcement to the forgeable marker path.
     NoAuthenticSidecar,
-    /// The sidecar exists but a transient IO error (EACCES-style, never plain absence or a squatting non-file).
+    /// The sidecar exists but a transient IO error (EACCES-style, never plain absence or a squatting non-file) blocked the read.
+    /// Not tamper evidence: the gate falls back to the marker decision, and the refetch trigger fires to rewrite it.
+    /// The claim is deliberately NOT consulted here: a genuine blip must not refuse, and a chmod-capable attacker could delete the claim anyway.
     SidecarUnreadable,
     /// Authentic sidecar; the policy is valid for this principal (or never opted into fail-closed enforcement).
     Trusted,
-    /// Authentic sidecar proving an opted-in policy is no longer valid here: edited on disk, expired, or bound to a different principal. Refuse.
+    /// Authentic sidecar proving an opted-in policy is no longer valid here: edited on disk, expired, or bound to a different principal.
+    /// Refuse, always.
     Compromised,
 }
 
@@ -704,7 +723,7 @@ fn signed_cache_compromised_with_keys(
     }
 }
 
-// Tests live in a sibling file (they dwarf the module) but form a child module, for private access.
+// Tests live in a sibling file (they dwarf the module) but form a child module, for private access; its envelope helpers serve the loader tests too
 #[cfg(test)]
 #[path = "signed_policy/tests.rs"]
 pub(crate) mod tests;

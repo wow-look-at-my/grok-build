@@ -4,6 +4,7 @@ use super::common::*;
 
 const DONE_SENTINEL: &str = "VERB_GROUP_DRAG_DONE";
 
+/// Wait for an OSC 52 payload BEYOND the first `seen` ones and return the new tail.
 /// `decode_osc52_payloads` reads the whole raw stream, so each drag's assertions must scope to its own delta.
 fn wait_for_new_osc52(harness: &mut PtyHarness, seen: usize, timeout: Duration) -> Vec<String> {
     let deadline = Instant::now() + timeout;
@@ -16,8 +17,8 @@ fn wait_for_new_osc52(harness: &mut PtyHarness, seen: usize, timeout: Duration) 
     }
 }
 
-/// Drag across `needle` on the current screen and return the drag's new OSC multiple payloads, joined. It
-/// pauses to settle first so the mouse press can't chain into the previous gesture's multi-click window.
+/// Drag across `needle` on the current screen and return the drag's new OSC 52 payloads, joined.
+/// It pauses to settle first so the mouse press can't chain into the previous gesture's multi-click window.
 fn drag_copy(harness: &mut PtyHarness, needle: &str) -> String {
     harness.update(Duration::from_millis(600));
     let seen = decode_osc52_payloads(harness.raw_output()).len();
@@ -37,7 +38,9 @@ fn drag_copy(harness: &mut PtyHarness, needle: &str) -> String {
     payloads.join("\n")
 }
 
-/// PTY: drag-copy on a verb-group header yields the aggregated label, folded AND expanded. Both rows previously shared one selectable range.
+/// PTY: drag-copy on a verb-group header yields the aggregated label, folded AND expanded.
+/// On the expanded slot the header row and member 0's row are independent targets: dragging the member's path never drags the header label along.
+/// The two rows previously shared one selectable range.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn verb_group_header_drag_copy_pty() {
@@ -67,6 +70,8 @@ async fn verb_group_header_drag_copy_pty() {
     content.set_response(DONE_SENTINEL);
 
     let binary = pager_binary().expect("resolve pager binary");
+    // SSH_CONNECTION makes macOS route the copy through OSC 52, which the test reads back from the raw stream
+    // Same pattern as read_tool_header_selection_copies_path_only_pty
     let overrides: Vec<(String, String)> = vec![(
         "SSH_CONNECTION".into(),
         "scripted-test 1 127.0.0.1 2".into(),
@@ -147,6 +152,7 @@ async fn verb_group_header_drag_copy_pty() {
             )
         });
 
+    // EXPANDED member 0 row: the drag copies the member's own text only; the header label one row above must not ride along
     let member_copy = drag_copy(&mut harness, "dragme1.txt");
     assert!(
         member_copy.contains("dragme1.txt") && !member_copy.contains("Read 2 files"),

@@ -1023,6 +1023,8 @@ fn auth_complete_opens_deferred_dashboard() {
         "the deferred-dashboard flag must be consumed",
     );
 }
+/// Mid-session re-auth completed from the dashboard still consumes the stash on the agent that 401'd (auth is global, not per-view).
+/// stash on the agent that 401'd (auth is global, not per-view).
 #[test]
 fn auth_complete_retries_stashed_prompt_from_dashboard() {
     let mut app = test_app_with_agent();
@@ -3311,6 +3313,7 @@ fn dashboard_usage_modal_reopen_retabs_without_refetch_and_session_slashes_stay_
         "unexpected toast: {toast}"
     );
 }
+/// The reply that carries the modal's generation settles it; a background reply (nonce 0) updates the cache but not the modal.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_usage_modal_settles_only_on_its_own_app_billing_generation() {
@@ -4052,6 +4055,8 @@ fn dashboard_deferred_plan_mode_applied_on_session_created() {
         "SessionCreated must emit SetSessionMode for the deferred plan mode"
     );
 }
+/// Any non-empty prompt, even a single character, dispatches a new session (the old 4-char floor was relaxed to 1 char).
+/// new session (the old 4-char floor was relaxed to 1 char).
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_dispatch_single_char_creates_session() {
@@ -4106,7 +4111,7 @@ fn dashboard_dispatch_empty_prompt_rejected() {
         "no agent created for an empty prompt"
     );
 }
-/// The dispatch input ALWAYS spawns a new session, even when a top-level row is selected. The selection is the overview navigation cursor, NOT a reply target; conflating both trapped the user "stuck replying to the same agent". To talk to an existing agent the user opens it (navigate, then Enter) and replies inside its own view.
+/// The dispatch input ALWAYS spawns a new session, even when a top-level row is selected. The selection is the overview navigation cursor, NOT a reply target; conflating the two trapped the user "stuck replying to the same agent". To talk to an existing agent the user opens it (navigate, then Enter) and replies inside its own view.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_dispatch_with_top_level_selection_creates_new_session() {
@@ -4135,7 +4140,8 @@ fn dashboard_dispatch_with_top_level_selection_creates_new_session() {
         app.active_view,
     );
 }
-/// New session, STAY on the dashboard, no attached_agent.
+/// Case 2: button focused, non-empty, Enter. New session,
+/// STAY on the dashboard, no attached_agent.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_enter_button_focused_with_text_creates_and_stays() {
@@ -4160,7 +4166,7 @@ fn dashboard_enter_button_focused_with_text_creates_and_stays() {
         "Enter (no Shift) must NOT set attached_agent",
     );
 }
-/// New session AND open detail AND set attached_agent so the overlay chrome paints. Was broken before the new-session attach path got the `attached_agent` write.
+/// Case 3: button focused, non-empty, Ctrl+S. New session AND open detail AND set attached_agent so the overlay chrome paints. Was broken before the new-session attach path got the `attached_agent` write.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_ctrl_s_button_focused_with_text_creates_and_opens() {
@@ -4190,8 +4196,9 @@ fn dashboard_ctrl_s_button_focused_with_text_creates_and_opens() {
         "selection on the new row implies the button is no longer focused",
     );
 }
-/// Open detail (no send). Emitted as `DashboardAttach` from the state handler, which the dispatcher
-/// routes through `dispatch_dashboard_attach` (sets attached_agent and switches view).
+/// Case 4: row selected, empty prompt, Enter. Open detail
+/// (no send). Emitted as `DashboardAttach` from the state handler, which the dispatcher routes through
+/// `dispatch_dashboard_attach` (sets attached_agent and switches view).
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_enter_row_selected_empty_prompt_opens_detail() {
@@ -4346,7 +4353,7 @@ fn dashboard_open_with_agents_list_focused() {
     );
     assert!(d.selected.is_none());
 }
-/// Open with multiple agents: input focused so "open and type to dispatch" works.
+/// Open with 0 agents: input focused so "open and type to dispatch" works.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_open_empty_input_focused() {
@@ -4929,7 +4936,7 @@ fn dashboard_overlay_cycle_wraps_through_agents() {
     let _ = dispatch_dashboard_overlay_cycle(&mut app, -1);
     assert_eq!(app.dashboard.as_ref().unwrap().attached_agent, Some(id2));
 }
-/// Cycle respects the dashboard's filter. With a state filter that hides one of agents, the cycle becomes a no-op (only one visible row to walk through); the user can clear the filter to reach the other agent.
+/// Cycle respects the dashboard's filter. With a state filter that hides one of two agents, the cycle becomes a no-op (only one visible row to walk through); the user can clear the filter to reach the other agent.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_overlay_cycle_respects_filter() {
@@ -6387,7 +6394,7 @@ fn dashboard_stop_last_row_falls_back_to_previous() {
     assert_eq!(app.dashboard.as_ref().unwrap().selected, Some(prev));
 }
 /// First Ctrl+X must NOT plant an `error_toast`. The dispatch-input placeholder is reserved for the user's typing target; the footer's `ShortcutsBar::with_pending` already surfaces the "press Ctrl+X again to close this session" hint via `delete_confirm` and is the canonical place for it.
-/// Copies of the same hint in different surfaces confused the user (the prompt one stole visual weight).
+/// Two copies of the same hint in two different surfaces confused the user (the prompt one stole visual weight).
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_stop_does_not_plant_error_toast() {
@@ -6627,6 +6634,7 @@ fn dashboard_focus_new_agent_button_action_clears_selection() {
         "FocusNewAgentButton must clear `selected` so the invariant holds",
     );
 }
+/// Up-arrow on the FIRST row hands focus over to the `[+ New Agent]` button: the button behaves as a virtual row at index -1 so the user can walk straight off the top of the list onto it without an extra Esc.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_up_arrow_from_first_row_focuses_button() {
@@ -6826,7 +6834,7 @@ fn extract_recent_lines_first_line_only() {
         "third line must not appear, got {line:?}"
     );
 }
-/// Entries returned in chronological order
+/// Two entries returned in chronological order
 /// (newest-last after the internal reverse).
 #[test]
 fn extract_recent_lines_chronological_order() {

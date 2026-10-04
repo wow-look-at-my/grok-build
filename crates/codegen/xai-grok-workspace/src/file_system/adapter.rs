@@ -1,4 +1,9 @@
-//! This adapter translates xai-grok-tools' `AsyncFileSystem` trait into ACP protocol calls.
+//! This adapter translates xai-grok-tools' `AsyncFileSystem` trait into ACP protocol calls:
+//!   `read_file()` → read_text_file
+//!   `write_file()` → write_text_file
+//!   `delete_file()` → not supported by ACP (returns error)
+//!
+//! It mirrors the pattern of `AcpTerminalAdapter` for terminal execution.
 
 use std::path::Path;
 
@@ -7,6 +12,7 @@ use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
 use xai_grok_tools::computer::types::{AsyncFileSystem, ComputerError};
 
 /// Wraps the ACP gateway as `AsyncFileSystem`.
+/// When the client advertises `fs.readTextFile` and `writeTextFile`, tools stop hitting local disk and route through the gateway.
 pub struct AcpFsAdapter {
     gateway: GatewaySender,
     session_id: acp::SessionId,
@@ -51,6 +57,7 @@ impl AsyncFileSystem for AcpFsAdapter {
     }
 
     async fn delete_file(&self, path: &Path) -> Result<(), ComputerError> {
+        // ACP protocol doesn't support file deletion yet
         tracing::warn!(?path, "ACP filesystem does not support file deletion");
         Err(ComputerError::io("File deletion not supported via ACP"))
     }

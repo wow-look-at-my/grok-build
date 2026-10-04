@@ -1,4 +1,8 @@
 //! Fail-safe for a prompt the agent never acknowledged: abort the turn locally, put the text back, tell the shell.
+//!
+//! Runs from the event loop's animation tick like the other `reconcile_overdue_*` recoveries.
+//! It never adopts, re-sends, or drains: the pane ends Idle with the prompt in the composer and the
+//! prompt id recorded as rewound, so any late acknowledgment for it is dropped by the existing gates.
 
 use super::turn::{RewindTarget, emit_cancel_turn, finish_turn_view, rewind_in_flight_prompt};
 use crate::app::actions::Effect;
@@ -35,8 +39,8 @@ fn prompt_ack_timeout_notice(limit: Duration, disposition: PromptAckDisposition)
     )
 }
 
-/// Poll every armed acknowledgment watch: log the soft notice once, and past
-/// the hard deadline abort the turn.
+/// Poll every armed acknowledgment watch: log the soft notice once, and past the hard deadline abort the turn.
+/// Returns `None` when nothing changed; `Some(effects)` (possibly empty) when a notice or abort needs a redraw.
 pub(crate) fn reconcile_overdue_prompt_acks(
     app: &mut AppView,
     deadlines: &PromptAckDeadlines,
@@ -76,7 +80,8 @@ fn poll_prompt_ack_for_agent(
     let Some(watch) = agent.prompt_ack.as_mut() else {
         return false;
     };
-    // Stale guard: only the live turn's own watch may fire.
+    // Stale guard: only the live turn's own watch may fire; anything else is dropped without effect
+    // Cancelling stays armed so an Esc during the wedge cannot park the pane on "Cancelling…" forever
     let busy = matches!(
         agent.session.state,
         AgentState::TurnRunning | AgentState::TurnCancelling
@@ -120,6 +125,7 @@ pub(super) fn restore_target(agent: &AgentView) -> Option<RewindTarget> {
     match (has_text, has_images) {
         (false, false) => Some(RewindTarget::ReplaceComposer),
         (true, false) => Some(RewindTarget::MergeIntoDraft),
+        // Both prompt lifetimes number images from 1, so the stash's `[Image #N]` placeholders would collide with the draft's
         (_, true) => None,
     }
 }

@@ -1,4 +1,11 @@
-//! Conversation history compaction — shared selection/assembly logic for compacting prior conversation turns.
+//! Conversation history compaction — shared selection/assembly logic for compacting
+//! prior conversation turns into a summary.
+//!
+//! Everything here is generic over [`CompactionItem`](crate::CompactionItem)
+//! / [`CompactionItemBuilder`](crate::CompactionItemBuilder) or pure
+//! string/text manipulation. Harness-bound extraction (Grok chat's
+//! `GrokConversation` traversal, `ChatCompletionRequest` user-message
+//! extraction, `GrokMessage` assembly) stays in the harness crate.
 
 pub mod filter;
 pub mod prompt;

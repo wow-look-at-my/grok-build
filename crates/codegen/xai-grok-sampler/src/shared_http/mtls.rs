@@ -1,4 +1,8 @@
 //! Builds and caches HTTP clients for model-specific mTLS identities.
+//!
+//! Cache keys include the certificate and private-key contents so rotated credentials create a
+//! new client without retaining unbounded client state. Credentialed clients require HTTPS and
+//! disable redirects to keep the identity scoped to its configured origin.
 
 use std::collections::HashMap;
 use std::io::Read;

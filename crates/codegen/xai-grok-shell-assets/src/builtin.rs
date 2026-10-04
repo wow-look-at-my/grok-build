@@ -123,8 +123,9 @@ const FORMER_PLATFORM_SKILL_HASHES: &[(&str, &str)] = &[
     ),
 ];
 
-/// Remove platform-skill leftovers extracted into `$GROK_HOME/skills/` by
-/// pre-bundle binaries, where they shadow `bundled/skills/`.
+/// Remove platform-skill leftovers extracted into `$GROK_HOME/skills/` by pre-bundle binaries, where they shadow `bundled/skills/`.
+/// Only dirs whose `SKILL.md` byte-matches a known shipped body are removed; user skills and edits are kept.
+/// Runs every startup so restored backups get re-cleaned.
 pub fn purge_stale_extracted_skills(grok_home: &std::path::Path) {
     purge_skill_dirs_matching(grok_home, FORMER_PLATFORM_SKILL_HASHES);
 }
@@ -237,7 +238,7 @@ mod tests {
     const EXTRACTED_BODY: &str = "old platform skill body\n";
     const OLDER_EXTRACTED_BODY: &str = "even older platform skill body\n";
 
-    /// Purge against a table with create-skill generations and one help body.
+    /// Purge against a table with two create-skill generations and one help body.
     fn purge_with_test_table(home: &std::path::Path) {
         let current = sha256_hex(EXTRACTED_BODY.as_bytes());
         let older = sha256_hex(OLDER_EXTRACTED_BODY.as_bytes());

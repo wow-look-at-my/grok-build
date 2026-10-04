@@ -2,6 +2,11 @@
 //! Approving then leaves plan mode and starts the implement turn.
 //!
 //! CI stages the pager binary via `PAGER_BINARY`.
+//! The test also runs under plain cargo, which builds the pager on demand:
+//!
+//! ```bash
+//! cargo test -p xai-grok-pager-pty-harness --test plan_approval_resume -- --nocapture
+//! ```
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plan_approval_restored_after_resume() {

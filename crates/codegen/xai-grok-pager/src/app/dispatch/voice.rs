@@ -80,33 +80,37 @@ pub(super) fn dispatch_enable_voice_mode(app: &mut AppView, from_hold: bool) -> 
     if !app.voice_mode_enabled {
         return vec![];
     }
-    // Tier gate: free / X Basic personal users can't use voice (the server
-    // zero-limits these tiers).
+    // Tier gate: free / X Basic personal users can't use voice (the server zero-limits these tiers)
+    // The Ctrl+Space / F8 keybinding bypasses the slash registry, so this is the enforcement point for it
+    // Show the SuperGrok upsell instead of starting a doomed session (`/voice` itself is separately hidden and upsold via the deny list)
     if app.is_voice_tier_restricted() {
         return open_voice_tier_upsell(app);
     }
     // Leave home after the flag / tier gates so a disabled or restricted press stays a no-op.
+    // Deliberately before the audio gate: the audio-less Bazel build is the only CI that runs
+    // these dispatch tests, and it must still cover leave-home (Always isolation) from voice.
     let effects = super::session::lifecycle::leave_welcome_for_session(app);
     if !xai_grok_voice::AUDIO_SUPPORTED {
         return effects;
     }
 
-    // Bind the dictation target at press time (the cold-start path defers
-    // capture to the event loop, where the view could have changed).
+    // Bind the dictation target at press time (the cold-start path defers capture to the event loop, where the view could have changed)
+    // `None` means a view with no box (occluded dashboard, or a welcome the gate kept closed), so stay a silent no-op
     let Some(target) = voice_target_for_view(app) else {
         return effects;
     };
 
     app.voice_ui_active = true;
     if app.voice_cmd_tx.is_some() {
-        // Pipeline already up. Start a new recording now; if one is already
-        // live leave it (and its hold-ownership) untouched.
+        // Pipeline already up. Start a new recording now; if one is already live leave it (and its hold-ownership) untouched.
+        // A press over an existing session doesn't take it over
         if !app.voice_listening() {
             app.voice_begin_recording(target, from_hold);
         }
     } else if !app.voice_state.pending_cold_start() {
-        // Pipeline still spawning. Queue a cold-start, but only if one isn't
-        // already pending.
+        // Pipeline still spawning. Queue a cold-start, but only if one isn't already pending.
+        // A second toggle/press must re-affirm the first start, not clobber its hold-ownership or its bound target
+        // Hold-ownership decides whether a Ctrl+Space release cancels the start
         app.voice_state = VoiceState::ColdStart {
             hold: from_hold,
             target,
@@ -115,20 +119,23 @@ pub(super) fn dispatch_enable_voice_mode(app: &mut AppView, from_hold: bool) -> 
     effects
 }
 
-/// Toggle mic capture: `Ctrl+Space`, Esc (while listening), the recording-row
-/// `[stop]`, and `Ctrl+Space` on terminals without key-release events.
+/// Toggle mic capture: `Ctrl+Space`, Esc (while listening), the recording-row `[stop]`, and `Ctrl+Space` on terminals without key-release events.
+/// While recording this stops; otherwise it starts, enabling voice mode and spawning the pipeline if needed, exactly like `/voice`.
+/// Running `/voice` first is not required.
 pub(super) fn dispatch_voice_toggle(app: &mut AppView) -> Vec<Effect> {
     if app.voice_listening() {
         // Stop always succeeds, even if the remote flag or `/voice` mode flipped mid-recording
         app.voice_stop_keeping_final();
         return vec![];
     }
-    // Not recording: start.
+    // Not recording: start. Mirrors `/voice` so the banner appears with one keypress (enables voice mode and spawns the pipeline if it isn't up yet).
+    // Not a hold, so a stray Ctrl+Space release won't cancel a queued cold-start.
     dispatch_enable_voice_mode(app, /* from_hold */ false)
 }
 
-/// Ctrl+Space hold-to-talk key release: end the session a Ctrl+Space hold
-/// started.
+/// Ctrl+Space hold-to-talk key release: end the session a Ctrl+Space hold started.
+/// That cancels a cold-start the hold queued (so a quick tap captures nothing) or stops a live hold recording.
+/// A `/voice` / toggle session is left untouched, so a Ctrl+Space release can neither cancel its queued start nor stop its recording.
 pub(super) fn dispatch_voice_stop(app: &mut AppView) -> Vec<Effect> {
     app.voice_hold_release();
     vec![]

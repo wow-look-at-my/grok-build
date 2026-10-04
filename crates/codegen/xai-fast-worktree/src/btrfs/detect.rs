@@ -1,4 +1,8 @@
 //! BTRFS filesystem and subvolume detection.
+//!
+//! This module handles detection of BTRFS filesystems and subvolumes, including
+//! the case where a BTRFS subvolume is bind-mounted to another location (e.g.
+//! when the working-tree path is not itself on BTRFS).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -9,13 +13,18 @@ use nix::sys::statfs::{BTRFS_SUPER_MAGIC, statfs};
 /// Information about a BTRFS subvolume.
 #[derive(Debug, Clone)]
 pub struct BtrfsInfo {
-    /// Root path of the subvolume as seen by the user. This may be a bind mount target (e.g., `/workspace/repo`).
+    /// Root path of the subvolume as seen by the user.
+    /// This may be a bind mount target (e.g., `/workspace/repo`).
     pub subvolume_root: PathBuf,
 
-    /// If the subvolume is accessed via a bind mount.
+    /// If the subvolume is accessed via a bind mount, this contains the actual
+    /// source path on the btrfs filesystem (e.g., `/mnt/btrfs/repo`).
+    /// None if the path is directly on btrfs without a bind mount.
     pub bind_mount_source: Option<PathBuf>,
 
-    /// The btrfs mount point where snapshots can be created. For bind mounts, this is the parent of bind_mount_source.
+    /// The btrfs mount point where snapshots can be created.
+    /// For bind mounts, this is the parent of bind_mount_source.
+    /// For direct btrfs paths, this is determined from the mount table.
     pub btrfs_mount_point: Option<PathBuf>,
 }
 
@@ -40,7 +49,8 @@ pub fn is_btrfs(path: &Path) -> Result<bool> {
 /// Bind-mount source via `findmnt`. `Ok(None)` if not a bind mount or if
 /// detection fails.
 pub fn get_bind_mount_info(path: &Path) -> Result<Option<BindMountInfo>> {
-    // Use findmnt to get mount information -n: no headers, -o: output fields, -T: target path
+    // Use findmnt to get mount information
+    // -n: no headers, -o: output fields, -T: target path
     let mut cmd = Command::new("findmnt");
     xai_tty_utils::detach_std_command(&mut cmd);
     cmd.stdin(Stdio::null());
@@ -69,7 +79,8 @@ pub fn get_bind_mount_info(path: &Path) -> Result<Option<BindMountInfo>> {
         return Ok(None);
     }
 
-    // Parse findmnt output: SOURCE TARGET FSTYPE OPTIONS Fields are separated by whitespace
+    // Parse findmnt output: SOURCE TARGET FSTYPE OPTIONS
+    // Fields are separated by whitespace
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() < 3 {
         tracing::debug!(path = %path.display(), line = %line, "unexpected findmnt output format");
@@ -97,7 +108,8 @@ pub fn get_bind_mount_info(path: &Path) -> Result<Option<BindMountInfo>> {
         return Ok(None);
     }
 
-    // For bind mounts, the source might be in format like "/dev/loop0[/repo]" We need to resolve the actual path
+    // For bind mounts, the source might be in format like "/dev/loop0[/repo]"
+    // We need to resolve the actual path
     let actual_source = resolve_bind_mount_source(path)?;
 
     if let Some(actual_source) = actual_source {
@@ -153,6 +165,7 @@ fn resolve_bind_mount_source(target: &Path) -> Result<Option<PathBuf>> {
             // For btrfs bind mounts, we need to find where the btrfs is mounted
             // and construct the full path
             if *fstype == "btrfs" {
+                // Try 1: Find a btrfs root mount (root="/") for this device.
                 // Common when the btrfs volume root is mounted separately
                 // (e.g., `/mnt/btrfs/`).
                 if let Some(btrfs_mount) = find_btrfs_mount_for_source(source, &mountinfo)? {
@@ -323,6 +336,8 @@ pub fn is_btrfs_subvolume(path: &Path) -> Result<Option<BtrfsInfo>> {
 
     if !on_btrfs {
         // Not on BTRFS at all (statfs says different fs type).
+        // Check if it's a bind mount from a BTRFS subvolume anyway
+        // (this handles the rare case where statfs doesn't report btrfs).
         tracing::debug!(
             path = %path.display(),
             "path not on BTRFS, checking for bind mount from BTRFS"

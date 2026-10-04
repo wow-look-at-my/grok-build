@@ -1,4 +1,6 @@
 //! `/help`: open the command palette (the command and shortcut browser).
+//!
+//! It opens the same command palette as Ctrl+P, hosted inline by the overlay app-modal host.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

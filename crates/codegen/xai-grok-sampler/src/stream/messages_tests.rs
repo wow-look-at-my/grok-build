@@ -1,4 +1,5 @@
 //! These tests live outside `messages.rs` so the implementation reads top-to-bottom.
+//! `#[path = "messages_tests.rs"] mod tests;` in messages.rs wires them in.
 
 use super::*;
 use futures_util::stream;
@@ -286,8 +287,15 @@ async fn reasoning_roundtrip_without_signature_survives_to_next_messages_request
         items
     );
 
-    // (b) Shell turn-loop commit: the Reasoning sibling rides the `push_tool_result` arm and is appended to history verbatim.
+    // (b) Shell turn-loop commit: the Reasoning sibling rides the
+    // `push_tool_result` arm and is appended to history verbatim; the
+    // Assistant rides `push_assistant_response`. Both end up in the flat
+    // history list that becomes the next ConversationRequest.
+    // (The real `push_message` appends + persists without dropping Reasoning;
+    // we reproduce the resulting ordered item list here.)
 
+    // Turn N+1: the user asks a follow-up; the previous turn's items are the
+    // prefix of the next request.
     items.push(ConversationItem::user("continue"));
 
     let req = ConversationRequest::from_items(items);
@@ -896,6 +904,7 @@ async fn message_delta_cache_fields_override_message_start() {
 
 #[tokio::test]
 async fn pure_cache_hit_with_zero_uncached_still_emits_usage() {
+    // 100% cache hit: Anthropic Messages API reports input_tokens=0 with cache_read>0.
     // Usage must still be emitted so callers see the cached cost
     let usage = usage_from_stream(vec![
         message_start_with_cache(0, 2500, 0),

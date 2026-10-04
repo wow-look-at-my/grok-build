@@ -54,6 +54,7 @@ pub(crate) struct CopyEntry {
 /// Configuration for the parallel copy operation.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ParallelCopyConfig {
+    /// Number of parallel workers (0 = num_cpus)
     pub num_workers: usize,
     /// Channel buffer size per shard
     pub channel_buffer: usize,

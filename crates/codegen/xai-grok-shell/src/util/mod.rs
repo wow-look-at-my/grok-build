@@ -1,12 +1,13 @@
 pub mod config;
-// Extracted to the `xai-grok-login` crate.
+// Extracted to the `xai-grok-login` crate; re-exported so `crate::util::grok_auth_credentials::*` call sites keep compiling unchanged.
 pub use xai_grok_login::grok_auth_credentials;
 pub mod hooks;
 pub mod limits;
 pub(crate) mod text_sanitize;
 pub(crate) mod user_identity;
 
-// The foundation utilities live in `xai-grok-shell-base` (upstream of this crate so they build in parallel) Re-exported at the paths.
+// The foundation utilities live in `xai-grok-shell-base` (upstream of this crate so they build in parallel)
+// Re-exported at the original paths so existing `crate::util::…` and `xai_grok_shell::util::…` users compile unchanged
 pub use xai_grok_shell_base::util::*;
 
 /// Parse an env var as a JSON object. Returns `None` if unset or not a valid JSON object.
@@ -54,6 +55,8 @@ pub(crate) fn is_user_instruction_path(
 }
 
 /// Ties a spawned helper task's lifetime to an async scope by aborting it on drop.
+/// Cancelling the parent future (e.g. a turn abort dropping the tool loop) tears down the helper instead of leaving it running detached.
+/// Aborting an already-finished task is a no-op, so this is safe to hold across normal scope exit too.
 pub(crate) struct AbortOnDrop(pub tokio::task::JoinHandle<()>);
 
 impl Drop for AbortOnDrop {

@@ -189,7 +189,7 @@ impl BlockContent for MemorySearchToolCallBlock {
                 for (i, r) in self.results.iter().enumerate() {
                     lines.push(Line::from("").into());
 
-                    // " 1. path/file.md:10-25 (score: 0.72, global)"
+                    // "  1. path/file.md:10-25  (score: 0.72, global)"
                     let idx_span = Span::styled(format!("  {}. ", i + 1), theme.muted());
                     let path_display = shorten_path(&r.path);
                     let path_span = Span::styled(
@@ -204,6 +204,7 @@ impl BlockContent for MemorySearchToolCallBlock {
                         idx_span, path_span, meta_span,
                     ])));
 
+                    // Snippet preview (first 3 non-empty lines, with bg_dark)
                     let snippet_lines: Vec<&str> = r
                         .snippet
                         .lines()
@@ -329,6 +330,7 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
 
         let lines: Vec<&str> = section.lines().collect();
 
+        // Line 0: "1 (score: 0.72, source: global)"
         if let Some(first) = lines.first() {
             if let Some(score_start) = first.find("score: ")
                 && let Some(after) = first.get(score_start + 7..)
@@ -347,6 +349,7 @@ pub fn parse_memory_results(output: &str) -> Vec<MemoryResult> {
             }
         }
 
+        // Line 1: "**File:** /path (lines 10-25)"
         for line in lines.iter().skip(1) {
             if let Some(rest) = line.strip_prefix("**File:** ") {
                 if let Some(paren) = rest.find(" (lines ") {

@@ -1,4 +1,5 @@
-//! Headless half of the prompt-acknowledgment fail-safe: the single `-p` prompt is bounded the same way as a TUI prompt.
+//! Headless half of the prompt-acknowledgment fail-safe: the single `-p` prompt is bounded the same way
+//! as a TUI prompt, but the only recovery is a bounded rewind cancel and a non-zero exit.
 
 use std::time::Duration;
 
@@ -10,7 +11,8 @@ use xai_grok_telemetry::events::{
 
 use crate::app::prompt_ack::{AckSignal, PromptAckDeadlines, queue_changed_acks};
 
-/// Bounds the rewind cancel and the final `x.ai/log` flush after an unacknowledged prompt.
+/// Bounds the rewind cancel and the final `x.ai/log` flush after an unacknowledged prompt: a wedged in-process
+/// shell holds the dispatch lock its `cancel()` also needs (see `test_hooks::park_forever_if_blackholed`).
 pub(super) const HEADLESS_ABORT_SEND_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Machine-greppable prefix on the exit error so integrations can tell this apart from a model failure.

@@ -21,6 +21,7 @@ pub enum AgentBuildError {
     RuntimeBuild(std::io::Error),
 
     /// MiniJinja template rendering failed (extend or full mode).
+    /// The error includes line numbers and context from the template.
     #[error("template rendering error: {0}")]
     MiniJinjaError(#[from] minijinja::Error),
 

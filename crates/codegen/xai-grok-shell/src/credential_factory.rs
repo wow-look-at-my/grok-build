@@ -1,4 +1,7 @@
 //! Shell-side credential factories.
+//!
+//! The OTel bootstrap reads the shell's endpoint config, which the low-level
+//! login crate cannot depend on. Everything else lives in `xai_grok_login::credential_provider`.
 
 use std::sync::Arc;
 
@@ -11,6 +14,7 @@ use xai_grok_login::credential_provider::{
 use xai_grok_login::grok_auth_credentials::GrokAuthCredentials;
 
 /// Build a `StorageClient` for proxy uploads. Pass the correct `client_identifier` so requests can be attributed.
+/// When `auth_manager` is `Some`, use the live provider (refresh and 401 recovery); otherwise fall back to a static token.
 /// `user_token` is only for AuthManager-less one-shots; live paths pass the AuthManager.
 pub fn build_storage_client_for_proxy(
     proxy_base_url: &str,

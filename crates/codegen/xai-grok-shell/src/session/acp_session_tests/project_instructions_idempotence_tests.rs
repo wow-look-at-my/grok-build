@@ -101,6 +101,8 @@ fn wrapper_prefix_mid_text_returns_false() {
 /// Instead, it mimics Site A's inner branch against a `(conversation, reminder, inherited_prefix_len)` tuple.
 #[test]
 fn site_a_skips_when_helper_returns_true_and_bumps_len_when_inserting() {
+    // Case 1: the helper returns false, so the insert happens and the tagged item lands at index 1
+    // inherited_prefix_len bumps from Some(1) to Some(2)
     let mut conv: Vec<ConversationItem> = vec![ConversationItem::system("SP")];
     let mut inherited_prefix_len: Option<usize> = Some(1);
     let reminder = "AGENTS.md body for spawn-time inject";
@@ -147,6 +149,8 @@ fn site_a_skips_when_helper_returns_true_and_bumps_len_when_inserting() {
         other => panic!("expected User at index 1, got {other:?}"),
     }
 
+    // Case 2: the helper now returns true on the same conversation, so Site A's guard short-circuits: no second insert, no further bump
+    // This catches accidental re-injection on retry or replay
     let conv_len_before = conv.len();
     let len_before = inherited_prefix_len;
 

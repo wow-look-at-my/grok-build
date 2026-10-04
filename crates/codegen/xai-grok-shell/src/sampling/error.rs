@@ -1,4 +1,7 @@
 //! Sampling error types.
+//!
+//! The canonical error types live in `xai_grok_sampling_types::error`.
+//! This module re-exports them and adds `map_sampling_err_to_acp`, which depends on `agent_client_protocol::Error` (a grok-shell dependency).
 
 pub use xai_grok_sampling_types::error::*;
 
@@ -7,31 +10,37 @@ pub use xai_grok_sampler::SamplingErrorKind;
 
 use agent_client_protocol as acp;
 
-/// ACP error code for rate-limited requests (HTTP 429).
+/// ACP error code for rate-limited requests (HTTP 429). Uses the JSON-RPC implementation-defined server error range (-32000 to -32099). Contract: set only for actual HTTP 429 responses from the sampling client.
+/// Clients derive user-facing text via [`format_rate_limited_user_message`]. The desktop path (`prompt_complete_fields`) reports the stop reason with no detail.
 pub const RATE_LIMITED_ERROR_CODE: i32 = -32003;
 
 /// OAuth / session rate-limit copy (personal plan upgrade path).
 pub const RATE_LIMITED_USER_MESSAGE_OAUTH: &str =
     "You\u{2019}ve hit the rate limit for your plan. Upgrade your account or try again later.";
 
-/// API key / team rate-limit copy. Personal grok.com upgrades do not raise API team limits; admins purchase credits or a higher spend-based tier. See https://docs.x.ai/developers/rate-limits#rate-limit-tiers
+/// API key / team rate-limit copy.
+/// Personal grok.com upgrades do not raise API team limits; admins purchase credits or a higher spend-based tier.
+/// See https://docs.x.ai/developers/rate-limits#rate-limit-tiers
 pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "You\u{2019}ve hit your team\u{2019}s API rate limit. Ask a team admin to purchase more credits for higher limits, or try again later. See https://docs.x.ai/developers/rate-limits#rate-limit-tiers";
 
 /// Well-known free-usage exhaustion code CCP returns on HTTP 429.
+/// Matches `prod_util_well_known_errors::SUBSCRIPTION_FREE_USAGE_EXHAUSTED`.
+/// sampling-types' `parse_error_bytes` prepends the flat `code` to the flattened message, so this reaches clients embedded in error detail.
 pub const FREE_USAGE_EXHAUSTED_ERROR_CODE: &str = "subscription:free-usage-exhausted";
 
-/// User-facing free-usage exhaustion copy (paywall). Promises no reset duration; the backend config drives the quota window.
+/// User-facing free-usage exhaustion copy (paywall).
+/// Promises no reset duration; the backend config drives the quota window.
 pub const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your free Grok Build usage limit for now. Get SuperGrok for much higher limits, or try again later: https://grok.com/supergrok?referrer=grok-build";
 
-/// Whether flattened server detail is free-usage-quota exhaustion (paywall),
-/// not transient throttling.
+/// Whether flattened server detail is free-usage-quota exhaustion (paywall), not transient throttling.
+/// Sniffs the well-known code embedded by `parse_error_bytes`.
 pub fn is_free_usage_exhausted_error(detail: &str) -> bool {
     detail.contains(FREE_USAGE_EXHAUSTED_ERROR_CODE)
 }
 
-/// The free-usage code wins first (consumer-only; checked before the API-key rewrite). An API-key caller whose detail pushes the personal SuperGrok upsell gets the team credits copy instead. Otherwise the body is
-/// shown after stripping the `API error (status …):` prefix (SamplingError Display). An empty detail falls back to the OAuth or API-key message. Callers that show this in UI should still run their usual
-/// sanitizer (scrub/cap).
+/// User-facing text for an ACP -32003 rate-limit error. The free-usage code wins first (consumer-only; checked before the API-key rewrite).
+/// An API-key caller whose detail pushes the personal SuperGrok upsell gets the team credits copy instead. Otherwise the body is shown after stripping the `API error (status …):` prefix (SamplingError Display).
+/// An empty detail falls back to the OAuth or API-key message. Callers that show this in UI should still run their usual sanitizer (scrub/cap).
 pub fn format_rate_limited_user_message(
     server_detail: Option<&str>,
     is_api_key_auth: bool,
@@ -68,14 +77,15 @@ fn strip_sampling_api_error_prefix(detail: &str) -> &str {
     detail.trim()
 }
 
-/// IC sometimes reuses OAuth free-tier upsell copy on 429s ("upgrade to a
-/// Grok subscription" / grok.com/supergrok).
+/// IC sometimes reuses OAuth free-tier upsell copy on 429s ("upgrade to a Grok subscription" / grok.com/supergrok).
+/// That is wrong for API-key / team auth: higher limits come from credits and spend-based rate-limit tiers, not a personal SuperGrok plan.
 fn pushes_consumer_subscription_upsell(detail: &str) -> bool {
     let d = detail.to_ascii_lowercase();
     d.contains("grok.com/supergrok") || d.contains("upgrade to a grok subscription")
 }
 
 /// User-facing copy for capacity/overload failures (stream `overloaded_error`, HTTP 529, proxy-wrapped 5xx).
+/// See [`SamplingError::is_overloaded`].
 pub const OVERLOADED_USER_MESSAGE: &str = "Model is temporarily overloaded. Try again in a moment.";
 
 pub(crate) fn idle_timeout_user_message(elapsed_secs: u64) -> String {
@@ -86,8 +96,8 @@ pub(crate) fn idle_timeout_user_message(elapsed_secs: u64) -> String {
 /// This stays in xai-grok-shell because it depends on `agent_client_protocol::Error`.
 pub(crate) fn map_sampling_err_to_acp(err: SamplingError) -> acp::Error {
     use reqwest::StatusCode;
-    // Capacity/overload gets the same short copy everywhere Message only,
-    // `data` unset: `Display` appends JSON-encoded `data`.
+    // Capacity/overload gets the same short copy everywhere
+    // Message only, `data` unset: `Display` appends JSON-encoded `data`, and this string is meant for direct display
     if err.is_overloaded() {
         return acp::Error::new(
             acp::ErrorCode::InternalError.into(),
@@ -107,6 +117,9 @@ pub(crate) fn map_sampling_err_to_acp(err: SamplingError) -> acp::Error {
             status, message, ..
         } => match status {
             StatusCode::UNAUTHORIZED => acp::Error::auth_required().data(message),
+            // 403 Forbidden is not an auth error: the request was authenticated, but the action is not permitted
+            // Examples: content-safety blocks, ZDR-gated operations, remote-settings-blocked users
+            // Passing the proxy's message via internal_error keeps the explanation visible without triggering the client's re-auth flow on -32000
             StatusCode::FORBIDDEN => {
                 let message = if message.contains("requires a Grok subscription")
                     && crate::agent::auth_method::has_xai_api_key_env()
@@ -119,6 +132,7 @@ pub(crate) fn map_sampling_err_to_acp(err: SamplingError) -> acp::Error {
                 } else {
                     message
                 };
+                // 403 is content-safety, never auth: on this setup path it stays `internal_error`, which maps to `server_error`
                 acp::Error::internal_error().data(message)
             }
             StatusCode::BAD_REQUEST => acp::Error::invalid_params().data(message),
@@ -127,6 +141,7 @@ pub(crate) fn map_sampling_err_to_acp(err: SamplingError) -> acp::Error {
             StatusCode::TOO_MANY_REQUESTS => {
                 acp::Error::new(RATE_LIMITED_ERROR_CODE, "Rate limited".to_string()).data(message)
             }
+            // Preserve the HTTP status in data so the classifier folds capacity errors (503/529) into `rate_limit`
             _ => acp::Error::internal_error()
                 .data(error_data_with_status(message, Some(status.as_u16()))),
         },
@@ -188,12 +203,16 @@ pub(crate) fn local_error(code: &str, message: impl Into<String>) -> acp::Error 
 }
 
 /// `acp::Error.data` key of the typed terminal-error kind marker (stamped by [`terminal_error_data`]).
+/// Snake_case like its shipped `data` siblings (`http_status`); frozen wire format.
+/// The notification paths carry the kind under their own keys/fields (see `extensions::notification::PROMPT_COMPLETE_ERROR_KIND_KEY`).
 const ERROR_KIND_DATA_KEY: &str = "error_kind";
 
-/// `acp::Error.data` key for a local failure's stable `code`.
+/// `acp::Error.data` key for a local failure's stable `code`; shared by [`local_error`], [`error_code_from_data`], and `session::persistence::io_error_to_acp`.
 pub(crate) const ERROR_CODE_DATA_KEY: &str = "code";
 
-/// `salvage_cause` values stamped on mid-salvage terminal errors.
+/// `salvage_cause` values stamped on mid-salvage terminal errors and forwarded onto the `shell.turn.length_empty_continuation` event.
+/// EMPTY covers every continuation that cannot be salvaged at the cap: nothing visible, or a truncated tool-call tail.
+/// The sampler folds both into `MaxTokensTruncation`; OVERFLOW means the request no longer fit.
 pub(crate) const SALVAGE_CAUSE_KEY: &str = "salvage_cause";
 pub(crate) const SALVAGE_CAUSE_EMPTY: &str = "empty_continuation";
 pub(crate) const SALVAGE_CAUSE_OVERFLOW: &str = "context_overflow";
@@ -222,8 +241,8 @@ pub(crate) fn terminal_error_data(
     data
 }
 
-/// The raw `error_kind` marker string from `acp::Error.data`, unparsed, for
-/// readers with their own vocabulary.
+/// The raw `error_kind` marker string from `acp::Error.data`, unparsed, for readers with their own vocabulary.
+/// The pager maps an unknown kind to its `Other`, keeping it immune to text recovery.
 pub fn error_kind_str_from_error(err: &acp::Error) -> Option<&str> {
     err.data.as_ref()?.get(ERROR_KIND_DATA_KEY)?.as_str()
 }
@@ -232,7 +251,7 @@ pub fn error_code_from_data(err: &acp::Error) -> Option<&str> {
     err.data.as_ref()?.get(ERROR_CODE_DATA_KEY)?.as_str()
 }
 
-/// Typed view of [`error_kind_str_from_error`] for the shell's own classification, where an unknown kind degrading to `None` (generic).
+/// Typed view of [`error_kind_str_from_error`] for the shell's own classification, where an unknown kind degrading to `None` (generic) is correct.
 pub fn error_kind_from_error(err: &acp::Error) -> Option<SamplingErrorKind> {
     error_kind_str_from_error(err)?.parse().ok()
 }
@@ -242,8 +261,8 @@ pub(crate) fn is_max_tokens_turn_error(err: &acp::Error) -> bool {
     error_kind_from_error(err) == Some(SamplingErrorKind::MaxTokensTruncation)
 }
 
-/// `turn_result.json` stop_reason for a failed turn: "MaxTokens" when the
-/// marker is present, else "Error".
+/// `turn_result.json` stop_reason for a failed turn: "MaxTokens" when the marker is present, else "Error".
+/// Matches the success path's `acp::StopReason` names.
 pub fn stop_reason_for_turn_error(err: &acp::Error) -> &'static str {
     if is_max_tokens_turn_error(err) {
         "MaxTokens"
@@ -256,11 +275,8 @@ fn error_message_from_data(data: &serde_json::Value) -> serde_json::Value {
     data.get("message").cloned().unwrap_or_else(|| data.clone())
 }
 
-/// Internal service names that upstream error bodies echo, rewritten to
-/// distinct sentence-friendly backend labels before display. The labels stay
-/// distinct so a user paste keeps the failing hop. Shared by shell and pager
-/// so the redaction cannot drift; apply via [`rewrite_service_names`]
-/// (case-insensitive, no cased variants here).
+/// Internal service names that upstream error bodies echo, rewritten to distinct sentence-friendly backend labels before display. The labels stay distinct so a user paste keeps the failing hop.
+/// Shared by shell and pager so the redaction cannot drift; apply via [`rewrite_service_names`] (case-insensitive, no cased variants here). No replacement value may re-match a pattern (pinned by test).
 pub const SERVICE_NAME_REWRITES: &[(&str, &str)] = &[
     ("cli-chat-proxy", "build backend"),
     ("cli_chat_proxy", "build backend"),
@@ -283,6 +299,7 @@ pub fn rewrite_service_names(text: &str) -> String {
 }
 
 /// ASCII-case-insensitive `replace`.
+/// Indices found on the lowercased copy map 1:1 onto `text`: `to_ascii_lowercase` never changes byte lengths.
 fn replace_ascii_case_insensitive(text: &str, pattern: &str, replacement: &str) -> String {
     // An empty pattern would never advance `idx`; fail safe in release too.
     if pattern.is_empty() {
@@ -731,8 +748,9 @@ mod tests {
         assert_eq!(acp_err.code, acp::Error::auth_required().code);
     }
 
-    /// Examples: content-safety blocks like SAFETY_CHECK_TYPE_DATA_LEAKAGE, ZDR-gated operations, remote settings blocks. That can race with invalid_grant_threshold to wipe
-    /// auth.json.
+    /// Regression test: 403 Forbidden must not map to auth_required. The cli-chat-proxy returns 403 for policy denials unrelated to the caller's credentials.
+    /// Examples: content-safety blocks like SAFETY_CHECK_TYPE_DATA_LEAKAGE, ZDR-gated operations, remote settings blocks.
+    /// Mapping these to auth_required makes the desktop app tear down the session and start silent re-auth on -32000. That can race with invalid_grant_threshold to wipe auth.json.
     #[test]
     fn forbidden_does_not_map_to_auth_required() {
         let err = SamplingError::Api {

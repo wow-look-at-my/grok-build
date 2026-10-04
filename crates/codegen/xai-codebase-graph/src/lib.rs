@@ -1,10 +1,82 @@
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::expect_used)] // Hits predate the gate
-#![allow(clippy::unwrap_used)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 30 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 17 hits predate the gate
+#![allow(clippy::unwrap_used)] // 4 hits predate the gate
 
-//! # xai-codebase-graph High-performance code graph generation using tree-sitter queries. This crate provides.
+//! # xai-codebase-graph
+//!
+//! High-performance code graph generation using tree-sitter queries.
+//!
+//! This crate provides:
+//! - **Go-to-definitions**: Find where symbols are defined
+//! - **Go-to-references**: Find where symbols are used
+//! - **Initial repository indexing**: Build the full index from scratch
+//! - **Incremental reindexing**: Update the index based on file system events
+//! - **Parallel processing**: Uses rayon for fast parallel parsing
+//! - **Memory-mapped I/O**: Zero-copy file reading and fast index caching
+//!
+//! ## Quick Start
+//!
+//! ```rust,ignore
+//! use std::path::Path;
+//! use xai_codebase_graph::{IndexBuilder, load_index, save_index, get_cache_path, Navigator};
+//!
+//! let repo_path = Path::new("/path/to/repo");
+//! let cache_path = get_cache_path(repo_path);
+//!
+//! // Try loading from cache first, otherwise build fresh
+//! let index = match load_index(&cache_path) {
+//!     Ok(index) => index,
+//!     Err(_) => {
+//!         let index = IndexBuilder::new()
+//!             .with_threads(8)
+//!             .build(repo_path)?;
+//!         save_index(&cache_path, &index)?;
+//!         index
+//!     }
+//! };
+//!
+//! // Create a navigator for location-based operations
+//! let navigator = Navigator::new(index);
+//!
+//! // Go to definition at a specific position (row and col are 1-indexed)
+//! let result = navigator.goto_definition(Path::new("src/main.rs"), 10, 15)?;
+//! for loc in result.locations {
+//!     println!("{}:{}", loc.path.display(), loc.line);
+//! }
+//! ```
+//!
+//! ## Channel-Based Incremental Updates
+//!
+//! `IndexManagerHandle` exposes direct query commands that answer in-place
+//! without cloning the full index.  Prefer these over `get_snapshot()` in
+//! hot paths.
+//!
+//! ```rust,ignore
+//! use std::path::PathBuf;
+//! use xai_codebase_graph::{IndexManager, IndexManagerConfig, FileEvent};
+//!
+//! // Create the manager with config
+//! let config = IndexManagerConfig::new("/path/to/repo".into())
+//!     .with_cache_path("/tmp/index.bin".into());
+//!
+//! let handle = IndexManager::spawn(config);
+//!
+//! // Send file events as they come from FSNotify
+//! handle.send_event(FileEvent::modified("src/main.rs".into()))?;
+//!
+//! // Query directly — no full-index clone needed
+//! let file = PathBuf::from("src/main.rs");
+//! let result = handle.goto_definition_blocking(file, 10, 15)??;
+//! for loc in result.locations {
+//!     println!("{}:{}", loc.path, loc.line);
+//! }
+//!
+//! // Lightweight stats — also no clone
+//! let file_count = handle.get_file_count();
+//! let exists     = handle.has_definition_blocking("MyStruct");
+//! ```
 
 #![deny(clippy::indexing_slicing)]
 

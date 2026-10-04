@@ -1,4 +1,23 @@
 //! Watch-footprint benchmark harness.
+//!
+//! Measures what a live `FsEventSource` costs the OS: watch count (crate
+//! accounting + `/proc/self/fdinfo` inotify ground truth on Linux) and
+//! startup latency, under either strategy (`GROK_FSNOTIFY_PER_DIR=0|1`).
+//!
+//! ```bash
+//! # Generate a synthetic tree, then measure both strategies against it:
+//! cargo run --release -p xai-fsnotify --example watch_stats -- gen js /tmp/js-repo
+//! GROK_FSNOTIFY_PER_DIR=0 cargo run --release -p xai-fsnotify --example watch_stats -- run /tmp/js-repo 5
+//! GROK_FSNOTIFY_PER_DIR=1 cargo run --release -p xai-fsnotify --example watch_stats -- run /tmp/js-repo 5
+//! ```
+//!
+//! Tree shapes are scaled replicas of synthetic large-repo measurements:
+//! - `js`: a JS/turbo monorepo where `node_modules/` trees nested below the
+//!   top level dominate the directory count (the shape behind the original
+//!   "grok holds 55k inotify watches" report).
+//! - `large`: a wide multi-language monorepo — 44 top-level dirs, ~52k
+//!   non-ignored dirs, ~7k nested-ignored, a large top-level `target/`, and
+//!   a `.git` with 13k+ internal dirs (objects/modules/logs/refs-remotes).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,6 +54,8 @@ fn make_git_dir(root: &Path, objects: usize, logs: usize, remotes: usize, module
     }
 }
 
+/// JS monorepo: 3 apps + 12 packages of sources (~3.2k non-ignored dirs) and
+/// nested `node_modules/` holding ~29k dirs — ignored, below the top level.
 fn gen_js(root: &Path) {
     fs::write(root.join(".gitignore"), "node_modules/\ndist/\n").unwrap();
     make_git_dir(root, 256, 400, 120, 0);
@@ -58,6 +79,7 @@ fn gen_js(root: &Path) {
 fn gen_large(root: &Path) {
     fs::write(root.join(".gitignore"), "target/\nnode_modules/\n.venv/\n").unwrap();
     make_git_dir(root, 256, 9000, 2500, 800);
+    // 44 top-level dirs; weights exercise a realistic wide fan-out.
     let weights: &[(&str, usize)] = &[
         ("apps", 23_000),
         ("services", 6_600),
@@ -78,7 +100,8 @@ fn gen_large(root: &Path) {
     make_dirs(&root.join("frontend/node_modules"), 4_000, 15);
     make_dirs(&root.join("python/common/.venv"), 2_000, 20);
     make_dirs(&root.join("crates/foo/target"), 1_400, 30);
-    // Top-level ignored target/ (~34k dirs): fan-out already skips it.
+    // Top-level ignored target/ (~34k dirs): fan-out already skips it; the
+    // recursive-root fallback (>64 top-level dirs) would not.
     make_dirs(&root.join("target"), 34_000, 50);
 }
 
@@ -138,7 +161,8 @@ fn main() {
                 let source =
                     FsEventSource::start(path.clone(), FsConfig::default()).expect("watcher start");
                 ready_ms.push(t.elapsed().as_secs_f64() * 1e3);
-                // Steady state: background arming (per-dir mode on big trees).
+                // Steady state: background arming (per-dir mode on big trees)
+                // is done once the kernel watch count stops moving.
                 let mut last = inotify_watches();
                 let deadline = Instant::now() + std::time::Duration::from_secs(120);
                 loop {

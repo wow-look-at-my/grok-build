@@ -1,4 +1,6 @@
 //! Decodes the shell's `x.ai/*` extension notifications into the headless [`ExtEvent`] the orchestrator dispatches.
+//! Also answers reverse `ext_method` requests with policy replies.
+//! This module owns the wire envelope shapes and the method-to-event mapping, kept out of `headless.rs`.
 
 use agent_client_protocol as acp;
 use xai_acp_lib::{AcpArgsBox, AcpResult};

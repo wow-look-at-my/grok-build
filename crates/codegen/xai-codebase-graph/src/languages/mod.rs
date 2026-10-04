@@ -17,8 +17,8 @@ pub use rust::rust_lang;
 pub use ts::ts_lang;
 pub use types::TSLanguageConfig;
 
-/// Registry of all supported languages. Lookup by extension and language ID; can check
-/// whether extensions share a family.
+/// Registry of all supported languages.
+/// Lookup by extension and language ID; can check whether two extensions share a family.
 pub struct LanguageRegistry {
     /// All registered language configs.
     configs: Vec<Arc<TSLanguageConfig>>,
@@ -92,7 +92,7 @@ impl LanguageRegistry {
         &self.configs
     }
 
-    /// Check if file extensions belong to the same language.
+    /// Check if two file extensions belong to the same language.
     ///
     /// Returns true if both extensions are registered under the same language config.
     pub fn extensions_same_language(&self, ext1: &str, ext2: &str) -> bool {

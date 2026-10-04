@@ -1,4 +1,7 @@
 //! Procedural art assets for the `/gboom` easter egg.
+//!
+//! Everything is generated in code: no binary assets, no copyrighted material.
+//! Wall textures are synthesized from hash noise, sprites are hand-drawn char-map pixel art, and text uses a tiny 5x7 pixel font.
 
 pub(super) type Rgb = [u8; 3];
 
@@ -9,9 +12,11 @@ pub(super) const TEX_SIZE: usize = 64;
 pub const GBOOM_RED: Rgb = [235, 40, 32];
 
 /// Imp eye color. The renderer exempts exactly this color from distance fog so eyes glow in the dark.
+/// Keep the sprite art and renderer in sync through this constant.
 pub(super) const EYE_GLOW: Rgb = [255, 216, 0];
 
-/// Minimal xorshift64* PRNG.
+/// Minimal xorshift64* PRNG. Damage rolls and the fire effect need deterministic, allocation-free randomness, not `rand`-crate quality.
+/// Each consumer gets its own seed so simulation and visuals stay independent streams.
 pub(super) struct XorShift64(u64);
 
 impl XorShift64 {
@@ -68,6 +73,7 @@ impl Texture {
     }
 }
 
+/// Generate the wall texture set, indexed by map cell value - 1.
 pub(super) fn build_textures() -> Vec<Texture> {
     vec![brick(), stone(), tech(), hellstone()]
 }
@@ -185,6 +191,7 @@ pub(super) fn build_ceiling_texture() -> Texture {
     for y in 0..TEX_SIZE {
         for x in 0..TEX_SIZE {
             let in_seam = y % 16 == 0 || x % 16 == 0;
+            // One panel in ~6 carries a recessed lamp in its center.
             let panel = ((x / 16) as u32, (y / 16) as u32);
             let has_lamp = hash01(panel.0, panel.1, 12) > 0.84;
             let in_lamp = has_lamp && (4..12).contains(&(x % 16)) && (4..12).contains(&(y % 16));
@@ -296,7 +303,7 @@ pub(super) struct ImpSprites {
 }
 
 pub(super) fn build_imp_sprites() -> ImpSprites {
-    // 16x20 horned demon. Walk frames differ in leg/arm pose.
+    // 16x20 horned demon. Two walk frames differ in leg/arm pose.
     let walk_a = Sprite::from_art(&[
         "..H..........H..",
         "..HH........HH..",
@@ -521,8 +528,8 @@ pub(super) fn build_gun_sprites() -> GunSprites {
 // 5x7 pixel font (uppercase + the few symbols the game needs)
 // -------------------------------------------------------------------------
 
-/// Return the 5x7 glyph rows for a character, MSB-left in the low a few
-/// bits. Unknown characters render as blank.
+/// Return the 5x7 glyph rows for a character, MSB-left in the low 5 bits.
+/// Unknown characters render as blank.
 pub(super) fn glyph5x7(ch: char) -> [u8; 7] {
     match ch.to_ascii_uppercase() {
         'A' => [
@@ -613,6 +620,7 @@ mod tests {
         // Zero seed must not collapse to the all-zero fixed point.
         let mut rng = XorShift64::new(0);
         assert!((0..4).map(|_| rng.next_u32()).any(|v| v != 0));
+        // Floats stay in [0, 1).
         let mut rng = XorShift64::new(42);
         for _ in 0..1000 {
             let f = rng.next_f32();
@@ -622,7 +630,8 @@ mod tests {
 
     #[test]
     fn every_sprite_palette_char_is_used_in_art() {
-        // Keep the palette free of dead entries: every mapped char's color must appear in at least one sprite Palette colors are distinct.
+        // Keep the palette free of dead entries: every mapped char's color must appear in at least one sprite
+        // Palette colors are distinct, so matching on color is equivalent to matching on char
         let mut used: std::collections::HashSet<Rgb> = std::collections::HashSet::new();
         let imps = build_imp_sprites();
         let guns = build_gun_sprites();

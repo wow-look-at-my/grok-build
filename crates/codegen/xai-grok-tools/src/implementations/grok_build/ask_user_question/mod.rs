@@ -1,4 +1,31 @@
 //! `AskUserQuestion` tool — new architecture (`Tool` trait).
+//!
+//! Interactive Q&A tool that presents the user with structured questions and
+//! option sets. In plan mode it serves as the **interview mechanism** — the
+//! agent clarifies requirements, disambiguates approaches, and gets user input
+//! on design decisions before finalizing the plan. Outside plan mode it is a
+//! general-purpose tool for gathering user preferences during implementation.
+//!
+//! ## How It Works
+//!
+//! 1. The agent calls `AskUserQuestion` with an array of structured questions
+//!    (each with options, optional preview, optional multi_select).
+//! 2. The tool sends a `UserQuestionAsked` **notification** to the gateway/client
+//!    carrying the full question payload as JSON.
+//! 3. The tool returns `AskUserQuestionOutput::QuestionsSent` to the model as
+//!    an immediate confirmation.
+//! 4. The client presents the question UI, collects user answers, and injects
+//!    them back into the conversation as the tool result. This client-side
+//!    round-trip is handled by the orchestration layer, not by this tool.
+//!
+//! ## Plan-Mode Interview Actions
+//!
+//! When called during plan mode, the client can present two extra buttons:
+//! - **"Respond to agent"** — partial answers, agent reformulates questions
+//! - **"Finish plan interview"** — agent stops asking, proceeds with what it has
+//!
+//! These are client-side behaviors that produce different tool-result strings;
+//! the tool itself is identical in and out of plan mode.
 
 pub mod format;
 pub mod types;
@@ -15,13 +42,19 @@ use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::resources::{NotificationHandle, SharedResources};
 use crate::types::tool::{ToolKind, ToolNamespace};
 
-/// Migration fallback: when `true`, a missing `UserQuestionSender` falls back to the fire-and-forget `QuestionsSent` behavior.
+/// Migration fallback: when `true`, a missing `UserQuestionSender` falls back to the old
+/// fire-and-forget `QuestionsSent` behavior with a warning. Set to `false` (or delete entirely)
+/// once the shell coordinator is wired up in TS-03 and confirmed working.
 const MIGRATION_FALLBACK: bool = true;
 
-/// Default max time to wait for the user to answer the questionnaire (all questions in this tool call share one timer).
+/// Default max time to wait for the user to answer the questionnaire (all questions in this tool
+/// call share one timer): 30 minutes. On expiry the tool returns the same skipped/cancel text as a
+/// user dismiss (`format::unanswered_text`), not a tool failure.
 pub const RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// Default for `timeout_enabled` across every resolver tier and settings surface.
+/// Default for `timeout_enabled` across every resolver tier and settings surface: the questionnaire
+/// timer is armed unless something disarms it. Single source — the shell resolver's `.default(...)`
+/// and the pager's settings registry both anchor on this const.
 pub const DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED: bool = true;
 
 /// Env var: override [`RESPONSE_TIMEOUT`] with a duration in **seconds**.
@@ -29,7 +62,7 @@ pub const RESPONSE_TIMEOUT_ENV: &str = "GROK_ASK_USER_QUESTION_TIMEOUT_SECS";
 
 /// Parse the [`RESPONSE_TIMEOUT_ENV`] override (positive integer seconds). Invalid or non-positive
 /// values are warned and treated as unset. Single source for this parse — the shell's env tier
-/// calls it too, so both resolutions can't drift.
+/// calls it too, so the two resolutions can't drift.
 pub fn response_timeout_env_secs() -> Option<u64> {
     let raw = std::env::var(RESPONSE_TIMEOUT_ENV).ok()?;
     match raw.trim().parse::<u64>() {
@@ -52,17 +85,22 @@ pub fn response_timeout() -> std::time::Duration {
         .unwrap_or(RESPONSE_TIMEOUT)
 }
 
-/// Runtime-configurable parameters for the `ask_user_question` tool, injected
-/// via `Params<AskUserQuestionParams>` in `SharedResources`.
+/// Runtime-configurable parameters for the `ask_user_question` tool, injected via `Params<AskUserQuestionParams>` in
+/// `SharedResources`. All fields are optional — `None` means "unset", which preserves the legacy env→default budget, so
+/// registry consumers that never resolve config (workspace toolset) keep today's behavior.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AskUserQuestionParams {
-    /// `Some(false)` disarms the questionnaire timer entirely (wait forever for an answer).
+    /// `Some(false)` disarms the questionnaire timer entirely (wait forever
+    /// for an answer). `None`/`Some(true)` keep the timer armed.
     #[serde(default)]
     pub timeout_enabled: Option<bool>,
     /// Wait budget in seconds when the timer is armed (positive integer).
+    /// `None` falls back to the env override / [`RESPONSE_TIMEOUT`].
     #[serde(default)]
     pub timeout_secs: Option<u64>,
-    /// Session state stamped by the agent builder for non-interactive sessions (headless `-p`, SDK).
+    /// Session state stamped by the agent builder for non-interactive
+    /// sessions (headless `-p`, SDK) — NOT a user config key. `Some(true)`
+    /// switches the cancel/timeout result to [`format::NO_OPERATOR_TEXT`].
     #[serde(default)]
     pub non_interactive: Option<bool>,
 }
@@ -81,6 +119,7 @@ impl AskUserQuestionParams {
         match self.timeout_secs {
             Some(secs) if secs > 0 => Some(std::time::Duration::from_secs(secs)),
             Some(secs) => {
+                // 0 must never mean "wait forever" — that is `timeout_enabled`'s job.
                 tracing::warn!(
                     value = secs,
                     "ask_user_question timeout_secs must be > 0; using default budget"
@@ -103,7 +142,8 @@ pub struct QuestionOption {
     #[schemars(description = "What picking this option means or implies.")]
     pub description: String,
 
-    /// Optional content shown while the option is focused — mockups, code snippets, anything the user should compare.
+    /// Optional content shown while the option is focused — mockups, code
+    /// snippets, anything the user should compare. Single-select only.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
         description = "Optional content shown while the option is focused — mockups, code snippets, anything the user should compare. Single-select questions only."
@@ -129,6 +169,11 @@ pub struct Question {
     pub options: Vec<QuestionOption>,
 
     /// Let the user pick more than one option (default false).
+    // Model-facing schema name is snake_case (`multi_select`); deserialize also
+    // accepts the legacy/ACP `multiSelect` so the shared `Question` type stays
+    // wire-compatible with the camelCase ACP ext_method. A caller that sends
+    // both spellings folds them through [`Question::MULTI_SELECT_KEYS`] rather
+    // than failing the whole tool call on a duplicate field.
     #[serde(default)]
     #[schemars(
         rename = "multi_select",
@@ -143,7 +188,9 @@ pub struct Question {
 }
 
 impl Question {
-    /// The keys [`multi_select`](Self::multi_select) is read under.
+    /// The keys [`multi_select`](Self::multi_select) is read under. The first
+    /// is what this type writes (the camelCase ACP spelling); `multi_select` is
+    /// the spelling the advertised tool schema names, so models send it.
     pub const MULTI_SELECT_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("multiSelect", &["multi_select"]);
 }
@@ -187,6 +234,11 @@ impl TryFrom<QuestionWire> for Question {
 }
 
 /// Forwards through [`QuestionWire`] and the fold.
+///
+/// This is the body `#[serde(try_from = "QuestionWire")]` would generate,
+/// written out because schemars 1.0 reads that attribute to build the advertised
+/// schema: it would publish the shadow's shape, naming both `multiSelect` and
+/// `multi_select` to the model instead of the one key the schema renames to.
 impl<'de> serde::Deserialize<'de> for Question {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -201,17 +253,22 @@ impl<'de> serde::Deserialize<'de> for Question {
 /// Input for the `AskUserQuestion` tool.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct AskUserQuestionInput {
-    /// The questions to ask, each with its own options. At least one question is required.
+    /// The questions to ask, each with its own options. At least one question
+    /// is required.
     #[schemars(description = "The questions to ask, each with its own options.")]
     pub questions: Vec<Question>,
 
-    /// Internal flag: when `true`, the tool result is formatted in the alternate shape (referenced by id, not label).
+    /// Internal flag: when `true`, the tool result is formatted in the alternate shape (referenced
+    /// by id, not label). Skipped on the wire and from the JSON schema so the model never sees or
+    /// controls this field.
     #[serde(default, skip)]
     #[schemars(skip)]
     pub use_id_keyed_format: bool,
 }
 
-/// `AskUserQuestion` tool.
+/// `AskUserQuestion` tool. Blocks inside `run()` until the user responds or the configured wait budget elapses for the
+/// whole questionnaire (default [`RESPONSE_TIMEOUT`], 30 minutes). Sends a request over an in-process mpsc channel to a
+/// session-owned coordinator (in xai-grok-shell), which performs an ACP `ext_method` round-trip to the client/pager.
 #[derive(Debug, Default)]
 pub struct AskUserQuestionTool;
 
@@ -236,7 +293,9 @@ impl crate::types::tool_metadata::ToolMetadata for AskUserQuestionTool {
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
-        // Standalone.
+        // Standalone. The plan-mode prompt note is
+        // `${% if tools.by_kind.exit_plan %}`-guarded, so it renders
+        // fine without the plan tools.
         Expr::True
     }
 }
@@ -343,6 +402,7 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
             });
         }
 
+        // ── Step 1: Validate unique question text ───────────────────────
         {
             let mut seen = std::collections::HashSet::new();
             for q in &input.questions {
@@ -355,6 +415,7 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
             }
         }
 
+        // ── Step 2: Obtain UserQuestionSender ───────────────────────────
         let sender = {
             let res = resources.lock().await;
             res.get::<UserQuestionSender>().cloned()
@@ -379,8 +440,10 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
             }
         };
 
+        // ── Step 3: Create oneshot ──────────────────────────────────────
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
 
+        // ── Step 4: Send UserQuestionRequest ────────────────────────────
         let request = types::UserQuestionRequest {
             tool_call_id: ctx.call_id.as_str().to_owned(),
             questions: input.questions.clone(),
@@ -394,6 +457,7 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
             ));
         }
 
+        // ── Step 5: Emit UserQuestionAsked + read the wait budget ───────
         let params = {
             let questions_json = serde_json::to_value(&input.questions)
                 .unwrap_or_else(|_| serde_json::Value::Array(vec![]));
@@ -404,9 +468,8 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
                     questions_json,
                 });
             }
-            // Shell-injected params win; absent or unset fields keep the
-            // env→default budget so non-shell registry consumers are
-            // unchanged.
+            // Shell-injected params win; absent or unset fields keep the legacy
+            // env→default budget so non-shell registry consumers are unchanged.
             res.get::<crate::types::resources::Params<AskUserQuestionParams>>()
                 .map(|p| p.0)
                 .unwrap_or_default()
@@ -420,6 +483,9 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
             "Asked user questions, blocking for response"
         );
 
+        // ── Step 6: Block on the oneshot result (whole batch, one timer) ─ A single pending-decision timeout covers the
+        // questionnaire, not per question: N questions in one call share one wait. A `None` budget (`timeout_enabled = false`)
+        // runs the same await with no timer, normalized into the timed shape so one match handles both.
         let outcome = match wait {
             Some(dur) => tokio::time::timeout(dur, result_rx).await,
             None => Ok(result_rx.await),
@@ -438,13 +504,15 @@ impl xai_tool_runtime::Tool for AskUserQuestionTool {
                     timeout_secs = ?wait.map(|d| d.as_secs()),
                     "User question timed out; continuing without answers"
                 );
-                // Drop the oneshot receiver on return.
+                // Drop the oneshot receiver on return. The shell coordinator races `result_tx.closed()` against ACP so it unblocks and
+                // can open the next questionnaire (stale UI is cancelled when a new ext_method arrives). Same model text as cancel.
                 return Ok(AskUserQuestionOutput::UserAnswered {
                     message: unanswered.to_string(),
                 });
             }
         };
 
+        // ── Step 7: Map result to formatter or error ────────────────────
         match result {
             Ok(UserQuestionResponse::Accepted {
                 answers,
@@ -661,8 +729,8 @@ mod tests {
         assert_eq!(input.questions[0].multi_select, Some(false));
     }
 
-    /// Both spellings carrying different answers is a real contradiction -- it
-    /// decides whether the user may pick more than one option -- so it fails
+    /// The two spellings carrying different answers is a real contradiction --
+    /// it decides whether the user may pick more than one option -- so it fails
     /// and names both keys rather than taking one in silence.
     #[test]
     fn a_question_whose_multi_select_spellings_disagree_is_an_error_naming_the_field() {
@@ -1070,9 +1138,8 @@ mod tests {
     /// = false` disarms the timer; `0` never means "wait forever".
     #[test]
     fn wait_budget_mapping() {
-        // Compared against `response_timeout()` rather than the raw constant
-        // so the assertions pin the delegation and hold under a dev's env
-        // override.
+        // Compared against `response_timeout()` rather than the raw constant so
+        // the assertions pin the legacy delegation and hold under a dev's env override.
         assert_eq!(
             AskUserQuestionParams::default().wait_budget(),
             Some(response_timeout()),

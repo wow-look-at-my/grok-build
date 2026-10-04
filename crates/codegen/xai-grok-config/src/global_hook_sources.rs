@@ -1,4 +1,6 @@
 //! Grok-owned direct global hook paths shared by shell discovery and sandbox write-deny.
+//! These are `$GROK_HOME/hooks`, `hooks-paths`, and absolute registry targets.
+//! Relative registry lines, project hooks, and vendor compat are out of scope.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -85,6 +87,7 @@ pub enum GlobalHookSourceError {
 }
 
 /// Hard-fail omits all sources.
+/// Soft `configured_error` keeps fixed slots and omits configured targets (sandbox must fail closed; discovery may log).
 #[derive(Debug)]
 pub struct ResolvedGlobalHookSources {
     pub sources: Vec<GlobalHookSource>,
@@ -201,8 +204,8 @@ pub(crate) fn is_filesystem_mountpoint(path: &Path) -> bool {
     }
 }
 
-/// Ancestors to RW self-bind so rename is EBUSY, walking from parent to root
-/// (never `/`).
+/// Ancestors to RW self-bind so rename is EBUSY, walking from parent to root (never `/`).
+/// Already-mounted nodes are skipped, but renameable ancestors above them are still pinned.
 pub fn ancestors_to_pin_as_mountpoints(path: &Path) -> Vec<PathBuf> {
     ancestors_to_pin_as_mountpoints_with(path, is_filesystem_mountpoint)
 }

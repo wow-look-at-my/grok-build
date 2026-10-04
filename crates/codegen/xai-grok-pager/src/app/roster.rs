@@ -1,4 +1,12 @@
 //! Mirror types for the leader "session roster" wire format.
+//!
+//! The leader process hosts session actors and exposes a roster API the pager consumes in leader mode (FleetView dashboard):
+//!
+//! - Request/response `x.ai/sessions/list` parses into [`RosterListResponse`].
+//! - Broadcast notification `x.ai/sessions/changed` parses into [`RosterChanged`].
+//!
+//! These structs mirror the producer-side wire format (camelCase JSON, snake_case activity enum).
+//! They are deserialize-only: the pager never produces them.
 
 use serde::Deserialize;
 
@@ -33,7 +41,8 @@ pub struct RosterEntry {
     pub cwd: String,
     #[serde(default)]
     pub is_worktree: bool,
-    /// Set only on rows the leader synthesizes for remote claims; those are not loadable sessions.
+    /// Set only on rows the leader synthesizes for remote claims; those are not loadable
+    /// sessions. `None` for rows a local agent owns.
     #[serde(default)]
     pub session_kind: Option<String>,
     #[serde(default)]
@@ -68,10 +77,9 @@ pub struct RosterChanged {
     pub removed: Vec<String>,
 }
 
-/// Parse an `x.ai/sessions/list` ext-response body into a
-/// [`RosterListResponse`]. The agent answers through
-/// `ExtMethodResult::success(..).to_ext_response()`, which wraps the payload
-/// as `{ "result": { "sessions": [...] } }`.
+/// Parse an `x.ai/sessions/list` ext-response body into a [`RosterListResponse`].
+/// The agent answers through `ExtMethodResult::success(..).to_ext_response()`, which wraps the payload as `{ "result": { "sessions": [...] } }`.
+/// A bare `{ "sessions": [...] }` body (no envelope) is tolerated too.
 pub fn parse_roster_list_response(body: &str) -> Option<RosterListResponse> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let payload = value.get("result").unwrap_or(&value);
@@ -124,8 +132,7 @@ mod tests {
             "agent wraps the payload in a `result` envelope: {body}"
         );
 
-        // Repro of the bug mechanism: a naive direct deserialize of the
-        // wrapped body succeeds but drops every session
+        // Repro of the original bug mechanism: a naive direct deserialize of the wrapped body succeeds but drops every session
         let naive: RosterListResponse =
             serde_json::from_str(body).expect("naive parse succeeds (that is the trap)");
         assert!(

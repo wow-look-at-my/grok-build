@@ -1,4 +1,6 @@
-//! The handler behind those inference endpoints.
+//! The one handler behind the three inference endpoints. A request is admitted, logged, and offered
+//! to the overrides; one they decline is answered by the next queued agent turn or the response
+//! mode, in the format of the endpoint it arrived on.
 
 use std::borrow::Cow;
 use std::collections::VecDeque;

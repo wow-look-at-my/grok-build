@@ -1,4 +1,6 @@
 //! Stream a response and measure frame timing during active streaming.
+//!
+//! What it stresses: streaming-chunk cache invalidation, `ensure_wrapped()` cache misses every generation, wave animation during running turn.
 
 use std::time::{Duration, Instant};
 
@@ -35,7 +37,7 @@ pub async fn run(harness: &mut PtyHarness, content: &ContentController) -> Resul
 
 fn build_response(words: usize) -> String {
     let mut s = String::with_capacity(words * 10);
-    // wait_for_text keys on this sentinel token, which is guaranteed to appear near the start of the stream
+    // wait_for_text keys on this sentinel token, which is guaranteed to appear near the very start of the stream
     s.push_str("stream-bench ");
     for i in 0..words {
         s.push_str("word");

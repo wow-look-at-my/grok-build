@@ -1,4 +1,17 @@
 //! PPTX text extraction shared by read tools.
+//!
+//! Minimal zip + quick-xml implementation that replaces `omniparse` (which
+//! dragged an old `scraper 0.18` / `cssparser 0.31` / `selectors 0.25` /
+//! `calamine` line into the shipped pager binary for what is, here, just
+//! "unzip and read the DrawingML text runs").
+//!
+//! Output format is compatible with the previous omniparse-based extraction:
+//! `--- Slide N ---` headers, slide body text with one line per paragraph,
+//! and a `Speaker Notes:` section when the slide has notes. Two omniparse
+//! bugs are deliberately fixed rather than replicated: slides are ordered
+//! numerically (slide2 before slide10, not lexicographically), and each
+//! slide's notes are matched by the slide's own number instead of its
+//! position in the sorted list.
 
 use std::io::{Cursor, Read};
 
@@ -7,7 +20,8 @@ use quick_xml::XmlVersion;
 use quick_xml::events::Event;
 use zip::ZipArchive;
 
-/// Cap on the decompressed size of any single XML entry we read.
+/// Cap on the decompressed size of any single XML entry we read, guarding
+/// against zip bombs (the compressed input is already capped by the caller).
 const MAX_XML_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Extract plain text from PPTX bytes. Returns the concatenated slide texts, or an error string
@@ -87,7 +101,9 @@ fn read_entry(
 /// Extract text from DrawingML: the character content of `<a:t>` runs,
 /// concatenated per paragraph, one line per `<a:p>` paragraph.
 fn extract_drawingml_text(xml: &str) -> Result<String, String> {
-    // No `trim_text`: whitespace inside `<a:t>` runs is significant (runs are frequently split mid-sentence).
+    // No `trim_text`: whitespace inside `<a:t>` runs is significant (runs are
+    // frequently split mid-sentence), and text outside runs is already
+    // excluded by the `in_text_run` gate below.
     let mut reader = Reader::from_str(xml);
 
     let mut text = String::new();
@@ -101,6 +117,8 @@ fn extract_drawingml_text(xml: &str) -> Result<String, String> {
                     .map_err(|e| e.to_string())?;
                 text.push_str(&content);
             }
+            // quick-xml ≥0.37 emits `&amp;` / `&#233;` as separate events
+            // instead of unescaping them inside `Event::Text`.
             Ok(Event::GeneralRef(e)) if in_text_run => {
                 if let Some(ch) = e.resolve_char_ref().map_err(|e| e.to_string())? {
                     text.push(ch);
@@ -182,7 +200,8 @@ mod tests {
 
     #[test]
     fn split_text_runs_concatenate_without_injected_spaces() {
-        // PowerPoint frequently splits a word across runs (e.g. spell-check boundaries).
+        // PowerPoint frequently splits a word across runs (e.g. spell-check
+        // boundaries); the run texts must be joined without separators.
         let slide = r#"<p:sld xmlns:a="a" xmlns:p="p"><a:p><a:r><a:t>Hel</a:t></a:r><a:r><a:t>lo &amp; bye</a:t></a:r></a:p></p:sld>"#;
         let bytes = build_zip(&[("ppt/slides/slide1.xml", slide)]);
         let text = extract_pptx_text_from_bytes(&bytes).unwrap();
@@ -233,7 +252,8 @@ mod tests {
 
     #[test]
     fn empty_text_elements_do_not_leak_surrounding_text() {
-        // A self-closing <a:t/> must not flip the in-run flag.
+        // A self-closing <a:t/> must not flip the in-run flag on (omniparse
+        // treated Empty like Start and then captured unrelated text nodes).
         let slide = r#"<p:sld xmlns:a="a" xmlns:p="p"><a:p><a:r><a:t/></a:r>stray<a:r><a:t>kept</a:t></a:r></a:p></p:sld>"#;
         let bytes = build_zip(&[("ppt/slides/slide1.xml", slide)]);
         let text = extract_pptx_text_from_bytes(&bytes).unwrap();

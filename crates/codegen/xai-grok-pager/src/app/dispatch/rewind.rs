@@ -9,7 +9,9 @@ use crate::scrollback::state::ScrollbackState;
 use crate::views::prompt_widget::{PromptWidget, StashedPrompt};
 use crate::views::rewind::{RewindPhase, RewindState};
 
-/// Interjections render as user prompts but the shell never numbers them.
+/// Interjections render as user prompts but the shell never numbers them, so counting them would skew the positional prompt-to-entry mapping.
+/// Known approximation: an interjection the shell converted into its own `interject-fallback-` turn IS shell-numbered.
+/// The positional fallback thus under-counts around it until a resume replays it as an indexed prompt.
 fn is_indexed_user_prompt(block: &RenderBlock) -> bool {
     matches!(block, RenderBlock::UserPrompt(b) if !b.is_interjection)
 }
@@ -369,12 +371,14 @@ pub(super) fn dispatch_rewind_success(
     let target = response.target_prompt_index;
     let stashed_draft = agent.rewind_state.take().and_then(|s| s.stashed_draft);
 
-    // The summary describes turns the rewind removed (the shell clears its persisted copy on the same branch) Bump gen.
+    // The summary describes turns the rewind just removed (the shell clears its persisted copy on the same branch)
+    // Bump gen so a late SessionMetaFromDisk hydrate cannot restore the pre-rewind summary.json value into the cleared field
     agent.set_last_turn_summary(None);
     let target_idx = find_user_prompt_entry_for_shell_index(&agent.scrollback, target);
     if let Some(anchor_idx) = target_idx {
         let removed = agent.scrollback.remove_from(anchor_idx);
-        // Explicit drop BEFORE the purge: the rewound tail must be freed for the release below to return its pages.
+        // Explicit drop BEFORE the purge: the rewound tail must be freed for the release below to return its pages
+        // (Entries and their render caches are potentially most of a long transcript.)
         drop(removed);
         crate::memory_release::release_retained_memory("rewind-truncate");
     }

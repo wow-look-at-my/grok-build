@@ -1,30 +1,42 @@
-//! Layer-3 LazinessDetector pure helpers: classifier prompt and config consts, transcript flattening, output parsing.
+//! Layer-3 LazinessDetector pure helpers: classifier prompt and config consts, transcript flattening, output parsing, and the decision logic.
+//! The actor-side glue lives in the `laziness` sibling.
 
 use super::*;
 
+// ── Layer 3: LazinessDetector pure helpers ──────────────────────────.
+// Idle-triggered classifier that asks the active session model whether the conversation looks stalled.
+// Decision logic lives here as pure functions so it can be unit-tested without the actor; the integration glue lives in `maybe_fire_laziness_check`.
 
-/// Harness-wide default `idle_threshold_ms`.
+/// Harness-wide default `idle_threshold_ms` when the per-model `LazinessDetectorPerModelConfig::idle_threshold_ms` is `None`.
+/// Catches stalls within ~10s without firing every time the user takes a sip of coffee.
 pub(crate) const LAZINESS_DEFAULT_IDLE_THRESHOLD_MS: u64 = 10_000;
 
 /// Harness-wide default `min_confidence` when the per-model `LazinessDetectorPerModelConfig::min_confidence` is `None`.
+/// 0.7 demands clearly better than a coin flip.
 pub(crate) const LAZINESS_DEFAULT_MIN_CONFIDENCE: f32 = 0.7;
 
 /// Baseline chat-history window: the classifier sees at least the last N items, tool calls and tool results included.
+/// The window extends further back when the per-kind minimums below aren't yet satisfied.
 pub(crate) const LAZINESS_CONTEXT_ITEM_LIMIT: usize = 30;
 
 /// Minimum number of real user prompts (`User` items with `synthetic_reason == Human`) in the classifier transcript.
+/// A short final message like "yes" or "do it" carries no signal alone; the prior prompts give the classifier the context to interpret it.
 pub(crate) const LAZINESS_MIN_USER_TURNS: usize = 5;
 
 /// Minimum number of assistant text turns (`Assistant` items with non-empty `content`) in the classifier transcript.
+/// Pairs with `LAZINESS_MIN_USER_TURNS` so the classifier always sees enough back-and-forth to interpret a one-word reply.
 pub(crate) const LAZINESS_MIN_ASSISTANT_TURNS: usize = 5;
 
 /// Output cap on the classifier's response. Tight because the schema is one short JSON object.
 pub(crate) const LAZINESS_MAX_OUTPUT_TOKENS: u32 = 150;
 
-/// Past this we emit `LAZINESS_ABORT_TIMEOUT` and drop the request.
+/// Past this we emit `LAZINESS_ABORT_TIMEOUT` and drop the request via the `SamplerHandle::submit_and_collect` RAII guard.
+/// A coarse bound: the call usually completes well under 10s; the budget exists to surface stuck calls in telemetry rather than hang.
+/// Raising the cap therefore does not delay cancellation on real activity.
 pub(crate) const LAZINESS_CLASSIFIER_TIMEOUT_MS: u64 = 120_000;
 
-/// Granularity at which `maybe_fire_laziness_check` polls the generation counters during the idle wait.
+/// Granularity at which `maybe_fire_laziness_check` polls the generation counters during the idle wait and sampler call.
+/// Reacts to a real user prompt within about a keystroke without burning CPU in the common no-stall steady state.
 pub(crate) const LAZINESS_ABORT_POLL_INTERVAL_MS: u64 = 100;
 
 impl LazinessAbortReason {
@@ -37,8 +49,9 @@ impl LazinessAbortReason {
         }
     }
 
-    /// Every variant of this enum, used by the producer-consistency test to
-    /// enumerate the closed set.
+    /// Every variant of this enum, used by the producer-consistency test to enumerate the closed set.
+    /// The match in `as_const_str` is the compiler-enforced source of truth.
+    /// Adding a variant here without updating `as_const_str` (and vice versa) is a compile error.
     #[cfg_attr(
         not(test),
         expect(
@@ -60,6 +73,7 @@ impl LazinessAbortReason {
 pub(crate) const LAZINESS_REQ_ID_PREFIX: &str = "xai-laziness-";
 
 /// Preamble on the User-item text of the classifier request.
+/// The User content is `format!("{LAZINESS_USER_PREAMBLE}=== BEGIN TRANSCRIPT ===\n{runtime_state}{transcript}=== END TRANSCRIPT ===\n")`.
 pub(crate) const LAZINESS_USER_PREAMBLE: &str =
     "Classify the following transcript. Output JSON only.\n\n";
 
@@ -170,17 +184,21 @@ Example INVALID outputs (do not produce any of these):\n\
 - \"The agent appears stalled. {...}\" (no prose around JSON)\n";
 
 /// Harness-wide default for `[assistant reasoning]` emission in the classifier transcript.
+/// An absent per-model `LazinessDetectorPerModelConfig::include_reasoning` resolves to this.
+/// Flip to `false` if the live classifier proves biased by chain-of-thought in shadow.
 pub(crate) const LAZINESS_INCLUDE_REASONING: bool = true;
 
-/// Compute `turn_elapsed_seconds` from a `turn_start_ms` epoch-ms snapshot
-/// and a `now_ms` epoch-ms reading. Production then drops the field rather
-/// than emit a meaningless value.
+/// Compute `turn_elapsed_seconds` from a `turn_start_ms` epoch-ms snapshot and a `now_ms` epoch-ms reading.
+/// Production then drops the field rather than emit a meaningless value.
+/// A pure helper so both branches are unit-testable without a full `SessionActor`.
 pub(crate) fn turn_elapsed_seconds_from_start_ms(
     turn_start_ms: Option<i64>,
     now_ms: i64,
 ) -> Option<u64> {
     let started_ms = turn_start_ms?;
-    // `try_from` is the negative-delta guard.
+    // `try_from` is the negative-delta guard: a backward-jumping wall clock produces a negative `i64` that maps to `None`.
+    // Integer division truncates sub-second deltas to 0, an explicit "very recent" signal rather than an absent field.
+    // At the prompt level 0 means "harness measured, almost no time elapsed" and absence means "harness could not measure".
     u64::try_from((now_ms - started_ms) / 1000).ok()
 }
 
@@ -298,6 +316,7 @@ pub(crate) fn neutralize_transcript_user_text(s: &str) -> String {
     // Role labels (all lowercase, colon-terminated) that could forge a turn.
     const ROLE_NEEDLES: [&str; 5] = ["user:", "assistant:", "system:", "tool:", "developer:"];
     // Lowercase once so role matching is case-insensitive in a single pass.
+    // `to_ascii_lowercase` preserves byte offsets and length, so offsets from `lower` index safely into the original `s` even for multibyte input
     let lower = s.to_ascii_lowercase();
     let lower_bytes = lower.as_bytes();
     let bytes = s.as_bytes();
@@ -320,7 +339,7 @@ pub(crate) fn neutralize_transcript_user_text(s: &str) -> String {
             i = colon + 1;
             continue;
         }
-        // Decode from the to handle multibyte separators (NEL/LS/PS).
+        // Decode from the original to handle multibyte separators (NEL/LS/PS).
         let Some(ch) = s.get(i..).and_then(|t| t.chars().next()) else {
             break;
         };
@@ -412,6 +431,7 @@ pub(crate) fn refresh_classifier_transcript(
 }
 
 /// Raw AGENTS.md body for the auto-mode classifier's project-instructions.
+/// It is the reminder the main agent sees with the `<system-reminder>` wrapper stripped, which is main-agent framing the classifier does not need.
 pub(crate) fn agents_md_classifier_body(reminder: &str) -> String {
     reminder
         .trim()
@@ -421,8 +441,9 @@ pub(crate) fn agents_md_classifier_body(reminder: &str) -> String {
         .to_string()
 }
 
-/// Whether a session should push AGENTS.md project-instructions to its
-/// permission actor's classifier.
+/// Whether a session should push AGENTS.md project-instructions to its permission actor's classifier.
+/// Only a top-level session that owns its manager and has a non-empty AGENTS.md section should.
+/// Re-setting from a subagent would clobber the shared slot with no restore path.
 pub(crate) fn should_set_classifier_project_instructions(
     owns_permission_manager: bool,
     section: Option<&str>,
@@ -430,9 +451,9 @@ pub(crate) fn should_set_classifier_project_instructions(
     owns_permission_manager && section.is_some()
 }
 
-/// Returns the earliest of candidate start indices, so every invariant is satisfied simultaneously. Same idea for assistant context: a short
-/// final assistant turn ("ok done") is meaningless without the earlier replies that built up to it. An assistant text turn excludes
-/// assistant items whose `.content` is empty (tool-call-only routing turns with no prose).
+/// Returns the earliest of three candidate start indices, so every invariant is satisfied simultaneously.
+/// Same idea for assistant context: a short final assistant turn ("ok done") is meaningless without the earlier replies that built up to it.
+/// An assistant text turn excludes assistant items whose `.content` is empty (tool-call-only routing turns with no prose).
 pub(crate) fn laziness_window_start(
     items: &[ConversationItem],
     item_limit: usize,
@@ -442,6 +463,7 @@ pub(crate) fn laziness_window_start(
     let tail_start = items.len().saturating_sub(item_limit);
 
     // Walk in reverse, tracking when each minimum is satisfied.
+    // `nth_user_idx` becomes Some when we've seen `min_user_turns` real user prompts; same for assistant
     let mut user_seen = 0usize;
     let mut assistant_seen = 0usize;
     let mut nth_user_idx: Option<usize> = None;
@@ -478,6 +500,7 @@ pub(crate) fn laziness_window_start(
 }
 
 /// Strictly-typed classifier output.
+/// `category` deserializes via the closed `LazinessCategory` enum, so an unknown string is a parse failure, not a silent fallback.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub(crate) struct ClassifierOutput {
     pub(crate) category: crate::session::events::LazinessCategory,
@@ -559,7 +582,8 @@ pub(crate) fn parse_classifier_output(raw: &str) -> Result<ClassifierOutput, Cla
             Some(Err(parsed.confidence))
         }
     }
-    // The first bad-confidence sighting wins the diagnostic Later passes that also fail with bad confidence don't overwrite it.
+    // The first bad-confidence sighting wins the diagnostic
+    // Later passes that also fail with bad confidence don't overwrite it, so the caller's log mentions the value the model most plainly produced
     let mut out_of_range: Option<f32> = None;
     let mut accept = |attempt: Option<Result<ClassifierOutput, f32>>| match attempt {
         Some(Ok(parsed)) => Some(parsed),
@@ -589,6 +613,7 @@ pub(crate) fn parse_classifier_output(raw: &str) -> Result<ClassifierOutput, Cla
 
 /// Observation-only mode (`enabled = true, max_nudges_per_session = 0`) therefore genuinely fires the classifier and emits `LazinessClassifierFired`.
 /// Takes `parsed` by reference and clones `evidence` only on the `Nudge` path.
+/// The NoNudge path is ~99% of fires (healthy turns returning `not_stalled_*`), so the `String` clone is paid only when a nudge actually fires.
 pub(crate) fn evaluate_laziness(
     parsed: &ClassifierOutput,
     cfg: &crate::agent::config::LazinessDetectorPerModelConfig,
@@ -667,8 +692,8 @@ pub(crate) fn build_laziness_nudge(
              in the transcript. Either run the tool_calls that back your claims, or correct the \
              claim and continue the actual work."
         }
-        // Defensive: only the stalled_* variants reach this function via
-        // `evaluate_laziness` The exhaustive match keeps the compiler honest.
+        // Defensive: only the stalled_* variants reach this function via `evaluate_laziness`
+        // The exhaustive match keeps the compiler honest if `is_stalled` gains a variant
         L::NotStalledComplete | L::NotStalledWaitingOnBackground | L::NotStalledWaitingOnUser => {
             return String::new();
         }

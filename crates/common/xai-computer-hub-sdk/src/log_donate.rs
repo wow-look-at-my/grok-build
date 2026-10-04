@@ -1,4 +1,13 @@
-//! Forward curated `tracing` events to the connected server over the WebSocket transport (`logs.donate`).
+//! Forward curated `tracing` events to the connected server over the
+//! WebSocket transport (`logs.donate`).
+//!
+//! [`DonatingLogLayer`] is installed **inert** at startup and activated
+//! post-connect by swapping in a [`LogDonationSender`] (a global-subscriber
+//! constraint); while inert, selected events are dropped before enqueueing.
+//!
+//! Only events on the [`TELEMETRY_TARGET`] target at `>= INFO` are
+//! forwarded, and only fields in [`ALLOWED_FIELDS`] are included; other
+//! fields such as `reason`/`error` are omitted.
 
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -25,6 +34,8 @@ use crate::donate_pump::{
 use crate::server::ToolServer;
 
 /// Stable target the workspace routes selected events through.
+/// The layer selects exactly this target, ignoring global
+/// `RUST_LOG`. The server re-stamps it as the OTLP scope name.
 pub const TELEMETRY_TARGET: &str = "workspace::telemetry";
 
 /// Set of forwardable field names — guaranteed-literal or numeric.
@@ -51,7 +62,8 @@ const ALLOWED_FIELDS: &[&str] = &[
 
 /// Flush a buffered batch once it reaches this many records.
 const LOG_BATCH_FLUSH_RECORDS: usize = 32;
-/// Flush a partial batch once its oldest record is at least this old.
+/// Flush a partial batch once its oldest record is at least this old
+/// (checked on the next event; the tail is fenced by teardown).
 const LOG_BATCH_MAX_AGE: Duration = Duration::from_secs(2);
 
 fn is_allowed(name: &str) -> bool {
@@ -75,8 +87,9 @@ fn at_least_info(level: &Level) -> bool {
     *level <= Level::INFO
 }
 
-/// Big-endian byte encoding of the local parent's ids into the OTLP 16-byte /
-/// 8-byte fields.
+/// Big-endian byte encoding of the local parent's ids into the OTLP
+/// 16-byte / 8-byte fields; empty when no fastrace local parent is
+/// active (the common case for detached producer tasks).
 fn current_ids() -> (Vec<u8>, Vec<u8>) {
     match SpanContext::current_local_parent() {
         Some(ctx) => encode_ids(&ctx),
@@ -184,7 +197,9 @@ fn build_log_record(level: &Level, visitor: AllowlistVisitor) -> LogRecord {
     }
 }
 
-/// Encodes batches of OTLP `LogRecord`s onto the pump channel.
+/// Encodes batches of OTLP `LogRecord`s onto the pump channel. Chunks at
+/// [`MAX_LOG_RECORDS_PER_DONATION`], drops payloads over
+/// [`MAX_DONATION_BYTES`], and never blocks.
 #[derive(Clone)]
 struct PumpLogExporter {
     tx: mpsc::Sender<PumpMsg>,
@@ -227,7 +242,9 @@ impl PumpLogExporter {
     }
 }
 
-/// Activation handle swapped into an inert [`DonatingLogLayer`].
+/// Activation handle swapped into an inert [`DonatingLogLayer`]. Wraps
+/// the pump sender plus the resource (`service.name`) the layer needs to
+/// encode batches.
 pub struct LogDonationSender {
     exporter: PumpLogExporter,
 }
@@ -291,8 +308,9 @@ impl LogLayerShared {
 static ACTIVE_LOG_LAYER: LazyLock<ArcSwapOption<LogLayerShared>> =
     LazyLock::new(ArcSwapOption::empty);
 
-/// A composable [`tracing_subscriber::Layer`] that converts selected events
-/// into OTLP log records and batches them onto the pump.
+/// A composable [`tracing_subscriber::Layer`] that converts selected
+/// events into OTLP log records and batches them onto the pump.
+/// Installed inert; activated by [`Self::activate`].
 #[derive(Clone)]
 pub struct DonatingLogLayer {
     shared: Arc<LogLayerShared>,
@@ -336,7 +354,9 @@ impl<S: tracing::Subscriber> Layer<S> for DonatingLogLayer {
     }
 }
 
-/// Flush the active [`DonatingLogLayer`]'s in-memory batch onto the pump.
+/// Flush the active [`DonatingLogLayer`]'s in-memory batch onto the
+/// pump. Called from `ToolServer` teardown before the pump drain so a
+/// crash-y shutdown does not abandon a partial batch.
 pub fn flush_log_layer() {
     if let Some(shared) = ACTIVE_LOG_LAYER.load_full() {
         shared.flush();

@@ -1,4 +1,17 @@
 //! Image processing helpers for sessions with image inputs.
+//!
+//! That harness uses a separate vision endpoint to describe images rather than passing them inline.
+//! When a user message contains image content blocks, the session calls a vision-capable Grok model.
+//! The model's text descriptions are injected into the turn.
+//! The vision model defaults to the agent's current model unless explicitly overridden.
+//! Per-image requests are deduplicated via [`ImageDescribeCache`] (same bytes and same describe prompt fingerprint).
+//!
+//! This module owns the **pure** building blocks: the conversation outline, the describe-prompt template, and the final user-message envelope.
+//! The outline is deterministic and assembled from prior real user messages; the envelope goes to the coding model.
+//! The sampling round-trip and the wiring inside `handle_prompt` live in `acp_session.rs`.
+//!
+//! A user turn that contains image blocks is routed through the vision model before being pushed onto chat state.
+//! If the describe call fails the whole turn fails; we never silently drop the images.
 use crate::sampling::{Client as OaiCompatClient, ConversationRequest, SyntheticReason};
 use agent_client_protocol::ImageContent;
 use base64::Engine as _;
@@ -9,7 +22,8 @@ use xai_chat_state::compaction_image_context::render_image_files_block;
 use xai_chat_state::compaction_utils::{extract_real_user_queries, extract_user_query};
 use xai_grok_sampling_types::conversation::{ContentPart, ConversationItem, UserItem};
 use xai_grok_tools::util::truncate::truncate_middle;
-/// Per-entry character cap for the conversation outline sent to the vision model. Mirrors the compat-harness behavior.
+/// Per-entry character cap for the conversation outline sent to the vision model.
+/// Mirrors the compat-harness behavior.
 pub(crate) const OUTLINE_PER_ENTRY_CAP: usize = 1_500;
 /// Total character cap for the assembled outline block.
 pub(crate) const OUTLINE_TOTAL_CAP: usize = 4_000;
@@ -18,6 +32,7 @@ pub(crate) const OUTLINE_MAX_ENTRIES: usize = 5;
 /// Character cap on the current `<user_query>` text injected into the describe prompt.
 pub(crate) const CURRENT_QUERY_CAP: usize = 12_000;
 /// Maximum number of images that will be captioned per turn.
+/// Only the **last** N images are described; older ones receive [`SKIPPED_IMAGE_MARKER`].
 pub(crate) const IMAGE_DESCRIPTION_PROCESSING_LIMIT: usize = 16;
 /// Placeholder stamped on images that fall outside [`IMAGE_DESCRIPTION_PROCESSING_LIMIT`].
 pub(crate) const SKIPPED_IMAGE_MARKER: &str = "[skipped-due-to-limit]";
@@ -52,6 +67,7 @@ pub(crate) fn strip_template_context_tags(text: &str) -> String {
     }
     collapse_newlines(&result)
 }
+/// Collapse runs of 3+ newlines into `\n\n` and trim.
 fn collapse_newlines(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut newline_count = 0u32;
@@ -135,10 +151,9 @@ pub(crate) fn build_describe_prompt(outline: Option<&str>, current_query: &str) 
         );
     parts.join(" ")
 }
-/// Sanitize a body string (multi-paragraph) before interpolating it into a
-/// structured envelope. Like the envelope scrub applied to `<image_files>`
-/// paths, but preserves `\n` so multi-paragraph content keeps its structure
-/// inside the envelope.
+/// Sanitize a body string (multi-paragraph) before interpolating it into a structured envelope.
+/// Like the envelope scrub applied to `<image_files>` paths, but preserves `\n` so multi-paragraph content keeps its structure inside the envelope.
+/// Other ASCII controls (BEL, ESC, etc.) are also stripped; they render as nothing useful and can corrupt terminal output in TUI consumers.
 pub(crate) fn scrub_envelope_body(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -285,12 +300,16 @@ fn mime_to_extension(mime: &str) -> &'static str {
     }
 }
 /// Variants are kept distinct so the caller in `acp_session.rs` can branch.
+/// Degradation policy (whether to abort, retry, or emit a stub `ToolResult` with the raw image bytes inline) is the caller's responsibility.
+/// This module never silently fakes a successful description.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DescribeError {
     /// The describe sampling call itself failed (transport error, auth failure, model not found, etc.).
+    /// The string is the upstream error rendered with `{e}`.
     #[error("image describe call failed: {0}")]
     Sampling(String),
     /// The vision model returned blank text after `trim()`.
+    /// This is a soft failure (the call itself succeeded) but the description is unusable.
     #[error("image describe model returned no content")]
     EmptyResponse,
 }

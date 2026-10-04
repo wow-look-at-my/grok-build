@@ -1,4 +1,6 @@
-//! The `grok agent stdio` child that `GrokStdioClient` and `AcpTestClient` drive: the sandbox it runs in, what is applied on top.
+//! The `grok agent stdio` child that `GrokStdioClient` and `AcpTestClient` drive: the sandbox it runs in, what
+//! is applied on top of the sandbox's hermetic baseline, and the spawn that hands the sandbox back together
+//! with the child.
 
 use std::path::Path;
 
@@ -10,7 +12,8 @@ use crate::sandbox::TestSandbox;
 pub(crate) struct AgentProcessOptions {
     sandbox: TestSandbox,
     pub(crate) extra_env: Vec<(String, String)>,
-    /// Keys removed from the sandbox baseline after the mock URL and `extra_env` are applied.
+    /// Keys removed from the sandbox baseline after the mock URL and `extra_env` are applied, so a
+    /// scenario can drop a variable the baseline sets (e.g. the mock's `XAI_API_KEY`).
     pub(crate) removed_env: Vec<String>,
     pub(crate) leading_args: Vec<String>,
 }

@@ -51,9 +51,12 @@ pub fn create_snapshot(source: &Path, dest: &Path) -> Result<()> {
 /// Result of creating a snapshot for a worktree.
 #[derive(Debug)]
 pub struct SnapshotResult {
-    /// The real on-disk btrfs snapshot subvolume.
+    /// The real on-disk btrfs snapshot subvolume. In the symlink case this
+    /// lives inside the btrfs mount (e.g., `<btrfs_mount>/worktrees/<name>`);
+    /// in the direct case it is `dest` itself.
     pub snapshot_path: PathBuf,
     /// Symlink at `dest` when the snapshot lives inside the btrfs mount.
+    /// `None` when the snapshot was created directly at `dest`.
     pub symlink_path: Option<PathBuf>,
 }
 
@@ -66,8 +69,9 @@ pub fn create_snapshot_with_symlink(btrfs_info: &BtrfsInfo, dest: &Path) -> Resu
         .as_ref()
         .unwrap_or(&btrfs_info.subvolume_root);
 
-    // When the source is directly on btrfs (no bind mount), the snapshot can
-    // be created at `dest` itself.
+    // When the source is directly on btrfs (no bind mount), the snapshot can be
+    // created at `dest` itself — it is a real subvolume, not a kernel mount, so
+    // it is namespace-independent and persistent. No symlink needed.
     if btrfs_info.bind_mount_source.is_none() {
         create_snapshot(snapshot_source, dest)?;
         return Ok(SnapshotResult {
@@ -149,7 +153,8 @@ pub fn create_snapshot_with_symlink(btrfs_info: &BtrfsInfo, dest: &Path) -> Resu
     // Create the snapshot inside the btrfs filesystem
     create_snapshot(snapshot_source, &snapshot_path)?;
 
-    // Nested subvolumes are excluded from the snapshot, leaving an empty `.grok-snapshots/` placeholder.
+    // Nested subvolumes are excluded from the snapshot, leaving an empty
+    // `.grok-snapshots/` placeholder. Remove it so the worktree stays clean.
     let stale_snapshots_dir = snapshot_path.join(".grok-snapshots");
     if stale_snapshots_dir.exists()
         && let Err(e) = std::fs::remove_dir(&stale_snapshots_dir)
@@ -187,8 +192,8 @@ pub fn create_snapshot_with_symlink(btrfs_info: &BtrfsInfo, dest: &Path) -> Resu
 }
 
 /// On-disk snapshot path. Subvol-is-repo uses `.grok-snapshots/` (hidden from
-/// git); otherwise `worktrees/`. Name is `<basename>-<hash>` so repos sharing a
-/// label on one mount cannot clobber each other. Shared with the delegate.
+/// git); otherwise `worktrees/`. Name is `<basename>-<hash>` so two repos sharing
+/// a label on one mount cannot clobber each other. Shared with the delegate.
 pub fn snapshot_dest_path(btrfs_mount: &Path, subvolume_root: &Path, dest: &Path) -> PathBuf {
     let subdir = if btrfs_mount == subvolume_root {
         BTRFS_SNAPSHOT_SUBDIRS.get(1).copied()
@@ -286,8 +291,9 @@ pub fn delete_snapshot(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Safe privileged-delete target only if: no `..`, not itself a symlink,
-/// parent is `worktrees` or `.grok-snapshots`.
+/// Safe privileged-delete target only if: no `..`, not itself a symlink, parent
+/// is `worktrees` or `.grok-snapshots`, and that dir sits directly under a real
+/// btrfs mount. Untrusted meta/symlink paths must pass this before delete.
 pub fn is_safe_snapshot_delete_target(snapshot_path: &Path) -> bool {
     is_safe_snapshot_delete_target_in(snapshot_path, &btrfs_mount_points())
 }
@@ -356,7 +362,8 @@ pub struct BtrfsSnapshotMetadata {
 /// Suffix for btrfs snapshot metadata files (e.g., `wt-abc.btrfs-meta.json`).
 pub const BTRFS_META_SUFFIX: &str = ".btrfs-meta.json";
 
-/// Snapshot storage dirs: `worktrees` when a separate root mount exists.
+/// Snapshot storage dirs: `worktrees` when a separate root mount exists;
+/// `.grok-snapshots` when the mount is the repo subvolume (hidden from git).
 pub const BTRFS_SNAPSHOT_SUBDIRS: &[&str] = &["worktrees", ".grok-snapshots"];
 
 /// Compute the sibling metadata file path for a snapshot directory.
@@ -399,14 +406,19 @@ pub fn remove_btrfs_metadata(snapshot_path: &Path) {
     }
 }
 
-/// Ownership from sibling `*.btrfs-meta.json`.
+/// Ownership from sibling `*.btrfs-meta.json`. Distinguishes a reclaimable
+/// crashed-creation orphan from another session's live snapshot before a
+/// privileged delete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotMetaState {
     /// No sibling metadata: snapshot created but metadata never written.
+    /// Reclaimable, still bounded by [`is_safe_snapshot_delete_target`].
     Absent,
-    /// Metadata records `mount_target == dest`: a stale snapshot for this exact worktree; safe to recreate.
+    /// Metadata records `mount_target == dest`: a stale snapshot for this exact
+    /// worktree; safe to recreate.
     Matches,
-    /// Metadata is present but targets a different dest (or is unreadable / unparseable / has no derivable path): not provably ours.
+    /// Metadata is present but targets a different dest (or is unreadable /
+    /// unparseable / has no derivable path): not provably ours, must not delete.
     Mismatch,
 }
 
@@ -449,7 +461,8 @@ mod tests {
 
         let result = create_snapshot(source, dest);
         assert!(result.is_err());
-        // Error could be "failed to create BTRFS snapshot" if btrfs exists.
+        // Error could be "failed to create BTRFS snapshot" if btrfs exists,
+        // or "failed to execute btrfs" if btrfs command is not available
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("btrfs") || err_msg.contains("BTRFS"),
@@ -584,7 +597,8 @@ mod tests {
 
     #[test]
     fn test_snapshot_dest_path_disambiguates_same_basename_across_repos() {
-        // Repos' same-label worktrees on one btrfs mount must NOT map to the same on-disk snapshot.
+        // Two repos' same-label worktrees on one btrfs mount must NOT map to the
+        // same on-disk snapshot (the cross-repo data-loss collision).
         let btrfs_mount = Path::new("/mnt/btrfs");
         let subvolume_root = Path::new("/workspace/repo");
         let dest_a = Path::new("/home/user/.grok/worktrees/repo-a/session/wt-abc");
@@ -734,7 +748,8 @@ mod tests {
 
     #[test]
     fn test_create_worktree_symlink_parent_is_file_fails_cleanly() {
-        // When dest's parent is a regular file, `create_dir_all` fails.
+        // When dest's parent is a regular file, `create_dir_all` fails: assert
+        // an error and that no partial symlink is left behind.
         let tmp = tempfile::TempDir::new().unwrap();
         let blocker = tmp.path().join("blocker");
         std::fs::write(&blocker, b"i am a file").unwrap();
@@ -768,7 +783,8 @@ mod tests {
 
     #[test]
     fn test_is_safe_snapshot_delete_target_rejects_unanchored_worktrees_dir() {
-        // A subvolume under a dir merely *named* `worktrees` that is NOT directly under a btrfs mount point must be refused.
+        // A subvolume under a dir merely *named* `worktrees` that is NOT directly
+        // under a btrfs mount point must be refused (anchoring).
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().join("worktrees");
         std::fs::create_dir(&dir).unwrap();
@@ -784,7 +800,8 @@ mod tests {
 
     #[test]
     fn test_is_safe_snapshot_delete_target_rejects_repo_root() {
-        // A symlink confused to point at the live source repo: its parent is not a snapshot-storage dir.
+        // A symlink confused to point at the live source repo: its parent is not
+        // a snapshot-storage dir, so deletion must be refused.
         let tmp = tempfile::TempDir::new().unwrap();
         let mount = dunce::canonicalize(tmp.path()).unwrap();
         let repo = tmp.path().join("repo");

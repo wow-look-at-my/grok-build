@@ -1,8 +1,12 @@
-//! Heap-leak test for the session lifecycle: create and remove many sessions, then fail if heap memory grows per session. Run.
+//! Heap-leak test for the session lifecycle: create and remove many sessions, then fail if heap memory grows per session.
+//! Run:
+//!   cargo test -p xai-grok-shell --features dhat-heap \
+//!     leader_session_lifecycle_heap_steady_state -- --ignored --nocapture
 use super::*;
 use xai_grok_workspace::permission::PermissionEvent;
 
-// Chosen between a healthy build (about zero retained allocations per session) and the smallest deliberately introduced leak.
+// Chosen between a healthy build (about zero retained allocations per session) and the smallest deliberately introduced leak (one per session)
+// Re-tune if healthy runs drift toward the limits
 const MAX_BLOCKS_PER_SESSION: f64 = 0.5;
 const MAX_BYTES_PER_SESSION: f64 = 1024.0;
 

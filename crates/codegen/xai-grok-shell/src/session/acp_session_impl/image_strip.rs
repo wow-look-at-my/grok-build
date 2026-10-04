@@ -1,4 +1,12 @@
 //! Shell policy for sampler image strips: which strips may rewrite stored history, when, and what the user is told.
+//!
+//! - Only `ServerRejected` with unambiguous blame (exactly one unique URL in the rejected request) may touch history.
+//!   The server's verdict names the request, not an image.
+//! - The rewrite waits for that request to terminal (`Completed` or `Failed`). The write is awaited
+//!   before the drain barrier releases so the next prompt cannot reread the image. Heuristic strips stay request-local.
+//! - The write is gated on a backup and acknowledged from disk ([`StripOutcome`]); only `Applied` claims the stored conversation changed.
+//! - Scope: `chat_history.jsonl` only.
+//!   A rebuild replaying `updates.jsonl` (e.g. a remote pull) restores the image and pays one more strip cycle.
 
 use xai_chat_state::StripOutcome;
 use xai_grok_sampler::{RequestId, StripReason};
@@ -148,7 +156,8 @@ impl SessionActor {
         reason: StripReason,
     ) {
         let stripped = stripped_urls.len();
-        // Blame is judged on unique URLs: the same image attached twice is still one suspect Distinct images are ambiguous.
+        // Blame is judged on unique URLs: the same image attached twice is still one suspect
+        // Distinct images are ambiguous, so the strip stays request-local
         let persist_deferred = Self::should_defer_image_strip(&stripped_urls, &reason);
         let mut unique = stripped_urls;
         unique.sort();
@@ -192,7 +201,8 @@ impl SessionActor {
 
     /// Persist a buffered `ServerRejected` strip once the stripped retry terminals (`Completed` or `Failed`).
     pub(crate) async fn apply_pending_image_strip(&self, request_id: &RequestId) {
-        // Acquire rewrite ownership before claiming URLs Rewind either clears queued work first.
+        // Acquire rewrite ownership before claiming URLs
+        // Rewind either clears queued work first, or waits until this proven strip finishes
         let _rewrite_guard = self.image_strip_rewrite_barrier.lock_strip().await;
         let urls = {
             let mut pending = self.pending_image_strip.lock();

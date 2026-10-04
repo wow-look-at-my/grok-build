@@ -1,4 +1,5 @@
-//! E2E: the pager modal Uninstall (`x.ai/plugins/action`) must clean up `~/.grok/plugin-data/<id>/` like the CLI uninstall path.
+//! E2E: the pager modal Uninstall (`x.ai/plugins/action`) must clean up
+//! `~/.grok/plugin-data/<id>/` like the CLI uninstall path, not orphan it.
 
 mod acp_harness;
 
@@ -41,7 +42,8 @@ fn plugins_action_uninstall_removes_plugin_data_dir() {
             outcome.message
         );
 
-        // Simulate persisted plugin state at the id the uninstall must clean.
+        // Simulate persisted plugin state at the id the uninstall must clean,
+        // derived exactly like `git_install::cleanup_plugin_data`.
         use xai_grok_agent::plugins::discovery::{PluginId, PluginScope};
         use xai_grok_agent::plugins::install_registry::InstallRegistry;
         let registry = InstallRegistry::load();

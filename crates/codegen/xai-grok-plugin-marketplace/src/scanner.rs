@@ -1,3 +1,6 @@
+//! Marketplace plugin discovery runs in one of two modes:
+//! 1. **Indexed:** if an index file exists, use it (see `index::load_index` for lookup order; `.grok-plugin/marketplace.json` is preferred).
+//! 2. **Filesystem fallback:** walk `plugins/*/` and resolve manifests directly.
 
 use std::path::Path;
 

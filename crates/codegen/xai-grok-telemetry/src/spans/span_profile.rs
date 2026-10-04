@@ -13,6 +13,7 @@ use tracing_subscriber::registry::LookupSpan;
 use crate::instrumentation::NoOpLayer;
 
 /// A fixed file is last-writer-wins across processes sharing the variable.
+/// Use a directory for multi-process runs (each writes `<label>-<pid>-.folded`).
 pub const OUT_ENV: &str = "GROK_SPAN_PROFILE_OUT";
 
 const MAX_PATHS: usize = 8192;
@@ -189,8 +190,8 @@ where
     Box::new(SpanProfileLayer { profile })
 }
 
-/// Write the folded span wall times, returning the artifact path; `None` when
-/// this process never enabled the layer or nothing closed.
+/// Write the folded span wall times, returning the artifact path; `None` when this process never enabled the layer or nothing closed.
+/// Safe to call from any exit path; later calls after a successful write return `None`.
 pub fn finalize() -> Option<PathBuf> {
     PROFILE.get()?.write()
 }

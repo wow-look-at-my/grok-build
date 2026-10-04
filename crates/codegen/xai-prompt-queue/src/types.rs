@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Content-block `_meta` key for per-prompt display texts when several
+/// follow-ups were combined (length ≥ 2). Empty / absent = not combined.
 pub const COMBINED_DISPLAY_TEXTS_META: &str = "combinedDisplayTexts";
 
-/// Per-item queue metadata the session actor attaches to user-originated
-/// inputs; synthetic inputs (auto-wake, nudges) carry none and never appear
-/// in the visible queue.
+/// Per-item queue metadata the session actor attaches to user-originated inputs; synthetic
+/// inputs (auto-wake, nudges) carry none and never appear in the visible queue. Held in
+/// actor state, never serialized itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueueEntryMeta {
     /// Stable id, reusing the prompt's unique `prompt_id`.
@@ -19,6 +21,7 @@ pub struct QueueEntryMeta {
     pub kind: String,
     /// Plain prompt text for the shared queue display.
     pub text: String,
+    /// Per-prompt display texts when combine merged several follow-ups (len ≥ 2).
     pub combined_texts: Option<Vec<String>>,
 }
 
@@ -55,15 +58,19 @@ pub struct QueueChanged {
     pub session_id: String,
     #[serde(default)]
     pub entries: Vec<QueueEntryWire>,
-    /// The prompt the actor is draining, `None` when no turn runs.
+    /// The prompt the actor is currently draining, `None` when no turn runs. The correlation
+    /// signal a subscriber uses to adopt `current_prompt_id` for notification routing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub running_prompt_id: Option<String>,
-    /// Display text for the running prompt.
+    /// Display text for the running prompt. Carried explicitly because the
+    /// running row is omitted from [`Self::entries`]; clients use this for the
+    /// turn-start user block without relying on a stale local mirror.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub running_text: Option<String>,
     /// Kind for the running prompt (`"prompt"` / `"bash"` / …).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub running_kind: Option<String>,
+    /// Per-prompt display texts when the running turn was combined (len ≥ 2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub running_combined_texts: Option<Vec<String>>,
 }

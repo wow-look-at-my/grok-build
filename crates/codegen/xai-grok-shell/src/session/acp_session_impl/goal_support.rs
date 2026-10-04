@@ -2,7 +2,8 @@
 
 use super::*;
 
-/// Number of consecutive non-completing goal-mode turns before the goal auto-pauses with `GoalPauseReason::BackOff`.
+/// Number of consecutive non-completing goal-mode turns before the goal auto-pauses with `GoalPauseReason::BackOff`. See `handle_turn_end`.
+/// Compile-time constant for v1; remote tunability is a deferred follow-up.
 pub(super) const GOAL_CONTINUATION_BACKOFF_THRESHOLD: u32 = 3;
 
 #[derive(Debug, Clone, Copy)]
@@ -145,8 +146,9 @@ impl NotAchievedSyntheticReason {
     }
 }
 
-/// Disarm-able tracker scope-guard: runs `on_drop` on scope exit AND when a
-/// state can never outlive its run.
+/// Disarm-able tracker scope-guard: runs `on_drop` on scope exit AND when a state can never outlive its run.
+/// No `GoalUpdated` from `Drop`: the Ctrl+C cancel path emits its own auto-pause update strictly after the turn future is dropped.
+/// `Drop` re-locks the non-reentrant tracker mutex; never let the guard drop while holding that lock.
 pub(super) struct TrackerDropGuard<'a, F: FnOnce(&mut crate::session::goal_tracker::GoalTracker)> {
     tracker: &'a parking_lot::Mutex<crate::session::goal_tracker::GoalTracker>,
     on_drop: Option<F>,
@@ -193,6 +195,8 @@ pub(super) enum GoalSetupOutcome {
     Message(String),
 }
 
+/// Goal-only `<task_completion_discipline>` (Rules 1-4); `{TODO_TOOL}` from [`GoalToolNames`].
+/// Template must end with `\n` so `{DISCIPLINE_BLOCK}TRACKING:` glues correctly.
 pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
     GOAL_TASK_DISCIPLINE_TEMPLATE.replace("{TODO_TOOL}", &names.todo)
 }
@@ -240,8 +244,9 @@ const GOAL_PLAN_CHECKLIST_IN_PLAN: &str = "\
   item per step, in order, and keep each status current. That list is your
   only checklist: the user watches it, and the next-step nudge reads it.";
 
-/// Plan path for the goal-mode reminder, or `None` on the path. `Some` only
-/// when the planner is enabled (`GROK_GOAL_PLANNER`) and a plan exists.
+/// Plan path for the goal-mode reminder, or `None` on the legacy path.
+/// `Some` only when the planner is enabled (`GROK_GOAL_PLANNER`) and a plan exists.
+/// All three render sites (`setup_goal`, `resume_goal`, continuation nudge) route through this helper so the gate can't drift.
 pub(super) fn goal_reminder_plan_path(
     planner_enabled: bool,
     orchestration: &crate::session::goal_tracker::GoalOrchestration,
@@ -251,21 +256,25 @@ pub(super) fn goal_reminder_plan_path(
         .flatten()
 }
 
-/// Worker rounds a refuted goal may run without re-running verification before the continuation directive escalates.
+/// Worker rounds a refuted goal may run without re-running verification before the continuation directive escalates to a forceful "re-verify now" block.
+/// A refuted weak model can otherwise churn indefinitely.
+/// Override with `GROK_GOAL_REVERIFY_AFTER` (floored at 1).
 pub(crate) const GOAL_REVERIFY_AFTER_DEFAULT: u32 = 8;
 
-/// Stable substring present in every rendered continuation directive (from
-/// [`GOAL_CONTINUATION_DIRECTIVE_TEMPLATE`]).
+/// Stable substring present in every rendered continuation directive (from [`GOAL_CONTINUATION_DIRECTIVE_TEMPLATE`]) and in no other reminder.
+/// Used to find and drop the prior turn's directive from history so only the latest copy persists.
 pub(super) const GOAL_CONTINUATION_SENTINEL: &str =
     "Goal NOT complete — continue working. Next step:";
 
-/// Bail-specific preface for the `{bail_preface}` slot of
-/// [`GOAL_CONTINUATION_DIRECTIVE_TEMPLATE`].
+/// Bail-specific preface for the `{bail_preface}` slot of [`GOAL_CONTINUATION_DIRECTIVE_TEMPLATE`].
+/// Used when the turn-final text matched a [`goal_stop_detector`](super::goal_stop_detector) pattern while pending todos remained.
+/// Names the apparent stop and the outstanding work, then lets the unchanged generic body carry the next-step / token / Rule-1/Rule-4 content.
 pub(super) const GOAL_CONTINUATION_BAIL_PREFACE: &str = "You appear to be stopping or handing off, but the goal is NOT complete \
      and todos remain. Do not end the turn here — keep working.\n\n";
 
-/// Render the shared goal-rules template with tool names and site-specific
-/// blocks substituted in.
+/// Render the shared goal-rules template with tool names and site-specific blocks substituted in.
+/// The template is the slim current form: verification is owned by the harness (the adversarial skeptic panel in `goal_classifier.rs`),.
+/// so this body only carries TRACKING / WORKING / VERIFY / TEST.
 pub(crate) fn format_compaction_goal_section(rules_body: &str) -> String {
     format!("## Active Goal\n{rules_body}")
 }
@@ -304,9 +313,10 @@ pub(super) fn render_goal_rules(
         .replace("{BLOCK_RECAP}", block_recap)
         .replace("{DISCIPLINE_BLOCK}", &discipline)
         .replace("{GOAL_STATE}", goal_state)
-        // A literal `{SCRATCH_DIR}` in the objective WOULD be expanded here (harmless, astronomically unlikely).
+        // A literal `{SCRATCH_DIR}` in the objective WOULD be expanded here (harmless, astronomically unlikely)
+        // The `{SCRATCH}` placeholder the text references is a different token, left unreplaced
         .replace("{SCRATCH_DIR}", scratch_dir)
-        // Only claim the dir exists when the harness created it.
+        // Only claim the dir exists when the harness actually created it.
         .replace(
             "{SCRATCH_STATUS}",
             if scratch_ready {
@@ -360,7 +370,9 @@ pub(super) fn format_goal_pause_message(
     pause_summary: &str,
     details_path: &str,
 ) -> String {
-    // An empty `details_path` means the harness has no artifact to point at For example.
+    // An empty `details_path` means the harness has no artifact to point at
+    // For example, the synthetic-details write is skipped on a squatted scratch root
+    // Omit the "See …" pointer rather than dangle a bare "See"
     let has_path = !details_path.trim().is_empty();
     match (pause_summary.trim().is_empty(), has_path) {
         (true, true) => format!("{headline} See {details_path}"),
@@ -443,7 +455,7 @@ pub(super) fn render_goal_continuation_directive(
         .replace("{todo_tool}", todo_tool)
         // `{SCRATCH}` is left literal; the model resolves it to this dir
         .replace("{scratch_dir}", scratch_dir)
-        // Only claim the dir exists when the harness created it.
+        // Only claim the dir exists when the harness actually created it.
         .replace(
             "{scratch_status}",
             if scratch_ready {
@@ -571,7 +583,8 @@ pub(super) fn render_strategist_note(
     };
     let begin = format!("--- STRATEGIST RECOMMENDATION (advisory) [{nonce}] ---");
     let end = format!("--- END STRATEGIST RECOMMENDATION [{nonce}] ---");
-    // Static marker prefixes used to drop any body line that LOOKS like a fence marker (with or without a nonce) A second layer on top.
+    // Static marker prefixes used to drop any body line that LOOKS like a fence marker (with or without a nonce)
+    // A second layer on top of the unguessable nonce
     const BEGIN_PREFIX: &str = "--- STRATEGIST RECOMMENDATION (advisory)";
     const END_PREFIX: &str = "--- END STRATEGIST RECOMMENDATION";
     // Drop forged-marker lines from the untrusted recommendation.
@@ -629,6 +642,8 @@ pub(super) fn render_verifier_gaps_block_legacy(gaps: &str, goal_tool: &str) -> 
 }
 
 /// `char` cap on the model-authored todo text inlined as the next step.
+/// Applied BEFORE tag neutralization, which may add a zero-width break per
+/// broken tag (plus the `…` cap suffix).
 pub(super) const GOAL_NEXT_STEP_MAX_CHARS: usize = 400;
 
 /// The next step for the continuation nudge. The todo list is the only
@@ -944,8 +959,8 @@ mod fold_active_tokens_by_model_tests {
     fn mixed_models_sum_marginals_sorted_desc() {
         let records = vec![
             rec(Some("g1"), 0, 100, Some("grok-3")),
-            rec(Some("g1"), 100, 500, Some("grok-4")),
-            rec(Some("g1"), 0, 50, Some("grok-3")),
+            rec(Some("g1"), 100, 500, Some("grok-4")), // marginal 400
+            rec(Some("g1"), 0, 50, Some("grok-3")),    // grok-3 total 150
         ];
         let out = fold_active_tokens_by_model(&records, "g1", "cur");
         assert_eq!(
@@ -998,6 +1013,7 @@ mod fold_active_tokens_by_model_tests {
     #[test]
     fn last_below_anchor_does_not_underflow() {
         let records = vec![rec(Some("g1"), 500, 100, Some("grok-4"))];
+        // The marginal saturates to 0, so the record is skipped as a zero-token entry
         assert!(fold_active_tokens_by_model(&records, "g1", "cur").is_empty());
     }
 
@@ -1011,8 +1027,7 @@ mod fold_active_tokens_by_model_tests {
 
     #[test]
     fn empty_or_whitespace_model_folds_under_current() {
-        // `Some("")` and `Some(" ")` must NOT create a blank-id bucket; they
-        // fold under the current model exactly like `None`
+        // `Some("")` and `Some("  ")` must NOT create a blank-id bucket; they fold under the current model exactly like `None`
         let records = vec![
             rec(Some("g1"), 0, 100, Some("")),
             rec(Some("g1"), 0, 200, Some("   ")),
@@ -1034,9 +1049,9 @@ mod fold_active_tokens_by_model_tests {
     }
 }
 
-/// Resolved per-role `/goal` model selection, cached on the actor. `Default` (every role `InheritCurrent`, empty skeptic pool) reproduces today's
-/// behavior. The kill-switch (`goal_use_current_model_only`) collapses all of them to `InheritCurrent` at resolution time, so consumers never need to
-/// re-check it.
+/// Resolved per-role `/goal` model selection, cached on the actor.
+/// `Default` (every role `InheritCurrent`, empty skeptic pool) reproduces today's behavior.
+/// The kill-switch (`goal_use_current_model_only`) collapses all three to `InheritCurrent` at resolution time, so consumers never need to re-check it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct GoalRoleModelConfig {
     /// Planner role choice (single pair or inherit).
@@ -1044,8 +1059,10 @@ pub(crate) struct GoalRoleModelConfig {
     /// Strategist role choice (single pair or inherit).
     pub(crate) strategist: crate::agent::config::GoalRoleModelChoice,
     /// Ordered skeptic pool; `pool[0]` is skeptic-0's model, the rest are assigned round-robin by index.
+    /// Empty means all skeptics inherit.
     pub(crate) skeptic_pool: Vec<crate::util::config::GoalRoleModel>,
-    /// Summary role choice.
+    /// Summary role choice. It has no pair form: `[models] goal_summarizer`
+    /// is the only way to move it off the session model.
     pub(crate) summarizer: crate::agent::config::GoalRoleModelChoice,
 }
 
@@ -1060,7 +1077,11 @@ pub(crate) fn planner_failure_pause_message() -> String {
     format!("No plan was produced. {GOAL_RESUME_HINT}")
 }
 
-/// The pause for a planner the USER stopped.
+/// The pause for a planner the USER stopped. Kept apart from
+/// [`planner_failure_pause_message`] because the two ask for different things:
+/// a failure invites a retry, a cancel was the retry being declined. Reading
+/// "Planning failed" after clicking stop sends the reader looking for a broken
+/// planner that is working exactly as asked.
 pub(crate) fn planner_cancelled_pause_message() -> String {
     "Planning cancelled; resume with /goal to plan again.".to_string()
 }
@@ -1084,8 +1105,8 @@ impl SessionActor {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// True while a `/goal` autonomous run is actively driving the turn (goal
-    /// harness enabled and the durable status is `Active`).
+    /// True while a `/goal` autonomous run is actively driving the turn (goal harness enabled and the durable status is `Active`).
+    /// Used to tag background tasks spawned during the goal turn as goal-turn-origin.
     pub(super) fn goal_loop_active(&self) -> bool {
         self.goal_harness_enabled()
             && self.goal_tracker.lock().status()
@@ -1102,9 +1123,9 @@ impl SessionActor {
         set.extend(task_ids);
     }
 
-    /// Tag `task_id`s reparented from a harness verifier/planner subagent as
-    /// goal-turn origin. Gated on the goal harness being enabled (stable
-    /// across status flips), NOT on `Active`.
+    /// Tag `task_id`s reparented from a harness verifier/planner subagent as goal-turn origin.
+    /// Gated on the goal harness being enabled (stable across status flips), NOT on `Active`.
+    /// A final-round skeptic exiting as the goal flips `Active → Blocked` is thus still suppressed.
     pub(super) fn record_reparented_goal_turn_task_ids(
         &self,
         task_ids: impl IntoIterator<Item = String>,
@@ -1256,7 +1277,14 @@ impl SessionActor {
                     if !can_publish {
                         break 'planner_attempt;
                     }
-                    // The subagent produced a plan and we are committing to publish it.
+                    // The subagent produced a plan and we are committing to
+                    // publish it. `run_goal_planner_attempt` already took the
+                    // planner run, so a late Send Now finds no live planner to
+                    // address and is correctly delivered only as a turn
+                    // interjection. Turn the "planning…" badge off NOW, before
+                    // the plan/baseline I/O below, instead of only at the very
+                    // end, so the UI never advertises "planning" for a planner
+                    // that is already done.
                     self.clear_goal_planning_latch(run_goal_id.as_deref()).await;
                     if attempt_file.persist(&plan_file).is_err() {
                         let still_same_goal =
@@ -1290,7 +1318,10 @@ impl SessionActor {
                         goal.plan_file = Some(plan_file);
                         need_baseline.then_some((src, dst))
                     };
-                    // The plan is published.
+                    // The plan is published. Put the planner's own todo items on
+                    // the session's list HERE, before the goal-start reminder is
+                    // rendered, so the implementing turn opens with them already
+                    // there instead of re-reading the plan to transcribe them.
                     self.apply_planner_todos(&goal_id, &planner_todos).await;
                     if let Some((src, dst)) = baseline_target {
                         let tmp = dst
@@ -1332,7 +1363,7 @@ impl SessionActor {
                 }
                 // A cancel is terminal. Spawning another planner does the
                 // opposite of what the Stop requested, onto a session whose
-                // spawns that same Stop latched shut.
+                // spawns that same Stop just latched shut.
                 crate::session::goal_planner::GoalPlannerOutcome::Interrupted => {
                     let _ = self
                         .auto_pause_goal_if_matches_with_message(
@@ -1347,8 +1378,8 @@ impl SessionActor {
                     user_stopped,
                     ..
                 } => {
-                    // A planner a person stopped is a pause. A harness cancel
-                    // (max turns, rewind, dequeue) is a planner failure.
+                    // A planner a person stopped is a pause the user asked for, and says so.
+                    // A harness cancel (max turns, rewind, dequeue) is a planner failure.
                     let aborted = user_stopped
                         && reason == crate::session::events::GoalPlannerFailClosedReason::Aborted;
                     // History reads "Planning failed" + "Paused: planner", not a bare pause.
@@ -1382,7 +1413,12 @@ impl SessionActor {
             break 'planner_attempt;
         }
 
-        // Catch-all latch reset for every exit path that did NOT already clear it at the commit-to-publish point.
+        // Catch-all latch reset for every exit path that did NOT already clear
+        // it at the commit-to-publish point (Stop / cap-exhausted / fail-closed /
+        // cancel, or a publish that broke out before committing). The
+        // conditional emit inside the helper keeps the success path's earlier
+        // clear from being re-emitted as a duplicate `planning=None`; a no-op if
+        // the orchestration has since vanished or the goal was replaced.
         self.clear_goal_planning_latch(run_goal_id.as_deref()).await;
     }
 
@@ -1421,7 +1457,30 @@ impl SessionActor {
         cleared
     }
 
-    /// Put the goal planner child's OWN todo list on the session's todo list. The planner is told to add the plan's work items to its own list with the session's todo tool as it plans. A child session keeps its own `State<TodoState>`, so `run_shell_child` reads that list back into `SubagentResult.todos` and it arrives here: these are the items the planner itself wrote, which is what makes the session's list the result of the planner's own `todo_write` rather than the harness reading the plan. A planner that named nothing seeds nothing. The plan prose is never mined for items, so an unfollowed instruction degrades to "the main agent keeps its own list" instead of the harness inventing work. Runs once per goal. `plan_todos_seeded` is claimed under the tracker lock before any I/O, and the append is additionally deduped by content, so a retry, a resume, or a re-entry cannot add a second copy of an item. Existing items are never touched: this appends, it does not replace. Best-effort by design. `pub(super)` so the goal e2e suite can drive it a second time directly; the publish path itself calls it exactly once.
+    /// Put the goal planner child's OWN todo list on the session's todo list.
+    ///
+    /// The planner is told to add the plan's work items to its own list with the
+    /// session's todo tool as it plans. A child session keeps its own
+    /// `State<TodoState>`, so `run_shell_child` reads that list back into
+    /// `SubagentResult.todos` and it arrives here: these are the items the
+    /// planner itself wrote, which is what makes the session's list the result
+    /// of the planner's own `todo_write` rather than the harness reading the
+    /// plan.
+    ///
+    /// A planner that named nothing seeds nothing. The plan prose is never
+    /// mined for items, so an unfollowed instruction degrades to "the main
+    /// agent keeps its own list" instead of the harness inventing work.
+    ///
+    /// Runs once per goal. `plan_todos_seeded` is claimed under the tracker lock
+    /// before any I/O, and the append is additionally deduped by content, so a
+    /// retry, a resume, or a re-entry cannot add a second copy of an item.
+    /// Existing items are never touched: this appends, it does not replace.
+    ///
+    /// Best-effort by design. A session with no append-capable todo tool, or a
+    /// failed append, logs and returns 0 — seeding must never fail the goal.
+    ///
+    /// `pub(super)` so the goal e2e suite can drive it a second time directly;
+    /// the publish path itself calls it exactly once.
     pub(super) async fn apply_planner_todos(
         &self,
         goal_id: &str,
@@ -1432,7 +1491,8 @@ impl SessionActor {
             return 0;
         }
 
-        // Claim the seed before the I/O.
+        // Claim the seed before the I/O. One lock covers the check and the set,
+        // so two racing publishes cannot both append.
         let claimed = {
             let mut tracker = self.goal_tracker.lock();
             tracker
@@ -1463,7 +1523,9 @@ impl SessionActor {
             }
         };
 
-        // Dedupe against what is already on the list: an item the user or the main agent already wrote is the same item.
+        // Dedupe against what is already on the list: an item the user or the
+        // main agent already wrote is the same item, and a planner that repeats
+        // one is still one piece of work.
         let mut seen = live_todo_contents(&bridge).await;
         let fresh: Vec<String> = planner_todos
             .iter()
@@ -1529,7 +1591,9 @@ impl SessionActor {
             tracing::debug!("goal planner: no subagent coordinator channel; skipping");
             return PlannerAttemptStep::Stop;
         };
-        // A user Stop latches this session's Task spawns closed until a turn reopens them.
+        // A user Stop latches this session's Task spawns closed until a turn
+        // reopens them. The planner can run outside a turn, so it reopens them
+        // itself. Without that, every planner spawn after a Stop is rejected.
         self.open_subagent_spawn_admission();
         let (goal_id, plan_file, attempt_plan_file) = {
             let tracker = self.goal_tracker.lock();
@@ -1566,7 +1630,8 @@ impl SessionActor {
         };
         let cancel_token = tokio_util::sync::CancellationToken::new();
         // The cell the spawn publishes the planner's coordinator id into: a
-        // Send Now landing mid-run addresses its context there.
+        // Send Now landing mid-run addresses its context there rather than
+        // restarting the planner.
         let planner_subagent_id = self
             .goal_tracker
             .lock()
@@ -1582,8 +1647,8 @@ impl SessionActor {
         let context = String::new();
 
         let task_tool_name = self.resolve_goal_tool_names().await.task;
-        // Tag the planner with the goal-creation turn's prompt id so its
-        // `subagent.json` / parent `subagents_spawned` ref link to this turn.
+        // Tag the planner with the goal-creation turn's prompt id so its `subagent.json` / parent `subagents_spawned` ref link to this turn
+        // That matches how model-spawned subagents attach to their parent
         let parent_prompt_id = self
             .current_prompt_id
             .lock()
@@ -1637,10 +1702,12 @@ impl SessionActor {
         )
         .await;
 
-        // Seal the planner's synthetic `task` pair into its own harness trace turn so it uploads.
+        // Seal the planner's synthetic `task` pair into its own harness trace turn so it uploads as a sibling `turn_{N}` artifact
+        // The planner is represented by its own turn. No-op when the spawn recorded nothing.
         self.chat_state_handle.flush_harness_trace_turn();
 
-        // Drop the run (and with it the planner's coordinator id): a Send Now arriving after this point has no live planner.
+        // Drop the run (and with it the planner's coordinator id): a Send Now
+        // arriving after this point has no live planner to address.
         let _ = self.goal_tracker.lock().take_planner_run();
 
         PlannerAttemptStep::Ran {
@@ -1655,7 +1722,8 @@ impl SessionActor {
     /// On success the recommendation and the strategy-note path are persisted on the orchestration so the continuation directive can inline them.
     /// Any failure (no coordinator, spawn error, missing note) is logged and ignored; the goal keeps running, never pauses.
     pub(super) async fn maybe_run_goal_strategist(&self, attempt: u32, consecutive_failures: u32) {
-        // The claim granted the cap bonus up front Every exit that delivers no restructure (early return, FailOpen, future dropped by a turn cancel).
+        // The claim granted the cap bonus up front
+        // Every exit that delivers no restructure (early return, FailOpen, future dropped by a turn cancel) must give it back
         let mut bonus_guard = TrackerDropGuard::new(&self.goal_tracker, |t| {
             t.revoke_strategist_cap_bonus();
         });
@@ -1748,7 +1816,8 @@ impl SessionActor {
         .await;
         self.end_goal_harness_role().await;
 
-        // Seal the strategist's synthetic `task` pair into its own harness trace turn (sibling of the planner / skeptic turns) No-op.
+        // Seal the strategist's synthetic `task` pair into its own harness trace turn (sibling of the planner / skeptic turns)
+        // No-op when the spawn recorded nothing
         self.chat_state_handle.flush_harness_trace_turn();
 
         // Fail-OPEN: persist on success; any other exit leaves `bonus_guard` armed (the runner already emitted telemetry and a warning)
@@ -1804,7 +1873,8 @@ impl SessionActor {
             .lock()
             .expect("current_prompt_id mutex poisoned")
             .clone();
-        // The summarizer keeps the parent toolset whatever model it runs on, so its §7 prompt names the parent toolset's tools either.
+        // The summarizer keeps the parent toolset whatever model it runs on,
+        // so its §7 prompt names the parent toolset's tools either way.
         let tool_names = self.resolve_inherit_role_tool_names().await;
         let summarizer_model = match &self.goal_role_models.summarizer {
             crate::agent::config::GoalRoleModelChoice::ModelOnly(m) => {
@@ -1857,8 +1927,8 @@ impl SessionActor {
             summary, ..
         } = outcome
         {
-            // Bump the stream start so the summary chunk carries a fresh `streamStartMs` Without it the client appends
-            // this closing message.
+            // Bump the stream start so the summary chunk carries a fresh `streamStartMs`
+            // Without it the client appends this closing message to the model's last turn message instead of a new block
             self.chat_state_handle
                 .record_stream_start(chrono::Utc::now().timestamp_millis());
             self.send_slash_command_output(&summary).await;
@@ -1952,8 +2022,20 @@ impl SessionActor {
     }
 
     /// Push the tool-layer `GoalLoopActive` flag so per-tool-call SUBAGENT
-    /// completion reminders suppress themselves while the goal loop drives
-    /// the turn (the loop consumes its own subagent results).
+    /// completion reminders suppress themselves while the goal loop drives the
+    /// turn (the loop consumes its own subagent results). Background bash/monitor
+    /// completions are NOT gated here — they surface at the next tool-call
+    /// boundary regardless, since a reminder riding a tool result interrupts
+    /// nothing; only the notification bridge's auto-wake prompt (which does
+    /// interrupt) stays goal-gated. Mirrors the `CurrentPromptIdResource` push.
+    ///
+    /// Also mirrors the value into `tool_context.goal_loop_active_gate`, the
+    /// shared `Arc<AtomicBool>` the notification bridge (bash auto-wake) and
+    /// subagent spawn contexts (subagent auto-wake) read to suppress synthetic
+    /// completion prompts mid-goal. Writing both from this one chokepoint keeps
+    /// the gate from *persistently* drifting from the resource; the two writes
+    /// are sequential (gate store, then async `update_resource`), so a transient
+    /// window exists — benign, since those consumers read only the gate.
     pub(super) async fn set_goal_loop_active_resource(&self, active: bool) {
         self.tool_context
             .goal_loop_active_gate

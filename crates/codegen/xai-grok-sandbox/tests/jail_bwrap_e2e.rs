@@ -1,4 +1,8 @@
 //! Drives the shipped `--sandbox` bwrap builder against real bubblewrap.
+//!
+//! The unit tests read the argv the builder produces. They cannot say whether
+//! bubblewrap accepts that argv, or whether the jail confines anything, and a
+//! flag set that only looks right is the failure this file exists to catch.
 
 #![cfg(target_os = "linux")]
 
@@ -44,7 +48,8 @@ fn plan(script: &str, mounts: Vec<Mount>, grok_home: &Path, cwd: &Path) -> JailP
         self_exe: PathBuf::from("/bin/sh"),
         cwd: cwd.to_path_buf(),
         args: vec![OsString::from("-c"), OsString::from(script)],
-        // These e2e scenarios are the release-default jail (ro base, tmpfs /tmp, rw $GROK_HOME).
+        // These e2e scenarios are the release-default jail (ro base, tmpfs
+        // /tmp, rw $GROK_HOME); they pin that the default bwrap argv confines.
         defaults: JailDefaults::default(),
         // No host worker: these scenarios exec a shell script inside the jail.
         ci_host_fd: None,
@@ -158,7 +163,8 @@ fn a_later_flag_beats_an_earlier_one() {
 
 /// Names the fd the parent handed this child its socket on.
 const WORKER_FD_ENV: &str = "GROK_CI_HOST_TEST_FD";
-/// The branch the jailed child asks about.
+/// The branch the jailed child asks about; its presence is also the switch that
+/// makes the child run in jailed-client mode rather than as a test.
 const JAILED_CHILD_ENV: &str = "GROK_JAILED_CHILD_BRANCH";
 
 /// A `--sandbox` session reaches `gh` only through the host worker, and the
@@ -169,7 +175,7 @@ const JAILED_CHILD_ENV: &str = "GROK_JAILED_CHILD_BRANCH";
 /// `--setenv` is an option for bwrap and everything after `--` is argv for the
 /// jailed program. Emitting it on the wrong side of that separator sets no
 /// variable at all, and the jailed pager then reports no CI while the run
-/// gains stray arguments. Only running real bubblewrap catches it.
+/// gains three stray arguments. Only running real bubblewrap catches it.
 ///
 /// The answer is checked for SHAPE, not content: a runner with no `gh` (and no
 /// credentials) is answered by the worker's nothing-usable sentinel, and that
@@ -184,7 +190,9 @@ fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
     let grok_home = fixture_dir("worker-home");
     std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
 
-    // The host side: the shipped worker loop in a real child of this binary, its socket end dup2'd onto a known fd - what `spawn_ci_host` does.
+    // The host side: the shipped worker loop in a real child of this binary,
+    // its socket end dup2'd onto a known fd - what `spawn_ci_host` does before
+    // a jail exec.
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     let theirs_fd = theirs.into_raw_fd();
     const WORKER_FD: i32 = 3;
@@ -232,7 +240,8 @@ fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
     jailed.ci_host_fd = Some(client_fd);
 
     let output = bwrap_command(&jailed)
-        // The branch is also the switch that puts the child in jailed-client mode.
+        // The branch is also the switch that puts the child in jailed-client
+        // mode, exactly as the marker env names the worker.
         .env(JAILED_CHILD_ENV, "master")
         .output()
         .expect("bwrap must run");
@@ -261,7 +270,10 @@ fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
          nothing-usable sentinel, not nothing at all: {answered:?}"
     );
 
-    // The jailed child is gone, but its copy of the client end was a dup.
+    // The jailed child is gone, but its copy of the client end was a dup: this
+    // process still holds the original, and until that closes the worker's read
+    // loop has no EOF to end on. (`ours` is forgotten above precisely so this
+    // is the single close of that fd.)
     unsafe {
         libc::close(client_fd);
     }
@@ -292,7 +304,8 @@ fn bwrap_worker_self_entry() {
     else {
         return;
     };
-    // SAFETY: the parent dup2'd its socketpair end onto this fd before exec, and nothing else in this process owns it.
+    // SAFETY: the parent dup2'd its socketpair end onto this fd before exec,
+    // and nothing else in this process owns it.
     let stream = unsafe { UnixStream::from_raw_fd(fd) };
     xai_grok_sandbox::ci_host::run_ci_host_worker_on(stream);
 }
@@ -313,7 +326,8 @@ fn bwrap_jailed_child_self_entry() {
         return;
     };
     report.push_str(&format!("fd={fd}\n"));
-    // SAFETY: the jail handed this process the fd by number and nothing else in this process owns it.
+    // SAFETY: the jail handed this process the fd by number and nothing else
+    // in this process owns it.
     let mut stream = unsafe { UnixStream::from_raw_fd(fd) };
     let answer = match stream.write_all(format!("gh-status {branch}\n").as_bytes()) {
         Err(e) => format!("write failed: {e}"),

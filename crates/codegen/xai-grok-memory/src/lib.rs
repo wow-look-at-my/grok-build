@@ -1,10 +1,34 @@
-#![allow(clippy::cast_lossless)] // Hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
-#![allow(clippy::cast_precision_loss)] // Hits predate the gate
-#![allow(clippy::cast_sign_loss)] // Hits predate the gate
-#![allow(clippy::unwrap_used)] // Hits predate the gate
+#![allow(clippy::cast_lossless)] // 6 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 11 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 6 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 4 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 6 hits predate the gate
+#![allow(clippy::unwrap_used)] // 2 hits predate the gate
 //! Cross-session memory for Grok.
+//!
+//! Two isolated pipelines. They do not share files, search, flush, or Dream.
+//! See the crate `AGENTS.md` before changing either path.
+//!
+//! - **Legacy:** markdown under `~/.grok/memory/` (tree below).
+//! - **v2:** `~/.grok/memory-v2/` topics, observation inbox, and generated
+//!   `MEMORY.md`. See `v2.rs`. v2 never reads or writes the legacy tree.
+//!
+//! ## Legacy data layout
+//!
+//! ```text
+//! ~/.grok/memory/
+//!   ├── MEMORY.md                         # Global curated knowledge
+//!   └── {workspace_hash}/                 # Per-workspace (blake3(cwd)[..16])
+//!       ├── MEMORY.md                     # Project-level curated knowledge
+//!       └── sessions/
+//!           └── YYYY-MM-DD-{slug}-{sid8}.md  # Session logs
+//! ```
+//!
+//! ## Feature Flag
+//!
+//! Resolve enablement through `MemoryConfig::resolve_settings`.
+//! `GROK_MEMORY`, `[memory] enabled`, and `[memory_v2] enabled` all participate.
+//! When disabled, this crate is not initialized by the host.
 
 #![allow(clippy::string_slice)]
 #![deny(clippy::indexing_slicing)]
@@ -89,6 +113,7 @@ pub async fn embed_missing_chunks(
     let total = chunks.len();
     let mut embedded = 0;
 
+    // 32 is the provider's typical max batch size
     for batch in chunks.chunks(32) {
         let texts: Vec<&str> = batch.iter().map(|(_, text)| text.as_str()).collect();
         match provider.embed_batch(&texts).await {

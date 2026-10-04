@@ -1,4 +1,5 @@
 //! Generates the file tree in the format used during training.
+//! It gives the model a project overview and a starting point for exploring the repository.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -16,6 +17,7 @@ const NUM_WALK_THREADS: usize = 8;
 pub struct ListContentsLimits {
     /// Maximum number of characters in the output
     pub max_characters: usize,
+    /// Maximum depth to traverse (0 means root only)
     pub max_depth: usize,
     pub max_dirs_visited: usize,
 }
@@ -114,7 +116,7 @@ fn collect_all_contents(
     );
 
     let walker = WalkBuilder::new(root)
-        .max_depth(Some(max_depth + 1))
+        .max_depth(Some(max_depth + 1)) // +1 because depth 0 is root itself
         .follow_links(false)
         .same_file_system(true)
         .ignore(true)

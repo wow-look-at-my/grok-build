@@ -7,9 +7,9 @@ pub enum McpElicitMode {
     Url,
 }
 
-/// Per-mode fields of an elicitation request, internally tagged with the wire
-/// `mode` key ("form" / "url") so a request can never carry a mode with the
-/// wrong companion fields.
+/// Per-mode fields of an elicitation request, internally tagged with the wire `mode` key ("form" /
+/// "url") so a request can never carry a mode with the wrong companion fields. Flattened into
+/// [`McpElicitExtRequest`], keeping the flat top-level camelCase wire shape.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum McpElicitModeFields {
@@ -60,7 +60,9 @@ impl McpElicitExtRequest {
 pub struct McpElicitCompletePayload {
     pub session_id: String,
     pub elicitation_id: String,
-    /// Emitting server, so a client can refuse a complete notification aimed at another server's card.
+    /// Emitting server, so a client can refuse a complete notification
+    /// aimed at another server's card. `Option` for version skew: older
+    /// shells omit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_name: Option<String>,
 }

@@ -1,3 +1,4 @@
+//! Coverage of 429 handling in the turn loop against a mock server, plus the harness that bursts more subagent turns than the concurrency cap.
 
 use super::support::*;
 use super::*;

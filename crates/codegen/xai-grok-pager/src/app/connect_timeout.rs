@@ -16,7 +16,8 @@ pub(super) const CONNECT_UI_TIMEOUT_TRY_COMMAND: &str =
 pub(super) const DEFAULT_CONNECT_UI_TIMEOUT: Duration = Duration::from_secs(30);
 const MIN_CONNECT_UI_TIMEOUT_SECS: u64 = 6;
 const PERSONAL_CONNECT_UI_SLACK: Duration = Duration::from_secs(2);
-// Floors the personal budget above the assert's connect-future sum.
+// Floors the personal budget above the assert's connect-future sum
+// (5.5 settings window + 5 eager-auth + 2 slack = 12.5s). No managed preamble.
 const PERSONAL_CONNECT_UI_FLOOR: Duration = Duration::from_millis(12_500);
 const _: () = assert!(
     PERSONAL_CONNECT_UI_FLOOR.as_millis()
@@ -26,6 +27,8 @@ const _: () = assert!(
     "the personal connect floor must cover the full personal connect future: settings window, \
      post-gate eager-auth refresh, and slack"
 );
+// Floors the managed budget above the assert's connect-future sum
+// (8+8 preamble + 25 settings window + 5 eager-auth + 4 slack = 50s) with 1s margin.
 const MANAGED_CONNECT_UI_FLOOR: Duration = Duration::from_secs(51);
 const MANAGED_CONNECT_UI_SLACK: Duration = Duration::from_secs(4);
 const _: () = assert!(
@@ -75,7 +78,8 @@ mod tests {
     #[test]
     fn managed_launch_floors_the_budget_above_the_settings_window() {
         use LaunchProfile::Managed;
-        // Managed override + floor; the floor-vs-connect-future coupling is enforced by the compile-time asserts above.
+        // Managed override + floor; the floor-vs-connect-future coupling is enforced
+        // by the compile-time asserts above, and Personal resolution by `resolve_cases`.
         assert_eq!(resolve(Some("1"), Managed), MANAGED_CONNECT_UI_FLOOR);
         assert_eq!(resolve(Some("5"), Managed), MANAGED_CONNECT_UI_FLOOR);
         assert_eq!(resolve(Some("9999"), Managed), Duration::from_secs(9999));

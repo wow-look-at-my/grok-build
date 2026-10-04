@@ -1,4 +1,16 @@
-//! Code Navigation Extension.
+//! Code Navigation Extension Methods
+//!
+//! Provides go-to-definition, go-to-references, and symbol lookup using the xai-codebase-graph index.
+//!
+//! ## Extension Methods
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `x.ai/code/goto-definition` | Definition location(s) for symbol at position |
+//! | `x.ai/code/goto-references` | Reference location(s) for symbol at position |
+//! | `x.ai/code/find-definitions` | All definitions of a symbol by name |
+//! | `x.ai/code/find-references` | All references to a symbol by name |
+//! | `x.ai/code/status` | Indexing status |
 
 use std::path::{Path, PathBuf};
 
@@ -7,6 +19,8 @@ use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
 
 /// Reason why a client is not eligible to use codebase indexing.
+/// Produced by the run loop's eligibility check when one of the policy gates fails.
+/// Used in `x.ai/code/status` responses and to generate clear error messages on code-nav requests from ineligible clients.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeNavEligibility {
     /// Client type is not web (web-only for initial rollout).
@@ -18,6 +32,7 @@ pub enum CodeNavEligibility {
     /// The cwd is not inside a git repository.
     NotGitRepo,
     /// `sessionId` is required for code navigation but was absent or refers to an unknown / evicted session.
+    /// Per-client capability cannot be determined without a valid session context.
     SessionRequired,
 }
 
@@ -45,8 +60,8 @@ type ExtResult = Result<acp::ExtResponse, acp::Error>;
 
 // ========== Request Types ==========
 
-/// Position-based query request (for goto-definition, goto-references).
-/// Position parameters are 1-indexed (matching editor display).
+/// Position-based query request (for goto-definition, goto-references). Position parameters are 1-indexed (matching editor display). **`sessionId` is required** for all code-nav requests.
+/// Per-client capability gating requires a valid session so eligibility is resolved correctly in both simple and leader modes. Requests without `sessionId` receive `reason: sessionRequired` in the error response.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GotoRequest {
@@ -72,6 +87,7 @@ pub(crate) struct FindSymbolRequest {
     pub session_id: Option<acp::SessionId>,
     /// Working directory (optional when session_id is provided).
     pub cwd: Option<String>,
+    /// Symbol name to search for
     pub symbol: String,
     /// Optional context file path for ranking results
     pub context_path: Option<String>,

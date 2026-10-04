@@ -1,10 +1,22 @@
-//! [`RetryPolicy`] — maps a non-2xx HTTP status code to a [`Disposition`].
+//! [`RetryPolicy`] — maps a non-2xx HTTP status code to a [`Disposition`],
+//! consolidating the scattered "what should I do with this response" logic.
+//!
+//! Three named presets:
+//! - [`RetryPolicy::server`] — server-side preset: retry on 429 or any 5xx;
+//!   all other non-2xx are terminal.
+//! - [`RetryPolicy::edge_client`] — [`RetryPolicy::server`] for clients whose
+//!   requests cross the Cloudflare edge, minus the origin-TLS codes.
+//! - [`RetryPolicy::client_storage`] — client upload/storage preset:
+//!   400/403/404 terminal-drop, 401 auth-refresh-once, everything else retried.
 
 /// What a caller should do with a non-2xx HTTP response, by status code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Disposition {
+    /// transient: retry with backoff (5xx, 429, etc.)
     Retryable,
+    /// refresh credentials once, then give up (e.g. 401)
     AuthRefresh,
+    /// permanent: drop immediately, never retry (e.g. 400/403/404)
     Terminal,
 }
 
@@ -41,7 +53,8 @@ impl RetryPolicy {
         matches!(self.classify(status), Some(Disposition::Retryable))
     }
 
-    /// This is the rule behind CCP's `x-should-retry` header.
+    /// Server preset: 429 and any 5xx are retryable, everything else is
+    /// terminal. This is the rule behind CCP's `x-should-retry` header.
     pub const fn server() -> Self {
         Self {
             retryable: &[429],
@@ -51,6 +64,10 @@ impl RetryPolicy {
         }
     }
 
+    /// Client preset for requests that cross the Cloudflare edge: the same
+    /// 429 + any 5xx rule as [`Self::server`], minus the origin-TLS codes
+    /// (525 handshake failed, 526 invalid certificate) — a broken origin
+    /// cert never clears on its own, unlike the transient 520–524/530 pages.
     pub const fn edge_client() -> Self {
         Self {
             retryable: &[429],
@@ -60,6 +77,10 @@ impl RetryPolicy {
         }
     }
 
+    /// Client storage/upload preset: 400/403/404 terminal-drop, 401
+    /// auth-refresh-once, everything else (429, 5xx, unlisted 4xx) retried —
+    /// except origin-TLS 525/526, terminal for the same reason as
+    /// [`Self::edge_client`] (uploads cross the same Cloudflare edge).
     pub const fn client_storage() -> Self {
         Self {
             retryable: &[],

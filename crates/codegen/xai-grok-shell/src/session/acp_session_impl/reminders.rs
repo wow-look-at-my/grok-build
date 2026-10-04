@@ -44,9 +44,12 @@ pub(super) enum WakeTurnMessage {
     Silent,
 }
 /// Owned snapshot returned by [`SessionActor::collect_todo_gate_input`].
+///
+/// Exposed as `pub` solely so the replay-trace integration test in `tests/trace_replay.rs` can drive the gate against synthetic JSON fixtures.
 #[doc(hidden)]
 pub struct CollectedTodoGateInput {
     /// Pairs of `(id, content, status)` in `TodoState.todo_items_with_ids()` (insertion) order.
+    /// `IndexMap` preserves this order, so the partition between backed and unbacked in-progress items is deterministic.
     pub todos: Vec<(String, String, crate::tools::todo::TodoStatus)>,
     /// Count of outstanding subagents plus incomplete bash/monitor tasks at the moment of gate evaluation.
     pub backing_task_count: usize,
@@ -77,11 +80,18 @@ impl CollectedTodoGateInput {
         }
     }
 }
-/// One actionable todo as `(id, content)`.
+/// One actionable todo as `(id, content)`. The gate reminder tells the model
+/// to cancel items by id, so it must print the id.
 pub(super) type GateTodo<'a> = (&'a str, &'a str);
 
-/// Inputs to `evaluate_todo_gate`. All fields are deliberately owned borrows
-/// from the gate's call-site so the helper is a pure function.
+/// Inputs to `evaluate_todo_gate`. All fields are deliberately owned
+/// borrows from the gate's call-site so the helper is a pure function.
+///
+/// The struct itself is `pub` (with `#[doc(hidden)]`) only so the
+/// replay-trace integration test in `tests/trace_replay.rs` can name
+/// the type as `&TodoGateInput<'_>` when calling `evaluate_todo_gate`.
+/// Fields stay crate-private — the test never constructs the struct
+/// directly; it obtains an instance via `CollectedTodoGateInput::as_input()`.
 #[doc(hidden)]
 pub struct TodoGateInput<'a> {
     pub(super) pending: Vec<GateTodo<'a>>,
@@ -494,8 +504,13 @@ fn format_workflow_completion_reminder(
     }
     buf
 }
-/// Whether a todo gate fits THIS agent and goal state, independent of any enable switch: the prompt must carry `<task_completion_discipline>` (`{DISCIPLINE_BLOCK}`), and the goal loop must not be active — the continuation directive drives the loop there. Applicability is kept separate from [`todo_stop_gate_enabled`] so the enable switch
-/// can change without touching what the gate applies to.
+/// Whether a todo gate fits THIS agent and goal state, independent of any
+/// enable switch: the prompt must carry `<task_completion_discipline>`
+/// (`{DISCIPLINE_BLOCK}`), and the goal loop must not be active — the
+/// continuation directive drives the loop there.
+///
+/// Applicability is kept separate from [`todo_stop_gate_enabled`] so the
+/// enable switch can change without touching what the gate applies to.
 pub(super) fn todo_gate_applicable(
     audience: xai_grok_agent::prompt::context::PromptAudience,
     definition: &AgentDefinition,
@@ -507,8 +522,12 @@ pub(super) fn todo_gate_applicable(
     }
     definition.carries_task_completion_discipline(audience)
 }
-/// The enable half of the built-in todo-stop gate. The switch is the
-/// persisted `[ui].stop_gate_unfinished_todos` toggle, which ships ON.
+/// The enable half of the built-in todo-stop gate.
+///
+/// The switch is the persisted `[ui].stop_gate_unfinished_todos` toggle, which
+/// ships ON. The `todo_gate` opt-in (remote `todo_gate_enabled`, or the
+/// `--todo-gate` CLI force-enable) is an OR on top, not an AND: ANDing the two
+/// leaves the shipped default unable to fire at all.
 pub(super) fn todo_stop_gate_enabled(
     policy: &xai_grok_agent::system_reminder::ReminderPolicy,
 ) -> bool {
@@ -540,10 +559,9 @@ impl SessionActor {
             "Injected date rollover reminder"
         );
     }
-    /// Frame the already-assembled user turn when a mid-stream abort left the
-    /// model no other signal. Verbatim prompts still consume the flag (this
-    /// is the next real user turn) but keep the caller-owned bytes, matching
-    /// truncation and send-now.
+    /// Frame the already-assembled user turn when a mid-stream abort left the model no other signal.
+    /// Verbatim prompts still consume the flag (this is the next real user turn) but keep the caller-owned bytes, matching truncation and send-now.
+    /// Callers must gate to `PromptOrigin::User` so synthetic turns leave the flag.
     pub(super) fn maybe_apply_interrupt_envelope(
         &self,
         user_message: String,
@@ -583,9 +601,9 @@ impl SessionActor {
         self.chat_state_handle
             .push_user_message(wrap_in_reminder_tag(content, tag));
     }
-    /// Mark completion IDs as reported in the shared
-    /// `ReportedTaskCompletions` state. The per-tool-call
-    /// `TaskCompletionReminder` then won't (re-)surface them.
+    /// Mark completion IDs as reported in the shared `ReportedTaskCompletions` state.
+    /// The per-tool-call `TaskCompletionReminder` then won't (re-)surface them.
+    /// Used to dedupe completions the model actually saw (notification-drain / started auto-wake prompts).
     pub(super) async fn mark_completions_reported(&self, ids: &[&str]) {
         if ids.is_empty() {
             return;

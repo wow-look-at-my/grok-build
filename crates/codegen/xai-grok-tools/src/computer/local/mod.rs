@@ -9,6 +9,7 @@ pub mod shell_state;
 pub mod static_shell;
 pub mod terminal;
 // Unix only, because the tests build their logs with shell tools.
+// See `computer::task_log` for the tests that run everywhere.
 #[cfg(all(test, unix))]
 mod terminal_snapshot_tests;
 
@@ -17,8 +18,9 @@ pub use file_system::LocalFs;
 pub use mock_fs::MockFs;
 pub use terminal::{ExitStatus, LocalTerminalBackend};
 
-/// Per-backend enable state for the bash-harness `find`→`bfs` /
-/// `grep`→`ugrep` shadows.
+/// Per-backend enable state for the bash-harness `find`→`bfs` / `grep`→`ugrep` shadows. Resolved
+/// once by the host (config.toml `[toolset.bash]` / env / requirements) and baked into a
+/// [`LocalTerminalBackend`] at creation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchShadowConfig {
     pub find_bfs: bool,

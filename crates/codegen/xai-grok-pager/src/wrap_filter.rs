@@ -1,24 +1,38 @@
+//! Streaming output filter for `grok wrap`: OSC 52 clipboard interception, host-image request handling, and DEC-mode observation.
+//!
+//! `Osc52Filter` sits between the wrap PTY reader and stdout (see `crate::pty_wrap`).
+//! It consumes OSC 52 clipboard sequences (plain and tmux DCS passthrough) and the private host-image request OSC ([`crate::wrap_clipboard_image`]).
+//! Everything else passes through verbatim, including every CSI sequence, which is additionally reported to the wrap mode tracker.
+//! The parser handles sequences split across arbitrary chunk boundaries.
 
 use base64::Engine as _;
 use std::sync::Arc;
 
 use crate::wrap_restore::ModeTracker;
 
+/// Maximum size for a buffered escape sequence candidate (1 MiB).
+/// This bounds the memory used while accumulating a candidate OSC 52 or DCS sequence.
+/// It must be large enough to hold the base64-encoded form of `MAX_CLIPBOARD_PAYLOAD` (~1.33x expansion) plus the escape envelope.
 const MAX_ESC_BUFFER: usize = 1024 * 1024;
 
-/// Maximum size for a buffered CSI sequence.
+/// Maximum size for a buffered CSI sequence. It must comfortably fit a single DECSET listing every tracked mode
+/// (~69 bytes today). A unit test pins that relationship, so mode-table growth cannot silently cross the cap.
 const MAX_CSI_BUFFER: usize = 128;
 
+/// Maximum decoded clipboard payload size (768 KiB).
+/// Aligned with `MAX_ESC_BUFFER`: a 768 KiB payload encodes to ~1 MiB of base64, fitting within the buffer limit.
+/// Payloads larger than this are unrealistic for clipboard content over SSH.
 const MAX_CLIPBOARD_PAYLOAD: usize = 768 * 1024;
 
+/// The prefix that identifies an OSC 52 sequence after the `ESC ]`.
 const OSC52_PREFIX: &[u8] = b"52;";
 
 /// The tmux DCS passthrough prefix after `ESC P`: `tmux;\x1b\x1b]`.
 const TMUX_DCS_PREFIX: &[u8] = b"tmux;\x1b\x1b]";
 
-/// Base64 engine that accepts both padded and unpadded input. OSC emitters in the wild (including
-/// some Go-based tools and terminals) may omit `=` padding. `Indifferent` mode avoids silent
-/// decode failures from legitimate clipboard sequences.
+/// Base64 engine that accepts both padded and unpadded input.
+/// OSC 52 emitters in the wild (including some Go-based tools and terminals) may omit `=` padding.
+/// `Indifferent` mode avoids silent decode failures from legitimate clipboard sequences.
 const BASE64_STANDARD_INDIFFERENT: base64::engine::GeneralPurpose =
     base64::engine::GeneralPurpose::new(
         &base64::alphabet::STANDARD,
@@ -26,18 +40,22 @@ const BASE64_STANDARD_INDIFFERENT: base64::engine::GeneralPurpose =
             .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent),
     );
 
+/// State machine states for the OSC 52 streaming parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FilterState {
     /// Normal output passthrough.
     Normal,
     /// Saw ESC (0x1b), waiting for next byte to determine sequence type.
     Esc,
-    /// Inside CSI: saw `ESC [`, accumulating until the final byte (0x40-0x7E).
+    /// Inside CSI: saw `ESC [`, accumulating until the final byte (0x40-0x7E). A fragment truncated by child EOF is
+    /// intentionally never flushed. Emitting a half-open CSI would leave the real terminal's parser mid-sequence,
+    /// eating the restore bytes the exit path writes right after.
     Csi,
     /// Inside OSC: saw `ESC ]`, accumulating until BEL or ST.
     Osc,
     /// Inside DCS: saw `ESC P`, checking for tmux passthrough prefix.
     Dcs,
+    /// Inside DCS tmux passthrough, accumulating inner OSC 52.
     DcsTmuxOsc,
     /// Saw ESC inside an OSC, could be ST terminator (`ESC \`).
     OscEsc,
@@ -50,7 +68,9 @@ type ClipboardSink = Box<dyn FnMut(&[u8])>;
 
 type WrapImageRequestHandler = Box<dyn FnMut()>;
 
+/// Streaming filter that intercepts OSC 52 clipboard sequences from PTY output and sends their decoded payload to the local clipboard.
 /// All non-OSC-52 bytes pass through unchanged.
+/// The parser handles sequences split across arbitrary byte boundaries.
 pub(crate) struct Osc52Filter {
     state: FilterState,
     buf: Vec<u8>,
@@ -94,7 +114,9 @@ impl Osc52Filter {
         }
     }
 
-    /// Process a chunk of bytes from PTY output. Returns bytes that should be written to stdout.
+    /// Process a chunk of bytes from PTY output.
+    /// Returns bytes that should be written to stdout.
+    /// OSC 52 clipboard sequences are consumed (not included in the output) and their decoded payload is sent to the clipboard sink.
     pub(crate) fn feed(&mut self, data: &[u8]) -> Vec<u8> {
         let mut output = Vec::with_capacity(data.len());
         for &byte in data {
@@ -134,14 +156,16 @@ impl Osc52Filter {
                         self.buf.clear();
                         self.state = FilterState::Normal;
                     } else if byte == 0x1b {
-                        // A new ESC aborts the CSI Flush the fragment and let the ESC start a fresh sequence.
+                        // A new ESC aborts the CSI
+                        // Flush the fragment and let the ESC start a fresh sequence, so OSC 52 right after a malformed CSI is still intercepted
                         self.buf.pop();
                         output.extend_from_slice(&self.buf);
                         self.buf.clear();
                         self.buf.push(0x1b);
                         self.state = FilterState::Esc;
                     } else if !(0x20..=0x3f).contains(&byte) || self.buf.len() > MAX_CSI_BUFFER {
-                        // Not a parameter/intermediate byte, or oversized: malformed Flush verbatim without reporting
+                        // Not a parameter/intermediate byte, or oversized: malformed
+                        // Flush verbatim without reporting
                         output.extend_from_slice(&self.buf);
                         self.buf.clear();
                         self.state = FilterState::Normal;
@@ -175,12 +199,14 @@ impl Osc52Filter {
                         self.buf.clear();
                         self.state = FilterState::Normal;
                     } else {
-                        // Not ST: continue accumulating in Osc state The ESC we saw might be part of the payload in some broken sequence.
+                        // Not ST: continue accumulating in Osc state
+                        // The ESC we saw might be part of the payload in some broken sequence; just keep buffering
                         self.state = FilterState::Osc;
                     }
                 }
                 FilterState::Dcs => {
                     self.buf.push(byte);
+                    // buf starts with \x1bP so tmux prefix bytes start at offset 2.
                     let prefix_pos = self.buf.len() - 2;
                     if prefix_pos <= TMUX_DCS_PREFIX.len() {
                         match prefix_pos
@@ -192,6 +218,7 @@ impl Osc52Filter {
                                     // Full tmux prefix matched: \x1bPtmux;\x1b\x1b]
                                     self.state = FilterState::DcsTmuxOsc;
                                 }
+                                // else keep matching prefix
                             }
                             _ => {
                                 // Prefix mismatch: not a tmux passthrough, flush.
@@ -212,6 +239,8 @@ impl Osc52Filter {
                     match byte {
                         // BEL terminates the inner OSC.
                         0x07 => {
+                            // Inner OSC is done but we still need DCS ST (ESC \) to close the tmux wrapper
+                            // Remain in this state to catch the ESC.
                         }
                         0x1b => {
                             self.state = FilterState::DcsTmuxOscEsc;
@@ -245,6 +274,7 @@ impl Osc52Filter {
         output
     }
 
+    /// Handle OSC 52 clipboard or wrap image request; `true` if consumed.
     fn try_handle_consumed_osc(&mut self) -> bool {
         let Some(body) = self.buf.get(2..) else {
             return false;
@@ -266,9 +296,12 @@ impl Osc52Filter {
         true
     }
 
-    /// Expected buffer format: `\x1bPtmux;\x1b\x1b]52;<sel>;<base64>\x07\x1b\\`.
+    /// Try to handle the buffered bytes as a tmux-wrapped OSC 52 sequence. Expected buffer format:
+    /// `\x1bPtmux;\x1b\x1b]52;<sel>;<base64>\x07\x1b\\`. Returns `true` if the sequence was a valid OSC 52 and was
+    /// consumed.
     fn try_handle_tmux_osc52(&mut self) -> bool {
-        // Strip the DCS tmux prefix.
+        // Strip the DCS tmux prefix: \x1bPtmux;\x1b\x1b] (total 9 bytes) and the DCS ST terminator: \x1b\ (2 bytes at the end)
+        // Copy the body to avoid borrowing self.buf while calling &mut self.
         let prefix_len = 2 + TMUX_DCS_PREFIX.len(); // \x1bP + tmux;\x1b\x1b]
         if self.buf.len() < prefix_len + 2 {
             return false;
@@ -284,6 +317,7 @@ impl Osc52Filter {
         self.extract_and_set_clipboard(body)
     }
 
+    /// Parse OSC 52 body (`52;<sel>;<base64>`), decode, and set clipboard.
     ///
     /// Returns `true` if successfully handled.
     fn extract_and_set_clipboard(&mut self, body: &[u8]) -> bool {
@@ -390,16 +424,19 @@ mod tests {
         (output, captured)
     }
 
+    /// Encode text as a plain OSC 52 sequence with BEL terminator.
     fn make_osc52_bel(text: &str) -> Vec<u8> {
         let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
         format!("\x1b]52;c;{b64}\x07").into_bytes()
     }
 
+    /// Encode text as a plain OSC 52 sequence with ST terminator.
     fn make_osc52_st(text: &str) -> Vec<u8> {
         let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
         format!("\x1b]52;c;{b64}\x1b\\").into_bytes()
     }
 
+    /// Encode text as a tmux-wrapped OSC 52 sequence.
     fn make_osc52_tmux(text: &str) -> Vec<u8> {
         let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
         format!("\x1bPtmux;\x1b\x1b]52;c;{b64}\x07\x1b\\").into_bytes()
@@ -415,6 +452,7 @@ mod tests {
 
     #[test]
     fn osc52_ansi_escapes_pass_through() {
+        // SGR color: ESC [ 31 m
         let input = b"\x1b[31mred text\x1b[0m";
         let (output, clips) = filter_output(input);
         assert_eq!(output, input.as_slice());
@@ -562,6 +600,7 @@ mod tests {
 
     #[test]
     fn osc52_non_52_osc_passes_through() {
+        // OSC 0 sets the window title
         let seq = b"\x1b]0;my title\x07";
         let (output, clips) = filter_output(seq);
         assert_eq!(output, seq.as_slice());
@@ -570,6 +609,7 @@ mod tests {
 
     #[test]
     fn osc52_non_52_osc_st_passes_through() {
+        // OSC 0 with ST terminator.
         let seq = b"\x1b]0;my title\x1b\\";
         let (output, clips) = filter_output(seq);
         assert_eq!(output, seq.as_slice());
@@ -621,7 +661,8 @@ mod tests {
         // No second ';' after "52;", so the selection param separator is missing
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"data");
         let seq = format!("\x1b]52;{b64}\x07").into_bytes();
-        // This has "52;" followed by base64 with no second ';' The parser treats everything after "52;" up to the next ';' as the selection param.
+        // This has "52;" followed by base64 with no second ';'
+        // The parser treats everything after "52;" up to the next ';' as the selection param; with no ';' it returns false
         let (output, clips) = filter_output(&seq);
         assert_eq!(output, seq, "should pass through without second ';'");
         assert!(clips.is_empty());
@@ -733,6 +774,9 @@ mod tests {
 
     #[test]
     fn csi_single_decset_with_every_tracked_mode_fits_the_cap() {
+        // One legal DECSET enabling every set-side tracked mode (25 is inverted: its latch side is `l`, appended separately)
+        // Pins the relationship between MAX_CSI_BUFFER and the mode table
+        // Growing the tracked set must not silently push this sequence over the cap into unreported passthrough
         let mut input =
             b"\x1b[?47;1000;1002;1003;1004;1005;1006;1015;1016;1047;1049;2004;2026h".to_vec();
         input.extend_from_slice(b"\x1b[?25l");

@@ -1,4 +1,7 @@
 //! `/transcript`: view the full conversation transcript in `$PAGER`.
+//!
+//! Renders the current session's transcript to a temp Markdown file and opens it in the user's pager (default `less`).
+//! The TUI is suspended until the pager exits.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

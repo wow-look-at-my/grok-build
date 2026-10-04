@@ -1,4 +1,7 @@
 //! Declarative end-to-end TUI scenario tests.
+//!
+//! These tests exercise the real `xai-grok-pager` binary through a PTY using YAML scenarios under `tests/scenarios/`.
+//! They are ignored by default because they build and spawn the pager and stream through a mock inference server.
 
 use std::path::PathBuf;
 
@@ -103,16 +106,17 @@ async fn scripted_table_cell_selection() {
     run_scenario("table_cell_selection.yaml").await;
 }
 
-/// Type-to-find pickers carry vim-mode. With vim-mode on, the command palette
-/// opens in INPUT (a letter filters immediately).
+/// Type-to-find pickers carry vim-mode. With vim-mode on, the command palette opens in INPUT (a letter filters
+/// immediately). Esc clears the query, a second Esc drops to NAV (letters no longer filter), and `i` re-enters
+/// INPUT. The footer's `i search` hint is absent on open (input) and present in nav.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_vim_modal_command_palette() {
     run_scenario("vim_modal_command_palette.yaml").await;
 }
 
-/// Selecting a tool header copies only the operand (the path or command), not
-/// the `Read ` / `Run ` / `$ ` label.
+/// Selecting a tool header copies only the operand (the path or command), not the `Read ` / `Run ` / `$ ` label.
+/// This guards the Selectable::Spans regression on tool-call headers.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_tool_header_path_selection() {
@@ -172,15 +176,17 @@ async fn scripted_image_normalize_persist_atomic() {
     run_scenario("image_normalize_persist_atomic.yaml").await;
 }
 
-/// A Mermaid fence (the engine is always compiled in) renders as an inline
-/// Unicode-art diagram, not an inline image.
+/// A Mermaid fence (the engine is always compiled in) renders as an inline Unicode-art diagram, not an inline image.
+/// A clickable affordance row follows: [Open Image] [Copy Image Path] [Copy Source].
+/// The run never panics.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_mermaid_affordances() {
     run_scenario("mermaid-affordances.yaml").await;
 }
 
-/// User report: a file path with a space (`Demo App.app`) must render fully. This wrapper also checks
+/// User report: a file path with a space (`Demo App.app`) must render fully. The ptyctl PTY stream must carry OSC 8
+/// for the full path (`Demo%20App.app`), not a truncated link ending at `Demo`. This wrapper also checks
 /// `raw_output.bin` so CI has byte-level proof without relying only on the ignored `pty_e2e` test.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
@@ -333,48 +339,51 @@ async fn scripted_inline_image_memory() {
     );
 }
 
-/// Enterprise deploy report: with `GROK_GOAL=1`, `/goal` must show in the
-/// slash menu on the welcome screen before the first user turn.
+/// Enterprise deploy report: with `GROK_GOAL=1`, `/goal` must show in the slash menu on the welcome screen before the first user turn.
+/// The scenario types `/goal` pre-session and asserts the dropdown carries the builtin's description, then captures screenshot artifacts.
+/// The description only renders when the command is advertised.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_goal_slash_presession() {
     run_scenario("goal_slash_presession.yaml").await;
 }
 
-/// Counterpart to `scripted_goal_slash_presession`, with the goal flag
-/// explicitly off (`GROK_GOAL=0`; goal mode defaults on).
+/// Counterpart to `scripted_goal_slash_presession`, with the goal flag explicitly off (`GROK_GOAL=0`; goal mode defaults on).
+/// `/goal` must stay hidden pre-session: the gate fails closed.
+/// The AlwaysOn builtin `/compact` still shows, proving the gate hides `/goal` and the dropdown itself works.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_goal_slash_presession_disabled() {
     run_scenario("goal_slash_presession_disabled.yaml").await;
 }
 
-/// Full folder-trust session: `GROK_FOLDER_TRUST=1` and a git repo that ships
-/// a repo-local `.mcp.json`.
+/// Full folder-trust session: `GROK_FOLDER_TRUST=1` and a git repo that ships a repo-local `.mcp.json` (declared via the scenario `workspace`).
+/// The trust question renders before any session, accepting it (`y`) lets the session proceed, and a submitted prompt streams the mock response.
+/// This is the declarative counterpart to the programmatic `folder_trust_*` PTY tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_folder_trust_prompt() {
     run_scenario("folder_trust_prompt.yaml").await;
 }
 
-/// Dashboard `/model` list: mouse-clicking a model must accept the completion
-/// into the dispatch prompt.
+/// Dashboard `/model` list: mouse-clicking a model must accept the completion into the dispatch prompt.
+/// It must not attach the session row under the dropdown (the click-through regression).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_dashboard_model_list_click() {
     run_scenario("dashboard_model_list_click.yaml").await;
 }
 
-/// Shortcuts cheatsheet end-to-end: open the modal, inline-expand a hint
-/// (→), and collapse it (←).
+/// Shortcuts cheatsheet end-to-end: open the modal, inline-expand a hint (→), and collapse it (←).
+/// Then open the man-style detail screen (Enter) showing long_help, return to browse (Esc), and close with the global Ctrl+X chord.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_shortcuts_help_detail() {
     run_scenario("shortcuts_help_detail.yaml").await;
 }
 
-/// Undo tip happy path: a substantial Ctrl+U wipe shows the "… to undo"
-/// banner.
+/// Undo tip happy path: a substantial Ctrl+U wipe shows the "… to undo" banner.
+/// The banner clears on its own TTL; undoing does not retire it early.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_undo_tip_clear_shows() {
@@ -388,7 +397,7 @@ async fn scripted_undo_tip_ctrl_c_clear_shows() {
     run_scenario("undo_tip_ctrl_c_clear_shows.yaml").await;
 }
 
-/// Undo tip no-show edge: wiping a short draft (under multiple chars) shows nothing.
+/// Undo tip no-show edge: wiping a short draft (under 20 chars) shows nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_undo_tip_short_draft_no_show() {
@@ -409,16 +418,15 @@ async fn scripted_undo_tip_completion_accept_no_show() {
     run_scenario("undo_tip_completion_accept_no_show.yaml").await;
 }
 
-/// Plan-nudge happy path: with contextual hints enabled, typing a planning
-/// keyword shows the "Planning?
+/// Plan-nudge happy path: with contextual hints enabled, typing a planning keyword shows the "Planning? Check out plan mode via shift+tab" banner.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_plan_nudge_shows() {
     run_scenario("plan_nudge_shows.yaml").await;
 }
 
-/// Plan-nudge opt-out edge: contextual hints are off by default, and this
-/// scenario also pins `GROK_CONTEXTUAL_HINTS=0` to be sure.
+/// Plan-nudge opt-out edge: contextual hints are off by default, and this scenario also pins `GROK_CONTEXTUAL_HINTS=0` to be sure.
+/// The same planning keyword shows nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_plan_nudge_opt_out_no_show() {
@@ -439,15 +447,15 @@ async fn scripted_mid_text_btw_sends_side_question() {
     run_scenario("mid_text_btw_sends_side_question.yaml").await;
 }
 
-/// Auto-compact: shrinking to several rows drops the sticky
-/// previous-question header (compact chrome engages).
+/// Auto-compact: shrinking to 14 rows drops the sticky previous-question header (compact chrome engages); growing back to 32 rows restores it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_auto_compact_resize() {
     run_scenario("auto_compact_resize.yaml").await;
 }
 
-/// Try /compact-mode" banner.
+/// Small-screen tip happy path: a 24-row terminal (in the 21..=28 band) shows the one-shot "Tight on space? Try /compact-mode" banner.
+/// The banner expires on its TTL and never re-shows after resizes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_small_screen_tip_band() {
@@ -461,7 +469,7 @@ async fn scripted_small_screen_tip_no_show_tall() {
     run_scenario("small_screen_tip_no_show_tall.yaml").await;
 }
 
-/// Small-screen tip no-show edge: at several rows auto-compact engages instead and the banner row cannot render.
+/// Small-screen tip no-show edge: at 14 rows auto-compact engages instead and the banner row cannot render.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "scripted scenario; run with cargo test -- --ignored"]
 async fn scripted_small_screen_tip_no_show_tiny() {

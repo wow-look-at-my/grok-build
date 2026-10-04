@@ -1,4 +1,15 @@
-//! [`AgentStatusBar`] collects items as `Line<'static>` spans, lays them out right-aligned with faint `│` separators.
+//! [`AgentStatusBar`] collects items as `Line<'static>` spans, lays them out right-aligned with faint `│` separators, and renders into a buffer row.
+//! Returns hit-test areas keyed by item ID.
+//!
+//! # Example
+//!
+//! ```ignore
+//! let mut status = AgentStatusBar::new(&theme);
+//! status.push("context", context_line);
+//! status.push("queue", queue_line);
+//! let areas = status.render(buf, status_bar_rect);
+//! let context_area = areas.get("context");
+//! ```
 
 use std::collections::HashMap;
 
@@ -25,6 +36,8 @@ struct StatusEntry {
 }
 
 /// Builder for the agent status bar.
+///
+/// Collect items with [`push`], then call [`render`] to lay them out right-aligned with separators and get back hit-test areas.
 pub struct AgentStatusBar<'a> {
     items: Vec<StatusEntry>,
     theme: &'a Theme,
@@ -150,8 +163,8 @@ pub(crate) fn task_status_line(
     let mut spans = Vec::with_capacity(2);
 
     if counts.running > 0 {
-        // Static, and the same diamond the task rows use The header sits in
-        // view the whole session.
+        // Static, and the same diamond the task rows use
+        // The header sits in view the whole session, so a spinner here reads as noise rather than progress
         spans.push(Span::styled(
             format!("{} {}", crate::glyphs::diamond_filled(), counts.running),
             running_style,
@@ -235,10 +248,9 @@ pub fn active_phase_label(goal: &GoalDisplayState) -> String {
     }
 }
 
-/// Format the classifier "attempts: n/m" counter for both the status chip and
-/// the modal so both displays cannot drift. Returns the empty string when
-/// both fields are absent / zero: no classifier run has been reserved yet, so
-/// there is no meaningful counter.
+/// Format the classifier "attempts: n/m" counter for both the status chip and the modal so the two displays cannot drift.
+/// Returns the empty string when both fields are absent / zero: no classifier run has been reserved yet, so there is no meaningful counter.
+/// Callers render it only when non-empty: the chip drops the `(n/m)` suffix, the modal falls back to a hyphen.
 pub fn classifier_attempts_label(goal: &GoalDisplayState) -> String {
     let attempt = goal.classifier_runs_attempted.unwrap_or(0);
     let max = goal.classifier_max_runs.unwrap_or(0);
@@ -494,8 +506,8 @@ mod tests {
 
     #[test]
     fn status_chip_shows_verifying_completion_when_flag_set() {
-        // An Active goal with `verifying_completion = true` renders the
-        // "Verifying (n/m)" label instead.
+        // An Active goal with `verifying_completion = true` renders the "Verifying (n/m)" label instead of the regular phase label
+        // The user can then see the classifier run
         let mut g = make_goal(
             GoalDisplayStatus::Active,
             GoalDisplayPhase::Executing,
@@ -539,6 +551,7 @@ mod tests {
             0,
             0,
         );
+        // Both None gives empty (no run reserved yet)
         assert_eq!(classifier_attempts_label(&g), "");
         // Explicit zeros also count as "no counter".
         g.classifier_runs_attempted = Some(0);
@@ -553,8 +566,8 @@ mod tests {
 
     #[test]
     fn live_elapsed_ms_clamps_to_carried_floor() {
-        // The displayed clock must never tick below the carried monotonic
-        // floor.
+        // The displayed clock must never tick below the carried monotonic floor, even when the latest authoritative base is lower
+        // (The pager's extrapolation outran the shell's flush point.)
         let mut g = make_goal(
             GoalDisplayStatus::UserPaused,
             GoalDisplayPhase::Idle,
@@ -583,8 +596,8 @@ mod tests {
 
     #[test]
     fn status_chip_shows_planning_when_flag_set() {
-        // An Active goal with `planning = true` renders the "Planning" label
-        // instead.
+        // An Active goal with `planning = true` renders the "Planning" label instead of the regular phase label
+        // The user can see the planner subagent run while it executes
         let mut g = make_goal(
             GoalDisplayStatus::Active,
             GoalDisplayPhase::Idle,
@@ -603,7 +616,7 @@ mod tests {
 
     #[test]
     fn status_chip_verifying_wins_over_planning() {
-        // Deterministic precedence: both flags never overlap in practice, but if both were set `verifying_completion` wins
+        // Deterministic precedence: the two flags never overlap in practice, but if both were set `verifying_completion` wins
         let mut g = make_goal(
             GoalDisplayStatus::Active,
             GoalDisplayPhase::Idle,
@@ -620,8 +633,8 @@ mod tests {
 
     #[test]
     fn status_chip_planning_suppressed_on_non_active_status() {
-        // The "Planning" label is gated on `Active` A paused goal that
-        // somehow still carries `planning = true` shows its terminal label.
+        // The "Planning" label is gated on `Active`
+        // A paused goal that somehow still carries `planning = true` shows its terminal label, not the in-flight one
         let mut g = make_goal(
             GoalDisplayStatus::UserPaused,
             GoalDisplayPhase::Idle,
@@ -635,7 +648,9 @@ mod tests {
 
     #[test]
     fn status_chip_verifying_suppressed_on_non_active_status() {
-        // The chip text is gated on `Active` A paused, complete.
+        // The chip text is gated on `Active`
+        // A paused, complete, or budget-limited goal can still carry `verifying_completion = true`
+        // It must show its terminal label, not the in-flight one
         let mut g = make_goal(
             GoalDisplayStatus::UserPaused,
             GoalDisplayPhase::Executing,
@@ -865,7 +880,7 @@ mod tests {
             .collect();
         let trimmed = row.trim();
 
-        // Exactly dividers (between the items), none at the ends.
+        // Exactly two dividers (between the three items), none at the ends.
         assert_eq!(trimmed.matches(SEPARATOR).count(), 2, "row = {trimmed:?}");
         assert!(
             !trimmed.starts_with(SEPARATOR),

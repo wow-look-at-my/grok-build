@@ -1,4 +1,14 @@
 //! Interactive markdown table rendering playground.
+//!
+//! Run with:
+//!   cargo run -p xai-grok-markdown --features playground --bin md-table-test
+//!
+//! Controls:
+//!   Space        — toggle textarea focus
+//!   Alt/Ctrl/Shift+Enter — submit markdown & defocus (when textarea focused)
+//!   h / Left     — shrink render width  (when unfocused)
+//!   l / Right    — grow render width    (when unfocused)
+//!   Esc          — quit (always)
 
 #![deny(clippy::indexing_slicing)]
 
@@ -33,6 +43,9 @@ const MD_STYLE: MarkdownStyle = md_style(anstyle::Style::new());
 
 // ── Compute minimum render width ─────────────────────────────────────────────
 
+/// Minimum width = 4k + 1, where k = number of table columns.
+/// Columns = max(`|` count per line) - 1  (the outer pipes are borders).
+/// This ensures every column gets at least 1 char + padding.  Floor of 10.
 fn min_render_width(source: &str) -> usize {
     let max_pipes = source
         .lines()
@@ -242,6 +255,9 @@ fn main() -> io::Result<()> {
 fn draw(f: &mut ratatui::Frame, app: &mut App) {
     let size = f.area();
 
+    // Layout: header (1) | textarea (flexible) | full render | streaming render
+    // We compute the heights we need for the render panels, then give the rest
+    // to the textarea.
 
     let render_w = app.render_width as u16;
     let full_height = wrapped_line_count(&app.full_lines, render_w).max(1) + 2; // +2 for border
@@ -372,7 +388,8 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
 }
 
 /// Count the number of visual rows a set of lines occupies when soft-wrapped
-/// to `width` columns.
+/// to `width` columns.  Each line takes ceil(display_width / width) rows,
+/// with a minimum of 1 row per line (empty lines still occupy a row).
 fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> u16 {
     use unicode_width::UnicodeWidthStr;
     if width == 0 {
@@ -407,6 +424,7 @@ fn render_panel(
     inner_w: u16,
     is_error: bool,
 ) {
+    // The block border adds 1 column on each side, so outer width = inner_w + 2.
     let outer_w = (inner_w + 2).min(area.width);
     let box_area = Rect {
         x: area.x,

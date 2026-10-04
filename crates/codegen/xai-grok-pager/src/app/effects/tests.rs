@@ -201,7 +201,7 @@ fn parse_kill_outcome_reads_result_envelope() {
     assert_eq!(parse_kill_outcome(resp), Some(KillOutcome::AlreadyExited));
 }
 /// Round-trip through the agent's own serializer: what `extensions::task::respond()` produces must parse back to the same typed outcome.
-/// This guards against both sides drifting apart.
+/// This guards against the two sides drifting apart.
 #[test]
 fn parse_kill_outcome_round_trips_agent_serialization() {
     use xai_grok_shell::extensions::task::KillTaskResponse;
@@ -281,7 +281,7 @@ fn parse_subagent_kill_outcome_unknown_kind_falls_back_to_legacy_bool() {
             SubagentKillOutcome::NothingLive { status: None }
         ));
 }
-/// Round-trip through the agent's own serializer guards both sides against drifting apart.
+/// Round-trip through the agent's own serializer guards the two sides against drifting apart.
 #[test]
 fn parse_subagent_kill_outcome_round_trips_agent_serialization() {
     use xai_grok_shell::extensions::task::{
@@ -769,6 +769,7 @@ async fn bounded_clipboard_probe_maps_each_drop_reason_to_its_completion() {
     assert!(matches!(attachment, ProbedAttachment::NoRaster));
     assert_eq!(file_urls.as_deref(), Some("/tmp/a"));
 }
+/// Runs the blocking stage against a canned pasteboard (baseline changeCount 1) with no session images dir.
 fn probe_stage(
     hook: crate::clipboard::ClipboardProbeHook,
 ) -> (ClipboardProbeStage, u32) {
@@ -1200,6 +1201,7 @@ async fn persist_permission_mode_acp_notification_fires_once_on_best_effort() {
              SettingPersistFailedBestEffort (Err), got {result:?}",
         );
 }
+/// WithRollback: notification count matches disk outcome (1 on Ok, 0 on Err).
 #[tokio::test]
 async fn persist_permission_mode_acp_notification_gated_on_disk_for_with_rollback() {
     use agent_client_protocol as acp;
@@ -2029,6 +2031,7 @@ async fn fetch_workflows_list_sends_session_id() {
     assert!(nth(&captured, 0).get("cwd").is_none());
 }
 /// The debounce arm must echo `query` and `seq` exactly.
+/// Awaits the real 250 ms debounce (tokio's paused clock needs `test-util`, not enabled in this crate).
 #[tokio::test]
 async fn debounce_session_search_echoes_query_and_seq() {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2058,9 +2061,9 @@ async fn debounce_session_search_echoes_query_and_seq() {
         other => panic!("expected SessionSearchDebounceExpired, got {other:?}"),
     }
 }
-/// Shift+Tab presses in a row must reach the shell in press order, so the mode
-/// it applies last is the mode the user pressed last. Each mode change is its
-/// own spawned task, so the second request must wait for the first one's
+/// Two Shift+Tab presses in a row must reach the shell in press order, so the
+/// mode it applies last is the mode the user pressed last. Each mode change is
+/// its own spawned task, so the second request must wait for the first one's
 /// answer instead of racing it onto the wire.
 #[tokio::test]
 async fn consecutive_mode_changes_reach_the_shell_in_press_order() {
@@ -2077,7 +2080,7 @@ async fn consecutive_mode_changes_reach_the_shell_in_press_order() {
             };
             seen.push(args.request.mode_id.0.to_string());
             if seen.len() == 1 {
-                // Give a second request every chance to arrive behind this
+                // Give a second request every chance to arrive behind this one
                 // before the first has been answered.
                 for _ in 0..16 {
                     tokio::task::yield_now().await;
@@ -2108,7 +2111,8 @@ async fn consecutive_mode_changes_reach_the_shell_in_press_order() {
             &flags,
             &progress_tx,
         );
-        // The event loop returns to the terminal for the next keypress between both dispatches.
+        // The event loop returns to the terminal for the next keypress between
+        // the two dispatches.
         tokio::task::yield_now().await;
     }
     while let Some(joined) = tasks.join_next().await {
@@ -2315,8 +2319,9 @@ fn subagents_without_plan_produces_no_profile() {
     };
     assert_eq!(flags.agent_profile(), None);
 }
-/// Neutralize `GROK_AGENT` for the profile-matrix tests below. The tests
-/// would then assert the wrong branch.
+/// Neutralize `GROK_AGENT` for the profile-matrix tests below.
+/// The tests would then assert the wrong branch.
+/// Callers must be `#[serial_test::serial(GROK_AGENT)]` (process-global env).
 fn without_grok_agent() -> crate::test_util::EnvVarGuard {
     crate::test_util::EnvVarGuard::set("GROK_AGENT", "")
 }
@@ -2416,7 +2421,7 @@ fn subagents_alone_emits_only_ask_user_question_disable() {
     assert!(meta.get("agentProfile").is_none());
     assert_eq!(j(&meta, "askUserQuestion"), false);
 }
-/// All flags on at the runtime default produce grok-build-plan and no `askUserQuestion` field.
+/// All three flags on at the runtime default produce grok-build-plan and no `askUserQuestion` field.
 #[serial_test::serial(GROK_AGENT)]
 #[test]
 fn all_flags_meta() {
@@ -3050,6 +3055,7 @@ fn upload_trace_request_without_intent_keeps_legacy_wire_shape() {
         );
 }
 /// Every answer the shell can give, plus a dead channel and a broken peer, comes back as `TeamCapabilityHydrated` for the identity that asked.
+/// The serialization arm is not in the table: `HydrateTeamCapabilityRequest` is two `Option<String>`s, whose `Serialize` cannot fail, so no input reaches it.
 #[tokio::test]
 async fn hydrate_team_capability_adapter_maps_every_reply_to_the_asking_identity() {
     use std::sync::Arc;

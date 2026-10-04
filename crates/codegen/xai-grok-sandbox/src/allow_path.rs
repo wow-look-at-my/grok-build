@@ -1,4 +1,9 @@
 //! Normalization of `read_only` / `read_write` sandbox config entries.
+//!
+//! This security-sensitive parser is kept separate from the profile resolver so the policy it implements stays small and easy to audit.
+//! Allow paths are literal directory grants.
+//! The only rewriting ever performed is stripping one trailing recursive glob down to the directory the user plainly meant.
+//! Everything else either passes through byte-for-byte or is rejected, never widened.
 
 use std::path::PathBuf;
 
@@ -79,7 +84,8 @@ mod tests {
             ("/a/*/*", None),
             ("/home/**/cache", None),
             ("/tmp/foo*", None),
-            // Surrounding whitespace is rejected, never trimmed Trimming would widen `/tmp/* ` into a grant of /tmp and rewrite `/srv/cache `.
+            // Surrounding whitespace is rejected, never trimmed
+            // Trimming would widen `/tmp/* ` into a grant of /tmp and rewrite `/srv/cache ` into a different directory than configured
             ("/tmp/* ", None),
             ("/srv/cache ", None),
             (" /srv/cache", None),

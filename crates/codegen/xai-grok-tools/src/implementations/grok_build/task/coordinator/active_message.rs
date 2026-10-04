@@ -903,7 +903,8 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
 
     pub(super) fn reject_spawn_ready_ids(&mut self, ids: &[String]) {
         for id in ids {
-            // Cancelled pending children never become active.
+            // Cancelled pending children never become active. Human parked
+            // sends are terminal; agent sends stay retryable not_active.
             self.spawn_ready.reject_terminal(id);
         }
     }

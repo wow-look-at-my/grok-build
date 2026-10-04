@@ -91,7 +91,7 @@ fn collect_report_joins_registry_and_flags_untracked() {
     std::fs::create_dir_all(&tracked).unwrap();
     std::fs::create_dir_all(&untracked).unwrap();
     std::fs::create_dir_all(&external).unwrap();
-    // Both under `worktrees/` are checkouts, which is what makes them
+    // The two under `worktrees/` are checkouts, which is what makes them
     // reportable at all; the bucket above them is not one.
     std::fs::write(
         tracked.join(".git"),
@@ -162,7 +162,10 @@ fn collect_report_joins_registry_and_flags_untracked() {
 #[cfg(unix)]
 #[test]
 fn one_sized_row_per_checkout_at_either_old_location_depth() {
-    // `grok du` must agree with the scan it lists alongside: one row per checkout.
+    // `grok du` must agree with the scan it lists alongside: one row per
+    // checkout, whether the unforked shape put it directly under `worktrees/`
+    // or the fork's shape put it inside a bucket, sized from its own tree, and
+    // never a row for a directory living inside one.
     let tmp = tempfile::TempDir::new().unwrap();
     let base = dunce::canonicalize(tmp.path()).unwrap();
     let home = base.join("grok-home");
@@ -171,7 +174,8 @@ fn one_sized_row_per_checkout_at_either_old_location_depth() {
     let depth_one = root.join("go-toolchain-dats-sandbox");
     let bucket = root.join("repos-buildhost");
     let depth_two = bucket.join("2026-09-14-reclaim");
-    // A directory in the bucket that was never a checkout.
+    // A directory in the bucket that was never a checkout -- on the real
+    // machine this is a 208 MB go build cache beside two real checkouts.
     let leftover = bucket.join("2026-09-14-gocache");
     for dir in [
         &depth_one,
@@ -243,7 +247,10 @@ fn one_sized_row_per_checkout_at_either_old_location_depth() {
 #[cfg(unix)]
 #[test]
 fn repo_local_worktree_is_sized_not_written_off() {
-    // A checkout made inside its own repository is grok-managed, so it gets a sized row.
+    // A checkout made inside its own repository is grok-managed, so it gets a
+    // sized row. Reading only `<grok home>/worktrees` here would count every
+    // worktree created since the layout moved as "outside the managed dirs" and
+    // show none of them.
     let tmp = tempfile::TempDir::new().unwrap();
     let base = dunce::canonicalize(tmp.path()).unwrap();
     let home = base.join("grok-home");
@@ -335,7 +342,9 @@ fn escape_symlink_is_counted_not_sized() {
     std::fs::create_dir_all(home.join("worktrees/xai")).unwrap();
     let external = base.join("external");
     std::fs::create_dir_all(&external).unwrap();
-    // A checkout reached through a symlink that leaves the managed roots: it is a worktree as far as detection is concerned, so it is discovered.
+    // A checkout reached through a symlink that leaves the managed roots: it is
+    // a worktree as far as detection is concerned, so it is discovered, and it
+    // is the canonicalized escape that keeps it from being sized.
     mark_as_checkout(&external, "escape");
     std::fs::write(external.join("huge.bin"), vec![b'x'; 65536]).unwrap();
     std::os::unix::fs::symlink(&external, home.join("worktrees/xai/escape")).unwrap();

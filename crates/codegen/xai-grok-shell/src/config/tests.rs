@@ -96,6 +96,7 @@ command = "$$HOME"
     assert_eq!(command, "$HOME");
 }
 /// Mutex to serialize tests that touch the GROK_MEMORY env var.
+/// Env vars are process-global, so parallel tests race on them.
 static MEMORY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Run `f` with `name` set to `value` (Some) or removed (None).
 /// Saves and restores the previous value, even on panic.
@@ -3546,9 +3547,9 @@ fn apply_requirements_pins_voice_mode_false() {
         );
     assert!(!cfg.is_feature_enabled(crate::agent::config::Feature::VoiceMode));
 }
-/// Layers pinning one key alike must report the layer that decided, not the first that asked.
-/// Otherwise the operator log names a user's file for an administrator's pin. Layers apply user
-/// first, system last.
+/// Two layers pinning one key alike must report the layer that decided, not the first that asked.
+/// Otherwise the operator log names a user's file for an administrator's pin.
+/// Layers apply user first, system last.
 #[test]
 fn a_repeated_pin_is_reported_against_the_layer_that_decided() {
     let mut cfg = crate::agent::config::Config::default();
@@ -4315,7 +4316,8 @@ fn from_remote_gated_ignores_server_advertised_writeback() {
         StorageMode::from_remote_gated(None, true),
         StorageMode::Local
     );
-    // Reuse the guard: it holds a process-wide env lock that a second guard for the same variable would deadlock on.
+    // Reuse the guard: it holds a process-wide env lock that a second guard
+    // for the same variable would deadlock on.
     _env.set_value("writeback");
     assert_eq!(
         StorageMode::resolve(None, None),

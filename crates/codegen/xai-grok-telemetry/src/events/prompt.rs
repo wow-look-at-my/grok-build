@@ -44,12 +44,16 @@ pub struct PromptSubmitted {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_identifier: Option<String>,
     /// Pager screen mode from the prompt request `_meta.screenMode` (`fullscreen` | `inline` | `minimal` | `headless`).
+    /// `None` for non-pager clients and synthetic prompts (goal summaries, drains, interjections).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub screen_mode: Option<String>,
     /// Raw prompt text for the external stream's `OTEL_LOG_USER_PROMPTS` gate **only**.
+    /// `#[serde(skip)]`: never serialized to product events/analytics.
+    /// Dropped at external emit time unless the gate is on (then capped at 60 KB and secret-scrubbed).
     #[serde(skip)]
     pub prompt_text: Option<String>,
-    /// Slash/skill command name for the external `command_name` attr. Always-on metadata (not user prompt text).
+    /// Slash/skill command name for the external `command_name` attr.
+    /// Always-on metadata (not user prompt text). `#[serde(skip)]`.
     #[serde(skip)]
     pub command_name: Option<String>,
 }
@@ -98,7 +102,8 @@ pub enum PromptAckSurface {
 pub enum PromptAckDisposition {
     RestoredToComposer,
     MergedIntoDraft,
-    /// Nothing went back to a composer: skill / wire-block / bash prompts, a composer busy editing a queued row.
+    /// Nothing went back to a composer: skill / wire-block / bash prompts, a composer busy editing a
+    /// queued row, a draft that already carries images, or the headless runner.
     NotRestorable,
 }
 
@@ -110,9 +115,9 @@ pub enum PromptAckPromptKind {
     Skill,
 }
 
-/// The client sent `session/prompt` and saw no acknowledgment (queue
-/// broadcast, update, or response naming the prompt) within its limit, so it
-/// aborted the turn locally.
+/// The client sent `session/prompt` and saw no acknowledgment (queue broadcast,
+/// update, or response naming the prompt) within its limit, so it aborted the
+/// turn locally. `waited_ms` is the observed wait at the abort.
 #[derive(Serialize)]
 pub struct PromptAckTimeoutFired {
     pub limit_ms: u64,

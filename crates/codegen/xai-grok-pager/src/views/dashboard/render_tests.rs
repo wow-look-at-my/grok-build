@@ -136,6 +136,7 @@ fn state_icon_one_per_variant() {
 }
 
 /// The dispatch dropdown paints upward from the input.
+/// A panel taller than the space above it used to saturate to row 0 and run off the bottom of the buffer.
 #[test]
 fn slash_dropdown_never_paints_outside_a_short_dashboard() {
     for (top, height) in [(0u16, 24u16)]
@@ -159,8 +160,8 @@ fn slash_dropdown_never_paints_outside_a_short_dashboard() {
 
         render_slash_dropdown(&mut buf, area, dispatch_rect, &Theme::default(), &mut state);
 
-        // Several rows above the input is well past the 3-row minimum panel A `None`
-        // here would mean the dropdown stopped rendering instead of clamping
+        // Six rows above the input is well past the 3-row minimum panel
+        // A `None` here would mean the dropdown stopped rendering instead of clamping
         if area.height >= 8 {
             assert!(
                 state.slash_dropdown_items_area.is_some(),
@@ -366,7 +367,7 @@ fn narrow_workspace_dashboard_keeps_archive_hit_target() {
 }
 
 /// `Open Previous` is a v2-only button on the actions row, right of `+ New Agent`; click and Enter open the session picker,
-/// and ←/→ move focus between both buttons.
+/// and ←/→ move focus between the two buttons.
 #[test]
 fn open_previous_actions_button_is_v2_only_and_follows_new_agent() {
     let render = |workspace_dashboard_enabled: bool, width: u16| {
@@ -842,6 +843,7 @@ fn render_empty_state_paints_loading_hint() {
     );
 }
 
+/// The hint still paints on a 1-row area (the `y_offset` collapses to 0 instead of overflowing the rect).
 #[test]
 fn render_empty_state_paints_on_single_row_area() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 80, 1));
@@ -854,7 +856,7 @@ fn render_empty_state_paints_on_single_row_area() {
     );
 }
 
-/// Those header / actions-row click rects are reset every frame, so a frame that paints none of them (an attached-agent overlay,
+/// The five header / actions-row click rects are reset every frame, so a frame that paints none of them (an attached-agent overlay,
 /// which returns before the header renderers run) leaves no stale rect from the wide frame before it.
 #[test]
 fn chrome_hit_areas_do_not_survive_a_frame_that_skips_the_header() {
@@ -905,11 +907,13 @@ fn chrome_hit_areas_do_not_survive_a_frame_that_skips_the_header() {
         ]
     };
 
+    // Frame 1: a wide normal frame registers every chrome rect
     render(&mut state);
     for (name, rect) in chrome_hits(&state) {
         assert!(rect.is_some(), "{name} must be painted on the wide frame");
     }
 
+    // Frame 2: attached mode paints only the compact banner and returns before the header renderers
     state.attached_agent = Some(crate::app::agent::AgentId(0));
     render(&mut state);
     for (name, rect) in chrome_hits(&state) {
@@ -975,7 +979,7 @@ fn render_rows_hit_rects_leave_no_dead_zones() {
         );
     }
 
-    // Each hit rect starts exactly where the one ended.
+    // Each hit rect starts exactly where the previous one ended.
     let mut rects: Vec<Rect> = state
         .row_rects
         .iter()
@@ -1023,7 +1027,9 @@ fn render_rows_hit_rects_leave_no_dead_zones() {
         "halo below must show the hover colour in its top half",
     );
 
-    // Terminal theme: a `▀` halo with a `Reset` fg renders in the default text color — a sharp bright bar over the canvas —.
+    // Terminal theme: a `▀` halo with a `Reset` fg renders in the default text color — a sharp bright
+    // bar over the canvas — so it must be skipped. Fresh buffer: the skip must not rely on overwriting
+    // a previous theme's glyphs.
     let mut buf = Buffer::empty(area);
     let native = Theme::terminal();
     render_rows(&mut buf, area, &native, &rows, &mut state);
@@ -1125,7 +1131,7 @@ fn selected_row_inverts_uniformly_on_terminal_theme() {
 }
 
 /// A row's content is vertically centered within its 3-cell rect: a title-only row renders padding, title, padding.
-/// A row with a secondary line stays top-aligned (a couple of lines cannot center in multiple cells).
+/// A row with a secondary line stays top-aligned (2 lines cannot center in 3 cells).
 #[test]
 fn render_row_centers_title_only_content() {
     let theme = Theme::current();
@@ -1167,6 +1173,7 @@ fn render_empty_state_zero_area_is_no_op() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 10, 10));
     let theme = Theme::current();
     render_empty_state(&mut buf, Rect::new(0, 0, 0, 0), &theme, false);
+    // No-op assertion: nothing crashes.
 }
 
 /// The no-match branch renders the filter feedback.
@@ -1196,6 +1203,7 @@ fn snap_offset_already_on_boundary_returns_input() {
     assert_eq!(snap_offset_to_line_boundary(6, &heights), 6);
 }
 
+/// A sub-row offset (1 or 2 cells into a 3-cell row) snaps DOWN to the row's starting cell.
 /// The topmost visible row always paints from its first cell.
 #[test]
 fn snap_offset_subrow_clips_to_row_start() {
@@ -1206,28 +1214,35 @@ fn snap_offset_subrow_clips_to_row_start() {
     assert_eq!(snap_offset_to_line_boundary(5, &heights), 3);
 }
 
-/// Headers (cells) and rows (cells) mix; the helper snaps to whichever item boundary precedes the offset.
+/// Headers (2 cells) and rows (3 cells) mix; the helper snaps to whichever item boundary precedes the offset.
 #[test]
 fn snap_offset_mixed_heights() {
     // [header=2, row=3, row=3]
     let heights = vec![2u16, 3, 3];
+    // Inside the header (0..2):
     assert_eq!(snap_offset_to_line_boundary(0, &heights), 0);
     assert_eq!(snap_offset_to_line_boundary(1, &heights), 0);
+    // At the row 0 start:
     assert_eq!(snap_offset_to_line_boundary(2, &heights), 2);
+    // Inside row 0 (2..5):
     assert_eq!(snap_offset_to_line_boundary(3, &heights), 2);
     assert_eq!(snap_offset_to_line_boundary(4, &heights), 2);
+    // At the row 1 start:
     assert_eq!(snap_offset_to_line_boundary(5, &heights), 5);
 }
 
-/// Offsets past the last item stay clamped at the last boundary. The bounds clamp in `clamp_viewport` prevents this in practice. `snap_offset_to_line_boundary` must still be safe on its own
-/// to keep the contract local.
+/// Offsets past the last item just stay clamped at the last boundary.
+/// The bounds clamp in `clamp_viewport` prevents this in practice.
+/// `snap_offset_to_line_boundary` must still be safe on its own to keep the contract local.
 #[test]
 fn snap_offset_past_last_item_returns_last_boundary() {
     let heights = vec![3u16, 3, 3];
+    // Last boundary is at cell 6 (start of row index 2).
     assert_eq!(snap_offset_to_line_boundary(7, &heights), 6);
     assert_eq!(snap_offset_to_line_boundary(99, &heights), 6);
 }
 
+/// With empty heights the snap returns 0 regardless of offset.
 #[test]
 fn snap_offset_empty_heights_returns_zero() {
     assert_eq!(snap_offset_to_line_boundary(0, &[]), 0);
@@ -1235,6 +1250,7 @@ fn snap_offset_empty_heights_returns_zero() {
 }
 
 /// `popup_rect` takes the FULL bottom area (no horizontal inset, no bottom inset) with only a top inset reserved for the dashboard banner.
+/// The previous centred-inset design left the dashboard's own dispatch input and footer visible below the popup, producing two stacked input bars.
 #[test]
 fn popup_rect_takes_full_bottom_area_with_top_banner() {
     let view = Rect::new(0, 0, 200, 80);
@@ -1263,6 +1279,7 @@ fn popup_rect_takes_full_bottom_area_with_top_banner() {
     );
 }
 
+/// Banner height is sized as ~1/3 of the screen, clamped into a sensible range (6-14 rows).
 /// The rows stay readable on tall terminals without crowding the popup.
 #[test]
 fn popup_rect_leaves_room_for_banner_on_large_terminal() {
@@ -1282,6 +1299,7 @@ fn popup_rect_leaves_room_for_banner_on_large_terminal() {
     );
 }
 
+/// Very short terminals (height < banner_min + 10) collapse the banner to 0 so the popup gets every available row.
 /// This mirrors the agent view's "drop bottom_vpad on short terminals" behaviour.
 #[test]
 fn popup_rect_collapses_banner_on_tiny_terminal() {
@@ -1318,7 +1336,8 @@ fn render_popup_overlay_divider_survives_inner_paint() {
     );
     assert!(drawn);
     let content = buf_to_text(&buf);
-    // The divider glyph `─` (U+2500) must appear at least once somewhere AFTER the title row.
+    // The divider glyph `─` (U+2500) must appear at least once somewhere AFTER the title row
+    // If the inner paint overwrote it the count would be zero
     let divider_count = content.matches('\u{2500}').count();
     assert!(
         divider_count > 0,
@@ -1348,6 +1367,7 @@ fn render_popup_overlay_registers_close_hit_rect() {
     let close_rect = state
         .popup_close_rect
         .expect("popup_close_rect must be registered");
+    // The close rect sits on the title row (y == area.y + 1) and on the right edge of the popup
     assert_eq!(close_rect.y, 1);
     assert!(close_rect.x > 50);
     // The outer rect is the full popup area
@@ -1361,7 +1381,7 @@ fn render_popup_overlay_registers_close_hit_rect() {
 /// It never leaves the user staring at an empty popup.
 #[test]
 fn render_popup_overlay_small_area_paints_fallback_hint() {
-    // A few rows of height (below `picker::render_bordered_frame`'s 5-row minimum) triggers the fallback path
+    // 4 rows of height (below `picker::render_bordered_frame`'s 5-row minimum) triggers the fallback path
     let mut buf = Buffer::empty(Rect::new(0, 0, 40, 4));
     let theme = Theme::current();
     let mut state = DashboardState::new();
@@ -1626,7 +1646,7 @@ fn render_rename_overlay_aligns_with_title_and_keeps_icon() {
             Some((title_col + prefix_w + draft_w, 3)),
             "cursor must sit one cell past the draft text",
         );
-        // With an empty draft the cursor sits immediately after `rename.
+        // With an empty draft the cursor sits immediately after `rename: ` (the position typing lands at)
         state.rename = Some(RenameDraft::new(id.clone(), ""));
         assert_eq!(
             rename_cursor_pos(&state, &rows),
@@ -1635,6 +1655,7 @@ fn render_rename_overlay_aligns_with_title_and_keeps_icon() {
         );
     }
 
+    // Narrow path: row sits 1 below the group header (no gap).
     let title_col = {
         let mut buf = Buffer::empty(Rect::new(0, 0, 30, 3));
         let mut state = DashboardState::new();
@@ -2205,6 +2226,7 @@ fn build_dashboard_lines_hides_collapsed_state_section() {
         .count();
     assert_eq!(working_rows, 2, "expanded Working section shows both rows");
 
+    // Collapse Working: header stays (count 2), rows hidden
     let mut collapsed = HashSet::new();
     collapsed.insert(SectionKey::State(RowState::Working));
     let lines = build_dashboard_lines(
@@ -2297,6 +2319,7 @@ fn overflow_of(lines: &[DashboardLine]) -> Option<(usize, bool)> {
 #[test]
 fn idle_cap_folds_old_agents() {
     use std::collections::HashSet;
+    // (MAX_VISIBLE_IDLE + 3) OLD idle agents: cap shown, 3 folded
     let total = MAX_VISIBLE_IDLE as u32 + 3;
     let rows: Vec<DashboardRow> = (0..total).map(|i| aged_idle_row(i, OLD_SECS)).collect();
     let none: HashSet<SectionKey> = HashSet::new();
@@ -2326,6 +2349,7 @@ fn idle_cap_folds_old_agents() {
 #[test]
 fn idle_cap_keeps_recent_beyond_count() {
     use std::collections::HashSet;
+    // 9 RECENT idle agents (just now): all shown, no overflow
     let rows: Vec<DashboardRow> = (0..9).map(|i| aged_idle_row(i, 0)).collect();
     let none: HashSet<SectionKey> = HashSet::new();
     let lines = build_dashboard_lines(&rows, Grouping::State, &Filter::None, &none, false, false);
@@ -2342,6 +2366,7 @@ fn idle_cap_keeps_recent_beyond_count() {
 #[test]
 fn idle_cap_mixes_recent_and_old() {
     use std::collections::HashSet;
+    // 4 recent + (cap - 1) old = cap + 3 total. base_limit = max(cap, 4) = cap, so 3 fold.
     let total = MAX_VISIBLE_IDLE as u32 + 3;
     let mut rows: Vec<DashboardRow> = (0..4).map(|i| aged_idle_row(i, 0)).collect();
     rows.extend((4..total).map(|i| aged_idle_row(i, OLD_SECS)));
@@ -2378,10 +2403,12 @@ fn idle_cap_show_all_reveals_all() {
     );
 }
 
+/// Folding only kicks in at MIN_IDLE_FOLD (2): a single over-cap row is shown rather than hidden behind a same-height overflow row.
 #[test]
 fn idle_cap_does_not_fold_a_single_row() {
     use std::collections::HashSet;
     let none: HashSet<SectionKey> = HashSet::new();
+    // MAX_VISIBLE_IDLE + 1 old would hide only 1: no fold
     let rows: Vec<DashboardRow> = (0..MAX_VISIBLE_IDLE as u32 + 1)
         .map(|i| aged_idle_row(i, OLD_SECS))
         .collect();
@@ -2392,6 +2419,7 @@ fn idle_cap_does_not_fold_a_single_row() {
         "1 over cap is not folded"
     );
     assert_eq!(overflow_of(&lines), None);
+    // MAX_VISIBLE_IDLE + 2 old hides 2: folds
     let rows: Vec<DashboardRow> = (0..MAX_VISIBLE_IDLE as u32 + 2)
         .map(|i| aged_idle_row(i, OLD_SECS))
         .collect();
@@ -2500,6 +2528,7 @@ fn render_rows_emits_pinned_section_at_top() {
     render_rows(&mut buf, Rect::new(0, 0, 80, 30), &theme, &rows, &mut state);
     let content = buf_to_text(&buf);
 
+    // A dedicated "Pinned" section header with a count of 1.
     assert!(
         content.contains("Pinned 1"),
         "missing `Pinned` section header, got: {content:?}",
@@ -2612,6 +2641,7 @@ fn render_rows_groups_off_uses_divider_not_pinned_header() {
 /// (matching `RowState::group_priority`).
 #[test]
 fn render_rows_emits_group_headers_in_state_order() {
+    // Rows are 3 cells tall, headers 2 cells; 5 of each needs 25 cells of vertical room
     let mut buf = Buffer::empty(Rect::new(0, 0, 80, 30));
     let mut state = DashboardState::new();
     assert_eq!(state.grouping, Grouping::State);
@@ -2675,6 +2705,7 @@ fn render_rows_emits_group_headers_in_state_order() {
 #[test]
 fn render_rows_scrollbar_is_thick_overlay_without_layout_shift() {
     let theme = Theme::current();
+    // 6 working rows: 1 header (2 cells) + 6 rows (3 cells) = 20 cells
     let rows: Vec<_> = (0..6)
         .map(|i| header_test_row(i, RowState::Working, "working task"))
         .collect();
@@ -2723,7 +2754,8 @@ fn render_rows_scrollbar_is_thick_overlay_without_layout_shift() {
     }
 }
 
-/// Row layout is visual lines.
+/// Row layout is two visual lines. Col 0: selection marker (thin bar `▏` when selected, space
+/// otherwise).
 #[test]
 fn render_row_two_line_layout_paints_title_and_secondary() {
     use std::path::PathBuf;
@@ -2731,7 +2763,7 @@ fn render_row_two_line_layout_paints_title_and_secondary() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 100, 2));
     let theme = Theme::current();
     let mut state = DashboardState::new();
-    state.spinner_tick = 8;
+    state.spinner_tick = 8; // Tick 8 selects dot_spinner_frames()[2], the `⸬` glyph.
     let row = DashboardRow {
         id: DashboardRowId::TopLevel(crate::app::agent::AgentId(1)),
         session_id: None,
@@ -2776,12 +2808,14 @@ fn render_row_two_line_layout_paints_title_and_secondary() {
         "row 0 col 4 must start the label"
     );
 
+    // Secondary row: `Responding` starts at the same column as the title's label start (col 4)
     assert_eq!(
         buf_cell(&buf, 4, 1).symbol(),
         "R",
         "row 1 col 4 must start the secondary text",
     );
 
+    // Age column right-aligns in the last few cells of row 0.
     let mut saw_s_in_age_zone = false;
     for x in (100 - 8)..100 {
         if buf_cell(&buf, x, 0).symbol() == "s" {
@@ -2803,7 +2837,9 @@ fn render_row_two_line_layout_paints_title_and_secondary() {
 fn render_row_selected_brightens_secondary_text() {
     use std::path::PathBuf;
     use std::time::SystemTime;
-    // A fixed RGB palette: dim metadata carries a gray_dim fg there.
+    // A fixed RGB palette: dim metadata carries a gray_dim fg there (on the
+    // terminal theme it is the DIM attribute instead, covered by
+    // `hovered_row_secondary_text_stays_visible_on_terminal_theme`).
     let theme = Theme::groknight();
     let id = DashboardRowId::TopLevel(crate::app::agent::AgentId(7));
     let row = DashboardRow {
@@ -2813,6 +2849,7 @@ fn render_row_selected_brightens_secondary_text() {
         subtitle: None,
         state: RowState::Working,
         activity: Some("Responding".to_string()),
+        // The 'R' in "Responding" lives at column 4 (matches `render_row_two_line_layout_paints_title_and_secondary`), so we sample fg at (4, 1)
         secondary_line: Some("Responding".to_string()),
         cwd_display: String::new(),
         cwd: PathBuf::from("/tmp"),
@@ -2893,6 +2930,7 @@ fn render_row_needs_input_yellow_blink_no_badge_pending_prefix() {
         buf
     };
 
+    // Bright phase (tick 0): the bullet is full yellow.
     let bright = render(0);
     assert_eq!(
         buf_cell(&bright, 2, 0).symbol(),
@@ -2938,6 +2976,7 @@ fn render_row_needs_input_yellow_blink_no_badge_pending_prefix() {
     }
 }
 
+/// The `New session #<id>` fallback title is painted two-tone: the `New session` head in the primary colour and the ` #id` suffix dim.
 #[test]
 fn render_row_new_session_fallback_label_is_two_tone() {
     use std::path::PathBuf;
@@ -2963,6 +3002,7 @@ fn render_row_new_session_fallback_label_is_two_tone() {
     };
     render_row(&mut buf, Rect::new(0, 0, 100, 2), &theme, &row, &mut state);
 
+    // Title starts at col 4: "New session" (11 chars, cols 4..15) then " #abc12345" (suffix from col 15)
     assert_eq!(
         buf_cell(&buf, 4, 0).symbol(),
         "N",
@@ -2973,6 +3013,7 @@ fn render_row_new_session_fallback_label_is_two_tone() {
         theme.text_primary,
         "`New session` head must use the primary colour",
     );
+    // The `#` of the suffix sits at col 16 and must be dim.
     assert_eq!(
         buf_cell(&buf, 16, 0).symbol(),
         "#",
@@ -2985,10 +3026,12 @@ fn render_row_new_session_fallback_label_is_two_tone() {
     );
 }
 
-/// The title-only row centers its title, so the title sits a few rows below the header in this fixture.
+/// The title-only row centers its title, so the title sits 3 rows below the header in this fixture.
 #[test]
 fn unselected_group_header_label_is_muted_on_terminal_theme() {
-    // Unselected section titles render via muted().
+    // Unselected section titles render via muted(): the DIM attribute on the
+    // terminal theme (gray is Reset — the old style painted full-brightness
+    // bold), the plain gray fg on RGB themes.
     let mut buf = Buffer::empty(Rect::new(0, 0, 80, 8));
     let mut state = DashboardState::new();
     let rows = vec![header_test_row(1, RowState::Idle, "session 019e5d9f")];
@@ -3021,6 +3064,8 @@ fn render_group_header_leads_with_disclosure_glyph() {
     let theme = Theme::current();
     render_rows(&mut buf, Rect::new(0, 0, 80, 8), &theme, &rows, &mut state);
 
+    // Col 0 is the (expanded) disclosure glyph; the label starts at col 2 (glyph, then a space)
+    // Rows below have their marker/icon in the left columns and text indented
     assert_eq!(
         buf_cell(&buf, 0, 0).symbol(),
         crate::glyphs::disclosure_open(),
@@ -3032,6 +3077,9 @@ fn render_group_header_leads_with_disclosure_glyph() {
         "section title `Idle …` must start after the disclosure glyph, got: {header_label_x:?}",
     );
 
+    // Header gap: row 1 is blank
+    // The title-only row centers its title within its 3-cell rect (y=2..5), so the title sits at y=3
+    // Rows still render their marker/icon in the left chrome columns
     let row_col0 = buf_cell(&buf, 0, 3).symbol().to_string();
     let row_col1 = buf_cell(&buf, 1, 3).symbol().to_string();
     let row_col2 = buf_cell(&buf, 2, 3).symbol().to_string();
@@ -3189,7 +3237,8 @@ fn render_dashboard_paints_full_area_background() {
     let theme = Theme::current();
     let area = Rect::new(0, 0, 80, 20);
     let mut buf = Buffer::empty(area);
-    // Seed every cell with a contrasting bg so a missing fill is detectable Any cell still carrying this seed colour.
+    // Seed every cell with a contrasting bg so a missing fill is detectable
+    // Any cell still carrying this seed colour after `render_dashboard` runs means the fill didn't reach it
     let seed = ratatui::style::Color::Rgb(0xFF, 0x00, 0xFF);
     buf.set_style(area, Style::default().bg(seed));
 
@@ -3223,7 +3272,7 @@ fn render_dashboard_paints_full_area_background() {
             );
         }
     }
-    // And spot-check that at least one cell matches the theme bg, i.e.
+    // And spot-check that at least one cell matches the theme bg, i.e., the fill actually used `theme.bg_base` (not just any non-seed colour)
     let mut saw_bg_base = false;
     for y in 0..area.height {
         for x in 0..area.width {
@@ -3670,6 +3719,7 @@ fn render_footer_default_compact_hints() {
     );
 }
 
+/// The dispatch input grows for multi-line drafts: a single-line prompt wants 1 text row, a 3-line prompt (Shift/Alt+Enter newlines) wants 3.
 /// Growth saturates at the cap so the box never starves the row list.
 #[test]
 fn dispatch_text_rows_grows_with_newlines() {
@@ -3688,6 +3738,7 @@ fn dispatch_text_rows_grows_with_newlines() {
         3,
         "3-line prompt wants 3 text rows",
     );
+    // Past the cap ((height/3).clamp(1,8) = 8 here) growth saturates.
     state.dispatch.set_text(&"x\n".repeat(40));
     assert_eq!(
         dispatch_text_rows(&state, width, height),
@@ -3998,6 +4049,7 @@ fn render_footer_peek_question_focus_flips_answer_vs_open() {
         "no-selection footer must NOT show `answer`, got: {picking:?}",
     );
 
+    // Unfocused: Enter opens; 1-9 select still shown (digits work)
     let unfocused = render(&make_state(false, None));
     assert!(
         unfocused.contains(":open"),
@@ -4012,6 +4064,7 @@ fn render_footer_peek_question_focus_flips_answer_vs_open() {
         "unfocused question footer must NOT show `answer`, got: {unfocused:?}",
     );
 
+    // Vim unfocused with a question: Enter:input, Right:open, still 1-9 select
     crate::appearance::cache::set_vim_mode(true);
     let mut vim_q = make_state(false, None);
     // Rebuild under vim so focused defaults false.
@@ -4473,7 +4526,7 @@ fn render_footer_multiline_mode_send_uses_shift_or_alt_enter() {
         content.contains("Shift+Enter:send") || content.contains("Alt+Enter:send"),
         "multiline footer must advertise Shift/Alt+Enter as send, got: {content:?}",
     );
-    // Bare Enter:send would appear as " Enter:send" (footer pad).
+    // Bare Enter:send would appear as "  Enter:send" (footer pad); the modified chords contain the substring "Enter:send" so avoid that
     assert!(
         !content.contains("  Enter:send"),
         "multiline footer must not claim bare Enter:send, got: {content:?}",

@@ -1,4 +1,11 @@
 //! Self-daemonization and single-instance locking for the workspace-server.
+//!
+//! The server is launched fire-and-forget by the sandbox orchestrator, which only ever holds a handle to the originally-spawned PID or process group.
+//! After the double-fork and `setsid()` the surviving daemon lives in a new session and process group.
+//! A later process-group kill on the original pgid therefore cannot reach it.
+//!
+//! The double-fork MUST run before the tokio runtime, `tracing_subscriber`, or the rustls provider start any threads.
+//! Forking a multi-threaded process leaves every lock held by a non-forking thread permanently locked in the child, which can deadlock it.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
@@ -17,6 +24,8 @@ use prometheus::{IntCounterVec, register_int_counter_vec};
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, RawFd};
 
+/// True if `e` reports that an advisory `flock` is held by another process: `WouldBlock` on Unix, `ERROR_LOCK_VIOLATION` (OS error 33) on Windows.
+/// Private flock-contention check; the bounded replacement lives in `xai-grok-file-lock` and this site migrates to it later.
 fn is_lock_contended(e: &io::Error) -> bool {
     e.kind() == io::ErrorKind::WouldBlock
         || (e.raw_os_error().is_some()
@@ -36,6 +45,7 @@ pub const DEFAULT_PIDFILE_PATH: &str = "/tmp/workspace-server.pid";
 pub const DEFAULT_PIDFILE_PATH: &str = "C:\\Windows\\Temp\\workspace-server.pid";
 
 /// How long a takeover waits for the predecessor to release the pidfile lock before a forceful kill.
+/// Far below the server's SIGTERM drain budget on purpose: the predecessor is already stale, so a bounded replacement matters more than a full drain.
 pub const TAKEOVER_GRACE: Duration = Duration::from_secs(2);
 
 /// How long a takeover waits for the lock after the forceful kill (process death releases the flock) before declining.
@@ -48,8 +58,10 @@ const TAKEOVER_POLL: Duration = Duration::from_millis(50);
 const WORKSPACE_SERVER_NAME_FRAGMENT: &str = "workspace-server";
 
 /// The workspace-server writes this `oom_score_adj` for itself when `--oom-protect` is set.
+/// -1000 is reserved for init and privileged agents; at -900 the server can still be killed as a last resort.
 pub const WORKSPACE_SERVER_OOM_SCORE_ADJ: i32 = -900;
 
+/// The supervised preview-proxy runs at this `oom_score_adj`, between user work at 0 and the workspace/files daemons at -900.
 pub const PREVIEW_PROXY_OOM_SCORE_ADJ: i32 = -500;
 
 /// `workspace_oom_protect_applied{outcome}`: whether the server's own `oom_score_adj` write inside the guest succeeded when `--oom-protect` is set.
@@ -129,8 +141,9 @@ pub fn daemonize(log_path: &Path) -> io::Result<()> {
     // First fork: the launcher-tracked parent exits, orphaning the child.
     fork_and_exit_parent()?;
 
-    // Start a new session and process group, detaching the controlling
-    // terminal This must follow a fork.
+    // Start a new session and process group, detaching the controlling terminal
+    // This must follow a fork: a process-group leader cannot call setsid()
+    // SAFETY: `setsid()` takes no pointers; it only changes session membership.
     if unsafe { libc::setsid() } == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -139,6 +152,7 @@ pub fn daemonize(log_path: &Path) -> io::Result<()> {
     fork_and_exit_parent()?;
 
     // Detach from the launch directory (callers capture cwd beforehand).
+    // SAFETY: `c"/"` is a 'static, NUL-terminated string valid for the call.
     if unsafe { libc::chdir(c"/".as_ptr()) } == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -164,8 +178,9 @@ pub fn daemonize(log_path: &Path) -> io::Result<()> {
         .open(log_path)?;
 
     let handle = HANDLE(log.as_raw_handle());
-    // SAFETY: `handle` is a live file handle owned by `log`; SetStdHandle
-    // only records it as the process stdout/stderr.
+    // SAFETY: `handle` is a live file handle owned by `log`; SetStdHandle only
+    // records it as the process stdout/stderr. `forget(log)` keeps it open for
+    // the process lifetime (the std streams reference it now).
     unsafe {
         SetStdHandle(STD_OUTPUT_HANDLE, handle).map_err(io::Error::other)?;
         SetStdHandle(STD_ERROR_HANDLE, handle).map_err(io::Error::other)?;
@@ -195,6 +210,8 @@ fn fork_and_exit_parent() -> io::Result<()> {
 }
 
 /// `OpenOptions` for a daemon-owned file (log or pidfile).
+/// On Unix it adds `O_NOFOLLOW` and mode `0600` as symlink and permission defense-in-depth; the per-tenant sandbox namespace is the primary control.
+/// The preview-proxy log (`preview_supervisor`) shares these options so both daemon-owned files are opened the same way.
 #[cfg(unix)]
 pub(crate) fn daemon_file_options() -> OpenOptions {
     use std::os::unix::fs::OpenOptionsExt;
@@ -238,11 +255,12 @@ fn redirect_stdio(log_path: &Path) -> io::Result<()> {
     redirect_fd(libc::STDIN_FILENO, &stdin_src)?;
     redirect_fd(libc::STDOUT_FILENO, &log)?;
     redirect_fd(libc::STDERR_FILENO, &log)?;
+    // `stdin_src` and `log` close here; fds 0/1/2 keep their dup'd copies
     Ok(())
 }
 
-/// The single-instance lock: an advisory `flock` on a pidfile, held for the
-/// daemon's lifetime.
+/// The single-instance lock: an advisory `flock` on a pidfile, held for the daemon's lifetime.
+/// Dropping it closes the file and releases the lock; the pidfile itself is left on disk for diagnostics.
 #[derive(Debug)]
 pub struct PidFile {
     file: File,
@@ -268,7 +286,8 @@ impl PidFile {
             Err(e) => return Err(e),
         }
 
-        // The recorded PID is advisory, for diagnostics.
+        // The recorded PID is advisory, for diagnostics; the flock provides the exclusion
+        // `set_len(0)` clears any stale (possibly longer) value first.
         file.set_len(0)?;
         file.write_all(process::id().to_string().as_bytes())?;
         file.flush()?;
@@ -276,7 +295,9 @@ impl PidFile {
         Ok(Some(Self { file }))
     }
 
-    /// Re-record the current PID.
+    /// Re-record the current PID. A launcher that takes the lock before detaching keeps it across the
+    /// fork (the flock travels with the open file description), but the PID [`Self::acquire`] wrote is
+    /// then the launcher's; the detached child calls this so the file names the process that holds it.
     pub fn record_current_pid(&mut self) -> io::Result<()> {
         self.file.set_len(0)?;
         self.file.seek(SeekFrom::Start(0))?;
@@ -284,9 +305,8 @@ impl PidFile {
         self.file.flush()
     }
 
-    /// Acquire the lock, taking over from a live predecessor: graceful
-    /// terminate, wait `grace`, then forceful kill. The flock is never
-    /// bypassed.
+    /// Acquire the lock, taking over from a live predecessor: graceful terminate, wait `grace`, then forceful kill. The flock is never bypassed.
+    /// `Ok(None)` means exit quietly: the holder is not an identifiable workspace-server, or a concurrent newer spawn won the lock.
     pub fn acquire_or_take_over(path: &Path, grace: Duration) -> io::Result<Option<Self>> {
         Self::acquire_or_take_over_matching(path, grace, WORKSPACE_SERVER_NAME_FRAGMENT)
     }
@@ -328,7 +348,8 @@ impl PidFile {
             return Ok(Some(guard));
         }
 
-        // The holder we signaled is dead yet the lock is still owned.
+        // The holder we signaled is dead yet the lock is still owned: a concurrent newer spawn won it
+        // Decline rather than run a second instance
         eprintln!("pidfile lock is still held after killing pid {pid}; exiting");
         Ok(None)
     }
@@ -358,8 +379,8 @@ fn read_pidfile_pid(path: &Path) -> Option<u32> {
         .filter(|&pid| pid > 0)
 }
 
-/// True if the basename of `name` (path separators `/` and `\` both count)
-/// contains `fragment`.
+/// True if the basename of `name` (path separators `/` and `\` both count) contains `fragment`.
+/// Matching the basename rather than the whole path keeps a directory like `/var/lib/workspace-server-data/foo` from satisfying the kill gate.
 #[cfg(any(test, target_os = "linux", windows))]
 fn basename_contains(name: &str, fragment: &str) -> bool {
     name.rsplit(['/', '\\']).next().is_some_and(|base| {
@@ -381,6 +402,7 @@ fn process_name_matches(pid: u32, fragment: &str) -> bool {
 }
 
 /// Pinned, verified handle to the predecessor (`pidfd_open` / `OpenProcess`).
+/// Pin before verify and signal only through the pin, closing the pid-reuse race; a recycled pid is unreachable.
 #[cfg(target_os = "linux")]
 struct PredecessorTarget {
     pid: u32,
@@ -393,7 +415,8 @@ impl PredecessorTarget {
     /// Pin `pid` and verify its executable basename matches `fragment`.
     /// `None` if the process is gone, inaccessible, or not a match.
     fn open(pid: u32, fragment: &str) -> Option<Self> {
-        // SAFETY: pidfd_open takes value arguments only; the returned fd is fresh and exclusively owned here.
+        // SAFETY: pidfd_open takes value arguments only; the returned fd is
+        // fresh and exclusively owned here.
         let ret = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0u32) };
         let pidfd = if ret >= 0 {
             // SAFETY: `ret` is a freshly returned, unowned fd.
@@ -452,7 +475,8 @@ struct PredecessorTarget {
     handle: HANDLE,
 }
 
-// SAFETY: the HANDLE is an owned kernel object reference.
+// SAFETY: the HANDLE is an owned kernel object reference; it is not tied to
+// the creating thread and is only used behind &self.
 #[cfg(windows)]
 unsafe impl Send for PredecessorTarget {}
 
@@ -563,7 +587,8 @@ mod tests {
 
         drop(first);
 
-        // Dropping the guard releases the flock.
+        // Dropping the guard releases the flock, but a concurrent fork can briefly duplicate the `O_CLOEXEC` fd until the child execs
+        // A short bounded retry makes the release deterministic without weakening the contended-acquire assertion
         let deadline = Instant::now() + Duration::from_secs(2);
         let third = loop {
             match PidFile::acquire(&path).unwrap() {
@@ -745,6 +770,7 @@ mod tests {
 
         let _guard = PidFile::acquire(&path).unwrap().unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode();
+        // Group/other bits are 0 regardless of umask (0600 & ~umask keeps them 0)
         assert_eq!(
             mode & 0o077,
             0,
@@ -799,6 +825,7 @@ mod tests {
     }
 
     /// Fixture child killed on drop: an assertion failure must not leak the SIGTERM-immune predecessor.
+    /// `kill` is SIGKILL, so it also ends the trap-armed fixture.
     #[cfg(target_os = "linux")]
     use xai_tty_utils::KillOnDrop as FixtureChild;
 
@@ -905,7 +932,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("ws.pid");
 
-        // The flock is held in-process for the whole test After the child named in the pidfile is dead.
+        // The flock is held in-process for the whole test
+        // After the child named in the pidfile is dead, the lock is still owned by "someone else" (a concurrent-spawn stand-in)
+        // The takeover must decline rather than run without single-instance protection
         let _holder = PidFile::acquire(&path).unwrap().unwrap();
         let mut child = spawn_predecessor();
         let child_pid = child.id();
@@ -939,7 +968,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("ws.pid");
 
-        // A predecessor that ignores the graceful signal: only the SIGKILL escalation can end it It touches a marker once the trap is installed.
+        // A predecessor that ignores the graceful signal: only the SIGKILL escalation can end it
+        // It touches a marker once the trap is installed so the test cannot signal it during bash startup
         let trap_ready = dir.path().join("trap-ready");
         let mut cmd = Command::new("bash");
         cmd.arg("-c")
@@ -1022,7 +1052,9 @@ mod tests {
     #[test]
     fn process_name_matches_own_argv0() {
         let pid = process::id();
-        // Derive the fragment from this process's real argv0 basename.
+        // Derive the fragment from this process's real argv0 basename rather than hardcoding a name
+        // Different test runners name the binary differently (e.g. Cargo uses `xai_grok_workspace_daemon-<hash>`).
+        // A hardcoded fragment would match under one runner but not another
         let cmdline = fs::read(format!("/proc/{pid}/cmdline")).expect("read own cmdline");
         let argv0 = cmdline.split(|&b| b == 0).next().expect("argv0 present");
         let basename = String::from_utf8_lossy(argv0)
@@ -1115,7 +1147,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let own = fs::read_to_string("/proc/self/oom_score_adj").expect("read own score");
         let restore = own.trim().to_owned();
-        // Lowering a bounded number of needs CAP_SYS_RESOURCE; skip when unavailable (CI host).
+        // Lowering below 0 needs CAP_SYS_RESOURCE; skip when unavailable (CI host).
         if set_oom_score_adj(WORKSPACE_SERVER_OOM_SCORE_ADJ).is_err() {
             return;
         }
@@ -1151,6 +1183,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let own = fs::read_to_string("/proc/self/oom_score_adj").expect("read own score");
         let restore = own.trim().to_owned();
+        // The precondition needs CAP_SYS_RESOURCE to plant -900
         if set_oom_score_adj(WORKSPACE_SERVER_OOM_SCORE_ADJ).is_err() {
             return;
         }
@@ -1176,6 +1209,7 @@ mod tests {
 
     #[test]
     fn oom_score_constants_preserve_ordering() {
+        // User work (0) > proxy (-500) > workspace/files (-900); never -1000
         const {
             assert!(PREVIEW_PROXY_OOM_SCORE_ADJ < 0);
             assert!(WORKSPACE_SERVER_OOM_SCORE_ADJ < PREVIEW_PROXY_OOM_SCORE_ADJ);

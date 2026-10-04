@@ -2,9 +2,9 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// With mid-turn queued rows, empty Enter delivers **both** into the running
-/// turn, in queue order — the interrupt is "take everything I have", not
-/// "take the top one". The resubmitted request carries the original prompt
+/// With two mid-turn queued rows, empty Enter delivers **both** into the
+/// running turn, in queue order — the interrupt is "take everything I have",
+/// not "take the top one". The resubmitted request carries the original prompt
 /// followed by alpha then bravo, each with the mid-turn preamble.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
@@ -51,11 +51,19 @@ async fn empty_enter_delivers_both_queued_rows() {
         .expect("bravo visible");
 
     harness.inject_keys(b"\r").expect("empty Enter interrupt");
+    // Hold turn 1 open until the delivery is observable. The shell harvests
+    // into a RUNNING turn, so releasing the completion barrier first would race
+    // the interrupt against turn end and let the rows drain as their own turns
+    // instead. Each delivered row is broadcast as an interjection and painted
+    // as a "❯ " block before the resubmitted request goes out.
     harness
         .wait_for_text("\u{276F} queue-alpha-top", Duration::from_secs(30))
         .expect("alpha delivered into the running turn");
     turn_one.release();
-    // Both rows land on the resubmitted request.
+    // Both rows land on the resubmitted request. Blocks can scroll above the
+    // viewport before a 100ms poll observes them, so gate on the WIRE — the
+    // authoritative record — rather than on-screen markers. Pump the event loop
+    // while waiting so the delivery actually happens.
     let deadline = std::time::Instant::now() + Duration::from_secs(90);
     while !all_user_messages(&content)
         .iter()
@@ -89,7 +97,8 @@ async fn empty_enter_delivers_both_queued_rows() {
         "delivered rows arrive as mid-turn interjections; wire was: {users:#?}"
     );
 
-    // The final request's user sequence proves the order: prompt, then alpha, then bravo — never bravo before alpha.
+    // The final request's user sequence proves the order: prompt, then alpha,
+    // then bravo — never bravo before alpha.
     let bodies = content.request_bodies();
     let last = bodies.last().expect("final request recorded");
     let finals: Vec<String> = last["messages"]

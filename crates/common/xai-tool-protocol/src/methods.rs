@@ -1,4 +1,9 @@
 //! Closed enumeration of every JSON-RPC method on the wire.
+//!
+//! Each variant is defined once in the [`define_methods!`] macro invocation
+//! together with its wire string. The macro generates the enum, serde
+//! renames, [`Method::as_wire_str`], and [`Method::from_wire_str`] from
+//! that single source of truth.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +15,10 @@ macro_rules! define_methods {
         ),* $(,)?
     ) => {
         /// Every JSON-RPC method understood by the computer hub.
+        ///
+        /// The variants are grouped by direction in source order; the enum is
+        /// flat — direction enforcement is the computer hub's job, not the
+        /// protocol crate's.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
         pub enum Method {
             $(
@@ -23,14 +32,16 @@ macro_rules! define_methods {
             /// Every `Method` variant, for exhaustive iteration in tests.
             pub const ALL: &'static [Method] = &[$(Self::$variant,)*];
 
-            /// Wire string for this method.
+            /// Wire string for this method. Equivalent to the serde
+            /// serialization but without a round-trip through `serde_json`.
             pub const fn as_wire_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $wire,)*
                 }
             }
 
-            /// Inverse of [`Self::as_wire_str`]. Returns `None` for strings that don't match any known method.
+            /// Inverse of [`Self::as_wire_str`]. Returns `None` for
+            /// strings that don't match any known method.
             pub fn from_wire_str(s: &str) -> Option<Self> {
                 match s {
                     $($wire => Some(Self::$variant),)*
@@ -41,23 +52,40 @@ macro_rules! define_methods {
     };
 }
 
-/// Message prefix the hub uses when rejecting a request whose `method` string does not parse into [`Method`] — the shape an OLD hub produces.
+/// Message prefix the hub uses when rejecting a request whose `method`
+/// string does not parse into [`Method`] — the shape an OLD hub produces
+/// for verbs it predates. Current clients answer hub skew from the
+/// `hello_ack` `capabilities` advertisement instead of sniffing this
+/// message, but the shape stays pinned here: terminal binaries built
+/// while the SDK still keyed old-hub detection on this exact prefix
+/// remain in the fleet. Do not change casually.
 pub const UNKNOWN_METHOD_MSG_PREFIX: &str = "unknown method `";
 
 define_methods! {
     // harness → service
     SessionOpen => "session_open",
     SessionClose => "session_close",
-    /// The harness is leaving the session but the workspace is untouched, exactly as if the harness connection had dropped.
+    /// The harness is leaving the session but the workspace is untouched,
+    /// exactly as if the harness connection had dropped; the hub sweeps
+    /// only what no other connection still holds. Used when a pooled
+    /// connection stays open for other sessions. A separate verb (not a
+    /// `session_close` flag) so a hub predating it rejects the frame with
+    /// `-32601` instead of silently unbinding the workspace.
     SessionDetach => "session_detach",
     SessionBindServer => "session_bind_server",
     SessionUnbindServer => "session_unbind_server",
-    /// Attach this harness connection to an EXISTING session as an observer.
+    /// Attach this harness connection to an EXISTING session as an
+    /// observer. Answered hub-locally from the session→tool-server
+    /// routing established by the owner's `session_bind_server` (or the
+    /// server's re-`serve`); never forwarded to the tool server.
     SessionAttachServer => "session_attach_server",
     ToolsList => "tools.list",
     ToolsSearch => "tools.search",
     ToolCall => "tool.call",
     /// Sugar for [`Method::Hook`] with [`crate::HookEvent::Cancel`].
+    /// SDKs translate this method to a hook frame before sending; there
+    /// is no separate `tool.cancel` wire frame and no `ToolCancelParams`
+    /// struct in [`crate::frames`].
     ToolCancel => "tool.cancel",
     ToolNotify => "tool.notify",
     SystemNotify => "system.notify",
@@ -74,13 +102,19 @@ define_methods! {
     ToolNotification => "tool.notification",
     /// Reply to a request/response hook, correlated back to the harness by `hook_id`.
     HookReply => "hook_reply",
-    /// Notification (no `id`, no response); rejects surface only in hub metrics.
+    /// Notification (no `id`, no response); rejects surface only in
+    /// hub metrics. Only hub-minted trace-ids are accepted.
     TracesDonate => "traces.donate",
-    /// Notification (no `id`, no response); rejects surface only in hub metrics.
+    /// Notification (no `id`, no response); rejects surface only in hub
+    /// metrics. Donor service.name must be hub-allowlisted.
     LogsDonate => "logs.donate",
-    /// Notification (no `id`, no response); rejects surface only in hub metrics.
+    /// Notification (no `id`, no response); rejects surface only in hub
+    /// metrics. Donor service.name must be hub-allowlisted. No envelope
+    /// `session_id` — metrics are process-aggregate.
     MetricsDonate => "metrics.donate",
-    /// A token-bound tool server presents its refreshed bearer on the live socket so the hub moves the socket's expiry deadline instead.
+    /// A token-bound tool server presents its refreshed bearer on the live
+    /// socket so the hub moves the socket's expiry deadline instead of
+    /// closing it. Optional: advertised in `hello_ack.capabilities`.
     AuthRefresh => "auth.refresh",
 
     // service → tool_server
@@ -91,7 +125,8 @@ define_methods! {
     SubscribeAck => "subscribe_ack",
     UnsubscribeAck => "unsubscribe_ack",
 
-    // harness → service (server discovery) List available tool servers for the authenticated user.
+    // harness → service (server discovery)
+    /// List available tool servers for the authenticated user.
     ServersList => "servers.list",
 
     // tool_server status lifecycle
@@ -101,24 +136,34 @@ define_methods! {
 
     // ── Session lifecycle ───────────────────────────────────────────
 
-    /// Full tool snapshot for a session (server → hub).
+    /// Full tool snapshot for a session (server → hub). Idempotent:
+    /// re-sending replaces the tool set; the hub diffs and emits
+    /// `tools_changed`.
     Serve => "serve",
-    /// Hub requests the server to start serving a session (hub → server). The server responds with its tool snapshot.
+    /// Hub requests the server to start serving a session
+    /// (hub → server). The server responds with its tool snapshot.
     SessionBind => "session.bind",
-    /// Hub tells the server to stop serving a session (hub → server). Notification — no response expected.
+    /// Hub tells the server to stop serving a session
+    /// (hub → server). Notification — no response expected.
     SessionUnbind => "session.unbind",
 
-    // bot_client ↔ service (bot relay) Passthrough of an in-box gateway command.
+    // bot_client ↔ service (bot relay)
+    /// Passthrough of an in-box gateway command. `name` and `args` are
+    /// upstream-verbatim; `agentId` is hub routing metadata.
     BotCommand => "bot.command",
     /// Short-lived noVNC descriptor. May wake a hibernated box.
     BotVncDescriptor => "bot.vncDescriptor",
-    /// Live agent roster read from the box.
+    /// Live agent roster read from the box. May wake a hibernated box; the
+    /// hub bounds the wait and answers a retryable `box_unavailable`
+    /// (`box_waking` / `box_hibernated`) or `box_migrating` while the box is
+    /// coming up — never an empty list because of a failure.
     BotRoster => "bot.roster",
     /// Off-box run-state read. Cold — never wakes the box.
     BotStatus => "bot.status",
     /// Off-box transcript page. Cold — never wakes the box.
     BotTranscriptOffbox => "bot.transcript.offbox",
-    /// Caller-scoped weekly Grok Bot usage summary. Cold — never wakes the box.
+    /// Caller-scoped weekly Grok Bot usage summary. Cold — never wakes the
+    /// box.
     BotUsage => "bot.usage",
     /// Subscribe this connection to `bot.event` for the given agents.
     BotSubscribe => "bot.subscribe",
@@ -126,7 +171,8 @@ define_methods! {
     BotUnsubscribe => "bot.unsubscribe",
     /// Record a conversation → agents index. Does not route by conversation.
     BotBindConversation => "bot.bindConversation",
-    /// Report whether this connection has the agent on screen, so the harness can hold that agent's turn-finished push.
+    /// Report whether this connection has the agent on screen, so the
+    /// harness can hold that agent's turn-finished push.
     BotPresence => "bot.presence",
     /// Hub → client event notification (not a client-callable verb).
     BotEvent => "bot.event",

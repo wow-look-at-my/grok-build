@@ -1,4 +1,5 @@
-//! What the loopback doubles share: a server that stops when its owner drops, fallbacks that log a request no route serves.
+//! What the loopback doubles share: a server that stops when its owner drops, fallbacks that log
+//! a request no route serves, and lossy header readers.
 
 use std::net::SocketAddr;
 

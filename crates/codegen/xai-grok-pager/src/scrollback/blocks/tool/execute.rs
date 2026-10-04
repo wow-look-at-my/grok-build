@@ -29,6 +29,7 @@ pub struct ExecuteToolCallBlock {
     /// Elapsed time in ms after completion.
     pub elapsed_ms: Option<i64>,
     /// Whether this is a user-initiated bash-mode (`!`) command.
+    /// Streams as a truncated live tail, expands to full output on finish.
     pub bash_mode: bool,
     /// Peeled display form for the header; `command` stays the full source of truth.
     pub header_display: Option<String>,
@@ -74,8 +75,9 @@ impl ExecuteToolCallBlock {
         }
     }
 
-    /// Finalize elapsed time from `started_at`. Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set
-    /// (already finalized).
+    /// Finalize elapsed time from `started_at`.
+    ///
+    /// Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set (already finalized).
     pub fn finish(&mut self) {
         if self.elapsed_ms.is_some() {
             return;
@@ -121,6 +123,8 @@ impl ExecuteToolCallBlock {
     }
 
     /// Display form of the command for the header (may peel `cd &&` prefix).
+    /// Preserves physical newlines so soft-wrap / copy can keep line structure.
+    /// Callers that need a single ratatui line must flatten themselves.
     fn command_display(&self) -> &str {
         self.header_display.as_deref().unwrap_or(&self.command)
     }
@@ -505,9 +509,9 @@ impl ExecuteToolCallBlock {
         {
             lines.push(BlockLine::separator(Line::from("")));
 
-            // Default foreground for the output body Under the
-            // terminal-native (minimal) palette, muted used to collapse to
-            // ANSI bright black and washed out.
+            // Default foreground for the output body
+            // Under the terminal-native (minimal) palette, muted used to collapse to ANSI bright black and washed out on many dark profiles
+            // Content must track the terminal's default fg (`primary` / Reset); labels / chrome stay on `muted`/`dim`
             let styled_lines: Vec<Line<'static>> =
                 crate::render::terminal_output::render_terminal_lines(output, theme.primary())
                     .into_iter()
@@ -550,6 +554,7 @@ impl ExecuteToolCallBlock {
                         )))
                         .with_panel_background(theme.bg_dark),
                     ));
+                    // Last M lines: range base + 1 (distinct from first chunk)
                     for (wrapped_line, joiner) in
                         wrapped.iter().zip(joiners.iter()).skip(total - last)
                     {
@@ -692,12 +697,14 @@ impl BlockContent for ExecuteToolCallBlock {
     }
 
     fn is_foldable(&self) -> bool {
-        // Collapsed with a description hides `$ command`.
+        // Collapsed with a description hides `$ command`; expand reveals it (and output/error when present)
+        // A bare "Run"/"Running" description strips to empty under Label-style stripping
+        // Its collapsed and expanded headers are then identical, so it must not claim a fold
         self.description_display(true).is_some() || self.output.is_some() || self.error.is_some()
     }
 
-    /// Minimum fold mode used by collapse and the running expand chevron.
-    /// Agent tools default to Collapsed (title only), no auto-expand.
+    /// Minimum fold mode used by collapse and the running expand chevron. Agent tools default to Collapsed (title
+    /// only), no auto-expand. When finished, Collapsed is always the true minimum (user can fold to title-only).
     fn collapse_mode(&self, is_running: bool) -> DisplayMode {
         if self.bash_mode && is_running {
             DisplayMode::Truncated
@@ -706,7 +713,9 @@ impl BlockContent for ExecuteToolCallBlock {
         }
     }
 
-    /// Agent tools start Collapsed (no auto-expand of stdout).
+    /// Agent tools start Collapsed (no auto-expand of stdout). User `!` bash defaults to Truncated so a kind-upgrade or
+    /// first materialize lands Truncated. `finish_running` then expands because the mode is not Collapsed. Same-kind
+    /// completion preserves Truncated rather than resetting.
     fn default_display_mode(&self) -> DisplayMode {
         if self.bash_mode {
             DisplayMode::Truncated
@@ -720,7 +729,9 @@ impl BlockContent for ExecuteToolCallBlock {
             // Interactive bash: full output on finish, like a terminal; the streaming preview would silently drop the middle lines
             Some(DisplayMode::Expanded)
         } else {
-            // Agent tools: do **not** force a mode on finish. - Never auto-expanded at start (default Collapsed). - If the user manually expanded.
+            // Agent tools: do **not** force a mode on finish.
+            // - Never auto-expanded at start (default Collapsed).
+            // - If the user manually expanded while running, keep that mode (no snap-shut). If they left it collapsed, it stays collapsed.
             None
         }
     }
@@ -729,7 +740,8 @@ impl BlockContent for ExecuteToolCallBlock {
         let theme = Theme::current();
         let header_style = ctx.appearance.scrollback.blocks.execute.header_style;
 
-        // `header_lines` flattens `\n` to spaces.
+        // `header_lines` flattens `\n` to spaces, which smashes multi-line commands into one run-on row in the block viewer
+        // The viewer draws no bullet, so `ctx.width` (not `content_width()`) is the row width
         let mut header_rows = Vec::new();
         self.push_header_lines(
             &mut header_rows,
@@ -958,7 +970,7 @@ mod tests {
 
         let mut bash = ExecuteToolCallBlock::new("ls");
         bash.bash_mode = true;
-        // User! streams truncated, finishes with the full output.
+        // User ! streams truncated, finishes with the full output.
         assert_eq!(bash.default_display_mode(), DisplayMode::Truncated);
         assert_eq!(bash.finished_display_mode(), Some(DisplayMode::Expanded));
         assert_eq!(bash.collapse_mode(true), DisplayMode::Truncated);

@@ -1,4 +1,23 @@
 //! Session-administration extension handlers.
+//!
+//! Methods grouped here are operational/admin endpoints that mutate
+//! persistent or shared agent state but are not part of the per-turn prompt
+//! lifecycle:
+//!
+//! - `x.ai/session/rename`                  rename a session locally and remote
+//! - `x.ai/session/delete`                  delete a session locally and remote
+//! - `x.ai/session/update_mcp_servers`      mid-session MCP server swap
+//! - `x.ai/session/add_local_workspace`     mid-session local workspace add-only (chat)
+//! - `x.ai/session/fork`                    fork a session into a new one
+//! - `x.ai/internal/reload_all_mcp_servers` config hot-reload, all sessions
+//! - `x.ai/internal/reload_project_mcp_servers` config hot-reload, cwd-scoped
+//! - `x.ai/internal/reload_skills`          skills file watcher fan-out
+//! - `x.ai/internal/reload_models`          model list hot-reload from config.toml
+//! - `x.ai/internal/reload_models_cache`    model catalog hot-reload from disk cache
+//! - `x.ai/internal/reload_output_rate_floor` output-rate floor hot-reload, all sessions
+//! - `x.ai/internal/auth_cleared`           auth hot-clear cleanup
+//! - `x.ai/plugins/reload`                  rebuild shared plugin registry
+//! - `x.ai/commands/list`                   list slash commands
 
 use std::path::Path;
 use std::sync::Arc;
@@ -127,8 +146,8 @@ async fn handle_session_rename(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtR
         let _ = handle
             .persistence_tx
             .send(PersistenceMsg::ManualTitleRenamed(title.clone()));
-        // Freeze the auto title refresh so an in-flight one cannot flip the
-        // user's title.
+        // Freeze the auto title refresh so an in-flight one can't flip the user's title and no later refresh fights it
+        // The actor persists the frozen watermark
         let _ = handle
             .cmd_tx
             .send(crate::session::commands::SessionCommand::TitleRenamed { manual: true });
@@ -170,6 +189,7 @@ async fn handle_session_rename(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtR
         }
     }
 
+    // Hook 2: update session replica with summary (fire-and-forget)
     spawn_registry_title_update(
         agent,
         &req.session_id,
@@ -212,8 +232,8 @@ async fn reset_session_title_to_auto(
     if cleared {
         if let Some(handle) = agent.resident_handle(&session_id_acp) {
             let _ = handle.persistence_tx.send(PersistenceMsg::ResetTitleToAuto);
-            // Reopen the auto title refresh so it can re-title from the whole
-            // conversation now that the manual pin is gone.
+            // Reopen the auto title refresh so it can re-title from the whole conversation now that the manual pin is gone
+            // The actor persists the reopened watermark
             let _ = handle
                 .cmd_tx
                 .send(crate::session::commands::SessionCommand::TitleRenamed { manual: false });
@@ -251,8 +271,7 @@ async fn reset_session_title_to_auto(
         }
         // `titleIsManual: false` is distinct from absent meta (absent means a racing auto title)
         notify_session_title_unpinned(agent, session_id_acp).await;
-        // Empty string, not None: `UpdateRequest.summary` omits `None` and
-        // the replica would keep advertising the manual title
+        // Empty string, not None: `UpdateRequest.summary` omits `None` and the replica would keep advertising the old manual title
         spawn_registry_title_update(
             agent,
             session_id,
@@ -417,11 +436,13 @@ async fn handle_session_delete(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtR
 
     let session_id = acp::SessionId::new(Arc::from(req.session_id.as_str()));
 
-    // For writeback storage (non-ZDR): remote delete is authoritative for the cloud history and runs first On failure no local bits are touched.
+    // For writeback storage (non-ZDR): remote delete is authoritative for the cloud history and runs first
+    // On failure no local bits are touched, so the pager does not remove the row or toast success
     let needs_remote =
         agent.is_writeback_storage() && agent.current_auth().is_some_and(|a| !a.is_zdr_team());
 
-    // Always drain: even a non-resident session can still have coordinator children finishing.
+    // Always drain: even a non-resident session can still have coordinator children finishing after an earlier fire-and-forget TeardownSession
+    // That happens on e.g. idle unload. hard_stop / kill_all no-op when not resident.
     agent.teardown_live_session_before_delete(&session_id).await;
 
     // Shared delete: remote-first, then local disk and FTS eviction
@@ -504,7 +525,8 @@ async fn handle_update_mcp_servers(agent: &MvpAgent, args: &acp::ExtRequest) -> 
         &compat,
     );
 
-    // Assign the resident handle's seed before enqueue.
+    // Assign the resident handle's seed before enqueue. The command carries the same list
+    // so the actor updates its own copy when it runs.
     let (tx, rx) = tokio::sync::oneshot::channel();
     let enqueued = agent
         .with_resident_mut(&params.session_id, |handle| {
@@ -604,8 +626,9 @@ async fn handle_reload_all_mcp_servers(agent: &MvpAgent) -> ExtResult {
         };
         let cwd = std::path::PathBuf::from(&handle.info.cwd);
         let compat = agent.cfg.borrow().compat_resolved;
-        // Re-seed the merge with the session's original client-provided MCP
-        // servers (e.g. a client session binding injected at `session/new`).
+        // Re-seed the merge with the session's original client-provided MCP servers (e.g. a client session binding injected at `session/new`).
+        // `merge_managed_mcp_servers` already re-reads every disk source (config.toml, plugins, ~/.claude.json, ~/.cursor/mcp.json, .mcp.json) So passing `load_mcp_servers()` output here was redundant
+        // It also silently dropped client servers that exist in no on-disk config, tearing them down on every config hot-reload
         if crate::session::managed_mcp::merge_and_send_managed_mcp_update(
             &handle.cmd_tx,
             &cwd,
@@ -659,9 +682,8 @@ async fn handle_reload_project_mcp_servers(agent: &MvpAgent, args: &acp::ExtRequ
         let Some(handle) = agent.resident_handle(session_id) else {
             continue;
         };
-        // See `handle_reload_all_mcp_servers`: seed with the session's
-        // client-provided servers, not `load_mcp_servers()` The merge
-        // re-reads all disk sources itself.
+        // See `handle_reload_all_mcp_servers`: seed with the session's client-provided servers, not `load_mcp_servers()`
+        // The merge re-reads all disk sources itself, and client-provided servers (session bindings) must survive config hot-reloads
         let merged = crate::session::managed_mcp::merge_managed_mcp_servers(
             handle.initial_client_mcp_servers.clone(),
             cwd,
@@ -694,8 +716,9 @@ async fn handle_reload_project_mcp_servers(agent: &MvpAgent, args: &acp::ExtRequ
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
-/// Returns `true` iff `session_cwd` equals `target_cwd` or sits beneath it
-/// (so a `<repo>/` edit reloads `<repo>/subdir/` sessions too).
+/// Returns `true` iff `session_cwd` equals `target_cwd` or sits beneath it (so a `<repo>/` edit reloads `<repo>/subdir/` sessions too).
+/// This uses `Path::starts_with`, which is **component-aware**: `/repo-test` does NOT match `/repo` even though the byte prefix matches.
+/// Paths come from `SessionInfo::cwd` (always absolute) and the watcher's emitted path (also absolute), so no canonicalization is needed here. The `==` short-circuit is redundant (`Path::starts_with` is reflexive) but kept for an explicit zero-allocation fast path.
 fn cwd_matches(session_cwd: &std::path::Path, target_cwd: &std::path::Path) -> bool {
     session_cwd == target_cwd || session_cwd.starts_with(target_cwd)
 }
@@ -762,8 +785,8 @@ fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
         agent_config.image_description_model = overrides.image_description;
         agent_config.prompt_suggest_model_pin = overrides.prompt_suggestion;
     }
-    // Recompute the campaign overlay and `pre_campaign_default` (the
-    // catalog-miss fallback).
+    // Recompute the campaign overlay and `pre_campaign_default` (the catalog-miss fallback) so reload matches spawn
+    // `new_from_toml_cfg` reset it to None
     {
         let mut agent_config = agent.cfg.borrow_mut();
         crate::util::config::sync_campaign_fields(&mut agent_config);
@@ -782,10 +805,9 @@ fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
 
 // internal/reload_models_cache
 
-/// Hot-reload the model catalog from `~/.grok/models_cache.json` after an
-/// external write detected by the config watcher. Routed through the agent's
-/// ACP stream (injected by the `ConfigUpdate::ModelsCacheChanged` arm in
-/// `agent/app.rs`).
+/// Hot-reload the model catalog from `~/.grok/models_cache.json` after an external write detected by the config watcher.
+/// Routed through the agent's ACP stream (injected by the `ConfigUpdate::ModelsCacheChanged` arm in `agent/app.rs`).
+/// It is not applied directly on the manager from the config-update task: stream requests are processed in order. When `config.toml` and `models_cache.json` change in the same watcher batch, this runs strictly after `reload_models`' `apply_config`. That avoids rebuilding the catalog and notifying clients mid-flight, before the new config was accepted or rejected.
 fn handle_reload_models_cache(agent: &MvpAgent) -> ExtResult {
     agent.models_manager.reload_from_disk_cache();
     agent.sync_process_static_api_key(None);
@@ -810,7 +832,8 @@ async fn handle_plugins_reload(agent: &MvpAgent) -> ExtResult {
             .resident_handle(&id)
             .map(|h| std::path::PathBuf::from(&h.info.cwd))
     });
-    // No resident session → the launch dir.
+    // No resident session → the launch dir. Trust gather, config read and the discovery walk are
+    // blocking filesystem work, so they run off the runtime.
     let cwd = session_cwd.unwrap_or_else(|| agent.launch_cwd().to_path_buf());
     let remote_settings = agent.cfg.borrow().remote_settings.clone();
     let handle = agent.plugin_registry_handle().clone();
@@ -826,7 +849,8 @@ async fn handle_plugins_reload(agent: &MvpAgent) -> ExtResult {
     }
     agent.mark_plugin_registry_initialized();
 
-    // Eagerly fan out the new registry to every live session: each adopts a cwd-correct snapshot.
+    // Eagerly fan out the new registry to every live session: each adopts a cwd-correct snapshot (hooks, MCP, skills, client slash-command catalog)
+    // This is the same refresh the originating session of a reload gets
     agent.broadcast_plugin_registry_to_sessions(None);
 
     super::to_ext_response(Ok(serde_json::json!({"ok": true})))
@@ -872,8 +896,9 @@ async fn handle_commands_list(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRe
         )));
     }
 
-    // For a given cwd, compute the plugin registry the same way a session
-    // will at spawn time.
+    // For a given cwd, compute the plugin registry the same way a session would at spawn time (via build_for_cwd) That is also how reload_plugins_impl computes it (ancestor project config walk and vendor compat merge)
+    // This makes `x.ai/commands/list` (the pull grok-desktop uses after session start) return plugin-provided slash commands for the target cwd
+    // In desktop-to-docker (and ssh) setups the agent's launch CWD is unrelated to the user's chosen workspace dir; without a cwd the shared launch-dir snapshot serves the pre-session case
     let plugin_reg = agent
         .plugin_registry_for_cwd(req.cwd.as_deref().map(Path::new))
         .await;

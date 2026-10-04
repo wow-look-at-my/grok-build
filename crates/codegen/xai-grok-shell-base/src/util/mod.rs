@@ -8,8 +8,9 @@ pub mod tips;
 pub mod uname;
 pub use xai_grok_shared::clipboard;
 pub use xai_grok_shared::stderr::{stderr_lock, with_locked_stderr};
-/// Entropy comes entirely from `RandomState::new()`, which the OS seeds (via
-/// `getrandom`) on each call.
+/// Generate a pseudo-random f64 in [0.0, 1.0). Entropy comes entirely from `RandomState::new()`, which the OS seeds (via `getrandom`) on each call.
+/// Dividing the top 53 hash bits by `2^53` stays uniform where casting a full `u64` to `f64` would collide values above `2^52`.
+/// Not cryptographically secure; suitable for sampling and feature rollouts, not for security-sensitive uses.
 pub fn random_f64() -> f64 {
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hasher};
@@ -18,6 +19,7 @@ pub fn random_f64() -> f64 {
     hasher.write_u64(0x517cc1b727220a95);
     (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
 }
+/// Returns `true` with probability `rate` (0.0 to 1.0).
 pub fn probabilistic_sample(rate: f64) -> bool {
     random_f64() < rate
 }
@@ -88,21 +90,23 @@ pub fn matches_trusted_base_url(candidate: &str, trusted_base: &str) -> bool {
         && candidate.port_or_known_default() == trusted.port_or_known_default()
         && path_matches
 }
-/// Production cli-chat-proxy base only (compiled-in constant).
+/// Production cli-chat-proxy base only (compiled-in constant). Unlike [`is_cli_chat_proxy_url`], this rejects loopback and staging/dev hosts. Used for security-sensitive remote kill-switches.
+/// Those must not become env toggles via `GROK_CLI_CHAT_PROXY_BASE_URL` (or similar) pointing at an attacker-controlled origin.
 pub fn is_prod_cli_chat_proxy_url(url: &str) -> bool {
     matches_trusted_base_url(url, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL)
 }
-/// True for configured first-party cli-chat-proxy routes, excluding arbitrary
-/// loopback URLs.
+/// True for configured first-party cli-chat-proxy routes, excluding arbitrary loopback URLs.
+/// Unlike [`is_cli_chat_proxy_url`], this only trusts the exact compiled or environment-selected route.
+/// It is suitable for xAI-only request extensions.
 pub fn is_trusted_cli_chat_proxy_url(url: &str) -> bool {
     if is_prod_cli_chat_proxy_url(url) {
         return true;
     }
     false
 }
-/// True for cli-chat-proxy URLs (production, plus local-dev hosts when the
-/// optional non-production feature is enabled). When that feature is on,
-/// runtime env overrides can extend this trust set.
+/// True for cli-chat-proxy URLs (production, plus local-dev hosts when the optional non-production feature is enabled).
+/// When that feature is on, runtime env overrides can extend this trust set.
+/// Loopback is always accepted (unit tests and local mock servers on arbitrary ports).
 pub fn is_cli_chat_proxy_url(url: &str) -> bool {
     if is_trusted_cli_chat_proxy_url(url) {
         return true;
@@ -115,13 +119,13 @@ pub fn is_cli_chat_proxy_url(url: &str) -> bool {
     }
     false
 }
-/// True for xAI-operated endpoints (`*.x.ai`, cli-chat-proxy, and optional
-/// non-production xAI hosts when that feature is enabled).
+/// True for xAI-operated endpoints (`*.x.ai`, cli-chat-proxy, and optional non-production xAI hosts when that feature is enabled). `disable_api_key_auth` refuses keys only for these; other hosts are BYOK and exempt.
+/// Safe against invalid URLs and suffix attacks (`evil-x.ai.example`). Scheme-agnostic so credential *refusal* fails closed. To decide where to *attach* a credential, use [`is_xai_api_bearer_url`].
 pub fn is_xai_api_url(url: &str) -> bool {
     is_xai_api_url_impl(url, false)
 }
-/// Like [`is_xai_api_url`], but requires `https` on every arm, so a session
-/// bearer is never attached to a cleartext endpoint.
+/// Like [`is_xai_api_url`], but requires `https` on every arm, so a session bearer is never attached to a cleartext endpoint, including loopback.
+/// A co-located process could otherwise read a token sent to `http://localhost`.
 pub fn is_xai_api_bearer_url(url: &str) -> bool {
     if is_trusted_xai_https_url(url) {
         return true;
@@ -166,7 +170,8 @@ fn is_loopback_host(parsed: &reqwest::Url) -> bool {
         None => false,
     }
 }
-/// Truncate a string to at most `max_chars` characters. Slices at char boundaries so multi-byte UTF-8 never panics.
+/// Truncate a string to at most `max_chars` characters.
+/// Slices at char boundaries so multi-byte UTF-8 never panics.
 #[allow(clippy::string_slice)] // `char_indices().nth` yields a char boundary
 pub fn truncate(s: &str, max_chars: usize) -> &str {
     if s.len() <= max_chars {
@@ -177,9 +182,9 @@ pub fn truncate(s: &str, max_chars: usize) -> &str {
         None => s,
     }
 }
-/// Check if a process is still alive. Unix: `kill(pid, 0)` via `nix`. True if
-/// the process exists (even under a different UID); false only on ESRCH.
-/// Windows: `OpenProcess(SYNCHRONIZE)` then `WaitForSingleObject(0)`.
+/// Check if a process is still alive.
+/// Unix: `kill(pid, 0)` via `nix`. True if the process exists (even under a different UID); false only on ESRCH.
+/// Windows: `OpenProcess(SYNCHRONIZE)` then `WaitForSingleObject(0)`. True while running; false on exit, absence, or open failure.
 #[cfg(unix)]
 pub fn is_process_alive(pid: u32) -> bool {
     use nix::errno::Errno;
@@ -205,6 +210,7 @@ pub fn is_process_alive(pid: u32) -> bool {
     wait_result == WAIT_TIMEOUT
 }
 /// Which termination signal to send.
+/// On Windows both map to `TerminateProcess` (already forceful), so the distinction only matters on Unix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KillSignal {
     /// Graceful `SIGTERM` (Unix); the process may catch and drain.

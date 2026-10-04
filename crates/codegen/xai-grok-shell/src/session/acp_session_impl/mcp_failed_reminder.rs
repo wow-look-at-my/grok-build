@@ -1,4 +1,5 @@
-//! The half of the "MCP servers that failed to connect" reminder that needs no `SessionActor`.
+//! The half of the "MCP servers that failed to connect" reminder that needs no `SessionActor`: classifying failures and rendering the section.
+//! Episode dedupe lives in [`crate::session::announcement_state::McpAnnounced`]; the reminder is injected from `acp_session_impl/mcp.rs`.
 
 use crate::session::announcement_state::{AnnouncedFailure, FailedServer};
 use crate::session::managed_mcp::mcp_server_name;
@@ -86,12 +87,13 @@ pub(super) fn render_failed_section(to_announce: &[FailedServer]) -> String {
             AnnouncedFailure::AuthRequired => "auth required".to_string(),
             AnnouncedFailure::Transport => match f.detail.as_deref().and_then(flatten_spoofable) {
                 // Quoted so printable remote text (e.g. an injected `) - other (…`) cannot pose as a sibling entry.
+                // Embedded double quotes are downgraded to keep the delimiters unambiguous
                 Some(detail) => format!("\"{}\"", detail.replace('"', "'")),
                 None => "connection failed".to_string(),
             },
         };
-        // The retry hint keeps the model using the server (a tool call
-        // re-handshakes it) instead of giving up.
+        // The retry hint keeps the model using the server (a tool call re-handshakes it) instead of giving up, and giving up is self-fulfilling
+        // Auth failures need user action
         let suffix = if f.retries_on_use {
             " — retries automatically on next tool call"
         } else {

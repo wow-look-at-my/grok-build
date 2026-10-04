@@ -1,4 +1,6 @@
-//! Process-wide sharing of [`FsEventSource`]s — one live watcher per canonical directory, reference-counted by subscribers.
+//! Process-wide sharing of [`FsEventSource`]s — one live watcher per
+//! canonical directory, reference-counted by subscribers — plus the
+//! create/reuse stats that measure it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,17 +13,23 @@ use crate::error::FsNotifyError;
 use crate::source::{FsConfig, FsEventSource};
 
 /// Long-lived runtime that shared [`FsEventSource`] event loops run on.
+/// A loop on the creating session's runtime would die with that session and break other subscribers.
+/// [`set_runtime_handle`] registers a process-lifetime runtime.
 static RUNTIME_HANDLE: OnceLock<Handle> = OnceLock::new();
 
 /// Process-wide registry of shared sources keyed by canonical watch path.
+/// Holds [`Weak`] refs so a watcher is torn down once its last subscriber
+/// (the last [`Arc`] returned by [`shared`]) is dropped.
 static REGISTRY: OnceLock<Mutex<HashMap<PathBuf, Weak<FsEventSource>>>> = OnceLock::new();
 
 /// Monotonic count of OS watchers actually created by [`shared`] (cache miss).
 static WATCHERS_CREATED: AtomicU64 = AtomicU64::new(0);
 /// Monotonic count of [`shared`] calls that reused a live watcher (cache hit).
+/// Equivalently: the number of redundant OS watchers avoided by sharing.
 static WATCHERS_REUSED: AtomicU64 = AtomicU64::new(0);
 
-/// Tracing target for shared-watcher lifecycle events.
+/// Tracing target for shared-watcher lifecycle events. Enable with
+/// `RUST_LOG=fs_watcher=debug` to watch create/reuse decisions live.
 pub const STATS_TARGET: &str = "fs_watcher";
 
 /// Snapshot of the shared-watcher registry. Use [`stats`] to read it.
@@ -31,7 +39,8 @@ pub struct FsWatcherStats {
     pub live_watchers: usize,
     /// Process-lifetime count of OS watchers created (cache misses).
     pub created_total: u64,
-    /// Process-lifetime count of reuses (cache hits) — i.e. OS watchers that did **not** have to be opened.
+    /// Process-lifetime count of reuses (cache hits) — i.e. OS watchers that
+    /// did **not** have to be opened because an existing one was shared.
     pub reused_total: u64,
 }
 
@@ -50,7 +59,9 @@ pub fn stats() -> FsWatcherStats {
     }
 }
 
-/// Register the long-lived runtime for shared watcher event loops.
+/// Register the long-lived runtime for shared watcher event loops. Call once
+/// at process startup from the main (process-lifetime) runtime. Idempotent —
+/// the first registration wins; later calls are ignored.
 pub fn set_runtime_handle(handle: Handle) {
     let _ = RUNTIME_HANDLE.set(handle);
 }
@@ -60,7 +71,7 @@ fn registry() -> &'static Mutex<HashMap<PathBuf, Weak<FsEventSource>>> {
 }
 
 /// Canonicalize so symlinked / relative spellings of the same directory map
-/// to one watcher.
+/// to one watcher. Falls back to the raw path if the dir doesn't exist yet.
 fn canonical_key(cwd: &Path) -> PathBuf {
     dunce::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf())
 }
@@ -91,12 +102,15 @@ pub fn shared(cwd: PathBuf, config: FsConfig) -> Result<Arc<FsEventSource>, FsNo
         }
     }
 
-    // Slow path: create the watcher *without* holding the registry lock — `start_on` blocks until OS-watcher init completes.
+    // Slow path: create the watcher *without* holding the registry lock —
+    // `start_on` blocks until OS-watcher init completes (up to seconds on a
+    // large tree) and we must not serialize unrelated directories behind it.
     let handle = event_loop_handle()?;
     let source = Arc::new(FsEventSource::start_on(handle, cwd, config)?);
 
     let mut map = registry().lock().unwrap_or_else(PoisonError::into_inner);
-    // Another caller may have created the watcher while we were initializing.
+    // Another caller may have created the watcher while we were initializing;
+    // prefer theirs and let ours drop (tearing down the redundant watcher).
     if let Some(existing) = map.get(&key).and_then(Weak::upgrade) {
         record_reuse(&key, map.len());
         return Ok(existing);

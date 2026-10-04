@@ -4,27 +4,39 @@ use std::num::NonZeroU64;
 
 use xai_grok_sampling_types::{ApiBackend, ContentPart, ConversationItem};
 
+/// Replaces an inline image evicted to keep the request body under the proxy's 50 MB limit.
 /// Phrased so the model treats the image as gone — a silent strip otherwise induces hallucination.
 const IMAGE_COMPACT_PLACEHOLDER: &str = "[An earlier image was removed to keep the request within its size limit and is no longer visible. Do not describe or reason about its contents from memory; ask the user to re-share it if you need to see it again.]";
 
-/// Appended to a tool result when any of its images are evicted. Tool-result image arrays cannot carry model-visible text, so the omission belongs in the result content itself.
+/// Appended to a tool result when any of its images are evicted. Tool-result
+/// image arrays cannot carry model-visible text, so the omission belongs in the
+/// result content itself.
 const TOOL_IMAGE_COMPACT_NOTE: &str = "[One or more images from this tool result were removed to keep the request within its size limit and are no longer visible. Do not describe or reason about their contents from memory.]";
 
-/// Hard request-body ceiling enforced by the inference proxy; the budget for
-/// a config that never passed model resolution.
+/// Hard request-body ceiling enforced by the inference proxy; the budget for a config that never passed model resolution.
+/// Larger bodies are rejected with HTTP 413 or a connection reset. Inline image `data:` URLs dominate.
 const MAX_REQUEST_BYTES: usize = ApiBackend::ChatCompletions
     .default_max_request_bytes()
     .get() as usize;
 
+/// Evict old images once the serialized body reaches this size (3 MB below the hard ceiling).
+/// Headroom covers uncounted tool definitions and the request envelope.
+/// Below the trigger every image stays so the KV-cache prefix remains byte-stable.
 pub const IMAGE_COMPACT_TRIGGER_BYTES: usize = MAX_REQUEST_BYTES - 3 * 1024 * 1024;
 
 /// Low-water mark that eviction reclaims down to once it fires (hysteresis).
+/// Clearing only the trigger would re-cross and re-bust the KV cache every turn.
+/// Dropping to half the hard limit rewrites the prefix once, then stays cache-warm.
 pub const IMAGE_COMPACT_RECLAIM_TARGET_BYTES: usize = MAX_REQUEST_BYTES / 2;
 
 // Hysteresis invariant: eviction is gated at the trigger but reclaims to a strictly lower mark.
+// One batch eviction buys many cache-warm turns instead of re-busting the prompt cache every turn.
+// Enforced at compile time so the two constants cannot drift together.
 const _: () = assert!(IMAGE_COMPACT_RECLAIM_TARGET_BYTES < IMAGE_COMPACT_TRIGGER_BYTES);
 
-/// An [`std::io::Write`] sink that counts bytes instead of storing them.
+/// An [`std::io::Write`] sink that counts bytes instead of storing them. Lets
+/// us measure a `serde_json` encoding's length without allocating the full
+/// (potentially tens-of-MB) output buffer.
 #[derive(Default)]
 struct ByteCounter(usize);
 
@@ -45,7 +57,9 @@ impl std::io::Write for ByteCounter {
 fn serialized_json_bytes<T: serde::Serialize + ?Sized>(value: &T) -> usize {
     let mut counter = ByteCounter::default();
     if let Err(err) = serde_json::to_writer(&mut counter, value) {
-        // Serializing in-memory state to a byte sink is infallible in practice; if it ever fails.
+        // Serializing in-memory state to a byte sink is infallible in
+        // practice; if it ever fails, fall back to the bytes counted so far
+        // (a lower bound) rather than forcing a needless compaction.
         tracing::warn!(%err, "failed to measure serialized size");
     }
     counter.0
@@ -103,6 +117,7 @@ const TRIGGER_HEADROOM_BYTES: usize = MAX_REQUEST_BYTES - IMAGE_COMPACT_TRIGGER_
 const MIN_REQUEST_BYTES: usize = 4 * TRIGGER_HEADROOM_BYTES;
 
 /// Trigger and reclaim target for a provider request-body cap.
+/// Model resolution fills the cap from `api_backend` when unset, so `None` only reaches here from a config that skipped it and gets the 50 MiB proxy default.
 pub fn image_budget_limits(max_request_bytes: Option<NonZeroU64>) -> (usize, usize) {
     let Some(max_request_bytes) = max_request_bytes else {
         return (

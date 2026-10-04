@@ -219,7 +219,9 @@ pub enum LspTransport {
     Socket,
 }
 
-/// Which solution or projects the server should load once it is running.
+/// Which solution or projects the server should load once it is running. Some servers do not derive their workspace from
+/// `rootUri`/`workspaceFolders` and instead load it through a protocol extension. Roslyn is the notable one: left alone it treats every file as
+/// a loose "miscellaneous file" and reports no project-level diagnostics at all, until it is sent `solution/open` or `project/open`.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceOpen {
@@ -283,8 +285,9 @@ impl LspServerConfig {
         self.max_restarts.unwrap_or(3)
     }
 
-    /// The directory this server should treat as its workspace: the
-    /// per-server override if there is one, otherwise the session cwd.
+    /// The directory this server should treat as its workspace: the per-server override if there is
+    /// one, otherwise the session cwd. Everything that needs to name the server's root — `rootUri`,
+    /// `workspaceFolders`, `workspaceOpen` — resolves it here so they cannot drift apart.
     pub fn effective_root<'a>(
         &'a self,
         workspace_root: &'a std::path::Path,

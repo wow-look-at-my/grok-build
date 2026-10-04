@@ -1,4 +1,8 @@
 //! Turn lifecycle hook payload types for `HookEvent::Custom`.
+//!
+//! These types ride inside `HookEvent::Custom { kind, payload }` and
+//! provide typed serialization for `before_turn` and `after_turn`
+//! custom hook payloads. They are NOT new `HookEvent` variants.
 
 use serde::{Deserialize, Serialize};
 
@@ -8,10 +12,12 @@ pub const BEFORE_TURN_KIND: &str = "before_turn";
 /// Well-known `HookEvent::Custom` kind string for after-turn hooks.
 pub const AFTER_TURN_KIND: &str = "after_turn";
 
-/// Default `session_relationship` wire value (mirrors `xai_grok_session_events::SessionRelationship::Primary`).
+/// Default `session_relationship` wire value (mirrors
+/// `xai_grok_session_events::SessionRelationship::Primary`).
 pub const DEFAULT_SESSION_RELATIONSHIP: &str = "primary";
 
-/// Default `schema_version` wire value.
+/// Default `schema_version` wire value. Bare literal (not the
+/// `xai-grok-session-events` constant) to avoid a dependency cycle.
 pub const DEFAULT_SCHEMA_VERSION: &str = "1.0";
 
 fn default_session_relationship() -> String {
@@ -29,17 +35,22 @@ fn default_schema_version() -> String {
 /// tracking, etc.) but MUST NOT block — hooks are fire-and-forget.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BeforeTurnPayload {
-    /// Per-session user-turn counter, 0-based.
+    /// Per-session user-turn counter, 0-based. Not strictly monotonic: a tool-result continuation keeps the issuing turn's number, and
+    /// editing or regenerating an earlier message reuses that turn's number (consumers deduping on it treat a regenerate as the same turn).
     pub turn_number: u64,
     /// Model being used for this turn (e.g. "grok-3").
     pub model_id: String,
     /// Whether the session is in YOLO / auto-approve mode.
     #[serde(default)]
     pub yolo_mode: bool,
-    // ── Extended fields (workspace mirrors these into `events.jsonl`).
+    // ── Extended fields (workspace mirrors these into `events.jsonl`);
+    // all `#[serde(default)]` for old-shell / old-workspace interop. ──
+    /// Mirrors `Event::TurnStarted::conversation_message_count`.
     #[serde(default)]
     pub conversation_message_count: usize,
-    /// Snake-case mirror of `Event::TurnStarted::session_relationship` (`"primary"` | `"subagent"`).
+    /// Snake-case mirror of `Event::TurnStarted::session_relationship`
+    /// (`"primary"` | `"subagent"`). A `String`, not the `xai-file-utils`
+    /// enum, to avoid a dependency cycle; decoded by the workspace at emit time.
     #[serde(default = "default_session_relationship")]
     pub session_relationship: String,
     /// Mirrors `Event::TurnStarted::schema_version`.
@@ -63,12 +74,15 @@ impl Default for BeforeTurnPayload {
     }
 }
 
-/// Payload for `after_turn` custom hooks. Sent by the harness after the agent
-/// loop completes a turn. **Design note:** This payload carries
-/// `tool_call_count` but intentionally omits per-tool names. The workspace
-/// can correlate tool names from its own `ActivityTracker` per-session state
-/// if needed. Keeping the payload small avoids unbounded growth on tool-heavy
-/// turns.
+/// Payload for `after_turn` custom hooks.
+///
+/// Sent by the harness after the agent loop completes a turn.
+///
+/// **Design note:** This payload carries `tool_call_count` but intentionally
+/// omits per-tool names. The workspace can correlate tool names from its own
+/// `ActivityTracker` per-session state if needed. Keeping the payload small
+/// avoids unbounded growth on tool-heavy turns. `written_repo_paths` is the
+/// exception: bounded by distinct files edited, not tool-call volume.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AfterTurnPayload {
     /// Same turn counter as the preceding `before_turn`.
@@ -78,21 +92,35 @@ pub struct AfterTurnPayload {
     /// Wall-clock duration of the turn in milliseconds.
     pub duration_ms: u64,
     /// Number of tool calls made during the turn.
+    /// Tool names are intentionally excluded — the workspace can correlate
+    /// from its own `ActivityTracker` if richer data is needed.
     pub tool_call_count: u32,
     /// Model used (may differ from `before_turn` if model was switched mid-turn).
     pub model_id: String,
-    /// Repo-relative agent writes, so proxy-mode workspaces can force-include gitignored edits. Empty in local mode.
+    /// Repo-relative agent writes, so proxy-mode workspaces can force-include
+    /// gitignored edits. Empty in local mode.
     #[serde(default)]
     pub written_repo_paths: Vec<String>,
-    /// Snake-case mirror of `Event::TurnEnded::cancellation_category` (e.g. `"doom_loop_repetition"`).
+    /// Snake-case mirror of `Event::TurnEnded::cancellation_category` (e.g.
+    /// `"doom_loop_repetition"`). Carried as a `String` for the same
+    /// dep-cycle-avoidance reason as `BeforeTurnPayload::session_relationship`;
+    /// the workspace decodes it into the `xai-file-utils`
+    /// `CancellationCategory` enum at emit time. `None` for non-cancelled turns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancellation_category: Option<String>,
-    /// Opaque JSON mirror of `Event::TurnEnded::cancellation_context`.
+    /// Opaque JSON mirror of `Event::TurnEnded::cancellation_context` (e.g.
+    /// `{ "reason": "max_turns_reached", "limit": 50 }`). Passed through
+    /// verbatim by the workspace. `None` when there is no context.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancellation_context: Option<serde_json::Value>,
 }
 
 /// Turn outcome as observed by the sampler.
+///
+/// Named `TurnHookOutcome` (not `TurnOutcome`) to avoid collision with the
+/// shell's existing `TurnOutcome` and the telemetry crate's
+/// `TurnOutcomeLabel`. Module-qualified usage (`turn_hook::TurnHookOutcome`)
+/// is still recommended in shell code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -108,8 +136,8 @@ pub enum TurnHookOutcome {
 /// `HookEvent::Custom` kind for the request/response turn hook.
 pub const TURN_HOOK_KIND: &str = "turn_hook";
 
-/// Request/response turn hook (sampler → bound workspace), internally
-/// tagged on `phase`.
+/// Request/response turn hook (sampler → bound workspace), internally tagged on `phase`.
+/// `phase` is a reserved key — `BeforeTurnPayload`/`AfterTurnPayload` must not define a field of that name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -167,21 +195,33 @@ pub struct HookReply {
     /// Optional loop-control override.
     #[serde(default)]
     pub control: TurnControl,
-    /// Artifact-handling ack for a [`TurnHookRequest::After`] request.
+    /// Artifact-handling ack for a [`TurnHookRequest::After`] request; `None`
+    /// on `Before` replies and from workspaces that predate the ack.
+    /// Informational only — the requester never gates its loop on it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_turn_ack: Option<AfterTurnAckPayload>,
 }
 
 /// Terminal status of the workspace's per-turn artifact handling, carried in
-/// the [`AfterTurnAckPayload`] the workspace sends back.
+/// the [`AfterTurnAckPayload`] the workspace sends back to the shell.
+///
+/// The variants are wire-stable snake_case strings; the shell routes on them
+/// to decide how to record the turn's data-collection outcome. The ack
+/// is informational — the shell never blocks its agent loop on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AfterTurnAckStatus {
-    /// Every archive the workspace attempted was durably handed off to its upload queue.
+    /// Every archive the workspace attempted was durably handed off to its
+    /// upload queue (written to the on-disk spill, or an inline-fallback
+    /// upload is in flight). The cloud upload then proceeds independently with
+    /// the queue's own retry policy. The caller MAY advance.
     Enqueued,
-    /// At least one archive could not be handed off.
+    /// At least one archive could not be handed off (temp file unwritable,
+    /// queue worker shut down, or the archive build failed). The workspace has
+    /// done what it can — the caller MUST NOT retry.
     Failed,
-    /// The workspace skipped uploads before touching disk (no upload queue configured / not in proxy mode).
+    /// The workspace skipped uploads before touching disk (no upload queue
+    /// configured / not in proxy mode). `error_message` carries the reason.
     Skipped,
 }
 
@@ -193,10 +233,13 @@ pub struct AfterTurnAckPayload {
     pub turn_number: u64,
     /// Terminal artifact-handling status for the turn.
     pub status: AfterTurnAckStatus,
-    /// Failure / skip reason.
+    /// Failure / skip reason. `Some` only for [`AfterTurnAckStatus::Failed`] or
+    /// [`AfterTurnAckStatus::Skipped`]; omitted from the wire when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
-    /// Count of archives this turn that landed durably on the queue's on-disk spill — `0`, `1`.
+    /// Count of archives this turn that landed durably on the queue's on-disk
+    /// spill — `0`, `1`, or `2` (before/after repository snapshot archives).
+    /// Informational; defaults to `0` for back-compat.
     #[serde(default)]
     pub artifact_count: u32,
 }
@@ -247,8 +290,7 @@ mod tests {
     #[test]
     fn after_turn_round_trip() {
         // Completed turn: both cancellation fields are `None` and therefore
-        // skip serialization — the wire shape is byte-identical to the
-        // shape.
+        // skip serialization — the wire shape is byte-identical to the legacy shape.
         let payload = AfterTurnPayload {
             turn_number: 42,
             outcome: TurnHookOutcome::Completed,
@@ -456,7 +498,8 @@ mod tests {
         assert!(reply.injections.is_empty());
         assert_eq!(reply.control, TurnControl::Auto);
         assert_eq!(reply.after_turn_ack, None);
-        // `None` must skip serialization so the default reply stays the legacy `{}`-compatible shape.
+        // `None` must skip serialization so the default reply stays the legacy
+        // `{}`-compatible shape (old decoders use `deny_unknown_fields`).
         let serialized = serde_json::to_value(&reply).unwrap();
         assert!(serialized.get("after_turn_ack").is_none());
     }
@@ -642,6 +685,8 @@ mod tests {
         assert_eq!(deserialized, payload);
     }
 
+    /// Back-compat: an ack with only the required fields (old sender) defaults
+    /// `artifact_count` to 0 and `error_message` to `None`.
     #[test]
     fn after_turn_ack_payload_minimal_defaults() {
         let json = json!({

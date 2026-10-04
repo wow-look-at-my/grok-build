@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use super::types::{AUTO_KILL_THRESHOLD_MS, RATE_LIMIT_REFILL_MS};
 
-/// Token bucket rate limiter. Starts full at `capacity` tokens. Each
-/// `try_consume()` takes one token.
+/// Token bucket rate limiter. Starts full at `capacity` tokens. Each `try_consume()` takes one
+/// token. Tokens refill at 1 per `refill_interval_ms`.
 pub struct TokenBucket {
     capacity: u32,
     tokens: u32,
@@ -53,7 +53,8 @@ pub struct SuppressionTracker {
 
 /// Result of processing an event through the rate limiter + suppression tracker.
 pub enum RateLimitOutcome {
-    /// Event is allowed through. If `catch_up_notice` is Some, a suppression notice should be sent before the event.
+    /// Event is allowed through. If `catch_up_notice` is Some, a suppression
+    /// notice should be sent before the event.
     Allowed { catch_up_notice: Option<String> },
     /// Event is suppressed (token bucket empty).
     Suppressed,
@@ -195,6 +196,7 @@ mod tests {
     fn bucket_does_not_exceed_capacity() {
         let mut bucket = TokenBucket::new(3, 50);
         std::thread::sleep(Duration::from_millis(200)); // enough for many refills
+        // Should be capped at 3
         assert!(bucket.try_consume());
         assert!(bucket.try_consume());
         assert!(bucket.try_consume());
@@ -253,13 +255,14 @@ mod tests {
     #[test]
     fn combined_rate_limiter() {
         let mut rl = MonitorRateLimiter::new(3, 2000);
-        // First events pass
+        // First 3 events pass
         for _ in 0..3 {
             assert!(matches!(
                 rl.process_event("test"),
                 RateLimitOutcome::Allowed { .. }
             ));
         }
+        // 4th is suppressed
         assert!(matches!(
             rl.process_event("test"),
             RateLimitOutcome::Suppressed

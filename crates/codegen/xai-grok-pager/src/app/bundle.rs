@@ -1,4 +1,8 @@
 //! Bundle status state and response types.
+//!
+//! Pager-side cache of what `xai-grok-shell` reports from `x.ai/bundle/status`.
+//! The shell downloads the bundle in the background after auth.
+//! The pager reads that snapshot for the agents modal (`/config-agents`).
 
 use serde::Deserialize;
 

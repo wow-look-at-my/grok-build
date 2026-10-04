@@ -12,6 +12,7 @@ fn at<T: Copy>(xs: &[T], i: usize) -> T {
 }
 
 /// After the first `prepare_layout`, subsequent `push_block` calls should EXTEND the layout cache instead of nuking it.
+/// This prevents the O(N) full rebuild that caused subagent fullscreen scrolling to drop to 0 FPS during streaming.
 #[test]
 fn test_push_extends_layout_cache_when_present() {
     let mut state = ScrollbackState::new();
@@ -42,6 +43,7 @@ fn test_push_extends_layout_cache_when_present() {
     assert_eq!(cache.entry_truncated_heights.len(), 3);
 }
 
+/// After an incremental extend, the next `prepare_layout` must NOT do a Case 1 full rebuild.
 /// We assert this indirectly: dirty_heights stays empty because push doesn't dirty existing entries.
 /// gaps_may_be_dirty is false because the gap was updated inline, and the cache pointer is preserved.
 #[test]
@@ -83,12 +85,14 @@ fn test_push_extends_virtual_y_correctly() {
     state.push_block(stub_block("b"));
 
     let cache = state.layout_cache.as_ref().unwrap();
+    // Index 1 should start exactly where the previous entry's content ended, plus the (possibly recomputed) gap
     let expected_y = prev_start + prev_height as usize + at(&cache.entries, 0).gap_after as usize;
     assert_eq!(at(&cache.virtual_y, 1), expected_y);
 
-    // Sanity: extending shouldn't have shifted the entry's start.
+    // Sanity: extending shouldn't have shifted the previous entry's start.
     assert_eq!(at(&cache.virtual_y, 0), prev_start);
     assert_eq!(at(&cache.entries, 0).height, prev_height);
+    // gap_after of the previous entry MAY change (e.g. from 1 to 0 for two groupable collapsed blocks), so we don't assert it's still prev_gap.
     let _ = prev_gap;
 }
 
@@ -149,6 +153,7 @@ fn collapsed_turn_marker_keeps_gap_from_collapsed_neighbors() {
         state.get_by_id(marker).unwrap().display_mode,
         DisplayMode::Collapsed
     );
+    // Two collapsed tool rows stack; the collapsed marker after them does not
     assert_eq!(gaps(&state), vec![0, 1, 1]);
 
     // Extend path: the child's completion row appended under the marker keeps the blank row
@@ -196,19 +201,26 @@ fn make_cache(heights: &[u16]) -> LayoutCache {
 
 #[test]
 fn test_entry_at_content_y_basic() {
+    // 3 entries: heights 3, 2, 4.  gap=1
+    // Layout:  [0..3) entry0, [3] gap, [4..6) entry1, [6] gap, [7..11) entry2
     let cache = make_cache(&[3, 2, 4]);
     let all = 0..3;
 
+    // Entry 0 occupies rows 0, 1, 2
     assert_eq!(cache.entry_at_content_y(0, all.clone()), Some(0));
     assert_eq!(cache.entry_at_content_y(2, all.clone()), Some(0));
 
+    // Row 3 is the gap after entry 0
     assert_eq!(cache.entry_at_content_y(3, all.clone()), None);
 
+    // Entry 1 occupies rows 4, 5
     assert_eq!(cache.entry_at_content_y(4, all.clone()), Some(1));
     assert_eq!(cache.entry_at_content_y(5, all.clone()), Some(1));
 
+    // Row 6 is the gap after entry 1
     assert_eq!(cache.entry_at_content_y(6, all.clone()), None);
 
+    // Entry 2 occupies rows 7, 8, 9, 10
     assert_eq!(cache.entry_at_content_y(7, all.clone()), Some(2));
     assert_eq!(cache.entry_at_content_y(10, all.clone()), Some(2));
 
@@ -229,18 +241,25 @@ fn test_entry_at_content_y_single_entry() {
 
 #[test]
 fn test_entry_at_content_y_restricted_range() {
+    // 5 entries, but only search within range 2..4
     let cache = make_cache(&[2, 2, 3, 4, 2]);
+    // virtual_y: [0, 3, 6, 10, 15]
 
+    // Entry 2 starts at virtual_y=6 with height 3, so it occupies [6..9)
     assert_eq!(cache.entry_at_content_y(6, 2..4), Some(2));
     assert_eq!(cache.entry_at_content_y(8, 2..4), Some(2));
 
+    // Gap at 9
     assert_eq!(cache.entry_at_content_y(9, 2..4), None);
 
+    // Entry 3 starts at virtual_y=10 with height 4, so it occupies [10..14)
     assert_eq!(cache.entry_at_content_y(10, 2..4), Some(3));
     assert_eq!(cache.entry_at_content_y(13, 2..4), Some(3));
 
+    // Entry 0 is outside the range
     assert_eq!(cache.entry_at_content_y(0, 2..4), None);
 
+    // Entry 4 is outside the range
     assert_eq!(cache.entry_at_content_y(15, 2..4), None);
 }
 
@@ -252,7 +271,9 @@ fn test_entry_at_content_y_empty_range() {
 
 #[test]
 fn test_entry_at_content_y_height_one_entries() {
+    // Entries of height 1 with gaps between give alternating entry/gap rows
     let cache = make_cache(&[1, 1, 1]);
+    // virtual_y: [0, 2, 4]  (each entry=1 + gap=1)
     let all = 0..3;
 
     assert_eq!(cache.entry_at_content_y(0, all.clone()), Some(0));
@@ -265,7 +286,9 @@ fn test_entry_at_content_y_height_one_entries() {
 
 // ── Hit-testing with sticky headers ──────────────────────────────
 
-/// Set up a scrollback state with a prompt + N response blocks, prepare layout, and return it.
+/// Set up a scrollback state with a prompt + N response blocks, prepare layout, and return it. Uses no-vpad
+/// appearance so heights are predictable: user_block("prompt") → height 1 stub_block("resp") → height 1. With
+/// ENTRY_GAP=1, a 2-entry layout is: row 0: prompt (entry 0) row 1: gap row 2: response (entry 1).
 fn make_scrollback_for_hittest(
     response_count: usize,
     viewport_width: u16,
@@ -316,8 +339,8 @@ fn ffmpeg_install_midsession_expands_video_reservation() {
         state.scroll_info().2
     };
 
-    // Installing ffmpeg mid-session must rebuild the layout so the poster
-    // claims full height Otherwise it paints over the text below.
+    // Installing ffmpeg mid-session must rebuild the layout so the poster claims full height
+    // Otherwise it paints over the text below the stale banner-sized reservation
     let poster_total = {
         let _ffmpeg = set_ffmpeg_available_for_test(true);
         state.prepare_layout(80, 40);
@@ -342,15 +365,18 @@ fn test_hit_test_no_scroll_no_header() {
         .map(|i| state.get_cached_entry_height(i).unwrap())
         .collect();
 
+    // With no-vpad prompt (height 1) and stub blocks (height 1), and ENTRY_GAP=1:
+    //   at(&virtual_y, 0)=0, at(&virtual_y, 1)=2, at(&virtual_y, 2)=4
     let virtual_y: Vec<usize> = state.layout_cache.as_ref().unwrap().virtual_y.clone();
 
+    // Entry 0 (prompt) at at(&virtual_y, 0)
     assert_eq!(
         state.entry_index_at_screen_row(0, area),
         Some(0),
         "heights={heights:?}, virtual_y={virtual_y:?}"
     );
 
-    // Find where entry multiple starts on screen
+    // Find where entry 1 starts on screen
     let entry1_screen_row = at(&virtual_y, 1) as u16;
     assert_eq!(
         state.entry_index_at_screen_row(entry1_screen_row, area),
@@ -358,7 +384,8 @@ fn test_hit_test_no_scroll_no_header() {
         "Entry 1 should be at screen row {entry1_screen_row}, heights={heights:?}, virtual_y={virtual_y:?}"
     );
 
-    let gap_row = at(&heights, 0); // right after entry
+    // Gap between entry 0 and entry 1
+    let gap_row = at(&heights, 0); // right after entry 0 ends
     assert_eq!(
         state.entry_index_at_screen_row(gap_row, area),
         None,
@@ -392,6 +419,7 @@ fn test_hit_test_with_sticky_header_excludes_header_rows() {
         state.scroll_offset
     );
 
+    // Rows in the header area should hit the pinned prompt (entry 0), except for gap rows which return None
     let sticky = state.current_sticky_layout(cache, &visible_range);
     for row in 0..header_rows {
         let result = state.entry_index_at_screen_row(row, area);
@@ -437,6 +465,8 @@ fn test_entry_screen_area_clipped_by_sticky_header() {
         .header_screen_rows();
 
     if header_rows > 0 {
+        // Get the screen area for an entry that's visible below the header
+        // Entry 1 (resp0) should be at or near the top of content area
         if let Some((entry_area, _top_clipped, _bottom_clipped)) = state.entry_screen_area(1, area)
         {
             // The entry area must NOT extend into the header
@@ -452,18 +482,22 @@ fn test_entry_screen_area_clipped_by_sticky_header() {
 
 #[test]
 fn test_entry_screen_area_behind_header_returns_none() {
+    // Scroll down far enough that entry 0 is entirely behind the sticky header
     let mut state = make_scrollback_for_hittest(10, 80, 10);
     let area = Rect::new(0, 0, 80, 10);
 
+    // Entry 0 (prompt) has height 1 at virtual_y=0.
     // Scrolling past it means it becomes the sticky header.
     state.scroll_down(5);
 
+    // Entry 0 is the pinned sticky header; entry_screen_area should return its header area (it IS visible, just in the header zone)
     let result = state.entry_screen_area(0, area);
     assert!(
         result.is_some(),
         "Entry 0 is the pinned sticky header, should be hittable"
     );
     let (entry_area, _top_clipped, _bottom_clipped) = result.unwrap();
+    // The header area should start at row 0 (top of scrollback)
     assert_eq!(entry_area.y, 0, "Pinned header should start at top");
     assert!(entry_area.height > 0, "Pinned header should have height");
 }
@@ -504,7 +538,8 @@ fn lazy_resumed_pinned_prompt_collapses_to_real_height() {
         .pinned
         .expect("an old prompt should be pinned after scrolling up");
 
-    // The pinned prompt was never measured (it sits above the viewport).
+    // The pinned prompt was never measured (it sits above the viewport), so its seeded truncated height is the 6-row MAX
+    // The collapsed sticky header must still match the prompt's real height (1 row), proving the seed no longer leaks empty padding rows
     assert!(
         !at(&cache.measured, pinned.entry_idx),
         "precondition: pinned prompt must be unmeasured (lazy seed in play)"
@@ -599,7 +634,7 @@ fn lazy_bulk_load_lays_out_viewport_plus_warm_pages_not_history() {
 
     let count = laid_out_count(&state);
     assert!(count >= 1, "the visible tail must be laid out");
-    // Bounded: viewport plus warm pages (each stub is several rows), never history
+    // Bounded: viewport plus warm pages (each stub is 6 rows), never history
     assert!(
         count <= 30 && count < state.len(),
         "laid-out count must be ~viewport+warm, not history (got {count})"
@@ -702,7 +737,8 @@ fn resize_defers_warm_above_across_a_frames_extra_layout_passes() {
 #[test]
 fn lazy_resume_scroll_up_lands_on_prewarmed_exact_entries() {
     let _theme = pin_theme();
-    // The point of the warm-up: scrolling up one page right after resume must land on already-exact entries (measured before the scroll).
+    // The point of the warm-up: scrolling up one page right after resume must land on already-exact entries (measured before the scroll)
+    // There is then no estimate-to-exact rebuild and no jump
     let mut state = ScrollbackState::new();
     bulk_load_stubs(&mut state, 200);
     state.prepare_layout(80, 20);
@@ -721,7 +757,9 @@ fn lazy_resume_scroll_up_lands_on_prewarmed_exact_entries() {
 #[test]
 fn lazy_warm_up_is_skipped_in_preserve_mode() {
     let _theme = pin_theme();
-    // Regression: the warm-up measures pages ABOVE the viewport and relies on the bottom re-pin to cancel the uniform shift.
+    // Regression: the warm-up measures pages ABOVE the viewport and relies on the bottom re-pin to cancel the uniform shift
+    // In follow_preserve_scroll (a prompt pinned at the TOP) follow_scroll_to_bottom keeps the scroll put, so warming above would shift the pin down
+    // That is a jump; the warm-up must skip preserve mode
     let mut state = bulk_load_wrapping(200);
     state.prepare_layout(20, 12);
 
@@ -744,7 +782,7 @@ fn lazy_warm_up_is_skipped_in_preserve_mode() {
         "preserve mode: warm-up must not measure above the viewport"
     );
 
-    // Same state without preserve: the warm-up DOES measure pages above (preserve guard is the only difference).
+    // Same state without preserve: the warm-up DOES measure pages above (preserve guard is the only difference), proving the test is load-bearing
     state.follow_preserve_scroll = false;
     state.warm_measure_pages_above(20);
     assert!(
@@ -782,7 +820,7 @@ fn lazy_scroll_up_measures_on_demand() {
     state.prepare_layout(80, 20);
     assert!(!measured_at(&state, 0), "top starts estimated");
 
-    // Scroll to the top and render again.
+    // Scroll to the very top and render again.
     state.goto_top();
     state.prepare_layout(80, 20);
 
@@ -801,7 +839,8 @@ fn lazy_scroll_up_measures_on_demand() {
 #[test]
 fn lazy_total_height_is_internally_consistent_and_refines_on_measure() {
     let _theme = pin_theme();
-    // Mixed estimated/exact entries: total_height must equal the cache sum Measuring everything (tall viewport) must refine it upward.
+    // Mixed estimated/exact entries: total_height must equal the cache sum
+    // Measuring everything (tall viewport) must refine it upward (word-wrap exact is at least the char-ceil estimate) while staying consistent
     let mut state = bulk_load_wrapping(40);
     state.prepare_layout(20, 6);
 
@@ -938,7 +977,9 @@ fn exact_total_oracle(state: &ScrollbackState, width: u16) -> u32 {
 #[test]
 fn lazy_scroll_to_entry_center_keeps_target_centered() {
     let _theme = pin_theme();
-    // Regression for the off-screen-center drift: an estimated target was positioned from estimated offsets The next settle.
+    // Regression for the off-screen-center drift: an estimated target was positioned from estimated offsets
+    // The next settle (which only re-pins top/bottom) left it off-center
+    // With the target region measured first, the target sits at the exact viewport center and stays there
     let mut state = bulk_load_wrapping(60);
     state.prepare_layout(20, 8); // bottom-pinned; target is off-screen
     let target = 15;
@@ -1129,6 +1170,7 @@ fn park_entry_at_row_zero(
     idx
 }
 
+/// Growing a streaming entry above a manually parked viewport must keep that marker at screen row 0.
 /// Missing semantic-anchor compensation lets `patch_virtual_y_for_dirty` shift later `virtual_y` while `scroll_offset` stays put.
 /// The marker then jolts downward.
 #[test]
@@ -1193,8 +1235,9 @@ fn growing_entry_above_manual_viewport_keeps_marker_at_screen_row_zero() {
     );
 }
 
-/// A full-cache rebuild that leaves `scroll_offset` uncompensated jolts the marker. Negative `screen_row_of` is valid failure evidence
-/// (marker now above the viewport); this must not panic or clamp-to-top into a false pass.
+/// Removing a multi-row entry above a manually parked viewport (edit coalesce / collapse) must keep that marker at screen row 0.
+/// A full-cache rebuild that leaves `scroll_offset` uncompensated jolts the marker.
+/// Negative `screen_row_of` is valid failure evidence (marker now above the viewport); this must not panic or clamp-to-top into a false pass.
 #[test]
 fn removing_entry_above_manual_viewport_keeps_marker_at_screen_row_zero() {
     let _theme = pin_theme();
@@ -1415,7 +1458,8 @@ fn removal_above_wrapped_park_keeps_row_inside_wrapping_entry() {
             .join("\n"),
         Color::Blue,
     ));
-    // One long paragraph of words too wide to pair up on a 20-col line Word-wrap burns about half of each line.
+    // One long paragraph of words too wide to pair up on a 20-col line
+    // Word-wrap burns about half of each line, so the char-ceil estimate undershoots the exact wrapped height; that is what makes the clamp bite
     let wrap_id = state.push_block(agent_block(&"aaaaaaaaaaa ".repeat(30)));
     push_anchor_fillers(&mut state, 60);
 
@@ -1537,7 +1581,8 @@ fn resize_clamps_subrow_within_rewrapping_anchor_line() {
         "viewport top is mid-paragraph (sub_rows > 0), not at the entry's top"
     );
 
-    // Widen: the anchor paragraph re-wraps to far fewer rows Without the clamp the stale `sub_rows` would push the top past the entry.
+    // Widen: the anchor paragraph re-wraps to far fewer rows
+    // Without the clamp the stale `sub_rows` would push the top past the entry; the clamp keeps it inside
     state.prepare_layout(wide, height);
     assert_eq!(
         entry_at_top(&state),
@@ -1557,9 +1602,10 @@ fn resize_anchors_gap_row_to_entry_above() {
     let _theme = pin_theme();
     let mut state = resize_anchor_state();
     let height = 20u16;
-    let anchor = 10usize;
+    let anchor = 10usize; // short, non-wrapping; the gap after it is 1 row
 
     state.prepare_layout(80, height);
+    // Park the top on the 1-row gap after entry 10 (the row just before 11).
     let gap_top = {
         let range = state.visible_entry_range();
         let vy = state.get_cached_virtual_y().unwrap();
@@ -1581,6 +1627,8 @@ fn resize_anchors_gap_row_to_entry_above() {
     );
     let before = screen_row_of(&state, anchor);
 
+    // Resize narrower: the wrapping block above grows
+    // The gap anchor must keep entry 10 within tolerance rather than jumping with the stale offset
     state.prepare_layout(40, height);
     assert_eq!(
         entry_at_top(&state),
@@ -1603,6 +1651,7 @@ fn lazy_measurement_window_boundaries_are_exact() {
     let viewport = 20usize;
     state.prepare_layout(80, viewport as u16);
 
+    // Derive the uniform stub stride from a measured entry (height plus the trailing gap of 1) rather than hard-coding it
     let stride = state.get_cached_entry_height(199).unwrap() as usize + 1;
     let top_idx = 100usize;
 
@@ -1610,7 +1659,8 @@ fn lazy_measurement_window_boundaries_are_exact() {
     state.set_scroll_offset(top_idx * stride);
     state.prepare_layout(80, viewport as u16);
 
-    // Window = [first_visible ..= last_visible + MEASURE_MARGIN_ENTRIES], with NO above-margin last_visible is the last entry starting.
+    // Window = [first_visible ..= last_visible + MEASURE_MARGIN_ENTRIES], with NO above-margin
+    // last_visible is the last entry starting before bottom
     let bottom = top_idx * stride + viewport;
     let last_visible = (bottom - 1) / stride;
     let win_end = (last_visible + MEASURE_MARGIN_ENTRIES).min(state.len() - 1);
@@ -1692,7 +1742,7 @@ fn lazy_total_height_matches_independent_exact_oracle() {
         oracle,
         "total_height equals the independent Σ-exact oracle"
     );
-    // cached == exact for several entries, not the last.
+    // cached == exact for several entries, not just the last.
     for idx in [0usize, 9, 21, 33, 39] {
         assert_eq!(
             state.get_cached_entry_height(idx).unwrap(),
@@ -1740,14 +1790,17 @@ fn lazy_empty_scrollback_and_oversized_viewport() {
     );
 }
 
-/// The last entry would also sit below the reachable `scroll_offset`.
+/// A long session can render past 65 535 rows, and the bottom must stay reachable. This test FAILS pre-fix:
+/// `total_height` saturates at 65 535, so the `total_height > 65_535` assertion fails. The last entry would also
+/// sit below the reachable `scroll_offset`.
 #[test]
 fn goto_bottom_reaches_end_past_u16_max_rows_gb3236() {
     let _theme = pin_theme();
     let mut state = ScrollbackState::new();
 
-    // Stub blocks render one screen row per source line (no markdown
-    // soft-wrapping).
+    // Stub blocks render one screen row per source line (no markdown soft-wrapping) and are not collapsed off-screen
+    // Their height ESTIMATE is therefore the full line count and counts toward total_height
+    // About 400 entries of about 200 lines each gives about 80 000 rows, comfortably past u16::MAX (65 535)
     let body = (0..200)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
@@ -1767,7 +1820,7 @@ fn goto_bottom_reaches_end_past_u16_max_rows_gb3236() {
         "total_height should exceed the old u16 cap, got {total_height}"
     );
 
-    // Pin to the bottom and confirm the final rows are on screen.
+    // Pin to the bottom and confirm the final rows are actually on screen.
     state.goto_bottom();
     let (scroll_offset, viewport_height, total_height) = state.scroll_info();
     assert!(
@@ -1775,6 +1828,7 @@ fn goto_bottom_reaches_end_past_u16_max_rows_gb3236() {
         "bottom unreachable: scroll_offset({scroll_offset}) + viewport({viewport_height}) \
          < total_height({total_height})"
     );
+    // The scroll position itself is past the old u16 ceiling, direct proof that content below row 65 535 is now reachable
     assert!(
         scroll_offset > 65_535,
         "scroll_offset should be past the old u16 cap, got {scroll_offset}"
@@ -1796,6 +1850,7 @@ fn goto_bottom_reaches_end_past_u16_max_rows_gb3236() {
 #[test]
 fn lazy_dirty_case2_settle_measures_revealed_region() {
     let _theme = pin_theme();
+    // A streaming chunk (Case 2: dirty heights, cache kept) while scrolled up into an unmeasured region must still measure the visible region
     let mut state = bulk_load_wrapping(200);
     state.prepare_layout(20, 10); // measures only the bottom
 
@@ -1807,6 +1862,7 @@ fn lazy_dirty_case2_settle_measures_revealed_region() {
         "visible region still estimated before the dirty frame"
     );
 
+    // Dirty entry 0 (off-screen) to take the Case 2 path on the next frame.
     let id = state.entry(0).unwrap().id;
     assert!(state.push_chunk_to_agent_deferred(id, "more"));
     state.prepare_layout(20, 10);
@@ -1821,7 +1877,8 @@ fn lazy_dirty_case2_settle_measures_revealed_region() {
 fn lazy_fold_anchor_settles_visible_region_on_estimated_session() {
     crate::appearance::cache::set_show_thinking_blocks(true);
     let _theme = pin_theme();
-    // fold_selected_impl nulls the cache and rebuilds to ESTIMATES. Without the in-fold settle they'd all be estimates.
+    // fold_selected_impl nulls the cache and rebuilds to ESTIMATES. Without the in-fold settle they'd all be
+    // estimates. (Load-bearing: verified to fail when the settle at fold_selected_impl is removed.).
     let mut state = ScrollbackState::new();
     let appearance = crate::appearance::AppearanceConfig {
         show_timestamps: false,
@@ -1883,7 +1940,9 @@ fn lazy_fold_anchor_settles_visible_region_on_estimated_session() {
 #[test]
 fn lazy_ensure_selected_visible_does_not_jump_on_upward_nav() {
     let _theme = pin_theme();
-    // Regression: `ensure_selected_visible` used to measure SYMMETRICALLY (above and below).
+    // Regression: `ensure_selected_visible` used to measure SYMMETRICALLY (above and below) and rebuild virtual_y
+    // Its fully-visible early return leaves scroll_offset unchanged, so the viewport jumped on `k`
+    // Measuring downward-only keeps the top anchored
     let mut state = bulk_load_wrapping(80);
     state.prepare_layout(20, 20);
     // Position the viewport in the middle so entries above the top stay estimated (only the visible window plus the below-margin gets measured)
@@ -1898,7 +1957,7 @@ fn lazy_ensure_selected_visible_does_not_jump_on_upward_nav() {
     );
     let top_row_before = screen_row_of(&state, top);
 
-    // Select a clearly-interior, fully-visible entry.
+    // Select a clearly-interior, fully-visible entry, then navigate UP one (it stays visible, so ensure_selected_visible takes its early return)
     state.set_selected(Some(top + 2));
     state.select_prev();
 
@@ -1972,7 +2031,9 @@ fn lazy_page_down_measures_revealed_entries() {
 #[test]
 fn lazy_ensure_selected_visible_measure_is_bounded() {
     let _theme = pin_theme();
-    // With the viewport jumped to the top and the selection far below.
+    // With the viewport jumped to the top and the selection far below, one select step must measure EXACTLY the
+    // bounded window [sel-vp, sel+vp]. It must never measure the whole prefix; that is the O(history) freeze being
+    // removed. A regression to the unbounded span fails here with a span mismatch, not an ambiguous count.
     let vp = 12u16;
     let mut state = bulk_load_wrapping(200);
     state.prepare_layout(20, vp);
@@ -1986,6 +2047,8 @@ fn lazy_ensure_selected_visible_measure_is_bounded() {
     );
     let before = state.layout_cache.as_ref().unwrap().measured.clone();
 
+    // One step down: ensure_selected_visible scrolls to 151 and measures EXACTLY the bounded window [151-vp, 151+vp]
+    // All 25 are plain agent messages (none hidden or group headers), so the whole window flips
     state.select_next();
     let selected = state.selected().unwrap();
     assert_eq!(selected, 151, "select_next advanced the parked selection");
@@ -2013,7 +2076,8 @@ fn lazy_ensure_selected_visible_measure_is_bounded() {
 fn lazy_fold_no_anchor_does_not_jump_on_estimated_session() {
     crate::appearance::cache::set_show_thinking_blocks(true);
     let _theme = pin_theme();
-    // With anchor_on_fold = false, folding must NOT measure above the viewport without re-anchoring (that jumps).
+    // With anchor_on_fold = false, folding must NOT measure above the viewport without re-anchoring (that jumps)
+    // The top entry must stay put
     let mut state = ScrollbackState::new();
     let mut appearance = crate::appearance::AppearanceConfig {
         show_timestamps: false,
@@ -2058,7 +2122,8 @@ fn lazy_fold_no_anchor_does_not_jump_on_estimated_session() {
 #[test]
 fn lazy_single_turn_center_measures_sticky_prompt() {
     let _theme = pin_theme();
-    // measure_scroll_target's SingleTurn branch measures the turn's sticky prompt (visible_range.start).
+    // measure_scroll_target's SingleTurn branch measures the turn's sticky prompt (visible_range.start), far above the centered target
+    // The sticky-header height in the centering math is therefore exact
     let mut state = ScrollbackState::new();
     let appearance = crate::appearance::AppearanceConfig {
         show_timestamps: false,
@@ -2091,8 +2156,9 @@ fn lazy_single_turn_center_measures_sticky_prompt() {
     );
     assert!(measured_at(&state, target), "target measured");
 
-    // Observable result (mirrors the AllTurns center test): the target lands
-    // at the viewport center.
+    // Observable result (mirrors the AllTurns center test): the target lands at the viewport center, offset down by the pinned prompt's sticky header
+    // `current_sticky_layout` reports the exact header at the final scroll, derived independently of the centering math under test
+    // A centering-math regression in SingleTurn mode is therefore caught here
     let header = {
         let cache = state.layout_cache.as_ref().unwrap();
         let range = state.visible_entry_range();
@@ -2139,9 +2205,11 @@ fn window_fixture(
 fn compute_paint_window_straddle_backs_off_one_entry() {
     let (vy, layouts) = window_fixture(&[(3, 1); 5], &[]);
     let no_run = |_: usize| -> usize { unreachable!("no verb headers in fixture") };
+    // vy = [0, 4, 8, 12, 16]; rows 5..9: entry 1 (rows 4..7) straddles the top.
     let (range, y0) = compute_paint_window(&vy, &layouts, 0..5, 5, 4, no_run);
     assert_eq!(range, 1..3);
     assert_eq!(y0, 4);
+    // Rows 7..11: entry 1 ends exactly at the viewport top, so no back-off
     let (range, y0) = compute_paint_window(&vy, &layouts, 0..5, 7, 4, no_run);
     assert_eq!(range, 2..3);
     assert_eq!(y0, 8);
@@ -2169,9 +2237,10 @@ fn compute_paint_window_empty_visible_range() {
 
 #[test]
 fn compute_paint_window_verb_header_extends_through_run_end() {
-    // Folded run: 1-row header at multiple height-0 members, then a break.
+    // Folded run: 1-row header at 2, three height-0 members, then a break.
     let rows = [(3, 1), (2, 1), (1, 0), (0, 0), (0, 0), (0, 1), (3, 1)];
     let (vy, layouts) = window_fixture(&rows, &[2]);
+    // vy = [0, 4, 7, 8, 8, 8, 9]; rows 0..8 end right after the header row, so every member sits past the window bottom
     let (range, y0) = compute_paint_window(&vy, &layouts, 0..7, 0, 8, |i| {
         assert_eq!(i, 2, "run_end is only consulted for the header");
         6
@@ -2189,12 +2258,14 @@ fn compute_paint_window_verb_header_extends_through_run_end() {
 
 #[test]
 fn compute_paint_window_truncation_header_extends_through_run_end() {
-    // Collapsed truncation run: a count-marked header at multiple height-0 hidden rows sharing the tail's virtual_y.
+    // Collapsed truncation run: a count-marked header at 1, two height-0 hidden rows sharing the tail's virtual_y, then the visible tail
+    // The header is NOT a verb header; the gate must fire on `is_group_header` alone. The hidden rows sit past the window bottom.
     let rows = [(3, 1), (1, 0), (0, 0), (0, 0), (1, 0), (1, 1)];
     let (vy, mut layouts) = window_fixture(&rows, &[]);
     if let Some(slot) = layouts.get_mut(1) {
         slot.group_header_count = 2;
     }
+    // vy = [0, 4, 5, 5, 5, 6]; rows 0..5 end right after the header row.
     let (range, _) = compute_paint_window(&vy, &layouts, 0..6, 0, 5, |i| {
         assert_eq!(i, 1, "run_end is only consulted for the header");
         6

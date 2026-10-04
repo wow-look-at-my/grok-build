@@ -224,7 +224,7 @@ fn slash_plan_no_args_already_in_plan_shows_plan() {
 
     let effects = dispatch(Action::SendPrompt("/plan".into()), &mut app);
 
-    // No SetSessionMode; show the plan (no async effect)
+    // No SetSessionMode; just show the plan (no async effect)
     assert!(effects.is_empty(), "expected no effects, got: {effects:?}");
 }
 
@@ -459,9 +459,8 @@ fn set_yolo_mode_off_to_on_emits_persist_with_rollback() {
                 crate::app::actions::PermissionModePersist::WithRollback("ask"),
                 "rollback must revert to the prior canonical (was 'ask')"
             );
-            // Assert session_id explicitly, not hidden behind `..` A
-            // regression that dropped it silently broke the ACP notification
-            // gate.
+            // Assert session_id explicitly, not hidden behind `..`
+            // A regression that dropped it silently broke the ACP notification gate at effects.rs
             assert!(
                 session_id.is_some(),
                 "session_id must be threaded through for ACP notification gating"
@@ -566,7 +565,8 @@ fn set_yolo_mode_on_to_off_emits_persist_with_rollback() {
         other => panic!("expected PersistPermissionMode, got {other:?}"),
     }
 
-    // Defense-in-depth: pin that the `SettingValue` re-export still imports.
+    // Defense-in-depth: pin that the `SettingValue` re-export still imports at the test boundary
+    // Pruning the public re-export would silently break the settings_e2e crate
     let _ = SettingValue::Enum("ask");
 }
 
@@ -613,7 +613,7 @@ fn enable_always_approve_sends_response_and_flips_yolo_and_persists() {
         &mut app,
     );
 
-    // The kind is `AllowOnce` on the wire.
+    // (1) The shell sees the option_id we picked. The kind is `AllowOnce` on the wire.
     //     The shell's `map_selected_outcome` resolves the id under the `AllowOnce` branch and returns `PromptOutcome::AllowOnce`
     //     Verify the id round-trips
     match response_rx.try_recv() {
@@ -636,7 +636,7 @@ fn enable_always_approve_sends_response_and_flips_yolo_and_persists() {
         }
     }
 
-    // This is the bridge that writes
+    // (2) The dispatcher returns a PersistPermissionMode effect with canonical "always-approve". This is the bridge that writes
     //     canonical "always-approve". This is the bridge that writes
     //     ~/.grok/config.toml AND fires x.ai/yolo_mode_changed.
     let persist = effects
@@ -654,6 +654,7 @@ fn enable_always_approve_sends_response_and_flips_yolo_and_persists() {
         "PersistPermissionMode canonical must be `always-approve` (not `ask`/`default`)",
     );
 
+    // (3) Per-session YOLO flag is flipped; future prompts will be auto-approved in `handle_permission_request`
     assert!(
         test_agent(&app, AgentId(0)).session.is_yolo(),
         "session.yolo_mode must be flipped on after selecting enable-always-approve",
@@ -718,7 +719,8 @@ fn set_yolo_mode_on_with_no_allow_once_option_sends_cancelled() {
     let mut app = test_app_with_agent();
     let agent = app.agents.get_mut(&AgentId(0)).unwrap();
 
-    // Inject a permission with only AllowAlways and RejectAlways (NO AllowOnce).
+    // Inject a permission with only AllowAlways and RejectAlways (NO AllowOnce)
+    // The drain must NOT pick AllowAlways even though it's the only "Allow" option; that would breach the safety contract
     let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
     let request = acp::RequestPermissionRequest::new(
         acp::SessionId::new(Arc::from("test-sess")),
@@ -772,6 +774,7 @@ fn set_yolo_mode_on_with_no_allow_once_option_sends_cancelled() {
             outcome: acp::RequestPermissionOutcome::Cancelled,
             ..
         })) => {
+            // Correct: preserved the safety contract
         }
         Ok(Ok(acp::RequestPermissionResponse {
             outcome:
@@ -793,7 +796,7 @@ fn set_yolo_mode_on_with_no_allow_once_option_sends_cancelled() {
 
 /// **Security-critical multi-item drain:** the drain loop must fully empty the queue, not stop at the first item.
 /// A regression that swapped `drain(..)` for `pop_front()` would silently leak queued permissions on YOLO toggle.
-/// With multiple items in the queue, this catches an off-by-N drain bug.
+/// With 3 items in the queue, this catches an off-by-N drain bug.
 #[test]
 fn set_yolo_mode_on_drains_multi_item_queue() {
     use crate::views::permission_view::{PermissionFocus, PermissionViewState};
@@ -802,7 +805,7 @@ fn set_yolo_mode_on_drains_multi_item_queue() {
     let mut app = test_app_with_agent();
     let agent = app.agents.get_mut(&AgentId(0)).unwrap();
 
-    // Inject permissions, each with AllowOnce.
+    // Inject 3 permissions, each with AllowOnce.
     let mut response_rxs = Vec::new();
     for i in 0..3u32 {
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -851,7 +854,7 @@ fn set_yolo_mode_on_drains_multi_item_queue() {
         test_agent(&app, AgentId(0)).permission_queue.is_empty(),
         "multi-item drain must fully empty the queue",
     );
-    // All channels received the AllowOnce response.
+    // All 3 channels received the AllowOnce response.
     for (i, mut rx) in response_rxs.into_iter().enumerate() {
         match rx.try_recv() {
             Ok(Ok(acp::RequestPermissionResponse {
@@ -866,8 +869,8 @@ fn set_yolo_mode_on_drains_multi_item_queue() {
     }
 }
 
-/// **Security-critical:** re-dispatching `SetYoloMode(true)` when already on MUST still drain permissions that arrived between both dispatches. A
-/// future "optimization" that skipped the drain on no-op redispatch would lose security-critical state.
+/// **Security-critical:** re-dispatching `SetYoloMode(true)` when already on MUST still drain permissions that arrived between the two dispatches.
+/// A future "optimization" that skipped the drain on no-op redispatch would lose security-critical state.
 #[test]
 fn set_yolo_mode_on_duplicate_dispatch_still_drains_queue() {
     use crate::views::permission_view::{PermissionFocus, PermissionViewState};
@@ -947,7 +950,7 @@ fn set_yolo_mode_redispatch_same_value_still_emits_effect_and_toast() {
     let mut app = test_app_with_agent();
     let _ = dispatch(Action::SetYoloMode(true), &mut app);
     assert!(test_agent(&app, AgentId(0)).toast.is_some());
-    // Clear the toast: prove the second dispatch RE-FIRES the toast (not "the first toast is still visible")
+    // Clear the toast: prove the second dispatch RE-FIRES the toast (not just "the first toast is still visible")
     app.agents.get_mut(&AgentId(0)).unwrap().toast = None;
 
     let effects = dispatch(Action::SetYoloMode(true), &mut app);
@@ -1148,7 +1151,7 @@ fn cycle_mode_plan_to_always_approve_when_auto_gated_off() {
 fn cycle_mode_auto_to_always_approve_blocked_by_policy_pin() {
     let mut app = test_app_with_agent();
     app.yolo_policy_block = Some(POLICY_WARNING);
-    // "In Auto" means the per-session flag the cycle reads (`is_auto()`), not the global `current_ui` mirror.
+    // "In Auto" means the per-session flag the cycle reads (`is_auto()`), not just the global `current_ui` mirror; gate is on via `test_app`
     app.current_ui.permission_mode = Some("auto".into());
     app.agents.get_mut(&AgentId(0)).unwrap().session.auto_mode = true;
 
@@ -1415,12 +1418,13 @@ fn permission_setters_never_touch_plan_state() {
     }
 }
 
+/// Security regression (0.2.89).
 /// Launch with `permission_mode = "always-approve"`, Shift+Tab on the welcome screen (no session yet) to Normal, then start the session.
 /// The cycle must persist "ask" to disk or the stale config re-enables yolo on the next launch while the footer shows Normal.
 #[test]
 fn cycle_mode_pre_session_always_approve_to_normal_persists_ask() {
     let mut app = test_app_with_agent();
-    // Launch-seeded always-approve.
+    // Launch-seeded always-approve: the global default (read by SessionFlags at CreateSession) and the per-agent flag the cycle arm matches on
     app.default_yolo = true;
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -1564,7 +1568,8 @@ fn set_permission_mode_default_overrides_canonical_to_default() {
              — the inner's bool projection would otherwise leave it at 'ask'",
     );
 
-    // Effect carries the canonical "default" and a rollback to the pre-dispatch canonical "ask" The prior `permission_mode` was None.
+    // Effect carries the canonical "default" and a rollback to the pre-dispatch canonical "ask"
+    // The prior `permission_mode` was None, falling through to "ask"
     assert_eq!(effects.len(), 1);
     let Some(effect) = effects.first() else {
         panic!("expected an effect, got {effects:?}");
@@ -1586,7 +1591,8 @@ fn set_permission_mode_default_overrides_canonical_to_default() {
         other => panic!("expected PersistPermissionMode, got {other:?}"),
     }
 
-    // Toast is the dedicated Default string.
+    // Toast is the dedicated Default string, NOT `yolo_toast(false)`
+    // `"✓ Always-approve: off"` would be the wrong wording for a Permission-mode picker commit
     let toast = test_agent(&app, AgentId(0))
         .toast
         .as_ref()
@@ -1603,8 +1609,8 @@ fn set_permission_mode_default_overrides_canonical_to_default() {
 fn set_permission_mode_always_approve_from_default_captures_prev_canonical() {
     use crate::app::actions::PermissionModeKind;
     let mut app = test_app_with_agent();
-    // Establish prior state: user is in "default" (yolo=false,
-    // current_ui.permission_mode = Some("default")).
+    // Establish prior state: user is in "default" (yolo=false, current_ui.permission_mode = Some("default"))
+    // This is the exact starting state the rollback path was designed to preserve
     let _ = dispatch(
         Action::SetPermissionMode(PermissionModeKind::Default),
         &mut app,
@@ -1628,6 +1634,7 @@ fn set_permission_mode_always_approve_from_default_captures_prev_canonical() {
     );
 
     // **Headline rollback-preservation contract.**
+    // Disk failure here must roll back to "default", NOT "ask" (which a bool projection of the prior yolo=false would produce)
     assert_eq!(effects.len(), 1);
     let Some(effect) = effects.first() else {
         panic!("expected an effect, got {effects:?}");
@@ -1647,8 +1654,8 @@ fn set_permission_mode_always_approve_from_default_captures_prev_canonical() {
         other => panic!("expected PersistPermissionMode, got {other:?}"),
     }
 
-    // Toast is the destructive ⚠ variant AlwaysApprove still reuses
-    // yolo_toast(true) because the user IS enabling YOLO.
+    // Toast is the destructive ⚠ variant
+    // AlwaysApprove still reuses yolo_toast(true) because the user IS enabling YOLO, and the weight of the destructive warning is correct
     let toast = test_agent(&app, AgentId(0))
         .toast
         .as_ref()
@@ -1666,12 +1673,15 @@ fn set_permission_mode_always_approve_from_default_captures_prev_canonical() {
 #[test]
 fn set_yolo_mode_with_live_yolo_and_default_ui_mirror_rolls_back_to_default() {
     let mut app = test_app_with_agent();
-    // Manually set up the divergence: agent yolo=true (LIVE), current_ui.permission_mode = Some("default").
+    // Manually set up the divergence: agent yolo=true (LIVE), current_ui.permission_mode = Some("default")
+    // The mirror says the user picked "Default" before something flipped yolo
     app.agents.get_mut(&AgentId(0)).unwrap().session.yolo_mode = true;
     app.default_yolo = true;
     app.current_ui.permission_mode = Some("default".into());
 
-    // Without the LIVE branch fix, the rollback canonical would derive from the bool `prev` as "always-approve".
+    // Without the LIVE branch fix, the rollback canonical would derive from the bool `prev` as "always-approve", losing the "default" preference
+    // The key invariant: the rollback target matches what the modal would have shown via `current_value_for` at dispatch time
+    // Since LIVE yolo wins in `current_value_for`, it must also win here
     let effects = dispatch(Action::SetYoloMode(false), &mut app);
     let Some(effect) = effects.first() else {
         panic!("expected an effect, got {effects:?}");
@@ -1740,7 +1750,7 @@ fn dispatch_cycle_mode_normal_to_plan_does_not_touch_yolo() {
 }
 
 /// `active_agent_plan_nudge_state` reports the plan-nudge visibility and the optimistic plan state.
-/// Those are both inputs to the shift+tab acceptance guard.
+/// Those are the two inputs to the shift+tab acceptance guard.
 #[test]
 fn active_agent_plan_nudge_state_tracks_nudge_and_plan() {
     let mut app = test_app_with_agent();
@@ -1812,7 +1822,8 @@ fn cycle_into_plan_without_nudge_leaves_other_tip_intact() {
 #[test]
 fn dispatch_cycle_mode_plan_to_always_approve_delegates_through_inner() {
     let mut app = test_app_with_agent();
-    // Start in Auto (Plan to Auto is a prior step.
+    // Start in Auto (Plan to Auto is a prior step; see cycle_mode_plan_to_auto)
+    // The cycle reads the per-session `is_auto()` flag, not the global mirror.
     app.current_ui.permission_mode = Some("auto".into());
     app.agents.get_mut(&AgentId(0)).unwrap().session.auto_mode = true;
 
@@ -2403,8 +2414,9 @@ fn set_plan_mode_idempotent_on() {
 #[test]
 fn set_plan_mode_idempotent_off() {
     let mut app = test_app_with_agent();
-    // Seed: NOT in plan mode The default state from test_app_with_agent
-    // already satisfies this.
+    // Seed: NOT in plan mode
+    // The default state from test_app_with_agent already satisfies this (plan_mode_active = false, plan_mode_pending = None)
+    // Assert it anyway for clarity
     {
         let agent = app.agents.get(&AgentId(0)).unwrap();
         assert!(!agent.plan_mode_active);
@@ -2452,6 +2464,8 @@ fn plan_mode_toast_format() {
     assert!(toast.contains('\u{2713}'));
 
     // Bring the agent into plan mode for the OFF toast assertion.
+    // The previous SetPlanMode(On) set pending = Some(true)
+    // We need the OFF dispatch to go through the real mutation path, so we let the optimistic state stand
     let _ = dispatch(
         Action::SetPlanMode(crate::app::actions::PlanModeKind::Off),
         &mut app,
@@ -2474,8 +2488,7 @@ fn plan_mode_toast_format() {
 #[test]
 fn set_plan_mode_idempotency_uses_pending_over_active() {
     let mut app = test_app_with_agent();
-    // Seed a divergent state: active=false (the shell hasn't confirmed yet),
-    // pending=Some(true) (the user toggled)
+    // Seed a divergent state: active=false (the shell hasn't confirmed yet), pending=Some(true) (the user just toggled)
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
         agent.plan_mode_active = false;
@@ -2553,6 +2566,9 @@ fn the_ring_keeps_its_stop_order_across_a_full_cycle() {
     );
 }
 
+/// Rapid Shift+Tab presses land on the Nth ring stop and keep it: two presses
+/// with no confirmation in between leave the effective mode on Auto (the 2nd
+/// stop), with the plan and auto signals agreeing.
 #[test]
 fn rapid_cycle_presses_land_on_and_keep_the_last_stop() {
     use crate::app::agent_view::ModeRequest;
@@ -2820,7 +2836,7 @@ fn an_agent_that_publishes_modes_drops_auto() {
     let mut app = test_app_with_agent();
     app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
 
-    // Presses move the agent from Normal to Plan to Auto before a session exists
+    // Two presses move the agent from Normal to Plan to Auto before a session exists
     dispatch(Action::CycleMode, &mut app);
     dispatch(Action::CycleMode, &mut app);
     assert!(test_agent(&app, AgentId(0)).session.is_auto());
@@ -2837,7 +2853,8 @@ fn an_agent_that_publishes_modes_drops_auto() {
     );
 }
 
-/// An agent that publishes modes answers `session/new` with the same modes.
+/// Binds `sess-1` to the test agent with a two-mode list.
+/// An agent that publishes modes answers `session/new` with the same two modes.
 fn create_session_with_published_modes(app: &mut AppView) -> Vec<Effect> {
     dispatch(
         Action::TaskComplete(TaskResult::SessionCreated {

@@ -1,10 +1,14 @@
-//! Where a task sits between running and evicted, and the proof required to move it.
+//! Where a task sits between running and evicted, and the proof required to
+//! move it. The transitions live here, away from the process plumbing, so the
+//! state machine can be tested without a live child.
 
 use std::time::Instant;
 
 use super::ExitStatus;
 
-/// Proof of whether the child was waited on.
+/// Proof of whether the child was waited on. The field is private: [`Collection::of`] reads the child handle, which
+/// tokio clears once a `wait` or `try_wait` has returned, so a call site cannot claim a wait that never happened.
+/// [`Collection::ABANDONED`] is always claimable, since that direction only costs more polling.
 pub(super) struct Collection(bool);
 
 impl Collection {
@@ -30,8 +34,9 @@ pub(super) enum Lifecycle {
         status: ExitStatus,
         collected: bool,
     },
-    /// The in-memory copy. An uncollected child keeps being polled after the
-    /// sweep, until eviction abandons it.
+    /// The in-memory copy has been dropped for the log on disk. An
+    /// uncollected child keeps being polled after the sweep, until eviction
+    /// abandons it.
     Swept {
         status: ExitStatus,
         at: Instant,

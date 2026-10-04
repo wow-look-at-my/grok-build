@@ -1,8 +1,12 @@
-//! Compaction mode — how much structure the model gets to recover detail the lossy summary dropped.
+//! Compaction mode — how much structure the model gets to recover detail the
+//! lossy summary dropped. In `xai-chat-state` so flag resolution and the
+//! transcript-hint builder share one definition.
 
 use xai_compaction_transcript::CompactionDetail;
 
 /// How compaction exposes pre-compaction history to the model afterwards.
+/// `Segments` carries its verbatim detail level inline, since detail is
+/// meaningful only there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum CompactionMode {

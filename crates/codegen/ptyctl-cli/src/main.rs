@@ -96,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
             stable_ms,
             timeout,
         } => {
+            // Exit code contract: 0 matched, 1 timeout, 2 usage/connection errors.
             let exit = |code: i32| -> ! { std::process::exit(code) };
             let url = match target.to_url() {
                 Ok(url) => url,

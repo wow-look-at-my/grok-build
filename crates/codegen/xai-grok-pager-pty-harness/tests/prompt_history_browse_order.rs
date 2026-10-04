@@ -1,4 +1,7 @@
 //! E2E: the Up browse is one reverse-chronological list holding every kind of thing typed at the composer, interleaved in send order.
+//!
+//! The panel paints oldest at the top, so a newest-first list lands on strictly descending rows.
+//! `#` notes need `[features] remember_mode = true`, which the run seeds into the sandbox `$GROK_HOME/config.toml`.
 
 use std::time::Duration;
 
@@ -209,7 +212,7 @@ fn send_shell_command(pager: &mut PtyHarness, command: &str) -> Result<()> {
 
 /// Rows of the open history panel, top (oldest) to bottom (newest, against the composer).
 ///
-/// The panel is bounded by horizontal rules; the top one carries the ` history ` caption.
+/// The panel is bounded by two horizontal rules; the top one carries the ` history ` caption.
 fn panel_rows(screen: &str) -> Vec<String> {
     let lines: Vec<&str> = screen.lines().collect();
     let Some(top) = lines

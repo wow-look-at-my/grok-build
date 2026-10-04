@@ -126,7 +126,9 @@ pub enum AccessKind {
     AgentMessage {
         subagent_id: String,
     },
-    /// A mutating tool that is neither a file edit, a command.
+    /// A mutating tool that is neither a file edit, a command, nor an MCP call (subagent spawn,
+    /// scheduler, workflow, generation, deploy, feedback, browser, anything unclassified), named by
+    /// its tool id. No grant scope covers it: every call prompts.
     Tool(String),
 }
 #[derive(Debug, Clone, PartialEq, Eq)]

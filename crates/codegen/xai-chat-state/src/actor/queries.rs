@@ -41,6 +41,7 @@ impl ChatStateActor {
         }
 
         // Find the conversation position of the Nth User item.
+        // Items before that position are kept; from that position onward removed.
         let mut user_count = 0;
         let mut truncate_at = self.state.conversation.len();
 
@@ -116,8 +117,8 @@ impl ChatStateActor {
         self.state.conversation.len()
     }
 
-    /// Whether the conversation has any assistant tool call without a
-    /// matching `ToolResult`.
+    /// Whether the conversation has any assistant tool call without a matching
+    /// `ToolResult` (the dangling-tool-call repair would fire on the next build).
     pub(super) fn has_dangling_tool_calls(&self) -> bool {
         xai_grok_sampling_types::has_dangling_tool_calls(&self.state.conversation)
     }
@@ -173,14 +174,16 @@ impl ChatStateActor {
                         segments.push(a.content.as_ref());
                     }
                 }
-                // Committed between salvage segments on reasoning models; not report content, not a boundary.
+                // Committed between salvage segments on reasoning models;
+                // not report content, not a boundary.
                 xai_grok_sampling_types::ConversationItem::Reasoning(_) => {}
                 // Join only across the salvage reminder; any other reminder
                 // separates distinct answers.
                 xai_grok_sampling_types::ConversationItem::User(u)
                     if u.synthetic_reason
                         == xai_grok_sampling_types::SyntheticReason::LengthContinue => {}
-                // Boundary — deliberately including `BackendToolCall`.
+                // Boundary — deliberately including `BackendToolCall`: a
+                // hosted-tool step between segments is a real step boundary.
                 _ => break,
             }
         }
@@ -215,13 +218,14 @@ impl ChatStateActor {
     }
 
     /// Return the current turn's last assistant message with non-empty text.
+    /// Bounded to the current prompt turn; see [`Self::assistant_texts_in_turn`].
     pub(super) fn get_last_assistant_text_in_turn(&self) -> Option<String> {
         self.assistant_texts_in_turn().pop()
     }
 
-    /// Concatenate every non-empty assistant message in the current turn
-    /// (`"\n"`-joined). Same turn-boundary rules as
-    /// [`Self::get_last_assistant_text_in_turn`].
+    /// Concatenate every non-empty assistant message in the current turn (`"\n"`-joined).
+    /// Same turn-boundary rules as [`Self::get_last_assistant_text_in_turn`].
+    /// Use this when export must keep earlier bubbles of a multi-round tool turn.
     pub(super) fn get_assistant_text_in_turn(&self) -> Option<String> {
         let texts = self.assistant_texts_in_turn();
         if texts.is_empty() {
@@ -259,8 +263,8 @@ impl ChatStateActor {
         self.state.conversation.get(index).cloned()
     }
 
-    /// Return the processed text of the last user query (metadata tags
-    /// stripped).
+    /// Return the processed text of the last user query (metadata tags stripped).
+    /// Delegates to [`extract_last_user_query`] so the caller does not need a full conversation clone.
     pub(super) fn get_last_user_query_text(&self) -> Option<String> {
         extract_last_user_query(&self.state.conversation)
     }

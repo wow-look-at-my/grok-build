@@ -1,4 +1,13 @@
-//! Builds the "Read 10 files, Ran 2 subagents" header label for a folded run of consecutive non-destructive tool calls.
+//! Builds the "Read 10 files, Ran 2 subagents" header label for a folded run of consecutive non-destructive tool calls and subagent lifecycle rows.
+//! A run also claims any finished collapsed thoughts inside it.
+//! The run classification ([`run_step`]) also lives here, shared by the layout fold, range resolution, and the label walk.
+//!
+//! The layout pass in `state/layout.rs` detects the runs and marks the header via `EntryLayoutInfo::verb_group_header`.
+//! The render loop calls [`verb_group_header_label`] to build the live label each frame.
+//! Running entries repaint every tick, so tense and counts update in place; no per-call detail churns beside the label while the run executes.
+//!
+//! The same bucket vocabulary labels the truncation ("N more") headers: the render loop calls [`truncation_header_label`] with the fold's span.
+//! Both walks feed the shared `BucketAccumulator` so the two label families can't drift.
 
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -14,8 +23,11 @@ use crate::theme::Theme;
 pub(crate) enum RunStep {
     /// A collapsed verb-groupable tool or subagent entry: joins the run and counts toward the fold threshold ([`RunScan::folds`]).
     Member(VerbGroupKind),
+    /// A finished, collapsed, shown thinking entry: claimed into the run (folds to height 0).
+    /// It never counts toward the threshold and never appears in the header label.
     ThoughtMember,
     /// An entry that renders its own rows (or none) without joining or breaking the run.
+    /// That covers hidden, streaming, user-opened thinking, thinking that carries prompt chrome, and a manually-opened verb-groupable tool.
     Transparent,
     /// Anything else: ends the run.
     Break,
@@ -34,7 +46,8 @@ pub(crate) fn run_step(entry: &ScrollbackEntry, show_thinking: bool) -> RunStep 
         if entry.display_mode == DisplayMode::Collapsed {
             RunStep::Member(kind)
         } else {
-            // A manually-opened member keeps its own rows without splitting the run.
+            // A manually-opened member keeps its own rows without splitting the run, the same treatment as opened thinking
+            // Toggling a member of an expanded group therefore never dissolves the group
             RunStep::Transparent
         }
     } else if matches!(entry.block, RenderBlock::Subagent(_)) {
@@ -57,8 +70,8 @@ pub(crate) fn run_step(entry: &ScrollbackEntry, show_thinking: bool) -> RunStep 
     }
 }
 
-/// Whether an in-place block swap changes the entry's verb-group kind (e.g.
-/// the eager `Other` placeholder refining into a `Read`).
+/// Whether an in-place block swap changes the entry's verb-group kind (e.g. the eager `Other` placeholder refining into a `Read`).
+/// Such swaps change fold membership, so the swap site must mark the entry structurally dirty for the layout fold to catch up on the next frame.
 pub(crate) fn verb_group_kind_changed(old: &RenderBlock, new: &RenderBlock) -> bool {
     let kind_of = |block: &RenderBlock| match block {
         RenderBlock::ToolCall(tc) => tc.verb_group_kind(),
@@ -70,6 +83,7 @@ pub(crate) fn verb_group_kind_changed(old: &RenderBlock, new: &RenderBlock) -> b
 /// Shape of one forward run walk, as reported by [`scan_run_forward`].
 pub(crate) struct RunScan {
     /// Member entries counted (tool calls and subagent rows), including a member start entry.
+    /// Thought members claim but never count; the fold threshold is members-only.
     pub(crate) members: usize,
     /// Exclusive run end: one past the last claimed entry (member or thought member), so trailing transparent entries stay outside the run.
     pub(crate) end: usize,
@@ -78,7 +92,9 @@ pub(crate) struct RunScan {
 }
 
 impl RunScan {
-    /// Whether the run folds into a verb-group header row.
+    /// Whether the run folds into a verb-group header row. Thought members never count, so a pure-thought run (whose
+    /// label would be empty) never folds. The layout fold and `verb_group_range_of` share this predicate so the two
+    /// can't drift.
     pub(crate) fn folds(&self) -> bool {
         self.members >= 1
     }
@@ -131,8 +147,8 @@ pub struct VerbGroupHeaderLabel {
     pub failed: bool,
 }
 
-/// The channel that carries a group-header row's aggregated label, mirroring
-/// the fold families of `groups::GroupKind`.
+/// The single channel that carries a group-header row's aggregated label, mirroring the fold families of
+/// `groups::GroupKind`. A header row belongs to exactly one fold, so a row carries at most one label.
 pub enum GroupHeaderLabel {
     /// Verb-group run header ("Read 3 files, Searched 2 patterns").
     VerbRun(VerbGroupHeaderLabel),
@@ -155,6 +171,8 @@ struct Bucket<'e> {
     kind: VerbGroupKind,
     calls: usize,
     /// Distinct-count override: when non-empty its size replaces `calls` as the displayed count.
+    /// Holds WebSearch citation URLs (distinct result websites) and subagent child session ids.
+    /// The started and terminal rows of one subagent count once; a burst of terminal rows counts each distinct subagent.
     sources: std::collections::HashSet<&'e str>,
     /// Distinct child ids whose Subagent row is still `is_running`. Empty for other kinds.
     running_sources: std::collections::HashSet<&'e str>,
@@ -217,7 +235,8 @@ pub fn truncation_header_label(
         match &entry.block {
             RenderBlock::ToolCall(block) => acc.push(block.label_kind()?, entry),
             RenderBlock::Subagent(_) => acc.push(VerbGroupKind::Subagent, entry),
-            // A participant the vocabulary can't name would leave the label dishonest about what's hidden Decline.
+            // A participant the vocabulary can't name would leave the label dishonest about what's hidden
+            // Decline so the numerically exact plain count renders instead
             _ => return None,
         }
     }
@@ -228,8 +247,9 @@ pub fn truncation_header_label(
     Some(acc.into_label(theme))
 }
 
-/// Shared bucket accumulation and label rendering for the aggregated group
-/// headers.
+/// Shared bucket accumulation and label rendering for the aggregated group headers.
+/// Callers own the walk: which entries join and under what classification.
+/// This owns per-kind counting, distinct-source overrides, tool outcome counting, and the rendered line.
 #[derive(Default)]
 struct BucketAccumulator<'e> {
     buckets: Vec<Bucket<'e>>,
@@ -490,7 +510,7 @@ mod tests {
             b.content = Some("results".into());
             entry(ToolCallBlock::WebSearch(b))
         };
-        // Distinct URLs across searches, one duplicated.
+        // Three distinct URLs across two searches, one duplicated.
         let entries = vec![
             searched("grok", &["https://a.com", "https://b.com"]),
             searched("pager", &["https://b.com", "https://c.com"]),
@@ -583,7 +603,7 @@ mod tests {
 
     #[test]
     fn truncation_label_buckets_commands_and_never_thoughts() {
-        // Commands and thoughts hidden: thoughts occupy participant slots but the label stays tools-only
+        // Three commands and two thoughts hidden: thoughts occupy participant slots but the label stays tools-only
         let entries = vec![execute(), thought(), execute(), thought(), execute()];
         let l = trunc_label(&entries, None).expect("commands bucket");
         assert_eq!(l.text, "Ran 3 commands");
@@ -656,6 +676,7 @@ mod tests {
         hidden_thought.set_display_mode(DisplayMode::Collapsed);
         let entries = [execute(), hidden_thought, execute()];
         let refs: Vec<&ScrollbackEntry> = entries.iter().collect();
+        // show_thinking=false: the thought is hidden chrome, not a participant, so both commands fit in a limit of 2
         let l = truncation_header_label(&refs, 0..refs.len(), Some(2), false, &Theme::current())
             .expect("buckets");
         assert_eq!(l.text, "Ran 2 commands");
@@ -663,8 +684,8 @@ mod tests {
 
     #[test]
     fn subagent_rows_bucket_with_tools_and_count_distinct_subagents() {
-        // A background subagent leaves both its started row and a terminal
-        // row in the run The child-session-id source override collapses them.
+        // A background subagent leaves both its started row and a terminal row in the run
+        // The child-session-id source override collapses them to one displayed subagent
         let entries = vec![
             read("a.rs"),
             sub_started("child-A"),

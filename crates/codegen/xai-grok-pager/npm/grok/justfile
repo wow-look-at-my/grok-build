@@ -1,6 +1,0 @@
-# The package's own binaries come first on PATH, as npm run puts them.
-export PATH := justfile_directory() + "/node_modules/.bin:" + env_var("PATH")
-
-# The npm script postinstall.
-postinstall:
-	node bin/postinstall.js

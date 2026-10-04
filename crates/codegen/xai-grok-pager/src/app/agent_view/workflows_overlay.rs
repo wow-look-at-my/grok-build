@@ -201,7 +201,8 @@ impl AgentView {
 
                 let result = match outcome {
                     ModalWindowOutcome::CloseRequested => {
-                        // [✗] and click-outside dismiss the overlay.
+                        // [✗] and click-outside dismiss the overlay. Back to
+                        // the run list is Left / Tab / the Runs shortcut.
                         self.show_workflows = false;
                         InputOutcome::Changed
                     }

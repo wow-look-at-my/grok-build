@@ -10,6 +10,7 @@ use crate::image_budget::{
 use crate::types::PruningConfig;
 
 /// Placeholder inserted when a tool result is hard-cleared.
+/// `pub(super)` so `mutations.rs` can use the same string on the retained conversation.
 pub(super) const HARD_CLEAR_PLACEHOLDER: &str = "[Tool result omitted — too old]";
 
 /// Separator inserted between head and tail in soft-trimmed results.
@@ -32,7 +33,8 @@ impl ChatStateActor {
         if let Some(reminder) = memory_reminder.as_deref()
             && persist_memory_reminder
         {
-            // A live in-place inject can prepend a `System` item, shifting indices under an active capture.
+            // A live in-place inject can prepend a `System` item, shifting indices
+            // under an active capture; snapshot + rebase like the other mutators.
             self.snapshot_turn_slice();
             let injected = inject_memory_reminder(&mut self.state.conversation, reminder);
             if injected {
@@ -73,6 +75,7 @@ impl ChatStateActor {
         }
         items = crate::compaction_utils::ModelRequestHistory::from_raw(items).into_items();
 
+        // Step 4: Assemble request
         let mut request = ConversationRequest {
             items,
             tools: tool_definitions,
@@ -99,11 +102,18 @@ impl ChatStateActor {
             chat_message_profile: self.state.sampling_config.chat_message_profile,
             thinking_replay: Default::default(),
             tool_schema_form: Default::default(),
-            // Execute completed tool calls on a Length-truncated turn instead of failing it.
+            // Execute completed tool calls on a Length-truncated turn instead
+            // of failing it; text-only salvage stays behind `CompletePartial`.
             length_policy: xai_grok_sampling_types::LengthPolicy::CompleteToolCalls,
         };
 
-        // The output budget shares the context window with the prompt.
+        // The output budget shares the context window with the prompt, so a
+        // conversation that is under the window on its own can still put the
+        // REQUEST over it: the provider adds `max_output_tokens` to the input
+        // and rejects the sum. The prompt size here is the tracked total — the
+        // provider's own reported usage for the last response plus the
+        // estimated delta since — which is the closest number this process
+        // has to what the server will count.
         let prompt_tokens = self.state.total_tokens + self.state.estimated_tokens_since_model;
         let usable_window = xai_token_estimation::window_less_estimate_slack(
             self.state.sampling_config.context_window.get(),
@@ -135,9 +145,12 @@ impl ChatStateActor {
 }
 
 // ============================================================================
-// Pruning.
+// Pruning (standalone functions, no actor state needed)
+// ============================================================================
 
 /// Check whether pruning should run based on context utilization.
+///
+/// Returns `true` when `total_tokens` exceeds 50% of `context_window`.
 pub(crate) fn should_prune(total_tokens: u64, context_window: std::num::NonZeroU64) -> bool {
     total_tokens > context_window.get() / 2
 }
@@ -170,7 +183,7 @@ pub(crate) fn prune_conversation(conversation: &mut [ConversationItem], config: 
             continue;
         }
 
-        // Hard clear: old tool results → replace entirely.
+        // Hard clear: very old tool results → replace entirely.
         if turn_from_end >= config.hard_clear_age_turns {
             if tool_result.content.as_ref() != HARD_CLEAR_PLACEHOLDER {
                 tool_result.content = std::sync::Arc::<str>::from(HARD_CLEAR_PLACEHOLDER);
@@ -189,7 +202,9 @@ pub(crate) fn prune_conversation(conversation: &mut [ConversationItem], config: 
     }
 }
 
-// ============================================================================ Memory reminder injection.
+// ============================================================================
+// Memory reminder injection
+// ============================================================================
 
 use crate::types::MEMORY_CONTEXT_OPEN_TAG;
 
@@ -246,7 +261,8 @@ fn upsert_memory_reminder_text(system_prompt: &mut std::sync::Arc<str>, reminder
 }
 
 // ============================================================================
-// String helpers.
+// String helpers
+// ============================================================================
 
 fn safe_char_slice(s: &str, start: usize, count: usize) -> String {
     s.chars().skip(start).take(count).collect()
@@ -268,9 +284,9 @@ mod tests {
     fn should_prune_gating() {
         use std::num::NonZeroU64;
         let cw = NonZeroU64::new(10000).unwrap();
-        assert!(!should_prune(1000, cw));
-        assert!(should_prune(6000, cw));
-        assert!(!should_prune(5000, cw));
+        assert!(!should_prune(1000, cw)); // 10%
+        assert!(should_prune(6000, cw)); // 60%
+        assert!(!should_prune(5000, cw)); // 50% exact (> not >=)
     }
 
     #[test]

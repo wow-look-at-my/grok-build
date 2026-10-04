@@ -621,6 +621,7 @@ fn gate_excludes_pure_identity_mismatch_but_keeps_artifact_tamper() {
     let home = dir.as_path();
     std::fs::create_dir_all(home).unwrap();
 
+    // (1) Principal A (fail_closed), artifact intact; serving team-b is a pure identity mismatch, so it is ALLOWED
     std::fs::write(home.join("requirements.toml"), "[features]\n").unwrap();
     mark_managed_config_synced_at(
         home,
@@ -648,6 +649,7 @@ fn gate_excludes_pure_identity_mismatch_but_keeps_artifact_tamper() {
         "a pure identity mismatch must still trigger a refetch (rebind)"
     );
 
+    // (2) The same principal with the artifact missing refuses offline
     mark_managed_config_synced_at(
         home,
         SyncMarker {
@@ -993,6 +995,7 @@ fn bump_rollback_floor_raises_when_verification_active() {
 fn managed_config_stale_for_far_future_sync() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path();
+    // ~year 3000: beyond the skew allowance.
     std::fs::write(
         home.join(MANAGED_CONFIG_CACHE_FILE),
         "{\"synced_at\":32503680000}",
@@ -1073,6 +1076,7 @@ fn missing_requirements_and_marker_not_armed() {
     );
 }
 
-// The is-managed claim gate tests live in a sibling child module (this file is past the 1k-line mark).
+// The is-managed claim gate tests live in a sibling child module (this file is past the 1k-line mark)
+// The #[path] include below keeps the same private access
 #[path = "claim_tests.rs"]
 mod claim_tests;

@@ -1,4 +1,8 @@
 //! Session fork/copy for the JSONL adapter.
+//!
+//! The `updates.jsonl` transcript is unbounded, so the copy streams it line by line.
+//! Peak memory tracks a single capped line, plus one small per-line record when a prompt cut is requested.
+//! Chat history stays materialized: its transforms need random access and the compacted history is bounded by the context window.
 
 use std::collections::BTreeSet;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, Write};
@@ -35,7 +39,7 @@ fn is_orchestration_projection_update(update: &SessionUpdate) -> bool {
     )
 }
 
-/// The `subagent_id` a persisted update belongs to. Only those subagent
+/// The `subagent_id` a persisted update belongs to. Only the three subagent
 /// records carry one; every other update answers `None`.
 fn subagent_id_of(update: &SessionUpdate) -> Option<&str> {
     let SessionUpdate::Xai(notification) = update else {
@@ -106,6 +110,7 @@ struct CopiedUpdates {
 }
 
 /// Anything past this cap is corruption (e.g. a tail that lost its newlines) and is discarded without being buffered.
+/// Discarded lines consume no index in either pass, unlike torn lines, which classify as [`RewindStep::Other`] and end a user run.
 const MAX_UPDATE_LINE_BYTES: usize = 64 * 1024 * 1024;
 
 /// [`for_each_jsonl_line_capped`] with the production cap.
@@ -359,6 +364,7 @@ impl JsonlStorageAdapter {
             self.read_chat_history_sync(self.chat_file(source_info), chat_format_version)?;
 
         if let Some(target_idx) = options.target_prompt_index {
+            // +1: the cut keeps the target prompt inclusive.
             let keep = conversation_truncate_for_prompt(&chat_to_copy, target_idx + 1);
             chat_to_copy.truncate(keep);
         }
@@ -388,9 +394,8 @@ impl JsonlStorageAdapter {
             options.inherited_prefix_len
         };
 
-        // Worktree forks skip the cwd rewrite: their display_cwd already
-        // shows the model the project path Rewritten conversation paths would
-        // contradict it
+        // Worktree forks skip the cwd rewrite: their display_cwd already shows the model the original project path
+        // Rewritten conversation paths would contradict it
         if !options.skip_cwd_transform && source_info.cwd != target_info.cwd {
             transform_conversation_cwd(&mut chat_to_copy, &source_info.cwd, &target_info.cwd);
         }
@@ -478,6 +483,7 @@ impl JsonlStorageAdapter {
             restamp_copied_usage(&self.usage_file(target_info), &target_info.id, None)?;
         }
         if usage_copied && !signals_copied {
+            // Resume copies billed history without signals, so the child would start at turn 0 and fold new work into inherited rows
             seed_signals_turn_from_usage(
                 &self.usage_file(target_info),
                 &self.signals_file(target_info),
@@ -498,9 +504,9 @@ impl JsonlStorageAdapter {
             &self.announcement_state_file(source_info),
             &self.announcement_state_file(target_info),
         )?;
-        // A truncating or filtering copy can drop the failure announcement
-        // from the child's context. The copied state still marks it
-        // announced, permanently muting it.
+        // A truncating or filtering copy can drop the failure announcement from the child's context.
+        // The copied state still marks it announced, permanently muting it.
+        // End the episodes so still-down servers re-announce, the same rule as after rewind or compaction.
         if announcement_state_copied
             && (options.target_prompt_index.is_some() || options.fork_filter)
         {
@@ -666,16 +672,15 @@ fn fork_summary(
         generated_title: source.generated_title,
         // A fork keeps the parent's title, so whether that title was set manually carries over too
         title_is_manual: source.title_is_manual,
-        // Re-derived from the target path, never inherited: the source's
-        // label describes the parent's worktree, not this
+        // Re-derived from the target path, never inherited: the source's label describes the parent's worktree, not this one
         worktree_label: target_worktree_identity
             .as_ref()
             .map(|identity| identity.label.clone()),
         agent: source.agent.clone(),
         sandbox_profile: source.sandbox_profile,
         reasoning_effort: source.reasoning_effort,
-        // Full forks keep the parent's last turn Partial forks
-        // (`target_prompt_index`) may drop that turn.
+        // Full forks keep the parent's last turn
+        // Partial forks (`target_prompt_index`) may drop that turn, so clear the summary rather than showing work not in the child conversation
         last_turn_summary: if options.target_prompt_index.is_some() {
             None
         } else {

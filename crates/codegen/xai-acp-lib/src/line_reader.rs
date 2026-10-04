@@ -1,4 +1,15 @@
 //! Cancel-safe line-buffered [`AsyncRead`] wrapper.
+//!
+//! `agent-client-protocol` v0.6's `handle_io` uses `select_biased!` with
+//! `BufReader::read_line`. `read_line` is **not** cancel-safe: it internally
+//! calls `consume()` on partial reads, so dropping the future mid-read loses
+//! bytes and corrupts the stream.
+//!
+//! [`LineBufferedRead`] works around this by pre-reading complete `\n`-delimited
+//! lines on a dedicated task and serving them through a channel. The `poll_read`
+//! implementation only returns `Pending` *between* lines (when no buffered data
+//! remains), so ACP's `BufReader::read_line` always finds `\n` without
+//! suspending, and can never be cancelled mid-read by `select_biased!`.
 
 use std::{
     io,
@@ -11,10 +22,12 @@ use futures::{
     io::BufReader,
 };
 
+/// Maximum size of a single NDJSON line (64 MiB).
 /// Prevents unbounded growth if a peer sends data without newlines.
 const MAX_LINE_SIZE: usize = 64 * 1024 * 1024;
 
 /// An [`AsyncRead`] that only yields complete `\n`-delimited lines.
+/// `poll_read` returns `Pending` only between lines, so `read_line` inside `select!` is cancel-safe.
 pub struct LineBufferedRead {
     /// Buffered bytes from the current line being served.
     buf: Vec<u8>,
@@ -227,6 +240,7 @@ mod tests {
     #[test]
     fn large_line_within_limit() {
         run(async {
+            // A line larger than BufReader's 8KB buffer but well under 64 MiB.
             let mut data = vec![b'x'; 100_000];
             data.push(b'\n');
             let source = Cursor::new(data.clone());

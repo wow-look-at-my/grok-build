@@ -1,8 +1,39 @@
-#![allow(clippy::cast_lossless)]
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_sign_loss)] // Hits predate the gate
+#![allow(clippy::cast_lossless)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_truncation)] // 6 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 4 hits predate the gate
 
 //! Cross-platform crash handler with startup crash detection.
+//!
+//! - **Unix**: SIGBUS/SIGSEGV/SIGABRT via `sigaction(2)`. SIGABRT capture
+//!   means `panic = "abort"` builds (every shipped release) leave a crash
+//!   report when a Rust panic aborts the process.
+//! - **Windows**: access violations via `SetUnhandledExceptionFilter`.
+//!   SIGABRT capture is Unix-only — `abort()` on Windows does not route
+//!   through the unhandled-exception filter.
+//!
+//! # Usage
+//!
+//! Call [`check_previous_crash`] first to detect crashes from the previous
+//! session, then [`install`] early in `main()`, before any async runtime or
+//! thread spawning. `check_previous_crash` must run before `install` because
+//! `install` opens `last-crash.bin` with `O_TRUNC`.
+//!
+//! ```rust,no_run
+//! use std::path::PathBuf;
+//!
+//! let crash_dir = PathBuf::from("/home/user/.myapp/crash");
+//!
+//! if let Some(report) = xai_crash_handler::check_previous_crash(&crash_dir) {
+//!     eprintln!("Application crashed during your last session.");
+//!     eprintln!("  Signal: {}", report.signal_name);
+//!     eprintln!("  Report: {}", report.report_path.display());
+//! }
+//!
+//! xai_crash_handler::install(xai_crash_handler::CrashHandlerConfig {
+//!     app_version: "0.1.0".to_string(),
+//!     crash_dir: crash_dir.clone(),
+//! });
+//! ```
 
 #![deny(clippy::indexing_slicing)]
 
@@ -21,7 +52,8 @@ const MAX_HISTORY: usize = 5;
 pub struct CrashHandlerConfig {
     /// Application version string (e.g. "0.1.169-alpha.2").
     pub app_version: String,
-    /// Directory where crash dumps are written. Created if it does not exist.
+    /// Directory where crash dumps are written.
+    /// Created if it does not exist.
     pub crash_dir: PathBuf,
 }
 
@@ -44,14 +76,16 @@ pub struct CrashReport {
     pub report_path: PathBuf,
 }
 
-/// Install the crash handler for SIGBUS, SIGSEGV, and SIGABRT (Unix; Windows:
-/// access violations).
+/// Install the crash handler for SIGBUS, SIGSEGV, and SIGABRT (Unix; Windows: access violations).
+/// Call early in `main()`, before any async runtime or thread spawning. Creates `crash_dir` if needed.
+/// Returns `true` on success; unsupported platforms are a no-op returning `false`.
 pub fn install(config: CrashHandlerConfig) -> bool {
     handler::install(&config.crash_dir, &config.app_version)
 }
 
-/// Install a minimal SIGSEGV/SIGBUS/SIGABRT handler that only restores the
-/// terminal.
+/// Install a minimal SIGSEGV/SIGBUS/SIGABRT handler that only restores the terminal.
+/// No crash reporting (no file I/O, no stack walking). If [`install`] is called later, it replaces these.
+/// No-op on unsupported platforms.
 pub fn install_terminal_restore_only() {
     handler::install_terminal_restore_only()
 }
@@ -113,6 +147,8 @@ fn write_owner_only(path: &Path, contents: &[u8]) -> std::io::Result<()> {
             .truncate(true)
             .mode(0o600)
             .open(path)?;
+        // mode() only applies on create — force owner-only before writing so a
+        // preexisting 0644 file never holds sensitive content while world-readable.
         let mut perms = file.metadata()?.permissions();
         perms.set_mode(0o600);
         file.set_permissions(perms)?;

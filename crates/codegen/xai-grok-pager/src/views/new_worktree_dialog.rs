@@ -110,6 +110,7 @@ pub fn render_new_worktree_dialog(area: Rect, buf: &mut Buffer, state: &NewWorkt
     let inner_x = dialog.x + 2;
     let inner_width = dialog.width.saturating_sub(INNER_PAD);
 
+    // Row 1: Title
     let title = Line::from(Span::styled(
         "New Worktree",
         Style::default()
@@ -118,6 +119,7 @@ pub fn render_new_worktree_dialog(area: Rect, buf: &mut Buffer, state: &NewWorkt
     ));
     title.render(Rect::new(inner_x, dialog.y + 1, inner_width, 1), buf);
 
+    // Row 2: Label input.
     let prefix_w = LABEL_PREFIX.width() as u16;
     let input_width = inner_width.saturating_sub(prefix_w);
     let viewport = state.viewport(input_width as usize);
@@ -134,6 +136,7 @@ pub fn render_new_worktree_dialog(area: Rect, buf: &mut Buffer, state: &NewWorkt
         }
     }
 
+    // Row 3: Hints
     let hints = Line::from(vec![
         Span::styled(
             "enter",
@@ -156,6 +159,7 @@ pub fn render_new_worktree_dialog(area: Rect, buf: &mut Buffer, state: &NewWorkt
 /// Dialog width that fits the typed label, clamped to the available area.
 fn dialog_width_for(area_width: u16, label: &str) -> u16 {
     let max_width = area_width.saturating_sub(4);
+    // The extra 1 is the block cursor cell
     let needed = (LABEL_PREFIX.width() + label.width() + 1 + INNER_PAD as usize) as u16;
     needed.max(MIN_DIALOG_WIDTH).min(max_width)
 }
@@ -185,7 +189,7 @@ mod tests {
     #[test]
     fn empty_dialog_uses_minimum_width() {
         assert_eq!(dialog_width_for(120, ""), MIN_DIALOG_WIDTH);
-        assert_eq!(dialog_width_for(40, ""), 36);
+        assert_eq!(dialog_width_for(40, ""), 36); // area.width 40 minus the 4-column margin
     }
 
     #[test]
@@ -209,7 +213,7 @@ mod tests {
     fn dialog_clamps_to_terminal_width() {
         let label = "x".repeat(100);
         let width = dialog_width_for(60, &label);
-        assert_eq!(width, 56);
+        assert_eq!(width, 56); // area.width 60 minus the 4-column margin
     }
 
     #[test]
@@ -254,7 +258,8 @@ mod tests {
         let mut buffer = Buffer::empty(area);
         render_new_worktree_dialog(area, &mut buffer, &state);
 
-        // Cursor cell: `bg == text_primary` on RGB themes.
+        // Cursor cell: `bg == text_primary` on RGB themes, SGR REVERSED
+        // where text_primary is Reset (which would match every untinted cell).
         let theme = Theme::current();
         let is_cursor = |cell: &ratatui::buffer::Cell| {
             cell.modifier.contains(ratatui::style::Modifier::REVERSED)

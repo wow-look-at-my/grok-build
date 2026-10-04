@@ -1,4 +1,8 @@
 //! Per-batch caps for media-generation tools (per tool name, not shared).
+//! Hosts apply [`partition_media_gen_batch`] before prepare/dispatch.
+//!
+//! Modest over-cap: first K of that name keep model order; the tail rejects.
+//! Egregious over-cap (`total >= 2 * max`) is a host resample signal.
 
 use std::collections::HashMap;
 
@@ -76,6 +80,7 @@ pub struct MediaGenOverCap {
 }
 
 impl MediaGenOverCap {
+    /// Spam-sized: at least twice the per-name cap (e.g. 16 `image_gen` when max is 8).
     pub fn is_egregious(&self) -> bool {
         self.max > 0 && self.total >= self.max.saturating_mul(2)
     }
@@ -104,6 +109,7 @@ pub fn over_cap_by_name<'a>(
     over
 }
 
+/// First over-cap at 2× (or more) resamples; later over-caps use first-K.
 pub fn should_resample_egregious(
     over: &[MediaGenOverCap],
     resamples_used: u32,
@@ -112,6 +118,7 @@ pub fn should_resample_egregious(
     resamples_used < max_resamples && over.iter().any(MediaGenOverCap::is_egregious)
 }
 
+/// Reminder after a discarded 2× burst: re-read the user ask; stay under the cap.
 pub fn resample_reminder(egregious: &[MediaGenOverCap]) -> String {
     debug_assert!(!egregious.is_empty());
     let names = join_backticked_names(egregious.iter().map(|o| o.name.as_str()));

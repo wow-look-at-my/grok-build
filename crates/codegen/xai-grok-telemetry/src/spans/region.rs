@@ -1,4 +1,9 @@
 //! Scope-owned measurement regions.
+//!
+//! A [`Region`] is a held (never entered) span whose parentage is a required constructor choice and whose close point belongs to scope.
+//! It replaces raw `tracing::Span` locals with hand-placed drops.
+//! Background tasks go through [`instrument_task!`], which accepts a named child or root, never a bare current span.
+//! A caller's span lifetime therefore cannot be extended silently.
 
 /// Where a region attaches in the trace tree. The choice is mandatory.
 pub enum Parent<'a> {
@@ -11,6 +16,7 @@ pub enum Parent<'a> {
 }
 
 /// A measured region: opens at construction, closes when it goes out of scope or at an explicit [`Region::close`].
+/// Held, not entered, so it is safe to keep across `.await`.
 #[must_use = "dropping a Region immediately closes its span as a zero-length frame"]
 pub struct Region(tracing::Span);
 

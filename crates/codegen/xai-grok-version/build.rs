@@ -32,7 +32,10 @@ fn git(args: &[&str]) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Walks up for `.git/HEAD`.
+/// Walks up for `.git/HEAD`. This crate sits several directories below the
+/// repository root, so a relative path from here breaks when the crate moves.
+/// A worktree's `.git` is a file and has no HEAD beside it, so `is_file` on
+/// HEAD itself is the test.
 fn git_head(from: &Path) -> Option<PathBuf> {
     from.ancestors()
         .map(|dir| dir.join(".git").join("HEAD"))

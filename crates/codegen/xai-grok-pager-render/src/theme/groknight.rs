@@ -1,4 +1,7 @@
 //! GrokNight theme: neutral gray base with TokyoNight accent colors.
+//!
+//! The canonical palette is defined in RGB (`Color::Rgb`).
+//! At startup [`Theme::quantized`] downgrades every color to the terminal's detected capability level (256-color, 16-color, etc.).
 
 use ratatui::style::{Color, Modifier};
 
@@ -8,7 +11,7 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::Rgb(r, g, b)
 }
 
-// Accents are TokyoNight Night hex.
+// Grayscale ramp anchored at bg #141414 / fg #f3f3f3. Accents are TokyoNight Night hex.
 #[allow(dead_code)]
 mod palette {
     use super::*;
@@ -16,17 +19,17 @@ mod palette {
     // ── Backgrounds ─────────────────────────────────────────────────────
     pub const BG: Color = rgb(10, 10, 10); //  #0a0a0a, Night (terminal bg)
     pub const BG_DARK: Color = rgb(12, 12, 12); //  #0c0c0c, darkest
-    pub const BG_STORM_DARK: Color = rgb(17, 17, 17);
-    pub const BG_STORM: Color = rgb(20, 20, 20);
-    pub const BG_HIGHLIGHT: Color = rgb(36, 36, 36);
+    pub const BG_STORM_DARK: Color = rgb(17, 17, 17); //  #111111, dark bg
+    pub const BG_STORM: Color = rgb(20, 20, 20); //  #141414, main bg
+    pub const BG_HIGHLIGHT: Color = rgb(36, 36, 36); //  #242424, highlight bg
 
     // ── Text / grays ────────────────────────────────────────────────────
     pub const FG: Color = rgb(225, 225, 225); // #e1e1e1, primary text
     pub const FG_DARK: Color = rgb(200, 200, 200); // #c8c8c8, secondary text
-    pub const FG_GUTTER: Color = rgb(65, 65, 65);
+    pub const FG_GUTTER: Color = rgb(65, 65, 65); //  #414141, dim
     pub const COMMENT: Color = rgb(108, 108, 108); //  #6c6c6c, muted
     pub const DARK3: Color = rgb(90, 90, 90); //  #5a5a5a, medium gray
-    pub const DARK5: Color = rgb(120, 120, 120);
+    pub const DARK5: Color = rgb(120, 120, 120); // #787878, bright gray
 
     // ── Accent colors (TokyoNight Night) ─────────────────────────────────
     pub const BLUE: Color = rgb(122, 162, 247); // #7aa2f7
@@ -44,7 +47,7 @@ mod palette {
     pub const YELLOW: Color = rgb(224, 175, 104); // #e0af68
 
     pub const RED_DARK: Color = rgb(66, 14, 20); // #420e14, quantizes to 256-color red, not gray
-    pub const GREEN_DARK: Color = rgb(6, 56, 6);
+    pub const GREEN_DARK: Color = rgb(6, 56, 6); // #063806, quantizes to 256-color green, not gray
 }
 use palette::*;
 
@@ -71,7 +74,7 @@ impl Theme {
             text_primary: FG,
             text_secondary: FG_DARK,
 
-            gray_dim: rgb(88, 88, 88),
+            gray_dim: rgb(88, 88, 88), // #585858, slightly brighter than FG_GUTTER
             gray: COMMENT,
             gray_bright: DARK5,
 
@@ -90,8 +93,8 @@ impl Theme {
             accent_remember: Color::Rgb(139, 195, 74), // #8BC34A, Material Design light green
 
             selection_border: rgb(60, 60, 65),
-            prompt_border: rgb(50, 50, 55),
-            prompt_border_active: rgb(80, 80, 88),
+            prompt_border: rgb(50, 50, 55), // #323237, dimmer prompt chrome
+            prompt_border_active: rgb(80, 80, 88), // #505058, brighter when focused
             hover_border: rgb(30, 30, 34),
 
             accent_model: TEAL,

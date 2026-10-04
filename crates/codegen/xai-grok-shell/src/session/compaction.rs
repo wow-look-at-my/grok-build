@@ -1,4 +1,6 @@
-//! This module contains all compaction methods: manual `/compact`, auto-compact threshold checks.
+//! This module contains all compaction methods: manual `/compact`, auto-compact threshold checks, and inline auto-compact with auto-continue.
+//! It also holds error-recovery compaction, preflight overflow detection, and checkpoint persistence.
+//! These methods form a second `impl SessionActor` block that lives alongside the primary one in `acp_session.rs`.
 use super::SessionActor;
 use super::is_project_instructions;
 use crate::extensions::notification::MODEL_FAMILY_SWITCH_COMPACT_BANNER;
@@ -52,8 +54,11 @@ fn format_loop_next_fire(
     }
     next.format("%d %b %H:%M UTC").to_string()
 }
+/// Reserve for the prompt and generated summary (plus reasoning on Responses/Messages); 32_768 covers p99 of prod output (~20k p95).
 const SUMMARY_BUDGET_RESERVE_TOKENS: u64 = 32_768;
 /// Default percentage points below the auto-compact threshold at which prefire (background pass-1) starts.
+/// The lead gives pass-1 runway to finish before the limit.
+/// Override with `GROK_PREFIRE_LEAD_PERCENT`.
 const DEFAULT_PREFIRE_LEAD_PERCENT: u64 = 10;
 fn prefire_lead_percent() -> u64 {
     std::env::var("GROK_PREFIRE_LEAD_PERCENT")
@@ -82,8 +87,8 @@ fn fingerprint_prefix(items: &[ConversationItem]) -> u64 {
     }
     h.finish()
 }
-/// Outcome of a background prefire pass-1 run, recorded on the
-/// `session.prefire_pass1` span as `compaction_prefire_outcome`.
+/// Outcome of a background prefire pass-1 run, recorded on the `session.prefire_pass1` span as `compaction_prefire_outcome`.
+/// [`PrefireOutcome::as_str`] values are stable telemetry keys (telemetry/dashboards key off them); don't rename the strings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 enum PrefireOutcome {
@@ -95,8 +100,8 @@ enum PrefireOutcome {
     SampleFailed,
     EmptyNote1,
 }
-/// Telemetry from one prefire pass-1 run; recorded onto the
-/// `session.prefire_pass1` span by [`SessionActor::run_prefire_pass1`].
+/// Telemetry from one prefire pass-1 run; recorded onto the `session.prefire_pass1` span by [`SessionActor::run_prefire_pass1`].
+/// A `None` field means the run exited before that stage.
 struct PrefirePass1Run {
     outcome: PrefireOutcome,
     prefix_len: Option<usize>,
@@ -122,6 +127,7 @@ mod two_pass_prefire_helper_tests;
 #[path = "compaction_verbatim_input_tests.rs"]
 mod verbatim_input_tests;
 impl SessionActor {
+    /// Two-pass is active for this session when the flag resolved on at build and the agent is not one that keeps its single short self-summary.
     pub(crate) fn two_pass_active(&self) -> bool {
         let agent = self.agent.borrow();
         agent.compaction_policy().two_pass_enabled
@@ -184,8 +190,9 @@ impl SessionActor {
         let start_pct = threshold.saturating_sub(prefire_lead_percent());
         xai_token_estimation::exceeds_threshold(estimated_total, cw, start_pct as u8)
     }
-    /// Always releases the in-flight guard. Spawned via `spawn_local` from the turn loop; reads a conversation
-    /// snapshot and does not mutate session state.
+    /// Background pass-1: summarize the ~95% prefix into NOTE₁ and cache it for a later pass-2 apply.
+    /// Always releases the in-flight guard.
+    /// Spawned via `spawn_local` from the turn loop; reads a conversation snapshot and does not mutate session state.
     #[tracing::instrument(
         name = "session.prefire_pass1",
         skip_all,
@@ -395,6 +402,7 @@ pub(crate) struct AutoCompactTriggerInfo {
     pub percentage: u8,
     pub reason_override: Option<&'static str>,
 }
+/// The "always fits" lossy summarization budget (~70% of window, minus tool definitions); shared by the ladder's Lossy step and the cold Lossy start.
 fn lossy_input_budget(context_window: u64, tool_tokens: u64) -> u64 {
     (context_window.saturating_mul(7) / 10).saturating_sub(tool_tokens)
 }
@@ -447,6 +455,7 @@ fn start_verbatim_compact_turns(
     }
 }
 /// Why auto-compaction was suppressed after a deterministic failure.
+/// [`SuppressReason::as_str`] is a stable telemetry value (BQ/OTLP/dashboards key off it); don't rename the strings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum SuppressReason {
@@ -457,8 +466,10 @@ pub(crate) enum SuppressReason {
     Other,
 }
 impl SuppressReason {
-    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change. `schema` and `other` get [`SUPPRESS_TURN`]: the next turn sends a different request, so it retries then. `credit_block` gets
-    /// [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
+    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change.
+    /// `schema` and `other` get [`SUPPRESS_TURN`]: the next turn sends a different request, so it retries then.
+    /// `credit_block` gets [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
+    /// `auth` gets [`SUPPRESS_AUTH`]: cleared on login/token refresh, not on a `200` (an over-window session never gets one).
     fn suppress_state(self) -> u8 {
         match self {
             SuppressReason::Size => SUPPRESS_STICKY,
@@ -469,6 +480,8 @@ impl SuppressReason {
     }
 }
 /// Longest provider error text carried into the user-facing compaction failure.
+/// A provider echoes the rejected request in some errors, and the whole body is
+/// not a status line.
 const COMPACT_FAILURE_DETAIL_LIMIT: usize = 400;
 /// Where a finished compaction's report went, and its one-line breakdown.
 #[derive(Debug, Default)]
@@ -498,6 +511,7 @@ fn compose_compact_failure(advice: &str, detail: &str) -> String {
 }
 /// Splice the preserved prefix (`conversation[0..prefix_len]`) onto the compacted suffix, dropping the suffix's leading System.
 /// If the prefix already has an AGENTS.md item, drop the suffix's re-injected AGENTS.md too (else the model sees it twice).
+/// Returns `Err(compacted_history)` unchanged when `prefix_len` is 0 or out of range.
 fn preserve_inherited_prefix(
     conversation: &[ConversationItem],
     compacted_history: Vec<ConversationItem>,
@@ -519,8 +533,8 @@ fn preserve_inherited_prefix(
     Ok(preserved)
 }
 /// Project the token count a re-pinned (preserved) history would reseed to.
-/// The release decision then compares against the same threshold the
-/// auto-compact trigger applies next turn.
+/// The release decision then compares against the same threshold the auto-compact trigger applies next turn.
+/// The conversation only grows, so this under-estimates the reseed (a lower bound) and can lean toward preserve.
 fn project_preserved_reseed_tokens(
     preserved_estimate: u64,
     tokens_before: u64,
@@ -535,6 +549,8 @@ impl SessionActor {
         crate::session::persistence::session_dir(&self.session_info).join("updates.jsonl")
     }
     /// Path to the raw `updates.jsonl` transcript if it exists, else `None`.
+    /// `pub(crate)` so the `Transcript`-mode dispatch in `compaction_segments` and transcript-location pointers can both reuse it.
+    /// The `path.exists()` guard keeps the pointer safe when a session never wrote one.
     pub(crate) fn get_transcript_path(&self) -> Option<String> {
         let path = self.transcript_path();
         if path.exists() {
@@ -684,6 +700,8 @@ impl SessionActor {
         }
         if let Some(already_armed) = self.compaction.pending_manual_compact.take() {
             // First request wins: it is the one the user has been waiting on.
+            // Answering the new caller `Ok` would report a compaction that ran
+            // with instructions this one never carried.
             self.compaction
                 .pending_manual_compact
                 .set(Some(already_armed));
@@ -739,7 +757,9 @@ impl SessionActor {
         .await;
         let result = self.run_compact(pending.instructions).await;
         if let Err(e) = &result {
-            // The client is mid-turn, so it is not in the command state that renders this request's own reply.
+            // The client is mid-turn, so it is not in the command state that
+            // renders this request's own reply. The notification is the only
+            // report that reaches the transcript.
             tracing::error!(error = %e, "mid-turn /compact failed");
             self.send_xai_notification(XaiSessionUpdate::AutoCompactFailed {
                 error: compose_compact_failure(
@@ -925,6 +945,7 @@ impl SessionActor {
             xai_grok_sampler::SamplingErrorKind::Auth,
         ))
     }
+    /// Clear [`SUPPRESS_AUTH`] on login/token refresh (credit suppress waits for a 200).
     pub(crate) fn clear_auth_compact_suppression(&self) {
         let _ = self.compaction.auto_compact_suppressed.compare_exchange(
             SUPPRESS_AUTH,
@@ -1077,8 +1098,11 @@ impl SessionActor {
                 self.reconstruct_full_config().await,
             ),
         };
-        // The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model, on a backend that takes a block it
-        // did not mint as text.
+        // The summary needs none of the thinking. It stays only where it
+        // buys a prompt-cache hit: the same model, on a backend that takes a
+        // block it did not mint as text. A Messages target rejects a block
+        // whose text the tool-message step mutated. Another model reads
+        // none of the blobs, and its own summary is the whole point.
         let summary_strips_reasoning = sampling_config.api_backend == ApiBackend::Messages
             || !xai_grok_sampling_types::same_model(&model_id, &sampling_config.model);
         let compaction = xai_grok_telemetry::events::CompactionScope::begin(
@@ -1273,7 +1297,9 @@ impl SessionActor {
         };
         let mut request_turns = simplified_messages.clone();
         let mut input_overflow_rejections: u32 = 0;
-        // The wire builders leave another model's thinking behind on their own.
+        // The wire builders leave another model's thinking behind on their
+        // own. This ladder is for the blob they let through: a same-model
+        // check the server disagrees with, or an origin nobody recorded.
         let mut thinking_stage = xai_grok_sampling_types::ThinkingReplay::Native;
         let two_pass_output = self
             .try_two_pass_pass2_apply(user_context.as_deref(), summary_strips_reasoning)
@@ -2325,9 +2351,13 @@ impl SessionActor {
             None
         }
     }
-    /// Returns true if the error response indicates tokens exceed the model's
-    /// context window: the session's tracked token estimate against the
-    /// `context_window`.
+    /// Returns true if the error response indicates tokens exceed the
+    /// model's context window: the session's tracked token estimate against
+    /// the `context_window` the [`SamplingErrorInfo`] metadata carries, or
+    /// the server's own message saying as much.
+    ///
+    /// Called from `handle_sampling_failure` with the
+    /// `SamplingErrorInfo` the sampler hands back.
     pub(crate) async fn should_compact_on_error(
         &self,
         err: &xai_grok_sampler::SamplingErrorInfo,
@@ -2354,7 +2384,13 @@ impl SessionActor {
             return false;
         }
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
-        // Ways to know the window is the problem.
+        // Two ways to know the window is the problem. Our own count is one, and
+        // it does not need the prompt to exceed the window on its own: a prompt
+        // that leaves no room for an answer is over it in practice, because the
+        // provider charges the requested output against the same window.
+        // The server saying so is the other, and it settles it — its tokenizer
+        // is the one that counts, and a 400 that names the context length is
+        // not a turn to hand back to the user.
         estimated_total > context_window.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS)
             || xai_grok_sampling_types::is_context_length_error(&err.message)
     }
@@ -2427,7 +2463,11 @@ impl SessionActor {
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
         let cfg = self.chat_state_handle.get_sampling_config().await?;
         let cw = cfg.context_window.get();
-        // The response shares the window with the prompt.
+        // The response shares the window with the prompt. A prompt that leaves
+        // less room than the smallest usable answer is over the window in
+        // practice, even when it is under it on its own: the request then goes
+        // out with its output budget cut to the floor, and the model answers in
+        // 1024 tokens. Compact instead.
         let usable = cw.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS);
         if estimated_total <= usable {
             return None;

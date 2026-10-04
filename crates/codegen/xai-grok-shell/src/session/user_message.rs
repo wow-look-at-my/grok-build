@@ -11,8 +11,9 @@ pub(crate) fn user_query(user_message: String) -> String {
     )
 }
 
-/// Environment info for constructing the `<user_info>` block. When `None`,
-/// values are read from the local machine.
+/// Environment info for constructing the `<user_info>` block.
+/// When `None`, values are read from the local machine.
+/// When `Some`, the provided values are used (e.g. from a remote workspace via `workspace.info` RPC).
 pub(crate) struct UserInfoOverride {
     pub os: String,
     pub shell: String,
@@ -70,3 +71,6 @@ fn resolve_shell_display() -> String {
     }
 }
 
+// Tests for extract_user_query now live in xai_chat_state::compaction_utils.
+// The `<user_info>` prefix is assembled by `SessionActor::construct_legacy_prefix`
+// (see `acp_session_impl/prompt_build.rs`).

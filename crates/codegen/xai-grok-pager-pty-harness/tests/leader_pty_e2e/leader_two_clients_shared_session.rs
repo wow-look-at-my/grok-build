@@ -8,8 +8,8 @@ use super::common::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test leader_pty_e2e -- --ignored --test-threads=1"]
 async fn leader_two_clients_shared_session() {
-    // The shared HOME/GROK_HOME hold the sessions AND the explicit leader
-    // socket B therefore attaches to the leader A spawned instead.
+    // The shared HOME/GROK_HOME hold the sessions AND the explicit leader socket
+    // B therefore attaches to the leader A spawned instead of the machine's default one
     let cluster = LeaderCluster::start(DEFAULT_ROWS, DEFAULT_COLS)
         .await
         .expect("start cluster");
@@ -38,6 +38,7 @@ async fn leader_two_clients_shared_session() {
         "A's turn must appear in B exactly once (duplicated replay?)\nB screen:\n{b_screen}"
     );
 
+    // Turn 2 driven from A streams live into the attached viewer B.
     cluster
         .content()
         .set_response(format!("{} second turn payload.", turn_sentinel(2)));
@@ -45,6 +46,7 @@ async fn leader_two_clients_shared_session() {
     b.wait_for_text(&turn_sentinel(2), STREAM_TIMEOUT)
         .expect("B received A's live turn");
 
+    // Turn 3 driven from B reaches A (driver/viewer flip).
     cluster
         .content()
         .set_response(format!("{} third turn payload.", turn_sentinel(3)));
@@ -52,9 +54,9 @@ async fn leader_two_clients_shared_session() {
     a.wait_for_text(&turn_sentinel(3), STREAM_TIMEOUT)
         .expect("A received B's live turn");
 
-    // Grow the viewport and wheel-scroll to the top so the whole 3-turn
-    // transcript is on screen. The scroll uses wheel events because the
-    // focused input box captures the keyboard scroll keys.
+    // Grow the viewport and wheel-scroll to the top so the whole 3-turn transcript is on screen. The scroll uses wheel
+    // events because the focused input box captures the keyboard scroll keys. Then count every sentinel exactly once
+    // on each pane: a duplicated replay or a dropped turn both fail here.
     fn wheel_scroll_to_top(h: &mut PtyHarness) {
         for burst in 0..4 {
             for _ in 0..50 {
@@ -77,6 +79,7 @@ async fn leader_two_clients_shared_session() {
         let mut screen = h.screen_contents();
         while !all_turns_once(&screen) && std::time::Instant::now() < deadline {
             wheel_scroll_to_top(h);
+            // If turn 1 is still off-screen, send Esc to jump to the top and wheel again
             if screen.matches(&turn_sentinel(1)).count() == 0 {
                 let _ = h.inject_keys(keys::ESC);
                 h.update(Duration::from_millis(200));

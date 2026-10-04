@@ -1,4 +1,10 @@
 //! `hashline_read` — anchor-annotated file reading.
+//!
+//! Reuses the core file-reading logic from [`grok_build::read_file::run_read_file`]
+//! and post-processes the result to replace standard line-number formatting with
+//! scheme-aware anchor annotations.
+//!
+//! Output format: `ANCHOR→CONTENT` (e.g. `22:abc:rst→  let x = 1;`).
 
 use crate::implementations::grok_build::read_file::{ReadFileInput, run_read_file};
 use crate::types::context::TruncationConfig;
@@ -43,7 +49,8 @@ pub(crate) fn format_hashline_content(
             raw_output.push('\n');
         }
 
-        // Build the anchor suffix.
+        // Build the anchor suffix: "local" or "local:context" (without line number,
+        // since we format the line number separately with right-alignment).
         let Some(anchor) = anchors.get(i) else {
             continue;
         };
@@ -52,7 +59,7 @@ pub(crate) fn format_hashline_content(
             None => anchor.local.clone(),
         };
 
-        // Format.
+        // Format: "LINE:LOCAL:CONTEXT→CONTENT" (or "LINE:LOCAL→CONTENT" for A)
         _ = write!(&mut output, "{line_num}:{anchor_suffix}→{line}").ok();
         raw_output.push_str(line);
     }
@@ -84,7 +91,9 @@ Usage:
 - You can call multiple tools in a single response
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents."#;
 
-/// `hashline_read` tool — reads files with anchor-annotated line numbers.
+/// `hashline_read` tool — reads files with anchor-annotated line numbers. Delegates to
+/// `run_read_file()` for file I/O, path resolution, image handling, and file-read tracking.
+/// Post-processes text file results to replace standard line formatting with scheme-aware anchors.
 #[derive(Debug, Default)]
 pub struct HashlineReadTool;
 
@@ -167,13 +176,15 @@ impl xai_tool_runtime::Tool for HashlineReadTool {
         use crate::types::tool_metadata::shared_resources;
         let resources = shared_resources(&ctx)?;
 
-        // Delegate to run_read_file with the offset/limit so that
-        // windowed-read semantics are preserved.
+        // Delegate to run_read_file with the ORIGINAL offset/limit so that windowed-read semantics
+        // are preserved: raw_output reflects the requested window, token limits apply to the
+        // window, file-read tracking records the window, and reminders observe the window.
         let cwd_override = ctx
             .extensions
             .get::<xai_tool_runtime::Cwd>()
             .map(|c| c.0.clone());
-        // `None`: the hashline tool does not stream.
+        // `None`: the hashline tool does not stream, so it needs no
+        // text-path streamability signal (see `run_read_file`).
         let invoking = crate::types::tool_metadata::invoking_param_names(&ctx);
         let result = run_read_file(
             input,
@@ -225,9 +236,12 @@ impl xai_tool_runtime::Tool for HashlineReadTool {
 
                 fc.content = hashline_content;
                 fc.content_concise = None; // hashline has only one format
-                // Drop tool-layer captures: `hashline_content` keeps the original URIs intact.
+                // Drop tool-layer captures: `hashline_content` keeps the
+                // original URIs intact, so session-layer extraction will
+                // catch them — clearing here avoids double-injection.
                 fc.extracted_images.clear();
-                // raw_output, offset, limit, tracking remain as set by run_read_file — windowed semantics preserved.
+                // raw_output, offset, limit, tracking remain as set by
+                // run_read_file — windowed semantics preserved.
                 Ok(ReadFileOutput::FileContent(fc))
             }
             // Non-text results (images, errors) pass through unchanged.
@@ -279,7 +293,8 @@ mod tests {
         let scheme = HashlineSchemeParams::default().build_scheme().unwrap();
         let (output, _raw) = format_hashline_content(content, None, None, &*scheme);
 
-        // chunk scheme produces LINE:LOCAL:CONTEXT→CONTENT Check that the first content line has colons.
+        // chunk scheme produces LINE:LOCAL:CONTEXT→CONTENT
+        // Check that the first content line has two colons (line:local:context)
         let first_content_line = output.lines().next().unwrap();
         let before_arrow = first_content_line.split('→').next().unwrap();
         let colon_count = before_arrow.matches(':').count();
@@ -425,7 +440,7 @@ mod tests {
                 assert!(fc.content.contains('→'));
                 assert!(fc.content.contains("fn main()"));
 
-                // Should have chunk-style anchors (colons before →)
+                // Should have chunk-style anchors (two colons before →)
                 let first_line = fc.content.lines().next().unwrap();
                 let before_arrow = first_line.split('→').next().unwrap();
                 assert!(
@@ -476,7 +491,7 @@ mod tests {
 
     /// `run_read_file`'s tool-layer base64 capture must be dropped after hashline reformats
     /// `fc.content` (which keeps original URIs verbatim); otherwise session-layer extraction would
-    /// also fire and we'd double-inject the same image as vision tokens.
+    /// also fire and we'd double-inject the same image as two vision tokens.
     #[tokio::test]
     async fn extracted_images_cleared_after_hashline_overwrite() {
         let tmp = TempDir::new().unwrap();
@@ -587,6 +602,7 @@ mod tests {
 
         match result {
             ReadFileOutput::FileContent(_fc) => {
+                // no longer emits "... lines not shown ..."
             }
             other => panic!("Expected FileContent, got {:?}", other),
         }
@@ -622,6 +638,7 @@ mod tests {
             ReadFileOutput::FileContent(fc) => {
                 let content_lines: Vec<&str> = fc.content.lines().collect();
 
+                // Exactly 2 content lines should be rendered.
                 assert_eq!(
                     content_lines.len(),
                     2,
@@ -633,6 +650,7 @@ mod tests {
                 let [first, second] = content_lines.as_slice() else {
                     panic!("expected two content lines: {content_lines:?}");
                 };
+                // Line numbers should be 2 and 3 (original file positions).
                 assert!(
                     first.starts_with("2:"),
                     "first line should start with '2:', got: {first}"
@@ -642,13 +660,13 @@ mod tests {
                     "second line should start with '3:', got: {second}"
                 );
 
-                // Content should be the lines "beta" and "gamma".
+                // Content should be the original lines "beta" and "gamma".
                 let after_arrow_0 = first.split('→').nth(1).unwrap();
                 let after_arrow_1 = second.split('→').nth(1).unwrap();
                 assert_eq!(after_arrow_0, "beta", "line 2 content mismatch");
                 assert_eq!(after_arrow_1, "gamma", "line 3 content mismatch");
 
-                // The stored offset/limit should reflect the request.
+                // The stored offset/limit should reflect the original request.
                 assert_eq!(fc.offset, Some(2));
                 assert_eq!(fc.limit, Some(2));
             }
@@ -709,7 +727,8 @@ mod tests {
     #[tokio::test]
     async fn small_window_into_large_file_succeeds() {
         let tmp = TempDir::new().unwrap();
-        // Create a file with many lines.
+        // Create a file with many lines (more than would fit in token budget
+        // if read fully, but a small window should be fine).
         let mut content = String::new();
         for i in 0..2000 {
             content.push_str(&format!("// line {i}: some padding content here\n"));

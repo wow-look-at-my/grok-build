@@ -32,8 +32,8 @@ impl PromptTiming {
         self.tool_collection_ms = total_prep_ms.saturating_sub(mcp_wait_ms);
     }
 
-    /// `ttft_ms` is not recorded here: the exported first-token latency is
-    /// stamped on the turn-start clock in [`crate::turn_phases`].
+    /// `ttft_ms` is not recorded here: the exported first-token latency is stamped on the
+    /// turn-start clock in [`crate::turn_phases`] and folded in when the event is emitted.
     pub fn record_stream_latency(&mut self, ttlb_ms: u64) {
         self.ttlb_ms = ttlb_ms;
     }

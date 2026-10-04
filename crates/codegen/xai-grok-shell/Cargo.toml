@@ -52,8 +52,11 @@ glob = { workspace = true }
 globset = { workspace = true }
 kanal = "0.1"
 regex = { workspace = true }
-# The remaining MCP code in this crate (extensions/mcp.rs, mcp_doctor.rs)
-# reaches rmcp model types via `xai_grok_mcp::rmcp::model::*`.
+# rmcp 2.1 + reqwest 0.13 are quarantined inside `xai-grok-mcp`. The remaining
+# MCP code in this crate (extensions/mcp.rs, mcp_doctor.rs) reaches rmcp model
+# types via `xai_grok_mcp::rmcp::model::*`. reqwest 0.13 is a private impl
+# detail of xai-grok-mcp::servers; shell never sees it. Every HTTP call site
+# in this crate uses workspace reqwest 0.12.
 xai-grok-mcp = { workspace = true }
 reqwest = { workspace = true, features = ["stream", "blocking"] }
 reqwest-middleware = { workspace = true }
@@ -353,7 +356,8 @@ harness = false
 [lints]
 workspace = true
 [build-dependencies]
-# build.rs only downloads ripgrep — no rmcp involvement.
+# build.rs only downloads ripgrep — no rmcp involvement. Workspace reqwest
+# (0.12) is plenty.
 reqwest = { workspace = true, features = ["blocking"] }
 flate2 = { workspace = true }
 tar = { workspace = true }

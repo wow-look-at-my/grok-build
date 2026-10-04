@@ -1,4 +1,17 @@
-//! The MinGit the grok Windows installer places under `%LOCALAPPDATA%\grok\git\<version>\cmd\git.exe`.
+//! The MinGit the grok Windows installer places under
+//! `%LOCALAPPDATA%\grok\git\<version>\cmd\git.exe`.
+//!
+//! Located once per process. A production spawn that resolves `git` by name
+//! calls [`prepend_bundled_git_path`] itself to put the `cmd` directory ahead
+//! of the user's `PATH` entries in the child's `PATH`, so that child resolves
+//! `git` to the version grok was tested with (a caller that set its own
+//! `PATH` on the `Command` keeps it, prepended; a caller that replaced the
+//! environment says so with [`PathBase::ExplicitOnly`] and never receives this
+//! process's `PATH`; `cmd.exe`'s cwd-first lookup is untouched). The detach
+//! helpers do not prepend: they only detach, so a hermetic test child that
+//! `env_clear`ed and installed its own `PATH` keeps exactly that. The user's
+//! own `PATH` and git installation are never modified. Off Windows, or when
+//! the payload is absent, nothing changes.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -10,14 +23,25 @@ pub struct BundledGit {
     pub cmd_dir: PathBuf,
     /// `<version>\cmd\git.exe`, the launcher that sets up MinGit's own paths.
     pub exe: PathBuf,
-    /// The directory holding MinGit's helper executables (`git-upload-pack.exe` and the `git-remote-*` transports).
+    /// The directory holding MinGit's helper executables (`git-upload-pack.exe`
+    /// and the `git-remote-*` transports): `<tree>\libexec\git-core`, else
+    /// `<tree>\bin`, for the first platform tree present (`mingw64`,
+    /// `clangarm64` on ARM64 MinGit, `clang64`, `mingw32`). What a `file://`
+    /// transport that spawns `git-upload-pack` by name needs on its `PATH`,
+    /// and the `GIT_EXEC_PATH` matching `exe`. Never `cmd`: it carries a
+    /// `git-upload-pack.exe` wrapper but not the exec tree (`git-remote-https`
+    /// and the rest), so naming it as `GIT_EXEC_PATH` would break transports.
+    /// `None` when no tree has the helper.
     pub helper_dir: Option<PathBuf>,
 }
 
 impl BundledGit {
     /// The platform tree's `bin` beside [`Self::helper_dir`]: where MinGit
     /// keeps the DLLs its helpers load (`libcurl`, `libiconv`, `zlib`, the
-    /// runtime).
+    /// runtime). `cmd\git.exe` adds it itself, but a helper spawned by name
+    /// (`git-upload-pack` from gix's `file://` transport) does not start
+    /// without it on `PATH`. `None` when there is no helper dir or the tree
+    /// has no `bin`.
     #[must_use]
     pub fn dll_dir(&self) -> Option<PathBuf> {
         let helper = self.helper_dir.as_deref()?;
@@ -31,15 +55,17 @@ impl BundledGit {
     }
 
     /// Whether helpers spawned by name can run from this payload: a
-    /// [`Self::helper_dir`] and its [`Self::dll_dir`] both exist.
+    /// [`Self::helper_dir`] and its [`Self::dll_dir`] both exist. The single
+    /// definition of "complete" that the payload picker ranks by and that
     #[must_use]
     pub fn is_usable(&self) -> bool {
         self.helper_dir.is_some() && self.dll_dir().is_some()
     }
 }
 
-/// The bundled MinGit of this machine, memoized for the process lifetime. `None` off Windows, when `%LOCALAPPDATA%` is unset, or when no
-/// payload is installed.
+/// The bundled MinGit of this machine, memoized for the process lifetime.
+/// `None` off Windows, when `%LOCALAPPDATA%` is unset, or when no payload is
+/// installed.
 #[must_use]
 pub fn bundled_git() -> Option<&'static BundledGit> {
     static FOUND: OnceLock<Option<BundledGit>> = OnceLock::new();
@@ -56,7 +82,16 @@ fn locate() -> Option<BundledGit> {
 
 /// The newest usable `<root>\<version>` payload under `root`: `cmd\git.exe`
 /// plus a platform tree holding `git-upload-pack.exe` and the `bin` with the
-/// DLLs the helpers load ([`BundledGit::is_usable`]).
+/// DLLs the helpers load ([`BundledGit::is_usable`]). Several versions
+/// coexist across an update, and an update can leave a newer tree with the
+/// launcher but no helpers, or with helpers but no `bin`, so usability ranks
+/// above version: a usable older install beats a half-installed newer one
+/// (`hermetic_git` pins the choice with no PATH fallback, so a payload whose
+/// helpers are missing or cannot start would fail every `file://` helper spawn
+/// for the process lifetime). Only when no payload is usable does the newest
+/// helper-carrying one win, then the newest launcher-only one. Hidden entries
+/// are never versions: the installer extracts into `.staging-*` and deletes
+/// stale ones, so a tree there may vanish under a process that picked it.
 fn bundled_git_in(root: &Path) -> Option<BundledGit> {
     std::fs::read_dir(root)
         .ok()?
@@ -110,11 +145,14 @@ fn helper_dir_in(version: &Path) -> Option<PathBuf> {
         .find(|dir| dir.join("git-upload-pack.exe").is_file())
 }
 
-/// MinGit's per-platform trees, in the order they are probed: x64 first (the installer's default payload), then the ARM64 build.
+/// MinGit's per-platform trees, in the order they are probed: x64 first (the
+/// installer's default payload), then the ARM64 build, then the others MinGit
+/// has shipped.
 const PLATFORM_TREES: &[&str] = &["mingw64", "clangarm64", "clang64", "mingw32"];
 
 /// Numeric dot-separated components (`2.47.1.windows.2` -> `[2, 47, 1, 2]`)
-/// so `2.50.0` outranks `2.9.1`.
+/// so `2.50.0` outranks `2.9.1`. The order the picker ranks version
+/// directories by; an installer pruning them must use the same one.
 #[must_use]
 pub fn version_key(version: &str) -> Vec<u64> {
     version
@@ -128,12 +166,16 @@ pub fn version_key(version: &str) -> Vec<u64> {
 pub enum PathBase {
     /// This process's `PATH`: the child inherits the environment.
     Process,
-    /// Nothing: the caller replaced the environment (`env_clear`), so this process's `PATH` must not leak back into it.
+    /// Nothing: the caller replaced the environment (`env_clear`), so this
+    /// process's `PATH` must not leak back into it; only an explicit `PATH`
+    /// is extended. std does not expose `env_clear`, so the caller says so.
     ExplicitOnly,
 }
 
 /// Prepend the bundled git's `cmd` directory to the child's `PATH` (no-op
-/// without a payload).
+/// without a payload). Production spawns that resolve `git` by name call this
+/// with the base that matches their environment handling; the detach helpers
+/// deliberately do not.
 pub fn prepend_bundled_git_path(cmd: &mut std::process::Command, base: PathBase) {
     if let Some(git) = bundled_git() {
         prepend_child_path(cmd, &git.cmd_dir, base);

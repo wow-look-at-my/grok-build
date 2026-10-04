@@ -49,7 +49,7 @@ impl ExportCopyDetector {
         {
             *t = now;
         } else {
-            // Far from the copy: this drag starts a new cluster.
+            // Far from the previous copy: this drag starts a new cluster.
             if let Some(&(_, prev_key)) = self.copies.back()
                 && entry_key.abs_diff(prev_key) > NEAR_ENTRIES
             {

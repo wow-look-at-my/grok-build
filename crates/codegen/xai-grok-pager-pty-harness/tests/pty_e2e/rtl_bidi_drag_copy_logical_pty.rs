@@ -5,7 +5,7 @@ use super::common::*;
 /// ASCII sentinel that anchors the mixed RTL row and settles the turn.
 const RTL_SENTINEL: &str = "RTLSENT";
 const RTL_OUTRO: &str = "RTL_OUTRO_DONE";
-/// Persian "khoob" (good), chosen with no lam-alef ligature so every letter occupies one display column.
+/// Persian "khoob" (good), chosen with no lam-alef ligature so every letter occupies one display column (1:1 logical-to-visual column mapping).
 const FA_LOGICAL: &str = "خوب";
 /// Its visual (reversed) form: what an app-reordered row paints.
 const FA_VISUAL: &str = "بوخ";
@@ -83,6 +83,7 @@ async fn rtl_bidi_drag_copy_logical_pty() {
         panic!("could not locate {RTL_SENTINEL:?}; screen:\n{screen}");
     });
     // Row layout (LTR base): "RTLSENT" then a space, then the reversed Persian.
+    // Persian occupies the three cells after "RTLSENT ".
     let fa_start = sentinel_col + RTL_SENTINEL.chars().count() as u16 + 1;
     let fa_end = fa_start + FA_LOGICAL.chars().count() as u16 - 1;
     // Sanity: the leftmost painted Persian cell is the last logical letter.

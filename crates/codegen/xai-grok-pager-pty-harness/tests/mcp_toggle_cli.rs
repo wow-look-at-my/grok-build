@@ -1,4 +1,5 @@
-//! CLI-seam tests for `grok mcp enable`/`disable`/`add`/`list` against the real pager binary: no-op toggles leave config.toml alone.
+//! CLI-seam tests for `grok mcp enable`/`disable`/`add`/`list` against the real pager binary: no-op
+//! toggles leave config.toml alone, policy refusals fire before any write, list reports verdicts.
 
 use std::process::{Command, Stdio};
 

@@ -1,4 +1,11 @@
 //! `/multiline`: toggle multiline input mode.
+//!
+//! In multiline mode, Enter inserts a newline and Shift+Enter sends the
+//! prompt (the inverse of normal mode). Empty-composer mid-turn Enter still
+//! interrupts the turn with the queue, same as normal mode.
+//! Toggled via `Ctrl+M`, this slash command, or the settings modal.
+//!
+//! Dispatches `Action::SetMultilineMode(!current)`. Per-session only (no disk persistence).
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

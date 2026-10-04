@@ -1,4 +1,19 @@
 //! Type-safe heterogeneous resource container for the new tool architecture.
+//!
+//! `Resources` is the typed dependency injection container. It provides a
+//! single `HashMap<TypeId, Box<dyn Any>>` that tools read from and write to.
+//!
+//! ## Design
+//!
+//! - **Typed access**: `get::<T>()`, `get_mut::<T>()`, `insert::<T>(val)`.
+//! - **Params vs State**: `Params<T>` and `State<T>` are wrappers with distinct
+//!   `TypeId`s so a tool's config and runtime state can coexist.
+//! - **Serialization**: Registered types (via `register_params` / `register_state`)
+//!   are serialized by category (`"params"` / `"state"`). Ephemeral types
+//!   (e.g., `Cwd`) are silently skipped.
+//! - **String-keyed access**: `get_json` / `set_json` for dynamic access by
+//!   category + key string — used by the gRPC `SetToolOptions` / `GetToolOptions`
+//!   RPCs.
 use crate::computer::types::{AsyncFileSystem, TerminalBackend};
 use crate::notification::types::ToolNotificationHandle;
 use serde::Serialize;
@@ -7,9 +22,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-/// Marker trait for types that can be stored in `Resources`. Each implementor
-/// must provide a unique `ID` string of the form `"namespace.Name"` (e.g.,
-/// `"grok_build.ReadFile"`).
+/// Marker trait for types that can be stored in `Resources`. Each implementor must provide a unique `ID` string of the
+/// form `"namespace.Name"` (e.g., `"grok_build.ReadFile"`). The ID is used as the serialization key when persisting
+/// resources. Use the `register_resource!` macro to implement this.
 pub trait ResourceType: Any + 'static {
     /// Unique identifier, e.g. `"grok_build.ReadFile"`.
     const ID: &'static str;
@@ -34,7 +49,9 @@ macro_rules! register_resource {
         }
     };
 }
-/// Wrapper for tool *configuration* / *parameters* stored in Resources.
+/// Wrapper for tool *configuration* / *parameters* stored in Resources. `Params<T>` and `State<T>`
+/// have distinct `TypeId`s even for the same `T`, so a tool's config and runtime state can coexist
+/// without collision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Params<T>(pub T);
 impl<T: Default> Default for Params<T> {
@@ -63,7 +80,9 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Params<T> {
         T::deserialize(deserializer).map(Params)
     }
 }
-/// Wrapper for tool *runtime state* stored in Resources.
+/// Wrapper for tool *runtime state* stored in Resources. `State<T>` has a distinct `TypeId` from
+/// `Params<T>`, enabling both to coexist in the same `Resources` container for the same inner type
+/// `T`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State<T>(pub T);
 impl<T: Default> Default for State<T> {
@@ -105,7 +124,8 @@ type SerializeFn = Box<dyn Fn(&(dyn Any + Send + Sync)) -> Option<serde_json::Va
 /// Type-erased deserialize closure for a registered resource.
 type DeserializeFn =
     Box<dyn Fn(serde_json::Value, &mut HashMap<TypeId, Box<dyn Any + Send + Sync>>) + Send + Sync>;
-/// Metadata for a registered (serializable) resource.
+/// Metadata for a registered (serializable) resource. Stores the `TypeId`, string key, category,
+/// and type-erased serialize/deserialize closures so `Resources` can round-trip through JSON.
 struct ResourceEntry {
     type_id: TypeId,
     /// The `ResourceType::ID` string (e.g., `"grok_build.ReadFile"`).
@@ -116,8 +136,9 @@ struct ResourceEntry {
     /// Deserialize a JSON value and insert it into the `data` map.
     deserialize_fn: DeserializeFn,
 }
-/// Type-safe heterogeneous container for tool resources. Stores typed values
-/// indexed by `TypeId`.
+/// Type-safe heterogeneous container for tool resources. Stores typed values indexed by `TypeId`. Registered types are
+/// serializable; ephemeral types (inserted directly without registration) are skipped during serialization. All stored
+/// values must be `Send + Sync` so `Resources` itself is `Send + Sync`.
 pub struct Resources {
     /// The actual storage: `TypeId` → `Box<dyn Any + Send + Sync>`.
     data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
@@ -329,10 +350,13 @@ impl std::fmt::Debug for Resources {
 /// Current working directory for the session.
 #[derive(Debug, Clone)]
 pub struct Cwd(pub PathBuf);
-/// Absolute path to the plan file for this session.
+/// Absolute path to the plan file for this session. Set by the session layer (from
+/// `PlanModeTracker::plan_file_path()`); read by `ExitPlanMode` to locate the plan on disk. When
+/// absent the tool falls back to `Cwd/.grok/plan.md`.
 #[derive(Debug, Clone)]
 pub struct PlanFilePath(pub PathBuf);
-/// Default plan-file path (relative to the workspace root) used when no explicit [`PlanFilePath`] is set.
+/// Default plan-file path (relative to the workspace root) used when no
+/// explicit [`PlanFilePath`] is set. Shared by the plan-mode tools.
 pub const PLAN_FILE_RELATIVE_PATH: &str = ".grok/plan.md";
 /// Resolve the session plan-file path from resources as `(absolute_target, display)`. `absolute_target` is `Some` ONLY
 /// when the resolved path is absolute, so callers that write/seed never create a file under the process CWD; it is
@@ -362,10 +386,14 @@ pub(crate) fn require_plan_file_path(
     })?;
     Ok((target, display))
 }
-/// Stable display path for forked sessions.
+/// Stable display path for forked sessions. When set, [`resolve_model_path`] rewrites absolute paths that start with this prefix to the real
+/// [`Cwd`] (the on-disk worktree backing the fork). This lets models keep using the original project path from conversation history while all
+/// I/O hits the correct path on disk. Inserted for forked sessions whose tool execution path differs from the path the model should see.
 #[derive(Debug, Clone)]
 pub struct DisplayCwd(pub PathBuf);
-/// Managed `Read`-deny glob patterns (e.g. `**/.env`, `**/*.pem`) from the permission policy.
+/// Managed `Read`-deny glob patterns (e.g. `**/.env`, `**/*.pem`) from the permission policy. The Grep tool passes
+/// these to ripgrep as `--glob '!<p>'` excludes so a search never reads a path the policy forbids reading — whether
+/// reached by a recursive walk or a `glob` arg that targets a denied file.
 #[derive(Debug, Clone, Default)]
 pub struct DenyReadGlobs(pub Vec<String>);
 /// Resolve a model-provided path, rewriting absolute paths from conversation history when [`DisplayCwd`] is set. If `display_cwd` is `None`,
@@ -399,8 +427,8 @@ pub fn resolve_model_path(
     cwd.join(input_path)
 }
 /// Strip surrounding whitespace (e.g. a trailing newline from block-form tool args) and quotes that models occasionally emit around path args.
-/// In that case also strip trailing **literal** escape sequences (`\n`, `\r`, `\t` as a couple of characters) left at the end of the unquoted
-/// value — `str::trim` only removes real whitespace, so the resolved path would otherwise end in a literal backslash-n and miss the file.
+/// In that case also strip trailing **literal** escape sequences (`\n`, `\r`, `\t` as two characters) left at the end of the unquoted value —
+/// `str::trim` only removes real whitespace, so the resolved path would otherwise end in a literal backslash-n and miss the file.
 fn sanitize_model_path_arg(input: &str) -> &str {
     let trimmed = input.trim();
     let quote_wrapped =
@@ -423,7 +451,9 @@ fn sanitize_model_path_arg(input: &str) -> &str {
 pub fn display_cwd_or_cwd(cwd: &std::path::Path, display_cwd: Option<&std::path::Path>) -> PathBuf {
     display_cwd.unwrap_or(cwd).to_path_buf()
 }
-/// Newtype wrapper for `Arc<dyn xai_tool_runtime::ToolDispatch>` so it can be stored in `ToolCallContext::extensions`.
+/// Newtype wrapper for `Arc<dyn xai_tool_runtime::ToolDispatch>` so it can be stored in
+/// `ToolCallContext::extensions`. Used by `use_tool` and the external MCP-call tool, which dispatch
+/// to target tools without going through the outer `ToolBridge` (which would deadlock).
 #[derive(Clone)]
 pub struct InnerDispatch(pub std::sync::Arc<dyn xai_tool_runtime::ToolDispatch>);
 #[derive(Debug, Clone)]
@@ -474,8 +504,9 @@ pub struct SessionEnv(pub Arc<HashMap<String, String>>);
 /// Whether system reminders are enabled globally.
 #[derive(Debug, Clone, Copy)]
 pub struct SystemRemindersEnabled(pub bool);
-/// Enforces `.gitignore` patterns on file-access tools (`read_file`,
-/// `search_replace`).
+/// Enforces `.gitignore` patterns on file-access tools (`read_file`, `search_replace`). Seeded at
+/// session start from the same rules used by AGENTS.md discovery. When absent (no git repo), tools
+/// allow all files.
 #[derive(Clone)]
 pub struct GitignoreFilter {
     gitignore: ignore::gitignore::Gitignore,
@@ -513,7 +544,9 @@ impl std::fmt::Debug for GitignoreFilter {
             .finish()
     }
 }
-/// Controls whether tools respect `.gitignore` patterns. Always seeded by `agent_rebuild`.
+/// Controls whether tools respect `.gitignore` patterns. Always seeded by `agent_rebuild`. When `true`, all tools block
+/// gitignored files. When `false`, `read_file` allows via `is_some_and` while `grep`/`list_dir`/`search_replace` also
+/// allow via `is_none_or`. Configured via `[tools] respect_gitignore = true` in `config.toml`.
 #[derive(Debug, Clone, Copy)]
 pub struct RespectGitignore(pub bool);
 impl Default for RespectGitignore {
@@ -521,7 +554,9 @@ impl Default for RespectGitignore {
         Self(true)
     }
 }
-/// Whether to enrich path-not-found errors with CWD reminders, "dropped repo folder" correction.
+/// Whether to enrich path-not-found errors with CWD reminders, "dropped repo folder" correction,
+/// and similar-name suggestions. Default `false`. Hosts may enable this via remote config or local
+/// settings.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PathNotFoundHints(pub bool);
 /// Map of canonical tool names → model-facing tool names.
@@ -537,7 +572,9 @@ impl ToolNameMapping {
             .unwrap_or(canonical)
     }
 }
-/// Set of client-facing names of all enabled **native** (non-MCP) tools.
+/// Set of client-facing names of all enabled **native** (non-MCP) tools. Populated once at `finalize()` from the finalized tool list (every
+/// tool whose client-facing name does not contain the `__` MCP delimiter). Without this, such calls hit the generic "not a valid MCP tool name"
+/// error and the model gets stuck, because `search_tool` only indexes MCP tools.
 #[derive(Debug, Clone, Default)]
 pub struct EnabledNativeToolNames(pub std::collections::HashSet<String>);
 /// Enabled native tools keyed by canonical registry ID with client-facing names.
@@ -563,7 +600,9 @@ impl ParamNameMapping {
             .unwrap_or(canonical)
     }
 }
-/// Canonical → client-facing param names for the tool executing.
+/// Canonical → client-facing param names for the tool currently executing. Stamped onto
+/// [`xai_tool_runtime::ToolCallContext::extensions`] by `prepare_dispatch` / `call_raw` from that
+/// tool's own `params_name_overrides`.
 #[derive(Debug, Clone, Default)]
 pub struct InvokingToolParamNames(pub HashMap<String, String>);
 impl InvokingToolParamNames {
@@ -585,10 +624,14 @@ impl InvokingToolParamNames {
             .unwrap_or(canonical)
     }
 }
-/// Map of `ToolKind` → client-facing tool name.
+/// Map of `ToolKind` → client-facing tool name. Built at finalize time from the enabled tools and client name overrides. Used at runtime by
+/// tools that reference other tools in error messages (e.g., search_replace saying "use the Read tool first"). This is the **kind-based**
+/// counterpart to `ToolNameMapping`. Tools query by semantic role (`ToolKind::Read`), not canonical name (`"read_file"`).
 #[derive(Debug, Clone, Default)]
 pub struct ToolKindNames(pub HashMap<crate::types::tool::ToolKind, String>);
-/// Map of `ToolKind` → { canonical param name → client-facing param name }.
+/// Map of `ToolKind` → { canonical param name → client-facing param name }. Built at finalize time
+/// from client param overrides. Used at runtime by tools that reference their own (or other tools')
+/// param names in error messages (e.g., "use `replaceAll` to replace all occurrences").
 #[derive(Debug, Clone, Default)]
 pub struct ParamKindNames(pub HashMap<crate::types::tool::ToolKind, HashMap<String, String>>);
 impl ParamKindNames {
@@ -606,12 +649,15 @@ impl ParamKindNames {
             .unwrap_or(canonical)
     }
 }
-/// Available skills for description template rendering.
+/// Available skills for description template rendering. Stored in Resources so
+/// `build_description_context()` can populate the `skills` field of `DescriptionContext`. Inserted
+/// by `with_backend()` before any tools are registered.
 #[derive(Debug, Clone)]
 pub struct AvailableSkills(pub Vec<crate::implementations::skills::types::SkillInfo>);
 impl AvailableSkills {
-    /// Check if a skill with the given name is available for model
-    /// invocation.
+    /// Check if a skill with the given name is available for model invocation. Returns `false` for skills with
+    /// `disable_model_invocation = true` (model cannot auto-invoke) or `user_invocable = false` (not shown in skill tool),
+    /// since the model would be unable to successfully invoke them.
     pub fn has_skill(&self, name: &str) -> bool {
         self.0
             .iter()
@@ -621,7 +667,9 @@ impl AvailableSkills {
 /// Session folder for logs and output files.
 #[derive(Debug, Clone)]
 pub struct SessionFolder(pub PathBuf);
-/// Per-turn registry mapping each attached image's `[Image #N]` display number to a reference `image_edit` can resolve.
+/// Per-turn registry mapping each attached image's `[Image #N]` display number to a reference `image_edit` can resolve. The model sees
+/// attachments inline (as pixels) and only the `[Image #N]` token in text — never a path — so this lets `image_edit` resolve that token instead
+/// of fabricating a filesystem path it can't know. Ephemeral — not persisted, not serde-registered.
 #[derive(Debug, Clone, Default)]
 pub struct AttachedImages(pub Vec<(usize, String)>);
 impl AttachedImages {
@@ -651,9 +699,13 @@ impl std::fmt::Debug for FileSystem {
 /// Terminal backend abstraction.
 pub struct Terminal(pub Arc<dyn TerminalBackend>);
 /// Session ID that owns processes spawned by this session's tools.
+/// Used to scope kill operations so subagent teardown only kills
+/// the subagent's own tasks on a shared terminal backend.
 #[derive(Debug, Clone)]
 pub struct OwnerSessionId(pub String);
-/// Shared citation counter for `[web:N]` numbering across web tools.
+/// Shared citation counter for `[web:N]` numbering across web tools. Stored as
+/// `State<WebCitationCounter>` in Resources so web tools that emit citations share the same
+/// monotonically increasing counter within a session.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WebCitationCounter {
     pub counter: u32,
@@ -672,7 +724,8 @@ impl std::fmt::Debug for Terminal {
         f.debug_struct("Terminal").finish()
     }
 }
-/// Per-tool retry/backoff configurations. Set by the agent builder, consumed by the bridge's retry loop.
+/// Per-tool retry/backoff configurations. Set by the agent builder, consumed by the bridge's retry
+/// loop. NOT persisted — ephemeral runtime state that's re-set on each session.
 #[derive(Debug, Clone, Default)]
 pub struct ToolRetries(pub HashMap<String, crate::retry::BackoffConfig>);
 impl ToolRetries {
@@ -689,7 +742,9 @@ impl ToolRetries {
         self.0.clear();
     }
 }
-/// Tracks whether a required "completion" tool has been called this turn.
+/// Tracks whether a required "completion" tool has been called this turn. Used by agent definitions that require a
+/// specific tool to be called before the agent can be considered "done" (e.g. a workflow's `complete_task` tool).
+/// Ephemeral — NOT persisted. Stored in Resources, not serde-registered.
 #[derive(Debug, Clone)]
 pub struct CompletionTracker {
     /// Canonical name of the tool that must be called.
@@ -726,10 +781,9 @@ pub struct McpResourceReadResult {
     pub mime_type: Option<String>,
     pub content: Option<McpResourceContent>,
 }
-/// Provider trait for MCP resource operations. Injected into
-/// `SharedResources` by the shell layer so tools (`ListMcpResources`,
-/// `FetchMcpResource`) can access MCP servers without depending on
-/// `xai-grok-mcp` directly.
+/// Provider trait for MCP resource operations. Injected into `SharedResources` by the shell layer so tools
+/// (`ListMcpResources`, `FetchMcpResource`) can access MCP servers without depending on `xai-grok-mcp` directly.
+/// Follows the same pattern as [`FileSystem`] (`Arc<dyn AsyncFileSystem>`).
 #[async_trait::async_trait]
 pub trait McpResourceProvider: Send + Sync {
     /// List resources from one or all MCP servers.
@@ -1164,9 +1218,9 @@ mod tests {
         let result = super::resolve_model_path(cwd, None, "  \n");
         assert_eq!(result, std::path::PathBuf::from("/worktree/abc"));
     }
-    /// A quote-wrapped arg carrying a *literal* `\n` escape sequence (a couple of characters, backslash
-    /// + n) — a JSON string literal pasted into a block-form arg with no unescaping — must resolve
-    /// to the real file, not one whose name ends in a literal backslash-n.
+    /// A quote-wrapped arg carrying a *literal* `\n` escape sequence (two characters, backslash +
+    /// n) — a JSON string literal pasted into a block-form arg with no unescaping — must resolve to
+    /// the real file, not one whose name ends in a literal backslash-n.
     #[test]
     fn resolve_model_path_quoted_literal_backslash_n() {
         let cwd = std::path::Path::new("/workspace");

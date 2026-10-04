@@ -155,6 +155,7 @@ fn build_truncated_preserves_small_query_truncates_context() {
     assert!(!message.contains(&context), "oversized context truncated");
     assert!(message.len() <= LARGE_PROMPT_THRESHOLD);
 }
+/// Both query and context oversized (the 80/20 split arm): both are bounded and neither full body is inlined.
 #[test]
 fn build_truncated_both_oversized_keeps_bounded_heads() {
     let path = fake_prompt_path();
@@ -360,6 +361,7 @@ fn assert_elided_ranges_match_file(is_cursor: bool) {
 fn elided_ranges_match_file_lines_grok() {
     assert_elided_ranges_match_file(false);
 }
+/// A short query leaves the budget to the skill: an 8 KB skill (twice the floor) is inlined whole.
 #[test]
 fn build_truncated_short_query_gives_skill_the_leftover() {
     let path = fake_prompt_path();
@@ -373,6 +375,7 @@ fn build_truncated_short_query_gives_skill_the_leftover() {
     assert!(!message.contains(ELISION_MARKER), "nothing was elided");
     assert!(message.len() <= LARGE_PROMPT_THRESHOLD);
 }
+/// With no skill and no context the whole budget goes to the query instead of a fixed 80 % share.
 #[test]
 fn build_truncated_oversized_query_alone_uses_full_budget() {
     let path = fake_prompt_path();
@@ -412,6 +415,7 @@ fn build_truncated_skill_and_context_oversized_keeps_context_floor() {
         message.len()
     );
 }
+/// A context that already fits its floor does not trigger the 80/20 split, so the query keeps the rest.
 #[test]
 fn build_truncated_small_context_does_not_trigger_80_20() {
     let path = fake_prompt_path();
@@ -640,6 +644,8 @@ fn notice_fits_reserve_with_long_names() {
         );
     }
 }
+/// Budget-starving shapes (empty or 1-byte parts, everything oversized, a 5 KB path, 64-byte names)
+/// never panic and always stay within the threshold.
 #[test]
 fn build_truncated_never_panics_on_degenerate_inputs() {
     fn check(path: &std::path::Path, info: &ReadToolInfo, [context, query, skill]: [&str; 3]) {

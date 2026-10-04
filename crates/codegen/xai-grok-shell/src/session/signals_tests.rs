@@ -202,6 +202,7 @@ async fn test_context_window_usage() {
     assert_eq!(snapshot.context_tokens_used, 100000);
     assert_eq!(snapshot.context_window_tokens, 100000);
 
+    // Over 100% should clamp to 100
     handle.update_context_usage(150000, 100000);
     let snapshot = handle.snapshot().await.unwrap();
     assert_eq!(snapshot.context_window_usage, 100);
@@ -321,7 +322,7 @@ async fn test_turn_end_snapshot_first_turn() {
     assert_eq!(snap.delta.last_time_to_first_token_ms, Some(150));
     assert_eq!(snap.delta.last_total_response_time_ms, Some(2500));
     assert_eq!(snap.delta.delta_long_pauses, 0);
-    assert_eq!(snap.delta.delta_successful_tool_uses, 3); // Calls, failures
+    assert_eq!(snap.delta.delta_successful_tool_uses, 3); // 3 calls, 0 failures
     assert_eq!(snap.delta.consecutive_cancellations, 0);
     assert!(snap.delta.error_types_this_turn.is_empty());
     // No explicit success/failure signals were sent
@@ -377,6 +378,7 @@ async fn test_turn_end_snapshot_multi_turn_deltas() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
+    // === Turn 1 ===
     handle.increment_turn();
     handle.record_tool_call("read_file");
     handle.record_tool_call("bash");
@@ -388,13 +390,14 @@ async fn test_turn_end_snapshot_multi_turn_deltas() {
     assert_eq!(snap1.delta.turn_number, 1);
     assert_eq!(snap1.delta.delta_tool_calls, 2);
     assert_eq!(snap1.delta.delta_errors, 1);
-    assert_eq!(snap1.delta.delta_successful_tool_uses, 2); // Calls, failures
+    assert_eq!(snap1.delta.delta_successful_tool_uses, 2); // 2 calls, 0 failures
     assert_eq!(snap1.delta.tools_this_turn.len(), 2);
     assert_eq!(snap1.delta.error_types_this_turn, vec!["timeout"]);
 
+    // === Turn 2 ===
     handle.increment_turn();
     handle.record_tool_call("search_replace");
-    handle.record_tool_failure("search_replace");
+    handle.record_tool_failure("search_replace"); // 1 tool failure (also increments error_count)
     handle.record_assistant_message();
     handle.record_latency(200, 3000);
 
@@ -403,7 +406,7 @@ async fn test_turn_end_snapshot_multi_turn_deltas() {
     assert_eq!(snap2.delta.delta_tool_calls, 1);
     assert_eq!(snap2.delta.delta_errors, 1); // tool failure counted as error
     assert_eq!(snap2.delta.delta_tool_failures, 1);
-    assert_eq!(snap2.delta.delta_successful_tool_uses, 0);
+    assert_eq!(snap2.delta.delta_successful_tool_uses, 0); // 1 call - 1 failure
     assert_eq!(snap2.delta.delta_assistant_messages, 1);
     assert_eq!(snap2.delta.tools_this_turn, vec!["search_replace"]);
     assert_eq!(snap2.delta.last_time_to_first_token_ms, Some(200));
@@ -413,8 +416,9 @@ async fn test_turn_end_snapshot_multi_turn_deltas() {
     // Cumulative should reflect both turns
     assert_eq!(snap2.current.turn_count, 2);
     assert_eq!(snap2.current.tool_call_count, 3);
-    assert_eq!(snap2.current.error_count, 2);
+    assert_eq!(snap2.current.error_count, 2); // 1 typed error + 1 tool failure
 
+    // === Turn 3: empty turn (no tool calls, no errors) ===
     handle.increment_turn();
     handle.record_assistant_message();
 
@@ -435,6 +439,7 @@ async fn test_inference_metrics_multi_response_aggregation() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
+    // Response 1: 10 intervals
     handle.record_inference_metrics(InferenceLatencyStats {
         time_to_first_token_ms: Some(100),
         time_to_last_byte_ms: 1000,
@@ -448,6 +453,7 @@ async fn test_inference_metrics_multi_response_aggregation() {
         ..Default::default()
     });
 
+    // Response 2: 11 intervals
     handle.record_inference_metrics(InferenceLatencyStats {
         time_to_first_token_ms: Some(120),
         time_to_last_byte_ms: 2000,
@@ -461,6 +467,7 @@ async fn test_inference_metrics_multi_response_aggregation() {
         ..Default::default()
     });
 
+    // Response 3: 5 intervals
     handle.record_inference_metrics(InferenceLatencyStats {
         time_to_first_token_ms: Some(90),
         time_to_last_byte_ms: 1500,
@@ -476,6 +483,9 @@ async fn test_inference_metrics_multi_response_aggregation() {
 
     let snap = handle.snapshot().await.unwrap();
 
+    // The 26 combined intervals, sorted: [5,10,10,15,20,20,25,30,40,50,60,70,80,90,100,100,110,120,130,140,150,160,170,180,190,200].
+    // Exact p50 (26/2=13) -> index 13 = 90.
+    // Exact p99: ceil(26*0.99)-1 = ceil(25.74)-1 = 26-1 = 25, min(25, 25) = 25 -> 200.
 
     // TDigest gives approximate percentiles
     let p50 = snap.itl_p50_ms.unwrap();
@@ -594,6 +604,7 @@ async fn test_turn_end_snapshot_consecutive_cancellations() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
+    // Turn 1: user cancels twice, then assistant completes
     handle.increment_turn();
     handle.record_cancellation();
     handle.record_cancellation();
@@ -606,6 +617,7 @@ async fn test_turn_end_snapshot_consecutive_cancellations() {
     // Turn complete resets consecutive count
     handle.record_turn_complete();
 
+    // Turn 2: no cancellations
     handle.increment_turn();
     handle.record_tool_call("read_file");
     handle.record_assistant_message();
@@ -631,7 +643,7 @@ async fn test_turn_end_snapshot_error_types_mixed() {
     handle.record_assistant_message();
 
     let snap = handle.take_turn_end_snapshot().await.unwrap();
-    assert_eq!(snap.delta.delta_errors, 3);
+    assert_eq!(snap.delta.delta_errors, 3); // all 3 count
     assert_eq!(
         snap.delta.error_types_this_turn,
         vec!["timeout", "rate_limit"]
@@ -646,6 +658,7 @@ async fn test_turn_end_snapshot_tool_outcomes() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
+    // Turn 1: bash succeeds twice, read_file succeeds once, search_replace fails once
     handle.increment_turn();
     handle.record_tool_call("bash");
     handle.record_tool_success("bash");
@@ -685,6 +698,7 @@ async fn test_turn_end_snapshot_tool_outcomes() {
         ]
     );
 
+    // Turn 2: no tools, outcomes should be empty
     handle.increment_turn();
     handle.record_assistant_message();
 
@@ -700,24 +714,27 @@ async fn test_turn_end_snapshot_token_usage() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
+    // Turn 1: one response with completion and reasoning tokens
     handle.increment_turn();
     handle.record_assistant_message();
-    handle.record_token_usage(500, 200);
+    handle.record_token_usage(500, 200); // 500 completion, 200 reasoning, so 300 response
 
     let snap1 = handle.take_turn_end_snapshot().await.unwrap();
     assert_eq!(snap1.delta.response_tokens, Some(300));
     assert_eq!(snap1.delta.thinking_tokens, Some(200));
 
+    // Turn 2: multi-round tool use, two responses accumulate
     handle.increment_turn();
     handle.record_tool_call("bash");
-    handle.record_token_usage(100, 50);
+    handle.record_token_usage(100, 50); // first response: 50 response + 50 thinking
     handle.record_assistant_message();
-    handle.record_token_usage(400, 0);
+    handle.record_token_usage(400, 0); // second response: 400 response, 0 thinking
 
     let snap2 = handle.take_turn_end_snapshot().await.unwrap();
     assert_eq!(snap2.delta.response_tokens, Some(450));
     assert_eq!(snap2.delta.thinking_tokens, Some(50));
 
+    // Turn 3: no token usage recorded, should be None (not Some(0))
     handle.increment_turn();
     handle.record_assistant_message();
 
@@ -773,7 +790,7 @@ async fn test_seed_counts_restores_all_counters() {
     handle.record_model_usage("grok-4.5"); // new model
 
     let snapshot = handle.snapshot().await.unwrap();
-    assert_eq!(snapshot.tool_call_count, 14);
+    assert_eq!(snapshot.tool_call_count, 14); // the seeded 12 plus 2 new calls
     assert_eq!(snapshot.tools_used.len(), 4); // bash not duplicated, grep added
     assert!(snapshot.tools_used.contains(&"grep".to_string()));
     assert_eq!(snapshot.models_used.len(), 3); // grok-3 not duplicated, grok-5 added
@@ -785,11 +802,12 @@ async fn test_seed_counts_restores_all_counters() {
 
 #[tokio::test]
 async fn test_restore_signals_full_round_trip() {
+    // Phase 1: Build up state in an actor, then snapshot it
     let (handle1, actor1) = SessionSignalsActor::new();
     let actor_handle1 = tokio::spawn(actor1.run());
 
     // Simulate several turns with diverse signals
-    handle1.increment_turn();
+    handle1.increment_turn(); // turn 1
     handle1.record_tool_call("bash");
     handle1.record_tool_call("read_file");
     handle1.record_tool_failure("bash");
@@ -810,13 +828,13 @@ async fn test_restore_signals_full_round_trip() {
         ..Default::default()
     });
 
-    handle1.increment_turn();
+    handle1.increment_turn(); // turn 2
     handle1.record_tool_call("search_replace");
     handle1.record_cancellation();
     handle1.record_assistant_message();
     handle1.record_model_usage("grok-4");
 
-    handle1.increment_turn();
+    handle1.increment_turn(); // turn 3
     handle1.record_tool_call("bash");
     handle1.record_assistant_message();
 
@@ -834,15 +852,16 @@ async fn test_restore_signals_full_round_trip() {
     assert_eq!(snapshot.assistant_message_count, 3);
     assert_eq!(snapshot.tool_call_count, 4);
     assert_eq!(snapshot.tool_failure_count, 1);
-    assert_eq!(snapshot.error_count, 2);
+    assert_eq!(snapshot.error_count, 2); // 1 tool failure (counted as error) + 1 explicit error
     assert_eq!(snapshot.cancellation_count, 1);
     assert_eq!(snapshot.tools_used.len(), 3);
     assert_eq!(snapshot.models_used.len(), 2);
     assert_eq!(snapshot.latency_sample_count, 2);
-    assert_eq!(snapshot.avg_time_to_first_token_ms, 150);
-    assert_eq!(snapshot.avg_response_time_ms, 1500);
+    assert_eq!(snapshot.avg_time_to_first_token_ms, 150); // mean of the 100 and 200 samples
+    assert_eq!(snapshot.avg_response_time_ms, 1500); // mean of the 1000 and 2000 samples
     assert_eq!(snapshot.min_time_to_first_token_ms, 100);
     assert_eq!(snapshot.max_time_to_first_token_ms, 200);
+    // ITL stats from phase 1 should be present
     assert!(
         snapshot.itl_p50_ms.is_some(),
         "itl_p50_ms should be set after recording ITL data"
@@ -852,13 +871,14 @@ async fn test_restore_signals_full_round_trip() {
         "itl_p99_ms should be set after recording ITL data"
     );
     assert_eq!(snapshot.itl_max_ms, Some(50));
-    assert_eq!(snapshot.itl_mean_ms, Some(30)); // mean of those recorded intervals
+    assert_eq!(snapshot.itl_mean_ms, Some(30)); // mean of the five recorded intervals
     assert_eq!(snapshot.total_chunk_count, 6);
     assert_eq!(snapshot.itl_sample_count, 1);
 
     handle1.shutdown();
     actor_handle1.await.unwrap();
 
+    // Phase 2: Restore the snapshot into a new actor
     let (handle2, actor2) = SessionSignalsActor::new();
     let actor_handle2 = tokio::spawn(actor2.run());
 
@@ -908,7 +928,8 @@ async fn test_restore_signals_full_round_trip() {
     assert_eq!(restored.itl_sample_count, 1);
 
     // Phase 2b: Take a turn-end snapshot *without* recording new ITL data.
-    handle2.increment_turn();
+    // The TakeTurnEndSnapshot handler calls update_session_itl_percentiles() which must NOT wipe persisted ITL p50/p99 when itl_digest is None
+    handle2.increment_turn(); // turn 4 (no ITL data recorded this turn)
     handle2.record_assistant_message();
     let delta_snap_no_itl = handle2.take_turn_end_snapshot().await.unwrap();
     let after_empty_turn = handle2.snapshot().await.unwrap();
@@ -924,7 +945,8 @@ async fn test_restore_signals_full_round_trip() {
     assert_eq!(after_empty_turn.itl_mean_ms, Some(30));
     assert_eq!(delta_snap_no_itl.delta.last_itl_p50_ms, None);
 
-    handle2.increment_turn();
+    // Phase 3: Verify subsequent signals accumulate correctly after restore
+    handle2.increment_turn(); // turn 5
     handle2.record_tool_call("grep"); // new tool
     handle2.record_tool_call("bash"); // existing tool (should dedup)
     handle2.record_model_usage("grok-3"); // existing model (should dedup)
@@ -938,21 +960,24 @@ async fn test_restore_signals_full_round_trip() {
     assert_eq!(after_turn.turn_count, 5);
     assert_eq!(after_turn.user_message_count, 5);
     assert_eq!(after_turn.assistant_message_count, 5);
-    assert_eq!(after_turn.tool_call_count, 6);
-    assert_eq!(after_turn.error_count, 3);
+    assert_eq!(after_turn.tool_call_count, 6); // the restored 4 plus 2 new calls
+    assert_eq!(after_turn.error_count, 3); // the restored 2 plus 1 new error
     assert_eq!(after_turn.tools_used.len(), 4); // bash not duplicated, grep added
     assert!(after_turn.tools_used.contains(&"grep".to_string()));
     assert_eq!(after_turn.models_used.len(), 2); // grok-3 not duplicated
+    // Latency: (100+200+300)/3 = 200
     assert_eq!(after_turn.latency_sample_count, 3);
     assert_eq!(after_turn.avg_time_to_first_token_ms, 200);
     assert_eq!(after_turn.avg_response_time_ms, 2000);
 
+    // Phase 4: Verify turn-end delta is computed against restored baseline, not zero
     let delta_snap = handle2.take_turn_end_snapshot().await.unwrap();
     assert_eq!(delta_snap.delta.turn_number, 5);
-    assert_eq!(delta_snap.delta.delta_tool_calls, 2);
-    assert_eq!(delta_snap.delta.delta_errors, 1);
+    assert_eq!(delta_snap.delta.delta_tool_calls, 2); // only the 2 new calls
+    assert_eq!(delta_snap.delta.delta_errors, 1); // only the 1 new error
     assert_eq!(delta_snap.delta.delta_tool_failures, 0); // no new failures
 
+    // Restore must not reset the session duration to 0
     assert!(after_turn.session_duration_seconds >= snapshot.session_duration_seconds);
 
     handle2.shutdown();
@@ -968,7 +993,7 @@ async fn test_loc_change_accumulates_correctly() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
-    // Agent adds lines to files
+    // Agent adds lines to two files
     handle.record_loc_change(true, 10, 0, "/tmp/a.rs".into());
     handle.record_loc_change(true, 5, 2, "/tmp/b.rs".into());
 
@@ -978,10 +1003,12 @@ async fn test_loc_change_accumulates_correctly() {
 
     let snap = handle.snapshot().await.unwrap();
 
+    // Agent: 10+5=15 added, 0+2=2 removed
     assert_eq!(snap.agent_lines_added, 15);
     assert_eq!(snap.agent_lines_removed, 2);
     assert_eq!(snap.agent_files_touched, 2); // a.rs, b.rs
 
+    // Human: 3+7=10 added, 0+1=1 removed
     assert_eq!(snap.human_lines_added, 10);
     assert_eq!(snap.human_lines_removed, 1);
     assert_eq!(snap.human_files_touched, 2); // a.rs, c.rs
@@ -989,6 +1016,7 @@ async fn test_loc_change_accumulates_correctly() {
     // Total files: a.rs, b.rs, c.rs = 3
     assert_eq!(snap.total_files_touched, 3);
 
+    // No reverts yet
     assert_eq!(snap.agent_lines_added_reverted, 0);
     assert_eq!(snap.human_lines_added_reverted, 0);
 
@@ -1001,14 +1029,17 @@ async fn test_loc_revert_is_noop_until_per_author_attribution() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
-    // Agent adds several lines
+    // Agent adds 10 lines
     handle.record_loc_change(true, 10, 0, "/tmp/a.rs".into());
 
+    // Revert event is received but intentionally ignored; all 4 revert counters stay at 0 to avoid publishing misleading partial data
     handle.record_loc_revert(5, 0);
 
     let snap = handle.snapshot().await.unwrap();
 
+    // Gross stays at 10
     assert_eq!(snap.agent_lines_added, 10);
+    // Reverts are 0 (handler is a no-op until per-author attribution is implemented)
     assert_eq!(snap.agent_lines_added_reverted, 0);
     assert_eq!(snap.agent_lines_removed_reverted, 0);
     assert_eq!(snap.human_lines_added_reverted, 0);
@@ -1023,6 +1054,7 @@ async fn test_loc_turn_deltas() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
+    // Turn 1: agent adds 10 lines
     handle.increment_turn();
     handle.record_loc_change(true, 10, 0, "/tmp/a.rs".into());
     handle.record_assistant_message();
@@ -1032,12 +1064,13 @@ async fn test_loc_turn_deltas() {
     assert_eq!(snap1.delta.delta_human_lines_added, 0);
     assert_eq!(snap1.delta.delta_agent_files_touched, 1);
 
+    // Turn 2: human adds 5 lines to a different file
     handle.increment_turn();
     handle.record_loc_change(false, 5, 0, "/tmp/b.rs".into());
     handle.record_assistant_message();
     let snap2 = handle.take_turn_end_snapshot().await.unwrap();
 
-    // Turn deltas should only reflect turn multiple changes
+    // Turn 2 deltas should only reflect turn 2 changes
     assert_eq!(snap2.delta.delta_agent_lines_added, 0);
     assert_eq!(snap2.delta.delta_human_lines_added, 5);
     assert_eq!(snap2.delta.delta_human_files_touched, 1);
@@ -1065,6 +1098,7 @@ async fn test_loc_file_dedup() {
 
     let snap = handle.snapshot().await.unwrap();
 
+    // Lines accumulate, but file count stays at 1
     assert_eq!(snap.agent_lines_added, 10);
     assert_eq!(snap.agent_files_touched, 1);
     assert_eq!(snap.total_files_touched, 1);
@@ -1074,16 +1108,21 @@ async fn test_loc_file_dedup() {
 }
 
 /// Hunk reshuffling (content moves between hunks during diff recomputation) must cancel out.
+/// A -12 and +12 from two ContentChanged events should net to zero, not inflate the counter.
 #[tokio::test]
 async fn test_loc_hunk_reshuffle_cancels_out() {
     let (handle, actor) = SessionSignalsActor::new();
     let actor_handle = tokio::spawn(actor.run());
 
-    // Agent adds several lines
+    // Agent adds 13 lines
     handle.record_loc_change(true, 13, 1, "/tmp/jokes.md".into());
 
+    // Human edits the file (hunk reshuffling):
+    // One hunk shrinks by 12 (content migrated away)
     handle.record_loc_change(false, -12, 0, "/tmp/jokes.md".into());
+    // Another hunk grows by 12 (absorbed the content)
     handle.record_loc_change(false, 12, 0, "/tmp/jokes.md".into());
+    // Plus the actual human addition: 1 line
     handle.record_loc_change(false, 1, 0, "/tmp/jokes.md".into());
 
     let snap = handle.snapshot().await.unwrap();
@@ -1209,7 +1248,7 @@ fn test_sample_rss_bytes_returns_nonzero() {
 
 #[test]
 fn test_sample_rss_bytes_is_stable() {
-    // Consecutive calls should return similar values (no wild swings)
+    // Two consecutive calls should return similar values (no wild swings)
     let rss1 = sample_rss_bytes();
     let rss2 = sample_rss_bytes();
     assert!(rss1 > 0);

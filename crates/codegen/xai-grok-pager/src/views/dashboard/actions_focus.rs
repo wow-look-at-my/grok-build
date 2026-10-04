@@ -1,9 +1,12 @@
-//! The keyboard cursor on the dashboard's actions row (`+ New Agent`, `Open Previous /resume`, `Worktree Ctrl+w`): which item can hold it.
+//! The keyboard cursor on the dashboard's actions row (`+ New Agent`, `Open Previous /resume`, `Worktree Ctrl+w`):
+//! which item can hold it, their visual order, and how `←`/`→` walk that order over the items the last frame painted.
+//! Owns the one item-to-hit-area mapping that navigation and the renderer's focus fallback both use.
 
 use crate::app::agent_view::HitArea;
 use crate::views::dashboard::state::DashboardState;
 
 /// A keyboard cursor target on the actions row.
+/// `←`/`→` walk [`ActionsFocus::VISUAL_ORDER`] over the items the last frame painted; `Enter` acts like a click on the focused item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionsFocus {
     /// `+ New Agent`: Enter creates a session (or dispatches a typed draft).
@@ -37,7 +40,8 @@ impl ActionsFocus {
         }
     }
 
-    /// Whether the last frame painted this item.
+    /// Whether the last frame painted this item; unpainted items (dropped for width, or `Open Previous` outside the workspace
+    /// dashboard) are skipped by the walk and vacate the cursor.
     pub(crate) fn is_painted(self, state: &DashboardState) -> bool {
         self.hit(state).rect.is_some()
     }

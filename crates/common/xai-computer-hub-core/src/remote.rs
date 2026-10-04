@@ -1,4 +1,15 @@
-//! `ConnectionClient` abstraction, `RemoteToolProxy`, and `RemoteTransport`.
+//! `ConnectionClient` abstraction, `RemoteToolProxy`, and
+//! `RemoteTransport`.
+//!
+//! `ConnectionClient` is the thin contract a downstream WebSocket SDK (or
+//! an in-test channel-backed mock) implements; this crate stays free of
+//! tokio-runtime / tokio-tungstenite deps so callers can pick their own.
+//!
+//! `RemoteToolProxy` wraps a remote tool registration so it implements
+//! [`ToolHandle`] — the router routes through the same handle
+//! type for local and remote registrations. `RemoteTransport` is the
+//! transport-side equivalent: it forwards arbitrary `(tool_id, args)`
+//! pairs over a [`ConnectionClient`] without needing a per-tool handle.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -26,26 +37,47 @@ use xai_tool_types::ToolDescription;
 use crate::resolver::ToolHandle;
 use crate::transport::{Principal, Transport, TransportKind};
 
-/// Object-safe contract for a connected remote endpoint. Concrete
-/// implementations supply the wire transport — the Rust SDK uses
-/// `tokio_tungstenite`; tests use channel-backed mocks. Implementations are
-/// expected to: - correlate request/response pairs by [`JsonRpcId`].
+/// Object-safe contract for a connected remote endpoint.
+///
+/// Concrete implementations supply the wire transport — the Rust SDK uses
+/// `tokio_tungstenite`; tests use channel-backed mocks. Implementations
+/// are expected to:
+///
+/// - correlate request/response pairs by [`JsonRpcId`];
+/// - deliver progress notifications matching `tool_call_id` to whichever
+///   subscriber registered for them;
+/// - surface transport-level disconnects as [`ToolError::NetworkError`].
 #[async_trait]
 pub trait ConnectionClient: Send + Sync + std::fmt::Debug {
-    /// Send a JSON-RPC request and await the matching response.
+    /// Send a JSON-RPC request and await the matching response. Errors
+    /// signal a transport-level failure (write failed, connection closed
+    /// before the response arrived); a successful return carries the
+    /// response envelope verbatim, including method-level error outcomes.
     async fn request(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse, ToolError>;
 
     /// Subscribe to progress notifications for `tool_call_id`.
+    ///
+    /// The returned stream closes when the call's terminal frame arrives,
+    /// when the connection drops, or when the caller drops the receiver.
+    /// Subscribers MUST be registered before the corresponding request is
+    /// sent — otherwise progress frames that arrive before subscription
+    /// is complete are lost.
     async fn subscribe_progress(
         &self,
         tool_call_id: ToolCallId,
     ) -> BoxStream<'static, ToolCallProgressFrame>;
 
-    /// Send a one-way notification (no response expected). Useful for hook frames such as cancel.
+    /// Send a one-way notification (no response expected). Useful for
+    /// hook frames such as cancel.
     async fn notify(&self, notification: JsonRpcNotification) -> Result<(), ToolError>;
 }
 
 /// Wraps a remote registration so it dispatches through a connection.
+///
+/// Identity, description, and capabilities come from the registration
+/// snapshot held on the proxy; execution forwards a `tool_call_request`
+/// over the connection and merges progress + terminal frames into a
+/// single [`ToolStream`].
 #[derive(Debug, Clone)]
 pub struct RemoteToolProxy {
     tool_id: ToolId,
@@ -106,6 +138,10 @@ impl ToolHandle for RemoteToolProxy {
 }
 
 /// Transport that forwards calls over a [`ConnectionClient`].
+///
+/// The transport is bound to a single `(user_id, session_id)` at
+/// construction. Calls do not require a pre-built proxy — the transport
+/// builds the request frame from the `tool_id` it is asked to dispatch.
 #[derive(Debug)]
 pub struct RemoteTransport {
     connection: Arc<dyn ConnectionClient>,
@@ -187,7 +223,9 @@ async fn dispatch_via_connection(
     let behavior_version = ctx.extensions.get::<BehaviorVersion>().map(|v| v.0.clone());
     let call_id = ctx.call_id;
 
-    // Subscribe BEFORE sending.
+    // Subscribe BEFORE sending. The single remaining `call_id.clone()`
+    // is unavoidable: subscription needs an owned id and the same id has
+    // to land in the request params below.
     let progress = connection.subscribe_progress(call_id.clone()).await;
 
     let params = ToolCallParams {
@@ -214,7 +252,8 @@ async fn dispatch_via_connection(
         },
     };
 
-    // Build the response future without awaiting it here so progress and terminal can be polled concurrently.
+    // Build the response future without awaiting it here so progress and
+    // terminal can be polled concurrently from the returned stream.
     let request_fut = Box::pin(async move { connection.request(request).await });
 
     Box::pin(RequestStream {
@@ -225,7 +264,8 @@ async fn dispatch_via_connection(
     })
 }
 
-/// Owned response future with `'static` lifetime so the stream can hold it across polls.
+/// Owned response future with `'static` lifetime so the stream can hold
+/// it across polls.
 type ResponseFuture = BoxFuture<'static, Result<JsonRpcResponse, ToolError>>;
 
 /// Stream that interleaves wire-side progress frames with the eventual
@@ -286,7 +326,9 @@ impl Stream for RequestStream {
     }
 }
 
-/// Map a wire-side [`ToolCallProgressFrame`] into a runtime [`ToolProgress`].
+/// Map a wire-side [`ToolCallProgressFrame`] into a runtime
+/// [`ToolProgress`]. `kind` becomes the `Custom` subkind so callers can
+/// dispatch on the producer-defined identifier without losing the body.
 pub fn progress_from_frame(frame: ToolCallProgressFrame) -> ToolProgress {
     ToolProgress::Custom {
         subkind: frame.kind,
@@ -335,9 +377,10 @@ pub fn decode_call_result(tool_id: ToolId, value: Value) -> Result<TypedToolOutp
 
 /// Project a wire [`ToolOutputWire`] into a JSON [`Value`].
 ///
-/// Shapes collapse to one runtime type: - `Text` becomes a JSON string; -
-/// `Json` is forwarded verbatim; - `Mcp { blocks }` is re-serialised as `{
-/// "blocks": [ContentBlock, ...] }`
+/// Three shapes collapse to one runtime type:
+/// - `Text` becomes a JSON string;
+/// - `Json` is forwarded verbatim;
+/// - `Mcp { blocks }` is re-serialised as `{ "blocks": [ContentBlock, ...] }`
 ///   so the same downstream decoder used for in-process content blocks
 ///   works without case-by-case adaptation.
 pub fn output_to_value(output: ToolOutputWire) -> Value {
@@ -346,7 +389,13 @@ pub fn output_to_value(output: ToolOutputWire) -> Value {
         ToolOutputWire::Json(v) => v,
         ToolOutputWire::Mcp { blocks } => {
             let runtime_blocks: Vec<ContentBlock> = blocks.into_iter().map(map_block).collect();
-            // `ContentBlock`'s derived `Serialize` impl never fails for any valid in-memory variant, but `to_value` is fallible at the type level.
+            // `ContentBlock`'s derived `Serialize` impl never fails for any
+            // valid in-memory variant, but `to_value` is fallible at the
+            // type level; collapse a hypothetical failure to `Value::Null`
+            // before wrapping so this function stays total without an
+            // `unwrap`. The outer `json!` only sees a `Value` expression
+            // (which `to_value` round-trips infallibly), so the macro's
+            // hidden `to_value` call cannot panic here.
             let blocks_value = serde_json::to_value(&runtime_blocks).unwrap_or(Value::Null);
             serde_json::json!({ "blocks": blocks_value })
         }
@@ -395,7 +444,9 @@ pub fn error_from_envelope(err: xai_tool_protocol::JsonRpcError) -> ToolError {
 }
 
 /// Recognize the hub's `workspace_unavailable` error on an already-decoded
-/// [`ToolError`].
+/// [`ToolError`]. Keys on `details["code"]` — the field that survives
+/// `ToolError::custom` + `with_details` — not the numeric code or the wire
+/// `Custom.subcode`.
 pub fn is_workspace_unavailable(err: &ToolError) -> bool {
     err.kind == ToolErrorKind::Custom
         && err

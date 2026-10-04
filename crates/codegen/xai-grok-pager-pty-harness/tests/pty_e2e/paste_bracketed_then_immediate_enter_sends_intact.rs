@@ -24,7 +24,8 @@ async fn paste_bracketed_then_immediate_enter_sends_intact() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
 
-    // Paste and Enter in ONE injected buffer.
+    // Paste and Enter in ONE injected buffer: the Enter chases the closing ESC[201~ with no settle
+    // It submits before any deferred paste work could possibly finish
     harness
         .inject_keys(format!("\x1b[200~{LINE_1}\n{LINE_2}\n{LINE_3}\x1b[201~\r").as_bytes())
         .expect("bracketed paste + immediate Enter");

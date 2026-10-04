@@ -1,5 +1,5 @@
-//! Fail-closed `git` arm of the routine-bash heuristic: any shape not
-//! recognized here goes to the model.
+//! Fail-closed `git` arm of the routine-bash heuristic: any shape not recognized here goes to the model.
+//! Callers pass wrapper-peeled words with `words[0]` literally `git`; a case-variant or path-qualified spelling may resolve to a different binary.
 
 use crate::permission::exec_risk::{
     git_words_are_read_only_query, git_words_have_unsafe_query_option,
@@ -56,7 +56,7 @@ fn is_routine_branch_switch(args: &[String]) -> bool {
             "-b" | "-B" | "-c" | "-C" | "--orphan" => {
                 it.next();
             }
-            // Bare `-` is the branch
+            // Bare `-` is the previous branch
             "-" => operands += 1,
             _ if BRANCH_SWITCH_BENIGN_FLAGS.contains(&word) => {}
             _ if word.starts_with('-') => return false,

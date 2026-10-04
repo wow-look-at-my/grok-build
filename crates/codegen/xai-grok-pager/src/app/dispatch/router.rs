@@ -143,9 +143,9 @@ pub(super) fn dispatch_copy_auth_url(
         generation: app.auth_clipboard_feedback_generation,
     }]
 }
-/// Dispatch an action: mutate state, return effects to execute. The returned
-/// `Vec<Effect>` may be empty (pure state mutation) or contain async work
-/// that the event loop should spawn.
+/// Dispatch an action: mutate state, return effects to execute.
+/// The returned `Vec<Effect>` may be empty (pure state mutation) or contain async work that the event loop should spawn.
+/// Do not extract a returning arm into a handler: as a delegation its `return`s become plain arm values and start flowing through the tail.
 pub(in crate::app::dispatch) fn confirmed_quit(app: &mut AppView) -> Vec<Effect> {
     if let Some(tx) = &app.voice_cmd_tx {
         let _ = tx.try_send(xai_grok_voice::VoiceCommand::Shutdown);
@@ -393,7 +393,10 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![]
         }
         Action::SendPrompt(text) => {
-            // Hand any stuck local rows to the shell first.
+            // Hand any stuck local rows to the shell first, so this prompt is
+            // eligible for the shell's queue — the only queue the running turn
+            // harvests. Ordering holds: those rows are older, and they land
+            // ahead of this one. See `migrate_local_rows_to_server_queue`.
             let mut effects = queue::migrate_local_rows_to_server_queue(app);
             effects.extend(dispatch_send_prompt(app, text));
             effects
@@ -1611,8 +1614,9 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
     sync_sleep_inhibitor(app);
     effects
 }
-/// Show the image notices queued so far as one message on the visible
-/// surface; true when a surface changed.
+/// Show the image notices queued so far as one message on the visible surface; true when a surface
+/// changed. The command that queued them may have navigated away (`/home`, `/new`), so the
+/// originating agent's own toast could be off-screen or gone.
 pub(crate) fn flush_image_notices(app: &mut AppView) -> bool {
     if app.pending_image_notices.is_empty() {
         return false;

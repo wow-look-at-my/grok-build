@@ -1,4 +1,4 @@
-//! Modal input handlers: the feedback modal, agents/persona modals.
+//! Modal input handlers: the feedback modal, agents/persona modals, and the extensions modal (hooks, plugins, marketplace, skills, MCP servers) with its actions.
 
 use super::AgentView;
 #[cfg(test)]
@@ -670,7 +670,9 @@ impl AgentView {
                         return self.confirm_extensions_modal_action(action, pending_entry_index);
                     }
                     _ => {
-                        // Dismissing the error/confirmation also clears the pending "[processing]" badge The action is done.
+                        // Dismissing the error/confirmation also clears the pending "[processing]" badge
+                        // The action is done and the user has acknowledged. Wait clears too so the overlay does not reappear under the message once the message is gone.
+                        // overlay does not reappear under the message once the message is gone.
                         state.modal_message = None;
                         state.pending_action = None;
                         state.pending_entry_index = None;
@@ -681,8 +683,8 @@ impl AgentView {
             return InputOutcome::Changed;
         }
 
-        // Block all action keys while an action is still running (no error
-        // overlay is showing.
+        // Block all action keys while an action is still running (no error overlay is showing; that case is handled above)
+        // Esc closes the modal so a hung list/refresh cannot trap the user; background work (auth, refresh) continues without the UI lock
         if self
             .extensions_modal
             .as_ref()
@@ -790,7 +792,9 @@ impl AgentView {
                 }
             };
             let config = crate::views::modal_window::ModalWindowConfig {
-                // Empty title, matching the renderer in extensions_modal.rs, which uses the tab bar to identify the modal contents Keep these.
+                // Empty title, matching the renderer in extensions_modal.rs, which uses the tab bar to identify the modal contents
+                // Keep these in sync
+                // A future handle_modal_key change that reads `title` (e.g. for accessibility announcements) must see the same value the user sees.
                 title: "",
                 tabs: Some(&labels),
                 shortcuts: &[],
@@ -880,6 +884,7 @@ impl AgentView {
                     return InputOutcome::Changed;
                 }
                 _ => {
+                    // Unhandled and other outcomes fall through to picker.
                 }
             }
         }
@@ -941,7 +946,8 @@ impl AgentView {
             action_keys: &action_keys,
             disable_search: false,
             compact_bottom_bar: false,
-            // Skills-tab letters double as quick keys today.
+            // Skills-tab letters double as quick keys today, and the tab feels noisy when typing a single letter immediately commits a query
+            // Require explicit `/` (or click) to activate search there
             search_only_on_slash: state.active_tab
                 == crate::views::extensions_modal::ExtensionsTab::Skills,
             vim_normal_first: crate::appearance::cache::load_vim_mode(),
@@ -966,7 +972,8 @@ impl AgentView {
                 if let Some(ref mut state) = self.extensions_modal
                     && let Some(&tab) = crate::views::extensions_modal::ExtensionsTab::ALL.get(idx)
                 {
-                    // switch_tab also clears the Add form, error overlay.
+                    // switch_tab also clears the Add form, error overlay, and pending [processing] badge
+                    // The new tab thus opens in a clean browse view
                     state.switch_tab(tab);
                 }
                 InputOutcome::Changed
@@ -1182,6 +1189,8 @@ impl AgentView {
                     return InputOutcome::Changed;
                 }
                 crate::views::modal_window::ModalWindowOutcome::ShortcutActivated(id) => {
+                    // Footer shortcut IDs of 100 or more map to action_keys
+                    // Resolve the char here; dispatch after the borrow is released so execute_modal_button_action can take &mut self
                     if id == 98 {
                         // The "Tab/Shift+Tab tabs" hint: cycle to the next tab, mirroring the Tab keypress flow
                         let all = crate::views::extensions_modal::ExtensionsTab::ALL;
@@ -1260,7 +1269,8 @@ impl AgentView {
                     | MouseEventKind::Down(crossterm::event::MouseButton::Middle)
             )
         {
-            // Mirror the keyboard dismissal path: clearing the error/confirmation also clears the pending "[processing]" badge The mouse.
+            // Mirror the keyboard dismissal path: clearing the error/confirmation also clears the pending "[processing]" badge
+            // The mouse and keyboard paths thus agree on what dismiss means
             state.modal_message = None;
             state.pending_action = None;
             state.pending_entry_index = None;
@@ -1555,6 +1565,8 @@ impl AgentView {
         if let Some(gk) = group_key {
             let is_expanded = state.is_group_expanded(sel, &gk);
             // `set_collapsed`'s third arg is the NEW collapsed state.
+            // Currently expanded means the new state is collapsed (true); currently collapsed means expanded (false)
+            // `!is_expanded` would make `e`/Enter/Space/click a no-op for every collapsible header (MCP servers, marketplace sources, hooks groups)
             if self.extensions_modal_set_collapsed(sel, &gk, is_expanded) {
                 self.log_extensions_modal_action(
                     if is_expanded { "collapse" } else { "expand" },
@@ -1673,6 +1685,7 @@ impl AgentView {
         use crate::views::extensions_modal::{ButtonAction, ModalInput, TabDataState};
 
         // A new user-initiated action supersedes any lingering result notice.
+        // The chained auto-reload goes through `Effect`, not here, so it keeps the triggering action's notice (see `dispatch_action_result`)
         if let Some(ref mut state) = self.extensions_modal {
             state.result_notice = None;
         }
@@ -1710,9 +1723,8 @@ impl AgentView {
                         state.marketplace_data = TabDataState::Loading;
                         state.hooks_data = TabDataState::Loading;
                     } else {
-                        // Per-plugin actions badge the selected row Update
-                        // gets its own verb (matching the Marketplace tab) so
-                        // the user sees the fetch is underway.
+                        // Per-plugin actions badge the selected row
+                        // Update gets its own verb (matching the Marketplace tab) so the user sees the fetch is underway, not a generic spinner
                         let label = if matches!(
                             plugins_action,
                             xai_hooks_plugins_types::PluginsAction::Update { .. }
@@ -1859,9 +1871,8 @@ impl AgentView {
                     use crate::views::extensions_modal::TabDataState;
                     state.modal_message = None;
                     match &marketplace_action {
-                        // Refresh re-syncs every source and reloads the whole
-                        // list Show a tab-level loading state instead of
-                        // decorating the row under the cursor
+                        // Refresh re-syncs every source and reloads the whole list
+                        // Show a tab-level loading state instead of decorating the single row under the cursor
                         xai_hooks_plugins_types::MarketplaceAction::Refresh { .. } => {
                             state.pending_action = None;
                             state.pending_entry_index = None;
@@ -1964,7 +1975,7 @@ impl AgentView {
                         .filter(|h| h.source_dir == *source)
                         .collect();
                     // Direction comes from the unpinned hooks only (all-pinned groups read enabled)
-                    // Shared with the button-label mirror so both can't drift
+                    // Shared with the button-label mirror so the two can't drift
                     let any_enabled = crate::views::extensions_modal::hook_group_any_enabled(
                         group_hooks.iter().copied(),
                     );
@@ -2025,6 +2036,7 @@ impl AgentView {
                         crate::views::extensions_modal::ConfirmationAction::Plugins(
                             xai_hooks_plugins_types::PluginsAction::Uninstall {
                                 plugin_id: plugin.id,
+                                // Server owns multi-plugin cascade text when count > 1.
                                 confirmed: false,
                             },
                         ),
@@ -2303,8 +2315,8 @@ impl AgentView {
                 InputOutcome::Action(Action::DeleteMcpServer { server_name })
             }
         };
-        // Low-level arms stamp picker_state.selected; overwrite with the row
-        // captured when the prompt opened Scroll can move selection.
+        // Low-level arms stamp picker_state.selected; overwrite with the row captured when the prompt opened
+        // Scroll can move selection under the overlay
         if let Some(ref mut state) = self.extensions_modal {
             state.pending_entry_index = pending_entry_index;
         }
@@ -2350,6 +2362,7 @@ impl AgentView {
                 name: plugin.name.clone(),
             }),
             None => {
+                // A source whose scan failed or found nothing has no plugin row to point at
                 if !source.plugins.is_empty() {
                     state.post_select_row_hint("plugin", verb);
                 }
@@ -2606,8 +2619,9 @@ mod extensions_action_target_tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
-    /// Pipeline harness: entries are built by the real renderer between keys
-    /// (the live input path reads the renderer-published entry vectors).
+    /// Pipeline harness: entries are built by the real renderer between keys (the live input path
+    /// reads the renderer-published entry vectors). Vim mode is pinned off so a boundary Down moves
+    /// focus to the tab bar regardless of the developer's on-disk `[ui].vim_mode`.
     fn pipeline_agent(modal: ExtensionsModalState) -> super::AgentView {
         crate::appearance::cache::set_vim_mode(false);
         let mut agent = super::test_fixtures::make_agent();
@@ -2854,6 +2868,9 @@ mod extensions_action_target_tests {
         }
     }
 
+    /// A mouse tab switch (tab label or the footer `Tab` hint) lands in the new tab's list with row 0
+    /// selected even when the tab bar held focus before the click; leaving it focused would light two
+    /// focus indicators while the arrows follow the bar.
     #[test]
     fn mouse_tab_switch_focuses_the_list_not_the_tab_bar() {
         let tab_index = |tab| ExtensionsTab::ALL.iter().position(|t| *t == tab).unwrap();
@@ -3951,6 +3968,7 @@ mod connectors_url_click_tests {
     #[test]
     fn managed_connectors_wait_click_through_does_not_open_list_row() {
         // Paint the list first to capture a real connectors-URL hit, then cover it with wait.
+        // A click on those coordinates must not open connectors via the row underneath.
         let mut agent = rendered_agent();
         let (col, band) = managed_url_hit(&agent);
         agent

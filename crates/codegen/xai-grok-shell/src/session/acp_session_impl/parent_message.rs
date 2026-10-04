@@ -52,6 +52,7 @@ pub(super) type ParentOwnedDelivery = OwnedDelivery<
 >;
 
 /// Named bound on live Steer and Interject slots waiting for the next safe point.
+/// Parent text becomes model-visible in one batch; this keeps that batch finite.
 const MAX_PARENT_SAFE_POINT_SLOTS: usize = 32;
 
 /// A safe-point delivery commit could not reach a downstream actor;
@@ -419,7 +420,9 @@ impl SessionActor {
             }
             (turn_binding(task), trigger)
         };
-        // The barrier precedes every visible side effect: a dead or cancelled persistence actor skips delivery.
+        // The barrier precedes every visible side effect: a dead or cancelled
+        // persistence actor skips delivery, and a teardown settlement landing
+        // while this await is suspended leaves nothing to roll back.
         let (persisted_tx, persisted_rx) = oneshot::channel();
         if self
             .notifications
@@ -436,7 +439,7 @@ impl SessionActor {
             );
             return false;
         }
-        // Persist and push only inside the commit under the state lock: teardown settlement transitions slots under the same lock.
+        // Persist and push only inside the commit under the state lock: teardown settlement transitions slots under the same lock, so a slot settled during the barrier yields no projecting messages here and its text never.
         let mut state = self.state.lock().await;
         let committed = state
             .message_delivery

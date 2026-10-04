@@ -4,7 +4,10 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
 /// An exclusive advisory lock on a file. Sites write holder stamps through
-/// `DerefMut<Target = File>`.
+/// `DerefMut<Target = File>`. Dropping unlocks (best effort) and closes. The raw `File` cannot be
+/// detached: `flock(LOCK_UN)` releases the lock for every dup and every forked copy of the open
+/// file description at once, so the guard must be the only holder. Calling `File::lock*` or
+/// `File::unlock` through the guard bypasses that ownership and breaks the crate's guarantees.
 #[must_use]
 #[derive(Debug)]
 pub struct LockedFile {

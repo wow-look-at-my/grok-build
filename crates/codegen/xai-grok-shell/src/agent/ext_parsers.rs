@@ -1,4 +1,6 @@
 //! Wire-shape parsers for ext-notification params handled by `MvpAgent`.
+//!
+//! Pure parsing only (params JSON into `SessionCommand`); session lookup and command dispatch stay in `mvp_agent::ext_notification`.
 
 use crate::session::SessionCommand;
 
@@ -13,7 +15,9 @@ pub(super) fn parse_queue_edit_command(
     match method {
         "x.ai/queue/remove" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
-            // The client supplies the version it last saw.
+            // The client supplies the version it last saw; the handler removes only on an exact match
+            // A stale version is a benign no-op plus a rebroadcast
+            // Default 0 covers never-edited prompts (the common case).
             let expected_version = params
                 .get("expectedVersion")
                 .and_then(|v| v.as_u64())
@@ -45,9 +49,8 @@ pub(super) fn parse_queue_edit_command(
                 .get("expectedVersion")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            // Optional client-edited replacement text (atomic edit and
-            // interject) Blank overrides are dropped (degrade to the stored
-            // queue text).
+            // Optional client-edited replacement text (atomic edit and interject)
+            // Blank overrides are dropped (degrade to the stored queue text); never interject an empty prompt on a malformed client param
             let new_text = params
                 .get("newText")
                 .and_then(|v| v.as_str())
@@ -64,9 +67,8 @@ pub(super) fn parse_queue_edit_command(
         "x.ai/queue/edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             let new_text = params.get("newText").and_then(|v| v.as_str())?.to_string();
-            // `owner` is the resolved attribution For edit it represents the
-            // most recent editor (recorded as `last_editor`), not the
-            // enqueuer
+            // `owner` is the resolved attribution
+            // For edit it represents the most recent editor (recorded as `last_editor`), not the original enqueuer
             Some(SessionCommand::EditQueuedPrompt {
                 id,
                 new_text,
@@ -109,6 +111,7 @@ mod tests {
             _ => panic!("expected RemoveQueuedPrompt"),
         }
 
+        // remove without expectedVersion defaults to 0.
         let p = serde_json::json!({ "sessionId": "s1", "id": "p8" });
         match parse_queue_edit_command("x.ai/queue/remove", &p, None) {
             Some(SessionCommand::RemoveQueuedPrompt {
@@ -228,6 +231,7 @@ mod tests {
             _ => panic!("expected InterjectQueuedPrompt"),
         }
 
+        // interject without expectedVersion defaults to 0.
         match parse_queue_edit_command(
             "x.ai/queue/interject",
             &serde_json::json!({ "sessionId": "s1", "id": "p11" }),

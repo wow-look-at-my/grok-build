@@ -1,4 +1,4 @@
-//! The `streaming-messages-json` reducer state: the per-response phase machine, partial-framing state, terminal metadata buffer.
+//! The `streaming-messages-json` reducer state: the per-response phase machine, partial-framing state, terminal metadata buffer, and session facts.
 
 use crate::headless::reducer::McpServer;
 
@@ -27,6 +27,7 @@ pub(super) struct ResponseIdentity {
 }
 
 impl ResponseIdentity {
+    /// The input-side `message.usage` this identity seeds (`output_tokens` stays 0).
     pub(super) fn input_usage(&self) -> MessageUsage {
         MessageUsage {
             input_tokens: self.input_tokens,

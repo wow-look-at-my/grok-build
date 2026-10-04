@@ -1,9 +1,11 @@
-//! Worktree methods.
+//! Worktree methods (`workspace.create_worktree`, `workspace.remove_worktree`, `workspace.apply_worktree`, `workspace.worktree_*`).
 use super::git::{ChangeType, GitFileChange};
 use super::{RpcActivityClass, WorkspaceRpc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 /// Worktree creation strategy.
+///
+/// Mirrors `xai_fast_worktree::CreationMode` but uses config-friendly naming (lowercase strings in TOML / JSON).
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum WorktreeType {
@@ -200,6 +202,7 @@ pub struct CreateWorktreeRequest {
     #[serde(default = "default_copy_mode")]
     pub copy_mode: WorktreeCopyMode,
     /// Git ref (branch, tag, or commit SHA) to checkout in the worktree.
+    /// If not specified, defaults to HEAD of the source repository.
     #[serde(default)]
     pub git_ref: Option<String>,
     /// Whether to copy ignored files in the background after creation
@@ -209,9 +212,11 @@ pub struct CreateWorktreeRequest {
     #[serde(default)]
     pub ignored_skip_patterns: Vec<String>,
     /// Worktree creation type: "linked", "standalone", or "git".
+    /// If not specified, the agent's config default will be used.
     #[serde(default)]
     pub worktree_type: Option<WorktreeType>,
     /// Human-readable label for the worktree directory name.
+    /// When absent, an automatic `YYYY-MM-DD-<uuid>` label is generated.
     #[serde(default)]
     pub label: Option<String>,
     /// When `Some(true)`, enable the grove worktree arm on the builder; absent or false means copy.
@@ -295,6 +300,7 @@ pub enum CreateWorktreeResponse {
         #[serde(rename = "worktreePath")]
         worktree_path: String,
         /// Working directory root of the source repo/worktree (via `workdir()`).
+        /// Clients strip this prefix from `source_path` to compute the subdirectory offset inside the new worktree.
         #[serde(rename = "sourceGitRoot", skip_serializing_if = "Option::is_none")]
         source_git_root: Option<String>,
     },
@@ -306,6 +312,7 @@ pub enum CreateWorktreeResponse {
         worktree_path: String,
         commit: String,
         /// Working directory root of the source repo/worktree (via `workdir()`).
+        /// Clients strip this prefix from `source_path` to compute the subdirectory offset inside the new worktree.
         #[serde(rename = "sourceGitRoot", skip_serializing_if = "Option::is_none")]
         source_git_root: Option<String>,
     },
@@ -356,6 +363,7 @@ pub struct CreateWorktreeFromWorktreeResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copied_changes: Option<CopiedChangesSummary>,
     /// Working directory root of the source repo/worktree (via `workdir()`).
+    /// Clients strip this prefix from `source_worktree_path` to compute the subdirectory offset inside the new worktree.
     #[serde(rename = "sourceGitRoot", skip_serializing_if = "Option::is_none")]
     pub source_git_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -431,6 +439,8 @@ impl TryFrom<CreateWorktreeFromWorktreeRequestWireShadow>
     }
 }
 /// `workspace.worktree_create_from_worktree_sync`: synchronous worktree fork.
+///
+/// Unlike [`WorktreeCreateSyncReq`] this is **not** `#[serde(transparent)]`, so the wire form keeps the `{ "inner": { … } }` wrapper.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateWorktreeFromWorktreeSyncReq {
     pub inner: CreateWorktreeFromWorktreeRequestWire,

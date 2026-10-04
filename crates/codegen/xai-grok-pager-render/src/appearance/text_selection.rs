@@ -1,4 +1,11 @@
 //! The `keep_text_selection` user setting (`flash` | `hold` | `word_select`).
+//!
+//! This is the single, unified control for scrollback text-selection behavior.
+//! It governs both how long an in-app selection highlight stays on screen and what a double/triple-click does, so the two never drift out of sync.
+//!
+//! The compile-time default is `flash`.
+//! A remote `keep_text_selection_default` soft-default (`flash` | `hold` | `word_select`) can override it at pager startup.
+//! See `apply_remote_keep_text_selection_default`.
 
 /// Scrollback text-selection behavior: highlight lifetime and double-click action.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -9,6 +16,7 @@ pub enum TextSelection {
     /// Stay visible until Esc/click/scroll; double-click toggles fold.
     Hold,
     /// Stay visible until dismissed; double-click selects and copies a word, triple-click a paragraph (terminal-like).
+    /// Implies [`TextSelection::holds`].
     WordSelect,
 }
 

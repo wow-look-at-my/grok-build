@@ -1,4 +1,8 @@
-//! The approval gate on hub tool calls.
+//! The approval gate on hub tool calls: the session owner's answer stands between the model and every
+//! mutating tool on the user's device. A call the toolset cannot decode never runs; only the read-only
+//! allowlist in [`AccessKind::from`] skips the prompt; no transport and no answer both deny; the folder's
+//! persisted grants are the TUI's `permission.toml`, shared on purpose so a grant given in either
+//! surface holds in the other.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -61,8 +65,9 @@ pub enum ToolApprovalGate {
     Off,
 }
 
-/// Pre-release stopgap: the daemon runs every hub tool call unasked (no
-/// permission cards) until sandboxing lands.
+/// Pre-release stopgap: the daemon runs every hub tool call unasked (no permission cards) until
+/// sandboxing lands. The sandbox guest keeps the opt-in its plane already uses
+/// (`GROK_HITL_PERMISSION_LIVE`).
 pub fn approval_gate_for(host_kind: WorkspaceHostKind) -> ToolApprovalGate {
     resolve_gate(host_kind, hitl_permission_live_enabled())
 }
@@ -93,8 +98,8 @@ fn requires_approval(access: &AccessKind) -> bool {
     }
 }
 
-/// The session's side of the gate: the hub-set ceiling and, once a guarded
-/// call arrives, the folder's grants.
+/// The session's side of the gate: the hub-set ceiling and, once a guarded call arrives, the folder's
+/// grants. Released with the [`WorkspaceSession`] that owns it.
 #[derive(Default)]
 pub(crate) struct SessionApproval {
     policy: parking_lot::Mutex<ToolApprovalPolicy>,
@@ -115,6 +120,9 @@ impl SessionApproval {
 struct FolderGrants {
     cwd: AbsPathBuf,
     /// The store's key: the served folder when the bound cwd is a repo-less directory under it.
+    /// Grok Desktop binds every conversation to its own scratch directory beneath the folder it
+    /// exposes, and a cwd-keyed store made an "always" answer hold for one chat only. A cwd inside a
+    /// repository keeps the repo-root key, so the CLI's per-project grants are unchanged.
     grant_dir: AbsPathBuf,
     store: CachedStateStore,
     state: PermissionState,
@@ -146,7 +154,8 @@ impl FolderGrants {
         }
         let bash = match access {
             AccessKind::Bash(cmd) => {
-                // The ambient git scan reads `.git/config` under the cwd.
+                // The ambient git scan reads `.git/config` under the cwd; off the runtime thread, and a
+                // scan that did not finish is a prompt
                 let (cmd, state, cwd) = (cmd.clone(), self.state.clone(), self.cwd.clone());
                 let evaluation = tokio::task::spawn_blocking(move || {
                     evaluate_bash_with_ambient(&cmd, &state, cwd.as_path())
@@ -157,13 +166,13 @@ impl FolderGrants {
             }
             _ => None,
         };
-        // The same floor the TUI applies: a hook root, `.git/hooks`, `.ssh`,
-        // a shell rc, the grant store is prompted for whatever grants say.
+        // The same floor the TUI applies: a hook root, `.git/hooks`, `.ssh`, a shell rc, the grant store
+        // is prompted for whatever grants say. Hub sessions have no display path, so no path context
         if protected_target(access, bash.as_ref(), self.cwd.as_path(), None).is_some() {
             return None;
         }
-        // A folder's blanket `allow_bash_execute` is unattended mode for
-        // bash; it is honoured only where the tenant allows unattended hosts.
+        // A folder's blanket `allow_bash_execute` is unattended mode for bash; it is honoured only where the
+        // tenant allows unattended hosts. Explicit command and glob grants are unaffected by the pin
         let yolo_pin = (policy != ToolApprovalPolicy::UnattendedAllowed)
             .then_some(BLANKET_BASH_NEEDS_UNATTENDED);
         let (decision, _) = session_grant_pre_decision(

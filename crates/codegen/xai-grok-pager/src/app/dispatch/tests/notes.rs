@@ -38,7 +38,8 @@ fn remember_save_carries_the_session_pinned_mode() {
         [Effect::RewriteMemoryNote { .. }]
     ));
 
-    // A later disk-config flip cannot affect the effect: it owns the mode returned by the active session.
+    // A later disk-config flip cannot affect the effect: it owns the mode
+    // returned by the active session when it was created.
     let save = dispatch(Action::SaveRememberNoteFromModal, &mut app);
     assert!(matches!(
         save.as_slice(),
@@ -132,6 +133,7 @@ fn manual_recap_with_messages_requests_and_shows_spinner() {
     assert!(agent.toast.is_none());
 }
 
+/// Regression: during session/load, scrollback is batched so `turn_count()` stays 0 until `end_batch`, but UserPrompt entries may already be present.
 /// Manual `/recap` must still request a recap.
 #[test]
 fn manual_recap_during_batch_load_with_prompts_still_requests() {
@@ -2473,7 +2475,8 @@ fn todo_capture_requests_and_shows_a_running_block() {
         .pending_todo_task_id
         .as_deref()
         .expect("capture is a running task at the top");
-    // The shell stamps its progress updates with the capture id the client minted.
+    // The shell stamps its progress updates with the capture id the client
+    // minted, so the row it names has to be the row this capture opened.
     assert_eq!(task_id, format!("todo-capture:{capture_id}"));
     let task = agent
         .session

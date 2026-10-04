@@ -338,7 +338,9 @@ fn id_from_path_strips_worktree_prefix_and_hashes_full_path() {
 
 #[test]
 fn same_basename_worktrees_in_different_repos_coexist() {
-    // Repos each have a `wt-abc` worktree.
+    // Two repos each have a `wt-abc` worktree. Registering both (the way
+    // discovery/register derive ids) must keep BOTH records — neither evicts
+    // the other via the `id` PRIMARY KEY or the `path UNIQUE` constraint.
     let db = WorktreeDb::open_in_memory().unwrap();
 
     let path_a = "/home/.grok/worktrees/repo-a/session/wt-abc";
@@ -421,6 +423,7 @@ fn list_filter_by_source_repo() {
     r3.repo_name = "repo-B".into();
     db.register(&r3).unwrap();
 
+    // Filter by source_repo = repo-A: should get 2
     let filter = ListFilter {
         source_repo: Some(PathBuf::from("/src/repo-A")),
         ..Default::default()
@@ -433,6 +436,7 @@ fn list_filter_by_source_repo() {
             .all(|r| r.source_repo == Path::new("/src/repo-A"))
     );
 
+    // Filter by source_repo = repo-B: should get 1
     let filter = ListFilter {
         source_repo: Some(PathBuf::from("/src/repo-B")),
         ..Default::default()
@@ -441,6 +445,7 @@ fn list_filter_by_source_repo() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.first().map(|r| r.id.as_str()), Some("wt-3"));
 
+    // Filter by nonexistent source_repo: should get 0
     let filter = ListFilter {
         source_repo: Some(PathBuf::from("/src/nonexistent")),
         ..Default::default()
@@ -448,6 +453,7 @@ fn list_filter_by_source_repo() {
     let results = db.list(&filter).unwrap();
     assert!(results.is_empty());
 
+    // No source_repo filter: should get all 3
     let results = db.list(&ListFilter::default()).unwrap();
     assert_eq!(results.len(), 3);
 }
@@ -552,7 +558,9 @@ fn get_by_label_returns_most_recent_on_duplicate_labels() {
 
 #[test]
 fn concurrent_open_at_survives_wal_conversion_race() {
-    // Fresh-db openers race the one-time WAL conversion (ignores busy_timeout). set_journal_mode's retry must make every open succeed.
+    // Fresh-db openers race the one-time WAL conversion (ignores busy_timeout).
+    // set_journal_mode's retry must make every open succeed; an Err is swallowed
+    // and silently drops worktree tracking. Without the retry this flakes.
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("worktrees.db");
 
@@ -590,7 +598,9 @@ fn open_at_uses_wal_on_local_fs() {
 
 #[test]
 fn network_mode_uses_fresh_per_host_truncate_db() {
-    // Network mode opens a per-host sibling of the given path.
+    // Network mode opens a per-host sibling of the given path (the legacy
+    // shared file is left untouched — a live old binary can flip it back to
+    // WAL at any time) in rollback-journal mode.
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("worktrees.db");
 
@@ -635,7 +645,9 @@ fn journal_conversion_respects_deadline_under_contention() {
             .unwrap();
     }
 
-    // A held WAL read transaction blocks the exclusive lock the WAL->TRUNCATE conversion needs.
+    // A held WAL read transaction blocks the exclusive lock the WAL->TRUNCATE
+    // conversion needs, so the open must give up at the deadline instead of
+    // stalling for attempts x busy_timeout.
     let holder = rusqlite::Connection::open(&eff).unwrap();
     holder
         .execute_batch("BEGIN; SELECT COUNT(*) FROM t;")
@@ -754,7 +766,9 @@ fn read_only_open_respects_deadline_under_contention() {
     use std::time::{Duration, Instant};
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("worktrees.db");
-    // WAL-stamp the exact file the forced-network open will use, then hold a read transaction.
+    // WAL-stamp the exact file the forced-network open will use, then hold a
+    // read transaction: the WAL->TRUNCATE conversion needs an exclusive lock,
+    // so the retry must give up at the deadline as busy, not as a broken file.
     let eff = JournalMode::Truncate.effective_db_path(&path);
     {
         let conn = rusqlite::Connection::open(&eff).unwrap();

@@ -24,7 +24,8 @@ async fn leader_reattach_completion_roundtrips_durable_log() {
     a.wait_for_text(&turn_sentinel(1), STREAM_TIMEOUT)
         .expect("A turn rendered");
 
-    // Attach the keep-alive viewer AFTER the turn so the leader survives A's exit Waiting for it.
+    // Attach the keep-alive viewer AFTER the turn so the leader survives A's exit
+    // Waiting for it to replay the transcript proves it is attached
     let mut keep = cluster.attach(&[]).expect("spawn keep-alive viewer");
     keep.wait_for_text(&turn_sentinel(1), LEADER_TIMEOUT)
         .expect("keep-alive replayed A's transcript");
@@ -51,7 +52,9 @@ async fn leader_reattach_completion_roundtrips_durable_log() {
     c.wait_for_text(&turn_sentinel(1), LEADER_TIMEOUT)
         .expect("C replayed the completed transcript");
 
-    // A finished turn clears the leader's prompt slot.
+    // A finished turn clears the leader's prompt slot, so a fresh reattach lands Idle even without the guard in the
+    // replaying client. The "Waiting" check therefore guards against a regression rather than proving the feature. The
+    // wait is bounded rather than a fixed sleep, which could flake under load.
     wait_for_labels_absent(&mut c, &["Waiting"], Duration::from_secs(5));
 
     assert!(
@@ -74,7 +77,7 @@ async fn leader_reattach_completion_roundtrips_durable_log() {
         inference_before_reattach,
         "reattach must replay from the durable log, not re-drive a turn (no new inference request)"
     );
-    // Pump once more so a late or duplicate replay batch would be painted before the exactly-once count below.
+    // Pump once more so a late or duplicate replay batch would be painted before the exactly-once count below, the check this test exists for
     c.update(Duration::from_millis(500));
     let screen = c.screen_contents();
     assert_eq!(

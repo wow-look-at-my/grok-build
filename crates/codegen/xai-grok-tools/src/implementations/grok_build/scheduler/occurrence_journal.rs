@@ -1,4 +1,8 @@
 //! Persisted one-shot removal receipts and restart reconciliation.
+//!
+//! A receipt records task absence and exact fire/removal versions in one JSON resources
+//! snapshot. Recovery is a pure plan: it reports removals requiring persistence and
+//! timer suppression while all state mutation/publication remains in the actor layer.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

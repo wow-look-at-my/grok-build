@@ -1,4 +1,8 @@
 //! `glob` tool — OpenCode architecture (`Tool` trait).
+//!
+//! File pattern matching using ripgrep's `--files` mode with glob filters.
+//! Returns matching file paths sorted by modification time (most recent first),
+//! capped at 100 results.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -19,6 +23,7 @@ use crate::types::tool_io::ToolInput;
 
 const RESULT_LIMIT: usize = 100;
 
+/// Hard cap on bytes read from ripgrep's stdout (5 MB).
 const MAX_STDOUT_BYTES: usize = 5_000_000;
 
 // ─── Description ────────────────────────────────────────────────────
@@ -73,12 +78,16 @@ pub struct GlobOutput {
     /// Number of files included in `entries` (capped at `RESULT_LIMIT`).
     pub count: usize,
     /// Total files matched by ripgrep before the cap. May exceed `count`.
+    /// When `truncated_by_bytes` was hit this is a lower bound.
     pub total_count: usize,
     /// Whether results were truncated at the limit.
     pub truncated: bool,
-    /// Absolute paths of matched files included in `count`, sorted by mtime descending. Empty when `count == 0`.
+    /// Absolute paths of matched files included in `count`, sorted by mtime
+    /// descending. Empty when `count == 0`.
     pub entries: Vec<String>,
-    /// The model-facing workspace root used to resolve `path` -- equal to `display_cwd_or_cwd(cwd, display_cwd)`.
+    /// The model-facing workspace root used to resolve `path` -- equal to `display_cwd_or_cwd(cwd,
+    /// display_cwd)`. Adapters that re-format the output use this as the relativization base when
+    /// the model omits `path`, instead of re-resolving cwd themselves.
     pub cwd_for_display: String,
 }
 
@@ -159,7 +168,8 @@ impl xai_tool_runtime::Tool for GlobTool {
             &input.path.clone().unwrap_or_default(),
         );
 
-        // ── Build ripgrep command ─────────────────────────────── rg --files --glob='!.git/*' --hidden --glob=<pattern>.
+        // ── Build ripgrep command ───────────────────────────────
+        //   rg --files --glob='!.git/*' --hidden --glob=<pattern> <search_dir>
         let rg_exec = rg_path()?;
         let mut cmd = Command::new(rg_exec);
         cmd.arg("--files")
@@ -170,6 +180,8 @@ impl xai_tool_runtime::Tool for GlobTool {
             .arg(&search_dir)
             .stdout(Stdio::piped())
             // stderr is never read; a pipe would block rg once warnings fill it.
+            // Cached descriptor, not `Stdio::null()`: an unlinked `/dev/null`
+            // must not fail the spawn.
             .stderr(xai_tty_utils::null_stdio());
         crate::util::detach_search_command(&mut cmd);
 
@@ -236,7 +248,9 @@ impl xai_tool_runtime::Tool for GlobTool {
             mtime_ms: i64,
         }
 
-        // Collect every match so total_count is accurate.
+        // Collect every match so total_count is accurate. Cap stat()s and the returned entry list
+        // at RESULT_LIMIT so we don't pay the syscall cost on huge result sets, but keep counting
+        // lines past the cap so the truncation marker can report the real overflow.
         let mut entries: Vec<FileEntry> = Vec::new();
         let mut total_count: usize = 0;
         for line in stdout.lines() {
@@ -719,7 +733,9 @@ mod tests {
 
     #[tokio::test]
     async fn gitignore_respected() {
-        // ripgrep's positive --glob overrides .gitignore, so we test the underlying ignore behavior by using a pattern.
+        // ripgrep's positive --glob overrides .gitignore, so we test the underlying ignore behavior by using a pattern that
+        // doesn't match the ignored file. Without .gitignore, `rg --files --hidden` *would* list ignored_dir/ contents, but
+        // with .gitignore they are excluded from results that don't glob-override them.
         let tmp = TempDir::new().unwrap();
 
         // Initialize a git repo so ripgrep respects .gitignore.
@@ -748,7 +764,8 @@ mod tests {
         let resources = test_resources(tmp.path());
 
         // Pattern **/*.txt would match both files if .gitignore were not in
-        // effect.
+        // effect. Because ripgrep processes the ignore stack *before* applying
+        // the glob whitelist for directory ignores, ignored_dir/ is pruned.
         let output = xai_tool_runtime::Tool::run(
             &tool,
             test_ctx(resources.into_shared()),

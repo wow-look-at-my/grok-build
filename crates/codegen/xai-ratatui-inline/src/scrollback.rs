@@ -5,6 +5,9 @@ use ratatui::layout::Rect;
 
 use crate::{common::TerminalLike, segment::split_into_line_segments};
 
+// CSI J with the default parameter (0): erase from cursor to end of display. Byte-identical to what the previous termwiz
+// constant (`CSI::Edit(Edit::EraseInDisplay(EraseInDisplay::EraseToEndOfDisplay))`) rendered, and to crossterm's
+// `Clear(ClearType::FromCursorDown)`.
 const ANSI_CLEAR_FROM_CURSOR_DOWN: &str = "\x1b[J";
 
 pub fn emit_to_scrollback<T: TerminalLike>(terminal: &mut T, content: &str) -> io::Result<()> {
@@ -116,7 +119,7 @@ mod tests {
         assert_eq!(terminal.writer.flush_count, 1);
 
         // Viewport should remain at bottom
-        assert_eq!(terminal.viewport_area.y, 22);
+        assert_eq!(terminal.viewport_area.y, 22); // 25 - 3
     }
 
     #[test]

@@ -6,8 +6,10 @@ use crate::identity::{SessionId, ToolCallId};
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ToolRequest {
     /// Execute a tool.
+    /// The streaming response is a sequence of `ToolChunk::Output` / `Progress` chunks ending with exactly one `ToolChunk::Final`.
     Call(ToolCallArgs),
-    /// List the registered tool definitions. The response is a single `ToolChunk::Definitions(Vec<ToolDef>)`.
+    /// List the registered tool definitions.
+    /// The response is a single `ToolChunk::Definitions(Vec<ToolDef>)`.
     Definitions,
 }
 

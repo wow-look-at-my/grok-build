@@ -25,19 +25,24 @@ pub enum MermaidError {
     #[error("mermaid render unsupported: {0}")]
     Unsupported(String),
     /// The engine panicked; [`render_checked`] caught it and carries the panic message here.
+    /// Only intercepted under `panic = "unwind"`; under `panic = "abort"` the process aborts instead (see [`render_checked`]).
     #[error("mermaid engine panicked: {0}")]
     Panic(String),
 }
 
-/// Caps [`render_checked`] applies before the engine runs.
+/// Caps [`render_checked`] applies before the engine runs, so untrusted source can't trivially exhaust memory via an oversized payload.
+/// A synchronous render cannot time itself out, so the pager enforces the wall-clock budget out of process via [`crate::run_with_timeout`].
+/// Output area and height are capped inside [`crate::rasterize`] by [`crate::MAX_OUTPUT_MEGAPIXELS`] and [`RenderParams::max_height_px`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderLimits {
     /// Maximum accepted source length in bytes.
+    /// Larger input is rejected with [`MermaidError::Unsupported`] *before* the engine runs.
     pub max_source_bytes: usize,
 }
 
 impl Default for RenderLimits {
     fn default() -> Self {
+        // 64 KiB, comfortably larger than any hand-authored diagram
         Self {
             max_source_bytes: 64 * 1024,
         }
@@ -45,8 +50,12 @@ impl Default for RenderLimits {
 }
 
 /// A pluggable Mermaid rendering backend.
+/// Prefer calling [`render_checked`] over [`MermaidEngine::render`] directly: it applies [`RenderLimits`] and isolates panics.
+/// Implementations must be cheap to share (`Send + Sync`) so a worker pool can hold one behind an `Arc`.
 pub trait MermaidEngine: Send + Sync {
     /// Render `source` to a PNG using `params`.
+    ///
+    /// Implementations may panic on pathological input; callers are expected to wrap this via [`render_checked`].
     fn render(&self, source: &str, params: &RenderParams) -> Result<RenderedDiagram, MermaidError>;
 }
 
@@ -150,7 +159,7 @@ mod tests {
             called: Default::default(),
             outcome: ok_diagram,
         };
-        let src = "12345678"; // several bytes
+        let src = "12345678"; // exactly 8 bytes
         let limits = RenderLimits {
             max_source_bytes: 8,
         };

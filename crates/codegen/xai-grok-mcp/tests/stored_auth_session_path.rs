@@ -22,7 +22,8 @@ async fn spawn_counting_gated_server() -> (String, Arc<AtomicUsize>, Arc<AtomicU
         .await
         .expect("bind fake server");
     let addr = listener.local_addr().expect("fake server addr");
-    // rmcp 3.x enforces RFC 8414 issuer validation: the advertised issuer must equal the issuer the client derived from the MCP base URL.
+    // rmcp 3.x enforces RFC 8414 issuer validation: the advertised issuer must equal
+    // the issuer the client derived from the MCP base URL (including its path).
     let issuer = format!("http://{addr}/mcp");
     let app = axum::Router::new().fallback(move |req: axum::extract::Request| {
         let requests = Arc::clone(&handler_requests);

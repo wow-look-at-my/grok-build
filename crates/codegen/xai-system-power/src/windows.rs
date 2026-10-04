@@ -1,4 +1,8 @@
-//! Windows system sleep/wake via `PowerRegisterSuspendResumeNotification` with a `DEVICE_NOTIFY_CALLBACK` recipient.
+//! Windows system sleep/wake via `PowerRegisterSuspendResumeNotification`
+//! with a `DEVICE_NOTIFY_CALLBACK` recipient — no hidden window or message
+//! loop required (Windows 8+).
+//!
+//! NOTE: this module only compiles when targeting Windows.
 
 use std::os::raw::c_void;
 
@@ -25,13 +29,15 @@ struct Context {
 }
 
 pub(crate) struct Listener {
-    // Registration handle from `PowerRegisterSuspendResumeNotification`.
+    // Registration handle from `PowerRegisterSuspendResumeNotification`
+    // (a `*mut c_void`; cast to `HPOWERNOTIFY` for unregister).
     handle: *mut c_void,
     // Kept alive (and freed in `Drop`) because the OS holds a raw pointer to it.
     ctx: *mut Context,
 }
 
-// The OS invokes the callback on an arbitrary thread; the handle is only used to unregister.
+// The OS invokes the callback on an arbitrary thread; the handle is only used
+// to unregister. `PowerCallback` is `Send + Sync`.
 unsafe impl Send for Listener {}
 unsafe impl Sync for Listener {}
 
@@ -80,7 +86,9 @@ unsafe extern "system" fn power_callback(
     let ctx = unsafe { &*(context as *const Context) };
     match event_type {
         PBT_APMSUSPEND => (ctx.callback)(PowerEvent::WillSleep),
-        // A single resume can deliver both PBT_APMRESUMEAUTOMATIC and PBT_APMRESUMESUSPEND.
+        // A single resume can deliver both PBT_APMRESUMEAUTOMATIC and PBT_APMRESUMESUSPEND, so `DidWake` may fire twice per
+        // wake. That is fine and intentional: lowering the sleep gate is idempotent, so a duplicate wake is harmless — do not
+        // try to "dedupe" this later.
         PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND => (ctx.callback)(PowerEvent::DidWake),
         _ => {}
     }
@@ -88,11 +96,14 @@ unsafe extern "system" fn power_callback(
 }
 
 pub(crate) fn current_power_state() -> crate::PowerState {
-    // No synchronous dark-wake query wired up on Windows.
+    // No synchronous dark-wake query wired up on Windows; report Unknown so
+    // callers fall back to the suspend/resume notification path.
     crate::PowerState::Unknown
 }
 
-/// No power-assertion support on this platform: callers carry on unprotected.
+/// No power-assertion support on this platform: callers carry on unprotected, which is the same behaviour as before
+/// assertions existed. Never constructed here (`hold_awake` always returns `None`); it exists so the cross-platform
+/// `SleepAssertion` has a field type on every target.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct Assertion;

@@ -1,4 +1,7 @@
-//! A finding is a fixed enum token naming a static-analysis risk the built-in Bash gate detected.
+//! A finding is a fixed enum token naming a static-analysis risk the built-in Bash gate detected, plus a fixed harness-owned description.
+//! Both are static constants that never carry a command, path, or argument; those stay in the untrusted proposed action.
+//! An attacker therefore cannot steer the classifier by smuggling text through a finding.
+//! Nonempty findings force the model path (the heuristic pre-pass may not auto-Allow), so the classifier always sees them before approving.
 
 use std::collections::BTreeSet;
 
@@ -24,7 +27,7 @@ pub enum ClassifierSecurityFinding {
     FileWrite,
     /// Dangerous command segment (`rm`, `chmod`, `git push`, …).
     DangerousCommand,
-    /// Special executable/disclosure surface.
+    /// Special executable/disclosure surface (`rg` unsafe flags, Git drivers/pagers, kubectl config/auth overrides, process-environment dump).
     SpecialExecSurface,
 }
 
@@ -84,8 +87,9 @@ impl ClassifierSecurityFinding {
         }
     }
 
-    /// Whether this finding constrains a broad grant (blanket execute,
-    /// prefix/glob, sandbox auto-allow).
+    /// Whether this finding constrains a broad grant (blanket execute, prefix/glob, sandbox auto-allow).
+    /// A broad grant cannot vouch for these effects, so they must reach the classifier rather than auto-allow.
+    /// `DangerousCommand`, `UnparseableShell`, and `FailClosedPolicy` are handled by their own arms.
     const fn is_grant_floor(self) -> bool {
         matches!(
             self,
@@ -99,7 +103,8 @@ impl ClassifierSecurityFinding {
     }
 }
 
-/// Canonical ordered, deduplicated finding set for one request.
+/// Canonical ordered, deduplicated finding set for one request; `BTreeSet` encodes that invariant so callers cannot reorder or duplicate.
+/// Built once in `evaluate_bash`; the manager may add `FailClosedPolicy`. `Default` is empty (non-Bash or fully safe).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BashSecurityAssessment(BTreeSet<ClassifierSecurityFinding>);
 
@@ -114,7 +119,7 @@ impl BashSecurityAssessment {
         self.0.is_empty()
     }
 
-    /// Whether the given finding is present.
+    /// Whether the given finding is present (readable across the crate boundary for callers that key behavior on one specific finding, e.g. tests).
     pub fn contains(&self, finding: ClassifierSecurityFinding) -> bool {
         self.0.contains(&finding)
     }
@@ -127,8 +132,8 @@ impl BashSecurityAssessment {
             .any(ClassifierSecurityFinding::is_grant_floor)
     }
 
-    /// Whether `FileWrite` is the only finding, the floor a narrow allow rule
-    /// naming a write-capable command can vouch for.
+    /// Whether `FileWrite` is the only finding, the one floor a narrow allow rule naming a write-capable command can vouch for.
+    /// Mixed assessments never qualify.
     pub(crate) fn is_file_write_only(&self) -> bool {
         self.0.len() == 1 && self.0.contains(&ClassifierSecurityFinding::FileWrite)
     }
@@ -141,7 +146,8 @@ impl BashSecurityAssessment {
         format!("[{}]", tokens.join(", "))
     }
 
-    /// Stable, ordered, deduplicated wire tokens for one request.
+    /// Stable, ordered, deduplicated wire tokens for one request; manager telemetry and trace evidence consume this same set the classifier saw.
+    /// Crate-private so the finding set never crosses the crate boundary (external OTEL must not gain finding fields).
     pub(crate) fn tokens(&self) -> Vec<String> {
         self.0.iter().map(|f| f.token().to_owned()).collect()
     }

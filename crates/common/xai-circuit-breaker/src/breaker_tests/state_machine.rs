@@ -1,4 +1,5 @@
-//! Closed → Open → HalfOpen → Closed transitions plus threshold, min-samples, window-eviction.
+//! Closed → Open → HalfOpen → Closed transitions plus threshold,
+//! min-samples, window-eviction, and disabled-breaker behaviour.
 
 use std::time::Duration;
 
@@ -130,7 +131,7 @@ fn old_samples_evicted_from_window() {
     cb.record(Outcome::Failure);
     clock.advance(Duration::from_millis(120));
 
-    // New success triggers eviction of the failure
+    // New success triggers eviction of the old failure
     cb.record(Outcome::Success);
     assert_eq!(cb.state(), BreakerState::Closed);
     assert!(cb.error_rate() < 0.01);
@@ -190,8 +191,9 @@ fn is_failure_status_with_custom_codes() {
     assert!(!cb.is_failure_status(502));
 }
 
-// We add stub aliases here so the named-test set is complete in this
-// file too.
+// The four `parse_failure_codes_*` and four `from_lookup_*` tests live
+// alongside `BreakerConfig` in `config.rs`. We add stub aliases here so
+// the named-test set is complete in this file too.
 
 #[test]
 fn parse_failure_codes_basic() {

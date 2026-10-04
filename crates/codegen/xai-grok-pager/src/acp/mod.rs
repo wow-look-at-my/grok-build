@@ -1,4 +1,7 @@
 //! ACP (Agent Communication Protocol) connection management.
+//!
+//! This module spawns the agent process, initializes the protocol, authenticates, and provides the channel for communication.
+/// Shared plan-file size cap for the pager keep.
 pub(crate) const MAX_PLAN_FILE_BYTES: usize = 256 * 1024;
 pub mod leader_bridge;
 pub mod meta;
@@ -11,6 +14,8 @@ pub mod tracker;
 mod version_mismatch;
 pub(crate) use version_mismatch::{is_version_mismatch_banner, version_mismatch_banner};
 /// Ext methods that carry a session-scoped update and may stamp `isReplay`.
+/// TUI dispatch, headless dispatch, and the session-load ACP barrier all share this list.
+/// A new method thus cannot be handled in one path and classified `Unrelated` in another.
 pub(crate) fn is_session_update_ext_method(method: &str) -> bool {
     matches!(method, "x.ai/session_notification" | "x.ai/session/update")
 }
@@ -31,17 +36,18 @@ use xai_grok_telemetry::startup;
 pub use xai_grok_telemetry::startup::{
     AgentKind, Owner, StartupOutcome, StartupPhase, StartupTimer,
 };
-/// Construct a `METHOD_NOT_FOUND` error for `WaitForTerminalExit`. Both the
-/// interactive pager and headless mode reject this ACP method (the adapter
-/// falls back to polling).
+/// Construct a `METHOD_NOT_FOUND` error for `WaitForTerminalExit`.
+/// Both the interactive pager and headless mode reject this ACP method (the adapter falls back to polling).
+/// Centralised here so the error code and message format stay in sync.
 pub(crate) fn wait_for_exit_not_supported(context: &str) -> acp::Error {
     acp::Error::new(
         acp::ErrorCode::MethodNotFound.into(),
         format!("{context} does not handle WaitForTerminalExit"),
     )
 }
-/// Initial auth mode hint from the agent's auth method metadata. Determined
-/// at startup from `AuthMethod.meta.external_provider`.
+/// Initial auth mode hint from the agent's auth method metadata.
+/// Determined at startup from `AuthMethod.meta.external_provider`.
+/// Used by the welcome screen to decide whether to show a browser-opening message or a manual token paste input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthStartMode {
     /// Mode not yet known (will be resolved after AuthenticateRequest).
@@ -49,8 +55,9 @@ pub enum AuthStartMode {
     /// External provider (meta.external_provider == true); the browser opens automatically.
     Command,
 }
-/// The pager's connection to an agent that is running but has not been set up
-/// yet.
+/// The pager's connection to an agent that is running but has not been set up yet.
+/// It holds the channel for sending requests to the agent, the channel for receiving its replies, the token that stops the agent, and the place the agent runs.
+/// `initialize_connection` sends `initialize` over these channels and returns the finished `AcpConnection`.
 pub(in crate::acp) struct AgentEndpoint {
     pub(in crate::acp) tx: AcpAgentTx,
     pub(in crate::acp) rx: AcpClientRx,
@@ -89,8 +96,10 @@ pub struct AcpConnection {
     /// Cancellation token to stop the agent.
     pub cancel: CancellationToken,
     /// In-process agent worker thread (`connect` only). Join after cancel so session actors can flush SessionEnd hooks.
+    /// `None` in leader mode.
     pub agent_thread: Option<std::thread::JoinHandle<anyhow::Result<()>>>,
     /// ACP-advertised slash commands parsed from `InitializeResponse.meta.availableCommands`.
+    /// Seeded into every new `AgentSession` so autocomplete has shell builtins and skills immediately, before any `AvailableCommandsUpdate` arrives.
     pub available_commands: Vec<acp::AvailableCommand>,
     pub needs_login: bool,
     /// Login button label from `AuthMethod.name` (e.g., "grok.com", "Acme Corp").
@@ -100,22 +109,26 @@ pub struct AcpConnection {
     /// Initial auth mode hint (Command vs Pending) from method metadata.
     pub auth_start_mode: AuthStartMode,
     /// Auth response metadata from eager authentication (cached token or API key).
+    /// Contains `team_name`, etc. `None` when interactive login is required.
     pub auth_meta: Option<serde_json::Value>,
     /// Leader connection status. `Some` only when connected via leader.
     pub leader_status_rx: Option<tokio::sync::watch::Receiver<leader_bridge::ConnectionStatus>>,
     /// Whether cancel-rewind is enabled (resolved by shell from config layers).
     pub cancel_rewind_enabled: bool,
-    /// Whether the session-recap feature is rolled out for this connection.
+    /// Whether the session-recap feature is rolled out for this connection. The client gates its automatic away-recap
+    /// poll and the manual `/recap` on this so a disabled feature produces zero `x.ai/recap` traffic.
     pub session_recap_available: bool,
     /// Shell-side feedback trace-offer eligibility (see `feedbackTraceOffer`).
     pub feedback_trace_offer: bool,
     /// `AuthManager` for pager-side authenticated channels (voice STT and TTS).
+    /// In-process mode shares the agent's instance (single token cache); leader mode builds a dedicated one off the same local `auth.json`.
+    /// Either way it resolves a fresh bearer per request via the refresh chain.
     pub auth_manager: std::sync::Arc<xai_grok_login::AuthManager>,
 }
 /// CLI flags that affect agent configuration, threaded from PagerArgs.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectFlags {
-    /// `--no-subagents`.
+    /// `--no-subagents`. Only an explicit flag reaches the CLI tier of the resolver; otherwise env, config.toml, and the default decide, exactly as in `grok agent stdio`.
     pub no_subagents: bool,
     /// CLI memory override set by a legacy compatibility flag.
     pub memory_enabled_override: Option<bool>,
@@ -124,7 +137,8 @@ pub struct ConnectFlags {
     pub disable_web_search: bool,
     /// Session-scoped `--todo-gate` override. Forces `ReminderPolicy.todo_gate.enabled = true` for this session.
     pub todo_gate: bool,
-    /// Session-scoped `--laziness-debug-log <path>` override. Observation-only (no nudges).
+    /// Session-scoped `--laziness-debug-log <path>` override. Observation-only (no nudges). Prototype and eval use
+    /// only; not persisted to config.toml.
     pub laziness_debug_log: Option<std::path::PathBuf>,
     /// Storage mode override.
     pub storage_mode: Option<String>,
@@ -150,8 +164,12 @@ pub struct ConnectFlags {
     pub rules: Option<String>,
     /// Override reasoning effort for all models.
     pub reasoning_effort_override: Option<ReasoningEffort>,
+    /// CLI permission rules from the --allow and --deny flags.
+    /// Not supported in leader mode (agent config is set at leader startup).
     pub permission_rules: Vec<xai_grok_workspace::permission::types::PermissionRule>,
+    /// Seed agent sessions with always-approve (YOLO) permission mode.
     pub default_yolo_mode: bool,
+    /// Seed agent sessions with auto (classifier) permission mode.
     /// Ignored when `default_yolo_mode` is true.
     pub default_auto_mode: bool,
 }
@@ -342,6 +360,7 @@ pub async fn connect_via_leader(
     initialize_connection(endpoint, &flags, auth_manager).await
 }
 /// Prints one warning per flag the chosen backend ignores. `reason` finishes the sentence "has no effect ...".
+/// This runs before tracing is set up, and the pager has already redirected fd 2, so the saved terminal stderr is the sink.
 pub(in crate::acp) fn warn_ignored_flags(flags: &[&'static str], reason: &str) {
     if flags.is_empty() {
         return;
@@ -523,6 +542,8 @@ pub fn parse_available_commands(meta: Option<&acp::Meta>) -> Vec<acp::AvailableC
         .unwrap_or_default()
 }
 /// Parse `sessionRecap` from `InitializeResponse.meta` (shell rollout gate).
+///
+/// Default `false` when missing or non-bool so older agents and dark-launch defaults produce zero automatic recap traffic.
 pub fn parse_session_recap_available(meta: Option<&acp::Meta>) -> bool {
     meta.and_then(|m| m.get("sessionRecap"))
         .and_then(|v| v.as_bool())
@@ -712,8 +733,9 @@ async fn authenticate(
         acp_send(acp::AuthenticateRequest::new(method_id), tx).await?;
     Ok(resp.meta.map(serde_json::Value::Object))
 }
-/// Pick the method id for eager authenticate. Legacy: `cached_token` if
-/// advertised, else first method
+/// Pick the method id for eager authenticate.
+/// 1. Agent's `defaultAuthMethodId` when present in the advertised list
+/// 2. Legacy: `cached_token` if advertised, else first method
 pub fn select_eager_auth_method(
     auth_methods: &[acp::AuthMethod],
     default_auth_method_id: Option<&acp::AuthMethodId>,

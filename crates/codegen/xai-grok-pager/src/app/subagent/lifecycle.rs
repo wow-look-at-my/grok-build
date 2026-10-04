@@ -1,8 +1,24 @@
 //! Attempt-aware subagent lifecycle reducer.
+//!
+//! Lifecycle is keyed by `(subagent_id, attempt_id)`; missing attempt IDs share the legacy key.
+//! Spawn makes an attempt current, progress applies only to the current running attempt, and finish
+//! either closes a known attempt or waits for its spawn. Reducer effects are domain-neutral: apply
+//! the transition, replace the current attempt, apply with a pending finish, retain a finish until
+//! spawn, or record a non-current terminal transition.
+//!
+//! Sequence numbers are per-attempt high-water marks, while `last_spawn_seq` rejects stale spawn
+//! replay across evicted attempts. Missing sequences remain compatible for retained legacy events,
+//! but cannot introduce an unseen attempt after sequenced spawn history. A finished unsequenced
+//! legacy spawn is a duplicate; only a newer sequence proves a legacy restart.
+//!
+//! The current attempt is never evicted. At most eight attempts are retained; an evicted key becomes
+//! unseen, so stale-spawn guards apply again. `PendingFinish` has meaning only while the bounded,
+//! expiring payload in `DeferredSubagentFinishes` exists; its owner removes unbacked pending state.
 
 use std::collections::{HashMap, VecDeque};
 
-/// A child retains only its most recently observed attempts.
+/// A child retains only its eight most recently observed attempts. Replays for
+/// attempts outside this window are treated as unseen after eviction.
 pub(crate) const SUBAGENT_ATTEMPT_HISTORY_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,7 +347,8 @@ impl SubagentLifecycleState {
         event_seq: Option<u64>,
     ) -> SubagentLifecycleReduction {
         let Some(attempt) = self.attempts.get(key) else {
-            // Progress is transient and the terminal update carries final counts.
+            // Progress is transient and the terminal update carries final counts, so buffering it
+            // would only let an out-of-order attempt overwrite current presentation.
             return SubagentLifecycleReduction::Dropped;
         };
         if self.current.as_ref() != Some(key)

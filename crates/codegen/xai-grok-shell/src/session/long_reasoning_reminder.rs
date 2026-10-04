@@ -1,4 +1,5 @@
-//! Immediate placement made grok-4.7 reason more in step replay.
+//! Immediate placement made grok-4.7 reason more in step replay; one call later it reasoned
+//! about a third less, so `delay` defaults to 1.
 
 use std::collections::VecDeque;
 
@@ -200,7 +201,8 @@ mod tests {
         assert_eq!(None, s.take_due_reminder(on));
         assert_eq!((3, 1), (s.model_calls, s.reminders_fired));
 
-        // Length salvage: due while awaiting continuation, evicted by the continuation's sample.
+        // Length salvage: due while awaiting continuation, evicted by the continuation's sample,
+        // still injected once normal sampling resumes.
         let mut s = LongReasoningTurnState::default();
         s.record_call(on, 5000, 10);
         s.record_call(on, 10, 10);

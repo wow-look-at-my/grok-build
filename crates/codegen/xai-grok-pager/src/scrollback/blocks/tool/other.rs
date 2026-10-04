@@ -19,7 +19,9 @@ pub struct OtherToolCallBlock {
     pub started_at: Option<std::time::Instant>,
     /// Elapsed time in ms after completion.
     pub elapsed_ms: Option<i64>,
-    /// The tail of the arguments the model is writing right now, decoded and split into lines.
+    /// The tail of the arguments the model is writing right now, decoded and
+    /// split into lines. Only a call still being streamed has any: the real
+    /// `ToolCall` replaces this block outright once the call is whole.
     pub streaming_preview: Vec<String>,
     /// Image references detected in the tool output.
     image_refs: Vec<crate::prompt_images::ScrollbackImageRef>,
@@ -102,8 +104,9 @@ impl OtherToolCallBlock {
         self.error = error;
     }
 
-    /// Finalize elapsed time from `started_at`. Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set
-    /// (already finalized).
+    /// Finalize elapsed time from `started_at`.
+    ///
+    /// Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set (already finalized).
     pub fn finish(&mut self) {
         if self.elapsed_ms.is_some() {
             return;
@@ -261,7 +264,8 @@ impl BlockContent for OtherToolCallBlock {
         match ctx.mode {
             DisplayMode::Collapsed => {
                 // Collapsed is the default mode, so a call being streamed is
-                // collapsed the whole time it is written.
+                // collapsed the whole time it is written. Its live tail has to
+                // render here or it is never seen at all.
                 let mut lines: Vec<BlockLine> = vec![
                     self.collapsed_line(&theme, muted_collapsed, Some(ctx.content_width()))
                         .into(),
@@ -279,14 +283,14 @@ impl BlockContent for OtherToolCallBlock {
                     let qa_lines = parse_ask_user_qa_pairs(output);
                     if !qa_lines.is_empty() {
                         for (i, (question, answer)) in qa_lines.iter().enumerate() {
-                            // " 1. question text"
+                            // "  1. question text"
                             let q_line = Line::from(vec![
                                 Span::styled(format!("  {}. ", i + 1), theme.muted()),
                                 Span::styled(question.clone(), theme.primary()),
                             ]);
                             lines.push(BlockLine::styled(q_line));
 
-                            // " → answer" or " (no answer)"
+                            // "     → answer" or "     (no answer)"
                             let a_line = if answer.is_empty() {
                                 Line::from(Span::styled(
                                     "     (no answer)".to_string(),
@@ -460,8 +464,8 @@ impl BlockContent for OtherToolCallBlock {
 
 // ── AskUserQuestion output parser ────────────────────────────────────
 
-/// Parse Q&A pairs from an AskUserQuestion tool result string. Recognizes all of them accepted output formats. Path
-/// A (accepted): `User has answered your questions: "Q1"="A1", "Q2"="A2". You can now.`. Path D (cancelled): `User
+/// Parse Q&A pairs from an AskUserQuestion tool result string. Recognizes all three accepted output formats. Path A
+/// (accepted): `User has answered your questions: "Q1"="A1", "Q2"="A2". You can now.`. Path D (cancelled): `User
 /// declined to answer.`. Paths B/C (plan mode): `- "Q1"\n Answer: A1\n- "Q2"\n (No answer provided)`.
 fn parse_ask_user_qa_pairs(output: &str) -> Vec<(String, String)> {
     // Path A: "User has answered your questions: "Q"="A", "Q"="A". You can now..."
@@ -475,7 +479,8 @@ fn parse_ask_user_qa_pairs(output: &str) -> Vec<(String, String)> {
             return vec![];
         }
 
-        // Parse "Q1"="A1", "Q2"="A2" pairs. Split on `", "` that appears between pairs (after `"="value"`).
+        // Parse "Q1"="A1", "Q2"="A2" pairs.
+        // Split on `", "` that appears between pairs (after `"="value"`).
         let mut pairs = Vec::new();
         let mut remaining = body;
 
@@ -514,8 +519,7 @@ fn parse_ask_user_qa_pairs(output: &str) -> Vec<(String, String)> {
                 answer_text.pop();
             }
 
-            // Remove annotation suffixes (selected preview:..., user
-            // notes:...) for display; keep the label
+            // Remove annotation suffixes (selected preview:..., user notes:...) for display; keep just the label
             if let Some(ann_start) = answer_text.find(" selected preview:") {
                 answer_text.truncate(ann_start);
             }
@@ -546,8 +550,8 @@ fn parse_ask_user_qa_pairs(output: &str) -> Vec<(String, String)> {
         return vec![]; // No Q&A to show
     }
 
-    // Paths B/C: plan mode, bullet format - "Q1"\n Answer: A1\n- "Q2"\n (No
-    // answer provided)
+    // Paths B/C: plan mode, bullet format
+    // - "Q1"\n  Answer: A1\n- "Q2"\n  (No answer provided)
     if output.contains("Questions asked") && output.contains("- \"") {
         let mut pairs = Vec::new();
         let lines: Vec<&str> = output.lines().collect();

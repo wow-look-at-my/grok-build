@@ -1,4 +1,5 @@
-//! Data-driven scripted responses: status/header/body triples the mock inference server queues per path and the loopback mocks serve.
+//! Data-driven scripted responses: status/header/body triples the mock inference server queues per path and the loopback mocks serve on request, rendered to HTTP at serve time.
+//! Pure data: no router or handler types are public.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -15,7 +16,8 @@ use serde_json::Value;
 pub(crate) type BoxWait = Pin<Box<dyn Future<Output = ()> + Send>>;
 pub(crate) type TerminalWait = Box<dyn FnOnce() -> BoxWait + Send>;
 
-/// An SSE comment the hang body flushes so the response head reaches the client, then the stream produces no chunk; a comment carries no event.
+/// An SSE comment the hang body flushes so the response head reaches the client, then the stream
+/// produces no chunk; a comment carries no event, so the client's idle timer runs from here.
 const HANG_OPENING_FRAME: &[u8] = b": grok-mock stream open\n\n";
 
 /// One SSE event as data: optional `event:` name plus the `data:` payload.
@@ -47,9 +49,11 @@ pub enum ScriptedBody {
     Sse(Vec<SseEvent>),
     /// Raw body bytes served verbatim, for byte-exact payloads such as malformed SSE.
     Raw(String),
-    /// The connection closes before the response head reaches the client.
+    /// The connection closes before the response head reaches the client: the body stream fails on
+    /// its first poll, so hyper tears the connection down without flushing the head it queued.
     Dropped,
-    /// The head reaches the client, then the body stalls forever with no chunk.
+    /// The head reaches the client, then the body stalls forever with no chunk, so the client's
+    /// inference idle timeout fires.
     Hang,
 }
 
@@ -62,6 +66,7 @@ pub struct ScriptedResponse {
 }
 
 impl ScriptedResponse {
+    /// 200 SSE response built from an event list.
     pub fn sse(events: Vec<SseEvent>) -> Self {
         Self {
             status: 200,
@@ -94,6 +99,8 @@ impl ScriptedResponse {
         }
     }
 
+    /// A 200 stream whose head reaches the client, then never yields a chunk, so the client's
+    /// inference idle timeout fires.
     pub fn hang() -> Self {
         Self {
             status: 200,

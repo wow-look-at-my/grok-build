@@ -1,4 +1,8 @@
 //! Unified overlay panel showing both background tasks and subagents in a single interleaved list.
+//!
+//! It replaces the separate `BgTaskPane` and `SubagentPane`.
+//! Items are sorted running-first, then by start time (newest first).
+//! Each entry dispatches to the correct action type (kill task vs kill agent, view output vs view session) based on its variant.
 
 use chrono::{DateTime, Utc};
 use crossterm::event::{KeyEvent, MouseEventKind};
@@ -142,6 +146,7 @@ pub enum GroupKind {
     Subagents,
     Tasks,
     /// Recurring background processes: `monitor` tasks and `/loop` scheduled tasks share one section.
+    /// They stay contiguous (monitors first, then loops) via [`TaskEntry::type_order`].
     Watchers,
 }
 
@@ -189,6 +194,7 @@ pub enum TaskEntry {
         running: bool,
         started_at: Instant,
         /// Capitalized persona / role / tag label (e.g. `Reviewer`, `Subagent`).
+        /// Used to order subagents by display label within their group.
         type_label: String,
     },
     Scheduled {
@@ -209,6 +215,7 @@ pub enum TaskEntry {
         started_at: Instant,
     },
     /// Collapsible group header row (e.g. `▾ Subagents 2`).
+    /// Not a task: selecting it and pressing Enter (or clicking it) toggles the group's collapse state.
     Header {
         group: GroupKind,
         styled: Line<'static>,
@@ -220,9 +227,8 @@ impl TaskEntry {
         task: &BgTaskState,
         highlight_cache: &mut HashMap<String, Vec<Span<'static>>>,
     ) -> Self {
-        // Prefer the tool call's description over the raw command for the
-        // pane label The full command is always available via the block
-        // viewer.
+        // Prefer the tool call's description over the raw command for the pane label
+        // The full command is always available via the block viewer (preamble of the BgTaskBlock)
         let description = task
             .description
             .as_deref()
@@ -231,7 +237,9 @@ impl TaskEntry {
 
         let running = task.status == BgTaskStatus::Running;
         let (label, styled) = if task.is_monitor {
-            // Monitor: blue "Monitor" tag and neutral description, mirroring scheduled `/loop` rows Falls back to the command.
+            // Monitor: blue "Monitor" tag and neutral description, mirroring scheduled `/loop` rows
+            // Falls back to the command if the description is somehow empty
+            // The description (not the raw command) is what we show, so it never gets bash-highlighted
             let theme = Theme::current();
             let text = description
                 .map(|d| d.replace('\n', " "))
@@ -252,7 +260,9 @@ impl TaskEntry {
             // Collapse newlines so multi-line descriptions render on one row.
             let one_line = desc.replace('\n', " ");
             let theme = Theme::current();
-            // Prefix the description with a constant `Task` tag in the theme's secondary text color The tag makes the entry type identifiable at a glance.
+            // Prefix the description with a constant `Task` tag in the theme's secondary text color
+            // The tag makes the entry type identifiable at a glance, the same way subagent rows lead with their persona/role label
+            // The prefix is included in `label` so it is searchable (the tasks-pane filter matches against `label`)
             const PREFIX: &str = "Task ";
             let desc_style = if running {
                 Style::default().fg(theme.text_primary)
@@ -341,7 +351,9 @@ impl TaskEntry {
             Style::default().fg(theme.gray_bright)
         };
 
-        // Live activity suffix, running rows only The description is capped so the live part survives typical pane widths.
+        // Live activity suffix, running rows only
+        // The description is capped so the live part survives typical pane widths (the right overlay's end-truncation remains the final safety net)
+        // The suffix stays out of `label` so filter matches don't flicker as activity changes
         const ACTIVITY_DESC_MAX_WIDTH: usize = 40;
         let activity = info
             .is_running()
@@ -486,6 +498,8 @@ impl TaskEntry {
         );
 
         // Only the tag (e.g. `Loop`) carries color, the blue system accent.
+        // The schedule, prompt preview, and status suffix all render in the neutral secondary text color, so the row has a single point of color
+        // No surrounding `[ ]` brackets: the color alone sets the tag apart from the schedule that follows it
         let schedule_style = format!("{} \u{b7} ", info.human_schedule);
         let neutral = Style::default().fg(theme.text_secondary);
         let styled = Line::from(vec![
@@ -562,8 +576,9 @@ impl TaskEntry {
         }
     }
 
-    /// Fine-grained sort rank, distinct per task kind so each renders as a
-    /// contiguous block.
+    /// Fine-grained sort rank, distinct per task kind so each renders as a contiguous block.
+    /// The order is subagents (0), one-shot bg tasks (1), monitors (2), scheduled/loops (3).
+    /// Monitors and loops share the `Watchers` group/header but keep distinct ranks so monitors always sort before loops within that section.
     fn type_order(&self) -> u8 {
         match self {
             TaskEntry::Workflow { .. } => 0,
@@ -594,6 +609,7 @@ impl ListItem for TaskEntry {
 
     fn prefix(&self) -> Option<Line<'_>> {
         match self {
+            // Headers sit flush-left; their chevron occupies the same two columns as an item's indent, so labels still line up
             TaskEntry::Header { .. } => None,
             _ => Some(Line::from(Span::raw("  "))),
         }
@@ -648,8 +664,11 @@ pub(crate) struct TaskStatusCounts {
 
 pub struct TasksPane {
     /// Display list: sorted `items` with group headers inserted and collapsed groups' items removed.
+    /// This is what the `ListPane` renders.
     entries: Vec<TaskEntry>,
-    /// Sorted task items only (no headers). `entries` is derived from this by [`Self::rebuild_entries`].
+    /// Sorted task items only (no headers).
+    /// `entries` is derived from this by [`Self::rebuild_entries`].
+    /// It is kept so collapse toggles can rebuild the display list without re-reading the live task data.
     items: Vec<TaskEntry>,
     /// Groups the user has collapsed (header shown, items hidden).
     collapsed_groups: std::collections::HashSet<GroupKind>,
@@ -684,8 +703,8 @@ fn clear_overlay_area(buf: &mut Buffer, area: Rect, y: u16, overlay_w: u16) {
     }
     let clear_x = area.x + area.width - clamped;
 
-    // Detect truncation BEFORE clearing: a non-blank cell at `clear_x` means
-    // the label is wider.
+    // Detect truncation BEFORE clearing: a non-blank cell at `clear_x` means the label is wider than the row minus the overlay reservation
+    // Capture the style at `clear_x - 1` (the cell that will host the ellipsis) so the inserted `…` matches the label color
     let needs_ellipsis = clear_x > area.x
         && buf
             .cell((clear_x, y))
@@ -829,6 +848,8 @@ impl TasksPane {
                 .cmp(&b.type_order())
                 // 2. Running before done *within* each group.
                 .then_with(|| b.is_running().cmp(&a.is_running()))
+                // 3. Within a (group, run-state): subagents order by display label (alphabetical) then newest-first.
+                //    Tasks/monitors/loops order newest-first. The per-variant match avoids mixing SystemTime and Instant across types.
                 .then_with(|| match (a, b) {
                     (
                         TaskEntry::Agent {
@@ -1040,8 +1061,9 @@ impl TasksPane {
         }
         let fraction_cap = (view_height as f32 * MAX_TASKS_FRACTION).floor() as u16;
         let max = MAX_TASKS_HEIGHT.min(fraction_cap).max(1);
-        // Reserve one extra row for the search/filter input bar (or an
-        // accepted matcher's status line).
+        // Reserve one extra row for the search/filter input bar (or an accepted matcher's status line).
+        // The bar then gets its own line instead of displacing the last task/agent entry `ListPane` carves
+        // the bar out of the bottom of the area it's given.
         let bar = u16::from(
             self.list_state.input_mode().is_some() || self.list_state.matcher().is_some(),
         );
@@ -1174,12 +1196,14 @@ impl TasksPane {
             return;
         }
 
-        // Then prepare the layout exactly once with the final viewport.
+        // Then prepare the layout exactly once with the final viewport. The offset would then sit short of
+        // the smaller viewport's bottom, so ▼ could never turn off at the end.
         let total = self.entries.len();
         let scrollable = total > inner.height as usize && inner.height >= 3;
         let scroll = self.list_state.scroll_offset();
 
-        // Reserve a row for a centered ▲ / ▼ indicator ONLY when that indicator is shown; no blank reserved rows The top row appears when scrolled down.
+        // Reserve a row for a centered ▲ / ▼ indicator ONLY when that indicator is actually shown; no blank reserved rows
+        // The top row appears when scrolled down; the bottom row appears when, after the top reservation, content still extends past the viewport
         let reserve_top = scrollable && scroll > 0;
         let top = u16::from(reserve_top);
         let rows_without_bottom = inner.height.saturating_sub(top) as usize;
@@ -1195,7 +1219,9 @@ impl TasksPane {
         self.list_state
             .prepare_layout(&self.entries, list_area.width, list_area.height);
 
-        // ListPane draws its scrollbar in the last column of the area it's given.
+        // ListPane draws its scrollbar in the last column of the area it's given. Only widen when the list
+        // will actually draw a scrollbar there (content overflows the viewport). When it won't, ListPane
+        // gives the full area to content, so the extra column would fill with label text.
         let needs_scrollbar = total > list_area.height as usize;
         let lp_area = if needs_scrollbar && list_area.right() < area.right() {
             Rect {
@@ -1210,7 +1236,8 @@ impl TasksPane {
             .style(self.list_style)
             .render(lp_area, buf, &mut self.list_state);
 
-        // The right-corner indicators (▲/▼) are suppressed for this pane Instead we draw the same glyphs, in the same color.
+        // The right-corner indicators (▲/▼) are suppressed for this pane
+        // Instead we draw the same glyphs, in the same color, centered on the reserved row(s) so they're easier to see
         let arrow_color = self.list_style.indicator_fg;
         if reserve_top {
             draw_centered_arrow(buf, inner, inner.y, "\u{25B2}", arrow_color);
@@ -1225,7 +1252,8 @@ impl TasksPane {
             );
         }
 
-        // Otherwise the spinner icons and kill/view buttons paint over the input bar.
+        // Otherwise the spinner icons and kill/view buttons paint over the input bar (e.g. the `⸬` spinner
+        // corrupting `search:` into `⸬earch:`).
         let bar_height = self.list_state.bottom_bar_height(list_area.height);
         let overlay_area = Rect {
             height: list_area.height.saturating_sub(bar_height),
@@ -1269,7 +1297,8 @@ impl TasksPane {
                         ..
                     } => OverlayEntryData::Scheduled(task_id.clone(), linked_subagent.clone()),
                     TaskEntry::Workflow { name, .. } => OverlayEntryData::Workflow(name.clone()),
-                    // Group headers have no kill/view buttons They still occupy a row (vis_row is enumerated before this filter).
+                    // Group headers have no kill/view buttons
+                    // They still occupy a row (vis_row is enumerated before this filter), so the y offsets for following items stay correct
                     TaskEntry::Header { .. } => return None,
                 };
                 Some((y, data))
@@ -1509,7 +1538,7 @@ impl TasksPane {
         rx = rx.saturating_sub(right_width);
         buf.set_span(rx, y, &Span::styled(right_text, right_style), right_width);
 
-        // Line count ( to the left of the duration).
+        // Line count (just to the left of the duration).
         if lines_w > 0 {
             rx = rx.saturating_sub(lines_w);
             buf.set_span(
@@ -1650,8 +1679,7 @@ impl TasksPane {
         rx = rx.saturating_sub(right_width);
         buf.set_span(rx, y, &Span::styled(right_text, right_style), right_width);
 
-        // Model (right-aligned, to the left of elapsed). Pre-computed above
-        // for overlay clearing.
+        // Model (right-aligned, just to the left of elapsed). Pre-computed above for overlay clearing.
         if !model_text.is_empty() {
             rx = rx.saturating_sub(model_w);
             let mstyle = Style::default().fg(theme.gray);
@@ -1867,7 +1895,7 @@ mod tests {
     fn line_badge_decimal_thousands() {
         assert_eq!(format_line_count_badge(1_000, false), "(1.0k)");
         assert_eq!(format_line_count_badge(1_234, false), "(1.2k)");
-        // Truncation, not rounding: stays at "1.9k".
+        // Truncation, not rounding: 1999 stays at "1.9k".
         assert_eq!(format_line_count_badge(1_999, false), "(1.9k)");
         assert_eq!(format_line_count_badge(9_999, false), "(9.9k)");
     }
@@ -2099,6 +2127,8 @@ mod tests {
         pane.overlay.show();
 
         let mut task = make_bg_task("t1", "ls", BgTaskStatus::Running);
+        // 42 newline-terminated rows render as `(42)`
+        // Use `set_stdout` so the cached `stdout_line_count` is populated
         task.set_stdout((0..42).map(|i| format!("line {i}\n")).collect::<String>());
         assert_eq!(task.stdout.lines().count(), 42);
         assert_eq!(task.stdout_line_count, 42);
@@ -2108,6 +2138,7 @@ mod tests {
 
         pane.sync(&bg_tasks, &HashMap::new(), &HashMap::new(), &[]);
 
+        // 12+ rows so `desired_height` is non-zero; wide enough that the overlay isn't clipped
         let lines = render_pane_to_strings(&mut pane, &bg_tasks, 80, 16);
         let joined = lines.join("\n");
         assert!(
@@ -2191,10 +2222,12 @@ mod tests {
 
     #[test]
     fn search_bar_not_overwritten_by_task_overlay() {
-        // Regression: while subagents/tasks are running, opening the search bar (`/`) used to render broken UI.
+        // Regression: while subagents/tasks are running, opening the search bar (`/`) used to render
+        // broken UI. The overlay must stop one row short of the input bar.
         let mut pane = TasksPane::new();
         pane.overlay.show();
 
+        // Three running tasks: entries = [Tasks header, t0, t1, t2]
         let mut bg_tasks = std::collections::BTreeMap::new();
         for i in 0..3 {
             bg_tasks.insert(
@@ -2215,6 +2248,8 @@ mod tests {
             "`/` should open the search input bar",
         );
 
+        // Height 4: the header plus 3 task rows exactly fill the area, so the search bar steals the bottom row
+        // Without the fix, the third task's overlay lands on that same row and clobbers the `search:` prompt
         let lines = render_pane_to_strings(&mut pane, &bg_tasks, 60, 4);
         let joined = lines.join("\n");
 
@@ -2238,7 +2273,8 @@ mod tests {
 
     #[test]
     fn search_bar_adds_a_line_keeping_last_entry_visible() {
-        // Opening the search bar should grow the pane by exactly one row so the bar gets its own line The last task/agent must stay visible.
+        // Opening the search bar should grow the pane by exactly one row so the bar gets its own line
+        // The last task/agent must stay visible rather than being displaced by the bar
         let mut pane = TasksPane::new();
         pane.overlay.show();
 
@@ -2268,7 +2304,7 @@ mod tests {
             "opening search should add exactly one row for the bar",
         );
 
-        // Render at the grown height: all tasks AND the search bar must be visible together
+        // Render at the grown height: all three tasks AND the search bar must be visible together
         let lines = render_pane_to_strings(&mut pane, &bg_tasks, 60, h_after);
         let joined = lines.join("\n");
         assert!(joined.contains("sleep 0"), "first task visible:\n{joined}");
@@ -2282,7 +2318,8 @@ mod tests {
 
     #[test]
     fn render_loop_row_truncates_before_kill_button() {
-        // A non-scrollable loop row with a long prompt must truncate before the `[✗]` kill button; nothing may render to its right Regression.
+        // A non-scrollable loop row with a long prompt must truncate before the `[✗]` kill button; nothing may render to its right
+        // Regression: the scrollbar-padding column used to fill with label text when the list wasn't scrollable, bleeding one cell past `[✗]`
         let mut pane = TasksPane::new();
         pane.overlay.show();
 
@@ -2378,7 +2415,7 @@ mod tests {
 
         pane.sync(&bg_tasks, &HashMap::new(), &HashMap::new(), &[]);
 
-        // Establish the viewport, then scroll to the bottom.
+        // Establish the viewport, then scroll to the very bottom.
         let _ = render_pane_to_strings(&mut pane, &bg_tasks, 40, 6);
         pane.list_state.set_scroll_offset(1000);
         let lines = render_pane_to_strings(&mut pane, &bg_tasks, 40, 6);
@@ -2524,6 +2561,7 @@ mod tests {
         ));
         assert!(matches!(pane_item(&pane, 1), TaskEntry::Scheduled { .. }));
 
+        // entries: ONE Watchers header (count 2), then monitor, then loop.
         assert_eq!(pane.entries.len(), 3);
         let header_text: String = match pane_entry(&pane, 0) {
             TaskEntry::Header {
@@ -2639,7 +2677,8 @@ mod tests {
 
     #[test]
     fn arrow_keys_expand_and_collapse_group() {
-        // Left collapses, Right expands (vs Enter / click which toggle) The arrow handler calls `set_group_collapsed`.
+        // Left collapses, Right expands (vs Enter / click which toggle)
+        // The arrow handler calls `set_group_collapsed`; exercise it directly
         let mut pane = TasksPane::new();
         let mut subagents = HashMap::new();
         subagents.insert("cs-1".into(), make_info());
@@ -2669,7 +2708,8 @@ mod tests {
 
     #[test]
     fn emptied_group_forgets_collapse_state() {
-        // Collapse a group, let it empty out, then repopulate it The new items must be visible (group auto-expands) rather than hidden.
+        // Collapse a group, let it empty out, then repopulate it
+        // The new items must be visible (group auto-expands) rather than hidden under a stale collapsed header
         let mut pane = TasksPane::new();
         let mut subagents = HashMap::new();
         subagents.insert("cs-1".into(), make_info());

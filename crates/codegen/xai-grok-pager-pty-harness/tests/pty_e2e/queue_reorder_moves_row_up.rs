@@ -7,6 +7,7 @@ use super::common::*;
 #[ignore]
 async fn queue_reorder_moves_row_up() {
     let content = ContentController::start().await.expect("start content");
+    // Gate turn 1 so both prompts provably queue while it is still the running turn.
     let mut turn_one = content.expect_agent_turn_blocked(
         "running turn before queue reorder",
         slow_turn_text("REORDERONE"),

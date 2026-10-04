@@ -345,6 +345,7 @@ pub(crate) fn extract_pdf_text(
     Ok(raw_text_to_file_content(text))
 }
 
+/// Three-tier PDF detection: infer metadata, magic bytes, or extension.
 pub fn is_pdf_file(file_bytes: &[u8], extension: &str) -> bool {
     bytes_to_metadata(file_bytes).is_ok_and(|m| m.is_pdf())
         || is_pdf_magic(file_bytes)

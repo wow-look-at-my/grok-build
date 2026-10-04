@@ -87,9 +87,11 @@ pub(crate) fn effective_suggest_model(
 }
 
 /// Total character budget for the compact transcript (~6k tokens at the bytes/4 estimate).
+/// It keeps the per-turn cost of the feature trivial even on long sessions.
 const TRANSCRIPT_BUDGET_CHARS: usize = 24_000;
 
 /// Per-message character cap inside the transcript.
+/// Long messages (pasted logs, big diffs) carry little signal for next-prompt prediction.
 const MESSAGE_CAP_CHARS: usize = 1_500;
 
 const TRUNCATION_MARKER: &str = "\n…";

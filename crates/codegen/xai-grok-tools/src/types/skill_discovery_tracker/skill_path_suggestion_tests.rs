@@ -76,6 +76,7 @@ fn suggests_nothing_for_ambiguous_disabled_non_skill_or_exact_requests() {
     );
 
     for requested in [
+        // Two registered candidates for the name.
         "/wrong/root/review/SKILL.md",
         // Disabled skill.
         "/wrong/root/retired/SKILL.md",
@@ -93,8 +94,9 @@ fn suggests_nothing_for_ambiguous_disabled_non_skill_or_exact_requests() {
 
 #[test]
 fn requested_path_among_same_named_registrations_is_ambiguous() {
-    // The failed read targets one registered path for "review"; another
-    // same-named registration exists.
+    // The failed read targets one registered path for "review"; another same-named registration
+    // exists. Counting the requested path as a match keeps this ambiguous (no suggestion) rather
+    // than treating the sibling as a unique alternate.
     let manager = seeded_manager(vec![
         skill("review", "/repo/.grok/skills/review/SKILL.md"),
         skill("review", "/home/user/.grok/skills/review/SKILL.md"),
@@ -115,7 +117,8 @@ fn requested_path_among_same_named_registrations_is_ambiguous() {
 fn includes_model_disabled_and_held_conditional_skills() {
     let mut model_disabled = skill("manual", "/home/user/.grok/skills/manual/SKILL.md");
     model_disabled.disable_model_invocation = true;
-    // `paths:`-gated skills are withheld from the listing but still registered.
+    // `paths:`-gated skills are withheld from the listing but still registered,
+    // whether seeded or dynamically discovered.
     let mut gated = skill("gated", "/repo/.grok/skills/gated/SKILL.md");
     gated.paths = Some(vec!["src/**".to_owned()]);
     let mut manager = seeded_manager(vec![model_disabled, gated]);
@@ -186,7 +189,8 @@ fn reload_disabling_a_discovered_skill_stops_suggesting_it() {
     manager.update_startup_baseline(vec![now_disabled]);
 
     // The reloaded baseline record owns the canonical path even though it is
-    // disabled.
+    // disabled, so the older enabled dynamic record at the same path can
+    // neither be suggested nor count as a second match.
     assert!(
         manager
             .suggest_skill_path(Path::new("/wrong/root/review/SKILL.md"))
@@ -196,7 +200,7 @@ fn reload_disabling_a_discovered_skill_stops_suggesting_it() {
 
 #[test]
 fn reload_moving_a_skill_suggests_only_the_current_registration() {
-    // Baseline-only move: the file may still exist on disk, but only the
+    // Baseline-only move: the old file may still exist on disk, but only the
     // current registration counts, so the moved path is unique.
     let mut manager = seeded_manager(vec![skill(
         "review",
@@ -214,7 +218,9 @@ fn reload_moving_a_skill_suggests_only_the_current_registration() {
         Path::new("/repo/new/.grok/skills/review/SKILL.md")
     );
 
-    // With a stale dynamic record left at the path, lookup cannot tell a stale record from a genuinely distinct same-name skill.
+    // With a stale dynamic record left at the old path, lookup cannot tell a
+    // stale record from a genuinely distinct same-name skill, so it fails safe
+    // with no suggestion rather than risk pointing at the wrong SKILL.md.
     let mut manager = seeded_manager(Vec::new());
     manager.add_discovered(vec![skill(
         "review",

@@ -1,4 +1,18 @@
 //! Inter-compaction chunked pipeline (shared core).
+//!
+//! Single pipeline shared by both `CompactionStrategy::Basic` and
+//! `CompactionStrategy::DivideAndConquer`. The only difference between
+//! the two is the per-chunk token budget:
+//!
+//! - **Basic** → unbounded chunk budget → exactly one chunk.
+//! - **DivideAndConquer** → `config.dnc_chunk_token_limit` → N chunks.
+//!
+//! Everything else — turn filtering, prior-compaction user-query
+//! extraction, chunk summarisation, and the final `<grok_user_queries>`
+//! + `<chunk_summary>` assembly — is shared. The harness supplies the
+//! candidate items, the *current* user-queries preamble (Grok chat
+//! extracts it from the raw `ChatCompletionRequest`), the sampler, the
+//! token counter, and an observer for metrics.
 
 use std::time::{Duration, Instant};
 
@@ -18,7 +32,8 @@ use crate::token::ItemTokenCounter;
 use super::config::InterCompactionConfig;
 use super::observer::InterCompactionObserver;
 
-/// Sentinel chunk budget used by [`CompactionStrategy::Basic`] so the chunking loop emits exactly one chunk.
+/// Sentinel chunk budget used by [`CompactionStrategy::Basic`] so the
+/// chunking loop emits exactly one chunk.
 const UNBOUNDED_CHUNK_LIMIT: u32 = u32::MAX;
 
 /// Output of the shared chunked pipeline — assembled text, not yet wrapped
@@ -26,12 +41,17 @@ const UNBOUNDED_CHUNK_LIMIT: u32 = u32::MAX;
 #[derive(Debug, Clone)]
 pub struct ChunkedCompactionOutput {
     /// `<grok_user_queries>` preamble + `<chunk_summary index="i">` blocks.
+    /// The harness wraps this into its summary-carrier message.
     pub combined_text: String,
-    /// Thinking-channel output: `<chunk_analysis>` blocks. Empty when the model produced no thinking output.
+    /// Thinking-channel output: `<chunk_analysis>` blocks. Empty when the
+    /// model produced no thinking output. Stored for audit/debug only.
     pub analysis_text: String,
 }
 
 /// Shared chunked pipeline.
+///
+/// Steps:
+/// 1. Filter items with
 ///    [`filter_turns_for_inter_compaction`](crate::history::filter::filter_turns_for_inter_compaction).
 /// 2. [`separate_prior_user_queries`] — split prior `<grok_user_queries>`
 ///    blocks out of every prior compaction summary item. The LLM never sees
@@ -44,7 +64,19 @@ pub struct ChunkedCompactionOutput {
 ///    blocks into the final summary text via
 ///    [`assemble_user_queries_preamble`]; combine the per-chunk
 ///    `thinking` channels into the analysis text.
-/// `current_user_queries` is the harness-extracted preamble for *this* round's user messages (Grok chat: verbatim from the raw request, with attachment refs). `conversation_id` / `response_id` are threaded through for log correlation only.
+///
+/// `current_user_queries` is the harness-extracted preamble for *this*
+/// round's user messages (Grok chat: verbatim from the raw request, with
+/// attachment refs). `conversation_id` / `response_id` are threaded
+/// through for log correlation only.
+///
+/// Observer events (the Grok chat observer maps them to the
+/// pre-unification metrics):
+/// - [`InterCompactionObserver::on_recompaction`] when prior-compaction
+///   summary items are found.
+/// - [`InterCompactionObserver::on_chunk_count`] — chunk count after
+///   assembly (always 1 for Basic; N for DnC).
+/// - [`InterCompactionObserver::on_chunk_sampled`] — per-chunk LLM latency.
 #[allow(clippy::too_many_arguments)]
 pub async fn sample_compaction_chunked<T: CompactionItemBuilder + Send + Sync>(
     turns: &[T],
@@ -79,6 +111,7 @@ pub async fn sample_compaction_chunked<T: CompactionItemBuilder + Send + Sync>(
         "[InterCompaction] starting chunked compaction"
     );
 
+    // Step 1 — filter.
     let filtered = filter_turns_for_inter_compaction(turns);
     info!(
         conversation_id = %conversation_id,
@@ -94,8 +127,14 @@ pub async fn sample_compaction_chunked<T: CompactionItemBuilder + Send + Sync>(
         )));
     }
 
+    // Step 2 — split prior `<grok_user_queries>` out of every prior
+    // compaction summary item. The LLM never sees them (it would re-emit
+    // them verbatim and snowball across rounds); they are reattached to
+    // the final summary via `assemble_user_queries_preamble`. Shared with
+    // intra-compaction's `History` target.
     let separated = separate_prior_user_queries(&filtered);
 
+    // Step 3 — chunk + flush over the LLM-safe item list.
     let mut compactable: Vec<T> = Vec::new();
     let mut chunk_tokens: u32 = 0;
     let mut chunk_outputs: Vec<LlmCompactionOutput> = Vec::new();
@@ -170,7 +209,8 @@ pub async fn sample_compaction_chunked<T: CompactionItemBuilder + Send + Sync>(
         combined_analysis.push_str(&wrap_chunk_analysis(i, &output.thinking));
     }
 
-    // Record chunk count after assembly so dashboards see the same timing they saw pre-unification.
+    // Record chunk count after assembly so dashboards see the same timing
+    // they saw pre-unification (where this lived inside DnC).
     observer.on_chunk_count(chunk_outputs.len());
 
     info!(

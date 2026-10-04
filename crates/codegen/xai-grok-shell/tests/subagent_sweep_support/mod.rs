@@ -1,4 +1,6 @@
 //! Shared harness for the subagent latency sweep and the bootstrap-cost regression tier.
+//! Both test binaries include this file via `#[path]`.
+//! The regression tier lives in its own binary because the waterfall sink and env latch once per process.
 #![allow(dead_code)]
 
 use std::time::{Duration, Instant};
@@ -469,6 +471,7 @@ pub fn run_burst(
 }
 
 /// Process-wide scaffold shared by the sweep and regression binaries.
+/// The mock gets its own runtime because agent startup prefetch would starve a shared one.
 pub struct SweepEnv {
     pub mock_rt: tokio::runtime::Runtime,
     pub deadline: Duration,

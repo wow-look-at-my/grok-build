@@ -6,6 +6,7 @@ use syntect::parsing::SyntaxDefinition;
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/Swift.sublime-syntax");
+    // Runtime `SyntaxSet::build` of two-face stalls first Read paint (GB-5513 PTY fold).
     let swift =
         SyntaxDefinition::load_from_str(include_str!("assets/Swift.sublime-syntax"), true, None)
             .expect("parse Swift.sublime-syntax");

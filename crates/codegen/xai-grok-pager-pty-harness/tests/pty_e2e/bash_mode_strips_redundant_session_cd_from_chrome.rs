@@ -64,7 +64,8 @@ async fn bash_mode_strips_redundant_session_cd_from_chrome() {
         screen.contains("STRIP_CD_OK"),
         "expected command output on screen:\n{screen}"
     );
-    // Asserting per line avoids slicing bytes through box-drawing characters.
+    // Asserting per line avoids slicing bytes through box-drawing characters, which panics on a char boundary
+    // The history line `#N ! cd …` keeps the typed command; only the Run (user) chrome loses the cd prefix
     let run_lines: Vec<&str> = screen
         .lines()
         .filter(|line| line.contains("Run (user)"))

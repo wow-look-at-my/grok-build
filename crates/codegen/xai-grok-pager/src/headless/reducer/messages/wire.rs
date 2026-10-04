@@ -1,4 +1,5 @@
 //! The `streaming-messages-json` serde wire DTOs: the Messages API line shapes and their serialization helpers.
+//! These types are pure data; the reducer logic lives elsewhere.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -82,7 +83,7 @@ pub(super) struct ServerToolUse {
 }
 
 impl From<&ResponseUsage> for MessageUsage {
-    /// Copy the shell's per-response usage into those `message.usage` fields.
+    /// Copy the shell's per-response usage into the four `message.usage` fields.
     fn from(u: &ResponseUsage) -> Self {
         Self {
             input_tokens: u.input_tokens,
@@ -182,6 +183,8 @@ pub(super) struct CompactMetadata {
 }
 
 /// Every top-level `streaming-messages-json` NDJSON line.
+/// `#[serde(tag = "type")]` derives the `type` discriminant from the variant, so a line can never carry a mistyped tag.
+/// The two `system` subtypes are discriminated by the nested [`SystemLine`] `subtype`.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(super) enum MessagesLine {
@@ -192,7 +195,7 @@ pub(super) enum MessagesLine {
     Result(Box<ResultLine>),
 }
 
-/// Both `system` line subtypes, discriminated by `subtype`.
+/// The two `system` line subtypes, discriminated by `subtype`.
 #[derive(Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
 pub(super) enum SystemLine {

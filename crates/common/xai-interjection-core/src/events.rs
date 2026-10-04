@@ -1,4 +1,7 @@
-//! Shared event queue for the push path: producers enqueue out-of-band events.
+//! Shared event queue for the push path: producers enqueue out-of-band events;
+//! readers drain the ones relevant to them at hook points. Internally
+//! synchronized and `Arc`-shared (clones share one queue), mirroring
+//! [`crate::buffer::InterjectionBuffer`].
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -66,8 +69,9 @@ impl<E> EventQueue<E> {
         std::mem::take(&mut *self.lock())
     }
 
-    /// Splice `events` back in ahead of everything queued, preserving their
-    /// order.
+    /// Splice `events` back in ahead of everything currently queued, preserving their
+    /// order. For cancel-safety: a reader whose async processing was aborted mid-drain
+    /// restores the unprocessed remainder, which arrived before anything pushed since.
     pub fn restore_front(&self, events: Vec<E>) {
         if events.is_empty() {
             return;
@@ -82,8 +86,9 @@ impl<E> EventQueue<E> {
         self.lock().clear();
     }
 
-    /// Every section below is a `Vec` take, push or clear, so a poison can
-    /// only come from elsewhere.
+    /// Every section below is a `Vec` take, push or clear, so a poison can only
+    /// come from elsewhere; recovering the inner value keeps a queue that is
+    /// still structurally sound from ending the interjection path forever.
     #[allow(clippy::disallowed_methods)]
     fn lock(&self) -> MutexGuard<'_, Vec<E>> {
         self.events.lock().unwrap_or_else(|e| e.into_inner())

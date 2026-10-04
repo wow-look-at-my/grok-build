@@ -22,10 +22,10 @@ const READ_CHUNK_SIZE: usize = 8192;
 /// Quiet lull ending the post-exit drain (backgrounded grandchildren may hold the pipes open).
 const POST_EXIT_QUIET: Duration = Duration::from_millis(250);
 
-/// Hard cap on the whole post-exit drain.
+/// Hard cap on the whole post-exit drain (`POST_EXIT_QUIET` is per-chunk, so a grandchild that keeps writing could otherwise reach the deadline).
 const POST_EXIT_BUDGET: Duration = Duration::from_secs(2);
 
-/// Grace between SIGTERM and SIGKILL when tearing down a timed-out process group, so a signal-aware child can exit cleanly.
+/// Grace between SIGTERM and SIGKILL when tearing down a timed-out process group, so a signal-aware child can exit cleanly before the force kill.
 const TERM_GRACE: Duration = Duration::from_millis(500);
 
 /// Resolve the `git` binary: `GIT_BIN_PATH` (Bazel's hermetic-git data dep; runfiles-relative, so resolved against the cwd) or bare `git` on `PATH`.
@@ -44,8 +44,9 @@ pub fn git_bin() -> OsString {
     }
 }
 
-/// Run a config-provided command string through the platform shell: `sh -c` on unix, `cmd /C` on Windows. It is the escape hatch shared by the auth
-/// providers and the identity command.
+/// Run a config-provided command string through the platform shell: `sh -c` on unix, `cmd /C` on Windows. It is the escape hatch shared by the auth providers and the identity command.
+/// Windows has no `sh` on `PATH` in a default install. Where Git Bash *is* installed, `sh` eats the backslashes in a native path such as `C:\corp\auth.exe`.
+/// `cmd /C` runs `.exe`, `.cmd`, and `.bat` directly and propagates the child's exit code, which PowerShell's `-Command` does not. The auth providers' "exit 0 means success" contract depends on that propagation.
 pub fn shell_c(script: &str) -> Command {
     let (shell, flag) = if cfg!(windows) {
         ("cmd", "/C")
@@ -58,6 +59,7 @@ pub fn shell_c(script: &str) -> Command {
 }
 
 /// Whether the command text may appear in spawn-failure/timeout logs.
+/// `Redacted` (the safe default) keeps it out for commands whose text may embed secrets; `Shown` includes it for diagnostics.
 #[derive(Clone, Copy)]
 pub enum CommandLog<'a> {
     Redacted,
@@ -143,14 +145,16 @@ pub async fn run_detached_with_timeout(
         }
     };
 
-    // Both streams drain concurrently under one budget measured fresh from the child's exit A child that exits.
+    // Both streams drain concurrently under one budget measured fresh from the child's exit
+    // A child that exits just before the timeout still gets its buffered output captured in full
     let drain_deadline = Instant::now() + POST_EXIT_BUDGET;
     let (stdout, stderr) = tokio::join!(
         drain_reader(stdout_rx, drain_deadline),
         drain_reader(stderr_rx, drain_deadline),
     );
     if !status.success() {
-        // Debug, not warn: some callers run secret-bearing commands (auth tokens, resolved identities).
+        // Debug, not warn: some callers run secret-bearing commands (auth tokens, resolved identities), so stderr stays out of routine logs
+        // Callers that need louder reporting inspect the returned stderr
         debug!(status = %status, label, "command exited with a nonzero status");
     }
     Ok(Output {

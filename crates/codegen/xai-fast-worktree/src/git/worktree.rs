@@ -34,7 +34,8 @@ pub(crate) fn worktree_add_no_checkout(source: &Path, dest: &str, git_ref: &str)
 enum StaleWorktreeMatch<'a> {
     /// Exactly the registration whose recorded worktree path is this path.
     Path(&'a Path),
-    /// Every registration whose recorded worktree path is under this prefix.
+    /// Every registration whose recorded worktree path is under this prefix
+    /// (e.g. a tool-owned base directory, proving ownership of the entries).
     UnderPrefix(&'a Path),
 }
 
@@ -102,6 +103,9 @@ fn remove_stale_worktree_registrations(
         let Ok(backlink) = std::fs::read_to_string(registration.join("gitdir")) else {
             continue;
         };
+        // The backlink names `<worktree>/.git`; under
+        // `worktree.useRelativePaths` (git >= 2.48) it is relative to the
+        // registration dir, not the CWD.
         let backlink_path = Path::new(backlink.trim());
         let backlink_abs = if backlink_path.is_relative() {
             registration.join(backlink_path)
@@ -152,8 +156,9 @@ pub fn remove_stale_worktree_registration(source_repo: &Path, worktree_path: &Pa
     remove_stale_worktree_registrations(source_repo, StaleWorktreeMatch::Path(worktree_path))
 }
 
-/// Remove stale registrations under a tool-owned base. Not `git worktree
-/// prune`: prune also drops paths merely invisible in this mount namespace.
+/// Remove stale registrations under a tool-owned base. Not `git worktree prune`:
+/// prune also drops paths merely invisible in this mount namespace. This only
+/// removes registrations whose recorded path is confirmed gone.
 pub fn remove_stale_worktree_registrations_under(source_repo: &Path, prefix: &Path) -> u64 {
     remove_stale_worktree_registrations(source_repo, StaleWorktreeMatch::UnderPrefix(prefix))
 }
@@ -249,6 +254,9 @@ mod tests {
         assert!(git_worktrees.exists());
     }
 
+    /// Rewrite a registration's `gitdir` backlink to the relative layout
+    /// `worktree.useRelativePaths` (git >= 2.48) produces, without requiring
+    /// that git version on the test host.
     fn make_backlink_relative(repo: &Path, reg_name: &str, worktree: &Path) {
         let reg_dir = repo.join(".git").join("worktrees").join(reg_name);
         let target = worktree.join(".git");

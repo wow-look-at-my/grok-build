@@ -1,3 +1,12 @@
+//! Error reports on the exit path must exit 1 when fd 2 is dead, not panic
+//! (SIGABRT under `panic = "abort"`, plus a crash report on the next launch).
+//!
+//! Two deterministic, offline errors pin the tests to the writes in question:
+//! `--memory-flush` without a prompt or session is a pre-TUI `anyhow::bail!` that lands in
+//! `main()`'s generic `Error:` arm; `-p` with no credentials fails auth inside headless mode,
+//! whose plain-format emitter reports it to stderr before `main()` gets the same error. The
+//! headless run also carries `--include-partial-messages`, whose ignored-flag warning is
+//! headless mode's other pre-auth stderr write, through the same `eprint_line` helper.
 
 use std::process::{Command, Stdio};
 

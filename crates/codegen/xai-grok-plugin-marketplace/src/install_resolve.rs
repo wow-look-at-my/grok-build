@@ -3,8 +3,7 @@
 use crate::types::{MarketplaceEntry, MarketplaceSource, SourceKind};
 use crate::{canonical_github_owner_repo, is_official_source_url};
 
-/// A parsed marketplace install ref: a plugin `name` with an optional source
-/// `qualifier`.
+/// A parsed marketplace install ref: a plugin `name` with an optional source `qualifier` (`owner/repo` for git, `local/<slug>` for local sources).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketplaceRef {
     pub name: String,

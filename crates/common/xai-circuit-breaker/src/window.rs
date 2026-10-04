@@ -3,12 +3,17 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// Safety cap on sliding window entries to bound memory under sustained high load.
+/// Safety cap on sliding window entries to bound memory under sustained
+/// high load (e.g. 10K req/s * 60s window would otherwise reach 600K
+/// entries).
 pub(crate) const MAX_WINDOW_ENTRIES: usize = 10_000;
 
 pub(crate) struct SlidingWindow {
     entries: VecDeque<(Instant, bool)>,
-    /// Incremental count of `is_failure = true` entries in `entries`.
+    /// Incremental count of `is_failure = true` entries currently in
+    /// `entries`. Maintained on push/pop so `error_rate()` is O(1)
+    /// instead of O(n) — avoids a per-request hot-path scan under
+    /// the breaker mutex.
     failures: usize,
 }
 

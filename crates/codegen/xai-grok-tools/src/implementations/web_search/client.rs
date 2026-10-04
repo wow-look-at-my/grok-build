@@ -3,13 +3,15 @@ use crate::attribution::{SharedAttributionCallback, ToolConsumer};
 use crate::types::SharedApiKeyProvider;
 use async_openai::types::responses as rs;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
-/// A minimal, purpose-built HTTP client for calling the Responses API with
-/// web search capability.
+/// A minimal, purpose-built HTTP client for calling the Responses API
+/// with web search capability.
+/// Which API the configured provider speaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SearchBackend {
     /// A model synthesizes an answer over the Responses API (`/responses`).
     Responses,
-    /// Kagi's own ranked results (`/search`).
+    /// Kagi's own ranked results (`/search`). No model is involved: Kagi
+    /// returns them already filtered, ranked, and snippet-ed.
     Kagi,
 }
 
@@ -32,12 +34,18 @@ pub struct WebSearchClient {
     backend: SearchBackend,
     /// Results per query on [`SearchBackend::Kagi`]; `None` uses Kagi's default.
     kagi_limit: Option<usize>,
-    /// Authoritative domain allowlist from `[toolset.web_search] allowed_domains`.
+    /// Authoritative domain allowlist from `[toolset.web_search] allowed_domains`. When set it
+    /// governs the search and the model's per-call `allowed_domains` is ignored (see
+    /// [`Self::resolve_filters`]). Mutually exclusive with `default_excluded_domains`.
     default_allowed_domains: Option<Vec<String>>,
     /// Authoritative domain blocklist from `[toolset.web_search] excluded_domains`.
+    /// The model cannot un-set it by naming a blocked domain in its own
+    /// `allowed_domains`. Mutually exclusive with `default_allowed_domains`.
     default_excluded_domains: Option<Vec<String>>,
     api_key_provider: Option<SharedApiKeyProvider>,
-    /// Optional 401-attribution hook.
+    /// Optional 401-attribution hook. Callers can wire this so a 401
+    /// from the Responses API emits an `auth_401_attribution` event
+    /// with `consumer == "WebSearch"`.
     attribution_callback: Option<SharedAttributionCallback>,
 }
 impl WebSearchClient {
@@ -158,7 +166,7 @@ impl WebSearchClient {
     }
     /// Resolve the effective domain filters for a request. This is required for `excluded_domains` to be a real block. Otherwise the model could
     /// bypass the user's blocklist simply by naming the blocked domain in its own `allowed_domains`. Only when no config policy is set does the
-    /// model's per-call allowlist apply. Both lists are mutually exclusive, so at most one of the returned options is `Some`.
+    /// model's per-call allowlist apply. The two lists are mutually exclusive, so at most one of the returned options is `Some`.
     fn resolve_filters(
         &self,
         model_allowed: Option<Vec<String>>,
@@ -179,7 +187,8 @@ impl WebSearchClient {
         }
         (model_allowed.filter(|d| !d.is_empty()), None)
     }
-    /// Build the serialized `/responses` request body for a single web search.
+    /// Build the serialized `/responses` request body for a single web search. The request always
+    /// carries exactly one tool (`web_search`) at index 0.
     fn build_request_json(
         &self,
         query: &str,
@@ -465,6 +474,10 @@ const KAGI_RESULT: i64 = 0;
 const KAGI_RELATED: i64 = 1;
 
 /// One Kagi Search API response body.
+///
+/// Kagi types each `data` entry with an integer `t`, so the fields are modelled
+/// flat and matched on `t` rather than as a serde-tagged enum (serde's internal
+/// tagging wants a string tag).
 #[derive(Debug, serde::Deserialize)]
 struct KagiSearchBody {
     #[serde(default)]
@@ -981,7 +994,8 @@ mod tests {
             Some("https://valid.com/")
         );
     }
-    /// A provider that always returns `None`, simulating an API-key user whose token has aged past the client-side TTL.
+    /// A provider that always returns `None`, simulating an API-key user
+    /// whose token has aged past the client-side TTL.
     struct NoneProvider;
     impl crate::types::ApiKeyProvider for NoneProvider {
         fn current_api_key(&self) -> Option<String> {
@@ -989,7 +1003,8 @@ mod tests {
         }
     }
     /// When the dynamic provider returns `None`, the static `api_key` from config must still be
-    /// sent as the Authorization header.
+    /// sent as the Authorization header. This is a regression scenario: API-key users past the
+    /// 30-day client TTL saw 401 because no auth was sent.
     #[tokio::test]
     async fn static_api_key_is_fallback_when_provider_returns_none() {
         use wiremock::matchers::{header, method, path};

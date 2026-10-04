@@ -1,4 +1,5 @@
 //! All tool execution goes through `xai-grok-tools` via the `ToolBridge`.
+//! Types (ToolOutput, ToolInput, TodoState, etc.) come from `xai-grok-tools` directly.
 
 pub mod bridge;
 pub mod config;

@@ -1,4 +1,5 @@
-//! Build the strategy report from a dispatch outcome plus the request gate.
+//! Build the strategy report from a dispatch outcome plus the request gate,
+//! and relay the daemon's redirect telemetry ring to the host's `log_event`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -15,7 +16,11 @@ use xai_grok_workspace_types::rpc::worktree::{
     StrategyReport, WorktreeType, is_grove_resolved, transport_for_resolved,
 };
 
-/// Budget for one whole drain.
+/// Budget for one whole drain. The fetch gets all of it and the ack gets what
+/// is left, but `NfsWorktreeClient::call` applies the value it is handed to
+/// connect, write, and read separately, so a daemon that accepts and stalls
+/// costs at most about three times the remaining budget per call before the
+/// ack is skipped.
 const REDIRECT_EVENTS_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(super) struct WorktreeEndedEmit<'a> {
@@ -87,10 +92,13 @@ pub(super) fn emit_worktree_ended(emit: WorktreeEndedEmit<'_>) -> WorktreeEnded 
     event
 }
 
-/// Set while one drain is in flight.
+/// Set while one drain is in flight, so concurrent worktree ends in one
+/// process do not both fetch and log the same unacked entries.
 static REDIRECT_DRAIN_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
-/// Holds `REDIRECT_DRAIN_IN_FLIGHT`.
+/// Holds `REDIRECT_DRAIN_IN_FLIGHT`. Releasing on `Drop` keeps the flag from
+/// wedging shut when tokio drops the spawned closure unrun at runtime shutdown
+/// or when the drain panics.
 #[must_use]
 struct RedirectDrainGuard;
 
@@ -143,7 +151,8 @@ pub(crate) fn drain_redirect_events(event: &WorktreeEnded) {
 /// because the host cannot use them and leaving them would block the ring
 /// forever.
 fn drain_redirect_events_sync(client: &NfsWorktreeClient) -> (usize, usize) {
-    // Each call receives the time left on this deadline and applies it per socket operation, so the deadline bounds the ack's start.
+    // Each call receives the time left on this deadline and applies it per
+    // socket operation, so the deadline bounds the ack's start, not the total.
     let deadline = Instant::now() + REDIRECT_EVENTS_DRAIN_TIMEOUT;
     let (values, next_seq) = match client.redirect_events(0, REDIRECT_EVENTS_DRAIN_TIMEOUT) {
         Ok(reply) => reply,
@@ -374,7 +383,8 @@ fn fallback_reason(
         .iter()
         .find(|s| s.arm.is_grove())
         .map(ArmSkip::to_string)
-        // A pre-dispatch rewrite kept every arm from running.
+        // A pre-dispatch rewrite kept every arm from running, so it is the only
+        // account of why grove did not serve this worktree.
         .or_else(|| rewrite_reason.map(str::to_owned))
 }
 
@@ -882,7 +892,8 @@ mod tests {
         })
     }
 
-    /// Both tests that observe `REDIRECT_DRAIN_IN_FLIGHT` hold this.
+    /// Both tests that observe `REDIRECT_DRAIN_IN_FLIGHT` hold this, since the
+    /// flag is process-wide and the test binary runs tests in parallel.
     static IN_FLIGHT_FLAG_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Telemetry is never initialized in a test binary, so the gate in
@@ -922,7 +933,8 @@ mod tests {
                 None,
             )
         });
-        // Dropping the runtime waits for every blocking task.
+        // Dropping the runtime waits for every blocking task, so a drain that
+        // slipped past the gate has connected by the time the daemon stops.
         drop(runtime);
         assert_eq!(
             Some(sock.clone()),

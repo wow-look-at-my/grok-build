@@ -1,5 +1,8 @@
 #!/opt/homebrew/bin/bash
-# Local-only helper: drives zig as the C compiler for x86_64-unknown-linux-gnu.
+# Local-only helper: drives zig as the C compiler for x86_64-unknown-linux-gnu
+# so `cargo clippy --target x86_64-unknown-linux-gnu` can reach the Linux-only
+# source files from a Mac. cc-rs passes its own target selection, which zig
+# spells differently, so every target flag is dropped here.
 set -euo pipefail
 
 args=()

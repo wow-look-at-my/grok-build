@@ -8,6 +8,14 @@
 /// The format is: `{unix_timestamp}::{message}`
 ///
 /// # Examples
+///
+/// ```ignore
+/// tprintln!("Hello, world!");
+/// // Logs: 1234567890::Hello, world!
+///
+/// tprintln!("Value: {}", 42);
+/// // Logs: 1234567890::Value: 42
+/// ```
 #[macro_export]
 macro_rules! tprintln {
     () => {{

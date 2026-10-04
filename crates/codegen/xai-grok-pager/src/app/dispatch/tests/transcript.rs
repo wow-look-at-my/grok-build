@@ -420,7 +420,8 @@ fn open_block_viewer_opens_image_only_blocks_natively() {
     assert!(entry.block.supports_fullscreen());
     assert!(!entry.block.has_normal_fullscreen_viewer());
 
-    // Pretend the host terminal speaks Kitty graphics.
+    // Pretend the host terminal speaks Kitty graphics so `guard_image_support` doesn't return early
+    // The dispatch then reaches the image branch, which opens the file natively rather than in an in-app viewer
     let _guard = set_protocol_for_test(GraphicsProtocol::Kitty);
     let effects = dispatch(Action::OpenBlockViewer, &mut app);
 
@@ -567,6 +568,7 @@ fn open_block_viewer_skips_image_viewer_when_no_graphics() {
     agent.scrollback.set_selected(Some(0));
 
     // The terminal has no inline-image protocol (e.g. Windows ConPTY).
+    // The dispatch refuses to open the image-viewer modal and shows a toast instead
     let _guard = set_protocol_for_test(GraphicsProtocol::None);
     let effects = dispatch(Action::OpenBlockViewer, &mut app);
 

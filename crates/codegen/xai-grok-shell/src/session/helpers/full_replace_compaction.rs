@@ -1,4 +1,11 @@
 //! grok-build's L5 wiring onto the shared full-replace engine (`xai_grok_compaction::code_compaction`).
+//!
+//! The shared engine drives the loop: sample, retry, then classify the result as degenerate or failed.
+//! The loop lives in [`sample_full_replace_summary`](xai_grok_compaction::sample_full_replace_summary).
+//! This module adapts grok-build's transport and telemetry to the engine's two traits: [`ShellCompactionSampler`] and [`ShellFullReplaceObserver`].
+//!
+//! The **input ladder** (verbatim, then fitted, then lossy) and auto-compaction suppression stay in L5 (`compaction.rs`).
+//! Both are driven by the `context_overflow` / `deterministic` flags on [`FullReplaceError`](xai_grok_compaction::FullReplaceError).
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -51,6 +58,7 @@ pub(crate) struct ShellCompactionSampler {
     session_id: acp::SessionId,
     sampling_config: SamplingConfig,
     /// Per-chunk idle timeout forwarded to `generate_session_compact`.
+    /// A stalled summarizer stream (no model-output chunk for this long) fails instead of hanging.
     idle_timeout: Duration,
     /// Wall-clock budget (secs) forwarded to `generate_session_compact` as the cap on runaway reasoning; `0` disables it.
     wall_clock_budget_secs: u64,
@@ -195,8 +203,8 @@ struct ObserverState {
     last_error_msg: Option<String>,
 }
 
-/// [`FullReplaceObserver`] that reproduces grok-build's per-attempt telemetry
-/// without the shared engine depending on a telemetry backend.
+/// [`FullReplaceObserver`] that reproduces grok-build's per-attempt telemetry without the shared engine depending on a telemetry backend.
+/// It records `CompactionAttempt` rows, rejection counters, the `CompactionRetryDegraded` event, and the warn/error tracing.
 pub(crate) struct ShellFullReplaceObserver {
     trigger: CompactionTrigger,
     context_window: u64,
@@ -324,7 +332,8 @@ impl FullReplaceObserver for ShellFullReplaceObserver {
                 }
             }
             FullReplaceAttemptOutcome::EmptyResponse { .. } => {
-                // The shell reports an empty response as a transient error (`generate_session_compact` returns `Transient`).
+                // The shell reports an empty response as a transient error (`generate_session_compact` returns `Transient`)
+                // It never reaches the shared `Ok("")` branch; handle defensively
                 s.transient_rejections += 1;
                 let msg = format!("{COMPACT_FAILED_PREFIX}model returned empty response");
                 s.attempt_details.push(CompactionAttempt {

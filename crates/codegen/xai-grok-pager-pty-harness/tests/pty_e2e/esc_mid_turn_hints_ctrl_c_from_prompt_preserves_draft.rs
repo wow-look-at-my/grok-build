@@ -33,7 +33,8 @@ async fn esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("stream started");
 
-    // Type a draft into the prompt while the turn streams (the prompt stays focused after submit).
+    // Type a draft into the prompt while the turn streams (the prompt stays focused after submit)
+    // A distinctive single token avoids any wrapping ambiguity
     let draft = "DRAFTKEEPME";
     harness.inject_keys(draft.as_bytes()).expect("type draft");
     harness

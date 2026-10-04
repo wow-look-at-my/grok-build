@@ -1,4 +1,41 @@
 //! Evidence-packet construction for the goal-verification stage.
+//!
+//! The packet is a strictly-formatted block that each adversarial skeptic subagent receives as its user prompt:
+//!
+//! ```text
+//! OBJECTIVE:
+//! <objective>
+//!
+//! CHANGES_FILE: <patch path or `(unavailable)`>
+//!
+//! CHANGED_FILES:
+//! - <path>
+//! ...
+//!
+//! RUN_LOG: <run-log path or `(unavailable)`>
+//!
+//! PLAN_FILE: <plan path or `(unavailable)`>
+//!
+//! PLAN_CHANGES: <unified diff of plan edits, or `(none)`>
+//!
+//! FINAL_RESPONSE:
+//! <last assistant text, sanitized>
+//! ```
+//!
+//! `PLAN_CHANGES` is the diff from the plan baseline to the current plan (the agent may edit `plan.md` mid-run).
+//! It renders `(none)` when there is no baseline, no edits, or the diff could not be captured.
+//!
+//! `CHANGES_FILE` is a unified-diff *changelog* (a scope pointer, and
+//! the anchor for the claim↔diff honesty check) — it may be truncated.
+//! `CHANGED_FILES` is the *complete* list of touched paths the skeptic
+//! reads in their current state; verification rests on the live files
+//! and on the run log, not on the diff alone. `RUN_LOG` is the
+//! harness-written record of every tool call the implementer made and
+//! what it returned (see `run_log.rs`); it is the runtime evidence, so the
+//! implementer never has to write proof files. The section names
+//! are consumed verbatim by `templates/goal_verifier_prompt.md`, so the
+//! format constants here are load-bearing and must not change without
+//! updating the template (and bumping any prompt-eval baselines).
 
 use super::GOAL_CLASSIFIER_DIFF_MAX_BYTES;
 use std::borrow::Cow;
@@ -16,14 +53,15 @@ use crate::util::subprocess::git_bin;
 /// Max wall-clock for git commands during evidence capture.
 const DIFF_COMMAND_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-/// Build a `tokio::process::Command` for `git` with `kill_on_drop(true)` so a `tokio::time::timeout` firing reaps the child instead.
+/// Build a `tokio::process::Command` for `git` with `kill_on_drop(true)` so a `tokio::time::timeout` firing reaps the child instead of orphaning it.
 fn git_command(cwd: &Path) -> Command {
     let mut cmd = Command::new(git_bin());
     cmd.current_dir(cwd).kill_on_drop(true);
     cmd
 }
 
-/// It is the synthetic parent for the initial-commit case.
+/// It is the synthetic parent for the initial-commit case (`git diff --root HEAD` does NOT include the initial commit's additions).
+/// SHA-256 repos fall back to this constant if `git hash-object` fails.
 const EMPTY_TREE_SHA1: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /// Only SUCCESSFUL derivations populate the cache so a transient git failure does not poison subsequent calls.
@@ -33,20 +71,24 @@ static EMPTY_TREE_HASH_CACHE: OnceLock<String> = OnceLock::new();
 const WALKDIR_PER_FILE_MAX_BYTES: usize = 64 * 1024;
 
 /// Sentinel rendered as the `CHANGES_FILE:` value when the harness could not capture a diff.
+/// The verifier prompt's rule 5 keys on this literal; keep in sync.
 pub(super) const CHANGES_UNAVAILABLE: &str = "(unavailable)";
 
 /// `PLAN_FILE:` value when `plan_file == None` (planner disabled or never ran).
+/// A recorded plan still renders its path even if the file was later deleted; only `None` selects this sentinel.
+/// The verifier prompt's rule 2 keys on this literal to fall through to rule 1; keep in sync.
 pub(super) const PLAN_UNAVAILABLE: &str = "(unavailable)";
 
 /// `PLAN_CHANGES:` value when there is no baseline, the plan was not edited, or the diff could not be captured.
+/// The literal is distinct from `PLAN_UNAVAILABLE`: `(unavailable)` means "no plan at all", `(none)` means "a plan exists but nothing changed in it".
 pub(super) const PLAN_CHANGES_NONE: &str = "(none)";
 
-/// It is `Copy` so the orchestrator can fan out the same reference to N
-/// parallel skeptic spawns without cloning the (already-borrowed).
+/// It is `Copy` so the orchestrator can fan out the same reference to N parallel skeptic spawns without cloning the (already-borrowed) string.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ChangesRef<'a> {
     /// Absolute path to a unified-diff patch file on disk.
     File(&'a str),
+    /// Capture failed; verifier prompt rule 5 takes over.
     Unavailable,
 }
 
@@ -57,9 +99,11 @@ pub(crate) enum ChangesCaptureError {
     NoBaseline,
     /// `git diff` exited non-zero, timed out, or could not be spawned.
     DiffCommandFailed(String),
-    /// The walkdir-based fallback returned no candidate files.
+    /// The walkdir-based fallback returned no candidate files: the workspace had no modifications since `goal_created_at`.
+    /// It is distinct from `NoBaseline` so the caller can report "nothing changed" rather than "couldn't tell".
     WalkdirEmpty,
     /// The walkdir fallback hit an I/O error before producing any output.
+    /// It is different from `WalkdirEmpty` (a legitimate no-op) so the failure is observable in dashboards.
     WalkdirFailed(io::Error),
 }
 
@@ -75,6 +119,7 @@ impl std::fmt::Display for ChangesCaptureError {
 }
 
 /// Max paths rendered into the `CHANGED_FILES` section.
+/// A sprawling diff can't blow up the packet; the overflow is shown to the skeptic as a `(… and N more)` note so it knows the list was capped.
 const CHANGED_FILES_MAX: usize = 300;
 
 /// Parse the changed-file paths from a unified diff's `diff --git a/<old> b/<new>` headers (the new path), deduplicated and sorted.
@@ -129,7 +174,8 @@ pub(crate) fn build_classifier_evidence_packet(
             + final_response.len()
             + 128,
     );
-    // `objective` is the user's own trusted instruction (the goal they typed).
+    // `objective` is the user's own trusted instruction (the goal they typed), so it is embedded verbatim
+    // Only model-/workspace-derived text (FINAL_RESPONSE, skeptic evidence) is control-token sanitized
     out.push_str("OBJECTIVE:\n");
     out.push_str(objective);
     out.push_str("\n\nCHANGES_FILE: ");
@@ -140,7 +186,8 @@ pub(crate) fn build_classifier_evidence_packet(
     } else {
         for path in changed_files.iter().take(CHANGED_FILES_MAX) {
             out.push_str("- ");
-            // Paths are workspace-derived: the agent can `touch` arbitrary names Escape frame-closing tags like FINAL_RESPONSE.
+            // Paths are workspace-derived: the agent can `touch` arbitrary names
+            // Escape frame-closing tags like FINAL_RESPONSE and replace line-breaking chars, which `-z` delivers raw
             out.push_str(&sanitize_final_response(&sanitize_path_control_chars(path)));
             out.push('\n');
         }
@@ -155,7 +202,8 @@ pub(crate) fn build_classifier_evidence_packet(
     out.push_str(run_log_value);
     out.push_str("\n\nPLAN_FILE: ");
     out.push_str(&plan_value);
-    // PLAN_CHANGES is model-/workspace-derived: the agent authored the plan The caller sanitizes it.
+    // PLAN_CHANGES is model-/workspace-derived: the agent authored the plan
+    // The caller sanitizes it for control tokens exactly like FINAL_RESPONSE before passing it here
     out.push_str("\n\nPLAN_CHANGES:");
     match plan_changes {
         Some(diff) => {
@@ -201,6 +249,8 @@ fn truncate_diff(raw: String) -> String {
         return raw;
     }
     let elided = raw.len().saturating_sub(GOAL_CLASSIFIER_DIFF_MAX_BYTES);
+    // Truncate at a UTF-8 boundary at or below the budget
+    // `floor_char_boundary` is stable as of 1.79 but we use a manual scan to stay on the crate's MSRV path
     let mut cut = GOAL_CLASSIFIER_DIFF_MAX_BYTES;
     while cut > 0 && !raw.is_char_boundary(cut) {
         cut -= 1;
@@ -216,7 +266,8 @@ fn truncate_diff(raw: String) -> String {
     out
 }
 
-/// Captured workspace changes for the evidence packet.
+/// Captured workspace changes for the evidence packet: the (truncated) unified diff destined for the patch file plus the COMPLETE changed-file list.
+/// The list is extracted from the full pre-truncation diff and includes untracked files the git layers cannot show.
 #[derive(Debug)]
 pub(crate) struct CapturedChanges {
     pub diff: String,
@@ -231,8 +282,9 @@ pub(crate) async fn capture_changes_diff(
     workspace_root: &Path,
     goal_created_at: i64,
 ) -> Result<CapturedChanges, ChangesCaptureError> {
-    // Keep the prefix even though the runtime is now the skeptic-panel
-    // verification stage, not the classifier.
+    // Layer 1: recorded baseline.
+    // Layer 2/3 instead of propagating immediately.
+    // Keep the prefix even though the runtime is now the skeptic-panel verification stage, not the legacy single classifier.
     if let Some(baseline) = baseline_commit {
         match run_git_diff_against_baseline(baseline, workspace_root).await {
             Ok(raw) => return Ok(finish_git_capture(raw, workspace_root).await),
@@ -246,6 +298,8 @@ pub(crate) async fn capture_changes_diff(
         }
     }
 
+    // Layer 2: lazy `git rev-parse HEAD`
+    // If the agent initialised the repo during the goal, emit the cumulative diff from the oldest-in-window commit's parent
     match lazy_git_baseline_diff(workspace_root, goal_created_at).await {
         Ok(raw) => return Ok(finish_git_capture(raw, workspace_root).await),
         Err(ChangesCaptureError::NoBaseline) => {}
@@ -257,6 +311,8 @@ pub(crate) async fn capture_changes_diff(
         }
     }
 
+    // Layer 3: walkdir and mtime
+    // Untracked files are already covered by the mtime filter, so there is no separate untracked merge
     let raw = walkdir_changes_since(workspace_root, goal_created_at).await?;
     let changed_files = extract_changed_files(&raw);
     Ok(CapturedChanges {
@@ -427,7 +483,9 @@ async fn lazy_git_baseline_diff(
         return Err(ChangesCaptureError::NoBaseline);
     };
 
-    // If `oldest` has a parent, diff `parent..HEAD` Otherwise the oldest IS the initial commit.
+    // If `oldest` has a parent, diff `parent..HEAD`
+    // Otherwise the oldest IS the initial commit; diff against the empty-tree SHA as a synthetic parent
+    // `git diff --root HEAD` does not include the initial commit's additions
     let mut cmd = git_command(workspace_root);
     if git_has_parent(workspace_root, &oldest).await {
         cmd.arg("diff").arg(format!("{oldest}^..{head}"));
@@ -717,6 +775,8 @@ fn walkdir_changes_blocking(
             }
             Err(_) => continue,
         }
+        // Binary heuristic: matches git's "is_binary" (a NUL byte in the head 8 KiB)
+        // Do not "improve" this without re-checking git
         let n = head_buf.len().min(8192);
         let Some(head_for_binary_check) = head_buf.get(..n) else {
             continue;
@@ -731,7 +791,8 @@ fn walkdir_changes_blocking(
             continue;
         }
         let text = String::from_utf8_lossy(&head_buf);
-        // Count newlines for the hunk header Files missing a trailing newline get +1 to match git's hunk-counting
+        // Count newlines for the hunk header
+        // Files missing a trailing newline get +1 to match git's hunk-counting
         let mut hunk_lines = text.matches('\n').count();
         let trailing_synthetic_newline = !text.ends_with('\n') && !text.is_empty();
         if trailing_synthetic_newline {
@@ -789,9 +850,12 @@ fn emit_walkdir_diff_header(out: &mut String, rel: &str) {
 /// Walk back from `desired` to the last valid UTF-8 char boundary at or below it.
 fn utf8_truncate_boundary(buf: &[u8], desired: usize) -> usize {
     let mut cap = desired.min(buf.len());
+    // Positions 0 and buf.len() are always boundaries.
     if cap == 0 || cap == buf.len() {
         return cap;
     }
+    // Walk back over continuation bytes until `buf[cap]` is a leading byte (or we reach 0)
+    // At most 3 hops are needed since the widest UTF-8 codepoint has 1 leading and 3 continuation bytes
     for _ in 0..3 {
         if cap == 0 || buf.get(cap).is_none_or(|b| b & 0b1100_0000 != 0b1000_0000) {
             break;
@@ -847,15 +911,20 @@ pub(crate) fn extract_final_response(items: &[ConversationItem]) -> Option<Strin
 }
 
 /// Cap (in `char`s, not bytes) on the persisted breadth anchor (`first_final_response`).
+/// It bounds only the on-disk value; the live panel still receives the full summary.
+/// Mirrors `GOAL_STRATEGIST_RECOMMENDATION_MAX_CHARS`.
 const FIRST_FINAL_RESPONSE_MAX_CHARS: usize = 4096;
 
 /// Heads the round-1 anchor on a re-verification round. The verifier
-/// prompt names this header, so both must change together.
+/// prompt names this header, so the two must change together.
 pub(crate) const EARLIER_SUMMARY_HEADER: &str = "## Earlier summary (round 1, superseded)\n\
      This is the agent's first-round text, kept to show the full scope. \
      The message above replaces it wherever the two disagree.\n";
 
-/// Output of [`compose_verifier_final_response`].
+/// Output of [`compose_verifier_final_response`]. `to_send` is the
+/// `FINAL_RESPONSE` for this round's panel; `to_persist` is `Some` only
+/// on the first round, carrying the (capped) value to freeze as the
+/// goal's breadth anchor.
 pub(crate) struct ComposedFinalResponse {
     pub to_send: String,
     pub to_persist: Option<String>,
@@ -891,7 +960,8 @@ pub(crate) fn compose_verifier_final_response(
             }
         }
         Some(anchor) => {
-            // A blank current message, or one that repeats the anchor.
+            // A blank current message, or one that repeats the anchor, has
+            // nothing to supersede it with: send the anchor alone.
             let latest = current.trim();
             let to_send = if latest.is_empty() || latest == anchor.trim() {
                 anchor.to_string()
@@ -906,7 +976,8 @@ pub(crate) fn compose_verifier_final_response(
     }
 }
 
-/// Tags that, if echoed verbatim inside FINAL_RESPONSE, let adversarial.
+/// Tags that, if echoed verbatim inside FINAL_RESPONSE, let adversarial or accidental content escape the verifier prompt's system-reminder block.
+/// Content that breaks out can re-interpret the rest of the evidence packet.
 const SANITIZE_TAGS: &[&str] = &[
     "</system-reminder>",
     "</goal-state>",
@@ -925,7 +996,8 @@ pub(crate) fn sanitize_final_response(text: &str) -> Cow<'_, str> {
     let mut out = text.to_string();
     for tag in SANITIZE_TAGS {
         if out.contains(tag) {
-            // Insert a `<!--esc-->` between `<` and `/` so the resulting string is no longer a valid close tag A human glancing.
+            // Insert a `<!--esc-->` between `<` and `/` so the resulting string is no longer a valid close tag
+            // A human glancing at the details file can still tell what the original content was
             let Some(rest) = tag.get(1..) else { continue };
             let escaped = format!("<<!--esc-->{rest}");
             out = out.replace(tag, &escaped);
@@ -997,7 +1069,8 @@ mod tests {
 
     #[test]
     fn evidence_packet_neutralizes_frame_tags_in_changed_file_paths() {
-        // A dir named `<` and a file named `system-reminder>` compose the literal close tag inside a path It must be escaped like FINAL_RESPONSE.
+        // A dir named `<` and a file named `system-reminder>` compose the literal close tag inside a path
+        // It must be escaped like FINAL_RESPONSE so the packet frame can't be terminated
         let files = vec!["a/</system-reminder>/b.rs".to_string()];
         let packet = build_classifier_evidence_packet(
             "do X",
@@ -1286,7 +1359,9 @@ mod tests {
 
     #[test]
     fn compose_verifier_final_response_reverify_leads_with_latest_message() {
-        // The implementer cannot edit the anchor.
+        // The implementer cannot edit the anchor. So the latest message
+        // must come first, and the anchor must follow under a header that
+        // marks it superseded.
         let composed = compose_verifier_final_response(
             Some("round 1: no correction needed"),
             "corrected: nine hits, two wgets".to_string(),
@@ -1342,7 +1417,8 @@ mod tests {
 
     #[test]
     fn compose_verifier_final_response_caps_persisted_value() {
-        // Oversized first-round summary: the panel still gets it in full.
+        // Oversized first-round summary: the panel still gets it in full, but the persisted anchor is bounded
+        // Multibyte chars (`é`, 2 bytes each) prove the cap is char-boundary-safe
         let oversized = "\u{00e9}".repeat(FIRST_FINAL_RESPONSE_MAX_CHARS + 500);
         let composed = compose_verifier_final_response(None, oversized.clone());
         assert_eq!(
@@ -1423,7 +1499,8 @@ mod tests {
 
     #[tokio::test]
     async fn capture_changes_diff_lazy_baseline_from_initial_commit() {
-        // `git init` exists but no commits.
+        // `git init` exists but no commits: the lazy path returns `NoBaseline` from `git_oldest_commit_since`
+        // The capture falls all the way through to the walkdir fallback
         let tmp = tempfile::tempdir().unwrap();
         init_repo(tmp.path());
         let goal_created_at = now_unix_seconds() - 60;
@@ -1450,7 +1527,8 @@ mod tests {
 
     #[tokio::test]
     async fn capture_changes_diff_lazy_baseline_when_repo_created_during_goal() {
-        // The goal was created BEFORE the repo was initialised.
+        // The goal was created BEFORE the repo was initialised; after creation the agent ran `git init` and `git commit`
+        // The lazy path must succeed via the empty-tree synthetic parent because the only commit is the initial one
         let tmp = tempfile::tempdir().unwrap();
         let goal_created_at = now_unix_seconds() - 120;
         init_repo(tmp.path());
@@ -1464,8 +1542,8 @@ mod tests {
             .await
             .expect("lazy baseline must succeed via --root")
             .diff;
-        // `index 0000000..<sha>` is git-only: walkdir's synthetic header has
-        // no blob hash to embed It distinguishes lazy-git recovery.
+        // `index 0000000..<sha>` is git-only: walkdir's synthetic header has no blob hash to embed
+        // It distinguishes lazy-git recovery from a silent walkdir fall-through
         assert!(
             diff.contains("index 0000000"),
             "lazy git output must carry the real `index 0000000..<sha>` line; got {diff}"
@@ -1515,6 +1593,8 @@ mod tests {
 
     #[tokio::test]
     async fn capture_changes_diff_layer1_fails_falls_through_to_lazy() {
+        // A stale recorded baseline makes Layer 1 fail; a post-creation commit IS present so Layer 2 (lazy git) recovers
+        // The git-only `index 0000000` token distinguishes Layer 2 from Layer 3
         let tmp = tempfile::tempdir().unwrap();
         let goal_created_at = now_unix_seconds() - 60;
         init_repo(tmp.path());
@@ -1538,7 +1618,8 @@ mod tests {
 
     #[tokio::test]
     async fn capture_changes_diff_layer1_and_layer2_fail_falls_through_to_walkdir() {
-        // Both git layers fail (no git repo and a stale baseline).
+        // Both git layers fail (no git repo and a stale baseline); Layer 3 (walkdir) must produce the synthetic diff
+        // The absence of `index 0000000` pins which layer recovered
         let tmp = tempfile::tempdir().unwrap();
         let goal_created_at = now_unix_seconds() - 60;
         // No `git init`: `lazy_git_baseline_diff` returns `NoBaseline` and drops through to walkdir
@@ -1552,6 +1633,8 @@ mod tests {
         )
         .unwrap();
 
+        // Layer 1 still tries `git diff` against the stale baseline (the file doesn't know there's no repo)
+        // It fails and cascades through Layer 2 to Layer 3
         let stale_baseline = "deadbeefcafef00d1234567890abcdef12345678";
         let diff = capture_changes_diff(Some(stale_baseline), tmp.path(), goal_created_at)
             .await
@@ -1726,7 +1809,7 @@ mod tests {
 
     #[tokio::test]
     async fn derive_empty_tree_sha_caches_successful_result() {
-        // Calls return identical strings (proxy for cache hit).
+        // Two calls return identical strings (proxy for cache hit).
         let tmp = tempfile::tempdir().unwrap();
         init_repo(tmp.path());
         let a = derive_empty_tree_sha(tmp.path()).await;
@@ -1770,7 +1853,8 @@ mod tests {
 
     #[tokio::test]
     async fn capture_changes_diff_walkdir_fallback_when_not_a_git_repo() {
-        // No `git init` at all: capture must reach the walkdir layer It synthesises diff hunks from files with mtime newer.
+        // No `git init` at all: capture must reach the walkdir layer
+        // It synthesises diff hunks from files with mtime newer than `goal_created_at`
         let tmp = tempfile::tempdir().unwrap();
         let goal_created_at = now_unix_seconds() - 60;
         tokio::fs::write(tmp.path().join("note.md"), b"# notes\n")
@@ -1824,6 +1908,7 @@ mod tests {
         // Many small files summing to > 256 KiB so the global cap fires; per-file cap is irrelevant
         let tmp = tempfile::tempdir().unwrap();
         let goal_created_at = now_unix_seconds() - 60;
+        // 30 × 12 KiB = ~360 KiB, comfortably over 256 KiB.
         let per_file_payload = "x".repeat(12 * 1024);
         for i in 0..30 {
             let path = tmp.path().join(format!("file_{i}.txt"));
@@ -1873,6 +1958,7 @@ mod tests {
                 .unwrap();
             String::from_utf8_lossy(&out.stdout).trim().to_string()
         };
+        // More than 256 KiB of changed lines in the alphabetically-first file
         let big_body: String = (0..40_000).map(|i| format!("line {i}\n")).collect();
         tokio::fs::write(tmp.path().join("aa_big.txt"), big_body.as_bytes())
             .await
@@ -1914,7 +2000,8 @@ mod tests {
 
     #[tokio::test]
     async fn untracked_files_appear_in_changed_files_for_git_layers() {
-        // `git diff <baseline>` omits never-added files entirely The capture must add them via `git ls-files --others`.
+        // `git diff <baseline>` omits never-added files entirely
+        // The capture must add them via `git ls-files --others` so skeptics can see files the goal created
         let tmp = tempfile::tempdir().unwrap();
         init_repo(tmp.path());
         tokio::fs::write(tmp.path().join("tracked.txt"), b"seed\n")

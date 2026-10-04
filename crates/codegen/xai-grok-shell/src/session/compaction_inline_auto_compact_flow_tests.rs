@@ -399,6 +399,8 @@ async fn suppression_gates_and_reset_is_reason_scoped() {
         })
         .await;
 }
+/// The background two-pass prefire is an AUTO trigger: suppression must gate
+/// it (else it silently re-sends the doomed request) and resets re-enable it.
 #[tokio::test(flavor = "current_thread")]
 async fn suppression_gates_prefire_two_pass() {
     use crate::session::compaction_config::{SUPPRESS_NONE, SUPPRESS_TURN};
@@ -520,6 +522,7 @@ async fn model_switch_keeps_account_state_suppression() {
         })
         .await;
 }
+/// Auth suppress clears on credential recovery, not on a model 200.
 #[tokio::test(flavor = "current_thread")]
 async fn auth_suppress_clears_on_credential_recovery() {
     use crate::session::compaction_config::{SUPPRESS_AUTH, SUPPRESS_NONE};
@@ -945,6 +948,7 @@ async fn family_switch_compacts_lossy_with_new_model() {
         })
         .await;
 }
+/// 401 auto-compact: SUPPRESS_AUTH and a reauthable RetryState (abort for /login).
 #[tokio::test(flavor = "current_thread")]
 async fn e2e_auto_compact_401_suppresses_auth_and_surfaces_reauth() {
     use crate::extensions::notification::SessionUpdate as XaiSessionUpdate;
@@ -1032,6 +1036,9 @@ async fn e2e_auto_compact_401_suppresses_auth_and_surfaces_reauth() {
         })
         .await;
 }
+/// A 413 with a GENERIC body must walk the whole input ladder — verbatim →
+/// verbatim_fitted → lossy, one request per stage — and only then suppress
+/// as sticky `size`, with the "too large to compact" notification.
 #[tokio::test(flavor = "current_thread")]
 async fn e2e_auto_compact_413_steps_ladder_then_sticky_size_suppress() {
     use crate::extensions::notification::SessionUpdate as XaiSessionUpdate;
@@ -1122,6 +1129,7 @@ async fn e2e_auto_compact_413_steps_ladder_then_sticky_size_suppress() {
         })
         .await;
 }
+/// Model-switch compact 401 must surface reauth (same path as pre-sampling).
 #[tokio::test(flavor = "current_thread")]
 async fn e2e_model_switch_compact_401_surfaces_reauth() {
     use crate::extensions::notification::SessionUpdate as XaiSessionUpdate;
@@ -1418,8 +1426,8 @@ async fn bare_manual_compact_failure_does_not_suppress_auto() {
         })
         .await;
 }
-/// A transient failure (retries exhausted) on the AUTO path notifies with guidance and the normalized error. The
-/// test takes ~6s: real retry delays run.
+/// A transient failure (500, retries exhausted) on the AUTO path notifies with guidance and the normalized error.
+/// The test takes ~6s: real retry delays run.
 #[tokio::test(flavor = "current_thread")]
 async fn transient_auto_compact_failure_notifies_with_real_error() {
     use crate::session::compaction_config::SUPPRESS_NONE;

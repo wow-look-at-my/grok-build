@@ -1,6 +1,9 @@
 //! This process's resource gauges: memory, threads, open files, CPU, start time.
 
-/// Fields are `None` where the platform offers no cheap equivalent.
+/// Fields are `None` where the platform offers no cheap equivalent. Open
+/// files are Linux-only, matching what the resource soaks bound; threads are
+/// reported on both Linux and macOS (a leaked-thread regression must be
+/// visible in memtrace samples on the platform where it takes machines down).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProcessResources {
     pub rss_bytes: Option<u64>,
@@ -16,7 +19,9 @@ pub fn sample_process_resources() -> ProcessResources {
     imp::sample()
 }
 
-/// Memory and thread gauges, leaving `open_files` unset.
+/// Memory and thread gauges, leaving `open_files` unset. Skips the Linux fd directory scan, for callers that sample on a
+/// timer: threads ride along free (parsed from the same `/proc/self/status` read on Linux, one cheap `proc_pidinfo` on
+/// macOS). The tiers only diverge on Linux — on macOS this and [`sample_process_resources`] take the same sample.
 pub fn sample_process_memory() -> ProcessResources {
     imp::sample_memory()
 }
@@ -61,7 +66,8 @@ mod cpu {
 
     /// Cumulative (user, system) CPU time for `who`.
     fn rusage_times(who: libc::c_int) -> Option<(Duration, Duration)> {
-        // SAFETY: the all-zero bit pattern is a valid `rusage`.
+        // SAFETY: the all-zero bit pattern is a valid `rusage`, and
+        // `getrusage` writes only within the struct it is handed.
         let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
         // SAFETY: `usage` is a properly sized and aligned out-pointer, and
         // self or reaped-children queries need no privileges.
@@ -137,7 +143,8 @@ mod imp {
         let mut info: T = unsafe { std::mem::zeroed() };
         let size = size_of::<T>() as i32;
         // SAFETY: `info` is a properly sized/aligned out-buffer and
-        // `buffersize` tells the kernel its length.
+        // `buffersize` tells the kernel its length; self-pid lookups need no
+        // extra privileges.
         let filled =
             unsafe { libc::proc_pidinfo(libc::getpid(), flavor, 0, (&raw mut info).cast(), size) };
         (filled == size).then_some(info)
@@ -167,7 +174,8 @@ mod imp {
         let mut info = TaskVmInfoPrefix::default();
         let mut count = PREFIX_COUNT;
         // SAFETY: `info` is a properly sized/aligned out-buffer and `count`
-        // tells the kernel its length in natural_t units.
+        // tells the kernel its length in natural_t units; TASK_VM_INFO on
+        // the caller's own task port cannot fault.
         let kr = unsafe {
             task_info(
                 mach_task_self_,
@@ -236,6 +244,8 @@ mod imp {
     }
 
     pub(super) fn start_time() -> Option<std::time::SystemTime> {
+        // Field 22 of /proc/self/stat, in ticks since boot; parse after the
+        // parenthesized comm, which may itself contain spaces.
         let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
         let after_comm = stat.get(stat.rfind(')')? + 1..)?;
         let start_ticks: u64 = after_comm.split_whitespace().nth(19)?.parse().ok()?;
@@ -383,15 +393,18 @@ mod tests {
                     let stop = stop_rx.clone();
                     std::thread::spawn(move || {
                         ready.send(()).ok();
-                        // Release the sender before parking: with the parent's copy dropped too.
+                        // Release the sender before parking: with the parent's copy dropped too, a thread that dies before signaling closes
+                        // the channel and errors the recv below instead of blocking it.
                         drop(ready);
-                        // Park until released (the lock serializes the recvs; each thread consumes one stop token).
+                        // Park until released (the lock serializes the
+                        // recvs; each thread consumes one stop token).
                         let guard = stop.lock().unwrap_or_else(|p| p.into_inner());
                         guard.recv().ok();
                     })
                 })
                 .collect();
-            // The parent holds no sender past this point.
+            // The parent holds no sender past this point, so a thread dying
+            // before it signals errors the recv instead of blocking it.
             drop(ready_tx);
             for _ in 0..SPAWNED {
                 ready_rx.recv().expect("spawned thread ready");

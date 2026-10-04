@@ -1,4 +1,19 @@
 //! grok-build's full-replace compaction pass.
+//!
+//! grok-build does not select a tail to keep; it summarizes the whole
+//! conversation and rebuilds a fresh history from scratch. This module is the
+//! transport-agnostic orchestration of that pass:
+//!
+//! ```text
+//! build prompt → sample (retry + classify) → clean → assemble
+//! ```
+//!
+//! Per-harness concerns stay in the product host (for example `xai-grok-shell`): the triggers, the
+//! conversation *gathering / sanitization* that produces `llm_turns`, the
+//! verbatim→fitted→lossy input ladder, the live LLM transport (the
+//! [`CompactionSampler`] impl), persistence/replay, and the rendering of
+//! `system_reminder`. This function takes those as inputs and returns the
+//! rebuilt history; it never commits or persists.
 
 use std::time::{Duration, Instant};
 
@@ -25,9 +40,11 @@ pub struct FullReplaceContext<T> {
     pub agents_md_reminder: Option<String>,
     /// The last real user query (raw), kept verbatim post-compaction.
     pub last_user_query: Option<String>,
-    /// Working tail retained verbatim (tool/subagent results from the current turn). grok-build keeps this; pass empty.
+    /// Working tail retained verbatim (tool/subagent results from the current
+    /// turn). grok-build keeps this; pass empty to drop it.
     pub recent_messages: Vec<T>,
-    /// Pre-rendered `<system-reminder>` (edited files, running tasks, subagents, MCP, …).
+    /// Pre-rendered `<system-reminder>` (edited files, running tasks,
+    /// subagents, MCP, …). The harness builds this; we only carry it.
     pub system_reminder: Option<String>,
     /// Optional transcript-pointer block appended to the summary.
     pub transcript_hint: Option<String>,
@@ -45,9 +62,12 @@ pub enum FullReplaceError {
     Sampler {
         /// The rendered upstream error.
         message: String,
-        /// Whether re-sending the *same* input cannot help.
+        /// Whether re-sending the *same* input cannot help. The product host
+        /// uses this to decide whether to suppress auto-compaction.
         deterministic: bool,
-        /// Whether the failure was a context-length overflow.
+        /// Whether the failure was a context-length overflow. The product host
+        /// uses this to step its input ladder (rebuild a smaller input and
+        /// call this pass again) instead of suppressing.
         context_overflow: bool,
     },
 }
@@ -66,15 +86,24 @@ impl std::error::Error for FullReplaceError {}
 
 /// A successful full-replace pass.
 pub struct FullReplaceOutput<T> {
-    /// The rebuilt, compacted history (`[SP, UP', AGENTS_MD?, UQ_last?, recent…, summary, reminder?]`).
+    /// The rebuilt, compacted history (`[SP, UP', AGENTS_MD?, UQ_last?,
+    /// recent…, summary, reminder?]`).
     pub history: Vec<T>,
-    /// The **raw** model summary (pre-clean), so the product host can persist it (request artifact, compaction segment) exactly.
+    /// The **raw** model summary (pre-clean), so the product host can persist
+    /// it (request artifact, compaction segment) exactly as the model emitted
+    /// it. The cleaned form is already embedded in `history` by the assembler.
     pub summary: String,
     /// Total sample attempts made (first try + retries).
     pub attempts: u32,
 }
 
 /// A successful full-replace **sampling** pass (summary only, no assembly).
+///
+/// Returned by [`sample_full_replace_summary`] for harnesses (grok-build's
+/// shell) that drive the input ladder and assemble the history themselves —
+/// they build the assembly inputs (state-context system-reminder, AGENTS.md,
+/// plan-mode) *after* the LLM call, so they cannot use the bundled
+/// [`apply_full_replace_compaction`].
 pub struct FullReplaceSummary {
     /// The **raw** model summary (pre-clean).
     pub summary: String,
@@ -164,7 +193,8 @@ where
     }
 
     let prompt = CompactionPrompt {
-        // grok-build appends the summarization prompt as the final user message.
+        // grok-build appends the summarization prompt as the final user
+        // message; there is no separate system prompt for the compaction call.
         system: String::new(),
         user: build_summary_prompt(user_context),
     };

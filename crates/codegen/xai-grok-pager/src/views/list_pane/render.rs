@@ -1,4 +1,16 @@
 //! `ListPane<'a, T>`: the rendering widget for a scrollable list pane.
+//!
+//! This [`StatefulWidget`] borrows item data and renders the visible portion.
+//! It follows [`ListPaneState`]'s layout cache, scroll position, and selection.
+//! An optional scrollbar renders when content overflows.
+//!
+//! ## Rendering Pipeline
+//!
+//! 1. The caller calls `state.prepare_layout(items, width, viewport_height)` once per frame.
+//!    It computes the layout cache, resolves selection IDs to indices, and clamps scroll.
+//! 2. The caller constructs `ListPane::new(items, &state)` and calls `StatefulWidget::render(...)` or `render_ref(...)`.
+//! 3. This module iterates the visible range (`state.visible_range()`), maps visible to physical indices, and delegates to `ListItem::render()`.
+//! 4. A scrollbar is rendered when content overflows the viewport.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -54,6 +66,8 @@ impl<T: ListItem> StatefulWidget for ListPane<'_, T> {
             return;
         }
 
+        // Split off bottom row(s) when the input bar is open or a matcher is active
+        // `bottom_bar_height` returns 0 when no bar is shown, and the bar height (1, or up to 5 for multi-line comment mode) otherwise
         let bar_height = state.bottom_bar_height(area.height);
         let (list_area, bottom_bar_area) = if bar_height > 0 {
             let list = Rect {
@@ -74,7 +88,7 @@ impl<T: ListItem> StatefulWidget for ListPane<'_, T> {
         let viewport_height = list_area.height;
 
         // Scale down for the scrollbar when total_height exceeds u16::MAX
-        // Both total and offset are divided by the same factor.
+        // Both total and offset are divided by the same factor so the thumb position remains proportionally correct
         let scale = if total_height > u16::MAX as usize {
             (total_height / u16::MAX as usize) + 1
         } else {
@@ -164,6 +178,7 @@ impl<T: ListItem> ListPane<'_, T> {
         };
         let prefix_w = prefix.as_ref().map(|p| line_display_width(p)).unwrap_or(0) as u16;
 
+        // Paint prefix on row 0.
         if let Some(ref pfx) = prefix {
             buf.set_line_safe(area.x, area.y, pfx, prefix_w);
         }
@@ -190,6 +205,7 @@ impl<T: ListItem> ListPane<'_, T> {
                     break;
                 }
                 buf.set_line_safe_bidi(content_x, y, wl, content_w as u16);
+                // On continuation lines (i > 0), the prefix area is left blank; indentation happens via the column offset
             }
         }
     }
@@ -226,7 +242,7 @@ impl<T: ListItem> ListPane<'_, T> {
             // How many rows to skip at the top of this item (only for the first item).
             let skip = if vi == first_vi { skip_rows } else { 0 };
 
-            // How many rows of this item are visible.
+            // How many rows of this item are actually visible.
             let visible_h = item_h.saturating_sub(skip);
             let rows_available = viewport_bottom.saturating_sub(cursor_y);
             let rows_to_render = visible_h.min(rows_available);
@@ -312,9 +328,13 @@ impl<T: ListItem> ListPane<'_, T> {
                 }
             }
 
+            // Post-pass 1: Selection background overlay --Patches only the bg of each cell, preserving fg,
+            // content, and modifiers. Applied after item render so items don't need to know about selection
+            // colors. Shown when focused, or when `show_selection_when_unfocused` is set.
             let show_sel = self.focused || state.show_selection_when_unfocused();
             if is_selected && show_sel {
-                // Use a different bg for the visual range vs the cursor line When `uniform_visual_bg` is set.
+                // Use a different bg for the visual range vs the cursor line
+                // When `uniform_visual_bg` is set, the cursor line blends into the visual range (distinguished by prefix only)
                 let in_visual = state.visual_mode;
                 let bg = if is_cursor && !(in_visual && self.style.uniform_visual_bg) {
                     self.style.selection_bg
@@ -344,8 +364,9 @@ impl<T: ListItem> ListPane<'_, T> {
                 && let Some(matcher) = state.matcher()
             {
                 let single_row = wrap_mode == WrapMode::NoWrap || item_h == 1;
-                // Highlights must map the painted string Framework items
-                // paint `content()` reordered, so highlight over it.
+                // Highlights must map the painted string
+                // Framework items paint `content()` reordered, so highlight over it; `search_text()` can differ in base direction or chrome
+                // Custom `render()` items paint logically and keep logical columns
                 let content_plain = (uses_framework && crate::render::bidi::is_enabled())
                     .then(|| crate::scrollback::types::line_plain_text(item.content()));
                 let (hl_text, map_visual) = match &content_plain {
@@ -431,9 +452,8 @@ fn render_corner_indicators(
     // Helper: place an indicator with `… ` padding if it overwrites content.
     let place_indicator =
         |buf: &mut Buffer, pos: (u16, u16), symbol: &str, fg: ratatui::style::Color| {
-            // Check if the indicator or the cell before it has content. If
-            // so, insert `… ` padding so the indicator doesn't visually
-            // merge with text (e.g., `count=3▶` becomes `count… ▶`)
+            // Check if the indicator or the cell just before it has content.
+            // If so, insert `… ` padding so the indicator doesn't visually merge with text (e.g., `count=3▶` becomes `count… ▶`)
             if area.width >= 3 && pos.0 >= area.x + 2 {
                 let at_pos = buf
                     .cell(pos)
@@ -647,7 +667,7 @@ mod tests {
         let pane = ListPane::new(&items);
         StatefulWidget::render(pane, area, &mut buf, &mut state);
 
-        // All items visible.
+        // All three items visible. Item 0 is auto-selected (">").
         assert_eq!(row_text(&buf, 0, 0, 20), ">alpha");
         assert_eq!(row_text(&buf, 1, 0, 20), " beta");
         assert_eq!(row_text(&buf, 2, 0, 20), " gamma");
@@ -664,6 +684,7 @@ mod tests {
         let area = Rect::new(0, 0, 20, 5);
         state.prepare_layout(&items, area.width, area.height);
 
+        // Auto-selected item 0. One select_next moves to item 1.
         state.select_next(&items);
         state.prepare_layout(&items, area.width, area.height);
 
@@ -671,6 +692,7 @@ mod tests {
         let pane = ListPane::new(&items);
         StatefulWidget::render(pane, area, &mut buf, &mut state);
 
+        // Item 1 gets the ">" prefix, the others " "
         assert_eq!(row_text(&buf, 0, 0, 20), " alpha");
         assert_eq!(row_text(&buf, 1, 0, 20), ">beta");
         assert_eq!(row_text(&buf, 2, 0, 20), " gamma");
@@ -682,7 +704,7 @@ mod tests {
             .map(|i| RenderTestItem::new(i, &format!("item-{i}")))
             .collect();
         let mut state = ListPaneState::new(WrapMode::NoWrap, false);
-        // Viewport of a few rows, no scrollbar since we want to test scroll position.
+        // Viewport of 3 rows, no scrollbar since we want to test scroll position.
         let area = Rect::new(0, 0, 20, 3);
         state.prepare_layout(&items, area.width, area.height);
 
@@ -692,6 +714,7 @@ mod tests {
         let pane = ListPane::new(&items);
         StatefulWidget::render(pane, area, &mut buf, &mut state);
 
+        // Rows show items 5, 6, 7 (the scrollbar takes 2 cols)
         let text_0 = row_text(&buf, 0, 0, 18);
         let text_1 = row_text(&buf, 1, 0, 18);
         let text_2 = row_text(&buf, 2, 0, 18);
@@ -751,10 +774,10 @@ mod tests {
 
     #[test]
     fn truncation_ellipsis_appended_after_text() {
-        // An item with desired_height > 1 in NoWrap mode gets the truncation "…" The text "hello" (chars with
-        // prefix " ") sits in a 20-char-wide area.
+        // An item with desired_height > 1 in NoWrap mode gets the truncation "…"
+        // The text "hello" (6 chars with prefix " ") sits in a 20-char-wide area, so the "…" is appended at position 6
         let items = vec![
-            RenderTestItem::new(0, "hello").with_height(3), // would be a few lines
+            RenderTestItem::new(0, "hello").with_height(3), // would be 3 lines tall
         ];
         let mut state = ListPaneState::new(WrapMode::NoWrap, false);
         let area = Rect::new(0, 0, 20, 5);
@@ -775,6 +798,8 @@ mod tests {
 
     #[test]
     fn truncation_ellipsis_replaces_last_char_at_full_width() {
+        // The text fills the exact width, so "…" replaces the last character
+        // Width 7 with a 1-char prefix leaves 6 text columns; "abcdef" fills all 7 columns
         let items = vec![RenderTestItem::new(0, "abcdef").with_height(2)];
         let mut state = ListPaneState::new(WrapMode::NoWrap, false);
         let area = Rect::new(0, 0, 7, 5);
@@ -812,6 +837,8 @@ mod tests {
 
     #[test]
     fn highlight_match_inverts_correct_cells() {
+        // Items: "alpha", "beta", "alphabet"
+        // Searching "alph" inverts fg and bg on the match cells in items 0 and 2
         let items = vec![
             RenderTestItem::new(0, "alpha"),
             RenderTestItem::new(1, "beta"),
@@ -838,6 +865,7 @@ mod tests {
         let pane = ListPane::new(&items);
         StatefulWidget::render(pane, area, &mut buf, &mut state);
 
+        // Item 0: ">alpha", "alph" at columns 1..5 (after the ">" prefix)
         for col in 1..5u16 {
             let Some(cell) = buf.cell((col, 0)) else {
                 panic!("cell ({col}, 0)");
@@ -847,6 +875,7 @@ mod tests {
                 "col {col}: should have REVERSED modifier",
             );
         }
+        // Column 5 ('a' of "alpha") is outside the match
         assert!(
             !buf.cell((5, 0))
                 .expect("cell")
@@ -855,6 +884,7 @@ mod tests {
             "col 5 should not be reversed"
         );
 
+        // Item 1: " beta" has no match, so no REVERSED
         for col in 0..5u16 {
             assert!(
                 !buf.cell((col, 1))
@@ -865,6 +895,7 @@ mod tests {
             );
         }
 
+        // Item 2: " alphabet", "alph" at columns 1..5
         for col in 1..5u16 {
             assert!(
                 buf.cell((col, 2))
@@ -912,6 +943,7 @@ mod tests {
             "non-match col 0 should not be reversed"
         );
 
+        // Match cells ("world" at columns 7..12) get REVERSED
         for col in 7..12u16 {
             assert!(
                 buf.cell((col, 0))
@@ -926,6 +958,7 @@ mod tests {
     /// Uses a realistic tracing line that wraps, with a search for "tool".
     #[test]
     fn highlight_match_wrap_mode_correct_positions() {
+        // A long line that wraps at width 40; it contains "tool" near the end
         let text = "abcdefghij klmnopqrst uvwxyz0123 tool_call foo bar baz qux";
         let items = vec![RenderTestItem::new(0, text)];
 
@@ -946,6 +979,7 @@ mod tests {
         StatefulWidget::render(pane, area, &mut buf, &mut state);
 
         // Find where "tool" appears visually in the buffer.
+        // The match is at byte offset 32 in the plain text.
         let byte_pos = text.find("tool").unwrap();
         assert_eq!(byte_pos, 33);
 
@@ -977,6 +1011,7 @@ mod tests {
         );
     }
 
+    /// Regression: long synthetic tracing line at terminal width 159.
     /// Searching "tool" used to highlight wrong positions due to a wrap mismatch.
     #[test]
     fn highlight_match_wrap_mode_real_tracing_line() {
@@ -1106,7 +1141,8 @@ mod tests {
             })
             .collect();
 
-        // "tool" appears multiple times in the text.
+        // "tool" appears multiple times in the text; each occurrence highlights exactly "tool" (4 chars)
+        // The highlighted text is therefore a concatenation of "tool" instances
         let tool_count = plain.matches("tool").count();
         let expected = "tool".repeat(tool_count);
         assert_eq!(
@@ -1129,6 +1165,7 @@ mod tests {
         let msg_part = "session.handle_prompt request_id=abc model_name=test: tool_execute command";
         let full_plain = format!("{prefix_part}{msg_part}");
 
+        // Create item with two styled spans but search_text returning plain.
         #[derive(Debug, Clone)]
         struct StyledItem {
             plain: String,
@@ -1234,6 +1271,7 @@ mod tests {
         }
     }
 
+    /// Synthetic long tracing line (800+ chars) for wrap regression tests.
     const LONG_LINE: &str = r#"2026-03-06T20:17:47.790351Z  INFO session.handle_prompt{session_id=019e0000-0000-7000-8000-000000000002 prompt_id=019e0000-0000-7000-8000-000000000012 prompt_preview="<user_query>\ncheck current weather in 10 ways\n</user_query>"}:session.process_conversation_turn_with_recovery{req_id=019e0000-0000-7000-8000-000000000012 session_id=019e0000-0000-7000-8000-000000000002}:session.process_conversation_turn{session_id=019e0000-0000-7000-8000-000000000002}:tools.execute{tool_count=10}: xai_grok_shell::session::acp_session: Model requesting tool: name='run_terminal_cmd', call_id='toolu_fake_01WXYZABCDEFGHIJKLMNOPQR', arguments={"command": "curl -s \"v2.wttr.in/?0\" 2>/dev/null", "description": "Way 6: v2.wttr.in fancy graphical view", "timeout": 15000}"#;
 
     /// Helper: collect all non-space characters from buffer as a String.
@@ -1258,6 +1296,7 @@ mod tests {
         let item = ContentTestItem::new(0, LONG_LINE);
         let height = item.desired_height(width);
 
+        // About 800 chars at width 112 need at least 7 lines
         assert!(
             height >= 7,
             "Long line should need at least 7 rows at width {}",
@@ -1327,7 +1366,7 @@ mod tests {
         let item = ContentTestItem::new(0, line);
         let items = [item];
 
-        // The flattened content equals the text
+        // The flattened content equals the original text
         let flattened: String = items[0]
             .content()
             .spans
@@ -1547,6 +1586,7 @@ mod tests {
             height_at_layout
         );
 
+        // Without the fix: 7 rows allocated, 8 needed, so 1 line is truncated
         let wrapped = word_wrap_line(item.content(), render_width as usize);
         let lines_truncated = (wrapped.len() as u16).saturating_sub(height_at_layout);
 
@@ -1559,10 +1599,13 @@ mod tests {
 
     #[test]
     fn scrollbar_width_fix_verified() {
-        // Verifies the prepare_layout fix works end-to-end.
+        // Verifies the prepare_layout fix works end-to-end. The fix: compute at the narrow width when a
+        // scrollbar is needed. Phase 1: vis_count > viewport means the scrollbar is definite, so compute
+        // at width-2. Phase 2: total_height > viewport triggers a fallback recompute at width-2.
         let full_width: u16 = 114;
         let narrow_width: u16 = 112;
 
+        // 2 items guarantee a scrollbar (Phase 1)
         let items: Vec<ContentTestItem> = vec![
             ContentTestItem::new(0, LONG_LINE),
             ContentTestItem::new(1, LONG_LINE),
@@ -1601,6 +1644,7 @@ mod tests {
 
     #[test]
     fn scrollbar_fix_phase1_many_items() {
+        // Phase 1: vis_count > viewport means the scrollbar is definite, so compute at width-2
         let full_width: u16 = 114;
         let viewport_height: u16 = 5;
 
@@ -1627,12 +1671,15 @@ mod tests {
 
     #[test]
     fn scrollbar_fix_phase2_few_heavy_items() {
+        // Phase 2: vis_count <= viewport but total_height > viewport triggers the fallback recompute at width-2
         let full_width: u16 = 114;
         let narrow_width: u16 = 112;
 
         let items = [ContentTestItem::new(0, LONG_LINE)];
         let height_narrow = items[0].desired_height(narrow_width);
 
+        // Viewport 6 is below the height at full width (7), so a scrollbar is needed
+        // But vis_count (1) <= viewport (6), so Phase 1 skips and Phase 2 catches it
         let viewport_height: u16 = 6;
 
         let mut state = ListPaneState::new(WrapMode::Wrap, false);

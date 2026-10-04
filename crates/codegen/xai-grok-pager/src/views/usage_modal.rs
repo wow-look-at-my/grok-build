@@ -1,4 +1,8 @@
 //! Tabbed usage and session-info modal, opened by `/usage`, `/session-info`, `/context`, and the context-bar click.
+//!
+//! The Session-info tab supports click-to-copy on value rows (with hover) and in-app drag-select after a movement threshold.
+//! `c` and `y` stay as programmatic copy.
+//! The modal opens with loading placeholders; the task-result handlers fill the slots in as the fetches land.
 
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 use ratatui::buffer::Buffer;
@@ -24,7 +28,7 @@ pub const COPY_SESSION_ID_SHORTCUT: usize = 1;
 /// Footer shortcut ID for "copy all session info".
 pub const COPY_ALL_SESSION_INFO_SHORTCUT: usize = 2;
 
-/// The tabs, in display order.
+/// The three tabs, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageInfoTab {
     ContextUsage,
@@ -103,6 +107,8 @@ pub struct UsageInfoModalState {
 }
 
 /// One labeled Session-info row, built upstream from typed session data.
+/// The modal renders and copies straight from these; it never parses a formatted string.
+/// `compact` selects the dense `Label: value` layout for the model/runtime group.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionInfoField {
     pub label: &'static str,
@@ -242,13 +248,16 @@ impl UsageInfoModalState {
 }
 
 /// Outcome of routing one key/mouse event through the modal.
+/// The host (agent view or dashboard) owns the modal slot, the clipboard, and the toast surface, so every variant is a request to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UsageModalOutcome {
     /// Drop the modal (Esc, `[✗]`, click outside). Only the chrome routers emit this.
     Close,
-    /// Copy the session ID to the clipboard. Emitted by the `c` shortcut and the footer button.
+    /// Copy the session ID to the clipboard.
+    /// Emitted by the `c` shortcut and the footer button.
     CopySessionId,
     /// Copy Session-info text.
+    /// Emitted by `y`, a click on a value row, the footer "copy all" button, and a finished drag-select.
     CopyText(String),
     Changed,
     Unchanged,
@@ -589,7 +598,8 @@ pub fn render_usage_modal(
         fold_info: None,
     };
 
-    // The chrome always fills `area` minus `v_margin`, so cap the height ourselves.
+    // The chrome always fills `area` minus `v_margin`, so cap the height ourselves: tall terminals would otherwise get a mostly-empty box
+    // 30 rows is about the widest tab's content (the context grid plus legend) plus chrome
     const MAX_MODAL_HEIGHT: u16 = 30;
     let outer = MAX_MODAL_HEIGHT + sizing.v_margin * 2;
     let area = if area.height > outer {
@@ -748,6 +758,7 @@ fn usage_limit_lines(
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     if state.ctx.chat_kind {
+        // Gateway chat sessions have no Build coding credits to show.
     } else if !state.ctx.usage_visible {
         lines.push(muted_line(theme, "Usage limits are managed by your team."));
     } else if let Some(url) = &state.ctx.billing_redirect_url {

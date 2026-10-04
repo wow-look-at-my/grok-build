@@ -1,4 +1,20 @@
 //! Send-safe view of the agent's in-flight work, shared with the leader's `tokio::spawn` tasks.
+//! Those tasks cannot read the `!Send` `MvpAgent` state on the `LocalSet`.
+//!
+//! The leader's `agent_busy` flag only counts IPC (Unix-socket) requests.
+//! Relay (grok.com WebSocket) traffic is bridged straight into the agent's ACP stdin and never sets it.
+//!
+//! [`AgentActivity::is_busy`] derives busyness from agent state regardless of transport.
+//! [`AgentActivity::flush_all_sessions`] lets the shutdown path end session actors gracefully instead of aborting them via `LocalSet` drop.
+//!
+//! ## Entries expire with their actor, not with agent bookkeeping
+//!
+//! The agent only ever **registers** sessions (at handle creation).
+//! There is deliberately no unregister: an entry is live exactly while its actor holds the command receiver (`!cmd_tx.is_closed()`).
+//! Closed entries are purged whenever the list is locked.
+//! This avoids races between `MvpAgent`'s map bookkeeping and the actor's lifetime.
+//! An actor removed from the agent's map but still shutting down stays visible to `is_busy`/`flush_all_sessions` until it actually exits.
+//! A session id rebuilt with a fresh actor is just a second, distinct entry.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,6 +29,8 @@ use crate::session::{SessionCommand, SessionHandle, ShutdownKind};
 const FLUSH_POLL: Duration = Duration::from_millis(50);
 
 /// Default bound on a process-exit session flush ([`AgentActivity::flush_all_sessions`]). Every exit path uses it.
+/// One wedged actor therefore delays exit by the same amount everywhere; sessions are normally idle and the flush completes in milliseconds.
+/// Known gap: a `SessionEnd` hook configured with a longer `timeout` than this is still cut off at the grace. Aligning the two needs the hook registry's configured timeouts at flush time, which this layer does not see.
 pub const SESSION_FLUSH_GRACE: Duration = Duration::from_secs(10);
 
 /// Per-session slice of state shared with the session actor (the same `Arc`s the actor mutates; see the matching `SessionHandle` fields).
@@ -127,8 +145,9 @@ impl AgentActivity {
         }
     }
 
-    /// Lock the session list, dropping entries whose actor has exited. Purging happens only here, so with
-    /// no periodic reader a dead entry lingers until the next register.
+    /// Lock the session list, dropping entries whose actor has exited.
+    /// Purging happens only here, so with no periodic reader a dead entry lingers until the next register.
+    /// The leak is bounded and tiny: a sender handle and two `Arc`s per entry.
     fn lock_live_sessions(&self) -> std::sync::MutexGuard<'_, Vec<SessionActivityEntry>> {
         let mut guard = self
             .inner
@@ -278,7 +297,8 @@ mod tests {
         let (rx, _p2, _i2) = register_raw(&activity, "healthy");
         let actor = spawn_actor(rx, Duration::ZERO);
 
-        // The wedged actor must not consume the healthy actor's budget The total wait must be about one grace period.
+        // The wedged actor must not consume the healthy actor's budget
+        // The total wait must be about one grace period, not one per session
         let start = tokio::time::Instant::now();
         activity.flush_all_sessions(Duration::from_secs(2)).await;
         let elapsed = start.elapsed();
@@ -309,10 +329,11 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn flush_signals_sessions_that_appear_mid_flush() {
         let activity = AgentActivity::default();
+        // Actor 1: holds the flush open for a few polls, then exits.
         let (rx1, _p1, _i1) = register_raw(&activity, "s1");
         let actor1 = spawn_actor(rx1, Duration::from_millis(300));
 
-        // Actor multiple registers AFTER the flush has started (a relay-driven prompt racing the shutdown); it must still receive Shutdown
+        // Actor 2 registers AFTER the flush has started (a relay-driven prompt racing the shutdown); it must still receive Shutdown
         let activity_late = activity.clone();
         let late = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -345,6 +366,7 @@ mod tests {
             start.elapsed() >= Duration::from_secs(2),
             "flush should wait out the grace period"
         );
+        // Returned rather than hanging forever; that's the assertion
     }
 
     #[tokio::test]

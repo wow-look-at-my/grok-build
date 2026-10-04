@@ -1,4 +1,5 @@
 //! Tracing layer for `target: "sampling_log"` → `~/.grok/logs/sampling.jsonl`.
+//! Enable with `--log-sampling` or `GROK_LOG_SAMPLING=1`.
 
 use tracing::Subscriber;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;

@@ -1,4 +1,7 @@
 //! Next-fire suffix for scheduled `/loop` rows (tasks pane and dock Watchers).
+//!
+//! Wall-clock `next_fire_at` and monotonic elapsed since create stay separate
+//! clocks: a pinned `now` in tests must not move the interval fallback.
 
 use std::time::Duration;
 

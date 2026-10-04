@@ -1,4 +1,5 @@
-//! Unix-only: the tests use `tokio::net::UnixStream` directly so they exercise the on-disk socket path.
+//! Currently Unix-only: the tests use `tokio::net::UnixStream` directly so they exercise the on-disk socket path.
+//! Equivalent Windows coverage would need to go through `LeaderStream`/`LeaderListener` and is tracked as a follow-up.
 
 #![cfg(unix)]
 
@@ -22,7 +23,7 @@ async fn wait_for_socket(sock_path: &std::path::Path) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
         if sock_path.exists() {
-            // Try to connect to verify it's listening
+            // Try to connect to verify it's actually listening
             if UnixStream::connect(sock_path).await.is_ok() {
                 return;
             }
@@ -177,7 +178,7 @@ async fn test_multiple_stdio_clients() {
     let temp = TempDir::new().unwrap();
     let (sock_path, cancel, mut acp_rx, response_tx) = setup_test_server(&temp).await;
 
-    // Connect stdio clients
+    // Connect two stdio clients
     let mut client1 = LeaderClient::connect(
         sock_path.clone(),
         "client-1",
@@ -222,12 +223,14 @@ async fn test_multiple_stdio_clients() {
         "Clients should have different IDs"
     );
 
+    // Send response to client 1 using its namespaced ID
     let response1 = format!(
         r#"{{"jsonrpc":"2.0","result":"response_1","id":"{}"}}"#,
         id1
     );
     response_tx.send(response1).unwrap();
 
+    // Send response to client 2 using its namespaced ID
     let response2 = format!(
         r#"{{"jsonrpc":"2.0","result":"response_2","id":"{}"}}"#,
         id2
@@ -261,7 +264,7 @@ async fn test_multiple_clients_same_message_ids() {
     let temp = TempDir::new().unwrap();
     let (sock_path, cancel, mut acp_rx, response_tx) = setup_test_server(&temp).await;
 
-    // Connect stdio clients
+    // Connect three stdio clients
     let mut client1 = LeaderClient::connect(
         sock_path.clone(),
         "client-1",
@@ -287,6 +290,7 @@ async fn test_multiple_clients_same_message_ids() {
     .await
     .unwrap();
 
+    // All three clients send messages with the SAME ID (id: 1)
     client1
         .send(r#"{"jsonrpc":"2.0","method":"method_1","id":1}"#.to_string())
         .unwrap();
@@ -297,7 +301,7 @@ async fn test_multiple_clients_same_message_ids() {
         .send(r#"{"jsonrpc":"2.0","method":"method_3","id":1}"#.to_string())
         .unwrap();
 
-    // Collect all messages from the server
+    // Collect all three messages from the server
     let msg1 = acp_rx.recv().await.unwrap();
     let msg2 = acp_rx.recv().await.unwrap();
     let msg3 = acp_rx.recv().await.unwrap();
@@ -362,7 +366,7 @@ async fn test_multiple_clients_same_message_ids() {
     response_tx.send(resp2).unwrap();
     response_tx.send(resp3).unwrap();
 
-    // Each client should receive its own response with the ID restored
+    // Each client should receive its own response with the original ID restored
     let recv1 = tokio::time::timeout(Duration::from_secs(2), client1.recv())
         .await
         .expect("timeout")
@@ -778,7 +782,8 @@ async fn test_session_based_routing() {
 
     assert_eq!(json["params"]["sessionId"], "session-123");
 
-    // Send a response with session_id for routing (without using request ID).
+    // Send a response with session_id for routing (without using request ID)
+    // This tests the session-based fallback routing
     let response = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-123","data":"update"}}"#;
     response_tx.send(response.to_string()).unwrap();
 
@@ -1032,7 +1037,8 @@ async fn test_session_ownership_from_response_routes_notifications() {
     assert_eq!(resp_json["result"]["sessionId"], "sess-abc-123");
     assert_eq!(resp_json["id"], 1); // original ID restored
 
-    // Now send a notification for this session (no id field, only sessionId in params) This tests session-based routing.
+    // Now send a notification for this session (no id field, only sessionId in params)
+    // This tests session-based routing: the leader must know which client owns sess-abc-123
     let notification = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-abc-123","status":"ready"}}"#;
     response_tx.send(notification.to_string()).unwrap();
 
@@ -1051,14 +1057,14 @@ async fn test_session_ownership_from_response_routes_notifications() {
 
 // ── Multi-client session isolation ────────────────────────────────────
 
-/// Clients with different sessions receive only their own notifications, not each other's.
+/// Two clients with different sessions receive only their own notifications, not each other's.
 /// Multiple connected VS Code windows rely on this isolation.
 #[tokio::test]
 async fn test_two_clients_session_isolation() {
     let temp = TempDir::new().unwrap();
     let (sock_path, cancel, mut acp_rx, response_tx) = setup_test_server(&temp).await;
 
-    // Connect clients (simulating VS Code windows)
+    // Connect two clients (simulating two VS Code windows)
     let mut client1 = LeaderClient::connect(
         sock_path.clone(),
         "vscode-1",
@@ -1076,6 +1082,7 @@ async fn test_two_clients_session_isolation() {
     .await
     .unwrap();
 
+    // Client 1 creates session A
     client1
         .send(r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/project-a","mcpServers":[]}}"#.to_string())
         .unwrap();
@@ -1083,7 +1090,7 @@ async fn test_two_clients_session_isolation() {
     let json1: serde_json::Value = serde_json::from_str(&msg1).unwrap();
     let id1 = json1["id"].as_str().unwrap().to_string();
 
-    // Client creates session B
+    // Client 2 creates session B
     client2
         .send(r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/project-b","mcpServers":[]}}"#.to_string())
         .unwrap();
@@ -1123,6 +1130,7 @@ async fn test_two_clients_session_isolation() {
     assert_eq!(r1["result"]["sessionId"], "sess-AAA");
     assert_eq!(r2["result"]["sessionId"], "sess-BBB");
 
+    // Now send a notification for session A; only client 1 should get it
     let notif_a = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-AAA","data":"for-client-1"}}"#;
     response_tx.send(notif_a.to_string()).unwrap();
 
@@ -1134,6 +1142,7 @@ async fn test_two_clients_session_isolation() {
     assert_eq!(n1["params"]["sessionId"], "sess-AAA");
     assert_eq!(n1["params"]["data"], "for-client-1");
 
+    // Send a notification for session B; only client 2 should get it
     let notif_b = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-BBB","data":"for-client-2"}}"#;
     response_tx.send(notif_b.to_string()).unwrap();
 
@@ -1160,7 +1169,7 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
     let temp = TempDir::new().unwrap();
     let (sock_path, cancel, mut acp_rx, response_tx) = setup_test_server(&temp).await;
 
-    // TUIs connected to the same leader, sharing one session.
+    // Two TUIs connected to the same leader, sharing one session.
     let mut invoker = LeaderClient::connect(
         sock_path.clone(),
         "grok-tui-A",
@@ -1178,7 +1187,9 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
     .await
     .unwrap();
 
-    // Subscribe both clients to the SAME session id The leader registers a client as a subscriber the first time it sees an ACP message.
+    // Subscribe both clients to the SAME session id
+    // The leader registers a client as a subscriber the first time it sees an ACP message from that client carrying a sessionId
+    // Any session-scoped method works, so we use a cheap synthetic one with distinct ids per client
     let shared_sid = "sess-shared-multi-client";
     invoker
         .send(format!(
@@ -1193,7 +1204,8 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
         ))
         .unwrap();
 
-    // Drain both synthetic subscribe requests off the server's outgoing channel The leader has already registered both clients as subscribers.
+    // Drain the two synthetic subscribe requests off the server's outgoing channel
+    // The leader has already registered both clients as subscribers of `shared_sid` by the time it puts them on `acp_rx`
     let _ = tokio::time::timeout(Duration::from_secs(2), acp_rx.recv())
         .await
         .expect("timeout draining subscribe 1")
@@ -1216,9 +1228,9 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
     assert_eq!(json["method"], "session/setModel");
     assert_eq!(json["params"]["modelId"], "grok-4");
 
-    // Simulate the agent's outputs for a successful switch: A
-    // session-scoped `ModelChanged` broadcast, which `model_switch::apply`
-    // emits via the gateway after the actor confirms the swap.
+    // Simulate the agent's two outputs for a successful switch: A session-scoped `ModelChanged` broadcast, which `model_switch::apply` emits via the gateway after the actor confirms the swap.
+    // The `SetSessionModelResponse`, routed by the leader to the invoker only via namespaced-id matching.
+    // Order matters: `model_switch::apply` fires the broadcast BEFORE the response, so it arrives at each subscriber's recv() first
     let broadcast = format!(
         r#"{{"jsonrpc":"2.0","method":"x.ai/session_notification","params":{{"sessionId":"{}","update":{{"sessionUpdate":"model_changed","model_id":"grok-4","reasoning_effort":"high"}}}}}}"#,
         shared_sid
@@ -1230,8 +1242,9 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
     );
     response_tx.send(response).unwrap();
 
-    // --- Invoker: must receive BOTH the broadcast AND the targeted response,
-    // in that order The broadcast is what keeps the other clients in sync.
+    // --- Invoker: must receive BOTH the broadcast AND the targeted response, in that order The broadcast is what keeps the other clients in sync
+    // The response is what the invoker's `SwitchModelComplete` dispatch handler keys on for the user-facing "Switched to X" message
+    // The pager's broadcast handler ignores it (it gates on `model_switch_pending == true`), so the invoker doesn't double-apply state But the leader is still required to fan it out, because the same JSON-RPC connection is what the response travels on Suppressing it leader-side would also suppress it for the follower below
     let invoker_msg1 = tokio::time::timeout(Duration::from_secs(2), invoker.recv())
         .await
         .expect("timeout waiting for broadcast on invoker")
@@ -1254,9 +1267,9 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
     );
     assert_eq!(inv2["result"]["meta"]["model"], "grok-4");
 
-    // --- Follower: must receive the broadcast Without it the follower's
-    // status bar, `/model` dropdown, and prompt header stay stuck on the
-    // pre-switch model.
+    // --- Follower: must receive the broadcast
+    // Without it the follower's status bar, `/model` dropdown, and prompt header stay stuck on the pre-switch model
+    // It must NOT receive the targeted response (that one is routed by request id to the invoker only)
     let follower_msg = tokio::time::timeout(Duration::from_secs(2), follower.recv())
         .await
         .expect(
@@ -1271,7 +1284,8 @@ async fn test_set_model_broadcasts_to_session_subscribers() {
     assert_eq!(f["params"]["update"]["model_id"], "grok-4");
     assert_eq!(f["params"]["update"]["reasoning_effort"], "high");
 
-    // Follower must NOT see the namespaced setModel response The leader routes responses by request-id prefix.
+    // Follower must NOT see the namespaced setModel response
+    // The leader routes responses by request-id prefix, and only the invoker's ClientId prefixes that id
     let unexpected = tokio::time::timeout(Duration::from_millis(200), follower.recv()).await;
     assert!(
         unexpected.is_err(),
@@ -1410,9 +1424,9 @@ async fn test_client_notification_forwarded_without_id_rewrite() {
     cancel.cancel();
 }
 
-/// With clients attached, `session/cancel` carrying `_meta.cancelPromptId` (the canceller's awaited prompt id) must reach the agent unmodified. The meta is how the session actor cancels only the canceller's queued
-/// prompt while preserving the other client's queued work. The actor side is covered by `cancel_running_task_resolves_cancellers_queued_prompt`. A second client's interleaved cancel for a different session must
-/// also pass through independently, with no cross-client meta bleed or reordering.
+/// With two clients attached, `session/cancel` carrying `_meta.cancelPromptId` (the canceller's awaited prompt id) must reach the agent unmodified.
+/// The meta is how the session actor cancels only the canceller's queued prompt while preserving the other client's queued work. The actor side is covered by `cancel_running_task_resolves_cancellers_queued_prompt`.
+/// A second client's interleaved cancel for a different session must also pass through independently, with no cross-client meta bleed or reordering.
 #[tokio::test]
 async fn test_cancel_prompt_id_meta_passes_through_with_two_clients() {
     let temp = TempDir::new().unwrap();
@@ -1665,7 +1679,9 @@ async fn test_session_ownership_cleanup_on_disconnect() {
     // Give server time to process disconnect
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // The server sends an eviction notification for "sess-temp" when client1 disconnects Drain it before client2's initialize.
+    // The server sends an eviction notification for "sess-temp" when client1 disconnects
+    // Drain it before client2's initialize to keep the channel in sync
+    // Also verifies the eviction was actually sent
     let eviction = acp_rx.recv().await.unwrap();
     let eviction_json: serde_json::Value = serde_json::from_str(&eviction).unwrap();
     assert_eq!(eviction_json["method"], "_x.ai/internal/evict_sessions");
@@ -1686,11 +1702,13 @@ async fn test_session_ownership_cleanup_on_disconnect() {
         .unwrap();
     let _ = acp_rx.recv().await.unwrap();
 
-    // Send a notification for the session; it should be DROPPED.
+    // Send a notification for the old session; it should be DROPPED, not forwarded to client2 The dead client's session entry is still in session_owners (for relay detection)
+    // Session-based routing sees the owner is dead and drops the notification to prevent cross-session leaks The reconnecting client will replay via session/load instead.
     let old_notif = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-temp","data":"orphan"}}"#;
     response_tx.send(old_notif.to_string()).unwrap();
 
     // client2 should NOT receive the dead-session notification.
+    // Send a second notification without a sessionId; this one SHOULD arrive via fallback routing, proving client2 is alive and connected
     let probe = r#"{"jsonrpc":"2.0","method":"x.ai/probe","params":{"ping":true}}"#;
     response_tx.send(probe.to_string()).unwrap();
 
@@ -1781,8 +1799,9 @@ async fn test_non_code_nav_client_gets_false_injected_into_session_new() {
     cancel.cancel();
 }
 
-/// Verify leader-mode per-client isolation end to end. Clients with different code-nav capabilities receive independent
-/// `codeNavEnabled` values in their session/new requests. One client's capability does not contaminate the other.
+/// Verify leader-mode per-client isolation end to end.
+/// Two clients with different code-nav capabilities receive independent `codeNavEnabled` values in their session/new requests.
+/// One client's capability does not contaminate the other.
 #[tokio::test]
 async fn test_leader_code_nav_client_isolation() {
     let temp = TempDir::new().unwrap();
@@ -1932,7 +1951,7 @@ async fn test_raw_registration_handshake_not_ready_then_ready() {
     let (acp_tx, mut acp_rx) = mpsc::unbounded_channel::<String>();
     let (response_tx, response_rx) = mpsc::unbounded_channel::<String>();
     let cancel = CancellationToken::new();
-    let (ready_tx, ready_rx) = watch::channel(false);
+    let (ready_tx, ready_rx) = watch::channel(false); // NOT ready yet
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
@@ -2001,7 +2020,9 @@ async fn test_raw_registration_handshake_not_ready_then_ready() {
         other => panic!("Expected Registered, got {other:?}"),
     }
 
-    // ── Signal readiness (simulates auth + prefetch completing) ─────────────── The server's per-client session is now blocked.
+    // ── Signal readiness (simulates auth + prefetch completing) ───────────────
+    // The server's per-client session is now blocked in its readiness wait loop.
+    // Signalling here causes it to send LeaderReady to this client.
     ready_tx.send(true).unwrap();
 
     // ── Server must now send LeaderReady ──────────────────────────────────────
@@ -2077,7 +2098,7 @@ async fn test_connect_waits_for_leader_ready() {
     let (acp_tx, mut acp_rx) = mpsc::unbounded_channel::<String>();
     let (response_tx, response_rx) = mpsc::unbounded_channel::<String>();
     let cancel = CancellationToken::new();
-    let (ready_tx, ready_rx) = watch::channel(false);
+    let (ready_tx, ready_rx) = watch::channel(false); // NOT ready yet
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
@@ -2117,6 +2138,7 @@ async fn test_connect_waits_for_leader_ready() {
     });
 
     // LeaderClient::connect should block until LeaderReady arrives, then return.
+    // If it returned immediately (before readiness), `initialize` would hit `leader_starting` errors, the bug this test guards against
     let connect_start = tokio::time::Instant::now();
     let mut client = LeaderClient::connect(
         sock_path,
@@ -2682,9 +2704,8 @@ async fn raw_recv_acp(reader: &mut tokio::io::ReadHalf<UnixStream>) -> serde_jso
     }
 }
 
-/// Count `unified.jsonl` orphan-drop entries for `request_id`. Namespaced
-/// request ids are unique per process (global `ClientId` counter). The pid
-/// filter fences off other test processes appending to the same shared log.
+/// Count `unified.jsonl` orphan-drop entries for `request_id`. Namespaced request ids are unique per process (global `ClientId` counter). The pid filter fences off other test processes appending to the same shared log.
+/// This binary does not sandbox GROK_HOME, so on a dev machine these entries land in the real `~/.grok` log — accepted: the server already writes `leader.client.*` lines there from every test in this file, and the pid+request-id fence keeps the counting sound regardless of what else is in the file. (Bazel sandboxes HOME, so CI writes stay test-scoped.)
 fn orphan_log_count(request_id: &str) -> usize {
     let Some(bytes) = xai_grok_telemetry::unified_log::snapshot_log() else {
         return 0;
@@ -2759,7 +2780,8 @@ async fn test_hung_agent_leaves_transport_healthy_and_forwards_cancel() {
     let json: serde_json::Value = serde_json::from_str(&forwarded).unwrap();
     assert_eq!(json["method"], "session/prompt");
 
-    // The agent hangs: no response The client must see nothing (no synthesized error, no disconnect).
+    // The agent hangs: no response
+    // The client must see nothing (no synthesized error, no disconnect) within a bounded observation window
     let quiet = tokio::time::timeout(Duration::from_millis(500), client.recv()).await;
     assert!(
         quiet.is_err(),
@@ -2804,6 +2826,7 @@ async fn test_sever_mid_rpc_orphans_response_and_replay_recovers() {
     let temp = TempDir::new().unwrap();
     let (sock_path, cancel, mut acp_rx, response_tx) = setup_persistent_test_server(&temp).await;
 
+    // Client 1: create the session, then leave a prompt in flight.
     let (mut reader1, mut writer1) = raw_register(&sock_path, "sever-client-1").await;
     write_message(
         &mut writer1,
@@ -2934,7 +2957,7 @@ async fn test_cancel_severed_in_swap_window_reaches_agent_after_recovery() {
 
     // Leader dies; the cancel is composed while the connection is already dead (the swap window), so it is silently eaten today
     cancel.cancel();
-    // Wait until the server finished its socket cleanup so the same-path respawn below cannot have its fresh socket deleted.
+    // Wait until the old server finished its socket cleanup so the same-path respawn below cannot have its fresh socket deleted from under it
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while sock_path.exists() && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -2989,9 +3012,9 @@ async fn test_cancel_severed_in_swap_window_reaches_agent_after_recovery() {
     cancel2.cancel();
 }
 
-/// Clients on one session; the driver severs mid-turn. The viewer must keep receiving
-/// the stream and the durable terminal. The driver's in-flight RPC response is
-/// orphan-dropped, not misrouted to the viewer.
+/// Two clients on one session; the driver severs mid-turn.
+/// The viewer must keep receiving the stream and the durable terminal.
+/// The driver's in-flight RPC response is orphan-dropped, not misrouted to the viewer.
 #[tokio::test]
 async fn test_driver_sever_mid_turn_viewer_sees_durable_terminal() {
     let temp = TempDir::new().unwrap();
@@ -3097,8 +3120,8 @@ async fn test_driver_sever_mid_turn_viewer_sees_durable_terminal() {
         "the severed driver's prompt response must be orphan-dropped exactly once"
     );
 
-    // The viewer must NOT have been handed the driver's RPC response The next
-    // message it sees (if any) is not a response.
+    // The viewer must NOT have been handed the driver's RPC response
+    // The next message it sees (if any) is not a response with the driver's original id
     let stray = tokio::time::timeout(Duration::from_millis(300), async {
         raw_recv_acp(&mut viewer_reader).await
     })

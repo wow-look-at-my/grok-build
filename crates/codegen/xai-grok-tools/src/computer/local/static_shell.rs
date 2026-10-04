@@ -1,4 +1,13 @@
 //! Static (replay-only) login-shell capture for the non-persistent bash path.
+//!
+//! Sources the user's rc once at init and captures function and alias
+//! definitions; every command replays that fixed snapshot in a fresh shell.
+//! Nothing is ever written back: no state dump, no tracked cwd, no
+//! persistence across calls. Env vars are deliberately not captured here —
+//! the host-side login env capture applies them with fill-gaps precedence.
+//!
+//! Self-contained by design: independent of the cursor persistent shell's
+//! `shell_state` machinery so changes to either path cannot affect the other.
 
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::Path;
@@ -106,7 +115,9 @@ impl StaticShellSnapshot {
         Self { snapshot, shell }
     }
 
-    /// A failing snapshot replay does not abort the command.
+    /// Build the replay wrapper: read the snapshot from fd 3, eval it (alias and function
+    /// definitions), then eval the user command; the shell exits with the user command's status. A
+    /// failing snapshot replay does not abort the command.
     pub fn prepare_command(
         &self,
         user_command: &str,

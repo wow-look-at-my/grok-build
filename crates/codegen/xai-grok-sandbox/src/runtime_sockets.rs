@@ -1,4 +1,11 @@
 //! Launch-time unix socket deny masks for sandbox profiles.
+//!
+//! `/run`, `/var`, and the home directory stay readable in restricted profiles (DNS/NSS, tool config).
+//! That leaves container-runtime API sockets and D-Bus/systemd private sockets path-reachable, so profile
+//! resolution denies the well-known endpoints that exist at launch.
+//! These launch-time masks are defense in depth only: they cannot cover sockets created or unlinked/recreated after startup.
+//! For container runtimes, the session-long guarantee is the per-spawn child network filter
+//! ([`crate::child_net::restrict_child_network`]). D-Bus/systemd masks block out-of-tree unit spawn via those buses.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -23,8 +30,8 @@ const PER_UID_SOCKET_SUFFIXES: &[&str] = &[
     "containerd/containerd.sock",
 ];
 
-/// Docker Desktop binds per-user endpoints under `$HOME/.docker` (`desktop/`
-/// on Linux, `run/` on macOS).
+/// Docker Desktop binds per-user endpoints under `$HOME/.docker` (`desktop/` on Linux, `run/` on macOS).
+/// They stay reachable through the home-directory read grants.
 const PER_HOME_SOCKET_SUFFIXES: &[&str] =
     &[".docker/desktop/docker.sock", ".docker/run/docker.sock"];
 

@@ -15,7 +15,8 @@ pub fn is_workflow_tool_id(id: &str) -> bool {
     workflow_tool_short_name(id) == WORKFLOW_TOOL_NAME
 }
 
-/// Child sessions must not receive the workflow tool.
+/// Child sessions must not receive the workflow tool. Match by kind **or**
+/// short id so kindless `ToolConfig::from_id` / tools-server entries drop too.
 pub fn is_workflow_tool(kind: Option<ToolKind>, id: &str) -> bool {
     kind == Some(ToolKind::Workflow) || is_workflow_tool_id(id)
 }

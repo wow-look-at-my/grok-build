@@ -597,8 +597,8 @@ fn x11_primary_hint_requires_canonical_full_miss_outcome() {
 fn wrap_host_image_request_eligible_covers_full_miss_and_attachment_error_only() {
     use crate::app::actions::{ClipboardPasteCompletion, ClipboardPasteFailure};
 
-    // A clean empty miss and a remote read *error* both fall through to the
-    // wrap host-image request That request is how `grok wrap` pastes images.
+    // A clean empty miss and a remote read *error* both fall through to the wrap host-image request
+    // That request is how `grok wrap` pastes images over headless SSH
     assert!(wrap_host_image_request_eligible(
         ClipboardPasteCompletion::FullMiss
     ));
@@ -811,6 +811,7 @@ fn plugins_action_success_sets_result_notice_and_autoreload_preserves_it() {
     let id = AgentId(0);
     {
         let mut modal = ExtensionsModalState::new(ExtensionsTab::Plugins);
+        // Simulate a per-row action (`u` update) in flight on row 2.
         modal.pending_entry_index = Some(2);
         app.agents.get_mut(&id).unwrap().extensions_modal = Some(modal);
     }
@@ -1488,7 +1489,8 @@ fn switch_model_incompatible_agent_shows_question_modal() {
 
 #[test]
 fn incompatible_agent_rollback_restores_previous_model() {
-    // SetDefaultModel optimistically updates models.current When the shell rejects with IncompatibleAgent.
+    // SetDefaultModel optimistically updates models.current
+    // When the shell rejects with IncompatibleAgent, the handler must roll back models.current to the prev_model_id
     let mut app = test_app_with_agent();
     let id = AgentId(0);
 
@@ -1589,7 +1591,7 @@ fn incompatible_agent_closes_active_modal() {
 
 #[test]
 fn same_agent_type_switch_no_modal() {
-    // Switching between models with the same (or no) agent type succeeds normally: no modal, no IncompatibleAgent error
+    // Switching between two models with the same (or no) agent type succeeds normally: no modal, no IncompatibleAgent error
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     let model_a = acp::ModelId::new(std::sync::Arc::from("grok-build-a"));
@@ -2315,7 +2317,9 @@ fn delete_completion_reports_membership_failure_if_store_became_read_only() {
 
 #[test]
 fn rename_session_failed_keeps_local_display_name_and_pushes_system_block() {
-    // Pins the design decision: a failed on-disk rename does NOT roll back the local `display_name` cache The cache is the source of truth.
+    // Pins the design decision: a failed on-disk rename does NOT roll back the local `display_name` cache
+    // The cache is the source of truth for the modal's rendering and the disk write is best-effort
+    // The user sees the failure via the system-block message instead
     let mut app = test_app_with_agent();
     // Seed the cache as the rename path would have done.
     if let Some(a) = app.agents.get_mut(&AgentId(0)) {
@@ -2486,6 +2490,7 @@ fn reset_session_title_complete_pushes_system_block() {
 }
 
 /// Regression: when the 30s gate poll detects the subscription gate has been lifted, it must emit `CheckSubscription` so the shell refreshes the JWT.
+/// Until that refresh the auth token lacks the subscription claim and all API calls return 403.
 #[test]
 fn gate_refreshed_emits_check_subscription_on_gate_lift() {
     let mut app = test_app();
@@ -2961,6 +2966,7 @@ fn rollback_unknown_key_does_not_panic() {
         &mut app,
     );
     assert!(effects.is_empty());
+    // No assertion on cache state (no arm to rollback through); the toast surfaces the inconsistency to the user
 }
 
 #[test]
@@ -3378,8 +3384,8 @@ fn compact_complete_error_surfaces_real_error_in_scrollback() {
 #[test]
 fn compact_complete_typed_detail_between_the_two_caps_is_not_retruncated() {
     use xai_grok_shell::session::helpers::session_compact::{CompactErrorKind, compact_error_data};
-    // Chars: over the pager sanitize cap, under the shell's 300-byte cap It
-    // must reach scrollback byte-identical.
+    // 250 chars: over the pager sanitize cap, under the shell's 300-byte cap
+    // It must reach scrollback byte-identical, exactly as the auto path renders it
     let detail = format!(
         "API error (status 500 Internal Server Error): {}",
         "y".repeat(204)
@@ -3442,7 +3448,8 @@ fn compact_complete_typed_failure_echoing_cancel_phrase_stays_a_failure() {
 #[test]
 fn compact_complete_renders_one_failure_line_per_completion() {
     use xai_grok_shell::session::helpers::session_compact::{CompactErrorKind, compact_error_data};
-    // One /compact failure must paint exactly one line.
+    // One /compact failure must paint exactly one line: `finish_command()` exits the compact state on the first completion
+    // A stray duplicate completion is dropped by the state guard instead of double-rendering
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents

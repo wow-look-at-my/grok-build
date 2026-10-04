@@ -43,6 +43,8 @@ use crate::scrollback::types::{
 use std::fmt;
 
 /// Shared selection-range id for tool-call header lines.
+/// Headers are single logical selection targets (path/query/url/command);
+/// using one id across tool kinds keeps multi-line drag/copy grouping simple.
 pub(crate) const TOOL_HEADER_RANGE: u16 = 0;
 
 /// 1-based inclusive line range for display.
@@ -66,9 +68,9 @@ impl fmt::Display for LineRange {
     }
 }
 
-/// Names what a verb-groupable (non-destructive) run member touched. A folded
-/// run of consecutive rows renders as "Read 3 files" or "Searched 4
-/// patterns".
+/// Names what a verb-groupable (non-destructive) run member touched. A folded run of consecutive rows renders as
+/// "Read 3 files" or "Searched 4 patterns". Most kinds classify tool blocks via [`ToolCallBlock::verb_group_kind`].
+/// `Subagent` classifies subagent lifecycle render blocks, which are not tool calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VerbGroupKind {
     /// Plain file reads.
@@ -90,6 +92,7 @@ pub enum VerbGroupKind {
     /// Subagent lifecycle rows (`RenderBlock::Subagent`).
     Subagent,
     /// Shell commands. Label-only: commands never fold eagerly ([`ToolCallBlock::verb_group_kind`] excludes them).
+    /// A truncation header describing hidden rows still buckets them ("Ran 6 commands").
     Command,
     /// File edits. Label-only, like [`Self::Command`].
     EditFile,

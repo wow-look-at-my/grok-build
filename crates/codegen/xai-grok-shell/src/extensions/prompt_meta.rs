@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 /// Typed metadata for a prompt `TextContent._meta` field.
+/// Use this instead of ad-hoc `serde_json::json!()` on the sender side and manual `.get()` parsing on the receiver side.
+/// Wire-compatible with the existing format: `{"bash_command": "ls -la"}`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptBlockMeta {
     /// Direct bash command to execute (bypasses agent loop).

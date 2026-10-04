@@ -1,4 +1,7 @@
 //! Copy-on-Write file cloning using the reflink-copy crate.
+//!
+//! Uses reflink (CoW) when supported by the filesystem, with automatic
+//! fallback to regular copy.
 
 use std::path::Path;
 
@@ -7,7 +10,9 @@ use anyhow::Result;
 /// Reflink (APFS/Btrfs/XFS) when the filesystem supports it; otherwise a regular copy.
 pub(crate) fn clone_file(src: &Path, dest: &Path) -> Result<()> {
     reflink_copy::reflink_or_copy(src, dest)?;
-    // reflink (FICLONE) only clones data blocks, creating the dest with default umask permissions.
+    // reflink (FICLONE) only clones data blocks, creating the dest with
+    // default umask permissions. Explicitly propagate the source mode so the
+    // executable bit etc. survive on reflink-capable filesystems.
     let perms = std::fs::metadata(src)?.permissions();
     std::fs::set_permissions(dest, perms)?;
     Ok(())

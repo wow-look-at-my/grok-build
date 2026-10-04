@@ -1,4 +1,7 @@
 //! These tests run the real turn loop against a mock server that 401s unauthenticated requests and 200s a fresh bearer.
+//! A fail-closed (credential-less) 401 must not consume `AuthRetrySchedule` budget.
+//! That was the failure seen in the field: each sleep cycle burned one slot.
+//! Credentialed 401s must still exhaust after `MAX_RETRIES`.
 
 use super::support::*;
 use super::*;
@@ -11,7 +14,9 @@ use xai_grok_test_support::{MockInferenceServer, MockModelEntry, ScriptedRespons
 /// The token the mock server accepts and the refresher mints on success.
 const FRESH_TOKEN: &str = "refreshed-test-token";
 
-/// With `fail_pre_request`, mimics the post-wake sequence.
+/// With `fail_pre_request`, mimics the post-wake sequence: `PreRequest` refreshes fail (the send
+/// goes out fail-closed) while 401 recovery mints [`FRESH_TOKEN`] for `mint_ttl` — a TTL inside
+/// the pre-request buffer (< 5 min) stays wire-valid yet keeps later prepares observable in `calls`.
 struct WakeGapRefresher {
     calls: Arc<AtomicU32>,
     fail_pre_request: bool,
@@ -118,6 +123,8 @@ fn retrying_updates(updates: &XaiUpdates) -> Vec<(u32, u32, String)> {
         .collect()
 }
 
+/// Assert the full Retrying stream: attempts count 1..=`expected_len`, each carrying
+/// `expected_max` and every reason needle (the retry-copy pin).
 fn assert_retrying(
     updates: &XaiUpdates,
     expected_len: usize,
@@ -159,6 +166,8 @@ fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg
 /// Shape options for [`session_token_actor`].
 #[derive(Default)]
 struct ActorShape {
+    /// Shape the actor like a spawned subagent turn — the only shape that
+    /// gets a 429 wait budget.
     is_subagent: bool,
     /// Budgeted workflow child (`task_output_token_budget` grant) — excluded from the park.
     task_output_budget: Option<u64>,
@@ -283,6 +292,9 @@ async fn run_prompt_with_cap(
     let prompt_blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(
         "hello".to_string(),
     ))];
+    // Hang guard, not a latency assertion: only a wedged turn reaches it
+    // The exhaustion test runs on a paused clock, and the 401 ladder plus refresh waits burn far past any real-time budget in virtual time
+    // Auto-advance makes that virtual time free
     tokio::time::timeout(
         Duration::from_secs(cap_secs),
         actor.handle_prompt(
@@ -304,6 +316,7 @@ async fn run_prompt_with_cap(
     .expect("turn must finish within timeout")
 }
 
+/// The turn future needs a session-sized stack (spawn.rs: 8 MiB); default test stacks overflow.
 fn on_session_stack(test: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
         .stack_size(8 * 1024 * 1024)
@@ -381,6 +394,7 @@ fn fail_closed_401_is_uncharged_and_turn_survives() {
                 calls.load(Ordering::SeqCst) >= 2,
                 "both the failing pre-flight and the recovery refresh must run"
             );
+            // The named invariant: the fail-closed 401 rode the uncharged budget, not a charged slot.
             assert_retrying(
                 &updates,
                 1,
@@ -391,7 +405,7 @@ fn fail_closed_401_is_uncharged_and_turn_survives() {
     });
 }
 
-/// Rule: kill switch off, a recovered fail-closed resubmits un-parked (no
+/// Rule: kill switch off, a recovered fail-closed 401 resubmits un-parked (no
 /// prepare/preflight skips) — full pre-park behavior on rollback.
 #[tokio::test(flavor = "current_thread")]
 async fn park_disabled_recovered_401_still_resubmits() {
@@ -405,8 +419,8 @@ async fn park_disabled_recovered_401_still_resubmits() {
             .await
             .expect("mock inference server");
             let calls = Arc::new(AtomicU32::new(0));
-            // The minted TTL sits inside the pre-request buffer: wire-valid
-            // for the resubmit.
+            // The minted TTL sits inside the pre-request buffer: wire-valid for the
+            // resubmit, yet every refresh-driving prepare stays observable in `calls`.
             let refresher = Arc::new(WakeGapRefresher {
                 calls: calls.clone(),
                 fail_pre_request: true,
@@ -500,8 +514,8 @@ fn authenticated_401s_still_exhaust_after_three_retries() {
                 "initial send plus MAX_RETRIES resubmits, all authenticated"
             );
 
-            // The budget is the terminal path outside
-            // `handle_sampling_failure`.
+            // The budget is the one terminal path outside `handle_sampling_failure`, and it used to return its error with no notification
+            // That left the pager with no re-auth prompt and no turn-failed block for a turn that died on 401s
             let (error_type, message) = terminal_failure(&updates)
                 .expect("an exhausted turn must report a terminal retryState");
             assert_eq!(
@@ -523,7 +537,9 @@ fn authenticated_401s_still_exhaust_after_three_retries() {
     });
 }
 
-/// Refresh-outage refresher: every refresh fails transiently.
+/// Refresh-outage refresher: every refresh fails transiently, counting `ServerRejected` and
+/// `PreRequest` attempts so tests pin that parked cycles dispatch neither. Recovery arrives
+/// out-of-band (hot_swap + notify), the way production recovers.
 #[derive(Default)]
 struct DeferredRefreshNeverLands {
     server_rejected_calls: Arc<AtomicU32>,
@@ -550,7 +566,9 @@ impl xai_grok_login::refresh::TokenRefresher for DeferredRefreshNeverLands {
     }
 }
 
-/// Deliberate exclusions (budgeted children, compact-path 401s) stay terminal.
+/// Rule, end to end: a credential-less 401 with transiently-failing recovery parks and the
+/// turn completes once a refresh lands. Deliberate exclusions (budgeted children,
+/// compact-path 401s) stay terminal.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn deferred_recovery_credential_less_401_parks_and_survives() {
     let local = tokio::task::LocalSet::new();
@@ -569,6 +587,7 @@ async fn deferred_recovery_credential_less_401_parks_and_survives() {
             let (_dir, am) = expired_auth_manager(refresher);
             let (actor, updates) = session_token_actor(&server, am, ActorShape::default()).await;
 
+            // Out-of-band driver: 30 virtual seconds in, a token lands and the notify fires.
             let waker = actor.auth_manager.clone().expect("actor has auth manager");
             tokio::task::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -593,6 +612,9 @@ async fn deferred_recovery_credential_less_401_parks_and_survives() {
                 .into_iter()
                 .filter(|r| r.path.contains("/responses"))
                 .collect();
+            // Send 1: credential-less, 401, one recovery dispatch fails → park.
+            // Middle sends: parked resubmits, still credential-less, paced by the escalating schedule, no further dispatch.
+            // Final send: authenticated once the out-of-band token lands.
             assert!(
                 inference.len() >= 3,
                 "expected credential-less send, parked resubmit(s), and an \
@@ -620,8 +642,8 @@ async fn deferred_recovery_credential_less_401_parks_and_survives() {
                 "exactly one recovery dispatch (two attempts) — parked cycles \
                  must not dispatch"
             );
-            // Exact by design: every preflight belongs to the pre-park
-            // iteration.
+            // Exact by design: every preflight belongs to the pre-park iteration; a
+            // regression letting parked cycles refresh shows up as extra dispatches.
             assert_eq!(
                 pre_request_calls.load(Ordering::SeqCst),
                 4,
@@ -697,7 +719,7 @@ async fn budgeted_workflow_child_credential_less_401_stays_terminal() {
 }
 
 /// Rule: a transient Api 5xx mid-park proves nothing about the credential — the next
-/// credential-less re-parks without a fresh recovery dispatch.
+/// credential-less 401 re-parks without a fresh recovery dispatch.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn api_5xx_during_park_does_not_unpark_or_redispatch() {
     let local = tokio::task::LocalSet::new();
@@ -709,6 +731,8 @@ async fn api_5xx_during_park_does_not_unpark_or_redispatch() {
             )
             .await
             .expect("mock inference server");
+            // Scripts outrank the auth gate, so rungs are positional: send 1 parks (401), the first parked resubmit burns an edge-502 streak (every sampler-internal retry must 5xx for the.
+            // Api error to surface), and later sends fall back to the gate.
             server.enqueue_response(
                 "/v1/responses",
                 ScriptedResponse::json(401, serde_json::json!({ "error": "missing API key" })),
@@ -757,7 +781,7 @@ async fn api_5xx_during_park_does_not_unpark_or_redispatch() {
         .await;
 }
 
-/// Rule: a parked resubmit's waits never re-prepare — the mid-wait
+/// Rule: a parked resubmit's 429 waits never re-prepare — the mid-wait
 /// re-prepare is park-gated, else each wait drives one refresh through the
 /// shared budget. Subagent-shaped: only subagent turns get a wait budget.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
@@ -768,6 +792,7 @@ async fn parked_429_wait_does_not_drive_refreshes() {
             let server = MockInferenceServer::start_with_models(vec![MockModelEntry::new("test")])
                 .await
                 .expect("mock inference server");
+            // One 429 rung, then the default 200: exactly one paced wait.
             server.enqueue_response(
                 "/v1/responses",
                 ScriptedResponse::json(429, serde_json::json!({ "error": "rate limited" })),
@@ -822,6 +847,8 @@ async fn parked_429_wait_does_not_drive_refreshes() {
         .await;
 }
 
+/// Rule: two-pass prefire must not re-arm while parked — pass-1 drives auth, and each
+/// spawn costs an extra credential-less send the runaway guard never counts.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn parked_turn_does_not_respawn_two_pass_prefire() {
     let local = tokio::task::LocalSet::new();
@@ -838,6 +865,8 @@ async fn parked_turn_does_not_respawn_two_pass_prefire() {
             let (_dir, am) = expired_auth_manager(refresher);
             let (actor, _updates) = session_token_actor(&server, am, ActorShape::default()).await;
 
+            // Two-pass on, usage in the prefire band: 77% of 100k vs the 85%
+            // threshold (the band opens at threshold − 10).
             {
                 let mut agent_slot = actor.agent.borrow_mut();
                 let agent = &*agent_slot;
@@ -861,7 +890,7 @@ async fn parked_turn_does_not_respawn_two_pass_prefire() {
                 .expect("test actor has sampling config");
             cfg.context_window = std::num::NonZeroU64::new(100_000).expect("non-zero");
             actor.chat_state_handle.update_sampling_config(cfg);
-            // ≥items so pass-1 survives its too-small check and reaches the auth-driving stage.
+            // ≥4 items so pass-1 survives its too-small check and reaches the auth-driving stage.
             use xai_grok_sampling_types::ConversationItem;
             actor.chat_state_handle.replace_conversation(vec![
                 ConversationItem::system("you are a coding agent"),
@@ -922,6 +951,8 @@ async fn parked_turn_past_compact_threshold_does_not_auto_compact() {
             let (_dir, am) = expired_auth_manager(refresher);
             let (actor, updates) = session_token_actor(&server, am, ActorShape::default()).await;
 
+            // 100k window, 85% threshold (create_test_actor): the seeded 90k
+            // usage puts every check past the auto-compact trigger.
             let mut cfg = actor
                 .chat_state_handle
                 .get_sampling_config()
@@ -929,7 +960,8 @@ async fn parked_turn_past_compact_threshold_does_not_auto_compact() {
                 .expect("test actor has sampling config");
             cfg.context_window = std::num::NonZeroU64::new(100_000).expect("non-zero");
             actor.chat_state_handle.update_sampling_config(cfg);
-            // Enough items that a leaked compact would sample instead of short-circuiting on a too-small conversation.
+            // Enough items that a leaked compact would really sample instead of
+            // short-circuiting on a too-small conversation.
             use xai_grok_sampling_types::ConversationItem;
             actor.chat_state_handle.replace_conversation(vec![
                 ConversationItem::system("you are a coding agent"),
@@ -939,13 +971,14 @@ async fn parked_turn_past_compact_threshold_does_not_auto_compact() {
                 ConversationItem::assistant("a2"),
             ]);
 
-            // Usage crosses the threshold only after the first iteration's compact check (which runs un-parked at t=0).
+            // Usage crosses the threshold only after the first iteration's compact check (which runs un-parked at t=0): the first parked resubmit is paced ≥1s out, so a 500ms seed lands between the park and every parked.
             let usage_seeder = actor.chat_state_handle.clone();
             tokio::task::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 usage_seeder.record_token_usage(90_000);
             });
 
+            // Out-of-band recovery, 30 virtual seconds in.
             let waker = actor.auth_manager.clone().expect("actor has auth manager");
             tokio::task::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -969,6 +1002,8 @@ async fn parked_turn_past_compact_threshold_does_not_auto_compact() {
                 terminal_failure(&updates).is_none(),
                 "a surviving turn must not report a terminal retryState"
             );
+            // Compact sends are the only /responses requests without the
+            // foreground turn header (two-pass prefire stays off here).
             let compact_sends = server
                 .requests()
                 .into_iter()
@@ -1036,6 +1071,7 @@ async fn parked_turn_authenticated_rejection_dispatches_and_exhausts_charged() {
             let (_dir, am) = expired_auth_manager(refresher);
             let (actor, updates) = session_token_actor(&server, am, ActorShape::default()).await;
 
+            // 30 virtual seconds in, a wire-valid token lands — the server keeps rejecting.
             let waker = actor.auth_manager.clone().expect("actor has auth manager");
             tokio::task::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -1070,13 +1106,15 @@ async fn parked_turn_authenticated_rejection_dispatches_and_exhausts_charged() {
                 (AuthRetrySchedule::MAX_RETRIES + 1) as usize,
                 "first authenticated resubmit plus MAX_RETRIES charged retries"
             );
-            // Sent rejections dispatch recovery.
+            // Sent rejections dispatch recovery, but it short-circuits on the wire-valid
+            // landed token — only the pre-park dispatch reaches the refresher.
             assert_eq!(
                 server_rejected_calls.load(Ordering::SeqCst),
                 2,
                 "only the pre-park recovery dispatch may reach the refresher"
             );
-            // The budget flips at the landing: exactly MAX_RETRIES charged backoffs after.
+            // The budget flips at the landing: exactly MAX_RETRIES charged backoffs after,
+            // all uncharged before — a dropped `is_missing()` conjunct breaks both halves.
             let retrying = retrying_updates(&updates);
             let (parked, charged) =
                 retrying.split_at(retrying.len() - AuthRetrySchedule::MAX_RETRIES as usize);

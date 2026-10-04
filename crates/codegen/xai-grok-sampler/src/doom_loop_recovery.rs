@@ -1,4 +1,19 @@
 //! Failed-response context retained for Doom-loop recovery retries.
+//!
+//! Only model-authored reasoning and visible text are replayed, and only from a turn that made no tool call.
+//! Responses reasoning items are bound to the function calls that follow them.
+//! Replaying a turn without its calls would send an orphaned reasoning item the API rejects.
+//! A turn that called a tool is therefore dropped whole and the retry carries the reminder alone.
+//!
+//! What the wire delivered as a completed item is authoritative for both content and order.
+//! That means the terminal `output` list, or a `response.output_item.done` when the attempt is aborted before its terminal frame.
+//! Streamed deltas only stand in for an item the wire never completed.
+//! So the replay keeps `encrypted_content` and the model's own item ids instead of synthesising plaintext copies.
+//! Reading the raw items also keeps the tool-call veto honest.
+//! The conversation form the sampler hands upward is lossy (it drops MCP calls) and has already had a streaming-reasoning fallback spliced into it.
+//!
+//! Capture is allocated only for an attempt whose doom-loop abort is armed ([`FailedResponseCapture::armed`]).
+//! Every other stream holds the default disarmed handle, whose recording methods are no-ops.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -8,14 +23,16 @@ use xai_grok_sampling_types::{ConversationItem, ConversationRequest, rs};
 pub(crate) const RECOVERY_REMINDER: &str = "<system_reminder>Your messages have been flagged as looping. Your response has been flagged as repeating the same text pattern. Avoid excessive repetition. If you are having trouble ask the user for guidance.</system_reminder>";
 
 /// Hard caps on the bytes of one failed turn replayed into a retry.
+/// A detector can report only at the terminal frame, so the failed turn may be a full generation.
+/// Every recovery attempt appends another one, and without a cap the retry prompt would grow until it overflowed the context.
 const MAX_RECOVERY_REASONING_BYTES: usize = 8 * 1024;
 const MAX_RECOVERY_TEXT_BYTES: usize = 4 * 1024;
 
 /// Marks the point where the cap cut the failed turn, so the model (and anyone reading the request) can tell replay from a complete turn.
 const TRUNCATION_MARKER: &str = " […truncated]";
 
-/// Byte budget for one channel (reasoning or visible text) of one failed
-/// turn.
+/// Byte budget for one channel (reasoning or visible text) of one failed turn.
+/// Once the cap is reached the budget is spent: later text in that channel is dropped rather than partially interleaved.
 struct RecoveryBudget {
     cap: usize,
     used: usize,
@@ -68,8 +85,8 @@ impl RecoveryBudget {
         self.append(slot, &text);
     }
 
-    /// Charge opaque bytes (an encrypted reasoning blob) that cannot be
-    /// truncated.
+    /// Charge opaque bytes (an encrypted reasoning blob) that cannot be truncated.
+    /// Returns `false` when they do not fit, in which case the caller drops them; the budget is left for the text that can be cut.
     fn charge(&mut self, len: usize) -> bool {
         if self.truncated || len > self.cap.saturating_sub(self.used) {
             return false;
@@ -176,8 +193,7 @@ impl FailedResponseCapture {
                 .or_default();
             captured.reasoning_budget.append(slot, delta);
             let retained = !slot.is_empty();
-            // The raw channel only wins once it holds text: an empty event,
-            // or one the budget dropped, must not discard the summary
+            // The raw channel only wins once it actually holds text: an empty event, or one the budget dropped, must not discard the summary
             if retained {
                 captured.raw_reasoning_indexes.insert(output_index);
             }
@@ -296,6 +312,8 @@ impl FailedResponseCapture {
     }
 
     /// Give up on replaying this turn.
+    /// A tool call binds the reasoning that precedes it, and a compaction item is opaque state the retry cannot carry.
+    /// Either way the failed turn cannot be resent piecemeal, so the retry falls back to the reminder alone.
     pub(crate) fn record_unreplayable(&self) {
         self.with(|captured| captured.veto_replay = true);
     }
@@ -358,9 +376,8 @@ impl FailedResponseCapture {
             };
         };
 
-        // The raw channel replaces the summary only where it holds text An
-        // empty or budget-dropped raw event leaves the summary as the
-        // recovery context rather than emptying it
+        // The raw channel replaces the summary only where it actually holds text
+        // An empty or budget-dropped raw event leaves the summary as the recovery context rather than emptying it
         let raw_content: BTreeMap<(u32, String), BTreeMap<u32, String>> = captured
             .reasoning_content
             .into_iter()
@@ -399,7 +416,8 @@ impl FailedResponseCapture {
             return Vec::new();
         }
 
-        // A turn that reached its terminal frame has told us everything it produced The deltas may not add items the wire left out.
+        // A turn that reached its terminal frame has told us everything it produced
+        // The deltas may not add items the wire left out, not even when the terminal projection comes out empty
         let wire_is_complete = captured.terminal_seen;
         let mut reasoning_budget = RecoveryBudget::new(MAX_RECOVERY_REASONING_BYTES);
         let mut text_budget = RecoveryBudget::new(MAX_RECOVERY_TEXT_BYTES);

@@ -1,4 +1,8 @@
 //! Discovery shapes for plugins and hooks.
+//! They appear in `OpsChunk::Plugins`, `OpsChunk::Plugin`, `WorkspaceEvent::PluginsChanged`, and `WorkspaceEvent::HooksChanged`.
+//!
+//! TODO: align with the canonical types in
+//! `xai-hooks-plugins-types` and `xai-grok-plugin-marketplace`.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +34,8 @@ pub struct HookInfo {
     /// Display name.
     #[serde(default)]
     pub name: String,
-    /// Hook event the script attaches to. TODO: free-form string until aligned with `HookEvent`; typos pass.
+    /// Hook event the script attaches to.
+    /// TODO: free-form string until aligned with `HookEvent`; typos currently pass.
     #[serde(default)]
     pub event: String,
     /// Originating plugin id, if the hook came from a plugin.

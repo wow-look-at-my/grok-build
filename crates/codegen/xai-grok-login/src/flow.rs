@@ -35,6 +35,8 @@ fn is_cached_credential_compatible(auth: &GrokAuth, grok_com_config: &GrokComCon
     true
 }
 /// CLI-flag override for the interactive login transport.
+/// `--oauth` forces the loopback-callback flow; `--device-auth` forces the device flow.
+/// `None` falls through to env / config / default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LoginTransportOverride {
     /// No CLI override; resolve from env / config / default.
@@ -45,11 +47,12 @@ pub enum LoginTransportOverride {
     /// `--device-auth`: force the RFC 8628 device flow.
     ForceDevice,
     /// Transport already resolved (and logged) upstream; `true` means device, `false` means loopback.
+    /// The inner flow honors the carried value without re-resolving, so it's never re-logged or mis-attributed to `cli`.
     Preresolved(bool),
 }
 impl LoginTransportOverride {
-    /// Resolve from the `--oauth` / `--device-auth` flags; `--oauth` wins if
-    /// both are somehow set.
+    /// Resolve from the `--oauth` / `--device-auth` flags; `--oauth` wins if both are somehow set.
+    /// Both the CLI (`run_cli_login`) and ACP (`AuthRequestMeta`) entry points resolve through here.
     pub fn from_flags(force_loopback: bool, force_device: bool) -> Self {
         if force_loopback {
             Self::ForceLoopback
@@ -610,8 +613,9 @@ pub(super) async fn run_auth_flow_steps(
         "No OAuth2 configuration available. Run `grok login` to authenticate, or contact your administrator if you use enterprise SSO."
     )
 }
-/// Non-interactive auth refresh: returns valid credentials if available
-/// without ever triggering interactive login (browser, device code, etc.).
+/// Non-interactive auth refresh: returns valid credentials if available without ever triggering interactive login (browser, device code, etc.).
+/// Tries cached non-expired credentials, then OIDC silent refresh (needs a refresh_token), then the external auth provider command (if configured).
+/// Returns `None` when no valid credentials can be obtained non-interactively.
 pub async fn try_ensure_fresh_auth(
     grok_com_config: &GrokComConfig,
     proxy_base_url: String,
@@ -641,9 +645,7 @@ async fn try_ensure_fresh_auth_with(auth_manager: &Arc<AuthManager>) -> Option<G
         }
     }
 }
-/// Readiness-path auth: a bounded refresh plus the expired-but-refreshable
-/// cached session, but no cold mint (which can run a provider command up to
-/// `STARTUP_AUTH_TIMEOUT`).
+/// Readiness-path auth: a bounded refresh plus the expired-but-refreshable cached session, but no cold mint (which can run a provider command up to `STARTUP_AUTH_TIMEOUT`). Minting is deferred to the post-readiness background task, so readiness waits at most `STARTUP_AUTH_REFRESH_TIMEOUT`.
 pub async fn try_noninteractive_auth_no_mint(
     grok_com_config: &GrokComConfig,
     proxy_base_url: String,
@@ -675,6 +677,7 @@ async fn try_noninteractive_auth_no_mint_with(auth_manager: &Arc<AuthManager>) -
     expired_refreshable_session(auth_manager)
 }
 /// A cached, refreshable session (not BYOK/ApiKey).
+/// Reached only after fresh auth failed, so in practice the token is expired but recoverable on 401.
 fn expired_refreshable_session(auth_manager: &AuthManager) -> Option<GrokAuth> {
     auth_manager
         .current_or_expired()
@@ -1788,6 +1791,7 @@ mod tests {
         assert_eq!(extract("some opaque output"), "some opaque output");
     }
     /// CLI `grok login` passes `on_stderr=None`; stderr must be inherited so sign-in URLs appear in real time.
+    /// Piped stderr with no reader deadlocks once the child writes past the pipe buffer (~64 KiB).
     #[tokio::test]
     async fn external_provider_cli_path_does_not_deadlock_on_large_stderr() {
         let dir = tempfile::tempdir().unwrap();

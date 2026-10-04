@@ -258,6 +258,7 @@ async fn completed_event_clears_slot_keeps_prior_uncommitted_segments() {
 
 /// Regression: the sampler-event drainer must release the per-turn stream-drain barrier when (and only when) it processes the `Completed` event.
 /// `run_turn_via_sampler` awaits this barrier before the turn loop emits the canonical client `ToolCall`s.
+/// Without it the tool call's `send_update` on the turn-loop task could interleave between two still-draining text chunks on the drainer task.
 #[tokio::test(flavor = "current_thread")]
 async fn completed_event_releases_stream_drain_barrier_and_timeout_keeps_request_ownership() {
     use xai_grok_sampler::{InferenceLatencyStats, RequestId, SamplingChannel, SamplingEvent};
@@ -361,7 +362,8 @@ async fn completed_event_releases_stream_drain_barrier_and_timeout_keeps_request
                  run_turn_via_sampler can proceed to emit tool calls in order"
             );
 
-            // A timeout drops only the ordering waiter Request ownership stays.
+            // A timeout drops only the ordering waiter
+            // Request ownership stays until the terminal event applies its side effects
             let late_req = RequestId::random();
             let (late_tx, late_rx) = tokio::sync::oneshot::channel::<()>();
             actor.turn_stream_drained.lock().insert(
@@ -1253,9 +1255,9 @@ fn streaming_capture_appender_respects_byte_cap() {
     );
 }
 
-/// A multi-generation reasoning-only turn must yield a capture whose `segments` hold every uncommitted generation, in order. The struct tests in
-/// `streaming_capture.rs` and `same_prompt_restart_accumulates_segments_via_handler` pin that a restart folds rather than wipes. Generations
-/// suffice: a wiped slot on each same-turn `StreamStarted` would leave only one.
+/// A multi-generation reasoning-only turn must yield a capture whose `segments` hold every uncommitted generation, in order.
+/// The struct tests in `streaming_capture.rs` and `same_prompt_restart_accumulates_segments_via_handler` pin that a restart folds rather than wipes.
+/// Two generations suffice: a wiped slot on each same-turn `StreamStarted` would leave only one.
 #[tokio::test(start_paused = true)]
 async fn reasoning_only_doomloop_turn_captures_every_generation_as_segments() {
     use xai_grok_sampler::{
@@ -1279,6 +1281,8 @@ async fn reasoning_only_doomloop_turn_captures_every_generation_as_segments() {
                 .lock()
                 .expect("current_prompt_id mutex poisoned") = Some("prompt-doomloop".to_string());
 
+            // Two reasoning-only generations under the SAME prompt id: enough to prove more than the last survives
+            // A same-prompt `StreamStarted` folds the prior in-progress generation into `segments`
             let req = RequestId::random();
             own_request(&actor, &req);
             actor
@@ -1368,7 +1372,8 @@ async fn reasoning_only_doomloop_turn_captures_every_generation_as_segments() {
                 panic!("a reasoning_only empty response must be a terminal error, not recoverable");
             };
 
-            // Take the capture exactly as the trace upload does.
+            // Take the capture exactly as the trace upload does: through the real `TakeStreamingCapture` command
+            // The command finalizes the uncommitted generations for upload
             let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
             let (_chat_tx, chat_rx) = mpsc::unbounded_channel::<xai_chat_state::ChatStateEvent>();
             let codebase_indexes = Arc::new(parking_lot::Mutex::new(
@@ -1398,8 +1403,9 @@ async fn reasoning_only_doomloop_turn_captures_every_generation_as_segments() {
                 .expect("the take responder must not be dropped")
                 .expect("a reasoning-only doomloop turn must yield a non-empty capture");
 
-            // This path's unique guarantee: every uncommitted reasoning-only
-            // generation is kept as its own segment.
+            // This path's unique guarantee: every uncommitted reasoning-only generation is kept as its own segment, in order
+            // The terminal classification also came through the command's finalize
+            // Finer-grained properties (timestamps, joined-view separators, token magnitude) are owned by the `streaming_capture.rs` struct tests
             assert_eq!(
                 capture.segments.len(),
                 2,

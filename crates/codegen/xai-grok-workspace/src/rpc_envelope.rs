@@ -1,4 +1,4 @@
-//! Maps `WorkspaceError` to and from wire codes for the workspace RPC envelope.
+//! Maps `WorkspaceError` to and from wire codes for the workspace RPC envelope (the envelope types are canonical in `xai_grok_workspace_types::rpc`).
 use crate::error::WorkspaceError;
 pub use xai_grok_workspace_types::rpc::{RpcEnvelope, RpcError};
 pub fn envelope_err<T>(error: &WorkspaceError) -> RpcEnvelope<T> {

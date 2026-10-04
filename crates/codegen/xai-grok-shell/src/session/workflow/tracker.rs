@@ -53,8 +53,9 @@ impl WorkflowRunStatus {
     }
 
     /// Whether `control` applies to a run in this status. A user pause only
-    /// interrupts a running engine; engine-paused runs already have nothing
-    /// to pause.
+    /// interrupts a running engine; engine-paused runs already have nothing to
+    /// pause. A budget-limited run has likewise already stopped, and its status
+    /// is what enforces the raise-the-cap rule on resume, so stop leaves it alone.
     pub(crate) fn accepts(self, control: WorkflowControl) -> bool {
         match control {
             WorkflowControl::Pause => self == Self::Active,

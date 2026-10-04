@@ -1,5 +1,13 @@
 #!/bin/bash
-# Runs a command with its output streamed to log-streamer, and runs it anyway when the streamer is not reachable.
+# Runs a command with its output streamed to log-streamer, and runs it anyway when the streamer
+# is not reachable.
+#
+# The org's stream action makes the client download required, so one 404 from the registry ends
+# the job before the command starts. That cost a whole measurement run: three legs and the probe
+# died in under a minute having compiled nothing. Realtime logs are a convenience, and a
+# convenience must never be able to fail a measurement.
+#
+#   stream-run.sh <stream-name> <command...>
 set -uo pipefail
 
 name="${1:-}"
@@ -21,7 +29,9 @@ if [ -n "${LOG_STREAMER_STREAM_KEY:-}" ]; then
 	done
 fi
 
-# The stream is a COPY, never the step's own output.
+# The stream is a COPY, never the step's own output. Letting the client own stdout cost a
+# measurement: its socket reset mid-step and the tally lines behind it never reached the job log,
+# so a 3116 s leg reported its wall and nothing that says which phase it was.
 if [ -n "$have_client" ]; then
 	if token="$("$client" token derive --name "$name" 2>/dev/null)" && [ -n "$token" ]; then
 		echo "::add-mask::$token"

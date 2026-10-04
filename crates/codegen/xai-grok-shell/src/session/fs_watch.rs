@@ -1,4 +1,6 @@
 //! The mechanism (OS watch, coalesce, refcount) lives in `xai_fsnotify`.
+//! This module decides which consumers exist, fans events through three explicit phases, and owns one `select!` loop.
+//! The loop serves the event hot path and the debounced refresh.
 
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
@@ -65,10 +67,9 @@ pub(crate) fn forward_to_hunk_tracker(
     }
 }
 
-/// Dedup key for `x.ai/git_head_changed`, shared by the watcher's `GitHead`
-/// consumer and the post-edit `maybe_notify_git_branch` path. The commit SHA
-/// is included so a same-branch commit (agent runs `git commit`) still
-/// notifies clients.
+/// Dedup key for `x.ai/git_head_changed`, shared by the watcher's `GitHead` consumer and the post-edit `maybe_notify_git_branch` path.
+/// The commit SHA is included so a same-branch commit (agent runs `git commit`) still notifies clients.
+/// The changes panel must drop the now-committed files.
 pub(crate) fn git_head_dedup_key(
     branch: Option<&str>,
     is_worktree: bool,
@@ -218,6 +219,7 @@ async fn refresh_codebase_graph_after_head_change(
 // ── capabilities / deps / plan ────────────────────────────────────────────
 
 /// What the client wants from the watcher: pure, `Copy`, mode-independent.
+/// Whether a proxy/hub session actually spawns the watcher is gated at the call site, not here.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FsWatchCapabilities {
     pub client_notify: bool,
@@ -246,6 +248,7 @@ impl FsWatchCapabilities {
 }
 
 /// Per-consumer signals fed to [`FsWatchCapabilities::resolve`].
+/// Named fields (not positional bools) so call sites can't silently transpose them.
 pub(crate) struct CapabilityInputs {
     pub client_notify: bool,
     pub hunk_tracking: bool,
@@ -523,7 +526,8 @@ impl GitHead {
                         raw.into(),
                     ));
             }
-            // The snapshot carries `workspace.branch`, so a checkout between turns has to repush it Otherwise the row names the branch.
+            // The snapshot carries `workspace.branch`, so a checkout between turns has to repush it
+            // Otherwise the row names the old branch until the next turn ends
             self.status_wake.notify_one();
         }
 
@@ -644,9 +648,9 @@ impl FsWatchPlan {
 
 type FsBatch = (Vec<PathBuf>, FsEventKind);
 
-/// Resolve a completed git op: report the batches to replay and whether a
-/// codebase-graph rebuild is needed. Whether the buffer held batches is
-/// sampled *before* it is drained.
+/// Resolve a completed git op: report the batches to replay and whether a codebase-graph rebuild is needed.
+/// Whether the buffer held batches is sampled *before* it is drained.
+/// An EdenFS-degraded `goto` completes with `head_changed: false` but with a buffered flood, so it still requests the rebuild.
 fn resolve_completed_op(head_changed: bool, op_buffer: &mut Vec<FsBatch>) -> (Vec<FsBatch>, bool) {
     let had_buffered = !op_buffer.is_empty();
     let replay = if head_changed {
@@ -659,10 +663,13 @@ fn resolve_completed_op(head_changed: bool, op_buffer: &mut Vec<FsBatch>) -> (Ve
 }
 
 /// Exceeding it means the completion boundary was lost (crashed git, a stale `.git` lock).
+/// It can also mean the settle window merged an op too big to buffer and replay.
+/// Either way, recover with a rebuild refresh instead of buffering forever.
 const MAX_OP_BUFFER: usize = 10_000;
 
-/// What the loop should do with one fs event. Pure (no I/O, no timers) so the
-/// `in_op`/`op_buffer` state machine is unit-testable.
+/// What the loop should do with one fs event.
+/// Pure (no I/O, no timers) so the `in_op`/`op_buffer` state machine is unit-testable.
+/// The loop performs the async consumer work and owns the debounce timer.
 enum Outcome {
     /// Op started, event buffered, or ignored; nothing to do now.
     Buffered,
@@ -760,7 +767,9 @@ impl Debounce {
     }
 }
 
-/// Give-up bound on consecutive in-op deferrals: at the 500ms quiet cadence this is ~60s.
+/// Give-up bound on consecutive in-op deferrals: at the 500ms quiet cadence this is ~60s, matching the watcher's stale-lock threshold.
+/// A crashed git leaving `.git/index.lock` parks the source in its locked state forever.
+/// No Completed arrives, no resync, the buffer never overflows on a quiet workspace, so without a bound the deferral would starve refreshes forever.
 const MAX_CONSECUTIVE_IN_OP_DEFERS: u32 = 120;
 
 /// Decision for a due debounce deadline.
@@ -790,7 +799,9 @@ fn on_settle_due(
     }
     if in_op && *in_op_defers < MAX_CONSECUTIVE_IN_OP_DEFERS {
         *in_op_defers += 1;
-        // Deferral re-arms in full, intentionally resetting the max-wait cap Every deferral means a refresh is already owed.
+        // Deferral re-arms in full, intentionally resetting the max-wait cap
+        // Every deferral means a refresh is already owed and retried each quiet window, so the cap's job (bounding un-fired bursts) is moot here
+        // The give-up bound above handles starvation from a wedged op instead
         debounce.arm();
         return SettleAction::Defer;
     }
@@ -879,7 +890,8 @@ pub(crate) fn spawn(plan: FsWatchPlan) -> FsWatchHandle {
         let mut op_buffer: Vec<FsBatch> = Vec::new();
         let mut debounce = Debounce::idle();
         let mut in_op_defers = 0u32;
-        // Single-flight: the refresh runs on its own task so the loop keeps draining events A settle while one is in flight re-arms instead.
+        // Single-flight: the refresh runs on its own task so the loop keeps draining events
+        // A settle while one is in flight re-arms instead of overlapping
         let refreshing = Rc::new(Cell::new(false));
 
         loop {
@@ -1041,7 +1053,7 @@ mod tests {
     #[test]
     fn is_under_hidden_dir_unrelated_path_is_not_dropped() {
         // strip_prefix fails and the (nonexistent) paths can't canonicalize
-        // We must NOT scan the absolute path and treat the `.cache` ancestor.
+        // We must NOT scan the absolute path and treat the `.cache` ancestor as hidden; that would silently drop every event for a repo under one
         assert!(!is_under_hidden_dir(
             &PathBuf::from("/home/user/.cache/repo/src/main.rs"),
             &PathBuf::from("/some/other/root"),
@@ -1365,7 +1377,7 @@ mod tests {
         pick_duration: Duration,
     ) -> usize {
         let settle = Duration::from_millis(xai_fsnotify::SETTLE_MS);
-        // Uniform cadence: either every re-lock lands inside the pick's settle window (one merged op) or none does.
+        // Uniform cadence: either every re-lock lands inside the previous pick's settle window (one merged op) or none does (per-pick pairs)
         let merged = pick_period - pick_duration <= settle;
 
         let mut in_op = false;
@@ -1446,6 +1458,7 @@ mod tests {
         assert_eq!(fires, 1, "one refresh per rebase, after the last pick");
     }
 
+    /// Picks faster than the settle window: fsnotify merges all 16 lock cycles into one operation.
     #[tokio::test(start_paused = true)]
     async fn dense_rebase_cadence_merges_into_one_fire() {
         let fires =

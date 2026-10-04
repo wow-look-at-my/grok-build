@@ -1,4 +1,32 @@
 //! Auth credentials and pool-dedup principal keys.
+//!
+//! [`AuthCredential`] models the credential the client attaches at
+//! handshake time. Two variants are supported:
+//!
+//! - [`AuthCredential::Bearer`] for the simple "Authorization: Bearer
+//!   …" path (e.g. JWT-against-OAuth2 deployments).
+//! - [`AuthCredential::Headers`] for callers that already hold a
+//!   pre-built header bundle (e.g. signed identity headers generated
+//!   by an upstream proxy or test harness).
+//!
+//! [`PrincipalKey`] is the stable hashable projection of an
+//! `AuthCredential`; the pool keys connections by
+//! `(url, principal_key)` so two [`crate::ToolServer`] builds with the
+//! same credential reuse one socket while distinct credentials open
+//! distinct sockets. The server derives `user_id` from the credential at
+//! upgrade time and returns it in the hello ack — the SDK never needs
+//! to carry `user_id` alongside the credential.
+//!
+//! ## Pool dedup and credential refresh
+//!
+//! Both variants include the secret material in the `PrincipalKey`
+//! fingerprint. This is deliberate: distinct secrets imply distinct
+//! credentials, so two callers with different tokens open distinct
+//! sockets. The trade-off is that a caller that rotates its bearer JWT
+//! every N minutes will open a new socket on each rotation.
+//! Long-running tool servers should reuse the SAME [`AuthCredential`]
+//! instance across builds and refresh the credential out-of-band rather
+//! than hand a fresh JWT to every build.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -8,13 +36,22 @@ use http::header::AUTHORIZATION;
 
 use crate::error::ClientError;
 
-/// Credential carried into the WebSocket upgrade. Clones are cheap (the
-/// secret material is at most a small number of owned strings).
+/// Credential carried into the WebSocket upgrade.
+///
+/// Clones are cheap (the secret material is at most a small number of
+/// owned strings). The server derives `user_id` from the credential at
+/// upgrade time and returns it in the [`xai_tool_protocol::HelloAckMsg`].
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum AuthCredential {
     /// Bearer token attached as the `Authorization: Bearer …` header.
     Bearer { token: String },
-    /// Pre-built header bundle.
+    /// Pre-built header bundle. Used when the auth flow lives outside
+    /// the SDK (e.g. an upstream proxy that already produced signed
+    /// identity headers). Header order is canonicalised for stable
+    /// hashing via [`BTreeMap`]; names are lowercased and validated
+    /// as `HeaderName` at construction time so an invalid name
+    /// surfaces as [`ClientError::InvalidConfig`] instead of being
+    /// silently dropped at upgrade time.
     Headers { headers: BTreeMap<String, String> },
 }
 
@@ -62,7 +99,8 @@ impl AuthCredential {
                 fingerprint: format!("bearer:{token}"),
             },
             Self::Headers { headers } => {
-                // Concatenate canonicalised name=value pairs so the fingerprint is order-independent.
+                // Concatenate canonicalised name=value pairs so the
+                // fingerprint is order-independent.
                 let mut joined = String::with_capacity(headers.len() * 32);
                 for (name, value) in headers {
                     joined.push_str(name);
@@ -113,8 +151,9 @@ impl fmt::Debug for AuthCredential {
     }
 }
 
-/// Stable hashable projection of an [`AuthCredential`] used as the pool dedup
-/// key alongside the connect URL.
+/// Stable hashable projection of an [`AuthCredential`] used as the
+/// pool dedup key alongside the connect URL. Two connections with the
+/// same token fingerprint will get the same server-assigned `user_id`.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PrincipalKey {
     fingerprint: String,
@@ -136,6 +175,12 @@ impl fmt::Debug for PrincipalKey {
 }
 
 /// Owner identity surfaced by an [`AuthProvider`] alongside its credential.
+///
+/// Mirrors the OAuth principal fields the provider parsed from its auth source.
+/// It is kept separate from [`AuthCredential`] on purpose: identity must NOT
+/// participate in pool-dedup hashing (that keys only on the secret), and the
+/// credential's `Eq`/`Hash` derives must stay token-only. Consumers (e.g. the
+/// workspace) map this onto their own identity record.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AuthIdentity {
     /// Stable user identifier (owner of the bearer token).
@@ -148,17 +193,28 @@ pub struct AuthIdentity {
 
 /// Credential provider called on every connect/reconnect.
 pub trait AuthProvider: Send + Sync + std::fmt::Debug {
-    /// The credential to present now.
+    /// The credential to present now. Must return promptly, or at least in
+    /// bounded time: the SDK also calls it from the blocking pool once per
+    /// connected phase and then periodically, and cannot cancel a call in
+    /// flight.
     fn current(&self) -> AuthCredential;
 
     /// Stable pool-dedup key, decoupled from the per-connect credential.
-    /// Defaults to the current credential's key (existing behavior).
+    ///
+    /// Defaults to the current credential's key (existing behavior). A provider
+    /// that re-mints a rotating secret on every [`Self::current`] call (e.g. a
+    /// refresh-before-use bearer) MUST override this to key only on stable
+    /// identity, otherwise each rotation fragments the connection pool.
     fn principal_key(&self) -> PrincipalKey {
         self.current().principal_key()
     }
 
-    /// Owner identity behind the credential, when the provider can surface
-    /// it.
+    /// Owner identity behind the credential, when the provider can surface it.
+    ///
+    /// Defaults to `None` for providers that only carry a bearer token (e.g. a
+    /// bare [`AuthCredential`]). Providers that parse OAuth principal fields
+    /// (e.g. OIDC) override this so downstream consumers can attribute
+    /// requests without a second auth-source read.
     fn identity(&self) -> Option<AuthIdentity> {
         None
     }

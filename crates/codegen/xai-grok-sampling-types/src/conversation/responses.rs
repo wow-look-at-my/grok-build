@@ -34,8 +34,7 @@ pub fn response_to_conversation_items(response: rs::Response) -> Vec<Conversatio
                 }
             }
             rs::OutputItem::FunctionCall(fc) => {
-                // Tied to the assistant turn: a ToolResult must follow each
-                // in conversation order, so they are not siblings
+                // Tied to the assistant turn: a ToolResult must follow each one in conversation order, so they are not siblings
                 tool_calls.push(ToolCall {
                     id: Arc::<str>::from(fc.call_id),
                     name: fc.name,
@@ -163,7 +162,8 @@ impl From<&ConversationRequest> for rs::CreateResponse {
 
 /// Reasoning items stay top-level siblings rather than folding into the assistant, so the input replays the model's original order.
 pub(super) fn build_responses_input(req: &ConversationRequest) -> rs::InputParam {
-    // A model that returns `encrypted_content` signs.
+    // A model that returns `encrypted_content` signs. Nothing else on this
+    // backend says so, so the conversation's own evidence is the whole plan.
     let plan = ThinkingReplayPlan::new(req, false);
     let mut left_behind = 0usize;
     let items: Vec<rs::InputItem> = req
@@ -200,7 +200,9 @@ pub(super) fn build_responses_input(req: &ConversationRequest) -> rs::InputParam
     rs::InputParam::Items(items)
 }
 
-/// Inject the `type: "reasoning_text"` discriminator the API requires. Delete this once upstream grows the field.
+/// Inject the `type: "reasoning_text"` discriminator the API requires.
+/// `async-openai`'s `ReasoningTextContent` has no `type` field, so it serializes to `{"text": ...}` and the API answers 400.
+/// Delete this once upstream grows the field.
 pub fn patch_reasoning_text_types(body: &mut serde_json::Value) {
     let Some(input) = body.get_mut("input").and_then(|v| v.as_array_mut()) else {
         return;

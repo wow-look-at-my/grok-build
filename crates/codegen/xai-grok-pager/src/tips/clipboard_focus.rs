@@ -1,4 +1,17 @@
-//! Clipboard-image tip trigger: while the terminal is focused and the active agent is image-eligible.
+//! Clipboard-image tip trigger: while the terminal is focused and the active agent is image-eligible, hint that ctrl+v pastes an image.
+//! The hint covers an image already sitting on the pasteboard, without waiting for a focus switch.
+//!
+//! Trigger model: opportunistic, focus-scoped polling.
+//! The caller drives [`ClipboardFocusTipState::poll`] only from event-loop iterations that already run for another reason.
+//! Those are input, FocusGained, resize, or an animation tick.
+//! Nothing schedules a wakeup and the tip never forces animation, so an idle/hibernating/unfocused app polls zero times.
+//! Each in-window poll is throttled to one cheap `changeCount` read per [`POLL_INTERVAL`].
+//! The heavier type classification runs ONLY on a changeCount delta.
+//! Frequency is further capped by a fire cooldown plus a changeCount dedup (the same copied content never re-fires), not a seen-count.
+//! The tip is contextual and recurring by design.
+//!
+//! The state machine takes the clock and BOTH probe steps as inputs.
+//! Every transition, including "classify skips an unchanged changeCount", is unit-testable with a fake clock and call-counting probes.
 
 use std::time::{Duration, Instant};
 
@@ -13,13 +26,16 @@ use crate::theme::Theme;
 /// Ephemeral-tip dedup key for the clipboard-image hint.
 pub const CLIPBOARD_IMAGE_TIP_KEY: &str = "clipboard_image_tip";
 
-/// Throttle for the opportunistic pasteboard poll: at most one `changeCount` read per this interval, even when the event loop iterates.
+/// Throttle for the opportunistic pasteboard poll: at most one `changeCount` read per this interval, even when the event loop iterates at ~30fps.
+/// The poll runs only on existing loop iterations (it never schedules a tick), so this only caps how often one touches the pasteboard.
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Minimum spacing between fires, so copy-heavy workflows aren't nagged on every new image.
 const FIRE_COOLDOWN: Duration = Duration::from_secs(30);
 
 /// Paste chord for the tip copy: always `ctrl+v`.
+/// Most macOS terminal emulators capture Cmd by default and don't forward Cmd+V to a raw-mode TUI, so Ctrl+V is the chord actually delivered.
+/// Derived from the real binding (not a literal), Ctrl+V being one of the two chords [`crate::input::key::is_paste_key`] accepts, so it can't drift.
 fn paste_label() -> String {
     KeyShortcut::new(KeyCode::Char('v'), KeyModifiers::CONTROL)
         .display()
@@ -51,11 +67,14 @@ pub struct CheckOutcome {
     /// Pasteboard change count at probe time (`None` when unavailable).
     pub change_count: Option<u64>,
     /// Whether a *pasteable* image was advertised: raster types with no file-URL types alongside.
+    /// File-manager copies (Finder) put a file-icon raster on the board next to the file URLs, but ctrl+v routes those through path handling.
+    /// So they must not fire a tip promising an image paste (see `clipboard_image_snapshot`).
     pub has_image: bool,
 }
 
-/// The `classify` step: the heavier native probe in one pasteboard pass, the
-/// changeCount plus the advertised type list (no bytes, no subprocess).
+/// The `classify` step: the heavier native probe in one pasteboard pass, the changeCount plus the advertised type
+/// list (no bytes, no subprocess). The throttled poll reaches here ONLY on a changeCount delta. the cheap
+/// changeCount-only read gates it.
 pub fn run_clipboard_check() -> CheckOutcome {
     let (change_count, has_image) = crate::clipboard::clipboard_image_snapshot();
     CheckOutcome {
@@ -64,8 +83,8 @@ pub fn run_clipboard_check() -> CheckOutcome {
     }
 }
 
-/// Pure state machine for the focus-scoped, opportunistically-polled
-/// clipboard-image tip.
+/// Pure state machine for the focus-scoped, opportunistically-polled clipboard-image tip. It never schedules
+/// itself: the caller drives [`Self::poll`] from event-loop iterations already running for some other reason.
 #[derive(Debug, Default)]
 pub struct ClipboardFocusTipState {
     /// When the last poll actually read the pasteboard (throttle anchor).
@@ -79,14 +98,16 @@ pub struct ClipboardFocusTipState {
 }
 
 impl ClipboardFocusTipState {
-    /// Throttle gate: at most one poll per [`POLL_INTERVAL`], so a ~30fps
-    /// loop still reads the pasteboard at most ~once a second.
+    /// Throttle gate: at most one poll per [`POLL_INTERVAL`], so a ~30fps loop still reads the pasteboard at most ~once a second.
+    /// Pure; does not mutate.
     pub fn due_to_poll(&self, now: Instant) -> bool {
         self.last_poll_at
             .is_none_or(|at| now.duration_since(at) >= POLL_INTERVAL)
     }
 
     /// Whether `change_count` differs from the one the last cheap read saw.
+    /// That is the signal the pasteboard changed and a classification is worth paying for.
+    /// A `None` (changeCount unavailable, e.g. AppKit failed to load) is treated as "nothing new" so the cheap path never escalates blindly.
     fn is_new_change_count(&self, change_count: Option<u64>) -> bool {
         change_count.is_some() && change_count != self.last_seen_change_count
     }
@@ -109,7 +130,8 @@ impl ClipboardFocusTipState {
             return None;
         }
         let outcome = classify();
-        // Commit the classify-dedup now only for non-image content (nothing to show, so it's fully handled) A fireable image waits for `note_fired`.
+        // Commit the classify-dedup now only for non-image content (nothing to show, so it's fully handled)
+        // A fireable image waits for `note_fired` so a refused show stays retryable
         if !outcome.has_image {
             self.last_seen_change_count = change_count;
         }
@@ -125,9 +147,9 @@ impl ClipboardFocusTipState {
                 || outcome.change_count != self.last_fired_change_count)
     }
 
-    /// Commit a successful (landed) show: anchors the cooldown, records the
-    /// fired changeCount, and commits the classify-dedup too. So the same
-    /// image isn't re-scanned once the cooldown elapses.
+    /// Commit a successful (landed) show: anchors the cooldown, records the fired changeCount, and commits the
+    /// classify-dedup too. So the same image isn't re-scanned once the cooldown elapses. A refused show (which never
+    /// calls this) leaves `last_seen` stale and stays retryable.
     pub fn note_fired(&mut self, outcome: &CheckOutcome, now: Instant) {
         self.last_fired_at = Some(now);
         if outcome.change_count.is_some() {
@@ -137,6 +159,7 @@ impl ClipboardFocusTipState {
     }
 
     /// Whether the fire cooldown is still in effect.
+    /// Part of the caller's in-window gate, so during the cooldown the poll touches the pasteboard zero times.
     pub fn in_cooldown(&self, now: Instant) -> bool {
         self.last_fired_at
             .is_some_and(|at| now.duration_since(at) < FIRE_COOLDOWN)
@@ -171,7 +194,7 @@ mod tests {
 
     #[test]
     fn paste_chord_is_ctrl_v() {
-        // Always ctrl+v (the chord terminals deliver), derived from the real binding so the label can't drift
+        // Always ctrl+v (the chord terminals actually deliver), derived from the real binding so the label can't drift
         assert_eq!(paste_label(), "ctrl+v");
         assert!(crate::input::key::is_paste_key(
             &crossterm::event::KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)
@@ -230,6 +253,7 @@ mod tests {
         let t0 = Instant::now();
         let classify_calls = Cell::new(0u32);
 
+        // First poll: changeCount 5 is new, so classify runs once
         let first = state.poll(
             t0,
             || Some(5),
@@ -278,7 +302,8 @@ mod tests {
         assert!(state.should_fire(&got, t0));
         state.note_fired(&got, t0);
 
-        // Same content, past the cooldown, changeCount unchanged: the cheap path short-circuits The classify closure panics if reached.
+        // Same content, past the cooldown, changeCount unchanged: the cheap path short-circuits
+        // The classify closure panics if reached, proving the same image never re-classifies or re-fires
         let later = t0 + FIRE_COOLDOWN + Duration::from_secs(1);
         let again = state.poll(
             later,
@@ -308,7 +333,8 @@ mod tests {
         assert_eq!(classify_calls.get(), 1);
         assert!(state.should_fire(&got, t0));
 
-        // Show REFUSED: the caller did NOT call note_fired `poll` must not have advanced `last_seen` for a fireable image.
+        // Show REFUSED: the caller did NOT call note_fired
+        // `poll` must not have advanced `last_seen` for a fireable image, so the same changeCount RE-classifies on the next poll (the retry)
         let t1 = t0 + POLL_INTERVAL;
         let retry = state.poll(
             t1,

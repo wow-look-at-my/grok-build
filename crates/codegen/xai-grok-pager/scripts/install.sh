@@ -1,5 +1,12 @@
 #!/bin/bash
-# Grok CLI installer — https://x.ai/cli/install.sh Auth: ~/.grok/auth.json.
+#
+# Grok CLI installer — https://x.ai/cli/install.sh
+#
+# Auth: ~/.grok/auth.json from `grok login`.
+# Env: GROK_CHANNEL (stable|alpha|enterprise, default: stable), GROK_BIN_DIR
+#
+# Windows: run under Git for Windows / MSYS2 Bash (same curl | bash flow); WSL
+# uses the Linux binary.
 
 set -e
 
@@ -76,6 +83,7 @@ download_file_parallel() {
     download_file "$url" "$output"
 }
 
+# Return 0 if a HEAD request for the URL gets HTTP 404.
 is_not_found() {
     local url="$1" code
     if [ "$DOWNLOADER" = "curl" ]; then
@@ -91,7 +99,9 @@ fetch_compressed() {
     shift 3
     is_not_found "$url" && return 1
     download_file_parallel "$url" "$tmp" || return 1
-    # pipefail catches a decoder error (corrupt) or the over-cap SIGPIPE so the caller falls back.
+    # pipefail catches a decoder error (corrupt) or the over-cap SIGPIPE so the
+    # caller falls back; head bounds the write so a bomb cannot fill the disk.
+    # A real binary is ~170 MiB, well under the cap.
     local max=$((512 * 1024 * 1024))
     if (set -o pipefail; "$@" <"$tmp" 2>/dev/null | head -c "$max" >"$out"); then
         [ -s "$out" ] && return 0
@@ -156,8 +166,11 @@ case "$(uname -m)" in
     *)                    echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
-# Rosetta lies: in a translated shell on Apple Silicon, uname -m reports x86_64. Install the native arm64 build (faster startup, no translation). sysctl lives in /usr/sbin, which pruned PATHs often drop — resolve the binary first (PATH, then
-# absolute) so the probe cannot quietly keep x86_64.
+# Rosetta lies: in a translated shell on Apple Silicon, uname -m reports
+# x86_64. Install the native arm64 build (faster startup, no translation).
+# sysctl lives in /usr/sbin, which pruned PATHs often drop — resolve the
+# binary first (PATH, then absolute) so the probe cannot quietly keep
+# x86_64. A probe that runs and finds no key is a genuine Intel Mac.
 if [ "$os" = "macos" ] && [ "$arch" = "x86_64" ]; then
     sysctl_bin="$(command -v sysctl || echo /usr/sbin/sysctl)"
     if [ "$("$sysctl_bin" -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
@@ -182,7 +195,10 @@ case "$CHANNEL" in
         ;;
 esac
 
-# Pick a working BASE_URL: try Cloudflare-fronted x.ai first, fall back to direct GCS if it's unreachable.
+# Pick a working BASE_URL: try Cloudflare-fronted x.ai first, fall back to
+# direct GCS if it's unreachable. The probe doubles as the channel-pointer
+# fetch when no explicit TARGET was passed, so the happy path costs zero
+# extra HTTP requests.
 if [ -z "$TARGET" ]; then echo "Fetching latest ${CHANNEL} version..." >&2; fi
 probe_result=$(download_file "${BASE_URL_PRIMARY}/${CHANNEL}" 2>/dev/null) || true
 if [ -n "$probe_result" ]; then
@@ -256,7 +272,7 @@ if [ "$os" = "windows" ]; then
         if ! cp -f "$binary_path" "$BIN_DIR/$bin_name" 2>/dev/null; then
             mv -f "$BIN_DIR/$bin_name" "$BIN_DIR/$bin_name.old" 2>/dev/null || true
             if ! cp -f "$binary_path" "$BIN_DIR/$bin_name" 2>/dev/null; then
-                # Rollback: restore the binary so the install isn't broken.
+                # Rollback: restore the old binary so the install isn't broken.
                 mv -f "$BIN_DIR/$bin_name.old" "$BIN_DIR/$bin_name" 2>/dev/null || true
                 echo "Error: failed to install $bin_name" >&2
                 exit 1
@@ -274,6 +290,7 @@ else
     mv -f "$binary_tmp" "$binary_path"
     # Use relative symlinks when BIN_DIR and DOWNLOAD_DIR share a parent
     # (default layout: ~/.grok/bin and ~/.grok/downloads are siblings).
+    # Relative symlinks survive Docker bind-mounts with a different $HOME.
     if [ "$(dirname "$BIN_DIR")" = "$(dirname "$DOWNLOAD_DIR")" ]; then
         link_target="../$(basename "$DOWNLOAD_DIR")/$(basename "$binary_path")"
     else
@@ -326,7 +343,8 @@ path_has_dir() {
     case ":$PATH:" in *":$1:"*) return 0 ;; *) return 1 ;; esac
 }
 
-# Try to symlink into a directory already on PATH so grok works immediately without restarting the shell.
+# Try to symlink into a directory already on PATH so grok works immediately
+# without restarting the shell. Candidate dirs in preference order.
 SYMLINK_CREATED=""
 if [ "$os" != "windows" ] && ! path_has_dir "$BIN_DIR"; then
     for candidate in "$HOME/.local/bin" "/usr/local/bin"; do

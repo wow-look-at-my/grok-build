@@ -18,6 +18,8 @@ const DEFAULT_NOTIFICATION_INTERVAL_MS: u64 = 100;
 const READ_BUFFER_SIZE: usize = 8192;
 
 /// Upper bound on how long terminal teardown waits for a SIGKILL'd child to be reaped.
+/// `child.wait()` after `start_kill()` normally resolves in milliseconds, but a process stuck in an uninterruptible kernel syscall may never exit.
+/// Teardown runs on the session actor's cancel path, and on the leader every session shares one `LocalSet` thread, so the wait must be bounded. The child is already SIGKILL'd with `KillOnDrop` set, so the OS still tears it down after we stop waiting.
 const KILL_REAP_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn notification_interval() -> Duration {
@@ -47,8 +49,9 @@ pub enum KillOutcome {
     AlreadyExited,
 }
 
-/// Sends ACP session notifications to the connected client. Implementations
-/// must not block for extended periods.
+/// Sends ACP session notifications to the connected client. Implementations must not block for extended periods.
+/// The terminal streaming loop calls [`SessionNotificationSender::session_notification`] inside a `tokio::select!` branch. If the call blocks, the loop stalls and the command timeout cannot fire until the next iteration.
+/// The default Blackbox implementation (`AcpAgentGatewaySender`) uses fire-and-forget delivery to satisfy this contract; see `gateway.rs`.
 #[async_trait::async_trait]
 pub trait SessionNotificationSender: Send + Sync {
     async fn session_notification(
@@ -67,8 +70,9 @@ impl SessionNotificationSender for xai_acp_lib::AcpAgentGatewaySender {
     }
 }
 
-/// A wrapper around a [`SessionNotificationSender`] that respects the
-/// `gateway_enabled` gate.
+/// A wrapper around a [`SessionNotificationSender`] that respects the `gateway_enabled` gate.
+/// When the gate is closed (e.g., for agent-initiated fork sessions before `session/load`), notifications are silently dropped.
+/// This prevents tool/bash output from leaking to the client before replay.
 pub struct GatedNotifier {
     inner: Arc<dyn SessionNotificationSender>,
     gateway_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -157,6 +161,7 @@ async fn deregister_entry(session_id: &str, terminal_id: &str) -> Option<Arc<Ter
 /// Backgrounded terminals (those the user explicitly asked to keep running) are left untouched.
 /// Draining under one registry lock avoids the race where a new terminal registers between listing IDs and killing them one by one.
 pub async fn kill_and_release_all_for_session(session_id: &str) {
+    // Phase 1: Remove all entries for this session under a short registry lock.
     // We don't check `backgrounded` here: holding the registry and output_state locks together could deadlock with the streaming loop
     let candidates: Vec<(TerminalKey, Arc<TerminalEntry>)> = {
         let mut reg = registry().lock().await;
@@ -171,6 +176,8 @@ pub async fn kill_and_release_all_for_session(session_id: &str) {
     };
     // Registry lock released here.
 
+    // Phase 2: Partition into backgrounded (kept alive) and foreground (killed)
+    // Deliver SIGKILL to each foreground child *synchronously* so teardown begins immediately, but do NOT wait for it to exit here
     let mut reinsert = Vec::new();
     let mut to_reap = Vec::new();
     for (key, entry) in candidates {
@@ -188,6 +195,7 @@ pub async fn kill_and_release_all_for_session(session_id: &str) {
         }
     }
 
+    // Phase 3: Re-insert backgrounded entries that should stay alive.
     if !reinsert.is_empty() {
         let mut reg = registry().lock().await;
         for (key, entry) in reinsert {
@@ -195,6 +203,9 @@ pub async fn kill_and_release_all_for_session(session_id: &str) {
         }
     }
 
+    // Phase 4: Reap the killed children OFF this task. On the leader every session shares one `LocalSet` thread, so waiting here would park the session until each child is reaped
+    // Worse, `Shutdown` / `IsBusy` queue behind the in-flight cancel, so the leader cannot evict a session stuck on a slow-dying child
+    // The children are already SIGKILL'd with `KillOnDrop` set, so they are torn down even if this reaper is cancelled The bounded waits (`KILL_REAP_TIMEOUT`) run concurrently, so one wedged child can't delay the others
     if !to_reap.is_empty() {
         tokio::task::spawn_local(async move {
             future::join_all(to_reap.into_iter().map(|entry| async move {
@@ -276,8 +287,8 @@ pub async fn get_terminal_output(session_id: &str, terminal_id: &str) -> Option<
 pub async fn wait_for_terminal_exit(session_id: &str, terminal_id: &str) -> Option<ExitStatus> {
     let entry = get_entry(session_id, terminal_id).await?;
 
-    // Notify::notified() captures notifications that occur either before or
-    // after the call Checking exit_status first, then awaiting, is safe.
+    // Notify::notified() captures notifications that occur either before or after the call
+    // Checking exit_status first, then awaiting, is safe: we won't miss the notification
     {
         let state = entry.output_state.lock().await;
         if let Some(status) = &state.exit_status {
@@ -494,7 +505,8 @@ impl StreamingLocalTerminalRunner {
         let mut last_sent_len = 0usize;
         let mut truncated = false;
         let mut ticker = tokio::time::interval(notification_interval());
-        // Compute an absolute deadline so the timeout fires as a competing branch inside `tokio::select!` even.
+        // Compute an absolute deadline so the timeout fires as a competing branch inside `tokio::select!` even when another branch is blocked
+        // The sleep is pinned once so the timer entry is not re-created on every loop iteration
         let sleep = tokio::time::sleep(request.timeout);
         tokio::pin!(sleep);
 
@@ -628,7 +640,8 @@ impl StreamingLocalTerminalRunner {
                     }
 
                     if output_buf.len() > last_sent_len {
-                        // NOTE: This `send_update` is safe because `session_notification` is fire-and-forget (see gateway.rs) If it ever becomes blocking again.
+                        // NOTE: This `send_update` is safe because `session_notification` is fire-and-forget (see gateway.rs)
+                        // If it ever becomes blocking again, the deadline branch above won't save us once the ticker arm is selected
                         self.send_update(
                             &request.tool_call_id,
                             &request.command,
@@ -993,6 +1006,7 @@ async fn wait_background_completion(
             .await;
 
             // For backgrounded commands, always mark as Completed regardless of exit code.
+            // The user chose to background this command and continue, so we shouldn't show it as "failed" even if it exits non-zero
             let final_status = acp::ToolCallStatus::Completed;
 
             let bash_output = BashOutput {
@@ -1290,7 +1304,7 @@ mod tests {
             .run_until(async {
                 let session_id = format!("kill-all-{}", std::process::id());
 
-                // Create terminals: one normal, one we'll background.
+                // Create two terminals: one normal, one we'll background.
                 let normal_id = create_terminal(
                     &session_id,
                     "sleep",

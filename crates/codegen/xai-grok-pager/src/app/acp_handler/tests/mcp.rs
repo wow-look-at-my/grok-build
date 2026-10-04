@@ -19,6 +19,7 @@
         use crate::views::mcps_modal::McpServerDisplayStatus;
         use xai_grok_shell::extensions::mcp::McpServerStatus;
 
+        // Agent 0 owns sess-owner; Agent 1 is foregrounded.
         let mut app = make_app_two_agents();
         seed_owner_agent_with_open_modal(&mut app);
         // Give the active agent its own modal so we can prove it's untouched.
@@ -132,6 +133,9 @@
 
     #[test]
     fn mcp_full_lifecycle_creates_then_clears() {
+        // Full N-server lifecycle:
+        //   init_progress(0/3) → init_progress(2/3)
+        //   → init_progress(3/3) → mcp_initialized → None
         let mut app = make_app_with_agent("sess-1");
         assert!(test_agent(&app, AgentId(0)).mcp_init_progress.is_none());
 
@@ -160,14 +164,18 @@
 
     #[test]
     fn mcp_zero_server_lifecycle() {
+        // 0-server lifecycle (the bug scenario):
+        //   init_progress(0/0) → mcp_initialized → None
+        // Previously mcp_initialized was never sent for 0 servers, leaving a stuck progress indicator
         let mut app = make_app_with_agent("sess-1");
         assert!(test_agent(&app, AgentId(0)).mcp_init_progress.is_none());
 
+        // The shell sends 0/0 for the 0-server case
         handle_ext_notification(&make_mcp_init_progress_notif(0, 0), &mut app);
         let p = test_agent(&app, AgentId(0)).mcp_init_progress.as_ref().unwrap();
         assert_eq!((p.total, p.connected), (0, 0));
 
-        // The shell now sends mcp_initialized even with multiple servers
+        // The shell now sends mcp_initialized even with 0 servers
         handle_ext_notification(&make_mcp_initialized_notif("sess-1"), &mut app);
         assert!(
             test_agent(&app, AgentId(0)).mcp_init_progress.is_none(),
@@ -177,7 +185,8 @@
 
     #[test]
     fn mcp_init_progress_routes_to_background_session() {
-        // init_progress carrying a background session's sessionId must update *that* agent's indicator.
+        // init_progress carrying a background session's sessionId must update *that* agent's indicator, not the foregrounded one
+        // It must not force a redraw (the background spinner isn't visible)
         let mut app = make_app_with_agent("sess-A");
         app.agents.insert(AgentId(1), make_agent(Some("sess-B")));
 
@@ -198,7 +207,8 @@
 
     #[test]
     fn mcp_initialized_routes_to_background_session() {
-        // mcp_initialized for a background session must clear *that* agent's indicator.
+        // mcp_initialized for a background session must clear *that* agent's indicator while leaving the foreground agent's intact
+        // Previously the clear was applied to whichever agent was active, so a background agent's spinner could stick forever
         let mut app = make_app_with_agent("sess-A");
         app.agents.insert(AgentId(1), make_agent(Some("sess-B")));
         for id in [AgentId(0), AgentId(1)] {
@@ -246,7 +256,9 @@
 
     #[test]
     fn mcp_lifecycle_notif_for_subagent_session_is_dropped() {
-        // A subagent runs its own MCP init.
+        // A subagent runs its own MCP init, emitting init_progress and mcp_initialized under the *child* session id
+        // Those must NOT write to or clear the parent agent's mcp_init_progress
+        // The indicator belongs to the root agent and has no subagent slot, so a subagent's init must not clobber the parent's spinner
         let mut app = make_app_with_agent("sess-A");
         app.agents.get_mut(&AgentId(0)).unwrap().mcp_init_progress =
             Some(crate::app::agent_view::McpInitProgress {
@@ -292,7 +304,8 @@
     fn server_status_handler_noop_when_modal_closed_background() {
         use xai_grok_shell::extensions::mcp::McpServerStatus;
         let mut app = make_app_two_agents();
-        // The owner is background and has NO modal open server_status must be a silent no-op.
+        // The owner is background and has NO modal open
+        // server_status must be a silent no-op (no Effect scheduling, no redraw)
         let notif = make_server_status_notif("sess-owner", "alpha", McpServerStatus::Ready, None);
         let redraw = handle_mcp_server_status(&notif, &mut app);
         assert!(!redraw, "closed-modal cheap path must not request a redraw");
@@ -316,6 +329,8 @@
     fn server_status_handler_noop_when_modal_closed_foreground() {
         use xai_grok_shell::extensions::mcp::McpServerStatus;
         let mut app = make_app_two_agents();
+        // The foreground is agent 1 (sess-active)
+        // Send a push targeting the foregrounded agent, with no modal open
         let notif = make_server_status_notif("sess-active", "alpha", McpServerStatus::Ready, None);
         let redraw = handle_mcp_server_status(&notif, &mut app);
         assert!(
@@ -361,6 +376,7 @@
             "name": "alpha",
             "source": "local",
             "reason": "initialized",
+            // Deliberately no `status`
         });
         let raw = serde_json::value::to_raw_value(&payload).unwrap();
         let notif = acp::ExtNotification::new("x.ai/mcp/server_status", raw.into());
@@ -397,7 +413,8 @@
         let mut app = make_app_two_agents();
         seed_owner_agent_with_open_modal(&mut app);
 
-        // tools is an arbitrary non-array shape; a future shell might emit something like `{ added: [], removed: [] }` It must NOT take down the status.
+        // tools is an arbitrary non-array shape; a future shell might emit something like `{ added: [], removed: [] }`
+        // It must NOT take down the status update
         let bad_tools = Some(serde_json::json!({"added": [], "removed": []}));
         let notif =
             make_server_status_notif("sess-owner", "alpha", McpServerStatus::Ready, bad_tools);
@@ -516,6 +533,7 @@
     #[test]
     fn servers_updated_skips_agents_with_closed_modal() {
         let mut app = make_app_two_agents();
+        // Only agent 1 (foregrounded) has a modal.
         {
             let active = app.agents.get_mut(&AgentId(1)).unwrap();
             active.extensions_modal = Some(make_mcps_modal_with_servers(Vec::new()));
@@ -547,6 +565,8 @@
         let _ = handle_mcp_servers_updated(&notif, &mut app);
         assert_eq!(app.pending_effects.len(), 1);
 
+        // Second push: the owner is now coalesced (agent 0 has a pending fetch)
+        // We add a modal to agent 1; that agent's push must NOT be dropped just because agent 0 has a pending fetch
         {
             let active = app.agents.get_mut(&AgentId(1)).unwrap();
             active.extensions_modal = Some(make_mcps_modal_with_servers(Vec::new()));
@@ -575,6 +595,8 @@
     fn mcp_initialized_clears_init_progress_on_owner() {
         use crate::app::agent_view::McpInitProgress;
         let mut app = make_app_two_agents();
+        // Seed init progress on the OWNER (agent 0) and on the active view (agent 1)
+        // The push must clear only the owner's overlay
         {
             let owner = app.agents.get_mut(&AgentId(0)).unwrap();
             owner.mcp_init_progress = Some(McpInitProgress {
@@ -615,7 +637,8 @@
     fn tools_changed_post_h2_routes_to_owning_agent_not_active_view() {
         let mut app = make_app_two_agents();
         seed_owner_agent_with_open_modal(&mut app);
-        // The active agent has NO modal.
+        // The active agent has NO modal, so a handler that routed by active view would do nothing
+        // Routing by sessionId must schedule a fetch against the OWNER agent (agent 0)
         let notif = make_tools_changed_notif_post_h2("sess-owner");
         let _ = handle_mcp_tools_changed(&notif, &mut app);
 
@@ -642,6 +665,7 @@
     #[test]
     fn tools_changed_pre_h2_falls_back_to_active_view() {
         let mut app = make_app_two_agents();
+        // The active agent (agent 1) gets a modal; the owner (agent 0) does not
         {
             let active = app.agents.get_mut(&AgentId(1)).unwrap();
             active.extensions_modal = Some(make_mcps_modal_with_servers(Vec::new()));

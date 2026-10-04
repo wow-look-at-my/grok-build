@@ -57,7 +57,8 @@ impl Harness {
         let (gateway_tx, gateway) = tokio::sync::mpsc::unbounded_channel();
         let (persistence_tx, mut persistence) =
             tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-        // Drop each message rather than hold the queue: that drops any ack channel inside it A writer waiting on one then fails fast instead.
+        // Drop each message rather than hold the queue: that drops any ack channel inside it
+        // A writer waiting on one then fails fast instead of waiting forever
         tokio::task::spawn_local(async move { while persistence.recv().await.is_some() {} });
         let (mut actor, events) =
             create_test_actor_ex(0, 256_000, 85, gateway_tx, persistence_tx).await;
@@ -843,6 +844,7 @@ async fn dropping_the_queue_leaves_nothing_reportable() {
 async fn a_long_assistant_message_is_clipped() {
     run(async {
         let over = xai_grok_hooks::event::MAX_ASSISTANT_MESSAGE_CHARS + 500;
+        // Four bytes a char, the UTF-8 worst case the char budget is derived from.
         let long = || ConversationItem::assistant("\u{1f642}".repeat(over));
         let assert_clipped = |text: &str| {
             assert!(

@@ -3,6 +3,7 @@
 use super::*;
 
 /// Max preview length stored per timeline entry.
+/// Render paths truncate further to the available width; this only bounds the snapshot.
 const PREVIEW_MAX_CHARS: usize = 120;
 
 /// One turn in the conversation timeline.
@@ -11,6 +12,7 @@ pub struct TimelineEntry {
     /// Turn's display ordinal (snapshot-only; not used to act on the transcript).
     pub turn_idx: usize,
     /// Stable id of the turn's `UserPrompt` entry: the jump/preview target.
+    /// Resolved to an index only at the [`ScrollbackState`] boundary, so a removal (`shift_remove`) can't make a stale index target another block.
     pub prompt_entry_id: EntryId,
     /// First non-empty line of the prompt text, capped at [`PREVIEW_MAX_CHARS`] chars.
     pub preview: String,
@@ -67,9 +69,9 @@ impl ScrollbackState {
             })
     }
 
-    /// The focused turn: the last turn whose prompt is at/above the viewport
-    /// top, or the first turn while pre-turn content owns the top. `None`
-    /// only when there are no turns or no layout.
+    /// The focused turn: the last turn whose prompt is at/above the viewport top, or the first turn while pre-turn content owns the top.
+    /// `None` only when there are no turns or no layout.
+    /// Trailing turns short enough to never own the top row never become active; they're fully on screen when it matters.
     pub fn active_turn_for_viewport(&self) -> Option<usize> {
         if self.view_mode == ViewMode::SingleTurn {
             return self.current_turn;
@@ -80,9 +82,9 @@ impl ScrollbackState {
         Some(self.prompts_above_top(false)?.saturating_sub(1))
     }
 
-    /// The nearest turn an upward scroll can land on: the last turn whose
-    /// prompt is STRICTLY above the viewport top, `None` when nothing is
-    /// above.
+    /// The nearest turn an upward scroll can land on: the last turn whose prompt is STRICTLY above the viewport top, `None` when nothing is above.
+    /// The ▲ chevron steps here rather than `active - 1`: from mid-turn it first aligns the current turn's own prompt, like the h key.
+    /// It can never target a trailing turn that no scroll reaches (the stuck-▲ bug).
     pub fn turn_above_viewport_top(&self) -> Option<usize> {
         if self.view_mode == ViewMode::SingleTurn {
             return self.current_turn?.checked_sub(1);
@@ -132,11 +134,11 @@ mod tests {
     #[test]
     fn timeline_entries_one_per_turn_in_order() {
         let mut state = ScrollbackState::new();
-        state.push_block(stub_block("session banner"));
-        state.push_block(user_block("first question"));
-        state.push_block(agent_block("first answer"));
-        state.push_block(user_block("second question"));
-        state.push_block(tool_block("ls"));
+        state.push_block(stub_block("session banner")); // 0: pre-turn
+        state.push_block(user_block("first question")); // 1
+        state.push_block(agent_block("first answer")); // 2
+        state.push_block(user_block("second question")); // 3
+        state.push_block(tool_block("ls")); // 4
         state.prepare_layout(80, 10);
 
         let entries = state.timeline_entries();
@@ -172,12 +174,12 @@ mod tests {
     #[test]
     fn active_turn_tracks_viewport_top() {
         let mut state = ScrollbackState::new();
-        state.push_block(user_block("Q1"));
-        state.push_block(tall_agent_block());
-        state.push_block(user_block("Q2"));
-        state.push_block(tall_agent_block());
-        state.push_block(user_block("Q3"));
-        state.push_block(tall_agent_block());
+        state.push_block(user_block("Q1")); // 0
+        state.push_block(tall_agent_block()); // 1
+        state.push_block(user_block("Q2")); // 2
+        state.push_block(tall_agent_block()); // 3
+        state.push_block(user_block("Q3")); // 4
+        state.push_block(tall_agent_block()); // 5
         state.prepare_layout(80, 6);
 
         state.goto_top();
@@ -192,13 +194,14 @@ mod tests {
 
     #[test]
     fn active_turn_stays_top_anchored_at_the_bottom() {
-        // A screenful of short trailing turns: even at the bottom the active turn is the one owning the top row (the web-timeline rule).
+        // A screenful of short trailing turns: even at the bottom the active turn is the one owning the top row (the web-timeline rule)
+        // This replaced a clamp to the newest turn, whose highlight leapt at one step off the bottom and whose ▲ chevron stuck
         let mut state = clustered_trailing_turns();
         state.goto_bottom();
         let at_bottom = state.active_turn_for_viewport().expect("active at bottom");
         assert!(at_bottom < 6, "top-anchored, not the newest: {at_bottom}");
 
-        // Nudging off the bottom moves the highlight at most one boundary.
+        // Nudging off the bottom moves the highlight at most one boundary (the old clamp leapt from the newest turn to the top-anchored one)
         state.scroll_up(1);
         let nudged = state.active_turn_for_viewport().expect("still in a turn");
         assert!(
@@ -231,7 +234,7 @@ mod tests {
         Some(target)
     }
 
-    /// One tall response, then short trailing turns that cluster in the last 80x12 screenful.
+    /// One tall response, then six short trailing turns that cluster in the last 80x12 screenful.
     fn clustered_trailing_turns() -> ScrollbackState {
         let mut state = ScrollbackState::new();
         state.push_block(user_block("Q1"));
@@ -246,11 +249,11 @@ mod tests {
 
     #[test]
     fn chevrons_walk_the_conversation_end_to_end_without_sticking() {
-        // The stuck-▲ shape: one tall response, then short turns that all cluster inside the final screenful
+        // The stuck-▲ shape: one tall response, then six short turns that all cluster inside the final screenful
         let mut state = clustered_trailing_turns();
         state.goto_bottom();
 
-        // ▲ to the top: every click moves the viewport up, one boundary per click once on a prompt row, no sticking
+        // ▲ to the very top: every click moves the viewport up, one boundary per click once on a prompt row, no sticking
         let mut up_visits = Vec::new();
         while up_visits.len() < 16 {
             let before = state.scroll_offset();
@@ -297,7 +300,8 @@ mod tests {
 
     #[test]
     fn down_chevron_enters_trailing_turns_at_the_bottom() {
-        // Reported bug: short turns cluster in the final screenful and ▼ sat dim at the bottom.
+        // Reported bug: short turns cluster in the final screenful and ▼ sat dim at the bottom, even though clicking their ticks jumped to them
+        // ▼ now targets the next turn, the same turn a tick click resolves to (both go through jump_to_turn)
         let mut state = clustered_trailing_turns();
         state.goto_bottom();
 
@@ -343,7 +347,8 @@ mod tests {
 
     #[test]
     fn chevrons_when_everything_fits_on_one_screen() {
-        // Fits with room to spare: the first turn owns the top ▲ dims (nothing above), but ▼ still enters the next turn.
+        // Fits with room to spare: the first turn owns the top
+        // ▲ dims (nothing above), but ▼ still enters the next turn, anchoring it to the top like clicking its tick, rather than dimming
         let mut state = ScrollbackState::new();
         state.push_block(user_block("Q1"));
         state.push_block(agent_block("a1"));

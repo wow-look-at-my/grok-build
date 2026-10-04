@@ -125,7 +125,8 @@ struct RestartContext {
     workspace_root: PathBuf,
     diagnostics_notify: DiagnosticsNotify,
     tracked_docs: Vec<(String, String)>,
-    /// Snapshotted under the same manager lock as the rest of the context.
+    /// Snapshotted under the same manager lock as the rest of the context so
+    /// each restart enrolls without an extra lock roundtrip.
     process_scope: Option<ProcessScope>,
 }
 
@@ -212,16 +213,17 @@ async fn restart_lsp_with_retries(
         {
             Ok(mut restarted_client) => {
                 if !restarted_client.enroll(process_scope.as_ref()) {
-                    // Closed scope == session teardown killed the child at registration.
+                    // Closed scope == session teardown killed the child at
+                    // registration; drop the client rather than install a dead
+                    // server and churn through further respawns.
                     tracing::info!(server = %server_name, "session scope closed, dropping restarted server");
                     return RestartOutcome::Shutdown;
                 }
                 let replayed_doc_count = tracked_docs.len();
                 let replayed_uris = replay_tracked_documents(&mut restarted_client, &tracked_docs);
-                // Re-check after the replay window: a `kill_all` between
-                // enroll and install has already SIGKILLed the enrolled
-                // child, and `install` only checks `shutting_down` (never set
-                // by `kill_all`).
+                // Re-check after the replay window: a `kill_all` between enroll and install has
+                // already SIGKILLed the enrolled child, and `install` only checks `shutting_down`
+                // (never set by `kill_all`) — installing here would mark a dead server ready.
                 if process_scope.as_ref().is_some_and(|s| s.is_closed()) {
                     tracing::info!(server = %server_name, "session scope closed during restart, dropping restarted server");
                     return RestartOutcome::Shutdown;
@@ -286,7 +288,8 @@ pub async fn restart_monitor(
     lsp_manager: Weak<tokio::sync::Mutex<LspManager>>,
     server_name: String,
 ) {
-    // Lifetime restart budget for this server monitor.
+    // Lifetime restart budget for this server monitor. Successful restarts
+    // reset backoff but do not reset the attempt counter.
     let mut attempts: u32 = 0;
     let mut backoff = std::time::Duration::from_secs(1);
     const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);

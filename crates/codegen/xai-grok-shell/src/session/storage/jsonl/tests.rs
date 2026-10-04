@@ -877,6 +877,7 @@ async fn test_load_prompts_only_nonexistent_session() {
     let prompts = adapter.load_prompts_only(&info).await.unwrap();
     assert!(prompts.is_empty());
 }
+/// A user prompt streamed as two consecutive `UserMessageChunk` updates must be merged into a single prompt string, not split into two.
 #[tokio::test]
 async fn test_load_prompts_only_merges_multi_chunk_prompt() {
     let temp_dir = TempDir::new().unwrap();
@@ -1974,11 +1975,13 @@ fn read_chat_history_handles_hybrid_legacy_and_post_pr_lines() {
     assert_eq!(
             kinds,
             vec![
+                // Turn 1 (legacy lifted)
                 "system",
                 "user",
                 "backend_tool_call", // ws_legacy_1 (passthrough sibling row)
                 "reasoning",         // reconstructed from assistant.reasoning
                 "assistant",         // legacy assistant with legacy fields stripped
+                // Turn 2 (post-PR passthrough)
                 "user",
                 "reasoning",         // passthrough sibling
                 "backend_tool_call", // passthrough sibling
@@ -2432,7 +2435,8 @@ async fn reasoning_sibling_without_signature_roundtrips_through_jsonl() {
         "thinking text must survive JSONL write + reload; got: {reloaded_thinking:?}"
     );
 
-    // And the reloaded reasoning must resend to a Chat Completions wire as reasoning_content on the follower assistant.
+    // And the reloaded reasoning must resend to a Chat Completions wire as
+    // reasoning_content on the follower assistant (the token-resend path).
     let mut with_followup = items.clone();
     with_followup.push(ConversationItem::user("q2"));
     let msgs = conversation_to_chat_messages(with_followup);

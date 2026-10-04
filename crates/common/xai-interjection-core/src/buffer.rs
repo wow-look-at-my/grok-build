@@ -4,6 +4,7 @@ use crate::events::EventQueue;
 use crate::format::format_interjection;
 
 /// A buffered mid-turn interjection awaiting the next safe drain point.
+/// `Attachment` is host-defined (inline images, asset IDs); core never reads it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingInterjection<Attachment> {
     pub text: String,
@@ -17,7 +18,9 @@ pub struct FormattedInterjection<Attachment> {
     pub attachments: Vec<Attachment>,
 }
 
-/// A queue of pending interjections — an [`EventQueue`] of [`PendingInterjection`].
+/// A queue of pending interjections — just an [`EventQueue`] of
+/// [`PendingInterjection`]. Use [`drain_formatted`] to drain + frame them as
+/// synthetic user messages.
 pub type InterjectionBuffer<Attachment> = EventQueue<PendingInterjection<Attachment>>;
 
 /// Drain `buffer`, framing each entry as a synthetic user message (FIFO, one

@@ -245,7 +245,9 @@ pub fn sweep_dead(conn: &Connection) -> Result<u64> {
         {
             continue;
         }
-        // `exists()` follows the dest.
+        // `exists()` follows the dest. A dangling worktree symlink still
+        // occupies the path and must be unlinked by the age pass, not marked
+        // dead and forgotten.
         if std::fs::symlink_metadata(dest).is_err() {
             conn.execute(
                 "UPDATE worktrees SET status = 'dead' WHERE id = ?1",

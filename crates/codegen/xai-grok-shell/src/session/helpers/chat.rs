@@ -8,7 +8,7 @@ pub(super) fn floor_char_boundary(s: &str, index: usize) -> usize {
     } else if s.is_char_boundary(index) {
         index
     } else {
-        // UTF-8 characters are a bounded number of bytes, so the loop backs up a bounded number of bytes
+        // UTF-8 characters are at most 4 bytes, so the loop backs up at most 3 bytes
         let mut i = index;
         while i > 0 && !s.is_char_boundary(i) {
             i -= 1;

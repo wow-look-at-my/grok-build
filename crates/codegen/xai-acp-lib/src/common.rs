@@ -18,18 +18,24 @@ pub fn acp_internal_error(message: impl Into<String>) -> acp::Error {
     acp::Error::new(acp::ErrorCode::InternalError.into(), message)
 }
 
-/// Both ways an [`acp_send`](crate::acp_send) round-trip fails when the
-/// channel is closed.
+/// The two ways an [`acp_send`](crate::acp_send) round-trip fails when the channel is closed.
+/// Both surface as JSON-RPC `INTERNAL_ERROR`; the typed `data` discriminant lets callers
+/// tell them apart without substring-matching the message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcpChannelFailure {
-    /// The request could not be ENQUEUED: the receiver half (the peer's connection task) is already gone.
+    /// The request could not be ENQUEUED: the receiver half (the peer's
+    /// connection task) is already gone, so no peer is listening — e.g. a
+    /// headless run with no client wired.
     SendFailed,
-    /// The request was enqueued but the RESPONSE channel was dropped before a reply arrived: a peer received the request.
+    /// The request was enqueued but the RESPONSE channel was dropped before a
+    /// reply arrived: a peer received the request, then went away (disconnect /
+    /// process exit) without answering.
     RecvFailed,
 }
 
 impl AcpChannelFailure {
-    /// `data` object key under which [`acp_send`](crate::acp_send) records the kind.
+    /// `data` object key under which [`acp_send`](crate::acp_send) records the
+    /// kind. Namespaced so it can never collide with other `with_data` payloads.
     const DATA_KEY: &'static str = "xaiAcpChannelFailure";
 
     const fn tag(self) -> &'static str {
@@ -68,8 +74,8 @@ pub fn acp_channel_failure(err: &acp::Error) -> Option<AcpChannelFailure> {
         .and_then(AcpChannelFailure::from_tag)
 }
 
-/// Compact single-line JSON for gateway debug traces. Uncolored: this feeds
-/// log files.
+/// Compact single-line JSON for gateway debug traces. Uncolored: this feeds log files.
+/// Replaces the former `colored_json` helper (dropped to shrink the dependency tree).
 #[doc(hidden)]
 pub fn compact_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_default()

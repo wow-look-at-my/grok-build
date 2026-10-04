@@ -1,4 +1,5 @@
-//! `CompoundResolver` and `ResolvedTool` coverage.
+//! `CompoundResolver` and `ResolvedTool` coverage. Exercises local-only,
+//! local-shadows-remote, remote-fallback, and cross-session scenarios.
 
 use std::sync::Arc;
 
@@ -52,7 +53,8 @@ impl Tool for StubTool {
 
 #[derive(Debug)]
 struct PlaneRegistry {
-    // Set once at construction; `TransportKind` is `Copy` so a direct field is the obvious choice.
+    // Set once at construction; `TransportKind` is `Copy` so a direct
+    // field is the obvious choice — no interior mutability required.
     transport_kind: TransportKind,
     entries: DashMap<(SessionId, ToolId), ToolRegistration>,
     handles: DashMap<ToolId, Arc<dyn ToolHandle>>,

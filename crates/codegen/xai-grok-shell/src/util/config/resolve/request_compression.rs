@@ -5,7 +5,11 @@ use std::sync::RwLock;
 use xai_grok_config_types::RemoteRequestEncoding;
 use xai_grok_sampler::RequestCompression;
 
-/// Base URL of the cli-chat-proxy whose `/v1/settings` listed `zstd` in `accept_request_encodings`.
+/// Base URL of the cli-chat-proxy whose `/v1/settings` listed `zstd` in
+/// `accept_request_encodings`. `None` until one does. One slot on purpose: a
+/// process fetches settings from a single proxy, and if a second one ever
+/// advertised, the first would fall back to plain JSON (exact-origin match),
+/// never to a wrong compression.
 static ZSTD_ORIGIN: RwLock<Option<String>> = RwLock::new(None);
 
 /// Called whenever the agent applies `RemoteSettings` fetched from `origin`.

@@ -1,4 +1,5 @@
 //! The actor task itself is single-threaded: it processes one command at a time.
+//! The actual streaming work happens in `tokio::spawn` per-request tasks, so multiple requests can be in flight concurrently.
 
 pub(crate) mod request_metadata;
 pub(crate) mod request_task;
@@ -29,6 +30,7 @@ pub struct SamplerActor {
     event_tx: mpsc::UnboundedSender<SamplingEvent>,
     state: ActorState,
     /// The actor's run loop selects on `cmd_rx.recv()` and `tasks.join_next()`.
+    /// A finished task returns its `RequestId` so the actor can clean up `active_requests`.
     tasks: JoinSet<RequestId>,
 }
 
@@ -61,7 +63,7 @@ fn spawn_tracked_round(
 
 /// Text describing what a panic carried, for a log line.
 ///
-/// Both payloads `panic!` itself produces are a `&'static str` (a literal)
+/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
 /// and a `String` (a formatted one). Anything else is named as a non-message
 /// rather than reported as nothing.
 fn panic_payload(panic: &(dyn Any + Send)) -> String {
@@ -137,7 +139,10 @@ impl SamplerActor {
             state: ActorState::new(config, retry_policy),
             tasks: JoinSet::new(),
         };
-        // The actor owns the command half every `SamplerHandle` sends to and every in-flight request reports through.
+        // The actor owns the command half every `SamplerHandle` sends to and
+        // every in-flight request reports through. Its death is reported here,
+        // by name, rather than surfacing later as a closed channel in
+        // whichever caller happens to send next.
         let run = tokio::spawn(actor.run());
         tokio::spawn(async move {
             if let Err(error) = run.await {
@@ -201,7 +206,7 @@ impl SamplerActor {
                     cancel_token: cancel_token.clone(),
                 };
                 if let Some(prev) = self.state.register(request_id.clone(), active) {
-                    // Caller submitted a duplicate id; cancel the one so we don't leak its task
+                    // Caller submitted a duplicate id; cancel the previous one so we don't leak its task
                     prev.cancel_token.cancel();
                 }
                 let effective_config = config
@@ -219,7 +224,9 @@ impl SamplerActor {
                 rejections
                     .tool_schemas
                     .apply(&effective_config.model, &mut request_inner);
-                // The id is what the actor needs back to clear `active_requests`.
+                // The id is what the actor needs back to clear
+                // `active_requests`, so the round is spawned through
+                // `spawn_tracked_round` rather than bare.
                 let tracked_id = request_id.clone();
                 // The round runs on its own task, so the submitter's queue
                 // clock is carried over by hand.

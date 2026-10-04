@@ -1,4 +1,17 @@
-//! Session persistence actor: every session-file write for a session flows through one FIFO channel.
+//! Session persistence actor: every session-file write for a session flows through one FIFO channel, drained by [`SessionPersistence::run`].
+//!
+//! # Loss contract on hard power loss
+//!
+//! - Fire-and-forget writes (streamed chunks, mid-turn tool records, feedback / btw_history appends) are buffered.
+//!   Anything since the last barrier may be lost, bounded to the actively-running turn's tail.
+//! - Anything a caller awaits (`FlushAndAck`, `AppendUpdateDurablyAndAck`, `AppendCwdSwitchAndAck`) is on stable media when the ack fires.
+//!   A barrier syncs only the files dirtied since the last one.
+//!   A failed buffered write (chat append, streamed update, …) latches until the next barrier.
+//!   That barrier then returns the error instead of acking a sync of stale or missing bytes.
+//! - Atomic-rename writes fsync the temp file before the rename, so replacing a file yields the old or the new content, never garbage.
+//!   A create additionally syncs the containing directory, and session-dir creation syncs every directory the new chain is created into.
+//!   So a first-time create (a session's first `summary.json`, and the session directory holding it) is durable once the write returns.
+//!   Windows has no directory fsync; there NTFS metadata journaling can roll a very recent create back to absent, never to garbage.
 
 use chrono::{DateTime, Utc};
 use std::borrow::Cow;
@@ -32,17 +45,21 @@ use crate::extensions::notification::{
 use crate::session::info::Info;
 use tokio::sync::{mpsc, watch};
 
-/// - Version 0: Legacy ChatRequestMessage format (default for old sessions) - Version 1: ConversationItem format.
+/// - Version 0: Legacy ChatRequestMessage format (default for old sessions)
+/// - Version 1: ConversationItem format (used for new sessions)
 pub const CHAT_FORMAT_VERSION: u8 = 1;
 
-/// Maximum Unicode scalars in a session title.
+/// Maximum Unicode scalars in a session title (`/rename`, dashboard editor, and the `x.ai/session/rename` ext boundary).
+/// Counted after control-strip and trim.
 pub const MAX_TITLE_SCALARS: usize = 100;
 
 /// UTF-8 byte ceiling before we bother stripping controls.
+/// 4 bytes/scalar plus slack so a handful of C0 bytes that will be stripped don't trip a false reject.
+/// Anything larger is already over the scalar cap.
 pub const MAX_TITLE_BYTES: usize = MAX_TITLE_SCALARS * 4 + 64;
 
-/// C0/C1 plus the bidi/format overrides the dashboard rename editor already
-/// rejects.
+/// C0/C1 plus the bidi/format overrides the dashboard rename editor already rejects.
+/// Shared by the persist path (drops these chars) and the display path (replaces them with U+FFFD) so the character class cannot drift.
 #[inline]
 pub fn is_forbidden_title_char(c: char) -> bool {
     c.is_control()
@@ -157,6 +174,8 @@ pub struct BtwEntry {
     /// Error message if failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Model-call attempts made (1 means no retry).
+    /// Entries written before this field existed deserialize as 1.
     #[serde(default = "default_btw_attempts")]
     pub attempts: u32,
 }
@@ -168,6 +187,8 @@ fn default_btw_attempts() -> u32 {
 // Local feedback persistence types
 
 /// A feedback entry persisted to `~/.grok/sessions/.../feedback.jsonl`.
+///
+/// Uses a tagged enum so different feedback types are self-describing in the JSONL file (currently only `UserFeedback`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LocalFeedbackEntry {
@@ -235,8 +256,8 @@ pub enum PersistenceMsg {
     },
     /// Replace the entire chat history (used for compaction)
     ReplaceChatHistory(Vec<ConversationItem>),
-    /// Destructive image-strip rewrite: back up the on-disk history first,
-    /// and only rewrite if the backup landed.
+    /// Destructive image-strip rewrite: back up the on-disk history first, and only rewrite if the backup landed.
+    /// Acks the combined disk outcome.
     ReplaceChatHistoryForStripAndAck {
         messages: Vec<ConversationItem>,
         respond_to: tokio::sync::oneshot::Sender<io::Result<()>>,
@@ -258,18 +279,19 @@ pub enum PersistenceMsg {
     PlanModeState(crate::session::plan_mode::PlanModeSnapshot),
     RewindPoint(RewindPoint),
     /// Truncate rewind points from a specific prompt index (inclusive).
+    /// Syncs the persisted file with the in-memory FileStateTracker after rewind.
     TruncateRewindPoints {
         from_index: usize,
     },
-    /// Merge rewind points at indices >= `target_index` into the point
-    /// (read-modify-write on disk, after a ConversationOnly rewind).
+    /// Merge rewind points at indices >= `target_index` into the previous point (read-modify-write on disk, after a ConversationOnly rewind).
+    /// Disk is authoritative, so a partial in-memory tracker can't truncate history.
     MergeRewindPointsFrom {
         target_index: usize,
     },
     /// Collection ID for telemetry tracing
     CollectionId(String),
-    /// Monotonic telemetry turn counter and optional request_id for trace
-    /// metadata/filenames.
+    /// Monotonic telemetry turn counter and optional request_id for trace metadata/filenames.
+    /// This is the "next turn" value (i.e., after increment).
     NextTraceTurn {
         next_trace_turn: u64,
         request_id: Option<String>,
@@ -289,7 +311,8 @@ pub enum PersistenceMsg {
         release: tokio::sync::oneshot::Receiver<()>,
     },
     Signals(SessionSignals),
-    /// Persist this turn's session usage, then ack.
+    /// Persist this turn's session usage, then ack. Callers that publish turn-end
+    /// (and `x.ai/session/state`) wait so `usage.json` is visible before the turn resolves.
     UsageTurn {
         turn_number: u32,
         live: crate::session::usage_file::UsageSummary,
@@ -317,39 +340,49 @@ pub enum PersistenceMsg {
     },
     /// Persist a compaction checkpoint file to `compaction_checkpoints/{id}.json`.
     CompactionCheckpoint(crate::extensions::notification::CompactionCheckpointFile),
-    /// Persist a compaction request and response artifact to `compaction_requests/{request_id}.json`.
+    /// Persist a compaction request and response artifact to `compaction_requests/{request_id}.json` for offline prompt iteration.
+    /// The file holds the exact ConversationItem list sent to the compaction model plus the summary it returned (or the final error).
+    /// It rides on the post-turn session archive to cloud storage automatically; no separate upload path is needed.
     CompactionRequest(crate::extensions::notification::CompactionRequestFile),
     /// Persist a recap request and response artifact to `recap_requests/{request_id}.json`.
+    /// Same GCS ride-along as compaction requests; enables offline recap prompt / garble replay.
     RecapRequest(crate::extensions::notification::RecapRequestFile),
     /// Persist a compaction segment (`Segments` mode).
     CompactionSegment(crate::extensions::notification::CompactionSegmentFile),
     /// Generated session title from background LLM task.
+    /// Routed back through the persistence channel so the storage write stays sequential with other summary.json mutations.
     GeneratedTitle(String),
+    /// Early-session title refresh (turns 3 and 6): overwrite an existing auto title with one regenerated from the whole conversation.
+    /// Never overwrites a manual `/rename` (enforced atomically under the summary lock).
     RegenerateTitle(String),
     /// Persist a bounded preview of the latest session recap so session listings can show it whenever available.
+    /// `None` clears it (rewind removed the described turns).
     LastRecap(Option<String>),
     /// Manual `/rename` title.
+    /// Rides this FIFO channel so the resulting `SetTitle` cannot race a `GeneratedTitle` `SetTitle` out-of-band.
     ManualTitleRenamed(String),
     /// `/rename --auto`: reset [`crate::session::summary::SummaryGenerator`] so the next content chunk regenerates.
+    /// Storage is already cleared by the ext handler; remote stores stay untouched until the fresh auto title is adopted.
     ResetTitleToAuto,
     /// Per-turn dashboard summary as `(text, prompt_id)`.
+    /// Replaces (`Some`) or clears (`None`, on conversation rewind) the previous one in `summary.json`.
     LastTurnSummary(Option<(String, String)>),
-    /// Enable remote writeback for a session created `Local` before remote
-    /// settings resolved (non-blocking startup).
+    /// Enable remote writeback for a session created `Local` before remote settings resolved (non-blocking startup); backfills its local history.
     UpgradeToWriteback {
         auth_manager: Arc<xai_grok_login::AuthManager>,
     },
     Flush,
-    /// Flush all pending writes AND fsync the session files, then signal the
-    /// caller.
+    /// Flush all pending writes AND fsync the session files, then signal the caller.
+    /// Unlike `Flush` (fire-and-forget, page-cache only), this is a **sync barrier**.
+    /// The caller's oneshot resolves only after all prior writes are on stable media.
     FlushAndAck {
         respond_to: tokio::sync::oneshot::Sender<io::Result<()>>,
     },
     ProbeWritable {
         respond_to: tokio::sync::oneshot::Sender<io::Result<()>>,
     },
-    /// Flush all pending writes, then copy the current session directory
-    /// contents and return the in-memory snapshot to the caller.
+    /// Flush all pending writes, then copy the current session directory contents and return the in-memory snapshot to the caller.
+    /// The caller can tar.gz and upload the copy to GCS, etc.
     CopyFile {
         one_shot: tokio::sync::oneshot::Sender<anyhow::Result<SessionStateCopy>>,
     },
@@ -364,14 +397,16 @@ fn storage_view(sessions_root: &Path) -> RelocationResult<RelocationView> {
     RelocationView::load_for_sessions_root(sessions_root)
 }
 
-/// Check if a session exists locally under the given cwd. A session is only
-/// "already local" if it lives under the same cwd as the current invocation.
+/// Check if a session exists locally under the given cwd.
+/// A session is only "already local" if it lives under the same cwd as the current invocation.
+/// A session stored under a different cwd does NOT satisfy this check; the caller must still run the remote restore into the requested cwd.
 pub fn session_exists_for_cwd(session_id: &str, cwd: &str) -> bool {
     let sessions_root = crate::util::grok_home::grok_home().join("sessions");
     session_exists_for_cwd_in_root(session_id, cwd, &sessions_root)
 }
 
-/// A directory is a resumable session only if it has a `summary.json`.
+/// A directory is a resumable session only if it has a `summary.json`; this skips `images/`-only stubs that would otherwise hijack `--resume`.
+/// Used by the resume/restore resolution path; `find_session_dir_by_id` intentionally stays dir-only for non-resume compatibility.
 fn is_persisted_session_dir(session_path: &Path) -> bool {
     session_path.join("summary.json").is_file()
 }
@@ -384,17 +419,17 @@ fn session_exists_for_cwd_in_root(session_id: &str, cwd: &str, sessions_root: &P
     is_persisted_session_dir(&session_path)
 }
 
-/// Find the local child session id that was restored from `remote_session_id`
-/// in the given `cwd`. When a remote session is restored, a new local child
-/// is created with `summary.parent_session_id == remote_session_id`.
+/// Find the local child session id that was previously restored from `remote_session_id` in the given `cwd`.
+/// When a remote session is restored, a new local child is created with `summary.parent_session_id == remote_session_id`.
+/// On a second `grok -r <remote_id>` in the same cwd, this function returns the already-restored child so no duplicate restore is performed.
 pub fn find_local_child_for_remote(remote_session_id: &str, cwd: &str) -> Option<String> {
     let sessions_root = crate::util::grok_home::grok_home().join("sessions");
     find_local_child_for_remote_in_root(remote_session_id, cwd, &sessions_root)
 }
 
 /// Resolve a session ID to one that is available locally under `cwd`.
-/// `session_id` exists directly under `cwd`: returns it as-is. A restored
-/// child of `session_id` exists: returns the child ID.
+/// Checks in order: 1. `session_id` exists directly under `cwd`: returns it as-is.
+/// A previously restored child of `session_id` exists: returns the child ID.
 pub fn resolve_local_session(session_id: &str, cwd: &str) -> Option<String> {
     if session_exists_for_cwd(session_id, cwd) {
         return Some(session_id.to_string());
@@ -478,7 +513,9 @@ fn find_local_child_for_remote_in_root(
         return None;
     }
 
-    // Collect all matching children Multiple can exist from older versions that restored a duplicate on each `grok -r <remote_id>` Tuple.
+    // Collect all matching children
+    // Multiple can exist from older versions that restored a duplicate on each `grok -r <remote_id>`
+    // Tuple: (updated_at, dir_mtime_nanos, session_id), all sorted descending
     let mut candidates: Vec<(String, u128, String)> = Vec::new();
 
     let entries = std::fs::read_dir(&cwd_dir).ok()?;
@@ -515,12 +552,14 @@ fn find_local_child_for_remote_in_root(
         }
     }
 
-    // Sort descending by all keys for full determinism.
+    // Sort descending by all three keys for full determinism.
     candidates.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)));
     candidates.into_iter().next().map(|(_, _, id)| id)
 }
 
 /// Searches across ALL cwd directories under `~/.grok/sessions/`.
+/// Use `session_exists_for_cwd` instead when the target cwd is known to avoid false-positive matches.
+/// Unlike [`resolve_local_session`] which only checks a single CWD, this scans every encoded-CWD subdirectory.
 pub fn resolve_local_session_any_cwd(session_id: &str) -> Option<String> {
     resolve_local_session_any_cwd_result(session_id)
         .ok()
@@ -705,8 +744,9 @@ pub(crate) async fn read_wake_summary_state_from_dir(
     .map_err(io::Error::other)?
 }
 
-/// Dir index plus on-demand summary reads. Search classifies only the FTS
-/// hits it walks.
+/// Dir index plus on-demand summary reads.
+/// Search classifies only the FTS hits it walks.
+/// Loading every `summary.json` on each query is too expensive at the ~12K-session scale already called out for recent listing.
 pub(crate) struct SessionKindIndex {
     view: RelocationView,
 }
@@ -803,8 +843,9 @@ fn most_recent_local_summary_for_cwd_in_view(
     Ok(best)
 }
 
-/// Sync, local-only summaries for `cwd` under the caller's title-selection
-/// policy.
+/// Sync, local-only summaries for `cwd` under the caller's title-selection policy.
+/// For startup paths that must resolve a resume target before the irreversible OS sandbox is applied; async callers use [`list_summaries`].
+/// Listing failures propagate so pre-sandbox callers can fail closed.
 pub fn local_summaries_for_cwd_sync(
     cwd: &str,
     selection: RecentSessionSelection,
@@ -826,9 +867,9 @@ fn local_summaries_for_cwd_sync_in_root(
         .collect())
 }
 
-/// Used at startup to restore the session's profile before the (irreversible)
-/// OS sandbox is applied. `session_id`: the explicit id from `--resume <id>`
-/// / `--load <id>` / `-s <id>`.
+/// Used at startup to restore the session's profile before the (irreversible) OS sandbox is applied.
+/// `session_id`: the explicit id from `--resume <id>` / `--load <id>` / `-s <id>`.
+/// Returns `None` when not resuming, the session isn't found locally, or it has no persisted profile (sessions created before this was tracked).
 pub fn resumed_session_sandbox_profile(
     session_id: Option<&str>,
     cwd: Option<&str>,
@@ -879,8 +920,8 @@ fn resumed_session_sandbox_profile_in_root(
     None
 }
 
-/// Owner-only and durable session dir for writers that bypass `init_session`
-/// (chat-kind, pre-init fork stamp).
+/// Owner-only and durable session dir for writers that bypass `init_session` (chat-kind, pre-init fork stamp).
+/// A later occupied `init_session` will not re-sync the encoded-cwd direntry.
 pub fn ensure_owner_only_session_dir(info: &Info) -> std::io::Result<PathBuf> {
     ensure_owner_only_session_dir_in(&grok_home(), info)
 }
@@ -924,8 +965,9 @@ fn session_dir_in(grok_home: &Path, info: &Info) -> PathBuf {
     crate::util::grok_home::sessions_cwd_dir_in(grok_home, &info.cwd).join(info.id.to_string())
 }
 
-/// Get file path for storing a large prompt. Creates the prompts subdirectory
-/// if it doesn't exist.
+/// Get file path for storing a large prompt.
+/// Creates the prompts subdirectory if it doesn't exist.
+/// Path format: `{session_dir}/prompts/prompt_{prompt_index}.txt`
 pub(crate) fn get_prompt_file_path(info: &Info, prompt_index: usize) -> PathBuf {
     get_prompt_file_path_in(&grok_home(), info, prompt_index)
 }
@@ -1056,7 +1098,7 @@ impl From<&xai_grok_agent::AgentDefinition> for PersistedAgent {
     }
 }
 
-/// Serializes as the legacy `agent_name`/`agent_profile` summary keys.
+/// Serializes as the legacy `agent_name`/`agent_profile` summary keys; a malformed or name-mismatched profile is dropped so the pair can never load as an inconsistent selection.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PersistedAgentSelection {
     selected: Option<PersistedAgent>,
@@ -1138,11 +1180,17 @@ pub struct Summary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection_id: Option<String>,
     /// Next telemetry trace turn id (monotonic, persisted).
+    /// Used to generate unique turn ids for telemetry metadata/filenames even across rewinds.
     #[serde(default)]
     pub next_trace_turn: u64,
+    /// Chat history format version:
+    /// - 0 (default): Legacy ChatRequestMessage format
+    /// - 1: ConversationItem format
     #[serde(default)]
     pub chat_format_version: u8,
     /// Stable display path for forked sessions.
+    /// When set, the system prompt's `Workspace Path` and prompt metadata paths show this value instead of the worktree/overlay path (`info.cwd`).
+    /// Persisted so the override survives session restore/reload without the caller needing to resend it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_display_cwd: Option<String>,
     /// What created this session: `"fork"`, `"subagent"`, `"subagent_fork"`, etc.
@@ -1155,12 +1203,16 @@ pub struct Summary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_parent_prompt_id: Option<String>,
     /// During compaction, items below this index are preserved as-is (the "inherited prefix").
+    /// Only items after this boundary are summarized.
+    /// `None` means no inherited prefix (non-forked session).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherited_prefix_len: Option<usize>,
     /// Visibility override. `None` means the default for `session_kind`, `Some` is explicit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hidden: Option<bool>,
-    /// The workspace directory this worktree session was spawned from.
+    /// The original workspace directory this worktree session was spawned from.
+    /// Used by clients to group worktree sessions under their source workspace regardless of the worktree's actual `cwd`.
+    /// Only set when `session_kind == "worktree"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_workspace_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1177,12 +1229,16 @@ pub struct Summary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grok_home: Option<String>,
     /// When the session last had content added (user or model messages).
+    /// Only advanced locally by `append_update` / `append_chat_message`; never touched by remote registry operations or metadata-only writes.
+    /// `None` for sessions created before this field was added.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_active_at: Option<DateTime<Utc>>,
     /// LLM-generated session title persisted separately from `session_summary`.
+    /// When present, this is preferred for display over `session_summary`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_title: Option<String>,
     /// True when `generated_title` was set by a manual `/rename` (vs auto LLM title).
+    /// Manual titles render inline in the prompt's top border on resume.
     #[serde(default, skip_serializing_if = "is_false")]
     pub title_is_manual: bool,
     /// Human-readable label for the worktree directory (e.g. "nuke-v-tables").
@@ -1191,23 +1247,29 @@ pub struct Summary {
     /// The agent active when the session was last saved, persisted so resume doesn't re-derive it from the mutable model catalog.
     #[serde(flatten)]
     pub(crate) agent: PersistedAgentSelection,
-    /// Persisted so a resumed session is restored to the same profile instead of silently falling back.
+    /// Persisted so a resumed session is restored to the same profile instead of silently falling back to the config default.
+    /// A fallback would break commands that worked before (a stricter profile denies filesystem/network the session relied on).
+    /// `None` for sessions created before this field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
-    /// Ultra-short summary of the most recent successful turn, shown as the dashboard row's secondary line.
+    /// Ultra-short summary of the most recent successful turn, shown as the dashboard row's secondary line (via the roster for non-attached clients).
+    /// Displayed until replaced by the next successful turn (or cleared by a conversation rewind).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_turn_summary: Option<String>,
     /// Prompt id of the turn `last_turn_summary` describes (provenance).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_turn_summary_prompt_id: Option<String>,
     /// Persisted so session listings (`/resume`, `/session-info`) can show it whenever available.
+    /// Distinct from `last_turn_summary` (a summary of the final turn only).
+    /// Regenerated on demand by `/recap`; this holds the last committed value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_recap: Option<String>,
 }
 
 /// `Summary::session_kind` for sessions whose cwd is inside a grok-managed worktree.
+/// `source_workspace_dir` is only ever set alongside this kind.
 pub(crate) const WORKTREE_SESSION_KIND: &str = "worktree";
 
 /// Current `grok_home` as a UTF-8 string, or `None` if the path isn't valid UTF-8.
@@ -1222,9 +1284,9 @@ pub fn default_model_id() -> acp::ModelId {
 }
 
 impl Summary {
-    /// Re-asserting the current agent's name is a no-op: a model or
-    /// reasoning-effort switch carries only the (built) name, and persisting
-    /// that built.
+    /// Re-asserting the current agent's name is a no-op: a model or reasoning-effort switch carries only
+    /// the (built) name, and persisting that built definition would double-expand an inline agent on
+    /// reload, so a same-name update must preserve the existing selection. Any other selection replaces it.
     pub(crate) fn set_agent(&mut self, agent: PersistedAgent) {
         let reasserts_current = matches!(&agent, PersistedAgent::Named(name)
             if self.agent_name() == Some(name.as_str()));
@@ -1321,9 +1383,9 @@ impl Summary {
         )
     }
 
-    /// Unused TUI-open husk: untitled, messages, and no fork provenance. Worktree
-    /// stamps do not exempt. `session_kind == "fork"` or `parent_session_id` /
-    /// `forked_at` do (worktree forks keep kind `worktree`).
+    /// Unused TUI-open husk: untitled, 0 messages, and no fork provenance.
+    /// Worktree stamps do not exempt. `session_kind == "fork"` or
+    /// `parent_session_id` / `forked_at` do (worktree forks keep kind `worktree`).
     pub fn is_unused_optimistic_husk(&self) -> bool {
         if matches!(self.session_kind.as_deref(), Some("fork"))
             || self
@@ -1338,6 +1400,8 @@ impl Summary {
     }
 
     /// Whether this is a one-shot `grok -p` session.
+    /// Deliberately not part of [`Self::is_hidden`]: headless sessions stay listable (the picker's Headless page, the search index).
+    /// Unstamped summaries (`session_kind` absent) are interactive, including pre-stamp one-shots and remote twins the registry has not classified.
     pub fn is_headless(&self) -> bool {
         self.session_kind.as_deref() == Some(crate::session::visibility::SESSION_KIND_HEADLESS)
     }
@@ -1357,8 +1421,9 @@ impl Summary {
         (!title.is_empty()).then(|| title.to_string())
     }
 
-    /// The manually-`/rename`d title (trimmed), `None` for auto-generated or
-    /// blank titles.
+    /// The manually-`/rename`d title (trimmed), `None` for auto-generated or blank titles.
+    /// Binds to `generated_title` (the field `title_is_manual` describes), never the `session_summary` display fallback.
+    /// A stale flag over a blank manual title therefore can't relabel an auto summary as manual.
     pub fn manual_title_opt(&self) -> Option<String> {
         self.title_is_manual
             .then_some(self.generated_title.as_deref())
@@ -1531,19 +1596,25 @@ struct SessionPersistence {
     /// True only for sessions created this run (not resumed); gates the writeback backfill so a resumed, already-synced session isn't re-sent.
     created_fresh: bool,
     /// WebSocket-based relay sync for real-time session sharing.
+    /// This streams updates to the relay backend in addition to local persistence.
     relay_sync: Option<crate::relay::RelaySync>,
     /// Session title generation lifecycle.
     summary: crate::session::summary::SummaryGenerator,
     registry_title_sync: Option<RegistryGeneratedTitleSync>,
     /// Client gateway for `SessionSummaryGenerated` notifications.
+    /// Used to announce an auto-generated title only once it has actually been adopted.
+    /// A title rejected for racing a manual `/rename` thus never reaches the client.
     gateway: Option<GatewaySender>,
     /// Read every turn, not at construction, so a session opened before the decision landed still indexes.
     search_index: crate::session::storage::search::SharedSearchIndex,
     disk_full_tx: watch::Sender<bool>,
     disk_full_notified: bool,
     /// Files that took buffered writes since the last successful sync barrier.
+    /// Atomic-rename writes are durable at write time and never enter the set.
     dirty_files: crate::session::storage::SessionFileSet,
     /// First buffered-write failure since the last barrier.
+    /// `FlushAndAck` must not return `Ok` after a chat/update append that never reached disk.
+    /// Fsyncing the previous bytes is not durability for that write.
     pending_write_error: Option<io::Error>,
     last_usage_live: Option<crate::session::usage_file::UsageSummary>,
     last_usage_turn: Option<u32>,
@@ -1839,7 +1910,9 @@ impl SessionPersistence {
     /// Restore uncommitted failures; sync committed records before returning errors.
     async fn drain_pending(&mut self) -> Result<(), crate::session::storage::AppendUpdateError> {
         if let Some(notification) = self.pending_notification.take() {
-            // `write_update` latches. NotCommitted.
+            // `write_update` latches.
+            // NotCommitted.
+            // This record is restored below for retry, so a latch from *this* miss is stale A fire-and-forget durable append (TurnCompleted drops its ack) would otherwise make the next.
             let had_prior_latch = self.pending_write_error.is_some();
             let result = self
                 .write_update(&SessionUpdate::Acp(Box::new(notification.clone())))
@@ -1872,7 +1945,8 @@ impl SessionPersistence {
     ) -> Result<(), crate::session::storage::AppendUpdateError> {
         match self.drain_pending().await {
             Ok(()) => {}
-            // Pending is already in the file / page cache Aborting here would drop a fire-and-forget TurnCompleted.
+            // Pending is already in the file / page cache
+            // Aborting here would drop a fire-and-forget TurnCompleted (the ack is dropped after the turn pre-flush) with no retry
             Err(crate::session::storage::AppendUpdateError::Committed(_)) => {}
             Err(error) => return Err(error),
         }
@@ -1884,12 +1958,14 @@ impl SessionPersistence {
         match &result {
             // Already fsynced at write time; stay off the dirty set.
             Ok(()) => {}
-            // `write_all` reached the page cache (file barrier or bookkeeping
-            // failed) A later idle FlushAndAck must retry the fsync.
+            // `write_all` reached the page cache (file barrier or bookkeeping failed)
+            // A later idle FlushAndAck must retry the fsync; TurnCompleted drops the ack after the turn's pre-flush, so this is the only retry path
             Err(crate::session::storage::AppendUpdateError::Committed(_)) => {
                 self.dirty_files.updates = true;
             }
             // The latch is for buffered chat/update/rewind misses.
+            // This path already reports via AppendUpdateDurablyAndAck
+            // Latching would make the next FlushAndAck fail after it has already synced later prompt bytes (TurnCompleted drops its ack)
             Err(crate::session::storage::AppendUpdateError::NotCommitted(_)) => {}
         }
         match (&update, &result) {
@@ -1908,7 +1984,8 @@ impl SessionPersistence {
     async fn flush_pending(&mut self) -> io::Result<()> {
         let result = match self.drain_pending().await {
             Ok(()) => Ok(()),
-            // JSONL reached the page cache.
+            // JSONL reached the page cache; `write_update` already dirtied updates so the barrier sync retries fsync
+            // Returning Err here would withhold persist_ack after a successful prompt-byte sync (the same contract as chat Committed misses)
             Err(crate::session::storage::AppendUpdateError::Committed(error)) => {
                 tracing::warn!(%error, "failed to write pending update");
                 Ok(())
@@ -1968,10 +2045,9 @@ impl SessionPersistence {
         }
     }
 
-    /// [`Self::flush_and_sync`] over the full barrier file set: `CopyFile`
-    /// snapshots the whole session directory regardless of dirtiness. Does
-    /// not consume `pending_write_error`: CopyFile is not the durability
-    /// barrier.
+    /// [`Self::flush_and_sync`] over the full barrier file set: `CopyFile` snapshots the whole session directory regardless of dirtiness.
+    /// Does not consume `pending_write_error`: CopyFile is not the durability barrier.
+    /// Stealing the latch would let a later FlushAndAck ack after a buffered write never reached disk.
     async fn flush_and_sync_all(&mut self) -> io::Result<()> {
         let flushed = self.flush_pending().await;
         let synced = self
@@ -1999,7 +2075,9 @@ impl SessionPersistence {
     }
 
     async fn run(mut self) {
-        // Persistence traffic counts as worktree activity.
+        // Persistence traffic counts as worktree activity, debounced to avoid per-message DB writes
+        // Long-resident sessions (leader/remote, active for days without a re-open) thus stay out of gc expiry
+        // The constructors fire the t=0 touch, so this starts at now().
         let mut last_worktree_touch = std::time::Instant::now();
         while let Some(msg) = self.rx.recv().await {
             if last_worktree_touch.elapsed() >= WORKTREE_TOUCH_INTERVAL {
@@ -2052,8 +2130,8 @@ impl SessionPersistence {
                 }
                 PersistenceMsg::AppendUpdateDurablyAndAck { update, respond_to } => {
                     let result = self.handle_durable_append(update).await;
-                    // A dropped receiver is a fire-and-forget durable append
-                    // (e.g. the TurnCompleted terminal).
+                    // A dropped receiver is a fire-and-forget durable append (e.g. the TurnCompleted terminal).
+                    // Its errors would otherwise vanish with the unread ack
                     if let Err(Err(error)) = respond_to.send(result) {
                         tracing::warn!(%error, "failed to write durable update");
                     }
@@ -2180,7 +2258,9 @@ impl SessionPersistence {
                     }
                 }
                 PersistenceMsg::PlanState(state) => {
-                    // Atomic-rename: durable at write time, never on the dirty set A failed plan write must not latch.
+                    // Atomic-rename: durable at write time, never on the dirty set A failed plan write must not latch into `pending_write_error`.
+                    // Latching here would make the next.
+                    // FlushAndAck fail after it has already synced those bytes.
                     let result = self.storage.write_plan_state(&self.info, &state).await;
                     self.observe_io(&result);
                     if let Err(e) = result {
@@ -2753,9 +2833,9 @@ pub(crate) fn io_error_to_acp(e: &io::Error) -> acp::Error {
 #[path = "persistence_io_error_to_acp_tests.rs"]
 mod io_error_to_acp_tests;
 
-/// Best-effort worktree liveness touch: stamp `last_accessed_at` on the
-/// worktree containing this session's cwd. `grok worktree gc` then expires by
-/// last use, not creation time.
+/// Best-effort worktree liveness touch: stamp `last_accessed_at` on the worktree containing this session's cwd.
+/// `grok worktree gc` then expires by last use, not creation time.
+/// Lives here (not in a `StorageAdapter`) so every session create/load path shares it regardless of backend.
 fn spawn_worktree_touch(info: &Info) -> tokio::task::JoinHandle<()> {
     let cwd = info.cwd.clone();
     tokio::task::spawn_blocking(move || {
@@ -2764,12 +2844,12 @@ fn spawn_worktree_touch(info: &Info) -> tokio::task::JoinHandle<()> {
 }
 
 /// Bound on how long session open waits for the liveness touch to commit.
+/// Generous vs the DB's 5s busy_timeout without letting a pathologically locked worktrees.db stall init.
 const WORKTREE_TOUCH_INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Touch the worktree and wait (bounded) for the write to commit before the
-/// session open completes. A detached touch can land after gc's pre-removal
-/// re-check reads the row, letting gc delete a worktree that is actively
-/// being opened or resumed.
+/// Touch the worktree and wait (bounded) for the write to commit before the session open completes.
+/// A detached touch can land after gc's pre-removal re-check reads the row, letting gc delete a worktree that is actively being opened or resumed.
+/// Awaiting a blocking-pool task does not block the runtime.
 async fn touch_worktree_for_session(info: &Info) {
     if tokio::time::timeout(WORKTREE_TOUCH_INIT_TIMEOUT, spawn_worktree_touch(info))
         .await
@@ -2795,7 +2875,8 @@ pub(crate) struct SessionDeps {
     pub(crate) session_summary_model: String,
     pub(crate) registry_title_sync: Option<RegistryGeneratedTitleSync>,
     pub(crate) search_index: crate::session::storage::search::SharedSearchIndex,
-    /// Client-claimed kind for a fresh session (allowlisted at `session/new`; only `"headless"`).
+    /// Client-claimed kind for a fresh session (allowlisted at `session/new`; currently only `"headless"`).
+    /// Ignored by the load paths, which never restamp a persisted kind.
     pub(crate) session_kind: Option<String>,
 }
 
@@ -2820,14 +2901,14 @@ pub(crate) async fn new(
 
     let mut summary = storage.init_session(info, model_id.clone()).await?;
     touch_worktree_for_session(info).await;
-    // Mint under the summary lock against the live on-disk id, not the pre-lock snapshot: a concurrent cold-spawn stamp.
+    // Mint under the summary lock against the live on-disk id, not the pre-lock snapshot:
+    // a concurrent cold-spawn stamp that already persisted a parseable agent must survive
     let identity = stamp_session_identity(&storage, info, summary.agent_id.as_deref()).await?;
     summary.agent_id = Some(identity.agent_id.clone());
     summary.attempt_id = Some(identity.attempt_id.clone());
 
-    // Stamp the claimed kind only on a summary that has none yet: a dir left
-    // by a crash keeps its persisted kind (init_session already loaded it)
-    // Goes through.
+    // Stamp the claimed kind only on a summary that has none yet: a dir left by a crash keeps its persisted kind (init_session already loaded it)
+    // Goes through the locked atomic summary writer so it cannot clobber a concurrent writer's fields or leave a torn summary.json
     if summary.session_kind.is_none()
         && let Some(kind) = session_kind
     {
@@ -2974,7 +3055,8 @@ pub(crate) async fn new_with_explicit_dir(
             ),
             registry_title_sync: None,
             gateway: None,
-            // A bootstrap never sees a subagent session: `list_sessions_sync` drops hidden summaries.
+            // A bootstrap never sees a subagent session: `list_sessions_sync` drops hidden summaries, and a subagent kind is hidden
+            // Skip it here too
             search_index: crate::session::storage::search::SharedSearchIndex::never_indexed(),
             disk_full_tx,
             disk_full_notified: false,
@@ -2999,6 +3081,7 @@ pub struct PersistedInfo {
     /// Path to updates file for streaming reads
     pub updates_file_path: Option<std::path::PathBuf>,
     /// Adapter-owned path to `rewind_points.jsonl` for the session's `FileStateTracker` to load lazily.
+    /// `None` if the backend doesn't persist rewind points to a streamable file.
     pub rewind_points_file_path: Option<std::path::PathBuf>,
     /// Persisted session signals (None for old sessions without signals file)
     pub signals: Option<SessionSignals>,
@@ -3151,12 +3234,15 @@ pub enum DeleteSessionError {
     Local(#[source] io::Error),
 }
 
-/// Where a session copy was removed by [`delete_session_history`].
+/// Where a session copy was actually removed by [`delete_session_history`].
+/// Both fields are `false` when nothing existed to delete (still a success).
+/// Callers use [`Self::any_removed`] to decide between a "deleted" and a "not found" message without conflating a remote-only delete with a no-op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SessionDeletion {
     /// A local on-disk session directory was found and removed.
     pub local_removed: bool,
     /// A remote (writeback) copy was found and removed.
+    /// `false` when `needs_remote` was not set, or the remote copy was already absent (the backend returned `404`).
     pub remote_removed: bool,
 }
 
@@ -3178,8 +3264,8 @@ pub async fn delete_session_history(
 ) -> Result<SessionDeletion, DeleteSessionError> {
     let sid = acp::SessionId::new(Arc::from(session_id));
 
-    // Resolve the local session info, scoping to cwd if provided A
-    // remote-only session will not be found here.
+    // Resolve the local session info, scoping to cwd if provided
+    // A remote-only session won't be found here; that's fine, the remote delete (if applicable) still runs
     let summaries = list_summaries(cwd)
         .await
         .map_err(DeleteSessionError::List)?;
@@ -3188,9 +3274,9 @@ pub async fn delete_session_history(
         .find(|s| s.info.id == sid)
         .map(|s| s.info.clone());
 
-    // Remote delete first (authoritative for cloud history) A genuine failure
-    // aborts before any local mutation so the row does not reappear A `404`
-    // means.
+    // Remote delete first (authoritative for cloud history)
+    // A genuine failure aborts before any local mutation so the row does not reappear
+    // A `404` means the copy is already gone, so deletion stays idempotent and falls through to local cleanup
     let remote_removed = if needs_remote {
         let result = crate::remote::client::BackendClient::new()
             .with_auth_manager(auth_manager)
@@ -3221,8 +3307,8 @@ pub async fn delete_session_history(
         )
         .await;
     }
-    // The eviction above is a point in time Queue the indexer too so an
-    // upsert already under way.
+    // The eviction above is a point in time
+    // Queue the indexer too so an upsert already under way, which would otherwise write the row back, is followed by a re-read that finds nothing
     if let Some(info) = removed {
         crate::session::storage::search::notify_session_updated(
             search_index,
@@ -3237,8 +3323,9 @@ pub async fn delete_session_history(
     })
 }
 
-/// Classify a remote `delete_session_data` result, reporting whether a remote copy was removed. A `2xx` means a copy was deleted (`Ok(true)`); a `404` means it was already gone so deletion stays idempotent (`Ok(false)`). Any other backend error aborts the delete (`Err`) so local bits
-/// are left untouched and it can be retried.
+/// Classify a remote `delete_session_data` result, reporting whether a remote copy was actually removed.
+/// A `2xx` means a copy was deleted (`Ok(true)`); a `404` means it was already gone so deletion stays idempotent (`Ok(false)`).
+/// Any other backend error aborts the delete (`Err`) so local bits are left untouched and it can be retried.
 fn classify_remote_delete(
     result: Result<(), crate::remote::client::BackendError>,
 ) -> Result<bool, DeleteSessionError> {
@@ -3274,7 +3361,8 @@ pub async fn list_recent_summaries(limit: usize) -> io::Result<Vec<Summary>> {
 
 static CLEANUP_SESSIONS_ONCE: std::sync::Once = std::sync::Once::new();
 
-/// The only files swept inside a live session: everything else there is a write-once artifact `updates.jsonl` still references.
+/// The only files swept inside a live session: everything else there is a write-once artifact
+/// `updates.jsonl` still references, so its own age says nothing about whether it is needed.
 const SWEPT_BLOB_DIRS: [&str; 4] = ["images", "videos", "downloads", "terminal"];
 
 /// Mid-attach `live_session_dir` is never deleted whole; callers `mark_session_live` first so
@@ -3402,7 +3490,7 @@ enum CleanupLevel {
     Cwd,
 }
 
-/// Stray files at these levels (`session_search.sqlite`, `prompt_history.jsonl`) keep the
+/// Stray files at these two levels (`session_search.sqlite`, `prompt_history.jsonl`) keep the
 /// per-file mtime rule; dot entries are the `.cwd` markers.
 fn cleanup_stale_sessions_inner(
     root: &Path,
@@ -3468,7 +3556,8 @@ fn cleanup_stale_sessions_inner(
                 }
                 CleanupLevel::Cwd => {
                     if path == live_session_dir {
-                        // Interactive grok usually has one session and it is this.
+                        // Interactive grok usually has one session and it is this one, so
+                        // skipping the prune here would mean its media never ages out
                         prune_blob_dirs(&path, ttl_days, &mut stats);
                     } else {
                         stats.absorb(cleanup_session_dir(&path, ttl_days));

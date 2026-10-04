@@ -1,4 +1,7 @@
 //! Index caching for fast loading.
+//!
+//! Uses a custom binary format with magic bytes "SGIX" for the new interned format.
+//! Automatically detects and skips legacy bincode format (returns error so caller can rebuild).
 
 use std::path::Path;
 

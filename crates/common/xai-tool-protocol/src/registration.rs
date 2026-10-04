@@ -29,8 +29,11 @@ pub struct ToolDescriptionWithSchema {
 }
 
 impl ToolDescriptionWithSchema {
-    /// Derive the canonical `ToolId`. Namespaced descriptions render as `"{namespace}:{name}"`; otherwise the bare `name`. The result is run through [`ToolId::new`], so an invalid name or namespace
-    /// surfaces as an [`IdError`].
+    /// Derive the canonical `ToolId`.
+    ///
+    /// Namespaced descriptions render as `"{namespace}:{name}"`; otherwise
+    /// the bare `name`. The result is run through [`ToolId::new`], so an
+    /// invalid name or namespace surfaces as an [`IdError`].
     pub fn derive_tool_id(&self) -> Result<ToolId, IdError> {
         match &self.description.namespace {
             Some(ns) => ToolId::new(format!("{ns}:{}", self.description.name)),
@@ -41,6 +44,11 @@ impl ToolDescriptionWithSchema {
 
 /// Single-tool registration. Wire-level sugar for a one-tool
 /// `register_server`.
+///
+/// `sessions` carries the per-tool session set with three-state
+/// semantics, modelled after `if_match_generation: Option<u64>`:
+///
+/// - `None` (field omitted on the wire) — "no change". For a
 ///   first-time registration the computer hub treats this as the empty
 ///   set; for a re-registration the existing session bindings are
 ///   preserved untouched. Use this for heartbeat-style re-register
@@ -50,11 +58,19 @@ impl ToolDescriptionWithSchema {
 ///   The tool stays registered against the connection but becomes
 ///   unreachable from any session until [`crate::Method::BindToolSession`]
 ///   adds a new binding.
+/// - `Some(vec![s1, ...])` — replace the per-tool session set with
+///   exactly the listed ids. Each id MUST already be in the
+///   connection's bound-session set (validated by the router);
+///   a missing id rejects the entire registration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolRegistration {
-    /// MUST equal `description.derive_tool_id()`. Carried explicitly so receivers can route without re-deriving.
+    /// MUST equal `description.derive_tool_id()`. Carried explicitly so
+    /// receivers can route without re-deriving. The IC service router
+    /// enforces this at register-tool time and rejects mismatches with
+    /// `InvalidRequest`.
     pub tool_id: ToolId,
-    /// Per-tool session set. See struct doc-comment for the `None` / `Some(vec![])` / `Some(vec![...])` semantics.
+    /// Per-tool session set. See struct doc-comment for the
+    /// `None` / `Some(vec![])` / `Some(vec![...])` semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sessions: Option<Vec<SessionId>>,
     pub user_id: UserId,
@@ -73,6 +89,7 @@ pub struct ToolRegistration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub if_match_generation: Option<u64>,
     /// Opaque metadata supplied by the tool server at registration time.
+    /// Propagated to `ServerInfo.metadata` in `servers.list` responses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 }
@@ -92,10 +109,18 @@ impl ToolRegistration {
 /// Multi-tool registration. The whole batch shares one `server_id` and one
 /// `sessions` value; per-tool outcomes are reported individually via
 /// [`RegistrationOutcome`].
+///
+/// `sessions` follows the same three-state semantics as
+/// [`ToolRegistration::sessions`]: `None` means "no change" (preserves
+/// existing per-tool session bindings on a re-register), `Some(vec![])`
+/// means "unbind every session for every tool in this batch", and
+/// `Some(vec![...])` means "replace each tool's session set with
+/// exactly these ids".
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolServerRegistration {
     pub server_id: ServerId,
-    /// Per-batch session set. See struct doc-comment for `None` / `Some(vec![])` / `Some(vec![...])` semantics.
+    /// Per-batch session set. See struct doc-comment for `None` /
+    /// `Some(vec![])` / `Some(vec![...])` semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sessions: Option<Vec<SessionId>>,
     pub user_id: UserId,
@@ -109,6 +134,8 @@ pub struct ToolServerRegistration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub if_match_generation: Option<u64>,
     /// Opaque metadata supplied by the tool server at registration time.
+    /// Applied to every tool in the batch and propagated to
+    /// `ServerInfo.metadata` in `servers.list` responses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 }

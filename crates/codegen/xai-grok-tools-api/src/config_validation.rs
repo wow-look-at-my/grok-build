@@ -1,4 +1,7 @@
-//! Validation of [`ToolConfigEntry`](crate::ToolConfigEntry) fields, shared so the backend's save-time check cannot drift.
+//! Validation of [`ToolConfigEntry`](crate::ToolConfigEntry) fields,
+//! shared so the backend's save-time check cannot drift from what the
+//! tools server enforces at finalize/bind. Errors carry the offending input
+//! so callers can render gRPC violations without re-parsing.
 
 use serde_json::{Map, Value};
 use xai_tool_protocol::ToolId;
@@ -6,7 +9,8 @@ use xai_tool_protocol::ToolId;
 /// Why a [`ToolConfigEntry`](crate::ToolConfigEntry) is invalid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolConfigEntryErrorKind {
-    /// Not valid JSON.
+    /// Not valid JSON. Includes an explicitly-set empty string: proto3
+    /// `optional` tracks presence, so `Some("")` is rejected, not unset.
     ParamsJsonParse { error: String, raw: String },
     /// Valid JSON but not an object.
     ParamsJsonNotObject { value: Value },

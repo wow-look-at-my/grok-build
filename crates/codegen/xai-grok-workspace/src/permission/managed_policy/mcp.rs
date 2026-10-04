@@ -1,4 +1,6 @@
-//! MCP server policy: allow/deny entries.
+//! MCP server policy: allow/deny entries, per-source allowlists, and the
+//! cross-source [`McpServerPolicy`] (any deny wins, every restricted source
+//! must allow, managed-only requires a positive grant).
 
 use std::path::Path;
 
@@ -6,6 +8,8 @@ use super::layer::{PolicyLayerOwnership, PolicySourceAuthority};
 use super::url_match::{AllowUrlMatcher, DenyUrlMatcher, argv_matches, mcp_server_name};
 
 /// What defined the server or marketplace a policy is applied to.
+/// `GrokNative` (user/system config, plugins, admin pins) is exempt from advisory sources; everything else is `Foreign` and subject to every source.
+/// Ambiguity classifies as `Foreign` (fail closed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicySubjectOrigin {
     GrokNative,
@@ -38,16 +42,20 @@ pub struct McpServerAllowlist {
     deny_entries: Vec<CompiledEntry<DenyUrlMatcher>>,
     /// `allowManagedMcpServersOnly`: a positive allow-entry match is required.
     managed_only: bool,
-    /// Present-but-empty allow list (vendor managed-settings semantics) or malformed key.
+    /// Present-but-empty allow list (vendor managed-settings semantics) or malformed key:
+    /// every server this source binds is blocked.
     lockdown: bool,
-    /// Who can write the layer this source came from (see [`PolicyLayerOwnership`] for the grant rules).
+    /// Who can write the layer this source came from (see
+    /// [`PolicyLayerOwnership`] for the grant rules).
     ownership: PolicyLayerOwnership,
     pub source_path: Option<std::path::PathBuf>,
     /// Whether this source's restrictions bind grok-native servers.
     authority: PolicySourceAuthority,
 }
 
-/// One policy entry with its URL matcher compiled at construction.
+/// One policy entry with its URL matcher compiled at construction, stored
+/// together so the compiled form can't drift from the entry list (a
+/// pattern-keyed side map would fail open on a miss).
 #[derive(Debug, Clone)]
 struct CompiledEntry<M> {
     entry: AllowedMcpServer,
@@ -256,6 +264,7 @@ impl McpServerAllowlist {
 
     /// Explicit `deniedMcpServers` match (vs merely missing from the
     /// allowlist); URL denies are host-normalized via [`DenyUrlMatcher`].
+    /// Unrecognized ACP transports fail closed when this source has deny entries.
     pub fn is_server_denied(&self, server: &agent_client_protocol::McpServer) -> bool {
         self.is_server_denied_known(server, mcp_transport_known(server))
     }
@@ -277,14 +286,18 @@ impl McpServerAllowlist {
     }
 }
 
-/// Namespace prefix for legacy injected MCP server names (`grok_com_*`). Policy matching still uses this spelling.
+/// Namespace prefix for legacy injected MCP server names (`grok_com_*`).
+/// Policy matching still uses this spelling.
 pub(super) const MANAGED_MCP_PREFIX: &str = "grok_com_";
 
-/// Max `char` length of a managed runtime name (`grok_com_` + normalized display name).
+/// Max `char` length of a managed runtime name (`grok_com_` + normalized display
+/// name), sized to the 64-char tool-name budget. Shared with `mcp_name_matches`
+/// so a long policy `serverName` still matches its truncated runtime name.
 pub(super) const MANAGED_MCP_NAME_MAX_CHARS: usize = 39;
 
-/// Normalize a bare MCP display name to its runtime spelling (lowercase,
-/// spaces → `_`).
+/// Normalize a bare MCP display name to its runtime spelling (lowercase, spaces
+/// → `_`). Shared with `mcp_name_matches` so the policy and runtime sides never
+/// drift.
 pub(super) fn normalize_managed_name(bare: &str) -> String {
     bare.to_lowercase().replace(' ', "_")
 }
@@ -296,9 +309,9 @@ pub(super) fn mcp_name_matches(pattern: &str, name: &str) -> bool {
     fn key(s: &str) -> String {
         normalize_managed_name(s.strip_prefix(MANAGED_MCP_PREFIX).unwrap_or(s))
     }
-    // Mirror the injected-name truncation: `grok_com_*` runtime names were
-    // capped at MANAGED_MCP_NAME_MAX_CHARS total (prefix-inclusive on the
-    // bare part).
+    // Mirror the legacy injected-name truncation: `grok_com_*` runtime
+    // names were capped at MANAGED_MCP_NAME_MAX_CHARS total (prefix-inclusive
+    // on the bare part).
     fn truncate(key: String) -> String {
         let max_bare = MANAGED_MCP_NAME_MAX_CHARS - MANAGED_MCP_PREFIX.len();
         match key.char_indices().nth(max_bare) {
@@ -308,9 +321,8 @@ pub(super) fn mcp_name_matches(pattern: &str, name: &str) -> bool {
     }
     let mut pattern_key = key(pattern);
     let mut name_key = key(name);
-    // Truncate only the runtime-truncated shape (managed name at exactly the
-    // cap), so a long entry never becomes a prefix grant over decoys
-    // Residual.
+    // Truncate only the runtime-truncated shape (managed name at exactly the cap), so a long entry never becomes a prefix grant over decoys
+    // Residual: a decoy spelled exactly like the truncated name is string-identical and no matcher can tell them apart
     if name.starts_with(MANAGED_MCP_PREFIX) && name.chars().count() == MANAGED_MCP_NAME_MAX_CHARS {
         pattern_key = truncate(pattern_key);
         name_key = truncate(name_key);

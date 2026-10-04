@@ -1,7 +1,7 @@
 use crate::model::{AuthMode, GrokAuth};
 
-/// What kind of bearer is loaded right now; the dispatch key for `auth()`,
-/// `unauthorized_recovery()`, and proactive refresh.
+/// What kind of bearer is loaded right now; the dispatch key for `auth()`, `unauthorized_recovery()`, and proactive refresh.
+/// It does not classify sessions; use `is_session_based_method` for that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {
     /// OIDC/OAuth2 session with a refresh_token available.

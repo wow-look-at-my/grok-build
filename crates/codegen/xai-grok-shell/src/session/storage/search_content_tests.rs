@@ -196,6 +196,7 @@ fn test_single_pass_nonexistent_file() {
 
 #[test]
 fn test_single_pass_assistant_text_cap() {
+    // Two 60K chunks in the same turn: the 100K assistant cap should truncate the second chunk
     let big_text = "x".repeat(60_000);
     let lines = vec![
         acp_update(&format!(
@@ -229,6 +230,7 @@ fn test_single_pass_assistant_text_cap() {
 
 #[test]
 fn test_single_pass_tool_call_count_cap() {
+    // Generate 250 tool calls; only the first 200 should be indexed
     let lines: Vec<String> = (0..250)
         .map(|i| {
             acp_update(&format!(

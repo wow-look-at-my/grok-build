@@ -108,6 +108,7 @@ impl WebSearchToolCallBlock {
         match max_width {
             Some(w) => {
                 // Collapsed shows deduplicated domain count as "sites".
+                // The fullscreen footer shows raw citation count as "Sources".
                 let site_count = self.unique_domains().len();
                 let suffix = if site_count > 0 {
                     let s = if site_count == 1 { "" } else { "s" };
@@ -117,6 +118,7 @@ impl WebSearchToolCallBlock {
                 };
 
                 // Only show suffix if prefix + suffix fit within width.
+                // Otherwise drop it to avoid overflow on narrow terminals.
                 let suffix_fits = prefix.len() + suffix.len() < w;
                 let effective_suffix = if suffix_fits { &suffix } else { "" };
 
@@ -146,6 +148,7 @@ impl WebSearchToolCallBlock {
 
     /// Header line with only the query span selectable (exclude label prefix/suffix).
     fn header_block_line(&self, line: Line<'static>) -> BlockLine {
+        // Spans are [prefix, query, optional_suffix]; only the query (index 1) is selectable
         let query_end = 2.min(line.spans.len()).max(1);
         BlockLine {
             selectable: Selectable::Spans(1..query_end),

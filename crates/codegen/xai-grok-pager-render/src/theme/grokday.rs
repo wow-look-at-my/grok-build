@@ -1,4 +1,6 @@
 //! GrokDay is the light counterpart to GrokNight.
+//! Backgrounds and text use a neutral grayscale ramp (no blue/warm tint).
+//! Accent colors are the same hue family as GrokNight but deepened for contrast on light backgrounds.
 
 use ratatui::style::{Color, Modifier};
 
@@ -20,12 +22,12 @@ mod palette {
     pub const BG_HIGHLIGHT: Color = rgb(222, 222, 222); // #dedede — highlight bg
 
     // ── Text / grays (neutral dark) ──────────────────────────────────────
-    pub const FG: Color = rgb(38, 38, 38);
-    pub const FG_DARK: Color = rgb(68, 68, 68);
+    pub const FG: Color = rgb(38, 38, 38); // #262626 — primary text
+    pub const FG_DARK: Color = rgb(68, 68, 68); // #444444 — secondary text
     pub const FG_GUTTER: Color = rgb(178, 178, 178); // #b2b2b2 — dim
-    pub const COMMENT: Color = rgb(118, 118, 118);
+    pub const COMMENT: Color = rgb(118, 118, 118); // #767676 — muted
     pub const DARK3: Color = rgb(142, 142, 142); // #8e8e8e — medium gray
-    pub const DARK5: Color = rgb(98, 98, 98);
+    pub const DARK5: Color = rgb(98, 98, 98); // #626262 — bright gray
 
     // ── Accent colors (deepened for light-background contrast) ───────────
     pub const BLUE: Color = rgb(47, 100, 210); // #2F64D2

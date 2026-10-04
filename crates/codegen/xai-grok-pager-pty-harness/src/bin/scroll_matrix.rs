@@ -1,5 +1,9 @@
-#![allow(clippy::expect_used)] // Hits predate the gate
-//! Runs matrix cells (`scroll_matrix::CELLS`) against a real pager binary in a PTY.
+#![allow(clippy::expect_used)] // 2 hits predate the gate
+//! Runs matrix cells (`scroll_matrix::CELLS`) against a real pager binary in a PTY and prints the per-cell verdict table.
+//! Writes `report.json` into the artifacts dir, next to each cell's recorder capture.
+//! Exits nonzero iff any cell failed or an xfail cell passed.
+//! The curated tier also runs in CI as `tests/scroll_matrix_curated.rs`.
+//! This binary is the local entry point for the full sweep and for one-off cell reruns (`--filter`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -35,6 +39,7 @@ struct Cli {
     #[arg(long, value_name = "SUBSTR")]
     filter: Option<String>,
 
+    /// Default 1: parallel cells stretch inter-report sleeps and can flip Auto classification. Invariants use the recorder clock, so more jobs stay sound.
     #[arg(long, value_name = "N", default_value_t = 1)]
     jobs: usize,
 
@@ -42,7 +47,8 @@ struct Cli {
     #[arg(long, value_name = "DIR", default_value = "target/scroll-matrix")]
     artifacts: PathBuf,
 
-    /// Pager binary. Defaults to PAGER_BINARY, CARGO_BIN_EXE_xai-grok-pager, or a locally-built debug binary.
+    /// Pager binary.
+    /// Defaults to PAGER_BINARY, CARGO_BIN_EXE_xai-grok-pager, or a locally-built debug binary.
     #[arg(long, value_name = "PATH")]
     binary: Option<PathBuf>,
 }
@@ -86,8 +92,9 @@ async fn run() -> Result<ExitCode> {
         );
     }
 
-    // The pager child resolves GROK_SCROLL_LOG against ITS cwd (the harness's
-    // temp workspace) A relative artifacts dir (including the default).
+    // The pager child resolves GROK_SCROLL_LOG against ITS cwd (the harness's temp workspace)
+    // A relative artifacts dir (including the default) would scatter captures there and starve the finalize wait
+    // Absolutize against the invoking cwd
     let artifacts = std::path::absolute(&cli.artifacts)
         .with_context(|| format!("absolutize artifacts dir {}", cli.artifacts.display()))?;
 

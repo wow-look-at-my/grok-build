@@ -1,4 +1,7 @@
 //! Shared parser for an auth command's stdout.
+//!
+//! [`super::external_auth`] (session auth) and [`super::auth_provider`] (the per-model provider mint) each run a command that prints a bearer token.
+//! Both parse the command's stdout here.
 
 #[derive(serde::Deserialize)]
 pub struct ExternalAuthOutput {
@@ -12,8 +15,8 @@ pub struct ExternalAuthOutput {
     pub issuer: Option<String>,
 }
 
-/// A bearer must be a single line: reject control characters (including an
-/// interior newline) so a malformed token can never reach an HTTP header.
+/// A bearer must be a single line: reject control characters (including an interior newline) so a malformed token can never reach an HTTP header.
+/// Failing here is clearer than relying on the HTTP layer to reject it later.
 fn reject_control_chars(token: &str) -> anyhow::Result<()> {
     if token.contains(char::is_control) {
         anyhow::bail!("token contains control characters");

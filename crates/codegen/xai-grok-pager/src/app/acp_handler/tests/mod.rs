@@ -651,6 +651,7 @@ pub(super) fn make_fired_notif_with_subagent(
     let raw = serde_json::value::to_raw_value(&notif).unwrap();
     acp::ExtNotification::new("x.ai/scheduled_task_fired", std::sync::Arc::from(raw))
 }
+/// Set up an app with two agents; the active view points to agent 1, but agent 0 owns the scheduled task.
 /// Handlers that gate on `active_view` will mutate the wrong agent (or silently no-op).
 pub(super) fn make_app_two_agents() -> AppView {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1117,7 +1118,8 @@ pub(super) fn xai_turn_completed_notif_with_cost(
                 num_turns: 1,
                 usage_is_incomplete: false,
             }),
-            // No agent-reported session total: exercises the turn-level attribution an agent.
+            // No agent-reported session total: exercises the turn-level
+            // attribution an agent that only prices whole turns produces.
             session_cost_usd_ticks: None,
             elapsed_ms: None,
         },
@@ -1130,7 +1132,7 @@ pub(super) fn xai_turn_completed_notif_with_cost(
 }
 /// A `ResponseCompleted` closing one model call, carrying that call's own cost
 /// and the agent's session-cumulative total. Built through the typed
-/// `SessionNotification` so both cost fields the handler reads cannot drift
+/// `SessionNotification` so the two cost fields the handler reads cannot drift
 /// from the wire shape the shell emits.
 pub(super) fn xai_response_completed_notif_with_cost(
     session_id: &str,
@@ -1488,6 +1490,7 @@ pub(super) fn work_status_lines(sb: &ScrollbackState) -> Vec<String> {
         })
         .collect()
 }
+/// Register two running background commands on the (idle) agent through the wire.
 pub(super) fn seed_two_bg_tasks(app: &mut AppView, session_id: &str) {
     let _ = handle_ext_notification(
         &make_task_backgrounded_notif(session_id, "tc-1", "task-1", "sleep 98"),
@@ -1526,6 +1529,7 @@ pub(super) fn last_interjection_text(sb: &ScrollbackState) -> Option<String> {
         })
 }
 /// Switch the active view to `id` via the canonical helper.
+/// Wrapping here keeps the source-scan invariant test (`no_direct_active_view_assignment_outside_switch_to_agent`) happy.
 pub(super) fn switch_active_to(app: &mut AppView, id: AgentId) {
     crate::app::dispatch::switch_to_agent(
         app,

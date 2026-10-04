@@ -4,18 +4,28 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-// Regression: scroll pacing, one 16ms scroll clock, no ghost frames.
+// Regression: scroll pacing, one 16ms scroll clock, no ghost frames. (b) no amplification: the
+// frame count never exceeds the event count. (c) no ghost frames: every captured frame paints at
+// least `MOVEMENT_CHARS_FLOOR` printable chars.
 
+/// 240 one-row lines, far more than the 50-row PTY, so the burst can never clamp at the transcript top.
+/// 30 events at up to 3 lines each under max trackpad acceleration is about 90 lines; ~200 rows sit above the bottom-pinned viewport.
+/// A clamped flush would legitimately paint nothing and break the ghost-frame floor.
 const MARKER_COUNT: usize = 240;
 
+/// 30 spaced single reports at a nominal 6ms: a flood the harness terminal's ept=3 profile classifies as trackpad (see `scroll.rs`).
 const BURST_EVENTS: usize = 30;
 
 const BURST_INTERVAL: Duration = Duration::from_millis(6);
 
 /// Minimum printable chars for a frame that scrolled the marker viewport.
+/// A 1-line shift rewrites at least one digit cell in each of the ~40 visible marker rows; a ghost frame carries ~0.
+/// 10 sits far from both.
 const MOVEMENT_CHARS_FLOOR: usize = 10;
 
 /// **Wheel-flood pacing regression.**
+/// A trackpad-like flood over a marker transcript must scroll the viewport with every captured frame painting real movement:
+/// at least two coalesced frames (the burst spans many 16ms cadence slots), at most one frame per event, and no frame below the movement char floor.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn wheel_flood_paints_no_ghost_frames() {
@@ -60,7 +70,9 @@ async fn wheel_flood_paints_no_ghost_frames() {
         harness.screen_contents()
     );
 
-    // (b) Coalescing bounds.
+    // (b) Coalescing bounds. The lower bound of 2 is jitter-safe: 30 events at intervals of at least 6ms span at least 174ms.
+    // That is many 16ms cadence slots, and more than one flush even if stretched gaps split the stream
+    // The upper bound is the amplification cap: never more than one frame per event
     let frames = harness.frame_count();
     assert!(
         frames >= 2,

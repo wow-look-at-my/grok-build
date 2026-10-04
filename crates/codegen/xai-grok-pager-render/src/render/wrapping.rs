@@ -53,7 +53,8 @@ pub fn byte_range_to_row_cols(
         if start < end {
             // Convert byte offsets within this row to display columns. The
             // rows come from `wrap_byte_ranges_matching`, whose ranges are
-            // `textwrap` boundaries of `text`.
+            // `textwrap` boundaries of `text`. `get` keeps that assumption from
+            // turning into a panic if a caller ever hands over a raw range.
             let Some(row_text) = text.get(wr.start..wr.end) else {
                 tracing::debug!(
                     row,
@@ -88,7 +89,7 @@ pub(crate) fn byte_offset_to_display_col(text: &str, byte_offset: usize) -> usiz
     col
 }
 
-/// Breakpoints must match visual rendering.
+/// Breakpoints must match visual rendering. FirstFit is greedy, so single-pass equals the two-stage wrap; a non-greedy change must mirror it.
 #[allow(clippy::single_range_in_vec_init)] // Intentional: the single range is the full text, no wrapping
 pub fn wrap_byte_ranges_matching(text: &str, width: usize) -> Vec<Range<usize>> {
     if width == 0 || text.is_empty() {
@@ -96,6 +97,8 @@ pub fn wrap_byte_ranges_matching(text: &str, width: usize) -> Vec<Range<usize>> 
     }
 
     // Must match the Options used by word_wrap_line_with_joiners (via RtOptions).
+    // Blockquote lines get a subsequent_indent equal to the prefix, which reduces the effective width for continuation lines
+    // Mirror that here so search-highlight breakpoints stay in sync with the visual rendering
     let bq_len = blockquote_prefix_len(text);
     let subsequent_width = if bq_len > 0 && bq_len < text.len() {
         match text.get(..bq_len) {
@@ -290,7 +293,7 @@ fn build_wrapped_line_from_range<'a>(
 fn is_table_line(line: &Line<'_>) -> bool {
     let mut chars = line.spans.iter().flat_map(|s| s.content.chars());
     match chars.next() {
-        // Box-drawing border characters (horizontal lines, corners, junctions): these are unambiguously table borders.
+        // Box-drawing border characters (horizontal lines, corners, junctions): these are unambiguously table borders, never blockquote prefixes
         Some(ch)
             if ('\u{2500}'..='\u{257F}').contains(&ch) && ch != '\u{2502}' && ch != '\u{2503}' =>
         {
@@ -317,9 +320,9 @@ fn is_table_line(line: &Line<'_>) -> bool {
     }
 }
 
-/// Must agree with the selection layer's style-aware twin, which depends on re-injected prefix spans.
+/// Leading `│ ` sequences, else 0. Must agree with the selection layer's style-aware twin, which depends on re-injected prefix spans.
 fn blockquote_prefix_len(flat: &str) -> usize {
-    const BAR_BYTES: usize = '\u{2502}'.len_utf8();
+    const BAR_BYTES: usize = '\u{2502}'.len_utf8(); // 3
     let mut len = 0;
     let mut chars = flat.chars();
     while let Some('\u{2502}') = chars.next() {
@@ -350,7 +353,9 @@ where
 
     let (flat, span_bounds) = flatten_line_and_bounds(line);
 
-    // Blockquote lines start with │ (U+2502) prefix(es) Set subsequent_indent to the prefix so continuation lines repeat the quote marker Skip.
+    // Blockquote lines start with │ (U+2502) prefix(es)
+    // Set subsequent_indent to the prefix so continuation lines repeat the quote marker
+    // Skip if the caller already set a subsequent_indent (caller intent wins).
     let bq_len = blockquote_prefix_len(&flat);
     if bq_len > 0 && bq_len < flat.len() && rt_opts.subsequent_indent.width() == 0 {
         let prefix = slice_line_spans(line, &span_bounds, &(0..bq_len), &mut 0);
@@ -379,7 +384,8 @@ where
         return (out, joiners);
     };
 
-    // Rows are emitted in increasing byte order.
+    // Rows are emitted in increasing byte order, so each row resumes the span scan where the previous one stopped instead of rescanning from 0
+    // This shared cursor (see `slice_line_spans`) is what keeps wrapping one huge line linear
     let mut span_cursor = 0usize;
 
     let first_line = build_wrapped_line_from_range(
@@ -393,6 +399,9 @@ where
     joiners.push(None);
 
     // Wrap the remainder using subsequent indent width.
+    // `base` is a `textwrap` range end over `flat`, and `skip_leading_spaces`
+    // counts ASCII spaces (one byte each), so every offset below stays on a
+    // char boundary of `flat`.
     let mut base = first_line_range.end;
     let skip_leading_spaces = match flat.get(base..) {
         Some(rest) => rest.chars().take_while(|c| *c == ' ').count(),
@@ -590,8 +599,8 @@ fn slice_line_spans<'a>(
     let start_byte = range.start;
     let end_byte = range.end;
 
-    // Spans ending at or before this row's start are done for every later row
-    // too (ranges are contiguous and queries monotonic).
+    // Spans ending at or before this row's start are done for every later row too (ranges are contiguous and queries monotonic)
+    // So advance the shared cursor past them once and never revisit them
     while span_bounds
         .get(*cursor)
         .is_some_and(|(r, _)| r.end <= start_byte)
@@ -634,6 +643,8 @@ fn slice_line_spans<'a>(
 }
 
 /// Word-wrap a header line with hanging indent.
+///
+/// The first span stays on line 1; remaining content wraps with `extra_indent + prefix_width` hanging indent on continuation lines.
 pub fn wrap_header_hanging(
     header: Line<'static>,
     width: usize,
@@ -1032,6 +1043,7 @@ mod tests {
         let (_flat, span_bounds) = flatten_line_and_bounds(&line);
         let total = span_bounds.last().map(|(r, _)| r.end).unwrap_or(0);
 
+        // Naive reference: rescan from index 0 for every range (old O(R*S) path).
         fn naive(
             original: &Line<'_>,
             span_bounds: &[(Range<usize>, ratatui::style::Style)],
@@ -1165,6 +1177,7 @@ mod tests {
 
     #[test]
     fn highlight_match_spanning_two_rows() {
+        // "world" (bytes 6..11) crosses the wrap at column 10, so the match spans both rows.
         let text = "hello world end";
         let ranges = vec![0..10, 10..15];
         let segments = byte_range_to_row_cols(text, &ranges, 6..11);
@@ -1191,6 +1204,7 @@ mod tests {
         let text = "0123456789abcdefghij";
         let ranges = vec![0..10, 10..20];
         let segments = byte_range_to_row_cols(text, &ranges, 5..10);
+        // Only row 0: the end is exclusive, so byte 10 is not included
         assert_eq!(
             segments,
             vec![HighlightSegment {
@@ -1255,9 +1269,13 @@ mod tests {
 
     #[test]
     fn highlight_with_multibyte_chars() {
+        // "ab—cd" where — is U+2014 (3 bytes, 1 display column).
+        // Byte layout: a(1) b(1) —(3) c(1) d(1) = 7 bytes total.
+        // Display:     a(0) b(1) —(2) c(3) d(4) = 5 display columns.
         let text = "ab\u{2014}cd";
         assert_eq!(text.len(), 7);
         let ranges = vec![0..7]; // one row
+        // Match "cd" (bytes 5..7) is display cols 3..5
         let segments = byte_range_to_row_cols(text, &ranges, 5..7);
         assert_eq!(
             segments,
@@ -1271,9 +1289,13 @@ mod tests {
 
     #[test]
     fn highlight_with_wide_emoji() {
+        // "a😀b" where 😀 is U+1F600 (4 bytes, 2 display columns).
+        // Byte layout: a(1) 😀(4) b(1) = 6 bytes total.
+        // Display:     a(0) 😀(1..3) b(3) = 4 display columns.
         let text = "a\u{1F600}b";
         assert_eq!(text.len(), 6);
         let ranges = vec![0..6];
+        // Match "b" (bytes 5..6) is display col 3..4
         let segments = byte_range_to_row_cols(text, &ranges, 5..6);
         assert_eq!(
             segments,
@@ -1313,7 +1335,7 @@ mod tests {
     fn table_row_padded_to_content_width() {
         use unicode_width::UnicodeWidthStr;
 
-        let line = Line::from("│ Status  │ Note      │");
+        let line = Line::from("│ Status  │ Note      │"); // 23 display columns
         assert_eq!(concat_line(&line).width(), 23);
 
         let content_width = 40;
@@ -1484,7 +1506,8 @@ mod tests {
 
     #[test]
     fn wrap_byte_ranges_blockquote_matches_visual() {
-        // wrap_byte_ranges_matching must produce the same breakpoints as word_wrap_line_with_joiners for blockquote lines.
+        // wrap_byte_ranges_matching must produce the same breakpoints as word_wrap_line_with_joiners for blockquote lines
+        // That keeps search highlights aligned with the visual rendering
         let text = "\u{2502} This is a blockquote that should wrap to multiple lines";
         let width = 30;
 

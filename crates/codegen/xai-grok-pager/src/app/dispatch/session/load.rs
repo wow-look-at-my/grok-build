@@ -118,9 +118,9 @@ pub(in crate::app::dispatch) fn focus_if_session_already_open(
     switch_to_agent(app, existing_id, SwitchCause::Load);
     Some(existing_id)
 }
-/// Matches the effects layer's `is_chat_path` after history-bypass clearing
-/// of `SessionFlags.chat_mode`. True for a conversation-entry row, or under
-/// sticky `--chat` without the local-disk history bypass.
+/// Matches the effects layer's `is_chat_path` after history-bypass clearing of `SessionFlags.chat_mode`.
+/// True for a conversation-entry row, or under sticky `--chat` without the local-disk history bypass.
+/// Gateway resumes (no bypass) are Chat; history-bypass local-disk rows stay Build.
 pub(in crate::app::dispatch) fn session_opens_as_chat(app: &AppView, chat_kind: bool) -> bool {
     if chat_kind {
         return true;
@@ -1589,8 +1589,9 @@ pub(in crate::app::dispatch) fn dispatch_show_session_picker(app: &mut AppView) 
     });
     dispatch_fetch_session_list(app)
 }
-/// The picker (modal `/resume` or welcome screen) was dismissed without a
-/// pick.
+/// The picker (modal `/resume` or welcome screen) was dismissed without a pick.
+/// A modal's fields (and generation) die with it, so its in-flight fetches are dropped by host liveness.
+/// The welcome fields survive the close, so their in-flight fetches must be invalidated here.
 pub(in crate::app::dispatch) fn dispatch_session_picker_closed(app: &mut AppView) -> Vec<Effect> {
     invalidate_picker_fetch_on_dismiss(app);
     vec![]

@@ -1,4 +1,6 @@
 //! `[cursor_worker]` section from config.toml.
+//! Always parsed so a build without worker support still accepts the table;
+//! only a leader compiled with it acts on the values. Re-exported from `agent::config`.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,12 +12,15 @@ pub struct CursorWorkerConfig {
     /// Display name for this worker; the hostname when `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Absolute repository directories offered to claimed agents; the first is the registered working directory.
+    /// Absolute repository directories offered to claimed agents; the first is the registered
+    /// working directory.
     pub worker_dirs: Vec<String>,
     /// Cap on concurrently claimed agents; `None` is uncapped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_agents: Option<u32>,
     /// Also register the any-repo door, which clones whatever repository a claimed agent brings.
+    /// Opt-in: only `Some(true)` plans it, alone or beside the bound door. `None` and
+    /// `Some(false)` never plan it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub any_repo: Option<bool>,
     /// Hub base URL for the worker session; derived from the leader's hub URL when `None`.

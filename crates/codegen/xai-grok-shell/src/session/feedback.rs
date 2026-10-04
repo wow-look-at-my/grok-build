@@ -12,8 +12,11 @@ pub use prod_mc_cli_chat_proxy_types::feedback_types::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeedbackTier {
+    /// Sustained engagement without issues (0.05% sample rate)
     Tier1,
+    /// Complex session with some friction (0.02% sample rate)
     Tier2,
+    /// Recovery from issues or session end (0.01% sample rate)
     Tier3,
 }
 
@@ -135,6 +138,7 @@ pub struct FeedbackHeuristics {
     cooldown_seconds: u64,
     max_requests_per_session: u32,
 
+    /// Tier 1 configuration
     tier1_enabled: bool,
     tier1_sample_rate: f64,
     tier1_min_turns: u32,
@@ -146,6 +150,7 @@ pub struct FeedbackHeuristics {
     tier1_prompt: String,
     tier1_max_triggers: u32,
 
+    /// Tier 2 configuration
     tier2_enabled: bool,
     tier2_sample_rate: f64,
     tier2_min_turns: u32,
@@ -157,6 +162,7 @@ pub struct FeedbackHeuristics {
     tier2_prompt: String,
     tier2_max_triggers: u32,
 
+    /// Tier 3 configuration
     tier3_enabled: bool,
     tier3_sample_rate: f64,
     tier3_min_turns: u32,
@@ -168,7 +174,7 @@ pub struct FeedbackHeuristics {
     tier3_prompt: String,
     tier3_max_triggers: u32,
 
-    /// A tier can trigger up to its configured max_triggers times (means unlimited).
+    /// A tier can trigger up to its configured max_triggers times (0 means unlimited).
     trigger_counts: std::collections::HashMap<FeedbackTier, u32>,
 
     requests_sent: u32,
@@ -190,11 +196,12 @@ impl FeedbackHeuristics {
             enabled: true,
 
             // Global limits
-            cooldown_seconds: 300, // A few
+            cooldown_seconds: 300, // 5 minutes
             max_requests_per_session: 3,
 
+            // Tier 1: Standard engagement
             tier1_enabled: true,
-            tier1_sample_rate: 0.0005,
+            tier1_sample_rate: 0.0005, // 0.05%
             tier1_min_turns: 10,
             tier1_min_tool_calls: 5,
             tier1_min_compactions: 2,
@@ -205,8 +212,9 @@ impl FeedbackHeuristics {
                 "You've been using Grok Code productively! Would you mind sharing quick feedback?"
                     .to_string(),
 
+            // Tier 2: Complex session with friction
             tier2_enabled: true,
-            tier2_sample_rate: 0.0002,
+            tier2_sample_rate: 0.0002, // 0.02%
             tier2_min_turns: 15,
             tier2_min_tool_calls: 10,
             tier2_min_compactions: 3,
@@ -217,8 +225,9 @@ impl FeedbackHeuristics {
                 "You've worked through a complex session. Your feedback would help us improve."
                     .to_string(),
 
+            // Tier 3: Recovery or significant milestone
             tier3_enabled: true,
-            tier3_sample_rate: 0.0001,
+            tier3_sample_rate: 0.0001, // 0.01%
             tier3_min_turns: 20,
             tier3_requires_cancellation: false,
             tier3_requires_revert: false,
@@ -249,6 +258,7 @@ impl FeedbackHeuristics {
         self.cooldown_seconds = config.cooldown_seconds as u64;
         self.max_requests_per_session = config.max_requests_per_session as u32;
 
+        // Tier 1
         self.tier1_enabled = config.tier1_enabled;
         self.tier1_sample_rate = config.tier1_sample_rate;
         self.tier1_min_turns = config.tier1_min_turns as u32;
@@ -260,6 +270,7 @@ impl FeedbackHeuristics {
         self.tier1_prompt = config.tier1_prompt.clone();
         self.tier1_max_triggers = config.tier1_max_triggers as u32;
 
+        // Tier 2
         self.tier2_enabled = config.tier2_enabled;
         self.tier2_sample_rate = config.tier2_sample_rate;
         self.tier2_min_turns = config.tier2_min_turns as u32;
@@ -271,6 +282,7 @@ impl FeedbackHeuristics {
         self.tier2_prompt = config.tier2_prompt.clone();
         self.tier2_max_triggers = config.tier2_max_triggers as u32;
 
+        // Tier 3
         self.tier3_enabled = config.tier3_enabled;
         self.tier3_sample_rate = config.tier3_sample_rate;
         self.tier3_min_turns = config.tier3_min_turns as u32;
@@ -356,6 +368,7 @@ impl FeedbackHeuristics {
             }
         }
 
+        // Check tiers in order of priority (Tier 3 is most specific, check first)
         if let Some(condition) = self.check_tier3(signals) {
             return self.maybe_request(condition);
         }
@@ -403,6 +416,7 @@ impl FeedbackHeuristics {
             return None;
         }
 
+        // Tier 1: Sustained engagement without major issues
         let cancellation_check = if self.tier1_no_cancellations {
             signals.cancellation_count == 0
         } else {
@@ -429,6 +443,7 @@ impl FeedbackHeuristics {
             return None;
         }
 
+        // Tier 2: Complex session with some friction but recovery
         if signals.turn_count >= self.tier2_min_turns
             && signals.tool_call_count >= self.tier2_min_tool_calls
             && signals.compaction_count >= self.tier2_min_compactions
@@ -449,6 +464,7 @@ impl FeedbackHeuristics {
             return None;
         }
 
+        // Tier 3: Recovery from significant issues
         let had_cancellation = signals.cancellation_count > 0;
         let had_revert = signals.has_reverted;
 
@@ -666,6 +682,7 @@ mod tests {
 
         let signals = make_signals(10, 5, 2, 0, 0);
 
+        // First evaluation finds Tier 1
         let eval = heuristics.evaluate(&signals);
         assert!(eval.trigger_condition.is_some());
         assert_eq!(
@@ -679,6 +696,7 @@ mod tests {
             .entry(FeedbackTier::Tier1)
             .or_insert(0) += 1;
 
+        // Second evaluation with the same signals does not trigger Tier 1 again
         let eval = heuristics.evaluate(&signals);
         assert!(
             eval.trigger_condition.is_none()
@@ -837,7 +855,7 @@ mod tests {
 
         let signals = make_signals(5, 3, 1, 0, 0);
 
-        // The tier fires a few times
+        // The tier fires exactly 3 times
         for i in 0..3 {
             let eval = h.evaluate(&signals);
             assert!(eval.should_request, "iteration {i}: should trigger");
@@ -858,6 +876,7 @@ mod tests {
         h.tier1_no_cancellations = false;
         h.tier2_enabled = false;
         h.tier3_enabled = false;
+        // max_triggers defaults to 1
 
         let signals = make_signals(5, 3, 1, 0, 0);
 
@@ -876,6 +895,7 @@ mod tests {
         let mut h = FeedbackHeuristics::new();
         h.tier1_max_triggers = 0; // unlimited
         h.tier2_max_triggers = 2;
+        // tier3_max_triggers stays at 1 (default)
         h.tier1_sample_rate = 1.0;
         h.tier2_sample_rate = 1.0;
         h.tier3_sample_rate = 1.0;
@@ -897,6 +917,7 @@ mod tests {
 
         let signals = make_signals(10, 5, 2, 1, 0);
 
+        // Tier 3 exhausts after 1 trigger (evaluate checks tier 3 first, then 2, then 1)
         let eval = h.evaluate(&signals);
         assert!(eval.should_request);
         assert_eq!(
@@ -904,7 +925,7 @@ mod tests {
             FeedbackTier::Tier3
         );
 
-        // Tier multiple fires next (tier3 exhausted)
+        // Tier 2 fires next (tier3 exhausted)
         let eval = h.evaluate(&signals);
         assert!(eval.should_request);
         assert_eq!(
@@ -912,7 +933,7 @@ mod tests {
             FeedbackTier::Tier2
         );
 
-        // Tier multiple fires again (max_triggers=2)
+        // Tier 2 fires again (max_triggers=2)
         let eval = h.evaluate(&signals);
         assert!(eval.should_request);
         assert_eq!(
@@ -920,6 +941,7 @@ mod tests {
             FeedbackTier::Tier2
         );
 
+        // Tier 2 is exhausted, so evaluation falls through to tier 1 (unlimited)
         let eval = h.evaluate(&signals);
         assert!(eval.should_request);
         assert_eq!(
@@ -927,7 +949,7 @@ mod tests {
             FeedbackTier::Tier1
         );
 
-        // Tier multiple keeps firing
+        // Tier 1 keeps firing
         let eval = h.evaluate(&signals);
         assert!(eval.should_request);
         assert_eq!(

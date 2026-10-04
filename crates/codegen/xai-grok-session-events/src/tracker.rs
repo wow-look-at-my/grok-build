@@ -5,7 +5,8 @@ use std::time::Instant;
 use crate::log::EventWriter;
 use crate::types::{CancellationCategory, Event, RedirectKind, TurnOutcomeLabel};
 
-/// The tool call running, kept so a cancel can report it.
+/// The tool call currently running, kept so a cancel can report it.
+/// `dispatch_duration_ms` was measured when the call was dispatched, so a cancel reports that instead of timing the call itself.
 #[derive(Debug, Clone)]
 struct ActiveTool {
     tool_name: String,
@@ -20,11 +21,17 @@ pub struct EventTracker {
     turn_ended_emitted: Cell<bool>,
     active_tool: RefCell<Option<ActiveTool>>,
     turn_tool_count: Cell<u32>,
-    /// The next real user prompt consumes it once, via `take_prior_interrupt_category`.
+    /// The next real user prompt consumes it once, via `take_prior_interrupt_category`, to tag
+    /// `UserItem::prior_turn_interrupt`. `begin_turn` must not clear it: it has to survive into that next turn. An
+    /// interjection does not cancel the turn, so it is never recorded here (see `Event::Interjected`).
     prior_interrupt_category: Cell<Option<CancellationCategory>>,
-    /// `CancelThenSend` means nothing was queued.
+    /// `CancelThenSend` means nothing was queued; `QueuedAfterCancel` means a prompt sat queued behind the aborted turn.
+    /// `cancel_running_task` sets it, and the next user `turn_started` consumes it into `Event::TurnStarted::redirect_kind`.
+    /// Like `prior_interrupt_category` it survives `begin_turn` so it reaches that next turn.
     prior_redirect_kind: Cell<Option<RedirectKind>>,
-    /// Set by the cancel path only when a turn was aborted mid-stream with no tool in flight.
+    /// Set by the cancel path only when a turn was aborted mid-stream with no tool in flight. Nothing else then tells the
+    /// model it was interrupted: no dangling tool call gets repaired and no permission tool result is written. The next real
+    /// user prompt consumes it and frames that query with the interrupt envelope.
     pending_interrupt_reminder: Cell<bool>,
 }
 
@@ -147,8 +154,8 @@ impl EventTracker {
         self.prior_interrupt_category.take()
     }
 
-    /// Records how the turn after a mid-turn abort starts (`CancelThenSend`
-    /// or `QueuedAfterCancel`).
+    /// Records how the turn after a mid-turn abort starts (`CancelThenSend` or `QueuedAfterCancel`).
+    /// A later abort overwrites an earlier one.
     pub fn set_prior_redirect_kind(&self, kind: RedirectKind) {
         self.prior_redirect_kind.set(Some(kind));
     }
@@ -158,8 +165,8 @@ impl EventTracker {
         self.prior_redirect_kind.take()
     }
 
-    /// Turns on the one-shot interrupt envelope for the next real user
-    /// prompt.
+    /// Turns on the one-shot interrupt envelope for the next real user prompt.
+    /// Only the cancel path sets it, and only when no tool was in flight, because the model would otherwise never learn it was interrupted.
     pub fn set_pending_interrupt_reminder(&self) {
         self.pending_interrupt_reminder.set(true);
     }
@@ -233,7 +240,9 @@ mod tests {
         ));
         assert!(t.take_prior_redirect_kind().is_none());
 
-        // `begin_turn` runs at the start of a turn, before the next real user prompt consumes the markers It must not clear these cross-turn markers.
+        // `begin_turn` runs at the start of a turn, before the next real user prompt consumes the markers
+        // It must not clear these cross-turn markers; it only resets the per-turn counters
+        // A regression here would silently drop the `prior_turn_interrupt` tag and the `redirect_kind`
         t.set_prior_interrupt_category(CancellationCategory::PermissionRejected);
         t.set_prior_redirect_kind(RedirectKind::CancelThenSend);
         t.set_pending_interrupt_reminder();

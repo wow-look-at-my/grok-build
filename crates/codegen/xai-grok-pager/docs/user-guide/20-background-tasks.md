@@ -6,7 +6,7 @@ Grok runs long-lived processes without blocking the conversation. This document 
 
 ## Background Commands
 
-Set `background: true` on the `run_terminal_command` tool to run a command in the background. It returns a task ID immediately. Retrieve output with `get_command_or_subagent_output`.
+Set `background: true` on the `run_terminal_command` tool to run a command in the background. It returns a task ID immediately; retrieve output with `get_command_or_subagent_output`.
 
 ### How It Works
 
@@ -17,12 +17,12 @@ Set `background: true` on the `run_terminal_command` tool to run a command in th
 
 ### Getting Output
 
-Use `get_command_or_subagent_output` to check a background command or subagent. Pass `task_ids` as a list (one id is a one-element array. Maximum 20):
+Use `get_command_or_subagent_output` to check a background command or subagent. Pass `task_ids` as a list (one id is a one-element array; maximum 20):
 
 - Omit `timeout_ms`, or pass `0`, for a non-blocking snapshot.
 - A positive `timeout_ms` waits for completion. Several ids wait until **all** complete.
 
-A positive `timeout_ms` is clamped to **1 hour** (`3600000` ms). Hosts with a shorter transport deadline set `GROK_MAX_WAIT_BLOCK_MS` (plain milliseconds. Unparseable values keep the default).
+A positive `timeout_ms` is clamped to **1 hour** (`3600000` ms). Hosts with a shorter transport deadline set `GROK_MAX_WAIT_BLOCK_MS` (plain milliseconds; unparseable values keep the default).
 
 If the wait returns while the child is still running, leave it alone: do not kill it or tell it to stop. Completion wakes the parent automatically. Poll again only if you need another snapshot.
 
@@ -81,9 +81,9 @@ The interval format supports:
 ### Behavior
 
 - The prompt fires immediately on creation, then repeats at the specified interval
-- Each firing runs in a detached background subagent, not as a turn in your conversation. The fire cannot see the conversation. As a result, the stored prompt must stand on its own. Only its result comes back
-- Recurring tasks auto-expire after several days
-- Maximum scheduled tasks can be active at once
+- Each firing runs in a detached background subagent, not as a turn in your conversation. The fire cannot see the conversation, so the stored prompt must stand on its own; only its result comes back
+- Recurring tasks auto-expire after 7 days
+- Maximum 50 scheduled tasks can be active at once
 
 ---
 
@@ -101,10 +101,10 @@ The `monitor` tool streams events from a long-running script. Each line of outpu
 ### Script Guidelines
 
 - **Always use `grep --line-buffered` in pipes.** Without it, pipe buffering delays events by minutes.
-- **Handle transient failures in poll loops** (`curl ... || true`). One failed request must not stop the monitor.
+- **Handle transient failures in poll loops** (`curl ... || true`). One failed request should not stop the monitor.
 - **Use selective filters.** Every line becomes a message, so never pipe raw logs.
-- **Set poll intervals to match the source.** Use many seconds or more for remote APIs to respect rate limits, and a lower count.5 to 1 second for local checks.
-- **Both stdout and stderr generate events.** Redirect output you do not want as events — for example, append `2>/dev/null` — or filter it out.
+- **Set poll intervals to match the source.** Use 30 seconds or more for remote APIs to respect rate limits, and 0.5 to 1 second for local checks.
+- **Both stdout and stderr generate events.** Redirect output you don't want as events — for example, append `2>/dev/null` — or filter it out.
 
 ### Examples
 
@@ -127,7 +127,7 @@ done
 
 ### Persistent Monitors
 
-Set `persistent: true` for monitors that must run for the lifetime of the session:
+Set `persistent: true` for monitors that should run for the lifetime of the session:
 
 - PR monitoring
 - Log tailing
@@ -157,7 +157,7 @@ Create a scheduled task:
 | `recurring`      | Repeat (default: `true`) or fire once (`false`)          |
 | `durable`        | Persist across sessions (default: `false`)               |
 
-Every fire runs in a detached background subagent. There is no option to run one as a turn in the conversation.
+Every fire runs in a detached background subagent; there is no option to run one as a turn in the conversation.
 
 ### scheduler_list
 
@@ -184,13 +184,13 @@ To toggle the prompt queue instead, press `Ctrl+;`.
 
 ## The Still-Running Status Line
 
-Whenever background work is still running while the agent looks idle — between turns, or while a turn is blocked on a user-interruptible wait. A persistent status line appears above the prompt:
+Whenever background work is still running while the agent looks idle — between turns, or while a turn is blocked on a user-interruptible wait — a persistent status line appears above the prompt:
 
 ```
 ◎ 1 command · 2 monitors · 1 loop · 1 subagent still running
 ```
 
-It counts running background commands, monitors, scheduled `/loop` tasks, and background subagents, and updates live as each finishes. Any of them can wake the agent for a new turn (commands and subagents on completion, monitors on events, loops on their timer). As a result, the cue stays up until nothing is left. The running counts live only on this status line: completions land in the transcript as a single "Task completed" chip. "Worked for" markers stay plain — the transcript never repeats or restates the running counts.
+It counts running background commands, monitors, scheduled `/loop` tasks, and background subagents, and updates live as each finishes. Any of them can wake the agent for a new turn (commands and subagents on completion, monitors on events, loops on their timer), so the cue stays up until nothing is left. The running counts live only on this status line: completions land in the transcript as a single "Task completed" chip, and "Worked for" markers stay plain — the transcript never repeats or restates the running counts.
 
 While a turn is waiting on background work (blocked in `get_command_or_subagent_output`), the status line adds a hint that typing takes over immediately:
 
@@ -198,7 +198,7 @@ While a turn is waiting on background work (blocked in `get_command_or_subagent_
 ◎ 1 command still running · send a message to interrupt
 ```
 
-The same hint appears as `◎ waiting · send a message to interrupt` when the agent is waiting on something with no live counter (a sleep, or work that already finished). Sending a message interrupts the wait and runs your message right away. The transcript keeps its usual shape throughout: one "Worked for" marker when the turn ends. When a completion wakes the agent and it replies, that reply gets its own "Worked for" marker. A wake the agent answers silently leaves no trace in the transcript — unless it fails, in which case a "Turn failed" line appears even. This is for a silent wake. As a result, a standing instruction never stops executing invisibly.
+The same hint appears as `◎ waiting · send a message to interrupt` when the agent is waiting on something with no live counter (a sleep, or work that already finished). Sending a message interrupts the wait and runs your message right away. The transcript keeps its usual shape throughout: one "Worked for" marker when the turn ends. When a completion wakes the agent and it replies, that reply gets its own "Worked for" marker; a wake the agent answers silently leaves no trace in the transcript — unless it fails, in which case a "Turn failed" line appears even for a silent wake, so a standing instruction never stops executing invisibly.
 
 ---
 
@@ -220,7 +220,7 @@ The agent runs the dev server with `background: true` and continues writing code
 /loop 5m Run the test suite and report any new failures since the last run
 ```
 
-Every few minutes, the agent runs tests and reports only new failures.
+Every 5 minutes, the agent runs tests and reports only new failures.
 
 ### Log Monitoring
 

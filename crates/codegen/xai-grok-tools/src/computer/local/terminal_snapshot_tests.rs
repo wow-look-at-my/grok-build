@@ -1,4 +1,5 @@
 //! Completion snapshots for background tasks, through the terminal actor.
+//! Unix only: the test logs are built with `head`, `tr`, and `/dev/zero`.
 
 use std::collections::HashMap;
 use std::time::Duration;

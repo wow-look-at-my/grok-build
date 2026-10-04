@@ -1,4 +1,8 @@
 //! `/history`: open the prompt-history search overlay.
+//!
+//! A search mode over the same prompts the panel's Up-arrow browsing steps through.
+//! Fuzzy-search the session's prior prompts; Enter/Tab drops the selection back into the composer.
+//! The slash pipeline clears the composer before dispatch, so the overlay opens with an empty query over the full history.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

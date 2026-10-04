@@ -3,6 +3,10 @@
 //! Session actor implementation for the MVP ACP agent.
 //!
 //! Each session runs as an actor with its own chat history and tool context.
+//! The agent owns the client connection and routes commands and events via channels:
+//! - Agent to Session: `SessionCommand` (prompt, cancel, shutdown)
+//! - Session to Client: `session_notification` via a shared gateway handle
+//!
 use super::commands::{
     AdvertiseTrigger, ParsedPromptInfo, PromptCompletionKind, PromptTurnOk, PromptTurnResult,
     SessionCommand, TaskWakeAdmission, TaskWakeFallback, ok_end_turn,
@@ -298,19 +302,25 @@ pub(crate) struct InputItem {
     /// Authoritative typed provenance for this input.
     pub(crate) input_origin: InputOrigin,
     /// Typed deferred completion retained while an admitted task wake is queued.
+    /// Consumed by an interactive stop if it removes the wake before the turn starts.
     pub(crate) task_wake_fallback: Option<TaskWakeFallback>,
     pub(crate) tool_overrides_update: Option<xai_grok_sampling_types::ToolOverridesUpdate>,
     pub(crate) respond_to: oneshot::Sender<PromptTurnResult>,
-    /// Fired after the user message is in chat history and a persistence flush barrier has completed.
+    /// Fired after the user message is in chat history and a persistence flush barrier has completed (see `SessionCommand::Prompt::persist_ack`).
     pub(crate) persist_ack: Option<oneshot::Sender<()>>,
     /// Pre-parsed prompt channel. See `SessionCommand::Prompt::parsed_prompt_tx`.
     pub(crate) parsed_prompt_tx: Option<oneshot::Sender<ParsedPromptInfo>>,
     /// Fires when this exact row is promoted to the running turn.
+    /// Dropped on removal so a queued-but-never-started initial child prompt cannot ack.
     pub(crate) initial_child_prompt_ready: Option<oneshot::Sender<oneshot::Sender<()>>>,
     /// Server-authoritative prompt-queue metadata.
+    /// `Some` for user-originated prompts (they appear in the shared queue).
+    /// `None` for synthetic / system inputs (auto-wake, nudges, notification drains).
     pub(crate) queue_meta: Option<crate::session::prompt_queue::QueueEntryMeta>,
     pub(crate) queue_mutation_policy: QueueMutationPolicy,
-    /// Whether this prompt entered via the send-now path.
+    /// Whether this prompt entered via the send-now path (explicit, derived during a blocking wait, or an interjection fallback).
+    /// Send-now inserts land behind earlier still-queued send-now prompts, so stacked sends run FIFO.
+    /// Sends stack e.g. during a goal turn, which promotes but never cancels.
     pub(crate) send_now: bool,
     /// See [`SessionCommand::Prompt::traceparent`].
     pub(crate) traceparent: Option<String>,
@@ -323,32 +333,40 @@ struct GoalToolNames {
     todo: String,
 }
 /// Shared body of the goal-mode system reminder.
+/// Used by both `setup_goal` (initial `/goal <objective>`) and `resume_goal` (`/goal resume`).
+/// Placeholders are uppercase to avoid collision with the literal `{...}` content in the prompt.
 pub(super) const GOAL_TASK_DISCIPLINE_TEMPLATE: &str =
     include_str!("templates/goal_task_discipline.md");
 pub(super) const GOAL_RULES_TEMPLATE: &str = include_str!("templates/goal_rules.md");
 pub(super) const GOAL_RULES_TEMPLATE_LEGACY: &str = include_str!("templates/goal_rules_legacy.md");
 /// Plan-aware preamble folded into the goal-rules block when the planner is enabled and a plan exists.
+/// Empty on the legacy path.
 const GOAL_PLAN_BLOCK_TEMPLATE: &str = include_str!("templates/goal_plan_block.md");
-/// Placeholders are lowercase because the template carries no literal
-/// JSON-ish `{...}` content that would collide.
+/// Placeholders are lowercase because the template carries no literal JSON-ish `{...}` content that would collide.
+/// (`goal_rules.md` keeps uppercase placeholders because it embeds verbatim user prose that may contain `{...}`.).
+/// A `/goal … --budget N` cap IS enforced at the turn-end continuation gate (terminal `BudgetLimited`).
 pub(super) const GOAL_CONTINUATION_DIRECTIVE_TEMPLATE: &str =
     include_str!("templates/goal_continuation_directive.md");
 pub(super) const GOAL_CONTINUATION_DIRECTIVE_TEMPLATE_LEGACY: &str =
     include_str!("templates/goal_continuation_directive_legacy.md");
-/// Compact can run mid-turn (`run_compact_only` / CompactAndResubmit).
+/// Compact can run mid-turn (`run_compact_only` / CompactAndResubmit); those
+/// callers must not inherit TurnEnd drain, `rounds_since_verify++`, or budget stop.
 enum GoalContinuationPurpose {
     TurnEnd,
     Compaction,
 }
-/// Built continuation directive plus the optional premature-stop pattern that
-/// the caller emits when it continues.
+/// Built continuation directive plus the optional premature-stop pattern that the caller emits when it actually continues.
+/// Produced by [`SessionActor::prepare_goal_continuation`].
 struct GoalContinuationPlan {
     directive: String,
     stop_pattern: Option<&'static str>,
     /// Recommendation embedded in `directive`, if any.
+    /// Handed to `consume_strategist_note` (compare-and-clear) only once the directive is committed for delivery.
     strategy_rec: Option<String>,
 }
 /// Maximum age of a queue-edit hold before the promoter discards it.
+/// Bounds leaked holds after a client crash or dropped `release_edit`.
+/// A repeat `hold_edit` inserts a fresh stamp so re-entering edit after a dropped release does not inherit an aged bound.
 pub(crate) const EDIT_HOLD_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 fn expire_older_than(holds: &mut HashMap<String, std::time::Instant>, ttl: std::time::Duration) {
     holds.retain(|_, since| since.elapsed() < ttl);
@@ -373,16 +391,24 @@ pub(crate) struct State {
     pub(crate) pending_inputs: VecDeque<InputItem>,
     pub(crate) pending_notifications: Vec<PendingNotification>,
     /// Prompt ids under composer edit, stamped (and re-stamped) by `hold_edit`.
+    /// Held followers are skipped by combine; a live held front blocks promote.
     pub(crate) edit_holds: HashMap<String, std::time::Instant>,
     /// When true, notifications are buffered but not drained until genuine user re-engagement.
+    /// Set by an interactive stop, cleared by a user prompt.
     pub(crate) notifications_suppressed: bool,
-    /// A `UserPromptSubmit` hook blocked the prompt.
+    /// A `UserPromptSubmit` hook blocked the previous prompt.
+    /// The promoter must not auto-start the next queued row, so follow-ups never run as if the blocked prompt had succeeded.
+    /// All transitions go through [`State::arm_hook_block_hold`] / [`State::take_hook_block_hold`]; read via [`State::hook_block_held`].
     pub(crate) hook_block_hold: HookBlockHold,
     /// Active prompt is still rewindable until the first outbound prompt-scoped event is emitted.
+    /// Set at promote, cleared at first output or by the rewind pop itself.
     pub(crate) rewindable: bool,
     /// Whether the running front's user message is recorded where the model will see it.
+    /// Transitions go through `mark_front_message_committed`.
     pub(crate) front_message_committed: bool,
     /// Layer-3 LazinessDetector: number of `<system-reminder>` nudges injected so far in this (session, model) pair.
+    /// Reset to 0 by the actor's main `select!` loop when its `model_switch_rx` watch channel fires.
+    /// See the `model_switch_rx.changed()` arm in `run_session`.
     pub(crate) nudges_used_this_session: u32,
 }
 /// Queue hold after a prompt-gate block; see [`State::hook_block_hold`].
@@ -407,10 +433,13 @@ impl State {
         self.pending_notifications.clear();
     }
     /// Prompt id of the in-flight turn, if any.
+    /// `running_task` lives under the same lock as `pending_inputs`, while `handle_completion` clears `current_prompt_id` before taking this lock.
     pub(crate) fn running_prompt_id(&self) -> Option<&str> {
         self.running_task.as_ref().map(|t| t.prompt_id.as_str())
     }
+    /// Sweep `pending_inputs` by `drop_if`, but never the running turn's own slot (matched by prompt id, not index 0).
     /// Returned items keep live `respond_to` senders; dropping them unfulfilled is only safe for synthetic items — user-originated matches must be resolved or `session/prompt` hangs.
+    /// Deleting the in-flight slot shifts a queued user prompt to index 0, where `cancel_running_task` destroys it and the message is lost.
     pub(crate) fn sweep_pending_inputs(
         &mut self,
         drop_if: impl Fn(&InputItem) -> bool,
@@ -429,10 +458,9 @@ impl State {
         dropped
     }
 }
-/// Shared idle predicate for synthetic-turn injection so notification drain
-/// and the laziness check cannot drift. True only when no turn is running, no
-/// user prompt is queued, and neither an interactive stop nor a hook-block
-/// hold is waiting on the user.
+/// Shared idle predicate for synthetic-turn injection so notification drain and the laziness check cannot drift.
+/// True only when no turn is running, no user prompt is queued, and neither an interactive stop nor a hook-block hold is waiting on the user.
+/// An injection under that hold would outrun the user's next prompt; idle reporting uses `state_is_busy` instead because an interrupt really is idle.
 pub(crate) fn is_session_idle_for_injection(state: &State) -> bool {
     state.running_task.is_none()
         && !state.finalization_gate.is_active()
@@ -634,6 +662,7 @@ pub(crate) struct PreparedToolCall {
     /// Reminder appended to the model-visible tool result. None when this call was left unchanged.
     coercion_note: Option<String>,
     /// Resolved target for meta-dispatch tools (`use_tool`, `CallMcpTool`); `None` for ordinary tools.
+    /// See [`ToolInput::dispatch_target_name`].
     dispatch_target_name: Option<String>,
     /// Read-only per `ToolKind`; decides whether the call takes the per-file lock.
     is_read_only: bool,
@@ -641,8 +670,8 @@ pub(crate) struct PreparedToolCall {
     additional_context: Vec<xai_grok_hooks::dispatcher::AdditionalContext>,
 }
 impl PreparedToolCall {
-    /// The tool name hooks see: the resolved dispatch target, else the wire
-    /// name.
+    /// The tool name hooks see: the resolved dispatch target, else the wire name.
+    /// The single source for the resolved name across the dispatch-phase hook events (PostToolUse / PostToolUseFailure) and their telemetry labels.
     pub(crate) fn hook_tool_name(&self) -> &str {
         self.dispatch_target_name
             .as_deref()
@@ -724,17 +753,30 @@ pub(crate) struct SessionActor {
     /// Transient turn-retry kill switch, resolved once at spawn; flips apply to new sessions.
     pub(crate) transient_retry_enabled: bool,
     /// Cumulative transient resubmits this prompt.
+    /// Prompt-scoped on the actor: auto-recovery, stop-hook continuations, and the goal loop re-enter the turn loop within one prompt.
+    /// A loop-local counter would reset the cap (exhaustion itself triggers auto-recovery).
     pub(crate) transient_retries_prompt_total: std::cell::Cell<u32>,
     /// Start of the current transient-recovery episode (first failed attempt; cleared on a successful sample).
+    /// Prompt-scoped with the counter above.
     pub(crate) transient_episode_start: std::cell::Cell<Option<tokio::time::Instant>>,
     /// Normal sessions hold a clone of `MvpAgent::auth_method_id`.
+    /// Subagents instead get a fresh, isolated handle seeded once at spawn (frozen for their lifetime).
+    /// `None` until the agent has selected a method.
     pub(crate) auth_method_id: crate::agent::auth_method::SharedAuthMethodId,
-    /// Memoized per-model auth state, read through [`SessionActor::model_auth_facts`].
+    /// Memoized per-model auth state, read through [`SessionActor::model_auth_facts`] and [`SessionActor::model_auth_provider`].
+    /// Because a config edit can turn the selected model into a per-model BYOK model without changing its id, keying on the id alone is insufficient.
+    /// Each model/credential chokepoint must clear this memo (`replace(None)`).
     pub(crate) model_auth_memo: std::cell::RefCell<Option<ModelAuthMemo>>,
-    /// The event fires at each of those `OaiCompatClient` arms in `xai-grok-sampler`.
+    /// The event fires at each of the six `OaiCompatClient` 401 arms in `xai-grok-sampler`.
+    /// Threaded into every `SamplerConfig` reconstructed by `reconstruct_full_config`.
+    /// `None` when the session was spawned without an `AuthManager` (BYOK direct mode, test fixtures).
     pub(crate) attribution_callback: Option<xai_grok_sampler::SharedAttributionCallback>,
+    /// Owns the token refresher (`configure_refresher()`) and non-sampler 401 attribution. Sampler path uses `attribution_callback`.
+    /// Idle-resume refresh calls `record_auth_401` directly with this handle.
+    /// `None` for tests / BYOK that don't need refresh or the attribution emit.
     pub(crate) auth_manager: Option<Arc<AuthManager>>,
     /// Set from the `session/new` / `session/load` `_meta` chat kind and sticky for the session.
+    /// Chat-kind ACU/list sources product REST skills, never Build disk skills.
     pub(crate) is_chat_kind: bool,
     pub(crate) state: TokioMutex<State>,
     /// Notification transport: gateway, persistence channel, replay buffer.
@@ -742,20 +784,28 @@ pub(crate) struct SessionActor {
     pub(crate) permissions: PermissionHandle,
     pub(crate) tool_context: ToolContext,
     /// Managed Read-deny glob patterns, resolved once at construction.
+    /// (Re-)injected into the ToolBridge so the Grep tool excludes policy-forbidden paths.
     pub(crate) deny_read_globs: Vec<String>,
     /// Consolidated MCP state (configs, clients, init status) protected by a single lock.
+    /// The single lock keeps config updates and init-status checks atomic.
     pub(crate) mcp_state: Arc<TokioMutex<McpState>>,
     /// MCP initialization strategy. `Cell`: per-attachment policy.
+    /// A resident `session/load` carrying explicit `startupHints` re-applies the attaching client's strategy (`UpdateAttachPolicy`).
+    /// So a headless client attaching to an actor spawned by an interactive one still gets Blocking MCP init on its turns (and vice versa).
     pub(crate) mcp_strategy: std::cell::Cell<McpInitStrategy>,
     /// Actor-based chat state handle; manages conversation, tokens, timing, and persistence.
+    /// Also stores credentials (api_key, optional extra access key, client_version) opaquely.
     pub(crate) chat_state_handle: xai_chat_state::ChatStateHandle,
     /// Current running prompt/turn id, shared with SessionHandle.
     pub(crate) current_prompt_id: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) active_work: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub(crate) unattributed_background_usage: std::sync::atomic::AtomicBool,
     /// Open blocking reverse-requests (permission / question / plan-approval), keyed by `tool_call_id`.
+    /// Shared with `SessionHandle` so the roster can read it synchronously to report `NeedsInput`.
+    /// Mutated by `PendingInteractionGuard` at each reverse-request site. Never persisted.
     pub(crate) pending_interactions: crate::session::pending_interaction::PendingInteractions,
     /// Gates product analytics, not trace uploads.
+    /// Resolved at spawn as `is_telemetry_enabled() && !is_zdr()`; ZDR teams always have this false.
     pub(crate) telemetry_enabled: bool,
     pub(crate) supports_backend_search: std::cell::Cell<bool>,
     /// Per-turn override, set at promotion. Not persisted; a reload reverts to the definition seed.
@@ -766,27 +816,39 @@ pub(crate) struct SessionActor {
         std::cell::Cell<Option<xai_grok_sampling_types::CompactionsRemaining>>,
     pub(crate) compaction_at_tokens:
         std::cell::Cell<Option<xai_grok_sampling_types::CompactionAtTokens>>,
-    /// Server-side doom-loop check policy, resolved once at spawn by `Config::resolve_doom_loop_recovery`.
+    /// Server-side doom-loop check policy, resolved once at spawn by `Config::resolve_doom_loop_recovery`; `None` means disabled.
+    /// `reconstruct_full_config` threads it into the sampler config, and the sampler itself sends the matching `x-grok-doom-loop-check` header.
     pub(crate) doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
-    /// Output-rate floor for the CURRENT model; `None` = ungated.
+    /// Output-rate floor for the CURRENT model; `None` = ungated. A Cell
+    /// rather than a plain field because the floor is per-model: a switch
+    /// re-resolves it, and every turn after reads the new one.
     pub(crate) output_rate_floor:
         std::cell::Cell<Option<xai_grok_sampling_types::OutputRateFloorPolicy>>,
-    /// Telemetry-only per-turn detector/recovery tally.
+    /// Telemetry-only per-turn detector/recovery tally (deduplicated labels, attempts, budget-spent accept, tightest recovery trigger).
+    /// Accumulated by the event drainer and taken at turn end for analytics events.
     pub(crate) doom_loop_turn_tally:
         parking_lot::Mutex<crate::session::doom_loop_telemetry::DoomLoopTurnTally>,
     /// File state tracker for rewind functionality
     pub(crate) file_state_tracker: Arc<FileStateTracker>,
     /// Last prompt text before the most recent rewind.
+    /// When set, the next `prompt()` compares its text to distinguish regeneration (same text) from edit-and-retry (different text).
     pub(crate) rewind_pending_prompt: std::sync::Mutex<Option<String>>,
     /// Startup hints for the session: they customize the user message prefix and the git status mode.
+    /// (Non-interactive mode gets the fast no-untracked git status.)
     pub(crate) startup_hints: StartupHints,
     /// Wakes the status-line emitter task, and on drop ends it.
+    /// See [`status_line::run_status_emitter`] and the `Drop` beside it.
     pub(crate) status_wake: status_line::StatusWake,
     /// Delivery-tool names for the CURRENT attachment, seeded from the spawn `startupHints.deliveryTools`.
+    /// Re-applied when a resident `session/load` carries explicit hints (`UpdateAttachPolicy`).
+    /// Structural spawn-time hints (subagent identity, inherited prefix) never change on re-attach; per-attachment policy may.
     pub(crate) delivery_tools: std::cell::RefCell<Vec<String>>,
     /// `nonInteractive` for the CURRENT attachment (same lifecycle as `delivery_tools`).
+    /// `startup_hints.non_interactive` keeps governing spawn-time structure (system prompt variant, user-message prefix, git-status mode).
     pub(crate) attach_non_interactive: std::rc::Rc<std::cell::Cell<bool>>,
-    /// Verbatim mirror-fork override: when `Some`, every turn sends this exact parent tool schema instead.
+    /// Verbatim mirror-fork override: when `Some`, every turn sends this exact parent tool schema instead of the locally-built toolset.
+    /// That keeps the child's request prefix byte-identical to the parent for radix cache reuse.
+    /// `None` for all non-fork (and summarized-fork) sessions.
     pub(crate) forked_tool_override: Option<Vec<ToolSpec>>,
     /// Compaction configuration and runtime state.
     pub(crate) compaction: super::compaction_config::CompactionConfig,
@@ -800,23 +862,43 @@ pub(crate) struct SessionActor {
     pub(crate) session_start: std::time::Instant,
     /// Per-chunk idle timeout for inference streaming; a stall aborts the stream.
     pub(crate) inference_idle_timeout: Duration,
-    /// Remote kill switch (`uncharged_401_park`), resolved once at spawn — see `resolve_uncharged_401_park`.
+    /// Remote kill switch (`uncharged_401_park`), resolved once at spawn —
+    /// see `resolve_uncharged_401_park`.
     pub(crate) uncharged_401_park_enabled: bool,
     pub(crate) max_retries: u32,
+    /// Fixed bounds on a subagent turn's 429 waiting.
     pub(crate) rate_limit_waits: RateLimitWaitConfig,
     /// Maximum tool-use turns before the session stops. `None` means unlimited.
     pub(crate) max_turns: Option<usize>,
     /// Pending mid-turn interjections from the user (Ctrl+Enter).
+    /// Pushed by `SessionCommand::Interject` handler, drained at safe points in `process_conversation_turn`.
+    /// Internally synchronized.
     pub(crate) pending_interjections: InterjectionBuffer<acp::ImageContent>,
     /// The in-flight sampler request id for the running turn, set by
-    /// `run_turn_via_sampler` and cleared on completion.
+    /// `run_turn_via_sampler` and cleared on completion. The
+    /// `SessionCommand::Interject` handler reads this to cancel the
+    /// in-flight model stream so the turn loop iterates and drains the
+    /// interjection immediately (ASAP injection) instead of waiting for
+    /// the stream — which can run for many minutes on a long
+    /// reasoning/text generation — to finish. `None` while no turn is
+    /// streaming (idle, or inside a tool call between requests).
     pub(crate) in_flight_sampler_request_id:
         parking_lot::Mutex<Option<xai_grok_sampler::RequestId>>,
-    /// Set by the `SessionCommand::Interject` handler to tell `run_turn_via_sampler`.
+    /// Set by the `SessionCommand::Interject` handler to tell
+    /// `run_turn_via_sampler` that the in-flight request it is awaiting
+    /// was cancelled *for an interjection* (not a user Stop). The error
+    /// path checks and clears this to return
+    /// [`SamplerTurnOutcome::CancelledForInterjection`] instead of a
+    /// terminal failure, so the turn loop drains and resubmits.
     pub(crate) interjection_cancel_requested: std::sync::atomic::AtomicBool,
-    /// Prompt ids queued when the running turn was promoted.
+    /// Prompt ids queued when the running turn was promoted. Those rows were
+    /// next in line before that turn existed, so mid-turn delivery
+    /// (`harvest_queued_prompts_into_interjections`) leaves them to run as
+    /// their own turns. Written by the promoter under the state lock.
     pub(crate) queued_at_turn_start: std::cell::RefCell<std::collections::HashSet<String>>,
     /// Skill-announcement reminders that arrived while a turn was running.
+    /// Flushed at the same safe points as `pending_interjections`, plus on cancel/idle.
+    /// The flush also delivers the plan tracker's buffered mid-turn activation reminder (see `activate_plan_mode_mid_turn`).
     pub(crate) pending_skill_reminders: Mutex<Vec<ConversationItem>>,
     /// Idle flush timeout: `None` means disabled, `Some(duration)` flushes after that much inactivity.
     pub(crate) idle_flush_timeout: Option<std::time::Duration>,
@@ -826,7 +908,8 @@ pub(crate) struct SessionActor {
     pub(crate) last_idle_flush_conversation_len: std::sync::atomic::AtomicUsize,
     /// Internal event queue for actor-owned replay buffering and flush barriers.
     pub(crate) event_tx: mpsc::UnboundedSender<SessionEvent>,
-    /// Buffering settings captured at session creation. The concrete ReplayBuffer is owned by `run_session()`.
+    /// Buffering settings captured at session creation.
+    /// The concrete ReplayBuffer is owned by `run_session()`.
     pub(crate) buffering_settings: Option<BufferingSettings>,
     /// Client identifier for telemetry, passed from the MvpAgent (extracted from initialize meta)
     pub(crate) client_identifier: Option<String>,
@@ -839,43 +922,72 @@ pub(crate) struct SessionActor {
     /// Cancellation token for the feedback sync loop (None if no feedback client)
     pub(crate) sync_loop_cancel: Option<tokio_util::sync::CancellationToken>,
     /// The fully-built Agent: owns the ToolBridge, system prompt, policies, and the AgentDefinition.
+    /// Replaces the old `tool_bridge` and `agent_definition` fields.
+    /// Wrapped in `RefCell` for mid-session mutation (skill refresh, prompt regen).
     pub(crate) agent: std::cell::RefCell<xai_grok_agent::Agent>,
     /// Dedup slot for `x.ai/git_head_changed`, shared with the fs-watch `GitHead` consumer (see `git_head_dedup_key`).
     pub(crate) last_reported_branch: Arc<parking_lot::Mutex<Option<String>>>,
     /// Client opted into `x.ai/gitHeadChanged`.
+    /// When false (headless/SDK), `maybe_notify_git_branch` no-ops; no git subprocess runs.
     git_head_enabled: bool,
     /// A client that will draw a status row has attached (`x.ai/statusLine`).
+    /// While false, the emitter wakes and returns without building anything: no git discovery, no chat-state round trips.
+    /// Live rather than fixed at spawn, because a resident session outlives the client that created it.
     pub(crate) status_line_enabled: Arc<std::sync::atomic::AtomicBool>,
     /// Shared models manager for etag-triggered refresh from response headers.
     pub(crate) models_manager: crate::agent::remote_config::ModelsManager,
     /// The system prompt's `Workspace Path` is set at build time via `AgentBuilder::with_prompt_working_directory()`.
+    /// Set once at session spawn from the `prompt_display_cwd` parameter.
+    /// Uses `OnceLock` for lock-free reads, a set-once guarantee, and `&self` mutability (SessionActor is behind `Arc`).
     pub(crate) display_cwd: std::sync::OnceLock<String>,
-    /// Initialized from the `AgentDefinition` at spawn, updated when the session mode changes.
+    /// Initialized from the `AgentDefinition` at spawn, updated when the session mode changes via `handle_session_mode()`.
+    /// Used by the model-switch guard to determine whether a model's `agent_type` is compatible with the current session.
     pub(crate) active_agent_type: parking_lot::Mutex<Option<String>>,
     /// Shared with the `SessionHandle`, which the subagent coordinator reads.
     pub(crate) allowed_subagent_types: crate::session::handle::SharedAllowedSubagentTypes,
     /// See [`ModeAgentState`].
     pub(crate) mode_agent: parking_lot::Mutex<ModeAgentState>,
-    /// Live gate shared with the notification bridge.
+    /// Live gate shared with the notification bridge (see `NotificationBridgeConfig::queue_exit_reminder_on_approved_exit`).
+    /// Seeded at spawn from the agent definition's harness.
+    /// Refreshed by `handle_rebuild_agent_for_definition` so the bridge always agrees with the live harness gate.
     pub(crate) queue_exit_reminder_on_approved_exit: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Live gate shared with the notification bridge (see `NotificationBridgeConfig::emit_local_background_tasks`).
+    /// Default `true`; flipped off when the session is gateway-backed so local
+    /// snapshots cannot last-wins-clear remote Running rows.
     pub(crate) emit_local_background_tasks: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// First skill the current prompt activated via its slash-skill path, recorded as `skill.name` on the turn span.
+    /// Reset at the start of each prompt (`handle_prompt`), so it never leaks across turns.
     pub(crate) active_skill: parking_lot::Mutex<Option<String>>,
     /// Canonical session mode last set via ACP `session/set_mode`.
+    /// Used as the fallback start prompt mode when prompt request metadata does not explicitly provide one.
     pub(crate) current_prompt_mode: Arc<parking_lot::Mutex<PromptMode>>,
+    /// Prompt mode captured at the start of the current turn.
+    /// Set once in `handle_prompt` and never modified during the turn.
+    /// Used for `start_prompt_mode` telemetry.
     pub(crate) turn_start_prompt_mode: parking_lot::Mutex<PromptMode>,
+    /// Set at turn start from the prompt mode parameter, then updated only by agent-initiated tool calls (`EnterPlanMode` / `ExitPlanMode`).
+    /// NOT affected by `session/set_mode` (which only changes the next turn's start mode).
+    /// Read at turn end for `end_prompt_mode` telemetry.
     pub(crate) turn_prompt_mode: Arc<parking_lot::Mutex<PromptMode>>,
+    /// Session-scoped dynamic plan-mode state (not part of `AgentDefinition`).
+    /// All plan mode logic lives in `plan_mode.rs`; the session actor just calls into the tracker at the appropriate points.
+    /// `Arc`-shared with the notification bridge so `PlanModeEntered` / `PlanModeExited` tool notifications can transition state directly.
     pub(crate) plan_mode: Arc<parking_lot::Mutex<crate::session::plan_mode::PlanModeTracker>>,
+    /// Whether goal mode (`/goal`) is enabled for this session (feature flag).
     pub(crate) goal_enabled: bool,
     pub(crate) background_workflows_enabled: bool,
     goal_harness_enabled: std::sync::atomic::AtomicBool,
     goal_harness_availability_reconciled: std::sync::atomic::AtomicBool,
-    /// Session-scoped state for the `/goal` Design-Execute-Verify loop. Modeled after `plan_mode` above.
+    /// Session-scoped state for the `/goal` Design-Execute-Verify loop.
+    /// Modeled after `plan_mode` above.
     pub(crate) goal_tracker: Arc<parking_lot::Mutex<crate::session::goal_tracker::GoalTracker>>,
     /// `task_id`s of background tasks (and monitors) that originated during the goal turn.
+    /// Either spawned by the goal model itself or reparented from a harness verifier/planner subagent on its exit.
+    /// Their late auto-wake completions are dropped by [`Self::maybe_drain_notifications`] regardless of the goal's current status.
     pub(crate) goal_turn_task_ids: parking_lot::Mutex<std::collections::HashSet<String>>,
     /// Consecutive non-completing (cancelled/errored) goal-mode turns while the goal is `Active`.
+    /// Auto-pauses the goal with `GoalPauseReason::BackOff` once the counter reaches [`GOAL_CONTINUATION_BACKOFF_THRESHOLD`].
+    /// In-memory only; session restart is itself a reset.
     pub(crate) goal_continuation_streak: std::sync::atomic::AtomicU32,
     pub(crate) goal_blocked_streak: std::sync::atomic::AtomicU32,
     pub(crate) goal_update_rx: std::cell::RefCell<
@@ -896,25 +1008,42 @@ pub(crate) struct SessionActor {
     pub(crate) goal_classifier_enabled: bool,
     /// Master switch for the goal planner subagent.
     pub(crate) goal_planner_enabled: bool,
-    /// Master switch for the one-shot goal summarizer.
+    /// Master switch for the one-shot goal summarizer (the closing "what was accomplished" summary on a verified achievement).
+    /// Cached at actor construction (mirrors `goal_classifier_enabled`); absent remote setting tracks goal mode, `Some(false)` is a kill-switch.
     pub(crate) goal_summary_enabled: bool,
-    /// Remote tier of the Length-salvage budget resolver, snapshot from `RemoteSettings` at actor construction.
+    /// Remote tier of the Length-salvage budget resolver, snapshot from
+    /// `RemoteSettings` at actor construction. `Some(0)` is explicit off.
     pub(crate) length_salvage_remote_budget: Option<u32>,
     /// Resolved skeptic count for the verification stage.
+    /// Cached at actor construction (mirrors `goal_classifier_enabled`) and threaded into [`Self::run_verification_stage_for_drain`].
+    /// Default `GOAL_VERIFIER_SKEPTIC_COUNT`; clamped to `[GOAL_VERIFIER_SKEPTIC_MIN, GOAL_VERIFIER_SKEPTIC_MAX]` by the resolver.
     pub(crate) goal_verifier_skeptic_count: u32,
     /// Resolved per-role `/goal` model selection (planner / strategist single pairs and the ordered skeptic pool).
+    /// The kill-switch is already applied.
+    /// Cached at actor construction from remote settings; `Default` (all `InheritCurrent`, empty pool) reproduces today's behavior.
     pub(crate) goal_role_models: GoalRoleModelConfig,
-    /// Every harness model slot, resolved when this actor was built.
+    /// Every harness model slot, resolved when this actor was built. A slot
+    /// the user left alone is absent and its consumer keeps the session
+    /// model. See `session::harness_models`.
     pub(crate) harness_models: crate::session::harness_models::ResolvedHarnessModels,
-    /// Kill-switch (`GROK_GOAL_USE_CURRENT_MODEL_ONLY` / `[features] goal_use_current_model_only`) resolved.
+    /// Kill-switch (`GROK_GOAL_USE_CURRENT_MODEL_ONLY` / `[features] goal_use_current_model_only`) resolved at actor build.
+    /// When `true`, every `/goal` role inherits the current model.
+    /// The skeptic panel also checks this flag directly so a previously-frozen `skeptic_model_assignment` is overridden too.
     pub(crate) goal_use_current_model_only: bool,
     /// Resolved per-goal cap on classifier runs (past the cap the goal auto-pauses via `BackOff`).
+    /// Cached at actor construction like `goal_verifier_skeptic_count`.
+    /// Default `GOAL_CLASSIFIER_MAX_RUNS_DEFAULT`; floored at `GOAL_CLASSIFIER_MAX_RUNS_MIN` with no upper ceiling by the resolver.
     pub(crate) goal_classifier_max_runs: u32,
-    /// Resolved N for the stall-triggered strategist: it fires every N consecutive `NotAchieved` verifications.
+    /// Resolved N for the stall-triggered strategist: it fires every N consecutive `NotAchieved` verifications (and again at 2N, 3N, …).
+    /// Default `max(1, goal_classifier_max_runs / 2)`; clamped to `>= 1` by the resolver.
+    /// Read by the strategist trigger in `apply_classifier_outcome`.
     pub(crate) goal_strategist_every: u32,
-    /// Resolved refuted-goal round count before the continuation directive escalates.
+    /// Resolved refuted-goal round count before the continuation directive escalates to a forceful "re-verify now" block.
+    /// Cached at actor construction.
+    /// Read by [`Self::prepare_goal_continuation`].
     pub(crate) goal_reverify_after: u32,
     /// Set on session load once `maybe_reconcile_active_goal_without_plan` has run.
+    /// Subsequent prompt-flow ticks then don't repeat the pause-on-load check.
     pub(crate) goal_plan_reconciled: std::sync::atomic::AtomicBool,
     pub(crate) pending_classifier_completions: parking_lot::Mutex<
         VecDeque<xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalInput>,
@@ -924,15 +1053,19 @@ pub(crate) struct SessionActor {
     /// Agent-level managed MCP gateway catalog cache.
     pub(crate) managed_mcp_handle: crate::session::managed_mcp::ManagedMcpStateHandle,
     /// Admitted client MCP seed. Set from `UpdateMcpServers.client_seed` on this actor.
+    /// `RefCell` matches `agent` and `plugin_registry`: the session task is single-threaded.
     pub(crate) initial_client_mcp_servers: std::cell::RefCell<Vec<acp::McpServer>>,
     /// Shared MCP tool metadata for the BM25 search index. Updated after MCP init.
     pub(crate) tool_metadata_snapshot:
         Arc<std::sync::Mutex<crate::session::tool_index::ToolMetadataSnapshot>>,
     /// MCP servers (connected and failed) already announced via system-reminder.
+    /// See [`crate::session::announcement_state::McpAnnounced`] for how repeats are deduped.
     pub(crate) mcp_announcements: Mutex<crate::session::announcement_state::McpAnnounced>,
     /// Controls whether MCP server reminders inject only changes (Delta) or the full server list (Full).
+    /// Read from `MCP_REMINDER_MODE` env var.
     pub(crate) mcp_reminder_mode: McpReminderMode,
     /// Set when the MCP server set changes and a reminder needs injection.
+    /// Cleared by `maybe_inject_mcp_reminder` after injecting.
     pub(crate) mcp_reminder_dirty: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) mcp_connecting_reminder_injected: std::cell::Cell<bool>,
     /// Serializes snapshot refreshes end-to-end so the last write is the latest read, without holding `mcp_state` across refresh awaits.
@@ -946,23 +1079,31 @@ pub(crate) struct SessionActor {
     pub(crate) weak_self: std::sync::Weak<SessionActor>,
     /// Where `&self` methods hand startup work so it outlives the caller's future but not the session.
     pub(crate) startup_tasks: StartupTaskHandle,
-    /// Extensions to notify at turn and session lifecycle edges.
+    /// Extensions to notify at turn and session lifecycle edges. Built once by `session_extension_registry` at actor construction and frozen after.
     pub(crate) extension_registry: xai_agent_lifecycle::LocalExtensionRegistry,
     /// Local date last shown to the model.
+    /// Shown via the `<user_info>` prefix (session start, compaction, model switch) or a date-rollover `<system-reminder>`.
+    /// Drives [`SessionActor::maybe_inject_date_rollover_reminder`].
     pub(crate) last_announced_local_date: std::cell::Cell<chrono::NaiveDate>,
     /// True when the render-failure fallback stamped a date into a date-free template's prefix.
+    /// [`SessionActor::maybe_inject_date_rollover_reminder`] then still rolls it over.
     pub(crate) prefix_carries_fallback_date: std::cell::Cell<bool>,
+    /// Prompt index when search_tool last ran; -1 means never.
     /// Used for turns_since_last_search.
     pub(crate) last_search_prompt_index: std::sync::atomic::AtomicI64,
     /// Timestamp (millis since epoch) of the last successful API request.
+    /// Used to detect session resume after idle and proactively refresh model metadata.
     pub(crate) last_api_request_at: std::sync::atomic::AtomicI64,
-    /// Loaded at session startup; can be updated mid-session via `/plugins
-    /// reload`.
+    /// Loaded at session startup; can be updated mid-session via `/plugins reload`.
+    /// `None` when no plugin registry was supplied at spawn time.
+    /// Wrapped in `RefCell` for mid-session reload from `&self` methods.
     pub(crate) hook_registry:
         std::cell::RefCell<Option<Arc<xai_grok_hooks::discovery::HookRegistry>>>,
     /// Disabled-hooks snapshot every dispatch filters on, so the actor never reads the file mid-turn.
+    /// Loaded at spawn and refreshed by hook reload and enable/disable; another session's toggle lands here at the next reload.
     pub(crate) hook_disabled: std::cell::RefCell<Arc<xai_grok_hooks::trust::DisabledHooks>>,
     /// The turn's single end-of-turn hook report.
+    /// Actor-scoped rather than turn-local because the gate runs on the turn task while a cancel runs on the command loop.
     pub(crate) turn_report: turn_report_slot::TurnReportSlot,
     /// Keyed on the same turn epoch as `turn_report`: a turn announces its abort at most once.
     pub(crate) turn_abort: turn_report_slot::AbortAnnouncement,
@@ -970,8 +1111,10 @@ pub(crate) struct SessionActor {
     pub(crate) turn_end_tx:
         std::cell::RefCell<Option<tokio::sync::mpsc::UnboundedSender<turn_end_hooks::QueueItem>>>,
     /// Client hooks from `session/new` `_meta["x.ai/hooks"]`; gated in [`crate::session::acp_session::hooks`].
+    /// `RefCell` so `load_session` reconnect can replace the set on the live actor (see `SessionCommand::SetClientHooks`).
     pub(crate) client_hooks: std::cell::RefCell<crate::extensions::hooks::ClientHooks>,
     /// Resolved workspace root for hooks: git worktree root if in a git repo, otherwise session cwd.
+    /// Used for hook child process cwd, envelope fields, and GROK_WORKSPACE_ROOT env var.
     pub(crate) hook_resolved_workspace_root: String,
     /// Errors from last hook config load (parse failures, etc.).
     pub(crate) hook_load_errors: std::cell::RefCell<Vec<String>>,
@@ -980,63 +1123,93 @@ pub(crate) struct SessionActor {
     pub(crate) plugin_registry:
         std::cell::RefCell<Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>>,
     /// Shared handle to the agent-level plugin registry.
+    /// Used by `/plugins reload` to trigger a rebuild that new sessions see.
     pub(crate) plugin_registry_handle: Option<xai_grok_agent::plugins::SharedPluginRegistryHandle>,
     /// Centralized event tracking: event log, turn-end guard, active tool, doom loop terminate flag.
     pub(crate) events: crate::session::events::EventTracker,
-    /// Optional hub-side session event emitter.
+    /// Optional hub-side session event emitter (always constructed without a harness client in the agent; methods no-op with `None` transport).
     pub(crate) observability_bridge: xai_computer_hub_sdk::ObservabilityBridge,
     /// Turn number captured at the start of each turn (before prompt index increment).
+    /// Used by `ToolCallStarted` bridge emissions so they report the same turn number as `TurnStarted` / `TurnEnded`.
     pub(crate) current_turn_number: std::cell::Cell<u64>,
     pub(crate) turn_phases: std::sync::Arc<xai_grok_telemetry::turn_phases::TurnPhaseProfile>,
     /// Recap rate-limit watermark (`main_turns` of last finished recap; `0` means none).
     pub(crate) last_recap_main_turn: std::cell::Cell<usize>,
     /// True while a recap model call is in flight (auto or manual).
+    /// Prevents concurrent `spawn_local` recaps from racing watermark restore.
     pub(crate) recap_in_flight: std::cell::Cell<bool>,
     /// Bumped on each real user prompt (queue accept and turn start); an in-flight recap suppresses emit if this changes before commit.
     pub(crate) recap_epoch: std::cell::Cell<u64>,
-    /// A newer completion (or a real prompt / rewind / cancel / shutdown) aborts it.
+    /// A newer completion (or a real prompt / rewind / cancel / shutdown) aborts it; its result would describe an older turn.
+    /// A completion respawns it; see `restart_turn_summary`.
+    /// Cleared when the task finishes so `Some` means "still running".
     pub(crate) turn_summary_task: std::cell::RefCell<Option<tokio::task::JoinHandle<()>>>,
-    /// Generation of the registered turn-summary task.
+    /// Generation of the currently registered turn-summary task.
+    /// Bumped on each spawn so a finishing older task cannot clear a newer slot.
     pub(crate) turn_summary_generation: std::cell::Cell<u64>,
     /// Turn-summary gate, resolved once at spawn (env / config / remote settings, from the `turn_summary` feature).
     pub(crate) turn_summary_enabled: bool,
-    /// Early-session title-refresh gate, resolved once at spawn.
+    /// Early-session title-refresh gate, resolved once at spawn (defaults to `turn_summary_enabled`; see `Config::resolve_title_refresh`).
     pub(crate) title_refresh_enabled: bool,
     /// The in-flight title-refresh side-call, if any.
+    /// Only one runs at a time (a newer completion skips rather than aborts); aborted on rename, rewind, and shutdown.
+    /// See `maybe_refresh_title`.
     pub(crate) title_refresh_task: std::cell::RefCell<Option<tokio::task::JoinHandle<()>>>,
-    /// Generation of the registered title-refresh task.
+    /// Generation of the currently registered title-refresh task.
+    /// A finishing task whose generation no longer matches must not persist its result.
     pub(crate) title_refresh_generation: std::cell::Cell<u64>,
     /// Index into `TITLE_REFRESH_TURNS` of the next checkpoint to apply.
+    /// Advanced when an attempt completes (success *or* failure, with catch-up past skipped checkpoints), and persisted to the watermark.
+    /// Once it reaches the end the title is frozen.
     pub(crate) next_title_refresh_idx: std::cell::Cell<usize>,
     /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`), resolved a single time at spawn.
     pub(crate) thinking_summaries_enabled: bool,
     /// True while THIS session has a prompt turn in flight (RAII-guarded in `handle_prompt`).
+    /// `tool_context.is_turn_active` is the agent-wide coordinator flag shared by all sessions, so it is unusable for per-session decisions.
+    /// `Arc` so it can be re-checked inside the chat-state actor's `RepairHistory` handler.
     pub(crate) session_turn_active: Arc<std::sync::atomic::AtomicBool>,
-    /// Out-of-band capture of streamed generations for trace upload.
+    /// Out-of-band capture of streamed generations for trace upload; never returned by `BuildConversationRequest` or sent back to the model.
+    /// `Completed` drops the in-progress generation without wiping earlier uncommitted ones, so a same-turn doomloop retry is preserved.
+    /// A queued prompt's `StreamStarted` can reset the live slot between cancel and `TakeStreamingCapture`, so the take sees a prompt-id mismatch and drops `streaming_partial.json`.
     pub(crate) streaming_turn_capture: parking_lot::Mutex<StreamingTurnCapture>,
     /// Arguments of the tool calls the model is still writing, keyed by the
     /// wire's `tool_index`.
+    ///
+    /// A call is named from its arguments, and they arrive in fragments. This
+    /// holds the fragments so each one can be re-read into a title while the
+    /// rest is still on the wire. A stream start and a stream end both clear
+    /// it. The next stream reuses index 0, and the bytes left behind by the
+    /// previous call would name it.
     pub(crate) streaming_tool_titles:
         parking_lot::Mutex<std::collections::HashMap<u32, tool_title::StreamingToolArgs>>,
     pub(crate) stream_apply_span: parking_lot::Mutex<Option<StreamApplySpan>>,
     pub(crate) current_turn_span_id: parking_lot::Mutex<Option<tracing::Id>>,
-    /// Orders streamed text against tool-call `send_update`s.
+    /// Orders streamed text against tool-call `send_update`s, which allocate the client-visible `eventId` at call time on separate `LocalSet` tasks.
+    /// Without the barrier a tool call can land between still-draining text chunks and split the assistant message on every client.
+    /// Map presence owns the stream; a timeout clears the waiter without invalidating FIFO events already queued, and turn/cancel boundaries revoke abandoned ownership.
     pub(crate) turn_stream_drained:
         parking_lot::Mutex<std::collections::HashMap<xai_grok_sampler::RequestId, StreamOwnership>>,
-    /// A server-confirmed image strip awaiting proof that the stripped retry
-    /// helped. URLs are buffered by request id on `ImagesStripped`.
+    /// A server-confirmed image strip awaiting proof that the stripped retry helped.
+    /// URLs are buffered by request id on `ImagesStripped`.
+    /// They persist to stored history only when that request's `Completed` arrives, and drop on `Failed`.
     pub(crate) pending_image_strip: parking_lot::Mutex<
         std::collections::HashMap<xai_grok_sampler::RequestId, PendingImageStrip>,
     >,
     /// Serializes durable image-strip writes with conversation rewinds.
     pub(crate) image_strip_rewrite_barrier: ImageStripRewriteBarrier,
     /// Handle to the per-session `xai-grok-sampler` actor.
+    /// Live sessions get a real handle from `spawn_session_actor`; tests and other constructor sites use `SamplerHandle::noop()`.
+    /// All inference flows through this handle.
     pub(crate) sampler_handle: xai_grok_sampler::SamplerHandle,
-    /// Turn-sampling gate: `None` is the main session (ungated).
+    /// Turn-sampling gate: `None` is the main session (ungated), `Some` is the process tree's shared sampling semaphore.
+    /// See `acquire_subagent_sampling_permit`.
     pub(crate) sampling_gate: Option<Arc<tokio::sync::Semaphore>>,
     /// Cached recipe for constructing this session's [`xai_grok_agent::Agent`].
+    /// Reused by `handle_rebuild_agent_for_definition` to build a fresh `Agent`.
+    /// A fresh `Agent` covers the system prompt, the [`xai_grok_tools::bridge::ToolBridge`], and the tool registry.
     pub(crate) rebuild_spec: Arc<crate::session::agent_rebuild::AgentRebuildSpec>,
     /// Resolved vision model ID for auxiliary image processing.
+    /// Populated from `Config.image_description_model` at spawn.
     pub(crate) image_description_model: String,
     /// Cache auxiliary image outputs by content and prompt fingerprint.
     pub(crate) image_describe_cache: Arc<crate::session::image_describe::ImageDescribeCache>,
@@ -1044,16 +1217,23 @@ pub(crate) struct SessionActor {
     pub(crate) subagent_token_records: parking_lot::Mutex<HashMap<String, SubagentTokenRecord>>,
     pub(crate) workspace_ops: xai_grok_workspace::WorkspaceOps,
     /// Template for building trace configs on synthetic auto-wake turns.
+    /// Captured from the first real user prompt's trace config so synthetic turns can upload artifacts using the same bucket/method.
     pub(crate) trace_config_template: std::cell::RefCell<Option<TraceConfigTemplate>>,
-    /// Generation counter bumped on each fresh user prompt.
+    /// Generation counter bumped on each fresh user prompt so the laziness check can detect input without a stored-permit wake.
+    /// A `Notify` fired before the classifier spawns would abort the first idle wait; an `AtomicU64` snapshot has no such hazard.
+    /// One consumer only, so a lock-bearing `watch` channel is unnecessary (model-switch still uses `watch` because the main loop must wake).
     pub(crate) user_input_generation: std::sync::atomic::AtomicU64,
     /// Observation-only: no nudges are ever injected when this is `Some`.
+    /// `Arc<Path>` because the path is immutable after session spawn.
+    /// Concurrent appends rely on `O_APPEND`'s atomic guarantee for writes under `PIPE_BUF` (JSONL lines fit).
     pub(crate) laziness_debug_log: Option<std::sync::Arc<std::path::Path>>,
     /// Last live-orphan disk scan.
+    /// SessionActor is `!Send`, so a `Cell` is enough to throttle mid-turn ticks without a lock.
     pub(crate) last_live_orphan_reconcile: std::cell::Cell<Option<std::time::Instant>>,
 }
-/// Template for building trace configs on synthetic auto-wake turns. Captured
-/// from the first real user prompt's `TraceExportConfig`.
+/// Template for building trace configs on synthetic auto-wake turns.
+/// Captured from the first real user prompt's `TraceExportConfig`.
+/// Synthetic turns can then upload artifacts to the same GCS bucket using the same upload method (direct / proxy).
 #[derive(Clone)]
 pub(crate) struct TraceConfigTemplate {
     pub(crate) bucket_url: Option<String>,
@@ -1134,9 +1314,9 @@ impl SessionActor {
         let tool_names = self.registered_tool_names().await;
         self.build_local_command_availability(&tool_names)
     }
-    /// Build the `CommandAvailability` snapshot from a precomputed slice of tool names plus the live session-scoped capability state. Single source
-    /// of truth for those gate fields. Both `command_availability` (resolve path) and `send_available_commands_update` (advertise path) call this
-    /// so both paths can never drift.
+    /// Build the `CommandAvailability` snapshot from a precomputed slice of tool names plus the live session-scoped capability state.
+    /// Single source of truth for the seven gate fields.
+    /// Both `command_availability` (resolve path) and `send_available_commands_update` (advertise path) call this so the two paths can never drift.
     fn build_command_availability(
         &self,
         tool_names: &[String],
@@ -1190,6 +1370,7 @@ impl SessionActor {
     }
     /// Names of every tool registered with the session's tool bridge.
     /// Allocates one `Vec<String>` per call.
+    /// Callers that need both gating and the wire payload should call once and pass the slice to `build_command_availability`.
     async fn registered_tool_names(&self) -> Vec<String> {
         let bridge = self.agent.borrow().tool_bridge().clone();
         bridge
@@ -1219,8 +1400,8 @@ impl SessionActor {
     pub(crate) fn goal_runs_on_workflow_engine(&self) -> bool {
         self.background_workflows_enabled
     }
-    /// Uses `AgentMessageChunk` so the text appears in the conversation
-    /// scrollback.
+    /// Uses `AgentMessageChunk` so the text appears in the conversation scrollback.
+    /// Then flushes the replay buffer so the text is delivered before the turn ends.
     async fn send_slash_command_output(&self, text: &str) {
         self.send_slash_command_output_with_meta(text, None).await;
     }
@@ -1258,8 +1439,8 @@ impl SessionActor {
     }
 }
 impl SessionActor {
-    /// Used by async methods that need to drop the `RefCell::Ref<Agent>`
-    /// borrow before awaiting.
+    /// Used by async methods that need to drop the `RefCell::Ref<Agent>` borrow before awaiting.
+    /// `Arc::clone` is cheap, and an outstanding `Ref` across `.await` would panic if anything on the suspended path did `self.agent.borrow_mut()`.
     fn tool_bridge_handle(&self) -> Arc<xai_grok_tools::bridge::ToolBridge> {
         Arc::clone(self.agent.borrow().tool_bridge())
     }
@@ -1288,9 +1469,9 @@ fn save_prompt_context(session_info: &SessionInfo, prompt_context: &xai_grok_age
     }
 }
 const SYSTEM_PROMPT_FILENAME: &str = "system_prompt.txt";
-/// Synchronously and atomically rewrite `{session_dir}/chat_history.jsonl`. `chat_state_handle.replace_conversation`
-/// persists the same content, but only after async actor hops. Whichever atomic `rename` lands last wins and the content is
-/// identical, so both writers can never produce a torn file.
+/// Synchronously and atomically rewrite `{session_dir}/chat_history.jsonl`.
+/// `chat_state_handle.replace_conversation` persists the same content, but only after two async actor hops.
+/// Whichever atomic `rename` lands last wins and the content is identical, so the two writers can never produce a torn file.
 fn persist_chat_history_jsonl_sync(session_info: &SessionInfo, conversation: &[ConversationItem]) {
     let dir = match crate::session::persistence::ensure_owner_only_session_dir(session_info) {
         Ok(dir) => dir,
@@ -1338,6 +1519,7 @@ fn save_system_prompt(session_info: &SessionInfo, system_prompt: &str) {
 }
 /// Load the canonical system prompt from `{session_dir}/system_prompt.txt`.
 /// Returns `None` for sessions created before this artifact existed.
+/// Callers should fall back to extracting from `chat_history.jsonl` if absent.
 #[expect(dead_code, reason = "API for future viewers/debug tools")]
 pub(crate) fn load_system_prompt(session_info: &SessionInfo) -> Option<String> {
     let dir = crate::session::persistence::session_dir(session_info);
@@ -1569,6 +1751,7 @@ mod managed_gateway_descriptor_tests {
     }
 }
 /// ToolBridge must route file operations through the injected FileSystem, not direct disk I/O.
+/// When `.with_fs()` is dropped from the builder, tools fall back to LocalFs and ACP client-side enforcement stops working.
 #[cfg(test)]
 #[path = "acp_session_tests/fs_injection_regression_tests.rs"]
 mod fs_injection_regression_tests;
@@ -1606,7 +1789,7 @@ mod plan_mode_midturn_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/pre_tool_use_decision_tests.rs"]
 mod pre_tool_use_decision_tests;
-/// Tests for [`conversation_has_project_instructions`], the idempotence helper.
+/// Tests for [`conversation_has_project_instructions`], the idempotence helper that gates the spawn-time AGENTS.md / CLAUDE.md injector.
 #[cfg(test)]
 #[path = "acp_session_tests/project_instructions_idempotence_tests.rs"]
 mod project_instructions_idempotence_tests;
@@ -1648,6 +1831,8 @@ mod turn_completion_emit_tests;
 #[cfg(test)]
 mod tool_meta_stamp_tests {
     //! Pin the `x.ai/tool` stamps on the harness emission paths.
+    //! Those are the early ToolCall registered by `prepare_tool_call` and the permission-request ToolCallUpdate.
+    //! (A dropped `stamp_tool_meta` call would regress silently.)
     use super::replay_buffer_send_update_tests::make_replay_send_update_fixture;
     use super::support::test_agent_with_tools;
     use super::*;
@@ -1829,7 +2014,8 @@ impl Drop for TurnMetrics {
 #[cfg(test)]
 #[path = "acp_session_tests/turn/asap_injection_tests.rs"]
 mod asap_injection_tests;
-/// Token rotation on the sampler/inference path is owned by the proactive refresh loop.
+/// Token rotation on the sampler/inference path is owned by the proactive refresh loop and the per-turn `refresh_token_if_expired`.
+/// `handle_sampling_failure` passes auth errors to the caller and never invokes the refresher itself.
 #[cfg(test)]
 #[path = "acp_session_tests/auth_error_no_retry_tests.rs"]
 mod auth_error_no_retry_tests;
@@ -1837,6 +2023,7 @@ mod auth_error_no_retry_tests;
 #[path = "acp_session_tests/turn/auth_retry_budget_tests.rs"]
 mod auth_retry_budget_tests;
 /// Regression coverage for the auto-wake suppression sweep and shutdown drain.
+/// These exercise the helpers added to fix the trailing `<system-reminder>` chat history bug.
 #[cfg(test)]
 #[path = "acp_session_tests/auto_wake_suppression_tests.rs"]
 mod auto_wake_suppression_tests;

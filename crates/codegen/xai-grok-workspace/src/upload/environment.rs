@@ -1,4 +1,9 @@
 //! Workspace environment capture (`workspace_environment.json`).
+//!
+//! Captures the session's owner/host/sandbox context once at session bind.
+//! It is serialized to `{session_id}/workspace_environment.json` so the session can be attributed.
+//! [`WorkspaceIdentity`] (who owns the workspace, also used to attribute upload 401s) is resolved at workspace construction.
+//! [`WorkspaceEnvironment`] is the full on-disk record.
 
 use std::path::Path;
 
@@ -18,6 +23,7 @@ pub struct WorkspaceIdentity {
     /// Stable user identifier (owner of the bearer token).
     pub user_id: String,
     /// `"User"` or `"Team"`.
+    /// `None` when the auth source does not distinguish principal kinds (e.g. a local-dev bearer token).
     pub principal_type: Option<String>,
     /// Team id when `principal_type == "Team"`; otherwise `None`.
     pub principal_id: Option<String>,
@@ -37,8 +43,8 @@ impl WorkspaceIdentity {
         }
     }
 
-    /// Construct a team-scoped identity (`principal_type == "Team"`, the team
-    /// id in `principal_id`).
+    /// Construct a team-scoped identity (`principal_type == "Team"`, the team id in `principal_id`).
+    /// Keeps the `PRINCIPAL_TYPE_TEAM` wire string in one place so callers (e.g. the in-process shell identity) don't duplicate the `"Team"` literal.
     pub fn team(user_id: impl Into<String>, team_id: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
@@ -52,7 +58,9 @@ impl WorkspaceIdentity {
         self.principal_type.as_deref() == Some(PRINCIPAL_TYPE_TEAM)
     }
 
-    /// The team id **iff** this is a team principal.
+    /// The team id **iff** this is a team principal: `None` for `"User"` principals even if `principal_id` is populated (per the wire contract).
+    /// The standalone server's `AuthEntry` never carries the shell's separate `GrokAuth.team_id`, so `team_id` derives from `principal_id`.
+    /// For a Team principal `principal_id` *is* the team id.
     pub(crate) fn team_id(&self) -> Option<String> {
         self.is_team().then(|| self.principal_id.clone()).flatten()
     }
@@ -67,9 +75,9 @@ impl WorkspaceIdentity {
     }
 }
 
-/// Derive the workspace owner identity from the server auth provider's
-/// [`AuthIdentity`](xai_computer_hub_sdk::AuthIdentity). Both types carry
-/// the same principal fields.
+/// Derive the workspace owner identity from the server auth provider's [`AuthIdentity`](xai_computer_hub_sdk::AuthIdentity).
+/// The two types carry the same principal fields.
+/// This is the single conversion point so the workspace reads identity from `HubConfig.auth` instead of a separate auth.json read.
 impl From<xai_computer_hub_sdk::AuthIdentity> for WorkspaceIdentity {
     fn from(id: xai_computer_hub_sdk::AuthIdentity) -> Self {
         Self::new(id.user_id, id.principal_type, id.principal_id)
@@ -108,8 +116,11 @@ pub struct WorkspaceEnvironment {
     pub cwd: String,
     /// Host OS (`std::env::consts::OS`).
     pub host_os: String,
+    /// Host architecture (`std::env::consts::ARCH`).
     pub host_arch: String,
+    /// Git working-tree root for `cwd`, when inside a repository.
     pub repo_root: Option<String>,
+    /// `origin` remote URL for the repository, when present.
     pub remote_url: Option<String>,
 }
 

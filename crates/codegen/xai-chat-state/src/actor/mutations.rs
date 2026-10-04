@@ -25,15 +25,21 @@ fn item_kind_str(item: &ConversationItem) -> &'static str {
     }
 }
 
-/// Derived-state matrix for in-place history rewrites: each kind picks
-/// turn-capture handling and persistence flavor here.
+/// Derived-state matrix for in-place history rewrites: each kind picks turn-capture
+/// handling and persistence flavor here. Item-count-changing rewrites use
+/// [`ChatStateActor::replace_conversation`], which also reseeds token totals.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum HistoryRewrite {
-    /// Dedup / dangling-tool-call repair: may add or remove items ahead.
+    /// Dedup / dangling-tool-call repair: may add or remove items ahead of
+    /// an active capture's boundary → snapshot + rebase. Token totals
+    /// untouched.
     IntegrityRepair,
-    /// Old tool-result hard-clear: content shrinks, item count and ordering unchanged → capture offsets stay valid.
+    /// Old tool-result hard-clear: content shrinks, item count and ordering
+    /// unchanged → capture offsets stay valid. Token totals untouched.
     RetainedPrune,
-    /// Server-confirmed image strip: parts replaced in place (`strip_images_by_url`'s invariant).
+    /// Server-confirmed image strip: parts replaced in place
+    /// (`strip_images_by_url`'s invariant), token totals untouched so the
+    /// provider-reported total survives. Backup-gated, disk-acked persist.
     ImageStrip,
 }
 
@@ -74,9 +80,9 @@ impl ChatStateActor {
         (changed, disk_ack)
     }
 
-    /// Repair dangling tool calls (assistant call IDs with no `ToolResult`)
-    /// and persist. Idempotent. Only call at write boundaries where the turn
-    /// is over.
+    /// Repair dangling tool calls (assistant call IDs with no `ToolResult`) and persist.
+    /// Idempotent. Only call at write boundaries where the previous turn is over.
+    /// Do not call from read handlers — concurrent tool execution would look dangling.
     pub(super) fn ensure_conversation_integrity(&mut self) {
         self.ensure_conversation_integrity_with_reason(DanglingToolCallReason::UserCancelled);
     }
@@ -278,8 +284,8 @@ impl ChatStateActor {
         self.state.conversation.push(item);
     }
 
-    /// Push a user message, repairing dangling tool calls first so
-    /// cancel/crash tails stay consistent.
+    /// Push a user message, repairing dangling tool calls first so cancel/crash tails stay consistent.
+    /// Also runs [`prune_retained_conversation`] to hard-clear very old tool results in memory.
     pub(super) fn push_user_message(&mut self, item: ConversationItem) {
         self.push_user_message_with_repair_reason(item, DanglingToolCallReason::UserCancelled);
     }
@@ -433,6 +439,8 @@ impl ChatStateActor {
     }
 
     /// Stash the per-turn `TokenUsage` from the most recent model response.
+    /// No event is emitted — this slot is read on demand at `PromptResponse`
+    /// construction time, not pushed to subscribers.
     pub(super) fn record_last_turn_usage(&mut self, usage: xai_grok_sampling_types::TokenUsage) {
         self.state.last_turn_usage = Some(usage);
     }
@@ -476,8 +484,8 @@ impl ChatStateActor {
                 .get_or_insert_default()
                 .record_subagent(by_model, incomplete);
         }
-        // The session ledger always folds, even when usage is not
-        // attributable to the open prompt.
+        // The session ledger always folds, even when usage is not attributable to the open prompt.
+        // Reporting that gap is the coordinator's sticky flag — never mark a different live prompt's ledger.
         self.state
             .session_usage
             .record_subagent(by_model, incomplete);
@@ -533,7 +541,9 @@ impl ChatStateActor {
         if is_compaction && let Some(cap) = &mut self.state.turn_capture {
             cap.compaction_occurred = true;
         }
-        // `harness_trace_buffer` / `harness_trace_turns` intentionally untouched: the planner/verifier subagents ran.
+        // `harness_trace_buffer` / `harness_trace_turns` intentionally untouched:
+        // the planner/verifier subagents ran, so their sealed trace turns survive
+        // a conversation replace (same intent as the `TruncateToPromptIndex` arm).
         self.persistence.replace_history(&items);
         let base_estimate = super::state::estimate_conversation_tokens(&items);
         let estimated_tokens = self.reseed_total_tokens(base_estimate);
@@ -570,7 +580,8 @@ impl ChatStateActor {
     /// Restore all state fields from a snapshot.
     pub(super) fn restore_snapshot(&mut self, snap: ChatStateSnapshot) {
         self.snapshot_turn_slice();
-        // Harness trace buffers are transient (not part of the snapshot) and intentionally survive a restore.
+        // Harness trace buffers are transient (not part of the snapshot) and
+        // intentionally survive a restore — see `replace_conversation`.
         self.state.conversation = snap.conversation;
         self.rebase_turn_capture_offset();
         self.state.sampling_config = snap.sampling_config;

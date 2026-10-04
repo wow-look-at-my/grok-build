@@ -214,8 +214,8 @@ async fn render_blob_attachment(blob: &BlobResourceContents) -> Option<String> {
         r#"<file_contents type="binary" path="{path}" mime_type="{mime}" size="{size}"/>"#
     ))
 }
-/// Base directory for Phase-1 session-scoped scratch files; the real
-/// session_dir lives in shell persistence.
+/// Base directory for Phase-1 session-scoped scratch files; the real session_dir lives in shell persistence.
+/// The PID suffix keeps concurrent test processes sharing `/tmp` from colliding on identical content-hash paths or racing each other's cleanup.
 fn session_scratch_root() -> PathBuf {
     std::env::temp_dir().join(format!("grok-test-sessions-{}", std::process::id()))
 }

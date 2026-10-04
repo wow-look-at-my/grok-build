@@ -77,8 +77,10 @@ opentelemetry_sdk = { workspace = true, features = [
     "rt-tokio-current-thread",
 ] }
 # `tls-aws-lc` compiles opentelemetry-otlp's TLS support for the gRPC
-# transport. aws-lc matches the TLS backend the workspace `tonic` already
-# uses.
+# transport. The workspace default is only `tls-roots`, which since otlp 0.32
+# no longer implies a TLS provider feature — without one, every `https://`
+# gRPC collector endpoint is rejected at exporter build time (GB-4580).
+# aws-lc matches the TLS backend the workspace `tonic` already uses.
 opentelemetry-otlp = { workspace = true, features = ["tls-aws-lc"] }
 # Embedded Mozilla trust anchors for the gRPC TLS fallback: keeps `https://`
 # collectors working on hosts with no readable system CA store (parity with

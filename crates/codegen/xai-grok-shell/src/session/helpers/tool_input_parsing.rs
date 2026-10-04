@@ -21,7 +21,7 @@ pub fn try_extract_concatenated_json_objects(arguments: &str) -> Option<Vec<serd
         }
     }
 
-    // A couple of objects are needed for this to be concatenated JSON
+    // At least 2 objects are needed for this to be concatenated JSON
     if objects.len() >= 2 {
         Some(objects)
     } else {

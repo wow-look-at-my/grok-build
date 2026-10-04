@@ -1,4 +1,5 @@
-//! Request, report and skip reasons for the `grok trace` per-turn gap-fill.
+//! Request, report and skip reasons for the `grok trace` per-turn gap-fill, plus the entry point
+//! that resolves to the real upload or to a stub that reports the feature as unavailable.
 use crate::session::repo_changes::TraceExportConfig;
 use serde::Serialize;
 use std::path::Path;
@@ -10,6 +11,7 @@ pub struct TraceTurnsRequest<'a> {
     pub upload_config: &'a TraceExportConfig,
     /// Uploaded moments ago by the caller; a probe chunk is trusted only if it reports this present.
     pub canary_object_path: &'a str,
+    /// The bundle bytes already uploaded; reused as the final turn's session-state archive when ≤ 50 MiB.
     pub bundle_archive: &'a [u8],
     pub client_version: String,
 }

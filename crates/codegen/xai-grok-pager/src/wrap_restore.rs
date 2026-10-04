@@ -1,4 +1,18 @@
 //! Terminal-mode tracking and restore emission for `grok wrap`.
+//!
+//! `grok wrap` cannot tell a clean child exit from a connection drop: an ssh transport death reaches it as a plain PTY EOF plus an exit code.
+//! What it *can* know is which DEC private modes the child enabled on the local terminal and never disabled; the reset bytes died with the link.
+//! [`ModeTracker`] observes every complete CSI sequence the wrap output filter forwards.
+//! It keeps a bitmask of latched modes plus the kitty keyboard push depth; [`restore_bytes`] emits disables for exactly that latched state.
+//! Dirty deaths get repaired and clean exits stay byte-for-byte transparent.
+//! Kitty pops are exactly as deep as the child's net pushes (a blind pop could corrupt an enclosing context's keyboard stack).
+//!
+//! The tracked set mirrors the canonical teardown table in [`xai_crash_handler::terminal`] (`RESTORE_SEQ`), pinned by a unit test below.
+//! It adds the remaining mouse encodings (`?1005`, `?1016`) and the legacy alternate screens (`?47`, `?1047`) that a wrapped TUI may use.
+//!
+//! Known limitation: the kitty protocol keeps an independent stack per screen buffer, while this tracker keeps one net-depth counter.
+//! A child that pushes on one screen and dies while the other is active is therefore restored by count, not by screen.
+//! The pager crash handler's teardown has the same limitation; tracking a depth per screen would close the gap.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -29,6 +43,7 @@ const ALT_1047: u32 = 1 << 11;
 /// Alternate screen buffer with cursor save/restore, `?1049`.
 const ALT_1049: u32 = 1 << 12;
 /// Cursor hidden; mode `?25` is tracked INVERTED.
+/// DECTCEM's set side (`?25h`) shows the cursor, so the latched (needs-repair) state is having seen `?25l` without a later `?25h`.
 const CURSOR_HIDDEN: u32 = 1 << 13;
 
 /// Mouse/paste/focus disables in the relative order pinned by `xai_crash_handler::terminal::RESTORE_SEQ`'s ordering tests.
@@ -65,8 +80,9 @@ fn mode_bit(mode: u32) -> Option<u32> {
     })
 }
 
-/// Tracks latched terminal state, shared (via `Arc`) between the wrap output
-/// filter, the exit-path drop guard.
+/// Tracks latched terminal state, shared (via `Arc`) between the wrap output filter, the exit-path drop guard, and
+/// the terminate-signal thread. So the uniform strongest ordering is chosen over reasoning about minimal per-site
+/// orderings.
 #[derive(Debug, Default)]
 pub(crate) struct ModeTracker {
     /// Bitmask of latched modes (the `MOUSE_*`/`PASTE_*`/... bits above).
@@ -76,6 +92,7 @@ pub(crate) struct ModeTracker {
     /// Claim phase of the one-shot restore gate: set by the first exit path that starts the restore.
     restore_claimed: AtomicBool,
     /// Completion phase: set by the claim winner once the restore has been fully emitted.
+    /// Losing exit paths then know it is safe to let the process exit.
     restore_done: AtomicBool,
 }
 
@@ -122,7 +139,11 @@ impl ModeTracker {
                 Some(b'>') => {
                     self.kitty_depth.fetch_add(1, Ordering::SeqCst);
                 }
+                // Kitty keyboard pop: `CSI < n u`, n defaulting to 1
+                // The depth floors at zero so a child popping an entry it never pushed cannot make wrap pop one on its behalf later
                 Some(b'<') => {
+                    // Zero also means the default (1): under the common CSI zero-means-default convention a terminal may pop one entry for `<0u`
+                    // Over-counting depth here risks the destructive extra pop at exit
                     let n = body
                         .get(1..)
                         .and_then(parse_decimal)
@@ -134,7 +155,7 @@ impl ModeTracker {
                         |depth| Some(depth.saturating_sub(n)),
                     );
                 }
-                // `CSI u` restores the cursor, `CSI ? u` queries, and `CSI =.
+                // `CSI u` restores the cursor, `CSI ? u` queries, and `CSI = .. u` sets flags without pushing; none are stack operations.
                 _ => {}
             },
             _ => {}
@@ -145,6 +166,7 @@ impl ModeTracker {
         let Some(bit) = mode_bit(mode) else {
             return;
         };
+        // Mode 25 is show-cursor: its latched (needs-repair) side is `l`.
         let latch = if mode == 25 { !set } else { set };
         if latch {
             self.modes.fetch_or(bit, Ordering::SeqCst);
@@ -160,7 +182,9 @@ impl ModeTracker {
         }
     }
 
-    /// The first caller gets `true` and must call `finish_restore` when done.
+    /// The first caller gets `true` and must call `finish_restore` when done. Later callers get `false` and must not
+    /// emit (the terminal would be reset twice, and the kitty pop is a destructive stack operation). They should
+    /// instead wait for completion before letting the process exit.
     pub(crate) fn begin_restore(&self) -> bool {
         !self.restore_claimed.swap(true, Ordering::SeqCst)
     }
@@ -321,7 +345,8 @@ mod tests {
 
     #[test]
     fn kitty_pop_zero_count_means_default_one() {
-        // A terminal following the CSI zero-means-default convention pops one entry for `<0u` Counting it.
+        // A terminal following the CSI zero-means-default convention pops one entry for `<0u`
+        // Counting it as zero would leave wrap's depth one too high: an extra pop into an enclosing stack at exit
         assert!(restore_for(&[b"\x1b[>1u", b"\x1b[<0u"]).is_empty());
     }
 
@@ -435,6 +460,7 @@ mod tests {
             tracker.observe_csi(&enable);
         }
 
+        // Every element present, in RESTORE_SEQ's relative order (wrap-only extras like ?1005/?1016/?1047 may interleave between them)
         let out = restore_bytes(tracker.snapshot());
         let positions: Vec<usize> = elements
             .iter()

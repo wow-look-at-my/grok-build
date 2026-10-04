@@ -54,7 +54,7 @@ fn a_first_party_server_wins_an_id_a_third_party_sibling_also_offers() {
     assert_eq!((plan.rejected, plan.over_cap), (1, 0));
 }
 
-/// First-party servers are still ambiguous with each other; the tier
+/// Two first-party servers are still ambiguous with each other; the tier
 /// settles cross-tier collisions only, never start order within a tier.
 #[test]
 fn two_first_party_servers_offering_one_id_both_lose_it() {

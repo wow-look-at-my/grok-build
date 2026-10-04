@@ -3,9 +3,11 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-/// The spec only says servers SHOULD inline it, so a structured-first server would otherwise leave
-/// the model with the summary line alone. Callers append the result last so truncation cuts it
-/// first.
+/// The compact JSON to append for `structuredContent`, or `None` when a rendered `content` part
+/// already carries it: the document at the part's first `{`/`[` equals the payload, or for a
+/// scalar (spec >= 2026-07-28) the whole part is its JSON or the string itself. The spec only says
+/// servers SHOULD inline it, so a structured-first server would otherwise leave the model with the
+/// summary line alone. Callers append the result last so truncation cuts it first.
 pub fn render_structured_content<'a>(
     structured: Option<&Value>,
     parts: impl IntoIterator<Item = &'a str>,

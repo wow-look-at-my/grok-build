@@ -1,14 +1,20 @@
-#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
 
 //! Writes a release number into an already-linked grok binary.
+//!
+//! The number comes from buildhost, which only assigns it once the build has
+//! passed. Reading it with `option_env!` at compile time is what forced the
+//! release to be created before anything was built.
 
 use xai_grok_version::{STAMP_MAGIC, STAMP_PAYLOAD_LEN, STAMP_SLOT_LEN};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StampError {
-    /// No slot. The binary was linked without `xai-grok-version`, or something dropped the `#[used]` static.
+    /// No slot. The binary was linked without `xai-grok-version`, or something
+    /// dropped the `#[used]` static.
     SlotMissing,
-    /// More than one slot.
+    /// More than one slot. Which one the running binary reads is then a guess,
+    /// so this fails instead of patching an arbitrary one.
     SlotAmbiguous(usize),
     /// The slot is at the very end of the file and is cut short.
     SlotTruncated,
@@ -68,7 +74,9 @@ pub fn read_stamp(binary: &[u8]) -> Result<Option<String>, StampError> {
         return Ok(None);
     }
     let payload = at + STAMP_MAGIC.len() + 1;
-    // The slot sits in a compiled binary: undecodable bytes mean the region is not a stamped payload.
+    // The slot sits in a compiled binary: undecodable bytes mean the region is
+    // not a stamped payload, which is exactly what `None` reports. Lossy would
+    // read a random section as a version string.
     #[allow(clippy::disallowed_methods)]
     let stamped = String::from_utf8(binary[payload..payload + len].to_vec()).ok();
     Ok(stamped)
@@ -148,7 +156,7 @@ mod tests {
         );
     }
 
-    /// Slots mean the running binary reads one of them and the stamper
+    /// Two slots mean the running binary reads one of them and the stamper
     /// cannot tell which.
     #[test]
     fn two_slots_are_refused() {

@@ -1,6 +1,9 @@
-#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::expect_used)] // 2 hits predate the gate
 
-//! Default model IDs loaded from `default_models.json` at runtime. Edit that JSON file to change them.
+//! Default model IDs loaded from `default_models.json` at runtime.
+//! Edit that JSON file to change them.
+//!
+//! At runtime each model is resolved from the first of these that is set: CLI flag, ENV var, config.toml, remote settings, these defaults.
 
 #![deny(clippy::indexing_slicing)]
 
@@ -11,6 +14,7 @@ pub use slots::{HARNESS_MODEL_SLOTS, ModelSlot, SlotFallback, slot_by_id, slot_f
 use std::sync::LazyLock;
 
 /// The raw JSON, embedded at compile time.
+/// It is `pub` because `xai_grok_shell::models` re-exports it and `agent::config` reads it.
 pub const DEFAULT_MODELS_JSON: &str = include_str!("../default_models.json");
 
 #[derive(serde::Deserialize)]

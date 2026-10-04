@@ -1,4 +1,18 @@
-//! Adjacent-tagged notification wire wrapper with a forward-compat `Custom` shape.
+//! Adjacent-tagged notification wire wrapper with a forward-compat
+//! `Custom` shape.
+//!
+//! Adjacent tagging (`#[serde(tag = "shape", content = "value")]`) was
+//! chosen over `#[serde(untagged)]` to eliminate the spoofing risk where
+//! a `Custom` payload could silently match a known PascalCase variant.
+//! The collision check ([`check_custom_kind`]) runs at
+//! notification-emit time, not at registration time.
+//!
+//! Wire shape:
+//!
+//! ```jsonc
+//! { "shape": "known",  "value": { "type": "BashOutputChunk", ... } }
+//! { "shape": "custom", "value": { "kind": "my_tool.progress", "payload": ... } }
+//! ```
 
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +25,8 @@ pub enum WireToolNotification {
 }
 
 /// Free-form notification payload for kinds the computer hub does not
-/// recognise.
+/// recognise. The `kind` MUST NOT collide with a known PascalCase variant
+/// (see [`check_custom_kind`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireCustomNotification {
     pub kind: String,
@@ -57,7 +72,9 @@ pub const fn known_notification_kinds() -> &'static [&'static str] {
 }
 
 /// Reject custom notification kinds whose name shadows a known PascalCase
-/// variant.
+/// variant. Runs at notification-emit time; an empty `kind` is accepted
+/// here (the producer is responsible for validating that the field is
+/// non-empty).
 pub fn check_custom_kind(kind: &str) -> Result<(), KnownVariantCollision> {
     if KNOWN_NOTIFICATION_KINDS.contains(&kind) {
         Err(KnownVariantCollision {

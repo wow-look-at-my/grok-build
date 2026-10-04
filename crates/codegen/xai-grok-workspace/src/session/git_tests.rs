@@ -172,9 +172,9 @@ async fn git_cli_scrubs_token_from_transport_failure() {
     let tmp = tempfile::tempdir().unwrap();
     git_cli(tmp.path(), &["init", "-b", "main"]).await.unwrap();
 
-    // Fetch from a remote whose URL embeds a token and that refuses
-    // immediately (port 1) git echoes the full URL (including the token) in
-    // its stderr.
+    // Fetch from a remote whose URL embeds a token and that refuses immediately (port 1)
+    // git echoes the full URL (including the token) in its stderr
+    // The `git_cli` failure branch must scrub it before returning/logging, so even a routine EnsureBinding fetch failure cannot leak the token
     let err = git_cli(
         tmp.path(),
         &[
@@ -210,8 +210,8 @@ fn detect_default_branch_prefers_remote_head_then_config() {
     // With no remote HEAD, detection falls back to config
     assert_eq!(detect_default_branch(&repo).as_deref(), Some("trunk"));
 
-    // A lone remote-tracking branch without `origin/HEAD` still falls back to
-    // config Detection reads the `origin/HEAD` symbolic ref.
+    // A lone remote-tracking branch without `origin/HEAD` still falls back to config
+    // Detection reads the `origin/HEAD` symbolic ref and never guesses from the remote-tracking branches
     repo.reference("refs/remotes/origin/main", oid, false, "test")
         .unwrap();
     assert_eq!(detect_default_branch(&repo).as_deref(), Some("trunk"));
@@ -327,7 +327,8 @@ fn test_resolve_persisted_session_git_metadata_detached_head() {
 
 #[test]
 fn test_resolve_persisted_session_git_metadata_worktree_resolves_remotes() {
-    // Set up a main repo with a remote, then create a worktree resolve_persisted_session_git_metadata_sync.
+    // Set up a main repo with a remote, then create a worktree
+    // resolve_persisted_session_git_metadata_sync on the worktree cwd must follow the commondir back to the shared config
     let tmp = tempfile::tempdir().unwrap();
     let main_path = tmp.path().join("main-repo");
     std::fs::create_dir_all(&main_path).unwrap();
@@ -862,7 +863,7 @@ fn test_find_git_root_from_subdir_returns_repo_root() {
 #[test]
 fn test_find_git_root_outside_repo_returns_err() {
     let tmp = tempfile::tempdir().unwrap();
-    // No git init, a plain directory
+    // No git init, just a plain directory
     assert!(find_git_root_from_path(tmp.path()).is_err());
 }
 

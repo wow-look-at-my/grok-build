@@ -3,8 +3,9 @@
 use std::sync::Arc;
 use xai_circuit_breaker::{BreakerState, Observer, Outcome};
 
-/// `Observer` that emits `tracing` events matching the breaker so existing
-/// analytics keep firing.
+/// `Observer` that emits `tracing` events matching the legacy breaker so existing analytics keep firing.
+/// Route on the **new** state only — `(old, new)` tuples mis-label `Open -> HalfOpen`.
+/// Failures are traced; successes are dropped so steady state does not dominate log volume.
 pub(crate) struct TracingObserver {
     name: &'static str,
 }

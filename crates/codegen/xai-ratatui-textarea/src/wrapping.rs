@@ -18,7 +18,8 @@ where
         match line {
             std::borrow::Cow::Borrowed(slice) => {
                 let slice_addr = slice.as_ptr() as usize;
-                // Skip slices whose pointers don't lie within `text`.
+                // Skip slices whose pointers don't lie within `text`. This guards against empty Cow::Borrowed("") slices from textwrap
+                // that reference static memory instead of the input buffer (e.g. at zero or degenerate widths).
                 if slice_addr < text_start || slice_addr > text_end {
                     continue;
                 }
@@ -72,17 +73,25 @@ pub struct RtOptions<'a> {
     pub width: usize,
     /// Line ending used for breaking lines.
     pub line_ending: textwrap::LineEnding,
-    /// Indentation used for the first line of output. See the [`Options::initial_indent`] method.
+    /// Indentation used for the first line of output. See the
+    /// [`Options::initial_indent`] method.
     pub initial_indent: Line<'a>,
-    /// Indentation used for subsequent lines of output. See the [`Options::subsequent_indent`] method.
+    /// Indentation used for subsequent lines of output. See the
+    /// [`Options::subsequent_indent`] method.
     pub subsequent_indent: Line<'a>,
     /// Allow long words to be broken if they cannot fit on a line.
+    /// When set to `false`, some lines may be longer than
+    /// `self.width`. See the [`Options::break_words`] method.
     pub break_words: bool,
-    /// Wrapping algorithm to use, see the implementations of the [`WrapAlgorithm`] trait for details.
+    /// Wrapping algorithm to use, see the implementations of the
+    /// [`WrapAlgorithm`] trait for details.
     pub wrap_algorithm: textwrap::WrapAlgorithm,
-    /// The line breaking algorithm to use, see the [`WordSeparator`] trait for an overview.
+    /// The line breaking algorithm to use, see the [`WordSeparator`]
+    /// trait for an overview and possible implementations.
     pub word_separator: textwrap::WordSeparator,
-    /// The method for splitting words.
+    /// The method for splitting words. This can be used to prohibit
+    /// splitting words on hyphens, or it can be used to implement
+    /// language-aware machine hyphenation.
     pub word_splitter: textwrap::WordSplitter,
 }
 impl From<usize> for RtOptions<'_> {
@@ -307,6 +316,11 @@ where
 }
 
 /// Cut `original`'s spans to `range`, keeping each span's own styling.
+///
+/// `range` comes from a wrap range and `span_bounds` are the spans' own
+/// offsets over the same flat line, so every endpoint is a char boundary of
+/// the line and their intersections are too; subtracting a span's start from
+/// one of those gives a char boundary of that span's content.
 #[allow(clippy::string_slice)] // range and span bounds are both char-aligned
 fn slice_line_spans<'a>(
     original: &'a Line<'a>,
@@ -422,7 +436,7 @@ mod tests {
             .subsequent_indent(Line::from("  "));
         let line = Line::from("hello world foo");
         let out = word_wrap_line(&line, opts);
-        // Expect a few lines with proper prefixes
+        // Expect three lines with proper prefixes
         assert!(concat_line(line_at(&out, 0)).starts_with("- "));
         assert!(concat_line(line_at(&out, 1)).starts_with("  "));
         assert!(concat_line(line_at(&out, 2)).starts_with("  "));
@@ -533,7 +547,8 @@ mod tests {
         let lines = vec![Line::from("hello world"), Line::from("foo bar baz")];
         let out = word_wrap_lines(&lines, opts);
 
-        // Expect: first line prefixed with "- ", subsequent wrapped pieces with " " and for the second input line.
+        // Expect: first line prefixed with "- ", subsequent wrapped pieces with "  "
+        // and for the second input line, there should be no "- " prefix on its first piece
         let rendered: Vec<String> = out.iter().map(concat_line).collect();
         let Some(first) = rendered.first() else {
             panic!("expected a wrapped line: {rendered:?}");
@@ -578,7 +593,7 @@ mod tests {
 
     #[test]
     fn line_height_counts_double_width_emoji() {
-        let line = "😀😀😀".into();
+        let line = "😀😀😀".into(); // each emoji ~ width 2
         assert_eq!(word_wrap_line(&line, 4).len(), 2);
         assert_eq!(word_wrap_line(&line, 2).len(), 3);
         assert_eq!(word_wrap_line(&line, 6).len(), 1);

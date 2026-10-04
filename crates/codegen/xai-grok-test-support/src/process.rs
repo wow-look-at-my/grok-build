@@ -1,4 +1,5 @@
 //! [`TestProcess`] is the Tokio-child owner used by ACP, leader, and headless harnesses.
+//! [`TestProcessTree`] is the narrower process-tree guard used when a dependency (notably `portable-pty`) owns the concrete child handle.
 
 use std::ffi::{OsStr, OsString};
 use std::fmt::Write as _;
@@ -842,7 +843,8 @@ pub fn process_has_exited_without_reap(pid: u32, label: &str) -> io::Result<bool
         ));
     }
 
-    // SAFETY: waitid writes one initialized siginfo_t, P_PID restricts the query to the caller-owned direct child.
+    // SAFETY: waitid writes one initialized siginfo_t, P_PID restricts the
+    // query to the caller-owned direct child, and WNOWAIT preserves its status.
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
     let result = unsafe {
         libc::waitid(

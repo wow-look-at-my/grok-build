@@ -173,6 +173,7 @@ pub struct HunkLineInfoWire {
 }
 
 /// Wire mirror of `xai_hunk_tracker::types::HunkSource`.
+/// An unrecognized `type` tag decodes to `Unknown` rather than failing the whole structured response. The server only produces known variants.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum HunkSourceWire {
@@ -186,6 +187,7 @@ pub enum HunkSourceWire {
 }
 
 /// Wire mirror of `xai_hunk_tracker::types::FileContentStatus`.
+/// Hand-written `Deserialize` because a string enum cannot use `#[serde(other)]`; unknown statuses become [`Unknown`](Self::Unknown) instead of failing the response.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FileContentStatusWire {

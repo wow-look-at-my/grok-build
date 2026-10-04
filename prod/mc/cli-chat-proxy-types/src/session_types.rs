@@ -24,7 +24,8 @@ pub struct RegisterSessionRequest {
     pub hostname: Option<String>,
     #[serde(default)]
     pub parent_session_id: Option<String>,
-    /// Opaque per-machine device id (`deviceId` on the wire).
+    /// Opaque per-machine device id (`deviceId` on the wire). Sent by the CLI
+    /// at register; optional for backward-compat with older clients.
     #[serde(default)]
     pub device_id: Option<String>,
 }
@@ -40,7 +41,9 @@ pub struct UpdateSessionRequest {
     pub last_turn_number: Option<i32>,
     #[serde(default)]
     pub repo_head_at_end: Option<String>,
-    /// Latest turn whose restore artifacts are confirmed durable. `None` = leave unchanged.
+    /// Latest turn whose restore artifacts are confirmed durable.
+    /// `None` = leave unchanged.  Written separately from `last_turn_number`
+    /// once session-state upload is confirmed.
     #[serde(default)]
     pub restorable_turn_number: Option<i32>,
 }
@@ -73,7 +76,8 @@ pub struct SessionReplicaResponse {
     pub updated_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub last_turn_number: i32,
-    /// See `UpdateSessionRequest.restorable_turn_number`.
+    /// See `UpdateSessionRequest.restorable_turn_number`.  Optional in the wire
+    /// type so newer CLI builds can parse responses from older servers gracefully.
     pub restorable_turn_number: Option<i32>,
     pub cwd: String,
     pub repo_remote_url: Option<String>,

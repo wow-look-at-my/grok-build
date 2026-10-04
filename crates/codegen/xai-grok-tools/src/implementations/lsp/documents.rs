@@ -1,4 +1,12 @@
 //! What we have told one server about each open document.
+//!
+//! Two readers besides the client need this. Incremental servers require a
+//! range on every change event, which is computed from where the previous
+//! revision ended. And every diagnostic answer has to be attributed to a
+//! document version — pull knows the version it asked about, and a pushed
+//! report that omits `version` is credited with the newest version we had sent
+//! when it arrived. Both of those happen off the client's thread, so the
+//! versions live behind a shared handle rather than inside `LspClient`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,7 +15,9 @@ use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use async_lsp::lsp_types::Position;
 
-/// The version a document is opened at.
+/// The version a document is opened at. Deliberately above [`super::diagnostics::NO_VERSION`],
+/// which is what a report about a document we have never opened is credited: were they equal, such
+/// a report would count as a verdict on our first edit to that file.
 pub const FIRST_VERSION: i32 = 1;
 const _: () = assert!(FIRST_VERSION > super::diagnostics::NO_VERSION);
 
@@ -17,7 +27,7 @@ pub struct Tracked {
     /// Version of the last notification we successfully sent for it.
     pub version: i32,
     pub language_id: String,
-    /// Where that revision ends. Integers, not a copy of the text.
+    /// Where that revision ends. Two integers, not a copy of the text.
     pub end: Position,
 }
 
@@ -52,10 +62,9 @@ impl Documents {
         Self::default()
     }
 
-    /// What to send for `uri`, without recording it as sent. Deliberately
-    /// separate from [`Self::commit`]: what is recorded here describes the
-    /// text the *server* has, so a notification that failed to go out must
-    /// not advance it.
+    /// What to send for `uri`, without recording it as sent. Deliberately separate from [`Self::commit`]: what is recorded here describes the text
+    /// the *server* has, so a notification that failed to go out must not advance it. Advancing it anyway would aim every later incremental range
+    /// at a revision the server never received — the same protocol violation the range exists to avoid.
     pub fn plan(&self, uri: &str) -> Update {
         match self.read().get(uri) {
             Some(tracked) => Update::Change {
@@ -68,12 +77,14 @@ impl Documents {
         }
     }
 
-    /// A notification's revision is written down here, before the
-    /// notification reaches the wire. The replaced value comes back, so
-    /// [`Self::restore`] can undo a send that failed. A push that names no
-    /// version is credited with the newest version we have sent, and the
-    /// server can answer on another thread before the sending thread gets
-    /// this far.
+    /// A notification's revision is written down here, before the notification
+    /// reaches the wire. The replaced value comes back, so [`Self::restore`]
+    /// can undo a send that failed.
+    ///
+    /// A push that names no version is credited with the newest version we
+    /// have sent, and the server can answer on another thread before the
+    /// sending thread gets this far. A report read against the older record
+    /// settles nothing, so the reader never sees it.
     pub fn commit(
         &self,
         uri: &str,
@@ -160,7 +171,8 @@ impl Documents {
 
 /// End position of `text`, i.e. the position just past its final character.
 pub fn end_position(text: &str) -> Position {
-    // `lines()` drops a trailing newline, which would give a position that is short of the real end of the document.
+    // `lines()` drops a trailing newline, which would give a position that is
+    // short of the real end of the document, so count explicitly.
     let mut line = 0u32;
     let mut last_line_start = 0usize;
     for (idx, ch) in text.char_indices() {
@@ -343,7 +355,7 @@ mod tests {
 
     #[test]
     fn end_position_measures_in_utf16_code_units() {
-        // Astral-plane characters are UTF-16 units; 'é' is one.
+        // Astral-plane characters are two UTF-16 units; 'é' is one.
         assert_eq!(end_position("é"), position(0, 1));
         assert_eq!(end_position("🚀"), position(0, 2));
         assert_eq!(end_position("a\n🚀b"), position(1, 3));

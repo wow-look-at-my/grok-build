@@ -1,4 +1,5 @@
-//! Parity tests for the `server` and `client` presets, including a sustained high-401-rate failure pattern.
+//! Parity tests for the `server` and `client` presets, including a
+//! sustained high-401-rate failure pattern.
 
 use std::time::Duration;
 
@@ -7,6 +8,8 @@ use super::support::breaker_with_mock;
 
 #[test]
 fn client_preset_trips_on_5x_401s() {
+    // With the sliding-window algorithm, 5 × 401 against `client()`
+    // gives sample_count=5 >= min_samples=5 and rate=1.0 >= 0.5.
     let cb = CircuitBreaker::new(BreakerConfig::client());
     for _ in 0..4 {
         cb.record(Outcome::Failure);
@@ -72,6 +75,10 @@ fn parity_server_does_not_trip_below_min_samples() {
 #[test]
 fn parity_server_does_not_trip_below_threshold() {
     let cb = CircuitBreaker::new(BreakerConfig::server());
+    // 5 failures and 6 successes interleaved (lead with the
+    // successes so the partial rate never crosses 0.5 once
+    // min_samples is reached): SSSSSS FFFFF → 11 samples,
+    // rate = 5/11 ≈ 0.4545.
     for _ in 0..6 {
         cb.record(Outcome::Success);
     }
@@ -110,6 +117,7 @@ fn parity_client_trips_on_fresh_session_5x_401() {
 
 #[test]
 fn client_preset_trips_on_interleaved_success_pattern() {
+    // [401×4, 200, 401×5] = 10 samples, 9 failures, rate = 0.9.
     let cb = CircuitBreaker::new(BreakerConfig::client());
     for _ in 0..4 {
         cb.record(Outcome::Failure);

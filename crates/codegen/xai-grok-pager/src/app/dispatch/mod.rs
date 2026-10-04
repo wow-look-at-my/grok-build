@@ -1,4 +1,13 @@
 //! Synchronous state dispatch.
+//! It takes an [`Action`](crate::app::actions::Action), mutates application state, and returns [`Effect`](crate::app::actions::Effect)s.
+//!
+//! **Invariants:**
+//! - This module never touches the terminal, network, or filesystem.
+//! - All mutations are synchronous and deterministic.
+//! - Async work is described as [`Effect`](crate::app::actions::Effect) values, not executed.
+//! - This makes dispatch fully testable without tokio or a terminal.
+//!
+//! Imports in this tree use at most one `super::` hop (absolute `crate::` paths otherwise); tests/ shares a fixture prelude via `use super::*;`.
 
 mod auth;
 mod billing;

@@ -1,4 +1,5 @@
-//! The attempt loop.
+//! The attempt loop. Each attempt takes the slot, re-opens the target, tries the flock once, and
+//! releases the slot before any sleep, so the slot is never held across a wait or past return.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io;
@@ -13,8 +14,15 @@ use crate::slot::{SlotAttempt, SlotHandle};
 /// Floor for `Wait::Poll`'s interval so a caller cannot spin.
 const MIN_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
-/// Acquire an exclusive advisory lock on `path`, creating the file if missing
-/// and never truncating it.
+/// Acquire an exclusive advisory lock on `path`, creating the file if missing and never
+/// truncating it. Every attempt re-opens the path, so a lock file unlinked and recreated by an
+/// older holder is picked up on the next attempt.
+///
+/// # Errors
+/// `Contended` (`Wait::NoWait`: held by another process), `Timeout` (`Wait::Poll`: still held when
+/// the budget ran out), `AcquireInProgress` (another process is wedged inside its own open+flock
+/// of `path`; the path was not touched), `Open` (the lock file could not be opened), `Lock`
+/// (`flock` failed for a reason other than contention).
 pub fn lock_file(path: &Path, options: &LockOptions) -> Result<LockedFile> {
     lock_file_with(path, options, &mut open_target)
 }

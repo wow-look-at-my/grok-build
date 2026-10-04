@@ -1,4 +1,5 @@
-//! What the mock OTLP server records: one exported OTLP log record or metric point in typed form, the export that carried it.
+//! What the mock OTLP server records: one exported OTLP log record or metric point in typed form, the
+//! export that carried it, and the faults a post can leave instead.
 
 use std::collections::BTreeMap;
 use std::fmt;

@@ -1,4 +1,10 @@
 //! REST client for feedback collection via cli-chat-proxy.
+//!
+//! This client handles:
+//! - Syncing session signals to cli-chat-proxy
+//! - Submitting feedback responses
+//! - Completing or dismissing feedback requests
+//! - Creating feedback requests (when triggered by heuristics)
 
 use std::sync::Arc;
 
@@ -17,6 +23,8 @@ use prod_mc_cli_chat_proxy_types::feedback_types::{
 const CLIENT_VERSION_HEADER: &str = "x-grok-client-version";
 
 /// HTTP error from the feedback/signals API with a preserved status code.
+///
+/// Used to let callers distinguish auth failures (401) from transient errors without fragile string matching on error messages.
 #[derive(Debug, thiserror::Error)]
 #[error("{context} failed with status {status}: {body}")]
 pub(crate) struct FeedbackApiError {
@@ -26,10 +34,12 @@ pub(crate) struct FeedbackApiError {
 }
 
 impl FeedbackApiError {
+    /// Returns `true` if this is a 401 Unauthorized response.
     pub(crate) fn is_unauthorized(&self) -> bool {
         self.status == reqwest::StatusCode::UNAUTHORIZED
     }
 
+    /// Returns `true` if this is a 403 Forbidden response.
     pub(crate) fn is_forbidden(&self) -> bool {
         self.status == reqwest::StatusCode::FORBIDDEN
     }
@@ -103,6 +113,7 @@ impl FeedbackClient {
     }
 
     /// Rebuild the middleware-wrapped client from the current credentials.
+    /// Called by each builder method so the middleware sees the final state.
     fn rebuild_middleware(&mut self) {
         self.client = Self::build_middleware_client(&self.http, &self.credentials);
     }
@@ -112,6 +123,9 @@ impl FeedbackClient {
         credentials: &crate::util::grok_auth_credentials::GrokAuthCredentials,
     ) -> reqwest_middleware::ClientWithMiddleware {
         let provider = Self::make_auth_provider(credentials);
+        // max_retries=0: the middleware stamps the auth header but does NOT drive its own ServerRejected recovery on 401
+        // Background consumers (signals sync, turn deltas) retry at the application level via with_one_shot_auth_retry or try_refresh_and_retry_sync
+        // Those first wait for the proactive refresh to complete before falling back to active recovery Otherwise the middleware's eager ServerRejected refresh would race every other auth consumer during token-expiry windows and amplify 401s
         reqwest_middleware::ClientBuilder::new(http.clone())
             .with(xai_grok_auth::AuthRetryMiddleware::new(provider, 0))
             .build()
@@ -166,9 +180,9 @@ impl FeedbackClient {
             .await
     }
 
-    /// Wait for another consumer (proactive refresh, main request path) to
-    /// refresh the token. Returns `true` if the token changed within the
-    /// timeout.
+    /// Wait for another consumer (proactive refresh, main request path) to refresh the token.
+    /// Returns `true` if the token changed within the timeout.
+    /// Background consumers call this before driving their own `ServerRejected` recovery to avoid amplifying 401 bursts.
     pub(crate) async fn wait_for_token_refresh(&self, timeout: std::time::Duration) -> bool {
         let Some(manager) = self.credentials.auth_manager() else {
             return false;
@@ -209,7 +223,11 @@ impl FeedbackClient {
         request: RequestBuilder,
         context: &'static str,
     ) -> Result<T> {
-        // Every endpoint on this client reports upstream -- session signals, session events, feedback bodies.
+        // Every endpoint on this client reports upstream -- session signals,
+        // session events, feedback bodies, terminal details. This build sends
+        // none of it, so refuse here rather than at each call site, and refuse
+        // loudly: a caller that believes it delivered something is worse than
+        // one told it did not.
         let _ = &request;
         anyhow::bail!("{context} disabled: this build does not report to xAI");
         #[allow(unreachable_code)]
@@ -392,7 +410,9 @@ pub fn signals_to_update(
         min_time_to_first_token_ms: Some(signals.min_time_to_first_token_ms as i64),
         max_time_to_first_token_ms: Some(signals.max_time_to_first_token_ms as i64),
         latency_sample_count: Some(signals.latency_sample_count as i64),
-        // ITL metrics (session-level aggregates) Guard p50/p99 with itl_sample_count > 0 so fresh sessions (no ITL measured) send None.
+        // ITL metrics (session-level aggregates)
+        // Guard p50/p99 with itl_sample_count > 0 so fresh sessions (no ITL measured) send None, which lands as SQL NULL
+        // That preserves the "not yet reported" meaning of the nullable PG columns
         last_itl_p50_ms: signals.itl_p50_ms.map(|v| v as i64),
         last_itl_p99_ms: signals.itl_p99_ms.map(|v| v as i64),
         worst_itl_max_ms: signals.itl_max_ms.map(|v| v as i64),
@@ -754,6 +774,7 @@ mod tests {
             min_time_to_first_token_ms: 0,
             max_time_to_first_token_ms: 0,
             latency_sample_count: 0,
+            // No ITL measured yet
             itl_p50_ms: None,
             itl_p99_ms: None,
             itl_max_ms: None,
@@ -779,6 +800,7 @@ mod tests {
     }
 }
 
+/// Auth resolve + 401 recovery tests.
 ///
 /// Nothing here may drive a request through `send_json` / `send_empty`: those
 /// bail before the wire in this build (see `egress_disabled_pins`), so a test

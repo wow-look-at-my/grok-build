@@ -1,4 +1,6 @@
-//! Toolset-swap guard policy: every trigger evaluates the decision table.
+//! Toolset-swap guard policy: every trigger evaluates the one decision table, [`SwapPolicy::evaluate`] over a [`SessionSnapshot`].
+//! The exhaustive match is the spec; the matrix test's `expected_decision` mirrors it row by row.
+
 use prometheus::{IntCounterVec, register_int_counter_vec};
 
 use crate::activity::ActivityTracker;
@@ -58,7 +60,7 @@ pub(crate) fn init_metrics() {
             }
         }
     }
-    // Only these reason/trigger pairs are reachable: in-flight guards owner rebinds; both turn-active guards fire on the update RPC
+    // Only these reason/trigger pairs are reachable: in-flight guards owner rebinds; the two turn-active guards fire on the update RPC
     for (reason, trigger) in [
         (DeferReason::InFlightCalls, SwapTrigger::OwnerRebind),
         (DeferReason::TurnActive, SwapTrigger::UpdateRpc),
@@ -89,9 +91,10 @@ fn bool_label(v: bool) -> &'static str {
 }
 
 /// What initiated a toolset swap attempt.
+/// The trigger fixes both the metric `trigger` label and the guard set the policy applies (see the module table).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SwapTrigger {
-    /// Hub `session.bind` against an existing session that carried a changed explicit toolset.
+    /// Hub `session.bind` against an existing session that carried a changed explicit toolset (`WorkspaceHandle::rebind_existing_hub_session`).
     OwnerRebind,
     /// The `workspace.update_tool_config` RPC.
     UpdateRpc,
@@ -100,6 +103,7 @@ pub(crate) enum SwapTrigger {
     /// `re_resolve_all_sessions` after a remote tools change/notification.
     HubTools,
     /// `re_resolve_all_sessions` from an unrecognized source (test callers only today).
+    /// Snapshot-rebuild policy, `other` metric label.
     Other,
 }
 
@@ -125,6 +129,8 @@ impl SwapTrigger {
     }
 
     /// Whether the apply path re-evaluates post-resolve, pre-install.
+    /// Only the update RPC: a turn can start mid-resolve (turn hooks are lock-free).
+    /// Owner rebinds must answer inside the server's ack budget, so they don't.
     pub(crate) fn rechecks_after_resolve(self) -> bool {
         self == Self::UpdateRpc
     }
@@ -133,7 +139,7 @@ impl SwapTrigger {
 /// Why a swap was skipped (nothing resolved, toolset and fingerprint kept).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SkipReason {
-    /// The toolset `Terminal` is not the session-owned backend (local/shell bind).
+    /// The toolset `Terminal` is not the session-owned backend (local/shell bind): a rebuild would detach tools from the shell's live task table.
     ExternallyOwned,
 }
 
@@ -141,10 +147,11 @@ pub(crate) enum SkipReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeferReason {
     /// Owner rebind arrived while the session had tool calls in flight.
+    /// Covers an explicit toolset changing to a different one and the identical re-apply that heals a stale toolset.
     InFlightCalls,
     /// The session's turn is active and the config differs (update-RPC entry check); retryable at the turn boundary.
     TurnActive,
-    /// [`Self::TurnActive`] detected by the post-resolve re-check: the turn started during the re-resolve.
+    /// [`Self::TurnActive`] detected by the post-resolve re-check: the turn started during the re-resolve and the resolved toolset was discarded.
     TurnActiveLate,
 }
 
@@ -173,8 +180,8 @@ pub(crate) enum SwapDecision {
     Defer(DeferReason),
 }
 
-/// How the candidate config's fingerprint relates to the session's stored
-/// one.
+/// How the candidate config's fingerprint relates to the session's stored one.
+/// Produced under a single lock acquisition (see [`classify`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BindFingerprintTransition {
     /// Candidate fingerprint equals the stored one.
@@ -201,16 +208,18 @@ fn classify(
     }
 }
 
-/// One coherent read (under `update_lock`) of the session state the policy
-/// keys on.
+/// One coherent read (under `update_lock`) of the session state the policy keys on.
+/// Turn/in-flight reads are lock-free on the tracker side, so a decision can go stale during a long resolve; see `rechecks_after_resolve`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SessionSnapshot {
-    /// `None` means no candidate config.
+    /// `None` means no candidate config: an in-place rebuild of the session's current baseline (the snapshot-driven triggers).
+    /// Such a rebuild never yields `Reuse`.
     transition: Option<BindFingerprintTransition>,
     turn_active: bool,
     in_flight_calls: u32,
     toolset_terminal_session_owned: bool,
     /// The last snapshot-driven rebuild failed and kept a stale toolset ([`WorkspaceSession::stale_resolve`]).
+    /// An identical fingerprint then does not prove the live toolset is current, only that the *config* is.
     stale_resolve: bool,
 }
 
@@ -225,8 +234,8 @@ impl SessionSnapshot {
         Self::with_transition(session, tracker, Some(transition)).await
     }
 
-    /// Capture for an in-place rebuild of the session's current baseline (the
-    /// snapshot-driven triggers).
+    /// Capture for an in-place rebuild of the session's current baseline (the snapshot-driven triggers).
+    /// There is no candidate config, so no fingerprint transition can exempt the rebuild.
     pub(crate) async fn capture_for_rebuild(
         session: &WorkspaceSession,
         tracker: &ActivityTracker,
@@ -304,8 +313,8 @@ impl SwapPolicy {
     }
 }
 
-/// What acting on a [`SwapDecision`] ultimately did, the key of
-/// [`record_swap_decision`].
+/// What acting on a [`SwapDecision`] ultimately did, the key of [`record_swap_decision`].
+/// No `Reused` action: a reuse changes nothing and no metric family counts it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SwapAction {
     /// [`SwapDecision::Skip`] honored.
@@ -318,8 +327,8 @@ pub(crate) enum SwapAction {
     ApplyFailed,
 }
 
-/// The single chokepoint all of them swap metric families emit from, so label values cannot drift per call
-/// site. Swap total on `Applied`, rejected total on `Deferred`, rebind-reresolve on owner-rebind results.
+/// The single chokepoint all three swap metric families emit from, so label values cannot drift per call site.
+/// Swap total on `Applied`, rejected total on `Deferred`, rebind-reresolve on owner-rebind results.
 pub(crate) fn record_swap_decision(
     tracker: &ActivityTracker,
     trigger: SwapTrigger,

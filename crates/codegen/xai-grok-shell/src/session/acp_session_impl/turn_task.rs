@@ -32,6 +32,7 @@ impl Drop for TurnSubagentScopeGuard {
 }
 
 /// RAII guard that stores `false` into an `is_turn_active` flag on drop.
+/// Guarantees the flag is cleared on all exit paths (early returns, errors, panics).
 pub(super) struct TurnActiveGuard(Option<Arc<std::sync::atomic::AtomicBool>>);
 
 impl TurnActiveGuard {
@@ -69,7 +70,8 @@ pub(crate) struct TurnInputRequest {
     pub(crate) start_gate: Option<oneshot::Receiver<()>>,
 }
 
-/// Pointer-identity token minted per task spawn.
+/// Pointer-identity token minted per task spawn: `Rc::ptr_eq` tells spawns
+/// apart even when a prompt id and epoch are reused.
 pub(super) type TaskIdentity = std::rc::Rc<()>;
 
 /// Completion-channel payload: prompt id, turn result, elapsed ms from `started_at`.
@@ -344,7 +346,9 @@ impl SessionActor {
         if let FinalizationBinding::Task { prompt_id, .. } = &lease.binding {
             self.clear_exact_turn_resources(prompt_id).await;
         } else if let FinalizationBinding::NoTask(Some(prompt_id)) = &lease.binding {
-            // Pin-only cancel: drop the live pin when it is this front.
+            // Pin-only cancel: drop the live pin when it is this front. Do not
+            // force the goal-loop gate off unless we actually owned that pin
+            // (a never-started queued row must not disturb another turn).
             self.clear_pinned_prompt_if_current(prompt_id).await;
         }
         self.state.lock().await.finish_finalization(lease)
@@ -379,7 +383,9 @@ impl AgentTask {
         completion_tx: mpsc::UnboundedSender<TurnCompletionMsg>,
     ) -> Self {
         let started_at = std::time::Instant::now();
-        // Open the turn here, not in the spawned future.
+        // Open the turn here, not in the spawned future: a cancel that wins the finalization
+        // lease before the future first runs must still snapshot this turn's number and this
+        // request's mode (the future resolves the final mode once it runs).
         session.signals_handle().increment_turn();
         *session.turn_start_prompt_mode.lock() = request.prompt_mode;
         *session.turn_prompt_mode.lock() = request.prompt_mode;
@@ -409,6 +415,8 @@ impl AgentTask {
 }
 
 /// Holds at most one spawned task; arming a new one aborts the previous.
+/// `Cell` interior mutability because `SessionActor` is `!Send` (single-threaded LocalSet).
+/// Backs both the deferred user-message prefix (`take`s the handle to await its result) and the idle-notification debounce (`cancel`s it).
 pub(crate) struct TaskSlot<T> {
     handle: std::cell::Cell<Option<tokio::task::JoinHandle<T>>>,
 }
@@ -600,7 +608,7 @@ mod start_gate_tests {
 
 #[cfg(test)]
 mod task_slot_tests {
-    // Exercises the shared `TaskSlot<T>` primitive that backs both the deferred prefix and the idle-notification debounce: arm, take, cancel.
+    // Exercises the shared `TaskSlot<T>` primitive that backs both the deferred prefix and the idle-notification debounce: arm, take, cancel, re-arm
     use super::TaskSlot;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

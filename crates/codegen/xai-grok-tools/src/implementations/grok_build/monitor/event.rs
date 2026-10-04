@@ -1,7 +1,9 @@
 use super::types::{BATCH_TRUNCATION_LIMIT, BUFFER_CAP_BYTES, LINE_TRUNCATION_LIMIT};
 use crate::util::truncate_str;
 
-/// Processes raw stdout chunks into complete lines.
+/// Processes raw stdout chunks into complete lines. Buffers partial lines, splits on `\n`,
+/// truncates individual lines at `LINE_TRUNCATION_LIMIT` chars, and caps the internal buffer at
+/// `BUFFER_CAP_BYTES`.
 #[derive(Default)]
 pub struct LineProcessor {
     buffer: Vec<u8>,
@@ -74,8 +76,9 @@ pub fn batch_lines(lines: &[String]) -> String {
     }
 }
 
-/// Sanitize a model-supplied monitor description for embedding in the
-/// `<monitor-event …>` attribute and in line labels.
+/// Sanitize a model-supplied monitor description for embedding in the `<monitor-event …>` attribute
+/// and in line labels: `"` would break the attribute / the parser's `" task_id="` anchor, and
+/// newlines would break the single-line opening-tag shape (`>\n` anchor) and label lines.
 pub fn sanitize_monitor_description(description: &str) -> String {
     description.replace('"', "'").replace(['\n', '\r'], " ")
 }
@@ -191,7 +194,7 @@ mod tests {
     #[test]
     fn truncate_line_multibyte_no_panic() {
         // 3-byte UTF-8 chars — truncation boundary may land mid-char
-        let line = "\u{4e16}\u{754c}".repeat(200); // CJK chars, a few bytes
+        let line = "\u{4e16}\u{754c}".repeat(200); // CJK chars, 3 bytes each
         let truncated = truncate_line(&line);
         assert!(truncated.ends_with("...(truncated)"));
         // Verify the result is valid UTF-8 (would panic if not)

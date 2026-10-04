@@ -1,4 +1,10 @@
 //! `/copy` copies the last (or Nth) assistant message to the clipboard.
+//!
+//! An optional file path writes to a file instead, and is also the fallback when the clipboard is unreachable:
+//! - `/copy`: latest to the clipboard (file fallback on failure)
+//! - `/copy 2`: 2nd-latest to the clipboard
+//! - `/copy out.txt`: latest to the file
+//! - `/copy 2 out.txt`: 2nd-latest to the file
 
 use std::path::PathBuf;
 

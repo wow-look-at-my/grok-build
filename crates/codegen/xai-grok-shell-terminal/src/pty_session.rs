@@ -1,6 +1,11 @@
 //! Agent-scoped interactive PTY manager.
+//! PTYs are keyed by `terminalId`, outlive sessions, and multiplex I/O over the existing ACP WebSocket.
+//! Shells enroll in the process-global scope as terminal owners, so teardown hangs a live shell up and it forwards that to its jobs.
+//! A shell that exits on its own leaves them running, as a terminal does.
+//! Their process groups are their own and nothing here holds a handle to them.
 
-// A panic here loses a shell: teardown paths run inside `Drop`.
+// A panic here loses a shell: teardown paths run inside `Drop`, where an unwind during another unwind aborts the process
+// Tests panic freely
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
 use std::collections::{HashMap, VecDeque};
@@ -69,9 +74,9 @@ pub struct PtySession {
     gateway: GatewaySender,
 }
 
-/// A shell and the group that can signal it. Reaping releases the pid, and a
-/// released pid can be recycled, so a signal after the reap may reach a
-/// stranger.
+/// A shell and the group that can signal it.
+/// Reaping releases the pid, and a released pid can be recycled, so a signal after the reap may reach a stranger.
+/// `Reaped` carries no group, which makes that mistake unrepresentable rather than a rule to remember.
 enum Shell {
     Running {
         child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -95,7 +100,10 @@ impl Shell {
                 group: Some(group), ..
             } if group.wants_hangup() => {
                 let _ = group.hangup();
-                // Hand it to the job-control children directly rather than trusting the shell to forward it.
+                // Hand it to the job-control children directly rather than
+                // trusting the shell to forward it on the way out. A shell that
+                // exits first leaves them nothing else to hear it from, and
+                // then the group kill cannot reach them either.
                 let _ = group.hangup_session_jobs();
                 true
             }
@@ -109,8 +117,9 @@ impl Shell {
         }
     }
 
-    /// Reap a shell that never reached the registry, where teardown would
-    /// otherwise never find it.
+    /// Reap a shell that never reached the registry, where teardown would otherwise never find it.
+    /// It follows the same order as [`reap`], and it has to wait: `killpg` returns before the kernel has zombified the leader.
+    /// Dropping straight after would leak it and retire the group with it.
     fn reap_now(&mut self) {
         if self.hangup() && self.wait_exit(xai_tty_utils::HANGUP_GRACE) {
             return;
@@ -172,6 +181,8 @@ impl Shell {
 }
 
 /// A shell not yet in the registry, where teardown would never find it.
+/// Dropping reaps it; [`Self::into_registered`] hands it to the registry instead.
+/// Disarming leaves [`Shell::Reaped`] behind rather than an empty slot, so the guard has no state in which its own field is missing.
 struct UnregisteredShell(Shell);
 
 impl UnregisteredShell {
@@ -201,8 +212,9 @@ impl UnregisteredShell {
 impl Drop for UnregisteredShell {
     fn drop(&mut self) {
         let mut shell = self.disarm();
-        // `reap_now` blocks through its grace waits, so keep it off an async
-        // thread Do not use the runtime's blocking pool though.
+        // `reap_now` blocks through its grace waits, so keep it off an async thread
+        // Do not use the runtime's blocking pool though: a task still queued there at shutdown is dropped unrun
+        // That takes the group with it and leaves the scope holding a dead `Weak`
         if tokio::runtime::Handle::try_current().is_ok() {
             std::thread::spawn(move || shell.reap_now());
         } else {
@@ -335,8 +347,7 @@ pub async fn create_pty(
     // Taking the lock first means nothing can await between disarming the guard and the insert that gives teardown another way to reach the shell
     let mut registry = PTY_REGISTRY.lock().await;
 
-    // The scope can close during the setup above, and teardown has already
-    // run by then: publishing here would advertise a shell it killed
+    // The scope can close during the setup above, and teardown has already run by then: publishing here would advertise a shell it just killed
     if xai_tty_utils::global_process_scope().is_closed() {
         return Err(TerminalExtError::Internal(
             "process scope closed while the shell was starting".to_string(),
@@ -400,7 +411,8 @@ async fn run_pty_output_loop(
     // A dedicated thread, not the runtime's blocking pool: this `read` only
     // returns once every slave fd is closed, which a job that outlives the
     // shell keeps open indefinitely, and the pool is joined at runtime
-    // shutdown.
+    // shutdown. On the pool one such job wedges the whole process instead of
+    // leaking one thread the exit will reclaim.
     std::thread::spawn(move || {
         let mut reader = reader;
         let mut buf = [0u8; 4096];
@@ -521,8 +533,8 @@ fn session_has_foreground_process(session: &PtySession) -> bool {
     }
 }
 
-/// `tcgetpgrp` has no ConPTY equivalent (`process_group_leader` is unix-only
-/// in portable-pty).
+/// `tcgetpgrp` has no ConPTY equivalent (`process_group_leader` is unix-only in portable-pty).
+/// Non-unix PTYs therefore never report a foreground process, and clients close terminals without confirmation.
 #[cfg(not(unix))]
 fn session_has_foreground_process(_session: &PtySession) -> bool {
     false
@@ -759,7 +771,7 @@ pub async fn load(
     let (replay, output_offset, exited, exit_code, rows, cols, busy) = {
         let mut session = entry.lock().await;
         session.target_client_id = target_client_id.clone();
-        // Facts, not one: a shell whose wait failed is gone with no code.
+        // Two facts, not one: a shell whose wait failed is gone with no code.
         let exited = session.shell.poll_exit();
         let exit_code = session.shell.exit_code();
         let busy = session_has_foreground_process(&session);
@@ -1007,9 +1019,11 @@ mod tests {
                 let (gateway, _) = recording_gateway();
                 let pty_id = create_test_pty(gateway).await;
 
-                // It has to outlive the runtime drop below, which is what
-                // this covers, and killing it here would close the slave and
-                // hide that.
+                // It has to outlive the runtime drop below, which is what this
+                // covers, and killing it here would close the slave and hide
+                // that. Nothing reaps a job that ignores the hangup, so it ends
+                // itself instead of leaking one sleeper per run: 60s is far
+                // longer than the drop needs and short enough not to litter.
                 write_pty_input(&pty_id, b"(trap '' HUP; sleep 60) & echo pid=$!\n")
                     .await
                     .expect("write command");

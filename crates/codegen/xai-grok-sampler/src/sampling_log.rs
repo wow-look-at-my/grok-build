@@ -1,4 +1,6 @@
 //! Emits `tracing` events with `target: "sampling_log"`.
+//! A dedicated layer in `xai-grok-telemetry` routes these to
+//! `~/.grok/logs/sampling.jsonl`. Enable with `--log-sampling`.
 
 use crate::types::RequestId;
 

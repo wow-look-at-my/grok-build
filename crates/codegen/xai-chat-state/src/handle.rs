@@ -214,7 +214,8 @@ impl ChatStateHandle {
             reply,
         };
         if self.cmd_tx.send(cmd).is_err() {
-            // Benign during session teardown when a turn epilogue races the actor's shutdown.
+            // Benign during session teardown when a turn epilogue races the
+            // actor's shutdown; the session's usage ledger is final by then.
             tracing::warn!("ChatStateActor dead: MarkUsageIncomplete dropped");
         }
     }
@@ -299,9 +300,9 @@ impl ChatStateHandle {
         .await
     }
 
-    /// Atomically align the leading `System` message with `prompt`,
-    /// persisting when changed. Serializes with turn pushes so a mid-turn
-    /// reconnect cannot drop concurrent updates.
+    /// Atomically align the leading `System` message with `prompt`, persisting when changed.
+    /// Serializes with turn pushes so a mid-turn reconnect cannot drop concurrent updates.
+    /// `Some(changed)`, or `None` if the actor is dead.
     pub async fn replace_system_head(&self, prompt: &str) -> Option<bool> {
         let prompt = prompt.to_owned();
         self.query("ReplaceSystemHead", |reply| {
@@ -358,8 +359,9 @@ impl ChatStateHandle {
             .send(ChatStateCommand::AppendHarnessTraceItems { items });
     }
 
-    /// Seal harness items accumulated since the last flush into one trace
-    /// turn.
+    /// Seal harness items accumulated since the last flush into one trace turn.
+    /// Call once per harness phase so each becomes its own uploaded `turn_{N}` artifact.
+    /// No-op when nothing was recorded since the last flush.
     pub fn flush_harness_trace_turn(&self) {
         let _ = self.cmd_tx.send(ChatStateCommand::FlushHarnessTraceTurn);
     }
@@ -377,7 +379,8 @@ impl ChatStateHandle {
     }
 
     /// Drop a trailing continue reminder whose continuation will never
-    /// sample.
+    /// sample. Fire-and-forget; mailbox order puts the pop before any
+    /// subsequent command's view of history.
     pub fn pop_stranded_continue_reminder(&self) {
         let _ = self
             .cmd_tx
@@ -480,8 +483,9 @@ impl ChatStateHandle {
         .flatten()
     }
 
-    /// Fail-closed prompt bill read. `Ok(None)` means the actor answered "no
-    /// ledger"; `Err(())` means it did not answer.
+    /// Fail-closed prompt bill read.
+    /// `Ok(None)` means the actor answered "no ledger"; `Err(())` means it did not answer.
+    /// Never collapse `Err` to `None`: an unreadable bill must not be mistaken for a free prompt.
     pub async fn try_get_prompt_usage(&self) -> Result<Option<crate::usage::UsageLedger>, ()> {
         self.query("GetPromptUsage", |reply| ChatStateCommand::GetPromptUsage {
             reply,
@@ -685,8 +689,8 @@ impl ChatStateHandle {
     }
 
     /// Joins trailing assistant segments, walking past mid-turn synthetics.
-    /// The join crosses only `LengthContinue` user items and `Reasoning`;
-    /// anything else bounds it.
+    /// The join crosses only `LengthContinue` user items and `Reasoning`; anything else bounds it.
+    /// `None` when no trailing text or the actor is dead.
     pub async fn get_trailing_assistant_report(&self) -> Option<String> {
         self.query("GetTrailingAssistantReport", |reply| {
             ChatStateCommand::GetTrailingAssistantReport { reply }

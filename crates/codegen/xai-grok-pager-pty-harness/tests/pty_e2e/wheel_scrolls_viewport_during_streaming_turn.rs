@@ -4,15 +4,22 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-// Regression: streaming must not starve wheel input. The symptom: "can't scroll while it's streaming".
+// Regression: streaming must not starve wheel input. The symptom: "can't scroll while it's
+// streaming". During a token flood, wheel/key events therefore sat in `input_rx` until `acp_rx`
+// momentarily emptied.
 
+/// 240 one-row markers, far more than the 50-row PTY: the up-burst can never clamp at the transcript top.
+/// (30 events at up to 3 lines each is about 90 lines, vs ~190 rows of headroom above the bottom-pinned viewport.)
 const MARKER_COUNT: usize = 240;
 
+/// 30 spaced single reports at a nominal 6ms: a trackpad-classified flood under the harness terminal's ept=3 profile (see `scroll.rs`).
 const BURST_EVENTS: usize = 30;
 
 const BURST_INTERVAL: Duration = Duration::from_millis(6);
 
-/// Space-separated tail words streamed one-per-delta after the marker block.
+/// Space-separated tail words streamed one-per-delta after the marker block, keeping ACP traffic in flight while the test scrolls.
+/// 160 words at the 30ms chunk delay is about 4.8s of paced streaming.
+/// That is a wide window for the pre-burst "still streaming" guard, small enough to keep the test quick.
 const TAIL_WORDS: usize = 160;
 
 /// Per-SSE-event pacing so deltas keep arriving while the wheel burst runs.
@@ -50,8 +57,9 @@ async fn wheel_scrolls_viewport_during_streaming_turn() {
         harness.screen_contents()
     );
 
-    // The core assertion: the viewport moved while the turn was still
-    // streaming.
+    // The core assertion: the viewport moved while the turn was still streaming.
+    // Strict decrease discriminates cleanly even against concurrent growth
+    // Starved input would leave follow mode pinned, and the topmost index could only stay or INCREASE as tail rows arrive
     let top_after = topmost_visible_marker(&harness).unwrap_or_else(|| {
         panic!(
             "no marker visible after the mid-stream burst\nscreen:\n{}",

@@ -11,11 +11,13 @@ use super::{MvpAgent, mark_as_replay, stamp_meta_value};
 use crate::session::storage::{ReplayToolCollapser, UnfinishedSubagent};
 
 /// Max in-flight `forward_with_completion` receivers during cold resume.
+/// Unbounded enqueue with sync pager apply peaks the pager at multi-GB on huge sessions; this keeps ACP apply roughly windowed.
 pub(super) const REPLAY_COMPLETION_WINDOW: usize = 64;
 
 type ReplayCompletionRx = tokio::sync::oneshot::Receiver<xai_acp_lib::AcpResult<()>>;
 
 /// Sliding window of replay completion receivers.
+/// Awaits the oldest when full so at most [`REPLAY_COMPLETION_WINDOW`] notifications sit un-acked.
 pub(super) struct ReplayCompletionDrain {
     pending: VecDeque<ReplayCompletionRx>,
     forwarded: usize,
@@ -92,6 +94,7 @@ impl MvpAgent {
             }
         };
         // updates.jsonl only persists `_x.ai/session/update` and `session/update`.
+        // Unknown methods fall through to the ACP parse below and are dropped on error.
         let method = env.method.unwrap_or("session/update");
         let Some(raw_params) = env.params else {
             tracing::debug!("replay: skipping JSONL line with no params");
@@ -168,9 +171,8 @@ impl MvpAgent {
         if mark_replay {
             mark_as_replay(&mut notification.meta, persist_data);
         }
-        // Stamp the leader unicast target regardless of mark_replay The
-        // leader then routes both historical and post-cursor live deltas
-        // only.
+        // Stamp the leader unicast target regardless of mark_replay
+        // The leader then routes both historical and post-cursor live deltas only to the loading client
         if let Some(tid) = target_client_id {
             stamp_meta_value(&mut notification.meta, "x.ai/leaderClientId", tid);
         }
@@ -423,8 +425,8 @@ impl MvpAgent {
     }
 }
 
-/// True when a persisted updates.jsonl line is a local `background_tasks`
-/// snapshot.
+/// True when a persisted updates.jsonl line is a local `background_tasks` snapshot.
+/// Gateway-backed attaches skip these so a stale empty list cannot last-wins-clear remote Running.
 fn line_is_background_tasks_update(line: &str) -> bool {
     line.contains("\"sessionUpdate\":\"background_tasks\"")
 }

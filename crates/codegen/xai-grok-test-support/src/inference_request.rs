@@ -1,4 +1,5 @@
-//! Those inference endpoints, a request as the mock received it.
+//! The three inference endpoints, a request as the mock received it, and the readers over its body
+//! that work on all three formats.
 use crate::conversation::{ConversationId, ConversationKey, ConversationTracker};
 use axum::http::HeaderMap;
 use serde_json::Value;
@@ -142,6 +143,7 @@ fn nonempty_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 /// The default `/v1/models` entry; also the model a reply names when the request names none.
+/// The one model the mock advertises unless a test names others.
 pub const DEFAULT_MODEL: &str = "test-model";
 pub(crate) fn model_name(body: &Value) -> &str {
     body.get("model")
@@ -162,7 +164,8 @@ pub(crate) fn first_system_message(body: &Value) -> Option<String> {
     }
     content_text(first.get("content")?)
 }
-/// A route may send its own preamble and then the prompt.
+/// A route may send its own preamble and then the prompt, so one message is not enough to tell
+/// two children of one turn apart. A third can only be a later turn.
 const OPENING_USER_MESSAGES: usize = 2;
 /// Capped at [`OPENING_USER_MESSAGES`] so the answer cannot change as the history grows.
 pub(crate) fn opening_user_turn(body: &Value) -> Option<String> {

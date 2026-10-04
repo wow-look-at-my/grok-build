@@ -1,4 +1,7 @@
-//! Process-cached reqwest clients for tool backends.
+//! Process-cached reqwest clients for tool backends. The key must cover
+//! every input that shapes the client: headers via [`headers_fingerprint`],
+//! constant timeouts via the kind prefix. Cached transports outlive
+//! per-session runtimes; pooled connections are ready-checked on reuse.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -12,7 +15,8 @@ struct Entry {
     last_used: u64,
 }
 
-/// Opaque cache key.
+/// Opaque cache key. [`cache_key`] is the only constructor, so the header
+/// fingerprint can never be skipped and a raw string can never stand in.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CacheKey(String);
 
@@ -43,7 +47,7 @@ pub(crate) fn cached_client<E>(
         entry.last_used = *tick;
         entry.slot.clone()
     };
-    // A builder panic must not brick the key; the slot is still empty.
+    // A builder panic must not brick the key; the slot is simply still empty.
     let mut slot = slot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -55,7 +59,9 @@ pub(crate) fn cached_client<E>(
     Ok(built)
 }
 
-/// Sole [`CacheKey`] constructor.
+/// Sole [`CacheKey`] constructor. Because [`cached_client`] takes `CacheKey`
+/// rather than `&str`, the header fingerprint is impossible to skip: the type
+/// is the guarantee.
 pub(crate) fn cache_key(kind: &str, headers: &reqwest::header::HeaderMap) -> CacheKey {
     CacheKey(format!("{kind}|{}", headers_fingerprint(headers)))
 }

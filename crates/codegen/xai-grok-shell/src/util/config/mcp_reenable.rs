@@ -1,4 +1,9 @@
 //! Whether a personally disabled MCP name should appear as a re-enableable stub in `/mcps`.
+//!
+//! A row shows only when a definition still exists (ignoring personal disable) and org policy would not block enable.
+//! Orphans that only linger in `disabled_mcp_servers` stay hidden.
+//!
+//! Discovery is shared with session merge ([`crate::session::managed_mcp::discover_mcp_definitions_ignoring_disable`]).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 

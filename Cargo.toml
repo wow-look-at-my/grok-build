@@ -392,7 +392,7 @@ zstd = "0.13"
 incremental = true
 panic = "abort"
 # A wrapped counter in a shipped binary and a panicking one in a debug build are
-# different programs. Check the arithmetic in both, so a token count, a byte
+# two different programs. Check the arithmetic in both, so a token count, a byte
 # length or a duration read from a provider fails on the developer's machine the
 # same way it would on a user's. `release-dist`, `release-dist-jemalloc` and
 # `x-prod` inherit this.
@@ -415,8 +415,9 @@ strip = false
 debug = 1
 split-debuginfo = "off"
 
-# Production profile for latency-sensitive x-product services (VF, home-mixer). Keeps
-# symbols + line tables for prod debuggability (perf, flamegraph, stack traces).
+# Production profile for latency-sensitive x-product services (VF, home-mixer).
+# Thin LTO gives ~90% of full LTO benefit at significantly faster link time.
+# Keeps symbols + line tables for prod debuggability (perf, flamegraph, stack traces).
 [profile.x-prod]
 inherits = "release"
 lto = "thin"
@@ -460,7 +461,8 @@ debug = false
 debug = true
 
 [workspace.lints.clippy]
-# Kept in sync with bazel/lint/linters.bzl.
+# prost 0.14 renders proto doc-comment bullet lists in a way that trips this
+# lint on generated code. Kept in sync with bazel/lint/linters.bzl.
 doc_lazy_continuation = "allow"
 doc_overindented_list_items = "allow"
 needless_lifetimes = "allow"
@@ -468,16 +470,20 @@ single_range_in_vec_init = "allow"
 too_many_arguments = "allow"
 
 # Allow uninlined_format_args lint to prevent main from breaking after merges
-# When older branches (created before this lint was added to CI) get merged, they
-# pass their own CI because their CI config doesn't include this lint check.
-# Developers having to fix lint violations from other people's merged code
-# Without a merge-queue that runs main's CI checks on the PR branch, these
-# violations slip through and break the build for everyone. TODO: -> "deny"
-# once/if merge queue enabled
+# When older branches (created before this lint was added to CI) get merged,
+# they pass their own CI because their CI config doesn't include this lint check.
+# However, once merged to main, the code violates main's lint rules, causing:
+# 1. Main's CI to fail
+# 2. All new branches based off main to fail CI
+# 3. Developers having to fix lint violations from other people's merged code
+# Without a merge-queue that runs main's CI checks on the PR branch,
+# these violations slip through and break the build for everyone.
+# TODO: -> "deny" once/if merge queue enabled
 uninlined_format_args = "allow"
 
 # The `fastrace::trace(properties = { … })` proc-macro expands `"{param}"`
 # into `format!("{}", param)`, which clippy flags as useless_format.
+# Suppressed until the upstream crate fixes its codegen (fixed in 0.7.16+).
 useless_format = "allow"
 
 # The banned-pattern gate.

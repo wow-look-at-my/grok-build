@@ -1,4 +1,41 @@
 //! Frame drawing with cursor blink preservation.
+//!
+//! # Problem
+//!
+//! Ratatui's [`Terminal::draw()`] (internally `try_draw()`) unconditionally sends cursor escape sequences on every frame:
+//!
+//! - If `frame.set_cursor_position()` was called: `Show` and `MoveTo` every frame
+//! - If not called: `Hide` every frame
+//!
+//! Both reset the terminal's cursor blink timer (`Show` restarts the blink cycle, `MoveTo` resets the blink phase).
+//! At 30fps, the 500ms blink interval never completes, so the cursor appears solid.
+//!
+//! # Solution
+//!
+//! We bypass `try_draw()` and use ratatui's lower-level API directly:
+//!
+//! ```text
+//! terminal.autoresize()     — handle terminal size changes
+//! terminal.get_frame()      — get a fresh buffer to render into
+//! terminal.flush()          — diff old/new buffers, write only changed cells
+//! terminal.swap_buffers()   — prepare for next frame
+//! ```
+//!
+//! Cursor is managed entirely by [`CursorState`] with de-duplication:
+//!
+//! - **No cell changes, same position**: zero cursor commands, so blink is preserved
+//! - **Cells changed, same position**: `MoveTo` to fix the cursor after cell writes
+//! - **Position changed**: `MoveTo` (blink resets; expected, the user just typed)
+//! - **Visibility transition**: `Show`/`Hide` (only on actual transition)
+//! - **Idle (no draw calls)**: nothing sent, so blink runs undisturbed
+//!
+//! The "no cell changes" case is detectable because [`xai_ratatui_inline::Terminal`]'s `flush()` returns whether any cells were written.
+//! When animated entries are off-screen, the buffer diff is empty and we skip all cursor commands.
+//!
+//! # Synchronized output
+//!
+//! Each frame is wrapped in `BeginSynchronizedUpdate` / `EndSynchronizedUpdate` so the terminal presents the cell diff, images, and cursor moves atomically.
+//! The wrapper is omitted when tmux is the immediate terminal (see [`crate::terminal::should_emit_synchronized_output`]): tmux repaints the whole pane when a block closes and already synchronizes its own output toward the outer terminal.
 use crate::terminal::{TerminalContext, should_emit_synchronized_output};
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use crossterm::{QueueableCommand, cursor};
@@ -12,6 +49,7 @@ use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 use xai_ratatui_inline::LinkSpan;
 /// Defined here (beside [`TermWriter`]) so the `render` module does not depend on `app`.
+/// Re-exported from `app` as `crate::app::PagerTerminal` for existing call sites.
 pub type PagerTerminal = xai_ratatui_inline::Terminal<CrosstermBackend<TermWriter>>;
 #[derive(Debug)]
 pub enum WriterEvent {
@@ -110,8 +148,8 @@ impl WriterSync {
         Ok(WriterDrain::Drained)
     }
 }
-/// Buffers a frame's escape sequences and hands them to a writer thread for
-/// the blocking write to stderr / the pty fd.
+/// Buffers a frame's escape sequences and hands them to a writer thread for the blocking write to stderr / the pty fd.
+/// If the terminal emulator is slow to read, only the writer thread stalls; the event loop keeps processing timers, events, and ACP messages.
 pub struct WriterPayload {
     pub(crate) sequence: u64,
     pub(crate) data: Vec<u8>,
@@ -202,8 +240,8 @@ impl Drop for TermWriter {
         self.sync.writer_active.store(false, Ordering::Release);
     }
 }
-/// Enqueue: an inline stderr lock from the event loop deadlocks when the
-/// terminal stops reading the pty. Event-loop thread only.
+/// Enqueue: an inline stderr lock from the event loop deadlocks when the terminal stops reading the pty.
+/// Event-loop thread only. Drop every clone before [`WriterThread::join_within`] or the writer never sees the channel close.
 #[derive(Clone)]
 pub struct EscapeWriter {
     tx: WriterSender,
@@ -213,8 +251,9 @@ impl EscapeWriter {
     pub fn new(tx: WriterSender, sync: WriterSync) -> Self {
         Self { tx, sync }
     }
-    /// A writer with no writer thread behind it: sends fail against a
-    /// private, receiver-less channel and are dropped.
+    /// A writer with no writer thread behind it: sends fail against a private,
+    /// receiver-less channel and are dropped. For the headless leader (no tty) and tests;
+    /// any TUI view must get the live handle from [`TermWriter::escape_writer`] instead.
     pub fn disconnected() -> Self {
         let (tx, _rx) = mpsc::channel::<WriterPayload>();
         Self {
@@ -248,7 +287,8 @@ impl EscapeWriter {
 pub enum WriterJoin {
     /// The thread drained its queue and exited.
     Joined,
-    /// The thread was still running at the deadline (tty blocked, or a sender still alive) and has been detached.
+    /// The thread was still running at the deadline (tty blocked, or a sender still alive)
+    /// and has been detached.
     TimedOut,
 }
 /// Joining ensures all queued frames have been written to the terminal before teardown (e.g. `LeaveAlternateScreen`).
@@ -394,8 +434,8 @@ fn spawn_writer_thread_with(spawn: WriterThreadSpawn) -> std::io::Result<WriterT
         },
     ))
 }
-/// Tracks the last cursor position written to the terminal, so each frame
-/// emits only the cursor escapes it needs.
+/// Tracks the last cursor position written to the terminal, so each frame emits only the cursor escapes it needs.
+/// Redundant `Show`/`Hide`/`MoveTo` would reset the terminal's blink timer.
 #[derive(Debug, Default)]
 pub struct CursorState {
     /// `None` means the cursor is hidden; `Some((x, y))` means it is visible at (x, y).
@@ -407,6 +447,7 @@ pub enum CursorAction {
     /// No cursor commands needed, so the blink timer is preserved.
     None,
     /// Cursor is visible and cells changed: reposition after cell writes disturbed the terminal cursor.
+    /// Resets blink (unavoidable when cells change on screen).
     Reposition(u16, u16),
     /// Cursor becoming visible at (x, y); needs `MoveTo` and `Show`.
     Show(u16, u16),
@@ -455,9 +496,10 @@ impl CursorState {
         }
     }
 }
-/// Bypasses ratatui `try_draw()` so cursor management stays conditional. OSC spans go out before the diff, in lockstep with cells.
-/// `PostFlush` stays inside the synchronized update so images appear atomically with the cell diff. Adopting the terminal size
-/// inside the update makes a fullscreen resize clear atomic with the repaint.
+/// Bypasses ratatui `try_draw()` so cursor management stays conditional. OSC 8 spans go out before the diff, in lockstep with cells.
+/// `PostFlush` stays inside the synchronized update so images appear atomically with the cell diff.
+/// `ctx` decides whether the frame is wrapped in DEC 2026 at all; both markers follow that one decision.
+/// Adopting the terminal size inside the update makes a fullscreen resize clear atomic with the repaint.
 pub fn draw_frame(
     terminal: &mut PagerTerminal,
     cursor: &mut CursorState,

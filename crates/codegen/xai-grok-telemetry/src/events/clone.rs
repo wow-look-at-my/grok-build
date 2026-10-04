@@ -116,6 +116,7 @@ pub enum CloneFallbackReason {
     RemoteUnavailable,
     CloneDisabled,
     FuseUnavailable,
+    /// Windows: `ProjectedFSLib.dll` absent or the build predates 22621.
     ProjfsUnavailable,
     DaemonDown,
     DaemonOld,

@@ -20,8 +20,9 @@ pub enum WrapMode {
     Truncate,
 }
 
-/// Accent/bullet color style for a block. Used by both `accent()` and
-/// `bullet()` trait methods.
+/// Accent/bullet color style for a block.
+/// Used by both `accent()` and `bullet()` trait methods.
+/// When `animated` is true, the renderer uses a wave animation effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccentStyle {
     pub color: Color,
@@ -110,6 +111,7 @@ pub struct BlockContext {
 }
 
 impl BlockContext {
+    /// Width of the bullet prefix (the char plus its trailing space), or 0 if disabled.
     pub fn bullet_indent(&self) -> usize {
         self.appearance
             .scrollback
@@ -121,14 +123,16 @@ impl BlockContext {
             .unwrap_or(0)
     }
 
-    /// Effective content width after subtracting the bullet prefix (if
-    /// enabled).
+    /// Effective content width after subtracting the bullet prefix (if enabled).
+    /// Blocks that render single-line collapsed content should use this instead of `self.width`.
+    /// Otherwise they overflow past the bullet character that `RenderBlock::output()` prepends.
     pub fn content_width(&self) -> usize {
         (self.width as usize).saturating_sub(self.bullet_indent())
     }
 
-    /// Whether a collapsed block should render with the muted style. Selected
-    /// blocks stay bright everywhere except legacy ConHost.
+    /// Whether a collapsed block should render with the muted style.
+    /// Selected blocks stay bright everywhere except legacy ConHost.
+    /// There the selected/unselected color gap reads as palette noise after 16-color quantization, and the selection box already indicates focus.
     pub fn mute_when_collapsed(&self, muted_collapsed_enabled: bool) -> bool {
         if !muted_collapsed_enabled {
             return false;
@@ -144,19 +148,23 @@ pub struct BlockLine {
     pub background: Option<Color>,
     /// Whether `background` is a decorative "panel" band rather than semantic shading. Semantic shading always paints.
     pub background_is_panel: bool,
-    /// Column where the background starts: paints full width, a positive value paints from that column.
+    /// Column where the background starts: 0 paints full width, a positive value paints from that column.
     pub bg_start_col: u16,
     pub wrap: WrapMode,
     pub selectable: Selectable,
     /// Logical selection range id within this block output.
+    /// Ids count up from 0; `u16::MAX` is reserved for the synthetic group-header row the renderer adds (`render::GROUP_HEADER_RANGE_ID`).
     pub selection_range: Option<u16>,
     /// Optional source-of-truth text for the selectable portion of this line.
     pub selection_text: Option<String>,
-    /// Soft-wrap joiner: how this line connects to the when copying.
+    /// Soft-wrap joiner: how this line connects to the previous when copying. The first line of a block should always
+    /// have `None`.
     pub joiner: Option<String>,
     /// Link target for rows whose painted text cannot recover it (tool headers).
     pub link_target: Option<crate::render::osc8::LinkTarget>,
-    /// Display width of the `subsequent_indent` prefix on wrapped continuation lines.
+    /// Display width of the `subsequent_indent` prefix on wrapped continuation lines. This width is NOT part of the
+    /// logical pre-wrap content, so hyperlink column mapping must exclude it when rebuilding pre-wrap coordinates from
+    /// post-wrap segments.
     pub indent_width: usize,
 }
 
@@ -221,7 +229,9 @@ impl BlockLine {
         self
     }
 
-    /// Set a decorative "panel" background (tool result preview boxes).
+    /// Set a decorative "panel" background (tool result preview boxes). Unlike `with_background` (semantic shading:
+    /// diff insert/delete rows, markdown code-block fill), a panel background is suppressed when the entry renders flat
+    /// (minimal mode) so the preview blends with the terminal's own background.
     pub fn with_panel_background(mut self, color: Color) -> Self {
         self.background = Some(color);
         self.background_is_panel = true;
@@ -261,6 +271,7 @@ impl BlockLine {
 }
 
 /// Flatten a rendered line's spans into the plain text drawn on that row.
+/// Shared by selection-text derivation and the search-highlight post-pass.
 pub fn line_plain_text(line: &Line) -> String {
     let mut out = String::new();
     line_plain_text_into(line, &mut out);
@@ -268,6 +279,7 @@ pub fn line_plain_text(line: &Line) -> String {
 }
 
 /// Append a rendered line's plain text to `out`, reusing its capacity.
+/// Lets the per-frame highlight pass avoid a fresh allocation for every visible row.
 pub fn line_plain_text_into(line: &Line, out: &mut String) {
     for span in &line.spans {
         out.push_str(span.content.as_ref());
@@ -282,7 +294,9 @@ pub fn derive_selection_text(line: &BlockLine) -> String {
     match &line.selectable {
         Selectable::None => String::new(),
         Selectable::All => {
-            // Table rows carry render-only trailing padding (added so the app owns every column).
+            // Table rows carry render-only trailing padding (added so the app owns every column); strip it so it never reaches the clipboard
+            // Every `Selectable::All` line is trimmed, matching conventional terminal/tmux copy behavior
+            // The canonical single-block `y` copy is unaffected; it uses the pre-wrap path
             let text = line_plain_text(&line.content);
             let trimmed = text.trim_end();
             if trimmed.len() == text.len() {
@@ -404,7 +418,8 @@ fn grapheme_width(grapheme: &str) -> usize {
     UnicodeWidthStr::width(grapheme)
 }
 
-/// Terminal cells `s` occupies when painted: the sum of its grapheme widths.
+/// Terminal cells `s` occupies when painted: the sum of its grapheme widths. Otherwise the last cell of such a line
+/// can't be selected or copied.
 pub(crate) fn str_display_cells(s: &str) -> usize {
     s.graphemes(true).map(grapheme_width).sum()
 }
@@ -419,8 +434,8 @@ pub struct BlockOutput {
     pub lines: Vec<BlockLine>,
 }
 
-/// Rare selection metadata: source bytes omitted from a visible row, and a
-/// way to reach a source row that paints blank but is not empty.
+/// Rare selection metadata: source bytes omitted from a visible row, and a way to reach a source row that paints blank but is not empty.
+/// TODO: Copy the absolute Read/Edit target for a full painted-path drag; partial drags copy painted columns only to keep highlight and clipboard aligned.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SelectionBoundary {
     prefix: String,
@@ -483,6 +498,7 @@ pub(crate) struct SelectionBoundaryEntry {
 }
 
 /// Sparse immutable metadata stored beside the output, keyed to exact line indices.
+/// Ordinary outputs keep `None`; clones share the boundary payloads through `Arc`.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SelectionBoundaries(Option<Arc<[SelectionBoundaryEntry]>>);
 
@@ -585,7 +601,7 @@ impl BlockOutput {
     }
 }
 
-/// Pre-wrap (logical source) line index for each post-wrap output row.
+/// Pre-wrap (logical source) line index for each post-wrap output row. The first row is always index 0.
 pub(crate) fn prewrap_index_per_row(lines: &[BlockLine]) -> Vec<usize> {
     let mut indices = Vec::with_capacity(lines.len());
     let mut prewrap = 0usize;
@@ -709,14 +725,15 @@ mod tests {
     #[test]
     fn test_selectable_cols() {
         let line = Line::from(vec![
-            Span::raw("prefix: "),
-            Span::raw("content"),
+            Span::raw("prefix: "), // 8 chars, span 0
+            Span::raw("content"),  // 7 chars, span 1
         ]);
 
         // All spans selectable
         let cols = selectable_cols(&line, &Selectable::All);
         assert_eq!(cols, Some(0..15));
 
+        // Only span 1 selectable
         let cols = selectable_cols(&line, &Selectable::Spans(1..2));
         assert_eq!(cols, Some(8..15));
 
@@ -782,7 +799,8 @@ mod tests {
 
     #[test]
     fn test_derive_selection_text_trims_trailing_ws_for_all_selectable_lines() {
-        // Trailing whitespace is stripped from EVERY Selectable::All line's copy text.
+        // Trailing whitespace is stripped from EVERY Selectable::All line's copy text, not just table rows (see the comment at the trim site)
+        // This matches conventional terminal/tmux copy behavior
         let line = BlockLine::styled(Line::from(vec![Span::raw("stdout line   ")]));
         assert_eq!(derive_selection_text(&line), "stdout line");
     }
@@ -816,6 +834,7 @@ mod tests {
 
     #[test]
     fn test_slice_display_cols_overlap_semantics() {
+        // A grapheme overlapping the range is kept whole: 么 spans [14, 16), so an end of 15 lands mid-glyph.
         let text = "需要我帮你做什么";
         assert_eq!(slice_display_cols(text, 0, 15), text);
         assert_eq!(slice_display_cols(text, 1, 4), "需要");
@@ -834,6 +853,7 @@ mod tests {
         assert_eq!(grapheme_cells_at("需要", 4), None);
         assert_eq!(grapheme_cells_at("", 0), None);
 
+        // 界 covers [0, 2) despite the leading ZWSP.
         assert_eq!(grapheme_cells_at("\u{200B}界y", 1), Some(0..2));
         assert_eq!(grapheme_cells_at("x\u{200B}界y", 2), Some(1..3));
     }

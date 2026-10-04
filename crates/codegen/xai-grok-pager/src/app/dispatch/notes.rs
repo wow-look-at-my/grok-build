@@ -15,6 +15,7 @@ use xai_grok_feedback::{
 };
 
 /// Monotonic counter for correlating async rewrite responses with the modal that requested them.
+/// It prevents stale results from populating a different note's review modal when the user closes and re-opens quickly.
 static REWRITE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 fn next_rewrite_nonce() -> u64 {
@@ -155,6 +156,7 @@ pub(super) fn dispatch_submit_feedback_modal(
         && app.team_name.is_none()
         && !app.is_zdr;
     // Modal copy never discloses re-enabling coding-data sharing (one archive, this report only).
+    // Unlike the legacy AlwaysUpload card, this path does not call `set_coding_data_sharing`.
     let trace_reenables_sharing = false;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
@@ -164,8 +166,8 @@ pub(super) fn dispatch_submit_feedback_modal(
     let Some(modal) = agent.feedback_modal.as_mut() else {
         return vec![];
     };
-    // A stale submit (deferred behind a paste, or replayed) must never send a
-    // different modal's draft.
+    // A stale submit (deferred behind a paste, or replayed) must never send a different modal's
+    // draft; a duplicate after the send-time close finds no modal at all and already returned.
     if !modal.matches_id(modal_id) {
         return vec![];
     }
@@ -203,7 +205,8 @@ pub(super) fn dispatch_submit_feedback_modal(
         }
         return vec![];
     }
-    // Refuse a typeless loaded draft before the in-modal trace step.
+    // Refuse a typeless loaded draft before the in-modal trace step, or the choose-a-type error is hidden until after the user confirms a trace choice.
+    // choose-a-type error is hidden until after the user confirms a trace choice.
     let draft_id = modal.draft_id().cloned();
     let draft_fields = modal.draft_body();
     if draft_id.is_some() && draft_fields.is_none() {
@@ -213,8 +216,7 @@ pub(super) fn dispatch_submit_feedback_modal(
     // First validated Write submit with an offer available: ask inside the modal instead of sending.
     if trace_choice.is_none() && offer_trace {
         modal.begin_trace_step();
-        // Funnel denominator for the in-modal trace step; logged once when
-        // Write advances.
+        // Funnel denominator for the in-modal trace step; logged once when Write actually advances.
         xai_grok_telemetry::session_ctx::log_event(
             xai_grok_telemetry::events::FeedbackTraceCardShown {
                 reenables_sharing: trace_reenables_sharing,
@@ -245,7 +247,8 @@ pub(super) fn dispatch_submit_feedback_modal(
     if draft_id.is_none() {
         drop(modal.take_images());
     }
-    // `send_this_session` is one archive for this successfully posted report.
+    // `send_this_session` is one archive for this successfully posted report; every other
+    // choice parks nothing, so no path from this modal can persist `[telemetry] trace_upload`.
     let intent = match trace_choice {
         Some(ModalTraceChoice::SendThisSession) => Some(FeedbackTraceUploadIntent::SendThisSession),
         _ => None,
@@ -815,7 +818,8 @@ pub(super) fn dispatch_send_btw(
 ) -> Vec<Effect> {
     // Drop deletes staged and session files. A side question does not keep them.
     let images = BtwImages::new(images);
-    // Slash submit strips image chips before the command runs.
+    // Slash submit strips image chips before the command runs. Put `[Image]`
+    // back so the panel title shows the attachment.
     let question = question_with_image_chips(&question, images.as_slice());
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
@@ -849,10 +853,14 @@ pub(super) fn dispatch_send_btw(
     }]
 }
 
-/// Prefix for the synthetic tasks-pane row that tracks an in-flight `/todo` capture.
+/// Prefix for the synthetic tasks-pane row that tracks an in-flight `/todo`
+/// capture. Kill requests for these ids are local-only (there is no shell
+/// bg-task to cancel); completion marks the row finished and keeps it.
 pub(crate) const TODO_CAPTURE_TASK_PREFIX: &str = "todo-capture:";
 
-/// The tasks-pane row id for a capture.
+/// The tasks-pane row id for a capture. The client mints `capture_id` and
+/// sends it to the shell, which stamps its progress updates with it — that
+/// round trip is what lets a transcript line find the row it belongs to.
 pub(crate) fn todo_capture_task_id(capture_id: &str) -> String {
     format!("{TODO_CAPTURE_TASK_PREFIX}{capture_id}")
 }
@@ -861,8 +869,9 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
     if let Some(old_id) = agent.pending_todo_task_id.take() {
         agent.session.bg_tasks.remove(&old_id);
     }
-    // Same chrome as a running tool: name `/todo`, summary is the request. A system one-liner is easy to miss at the bottom of the transcript; a running tool stays in the
-    // live turn the way other in-flight work does.
+    // Same chrome as a running tool: name `/todo`, summary is the request.
+    // A system one-liner is easy to miss at the bottom of the transcript;
+    // a running tool stays in the live turn the way other in-flight work does.
     let entry_id = agent
         .scrollback
         .push(crate::scrollback::entry::ScrollbackEntry::running(
@@ -871,7 +880,8 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
             ))),
         ));
     agent.pending_todo_entry = Some(entry_id);
-    // Tasks pane sits at the top of the agent view and auto-opens on a new live running task —.
+    // Tasks pane sits at the top of the agent view and auto-opens on a new
+    // live running task — that is the "in-flight at the top" surface.
     let task_id = todo_capture_task_id(capture_id);
     agent.session.bg_tasks.insert(
         task_id.clone(),
@@ -916,7 +926,8 @@ fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
             BgTaskStatus::Failed
         };
         task.end_time = Some(std::time::SystemTime::now());
-        // The running scrollback entry is gone above.
+        // The running scrollback entry is gone above, so a row pointing at it
+        // would open a viewer on an entry that no longer exists.
         task.scrollback_entry_id = None;
     }
 }
@@ -939,7 +950,9 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: boo
             return vec![];
         };
         agent.prompt.set_text("");
-        // Repeated `/todo`s are independent captures, so each gets its own block; only the newest id is tracked.
+        // Repeated `/todo`s are independent captures, so each gets its own
+        // block; only the newest id is tracked, and an older spinner is stopped
+        // by whichever response lands.
         begin_todo_capture_ui(agent, &request, &capture_id);
         session_id
     };
@@ -985,7 +998,8 @@ pub(super) fn handle_todo_captured(
     vec![]
 }
 
-/// Owns `/btw` attachments until they are handed to the send effect. Drop unlinks staged temps and session copies.
+/// Owns `/btw` attachments until they are handed to the send effect.
+/// Drop unlinks staged temps and session copies.
 struct BtwImages(Vec<crate::prompt_images::PastedImage>);
 
 impl BtwImages {
@@ -1051,7 +1065,8 @@ impl Drop for BtwImages {
     }
 }
 
-/// Side-question payload cap.
+/// Side-question payload cap. Matches the per-image send limit so one screenshot
+/// under 50MB is never dropped; extra images past this total are omitted.
 const BTW_IMAGE_AGGREGATE_CAP: usize = 50_000_000;
 
 pub(crate) struct BtwImageEncode {
@@ -1132,6 +1147,7 @@ fn images_within_aggregate_cap(
 }
 
 /// Toast when a manual `/recap` produces no summary.
+/// Empty sessions get a clear empty-state message; anything else (model failure, empty summary, etc.) keeps the generic failure toast.
 pub(crate) fn recap_unavailable_toast(has_user_messages: bool) -> &'static str {
     if has_user_messages {
         "Couldn't generate recap"
@@ -1140,9 +1156,9 @@ pub(crate) fn recap_unavailable_toast(has_user_messages: bool) -> &'static str {
     }
 }
 
-/// Whether scrollback already has a user prompt. Scans entries rather than
-/// `turn_count` so it stays correct during `begin_batch`/`end_batch` session
-/// load.
+/// Whether scrollback already has a user prompt.
+/// Scans entries rather than `turn_count` so it stays correct during `begin_batch`/`end_batch` session load.
+/// There `push` defers `rebuild_turns`, so `turn_count` can stay 0 while replayed prompts are already present.
 pub(crate) fn scrollback_has_user_messages(
     scrollback: &crate::scrollback::state::ScrollbackState,
 ) -> bool {
@@ -1162,8 +1178,8 @@ pub(super) fn dispatch_send_recap(app: &mut AppView, auto: bool) -> Vec<Effect> 
         return vec![];
     };
 
-    // The shell is authoritative (remote settings, config, env) Skip client
-    // requests entirely when the feature is off.
+    // The shell is authoritative (remote settings, config, env)
+    // Skip client requests entirely when the feature is off so we never hit `x.ai/recap`
     if !app.session_recap_available {
         if !auto {
             agent.show_toast("Session recap is not enabled");
@@ -1180,15 +1196,16 @@ pub(super) fn dispatch_send_recap(app: &mut AppView, auto: bool) -> Vec<Effect> 
 
     if !auto {
         agent.prompt.set_text("");
-        // Nothing to summarize yet: show a clear empty-state toast instead of
-        // a spinner that ends in "Cannot generate recap" Skip the
-        // short-circuit.
+        // Nothing to summarize yet: show a clear empty-state toast instead of a spinner that ends in "Couldn't generate recap"
+        // Skip the short-circuit while session replay is still loading (prompts may not have arrived yet)
+        // Prefer an entry scan over `turn_count()` so mid-batch resume (deferred `rebuild_turns`) still sees history
         if !agent.session.loading_replay && !scrollback_has_user_messages(&agent.scrollback) {
             agent.show_toast(recap_unavailable_toast(false));
             return vec![];
         }
-        // Show an immediate loading block with the animated "running" sidebar
-        // so the user has feedback that a recap is being generated.
+        // Show an immediate loading block with the animated "running" sidebar so the user has feedback that a recap is being generated
+        // The `SessionRecap` handler fills this entry in and stops the animation
+        // Reuse an existing in-flight loading block instead of stacking spinners when `/recap` is pressed repeatedly
         let already_loading = agent.pending_recap_entry.is_some_and(|eid| {
             agent
                 .scrollback
@@ -1208,6 +1225,9 @@ pub(super) fn dispatch_send_recap(app: &mut AppView, auto: bool) -> Vec<Effect> 
             agent.pending_recap_entry = Some(entry_id);
         }
     } else {
+        // Retry backoff only: do not consume the away period on dispatch
+        // The shell often no-ops auto recap until at least 3 min since the last main turn
+        // mark_recap_shown runs when any SessionRecap arrives (auto or manual `/recap`)
         app.notification_service
             .focus_tracker
             .note_auto_recap_attempt();

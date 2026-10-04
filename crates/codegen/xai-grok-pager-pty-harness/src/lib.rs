@@ -1,10 +1,29 @@
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
-#![allow(clippy::cast_precision_loss)] // Hits predate the gate
-#![allow(clippy::cast_sign_loss)] // Hits predate the gate
-#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 13 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 12 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
+#![allow(clippy::expect_used)] // 15 hits predate the gate
 
 //! Unified PTY harness for xai-grok-pager.
+//!
+//! The same layered API serves three consumers:
+//!
+//! 1. **Regression scenarios** (e.g. `scenarios::plan_approval_resume`) assert screen contents and multi-process resume behavior.
+//!    They run via `tests/` in this crate and via `pty-scenario` YAML under `tests/scenarios/`.
+//! 2. **Benchmarks** (`benches/pty_bench.rs`) run timing scenarios, collect per-frame timings, emit JSON, and compare against baselines.
+//! 3. **Ad-hoc scenario runs** spin up the harness to reproduce issues locally.
+//!
+//! ## Layers
+//!
+//! - **`pty`** (L1)       — PTY management (spawn, inject keys, resize, drain).
+//! - **`screen`** (L2a)   — Virtual terminal state via `alacritty_terminal` ("what the user sees").
+//! - **`timing`** (L2b)   — Per-frame durations via `?2026 h/l` markers.
+//! - **`content`** (L3)   — Mock inference server driving real content into the pager.
+//! - **`scenarios`**      — Named, parameterised workloads returning `BenchResults`.
+//! - **`results`**        — Aggregated statistics, baseline compare.
+//! - **`scroll_matrix`**  — `GROK_SCROLL_LOG` JSONL ingestion for the scroll validation matrix.
+//! - **`env`**            — Binary resolution and workspace path helpers.
+//! - **`flows`**          — Cross-suite drive/seed helpers shared by the pager's e2e targets.
 
 pub mod content;
 pub mod env;
@@ -75,10 +94,12 @@ pub struct PtyHarness {
     /// Spawn instant, the time origin for asciinema cast event timestamps.
     spawned_at: Instant,
     /// Per-chunk cast events as `(elapsed_secs, end_offset_into_raw_output)`.
+    /// Each event's bytes are `raw_output[prev_end..end]`, so the chunks are not duplicated in memory.
     cast_events: Vec<(f64, usize)>,
     /// Terminal size at spawn as `(cols, rows)` for the cast header.
     cast_size: (u16, u16),
-    /// When true, [`update`](Self::update) forwards terminal-generated replies (cursor-position reports, device attributes, …) back.
+    /// When true, [`update`](Self::update) forwards terminal-generated replies (cursor-position reports, device attributes, …) back to the child.
+    /// Off by default; see [`Self::set_respond_to_queries`].
     respond_to_queries: bool,
 }
 
@@ -478,8 +499,9 @@ impl PtyHarness {
         let mut start = 0usize;
         for (elapsed, end) in &self.cast_events {
             let mut end = *end;
-            // A multi-byte codepoint split across PTY reads must not be
-            // lossy-decoded in halves Back off to the char boundary and let.
+            // A multi-byte codepoint split across two PTY reads must not be lossy-decoded in halves
+            // Back off to the char boundary and let the partial bytes ride in the next event
+            // A dangling tail at end-of-capture still decodes lossily; there is no next event to carry into
             while end > start
                 && end < self.raw_output.len()
                 && (self.raw_output[end] & 0xC0) == 0x80
@@ -506,6 +528,7 @@ impl PtyHarness {
 
     /// Scrollback history plus the visible screen, joined oldest to newest.
     /// Use when a block may be on-screen or scrolled above the viewport.
+    /// Where it lands depends on how much has accumulated.
     pub fn full_text(&self) -> String {
         self.screen.full_text()
     }
@@ -599,8 +622,9 @@ impl PtyHarness {
         self.pty.quit()
     }
 
-    /// Wait without collapsing exit, pending-status, liveness, or poll
-    /// errors.
+    /// Wait without collapsing exit, pending-status, liveness, or poll errors.
+    /// Returns [`PtyExitPoll::PendingStatus`] immediately for an already-exited child.
+    /// Returns [`PtyExitPoll::Running`] only when the live-child deadline expires.
     pub fn wait_exit_code(&mut self, timeout: Duration) -> Result<PtyExitPoll<u32>> {
         self.pty.wait_exit_code(timeout)
     }

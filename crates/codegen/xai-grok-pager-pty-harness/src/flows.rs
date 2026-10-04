@@ -1,4 +1,7 @@
 //! Cross-suite e2e flow helpers over [`PtyHarness`] / [`ContentController`].
+//!
+//! Driving/seeding helpers shared by the pager's `pty_e2e` and `leader_pty_e2e` test targets (both depend on this crate).
+//! Suite-local constants (sizes, sentinels, timeouts) stay in each suite's `common.rs`.
 
 use std::time::{Duration, Instant};
 
@@ -20,8 +23,8 @@ pub fn submit_turn(h: &mut PtyHarness, prompt: &str, sentinel: &str, timeout: Du
     let deadline = Instant::now() + timeout;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
-        // Each attempt gets its own budget, generous enough that a genuinely
-        // in-progress submit resolves before we press Enter again.
+        // Each attempt gets its own budget, generous enough that a genuinely in-progress submit resolves before we press Enter again
+        // The extra Enter then only ever fires on an empty composer, where it is a no-op
         if h.wait_for_text(sentinel, Duration::from_secs(10).min(remaining))
             .is_ok()
         {
@@ -55,13 +58,14 @@ pub fn inference_request_count(content: &ContentController) -> usize {
     inference_requests(content).len()
 }
 
-/// `XAI_API_KEY` never enters the auth manager. Scope is
-/// `<issuer>::<client_id>`, oidc, far-future expiry so no refresh.
+/// `XAI_API_KEY` never enters the auth manager. Scope is `<issuer>::<client_id>`, oidc, far-future expiry so no refresh.
+/// Opt-out must be false or collection e2es never enqueue; a missing field deserializes as opted-out.
 pub fn seed_fake_oauth(content: &ContentController, user: &str) {
     seed_fake_oauth_with_opt_out(content, user, false);
 }
 
 /// Like [`seed_fake_oauth`], but with `coding_data_retention_opt_out: true`.
+/// That is the auth-side precondition for the coding-data privacy upsell banner.
 pub fn seed_fake_oauth_coding_data_opted_out(content: &ContentController, user: &str) {
     seed_fake_oauth_with_opt_out(content, user, true);
 }
@@ -72,9 +76,9 @@ const TEAM_PRINCIPAL_FIELDS: &str = r#",
     "principal_id": "6f1c1d3e-0000-4000-8000-000000000000",
     "team_id": "6f1c1d3e-0000-4000-8000-000000000000""#;
 
-/// Like [`seed_fake_oauth_coding_data_opted_out`], but on a Zero Data
-/// Retention team. `team_blocked_reasons` carries `BLOCKED_REASON_NO_LOGS`,
-/// the shell's `GrokAuth::is_zdr_team` trigger.
+/// Like [`seed_fake_oauth_coding_data_opted_out`], but on a Zero Data Retention team.
+/// `team_blocked_reasons` carries `BLOCKED_REASON_NO_LOGS`, the shell's `GrokAuth::is_zdr_team` trigger.
+/// This locks the settings modal's `coding_data_sharing` row to `ZDR` and suppresses the privacy banner.
 pub fn seed_fake_oauth_zdr_team(content: &ContentController, user: &str) {
     seed_fake_oauth_raw(
         content,
@@ -166,6 +170,7 @@ fn seed_fake_oauth_raw(
 }
 
 /// Remove only the sandbox's fake API-key credential.
+/// The `auth.json` entry written by [`seed_fake_oauth`] then determines the advertised auth method.
 pub fn oauth_credential_ops() -> [crate::EnvOp<'static>; 1] {
     [crate::EnvOp::remove("XAI_API_KEY")]
 }

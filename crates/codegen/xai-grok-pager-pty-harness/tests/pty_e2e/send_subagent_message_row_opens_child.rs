@@ -1,4 +1,6 @@
-//! PTY: Enter and Ctrl+F on a `Message sent to Subagent “sleeper”` row open the child's takeover, exactly as on its `Subagent` row.
+//! PTY: Enter and Ctrl+F on a `Message sent to Subagent “sleeper”` row open the child's takeover, exactly as on its
+//! `Subagent` row, and `q` comes back; Enter on the rejected row (an id no spawn named) stays in the parent.
+// Unix only: shares the `/bin/sleep`-held child of `send_subagent_message_row`.
 #![cfg(unix)]
 #[allow(unused_imports)]
 use super::common::*;
@@ -6,7 +8,8 @@ use super::send_subagent_message_row::{
     CHILD_LABEL, PARENT_DONE, ROW_TIMEOUT, SendMessageScenario,
 };
 
-/// The footer hint pinned only while a child takeover is up.
+/// The footer hint pinned only while a child takeover is up; the dock shows the child's title and `[✗]` in the
+/// parent too, so neither of those can stand in for it.
 const TAKEOVER_HINT: &str = "q/Esc:back";
 const CTRL_F: &[u8] = b"\x06";
 
