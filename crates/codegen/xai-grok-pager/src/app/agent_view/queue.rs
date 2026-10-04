@@ -100,26 +100,17 @@ impl AgentView {
     }
 
     /// Interrupt the running turn with everything queued, from the prompt
-    /// (empty composer).
-    ///
-    /// The model stops mid-response and reads the queue instead of finishing
-    /// what it was saying — see [`Action::InterruptWithQueuedPrompts`]. Bare
-    /// Enter and the send-now chord share this path; queue-pane selection /
-    /// mouse "Send now" keep intentional single-row semantics. Returns `None`
-    /// when there is nothing queued to send.
-    ///
-    /// Two exceptions keep the older cancel-and-send route for the top row:
-    ///
-    /// - A **sendable wait**: the turn is parked in a blocking tool call, so
+    /// (empty composer). The model stops mid-response and reads the queue
+    /// instead of finishing what it was saying — see
+    /// [`Action::InterruptWithQueuedPrompts`]. Bare Enter and the send-now
+    /// chord share this path; queue-pane selection / mouse "Send now" keep
+    /// intentional single-row semantics. Returns `None` when there is nothing
+    /// queued to send. Exceptions keep the older cancel-and-send route for
+    /// the top row: - A **sendable wait**: the turn is parked in a blocking
+    /// tool call.
     ///   there is no model stream to interrupt and an interjection would sit in
     ///   the buffer until the wait ends. Send-now aborts the wait, which is
     ///   what "now" means while parked.
-    /// - **Nothing interjectable queued**: send-now targets the first row
-    ///   that can actually go out (any server row, or a local Prompt-kind
-    ///   row — plain or an expanded skill, its wire_blocks riding along). A
-    ///   bash/command/cron row is executed from block meta this path has no
-    ///   field for, so if that is the only thing queued, send-now refuses it
-    ///   with a toast rather than folding it in wrong.
     pub(in crate::app) fn try_interrupt_with_queued_from_prompt(&mut self) -> Option<InputOutcome> {
         if !self.session.state.is_turn_running() {
             return None;
@@ -128,10 +119,7 @@ impl AgentView {
         let ids = self.queue.entry_ids();
         let id = *ids.first()?;
         let outcome = if self.is_parked_on_sendable_wait() || !self.queue_has_interjectable_row() {
-            // Force the first row that will actually go out, not blindly the
-            // oldest: a bash/command/cron row parked ahead of real prompts
-            // would otherwise bounce every bare-Enter off "Can't send this
-            // now" while perfectly sendable rows sit right behind it.
+            // Force the first row that will go out, not blindly the oldest.
             let target = ids
                 .iter()
                 .copied()
@@ -445,13 +433,11 @@ impl AgentView {
         Some(crate::views::queue_pane::wire_row_is_steering_text(wire))
     }
 
-    /// Whether [`Self::force_interject_queue_row`] will actually deliver
-    /// `id` rather than bounce it off the "Can't send this now" toast: any
-    /// server row (the shell folds any kind), a local Prompt-kind row (plain
-    /// or an expanded skill — its wire_blocks rides along), or a local
-    /// Command row (`/compact`, which sends as its own request). A local
-    /// bash/cron row is neither: it runs from block meta this path has no
-    /// field for.
+    /// Whether [`Self::force_interject_queue_row`] will deliver `id` rather
+    /// than bounce it off the "Can't send this now" toast: any server row
+    /// (the shell folds any kind), a local Prompt-kind row (plain or an
+    /// expanded skill — its wire_blocks rides along), or a local Command
+    /// row (`/compact`, which sends as its own request).
     fn queue_row_force_sendable(&self, id: u64) -> bool {
         let Some(row) = self.queue.row_ref(id) else {
             return false;
@@ -517,10 +503,7 @@ impl AgentView {
             self.show_toast("Compacting at this turn's next safe point");
             return InputOutcome::Action(Action::CompactNow { text: row.text });
         }
-        // Local rows: only Prompt-kind rows can re-send. Bash/cron rows run
-        // from block meta this action has no field for, so they stay queued —
-        // an expanded skill's wire_blocks rides along below, so it no longer
-        // needs the same refusal.
+        // Local rows: only Prompt-kind rows can re-send.
         let is_prompt_kind = local_kind == Some(crate::app::agent::QueueEntryKind::Prompt);
         if !is_prompt_kind {
             self.show_toast("Can't send this now: it runs when the current turn ends");
@@ -1655,8 +1638,7 @@ mod queue_edit_routing_tests {
         agent.session.pending_prompts.clear();
         agent.sync_queue_pane();
         assert!(agent.held_queue_top_sendable());
-        // Mid-turn, the prompt-path send-now interrupts with the whole queue
-        // rather than singling out the top row.
+        // Mid-turn, the prompt-path send-now interrupts with the whole queue rather than singling out the top row.
         let outcome = agent.handle_prompt_key_for_test(&force_interject_key());
         assert!(
             matches!(
@@ -1665,8 +1647,7 @@ mod queue_edit_routing_tests {
             ),
             "{outcome:?}"
         );
-        // While parked on a sendable wait there is no stream to interrupt, so
-        // the ordinary server top row still takes the single-row send-now.
+        // While parked on a sendable wait there is no stream to interrupt.
         crate::app::agent_view::test_fixtures::simulate_wait_all(&mut agent);
         assert!(agent.is_parked_on_sendable_wait());
         let outcome = agent.handle_prompt_key_for_test(&force_interject_key());

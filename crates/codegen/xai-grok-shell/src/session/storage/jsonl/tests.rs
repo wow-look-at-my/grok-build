@@ -2435,8 +2435,7 @@ async fn reasoning_sibling_without_signature_roundtrips_through_jsonl() {
         "thinking text must survive JSONL write + reload; got: {reloaded_thinking:?}"
     );
 
-    // And the reloaded reasoning must resend to a Chat Completions wire as
-    // reasoning_content on the follower assistant (the token-resend path).
+    // And the reloaded reasoning must resend to a Chat Completions wire as reasoning_content on the follower assistant.
     let mut with_followup = items.clone();
     with_followup.push(ConversationItem::user("q2"));
     let msgs = conversation_to_chat_messages(with_followup);

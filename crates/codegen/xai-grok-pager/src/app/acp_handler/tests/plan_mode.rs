@@ -787,8 +787,7 @@
         app.auto_mode_gate = true;
         let id = AgentId(0);
 
-        // Two rapid presses from Normal, with no confirmation in between:
-        // Normal -> Plan -> Auto.
+        // Rapid presses from Normal, with no confirmation in between: Normal -> Plan -> Auto.
         let _ = crate::app::dispatch::dispatch(Action::CycleMode, &mut app);
         let _ = crate::app::dispatch::dispatch(Action::CycleMode, &mut app);
         {
@@ -800,8 +799,7 @@
             assert!(agent.session.is_auto(), "setup: the auto flag is set");
         }
 
-        // The confirmation of the FIRST press (plan) lands now, after the
-        // second press already moved the ring to Auto.
+        // The confirmation of the FIRST press (plan) lands now, after the second press already moved the ring to Auto.
         let (tx, _rx) = tokio::sync::oneshot::channel();
         handle(
             AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {

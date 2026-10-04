@@ -819,9 +819,7 @@ pub(crate) struct SessionActor {
     /// Server-side doom-loop check policy, resolved once at spawn by `Config::resolve_doom_loop_recovery`; `None` means disabled.
     /// `reconstruct_full_config` threads it into the sampler config, and the sampler itself sends the matching `x-grok-doom-loop-check` header.
     pub(crate) doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
-    /// Output-rate floor for the CURRENT model; `None` = ungated. A Cell
-    /// rather than a plain field because the floor is per-model: a switch
-    /// re-resolves it, and every turn after reads the new one.
+    /// Output-rate floor for the CURRENT model; `None` = ungated.
     pub(crate) output_rate_floor:
         std::cell::Cell<Option<xai_grok_sampling_types::OutputRateFloorPolicy>>,
     /// Telemetry-only per-turn detector/recovery tally (deduplicated labels, attempts, budget-spent accept, tightest recovery trigger).
@@ -875,26 +873,12 @@ pub(crate) struct SessionActor {
     /// Internally synchronized.
     pub(crate) pending_interjections: InterjectionBuffer<acp::ImageContent>,
     /// The in-flight sampler request id for the running turn, set by
-    /// `run_turn_via_sampler` and cleared on completion. The
-    /// `SessionCommand::Interject` handler reads this to cancel the
-    /// in-flight model stream so the turn loop iterates and drains the
-    /// interjection immediately (ASAP injection) instead of waiting for
-    /// the stream — which can run for many minutes on a long
-    /// reasoning/text generation — to finish. `None` while no turn is
-    /// streaming (idle, or inside a tool call between requests).
+    /// `run_turn_via_sampler` and cleared on completion.
     pub(crate) in_flight_sampler_request_id:
         parking_lot::Mutex<Option<xai_grok_sampler::RequestId>>,
-    /// Set by the `SessionCommand::Interject` handler to tell
-    /// `run_turn_via_sampler` that the in-flight request it is awaiting
-    /// was cancelled *for an interjection* (not a user Stop). The error
-    /// path checks and clears this to return
-    /// [`SamplerTurnOutcome::CancelledForInterjection`] instead of a
-    /// terminal failure, so the turn loop drains and resubmits.
+    /// Set by the `SessionCommand::Interject` handler to tell `run_turn_via_sampler`.
     pub(crate) interjection_cancel_requested: std::sync::atomic::AtomicBool,
-    /// Prompt ids queued when the running turn was promoted. Those rows were
-    /// next in line before that turn existed, so mid-turn delivery
-    /// (`harvest_queued_prompts_into_interjections`) leaves them to run as
-    /// their own turns. Written by the promoter under the state lock.
+    /// Prompt ids queued when the running turn was promoted.
     pub(crate) queued_at_turn_start: std::cell::RefCell<std::collections::HashSet<String>>,
     /// Skill-announcement reminders that arrived while a turn was running.
     /// Flushed at the same safe points as `pending_interjections`, plus on cancel/idle.
@@ -1022,9 +1006,7 @@ pub(crate) struct SessionActor {
     /// The kill-switch is already applied.
     /// Cached at actor construction from remote settings; `Default` (all `InheritCurrent`, empty pool) reproduces today's behavior.
     pub(crate) goal_role_models: GoalRoleModelConfig,
-    /// Every harness model slot, resolved when this actor was built. A slot
-    /// the user left alone is absent and its consumer keeps the session
-    /// model. See `session::harness_models`.
+    /// Every harness model slot, resolved when this actor was built.
     pub(crate) harness_models: crate::session::harness_models::ResolvedHarnessModels,
     /// Kill-switch (`GROK_GOAL_USE_CURRENT_MODEL_ONLY` / `[features] goal_use_current_model_only`) resolved at actor build.
     /// When `true`, every `/goal` role inherits the current model.
@@ -1174,12 +1156,6 @@ pub(crate) struct SessionActor {
     pub(crate) streaming_turn_capture: parking_lot::Mutex<StreamingTurnCapture>,
     /// Arguments of the tool calls the model is still writing, keyed by the
     /// wire's `tool_index`.
-    ///
-    /// A call is named from its arguments, and they arrive in fragments. This
-    /// holds the fragments so each one can be re-read into a title while the
-    /// rest is still on the wire. A stream start and a stream end both clear
-    /// it. The next stream reuses index 0, and the bytes left behind by the
-    /// previous call would name it.
     pub(crate) streaming_tool_titles:
         parking_lot::Mutex<std::collections::HashMap<u32, tool_title::StreamingToolArgs>>,
     pub(crate) stream_apply_span: parking_lot::Mutex<Option<StreamApplySpan>>,

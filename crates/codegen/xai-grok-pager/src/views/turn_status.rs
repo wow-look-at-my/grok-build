@@ -168,7 +168,6 @@ pub struct TurnStatusArgs<'a> {
     /// Context-window tokens used, shown as `⇣Nk`.
     pub total_tokens: Option<u64>,
     /// The model's live output rate, shown as `N tok/s` beside the timers.
-    /// `None` between responses, which is when there is no rate to show.
     pub output_rate: Option<crate::acp::tracker::OutputRate>,
     /// When the session create was dispatched; `Some` until the id binds or the create fails
     pub session_starting_since: Option<Instant>,
@@ -335,14 +334,7 @@ pub fn render_turn_status(
     let turn_timer_width = turn_timer_str.width();
 
     // Output rate, rendered in its own color: gray while healthy, amber once
-    // it is near the configured floor, red once it is under it. Under the
-    // floor it also carries how long it has been there, because "slow right
-    // now" and "slow for the last 40 seconds" are different situations and
-    // only the second one is about to reissue the request.
-    //
-    // A rate describes a stream in flight, and a row that reports it is waiting
-    // for the model has none. A reading left over from the previous model call
-    // would sit under that label and read as the wait being slow.
+    // it is near the configured floor, red once it is under it.
     let output_rate = output_rate.filter(|_| {
         !matches!(
             activity,
@@ -609,8 +601,7 @@ pub fn render_turn_status(
 }
 
 /// A goal-harness phase that owns the running turn: its role and the live
-/// counts of the subagent it runs. The counts are the only sign of progress
-/// while the model itself is idle.
+/// counts of the subagent it runs.
 #[derive(Debug, Clone, Copy)]
 pub struct GoalHarnessActivity<'a> {
     pub role: &'a str,
@@ -657,8 +648,7 @@ impl<'a> GoalHarnessActivity<'a> {
     }
 }
 
-/// Longest retry reason the status bar carries. The whole failure is in the
-/// session log; this line only has to say which one it was.
+/// Longest retry reason the status bar carries.
 const RETRY_REASON_MAX: usize = 80;
 
 /// Label for a retry in progress.
@@ -709,8 +699,7 @@ fn compute_activity(
             false,
         ),
         // A goal-harness phase (skeptic panel, strategist, summarizer) runs
-        // in-turn while the model is idle. The turn's last streaming activity
-        // still reads `Responding`/`Thinking`, so the phase label wins.
+        // in-turn while the model is idle.
         (AgentState::TurnRunning, _) if goal_harness.is_some() => (
             Style::default().fg(theme.text_secondary),
             goal_harness.map(|g| g.label()).unwrap_or_default(),
@@ -864,9 +853,7 @@ pub use crate::util::format_duration as format_turn_timer;
 /// The output-rate segment of the status row: ` 42 tok/s`, or
 /// ` 3.4 tok/s (slow 41s)` once the rate is under the floor.
 ///
-/// A rate under 10 keeps one decimal. The whole point of the indicator is a
-/// collapse from three digits to one, and `4 tok/s` for anything from 3.5 to
-/// 4.4 hides how far it fell.
+/// A rate a bounded number of keeps one decimal.
 fn format_output_rate(rate: crate::acp::tracker::OutputRate) -> String {
     let tps = rate.tokens_per_sec;
     let value = if tps < 10.0 {
@@ -884,11 +871,6 @@ fn format_output_rate(rate: crate::acp::tracker::OutputRate) -> String {
 }
 
 /// Format a token count for compact display.
-///
-/// - Under 1000: `1`, `10`, `100` (raw number)
-/// - 1k-100k: `1.23k`, `10.1k` (with decimal)
-/// - 100k-1m: `100k`, `500k` (whole thousands)
-/// - 1m+: `1.23m`, `10.1m` (with decimal)
 fn format_tokens_short(tokens: u64) -> String {
     if tokens < 1000 {
         format!("{tokens}")
@@ -1178,8 +1160,7 @@ mod tests {
     #[test]
     fn bash_turn_still_renders_running_not_waiting() {
         let theme = Theme::current();
-        // A bash (non-inference) turn with no activity keeps its own "Running…"
-        // label — the view leaves it as `None` rather than Waiting(Model).
+        // A bash (non-inference) turn with no activity keeps its own "Running…" label — the view leaves it as `None`.
         let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, true, None);
         assert_eq!(label, "Running…");
     }
@@ -1486,8 +1467,7 @@ mod tests {
             "nothing is streaming, so no rate may show: {text:?}"
         );
 
-        // Same reading, same timer, an activity that is a stream: the segment
-        // comes back, so the guard is the wait and not the number.
+        // Same reading, same timer, an activity that is a stream: the segment comes back.
         let responding = Some(TurnActivity::Responding);
         let mut args = idle_args(Watchers::default());
         args.state = &AgentState::TurnRunning;

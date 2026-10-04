@@ -34,21 +34,14 @@ pub(crate) fn validate_no_duplicate_ids(updates: &[TodoUpdate]) -> Result<(), To
     Ok(())
 }
 
-/// Every write is a merge: updates are folded into the existing state.
-/// - **Existing items**: `content` is optional — if omitted the previous
+/// Every write is a merge: updates are folded into the existing state. -
+/// **Existing items**: `content` is optional — if omitted the previous
 ///   value is kept. This lets the model mark an item from `in_progress` →
 ///   `completed` without echoing the content back.
 /// - **New items** (id not yet in state): if `content` is omitted the `id`
 ///   is used as a fallback so the tool never errors on a merge call. This
 ///   makes the tool resilient to state being lost between calls.
-///
 /// `prepend` puts new items at the FRONT of the list, in the order given.
-/// Existing items keep their place either way, so a prepend still cannot
-/// reorder or rewrite work already on the list.
-///
-/// An id already on the list is never dropped by a write that omits it. An
-/// item leaves the actionable set only by becoming `Completed` or
-/// `Cancelled`, which is a status the caller has to ask for by id.
 pub(crate) fn apply_merge(
     state: &mut TodoState,
     updates: &[TodoUpdate],
@@ -283,16 +276,7 @@ const fn default_merge() -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TodoWriteInput {
-    /// When true (the default), merge the provided todos into the existing
-    /// list by id (partial updates are allowed — leave unchanged fields
-    /// undefined). When explicitly set to false, the provided todos replace
-    /// the existing list entirely.
-    /// Accepted for wire compatibility and ignored: every write merges.
-    ///
-    /// Absent from the advertised schema because both values now behave the
-    /// same. It used to select a wholesale replace, which cleared the list and
-    /// dropped every item the call did not resend — the one way the tool could
-    /// destroy work the user put there.
+    /// When true (the default), merge the provided todos into the existing list by id.
     #[serde(
         default = "default_merge",
         deserialize_with = "crate::types::schema::deserialize_lenient_bool"
@@ -306,12 +290,6 @@ pub struct TodoWriteInput {
     pub todos: Vec<TodoUpdate>,
 
     /// Put new merged items at the front of the list instead of the end.
-    ///
-    /// Deliberately absent from the advertised schema: the only caller is the
-    /// `/TODO` capture path, and a knob the model can reach would let it
-    /// reorder the list the user is watching. Keeping it out also leaves the
-    /// serialized tool list byte-identical, so the conversation's prompt cache
-    /// survives this field.
     #[serde(default)]
     #[schemars(skip)]
     pub prepend: bool,
@@ -398,8 +376,7 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
 
-            // Always a merge. The list belongs to the user, so a write adds
-            // and updates by id and never drops what it leaves out.
+            // Always a merge.
             apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
 
             summary_for_prompt = summarize_todo_state(&todo_state.0);
@@ -873,8 +850,8 @@ mod tests {
         assert_eq!(get_item(&state, "new").content, "New task");
     }
 
-    /// The three ways work is allowed to change, and the fact that none of
-    /// them shortens the list.
+    /// The ways work is allowed to change, and the fact that none of them
+    /// shortens the list.
     #[test]
     fn completing_cancelling_and_rewording_all_keep_the_item() {
         let mut state = seed_state(&[
@@ -1173,7 +1150,6 @@ mod tests {
         ];
         apply_merge(&mut state, &initial, false).unwrap();
 
-        // Step 2: content=null, just status changes
         let updates = vec![
             make_update("explore_codebase", None, Some(TodoStatus::Completed)),
             make_update("analyze_and_propose", None, Some(TodoStatus::InProgress)),

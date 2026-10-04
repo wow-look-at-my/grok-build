@@ -20,14 +20,9 @@ fn canonical_effort_if_offered(
 /// Shared by `/effort`, the CLI deferred switch, and headless so they classify the same input identically and differ only in how they report the error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EffortTokenError {
-    /// The target model does not advertise `supportsReasoningEffort`. Carries
-    /// the evidence the gate acted on, because this is the refusal a user has to
-    /// argue with when the model does in fact take an effort.
+    /// The target model does not advertise `supportsReasoningEffort`.
     Unsupported(Box<UnsupportedEffortDiagnosis>),
-    /// The token is neither a menu id nor a canonical value offered by this
-    /// model's menu. `offered` is the model-specific list of option ids the
-    /// user can type (never a hardcoded global set — so we do not advertise
-    /// `none`/`minimal` when the model does not offer them).
+    /// The token is neither a menu id nor a canonical value offered by this model's menu.
     UnknownToken { token: String, offered: Vec<String> },
     /// No active model to resolve the effort against.
     NoActiveModel,
@@ -39,16 +34,13 @@ pub(crate) enum EffortTokenError {
 pub(crate) struct UnsupportedEffortDiagnosis {
     /// The catalog key the gate looked up — what `[model.<key>]` must be named.
     pub(crate) model_id: String,
-    /// False when the id is not in this session's catalog at all, which is a
-    /// different fault from a model that is there and unflagged.
+    /// False when the id is not in this session's catalog at all.
     pub(crate) in_catalog: bool,
-    /// How many models the session's catalog holds, so an empty catalog (the
-    /// pre-`session/new` window) is visible as such.
+    /// How many models the session's catalog holds.
     pub(crate) catalog_len: usize,
     /// What the gate read at `meta.supportsReasoningEffort`.
     pub(crate) meta_state: ReasoningEffortMetaState,
-    /// Whether the entry carries a `reasoningEfforts` menu. A menu with no gate
-    /// flag is a contradiction in the catalog entry, and it names the bug.
+    /// Whether the entry carries a `reasoningEfforts` menu.
     pub(crate) efforts_menu_len: Option<usize>,
 }
 

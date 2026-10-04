@@ -89,10 +89,7 @@ impl ResourcesPersistence {
         // runs through `guarded` and logs the panic under the writer's name.
         #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
-            // Guarded so the writer's own death is attributed. Unobserved, it
-            // would look like a session that persisted its tool state: `rx`
-            // goes with the task, so later sends fail and `flush` below is the
-            // only place anyone could still notice.
+            // Guarded so the writer's own death is attributed.
             let wrote = crate::util::detached::guarded(
                 "resources persistence writer",
                 Self::writer_loop(rx, writer_path),

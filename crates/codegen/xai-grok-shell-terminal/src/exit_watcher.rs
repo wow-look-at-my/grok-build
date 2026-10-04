@@ -208,8 +208,8 @@ pub(super) async fn watch_for_exit_releasing_task(
         return;
     };
     // Skipped once the task reads completed, because a second release would
-    // overwrite the exit status the real completion recorded with this one.
-    // A poisoned map says nothing either way, so the release is attempted.
+    // overwrite the exit status the real completion recorded with this. A
+    // poisoned map says nothing either way, so the release is attempted.
     let released_already = match tasks.lock() {
         Ok(tracked) => tracked
             .get(task_id.as_str())
@@ -227,7 +227,7 @@ pub(super) async fn watch_for_exit_releasing_task(
         return;
     }
     // Guarded in turn: a release that unwinds would be lost exactly like the
-    // round this one is recovering from.
+    // round this is recovering from.
     let _ = xai_grok_tools::util::detached::guarded(
         "terminal exit watcher release",
         complete_and_release(

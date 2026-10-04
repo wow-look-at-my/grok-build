@@ -49,20 +49,6 @@ fn tag_suffix_width(row: &SuggestionRow) -> usize {
 }
 
 /// Compute the aligned label column width from all visible items.
-///
-/// The longest label wins, bounded by 60% of the available width so the
-/// description column keeps the rest. That bound is the whole limit: on a wide
-/// terminal a long label gets the room it needs, and on a narrow one it is
-/// truncated to fit what is actually there.
-///
-/// The tag suffix is folded in so a `/cmd [tag]` row and a plain `/cmd` row
-/// share the same description column.
-///
-/// Every row must contribute. Excluding the long ones instead means a list
-/// where they are ALL long has nothing left to take a max over, which yields a
-/// zero-width column that truncates every label to nothing -- rows that draw,
-/// highlight and select while showing nothing. Model ids of the form
-/// `provider/vendor:family:size` do exactly that.
 fn compute_label_column_w(items: &[SuggestionRow], content_w: usize) -> usize {
     let budget = content_w * 3 / 5;
     let max_display_w = items
@@ -74,12 +60,6 @@ fn compute_label_column_w(items: &[SuggestionRow], content_w: usize) -> usize {
 }
 
 /// Columns reserved for the residency dot, for the WHOLE list.
-///
-/// List-wide rather than per-row on purpose: a per-row reservation starts the
-/// label at a different column on a dotted row than on a plain one, and a
-/// model picker holding both local and cloud models would read as two ragged
-/// lists. Reserved once, every label starts in the same place and only the
-/// dot itself differs.
 fn dot_column_w(items: &[SuggestionRow]) -> usize {
     usize::from(items.iter().any(|r| r.loaded_in_vram.is_some())) * (DOT_W + DOT_GAP)
 }
@@ -1044,7 +1024,6 @@ mod tests {
             selected: 0,
             ..Default::default()
         };
-        // 69 columns leave a 40-column label budget (60% of the 67 after the prefix).
         let area = Rect::new(0, 0, 69, 1);
         let mut buf = Buffer::empty(area);
         render_dropdown(&mut buf, area, &snap, None, &theme);
@@ -1071,7 +1050,6 @@ mod tests {
         let theme = Theme::default();
         let short = "/cache";
         let long_display = "/principles-redesign-from-first-principles";
-        // 69 columns leave a 40-column label budget (60% of the 67 after the prefix).
         let width: u16 = 69;
         let snap = SlashSnapshot {
             open: true,

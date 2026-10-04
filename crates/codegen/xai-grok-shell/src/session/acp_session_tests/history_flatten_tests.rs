@@ -8,8 +8,6 @@ use xai_grok_sampling_types::conversation::{
     AssistantItem, ConversationItem, ToolCall, ToolResultItem,
 };
 
-/// The 400 a provider answers with when the history carries an encrypted
-/// reasoning blob it cannot decrypt.
 fn encrypted_content_error() -> xai_grok_sampler::SamplingErrorInfo {
     xai_grok_sampler::SamplingErrorInfo {
         kind: xai_grok_sampler::SamplingErrorKind::Api,

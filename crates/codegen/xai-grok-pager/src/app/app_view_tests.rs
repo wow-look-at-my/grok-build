@@ -630,8 +630,7 @@ fn needs_animation_gates_prompt_history_tick_delivery() {
         app.needs_animation(),
         "an open prompt history overlay must request animation ticks"
     );
-    // Drive `tick()` and check the count separately, on a wall-clock
-    // deadline.
+    // Drive `tick()` and check the count separately, on a wall-clock deadline.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut delivered = false;
     while std::time::Instant::now() < deadline {

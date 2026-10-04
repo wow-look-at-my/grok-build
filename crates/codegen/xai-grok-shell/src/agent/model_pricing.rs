@@ -1,12 +1,4 @@
 //! Per-token pricing for a model whose endpoint reports no cost.
-//!
-//! Resolution order is config, then the on-disk catalog cache, then a fetch
-//! from modelinfo. Config wins outright: a price the user wrote is the price,
-//! and the network never overrides it.
-//!
-//! The lookup runs on the turn path, so it never blocks. A model with no
-//! cached answer yet returns unusable pricing for this call and starts a
-//! background fetch that lands for the next one.
 
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
@@ -17,8 +9,7 @@ use xai_grok_sampling_types::ModelPricing;
 pub(crate) const PRICING_CACHE_FILE: &str = "model_pricing_cache.json";
 /// How long a price stays good. Prices move on the scale of a release.
 const POSITIVE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-/// How long "modelinfo does not know this model" stays good. Shorter, because
-/// a model the catalog gains is worth picking up soon.
+/// How long "modelinfo does not know this model" stays good.
 const NEGATIVE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -68,9 +59,9 @@ pub(crate) struct ModelinfoDocument {
 }
 
 impl ModelinfoDocument {
-    /// The four tiers `ModelPricing` bills on. A document that prices nothing
-    /// gives `None`, which is recorded as a negative answer rather than as
-    /// an all-zero price the cost path would read as configured.
+    /// The tiers `ModelPricing` bills on. A document that prices nothing
+    /// gives `None`, which is recorded as a negative answer rather than as an
+    /// all-zero price the cost path would read as configured.
     pub(crate) fn to_pricing(&self) -> Option<ModelPricing> {
         let pricing = ModelPricing {
             input_per_token_usd: self.input_cost_per_token.unwrap_or(0.0),
@@ -85,8 +76,7 @@ impl ModelinfoDocument {
 /// The process's view of the catalog. Hydrated from disk on first use.
 struct Store {
     entries: HashMap<String, PricingCacheEntry>,
-    /// Models with a fetch in flight. A second turn on the same model must
-    /// not start a second request.
+    /// Models with a fetch in flight. A second turn on the same model must not start a second request.
     in_flight: HashSet<String>,
     loaded_from_disk: bool,
 }
@@ -157,23 +147,17 @@ pub(crate) fn resolve(model_id: &str) -> ModelPricing {
     cached_or_schedule(model_id, &configured.catalog_url).unwrap_or(configured.model)
 }
 
-/// Model ids no lookup may run for, registered at catalog build.
-///
-/// A model DISCOVERED from a local runtime is not in config, so
+/// Model ids no lookup may run for, registered at catalog build. A model
+/// DISCOVERED from a local runtime is not in config, so
 /// `resolve_configured_pricing` — which rebuilds the catalog from config
-/// alone — cannot see its `pricing_lookup_enabled = false`. Without this the
-/// session asks the modelinfo catalog to price `qwen3-coder:30b` on every TTL
-/// expiry, forever, and every one of those requests is a 404 by construction:
-/// the model runs on this machine, charges nothing, and is in no catalog.
+/// alone — cannot see its `pricing_lookup_enabled = false`.
 fn suppressed() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
     static SUPPRESSED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
         std::sync::OnceLock::new();
     SUPPRESSED.get_or_init(Default::default)
 }
 
-/// Register model ids whose price must never be looked up. Additive: a
-/// catalog rebuild that drops a provider leaves its ids registered, which
-/// costs nothing and keeps a rebuild from re-enabling a lookup mid-session.
+/// Register model ids whose price must never be looked up.
 pub(crate) fn suppress_lookup_for(model_ids: impl IntoIterator<Item = String>) {
     let Ok(mut guard) = suppressed().lock() else {
         return;

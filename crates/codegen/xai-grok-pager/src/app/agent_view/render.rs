@@ -1360,15 +1360,7 @@ impl AgentView {
                 status.push_front("link_url", Line::from(Span::styled(display, link_style)));
             }
         }
-        // Top-right: this run's total cost. The agent's own session ledger is
-        // the source of truth — it counts every model call and subagent fold,
-        // including spend behind a message that was rewound or never rendered,
-        // which a sum over the scrollback cannot see. The scrollback sum is the
-        // fallback for an agent too old to report the total, and only while it
-        // measures the same run: after a reload replays priced messages it
-        // measures an earlier run instead, and showing that would mean the
-        // number FALLS at the next live call. Absent until something reports a
-        // cost — never a fabricated `$0.00`.
+        // Top-right: this run's total cost.
         let session_cost_ticks = self
             .session
             .tracker
@@ -1437,11 +1429,11 @@ impl AgentView {
             .current_branch
             .clone()
             .or_else(|| lazy_git.as_ref().and_then(|i| i.branch.clone()));
-        // Realtime CI-status dot (issue #40): a colored dot beside the branch
-        // whose state is polled from the `gh` CLI. The poll is throttled and
-        // off-thread (see `ci_status::ci_status_lazy`), so this render call is
-        // cheap; absent a real branch (detached/empty) or any CI signal, no
-        // dot is drawn — a graceful "no CI status" state.
+        // Realtime CI-status dot: a colored dot beside the branch whose state
+        // is polled from the `gh` CLI. The poll is throttled and off-thread
+        // (see `ci_status::ci_status_lazy`), so this render call is cheap;
+        // absent a real branch (detached/empty) or any CI signal, no dot is
+        // drawn — a graceful "no CI status" state.
         if let Some(b) = branch.as_deref()
             && !b.is_empty()
             && let Some(dot_span) =
@@ -1450,12 +1442,7 @@ impl AgentView {
                         crate::ci_status::CiStatus::Red => Some(theme.accent_error),
                         crate::ci_status::CiStatus::Yellow => {
                             // While CI is running, pulse the yellow dot's HSV
-                            // value so it visibly "thinks". The phase is wall-clock
-                            // time, not the animation tick: the tick cadence
-                            // follows whatever else the UI is doing (Slow on an
-                            // idle session, ~30 fps while streaming), so a
-                            // tick-counted pulse breathes at a different speed
-                            // depending on how busy the screen is.
+                            // value so it visibly "thinks".
                             let dyn_col =
                                 crate::ci_status::in_progress_dot_color(rgb_of(theme.warning));
                             Some(ratatui::style::Color::Rgb(dyn_col.0, dyn_col.1, dyn_col.2))
@@ -4972,29 +4959,28 @@ fn rgb_of(color: ratatui::style::Color) -> (u8, u8, u8) {
 /// Map a 256-color palette index to approximate RGB (the common xterm cube).
 fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
     if i < 16 {
-        // Standard 16 colors; built-in grayscale + base palette, approximated.
+        // Standard colors; built-in grayscale + base palette, approximated.
         const BASE: [(u8, u8, u8); 16] = [
-            (0, 0, 0),       // 0 black
-            (128, 0, 0),     // 1 red
-            (0, 128, 0),     // 2 green
-            (128, 128, 0),   // 3 yellow
-            (0, 0, 128),     // 4 blue
-            (128, 0, 128),   // 5 magenta
-            (0, 128, 128),   // 6 cyan
-            (192, 192, 192), // 7 white
-            (128, 128, 128), // 8 bright black
-            (255, 0, 0),     // 9 bright red
-            (0, 255, 0),     // 10 bright green
-            (255, 255, 0),   // 11 bright yellow
-            (0, 0, 255),     // 12 bright blue
-            (255, 0, 255),   // 13 bright magenta
-            (0, 255, 255),   // 14 bright cyan
-            (255, 255, 255), // 15 bright white
+            (0, 0, 0),
+            (128, 0, 0),
+            (0, 128, 0),
+            (128, 128, 0),
+            (0, 0, 128),
+            (128, 0, 128),
+            (0, 128, 128),
+            (192, 192, 192),
+            (128, 128, 128),
+            (255, 0, 0),
+            (0, 255, 0),
+            (255, 255, 0),
+            (0, 0, 255),
+            (255, 0, 255),
+            (0, 255, 255),
+            (255, 255, 255),
         ];
         return BASE.get(usize::from(i)).copied().unwrap_or_default();
     }
     if i < 232 {
-        // 6×6×6 color cube starting at 16.
         let n = (i - 16) as u16;
         let r = n / 36;
         let g = (n % 36) / 6;
@@ -5002,7 +4988,6 @@ fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
         let chan = |v: u16| -> u8 { (if v == 0 { 0 } else { 55 + v * 40 }) as u8 };
         return (chan(r), chan(g), chan(b));
     }
-    // Grayscale ramp 232..=255.
     let g = 8 + (i - 232) * 10;
     (g, g, g)
 }

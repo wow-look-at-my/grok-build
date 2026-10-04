@@ -2475,8 +2475,7 @@ fn todo_capture_requests_and_shows_a_running_block() {
         .pending_todo_task_id
         .as_deref()
         .expect("capture is a running task at the top");
-    // The shell stamps its progress updates with the capture id the client
-    // minted, so the row it names has to be the row this capture opened.
+    // The shell stamps its progress updates with the capture id the client minted.
     assert_eq!(task_id, format!("todo-capture:{capture_id}"));
     let task = agent
         .session

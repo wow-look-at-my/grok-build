@@ -421,8 +421,7 @@ impl SessionActor {
         // xAI proxy.
         if !crate::util::is_cli_chat_proxy_url(base_url) {
             if crate::util::is_xai_api_url(base_url) {
-                // xAI endpoints are served by the proxy listing; don't re-ask a
-                // bare api.x.ai for BYOK-style metadata here.
+                // xAI endpoints are served by the proxy listing.
                 return;
             }
             let own_key = self.chat_state_handle.get_credentials().await.api_key;

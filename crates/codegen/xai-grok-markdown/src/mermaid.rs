@@ -1366,9 +1366,6 @@ fn split_er_relationship(st: &str) -> Option<(&str, Option<&str>)> {
 }
 
 /// Split a 6-byte ER relationship token into its cardinality and line parts.
-///
-/// The guard below rejects anything that is not exactly six ASCII bytes, so
-/// every byte offset in the body is a char boundary.
 #[allow(clippy::string_slice)] // the body only runs on an all-ASCII token
 fn parse_er_op(tok: &str) -> Option<(&'static str, &'static str, LineKind)> {
     if !tok.is_ascii() || tok.len() != 6 {

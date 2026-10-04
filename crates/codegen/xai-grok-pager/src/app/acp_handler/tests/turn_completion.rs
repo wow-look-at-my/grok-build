@@ -195,16 +195,10 @@
 
     #[test]
     fn turn_completed_reported_cost_attaches_to_agent_entry_and_session_total() {
-        // The durable `TurnCompleted` carries the per-turn `PromptUsage` cost
-        // (`cost_usd_ticks`) that the ACP text-chunk rail never delivers. This
-        // drives the SHIPPED runtime path end-to-end: stream an agent message,
-        // finalize the turn via the extension notification, and assert the
-        // reported cost lands on the agent-message entry AND the session-total
-        // indicator data (`session_total_cost_usd_ticks`) reflects it.
+        // The durable `TurnCompleted` carries the per-turn `PromptUsage` cost (`cost_usd_ticks`).
         let mut app = make_app_with_agent("sess-cost");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
 
-        // Turn 1: stream an agent message, then finalize with a reported cost.
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
             agent.session.start_turn(&mut agent.scrollback);
@@ -250,7 +244,6 @@
             "session-total indicator data must equal the reported turn cost"
         );
 
-        // Turn 2: a second reported cost accumulates into the running total.
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
             agent.session.start_turn(&mut agent.scrollback);
@@ -272,8 +265,6 @@
             "the session-total is the exact cumulative sum of reported costs (got {total:?})"
         );
 
-        // Turn 3: a TurnCompleted that reports NO cost (e.g. scrubbed/partial)
-        // must not fabricate a zero — it leaves the prior total unchanged.
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
             agent.session.start_turn(&mut agent.scrollback);
@@ -298,10 +289,7 @@
 
     #[test]
     fn every_response_in_a_tool_loop_prices_its_own_message() {
-        // One turn, two model calls (the shape of any turn that uses a tool).
-        // Each call closes with its own `ResponseCompleted`, so each rendered
-        // message must carry ITS call's cost — not one cost on the last message
-        // and nothing on the rest.
+        // One turn, model calls (the shape of any turn that uses a tool).
         let mut app = make_app_with_agent("sess-per-msg");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -310,7 +298,6 @@
             agent.turn_started_at = Some(std::time::Instant::now());
         }
 
-        // Call 1: streams a message, then closes at $0.10 (session total $0.10).
         let _ = handle(
             make_agent_chunk_for_response("sess-per-msg", "calling a tool", "pid-loop", 1_000),
             &mut app,
@@ -325,11 +312,6 @@
         );
         assert!(affected, "pricing a visible message must redraw");
 
-        // Call 2: a new `streamStartMs` opens the second message block; it
-        // closes at $0.20. The session total reported alongside it ($0.50) is
-        // deliberately MORE than the two messages sum to — a subagent's spend
-        // is real money with no message of its own, and the indicator must
-        // follow the agent's ledger rather than re-deriving from what it drew.
         let _ = handle(
             make_agent_chunk_for_response("sess-per-msg", "here is the answer", "pid-loop", 2_000),
             &mut app,
@@ -377,13 +359,7 @@
 
     #[test]
     fn reloaded_transcript_keeps_message_costs_without_resurrecting_an_old_total() {
-        // `ResponseCompleted` is persisted, so a reload replays it after its own
-        // message's chunks and the message keeps the cost it was priced at.
-        // The session total is a different question: the agent's ledger is
-        // in-memory and restarts at reload, so the replayed total must NOT be
-        // adopted — and neither may the scrollback sum stand in for it, or the
-        // indicator would show the old run's spend and then FALL to this run's
-        // at the first live call.
+        // `ResponseCompleted` is persisted, so a reload replays it after its own message's chunks.
         let mut app = make_app_with_agent("sess-reload");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -429,9 +405,7 @@
 
     #[test]
     fn turn_cost_still_lands_when_no_response_priced_the_turn() {
-        // An agent that prices only whole turns (no per-response cost) must keep
-        // the old behavior: the turn's cost lands on the message it rendered.
-        // The per-response path stands down only for prompts it actually priced.
+        // An agent that prices only whole turns (no per-response cost) must keep the behavior.
         let mut app = make_app_with_agent("sess-mixed");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -485,13 +459,7 @@
 
     #[test]
     fn driver_turn_completed_cost_lands_on_running_entry_before_prompt_finish() {
-        // DRIVER path (attached_as_viewer=false, the pager's own prompted turns
-        // — the primary interactive flow). On the driver the `PromptResponse`
-        // RPC owns the lifecycle, so `TurnCompleted` normally arrives BEFORE
-        // `finish_turn` runs (in `prompt.rs`). At that moment the agent message
-        // is still streaming (`current_agent_msg`), and the reported cost must
-        // be attributed to the running turn's live block — not dropped because
-        // no turn had been "finished" yet.
+        // DRIVER path (attached_as_viewer=false, the pager's own prompted turns — the primary interactive flow).
         let mut app = make_app_with_agent("sess-drive-cost");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -529,9 +497,7 @@
             );
         }
 
-        // Now the driver's actual finish arrives (PromptResponse → prompt.rs
-        // `finish_turn`). It must NOT drop or duplicate the already-attached
-        // cost, and the session total reflects exactly that one turn.
+        // Now the driver's actual finish arrives (PromptResponse → prompt.rs `finish_turn`).
         prompt_response(&mut app, "pid-d1");
         let (entry_cost, total, idle) = {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -556,10 +522,7 @@
 
     #[test]
     fn stale_turn_completed_cannot_corrupt_a_later_turn_cost() {
-        // A stale/misordered `TurnCompleted` for an ALREADY-FINISHED turn must
-        // be routed to that turn's own prompt-keyed entry, NOT to a newer turn
-        // that has begun streaming. Drives real finishes via `prompt.rs`
-        // (`PromptResponse`) so the prompt→entry map is populated by shipped code.
+        // A stale/misordered `TurnCompleted` for an ALREADY-FINISHED turn must be routed to that turn's own prompt-keyed entry.
         let mut app = make_app_with_agent("sess-stale-cost");
 
         // Turn P1: stream + finish via PromptResponse (no cost reported on the
@@ -588,7 +551,7 @@
             &mut app,
         );
 
-        // Late TurnCompleted for the OLD turn P1, carrying its cost, arrives
+        // Late TurnCompleted for the turn P1, carrying its cost, arrives
         // while P2 is streaming.
         let _ = handle_ext_notification(
             &xai_turn_completed_notif_with_cost("sess-stale-cost", "pid-p1", Some(3_000_000_000)),

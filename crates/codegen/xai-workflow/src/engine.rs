@@ -1245,8 +1245,7 @@ mod tests {
         );
         let outcome = run_workflow(params(&script, journal, tx));
         // The host records its flag *after* the reply lands, so the engine's
-        // own wait does not order that write. Joining the host thread is what
-        // makes the read below see a finished callback rather than a racing one.
+        // own wait does not order that write.
         host.join()
             .expect("the mock host exits once the engine drops its sender");
         match outcome {

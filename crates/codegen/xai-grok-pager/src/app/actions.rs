@@ -165,17 +165,11 @@ pub enum Action {
         /// Notice raised while the composer was consumed (a placeholder no image backs); the key
         /// handler has no `AppView`, so it travels with the send and is queued when it dispatches.
         image_notice: Option<String>,
-        /// A queue row's expanded skill payload (differs from `text`, its
-        /// display form). `Some` sends this verbatim instead of deriving
-        /// blocks from `text` — losing it would send the display text in
-        /// place of the skill's real wire payload.
+        /// A queue row's expanded skill payload (differs from `text`, its display form).
         wire_blocks: Option<Vec<acp::ContentBlock>>,
     },
     /// Compact without waiting for the running turn, from "Send now" on a
-    /// queued `/compact`. It does NOT cancel the turn, which is what separates
-    /// it from [`Self::SendPromptNow`]: the shell arms the request and the
-    /// turn runs it at its next safe point. It also leaves the session's
-    /// command state alone, because the turn still owns it.
+    /// queued `/compact`.
     CompactNow {
         /// The row's text, `/compact` or `/compact <instructions>`.
         text: String,
@@ -245,12 +239,7 @@ pub enum Action {
         /// Atomicity is documented on [`Effect::QueueInterject`].
         new_text: Option<String>,
     },
-    /// Interrupt the running turn with everything the user has queued: bare
-    /// Enter on an empty composer while the session is busy. Server-owned rows
-    /// ride [`Effect::QueueDeliverNow`]; local rows the shell has never seen
-    /// are sent as interjections in the same dispatch. Both paths cancel the
-    /// in-flight model stream shell-side, so the model stops mid-response and
-    /// reads the queue instead of finishing what it was saying.
+    /// Interrupt the running turn with everything the user has queued.
     InterruptWithQueuedPrompts,
     /// A queued-row edit whose saved text is a complete pager builtin invocation: drop the row and run the command through the normal slash dispatch.
     /// The view only classifies; dispatch stays the sole execution owner.
@@ -526,13 +515,7 @@ pub enum Action {
     SetPageFlipOnSend(bool),
     /// Set `[ui].confirm_before_rewind` (default ON). Persists via `Effect::PersistSetting`.
     SetConfirmBeforeRewind(bool),
-    /// Set `[ui].stop_gate_unfinished_todos` (default ON). Persists via
-    /// `Effect::PersistSetting`. Gates the session Stop gesture while the todo
-    /// list has unfinished items.
     SetStopGateUnfinishedTodos(bool),
-    /// Set `[ui].stop_gate_ci_failing` (default ON). Persists via
-    /// `Effect::PersistSetting`. Gates the turn end while the branch has a
-    /// failing CI run.
     SetStopGateCiFailing(bool),
     /// Set whether the drain call site merges the run of leading queued `Prompt` entries into one turn instead of sending them one by one.
     /// SHARED-owned: updates the process-wide cache mirror (read by the drain site).
@@ -571,24 +554,17 @@ pub enum Action {
     /// Commit the max-thoughts-width (column budget for the thoughts panel).
     /// Payload is `i64`; clamped to `u16` at the shell helper boundary.
     SetMaxThoughtsWidth(i64),
-    /// Set `[ui].min_output_tokens_per_sec`: the floor under which a model
-    /// call is reissued. `0` turns the gate off.
+    /// Set `[ui].min_output_tokens_per_sec`: the floor under which a model call is reissued. `0` turns the gate off.
     SetMinOutputTokensPerSec(i64),
-    /// Set `[ui].output_rate_sustained_secs`: how long the rate must stay
-    /// under that floor before the request is reissued.
+    /// Set `[ui].output_rate_sustained_secs`: how long the rate must stay under that floor.
     SetOutputRateSustainedSecs(i64),
     /// Set `[ui].output_rate_window_secs`: the window the rate is averaged over.
     SetOutputRateWindowSecs(i64),
-    /// Set `[ui].output_rate_max_retries`: how many times one model call is
-    /// reissued for slow output. `0` never reissues.
+    /// Set `[ui].output_rate_max_retries`: how many times one model call is reissued for slow output.
     SetOutputRateMaxRetries(i64),
-    /// Set `[ui].ttft_timeout_secs`: how long a model call may go without
-    /// output before it is reissued. `0` turns the limit off.
+    /// Set `[ui].ttft_timeout_secs`: how long a model call may go without output before it is reissued.
     SetTtftTimeoutSecs(i64),
-    /// Commit one harness model slot into `[models]`. The first field is
-    /// the slot id from `xai_grok_models::HARNESS_MODEL_SLOTS`; an empty
-    /// model id clears the slot. Restart-required — a slot is resolved
-    /// when a session actor is built.
+    /// Commit one harness model slot into `[models]`.
     SetHarnessModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required: tips are resolved once at startup.
@@ -736,8 +712,7 @@ pub enum Action {
     /// Send a /todo capture request (bypasses queue, works while agent is busy).
     SendTodo {
         request: String,
-        /// The user typed `/TODO`, so the items go to the top of the list and
-        /// the agent is told to pick them up after its current unit of work.
+        /// The user typed `/TODO`, so the items go to the top of the list.
         urgent: bool,
     },
     /// Request a session recap ("where was I" summary).
@@ -1468,9 +1443,7 @@ pub enum Effect {
         minted_session_id: Option<String>,
         /// One-shot `/chat` or sticky `--chat`: stamp `_meta` kind=chat on fresh create (resume uses `LoadSession.chat_kind` instead).
         chat_kind: bool,
-        /// `/fork --worktree --agents`: carry `load_session_id`'s
-        /// still-running subagents into the forked session. Off for every
-        /// path that is not a fork.
+        /// `/fork --worktree --agents`: carry `load_session_id`'s still-running subagents into the forked session.
         include_agents: bool,
     },
     /// Load (resume) an existing ACP session by ID.
@@ -1616,9 +1589,7 @@ pub enum Effect {
     Compact {
         agent_id: AgentId,
         session_id: acp::SessionId,
-        /// The `/compact <instructions>` argument. The shell has always read
-        /// this (`CompactConversationRequest::user_context`); omitting it from
-        /// the request is what made the argument a no-op.
+        /// The `/compact <instructions>` argument.
         user_context: Option<String>,
     },
     /// Kill a background task.
@@ -1779,24 +1750,14 @@ pub enum Effect {
         expected_version: u64,
         new_text: Option<String>,
     },
-    /// Deliver every server-owned queued prompt into the running turn NOW:
-    /// fire-and-forget `x.ai/queue/deliver_now`. The session actor harvests
-    /// the queue into the running turn's interjection buffer and cancels the
-    /// in-flight model stream so the turn drains them before its next request
-    /// instead of at its next natural gap. Rows that own their turn (bash,
-    /// send-now, synthetic) stay queued; the agent rebroadcasts the
-    /// authoritative queue either way.
+    /// Deliver every server-owned queued prompt into the running turn NOW: fire-and-forget `x.ai/queue/deliver_now`.
     QueueDeliverNow { session_id: acp::SessionId },
     /// Set the session mode via ACP `session/set_mode`.
     SetSessionMode {
         session_id: acp::SessionId,
         mode_id: acp::SessionModeId,
     },
-    /// Set the session mode twice, sequentially in one task. Two separate
-    /// `SetSessionMode` effects race (each is spawned as its own task), so
-    /// this exists for the one case that needs strict ordering: the
-    /// Shift+Tab ring wrapping past the last agent-identity stop, which
-    /// must restore the base agent before re-entering Plan.
+    /// Set the session mode twice, sequentially in one task.
     SetModeThenMode {
         session_id: acp::SessionId,
         first_mode_id: acp::SessionModeId,
@@ -2097,11 +2058,9 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
         request: String,
-        /// The user typed `/TODO`, so the items go to the top of the list and
-        /// the agent is told to pick them up after its current unit of work.
+        /// The user typed `/TODO`, so the items go to the top of the list.
         urgent: bool,
-        /// Names the tasks-pane row opened for this capture, so the shell's
-        /// progress updates can find it.
+        /// Names the tasks-pane row opened for this capture, so the shell's progress updates can find it.
         capture_id: String,
     },
     /// Request a session recap via the x.ai/recap ext method.
@@ -2217,9 +2176,7 @@ pub enum Effect {
         parent_is_worktree: bool,
         /// Optional client-chosen ID for the forked session (`--session-id` with `--fork-session`).
         new_session_id: Option<String>,
-        /// `/fork --agents`: carry the parent's still-running subagents into
-        /// the fork. Off by default, so the fork opens with the main thread's
-        /// conversation and none of the parent's live agents.
+        /// `/fork --agents`: carry the parent's still-running subagents into the fork.
         include_agents: bool,
     },
     /// Read session display fields from local `summary.json` after load/resume.

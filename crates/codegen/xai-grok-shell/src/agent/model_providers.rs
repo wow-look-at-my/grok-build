@@ -26,13 +26,11 @@ pub struct ModelProviderConfig {
     pub env_key: Option<EnvKeys>,
     pub api_key: Option<String>,
     pub api_backend: Option<ApiBackend>,
-    /// Static request headers; inherited per key, so a model that sets one
-    /// header of its own still gets the rest of the provider's.
+    /// Static request headers; inherited per key, so a model that sets one header of its own still gets the rest.
     pub extra_headers: IndexMap<String, String>,
     /// Query parameters folded into every request URL; inherited per key.
     pub query_params: IndexMap<String, String>,
-    /// Header name to environment variable; inherited per key, resolved at
-    /// client build.
+    /// Header name to environment variable; inherited per key, resolved at client build.
     pub env_http_headers: IndexMap<String, String>,
     pub auth_provider: Option<String>,
     pub auth: Option<xai_grok_config_types::AuthProviderConfig>,
@@ -58,30 +56,19 @@ pub struct ModelProviderConfig {
     pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
     pub min_output_tokens_per_sec: Option<f64>,
     pub ttft_timeout_secs: Option<u64>,
-    /// Ask this provider for its model list. Default on. Turn it off for a
-    /// provider whose listing is too large to pick from.
+    /// Ask this provider for its model list. Default on.
     pub models_autodetect: Option<bool>,
     /// Listing URL for the discovery above. Unset asks `<base_url>/models`.
     pub models_list_url: Option<String>,
-    /// Globs that mark a discovered or configured model of this provider as a
-    /// favorite. Matched against the catalog key and the routing slug.
+    /// Globs that mark a discovered or configured model of this provider as a favorite.
     pub favorite_models: Vec<String>,
-    /// Which shape this provider's model listing has. The default reads an
-    /// OpenAI `{data: [...]}` body. A local runtime's own listing answers the
-    /// questions that one cannot: the real context window, whether the model
-    /// was trained for tools, and whether it is resident right now.
+    /// Which shape this provider's model listing has. The default reads an OpenAI `{data: [...]}` body.
     pub models_list_dialect: Option<ModelsListDialect>,
-    /// Which window a local dialect reports: the one the runner is LOADED at,
-    /// or the model's maximum. Defaults to `Loaded`, because compaction has to
-    /// respect the window inference actually runs under. Ignored by the
-    /// OpenAI dialect, which reports only one number.
+    /// Which window a local dialect reports: the one the runner is LOADED at, or the model's maximum.
     pub context_window_source: Option<ContextWindowSource>,
     /// Suppress the modelinfo price lookup for this provider's models.
-    /// A local runtime charges nothing, and its model names are not in any
-    /// catalog, so the lookup is a request that can only fail.
     pub pricing_lookup_enabled: Option<bool>,
-    /// Extra top-level fields merged into every request body this provider
-    /// serves. Inherited per key, like `extra_headers`.
+    /// Extra top-level fields merged into every request body this provider serves.
     pub extra_body: IndexMap<String, toml::Value>,
     /// Request-body cap of this endpoint; inherited by models that set none of their own.
     pub max_request_bytes: Option<NonZeroU64>,
@@ -94,10 +81,9 @@ pub enum ModelsListDialect {
     /// `GET <base>/models` answering `{ "data": [...] }`.
     #[default]
     Openai,
-    /// `GET <host>/api/tags`, with `POST <host>/api/show` per model for the
-    /// window and capabilities and `GET <host>/api/ps` for residency.
+    /// `GET <host>/api/tags`, with `POST <host>/api/show` per model for the window and capabilities and `GET <host>/api/ps`.
     Ollama,
-    /// `GET <host>/api/v1/models`, which carries all three in one answer.
+    /// `GET <host>/api/v1/models`, which carries all of them in one answer.
     Lmstudio,
 }
 
@@ -109,13 +95,11 @@ impl ModelsListDialect {
     }
 }
 
-/// Which of a local runtime's two windows reaches the catalog.
+/// Which of a local runtime's windows reaches the catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextWindowSource {
-    /// The window the loaded instance is running at. Falls back to the
-    /// maximum when nothing is loaded, because an unloaded model has no
-    /// running window to report.
+    /// The window the loaded instance is running at.
     #[default]
     Loaded,
     /// The model's own maximum, whatever it is loaded at.
@@ -179,9 +163,7 @@ pub(crate) fn apply_builtin_preset(id: &str, provider: &mut ModelProviderConfig)
         provider.models_list_dialect = Some(dialect);
     }
     // A local runtime needs no credential, and a session bearer must never be
-    // sent to one. `entry_for_provider_model` already fails closed on an
-    // unresolved credential; this only keeps the listing fetch from carrying
-    // an Authorization header nothing asked for.
+    // sent to one.
     if provider.pricing_lookup_enabled.is_none() {
         provider.pricing_lookup_enabled = Some(false);
     }
@@ -385,8 +367,7 @@ impl ConfigModelOverride {
             pricing,
             min_output_tokens_per_sec,
             ttft_timeout_secs,
-            // Discovery and favorites describe the provider's LISTING, not a
-            // model's connection. A model inherits neither.
+            // Discovery and favorites describe the provider's LISTING, not a model's connection.
             models_autodetect: _,
             models_list_url: _,
             favorite_models: _,
@@ -441,8 +422,7 @@ impl ConfigModelOverride {
         if merged.reasoning_efforts.is_empty() {
             merged.reasoning_efforts = reasoning_efforts.clone();
         }
-        // Per KEY, not wholesale: a model that sets one header of its own must
-        // not have to restate the provider's others to keep them.
+        // Per KEY, not wholesale: a model that sets one header of its own must not have to restate the provider's others.
         inherit_headers(&mut merged.extra_headers, extra_headers);
         inherit_headers(&mut merged.env_http_headers, env_http_headers);
         for (k, v) in query_params {

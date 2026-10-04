@@ -192,9 +192,7 @@ pub enum SamplingError {
         aborted_at_chunk: Option<u64>,
     },
     /// The model's output rate stayed under the configured floor for a whole
-    /// measurement window. Retryable on the rate gate's own budget, separate
-    /// from the transport budget: the request is fine, the engine serving it
-    /// is not, and a fresh request usually lands on a healthy one.
+    /// measurement window.
     #[error(
         "output rate collapsed to {observed_tokens_per_sec:.1} tok/s over {window_secs}s (floor {floor_tokens_per_sec:.1})"
     )]
@@ -204,7 +202,6 @@ pub enum SamplingError {
         window_secs: u64,
     },
     /// The attempt produced no output within the time-to-first-token limit.
-    /// Retryable on the rate gate's budget, like `OutputRateCollapsed`.
     #[error("no output after {waited_secs}s (time-to-first-token limit {limit_secs}s)")]
     FirstTokenTimeout { waited_secs: u64, limit_secs: u64 },
 }
@@ -395,12 +392,8 @@ impl SamplingError {
         )
     }
 
-    /// The server rejected a replayed `thinking` block's signature, e.g.
-    /// "messages.1.content.0: Invalid `signature` in `thinking` block". The
-    /// signature is verified against the model that minted it, so a
-    /// conversation carried onto another model fails this way on every turn
-    /// until the blocks are dropped. Recovered by stripping reasoning and
-    /// retrying — the signature cannot be re-minted.
+    /// The server rejected a replayed `thinking` block's signature, e.g. "messages.1.content.0: Invalid `signature` in `thinking` block". The signature is verified against the model that minted it, so a conversation carried onto another model fails this way
+    /// on every turn until the blocks are dropped.
     pub fn is_thinking_signature_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -430,17 +423,8 @@ impl SamplingError {
 
     /// The provider rejected the request because the routed model/endpoint
     /// **mandates** reasoning and our body asked for it disabled or omitted,
-    /// e.g. OpenRouter's
-    /// "Reasoning is mandatory for this endpoint and cannot be disabled."
-    ///
-    /// This is a request-content error, not a transient one: re-sending the
-    /// same disabling body always fails. The recovery is to remap the
-    /// requested effort to the lowest non-disabled tier (via
-    /// [`wire_reasoning_effort`]) and retry.
-    ///
-    /// Matches the "reasoning is mandatory" fragment case-insensitively, so
-    /// provider wordings that keep that phrase (regardless of the trailing
-    /// "…for this endpoint and cannot be disabled.") are recognized.
+    /// e.g. OpenRouter's "Reasoning is mandatory for this endpoint and cannot
+    /// be disabled."
     pub fn is_reasoning_mandatory_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -497,11 +481,9 @@ impl SamplingError {
     /// unroutable, so the recovery is the same strip but the cause is the
     /// model choice.
     ///
-    /// Providers disagree on both status and wording — OpenRouter answers 404
-    /// "No endpoints found that support image input", OpenAI answers 400
-    /// "Invalid content type. image_url is only supported by certain models" —
-    /// so this matches a phrase set case-insensitively across the statuses
-    /// providers actually use for it.
+    /// image_url is only supported by certain models" — so this matches a
+    /// phrase set case-insensitively across the statuses providers actually use
+    /// for it.
     pub fn is_image_input_unsupported_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -534,19 +516,9 @@ impl SamplingError {
     }
 
     /// The provider's schema rejected a message-level property it does not
-    /// define, e.g. Cerebras's
-    /// `wrong_api_format: messages.6.assistant.model_id: property
+    /// define, e.g. Cerebras's `wrong_api_format:
+    /// messages.6.assistant.model_id: property
     ///  'messages.6.assistant.model_id' is unsupported`.
-    ///
-    /// This is a request-content error, not a transient one: the property
-    /// lives in conversation *history*, so re-sending the same body fails
-    /// identically on every turn and every retry. The recovery is to drop the
-    /// named properties from the serialized body and retry, which this
-    /// classifier enables by identifying the error.
-    ///
-    /// Narrow on purpose: the provider's own `wrong_api_format` code AND an
-    /// "is unsupported" phrase must both appear, so an unrelated 400 that
-    /// merely mentions a property name is not mistaken for this.
     pub fn is_unsupported_message_property_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -563,8 +535,6 @@ impl SamplingError {
 
     /// Whether this error names `model_id` as an unsupported property, so the
     /// recovery can strip exactly what the provider objected to.
-    /// Case-insensitive; the property name is matched as a whole token so
-    /// `messages.6.assistant.model_id` hits and `model_identifier` does not.
     pub fn names_unsupported_model_id(&self) -> bool {
         self.unsupported_property_names()
             .is_some_and(|names| names.iter().any(|n| n == "model_id"))
@@ -593,11 +563,7 @@ impl SamplingError {
         };
         let mut names = Vec::new();
         for line in message.split('\n') {
-            // Each line is `<path>: property '<path>' is unsupported`, and may
-            // carry a client-side prefix before the path (`API error (status
-            // 400 Bad Request): wrong_api_format: <path>: property ...`).
-            // Anchoring on the `: property '` separator — rather than the
-            // first `:` — keeps the prefix from being read as the path.
+            // Each line is `<path>: property '<path>' is unsupported`.
             let line = line.to_ascii_lowercase();
             if !line.contains("is unsupported") {
                 continue;
@@ -605,8 +571,7 @@ impl SamplingError {
             let Some((path, _)) = line.split_once(": property '") else {
                 continue;
             };
-            // `<path>` may itself carry a `<prefix>: wrong_api_format: ` head;
-            // the property path is the final colon-separated segment.
+            // `<path>` may itself carry a `<prefix>: wrong_api_format: ` head.
             let path = path.rsplit(':').next().unwrap_or(path);
             // `messages.6.assistant.model_id` -> the final dot-segment.
             let Some(name) = path.trim().rsplit('.').next() else {
@@ -617,18 +582,13 @@ impl SamplingError {
                 names.push(name.to_owned());
             }
         }
-        // An unsupported-property error that names nothing is still this error
-        // class (caller strips what it knows how to strip); return an empty
-        // list rather than `None` so the class is not lost.
+        // An unsupported-property error that names nothing is still this error class (caller strips what it knows how to strip).
         Some(names)
     }
 
     /// The response stream died part-way through: the SSE connection dropped,
     /// or reqwest could not decode the body it was reading ("error decoding
-    /// response body"). The request itself is sound, so a fresh one usually
-    /// lands. The sampler gives this class its own retry budget — see
-    /// `xai_grok_sampler::STREAM_INTERRUPT_MAX_RETRIES` — so a network blip
-    /// never spends the transport budget the next 5xx needs.
+    /// response body").
     pub fn is_stream_interrupted(&self) -> bool {
         match self {
             SamplingError::EventStreamError(_) => true,
@@ -886,10 +846,8 @@ pub fn status_user_message(status: StatusCode) -> String {
     status_copy(status, "The server", "the server")
 }
 
-/// As [`status_user_message`], naming the service that answered.
-///
-/// Every provider shares this copy. So the name comes from the request, never
-/// from a constant: a fixed name blames a service the request never reached.
+/// As [`status_user_message`], naming the service that answered. Every
+/// provider shares this copy.
 pub fn status_user_message_from(status: StatusCode, service: &str) -> String {
     status_copy(status, service, service)
 }
@@ -989,13 +947,11 @@ pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String
     }
 }
 
-/// As [`user_facing_api_error_message`], naming the endpoint on a 404.
 ///
-/// A 404 says the URL that was called does not exist there, so the URL is the
-/// whole diagnosis -- and it is the one thing the caller cannot see. Servers
-/// answer it with an empty or contentless body, which leaves the bare message
-/// ("Request failed (HTTP 404).") describing nothing a user can act on. Other
-/// statuses are about the request, not the address, and keep their message.
+/// Servers answer it with an empty or contentless body, which leaves the bare
+/// message ("Request failed (HTTP 404).") describing nothing a user can act
+/// on. Other statuses are about the request, not the address, and keep their
+/// message.
 pub fn api_error_message_for_endpoint(status: StatusCode, bytes: &[u8], endpoint: &str) -> String {
     let host = reqwest::Url::parse(endpoint)
         .ok()
@@ -1130,7 +1086,6 @@ pub fn is_retryable_reqwest(err: &reqwest::Error) -> bool {
 
     // A decode failure is a body that stopped arriving mid-read, not a
     // deterministic fault: reqwest renders it "error decoding response body".
-    // Calling it fatal ends a turn on one network blip.
     if err.is_decode() {
         return true;
     }
@@ -1671,9 +1626,9 @@ mod tests {
         );
     }
 
-    /// A 404 must name the URL. Without it the message is "Request failed
-    /// (HTTP 404)." -- true, and no help at all in telling a wrong base URL
-    /// from a wrong path from a model that is not served there.
+    /// Without it the message is "Request failed (HTTP 404)." -- true, and
+    /// no help at all in telling a wrong base URL from a wrong path from a
+    /// model that is not served there.
     #[test]
     fn a_404_names_the_endpoint_and_other_statuses_do_not() {
         let url = "https://api.example.com/v1/responses";
@@ -1684,8 +1639,6 @@ mod tests {
             "a 404 must name the endpoint that does not exist: {not_found}"
         );
 
-        // An empty body is the common 404 shape, and the status text alone
-        // carries no address.
         assert!(
             !user_facing_api_error_message(StatusCode::NOT_FOUND, b"").contains(url),
             "precondition: the plain message has no URL to begin with"
@@ -2098,9 +2051,8 @@ mod tests {
     }
 
     /// The reported trap: OpenRouter's "Reasoning is mandatory for this
-    /// endpoint and cannot be disabled." must be recognized as a
-    /// reasoning-mandatory signal, not left as an opaque 400. The message
-    /// fragment is matched case-insensitively.
+    /// endpoint and cannot be disabled." The message fragment is matched
+    /// case-insensitively.
     #[test]
     fn openrouter_reasoning_mandatory_400_is_detected() {
         let err = SamplingError::Api {
@@ -2148,8 +2100,6 @@ mod tests {
 
     #[test]
     fn reasoning_mandatory_requires_the_phrase() {
-        // A 400 that disables reasoning but is not the mandatory phrase must
-        // not be misclassified.
         let err = SamplingError::Api {
             status: StatusCode::BAD_REQUEST,
             message: "reasoning_effort must be one of [minimal, low, medium]".into(),
@@ -2177,9 +2127,6 @@ mod tests {
         );
     }
 
-    /// The reported trap: OpenRouter answers a vision-less model with a 404,
-    /// which is otherwise a fatal status, so the images stayed in history and
-    /// every retry — including `/goal resume` — hit the same wall.
     #[test]
     fn image_input_unsupported_openrouter_404_detected() {
         let err = SamplingError::Api {
@@ -2228,8 +2175,6 @@ mod tests {
         }
     }
 
-    /// The other 404 this code path sees is a wrong model name, which stripping
-    /// images would not fix — it must stay fatal.
     #[test]
     fn image_input_unsupported_ignores_unrelated_errors() {
         for (status, message) in [
@@ -2559,10 +2504,8 @@ mod tests {
         );
     }
 
-    /// Narrowness: the classifier requires the provider's own code AND the
-    /// "is unsupported" phrase. An unrelated 400 that merely mentions a
-    /// property must not be caught — otherwise a genuine request bug would be
-    /// silently retried with fields stripped.
+    /// Narrowness: the classifier requires the provider's own code AND the "is
+    /// unsupported" phrase.
     #[test]
     fn unrelated_400_mentioning_a_property_is_not_matched() {
         for message in [

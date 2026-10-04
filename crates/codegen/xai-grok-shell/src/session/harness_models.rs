@@ -1,11 +1,4 @@
 //! Every harness model slot, resolved once when the session actor is built.
-//!
-//! A consumer asks for its slot by id and gets the model the user chose, or
-//! `None` when the slot inherits the session model. Resolution reads the
-//! environment and `config.toml`, so it happens at build time and not on the
-//! turn path.
-//!
-//! See `xai_grok_models::slots` for the slot table itself.
 
 use std::collections::HashMap;
 

@@ -1832,7 +1832,6 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
             );
         }
         // Both setters clamp, so the value has to be in range to move at all.
-        // Each value differs from its default: 25 vs 15, 30 vs 10, 4 vs 2.
         "min_output_tokens_per_sec" => {
             let _ = dispatch(Action::SetMinOutputTokensPerSec(25), app);
         }
@@ -2371,9 +2370,7 @@ fn set_show_thinking_blocks_applies_persists_and_rolls_back() {
 }
 #[test]
 fn set_thinking_summaries_persists_the_ui_key_and_rolls_back() {
-    // The row's only state is `[ui].thinking_summaries`: the shell resolves it
-    // when a session spawns, so there is no live cache to update and nothing to
-    // re-render. What must be right is the persisted value and the rollback.
+    // The row's only state is `[ui].thinking_summaries`: the shell resolves it when a session spawns.
     let mut app = test_app_with_agent();
     let shipped = app.current_ui.thinking_summaries_enabled();
     assert!(shipped, "the feature ships ON");

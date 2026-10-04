@@ -4800,8 +4800,7 @@ fn resolve_trace_upload_disabled_when_telemetry_off_despite_remote_flag() {
 #[test]
 #[serial]
 fn resolve_trace_upload_explicit_config_cannot_reenable() {
-    // Trace upload is hard-disabled: neither explicit config nor a
-    // requirements pin may force it back on.
+    // Trace upload is hard-disabled: neither explicit config nor a requirements pin may force it back on.
     unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
     unsafe { std::env::remove_var("GROK_TELEMETRY_TRACE_UPLOAD") };
     let mut cfg = Config::default();
@@ -4839,8 +4838,7 @@ fn trace_upload_decision_debug_reports_winning_source() {
     assert_eq!(d["telemetry_mode"], serde_json::json!("false"));
     assert_eq!(d["in_remote_trace_upload_enabled"], serde_json::json!(true));
     assert_eq!(d["has_remote_settings"], serde_json::json!(true));
-    // Hard-disable: even explicit config cannot flip the decision; the
-    // raw input is still reported for debugging.
+    // Hard-disable: even explicit config cannot flip the decision; the raw input is still reported for debugging.
     cfg.telemetry.trace_upload = Some(true);
     let d = cfg.trace_upload_decision_debug();
     assert_eq!(d["trace_upload"], serde_json::json!(false));
@@ -4850,8 +4848,7 @@ fn trace_upload_decision_debug_reports_winning_source() {
 #[test]
 #[serial]
 fn resolve_telemetry_mode_hard_disabled_despite_env_config_and_remote() {
-    // Telemetry is hard-disabled: env, explicit config, a requirements
-    // pin, and remote settings must all be ignored.
+    // Telemetry is hard-disabled: env, explicit config, a requirements pin, and remote settings must all be ignored.
     unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "true") };
     let mut cfg = Config::default();
     cfg.features.telemetry = Some(TelemetryMode::Enabled);
@@ -5845,8 +5842,7 @@ fn resolve_goal_skeptic_models_no_pool_inherits() {
     assert_eq!(r.source, ConfigSource::Default);
 }
 /// Every harness model slot parses from `[models]` and answers through
-/// [`Config::resolve_harness_model`]. This is what makes the slot table
-/// and the config schema one thing rather than two that drift.
+/// [`Config::resolve_harness_model`].
 #[test]
 fn every_harness_model_slot_parses_from_the_models_table() {
     let body: String = xai_grok_models::HARNESS_MODEL_SLOTS
@@ -8692,12 +8688,7 @@ fn resolve_model_list_inherits_context_window_from_default_when_prefetched_has_f
 }
 #[test]
 fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
-    // A `[model.*]` config entry that shares a routing slug with a
-    // `/v1/models` listing entry (Synthetic's `syn:large:text`, whose
-    // `context_length` is read as `context_window`) must adopt the
-    // listing's real window even though the config override did not set
-    // `context_window` — it lands at DEFAULT_CONTEXT_WINDOW and the slug
-    // backfill promotes it. Regression for the Synthetic provider.
+    // A `[model.*]` config entry that shares a routing slug with a `/v1/models` listing entry.
     let mut cfg = Config::default();
     cfg.config_models.insert(
         "synthetic".to_owned(),
@@ -8708,8 +8699,6 @@ fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
             ..Default::default()
         },
     );
-    // The prefetched `/v1/models` entry for the model carries the real
-    // context (524288 = `context_length`) under its own routing slug.
     let mut prefetched = IndexMap::new();
     prefetched.insert(
         "syn:large:text".to_owned(),

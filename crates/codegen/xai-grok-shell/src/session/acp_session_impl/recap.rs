@@ -136,8 +136,7 @@ impl SessionActor {
             req_id: format!("xai-btw-{}", uuid::Uuid::new_v4()),
         });
 
-        // conversation_collect is one-shot (no sampler-actor retry); /btw adds
-        // its own bounded transient-failure retry (policy + predicate above).
+        // conversation_collect is one-shot (no sampler-actor retry).
         let attempts = std::cell::Cell::new(1u32);
         let result = collect_aux_call(&sampling_client, &base_request, "btw", |e, backoff| {
             attempts.set(attempts.get() + 1);

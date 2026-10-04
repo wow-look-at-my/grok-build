@@ -126,9 +126,7 @@ fn open_tool_loop_lost_its_thinking(req: &ConversationRequest, plan: &ThinkingRe
 
 /// The Claude generation a model id names, as `(major, minor)`. Both spellings
 /// the family has used are read: `claude-haiku-4-5` and `claude-3-7-sonnet`,
-/// each optionally behind a gateway prefix and ahead of a dated snapshot. The
-/// first one- or two-digit component is the major, which is what keeps a
-/// snapshot stamp from being read as a version.
+/// each optionally behind a gateway prefix and ahead of a dated snapshot.
 fn claude_version(model: &str) -> Option<(u32, u32)> {
     let tail = model.to_ascii_lowercase();
     let tail = tail.split("claude").nth(1)?;
@@ -146,20 +144,13 @@ fn claude_version(model: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
-/// Which `thinking` dialect a model speaks. Claude 4.6 replaced
-/// `{"type":"enabled","budget_tokens":N}` with `{"type":"adaptive"}` plus
-/// `output_config.effort`, and each generation rejects the other's spelling
-/// outright ("Input tag 'adaptive' ... does not match any of the expected
-/// tags"). A name that is not a Claude at all is a gateway's own model, which
-/// this cannot speak for: it keeps the request it has always been sent.
+/// Which `thinking` dialect a model speaks.
 fn speaks_adaptive_thinking(model: &str) -> bool {
     claude_version(model).is_none_or(|version| version >= (4, 6))
 }
 
 /// The `budget_tokens` a pre-4.6 Claude sizes its thinking with, standing in
-/// for the effort word its dialect has no room for. The API's floor is 1024 and
-/// the budget must leave the answer room under `max_tokens`, so a ceiling that
-/// cannot house the floor yields no thinking rather than a 400.
+/// for the effort word its dialect has no room for.
 fn thinking_budget(effort: crate::ReasoningEffort, max_tokens: u32) -> Option<u32> {
     use crate::ReasoningEffort as Effort;
 
@@ -270,8 +261,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     let mut dropped_foreign_thinking = 0usize;
     let mut converted_foreign_thinking = 0usize;
     let plan = replay_plan(req);
-    // Thinking off for this request takes its blocks with it: a block sent
-    // without the top-level config is rejected in turn.
+    // Thinking off for this request takes its blocks with it.
     let thinking_off = open_tool_loop_lost_its_thinking(req, &plan);
 
     for (idx, item) in req.items.iter().enumerate() {
@@ -456,11 +446,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         ConversationToolChoice::None => ToolChoiceParam::Auto, // ToolChoiceParam has no none variant, so fall back to the default
     });
 
-    // The mandatory-reasoning remap happens BEFORE the Messages mapping: for
-    // a reasoning-mandatory target, `None`/`Minimal` must not be omitted from
-    // the wire, so they are lifted to the lowest supported non-disabled
-    // effort first. A request for such a target always carries
-    // `output_config.effort` (and its auto-paired `thinking`).
+    // The mandatory-reasoning remap happens BEFORE the Messages mapping.
     let effective_effort = wire_reasoning_effort(req.reasoning_mandatory, req.reasoning_effort);
     let effort = effective_effort
         .map(|e| e.to_messages_api())
@@ -501,8 +487,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         budget.map(|budget_tokens| crate::messages::ThinkingConfig::Enabled { budget_tokens })
     };
 
-    // `output_config.effort` is 4.6-and-later too; an older Claude 400s on it,
-    // and its `thinking` budget already carries the same intent.
+    // `output_config.effort` is 4.6-and-later too.
     let effort = effort.filter(|_| adaptive);
 
     let output_config = if effort.is_some() || format.is_some() {

@@ -71,11 +71,9 @@ struct Inner {
     model_switch_watch: tokio::sync::watch::Sender<u64>,
     /// Progress of the first real-catalog load, watched by bounded waits.
     catalog_progress: tokio::sync::watch::Sender<CatalogProgress>,
-    /// False while the `[model_providers.*]` listings are in flight. A session
-    /// built before they land picks its model from a catalog that lacks them.
+    /// False while the `[model_providers.*]` listings are in flight.
     provider_discovery_settled: tokio::sync::watch::Sender<bool>,
-    /// Set once the user explicitly picks a model (`/model`); guards the
-    /// first-catalog reselect from clobbering that choice.
+    /// Set once the user explicitly picks a model (`/model`).
     user_selected_model: AtomicBool,
 }
 
@@ -1051,8 +1049,7 @@ impl ModelsManager {
 
     /// Wipe in-memory state so a previous identity's catalog doesn't leak.
     fn clear(&self) {
-        // The additive provider's models are not this identity's to wipe, so
-        // they are re-merged into the emptied catalog.
+        // The additive provider's models are not this identity's to wipe.
         let cfg = self.inner.cfg.read().clone();
         let models = self.with_additive_catalogs(&cfg, IndexMap::new());
         {

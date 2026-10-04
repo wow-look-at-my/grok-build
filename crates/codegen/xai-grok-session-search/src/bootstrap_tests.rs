@@ -395,19 +395,8 @@ async fn test_concurrent_gates_single_flight() {
 
     let a_ran = progress_a.total.load(Ordering::Relaxed) > 0;
     let b_ran = progress_b.total.load(Ordering::Relaxed) > 0;
-    // At least one gate must do the work; both is legal and not a single-flight
-    // failure. A barrier starts these together but cannot keep them overlapping:
-    // on a loaded machine the first gate can claim, reindex two tiny sessions,
-    // and release before the second gate's FIRST claim attempt. That second gate
-    // has then seen no peer, and a launch's first claim deliberately ignores an
-    // existing marker (it owes pruning and skipped retries), so it reindexes
-    // too. The lease only serializes gates that actually overlap. Asserting
-    // "exactly one" here asserted the scheduler, not the product, and failed on
-    // CI roughly one run in five.
-    //
-    // The property that must hold — a gate that meets a live claim never
-    // reindexes behind it — is asserted deterministically in
-    // `test_gate_does_not_reindex_behind_a_live_peer_claim`.
+    // At least one gate must do the work; both is legal and not a
+    // single-flight failure.
     assert!(
         a_ran || b_ran,
         "some gate must reindex, a_total={}, b_total={}",
@@ -416,9 +405,9 @@ async fn test_concurrent_gates_single_flight() {
     );
 }
 
-/// The single-flight guarantee itself, with no dependence on how the two gates
+/// The single-flight guarantee itself, with no dependence on how both gates
 /// interleave: while a peer's claim is live, a launch gate must leave the index
-/// alone. If the lease stopped being honoured, two processes would reindex the
+/// alone. If the lease stopped being honoured, processes would reindex the
 /// shared database at once — this goes red, where the racing test above cannot
 /// be relied on to.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -429,8 +418,7 @@ async fn test_gate_does_not_reindex_behind_a_live_peer_claim() {
     let db_path = search_db_path(&root);
     with_search_index(&db_path, |_| Ok(())).unwrap();
 
-    // A peer holds the claim for the whole call — no release, so nothing about
-    // this test turns on when the release lands.
+    // A peer holds the claim for the whole call — no release.
     let peer = ClaimToken::new();
     assert!(
         claim_bootstrap_lease(&db_path, &peer, TEST_TIMING.lease)
@@ -460,8 +448,7 @@ async fn test_gate_does_not_reindex_behind_a_live_peer_claim() {
         "the peer's claim must survive the gate that waited on it"
     );
 
-    // The peer's claim is still the peer's: releasing with its token works, so
-    // the gate never stole and re-stamped the lease under it.
+    // The peer's claim is still the peer's: releasing with its token works.
     release_bootstrap_claim(&db_path, &peer).await;
     assert!(!has_bootstrap_claim(&db_path).unwrap());
 }

@@ -22,8 +22,7 @@ pub(crate) const MAX_THOUGHTS_WIDTH_MAX: i64 = 500;
 /// Registry key for `max_thoughts_width`; it is shared between the registry definition and the live-wrap-preview gate in the int stepper.
 pub(crate) const MAX_THOUGHTS_WIDTH_KEY: &str = "max_thoughts_width";
 
-// ---------------------------------------------------------------------------
-// Int bounds for the output-rate floor.
+// --------------------------------------------------------------------------- Int bounds for the output-rate floor.
 const U32_FIELD_MAX: i64 = u32::MAX as i64;
 pub(crate) const OUTPUT_RATE_MAX_RETRIES_MIN: i64 = -1;
 pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MIN: i64 = 0;
@@ -51,10 +50,9 @@ pub(crate) const OUTPUT_RATE_FLOOR_CHILDREN: &[&str] = &[
 // ---------------------------------------------------------------------------
 // Theme choice catalogs.
 //
-// Canonical names MUST match `ThemeKind::display_name()`.
-// Shared by `theme`, `auto_dark_theme`, and `auto_light_theme`;
-// auto-* sub-pickers drop "auto" to avoid circular reference.
-// Bounded by `MAX_PICKER_CHOICES`.
+// Canonical names MUST match `ThemeKind::display_name()`. Shared by `theme`,
+// `auto_dark_theme`, and `auto_light_theme`; auto-* sub-pickers drop "auto"
+// to avoid circular reference. Bounded by `MAX_PICKER_CHOICES`.
 // ---------------------------------------------------------------------------
 
 /// Full theme catalog including the "auto" meta-variant; only `theme` uses it.
@@ -667,8 +665,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             },
             restart_required: false,
         },
-        // SHARED. `[ui].min_output_tokens_per_sec`, `Option<u32>` widened to
-        // `i64`. 0 is the off state.
+        // SHARED. `[ui].min_output_tokens_per_sec`, `Option<u32>` widened to `i64`.
         SettingMeta {
             key: "min_output_tokens_per_sec",
             category: SettingCategory::Agent,
@@ -770,8 +767,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             },
             restart_required: false,
         },
-        // SHARED. `[ui].ttft_timeout_secs`, `Option<u32>` widened to `i64`. 0 is
-        // the off state.
+        // SHARED. `[ui].ttft_timeout_secs`, `Option<u32>` widened to `i64`.
         SettingMeta {
             key: "ttft_timeout_secs",
             category: SettingCategory::Agent,
@@ -821,9 +817,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
         },
         SettingMeta {
-            // Persisted key stays `simple_mode`; the user-facing label
-            // distinguishes the PROMPT vim-mode (this setting) from the
-            // scrollback `vim_mode` keybindings below.
+            // Persisted key stays `simple_mode`; the user-facing label distinguishes the PROMPT vim-mode (this setting).
             key: "simple_mode",
             category: SettingCategory::Appearance,
             owner: SettingOwner::Shared,
