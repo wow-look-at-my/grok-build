@@ -1,11 +1,4 @@
 //! File search state: owns the fuzzy matcher daemon, results, and dropdown state.
-//!
-//! This is the core engine for @-completion. It manages:
-//! - A background [`FuzzyFileMatcherDaemon`] that walks the directory tree
-//! - The current [`AtContext`] (parsed from prompt text and cursor)
-//! - Cached fuzzy match results (polled on tick)
-//! - Dropdown selection state (selected index, scroll offset)
-//! - Text replacement logic when a result is accepted
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -53,11 +46,8 @@ fn accept_text(path: &str, at_end: bool) -> String {
 /// File search state for @-completion.
 pub struct FileSearchState {
     /// Directory the matcher walks.
-    /// Mirrors the daemon's root (otherwise moved into its worker thread) so callers can see where `@`-completion is currently pointed.
     root: PathBuf,
     /// Background fuzzy matcher daemon, built lazily on first @-use.
-    /// Eager construction spawns the nucleo pool and walker threads even in sessions that never open @-search.
-    /// Deferring it moves that thread spawn, and its EAGAIN risk, to first use rather than removing it.
     daemon: Option<FuzzyFileMatcherDaemon>,
     /// Test-only count of daemon builds, to prove reuse (no drop-and-rebuild).
     #[cfg(test)]
@@ -70,16 +60,13 @@ pub struct FileSearchState {
     context: Option<AtContext>,
     /// Selected index in the dropdown list (keyboard-driven).
     selected: usize,
-    /// Hovered index in the dropdown list (mouse-driven).
-    /// `None` when the mouse is not over any item.
+    /// Hovered index in the dropdown list (mouse-driven). `None` when the mouse is not over any item.
     hovered: Option<usize>,
     /// Scroll offset for the dropdown list.
     scroll_offset: usize,
-    /// Floor for accepted result generations: the stale-result fence. Rises monotonically and is never
-    /// lowered.
+    /// Floor for accepted result generations: the stale-result fence. Rises monotonically and is never lowered.
     min_generation: usize,
     /// Directory being drilled into; keeps the @-token alive when its name has whitespace (`my dir`).
-    /// Self-validating: applies only while the path matches.
     drill_prefix: Option<String>,
 }
 
@@ -104,8 +91,6 @@ impl FileSearchState {
     }
 
     /// Point @-completion at a new tree (e.g. after worktree creation).
-    ///
-    /// Drops any built daemon; the next @-use rebuilds it lazily against `root`.
     pub fn retarget(&mut self, root: &Path) {
         *self = Self::new(root);
     }
@@ -346,14 +331,13 @@ impl FileSearchState {
         let ctx = self.context.as_ref()?;
         let res = self.results.topk.get(self.selected)?;
 
-        // Dir-only contract: this always appends `/`, so it is valid only for a directory chosen in dir mode
-        // Enforce it here so a file-selection caller can never emit `some/file.rs/`
+        // Dir-only contract: this always appends `/`, so it is valid only for
+        // a directory chosen in dir mode Enforce it here.
         if !res.is_dir || !ctx.is_dir_mode() {
             return None;
         }
 
-        // Replace only the path portion of the @-token (preserving `@` and any hidden-mode `!` marker)
-        // See `AtContext::path_range`
+        // Replace only the path portion of the @-token (preserving `@` and any hidden-mode `!` marker).
         let range = ctx.path_range();
         let path = normalize_display_path(&res.path.to_string()).to_owned();
         let at_end = range.end == src.len();
@@ -362,11 +346,10 @@ impl FileSearchState {
         let no_op = src.get(range.clone()) == Some(accept_text(&path, false).as_str());
         let text = accept_text(&path, no_op && at_end);
 
-        // Cursor sits just past the emitted text (after the trailing `/`).
+        // Cursor sits past the emitted text (after the trailing `/`).
         let mut cursor = range.start + text.len();
-        // A committed dir that is not at the prompt end keeps its existing terminator (whitespace, `,`, or `;`, possibly multibyte)
-        // See `context::detect`
-        // Step past that one char so typing resumes after the directory
+        // A committed dir that is not at the prompt end keeps its existing
+        // terminator (whitespace, `,`, or `;`, possibly multibyte).
         if no_op && !at_end {
             cursor += src
                 .get(range.end..)
@@ -516,7 +499,6 @@ mod tests {
         assert!(state.daemon_is_built());
         assert!(state.context().is_some());
 
-        // A query edit stays in @-mode and reuses the same daemon: the build count stays at 1, proving no drop-and-rebuild
         assert_eq!(state.daemon_build_count(), 1);
         state.update_context("@alpha_marker", "@alpha_marker".len());
         assert!(state.daemon_is_built());

@@ -1,4 +1,4 @@
-//! `x.ai/session/rename` ext-handler coverage: resident `ManualTitleRenamed` enqueue, non-resident skip, and control-char stripping at the boundary.
+//! `x.ai/session/rename` ext-handler coverage: resident `ManualTitleRenamed` enqueue, non-resident skip.
 
 use agent_client_protocol as acp;
 use xai_grok_test_support::EnvGuard;
@@ -254,7 +254,7 @@ async fn rename_counts_scalars_after_control_strip() {
     seed_session(&info).await;
 
     let agent = build_minimal_agent_for_tests();
-    // 100 thumbs + one ESC: after strip this is exactly the cap.
+    // Thumbs + one ESC: after strip this is exactly the cap.
     let raw = format!("\u{1b}{}", "👍".repeat(MAX_TITLE_SCALARS));
     let resp = drive_rename(&agent, sid.0.as_ref(), &raw, cwd)
         .await
@@ -334,8 +334,6 @@ async fn rename_rejects_title_over_max_bytes_before_strip() {
     let before = seeded.display_title().to_owned();
 
     let agent = build_minimal_agent_for_tests();
-    // 65 C0 + 100 4-byte scalars = MAX_TITLE_BYTES + 1, but only 100 scalars after strip; the scalar cap would accept this
-    // Isolates the byte gate: 64 C0 + 100 thumbs is the slack accept below
     let too_long = format!("{}{}", "\u{1b}".repeat(65), "👍".repeat(MAX_TITLE_SCALARS));
     assert_eq!(too_long.len(), MAX_TITLE_BYTES + 1);
     assert_eq!(
@@ -357,7 +355,6 @@ async fn rename_rejects_title_over_max_bytes_before_strip() {
         .unwrap();
     assert_eq!(after.display_title(), before);
 
-    // Slack: 64 C0 bytes + 100 4-byte scalars still sit on the ceiling.
     let slack = format!("{}{}", "\u{1b}".repeat(64), "👍".repeat(MAX_TITLE_SCALARS));
     assert_eq!(slack.len(), MAX_TITLE_BYTES);
     let resp = drive_rename(&agent, sid.0.as_ref(), &slack, cwd)

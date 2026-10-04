@@ -1,10 +1,4 @@
 //! WebSocket server for remote agent connections.
-//!
-//! Remote TUI clients connect here to a grok agent running on a different machine.
-//!
-//! The agent persists across WebSocket reconnections: a single MvpAgent instance is created on first connection and reused for all later ones.
-//! Session actors (and any in-flight prompts) therefore survive client disconnects.
-//! When a client reconnects and loads an existing session, ongoing work continues to stream to the new connection.
 
 use std::cell::RefCell;
 use std::net::SocketAddr;
@@ -43,9 +37,7 @@ use crate::agent::remote_config::{ModelFetchAuth, prefetch_models_blocking};
 
 use indexmap::IndexMap;
 
-/// Swappable destination for the relay task.
-/// Points at the current ACP connection's gateway sender.
-/// When no client is connected, the value is `None` and outbound messages are silently dropped.
+/// Swappable destination for the relay task. Points at the current ACP connection's gateway sender.
 type RelayDest = Rc<RefCell<Option<mpsc::UnboundedSender<AcpClientMessage>>>>;
 
 const MAX_BUFFER_SIZE: usize = 8 * 1024 * 1024;
@@ -54,7 +46,6 @@ const KEEPALIVE_INTERVAL_SECS: u64 = 15;
 /// Configuration for the agent WebSocket server.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
-    /// Address to bind the server to
     pub bind_addr: SocketAddr,
     /// Secret token for client authentication (required)
     pub secret: String,
@@ -65,10 +56,8 @@ struct ServerState {
     agent_config: AgentConfig,
     secret: String,
     /// Persistent agent slot.
-    /// Lazily initialised on first connection; protected by a tokio Mutex so the axum handler (which is `Send`) can acquire it.
     agent_slot: tokio::sync::Mutex<AgentSlot>,
     /// Monotonic id for each boot attempt.
-    /// Reclaim/fail/drop must match it or a stale waiter can clobber a newer `Booting` and spawn a second agent.
     boot_gen: AtomicU64,
 }
 
@@ -222,8 +211,8 @@ async fn reclaim_abandoned_boot(
     }
 }
 
-/// Best-effort revert of `Booting` if `ensure_persistent_agent` is dropped before it stores `Up` or `Down`.
-/// `try_lock` is enough: a waiter that holds the mutex will see the dropped sender and reclaim.
+/// Best-effort revert of `Booting` if `ensure_persistent_agent` is dropped
+/// before it stores `Up` or `Down`.
 #[must_use]
 struct BootSlotGuard<'a> {
     slot: &'a tokio::sync::Mutex<AgentSlot>,
@@ -572,9 +561,6 @@ fn setup_acp_connection(
                 break;
             }
         }
-        // WS disconnected: the simplex writer is dropped, causing `handle_io` to complete
-        // The GatewayReceiver for this connection will also stop
-        // But the MvpAgent and session actors stay alive, ready for the next connection
     });
 
     tokio::task::spawn_local(async move {

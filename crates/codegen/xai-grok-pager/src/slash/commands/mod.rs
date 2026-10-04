@@ -1,4 +1,4 @@
-//! Each command lives in its own submodule. This module re-exports command structs and provides `builtin_commands()` for registry construction.
+//! Each command lives in its own submodule.
 pub mod always_approve;
 pub mod announcements;
 pub mod auto;
@@ -167,7 +167,7 @@ mod tests {
     use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
     use crate::slash::registry::CommandRegistry;
     use agent_client_protocol as acp;
-    /// Build a ModelState with two models for testing.
+    /// Build a ModelState with models for testing.
     fn sample_models() -> ModelState {
         let mut models = ModelState::default();
         let id_fast = acp::ModelId::new(Arc::from("grok-4.5"));

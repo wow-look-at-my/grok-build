@@ -19,9 +19,7 @@ pub(crate) fn find_worktree_git_dir(worktree_path: &Path) -> Result<PathBuf> {
             .ok_or_else(|| anyhow::anyhow!("invalid .git file format: {}", content.trim()))?
             .trim();
 
-        // git may write a relative pointer. Resolve against the worktree dir —
-        // otherwise index lookups join it against the CWD and break (mirrors
-        // `read_worktree_gitdir` in api.rs).
+        // git may write a relative pointer.
         let raw_path = Path::new(raw);
         let resolved = if raw_path.is_relative() {
             worktree_path.join(raw_path)
@@ -76,9 +74,7 @@ mod tests {
 
     #[test]
     fn test_find_worktree_git_dir_resolves_relative_gitdir() {
-        // A worktree `.git` file can hold a RELATIVE `gitdir:` pointer; it must
-        // resolve against the worktree dir, not be returned as-is (which would
-        // break index copy for relative-gitdir worktrees).
+        // A worktree `.git` file can hold a RELATIVE `gitdir:` pointer.
         let temp = TempDir::new().unwrap();
         let worktree = temp.path().join("wt");
         std::fs::create_dir_all(&worktree).unwrap();

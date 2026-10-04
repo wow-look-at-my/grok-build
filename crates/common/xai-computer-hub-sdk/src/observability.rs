@@ -1,18 +1,4 @@
 //! Server-side session event emitter.
-//!
-//! [`ObservabilityBridge`] is a thin facade for emitting session-level
-//! events (turn lifecycle, phase changes) to the connected server. Tool-call events
-//! (`ToolCallStarted` / `ToolCallCompleted`) are emitted automatically
-//! by [`crate::harness::ToolHarness::call`] and do not need the bridge.
-//!
-//! The caller is responsible for also emitting to the local sink
-//! (`EventTracker` in the shell, `EventProcPublisher` in the
-//! chat service) — the bridge handles only the server leg.
-//!
-//! This separation is deliberate: each sampler's local sink has a
-//! different type and API surface.  Forcing a trait/callback into the
-//! bridge would add abstraction overhead without benefit, since the
-//! call sites already have the local sink in scope.
 
 use std::sync::Arc;
 
@@ -20,16 +6,8 @@ use xai_tool_protocol::{SessionId, session_event::SessionEvent};
 
 use crate::harness::ToolHarness;
 
-/// Emits [`SessionEvent`]s to the connected server as `ToolNotificationFrame` custom
-/// notifications with `kind = "session_event"`.
-///
-/// No-ops gracefully when no harness is present (i.e. `harness` is
-/// `None`).  Server notification failures are silently ignored — the bridge
-/// is fire-and-forget so server issues never affect the sampler's main loop.
-///
-/// Callers MUST also emit to their local sink separately:
-/// - Shell: `self.events.emit(Event::...)`
-/// - Chat service: `publisher.publish_agent_event(...)`
+/// Emits [`SessionEvent`]s to the connected server as `ToolNotificationFrame`
+/// custom notifications with `kind = "session_event"`.
 pub struct ObservabilityBridge {
     harness: Option<Arc<ToolHarness>>,
     /// Retained for future payload enrichment and logging.
@@ -54,7 +32,7 @@ impl ObservabilityBridge {
         self.harness.is_some()
     }
 
-    /// Emit a session event to the connected server.  No-ops if no harness is present.
+    /// Emit a session event to the connected server. No-ops if no harness is present.
     ///
     /// Delegates frame construction + wire dispatch to
     /// [`ToolHarness::emit_session_event`] so the SDK keeps a single

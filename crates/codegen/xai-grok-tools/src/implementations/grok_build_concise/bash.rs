@@ -22,8 +22,8 @@ fn annotations(bash: &BashOutput) -> String {
         ));
     }
     if let Some(signal) = &bash.signal {
-        // Synthetic kill reasons are conveyed by the `Exit code: killed (reason)`
-        // header — suppress the redundant `[signal=…]` / `[timeout]` here.
+        // Synthetic kill reasons are conveyed by the `Exit code: killed
+        // (reason)` header.
         if signal.parse::<KillReason>().is_err() {
             s.push_str(&format!(" [signal={}]", signal));
         }
@@ -74,8 +74,7 @@ fn format_concise_background_prompt(bash: &BashOutput) -> String {
     )
 }
 
-/// Concise variant of `BashTool`. Delegates to `BashTool::run()`, then overwrites
-/// `output_for_prompt` with the concise format. The `concise` concept lives entirely in this file.
+/// Concise variant of `BashTool`.
 #[derive(Debug, Default)]
 pub struct BashConciseTool;
 
@@ -256,9 +255,7 @@ mod tests {
 
     #[test]
     fn no_double_header_after_default_prebake() {
-        // Simulate the real flow: BashTool pre-bakes DEFAULT prompt into
-        // output_for_prompt, then BashConciseTool overwrites with concise.
-        // to_prompt_format() is a passthrough — it must NOT add another header.
+        // Simulate the real flow: BashTool pre-bakes DEFAULT prompt into output_for_prompt, then BashConciseTool overwrites.
         let mut bash = make_bash(0, "hello world\n");
         // Pre-bake DEFAULT (what BashTool::run() does)
         bash.output_for_prompt =

@@ -1,6 +1,4 @@
-//! Re-exports [`ClipboardProvider`] and [`InternalClipboard`] from `xai-ratatui-textarea`, and adds [`SystemClipboard`] backed by `arboard`.
-//!
-//! A copy writes every active leg (native / tmux / OSC 52); [`ClipboardDelivery`] is the evidence the write reached its destination.
+//! Re-exports [`ClipboardProvider`] and [`InternalClipboard`] from `xai-ratatui-textarea`, and adds [`SystemClipboard`] backed.
 
 mod trust;
 
@@ -17,7 +15,6 @@ use xai_grok_telemetry::events::ClipboardProbeDropReason;
 use crate::terminal::{MultiplexerKind, TerminalContext};
 
 /// Env var overriding where the copy backup file is written (supports `~`).
-/// Documented in `xai-grok-pager/docs/internal/22-environment-variables.md`.
 pub const GROK_COPY_FILE_ENV: &str = "GROK_COPY_FILE";
 
 /// Cached result of the remote-session check (env vars don't change at runtime).
@@ -32,8 +29,8 @@ fn is_container_no_display() -> bool {
     *CONTAINER.get_or_init(xai_grok_shared::clipboard::is_containerized_without_display)
 }
 
-/// `grok wrap` intercepts OSC 52 onto the local clipboard and advertises it. Over SSH only `TERM` propagates, so brands look incapable.
-/// `LC_GROK_OSC52_SINK` survives default OpenSSH `SendEnv`/`AcceptEnv` of `LC_*`.
+/// Over SSH only `TERM` propagates, so brands look incapable. `LC_GROK_OSC52_SINK` survives default OpenSSH `SendEnv`/`AcceptEnv` of
+/// `LC_*`.
 pub fn osc52_sink_active() -> bool {
     static SINK: OnceLock<bool> = OnceLock::new();
     *SINK.get_or_init(|| {
@@ -42,7 +39,6 @@ pub fn osc52_sink_active() -> bool {
     })
 }
 
-/// `GROK_CLIPBOARD_NO_OSC52` forces OSC 52 off everywhere, including Linux always-emit and the wrap sink. For hosts that paint OSC 52 as garbage.
 pub fn osc52_disabled() -> bool {
     static DISABLED: OnceLock<bool> = OnceLock::new();
     *DISABLED.get_or_init(|| std::env::var_os("GROK_CLIPBOARD_NO_OSC52").is_some())
@@ -72,19 +68,13 @@ pub fn wayland_data_control_label() -> &'static str {
 }
 
 /// Describes the clipboard write strategy for the current environment.
-///
-/// `Display` formats as `+`-separated active legs (e.g. "native+osc52").
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClipboardRoute {
     /// Always attempt a native clipboard write.
     pub native: bool,
     /// Mirror into the tmux paste buffer via `tmux load-buffer`.
     pub tmux_buffer: bool,
-    /// Emit an OSC 52 escape sequence toward the outer terminal.
     pub osc52: bool,
-    /// Wrap OSC 52 in the tmux DCS passthrough envelope.
-    /// True only when tmux is the IMMEDIATE terminal (tmux-backed and not inside an editor `:terminal`).
-    /// This flag is not a clipboard "leg" and is excluded from `Display`.
     pub osc52_tmux_passthrough: bool,
 }
 
@@ -129,8 +119,8 @@ struct ClipboardRouteOpts {
 /// Pure clipboard-route resolution (kill-switch / wrap-sink injected for tests).
 fn resolve_clipboard_route_with(ctx: &TerminalContext, opts: ClipboardRouteOpts) -> ClipboardRoute {
     let is_tmux = ctx.multiplexer == MultiplexerKind::Tmux;
-    // Linux always emits OSC 52. macOS/Windows only in tmux/SSH/container or when a wrap sink captures it.
-    // `GROK_CLIPBOARD_NO_OSC52` wins over every automatic path.
+    // macOS/Windows only in tmux/SSH/container or when a wrap sink captures
+    // it.
     let osc52 = !opts.no_osc52
         && (cfg!(target_os = "linux")
             || is_tmux
@@ -141,8 +131,7 @@ fn resolve_clipboard_route_with(ctx: &TerminalContext, opts: ClipboardRouteOpts)
         native: true,
         tmux_buffer: is_tmux,
         osc52,
-        // Editor :terminal's immediate emulator is libvterm, not tmux, so don't wrap there
-        // No point in tmux passthrough when OSC 52 itself is disabled.
+        // Editor :terminal's immediate emulator is libvterm, not tmux.
         osc52_tmux_passthrough: osc52 && is_tmux && ctx.embedded_editor.is_none(),
     }
 }
@@ -154,8 +143,7 @@ fn write_tmux_buffer(text: &str) -> bool {
     use std::process::{Command, Stdio};
 
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        // Spooled stdin, not a pipe: a payload past the pipe buffer would block the UI thread if a wedged tmux server stops draining stdin
-        // The bounded wait below also needs stdin already closed
+        // Spooled stdin, not a pipe: a payload past the pipe buffer would block the UI thread.
         let stdin = xai_grok_shared::clipboard::spool_for_stdin(text.as_bytes())?;
         let mut cmd = Command::new("tmux");
         cmd.args(["load-buffer", "-"])
@@ -181,9 +169,7 @@ fn write_tmux_buffer(text: &str) -> bool {
     result.is_ok()
 }
 
-/// Delegates to [`xai_grok_shared::clipboard`], which uses `pbcopy`/`pbpaste` on macOS (avoiding AppKit GPU overhead) and `arboard` elsewhere.
-///
-/// In tmux-backed environments, clipboard writes follow the full three-leg contract: native clipboard, tmux buffer, and OSC 52.
+/// Delegates to [`xai_grok_shared::clipboard`], which uses `pbcopy`/`pbpaste` on macOS (avoiding AppKit GPU overhead).
 #[derive(Debug)]
 pub struct SystemClipboard;
 
@@ -216,7 +202,6 @@ pub(crate) struct ClipboardWriteLegs {
     pub(crate) cli_ok: bool,
     pub(crate) arboard_ok: bool,
     /// Wayland data-control was available for the native leg (environment probe).
-    /// The arboard write is focus-free and authoritative only when `arboard_ok` also holds (see `trust::trusted_native`).
     pub(crate) data_control: bool,
     pub(crate) tmux_ok: bool,
     pub(crate) osc52_ok: bool,
@@ -271,17 +256,13 @@ pub struct CopyResult {
     /// Full user-facing toast message.
     pub message: &'static str,
     /// Compact lead of `message` (no trailing guidance).
-    /// Used when the toast names a backup path so the lead plus the path fits a narrow terminal.
     pub message_lead: &'static str,
-    /// Toast duration in ticks (30fps: 30 ticks is ~1s, 120 is ~4s).
     pub ticks: u8,
     /// Evidence that the write reached the destination named by the UI.
     pub delivery: ClipboardDelivery,
 }
 
 /// Kind of clipboard feedback (success route, unverified send, or failure).
-///
-/// Telemetry labels come from `IntoStaticStr` (`snake_case`); user-facing copy lives in [`ClipboardFeedback::message`] (intentionally different).
 #[derive(Debug, Clone, Copy, Eq, PartialEq, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum ClipboardFeedback {
@@ -289,15 +270,10 @@ pub(crate) enum ClipboardFeedback {
     Copied,
     /// Successful copy mirrored into the tmux paste buffer.
     CopiedTmux,
-    /// Successful copy via OSC 52 in a container without display.
     CopiedOscContainer,
-    /// Successful copy via OSC 52 over SSH/remote.
     CopiedOscRemote,
-    /// OSC 52 emitted over SSH, but the outer terminal's support is unknown.
     UnverifiedOscRemote,
-    /// OSC 52 emitted from a displayless container with unknown outer support.
     UnverifiedOscContainer,
-    /// VS Code over SSH/remote with non-ASCII text: OSC 52 may garble it.
     VsCodeSshNonAscii,
     /// No route reached the user's local clipboard from a remote/container topology.
     FailedRemote,
@@ -352,7 +328,6 @@ impl ClipboardFeedback {
         }
     }
 
-    /// Toast duration in ticks (30fps: 30 ticks is ~1s, 120 is ~4s).
     fn ticks(self) -> u8 {
         match self {
             Self::Copied => 30,
@@ -417,7 +392,6 @@ pub fn copy_text(text: &str) -> CopyResult {
 #[derive(Debug)]
 pub enum CopyDelivery {
     /// Trusted clipboard backend accepted the write.
-    /// `file` is the always-written backup copy (`None` only when the file write itself failed; that never fails the copy).
     Clipboard {
         result: CopyResult,
         file: Option<std::path::PathBuf>,
@@ -437,7 +411,7 @@ impl CopyDelivery {
         !matches!(self, Self::Failed { .. })
     }
 
-    /// Confirmed writes use the static message. Unverified OSC 52 and file-only fallbacks name the backup path.
+    /// Confirmed writes use the static message.
     pub fn toast_message(&self) -> std::borrow::Cow<'static, str> {
         use std::borrow::Cow;
         match self {
@@ -795,8 +769,8 @@ pub fn paste_payload_needs_clipboard_attachment_probe(payload: &str) -> bool {
     line_count <= 4 || t.contains("://")
 }
 
-/// Terminals rewrite `\n` to `\r` on paste. A mismatch is an IME commit or a diverged tmux buffer, not a clipboard paste.
-/// Reads clipboard text; call only off the event loop.
+/// Terminals rewrite `\n` to `\r` on paste. A mismatch is an IME commit or a
+/// diverged tmux buffer, not a clipboard paste.
 pub fn bracketed_payload_came_from_clipboard(payload: &str) -> bool {
     bracketed_payload_came_from_clipboard_result(payload).unwrap_or(false)
 }
@@ -885,7 +859,8 @@ pub fn attachment_probe_gate(clipboard_text: Option<&str>) -> Option<Option<u64>
     .then_some(snapshot_change_count)
 }
 
-/// Whether [`system_clipboard_probe_attachments`] would run the osascript probe for `clipboard_text` (thin bool view of [`attachment_probe_gate`]).
+/// Whether [`system_clipboard_probe_attachments`] would run the osascript
+/// probe for `clipboard_text`.
 pub fn attachment_probe_would_run(clipboard_text: Option<&str>) -> bool {
     attachment_probe_gate(clipboard_text).is_some()
 }
@@ -906,8 +881,8 @@ fn read_drop_reason(error: &anyhow::Error) -> ClipboardProbeDropReason {
 pub fn system_clipboard_probe_attachments(
     clipboard_text: Option<&str>,
 ) -> Result<(Option<ImageData>, Option<String>), ClipboardProbeDropReason> {
-    // Native snapshot (sub-ms, no subprocess) skips the osascript image probe for a text paste when the pasteboard holds no raster
-    // This is the single gate site
+    // Native snapshot (sub-ms, no subprocess) skips the osascript image probe
+    // for a text paste.
     if !attachment_probe_would_run(clipboard_text) {
         return Ok((None, None));
     }
@@ -976,7 +951,7 @@ pub fn guarded_pasteboard_read(
     outcome.map_err(|reason| dropped(reason, None))
 }
 
-/// Keyed blake3 of the raster bytes: same bytes twice vs two images within one run; the per-process key keeps images unlinkable across users.
+/// Keyed blake3 of the raster bytes: same bytes twice vs images within one run; the per-process key keeps images unlinkable across users.
 fn image_fingerprint(image: &ImageData) -> String {
     static KEY: OnceLock<[u8; 32]> = OnceLock::new();
     let key = KEY.get_or_init(|| {
@@ -1095,9 +1070,8 @@ pub fn clipboard_image_snapshot() -> (Option<u64>, bool) {
     xai_grok_shared::clipboard::clipboard_image_snapshot()
 }
 
-/// Cheap pasteboard `changeCount` read (one native message, no type scan, no data read).
-/// The focus-driven clipboard-image tip checks this first: a delta here is what gates the heavier [`clipboard_image_snapshot`] classification.
-/// `None` off-macOS.
+/// Cheap pasteboard `changeCount` read (one native message, no type scan, no data read). The focus-driven clipboard-image tip checks this first: a delta here is what gates the heavier [`clipboard_image_snapshot`]
+/// classification. `None` off-macOS.
 pub fn clipboard_change_count() -> Option<u64> {
     // Hook consistency: a hooked snapshot's change_count is the changeCount
     #[cfg(any(test, feature = "test-support"))]
@@ -1193,7 +1167,6 @@ pub mod test_support {
         /// Make the unified attachment seam fail with this reason (`ReadFailed` or `Timeout`).
         pub attachment_probe_error: Option<ClipboardProbeDropReason>,
         /// `(changeCount, has_image)` snapshot.
-        /// Unset defaults to available with raster iff a canned `image` is set, so text hooks skip and image hooks probe.
         pub snapshot: Option<(Option<u64>, bool)>,
         /// Snapshot served once the attachment probe has run: a copy landing during the read. Unset keeps `snapshot`.
         pub snapshot_after_read: Option<(Option<u64>, bool)>,
@@ -1354,7 +1327,6 @@ mod tests {
         assert_eq!(read_drop_reason(&other), Reason::ReadFailed);
     }
 
-    /// Within one process equal bytes hash equal regardless of MIME label; 64 hex chars.
     #[test]
     fn image_fingerprint_is_content_only_within_the_process() {
         let image = |data: &[u8], mime: &str| ImageData {
@@ -1762,8 +1734,7 @@ mod tests {
             }
         }
 
-        // ImageOnly skips ONLY when the snapshot is supported, AVAILABLE, and reports no raster
-        // An unavailable snapshot (AppKit failure / non-macOS) can't rule out a raster, so it must probe
+        // ImageOnly skips ONLY when the snapshot is supported, AVAILABLE.
         assert!(!should_run_attachment_probe(ImageOnly, true, true, false));
         assert!(should_run_attachment_probe(ImageOnly, true, true, true));
         // available=false must probe even when has_image=false
@@ -1865,8 +1836,7 @@ mod tests {
     }
 
     // =====================================================================
-    // resolve_clipboard_route: pure routing logic
-    // =====================================================================
+    // resolve_clipboard_route.
 
     #[derive(Debug)]
     struct ClipboardRouteCase {
@@ -2034,7 +2004,6 @@ mod tests {
 
     #[test]
     fn clipboard_route_osc52_always_for_tmux_backed() {
-        // In tmux-backed environments, OSC 52 is always emitted regardless of remote session status (unless the kill switch is on, tested below)
         for ctx in [plain_tmux_ctx(), byobu_tmux_ctx()] {
             let route = resolve_clipboard_route_with(
                 &ctx,
@@ -2082,7 +2051,6 @@ mod tests {
             // Other legs are unaffected.
             assert!(route.native);
         }
-        // tmux buffer still active when in tmux; only OSC 52 is killed
         let tmux = resolve_clipboard_route_with(
             &plain_tmux_ctx(),
             ClipboardRouteOpts {
@@ -2148,7 +2116,6 @@ mod tests {
     // Extended clipboard route matrix (final hardening)
     // =====================================================================
 
-    // -- Byobu-screen: native only, no tmux buffer, no OSC 52 ----------------
 
     #[test]
     fn clipboard_route_byobu_screen_no_tmux_buffer_no_osc52() {
@@ -2158,7 +2125,6 @@ mod tests {
             !route.tmux_buffer,
             "Byobu-screen must not write tmux buffer"
         );
-        // OSC 52 depends on is_remote(), but tmux_buffer must be false.
     }
 
     // -- Plain screen: no tmux buffer -----------------------------------------
@@ -2195,7 +2161,7 @@ mod tests {
         }
     }
 
-    // -- tmux-backed: all three legs are active --------------------------------
+    // -- tmux-backed: all legs are active --------------------------------
 
     #[test]
     fn clipboard_route_tmux_backed_all_three_legs() {
@@ -2337,7 +2303,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("copy.txt");
 
-        // Fresh file: created 0600.
         write_text_to_copy_file("secret", &path).expect("write");
         let mode = std::fs::metadata(&path)
             .expect("metadata")
@@ -2345,7 +2310,6 @@ mod tests {
             .mode();
         assert_eq!(mode & 0o777, 0o600, "fresh copy file must be 0600");
 
-        // Pre-existing world-readable file: tightened to 0600 on rewrite.
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
             .expect("loosen for test");
         write_text_to_copy_file("secret2", &path).expect("rewrite");

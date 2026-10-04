@@ -1,28 +1,4 @@
 //! Spawns the real pager binary in a PTY, dispatches named scenarios, and emits aggregated results as JSON.
-//! Supports baseline comparison for CI regression detection.
-//!
-//! ## Typical use
-//!
-//! Run a single scenario locally:
-//! ```bash
-//! cargo bench -p xai-grok-pager-pty-harness \
-//!   --bench pty_bench -- --scenario scroll-stress
-//! ```
-//!
-//! Run every scenario and write a new baseline:
-//! ```bash
-//! cargo bench -p xai-grok-pager-pty-harness \
-//!   --bench pty_bench -- --all \
-//!   --write-baseline benches/pty_baselines/local.json
-//! ```
-//!
-//! Run every scenario in CI and fail on >15% p99 regression:
-//! ```bash
-//! PAGER_BINARY=./artifacts/grok-${VERSION}-linux-x86_64 \
-//!   cargo bench -p xai-grok-pager-pty-harness \
-//!   --bench pty_bench -- --all \
-//!   --baseline benches/pty_baselines/linux-x86_64.json
-//! ```
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -49,8 +25,7 @@ struct Cli {
     #[arg(long)]
     all: bool,
 
-    /// Path to the pager binary.
-    /// Defaults to auto-resolve (PAGER_BINARY env or a locally-built debug binary).
+    /// Path to the pager binary. Defaults to auto-resolve (PAGER_BINARY env or a locally-built debug binary).
     #[arg(long)]
     binary: Option<PathBuf>,
 
@@ -70,12 +45,10 @@ struct Cli {
     #[arg(long, value_name = "PATH", conflicts_with = "baseline")]
     write_baseline: Option<PathBuf>,
 
-    /// Regression threshold as a fraction of baseline p99 (0.15 = 15%).
     #[arg(long, default_value_t = DEFAULT_REGRESSION_THRESHOLD)]
     threshold: f64,
 
-    /// Accepted for `cargo bench` compatibility (libtest-style argument).
-    /// We ignore it; this isn't a libtest harness.
+    /// Accepted for `cargo bench` compatibility (libtest-style argument). We ignore it; this isn't a libtest harness.
     #[arg(long, hide = true)]
     #[allow(dead_code)]
     bench: bool,

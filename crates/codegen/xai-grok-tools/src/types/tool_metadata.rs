@@ -1,20 +1,4 @@
 //! `ToolMetadata` — grok-tools-specific metadata for tools.
-//!
-//! Each tool implements two traits:
-//! 1. `xai_tool_runtime::Tool` — typed Args/Output, `run()` with actual logic
-//! 2. `ToolMetadata` — kind, namespace, description template, and optional
-//!    overrides for fingerprinting, reminders, etc.
-//!
-//! Only three methods are required (`kind`, `tool_namespace`,
-//! `description_template`); all others have sensible defaults derived
-//! from `kind()`.
-//!
-//! ## Context helpers
-//!
-//! Tools access session state through `xai_tool_runtime::ToolCallContext`
-//! extensions. This module provides helper functions to extract
-//! `SharedResources`, resolve the working directory, and read the
-//! behavior version.
 
 use std::path::PathBuf;
 
@@ -29,23 +13,16 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 /// `ToolMetadata` impl so it can call `versioned_definition()`, etc. after dispatch.
 pub trait ToolMetadata: Send + Sync {
     /// High-level category (Read, Edit, Search, Execute, ...).
-    /// Drives template rendering (`${{ tools.by_kind.search }}`) and the
-    /// default `is_read_only()` derivation.
     fn kind(&self) -> ToolKind;
 
     /// Namespace grouping (GrokBuild, Cursor, OpenCode, ...).
-    /// Used to build the fully-qualified tool ID at registration time
-    /// (e.g., `"GrokBuild:grep"`).
     fn tool_namespace(&self) -> ToolNamespace;
 
-    /// Raw MiniJinja description template with `${{ tools.by_kind.X }}` and
-    /// `${{ params.tool.param }}` placeholders. Resolved at finalize time by
-    /// the `TemplateRenderer`.
+    /// Raw MiniJinja description template with `${{ tools.by_kind.X }}` and `${{ params.tool.param }}` placeholders.
     fn description_template(&self) -> &str;
 
     // -----------------------------------------------------------------------
-    // Defaults — override only when needed
-    // -----------------------------------------------------------------------
+    // Defaults — override only.
 
     /// Whether the tool is read-only (no filesystem / external side-effects).
     /// Default: derived from `kind()`.
@@ -54,8 +31,7 @@ pub trait ToolMetadata: Send + Sync {
     }
 
     /// Notification variant tags this tool may emit during execution.
-    /// Default: none. Tags match `ToolNotification`'s serde `type` discriminator
-    /// (the keys of [`notification_schema_catalog`](crate::notification::notification_schema_catalog)).
+    /// Default: none.
     fn emitted_notifications(&self) -> &'static [&'static str] {
         &[]
     }
@@ -66,9 +42,9 @@ pub trait ToolMetadata: Send + Sync {
         Expr::True
     }
 
-    /// Model-safe fallback description for `xai_tool_runtime::Tool::description()` implementations: the raw template with all `${{ … }}` / `${% …
-    /// %}` markers stripped. The registry path (`versioned_definition`) renders templates properly with the finalized toolset context; this is only
-    /// for consumers that bypass the registry, which must never see raw template syntax.
+    /// Model-safe fallback description for
+    /// `xai_tool_runtime::Tool::description()` implementations: the raw
+    /// template.
     fn sanitized_description_template(&self) -> String {
         crate::types::template_renderer::strip_template_markers(self.description_template())
     }
@@ -132,9 +108,8 @@ pub async fn resolve_cwd(
         })
 }
 
-/// Build a `ToolCallContext` with `SharedResources` installed and a fresh v7 call id. Convenience
-/// for tests — replaces the per-tool `make_ctx` / `runtime_ctx` helpers that were duplicated across
-/// ~50 tool implementations. Use [`test_ctx_with_call_id`] when the test needs a specific call id.
+/// Build a `ToolCallContext` with `SharedResources` installed and a fresh v7 call id. Use
+/// [`test_ctx_with_call_id`] when the test needs a specific call id.
 pub fn test_ctx(resources: SharedResources) -> xai_tool_runtime::ToolCallContext {
     let mut ctx = xai_tool_runtime::ToolCallContext::default();
     ctx.extensions.insert(resources);

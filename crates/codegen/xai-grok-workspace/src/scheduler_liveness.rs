@@ -1,5 +1,4 @@
 //! Keeps the sandbox awake while a `/loop` is alive.
-//! It polls each session's scheduler and feeds [`crate::activity::ActivityTracker::record_scheduler_poll`].
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

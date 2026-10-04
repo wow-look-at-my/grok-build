@@ -41,8 +41,7 @@ impl AuthFileLock {
 }
 
 /// Shared by the auth manager and the managed-config identity reads: a reader that bypasses it
-/// splits "who is signed in" between the two.
-// Empty override (e.g. an unexpanded `$VAR`) is treated as unset; non-UTF-8 preserved.
+/// splits "who is signed in" between both.
 fn resolve_auth_json_path(grok_auth_path: Option<OsString>, grok_home: &Path) -> PathBuf {
     match grok_auth_path {
         Some(p) if !p.is_empty() => PathBuf::from(p),
@@ -81,8 +80,10 @@ pub fn read_auth_json(auth_file: &Path) -> std::io::Result<AuthStore> {
     Ok(map)
 }
 
-/// Read auth.json, returning an empty map if the file does not exist. Non-empty corrupt JSON, permission errors, etc. are returned as errors.
-/// The caller can then decide whether to skip the write (to avoid clobbering sibling scopes). Kept for the test-only `persist_and_swap` and as a strict reader.
+/// Read auth.json, returning an empty map if the file does not exist.
+/// Non-empty corrupt JSON, permission errors, etc. are returned as errors.
+/// The caller can then decide whether to skip the write (to avoid clobbering
+/// sibling scopes).
 #[cfg_attr(
     not(test),
     expect(
@@ -131,8 +132,9 @@ pub fn backup_corrupt_auth_file(path: &Path) -> Option<PathBuf> {
                 backup = %backup.display(),
                 "auth: backed up corrupt auth.json before recovery write"
             );
-            // Must reach unified.jsonl: the tracing line above is invisible in production captures
-            // This is the only record of both the corruption and where the original bytes went
+            // Must reach unified.jsonl: the tracing line above is invisible
+            // in production captures This is the only record of both the
+            // corruption and where the bytes went
             xai_grok_telemetry::unified_log::error(
                 "auth: corrupt auth.json backed up",
                 None,
@@ -172,9 +174,8 @@ pub fn read_auth_json_or_empty_recovering_corrupt(auth_file: &Path) -> std::io::
     }
 }
 
-/// Persist `auth.json`, preferring a crash-safe atomic write but falling back to a non-atomic in-place write when the disk is full. The atomic path (a temp file, then a rename) needs free space of at least the file size.
-/// The old file and the full temp copy coexist until the rename. When that happens we retry with an in-place truncate-and-rewrite, which only needs the blocks the old file freed.
-/// The in-place path is non-atomic, with two accepted trade-offs: A failed in-place write restores the prior bytes best-effort, so on-disk state ends up no worse than before the attempt.
+/// Persist `auth.json`, preferring a crash-safe atomic write but falling back
+/// to a non-atomic in-place write when the disk is full.
 pub(super) fn write_auth_json(auth_file: &Path, auth_store: &AuthStore) -> std::io::Result<()> {
     write_auth_json_with(auth_file, auth_store, write_auth_json_atomic)
 }
@@ -225,8 +226,8 @@ fn write_store_to(path: &Path, auth_store: &AuthStore) -> std::io::Result<()> {
         .into_inner()
         .map_err(|e| e.into_error())?
         .sync_all()?;
-    // `open_secure_file` mode bits apply only on create; tighten existing paths. Best-effort after durable content: a chmod-only failure must not look like a failed write
-    // The in-place fallback restores the prior snapshot on any `write_store_to` Err, which would discard freshly written tokens The load path re-tightens on the next read
+    // `open_secure_file` mode bits apply only on create; tighten existing
+    // paths.
     if let Err(e) = xai_grok_shell_base::util::secure_file::ensure_owner_only_permissions(path) {
         tracing::warn!(
             error = %e,
@@ -237,8 +238,7 @@ fn write_store_to(path: &Path, auth_store: &AuthStore) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Test-only, path-scoped write fault: `write_auth_json_atomic` fails with `Unsupported` for exactly this `auth.json` path.
-/// Path-scoped so parallel tests in the same process do not sabotage each other.
+/// Test-only, path-scoped write fault: `write_auth_json_atomic` fails with `Unsupported`.
 #[cfg(test)]
 pub(super) static WRITE_FAULT_PATH: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
@@ -257,8 +257,7 @@ fn write_auth_json_atomic(auth_file: &Path, auth_store: &AuthStore) -> std::io::
             "injected write fault (WRITE_FAULT_PATH)",
         ));
     }
-    // Unique per write (pid and a monotonic seq): two concurrent in-process writers must not share one tmp path
-    // The background mint and the proactive refresher can both write at once
+    // Unique per write (pid and a monotonic seq): concurrent in-process writers must not share one tmp path The background mint.
     static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
     let tmp = auth_file.with_extension(format!(
         "json.{}.{}.tmp",
@@ -297,9 +296,9 @@ fn write_auth_json_atomic(auth_file: &Path, auth_store: &AuthStore) -> std::io::
     Ok(())
 }
 
-/// This runs only when [`write_auth_json_atomic`] fails with `StorageFull`. Opening with truncation first frees the old content's blocks before the new bytes are written.
-/// The write therefore needs only the file size in free space, not the extra full copy the temp-file approach keeps alive.
-/// Truncation is destructive, so the prior bytes are snapshotted first and restored best-effort if the rewrite fails partway. A failed fallback must not leave an empty or torn file where a parseable (if stale) credential used to be. A partial file that survives (because even the restore failed) is healed on the next read via [`read_auth_json_or_empty_recovering_corrupt`].
+/// This runs only when [`write_auth_json_atomic`] fails with `StorageFull`.
+/// Opening with truncation first frees the content's blocks before the new
+/// bytes are written.
 fn write_auth_json_in_place(auth_file: &Path, auth_store: &AuthStore) -> std::io::Result<()> {
     write_auth_json_in_place_with(auth_file, auth_store, write_store_to)
 }
@@ -310,8 +309,7 @@ fn write_auth_json_in_place_with(
     auth_store: &AuthStore,
     write: fn(&Path, &AuthStore) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    // Snapshot the prior bytes so a torn/empty write can be rolled back to the previous on-disk credential
-    // `prior` is `None` when the file is absent
+    // Snapshot the prior bytes so a torn/empty write can be rolled back to the on-disk credential `prior` is `None`.
     let prior = std::fs::read(auth_file).ok();
     match write(auth_file, auth_store) {
         Ok(()) => Ok(()),
@@ -353,8 +351,6 @@ fn read_api_key_at_scope(grok_home: &Path, scope: &str) -> Option<String> {
 }
 
 /// Store a plain API key in auth.json under the `xai::api_key` scope.
-///
-/// Uses the corrupt-recovery reader so a malformed auth.json (e.g. from a previous crash) can be healed when the user sets an API key.
 pub fn store_api_key(grok_home: &Path, api_key: &str) -> std::io::Result<()> {
     store_api_key_at_scope(grok_home, API_KEY_SCOPE, api_key)
 }
@@ -452,7 +448,7 @@ mod write_fallback_tests {
     /// Simulates an in-place write that truncates the file (destroying the old content, as `open_secure_file` does) and then fails partway.
     /// This is the torn-write case the rollback must recover from.
     fn fake_truncate_then_fail(path: &Path, _: &AuthStore) -> std::io::Result<()> {
-        xai_grok_shell_base::util::secure_file::open_secure_file(path)?; // truncates to 0 bytes
+        xai_grok_shell_base::util::secure_file::open_secure_file(path)?;
         Err(std::io::Error::from(std::io::ErrorKind::StorageFull))
     }
 

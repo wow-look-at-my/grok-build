@@ -6,7 +6,7 @@ use super::interval::{interval_to_human, parse_interval};
 use super::types::{ScheduledTask, SchedulerCommand, SchedulerHandle, scheduler_tool_error};
 
 // Canonical /loop wording lives in the light API crate so other consumers can
-// link it without the tools implementation crate; re-exported to keep paths stable.
+// link it without the tools implementation crate.
 pub use xai_grok_tools_api::slash_commands::{
     SCHEDULER_CREATE_TOOL_NAME, loop_schedule_instruction, loop_usage_message,
 };
@@ -51,9 +51,7 @@ pub struct SchedulerCreateInput {
     )]
     pub durable: Option<bool>,
 
-    /// Whether to fire immediately on creation. Default false (wait for the
-    /// first interval — a "scheduled" task should not run on creation unless
-    /// explicitly asked to).
+    /// Whether to fire immediately on creation.
     #[serde(
         default,
         deserialize_with = "crate::types::schema::deserialize_lenient_bool"
@@ -114,9 +112,6 @@ Usage notes:
             )
         });
         &DESCRIPTION
-        // TODO: scheduler tools share ToolKind::Other so they can't be template-ized
-        // via ${{ tools.by_kind.* }}. If tool name randomization is needed, add
-        // dedicated ToolKind variants (SchedulerCreate, SchedulerDelete, SchedulerList).
     }
 
     fn emitted_notifications(&self) -> &'static [&'static str] {

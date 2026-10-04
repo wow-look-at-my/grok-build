@@ -1,7 +1,4 @@
 //! Main event loop.
-//!
-//! A thin `tokio::select!` loop. All input routing, rendering, and state management is delegated to [`AppView`].
-//! The event loop only handles IO: terminal events, the ACP channel, spawned task results, animation ticks, and hot-reloadable config changes.
 use super::actions::{Action, Effect, TaskResult};
 use super::app_view::{
     ActiveView, AppView, AuthState, InputOutcome, PasteProvenance, TrustState, VoiceState,
@@ -23,9 +20,9 @@ use std::time::Duration;
 use tokio::task::JoinSet;
 use tokio::time::{Instant, sleep_until};
 use xai_acp_lib::{AcpClientMessage, acp_send};
-/// During a continuous terminal drag, dozens of resize events fire per second, and each would rebuild the layout of every entry.
-/// One deferred draw runs after the size stabilizes instead.
-/// Whether authenticated interactive startup should create the unused home session.
+/// During a continuous terminal drag, dozens of resize events fire per
+/// second, and each would rebuild the layout of every entry. One deferred
+/// draw runs after the size stabilizes instead.
 pub(crate) fn should_create_home_on_authenticated_startup(app: &AppView) -> bool {
     matches!(app.active_view, ActiveView::Welcome)
         && app.session_startup_allowed()
@@ -68,9 +65,8 @@ fn is_typeahead_event(event: &Event) -> bool {
         _ => false,
     }
 }
-/// Apply the type-ahead policy to one ordered drain batch: keep only genuine typing (see [`is_typeahead_event`]), truncating at the first Esc key.
-/// After `EnableMouseCapture`/`EnableFocusChange` it is often prefixed by mouse/focus reports in the same drain, so the Esc is not necessarily first.
-/// Dropping from the Esc onward discards the printable tail the per-event filter would keep as ghost text, while keeping typing that came before it.
+/// Apply the type-ahead policy to one ordered drain batch: keep only genuine
+/// typing (see [`is_typeahead_event`]), truncating at the first Esc key.
 fn is_startup_submission_enter(event: &Event) -> bool {
     matches!(event, Event::Key(key)
         if key.kind == KeyEventKind::Press
@@ -122,9 +118,8 @@ pub(super) fn normalize_startup_submissions(events: &mut Vec<TimedInputEvent>) {
         }
     });
 }
-/// Poll-drain the terminal input queue, returning the events `keep` selects and discarding the rest.
-/// `poll_timeout` is the quiet window and restarts after each event.
-/// Startup capture uses [`capture_startup_typeahead`] for an absolute deadline.
+/// Poll-drain the terminal input queue, returning the events `keep` selects
+/// and discarding the rest.
 fn drain_deadline_reached(poll_timeout: Duration, deadline: std::time::Instant) -> bool {
     !poll_timeout.is_zero() && std::time::Instant::now() >= deadline
 }
@@ -162,9 +157,8 @@ pub(super) fn drain_pending_events(
         keep(&event).then(|| TimedInputEvent::now(event))
     })
 }
-/// Capture keyboard type-ahead pending in the terminal input queue.
-/// A prompt typed while the app was still loading is therefore not lost.
-/// If a login/trust/paywall screen is still up, [`run`] drops the events rather than let that screen swallow (or be answered by) the keys.
+/// Capture keyboard type-ahead pending in the terminal input queue. A prompt
+/// typed while the app was still loading is therefore not lost.
 fn normalize_startup_event(event: Event) -> Event {
     match event {
         Event::Key(mut key) if matches!(key.code, KeyCode::Char('\u{0008}' | '\u{007f}')) => {
@@ -214,10 +208,9 @@ fn replay_startup_typeahead(
 pub(crate) struct TerminalState {
     pub is_control_mode: bool,
     pub screen_mode: super::ScreenMode,
-    /// Do NOT re-resolve via `theme::cache::resolve_initial_theme()` here: its OSC 11 fallback reads stdin and competes with the input reader.
+    /// Do NOT re-resolve via `theme::cache::resolve_initial_theme()` here.
     pub initial_theme: ThemeKind,
-    /// Type-ahead captured by `init_terminal` AFTER raw mode was enabled (the one field here computed post-takeover).
-    /// Replayed into the composer by [`run`] when it is the active consumer at launch, else dropped; see [`capture_startup_typeahead`].
+    /// Type-ahead captured by `init_terminal` AFTER raw mode was enabled (the field here computed post-takeover).
     pub startup_typeahead: Vec<TimedInputEvent>,
 }
 /// Result of the event loop run.
@@ -226,8 +219,8 @@ pub(crate) struct RunResult {
     /// stderr line to print after the TUI is restored (failed Welcome trust save).
     pub trust_quit_error: Option<String>,
 }
-/// In-flight reconnect re-initialization, tied to the agents whose reload windows it opened.
-/// Completion lands on them even if the user switches views (or closes one) while the re-init runs.
+/// In-flight reconnect re-initialization, tied to the agents whose reload
+/// windows it opened.
 struct ReconnectReinit {
     rx: tokio::sync::oneshot::Receiver<ReinitOutcome>,
     /// Agents being reloaded, active tab first; empty when the reconnect happened with no open sessions (init/auth are still re-run).
@@ -246,7 +239,6 @@ struct AgentLoadOutcome {
     agent_id: super::agent::AgentId,
     success: bool,
     /// `x.ai/runningPromptId` from the reload response: the turn another client is driving mid-reconnect.
-    /// Adopted at finalize (mirrors the `SessionLoaded` adoption in `dispatch.rs`).
     running_prompt_id: Option<String>,
     /// Persistent-memory implementation pinned by the re-spawned actor.
     memory_mode: Option<xai_grok_shell::config::MemoryMode>,
@@ -261,10 +253,8 @@ type ReconnectLoadState = (
 struct ReconnectLoadPlan {
     session_id: acp::SessionId,
     /// The session's own cwd (its on-disk storage key), falling back to the pager cwd only when unset.
-    /// The pager cwd only matches sessions started in it; worktree/cross-cwd sessions would fail to reload.
     cwd: std::path::PathBuf,
     /// `yoloMode` plus the optional reconnect `cursor`.
-    /// The agent replays only the post-cursor tail (as live updates) when it finds the eventId, and full-replays when it doesn't.
     meta: serde_json::Value,
 }
 fn restore_dashboard_peek_before_reload(
@@ -299,16 +289,13 @@ fn plan_reconnect_load(
         meta,
     })
 }
-/// Resolve the two post-reconnect restore outcomes from the per-agent `session/load` results.
-///
-/// - `all_restored` (AND across every reloaded tab, plus `init_ok`) drives the user-facing toast: it reports whether the WHOLE reconnect came back.
-/// - `active_restored` is per-agent: the ACTIVE tab's OWN reload succeeded.
+/// Resolve both post-reconnect restore outcomes from the per-agent
+/// `session/load` results. - `all_restored` (AND across every reloaded tab,
+/// plus `init_ok`) drives the user-facing toast: it reports whether the WHOLE
+/// reconnect came back. - `active_restored` is per-agent: the ACTIVE tab's
+/// OWN reload succeeded.
 ///   It gates that tab's post-reconnect queue drain.
 ///   Gating the drain on `all_restored` would let one failed background tab strand prompts queued on a healthy active tab.
-///   The drain (`dispatch_drain_queue`) only ever touches the active agent, so a background failure has no bearing on it.
-///
-/// `loads` maps each reloaded agent to `(success, running_prompt_id, memory_mode)`.
-/// An agent in `pending_agent_ids` but absent from `loads` is treated as failed (mirrors the `unwrap_or((false, _))` at the finalize site).
 fn reconnect_restore_outcome(
     init_ok: bool,
     pending_agent_ids: &[super::agent::AgentId],
@@ -466,7 +453,6 @@ fn suspend_for_child(
     Ok(())
 }
 /// How long the writer thread may sit on unwritten payloads before it is reported blocked.
-/// Healthy writes land in milliseconds; seconds mean the terminal stopped reading the pty.
 const WRITER_BLOCKED_WARN_AFTER: Duration = Duration::from_secs(5);
 /// What one [`Presenter::observe_writer_progress`] observation concluded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -485,13 +471,10 @@ struct Presenter {
     force_full_repaint: bool,
     in_flight_target: Option<u64>,
     /// Start of the current zero-progress stall episode ([`Self::observe_writer_progress`]).
-    /// Covers frames and out-of-band escapes alike; drives the blocked-writer report.
     writer_stalled_since: Option<Instant>,
-    /// Written watermark at the previous observation; progress re-anchors the episode so a slowly-draining terminal never accrues into a false blocked report.
-    /// a slowly-draining terminal never accrues into a false blocked report.
+    /// Written watermark at the observation.
     last_written_observed: u64,
-    /// Latched once the current stall episode has been reported blocked, so one episode
-    /// emits exactly one report. Cleared when the writer makes progress.
+    /// Latched once the current stall episode has been reported blocked, so one episode emits exactly one report.
     blocked_reported: bool,
     last_draw_at: Instant,
     draw_scheduled_at: Option<Instant>,
@@ -638,7 +621,9 @@ fn writer_event_sequence(event: WriterEvent) -> std::io::Result<u64> {
         WriterEvent::Failed(error) => Err(error),
     }
 }
-/// Re-assert mouse capture on refocus: ConPTY-backed relays can strip DEC private modes, downgrading SGR mouse reports to X10, which corrupts into typed characters. Gated so a deliberate capture-off is never undone. Must ride the queue — refocusing a frozen tab was the field trigger of the mid-turn freeze (see [`EscapeWriter`](crate::render::draw::EscapeWriter)).
+/// Re-assert mouse capture on refocus: ConPTY-backed relays can strip DEC
+/// private modes, downgrading SGR mouse reports to X10, which corrupts into
+/// typed characters. Gated so a deliberate capture-off is never undone.
 fn reassert_mouse_capture_on_focus(escape_writer: &EscapeWriter) {
     if crate::app::MOUSE_CAPTURE_ENABLED.load(std::sync::atomic::Ordering::Acquire) {
         escape_writer.emit_command(crossterm::event::EnableMouseCapture);
@@ -1425,10 +1410,7 @@ pub(crate) async fn run(
     const GATE_POLL_INTERVAL: Duration = Duration::from_secs(30);
     let mut gate_poll_at: Option<Instant> = None;
 
-    // CI-status dot: the render path refreshes it only on frames it draws, and
-    // a session watching its own CI draws none, so this timer is what keeps
-    // polling. The channel is the other half — an off-thread poll that lands
-    // on a different color asks for the one repaint that shows it.
+    // CI-status dot: the render path refreshes it only on frames it draws, and a session watching its own CI draws none.
     let mut ci_poll_at: Option<Instant> = Some(Instant::now() + crate::ci_status::CI_POLL_INTERVAL);
     let (ci_change_tx, mut ci_change_rx) = tokio::sync::mpsc::unbounded_channel();
     crate::ci_status::set_change_notifier(ci_change_tx);
@@ -1873,14 +1855,12 @@ pub(crate) async fn run(
         tokio::select! {
             biased;
 
-            // Leader disconnect: the bridge fires cancel when the IPC channel closes
-            // Without this arm the loop would hang because AppView holds the client-side tx, keeping acp_rx open
+            // Leader disconnect: the bridge fires cancel when the IPC channel closes Without this arm the loop would hang.
             _ = connection_cancel.cancelled() => {
                 break;
             }
 
-            // Graceful-quit request from the signal handler
-            // Kept high in the biased order so a SIGTERM quit isn't starved by an ACP firehose
+            // Graceful-quit request from the signal handler Kept high in the biased order so a SIGTERM quit isn't starved.
             _ = quit_notify.notified() => {
                 let effs = dispatch::dispatch(Action::Quit, &mut app);
                 let _ = process_effects(effs, &mut tasks, &mut app, &progress_tx);
@@ -1911,9 +1891,7 @@ pub(crate) async fn run(
                 }
             }
 
-            // Writer sat on unwritten payloads past the threshold: the terminal stopped
-            // reading the pty. Field diagnosis for the mid-turn freeze family (loop alive,
-            // screen frozen). Above the ACP arm so a mid-turn token firehose cannot starve it.
+            // Writer sat on unwritten payloads past the threshold: the terminal stopped reading the pty.
             _ = writer_blocked_report => {
                 let blocked_for = presenter.mark_blocked_reported();
                 crate::unified_log::warn(
@@ -1932,12 +1910,9 @@ pub(crate) async fn run(
                 );
             }
 
-            // Biased order: cancellation/quit, writer acks/failures, blocked-writer report, ACP, task/progress results, updates, input, and render/poll timers
-            // All of them precede the deliberately-last voice STT arm (see its note below)
+            // Biased order: cancellation/quit, writer acks/failures, blocked-writer report, ACP, task/progress results, updates, input.
 
-            // Without the gate, buffered wheel/key events sat in input_rx until the stream went quiet
-            // Gating, not reordering: moving input above ACP would flip the starvation direction (streaming redraws starving behind held keys)
-            // Cancel/quit must stay above the firehose regardless
+            // Without the gate, buffered wheel/key events sat in input_rx until the stream went quiet Gating, not reordering.
             msg = async {
                 match acp_peek.take() {
                     Some(msg) => Some(msg),
@@ -1954,8 +1929,6 @@ pub(crate) async fn run(
                 }
 
                 // Drain immediately-ready ACP messages before drawing.
-                // During streaming, dozens of messages queue per frame
-                // Bounded, and cut short the moment input arrives, so wheel/key events wait at most one batch, never a whole token flood
                 let mut drained = 1;
                 while drained < ACP_DRAIN_BATCH_MAX && input_rx.is_empty() {
                     let Ok(msg) = acp_rx.try_recv() else { break };
@@ -2074,23 +2047,18 @@ pub(crate) async fn run(
                         break;
                     }
                 }
-                // Opportunistic clipboard-image poll (throttled, changeCount-first)
-                // Never scheduled by a timer: an idle app polls zero times
-                // Run before schedule_tick so a freshly shown tip's TTL arms the animation ticks that later clear it
+                // Opportunistic clipboard-image poll (throttled, changeCount-first) Never scheduled by a timer: an idle app polls zero times Run.
                 let tip_shown = app.poll_clipboard_focus_tip();
                 schedule_tick(&mut animation_tick_at, &app, tick_interval);
                 if result.needs_draw || tip_shown {
                     if result.force_repaint {
-                        // Refocus heal wins over the resize debounce
-                        // A coalesced same-size resize wouldn't autoresize-clear, so clear and fully repaint now
+                        // Refocus heal wins over the resize debounce A coalesced same-size resize wouldn't autoresize-clear.
                         resize_debounce_at = None;
                         presenter.request(true);
                     } else if result.resize_only && !tip_shown {
                         // Debounce: schedule a single draw after the size stabilizes.
-                        // Each new resize resets the timer, so layout is rebuilt only once
                         resize_debounce_at = Some(Instant::now() + RESIZE_DEBOUNCE);
-                        // One immediate draw repaints the (now hidden) preview cells — the erase on iTerm2, which smears committed pixels during a drag (see resize_hides_prompt_preview).
-                        // Ownership then clears, so later drag events fall back to pure debounce.
+                        // One immediate draw repaints the (now hidden) preview cells — the erase on iTerm2.
                         if crate::terminal::overlay::has_committed_owner()
                             && crate::terminal::image::prompt_preview_graphics_protocol()
                                 == crate::terminal::image::GraphicsProtocol::ITerm2
@@ -2128,9 +2096,7 @@ pub(crate) async fn run(
                 suspend_retry_after = None;
             }
 
-            // Scroll clock: flush residual wheel/trackpad lines and detect the 80ms stream gap
-            // Runs on the 16ms redraw cadence, not the slower animation fps
-            // The next deadline is re-derived at loop top from the post-tick scroll state
+            // Scroll clock: flush residual wheel/trackpad lines and detect the 80ms stream gap Runs on the 16ms redraw cadence.
             _ = scroll_tick => {
                 if app.tick_scroll() {
                     presenter.request(false);
@@ -2141,8 +2107,7 @@ pub(crate) async fn run(
 
             _ = animation_tick => {
                 animation_tick_at = None;
-                // Lost-cancel recovery: re-send cancels for panes still cancelling past the grace (`dispatch::reconcile_overdue_cancels`)
-                // `needs_animation()` keeps ticks alive while either recovery is armed, so these checks cannot be starved
+                // Lost-cancel recovery: re-send cancels for panes still cancelling past the grace (`dispatch::reconcile_overdue_cancels`).
                 if let Some(resends) = dispatch::reconcile_overdue_cancels(&mut app)
                     && process_effects(resends, &mut tasks, &mut app, &progress_tx)
                 {
@@ -2157,8 +2122,7 @@ pub(crate) async fn run(
                     }
                     presenter.request(false);
                 }
-                // Lost-response recovery (see `dispatch::reconcile_overdue_turn_ends`)
-                // Finish any turn whose `prompt_complete` broadcast outlived the grace window without its `session/prompt` RPC response arriving
+                // Lost-response recovery (see `dispatch::reconcile_overdue_turn_ends`).
                 let reconciled = dispatch::reconcile_overdue_turn_ends(&mut app);
                 // The reconcile drains queues outside any dispatched action; its image notices show now.
                 let notice_shown = app.flush_image_notices_if_root();
@@ -2205,10 +2169,7 @@ pub(crate) async fn run(
                 }
             }
 
-            // Keep the branch's CI dot polling with no frames in flight. The
-            // poll itself is throttled and off-thread; this arm draws nothing,
-            // because a result that matches what is already on screen must not
-            // wake an idle terminal. The repaint comes from `ci_change` below.
+            // Keep the branch's CI dot polling with no frames in flight.
             _ = ci_poll => {
                 ci_poll_at = Some(Instant::now() + crate::ci_status::CI_POLL_INTERVAL);
                 if let Some((cwd, branch)) = ci_dot_target(&app) {
@@ -2218,8 +2179,7 @@ pub(crate) async fn run(
 
             Some(()) = ci_change_rx.recv() => {
                 presenter.request(false);
-                // A run that just started pulses; `tick_demand` reports that
-                // from the freshly-stored color, so re-arm the tick here.
+                // A run that started pulses.
                 schedule_tick(&mut animation_tick_at, &app, tick_interval);
             }
 
@@ -2232,8 +2192,7 @@ pub(crate) async fn run(
                 if app.status_line.take_changed() {
                     presenter.request(false);
                 }
-                // Re-armed at fire time, so the cadence is independent of how long a run takes
-                // The owed-run rule above is what keeps a slow script from stacking runs behind the timer
+                // Re-armed at fire time, so the cadence is independent of how long a run takes The owed-run rule above is what keeps a slow script.
                 if let Some(interval) = status_line_refresh_interval {
                     status_line_refresh_at = Some(Instant::now() + interval);
                 }
@@ -2265,8 +2224,7 @@ pub(crate) async fn run(
                 }
             }
 
-            // Pre-generate the away recap so it's already on screen when the user returns
-            // Cheap no-op while focused / not-yet-eligible
+            // Pre-generate the away recap so it's already on screen when the user returns Cheap no-op.
             _ = recap_poll => {
                 if should_pregenerate_away_recap(&app) {
                     let effs = dispatch::dispatch(Action::SendRecap { auto: true }, &mut app);
@@ -2283,9 +2241,7 @@ pub(crate) async fn run(
             // Hot-reload: config file changed (dev mode) or initial load.
             Ok(()) = config_watcher.changed() => {
                 let mut config = config_watcher.current().clone();
-                // The watcher only knows about pager.toml, so a hot-reload would otherwise revert these to their hardcoded defaults
-                // The canonical re-derive below owns any correction, so its fast path cannot skip a needed prompt-widget fan-out
-                // (`set_appearance` alone never syncs `PromptWidget.compact`.)
+                // The watcher only knows about pager.toml.
                 config.prompt.compact = app.appearance.prompt.compact;
                 config.show_timestamps = app.appearance.show_timestamps;
                 config.show_timeline = app.appearance.show_timeline;
@@ -2340,15 +2296,12 @@ pub(crate) async fn run(
                 use crate::acp::leader_bridge::ConnectionStatus;
 
                 let Some(rx) = leader_status_rx.as_mut() else {
-                    // Guard: the async block above pends when None, but defensive code should never .unwrap() in production
                     continue;
                 };
                 let status = rx.borrow_and_update().clone();
                 match status {
                     ConnectionStatus::Reconnecting { attempt } => {
-                        // Unified-log marker: an IPC reconnect mints a new leader-side ClientId
-                        // Without this marker the reconnect is invisible in the unified log
-                        // It only surfaced as ghost `session loaded` replays with no matching `session.load.start`
+                        // Unified-log marker: an IPC reconnect mints a new leader-side ClientId Without this marker the reconnect is invisible.
                         crate::unified_log::warn(
                             "leader.ipc.reconnecting",
                             None,
@@ -2378,12 +2331,10 @@ pub(crate) async fn run(
                         );
                         last_leader_generation = generation;
                         app.reconnect_pending = true;
-                        // Connection-scoped: a re-elected shell reseeds its push gen from wall clock
-                        // A surviving higher watermark would silently drop its fresh pushes
+                        // Connection-scoped: a re-elected shell reseeds its push gen.
                         app.announcements_last_gen = 0;
 
-                        // Cancel any in-flight re-init from a previous reconnect cycle and restore those agents' stashed transcripts
-                        // Their load requests rode the now-dead connection
+                        // Cancel any in-flight re-init from a previous reconnect cycle.
                         if let Some(handle) = reconnect_abort_handle.take() {
                             handle.abort();
                         }
@@ -2399,9 +2350,7 @@ pub(crate) async fn run(
                             }
                         }
 
-                        // Open a reload window on EVERY agent with a session (active tab first so the visible one restores fastest)
-                        // Reloading only the active session would leave every other tab on a session id the new leader has never seen
-                        // Their next prompt would then fail with "unknown session id"
+                        // Open a reload window on EVERY agent with a session (active tab first so the visible one restores fastest).
                         let fallback_cwd = app.cwd.clone();
                         let active_agent_id = match app.active_view {
                             ActiveView::Agent(id) => Some(id),
@@ -2423,8 +2372,7 @@ pub(crate) async fn run(
                             let Some(plan) = plan_reconnect_load(agent, &fallback_cwd) else {
                                 continue;
                             };
-                            // Keep the per-session display flag in lockstep with the enforcement value (`autoMode`) we just re-seeded on this agent
-                            // Yolo wins; it is computed inside `plan_reconnect_load`
+                            // Keep the per-session display flag in lockstep with the enforcement value (`autoMode`) we re-seeded on this agent Yolo wins.
                             agent.session.auto_mode = plan
                                 .meta
                                 .get("autoMode")
@@ -2437,7 +2385,7 @@ pub(crate) async fn run(
                             load_plans.push((id, plan));
                         }
                         let any_reload = !reload_agent_ids.is_empty();
-                        // Per-agent `auto_mode` was just re-seeded from the reload meta; keep `/auto` feature-gate slash visibility in sync
+                        // Per-agent `auto_mode` was re-seeded from the reload meta.
                         app.sync_permission_mode_slash_gate();
 
                         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
@@ -2449,14 +2397,11 @@ pub(crate) async fn run(
 
                         let acp_tx = app.acp_tx.clone();
                         let join_handle = tokio::spawn(async move {
-                            // 30 s for initialize/authenticate plus a budget per session/load
-                            // Each load replays history and may respawn MCP servers on the new leader
                             let timeout = Duration::from_secs(
                                 (30 + 30 * load_plans.len() as u64).min(300),
                             );
 
-                            // Inner result: `None` means init/auth failure (no load was attempted)
-                            // `Some(loads)` means per-agent load outcomes with the optional mid-turn running prompt id from each reload response
+                            // Inner result: `None` means init/auth failure (no load was attempted) `Some(loads)` means per-agent load outcomes.
                             let ok = tokio::time::timeout(timeout, async {
                                 let mut echo_meta = serde_json::Map::new();
                                 echo_meta.insert(
@@ -2574,9 +2519,7 @@ pub(crate) async fn run(
                     }
                 };
 
-                // Finalize the reload windows on the agents the re-init was started for, NOT whatever view is active now
-                // See `SessionReload` for the outcome handling
-                // Each window resolves on ITS load outcome (one broken session must not discard the other tabs' replayed transcripts)
+                // Finalize the reload windows on the agents the re-init was started for, NOT whatever view is active now See `SessionReload`.
                 let mut loads: std::collections::HashMap<_, _> = outcome
                     .loads
                     .into_iter()
@@ -2627,9 +2570,7 @@ pub(crate) async fn run(
                     app.show_toast("Session restore failed. Kept the existing transcript.");
                 }
 
-                // Re-trigger the queue drain suppressed during the outage
-                // Every normal trigger (PromptResponse, DrainQueue, send-prompt, session-created) early-returns while `reconnect_pending` is set
-                // A failed active restore suppresses the drain, since sending into an unrestored session would be wrong
+                // Re-trigger the queue drain suppressed during the outage Every normal trigger.
                 if active_restored {
                     let drain_effects = dispatch::dispatch(Action::DrainQueue, &mut app);
                     if process_effects(drain_effects, &mut tasks, &mut app, &progress_tx) {
@@ -2640,9 +2581,7 @@ pub(crate) async fn run(
                 presenter.request(false);
             }
 
-            // A burst can backlog the 128-slot channel, so `voice_rx` is effectively always-ready
-            // Kept last, it can never starve cancellation, ACP, task/progress completions, keyboard input, or the render/animation/poll timers
-            // Voice is only serviced when nothing else is pending
+            // A burst can backlog the 128-slot channel, so `voice_rx` is effectively always-ready Kept last, it can never starve cancellation, ACP.
             ev = async {
                 match voice_rx.as_mut() {
                     Some(rx) => rx.recv().await,
@@ -2697,9 +2636,9 @@ pub(crate) async fn run(
     app.notification_service.shutdown();
     Ok(finish_run(&mut app))
 }
-/// `[ui]` as it was on disk at startup, or the default if it could not be read.
-/// Read once for the process: the status line capability is advertised from this at connect and the row is rendered from it later.
-/// A second read could answer the two differently.
+/// `[ui]` as it was on disk at startup, or the default if it could not be read. Read once for the process: the status line
+/// capability is advertised from this at connect and the row is rendered from it later. A second read could answer both
+/// differently.
 pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfig {
     use xai_grok_shell::agent::config::UiConfig;
     static INITIAL_UI: std::sync::OnceLock<UiConfig> = std::sync::OnceLock::new();
@@ -2927,10 +2866,8 @@ struct DrainResult {
     /// Whether the app should quit.
     should_quit: bool,
     /// Whether resize was the only source of change (no key/mouse/action changes).
-    /// When true, the caller should debounce the draw to avoid redundant layout rebuilds during continuous terminal resize drags.
     resize_only: bool,
     /// Whether the next draw must be preceded by a full clear and repaint.
-    /// Set on refocus in editor/multiplexer contexts to heal out-of-band stranded rows.
     force_repaint: bool,
     /// Count of coalesced events processed in this drain batch, summed into the stall window's `events_handled`.
     handled: u32,
@@ -3218,7 +3155,6 @@ async fn drain_and_process(
     }
 }
 /// Timeout for the first extension round (detection).
-/// If no event arrives within this window the batch was a normal keystroke.
 const PASTE_DETECT_TIMEOUT: Duration = Duration::from_millis(2);
 /// Timeout for subsequent rounds once paste has been detected.
 const PASTE_CONTINUE_TIMEOUT: Duration = Duration::from_millis(10);
@@ -3291,7 +3227,6 @@ pub(super) fn drain_immediate(
 /// Minimum key events in a run to trigger paste coalescing.
 const PASTE_COALESCE_THRESHOLD: usize = 3;
 /// Minimum run length for the Windows path-shape coalesce branch.
-/// Covers the shortest realistic dropped image path (`C:\x.png`, `/a.png`) while leaving short typed prose alone.
 #[cfg(target_os = "windows")]
 const PATH_COALESCE_THRESHOLD: usize = 8;
 /// Check if a terminal event is a pasteable key press: a character, Enter, or Tab with no control modifiers (Ctrl/Alt/Super).
@@ -3311,9 +3246,8 @@ fn is_pasteable_key_event(ev: &Event) -> bool {
         _ => false,
     }
 }
-/// A pasted line feed (`\n`, 0x0A).
-/// In raw mode crossterm parses a bare LF as `Ctrl+J` (0x0A is the control code for `j`).
-/// So an `Enter` immediately followed by this is a pasted CRLF line break, not a submit; see [`coalesce_rapid_keys`].
+/// A pasted line feed (`\n`, 0x0A). In raw mode crossterm parses a bare LF as
+/// `Ctrl+J` (0x0A is the control code for `j`).
 fn is_paste_lf(ev: &Event) -> bool {
     matches!(ev, Event::Key(ke)
         if ke.kind == KeyEventKind::Press
@@ -3347,9 +3281,8 @@ fn voice_chord_action(
         None
     }
 }
-/// Whether the event-loop intercept claims a voice-chord key event (pure for unit tests).
-/// Its release only ever stops capture, so flipping the setting off mid-hold must not orphan it and wedge the mic open.
-/// Outside a hold, a bare release is never ours (normal typing) and a press honors the setting.
+/// Whether the event-loop intercept claims a voice-chord key event (pure for
+/// unit tests).
 fn voice_chord_claims_event(kind: KeyEventKind, keybind_enabled: bool, hold_owned: bool) -> bool {
     if hold_owned {
         return true;
@@ -3368,9 +3301,9 @@ fn is_voice_chord(ke: &KeyEvent) -> bool {
         }
     }
 }
-/// On terminals without bracketed paste, pasted text arrives as individual key events.
-/// Enter keys mid-run would otherwise trigger "submit prompt" and split multi-line pastes.
-/// **Windows only:** `>= PATH_COALESCE_THRESHOLD` events AND the assembled text starts with a drag-drop-style path anchor.
+/// On terminals without bracketed paste, pasted text arrives as individual
+/// key events. Enter keys mid-run would otherwise trigger "submit prompt" and
+/// split multi-line pastes.
 #[cfg(test)]
 fn coalesce_rapid_keys(events: Vec<TimedInputEvent>) -> Vec<TimedInputEvent> {
     let live_input_started_at = events
@@ -3869,8 +3802,7 @@ mod tests {
             Some((cwd.clone(), "feature/x".to_string()))
         );
 
-        // Detached HEAD renders as `detached` with no dot, so there is nothing
-        // to poll for.
+        // Detached HEAD renders as `detached` with no dot, so there is nothing to poll for.
         app.agents.get_mut(&id).expect("agent").current_branch = Some(String::new());
         assert_eq!(ci_dot_target(&app), None);
 
@@ -5738,7 +5670,7 @@ mod tests {
             assert_eq!(nth(&result, 0).event, Event::Paste(input.to_string()));
         }
     }
-    /// Below-threshold path-shape (under 8 chars) and non-path prose of any length must NOT coalesce: keep typed editing intact.
+    /// Below-threshold path-shape (under multiple chars) and non-path prose of any length must NOT coalesce: keep typed editing intact.
     #[cfg(target_os = "windows")]
     #[test]
     fn coalesce_path_shape_rejects_short_or_non_path() {

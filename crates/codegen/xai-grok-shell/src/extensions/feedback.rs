@@ -1,8 +1,4 @@
 //! `x.ai/feedback`, `x.ai/feedback/dismiss`, `x.ai/btw`, and `x.ai/review/*` extension handlers.
-//!
-//! - `feedback` and `feedback/dismiss`: persist user ratings and text locally and forward to cli-chat-proxy.
-//! - `btw`: dispatch a side question to the active session via `SessionCommand::SideQuestion` and return the answer.
-//! - `review/comment` and `review/comment/delete`: record inline code review events to cloud storage.
 
 use std::sync::Arc;
 
@@ -131,11 +127,8 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
             {
                 use prod_mc_cli_chat_proxy_types::feedback_types::RatingType;
                 let (is_positive, is_negative) = match feedback_input.rating_type {
-                    // Thumbs: -1 is down, 0 is neutral, 1 is up
                     Some(RatingType::Thumbs) | None => (rating_value > 0, rating_value < 0),
-                    // Stars (1-5): >= 4 positive, <= 2 negative, 3 neutral
                     Some(RatingType::Stars) => (rating_value >= 4, rating_value <= 2),
-                    // NPS (0-10): 9-10 promoter, 0-6 detractor, 7-8 passive
                     Some(RatingType::Nps) => (rating_value >= 9, rating_value <= 6),
                 };
                 if is_positive {
@@ -168,9 +161,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
                     "no feedback client available (missing proxy credentials); feedback saved locally only"
                 );
             }
-            // Read the live feedback.user config; the session-actor path uses its spawn-time snapshot
-            // Both dedupe through the same process-wide identity cache, so a stable config resolves identically either way
-            // Clone out so the RefCell borrow doesn't span an await.
+            // Read the live feedback.user config; the session-actor path uses its spawn-time snapshot Both dedupe through the same process-wide.
             let user_cfg = agent.cfg.borrow().feedback.user.clone();
             let author_identity =
                 crate::util::user_identity::cached_identity(user_cfg.as_ref()).await;

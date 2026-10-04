@@ -1,5 +1,5 @@
-//! Telemetry payload structs in this crate reference these enums, so they live here.
-//! `xai-grok-shell` re-exports them from their original paths (`session::mcp_servers`, `util::config`) to keep callers unchanged.
+//! Telemetry payload structs in this crate reference these enums, so they
+//! live here.
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, Default)]
 #[serde(rename_all = "snake_case")]

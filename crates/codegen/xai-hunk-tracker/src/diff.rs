@@ -16,8 +16,7 @@ const CONTEXT_LINES: usize = 3;
 const DIFF_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Maximum file size (in bytes) to attempt diffing.
-/// Files larger than this will be skipped to avoid pathological diff behavior.
-const MAX_DIFF_FILE_SIZE: usize = 1024 * 1024; // 1 MB
+const MAX_DIFF_FILE_SIZE: usize = 1024 * 1024;
 
 /// Generate a unified diff patch string from baseline and current content. This produces a patch that can be parsed by
 /// Pierre's `getSingularPatch`. Returns None if: Content is identical; Either file exceeds MAX_DIFF_FILE_SIZE; Diff
@@ -355,7 +354,7 @@ pub fn patch_lines(
     output
 }
 
-/// Compare two hunks to see if they represent the same logical change
+/// Compare hunks to see if they represent the same logical change
 /// (content match, possibly at different positions).
 pub fn hunks_match_content(a: &Hunk, b: &Hunk) -> bool {
     a.path == b.path && a.old_text == b.old_text && a.new_text == b.new_text
@@ -366,9 +365,9 @@ pub fn hunk_moved(old: &Hunk, new: &Hunk) -> bool {
     hunks_match_content(old, new) && old.line_info != new.line_info
 }
 
-/// Check if two hunks overlap by line range in the baseline (old) file.
-/// Uses old_start/old_count for stable overlap detection even when file shifts.
-/// Used for determining when hunks should be merged or matched.
+/// Check if hunks overlap by line range in the baseline (old) file. Uses
+/// old_start/old_count for stable overlap detection even when file shifts. Used
+/// for determining when hunks should be merged or matched.
 pub fn hunks_overlap(a: &Hunk, b: &Hunk) -> bool {
     if a.path != b.path {
         return false;
@@ -382,12 +381,11 @@ pub fn hunks_overlap(a: &Hunk, b: &Hunk) -> bool {
 
     // For pure insertions (old_count=0), consider adjacent positions as overlapping
     if a.line_info.old_count == 0 && b.line_info.old_count == 0 {
-        // Two insertions at the same baseline position overlap
+        // Insertions at the same baseline position overlap
         return a_start == b_start;
     }
 
-    // Handle insertions overlapping with regular hunks:
-    // An insertion at position X overlaps with a hunk spanning [start, end) if start <= X <= end
+    // Handle insertions overlapping with regular hunks.
     if a.line_info.old_count == 0 {
         // a is an insertion at a_start
         return a_start >= b_start && a_start <= b_end;
@@ -397,13 +395,11 @@ pub fn hunks_overlap(a: &Hunk, b: &Hunk) -> bool {
         return b_start >= a_start && b_start <= a_end;
     }
 
-    // Overlaps if NOT (a ends before b starts OR b ends before a starts)
-    // Include adjacent (touching) hunks as overlapping
+    // Overlaps if NOT (a ends before b starts OR b ends before a starts) Include adjacent (touching) hunks.
     !(a_end < b_start || b_end < a_start)
 }
 
 /// Find the best matching old hunk for a new hunk.
-/// Priority: 1) exact content + position match, 2) content match closest by line, 3) maximum overlap size
 pub fn find_matching_old_hunk<'a>(
     new_hunk: &Hunk,
     old_hunks: &'a [Arc<Hunk>],
@@ -415,8 +411,8 @@ pub fn find_matching_old_hunk<'a>(
         .collect();
 
     if !content_matches.is_empty() {
-        // If we have content matches, pick the one closest by line position
-        // This handles the case of identical changes at multiple locations (e.g., variable rename)
+        // If we have content matches, pick the closest by line position This
+        // handles the case of identical changes at multiple locations.
         return content_matches
             .into_iter()
             .min_by_key(|o| o.line_info.new_start.abs_diff(new_hunk.line_info.new_start));
@@ -429,7 +425,7 @@ pub fn find_matching_old_hunk<'a>(
         .max_by_key(|o| calculate_overlap_size(&o.line_info, &new_hunk.line_info))
 }
 
-/// Calculate the overlap size between two hunks (in baseline lines)
+/// Calculate the overlap size between hunks (in baseline lines)
 fn calculate_overlap_size(a: &HunkLineInfo, b: &HunkLineInfo) -> usize {
     let a_start = a.old_start;
     let a_end = a.old_start + a.old_count;
@@ -558,8 +554,6 @@ mod tests {
 
     #[test]
     fn test_find_matching_hunk_with_identical_content_at_different_positions() {
-        // Simulate a variable rename that appears at multiple locations
-        // Old hunks at lines 10 and 100 with identical content
         let old_hunk_at_10 = Arc::new(Hunk {
             id: HunkId::from_string("hunk-10".to_string()),
             path: "test.rs".into(),
@@ -596,7 +590,6 @@ mod tests {
 
         let old_hunks = vec![old_hunk_at_10.clone(), old_hunk_at_100.clone()];
 
-        // New hunk at line 10 should match old hunk at line 10
         let new_hunk_near_10 = Hunk {
             id: HunkId::new(),
             path: "test.rs".into(),
@@ -618,7 +611,6 @@ mod tests {
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().id.as_str(), "hunk-10");
 
-        // New hunk at line 100 should match old hunk at line 100
         let new_hunk_near_100 = Hunk {
             id: HunkId::new(),
             path: "test.rs".into(),
@@ -654,7 +646,7 @@ mod tests {
                 old_start: 1,
                 old_count: 1,
                 new_start: 1,
-                new_count: 2, // covers new lines 1-2
+                new_count: 2,
             },
             source: agent_source(),
             old_text: Some("old-small\n".to_string()),
@@ -671,7 +663,7 @@ mod tests {
                 old_start: 3,
                 old_count: 1,
                 new_start: 3,
-                new_count: 4, // covers new lines 3-6
+                new_count: 4,
             },
             source: agent_source(),
             old_text: Some("old-large\n".to_string()),
@@ -683,8 +675,7 @@ mod tests {
 
         let old_hunks = vec![old_hunk_small.clone(), old_hunk_large.clone()]; // small first!
 
-        // New hunk overlaps both, but more with large: new lines 2-5 (end=6). small: overlap lines 2 (size=1); large: overlap
-        // lines 3-5 (size=3). Content differs -> no content match -> fallback to overlap
+        // Content differs -> no content match -> fallback to overlap
         let new_hunk = Hunk {
             id: HunkId::new(),
             path: "test.rs".into(),
@@ -692,7 +683,7 @@ mod tests {
                 old_start: 2,
                 old_count: 4,
                 new_start: 2,
-                new_count: 4, // lines 2-5
+                new_count: 4,
             },
             source: agent_source(),
             old_text: Some("different-old\n".to_string()),
@@ -705,8 +696,8 @@ mod tests {
         let matched = find_matching_old_hunk(&new_hunk, &old_hunks);
         assert!(matched.is_some(), "Should find an overlapping hunk");
 
-        // EXPECTS BEST MATCH: large overlap, NOT the first one
-        // (this currently FAILS with .find(), proving the bug)
+        // EXPECTS BEST MATCH: large overlap, NOT the first one (this FAILS
+        // with .find(), proving the bug)
         assert_eq!(
             matched.unwrap().id.as_str(),
             "hunk-large",
@@ -718,7 +709,6 @@ mod tests {
     fn test_patch_lines_basic() {
         let content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
 
-        // Replace line 2 with "CHANGED"
         let patched = super::patch_lines(content, 2, 1, "CHANGED\n");
         assert_eq!(patched, "line 1\nCHANGED\nline 3\nline 4\nline 5\n");
     }
@@ -727,7 +717,6 @@ mod tests {
     fn test_patch_lines_no_trailing_newline_in_insert() {
         let content = "line 1\nline 2\nline 3\n";
 
-        // Replace line 2 with "CHANGED" (no trailing newline in insert text)
         let patched = super::patch_lines(content, 2, 1, "CHANGED");
         assert_eq!(patched, "line 1\nCHANGED\nline 3\n");
     }
@@ -736,7 +725,6 @@ mod tests {
     fn test_patch_lines_pure_insert() {
         let content = "line 1\nline 2\nline 3\n";
 
-        // Insert at line 2 without removing anything
         let patched = super::patch_lines(content, 2, 0, "INSERTED\n");
         assert_eq!(patched, "line 1\nINSERTED\nline 2\nline 3\n");
     }
@@ -745,7 +733,6 @@ mod tests {
     fn test_patch_lines_pure_delete() {
         let content = "line 1\nline 2\nline 3\n";
 
-        // Delete line 2 without inserting anything
         let patched = super::patch_lines(content, 2, 1, "");
         assert_eq!(patched, "line 1\nline 3\n");
     }
@@ -754,7 +741,6 @@ mod tests {
     fn test_patch_lines_multiple_lines() {
         let content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
 
-        // Replace lines 2-3 with 2 new lines
         let patched = super::patch_lines(content, 2, 2, "NEW A\nNEW B\n");
         assert_eq!(patched, "line 1\nNEW A\nNEW B\nline 4\nline 5\n");
     }
@@ -820,13 +806,11 @@ mod tests {
 
     #[test]
     fn test_compute_hunks_after_accept_simulation() {
-        // Simulate what happens after accepting one hunk and diffing
-        // This simulates the scenario in test_sequential_accepts_preserve_remaining_hunks
+        // Simulate what happens after accepting one hunk and diffing This simulates the scenario.
 
-        // Patched baseline (after accepting HUNK_A at line 2)
         let patched_baseline = "line 1\nHUNK_A\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\n";
 
-        // Current content (has all 3 changes)
+        // Current content (has all changes)
         let current = "line 1\nHUNK_A\nline 3\nline 4\nline 5\nline 6\nHUNK_B\nline 8\nline 9\nline 10\nHUNK_C\nline 12\n";
 
         let hunks = compute_hunks(
@@ -836,7 +820,6 @@ mod tests {
             agent_source(),
         );
 
-        // Should produce 2 hunks: one at line 7, one at line 11
         assert_eq!(
             hunks.len(),
             2,

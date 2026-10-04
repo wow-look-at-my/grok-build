@@ -1,17 +1,12 @@
 //! Regression tests: rewind must remove the rewound turn even when the session contains synthetic-origin turns.
-//! Synthetic origins include auto-wake task/subagent completions, notification drains, and scheduler fires.
-//!
-//! Those turns increment `prompt_index` but push a *synthetic* `User` item.
-//! Truncation that counts only non-synthetic `User` items therefore leaves the "rewound" turn in the model's context.
 
 use super::support::create_test_actor;
 
 use crate::sampling::ConversationItem;
 use crate::session::{RewindMode, RewindRequest};
 
-/// Build the canonical session shape that triggered the bug.
-/// ```text [Sys, User(user_info), U0(real), A0, U1(auto-wake, synthetic), A1, U2(real), A2] prompt_index = 3, prompt_texts = [P0, TASK_WAKE, P2] ```.
-/// Turn 1 is a background-task auto-wake (`PromptOrigin::TaskCompleted`): it consumed a prompt index but its user item is synthetic.
+/// Build the canonical session shape that triggered the bug. ```text [Sys, User(user_info), U0(real), A0, U1(auto-wake, synthetic), A1, U2(real), A2]
+/// prompt_index = 3, prompt_texts = [P0, TASK_WAKE, P2] ```.
 fn seed_conversation(mark_turn_starts: bool) -> Vec<ConversationItem> {
     let turn_user = |text: &str, idx: usize| {
         let mut item = ConversationItem::user(text);
@@ -59,7 +54,6 @@ async fn run_rewind_over_synthetic_turn(mark_turn_starts: bool) {
     snap.last_compaction_prompt_index = None;
     actor.chat_state_handle.restore_snapshot(snap);
 
-    // Rewind to prompt #2: "restore state before P2 ran"
     let resp = actor
         .handle_rewind(RewindRequest {
             target_prompt_index: 2,
@@ -145,8 +139,8 @@ async fn rewind_with_no_prompts_lists_no_points_and_rejects_execute() {
         .await;
 }
 
-/// Rewind to the conversation start (target = 0) keeps only the session preamble, even when turn 0 exists alongside synthetic auto-wake turns.
-/// The preamble is the System item, the user_info item, and any pre-turn synthetic reminders.
+/// Rewind to the conversation start (target = 0) keeps only the session preamble, even when turn multiple exists alongside synthetic auto-wake
+/// turns. The preamble is the System item, the user_info item, and any pre-turn synthetic reminders.
 #[tokio::test(flavor = "current_thread")]
 async fn rewind_to_start_keeps_only_preamble() {
     let local = tokio::task::LocalSet::new();
@@ -157,7 +151,6 @@ async fn rewind_to_start_keeps_only_preamble() {
             let actor = create_test_actor(0, 200_000, 80, gateway_tx, persistence_tx).await;
 
             let mut conversation = seed_conversation(true);
-            // Pre-turn reminder in the preamble prefix must survive target=0.
             conversation.insert(2, ConversationItem::system_reminder("skills"));
             let mut snap = actor
                 .chat_state_handle
@@ -193,7 +186,6 @@ async fn rewind_to_start_keeps_only_preamble() {
             );
             assert_eq!(actor.chat_state_handle.get_prompt_index().await, 0);
 
-            // With prompt_index back at 0 the session behaves like a fresh one: no points, further rewinds rejected
             assert!(actor.get_rewind_points().await.rewind_points.is_empty());
             let again = actor
                 .handle_rewind(RewindRequest {
@@ -208,8 +200,8 @@ async fn rewind_to_start_keeps_only_preamble() {
         .await;
 }
 
-/// Two sequential rewinds narrow the history correctly each time.
-/// The second rewind operates on the already-truncated conversation, with markers still present on the surviving items.
+/// Sequential rewinds narrow the history correctly each time. The second rewind operates on the already-truncated
+/// conversation, with markers still present on the surviving items.
 #[tokio::test(flavor = "current_thread")]
 async fn rewind_twice_narrows_history_each_time() {
     let local = tokio::task::LocalSet::new();
@@ -219,7 +211,7 @@ async fn rewind_twice_narrows_history_each_time() {
             let (persistence_tx, _persistence_rx) = tokio::sync::mpsc::unbounded_channel();
             let actor = create_test_actor(0, 200_000, 80, gateway_tx, persistence_tx).await;
 
-            // 5 turns: real, wake, real, wake, real.
+            // Turns: real, wake, real, wake, real.
             let marked = |text: &str, idx: usize| {
                 let mut item = ConversationItem::user(text);
                 item.set_prompt_index(idx);
@@ -259,7 +251,6 @@ async fn rewind_twice_narrows_history_each_time() {
             ];
             actor.chat_state_handle.restore_snapshot(snap);
 
-            // First rewind: to turn 3 (drops W3, A3, P4, A4).
             let first = actor
                 .handle_rewind(RewindRequest {
                     target_prompt_index: 3,
@@ -288,7 +279,6 @@ async fn rewind_twice_narrows_history_each_time() {
             );
             assert_eq!(actor.chat_state_handle.get_prompt_index().await, 3);
 
-            // Second rewind: to turn 1 (drops W1, A1, P2, A2).
             let second = actor
                 .handle_rewind(RewindRequest {
                     target_prompt_index: 1,
@@ -308,7 +298,6 @@ async fn rewind_twice_narrows_history_each_time() {
             );
             assert_eq!(actor.chat_state_handle.get_prompt_index().await, 1);
 
-            // Picker after two rewinds offers exactly turn 0.
             let points = actor.get_rewind_points().await;
             let indices: Vec<usize> = points
                 .rewind_points

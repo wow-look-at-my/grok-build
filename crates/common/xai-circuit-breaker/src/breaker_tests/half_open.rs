@@ -1,6 +1,4 @@
-//! Half-open probe limiting, `half_open_max_probes = 0` clamping,
-//! abandoned-probe lease reclaim, and CAS-loss recovery on the
-//! Open → HalfOpen transition.
+//! Half-open probe limiting, `half_open_max_probes = 0` clamping, abandoned-probe lease reclaim.
 
 use std::sync::Arc;
 use std::thread;
@@ -41,7 +39,6 @@ fn max_probes_clamped_to_at_least_one() {
     cb.record(Outcome::Failure);
     clock.advance(Duration::from_millis(70));
 
-    // Even with max_probes=0 in config, clamped to 1 so one probe gets through
     assert!(cb.check().is_ok());
     assert_eq!(cb.state(), BreakerState::HalfOpen);
     // Second is rejected
@@ -91,8 +88,7 @@ fn abandoned_probe_slot_reclaimed_after_lease_expiry() {
     // While the lease is live, the slot stays claimed.
     assert!(cb.check().is_err());
 
-    // Once the lease (open_duration) expires, the claim is treated as
-    // abandoned: exactly one caller takes the slot over.
+    // Once the lease (open_duration) expires, the claim is treated as abandoned.
     clock.advance(Duration::from_millis(50));
     assert!(
         cb.check().is_ok(),
@@ -131,10 +127,10 @@ fn repeatedly_abandoned_probes_keep_recovery_alive() {
     assert_eq!(cb.state(), BreakerState::Closed);
 }
 
-/// Race two threads attempting the Open → HalfOpen CAS. Only one
-/// should win the CAS; the loser must observe `HalfOpen` and
-/// take the same probe-counting path so the half_open_probes
-/// counter is consistent.
+/// Race threads attempting the Open → HalfOpen CAS. Only one
+/// should win the CAS; the loser must observe `HalfOpen` and take
+/// the same probe-counting path so the half_open_probes counter is
+/// consistent.
 #[test]
 fn cas_loss_recovery_with_mock_clock() {
     let (cb, clock) = breaker_with_mock(BreakerConfig {
@@ -149,8 +145,7 @@ fn cas_loss_recovery_with_mock_clock() {
 
     clock.advance(Duration::from_millis(70));
 
-    // Spawn many threads simultaneously. Only one probe slot;
-    // exactly one Ok overall.
+    // Spawn many threads simultaneously. Only one probe slot; exactly one Ok overall.
     let cb_arc = Arc::new(cb);
     let barrier = Arc::new(std::sync::Barrier::new(16));
     let handles: Vec<_> = (0..16)

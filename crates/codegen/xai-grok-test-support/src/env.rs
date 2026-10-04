@@ -28,9 +28,7 @@ pub fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
     }
 }
 
-/// RAII guard for a single environment variable in `#[serial]` tests. Restoring rather than always unsetting avoids
-/// clobbering vars a parent process/harness set (e.g. `RUST_LOG`). Callers MUST be `#[serial_test::serial]`. The `unsafe`
-/// `set_var`/`remove_var` are sound only when no other thread accesses the environment concurrently.
+/// RAII guard for a single environment variable in `#[serial]` tests.
 pub struct EnvGuard {
     key: &'static str,
     prior: Option<OsString>,
@@ -101,7 +99,7 @@ pub unsafe fn isolate_grok_env(home: &Path) {
 }
 
 fn workspace_root() -> PathBuf {
-    // nth(3): crate is nested three levels below the cargo workspace root.
+    // nth(3): crate is nested a few levels below the cargo workspace root.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
@@ -151,7 +149,7 @@ pub fn ensure_cargo_bin(package: &str, bin: &str) -> PathBuf {
     binary
 }
 
-// Reserve four cores for the pager children other test threads spawn, so a cold build does not starve them.
+// Reserve cores for the pager children other test threads spawn, so a cold build does not starve them.
 fn build_jobs() -> usize {
     let cores = std::thread::available_parallelism()
         .map(std::num::NonZeroUsize::get)
@@ -209,8 +207,7 @@ pub fn grok_binary() -> PathBuf {
     if let Ok(path) = std::env::var("GROK_BINARY") {
         let p = PathBuf::from(path);
         assert!(p.exists(), "GROK_BINARY does not exist: {}", p.display());
-        // Bazel's GROK_BINARY is runfiles-relative; the harness spawns the child with a different cwd
-        // Absolutize against the (runfiles-root) cwd now
+        // Bazel's GROK_BINARY is runfiles-relative; the harness spawns the child with a different cwd Absolutize against the (runfiles-root).
         return std::path::absolute(&p).unwrap_or(p);
     }
 

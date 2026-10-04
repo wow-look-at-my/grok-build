@@ -6,9 +6,7 @@ edition.workspace = true
 description = "Render Mermaid diagram source to a rasterized PNG behind a swappable engine trait"
 
 [dependencies]
-# SVG -> PNG rasterization. `resvg` re-exports the matching `usvg` (0.47) and
-# `tiny_skia`; we deliberately use `resvg::usvg` rather than the workspace
-# `usvg` (0.45.1) so `resvg::render` typechecks against the tree we parse.
+# SVG -> PNG rasterization.
 resvg = { workspace = true }
 tiny-skia = { workspace = true }
 fontdb = { workspace = true }

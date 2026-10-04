@@ -1,5 +1,4 @@
 //! Types are canonical in `xai-grok-tools`.
-//! This module adds conversions between ACP plan entries and `TodoItem` since `xai-grok-tools` is protocol-agnostic.
 
 pub use xai_grok_tools::implementations::grok_build::todo::TodoId;
 pub use xai_grok_tools::implementations::grok_build::todo::TodoItem;

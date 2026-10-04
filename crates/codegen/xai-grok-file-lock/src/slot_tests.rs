@@ -63,7 +63,6 @@ mod unix {
         })
     }
 
-    /// `tempfile::tempdir()` inherits the umask (0755), which a `GuardedIn` dir is refused for.
     fn slot_dir_in(root: &Path) -> PathBuf {
         let dir = root.join("slots");
         fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
@@ -109,7 +108,7 @@ mod unix {
         let target = root.path().join("state.lock");
         let slot_path = slot_path_in(&slot_dir, &target);
         let options = guarded_in(&slot_dir, Duration::from_millis(100));
-        // Dropping the probe releases the flock it just took.
+        // Dropping the probe releases the flock it took.
         let assert_slot_free = || File::open(&slot_path).unwrap().try_lock().unwrap();
 
         let held = lock_file(&target, &options).unwrap();

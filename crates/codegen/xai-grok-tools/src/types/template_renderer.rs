@@ -1,33 +1,4 @@
-//! Pre-built template renderer for tool/param name resolution and
-//! host-shell branching.
-//!
-//! `TemplateRenderer` is built once at finalize time with the tool kind →
-//! client-facing name mappings and stored in Resources. Tools and reminders
-//! call `render()` at runtime to resolve `${{ tools.by_kind.read }}`,
-//! `${{ params.edit.old_string }}`, etc. Host-shell flags
-//! (`is_windows`, `shell_uses_semicolon`, `has_unix_utilities`) are
-//! computed once at construction so templates can branch on the runtime
-//! environment without per-tool plumbing.
-//!
-//! Skills are **not** part of this renderer — they are passed to the Skill
-//! tool at construction time and rendered in its description at finalize time.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let renderer = resources.get::<TemplateRenderer>().unwrap();
-//!
-//! // Resolve a tool name
-//! let name = renderer.render("${{ tools.by_kind.read }}")?;
-//!
-//! // Resolve a param name
-//! let param = renderer.render("${{ params.edit.old_string }}")?;
-//!
-//! // Branch on the host shell
-//! let msg = renderer.render(
-//!     "${%- if has_unix_utilities %}use grep${%- else %}grep is unavailable${%- endif %}"
-//! )?;
-//! ```
+//! Pre-built template renderer for tool/param name resolution and host-shell branching.
 
 use std::collections::HashMap;
 
@@ -45,25 +16,20 @@ struct ToolsContext {
     by_kind: HashMap<ToolKind, String>,
 }
 
-/// The data MiniJinja sees at render time. `tools.by_kind` and `params` keys are snake_case (serde serializes
-/// `ToolKind::Read` → `"read"`), so templates write `${{ tools.by_kind.read }}` / `${{ params.edit.old_string }}`.
-/// Shell flags are computed once in [`TemplateRenderer::new`] from [`xai_grok_config::shell`].
+/// The data MiniJinja sees at render time. `tools.by_kind` and `params` keys
+/// are snake_case (serde serializes `ToolKind::Read` → `"read"`), so
+/// templates write `${{ tools.by_kind.read }}` / `${{ params.edit.old_string
+/// }}`.
 #[derive(Debug, Clone, serde::Serialize)]
 struct TemplateContext {
     tools: ToolsContext,
     params: HashMap<String, HashMap<String, String>>,
     /// `cfg!(not(unix))`.
     is_windows: bool,
-    /// `powershell.exe` 5.1 and `cmd.exe` chain with `;`; everything else
-    /// with `&&`. Used by templates that document command chaining.
     shell_uses_semicolon: bool,
-    /// Whether `grep`, `head`, `tail`, `sed`, `awk`, `find` are usable from the active shell. False
-    /// on Windows + PowerShell / cmd.exe; true everywhere else. Tool descriptions branch on this to
-    /// swap Unix-centric guidance for PowerShell-aware guidance.
+    /// Whether `grep`, `head`, `tail`, `sed`, `awk`, `find` are usable from the active shell.
     has_unix_utilities: bool,
-    /// Whether the client delivers system reminders (e.g. completion notifications for backgrounded commands/subagents) to
-    /// the model. Descriptions that promise "you are notified on completion" branch on this so the promise is only made
-    /// when it can be kept. Defaults to `true` (prod CLI behavior).
+    /// Whether the client delivers system reminders (e.g. completion notifications for backgrounded commands/subagents).
     system_reminders_enabled: bool,
     /// Absolute path to this session's drafts file, when known.
     feedback_drafts_path: String,
@@ -87,8 +53,8 @@ fn render_with_env(
         })
 }
 
-/// Error returned when a template fails to render. Wraps the underlying MiniJinja error. Callers
-/// that want the old silent-fallback behavior can use `.unwrap_or_else(|_| ...)`.
+/// Error returned when a template fails to render. Wraps the underlying
+/// MiniJinja error.
 #[derive(Debug)]
 pub struct TemplateRenderError {
     template: String,
@@ -118,9 +84,10 @@ impl std::error::Error for TemplateRenderError {
     }
 }
 
-/// Pre-built template renderer stored in Resources. Strip unrendered template markers (`${{ … }}` and `${% … %}`) from `raw`. Last-resort
-/// fallback for when MiniJinja rendering fails: the model must never see raw template syntax, so the offending spans are dropped entirely.
-/// Render-failure fallback: strip template markers so the model never sees raw syntax.
+/// Pre-built template renderer stored in Resources. Strip unrendered template
+/// markers (`${{ … }}` and `${% … %}`) from `raw`. Last-resort fallback
+/// for when MiniJinja rendering fails: the model must never see raw template
+/// syntax, so the offending spans are dropped entirely.
 #[track_caller]
 pub fn strip_markers_on_render_failure(raw: &str, err: &TemplateRenderError) -> String {
     debug_assert!(
@@ -165,8 +132,8 @@ pub fn strip_template_markers(raw: &str) -> String {
 /// Byte cap on the snippet [`unresolved_template_markers`] reports per offending description.
 const MARKER_SNIPPET_BYTES: usize = 80;
 
-/// Byte offset of the first `${{` or `${%`; shell-style `${VAR}` is not a marker. This is not a parser: it names the two
-/// delimiters the renderer has always special-cased inline, so callers can ask whether a final text still contains one.
+/// Byte offset of the first `${{` or `${%`; shell-style `${VAR}` is not a
+/// marker.
 fn first_template_marker(text: &str) -> Option<usize> {
     match (text.find("${{"), text.find("${%")) {
         (Some(interp), Some(tag)) => Some(interp.min(tag)),
@@ -218,17 +185,15 @@ pub fn unresolved_template_markers(defs: &[ToolDefinition]) -> Vec<(String, Stri
         if let Some(desc) = def.function.description.as_deref() {
             check(desc);
         }
-        // The walker is the renderer's mutable one; cloning the schema keeps a single walk in the file, and this runs
-        // only when a session's toolset changes
+        // The walker is the renderer's mutable one.
         let mut parameters = def.function.parameters.clone();
         for_each_schema_description_mut(&mut parameters, &mut |desc| check(desc.as_str()));
     }
     offenders
 }
 
-/// Created once at finalize time and available to all tools and reminders via `resources.get::<TemplateRenderer>()`.
-/// Uses MiniJinja with custom `${{ }}` / `${% %}` delimiters to avoid collisions with literal `{{ }}` in tool
-/// descriptions and error messages. Context is baked in at construction and cannot be modified afterwards.
+/// Created once at finalize time and available to all tools and reminders via
+/// `resources.get::<TemplateRenderer>()`.
 #[derive(Clone)]
 pub struct TemplateRenderer {
     ctx: TemplateContext,
@@ -257,8 +222,7 @@ impl TemplateRenderer {
                 tools: ToolsContext { by_kind: tools },
                 params,
                 is_windows: cfg!(not(unix)),
-                // `chain_separator()` returns `"&&"` on Unix, so the
-                // comparison is naturally false there — no cfg guard needed.
+                // `chain_separator()` returns `"&&"` on Unix.
                 shell_uses_semicolon: xai_grok_config::shell::chain_separator() == ";",
                 has_unix_utilities: xai_grok_config::shell::has_unix_utilities(),
                 system_reminders_enabled: true,
@@ -284,17 +248,13 @@ impl TemplateRenderer {
     }
 
     /// Override whether templates see `system_reminders_enabled` as true.
-    /// Called at finalize time with the client's setting; every other
-    /// construction site keeps the default (`true`).
     #[must_use]
     pub fn with_system_reminders_enabled(mut self, enabled: bool) -> Self {
         self.ctx.system_reminders_enabled = enabled;
         self
     }
 
-    /// Render a template string with the full context. `${{ tools.by_kind.read }}` — resolves to the client-facing Read tool name `${{
-    /// params.edit.old_string }}` — resolves to the client-facing param name `${%- if tools.by_kind.search %}...${%- endif %}` — conditional
-    /// sections Returns the raw template unchanged (without error) if it contains no template markers (`${{` or `${%`).
+    /// Render a template string with the full context.
     pub fn render(&self, template: &str) -> Result<String, TemplateRenderError> {
         render_with_env(template, &self.ctx)
     }
@@ -325,16 +285,15 @@ impl TemplateRenderer {
         });
     }
 
-    /// Returns the client-facing tool name for the given `ToolKind` if a tool of that kind is registered in the finalized
-    /// toolset. Use this when you need a structural answer to "does the active toolset expose a tool of kind X?" — the
-    /// kind→name map is the single source of truth, populated at `FinalizedToolset` build time from each tool's `kind()`.
+    /// Returns the client-facing tool name for the given `ToolKind` if a tool
+    /// of that kind is registered in the finalized toolset.
     pub fn tool_for_kind(&self, kind: ToolKind) -> Option<&str> {
         self.ctx.tools.by_kind.get(&kind).map(String::as_str)
     }
 
-    /// The client-facing name of a canonical parameter on the tool of `kind`, or `None` when no tool of that kind exposes
-    /// that parameter in the finalized toolset. This is the param-map twin of [`Self::tool_for_kind`]: it resolves the same
-    /// `${{ params.<kind>.<param> }}` mapping that [`Self::render`] would, but eagerly and as an `Option`.
+    /// The client-facing name of a canonical parameter on the tool of `kind`,
+    /// or `None` when no tool of that kind exposes that parameter in the
+    /// finalized toolset.
     pub fn param_for_kind<'a>(&'a self, kind: ToolKind, canonical: &str) -> Option<&'a str> {
         let key_value = serde_json::to_value(kind).ok()?;
         let key = key_value.as_str()?;
@@ -528,9 +487,9 @@ mod tests {
             Some("is_background")
         );
 
-        // Regression: an execute tool WITHOUT `is_background` in its schema (e.g. OpenCode's foreground-only bash) seeds
-        // `params.execute` from its real fields only. `param_for_kind` must report the missing field as absent so
-        // `get_task_output` / `wait_tasks` don't tell the model to pass `is_background=true` to a tool that has no such field.
+        // Regression: an execute tool WITHOUT `is_background` in its schema
+        // (e.g. OpenCode's foreground-only bash) seeds `params.execute` from
+        // its real fields only.
         let opencode_bash = make_renderer(
             &[(ToolKind::Execute, "bash")],
             &[(
@@ -700,9 +659,9 @@ mod tests {
         assert_eq!(result, "OK");
     }
 
-    /// Documents MiniJinja's default (lenient) undefined behavior: a missing kind in *output* position renders as an empty
-    /// string with `Ok`, it does NOT return `Err`. Callers that want a fallback name for a missing kind must check for an
-    /// empty result — `.unwrap_or_else` on the `Result` alone never fires for this case.
+    /// Documents MiniJinja's default (lenient) undefined behavior: a missing
+    /// kind in *output* position renders as an empty string with `Ok`, it
+    /// does NOT return `Err`.
     #[test]
     fn render_missing_kind_output_position_is_empty_ok() {
         let r = make_renderer(&[], &[]);

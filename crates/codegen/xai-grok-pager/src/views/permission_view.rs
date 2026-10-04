@@ -608,9 +608,7 @@ pub fn render_permission_view(
         }
 
         if is_followup && option.kind == acp::PermissionOptionKind::RejectOnce {
-            // Always-focused input row. No reverse-video overlay here: it is
-            // an editable line (hardware cursor + accent bar carry focus),
-            // so the terminal theme simply renders it bandless.
+            // Always-focused input row.
             let row_bg = theme.bg_visual;
 
             let full_row = Rect {
@@ -2867,9 +2865,7 @@ mod tests {
 
     #[test]
     fn execute_header_display_matches_overlay_body() {
-        // Both render paths read the process-global theme; hold the theme
-        // test lock so a concurrent theme test can't flip the palette (and
-        // the markdown polarity mode) between the two renders.
+        // Both render paths read the process-global theme.
         let _theme = crate::theme::cache::pin_theme();
         let script = dump_script_twin();
         for width in [12usize, 40, 400] {

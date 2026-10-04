@@ -131,8 +131,8 @@ pub struct MarketplaceSource {
 }
 
 impl MarketplaceSource {
-    /// The stable identity string — the configured git URL or the expanded local path; keys install
-    /// provenance (`source_url_or_path`), remove-matching, and update caches.
+    /// The stable identity string — the configured git URL or the expanded
+    /// local path.
     pub fn identity(&self) -> String {
         match &self.kind {
             SourceKind::Local { path } => path.display().to_string(),
@@ -190,7 +190,6 @@ pub struct MarketplaceEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_subdir: Option<String>,
     /// Structured inventory from the marketplace catalog (`plugin-index.json`).
-    /// `None` means the catalog has no data for this plugin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub components: Option<xai_hooks_plugins_types::PluginComponents>,
 }

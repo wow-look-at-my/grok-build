@@ -1,8 +1,4 @@
 //! Prompt construction for **steps** compaction.
-//!
-//! The step-level intra-compaction prompt: short and focused on summarising
-//! tool-call history mid-task. Parallel to [`crate::history::prompt`] (the
-//! history-compaction prompts); templates live in the crate-root `templates/`.
 
 use crate::prompt::CompactionPrompt;
 

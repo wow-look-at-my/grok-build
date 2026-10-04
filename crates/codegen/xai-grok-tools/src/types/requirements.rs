@@ -1,16 +1,4 @@
 //! Requirement expressions for tool dependency validation.
-//!
-//! Three layers of evaluation, bottom-up:
-//!
-//! ```text
-//! Expr<ToolRequirement>::eval(|req| req.eval(&ctx))       // top: walk requirement tree
-//!   └─ Expr<ToolParamsRequirement>::eval(|pr| pr.check(params))  // mid: walk param conditions
-//!       └─ Expr<serde_json::Value>::eval(|v| actual == v)        // leaf: value equality
-//! ```
-//!
-//! `Expr<T>` is the generic boolean expression tree. Each domain type
-//! (`ToolRequirement`, `ToolParamsRequirement`, `serde_json::Value`) plugs
-//! in as the closure to `eval()`.
 
 use crate::types::tool::ToolKind;
 
@@ -65,9 +53,7 @@ impl ToolParamsRequirement {
         }
     }
 
-    /// Check this requirement against a JSON params object. Looks up `self.key` in `params`, then
-    /// evaluates `self.value` as an expression over the actual value. For the common case
-    /// (`Expr::Value(expected)`), this is just equality.
+    /// Check this requirement against a JSON params object.
     pub fn check(&self, params: &serde_json::Value) -> bool {
         let actual = params.get(&self.key);
         self.value.eval(&|expected| actual == Some(expected))
@@ -80,19 +66,15 @@ pub struct ProposedTool<'a> {
     pub id: &'a str,
     pub kind: ToolKind,
     pub params: &'a serde_json::Value,
-    /// Input schema (JSON Schema) — used by `InputParam` to verify
-    /// that a param exists and is visible in the schema.
+    /// Input schema (JSON Schema) — used by `InputParam` to verify that a param exists and is visible in the schema.
     pub input_schema: Option<&'a serde_json::Value>,
 }
 
-/// The world a `ToolRequirement` evaluates against. Built from the enabled tools + their params
-/// (from `ToolServerConfig`), combined with static metadata (tool_kinds) from the
-/// `ToolRegistryBuilder`.
+/// The world a `ToolRequirement` evaluates against.
 pub struct EvalContext<'a> {
     /// All enabled tools in the proposed configuration.
     pub tools: &'a [ProposedTool<'a>],
-    /// Params of the tool whose `requires_expr` we're evaluating.
-    /// Used by `IfParams` to check "our own" params.
+    /// Params of the tool whose `requires_expr` we're evaluating. Used by `IfParams` to check "our own" params.
     pub self_params: &'a serde_json::Value,
 }
 
@@ -109,8 +91,7 @@ pub enum ToolRequirement {
     /// tool's params satisfy `if_params`.
     ToolKind {
         kind: Expr<ToolKind>,
-        /// When set, at least one tool of this kind must have params
-        /// satisfying this expression.
+        /// When set, at least one tool of this kind must have params satisfying this expression.
         #[serde(skip_serializing_if = "Option::is_none")]
         if_params: Option<Expr<ToolParamsRequirement>>,
     },
@@ -120,9 +101,7 @@ pub enum ToolRequirement {
         condition: Expr<ToolParamsRequirement>,
         requirement: Box<ToolRequirement>,
     },
-    /// Require that a tool of the given kind has a visible input param. Used when description templates reference `${{
-    /// params.<kind>.<param> }}` — ensures the param exists and isn't hidden/pinned by the client config. Validation fails
-    /// if the param is missing from the tool's input schema.
+    /// Require that a tool of the given kind has a visible input param.
     InputParam { kind: Expr<ToolKind>, param: String },
 }
 

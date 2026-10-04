@@ -7,7 +7,6 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     /// The file was written by a newer grok (`user_version` above what this build supports).
-    /// The handle stays open read-only; every write returns this.
     #[error("workspace store is schema v{found}; this build supports v{supported} (read-only)")]
     NewerSchema { found: u32, supported: u32 },
 
@@ -16,7 +15,6 @@ pub enum StoreError {
     AllPinned { capacity: usize },
 
     /// Returned where a missing row is a real caller error (`update_member_metadata`, the rank setters, `rekey`).
-    /// Never returned by `remove_member`, which is idempotent.
     #[error("no workspace member {session_id} ({kind})")]
     MemberNotFound { session_id: String, kind: String },
 
@@ -37,7 +35,6 @@ pub enum StoreError {
     CwdTooLong { max: usize },
 
     /// A caller-supplied unknown enum value that is structurally invalid.
-    /// Values read back from the store are exempt for forward compatibility.
     #[error("invalid unknown {column} value: {reason}")]
     InvalidEnumValue {
         column: &'static str,
@@ -45,18 +42,14 @@ pub enum StoreError {
     },
 
     /// A caller-supplied unknown enum value over the byte cap.
-    /// Rejected, never truncated: a clipped `kind` would address a different primary key.
-    /// A clipped origin or grouping would break byte-identical passthrough.
     #[error("unknown {column} value exceeds {max} bytes")]
     EnumValueTooLong { column: &'static str, max: usize },
 
     /// The busy timeout elapsed while another connection held the write lock.
-    /// `waited_ms` is measured by the store around the failing operation; SQLite's busy handler reports nothing.
     #[error("workspace store busy after {waited_ms}ms")]
     Busy { waited_ms: u64 },
 
     /// The file is corrupt or is not a SQLite database.
-    /// The store never deletes, truncates, or quarantines it: the user's workspace stays on disk for manual recovery.
     #[error("workspace store file is unusable: {source}")]
     Unusable {
         #[source]

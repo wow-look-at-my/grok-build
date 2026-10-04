@@ -1,9 +1,4 @@
 //! Skill, plugin, project-config, and permissions discovery.
-//!
-//! Delegates to the existing discovery implementations in `xai-grok-agent` and `xai-grok-tools` rather than duplicating them.
-//! The workspace stores configuration on [`WorkspaceShared`] and the [`MpscChannel`] methods call these helpers.
-//!
-//! Re-exports [`AgentsMdTracker`] from `xai-grok-tools` for external consumers that need per-session project-instruction tracking.
 
 use std::path::Path;
 
@@ -140,8 +135,7 @@ pub fn load_project_config(root_cwd: &Path) -> Value {
     let config_path = root_cwd.join(".grok").join("config.toml");
     match xai_grok_config::load_config_file(&config_path) {
         Ok(toml::Value::Table(ref t)) if t.is_empty() => {
-            // The config loader returns an empty table when the file does not exist
-            // Normalize to Null for callers
+            // The config loader returns an empty table when the file does not exist Normalize to Null for callers
             Value::Null
         }
         Ok(toml_val) => toml_to_json(&toml_val),

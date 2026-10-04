@@ -122,9 +122,8 @@ impl ReadToolCallBlock {
         self.error = error;
     }
 
-    /// Finalize elapsed time from `started_at`.
-    ///
-    /// Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set (already finalized).
+    /// Finalize elapsed time from `started_at`. Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set
+    /// (already finalized).
     pub fn finish(&mut self) {
         if self.elapsed_ms.is_some() {
             return;
@@ -569,8 +568,7 @@ mod tests {
 
     #[test]
     fn content_preview_shading_is_marked_panel() {
-        // The preview's bg_dark band is decoration, not meaningful shading
-        // It must be flagged `background_is_panel` so minimal mode's flat rendering can drop it (EntryRenderer::flat_background)
+        // The preview's bg_dark band is decoration.
         let block = ReadToolCallBlock::new("notes.txt").with_content("alpha\nbravo".to_string(), 2);
         let mut ctx = make_ctx();
         ctx.mode = DisplayMode::Expanded;

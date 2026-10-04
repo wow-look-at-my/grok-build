@@ -4,8 +4,7 @@ pub const LARGE_PROMPT_THRESHOLD: usize = 25_000;
 pub const INTERJECTION_NOTE: &str = "The user sent a message while you were working:";
 pub const INTERRUPT_NOTE: &str = "The user interrupted the previous turn:";
 
-/// Trailing reminder so a mid-turn steer or post-cancel follow-up answers the user before
-/// resuming in-flight work.
+/// Trailing reminder so a mid-turn steer or post-cancel follow-up answers the user before resuming in-flight work.
 pub const UNFINISHED_TASKS_REMINDER: &str = "If the user is asking for a response, address the user first. After replying, complete any unfinished tasks from previous turns.";
 
 /// Wrap a user message in the canonical `<user_query>` envelope.
@@ -18,7 +17,7 @@ pub fn user_query(user_message: &str) -> String {
 }
 
 /// Prefix `note` and the unfinished-task trailer around an already-assembled
-/// user turn (a `<user_query>` block, optionally with skill/context tails).
+/// user turn.
 pub fn frame_user_turn(note: &str, assembled: &str) -> String {
     format!("{note}\n{assembled}\n{UNFINISHED_TASKS_REMINDER}")
 }

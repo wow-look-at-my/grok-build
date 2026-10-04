@@ -15,8 +15,7 @@ pub enum LimitBehavior {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubagentLimits {
-    /// Subagents one session may run at once. Zero does not disable the
-    /// limit: [`Admission::new`] clamps it to 1.
+    /// Subagents one session may run at once.
     pub max_concurrent: usize,
     pub behavior: LimitBehavior,
 }
@@ -95,9 +94,6 @@ pub(super) struct Admission {
 }
 
 impl Admission {
-    /// `max_concurrent: 0` is clamped to 1 (the env path already filters
-    /// zero): a limit can be adjusted but never disabled, and the actor's
-    /// "queued implies running" exit invariant needs at least one slot.
     pub(super) fn new(mut limits: SubagentLimits) -> Self {
         limits.max_concurrent = limits.max_concurrent.max(1);
         Self { limits }

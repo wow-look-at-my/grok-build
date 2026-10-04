@@ -1682,7 +1682,6 @@ fn chat_mode_debounce_expiry_fetches_current_and_drops_stale() {
          with the same host and generation, got {effects:?}"
     );
 }
-/// Build mode: any query of 2 or more chars arms the deep-search debounce.
 /// Abundant title matches must not suppress the content search (users read that as "content search doesn't exist").
 /// Ctrl+/ still searches immediately.
 #[test]
@@ -1807,7 +1806,6 @@ fn build_mode_debounce_expiry_searches_current_and_drops_stale() {
         "build-mode expiry for a hidden welcome picker must not search, got {effects:?}"
     );
 }
-/// Modal `/resume` surface: the debounce expiry validates against the MODAL's deep-search seq (the welcome counter still sits at 0 here).
 #[test]
 fn build_mode_modal_debounce_expiry_validates_modal_seq() {
     use crate::views::modal::ActiveModal;
@@ -1845,9 +1843,8 @@ fn build_mode_modal_debounce_expiry_validates_modal_seq() {
         "expiry must validate against the modal seq, got {effects:?}"
     );
 }
-/// The modal arms a debounce, then closes.
-/// The dismissal bump lands on the WELCOME counter and collides with the carried modal seq (both 1 here).
-/// The expiry must still be dropped because no picker surface is live.
+/// The modal arms a debounce, then closes. The expiry must still be dropped because no picker surface is
+/// live.
 #[test]
 fn build_mode_modal_close_drops_armed_debounce_despite_seq_collision() {
     use crate::views::modal::ActiveModal;
@@ -2791,9 +2788,8 @@ fn build_mode_rapid_plain_fetches_drop_superseded_response() {
         "a late superseded response must not clobber the applied result"
     );
 }
-/// Picker incarnation generations: every fetch reallocates the welcome picker's generation.
-/// A fetch with the modal open overwrites the modal's constructed 0 placeholder with a fresh allocation (distinct from the welcome one).
-/// A dismissal reallocates the welcome generation again.
+/// Picker incarnation generations: every fetch reallocates the welcome picker's generation. A dismissal reallocates the welcome
+/// generation again.
 #[test]
 fn picker_generations_reallocate_on_fetch_and_dismissal() {
     use crate::views::modal::ActiveModal;

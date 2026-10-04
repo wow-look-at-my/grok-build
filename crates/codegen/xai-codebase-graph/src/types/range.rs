@@ -1,8 +1,4 @@
 //! Position and Range types for representing source code locations.
-//!
-//! These types follow LSP conventions:
-//! - Internally stored as 0-indexed (tree-sitter compatible)
-//! - Public API provides both 0-indexed and 1-indexed accessors
 
 use serde::{Deserialize, Serialize};
 
@@ -330,7 +326,7 @@ impl Range {
 
     /// Check if this range intersects with another (line-based).
     pub fn intersects_without_byte(&self, other: &Range) -> bool {
-        // Two ranges intersect if one starts before the other ends AND ends after the other starts
+        // Ranges intersect if one starts before the other ends AND ends after the other starts
         self.start_line() <= other.end_line() && self.end_line() >= other.start_line()
     }
 

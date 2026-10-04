@@ -151,8 +151,7 @@
 
     #[test]
     fn interjection_notification_pushes_block_to_matching_session() {
-        // Multi-client: an interjection typed in one pane is broadcast by the shell as x.ai/session/interjection
-        // EVERY attached pane (incl. the originator, which no longer pushes a local block) renders it.
+        // Multi-client: an interjection typed in one pane is broadcast by the shell as x.ai/session/interjection EVERY attached pane.
         let mut app = make_app_with_agent("sess-view");
         let affected =
             handle_ext_notification(&interjection_ext("sess-view", "also add tests"), &mut app);
@@ -197,8 +196,7 @@
 
     #[test]
     fn interjection_notification_dedups_originators_own_echo() {
-        // The originator rendered an optimistic block in dispatch_interject and recorded the id
-        // Its own broadcast echo must be dropped (no dup) and the id forgotten
+        // The originator rendered an optimistic block in dispatch_interject and recorded the id Its own broadcast echo must be dropped (no dup).
         let mut app = make_app_with_agent("sess-view");
         app.agents
             .get_mut(&AgentId(0))

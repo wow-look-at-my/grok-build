@@ -3,9 +3,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// A content-date window for `x_search`: `fromDate` inclusive, `toDate` exclusive at 00:00 UTC of
-/// the named day. Both are canonical `YYYY-MM-DD` (camelCase on the wire), validated in
-/// [`SearchDateBound::new`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", try_from = "SearchDateBoundWire")]
 #[schemars(deny_unknown_fields)]
@@ -82,7 +79,6 @@ fn validate_bound_date(
             value: s.to_owned(),
         }
     })?;
-    // chrono's proleptic calendar admits year 0; reject it so the minimum year is 1.
     if chrono::Datelike::year(&parsed) < 1 {
         return Err(SearchDateBoundError::InvalidDate {
             field,
@@ -133,8 +129,7 @@ impl XSearchOptions {
         // Destructure so a new field forces a compile error rather than a dropped wire field.
         let XSearchOptions { date_bound } = self;
         let bound = date_bound.as_ref();
-        // The object is built directly rather than through `to_value`, so this
-        // has no failure to hide behind an expect.
+        // The object is built directly rather than through `to_value`, so this has no failure to hide behind an expect.
         let mut entry = serde_json::Map::new();
         entry.insert(
             "type".to_owned(),
@@ -202,12 +197,11 @@ mod x_search_entry_tests {
     }
 }
 
-/// The public web-search API caps each domain list at 5 entries.
+/// The public web-search API caps each domain list at multiple entries.
 pub const MAX_WEB_SEARCH_DOMAINS: usize = 5;
 
-/// `web_search` override: a domain allowlist and/or blocklist (empty or absent is unbounded). The two lists are mutually
-/// exclusive and each is capped at [`MAX_WEB_SEARCH_DOMAINS`]; both rules are enforced by [`WebSearchOptions::validate`]
-/// on every deserialize ingress.
+/// `web_search` override: a domain allowlist and/or blocklist (empty or
+/// absent is unbounded).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", try_from = "WebSearchOptionsWire")]
 #[schemars(deny_unknown_fields)]
@@ -305,9 +299,8 @@ pub enum WebSearchOptionsError {
     TooManyDomains { field: &'static str, count: usize },
 }
 
-/// Deserialize target for [`WebSearchOptions`]: every ingress (agent frontmatter, per-turn
-/// `ToolOverridesUpdate`) routes through `try_from`, so both-set and over-limit configs fail
-/// to parse instead of surfacing as a request-level API error later.
+/// Deserialize target for [`WebSearchOptions`]: every ingress (agent
+/// frontmatter, per-turn `ToolOverridesUpdate`) routes through `try_from`.
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WebSearchOptionsWire {
@@ -357,7 +350,6 @@ impl ToolOverrides {
 }
 
 /// A tri-state per-turn patch field: absent leaves, `null` clears, a value sets.
-/// Pair with [`crate::serde_helpers::double_option`].
 pub type ClearableField<T> = Option<Option<T>>;
 
 /// The ingress-only per-turn patch: each tool is a tri-state [`ClearableField`] applied by
@@ -392,8 +384,8 @@ impl ToolOverridesUpdate {
     }
 }
 
-/// Normalize an override option: empty carries no constraint, so it reads as absent.
-/// `merge_field` and `apply_tool_overrides` both call this, so the rule lives in one place.
+/// Normalize an override option: empty carries no constraint, so it reads as
+/// absent.
 pub(crate) fn drop_empty<T>(opt: Option<T>, is_empty: impl Fn(&T) -> bool) -> Option<T> {
     opt.filter(|value| !is_empty(value))
 }

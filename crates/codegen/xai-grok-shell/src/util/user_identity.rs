@@ -249,8 +249,8 @@ impl IdentityField {
         }
     }
 
-    /// Whether the config declares a source that could still fill this field later.
-    /// `email_domain` is excluded: a derived `<name>@<domain>` depends only on the resolved name, so it won't change on retry.
+    /// Whether the config declares a source that could still fill this field
+    /// later.
     fn can_produce(self, cfg: &FeedbackUserConfig) -> bool {
         !self.sources(cfg).is_empty() || cfg.command.is_some()
     }
@@ -343,9 +343,8 @@ struct CacheEntry {
 }
 
 impl CacheEntry {
-    /// Whether every field this config can populate has a value.
-    /// Complete entries never expire.
-    /// Incomplete ones are retried after [`INCOMPLETE_RESULT_TTL`] so a source that wasn't ready (git, a slow command) can fill in later.
+    /// Whether every field this config can populate has a value. Complete
+    /// entries never expire.
     fn is_complete(&self) -> bool {
         IdentityField::iter()
             .all(|field| self.identity.slot(field).is_some() || !field.can_produce(&self.cfg))
@@ -364,9 +363,8 @@ impl IdentityCache {
         }
     }
 
-    /// Holds the lock across resolution so concurrent submissions run a slow command once, not once each.
-    /// The tradeoff: submissions serialize, and a first-time resolution can take up to the combined source timeouts.
-    /// The pre-warm at session spawn keeps this off the interactive path.
+    /// Holds the lock across resolution so concurrent submissions run a slow
+    /// command once, not once each.
     pub(crate) async fn get(
         &self,
         cfg: Option<&FeedbackUserConfig>,
@@ -782,8 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_retry_keeps_a_previously_resolved_field() {
-        // First run resolves only the name; the post-TTL retry resolves only the email
-        // The retry must not drop the name the first run already resolved
+        // First run resolves only the name; the post-TTL retry resolves only the email The retry must not drop the name the first run already.
         let dir = tempfile::tempdir().unwrap();
         let (command, counter) = first_then_command(
             dir.path(),
@@ -851,8 +848,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_single_flights_concurrent_resolution() {
-        // Two concurrent submissions must run the slow command once, not once each
-        // The cache holds its lock across resolution so the work isn't duplicated
+        // Concurrent submissions must run the slow command once.
         let dir = tempfile::tempdir().unwrap();
         let counter = dir.path().join("runs");
         let command = format!(

@@ -1,5 +1,4 @@
 //! Code-navigation eligibility gating and codebase-index management for [`MvpAgent`].
-//! Co-located child of `mvp_agent` (`use super::*`).
 
 use super::*;
 use crate::extensions::code_nav::CodeNavEligibility;
@@ -34,9 +33,9 @@ impl MvpAgent {
         Some((handle, was_newly_started))
     }
 
-    /// Core eligibility check: a pure function that accepts explicit client context rather than reading global agent state.
-    /// This is the single place that applies all four gates.
-    /// Call it via [`code_nav_eligibility_for_request`] (leader-mode safe) or [`code_nav_eligibility`] (global state, non-leader use only).
+    /// Core eligibility check: a pure function that accepts explicit client context rather than reading global agent state. This is the
+    /// single place that applies all gates. Call it via [`code_nav_eligibility_for_request`] (leader-mode safe) or [`code_nav_eligibility`]
+    /// (global state, non-leader use only).
     pub(super) fn code_nav_eligibility_inner(
         &self,
         cwd: &std::path::Path,
@@ -45,7 +44,6 @@ impl MvpAgent {
     ) -> Result<(), CodeNavEligibility> {
         use crate::agent::config::CodebaseIndexingSetting;
 
-        // Gate 1: client type
         if !matches!(client_type, ClientType::GrokWeb) {
             tracing::info!(
                 client_type = ?client_type,
@@ -56,7 +54,6 @@ impl MvpAgent {
             return Err(CodeNavEligibility::ClientNotWeb);
         }
 
-        // Gate 2: capability advertised
         if !code_nav_enabled {
             tracing::info!(
                 gate = "capability",
@@ -66,7 +63,6 @@ impl MvpAgent {
             return Err(CodeNavEligibility::CapabilityNotAdvertised);
         }
 
-        // Gate 3: config
         let setting = self.cfg.borrow().features.codebase_indexing.clone();
         if let CodebaseIndexingSetting::Enabled(false) = &setting {
             tracing::info!(
@@ -77,7 +73,6 @@ impl MvpAgent {
             return Err(CodeNavEligibility::DisabledByConfig);
         }
 
-        // Gate 4: git root / config globs
         let git_root = xai_grok_workspace::session::git::find_git_root_from_path(cwd).ok();
         match &setting {
             CodebaseIndexingSetting::Enabled(true) => {
@@ -119,9 +114,7 @@ impl MvpAgent {
     ) -> Result<(), CodeNavEligibility> {
         let session_id = match session_id {
             Some(sid) => sid,
-            // No session_id: per-client capability cannot be determined without a session
-            // Reject with SessionRequired rather than fall back to shared global state
-            // Callers must provide sessionId for x.ai/code/* requests
+            // No session_id: per-client capability cannot be determined without a session Reject with SessionRequired rather than fall back.
             None => return Err(CodeNavEligibility::SessionRequired),
         };
 
@@ -130,8 +123,7 @@ impl MvpAgent {
             let ct = crate::http::client_type_from_origin(handle.origin_client.as_ref());
             (ct, handle.code_nav_enabled)
         } else {
-            // Session not found (evicted/unknown): reject rather than silently falling back to shared global state
-            // The fallback would reintroduce the last-client-wins bug for stale session IDs in leader mode
+            // Session not found (evicted/unknown): reject rather than silently falling back.
             return Err(CodeNavEligibility::SessionRequired);
         };
         self.code_nav_eligibility_inner(cwd, client_type, code_nav_enabled)
@@ -182,7 +174,6 @@ impl MvpAgent {
 
         let target = git_root.unwrap_or_else(|| cwd.to_path_buf());
         // get_or_create returns the authoritative (handle, was_newly_started) pair.
-        // Log only on actual first spawn so reuse requests are not misleadingly labelled as "starting"
         let (handle, was_newly_started) = self.get_or_create_codebase_index(target.clone());
         if was_newly_started {
             tracing::info!(

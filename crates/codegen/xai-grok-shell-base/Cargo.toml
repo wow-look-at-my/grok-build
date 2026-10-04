@@ -8,8 +8,8 @@ description = "Foundation modules for the grok shell crate family: environment p
 [features]
 # Forwarded from shell; empty here (no local-ws code in this crate).
 local-workspace = []
-# Exposes `#[cfg(test)]`-only helpers (`env::EnvVarGuard`,
-# `cpu_profile` test seams) to downstream crates' test targets. Enabled by
+# Exposes `#[cfg(test)]`-only helpers (`env::EnvVarGuard`, `cpu_profile`
+# test seams) to downstream crates' test targets.
 test-support = ["xai-grok-env/test-support"]
 default-bazel = ["test-support"]
 

@@ -1,9 +1,4 @@
 //! Manages code graph indexes for code navigation features (go-to-definition, go-to-references).
-//! Indexes are shared across sessions with the same cwd to avoid duplicate work.
-//!
-//! Deduplication happens at two levels:
-//! 1. **Process-level**: `IndexManager::spawn()` ensures at most one manager per workspace per process
-//! 2. **Cross-process**: File-based locking prevents duplicate background operations
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,8 +17,8 @@ pub fn get_index_cache_path(cwd: &Path) -> PathBuf {
         .join("goto_index.bin")
 }
 
-/// Wraps `IndexManager::spawn()` with cache-path config and cross-session handle reuse.
-/// Keeps only `Weak` refs; sessions hold the strong `Arc`s, so the actor is reaped when the last session in a git-root closes.
+/// Wraps `IndexManager::spawn()` with cache-path config and cross-session
+/// handle reuse.
 pub struct CodebaseIndexManager {
     indexes: HashMap<PathBuf, Weak<IndexManagerHandle>>,
 }
@@ -156,8 +151,7 @@ mod tests {
             &inner_handle
         ));
 
-        // Drop the longest root's strong ref: its `Weak` is now dead
-        // Covering must fall back to the shorter live `outer`, not return `None`
+        // Drop the longest root's strong ref: its `Weak` is now dead Covering must fall back to the shorter live `outer`.
         drop(inner_handle);
         let covering = mgr.get_covering(&file).expect("fall back to live outer");
         assert!(std::sync::Arc::ptr_eq(&covering, &outer_handle));

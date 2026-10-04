@@ -5,11 +5,7 @@
     unreachable_code,
     dead_code
 )]
-//! Backend environment presets for the Grok CLI crate family: endpoint URL
-//! defaults, environment selection, and env-var test support.
-//!
-//! The compiled production endpoints identify first-party hosts. They are never
-//! connected to by default: a value resolves to its `GROK_*` env var, else blank.
+//! Backend environment presets for the Grok CLI crate family: endpoint URL defaults, environment selection.
 #![deny(clippy::indexing_slicing)]
 mod registry;
 pub use registry::{FIRST_PARTY_CREDENTIAL_ENV_VARS, env_bool, env_string};
@@ -80,8 +76,8 @@ impl GrokBuildEnvironment {
     pub fn asset_server_url(&self) -> String {
         self.resolve("_ASSET_SERVER_URL", self.endpoints().asset_server_url)
     }
-    /// The relay WebSocket URL (Web Frontend at `grok.com/code` driving a local agent).
-    /// Not the cloud-sandbox gateway ([`Self::gateway_ws_url`]); the two speak different protocols.
+    /// The relay WebSocket URL (Web Frontend at `grok.com/code` driving a
+    /// local agent).
     pub fn relay_ws_url(&self) -> String {
         self.resolve("_WS_URL", self.endpoints().relay_ws_url)
     }
@@ -104,7 +100,6 @@ static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
     /// Set while this thread owns [`ENV_LOCK`].
-    /// `ENV_LOCK` is not reentrant, so without this a second guard on one thread blocks forever on the first guard's lock.
     static ENV_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 #[cfg(any(test, feature = "test-support"))]
@@ -119,9 +114,8 @@ fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     ENV_LOCK_HELD.set(true);
     lock
 }
-/// RAII env-var override for tests: constructors snapshot the prior value under [`ENV_LOCK`], `Drop` restores it, panics included.
-/// A guard owns [`ENV_LOCK`] for its whole lifetime, so one thread can only ever hold one.
-/// To override several keys at once, chain [`Self::and_set`] / [`Self::and_remove`] onto a single guard.
+/// RAII env-var override for tests: constructors snapshot the prior value
+/// under [`ENV_LOCK`], `Drop` restores it, panics included.
 #[cfg(any(test, feature = "test-support"))]
 pub struct EnvVarGuard {
     /// The constructor's key; [`Self::set_value`] targets it.
@@ -229,7 +223,7 @@ mod tests {
         );
         assert!(std::env::var(B).is_err());
     }
-    /// Stacking two guards on one thread used to block forever on the non-reentrant `ENV_LOCK`, which surfaced only as a CI test timeout.
+    /// Stacking guards on one thread used to block forever on the non-reentrant `ENV_LOCK`, which surfaced only as a CI test timeout.
     #[test]
     #[should_panic(expected = "this thread already holds a live guard")]
     fn env_var_guard_rejects_a_second_guard_on_the_same_thread() {

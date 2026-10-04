@@ -4,11 +4,10 @@ use super::*;
 use xai_grok_telemetry::session_end::{self, Phase};
 
 const DREAM_MODEL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
-/// Stale-lock floor: the whole dream (model call plus post-call reindex) must finish inside this, so it must exceed the model timeout; doubling it leaves reindex headroom.
+/// Stale-lock floor: the whole dream (model call plus post-call reindex) must finish inside this, so it must exceed the model timeout.
 const DREAM_LOCK_STALE_FLOOR_SECS: u64 = DREAM_MODEL_TIMEOUT.as_secs() * 2;
 
-/// Whether a dream attempt reached the model call. `Ran` reports its own result; `Skipped` returned
-/// before the model call, so a user-initiated caller surfaces the reason and `/dream` is never silent.
+/// Whether a dream attempt reached the model call.
 enum DreamAttempt {
     Ran(MemoryDreamDisposition),
     Skipped(MemoryDreamDisposition, &'static str),
@@ -215,8 +214,7 @@ impl SessionActor {
             return;
         };
 
-        // Cheap pre-check to filter out the common closed-gate case before taking the lock; the
-        // authoritative gate is re-checked under the lock inside run_dream_inner.
+        // Cheap pre-check to filter out the common closed-gate case before taking the lock; the authoritative gate is re-checked.
         let gate = check_dream_gates(&self.memory.dream_config, &lock, &sessions_dir, Some(&sid8));
         let sessions = match gate {
             DreamGate::Open { sessions } => sessions,
@@ -357,8 +355,7 @@ impl SessionActor {
             }
         };
 
-        // Re-check the gate under the lock: the pre-check ran before we held it, so the winner may
-        // have consolidated and closed the gate in the meantime.
+        // Re-check the gate under the lock: the pre-check ran before we held it.
         let rechecked_sessions;
         let sessions: &[String] = match recheck_sid8 {
             Some(sid8) => {
@@ -428,9 +425,7 @@ impl SessionActor {
 
         let result = execute_dream(storage, &model_response, sessions.len());
 
-        // Commit for Completed and NothingToConsolidate to close the gate; a Failed guard stays
-        // uncommitted so its drop releases the mutex and reopens the gate for a retry. A commit that
-        // cannot durably write the marker returns false: leave the gate open and do not claim success.
+        // Commit for Completed and NothingToConsolidate to close the gate.
         let mut cleaned_stems: Vec<String> = Vec::new();
         let dream_path = match &result.status {
             DreamStatus::Completed { .. } => {
@@ -439,7 +434,8 @@ impl SessionActor {
 
                 cleaned_stems = clean_processed_sessions(sessions_dir, &dream_msg.processed_stems);
 
-                // Purge index chunks only for files actually deleted; stems skipped by the recency guard stay on disk and searchable.
+                // Purge index chunks only for files deleted; stems skipped by
+                // the recency guard stay on disk and searchable.
                 if !cleaned_stems.is_empty() {
                     let deleted_paths: Vec<std::path::PathBuf> = cleaned_stems
                         .iter()
@@ -570,9 +566,7 @@ impl SessionActor {
 
         let result = async {
             // `[memory] flush_model` is the older, narrower spelling and
-            // stays ahead of the `[models] memory_flush` slot. Either one
-            // brings the model's OWN sampler: its id on the session's client
-            // would reach the session model's endpoint instead.
+            // stays ahead of the `[models] memory_flush` slot.
             let flush_model = self
                 .memory
                 .flush_config
@@ -880,8 +874,7 @@ impl SessionActor {
             ));
         }
 
-        // A pinned slot brings its own client; its id on the session's client
-        // would reach the session model's endpoint instead.
+        // A pinned slot brings its own client.
         let slot_sampler = self.resolve_slot_sampler("memory_flush").await;
         let sampling_client = match &slot_sampler {
             Some((client, _)) => client.clone(),

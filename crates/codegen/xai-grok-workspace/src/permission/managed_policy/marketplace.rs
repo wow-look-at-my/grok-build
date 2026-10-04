@@ -1,13 +1,11 @@
-//! Marketplace policy: per-source allowlists, the cross-source
-//! [`MarketplacePolicy`] (strictest wins), managed marketplace pins, and the
-//! canonical git-URL identity.
+//! Marketplace policy: per-source allowlists, the cross-source [`MarketplacePolicy`] (strictest wins), managed marketplace pins.
 
 use super::layer::{PolicyLayerOwnership, PolicySourceAuthority};
 use super::mcp::PolicySubjectOrigin;
 use super::verdict::user_facing_policy_source;
 
 /// Marketplace allowlist from ONE source; exists only when its strict key was
-/// present, so empty `allowed_urls` is a lockdown (see `McpServerAllowlist::lockdown`; no `Default`).
+/// present.
 #[derive(Debug, Clone)]
 pub struct MarketplaceAllowlist {
     pub allowed_urls: Vec<String>,

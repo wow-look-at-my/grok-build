@@ -1,6 +1,4 @@
 //! Public wire types (DTOs) for the ACP session actor.
-//!
-//! These are the request/response structs exchanged between the agent layer and the session actor.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -39,8 +37,7 @@ pub(crate) struct CompactConversationRequest {
 }
 
 impl CompactConversationRequest {
-    /// The keys [`session_id`](Self::session_id) is read under. ACP params are
-    /// camelCase; the snake_case spelling arrives from in-process callers.
+    /// The keys [`session_id`](Self::session_id) is read under.
     pub(crate) const SESSION_ID_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("session_id", &["sessionId"]);
     /// The keys [`user_context`](Self::user_context) is read under. `/compact
@@ -131,8 +128,7 @@ pub enum FeedbackOutcome {
     SubmittedCleanupFailed,
     LocalOnly,
     OutcomeUnknown,
-    /// Unknown wire variant from a newer shell. Treat like [`Self::OutcomeUnknown`]:
-    /// do not claim a definite failure or invite a resend.
+    /// Unknown wire variant from a newer shell.
     #[serde(other)]
     Other,
 }
@@ -161,8 +157,6 @@ pub struct ClientFeedbackInput {
     pub rating_type: Option<prod_mc_cli_chat_proxy_types::feedback_types::RatingType>,
 
     /// Rating value (interpretation depends on rating_type).
-    /// thumbs: -1 (down), 0 (neutral), 1 (up).
-    /// Values are clamped to valid ranges on the agent side.
     #[serde(default)]
     pub rating_value: Option<i32>,
 
@@ -184,7 +178,6 @@ pub struct ClientFeedbackInput {
     pub turn_number: Option<i64>,
 
     /// Feedback request ID: if present, this is a response to a FeedbackRequestNotification (i.e., solicited feedback).
-    /// If absent, this is spontaneous user feedback.
     #[serde(default)]
     pub request_id: Option<String>,
 
@@ -281,10 +274,6 @@ impl TryFrom<ClientFeedbackInputWire> for ClientFeedbackInput {
 
 impl ClientFeedbackInput {
     /// Clamp rating value to valid range based on rating type.
-    ///
-    /// - thumbs: -1 to 1
-    /// - stars: 1 to 5
-    /// - nps: 0 to 10
     fn clamp_rating_value(
         rating_type: Option<prod_mc_cli_chat_proxy_types::feedback_types::RatingType>,
         rating_value: Option<i32>,
@@ -395,8 +384,8 @@ pub struct FeedbackDraftEditedBody {
     pub terminal_info: Option<prod_mc_cli_chat_proxy_types::feedback_types::FeedbackTerminalInfo>,
 }
 
-/// Pager attestation carried on the one-shot `x.ai/feedback/upload-trace` request. Deliberately no
-/// catch-all variant: an unknown intent fails the request instead of changing its gate.
+/// Pager attestation carried on the one-shot `x.ai/feedback/upload-trace`
+/// request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeedbackTraceUploadIntent {
@@ -438,7 +427,6 @@ pub struct Citation {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CommentRequest {
     pub session_id: String,
-    /// 0-indexed prompt turn this comment is associated with
     pub prompt_index: u32,
     pub comment: String,
     pub citation: Citation,
@@ -473,10 +461,8 @@ pub enum RewindMode {
     /// Roll back both conversation and files (full time-travel).
     All,
     /// Roll back conversation only; leave files untouched.
-    /// Use when the agent went in the wrong direction but the code is fine.
     ConversationOnly,
     /// Roll back files only; leave conversation untouched.
-    /// Use when the files went wrong but the conversation context is valuable.
     #[serde(alias = "code_only")]
     FilesOnly,
 }
@@ -484,12 +470,10 @@ pub enum RewindMode {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RewindRequest {
     /// Target prompt index to rewind to (0-based).
-    /// Rewinding to N restores the state from before prompt N ran; prompts 0..N-1 are kept.
     pub target_prompt_index: usize,
     /// Whether to force rewind even with conflicts
     pub force: bool,
-    /// Clients must specify this explicitly.
-    /// Defaults to `All` for backwards compatibility with older clients.
+    /// Clients must specify this explicitly. Defaults to `All` for backwards compatibility with older clients.
     #[serde(default = "default_rewind_mode")]
     pub mode: RewindMode,
 }
@@ -510,8 +494,7 @@ pub struct RewindResponse {
     pub clean_files: Vec<String>,
     /// List of conflicts that were encountered (when `force` is false and conflicts exist, `success` is false)
     pub conflicts: Vec<RewindConflictInfo>,
-    /// The original prompt text at target_prompt_index, for pre-filling the input field.
-    /// Populated on successful conversation rewind (All or ConversationOnly).
+    /// The prompt text at target_prompt_index, for pre-filling the input field.
     #[serde(default)]
     pub prompt_text: Option<String>,
     pub error: Option<String>,
@@ -537,7 +520,6 @@ pub struct RewindPointInfo {
     pub created_at: String,
     pub num_file_snapshots: usize,
     /// Whether this prompt has file snapshots that can be reverted.
-    /// When false, only conversation rewind is available for this checkpoint.
     #[serde(default)]
     pub has_file_changes: bool,
     /// Preview of the user prompt text (truncated)
@@ -547,9 +529,8 @@ pub struct RewindPointInfo {
 
 // ── Session info ────────────────────────────────────────────────────────
 
-/// Itemized token usage for one context category, shown as an informational row in `/context`, e.g. the skills listing or the MCP server listing.
-/// Token counts come from rendering the current state (the skill set, the connected servers), never from parsing conversation text.
-/// Once injected, these rows overlap [`ContextInfo::message_tokens`]; a fresh session can show rows before the reminders are injected.
+/// Itemized token usage for one context category, shown as an informational
+/// row in `/context`, e.g. the skills listing or the MCP server listing.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TokenUsageCategory {
@@ -624,13 +605,9 @@ pub struct ContextInfo {
     pub message_tokens: u64,
     pub free_tokens: u64,
     pub usage_pct: u8,
-    /// The resolved auto-compact threshold percent (0-100) for the active model at the time this snapshot was captured.
-    /// Comes from the 6-tier resolution (env > user per-model > user global > GB per-model > GB global > 85).
-    /// Used by the TUI `/context` view so the displayed “Auto-compact at X%” matches the actual trigger (e.g. 65 for grok-build in remote settings).
     #[serde(default = "default_auto_compact_threshold")]
     pub auto_compact_threshold_percent: u8,
-    /// Itemized usage rows (skills, workflows, MCP servers, AGENTS.md).
-    /// Empty on partial snapshots.
+    /// Itemized usage rows (skills, workflows, MCP servers, AGENTS.md). Empty on partial snapshots.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub usage_categories: Vec<TokenUsageCategory>,
 }
@@ -650,7 +627,7 @@ impl ContextInfo {
     }
 }
 
-/// Serde default for the threshold field (keeps old snapshots and partials deserializing without error and gives the historical default of 85).
+/// Serde default for the threshold field.
 fn default_auto_compact_threshold() -> u8 {
     DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT
 }
@@ -669,7 +646,6 @@ pub struct SessionInfoData {
     pub resolved_model_id: Option<String>,
     pub model_fingerprint: Option<String>,
     /// Catalog opt-in to display checkpoint identity (the served fingerprint and the resolved model ID) for this model.
-    /// Sole control: the client keeps no built-in per-slug default, so turning this off in the catalog hides both.
     #[serde(default)]
     pub show_model_fingerprint: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -678,8 +654,7 @@ pub struct SessionInfoData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
     pub turns: u64,
-    /// Current turn (0-based).
-    /// Matches the `turn_number` used in TurnStarted events, traces, and rewinds.
+    /// Current turn (0-based). Matches the `turn_number` used in TurnStarted events, traces, and rewinds.
     #[serde(default)]
     pub turn_index: u64,
     pub context: ContextInfo,
@@ -708,8 +683,6 @@ pub fn model_display_name(
 }
 
 /// Full wire response for `x.ai/session/info`.
-///
-/// Wraps `SessionInfoData` with session-level fields (`session_id`, `cwd`) that come from the agent layer rather than the session actor.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfoResponse {
@@ -749,33 +722,27 @@ pub struct StartupHints {
     #[serde(default)]
     pub non_interactive: bool,
     /// Leading conversation items to preserve verbatim across compaction (the immutable head).
-    /// A fresh subagent's head is its spawn-injected items; a `resume_from` subagent's is just the System head so the resumed body stays compactable.
     #[serde(default)]
     pub inherited_prefix_len: Option<usize>,
     /// When true, this session is a subagent child and its prompts should not be appended to the per-CWD prompt_history.jsonl file.
     #[serde(default)]
     pub is_subagent: bool,
     /// Parent session id when this session is a subagent child.
-    /// Emitted as `parent_agent_id` on the turn span for trace attribution.
     #[serde(default)]
     pub parent_session_id: Option<String>,
     /// The task's `subagent_type` when this session is a subagent child, put on hook payloads for attribution.
-    /// It matches the `SubagentStart`/`SubagentStop` events the parent emits, which also key off the task type, not the resolved agent name.
     #[serde(default)]
     pub subagent_type: Option<String>,
     /// Set on a fork spawn so `install_system_prompt` does NOT overwrite the inherited System at `conversation[0]`.
-    /// The verbatim parent copy already holds the parent's System, and overwriting it would bust the cache prefix.
     #[serde(default)]
     pub preserve_inherited_system: bool,
-    /// Tool names the session delivers its reply through (e.g. a messaging MCP tool); listing any keeps the full MCP waits at the prefix and tool-definition gates instead of the short startup grace.
+    /// Tool names the session delivers its reply through (e.g. a messaging MCP tool).
     #[serde(default)]
     pub delivery_tools: Vec<String>,
     /// Parent project cwd for child/worktree overlay kill-switch. Not on the wire.
     #[serde(skip)]
     pub parent_cwd: Option<PathBuf>,
     /// Only `"alwaysAllow"` is honored: would-be prompts resolve as allow at the manager's dispatch gate.
-    /// Clamped off by the managed always-approve pin; a configured `defaultMode` wins.
-    /// Unlike `yoloMode` / `autoMode`, a warm re-attach to an already-resident actor does NOT re-apply it.
     #[serde(default)]
     pub permission_mode: Option<String>,
     #[serde(skip)]
@@ -1147,8 +1114,8 @@ mod wire_alias_tests {
         assert_eq!(request.user_context.as_deref(), Some("x"));
     }
 
-    /// Two different instructions decide what the summary keeps, and two session
-    /// ids decide which session is compacted.
+    /// Different instructions decide what the summary keeps, and session ids
+    /// decide which session is compacted.
     #[test]
     fn a_compact_request_whose_spellings_disagree_errors_naming_the_field() {
         for (json, field) in [

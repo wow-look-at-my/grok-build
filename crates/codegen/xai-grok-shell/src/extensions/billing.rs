@@ -1,7 +1,4 @@
 //! `x.ai/billing` extension handler.
-//!
-//! Fetches the authenticated user's Grok Build billing configuration (credit limit, usage, on-demand cap, billing period, history) from the backend.
-//! The pager and desktop use it to display credits and usage.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -19,7 +16,6 @@ pub struct BillingCycle {
 /// Cent value from the billing API (USD cents).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cent {
-    /// proto3 JSON omits zero-valued scalars, so a `$0` Cent arrives as `{}`; default to 0 rather than failing the whole parse.
     #[serde(default)]
     pub val: i64,
 }
@@ -58,12 +54,9 @@ pub struct BillingPeriodUsage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BillingConfig {
-    /// Included credit usage as a percentage of the allowance (0.0 to 100.0).
-    /// Prefer it over deriving from `monthly_limit`/`used`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credit_usage_percent: Option<f64>,
-    /// Current usage period (weekly or monthly).
-    /// Prefer it over `billing_period_start`/`billing_period_end`.
+    /// Current usage period (weekly or monthly). Prefer it over `billing_period_start`/`billing_period_end`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_period: Option<UsagePeriod>,
     /// Deprecated: included monthly credit budget. Use `credit_usage_percent`.
@@ -77,12 +70,9 @@ pub struct BillingConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_demand_used: Option<Cent>,
     /// Remaining prepaid (purchased) credit balance, positive: the "bought credits" the user has topped up.
-    /// It comes from the credits config (`GetGrokCreditsConfig.prepaid_balance`) and is absent in the legacy billing shape.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prepaid_balance: Option<Cent>,
     /// Whether this user is on unified usage billing (a shared weekly/monthly pool).
-    /// It comes from `GrokCreditsConfig.is_unified_billing_user`, which billing sets from the remote setting `unified_consumer_billing_enabled`.
-    /// `None` when absent (legacy `GetGrokBuildBillingConfig` shape or older servers).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_unified_billing_user: Option<bool>,
     /// Deprecated: use `current_period.start`.
@@ -100,11 +90,9 @@ pub struct BillingConfig {
 pub struct BillingConfigResponse {
     pub config: Option<BillingConfig>,
     /// Whether on-demand credit usage is enabled; when `false`, the pager should hide on-demand controls.
-    /// It comes from `RemoteSettings`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_demand_enabled: Option<bool>,
     /// User-friendly subscription tier name (e.g. "SuperGrok Heavy").
-    /// It comes from `RemoteSettings` so the pager can update its cached tier on every billing fetch without an extra request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription_tier: Option<String>,
 }
@@ -113,8 +101,7 @@ pub struct BillingConfigResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoTopupRule {
-    /// proto3 JSON omits `false`, so a disabled rule arrives without this field; default to `false` rather than failing the parse.
-    /// A failed parse would keep a stale cached rule in the pager.
+    /// proto3 JSON omits `false`, so a disabled rule arrives without this field.
     #[serde(default)]
     pub enabled: bool,
     pub min_before_hitting_sl: Option<Cent>,
@@ -258,8 +245,8 @@ async fn handle_get_billing(agent: &MvpAgent) -> ExtResult {
             .or_else(|| rs.subscription_tier.clone())
     });
 
-    // Every prompt, `/usage`, and poll path hits `x.ai/billing`
-    // Log the fetched credits snapshot so support can correlate the limit UI with real balances
+    // Every prompt, `/usage`, and poll path hits `x.ai/billing` Log the
+    // fetched credits snapshot so support can correlate the limit UI.
     xai_grok_telemetry::unified_log::info(
         "billing: fetched credits config",
         None,
@@ -330,8 +317,8 @@ mod tests {
 
     #[test]
     fn auto_topup_disabled_rule_omits_enabled_field() {
-        // proto3 JSON omits `false` and `0`, so a disabled rule arrives without `enabled` (and zero Cents arrive as `{}`)
-        // It must still deserialize (as disabled) rather than erroring; otherwise the pager keeps a stale cached rule
+        // proto3 JSON omits `false` and `0`, so a disabled rule arrives without `enabled` (and zero Cents arrive as
+        // `{}`) It must still deserialize.
         let json = serde_json::json!({
             "rule": { "topupAmount": {"val": 500}, "minBeforeHittingSl": {} }
         });
@@ -596,7 +583,6 @@ mod tests {
         assert_eq!(config.on_demand_used.unwrap().val, 300);
         assert_eq!(config.prepaid_balance.unwrap().val, 1250);
         assert_eq!(config.is_unified_billing_user, Some(true));
-        // The CLI billing code does not read `productUsage` yet
         assert_eq!(config.history.len(), 1);
         let Some(history) = config.history.first() else {
             panic!("expected one history period");

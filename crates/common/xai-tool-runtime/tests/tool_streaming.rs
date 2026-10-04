@@ -1,5 +1,4 @@
-//! Streaming `Tool::execute` overrides — interleaving Progress with a
-//! single Terminal item.
+//! Streaming `Tool::execute` overrides — interleaving Progress with a single Terminal item.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -152,8 +151,7 @@ async fn streaming_err_propagates_through_terminal() {
 
 #[tokio::test]
 async fn empty_progress_still_yields_terminal() {
-    // Building `with_progress` on an empty stream still produces exactly
-    // one terminal item — the same shape `terminal_only` produces.
+    // Building `with_progress` on an empty stream still produces exactly one terminal item.
     let progress = stream::iter(Vec::<ToolProgress>::new());
     let mut stream = with_progress(progress, async move { Ok::<u32, ToolError>(99) });
     let item = stream.next().await.unwrap();

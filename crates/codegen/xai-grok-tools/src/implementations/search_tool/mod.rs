@@ -9,12 +9,9 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 use crate::types::tool_index::ToolIndex;
 
 /// Wire name of the MCP discovery tool (see [`USE_TOOL_NAME`]).
-///
-/// [`USE_TOOL_NAME`]: crate::implementations::use_tool::USE_TOOL_NAME
 pub const SEARCH_TOOL_NAME: &str = "search_tool";
 
-/// Maximum length for MCP tool/server descriptions. Matches the common
-/// `MAX_MCP_DESCRIPTION_LENGTH` constant. Descriptions exceeding this are truncated.
+/// Maximum length for MCP tool/server descriptions. Matches the common `MAX_MCP_DESCRIPTION_LENGTH` constant.
 pub const MAX_MCP_DESCRIPTION_LENGTH: usize = 2048;
 
 const TRUNCATION_SUFFIX: &str = "\u{2026} [truncated]";
@@ -180,9 +177,7 @@ fn format_server_line(server: &crate::types::tool_index::ServerSummary) -> Strin
     format_server_line_inner(&server.name, server.tool_count, &desc)
 }
 
-/// Format a server line for the compaction system-reminder. Takes pre-processed fields instead of a `ServerSummary`,
-/// since compaction stores data in a different shape (already sanitized/truncated). Tool names are not included
-/// (discover via `search_tool`); they remain on `ServerSummary` only for change-detection fingerprints.
+/// Format a server line for the compaction system-reminder.
 pub fn format_compaction_server_line(name: &str, count: usize, desc: &Option<String>) -> String {
     format_server_line_inner(name, count, desc)
 }
@@ -282,9 +277,7 @@ impl xai_tool_runtime::Tool for SearchTool {
             "search_tool.search"
         );
 
-        // Group results by server, preserving BM25 score order within each group. Groups are sorted by highest score
-        // (best-matching server first). snapshot.results is sorted by BM25 score descending, so the first tool per server is
-        // the highest-scoring — used as the group score.
+        // Group results by server, preserving BM25 score order within each group.
         let mut groups: Vec<(String, f32, Vec<serde_json::Value>)> = Vec::new();
         for r in &snapshot.results {
             let tool_json = serde_json::json!({
@@ -323,8 +316,7 @@ impl xai_tool_runtime::Tool for SearchTool {
             Some("Some MCP servers are still connecting. Results may be incomplete.")
         } else if snapshot.total_hidden_tools == 0 && result_groups.is_empty() {
             // Ready but empty: help distinguish "MCP not set up / inheritance
-            // off" from a query that simply matched nothing. Wording is
-            // source-agnostic: search_tool runs in parent and subagent sessions.
+            // off" from a query that matched nothing.
             Some(
                 "No MCP tools are available in this session. Connect MCP servers here, or if this is a subagent, check the agent's mcpInheritance.",
             )
@@ -495,7 +487,6 @@ mod tests {
 
     #[test]
     fn truncate_multibyte_under_char_limit_unchanged() {
-        // 1024 CJK chars = ~3072 bytes, but only 1024 chars — well under 2048 char limit.
         let cjk: String = "\u{4e16}".repeat(1024);
         assert!(cjk.len() > MAX_MCP_DESCRIPTION_LENGTH);
         assert_eq!(truncate_description(&cjk), cjk);
@@ -759,7 +750,6 @@ mod tests {
         let h = hash_value(&"grok-mcp-fingerprint-stability-test");
         assert_eq!(h, hash_value(&"grok-mcp-fingerprint-stability-test"));
         // The value must not change across runs (FNV-1a is deterministic).
-        // If this assertion fails, the hasher implementation was modified.
         assert_ne!(h, 0, "hash should be non-zero for non-empty input");
     }
 }

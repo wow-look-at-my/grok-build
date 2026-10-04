@@ -1,21 +1,4 @@
 //! `bash` tool — OpenCode namespace.
-//!
-//! Executes shell commands with optional timeout and working directory
-//! override. Delegates to the shared `TerminalBackend` for process
-//! management, output streaming, and background task support. The
-//! grok-tools-server serves this tool on the stateless local backend
-//! (fresh shell per command; persistent shell state is only enabled when
-//! `Cursor:Shell` is served), which is what the description documents.
-//!
-//! ## Resources
-//!
-//! - `Terminal` — terminal backend for running commands (required)
-//! - `Cwd` — default working directory (required)
-//! - `ToolCallId` — notification correlation + output file naming (required)
-//! - `SessionFolder` — output file path prefix (required)
-//! - `SessionEnv` — environment variables (optional, defaults empty)
-//! - `NotificationHandle` — bash execution notifications (optional, noop fallback)
-//! - `TruncationCfg` — max output bytes override (optional)
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -35,11 +18,9 @@ use crate::types::resources::{
 use crate::types::tool::{ToolKind, ToolNamespace};
 use crate::types::tool_io::ToolInput;
 
-// ───────────────────────────────────────────────────────────────────────────
-// Constants
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────── Constants.
 
-const MAX_TIMEOUT_MS: u64 = 600_000; // 10 minutes
+const MAX_TIMEOUT_MS: u64 = 600_000; // Several
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -162,9 +143,7 @@ Important:
 # Other common operations
 - View comments on a GitHub PR: gh api repos/foo/bar/pulls/123/comments"#;
 
-// ───────────────────────────────────────────────────────────────────────────
-// Input
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────── Input.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -188,7 +167,6 @@ pub struct BashInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workdir: Option<String>,
 
-    /// A clear, concise description of what this command does in 5-10 words.
     #[schemars(
         description = "One sentence explanation as to why this command needs to be run and how it contributes to the goal."
     )]
@@ -226,9 +204,7 @@ impl From<BashInput> for ToolInput {
     }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Tool implementation
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────── Tool implementation.
 
 /// OpenCode bash tool — executes shell commands via the `Terminal` backend.
 #[derive(Debug, Default)]
@@ -816,7 +792,7 @@ mod tests {
         match result {
             BashToolOutput::Bash(bash) => {
                 assert_eq!(bash.signal, Some("SIGKILL".to_string()));
-                assert_eq!(bash.exit_code, -1); // None maps to -1
+                assert_eq!(bash.exit_code, -1);
             }
             BashToolOutput::BackgroundTaskStarted(_) => panic!("Expected foreground output"),
         }

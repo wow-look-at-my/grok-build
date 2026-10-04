@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// Wraps a `String` so callers can pass an externally-assigned ID (e.g., a session-assigned UUID) or generate a fresh one via [`RequestId::random`].
+/// Wraps a `String` so callers can pass an externally-assigned ID (e.g., a session-assigned UUID) or generate a fresh one.
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RequestId(String);
 
@@ -44,7 +44,6 @@ mod tests {
         let a = RequestId::random();
         let b = RequestId::random();
         assert_ne!(a, b, "two random IDs must differ");
-        // UUIDv4 strings are 36 characters (8-4-4-4-12 hex with hyphens).
         assert_eq!(a.as_str().len(), 36);
     }
 }

@@ -1,5 +1,4 @@
-//! What it takes to get a session back to a usable credential, and the one
-//! bounded unattended attempt the startup paths make before asking the user.
+//! What it takes to get a session back to a usable credential.
 use super::{AuthManager, RefreshReason};
 use crate::error::AuthError;
 use crate::model::GrokAuth;
@@ -28,9 +27,8 @@ impl AuthRemedy {
             Self::ProviderLogin { .. } | Self::ManualLogin => "auth",
         }
     }
-    /// The same remedy, for a turn that has already spent its automatic retries.
-    /// [`Self::SelfHealing`] cannot survive that: its whole message is "retry in a few seconds", exactly what just failed several times over.
-    /// What is left is a plain re-authentication, no advice of our own, and classified so the client offers its own way back.
+    /// The same remedy, for a turn that has already spent its automatic
+    /// retries.
     pub fn after_retries_exhausted(self) -> Self {
         match self {
             Self::SelfHealing => Self::ManualLogin,
@@ -54,11 +52,8 @@ impl AuthRemedy {
     }
 }
 /// Outcome of a bounded best-effort mint.
-/// Callers must distinguish "the deadline elapsed with the exchange still in flight" (spawned, not dropped) from a refresh that resolved.
-/// Forcing a second mint after a deadline only queues behind the detached exchange for up to another full budget.
 pub enum BoundedRefresh {
     /// The chain finished inside the budget with this result.
-    /// Boxed like [`SilentRefresh::Renewed`]: `GrokAuth` is large and the other variant is unit-sized.
     Resolved(Box<Result<GrokAuth, AuthError>>),
     /// The spawned chain outlived the budget and continues in the background (persisting and hot-swapping any minted token when it lands).
     DeadlineElapsed,
@@ -67,14 +62,12 @@ pub enum BoundedRefresh {
 #[derive(Debug, Clone)]
 pub enum SilentRefresh {
     /// The credential [`AuthManager::auth`] vouched for, the one the next request would carry.
-    /// Carried, not re-read: `auth()` also succeeds on its grace arm, serving a token still wire-valid but inside the early-invalidation buffer. [`AuthManager::current`] hides exactly that token.
-    /// A caller that answered `Renewed` with `current()` would reject the session this outcome just accepted. It would also disagree with the `Failed(SelfHealing)` arm on the very same credential.
     Renewed(Box<GrokAuth>),
     Failed(AuthRemedy),
 }
 impl AuthManager {
-    /// Attempt one unattended refresh, bounded because the caller's response gates the client's first draw. Spawned rather than awaited inline.
-    /// Dropping the future at the deadline abandons an IdP exchange whose rotated refresh token the server may already have burned. That is how a suspend mid-refresh revoked whole token families in the field.
+    /// Attempt one unattended refresh, bounded because the caller's response
+    /// gates the client's first draw. Spawned rather than awaited inline.
     pub async fn silent_refresh(self: &Arc<Self>) -> SilentRefresh {
         self.silent_refresh_within(xai_grok_http::STARTUP_AUTH_REFRESH_TIMEOUT)
             .await
@@ -99,13 +92,11 @@ impl AuthManager {
         outcome
     }
     /// Never blocks the caller; a no-op when the credential needs no refresh.
-    /// `cancel` (the agent's teardown token) stops the task, but an exchange already in flight is abandoned, not dropped, and may still land after teardown ([`AuthManager::silent_refresh`]'s rotated-token safety).
     pub fn prewarm_auth_refresh(self: &Arc<Self>, cancel: CancellationToken) {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
             tokio::select! {
-                // A cancel that lands before the first poll must win, so a
-                // failed spawn never starts an exchange at all.
+                // A cancel that lands before the first poll must win.
                 biased;
                 _ = cancel.cancelled() => {}
                 _ = manager.silent_refresh() => {}

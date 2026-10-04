@@ -1807,7 +1807,7 @@ fn repair_history_strips_displaced_result_and_backfills_call() {
 }
 /// A result split from its owner by another assistant item is stripped
 /// and the call backfilled — keeping it would make the dangling pass
-/// insert a synthetic duplicate beside it (two results for one id).
+/// insert a synthetic duplicate beside it (results for one id).
 #[test]
 fn repair_history_strips_result_split_by_assistant_item() {
     let mut items = vec![
@@ -1838,7 +1838,7 @@ fn repair_history_strips_result_in_later_run() {
         ConversationItem::tool_result("call_A", "ok"),
         ConversationItem::assistant_tool_calls(vec![call("call_C")]),
         ConversationItem::tool_result("call_C", "ok"),
-        // call_B's owner was flushed two messages ago.
+        // call_B's owner was flushed messages ago.
         ConversationItem::tool_result("call_B", "displaced"),
     ];
     let report = repair_history(&mut items);
@@ -2082,18 +2082,13 @@ async fn build_compacted_history_transcript_hint() {
 async fn build_compacted_history_multi_turn_with_parallel_tool_calls() {
     use xai_grok_sampling_types::{AssistantItem, ToolCall};
     let conversation = vec![
-        // [0] System prompt
         ConversationItem::system("You are a helpful coding assistant."),
-        // [1] User info prefix (no <user_query> tags — this is the initial message)
         ConversationItem::user(
             "<user_info>\nOS Version: macos\nShell: /bin/bash\nWorkspace Path: /Users/dev/project\n</user_info>\n\n<project_layout>\n/Users/dev/project/\n  src/\n    main.rs\n    lib.rs\n</project_layout>",
         ),
-        // ── Turn 1 ──────────────────────────────────────────────────
-        // [2] User query (wrapped in <user_query> tags by parse_prompt)
         ConversationItem::user(
             "<user_query>\nRead main.rs and lib.rs and tell me what they do\n</user_query>",
         ),
-        // [3] Assistant with 2 parallel tool calls
         ConversationItem::Assistant(AssistantItem {
             content: "I'll read both files for you.".into(),
             tool_calls: vec![
@@ -2114,21 +2109,15 @@ async fn build_compacted_history_multi_turn_with_parallel_tool_calls() {
             model_fingerprint: None,
             reasoning_effort: None,
         }),
-        // [4] Tool result for call_1
         ConversationItem::tool_result("call_1", "fn main() {\n    println!(\"hello world\");\n}"),
-        // [5] Tool result for call_2
         ConversationItem::tool_result(
             "call_2",
             "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}",
         ),
-        // [6] Assistant summary after reading both files
         ConversationItem::assistant("main.rs prints hello world. lib.rs has an `add` function."),
-        // ── Turn 2 ──────────────────────────────────────────────────
-        // [7] User query (second turn)
         ConversationItem::user(
             "<user_query>\nNow fix the typo in main.rs and run the tests\n</user_query>",
         ),
-        // [8] Assistant with 2 parallel tool calls
         ConversationItem::Assistant(AssistantItem {
             content: "I'll fix the typo and run tests.".into(),
             tool_calls: vec![
@@ -2150,14 +2139,11 @@ async fn build_compacted_history_multi_turn_with_parallel_tool_calls() {
             model_fingerprint: None,
             reasoning_effort: None,
         }),
-        // [9] Tool result for call_3
         ConversationItem::tool_result("call_3", "File edited successfully."),
-        // [10] Tool result for call_4
         ConversationItem::tool_result(
             "call_4",
             "running 1 test\ntest tests::test_add ... ok\n\ntest result: ok. 1 passed",
         ),
-        // [11] Assistant final response
         ConversationItem::assistant("Fixed the typo and all tests pass!"),
     ];
     let mut edited = BTreeSet::new();
@@ -2957,7 +2943,6 @@ fn strip_reasoning_blocks_passes_other_items_through() {
     assert!(matches!(at(&result, 1), ConversationItem::User(_)));
     assert!(matches!(at(&result, 2), ConversationItem::ToolResult(_)));
 }
-/// Reproduces the production 400: signed `reasoning` plus `tool_calls` fails after text mutation.
 /// After `prepare_conversation_for_summarization` no `reasoning` may remain for the provider to validate.
 #[test]
 fn prepare_for_summarization_drops_reasoning_sibling_on_mutated_assistant() {
@@ -3218,7 +3203,7 @@ fn test_prepare_for_summarization_strips_images() {
 }
 /// The segment view must KEEP verbatim tool I/O (calls + results) — that's
 /// what lets the model recover exact outputs — while the summary view drops
-/// it. Guards against anyone collapsing the two preps into one.
+/// it. Guards against anyone collapsing both preps into one.
 #[test]
 fn prepare_conversation_for_segment_keeps_tool_io_unlike_summary() {
     use xai_grok_sampling_types::ToolCall;
@@ -3513,7 +3498,6 @@ fn fit_truncates_oversized_tail_text_item() {
         other => panic!("expected truncated trailing assistant, got {other:?}"),
     }
 }
-/// Incompactable-state regression: `fit` must charge images (765 each), so an image-heavy old turn is trimmed.
 #[test]
 fn fit_counts_user_images_against_budget() {
     use xai_grok_sampling_types::ContentPart;
@@ -3523,7 +3507,7 @@ fn fit_counts_user_images_against_budget() {
     }
     let conv = vec![
         ConversationItem::system("sys"),
-        img_user, // old turn, huge by image charges, ~0 by text bytes
+        img_user,
         ConversationItem::user("recent question"),
         ConversationItem::assistant("recent answer"),
     ];
@@ -3555,7 +3539,7 @@ fn fit_counts_encrypted_reasoning_against_budget() {
     });
     let conv = vec![
         ConversationItem::system("sys"),
-        reasoning, // old turn, huge by encrypted bytes, 0 by visible text
+        reasoning,
         ConversationItem::user("recent question"),
         ConversationItem::assistant("recent answer"),
     ];

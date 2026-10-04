@@ -474,8 +474,7 @@ async fn the_ambient_git_scan_runs_on_the_hub_path() {
 }
 /// A later `session.bind` must apply that bind's tenant ceiling: a reused session that first
 /// bound under `grants_allowed` cannot keep honouring a session grant after the hub rebinds
-/// `always_prompt`. The bind fixture's default catalog is `search_replace`, not bash — a
-/// folder `cargo build` grant would 404 (`Tool not found`) and never reach the policy.
+/// `always_prompt`.
 #[tokio::test]
 async fn a_rebind_applies_the_tenant_approval_ceiling() {
     let handle = make_handle();

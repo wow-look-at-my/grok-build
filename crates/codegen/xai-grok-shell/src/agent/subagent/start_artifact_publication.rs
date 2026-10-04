@@ -1,6 +1,4 @@
-//! Ordinary spawns publish durable metadata and `SubagentSpawned` at preparation;
-//! wakes publish only after `Started` is accepted, leaving prior metadata intact
-//! when a wake fails before start.
+//! Ordinary spawns publish durable metadata and `SubagentSpawned` at preparation; wakes publish only after `Started` is accepted.
 
 use std::path::PathBuf;
 

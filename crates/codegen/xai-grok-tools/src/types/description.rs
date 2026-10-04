@@ -1,23 +1,10 @@
 //! MiniJinja-based description template rendering for tool descriptions.
-//!
-//! Tool descriptions often reference other tool names (e.g., "Use `read_file`
-//! before editing"). When tool names are randomized for the model, these
-//! references must be updated to use the model-facing names.
-//!
-//! This module provides:
-//! - `make_desc_env()` — MiniJinja environment with custom `${{ }}`/`${%  %}`
-//!   delimiters to avoid collisions with literal `{{ }}` in descriptions.
-//! - `DescriptionContext` — maps tool/param names for template resolution.
-//! - `resolve_description()` — renders a template with tool/param names,
-//!   handling disabled tools via conditional sections.
 
 use std::collections::HashMap;
 
 use crate::implementations::grok_build::task::model_policy::TaskModelSelection;
 
-/// Context for resolving tool description templates. `tools`: canonical name → `Some(model_facing_name)` if enabled,
-/// `None` if disabled. `params`: canonical tool name → { canonical param → model_facing param }. `skills`: available
-/// skills for the skill tool description.
+/// Context for resolving tool description templates.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct DescriptionContext {
     /// Canonical tool name → `Some(model_facing_name)` (enabled) or `None` (disabled).

@@ -1,7 +1,4 @@
 //! Event-driven wait/expect primitives over the terminal grid.
-//!
-//! Waiters never poll: the session's feeder bumps a generation watch after
-//! each `term.feed()`, and conditions are re-checked only on bumps.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -49,14 +46,13 @@ pub struct WaitDiagnostics {
     pub raw_tail: String,
     /// Grid generation at timeout.
     pub generation: u64,
-    /// True when the session's output ended (child exited) before the deadline,
-    /// so the condition could never have been met.
+    /// True when the session's output ended (child exited) before the deadline.
     pub ended: bool,
 }
 
-/// Handles needed to wait on screen conditions without holding any outer session lock.
-/// A long-poll must clone this handle and drop the session guard, or it blocks send/screen.
-/// TODO: next lock-free verb should make `stop()` take `&self` and delete this handle — do not clone another field trio.
+/// Handles needed to wait on screen conditions without holding any outer
+/// session lock. A long-poll must clone this handle and drop the session
+/// guard, or it blocks send/screen.
 pub struct WaitHandle {
     pub(crate) terminal: Arc<Mutex<Terminal>>,
     pub(crate) generation_rx: watch::Receiver<u64>,

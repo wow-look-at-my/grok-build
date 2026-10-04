@@ -1,17 +1,4 @@
 //! `grok wrap` runs any command in a local PTY that forwards its clipboard.
-//!
-//! Generalizes the `grok ssh` wrapper: spawns an arbitrary command inside a local pseudo-terminal.
-//! It intercepts OSC 52 clipboard escape sequences from the command's output and writes their payload to the local system clipboard.
-//! It is useful for containerized or remote shells (`docker exec`, `kubectl exec`, ...) whose clipboard cannot otherwise reach the user.
-//! That matters most in terminals that do not handle OSC 52 themselves (for example Apple Terminal).
-//! It also stamps `LC_GROK_APPEARANCE` from the local OS theme so a remote `theme = "auto"` can resolve over SSH and tmux.
-//!
-//! Resolvable programs spawn directly.
-//! On Unix, a command a direct spawn cannot run (a single shell-quoted string `grok wrap "mycli ssh host"` or a shell alias) goes to `$SHELL -i -c`.
-//! The user's own shell then does the word-splitting and alias expansion.
-//! The exec fallback (a non-TTY session, or PTY setup failure) keeps the same route but drops `-i` to avoid job-control noise without our PTY.
-//!
-//! The PTY/OSC 52/resize engine lives in [`crate::pty_wrap::run_wrapped_command`].
 
 use anyhow::Result;
 
@@ -25,9 +12,9 @@ pub fn run(args: &WrapArgs) -> Result<()> {
         .first()
         .ok_or_else(|| anyhow::anyhow!("grok wrap: no command given"))?;
 
-    // Unix: derive both spawn plans up front from one env snapshot so the PTY attempt and its fallback route consistently
-    // The wrapped run uses `$SHELL -i` when routing through the shell (rc files load, aliases expand; safe because it runs inside our PTY)
-    // The exec fallback drops `-i` because an interactive shell without our PTY risks job-control noise
+    // Unix: derive both spawn plans up front from one env snapshot so the PTY
+    // attempt and its fallback route consistently The wrapped run uses
+    // `$SHELL -i`.
     #[cfg(unix)]
     let (wrapped, fallback) = {
         let shell = user_shell();
@@ -54,7 +41,7 @@ pub fn run(args: &WrapArgs) -> Result<()> {
         match crate::pty_wrap::run_wrapped_command(&wrapped.program, &wrapped.args) {
             Ok(code) => std::process::exit(code),
             Err(e) => {
-                // PTY setup failed; keep the chosen route without our PTY so the command still works (just without clipboard forwarding)
+                // PTY setup failed; keep the chosen route without our PTY so the command still works.
                 eprintln!("grok wrap: wrapped mode failed, running without PTY wrapping: {e}");
                 exec_command(&fallback.program, &fallback.args)
             }
@@ -109,15 +96,14 @@ fn derive_spawn(
         };
     };
 
-    // A single argument containing whitespace is a shell-quoted command line (`grok wrap "mycli ssh host"`), not a program name
-    // Hand it to the shell verbatim so it does word-splitting, alias expansion, pipes, etc
+    // A single argument containing whitespace is a shell-quoted command line
+    // (`grok wrap "mycli ssh host"`).
     if command.len() == 1 && first.contains(char::is_whitespace) {
         return via_shell(first.clone());
     }
 
-    // A bare program name that PATH cannot resolve is usually a shell alias (`alias mycli=remote`); only a shell can
-    // expand it. An empty one (`grok wrap "$PROG".` with `$PROG` unset) must keep failing fast instead of silently
-    // running the tail.
+    // A bare program name that PATH cannot resolve is usually a shell alias
+    // (`alias mycli=remote`); only a shell can expand it.
     if !first.is_empty()
         && !first.contains('/')
         && !first.contains(char::is_whitespace)
@@ -152,17 +138,14 @@ fn join_command_line(command: &[String]) -> String {
 }
 
 /// Single-quote `word` for a POSIX shell.
-/// Always quotes: a hand-maintained bare-word safe set rots per shell (zsh alone expands bare `=word`).
-/// Only the shell ever reads the composed line.
 #[cfg(unix)]
 fn quote_word(word: &str) -> String {
     // Single quotes are literal in POSIX shells except `'` itself, which must close the quote, escape, and reopen: `'` becomes `'\''`
     format!("'{}'", word.replace('\'', "'\\''"))
 }
 
-/// The user's shell from `$SHELL` when it points at an existing file, otherwise `/bin/sh`.
-/// `$SHELL` is preferred because the user typed the wrapped command in their own shell's dialect (aliases live there).
-/// This deliberately avoids `xai_grok_config::shell::unix_shell_path`, which coerces to bash/zsh and would drop fish/other-shell aliases.
+/// The user's shell from `$SHELL` when it points at an existing file,
+/// otherwise `/bin/sh`.
 #[cfg(unix)]
 fn user_shell() -> String {
     resolve_shell(std::env::var("SHELL").ok().as_deref())

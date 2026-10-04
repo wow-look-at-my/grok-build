@@ -1,7 +1,4 @@
 //! The delete gate: decides whether removing a worktree would lose anything.
-//! Every failure, timeout, or unreadable path is a keep — the gate fails toward
-//! keep. One module per question; see
-//! `docs/internal/automatic-worktree-cleanup.md`.
 
 pub use super::reason::KeepReason;
 pub(crate) use super::reason::Safety;
@@ -56,8 +53,7 @@ enum Ownership {
 }
 
 // Production names reflog-only commits itself before deleting, so the gate
-// leaves that to the caller. These test entry points layer that keep back on
-// so the gate's conservative behavior can be exercised directly.
+// leaves that to the caller.
 #[cfg(test)]
 pub(crate) fn safe_to_delete_worktree(worktree: &Path, surviving: Option<&Path>) -> Safety {
     keep_on_reflog_only(
@@ -260,8 +256,8 @@ fn decide_linked(
 }
 
 fn outlives(worktree: &Path, candidate: &Path) -> bool {
-    // Couldn't tell (either side fails to canonicalize) ⇒ do not trust the
-    // candidate as a surviving store; caller then judges the worktree alone.
+    // Cannot tell (either side fails to canonicalize) ⇒ do not trust the
+    // candidate as a surviving store.
     let (Ok(worktree), Ok(candidate)) = (
         dunce::canonicalize(worktree),
         dunce::canonicalize(candidate),

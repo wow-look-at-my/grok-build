@@ -11,7 +11,6 @@ pub struct FsListParams {
     pub path: String,
     pub depth: usize,
     pub limit: usize,
-    /// Pagination offset applied after the dirs-first sort (default 0).
     pub offset: u64,
     // WalkBuilder options
     pub include_hidden: bool,

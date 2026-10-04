@@ -1,5 +1,4 @@
 //! Session lifecycle, roster deltas, and the idle-session supervisor for [`MvpAgent`].
-//! Lives inside `mvp_agent` (`use super::*`) so the `impl` block keeps access to `MvpAgent`'s private fields.
 #![cfg_attr(
     not(test),
     deny(
@@ -15,8 +14,7 @@ use super::*;
 use xai_grok_tools::registry::types::FinalizedToolset;
 /// Bound on close's wait for a prompt still in intake.
 pub(super) const CLOSE_INTAKE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
-/// Who releases a workspace binding: the session's owner outright, or a rolled-back install that
-/// releases only while the toolset bound for it at install is still the bound one.
+/// Who releases a workspace binding: the session's owner outright.
 enum WorkspaceBindingOwner {
     Session,
     Install(Option<Arc<FinalizedToolset>>),
@@ -26,10 +24,8 @@ const CLOSE_ATTACH_SETTLE_WAIT: std::time::Duration = std::time::Duration::from_
 /// Cap on the sum of every close wait.
 pub(super) const CLOSE_TOTAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
 /// Bound on delete's wait for the subagent coordinator to drain a session's children.
-/// Separate from [`DRAIN_OLD_THREAD_WAIT`] (which bounds waiting out a flushing actor thread) so the two budgets can move independently.
 const DRAIN_SUBAGENTS_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Cap on the sum of every delete wait (subagent drain and old-thread drain).
-/// Mirrors [`CLOSE_TOTAL_BUDGET`] so the delete toast cannot outlast it.
 const DELETE_TOTAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
 /// `cap`, shrunk to what remains under `deadline`.
 fn stage_budget(deadline: tokio::time::Instant, cap: std::time::Duration) -> std::time::Duration {
@@ -115,8 +111,8 @@ impl MvpAgent {
         true
     }
     /// Hard-stop before wiping history so delete cannot race live writers. Order matches [`Self::close_active_session`]: drop residency before any await.
-    /// The supervisor treats a finished still-resident actor as a crash, so awaiting the subagent drain while resident races that sweep.
-    /// Every wait spends from a shared [`DELETE_TOTAL_BUDGET`] so the two drains cannot stack into a toast twice as long as close's.
+    /// The supervisor treats a finished still-resident actor as a crash, so awaiting the subagent drain while resident races that sweep. Every wait
+    /// spends from a shared [`DELETE_TOTAL_BUDGET`] so both drains cannot stack into a toast twice as long as close's.
     pub(crate) async fn teardown_live_session_before_delete(&self, id: &acp::SessionId) {
         let deadline = tokio::time::Instant::now() + DELETE_TOTAL_BUDGET;
         let resident = self.hard_stop_resident(id, CancelTrigger::SessionDelete);
@@ -317,8 +313,8 @@ impl MvpAgent {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
-    /// Per-session prompt-intake lock: prompts land in submission order and a cancel cannot overtake the prompt it targets.
-    /// Keep the work done while holding it short.
+    /// Per-session prompt-intake lock: prompts land in submission order and a
+    /// cancel cannot overtake the prompt it targets.
     pub(super) fn dispatch_lock(&self, id: &acp::SessionId) -> std::rc::Rc<tokio::sync::Mutex<()>> {
         self.session_registry.dispatch_lock(id)
     }
@@ -622,7 +618,6 @@ pub(crate) struct RegistrySnapshot {
     pub sessions: usize,
     pub loading_sessions: usize,
     /// Ids the session registry still tracks.
-    /// Non-zero when every count below is zero means an entry survived with a field none of them name.
     pub session_registry_entries: usize,
     pub session_threads: usize,
     pub resident_resources: usize,

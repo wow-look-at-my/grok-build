@@ -1,14 +1,4 @@
 //! Free-to-paid subscription detection and gate imposition/lift.
-//!
-//! All gate transitions go through [`AppView::impose_gate`] / [`AppView::lift_gate`].
-//! That keeps the defer-vs-show decision and the lift bookkeeping (focus, telemetry, JWT-refresh check) in one place.
-//!
-//! Design constraints that are not obvious from the code:
-//! - Gates from cached auth meta, prefetched settings, or settings pushes can be stale: the user may have subscribed since the snapshot was computed.
-//!   Painting such a gate directly flashes a paywall at a paying user, so it is held in `pending_gate_verification` while a live check runs.
-//!   On check failure or timeout we err on blocking.
-//! - Timer effects have no cancellation, so verifications are stamped with `gate_verify_gen`.
-//!   Results and timeouts from superseded deferrals are ignored by generation mismatch.
 
 use super::actions::Effect;
 use super::app_view::{AppView, AuthState};
@@ -18,8 +8,7 @@ use super::app_view::{AppView, AuthState};
 pub(crate) const SUBSCRIPTION_WATCH_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(60);
 
-/// Floor for the server-supplied cadence: a fat-fingered remote settings value must not make the whole fleet poll rapidly.
-/// `0` means "disabled" and is special-cased before this clamp.
+/// Floor for the server-supplied cadence: a fat-fingered remote settings value must not make the whole fleet poll.
 pub(crate) const SUBSCRIPTION_WATCH_MIN_INTERVAL_SECS: u64 = 30;
 
 /// Floor for the `GROK_SUBSCRIPTION_WATCH_INTERVAL_SECS` env override (for tests and power users; deliberately below the server floor).
@@ -30,8 +19,6 @@ pub(crate) const SUBSCRIPTION_CHECK_DEBOUNCE: std::time::Duration =
     std::time::Duration::from_secs(30);
 
 /// How long a deferred gate is held before being shown anyway.
-/// This is a safety net for a hung ACP round-trip only; a completed check (even a failed one) resolves the deferral immediately.
-/// Generous on purpose: the check can chain a `/user` fetch, a JWT refresh, and a settings re-fetch.
 pub(crate) const GATE_VERIFY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl AppView {
@@ -202,8 +189,8 @@ impl AppView {
             && let Some(gate) = self.pending_gate_verification.take()
             && self.gate.is_none()
         {
-            // Warn: the verification did not confirm access, so the user is now blocked
-            // If this is wrong (paying user paywalled), this entry plus the preceding check.fired/check.complete lines show which path failed
+            // Warn: the verification did not confirm access, so the user is
+            // now blocked If this is wrong (paying user paywalled).
             crate::unified_log::warn(
                 "subscription.gate.promoted",
                 None,

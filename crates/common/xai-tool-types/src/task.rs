@@ -1,27 +1,18 @@
-//! Input/output types for the background-task / sub-agent task tools
-//! (`task`, `get_task_output`, `wait_tasks`).
+//! Input/output types for the background-task / sub-agent task tools (`task`, `get_task_output`, `wait_tasks`).
 
 use crate::Aliases;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ───────────────────────────────────────────────────────────────────────────
-// Agent usage frequency — how strongly system-prompt/tool wording nudges the
-// model toward spawning subagents
-// ───────────────────────────────────────────────────────────────────────────
+// Agent usage frequency.
 
 /// How strongly system-prompt and tool-description wording nudges the model
 /// toward using the `task` tool to spawn subagents.
-///
-/// This never gates the tool itself — that is `subagents_enabled` (see the
-/// host's own subagents config). It only varies the surrounding wording, from
-/// telling the model to leave delegation to explicit user request, up to
-/// telling it to default to delegating independent work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentUsageFrequency {
-    /// Never spawn a subagent unless the user explicitly asks for an agent,
-    /// subagent, or the task tool in the current conversation.
+    /// Never spawn a subagent unless the user explicitly asks for an agent, subagent.
     ExplicitOnly,
     VeryRare,
     Rare,
@@ -178,28 +169,20 @@ pub struct TaskToolInput {
     #[schemars(description = "The full task prompt for the subagent to execute.")]
     pub prompt: String,
 
-    /// Short description of the task (3-5 words).
     #[schemars(description = "Short description of the task (3-5 words).")]
     pub description: String,
 
-    /// Not on the model-facing schema. Omitted JSON defaults to general-purpose
-    /// and is not written back. A present key is kept: hosts persist this struct
-    /// through ACP `raw_input`, and callers still select explore, plan, and
-    /// custom types by name.
+    /// Not on the model-facing schema. Omitted JSON defaults to general-purpose and is not written back.
     #[schemars(skip)]
     #[serde(default = "default_subagent_type")]
     pub subagent_type: String,
 
-    /// True when the JSON key was present. In-process constructors leave this
-    /// false, so a default `general-purpose` string is still an omitted type.
+    /// True when the JSON key was present.
     #[schemars(skip)]
     #[serde(default, skip_serializing)]
     pub subagent_type_specified: bool,
 
-    /// Whether to run the subagent in the background.
-    ///
-    /// Returns immediately with a subagent_id. Use the task output tool to
-    /// retrieve results. This is set to true by default.
+    /// Whether to run the subagent in the background. Returns immediately with a subagent_id.
     #[schemars(
         description = "Returns immediately with a subagent_id. Use the task output tool to \
             retrieve results. This is set to true by default."
@@ -210,10 +193,7 @@ pub struct TaskToolInput {
     )]
     pub run_in_background: bool,
 
-    /// Harness-internal only. Not advertised on the model-facing schema;
-    /// JSON that still sends this key is ignored so a `general-purpose`
-    /// child keeps its type's full toolset. Compat-harness adapters and
-    /// role/definition defaults still set this in-process.
+    /// Harness-internal only.
     #[schemars(skip)]
     #[serde(default, skip_deserializing, skip_serializing)]
     pub capability_mode: Option<SubagentCapabilityMode>,
@@ -228,14 +208,6 @@ pub struct TaskToolInput {
     pub isolation: Option<SubagentIsolationMode>,
 
     /// Resume a previous subagent's conversation instead of starting fresh.
-    ///
-    /// The new subagent inherits the source's raw transcript, tool state, and
-    /// model. The system prompt and tool configuration are freshly rendered
-    /// from the current agent definition. The new task prompt is appended as
-    /// the next user message.
-    ///
-    /// The source subagent must be completed (not active or unknown) and
-    /// belong to the same parent session.
     #[schemars(
         description = "Resume from a previously completed subagent's conversation. \
             Pass the subagent_id returned by a prior task call. The new subagent \
@@ -246,12 +218,7 @@ pub struct TaskToolInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_from: Option<String>,
 
-    /// Explicit working directory for the subagent. When set, the child
-    /// session operates in this directory instead of the parent's cwd.
-    /// Mutually exclusive with `isolation: "worktree"` (both set the
-    /// effective cwd — setting both is ambiguous).
-    /// Path validation (exists, is a directory) happens at subagent launch
-    /// time, not here.
+    /// Explicit working directory for the subagent.
     #[schemars(
         description = "Explicit working directory for the subagent. The path must exist and \
             be a directory. Mutually exclusive with isolation=\"worktree\". \
@@ -271,9 +238,7 @@ pub struct TaskToolInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
-    /// Optional id of the workspace the child runs in. Accepted on the wire
-    /// and ignored locally; omitted from the derived schema, so hosts that
-    /// support it advertise the property themselves.
+    /// Optional id of the workspace the child runs in.
     #[schemars(skip)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
@@ -498,8 +463,6 @@ pub struct SubagentCompletedOutput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub persona: Option<String>,
     /// The `subagent_id` to pass as `resume_from` to continue this subagent.
-    /// Always equals `subagent_id` — provided as a convenience so programmatic
-    /// consumers can extract the resume handle without parsing text.
     pub resume_from_hint: String,
     /// If the subagent used a persona, the persona name to pass when resuming.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -526,19 +489,12 @@ impl SubagentCompletedOutput {
     }
 }
 
-/// Plain-text CTA after a background-spawn notice.
-///
-/// Keep this unwrapped (no `<system-reminder>` / `<system_reminder>` tags).
-/// Hardcoding either tag in shared tool text clashes with harness-specific
-/// wrappers and can make UIs hide the whole spawn result as a reminder block.
-/// Harness-owned reminders go through `format_with_reminders` with
-/// `system_reminder_tag`.
+/// Plain-text CTA after a background-spawn notice. Keep this unwrapped (no
+/// `<system-reminder>` / `<system_reminder>` tags).
 pub const BACKGROUND_SUBAGENT_CONTINUE_PARENT_WORK: &str =
     "Do not only poll the child. Continue unfinished parent work now.";
 
-/// How many asks *before* the latest one may still count as leftover parent
-/// exec. Older implement/fix history after the user switched to review-only
-/// must not keep the CTA on.
+/// How many asks *before* the latest one may still count as leftover parent exec.
 const PRIOR_EXEC_LOOKBACK: usize = 2;
 
 /// Whether background-spawn text should tell the parent to keep its own work.
@@ -547,9 +503,9 @@ const PRIOR_EXEC_LOOKBACK: usize = 2;
 /// this spawn's tool call. `child_description` / `child_prompt` are the spawn
 /// being acknowledged.
 ///
-/// Returns true only when the latest ask (or either of the two before it)
-/// shows unfinished parent exec work besides the delegated child job.
-/// No user asks → false.
+/// Returns true only when the latest ask (or either of both before it)
+/// shows unfinished parent exec work besides the delegated child job. No
+/// user asks → false.
 pub fn should_continue_parent_work(
     user_asks: &[String],
     child_description: &str,
@@ -645,10 +601,7 @@ fn blob_is_delegate(text: &str) -> bool {
     NEEDLES.iter().any(|n| t.contains(n))
 }
 
-/// Model-facing names used by the background-subagent notices. The retrieval
-/// tool and both of its parameters are host-renameable (tool randomization),
-/// so callers resolve them (e.g. from their `TemplateRenderer`) instead of
-/// baking the canonical names into the notice text.
+/// Model-facing names used by the background-subagent notices.
 #[derive(Clone, Copy, Debug)]
 pub struct BackgroundNoticeNaming<'a> {
     /// Task-result retrieval tool (canonical: `get_task_output`).
@@ -851,35 +804,19 @@ pub fn format_resume_footer(subagent_id: &str, persona: Option<&str>) -> String 
     footer
 }
 
-/// Maximum number of task IDs accepted by a single multi-id `get_task_output`
-/// (or legacy `wait_tasks`) call. Shared by the tool schema, the server-side
-/// fan-out, and the toolbox wait path so the cap cannot drift.
+/// Maximum number of task IDs accepted by a single multi-id `get_task_output` (or legacy `wait_tasks`) call.
 pub const MAX_MULTI_WAIT_IDS: usize = 20;
 
 /// Input for the `get_task_output` tool.
 #[derive(Debug, Clone, Default, Serialize, JsonSchema)]
 pub struct TaskOutputToolInput {
     /// Task IDs to query. Pass one or more; a single task is a one-element list.
-    ///
-    /// Lenient on the wire (invisible to the advertised schema — schemars
-    /// ignores serde aliases and custom deserializers): also accepts the
-    /// singular `task_id` key and a bare string/number instead of an array.
-    /// Models frequently mirror `kill_task`'s singular `task_id` here (in
-    /// soak rollouts 3 of 4 organic calls did) and previously hard-failed
-    /// with "Provide a non-empty task_ids list", after which they abandoned
-    /// the background-task workflow for shell polling. A call naming both
-    /// keys folds them through [`TaskOutputToolInput::TASK_IDS_KEYS`], so the
-    /// frequent case of one list spelled twice parses.
     #[schemars(
         description = "Task IDs to get output from. Pass one or more; for a single task use a one-element array. With a positive timeout_ms, multiple ids wait until all complete. Omit timeout_ms or pass 0 for a non-blocking snapshot."
     )]
     pub task_ids: Vec<String>,
 
     /// When set and positive, wait up to this many milliseconds; omit or `0` polls.
-    ///
-    /// `{max_wait_ms}` is resolved at finalize from the session's wait ceiling,
-    /// which also pins it as the schema `maximum` — the tool description cannot
-    /// carry the bound alone, since randomization may replace it wholesale.
     #[schemars(
         description = "Max wait time in milliseconds, up to {max_wait_ms}. A positive value waits for completion; omit or pass 0 for a non-blocking status poll."
     )]
@@ -888,8 +825,7 @@ pub struct TaskOutputToolInput {
 }
 
 impl TaskOutputToolInput {
-    /// The keys [`task_ids`](Self::task_ids) is read under. The first is what
-    /// this type writes; `task_id` is accepted on input only.
+    /// The keys [`task_ids`](Self::task_ids) is read under.
     pub const TASK_IDS_KEYS: Aliases = Aliases::new("task_ids", &["task_id"]);
 }
 
@@ -928,11 +864,6 @@ impl TryFrom<TaskOutputToolInputWire> for TaskOutputToolInput {
 }
 
 /// Forwards through [`TaskOutputToolInputWire`] and the fold.
-///
-/// This is the body `#[serde(try_from = "TaskOutputToolInputWire")]` would
-/// generate, written out because schemars 1.0 reads that attribute to build the
-/// advertised schema — it would publish the shadow's shape, and so name
-/// `task_id` to the model, which the whole leniency exists to avoid.
 impl<'de> Deserialize<'de> for TaskOutputToolInput {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -972,24 +903,14 @@ impl TaskOutputToolInput {
 }
 
 /// Whether `get_task_output` should wait, from optional `timeout_ms`.
-///
-/// Positive `timeout_ms` waits; omit or `0` polls without blocking.
 pub fn task_output_waits(timeout_ms: Option<u64>) -> bool {
     timeout_ms.is_some_and(|ms| ms > 0)
 }
 
-/// Default ceiling on a single blocking wait (`get_task_output` with a positive
-/// `timeout_ms`, `wait_tasks`). One hour: above the p99 of timeouts the model
-/// actually requests, so the harness rarely hands back "still running" first.
-/// Hosts with a shorter transport deadline set `GROK_MAX_WAIT_BLOCK_MS`.
+/// Default ceiling on a single blocking wait (`get_task_output` with a positive `timeout_ms`, `wait_tasks`).
 pub const MAX_WAIT_BLOCK_MS_DEFAULT: u64 = 3_600_000;
 
 /// The blocking-wait ceiling in effect, honoring `GROK_MAX_WAIT_BLOCK_MS`.
-///
-/// A host whose transport deadline is shorter than the default sets the env var
-/// so the server enforces — and the tool descriptions advertise — the same
-/// number the caller will actually wait for. Without that, a model believing the
-/// default asks for a wait its own client will abandon first.
 pub fn max_wait_block_ms() -> u64 {
     std::env::var("GROK_MAX_WAIT_BLOCK_MS")
         .ok()
@@ -997,11 +918,9 @@ pub fn max_wait_block_ms() -> u64 {
         .unwrap_or(MAX_WAIT_BLOCK_MS_DEFAULT)
 }
 
-/// Render a wait ceiling for tool descriptions, e.g. `3600000 (~1 h)`.
-///
-/// The unit is derived from the value, so it cannot drift from the millisecond
-/// figure beside it. All branches round *down*: a cap must never read as
-/// longer than it is.
+/// Render a wait ceiling for tool descriptions, e.g. `3600000 (~1 h)`. The
+/// unit is derived from the value, so it cannot drift from the millisecond
+/// figure beside it.
 pub fn format_wait_cap_ms(ms: u64) -> String {
     if ms < 60_000 {
         format!("{ms} (~{} s)", ms / 1_000)
@@ -1013,10 +932,6 @@ pub fn format_wait_cap_ms(ms: u64) -> String {
 }
 
 /// Placeholder the description builders emit for the wait ceiling.
-///
-/// Resolved per session by `TruncationConfig::interpolate_description` in the
-/// finalize loop, the same way `{max_lines_read}` is: the cap is client
-/// configurable, so it cannot be baked in when the description is built.
 pub const MAX_WAIT_MS_PLACEHOLDER: &str = "{max_wait_ms}";
 
 /// Same as [`task_output_waits`], from raw tool-arg JSON (fingerprint / doom-loop).
@@ -1043,27 +958,17 @@ pub struct TaskOutputResult {
     pub command: String,
     pub status: String,
     pub exit_code: Option<i32>,
-    /// Wall-clock start time (ISO 8601 format)
     pub started: String,
-    /// Wall-clock end time if completed (ISO 8601 format)
     pub ended: Option<String>,
     /// Duration in seconds
     pub duration_secs: f64,
     pub output: String,
     pub output_file: String,
     pub truncated: bool,
-    /// Pre-resolved hint text for truncated output.
-    /// Built by the tool's run() using resolved tool names.
+    /// Pre-resolved hint text for truncated output. Built by the tool's run() using resolved tool names.
     #[serde(default)]
     pub truncation_hint: String,
     /// Raw output byte count before any truncation or soft-wrapping.
-    ///
-    /// When `truncated` is true the `output` field only contains a short
-    /// preview; the formatted string length stays roughly constant even as
-    /// the underlying task output grows.  This field always reflects the
-    /// actual task output size and is therefore used by doom-loop polling-
-    /// progress detection to distinguish genuine output growth from
-    /// stagnation.
     #[serde(default)]
     pub raw_output_bytes: usize,
 }
@@ -1095,20 +1000,10 @@ impl TaskOutputResult {
     }
 
     /// Compute a progress signature from the semantically meaningful output
-    /// fields of a `get_task_output` result.
-    ///
-    /// Two results with the same signature are considered stagnant — the task
-    /// state has not changed between polls.  Used by the doom-loop detector to
-    /// distinguish legitimate waiting (progress) from a true polling stall.
-    ///
-    /// Included fields: `status`, `exit_code`, `ended` (presence), and
-    /// `raw_output_bytes`.
-    ///
-    /// `raw_output_bytes` is used instead of `output.len()` because when the
-    /// output is truncated the formatted `output` string stays roughly the
-    /// same length even as the underlying task output grows.  `raw_output_bytes`
-    /// always reflects the true task output size, so it correctly detects
-    /// progress for long-running tasks whose output exceeds the truncation limit.
+    /// fields of a `get_task_output` result. Results with the same
+    /// signature are considered stagnant — the task state has not changed
+    /// between polls. Used by the doom-loop detector to distinguish
+    /// legitimate waiting (progress) from a true polling stall.
     pub fn progress_signature(&self) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -1122,8 +1017,7 @@ impl TaskOutputResult {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// `wait_tasks` tool — Input
-// ───────────────────────────────────────────────────────────────────────────
+// `wait_tasks` tool.
 
 /// How a multi-wait (`wait_tasks`) request should resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1145,16 +1039,14 @@ pub struct WaitTasksToolInput {
     )]
     pub mode: WaitMode,
 
-    /// Carries the same `{max_wait_ms}` marker as `TaskOutputToolInput`: this
-    /// tool blocks on the same ceiling, so it needs the same resolved bound.
+    /// Carries the same `{max_wait_ms}` marker as `TaskOutputToolInput`: this tool blocks on the same ceiling.
     #[schemars(description = "Max wait time in milliseconds, up to {max_wait_ms}")]
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// `kill_task` (cancel) tool — Input / Output
-// ───────────────────────────────────────────────────────────────────────────
+// `kill_task` (cancel) tool.
 
 /// Input for the `kill_task` tool — terminates a running background task,
 /// monitor, or subagent by id.
@@ -1186,25 +1078,21 @@ impl KillTaskOutput {
     }
 }
 
-/// One entry in the dynamic `task` tool description: a subagent type the model
-/// may launch, with a human-readable summary and an optional fragment listing
-/// the tools that agent can use.
+/// One entry in the dynamic `task` tool description: a subagent type the
+/// model may launch, with a human-readable summary.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentDescriptor {
     /// `subagent_type` value the model passes to the `task` tool.
     pub name: String,
     /// One-line summary of what this subagent does.
     pub description: String,
-    /// Optional fragment summarizing the tools the subagent can use. Appended
-    /// verbatim after the description; may itself contain product-specific
-    /// template variables (e.g. the CLI's `${{ tools.by_kind.* }}`).
+    /// Optional fragment summarizing the tools the subagent can use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<String>,
 }
 
 /// A built-in subagent type shared by the CLI (`xai-grok-agent`) and other
-/// embedding crates: its `subagent_type` name, canonical model-facing description,
-/// tool-access fragment, and type-specific prompt body.
+/// embedding crates: its `subagent_type` name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BuiltinSubagent {
     /// `subagent_type` value the model passes to the `task` tool.
@@ -1218,9 +1106,8 @@ pub struct BuiltinSubagent {
 }
 
 impl BuiltinSubagent {
-    /// Render the tool-access fragment, substituting each `${{ tools.by_kind.* }}`
-    /// placeholder with the matching name from `naming`. Kinds the naming doesn't
-    /// cover fall back to the bare kind name, so a partial map still renders.
+    /// Render the tool-access fragment, substituting each `${{
+    /// tools.by_kind.* }}` placeholder with the matching name from `naming`.
     pub fn render_tools(&self, naming: &SubagentToolNaming) -> String {
         substitute_tool_placeholders(self.tools_template, |kind| {
             naming.tool_for_kind(kind).map(str::to_owned)
@@ -1499,8 +1386,7 @@ pub struct TaskToolNaming<'a> {
     pub resume_from_param: &'a str,
     /// Name of the task result retrieval tool.
     pub background_retrieval_tool: &'a str,
-    /// Name of the `isolation` parameter, used in the isolation/worktree
-    /// paragraph.
+    /// Name of the `isolation` parameter, used in the isolation/worktree paragraph.
     pub isolation_param: &'a str,
 }
 
@@ -1542,11 +1428,6 @@ fn lifecycle_target_suffix(monitor_present: bool, subagent_present: bool) -> &'s
 }
 
 /// Optional "(a monitor's {id_name} is returned by {monitor})" clause.
-///
-/// `id_name` is the model-facing singular id name — kill_task's `task_id`
-/// input (tracks renames). get_task_output's `task_ids` array is plural and
-/// must not be used here; both tools share this wording so randomization
-/// cannot disagree across kill vs get-output docs.
 fn monitor_task_id_note(monitor_tool: Option<&str>, id_name: &str) -> String {
     match monitor_tool {
         Some(m) => format!(" (a monitor's {id_name} is returned by {m})"),
@@ -1629,8 +1510,7 @@ pub struct TaskOutputToolNaming<'a> {
     pub task_ids_param: &'a str,
     /// Model-facing name of the `timeout_ms` input (tracks param renames).
     pub timeout_ms_param: &'a str,
-    /// Singular monitor-id name for the monitor aside — kill_task's `task_id`
-    /// (tracks renames). Not get_task_output's plural `task_ids`.
+    /// Singular monitor-id name for the monitor aside — kill_task's `task_id` (tracks renames).
     pub task_id_param: &'a str,
 }
 
@@ -2045,8 +1925,7 @@ mod tests {
         let input: TaskOutputToolInput = serde_json::from_str(r#"{"task_ids": "solo"}"#).unwrap();
         assert_eq!(input.resolved_task_ids(), vec!["solo"]);
 
-        // Bare number (observed: an OS PID) becomes a string id, so the tool
-        // answers "Task 228 not found" instead of a deserialize error.
+        // Bare number (observed: an OS PID) becomes a string id.
         let input: TaskOutputToolInput = serde_json::from_str(r#"{"task_id": 228}"#).unwrap();
         assert_eq!(input.resolved_task_ids(), vec!["228"]);
     }
@@ -2067,7 +1946,7 @@ mod tests {
         assert_eq!(input.resolved_task_ids(), vec!["a"]);
     }
 
-    /// Two different id lists in one call is a contradiction about which task to
+    /// Different id lists in one call is a contradiction about which task to
     /// read; the tool may not pick a side in silence.
     #[test]
     fn task_output_input_whose_key_spellings_disagree_is_an_error_naming_the_field() {
@@ -2123,9 +2002,7 @@ mod tests {
 
     #[test]
     fn task_output_input_schema_does_not_advertise_the_alias() {
-        // The leniency is wire-only: the advertised schema must keep exactly
-        // the canonical properties (task_ids, timeout_ms) so tool-definition
-        // dumps and param randomization are unaffected.
+        // The leniency is wire-only: the advertised schema must keep exactly the canonical properties (task_ids, timeout_ms).
         let schema = serde_json::to_value(schemars::schema_for!(TaskOutputToolInput)).unwrap();
         let props = schema["properties"].as_object().unwrap();
         assert!(props.contains_key("task_ids"));
@@ -2203,8 +2080,7 @@ mod tests {
             Some("Read-only \u{2014} has access to: read, list, search.")
         );
 
-        // Descriptions must be single-spaced (line-continuation whitespace is
-        // stripped), so they read as one clean paragraph in the tool listing.
+        // Descriptions must be single-spaced (line-continuation whitespace is stripped).
         assert!(!GENERAL_PURPOSE_SUBAGENT.description.contains("  "));
     }
 
@@ -2458,7 +2334,6 @@ mod tests {
         );
         assert_eq!(format_wait_cap_ms(3_600_000), "3600000 (~1 h)");
         assert_eq!(format_wait_cap_ms(300_000), "300000 (~5 min)");
-        // Rounds down: 1.5 min must not read as 2.
         assert_eq!(format_wait_cap_ms(90_000), "90000 (~1 min)");
         // Sub-minute caps switch unit rather than rendering "~0 min".
         assert_eq!(format_wait_cap_ms(30_000), "30000 (~30 s)");
@@ -2692,7 +2567,7 @@ mod tests {
             "3 agent review",
             "review the diff",
         ));
-        // Exec two asks ago still counts (check bugs → nudge → review spawn).
+        // Exec asks ago still counts (check bugs → nudge → review spawn).
         assert!(should_continue_parent_work(
             &[
                 "kan je is de recente signal bug's checken?".into(),
@@ -2702,7 +2577,7 @@ mod tests {
             "review bugs",
             "independent review",
         ));
-        // Exec three asks ago is too old once the user is review-only.
+        // Exec asks ago is too old once the user is review-only.
         assert!(!should_continue_parent_work(
             &[
                 "implement foo and fix the tests".into(),

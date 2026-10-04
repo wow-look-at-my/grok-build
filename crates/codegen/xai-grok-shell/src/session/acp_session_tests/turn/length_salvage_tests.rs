@@ -1,7 +1,4 @@
-//! Integration tests that run the real turn loop against a scripted Chat Completions backend whose responses end with `finish_reason: "length"`.
-//!
-//! There is deliberately no test of the default agent with the env gate ON: env mutation is process-global and racy in the parallel test binary.
-//! That case gains coverage when the RemoteSettings gate makes the budget injectable.
+//! Integration tests that run the real turn loop against a scripted Chat Completions backend whose responses end.
 use super::support::*;
 use super::*;
 use std::sync::Arc;

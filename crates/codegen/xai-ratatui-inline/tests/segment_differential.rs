@@ -1,20 +1,9 @@
-//! Differential test: the anstyle-parse-based `split_into_line_segments`
-//! against a reference copy of the previous termwiz-based implementation.
-//!
-//! Production code uses `anstyle-parse` for ANSI line splitting. This test
-//! embeds the prior termwiz-based splitter as a reference and asserts
-//! identical observable output so the rewrite cannot drift. `termwiz` is a
-//! dev-dependency only (powers this test; not linked into shipped binaries).
-//!
-//! Inputs are restricted to what the production splitter actually sees:
-//! complete escape sequences (the old implementation `debug_assert`ed on
-//! trailing incomplete ones) and no raw C1 controls encoded as UTF-8 (termwiz
-//! maps e.g. U+0085 to a control action while VTE prints it; that corner was
-//! unspecified before and is not exercised by terminal output we render).
+//! Differential test: the anstyle-parse-based `split_into_line_segments` against a reference copy.
 
 use xai_ratatui_inline::split_into_line_segments;
 
-// ─── Reference: the previous termwiz-based implementation, verbatim ────────
+// ─── Reference: the termwiz-based implementation, verbatim
+// ────────
 
 struct RefSegment<'a> {
     content: &'a str,

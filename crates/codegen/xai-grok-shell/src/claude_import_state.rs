@@ -1,7 +1,4 @@
 // Tracks what Claude settings have been imported/dismissed so we don't re-prompt.
-//
-// State is persisted to `~/.grok/claude_import_state.json`.
-// Hash is SHA-256 over sorted, concatenated contents of all Claude settings files at a given scope (global or project)
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -152,7 +149,6 @@ fn compute_project_hash(cwd: &Path) -> (String, Vec<PathBuf>) {
         .collect();
 
     // Also include .mcp.json candidate paths from cwd up to repo root.
-    // Non-existent files are skipped by compute_settings_hash(), so we unconditionally add candidates (avoids a TOCTOU race vs .exists())
     let mut all = project_paths;
     let mut current = cwd.to_path_buf();
     loop {

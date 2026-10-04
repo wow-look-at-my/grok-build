@@ -1,5 +1,4 @@
-//! Status row state: whether this process draws a row at all, and for one that does, its content, throttle, and which runs may still paint.
-//! What the row should become is decided in `status_line_policy`, rendering is `views::status_line`, and the counters are the `metrics` child.
+//! Status row state: whether this process draws a row at all, and for one that does, its content, throttle.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,8 +13,6 @@ mod command;
 pub(crate) mod metrics;
 
 /// Shortest gap between event-driven recomputes; it keeps a busy turn from re-running a script every frame.
-/// A constant rather than a config knob: the one cadence a user can set is the `refresh_interval` timer.
-/// A force and a due refresh drop to [`MIN_REFRESH_INTERVAL_MS`] instead, so those may run after 100ms rather than 300.
 pub(crate) const EVENT_DEBOUNCE: Duration = Duration::from_millis(300);
 
 pub(crate) const MIN_REFRESH_INTERVAL_MS: Duration = Duration::from_millis(100);
@@ -23,8 +20,6 @@ pub(crate) const MIN_REFRESH_INTERVAL_MS: Duration = Duration::from_millis(100);
 pub(crate) const ABANDON_AFTER: Duration = Duration::from_secs(30);
 
 /// The consecutive refresh failure at which the error text paints; below it the row keeps its last confirmed output.
-/// A transient outage must not paint an error over hours of good answers.
-/// From here on the script itself is broken and stops being papered over with stale data.
 pub(crate) const REFRESH_FAILURES_TO_PAINT: u32 = 3;
 
 const _: () = assert!(
@@ -44,8 +39,6 @@ fn display_for(text: &str) -> Option<StatusLineDisplay> {
 }
 
 /// The parts of the payload the client fills in rather than the shell.
-/// The overlay and the staleness check read this one value, so a field added here is watched by the code that applies it.
-/// `trigger` is client-stamped too but lives outside: it is a property of one run, not a staleness input the row must rebuild over.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ClientOwnedFields {
     pub(crate) session_name: Option<String>,
@@ -85,7 +78,6 @@ pub(crate) enum RunSlot {
     Free,
     WithinDeadline,
     /// A run holds the slot past [`ABANDON_AFTER`].
-    /// Only the tick that runs [`StatusLineState::abandon_if_past_deadline`] hands the slot back.
     PastDeadline,
 }
 
@@ -145,9 +137,8 @@ pub struct StatusLineRun {
     term_size: RowSize,
 }
 
-/// What one run produced.
-/// A failure carries both the text it would paint and the raw error for the log.
-/// The state can decide which run gets which without re-deriving either.
+/// What one run produced. A failure carries both the text it would paint and
+/// the raw error for the log.
 #[derive(Debug)]
 pub enum RunOutcome {
     Output(String),
@@ -176,8 +167,6 @@ pub(crate) struct StatusLineState {
     forced: bool,
     refresh_due: bool,
     /// Consecutive failed refresh runs of the user's script, reset by any run that succeeds.
-    /// The configured command is fixed for the life of the process, so the count deliberately survives [`Self::invalidate`].
-    /// An agent switch does not absolve a broken script; a future config reload must reset the count when the command changes.
     refresh_failures: u32,
     run: RunState,
     next_run_id: RunId,
@@ -224,9 +213,8 @@ impl StatusLineState {
         self.settled
     }
 
-    /// Settle with no content, leaving `last_update` alone so a later snapshot paints at once.
-    /// A force left standing would demand ticks forever, and so would a due refresh.
-    /// Whatever starved this update of a context starves the run the refresh is waiting for too.
+    /// Settle with no content, leaving `last_update` alone so a later
+    /// snapshot paints at once.
     pub(crate) fn settle_empty(&mut self) {
         self.settled = true;
         self.clear_force();
@@ -392,7 +380,7 @@ impl StatusLineState {
                         self.settle_with_session_content(display_for(&text));
                         FinishDisposition::RefreshFailurePainted { error, failures }
                     } else {
-                        // Settled without touching the content: the row keeps its last answer rather than waiting on this one
+                        // Settled without touching the content: the row keeps its last answer rather than waiting.
                         self.settled = true;
                         FinishDisposition::RefreshFailureKept { error, failures }
                     }
@@ -406,8 +394,9 @@ impl StatusLineState {
     pub(crate) fn supersede_command_run(&mut self, after: AfterSupersede) {
         self.run = match self.run {
             RunState::Running(run) => {
-                // The refresh a superseded run carried is still owed
-                // A resize landing mid-run would otherwise swallow the cycle the timer scheduled until the next fire
+                // The refresh a superseded run carried is still owed A resize
+                // landing mid-run will otherwise swallow the cycle the timer
+                // scheduled.
                 if run.trigger == StatusLineTrigger::RefreshInterval {
                     self.refresh_due = true;
                 }
@@ -432,8 +421,8 @@ impl StatusLineState {
     /// About the config rather than the session, so it does not count as content.
     pub(crate) fn set_problem(&mut self, text: &str) {
         self.settled = true;
-        // A segment for the warning tone: the rest of the row is chrome
-        // A row that cannot read its own config is the one thing the user must notice
+        // A segment for the warning tone: the rest of the row is chrome A row
+        // that cannot read its own config is the thing the user must notice
         self.write_content(Some(StatusLineDisplay::Segments(vec![
             StatusSegment::warn(text),
         ])));
@@ -457,9 +446,8 @@ impl StatusLineState {
         }
     }
 
-    /// Clear the content and leave the row unsettled, so ticks continue until an answer arrives.
-    /// Contrast [`Self::settle_empty`]: the force goes with it, but `refresh_due` deliberately survives.
-    /// A refresh owed while the welcome screen had no agent is kept for the first run after one appears.
+    /// Clear the content and leave the row unsettled, so ticks continue until
+    /// an answer arrives.
     pub(crate) fn invalidate(&mut self) {
         self.supersede_command_run(AfterSupersede::NoRun);
         self.write_content(None);

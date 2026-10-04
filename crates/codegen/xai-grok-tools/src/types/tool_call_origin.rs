@@ -1,7 +1,4 @@
 //! Value-only attribution for one tool invocation.
-//!
-//! Holds no emitter, session owner, or live span. A direct-user or system call
-//! leaves the model absent unless the caller supplies a model from a known invocation.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InvocationSource {

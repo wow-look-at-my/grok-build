@@ -1,7 +1,4 @@
 //! Jujutsu (jj) operations for colocated repos.
-//!
-//! Mirrors the git operations in [`super::git`] but uses the `jj` CLI.
-//! All read-only calls use `--ignore-working-copy`; mutating calls use [`super::git::jj_cli_mut`].
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -128,9 +125,8 @@ pub async fn status(cwd: &Path) -> Result<GitStatusData> {
     })
 }
 
-/// Current commit id: the working-copy commit (`@`), matching the `commit` field reported by [`status`].
-/// In a colocated repo, git HEAD points at `@-` (the parent of the working-copy commit), so reading it would return a different revision.
-/// Returns `Ok(None)` if the id can't be determined, mirroring the lenient behavior of `git::get_current_commit`.
+/// Current commit id: the working-copy commit (`@`), matching the `commit`
+/// field reported by [`status`].
 pub async fn current_commit(cwd: &Path) -> Result<Option<String>> {
     let commit = jj_cli(cwd, &["log", "--no-graph", "-r", "@", "-T", "commit_id"])
         .await

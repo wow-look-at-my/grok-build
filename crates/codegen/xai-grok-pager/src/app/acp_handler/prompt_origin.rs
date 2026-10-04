@@ -5,9 +5,9 @@ pub(crate) fn is_server_initiated_prompt(prompt_id: &str) -> bool {
     xai_grok_shell::session::PromptOrigin::from_prompt_id(prompt_id).is_synthetic()
 }
 
-/// Returns true if the prompt_id is a scheduled-task (`/loop`) fire.
-/// Unlike wake turns they run through `MvpAgent::prompt()` and emit the `x.ai/session/prompt_complete` turn-end signal.
-/// That exit is why a viewer can enter `TurnRunning` for them without stranding, and why the dashboard shows a running `/loop` session as Working.
+/// Returns true if the prompt_id is a scheduled-task (`/loop`) fire. Unlike
+/// wake turns they run through `MvpAgent::prompt()` and emit the
+/// `x.ai/session/prompt_complete` turn-end signal.
 pub(crate) fn is_scheduler_fired_prompt(prompt_id: &str) -> bool {
     matches!(
         xai_grok_shell::session::PromptOrigin::from_prompt_id(prompt_id),
@@ -63,9 +63,9 @@ pub(crate) fn is_wake_prompt(prompt_id: &str) -> bool {
     )
 }
 
-/// That is safe only when the turn will emit a terminal `x.ai/session/prompt_complete`, the only non-interactive way a viewer leaves `TurnRunning`.
-/// Actor-run synthetic turns never do, so adopting one strands the viewer in `TurnRunning`.
-/// This guard reads only the prompt id.
+/// That is safe only when the turn will emit a terminal
+/// `x.ai/session/prompt_complete`, the only non-interactive way a viewer
+/// leaves `TurnRunning`.
 pub(crate) fn should_adopt_running_prompt(prompt_id: &str) -> bool {
     !is_server_initiated_prompt(prompt_id) || is_scheduler_fired_prompt(prompt_id)
 }
@@ -102,9 +102,9 @@ pub(super) fn note_child_live_prompt(
         return false;
     }
     let Some(pid) = prompt_id else {
-        // A nameless leftover keeps the previous turn's start. Once a named
-        // prompt owns the clock, applying it restamps that anchor and lands
-        // the rows on the follow-up.
+        // A nameless leftover keeps the turn's start. Once a named prompt
+        // owns the clock, applying it restamps that anchor and lands the rows
+        // on the follow-up.
         if let (Some(chunk_start), Some(live_pid)) =
             (turn_start_ms, child.session.current_prompt_id.as_deref())
             && child.turn_start_ms_prompt.as_deref() == Some(live_pid)
@@ -192,8 +192,6 @@ pub(super) fn viewer_turn_anchor(turn_start_ms: Option<i64>) -> std::time::Insta
 }
 
 /// Wire fields of the wake turn's terminal signal.
-/// `cancel_trigger` is `_meta.cancelTrigger`: `"send_now"` marks an internal cancel-and-send, so the `TurnCancelled` marker is suppressed.
-/// The wire trigger wins; `expect_send_now_cancel` is the fallback for older shells.
 pub(super) struct WakeTerminal<'a> {
     pub stop_reason: &'a str,
     pub agent_result: Option<&'a str>,
@@ -232,8 +230,7 @@ pub(super) fn finish_wake_turn(
         &mut agent.scrollback,
         agent.session.current_prompt_id.as_deref(),
     );
-    // The stored `turn_start_ms` may belong to an earlier turn: a silent wake streamed no deltas of its own, and interleaved deltas can re-stamp it
-    // Claim an elapsed only when the anchor is provably this wake's
+    // The stored `turn_start_ms` may belong to an earlier turn: a silent wake streamed no deltas of its own.
     let anchor_is_ours = agent.turn_start_ms_prompt.as_deref() == Some(prompt_id);
     let elapsed = if had_output && anchor_is_ours {
         agent.turn_start_ms.and_then(|start_ms| {

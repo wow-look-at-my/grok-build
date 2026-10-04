@@ -1,9 +1,4 @@
 //! Durable, fenced consolidation of pending memory-v2 observations.
-//!
-//! A claim records an immutable inbox snapshot in SQLite while capture keeps
-//! publishing new files. Model work happens outside transactions. The final
-//! topic/archive/index/manifest commit is replayable from a deterministic plan,
-//! and every mutating entry point verifies the scope lease generation.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
@@ -29,8 +24,7 @@ const MAX_TOPIC_OPERATIONS: usize = 128;
 const MAX_TOPIC_PATH_BYTES: usize = 240;
 pub const MAX_EVIDENCE_PER_OPERATION: usize = 64;
 const MAX_FAILURE_BYTES: usize = 512;
-/// Upper bound on unresumable durable plans one claim will abandon before it
-/// falls back to a fresh deterministic claim; the rest are handled next time.
+/// Upper bound on unresumable durable plans one claim will abandon before it falls back to a fresh deterministic claim.
 const MAX_DURABLE_PLAN_PROBES: usize = 64;
 
 pub type Result<T> = std::result::Result<T, V2ConsolidationError>;
@@ -173,9 +167,6 @@ pub struct DreamEligibility {
 }
 
 /// Scope-local durable consolidation store.
-///
-/// Independent handles coordinate through `memory_state.sqlite`; no process
-/// global or session-actor state participates in exclusivity.
 #[derive(Debug)]
 pub struct V2ConsolidationStore {
     scope_dir: PathBuf,
@@ -283,9 +274,9 @@ impl V2ConsolidationStore {
         }
         let generation = lock.2.saturating_add(1);
 
-        // Re-lease durable plans whose topic writes outlived a failed archive.
-        // Their operation ids cannot be reconstructed after new captures arrive.
-        // Shadow claims never mutate topics and must not adopt canonical plans.
+        // Re-lease durable plans whose topic writes outlived a failed
+        // archive. Their operation ids cannot be reconstructed after new
+        // captures arrive.
         if !include_hidden
             && let Some(lease) =
                 self.reclaim_durable_plan(&transaction, request, generation, expires_at)?
@@ -534,11 +525,8 @@ impl V2ConsolidationStore {
         Ok(None)
     }
 
-    /// Evaluate automatic Dream eligibility when capture publishes an outcome.
-    ///
-    /// This performs no polling. Callers invoke it from the durable
-    /// capture-completed event; simultaneous events collapse to one persisted
-    /// trigger while a canonical editor is active.
+    /// Evaluate automatic Dream eligibility when capture publishes an
+    /// outcome. This performs no polling.
     pub fn on_capture_completed(
         &self,
         now: i64,
@@ -668,9 +656,7 @@ impl V2ConsolidationStore {
     ) -> Result<ConsolidationResult> {
         let result = self.try_complete_shadow(lease, operations, now);
         if let Err(error) = &result {
-            // A rejected shadow plan must not strand the canonical lease until
-            // expiry. Preserve the original error for classification while
-            // best-effort transitioning this owned claim to retryable.
+            // A rejected shadow plan must not strand the canonical lease until expiry.
             let _ = self.fail_retryable(lease, now, &error.to_string());
         }
         result

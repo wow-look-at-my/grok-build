@@ -1,5 +1,4 @@
 //! Tool dispatch helpers for `SessionActor`.
-//! Covers `dispatch_tool` and its lock and display helpers, direct bash-mode execution, and tool argument parse-error formatting.
 
 use super::*;
 use std::path::PathBuf;
@@ -8,7 +7,6 @@ use std::path::PathBuf;
 const BASH_MODE_FINAL_OUTPUT_LINES: usize = 10;
 const BASH_MODE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
-/// Phase 2: dispatch a tool call through [`WorkspaceOps::call_tool`].
 ///
 /// Agent sessions always use local workspace ops (in-process toolset).
 /// Production dispatch builds the origin itself and calls [`dispatch_observed`].
@@ -144,9 +142,10 @@ pub(super) fn backend_tool_display(name: &str) -> (String, acp::ToolKind, serde_
     }
 }
 
-/// The backend reports each call's real success or failure in the payload's `status` field.
-/// A `"failed"` status becomes [`acp::ToolCallStatus::Failed`]; any other or absent status stays `Completed`.
-/// Consumers, notably the headless `streaming-messages-json` `web_search_tool_result_error` branch, see the real failure instead of `Completed`.
+/// The backend reports each call's real success or failure in the payload's
+/// `status` field. A `"failed"` status becomes
+/// [`acp::ToolCallStatus::Failed`]; any other or absent status stays
+/// `Completed`.
 pub(super) fn backend_tool_call_status(result: Option<&serde_json::Value>) -> acp::ToolCallStatus {
     let failed = result
         .and_then(|r| r.get("status"))
@@ -159,9 +158,8 @@ pub(super) fn backend_tool_call_status(result: Option<&serde_json::Value>) -> ac
     }
 }
 
-/// Expose the resolved model ID only when the backend actually routed elsewhere AND the catalog opted this model into checkpoint identity.
-/// It checks the same `show_model_fingerprint` flag as the fingerprint itself, so one server-side setting governs both.
-/// The client keeps no per-slug default.
+/// Expose the resolved model ID only when the backend routed elsewhere AND
+/// the catalog opted this model into checkpoint identity.
 pub(super) fn should_show_resolved_model(
     requested: &str,
     resolved: &str,
@@ -195,7 +193,6 @@ pub(super) fn resolve_session_shell() -> String {
 }
 
 /// Key in `ToolError::details` that carries the HTTP status code.
-/// Used by both error producers (image_gen, video_gen, test helpers) and the `is_auth_tool_error` classifier to avoid accidental key mismatch.
 pub(crate) const HTTP_STATUS_DETAILS_KEY: &str = "status";
 
 impl SessionActor {
@@ -292,7 +289,7 @@ impl SessionActor {
             cwd: self.tool_context.cwd.clone(),
             env: self.tool_context.session_env.as_ref().clone(),
             timeout: BASH_MODE_TIMEOUT,
-            output_byte_limit: 1_048_576, // 1 MiB
+            output_byte_limit: 1_048_576,
             stream: true,                 // Enable streaming for bash mode
             output_file: None,            // No file logging for interactive bash mode
         };
@@ -324,8 +321,7 @@ impl SessionActor {
 
         let is_backgrounded = signal.as_deref() == Some("backgrounded");
 
-        // Send final tool call update
-        // For backgrounded commands, don't mark as completed/failed; let the background task do that
+        // Send final tool call update For backgrounded commands, don't mark as completed/failed.
         if !is_backgrounded {
             let final_status = if exit_code == 0 && signal.is_none() {
                 acp::ToolCallStatus::Completed
@@ -359,8 +355,8 @@ impl SessionActor {
             .await;
         }
 
-        // No AgentMessageChunk summary is sent here: the execute block already shows the full output, so an agent copy would duplicate scrollback
-        // Old sessions that persisted one still replay fine
+        // No AgentMessageChunk summary is sent here: the execute block
+        // already shows the full output.
 
         // Build a single user message for chat history that includes command, output, and exit code
         let user_message = format!(
@@ -387,8 +383,6 @@ impl SessionActor {
 // `truncate_bytes` is the UTF-8-safe truncation helper from xai-grok-sampling-types
 
 /// Maximum bytes of `raw_arguments` echoed in a parse-error tool_result.
-/// The model already holds the full arguments in context, so a prefix plus the JSON error position is enough; echoing more grows every later turn.
-/// A syntax error position past this limit points into truncated text, but the model still has the full arguments in context.
 pub(crate) const MAX_ARGS_IN_ERROR: usize = 2_000;
 
 /// Build the user-facing error message shown when tool arguments cannot be parsed.
@@ -405,8 +399,7 @@ pub(super) fn build_tool_parse_error_message(
         return msg;
     }
 
-    // Append the original arguments (capped) so the model knows what it sent.
-    // Use truncate_bytes to avoid panicking on a multi-byte UTF-8 boundary.
+    // Append the arguments (capped) so the model knows what it sent.
     msg.push_str("\n\nYour original arguments:\n");
     let prefix = truncate_bytes(raw_arguments, MAX_ARGS_IN_ERROR);
     msg.push_str(prefix);

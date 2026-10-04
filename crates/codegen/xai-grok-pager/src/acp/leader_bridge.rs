@@ -1,7 +1,4 @@
 //! Bridge a leader IPC connection into an `AcpClientChannel`.
-//!
-//! Adapts the leader's raw JSON string channels into the typed ACP channel interface.
-//! Reuses `ClientSideConnection` from `agent_client_protocol` for JSON-RPC ser/deser.
 
 use std::sync::Arc;
 use std::thread;
@@ -186,9 +183,7 @@ pub(crate) fn bridge_channels(
                                         {
                                             ForwardOutcome::Sent => {}
                                             ForwardOutcome::DroppedStale => {
-                                                // Unified-log marker: this drop is deliberate. Replaying a stale `session/load` would double-replay the
-                                                // transcript. But the drop can eat one-shot notifications like `session/cancel`, a known stuck-cancel failure.
-                                                // Record WHAT was dropped so the next investigation sees it in the unified log.
+                                                // Unified-log marker: this drop is deliberate.
                                                 let method = serde_json::from_str::<serde_json::Value>(pending)
                                                     .ok()
                                                     .and_then(|j| {
@@ -418,8 +413,6 @@ mod tests {
         drop(leader_outbound_rx);
 
         // Spawn a background task that pushes an outbound ACP request.
-        // acp_send blocks for a response that will never arrive (the outbound receiver is dropped)
-        // The writer task should survive the failed send rather than breaking the simplex pipe
         let tx = bridge.channel.tx.clone();
         tokio::spawn(async move {
             let _ = acp_send(

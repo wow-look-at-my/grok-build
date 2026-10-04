@@ -25,8 +25,7 @@ pub(crate) fn collect_unignored_paths(
     let unignored: Arc<DashSet<PathBuf>> = Arc::new(DashSet::new());
 
     // git_exclude/git_global off: external tools append broad patterns (e.g.
-    // *.zip) to `.git/info/exclude`; the `ignore` crate would then drop matching
-    // TRACKED files from the unignored set, so the ignored-copy clobbers them.
+    // *.zip) to `.git/info/exclude`.
     let walker = WalkBuilder::new(source)
         .hidden(false)
         .git_ignore(true)
@@ -73,8 +72,7 @@ mod tests {
     #[test]
     fn collect_unignored_includes_tracked_file_matching_git_exclude() {
         xai_test_utils::require_git!();
-        // A tracked file matching `.git/info/exclude` must stay "unignored" so
-        // the ignored-copy doesn't re-copy and clobber it.
+        // A tracked file matching `.git/info/exclude` must stay "unignored" so the ignored-copy doesn't re-copy.
         let temp = TempDir::new().unwrap();
         let repo = temp.path();
         init_git_repo(repo);
@@ -85,8 +83,6 @@ mod tests {
         git_commit_all(repo, "initial");
 
         // External tooling appends broad patterns here (e.g., *.min.js, *.zip).
-        // `git init` does not always create `.git/info/` (the hermetic git on
-        // arm64 CI ships no init template), so create it before writing.
         let info_dir = repo.join(".git").join("info");
         std::fs::create_dir_all(&info_dir).unwrap();
         std::fs::write(info_dir.join("exclude"), "*.zip\n").unwrap();

@@ -26,8 +26,7 @@ async fn paste_ctrl_v_image_keeps_ui_responsive_macos() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
 
-    // Ctrl+V then a typed burst in ONE injected buffer: the burst chases the chord with no settle
-    // It can only echo promptly if the paste's clipboard read, decode, and persist run off the event loop
+    // Ctrl+V then a typed burst in ONE injected buffer: the burst chases the chord with no settle It can only echo promptly.
     let start = Instant::now();
     let mut keys = vec![0x16];
     keys.extend_from_slice(ECHO.as_bytes());
@@ -53,7 +52,7 @@ async fn paste_ctrl_v_image_keeps_ui_responsive_macos() {
         .expect("deferred clipboard probe attaches the [Image #1] chip");
     let chip_elapsed = start.elapsed();
 
-    // The assert above that the chip was absent at echo time proves ordering; comparing the two sequenced elapsed() readings would be vacuous
+    // The assert above that the chip was absent at echo time proves ordering; comparing both sequenced elapsed() readings would be vacuous
     eprintln!(
         "paste_ctrl_v_image_keeps_ui_responsive_macos: typed-burst echo {} ms, image chip {} ms",
         echo_elapsed.as_millis(),

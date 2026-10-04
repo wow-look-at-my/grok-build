@@ -395,17 +395,16 @@ pub(super) fn test_agent(app: &AppView, id: AgentId) -> &AgentView {
         None => panic!("missing agent {id:?}"),
     }
 }
-/// Give a test agent a generated title so the dashboard renders it.
-/// The dashboard hides sessions with no real turn (`views::dashboard::row::is_empty_top_level`).
-/// Nav and render tests that rely on their placeholder agents being visible call this to opt in.
+/// Give a test agent a generated title so the dashboard renders it. The
+/// dashboard hides sessions with no real turn
+/// (`views::dashboard::row::is_empty_top_level`).
 fn mark_agent_nonempty(app: &mut AppView, id: AgentId) {
     if let Some(a) = app.agents.get_mut(&id) {
         a.generated_session_title = Some(format!("Session {}", id.0));
     }
 }
-/// Push a plain prompt directly onto the local drip-feed queue (`pending_prompts`), bypassing the server-authoritative immediate send.
-/// Used by tests exercising the local `maybe_drain_queue`, editing, and `DrainQueue` machinery.
-/// That local path still handles image, skill, bash, and editing prompts and idle drains.
+/// Push a plain prompt directly onto the local drip-feed queue
+/// (`pending_prompts`), bypassing the server-authoritative immediate send.
 pub(super) fn enqueue_local(app: &mut AppView, id: AgentId, text: &str) {
     app.agents
         .get_mut(&id)
@@ -653,7 +652,6 @@ fn insert_placeholder_agent(app: &mut AppView, id: AgentId) {
     agent.active_pane = ActivePane::Scrollback;
     app.agents.insert(id, agent);
 }
-/// Build an app with three agents (ids 0, 1, 2) and `active_view` set to agent 0.
 pub(super) fn three_agent_app() -> AppView {
     let mut app = test_app_with_agent();
     insert_placeholder_agent(&mut app, AgentId(1));
@@ -687,9 +685,9 @@ fn fork_args(worktree_override: Option<bool>, directive: Option<&str>) -> ForkAr
         include_agents: false,
     }
 }
-/// Build a single-agent app for the `/fork` dispatcher tests.
-/// Sets `current_branch` to `Some("main")` so the agent appears to be inside a git repo.
-/// `dispatch_fork` skips the worktree question when `current_branch` is `None` (non-git cwd).
+/// Build a single-agent app for the `/fork` dispatcher tests. Sets
+/// `current_branch` to `Some("main")` so the agent appears to be inside a git
+/// repo.
 fn fork_test_app() -> AppView {
     let mut app = test_app_with_agent();
     app.agents.get_mut(&AgentId(0)).unwrap().current_branch = Some("main".into());
@@ -765,7 +763,6 @@ pub(super) fn make_bg_task(task_id: &str) -> crate::app::agent::BgTaskState {
         restored_from_replay: false,
     }
 }
-/// Set up a two-agent app: agent 0 is active with "sess-A", agent 1 is inactive with "sess-B" and a bg task.
 fn two_agent_app_with_bg_task() -> AppView {
     let mut app = test_app_with_agent();
     let Some(agent) = app.agents.get_mut(&AgentId(0)) else {
@@ -824,7 +821,7 @@ fn two_agent_app_with_bg_task() -> AppView {
     app
 }
 /// Test helper: open Settings then OpenResetConfirm for `key`.
-/// Extracted so individual tests don't have to repeat the two opens.
+/// Extracted so individual tests don't have to repeat both opens.
 fn setup_reset_confirm_open(app: &mut AppView, key: crate::settings::SettingKey) {
     use crate::views::modal::ActiveModal;
     let _ = dispatch(Action::OpenSettings, app);
@@ -924,9 +921,8 @@ fn read_toast(app: &AppView) -> String {
         .map(|(s, _)| s.clone())
         .expect("toast should be set")
 }
-/// Enqueue one permission whose options mirror the list the shell builds for TUI, Pager, and Desktop.
-/// The options: "enable-always-approve" (AllowOnce, position 0, default-selected), "opt-allow-once" (AllowOnce), and "opt-reject-once" (RejectOnce).
-/// Returns the response receiver for the injected permission.
+/// Enqueue one permission whose options mirror the list the shell builds for TUI, Pager, and Desktop. Returns the response receiver for the injected
+/// permission.
 fn enqueue_permission_with_enable_always_approve(
     app: &mut AppView,
 ) -> tokio::sync::oneshot::Receiver<acp::Result<acp::RequestPermissionResponse>> {

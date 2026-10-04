@@ -1,10 +1,4 @@
-//! Grove artifact-directory redirection events, drained from the daemon's
-//! ring over IPC and translated by the workspace host. Every field is a closed
-//! enum or a count, never a path, repo name, or user text.
-//!
-//! The daemon mirrors these types without linking this crate, so the wire
-//! fixture tests in `events/mod.rs` and grove's `redirect/events_tests.rs`
-//! pin the same JSON literals and the two copies cannot drift.
+//! Grove artifact-directory redirection events, drained from the daemon's ring over IPC and translated.
 
 use serde::{Deserialize, Serialize};
 

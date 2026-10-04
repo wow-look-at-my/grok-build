@@ -1,12 +1,11 @@
 use super::*;
 
-/// Regression test: exact incident that caused kimi-k2.5 / OpenRouter sessions to fail with 400 errors on every retry.
-/// The model produced malformed JSON (missing `"` before `new_string`).
-/// The error message must include: 1. The original broken arguments (up to MAX_ARGS_IN_ERROR chars) so the model can fix the one-character syntax error directly.
+/// Regression test: exact incident that caused kimi-k2.5 / OpenRouter sessions to fail with multiple errors on every retry. The model produced malformed JSON
+/// (missing `"` before `new_string`). The original broken arguments (up to MAX_ARGS_IN_ERROR chars) so the model can fix the one-character syntax error directly.
 #[test]
 fn test_malformed_json_includes_original_args_and_position() {
     let bad_args = r#"{"file_path": "/testbed/cxx_polynomial/include/emsr/remez.h", "old_string": "", new_string": "content"}"#;
-    // bad_args is ~100 chars, well under MAX_ARGS_IN_ERROR.
+    // bad_args is chars, well under MAX_ARGS_IN_ERROR.
     let err: xai_tool_runtime::ToolError = serde_json::from_str::<serde_json::Value>(bad_args)
         .unwrap_err()
         .into();
@@ -21,7 +20,6 @@ fn test_malformed_json_includes_original_args_and_position() {
         msg.contains("invalid JSON"),
         "error message must mention invalid JSON; got:\n{msg}"
     );
-    // Must include the char-position hint from serde_json (line 1 column 81 / char 80).
     assert!(
         msg.contains("column 81") || msg.contains("char 80"),
         "error message must include the parse-error position; got:\n{msg}"
@@ -98,8 +96,7 @@ fn test_long_arguments_are_truncated() {
 /// Non-ASCII tool arguments (CJK paths, accented strings, emoji) are common.
 #[test]
 fn test_truncate_bytes_non_ascii() {
-    // "日本語" is 9 bytes (3 chars × 3 bytes each).
-    // Truncating at 5 would land in the middle of the second char, so truncate_bytes must walk back
+    // "日本語" is several bytes (chars × a few bytes each).
     let s = "日本語";
     assert_eq!(s.len(), 9);
     let t = truncate_bytes(s, 5);
@@ -107,7 +104,7 @@ fn test_truncate_bytes_non_ascii() {
         s.is_char_boundary(t.len()),
         "result must end on a char boundary"
     );
-    assert_eq!(t, "日"); // Only the first char (3 bytes) fits before byte 5
+    assert_eq!(t, "日");
 
     // Exact boundary is fine.
     assert_eq!(truncate_bytes(s, 3), "日");
@@ -121,7 +118,6 @@ fn test_truncate_bytes_non_ascii() {
 #[test]
 fn test_non_ascii_arguments_truncated_safely() {
     // Construct args where MAX_ARGS_IN_ERROR bytes falls inside a multi-byte char.
-    // Each '文' is 3 bytes; fill to just past the boundary.
     let filler = "文".repeat(MAX_ARGS_IN_ERROR / 3 + 1);
     let long_args = format!(r#"{{"old_string": "{filler}"}}"#);
     assert!(long_args.len() > MAX_ARGS_IN_ERROR);

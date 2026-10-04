@@ -1,13 +1,4 @@
 //! Hot-reloadable appearance configuration.
-//!
-//! Two unrelated concerns live under this module name:
-//!
-//! - **`config` + `watcher`**: dev-only `~/.grok/pager.toml` RenderConfig
-//!   (200+ fields for terminal rendering tuning).
-//!   Hot-reloaded in dev mode, static defaults in prod.
-//! - **`cache`**: thread-local in-memory caches for the user-facing UI bool settings (`compact_mode`, `show_timestamps`, `simple_mode`).
-//!   Disk writes happen in `xai_grok_shell::util::config::set_<field>()` via `Effect::PersistSetting`, NOT here; this is a read-cache only.
-//! - **`permission_cursor`**: the `default_selected_permission` value type plus the caches and logic for which row a permission prompt preselects.
 
 pub mod cache;
 mod config;
@@ -31,7 +22,6 @@ pub use text_selection::TextSelection;
 pub use watcher::ConfigWatcher;
 
 // Atomic so MarkdownContent can read tab width without an AppearanceConfig handle.
-// Updated by the event loop whenever pager.toml is (re)loaded.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 

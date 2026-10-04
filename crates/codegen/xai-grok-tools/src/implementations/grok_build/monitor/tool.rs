@@ -147,9 +147,7 @@ impl xai_tool_runtime::Tool for MonitorTool {
         notification_handle.send_backgrounded(crate::notification::BashExecutionBackgrounded {
             base: crate::notification::BashNotificationBase {
                 tool_call_id: ctx.call_id.as_str().to_owned(),
-                // Send the real monitor command (so the block viewer shows the actual script). The human-readable description travels
-                // in `monitor_description` so the pager can render a "Monitor" tag instead of bash-highlighting a "[monitor] …"
-                // pseudo-command.
+                // Send the real monitor command (so the block viewer shows the actual script).
                 command: input.command.clone(),
                 output: Vec::new(),
                 total_bytes: 0,
@@ -163,13 +161,9 @@ impl xai_tool_runtime::Tool for MonitorTool {
         });
 
         // Spawn the stdout processing pipeline.
-        // Reads the output file, processes lines through the rate limiter,
-        // and emits MonitorEvent notifications.
         let pipeline_task_id = task_id.clone();
         let pipeline_description = description;
-        // Weak handle: the pipeline must not keep the session's terminal backend
-        // (and the monitored process) alive past session end. See
-        // `run_monitor_pipeline`.
+        // Weak handle: the pipeline must not keep the session's terminal backend (and the monitored process).
         let pipeline_terminal = std::sync::Arc::downgrade(&terminal);
         let pipeline_notif = notification_handle.clone();
         let pipeline_output_file = bg_handle.output_file;
@@ -306,8 +300,7 @@ async fn run_monitor_pipeline(
     notification_handle: &ToolNotificationHandle,
     output_file: &std::path::Path,
     kill_tool_name: Option<String>,
-    // Starting file offset. Pass 0 for fresh pipelines or the current file
-    // size when re-spawning after reparent to avoid duplicate events.
+    // Starting file offset.
     start_offset: u64,
 ) {
     let rate_limiter = Arc::new(Mutex::new(
@@ -330,8 +323,7 @@ async fn run_monitor_pipeline(
         let snapshot = terminal.get_task(task_id).await;
         let completed = snapshot.is_none() || snapshot.as_ref().is_some_and(|s| s.completed);
 
-        // Re-read each tick (a reparented monitor follows its new owner); keep
-        // the last seen owner so an evicted-snapshot terminal event still routes.
+        // Re-read each tick (a reparented monitor follows its new owner).
         let snapshot_owner = snapshot.as_ref().and_then(|s| s.owner_session_id.clone());
         if snapshot_owner.is_some() {
             last_owner.clone_from(&snapshot_owner);
@@ -370,9 +362,7 @@ async fn run_monitor_pipeline(
                 .await;
             }
 
-            // Do NOT emit a terminal `[monitor ended: …]` MonitorEvent here. Natural exit auto-wakes via `TaskCompleted` →
-            // immediate Prompt (`format_monitor_completion` in the notification bridge). Emitting a terminal event as well
-            // produced a second NotificationDrain turn with the same ended signal.
+            // Do NOT emit a terminal `[monitor ended: …]` MonitorEvent here.
 
             break;
         }
@@ -449,7 +439,6 @@ async fn process_event(
             });
         }
         RateLimitOutcome::Suppressed => {
-            // Silently dropped.
         }
         RateLimitOutcome::AutoKill { message } => {
             let wrapped = event::wrap_monitor_event(description, &message, task_id);
@@ -479,8 +468,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let output_file = tmp.path().join("monitor.log");
 
-        // Session-owned terminal backend (mirrors multi-session hosts that
-        // build one LocalTerminalBackend per session on a shared runtime).
+        // Session-owned terminal backend.
         let backend: Arc<dyn TerminalBackend> = Arc::new(LocalTerminalBackend::new());
         let weak = Arc::downgrade(&backend);
 
@@ -531,13 +519,10 @@ mod tests {
         );
 
         // Session ends: drop every session-owned reference to the backend.
-        // Only the pipeline's (weak) reference remains.
         drop(handle);
         drop(backend);
 
-        // The backend — and the monitored process it owns — must be reclaimed
-        // promptly. If the pipeline holds a strong `Arc`, `weak.upgrade()` never
-        // returns `None` and the actor's `shutdown_all` never reaps the process.
+        // The backend — and the monitored process it owns — must be reclaimed promptly.
         let mut reclaimed = false;
         for _ in 0..50 {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -651,8 +636,7 @@ mod tests {
             .expect("spawn monitor");
         let task_id = handle.task_id.clone();
 
-        // Subagent dies -> reparent its monitor to the parent. This flips the
-        // owner and re-spawns the pipeline on the parent's capture handle.
+        // Subagent dies -> reparent its monitor to the parent.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let parent_handle = ToolNotificationHandle::from_sender(tx);
         backend
@@ -664,8 +648,7 @@ mod tests {
             )
             .await;
 
-        // The re-spawned pipeline streams post-reparent ticks, all of which must
-        // carry the parent owner.
+        // The re-spawned pipeline streams post-reparent ticks, all of which must carry the parent owner.
         let mut saw_parent_owned_event = false;
         for _ in 0..50 {
             tokio::time::sleep(Duration::from_millis(100)).await;

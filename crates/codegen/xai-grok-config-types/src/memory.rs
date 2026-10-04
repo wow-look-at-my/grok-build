@@ -1,15 +1,8 @@
 //! Memory-system configuration value types, extracted from xai-grok-shell so crates the shell depends on can use them.
-//!
-//! These are the raw optional settings and resolved leaf value types for the
-//! legacy `[memory.*]`, isolated `[memory_v2]`, and memory-owned
-//! `[compaction.*]` tables.
 
 use serde::{Deserialize, Serialize};
 
 /// Persistent-memory implementation selected for a session.
-///
-/// The mode is resolved once with the rest of [`MemoryConfig`] and is not
-/// changed for an already-running session.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryMode {
@@ -105,11 +98,9 @@ pub struct MemorySettings {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MemoryV2Settings {
-    /// Primary opt-in for the memory-v2 implementation. Absent or false falls
-    /// through to legacy memory enablement.
+    /// Primary opt-in for the memory-v2 implementation. Absent or false falls through to legacy memory enablement.
     pub enabled: Option<bool>,
-    /// Emit capture lifecycle notifications to the user interface. Intended
-    /// only for debugging; telemetry and tracing are always recorded.
+    /// Emit capture lifecycle notifications to the user interface.
     pub capture_status_enabled: Option<bool>,
     pub rollout: Option<MemoryV2Rollout>,
     pub capture_enabled: Option<bool>,
@@ -285,7 +276,7 @@ pub struct PruningSettings {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct MemoryIndexConfig {
-    /// Maximum chunk size in characters (about 4 characters per token).
+    /// Maximum chunk size in characters (about a few characters per token).
     pub max_chunk_chars: usize,
     /// Character overlap between consecutive chunks.
     pub chunk_overlap_chars: usize,
@@ -334,15 +325,12 @@ pub struct MemorySearchConfig {
     pub vector_weight: f32,
     /// Weight for BM25 text similarity in hybrid scoring.
     pub text_weight: f32,
-    /// **Deprecated**: use `temporal_decay` instead.
-    /// When `temporal_decay.enabled` is true, this field is ignored.
-    /// The conversion is `half_life ≈ -1 / log₂(recency_decay)`.
+    /// **Deprecated**: use `temporal_decay` instead. When `temporal_decay.enabled` is true, this field is ignored.
     pub recency_decay: f32,
     /// Temporal decay configuration for time-aware scoring.
     pub temporal_decay: TemporalDecayConfig,
     /// MMR diversity re-ranking configuration (enabled by default).
     pub mmr: MmrConfig,
-    /// Source-type weight multipliers: all default to 1.0.
     pub source_weights: std::collections::HashMap<String, f32>,
 }
 
@@ -387,16 +375,12 @@ impl Default for TemporalDecayConfig {
 }
 
 /// MMR (Maximal Marginal Relevance) diversity re-ranking configuration.
-/// When enabled, re-ranks search results to penalize redundancy.
-/// It uses Jaccard similarity on tokenized snippets to measure how alike two results are.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct MmrConfig {
     /// Whether MMR re-ranking is enabled. Default: true.
     pub enabled: bool,
     /// Trade-off between relevance and diversity.
-    /// 0.0 means maximum diversity, 1.0 means pure relevance (no re-ranking).
-    /// It is clamped to [0.0, 1.0] at parse time. Default: 0.7.
     #[serde(deserialize_with = "deserialize_clamped_unit")]
     pub lambda: f64,
 }
@@ -410,7 +394,6 @@ impl Default for MmrConfig {
     }
 }
 
-/// Deserialize an `f64` clamped to [0.0, 1.0].
 /// Used for fields where values outside the unit interval are meaningless
 /// (e.g. cosine similarity thresholds, trade-off lambdas).
 fn deserialize_clamped_unit<'de, D>(deserializer: D) -> Result<f64, D::Error>
@@ -434,8 +417,7 @@ where
 pub const DEFAULT_RECENCY_DECAY: f32 = 0.95;
 
 impl MemorySearchConfig {
-    /// Resolve the effective half-life for temporal decay.
-    /// `temporal_decay.enabled = true`: use `temporal_decay.half_life_days`; Otherwise, when `recency_decay` differs from the default (0.95): convert the legacy per-day factor to an approximate half-life. The conversion `half_life ≈ -1.0 / log₂(recency_decay)` preserves behavior for users who only set `recency_decay`; Otherwise `None` (decay fully disabled).
+    /// Resolve the effective half-life for temporal decay. The conversion `half_life ≈ -1.0 / log₂(recency_decay)` preserves behavior for users who only set `recency_decay`; Otherwise `None` (decay fully disabled).
     pub fn effective_half_life_days(&self) -> Option<f64> {
         if self.temporal_decay.enabled {
             if self.temporal_decay.half_life_days <= 0.0 {
@@ -474,7 +456,6 @@ pub struct MemoryInitialInjectionConfig {
     /// Whether to search memory and inject a reminder on the first turn.
     pub enabled: bool,
     /// Optional score threshold override for first-turn injection.
-    /// When `None`, the first-turn search uses the historical default of `0.0` (no threshold filtering).
     pub min_score: Option<f32>,
 }
 
@@ -513,9 +494,7 @@ pub struct MemoryDreamConfig {
     pub min_sessions: u64,
     /// Seconds before a stale dream lock is reclaimed.
     pub stale_lock_secs: u64,
-    /// Periodic dream check interval in seconds.
-    /// `None` disables it (dream only at launch or via /dream).
-    /// When set, the session actor checks dream gates on this interval.
+    /// Periodic dream check interval in seconds. `None` disables it (dream only at launch or via /dream).
     pub check_interval_secs: Option<u64>,
 }
 
@@ -531,15 +510,14 @@ impl Default for MemoryDreamConfig {
     }
 }
 
-/// File watcher configuration for detecting external memory edits (`[memory.watcher]`).
-/// Sync runs at most once per search call, when dirty files are present and the claim is acquired.
+/// File watcher configuration for detecting external memory edits
+/// (`[memory.watcher]`).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct MemoryWatcherConfig {
     /// Whether the file watcher is enabled. Default: true (when memory is enabled).
     pub enabled: bool,
     /// Seconds after which a reindex claim is considered stale (crashed agent).
-    /// Default: 60.
     pub stale_claim_secs: i64,
 }
 
@@ -552,8 +530,8 @@ impl Default for MemoryWatcherConfig {
     }
 }
 
-/// Garbage collection for orphaned workspace memory directories (`[memory.gc]`).
-/// `tmp*` dirs: empty ones removed unconditionally, non-empty ones removed after 7 days; Other workspaces with no session files: removed after `max_age_days`; Non-empty non-tmp workspaces: never touched.
+/// Garbage collection for orphaned workspace memory directories
+/// (`[memory.gc]`).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct MemoryGcConfig {
@@ -578,13 +556,10 @@ pub struct MemoryFlushConfig {
     pub flush_model: Option<String>,
     /// Max characters the flush response may write to memory.
     pub max_flush_write_chars: usize,
-    /// Idle timeout in seconds: when no user message is received for this duration, a background flush is triggered automatically.
-    /// `None` disables it (flush only before compaction).
+    /// Idle timeout in seconds: when no user message is received for this duration.
     #[serde(default)]
     pub idle_timeout_secs: Option<u64>,
     /// Cosine similarity threshold for semantic dedup of flush content.
-    /// When `None`, it falls back to the compiled-in default (0.92).
-    /// It is clamped to [0.0, 1.0] at parse time.
     #[serde(default, deserialize_with = "deserialize_clamped_unit_option")]
     pub semantic_dedup_threshold: Option<f64>,
 }
@@ -639,7 +614,6 @@ impl Default for PruningConfig {
 pub struct MemoryConfig {
     pub enabled: bool,
     /// Memory was turned off for the whole process (`--no-memory` or `GROK_MEMORY=0`).
-    /// Unlike a TOML opt-out, the `/memory` session toggle cannot override this.
     #[serde(skip)]
     pub force_disabled: bool,
     pub mode: MemoryMode,
@@ -745,9 +719,7 @@ impl MemoryConfig {
         let v2_enabled = memory_v2
             .enabled
             .or_else(|| remote_v2.and_then(|settings| settings.enabled));
-        // A false CLI/env value disables both implementations, as does a local
-        // `[memory] enabled = false` unless the same TOML sets `[memory_v2] enabled = true`.
-        // A remote v2 gate alone never overrides a local opt-out.
+        // A false CLI/env value disables both implementations.
         let force_disabled = !legacy_enabled.value
             && matches!(
                 legacy_enabled.source,
@@ -757,9 +729,7 @@ impl MemoryConfig {
             || (!legacy_enabled.value
                 && legacy_enabled.source == crate::ConfigSource::Config
                 && memory_v2.enabled != Some(true));
-        // A false v2 gate is not a global kill switch: it delegates to the
-        // independent legacy waterfall. Local `[memory_v2]` has precedence
-        // over the dedicated remote v2 settings.
+        // A false v2 gate is not a global kill switch: it delegates to the independent legacy waterfall.
         let v2_selected = v2_enabled == Some(true);
         let enabled = !globally_disabled && (v2_selected || legacy_enabled.value);
         let mode = if v2_selected {

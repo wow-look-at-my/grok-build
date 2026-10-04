@@ -14,7 +14,7 @@ mod ns_lockdown {
 
     pub(super) const OFF_NR: u32 = 0;
     pub(super) const OFF_ARCH: u32 = 4;
-    pub(super) const OFF_ARGS0_LO: u32 = 16; // LE low half of args[0]
+    pub(super) const OFF_ARGS0_LO: u32 = 16;
 
     #[cfg(target_arch = "x86_64")]
     pub(super) const EXPECTED_ARCH: u32 = 0xc000_003e; // AUDIT_ARCH_X86_64
@@ -77,7 +77,6 @@ mod ns_lockdown {
             SYS_fsconfig, SYS_fsmount, SYS_fsopen, SYS_mount, SYS_mount_setattr, SYS_move_mount,
             SYS_pivot_root, SYS_umount2,
         };
-        // open_tree is 428 in the architecture-generic Linux syscall table but is missing from some libc target headers
         const SYS_OPEN_TREE: u32 = 428;
         [
             SYS_mount as u32,
@@ -154,7 +153,6 @@ mod ns_lockdown {
         }
 
         // SAFETY: prog valid for the duration of the syscall.
-        // rc: 0 ok; >0 TSYNC failing TID; -1 errno.
         let rc = unsafe {
             libc::syscall(
                 SYS_seccomp,
@@ -215,18 +213,16 @@ fn build_child_network_filter() -> Vec<libc::sock_filter> {
     f
 }
 
-/// The child-network BPF program, built once in the parent process. `pre_exec` closures run between `fork` and `exec` in
-/// a multi-threaded process. Another thread can hold the allocator lock at fork, so any heap allocation there can
-/// deadlock the child. Install therefore only references this parent-built buffer.
+/// The child-network BPF program, built once in the parent process.
+/// `pre_exec` closures run between `fork` and `exec` in a multi-threaded
+/// process.
 #[cfg(target_os = "linux")]
 pub fn prebuilt_child_network_filter() -> &'static [libc::sock_filter] {
     static FILTER: std::sync::OnceLock<Vec<libc::sock_filter>> = std::sync::OnceLock::new();
     FILTER.get_or_init(build_child_network_filter)
 }
 
-/// # Safety
-/// After fork / before exec only. Async-signal-safe: two `prctl`s on the
-/// parent-built program; never allocate, lock, log, format, or read env.
+/// # Safety After fork / before exec only.
 #[cfg(target_os = "linux")]
 pub unsafe fn install_child_network_filter(filter: &[libc::sock_filter]) -> std::io::Result<()> {
     use libc::{PR_SET_NO_NEW_PRIVS, PR_SET_SECCOMP, SECCOMP_MODE_FILTER, prctl, sock_fprog};
@@ -263,9 +259,10 @@ pub unsafe fn install_namespace_lockdown_filter() -> std::io::Result<()> {
     ns_lockdown::install(&mut filter)
 }
 
-/// They do not survive a daemon unlink/recreate, so the session-long guarantee is this per-spawn seccomp filter. Every
-/// spawn of an approved user- or workspace-authored executable must call one of them instead of hand-rolling the
-/// `pre_exec` install. No-op when the sandbox does not restrict child networking, and on non-Linux targets.
+/// They do not survive a daemon unlink/recreate, so the session-long
+/// guarantee is this per-spawn seccomp filter. Every spawn of an approved
+/// user- or workspace-authored executable must call one of them instead of
+/// hand-rolling the `pre_exec` install.
 pub fn restrict_child_network(cmd: &mut tokio::process::Command) {
     #[cfg(target_os = "linux")]
     if crate::should_restrict_child_network() {

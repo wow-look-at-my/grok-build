@@ -87,7 +87,7 @@ fn short_overlay_drops_spacers_before_the_copy_button_and_url() {
     let url_rows = word_wrap(&wait.url, 60).len();
     assert_eq!(url_rows, 2, "team URL wraps to two rows at this width");
 
-    // Three text/button rows plus two URL rows fit only once both spacers are gone.
+    // Text/button rows plus URL rows fit only once both spacers are gone.
     let area = Rect::new(0, 0, 60, 5);
     let mut buf = Buffer::empty(area);
     render_managed_connectors_wait(&mut buf, area, &mut wait, &theme);
@@ -110,8 +110,6 @@ fn short_overlay_drops_spacers_before_the_copy_button_and_url() {
         "no blank spacer row may remain while content is cut: {painted:?}"
     );
 
-    // With room to spare the spacers stay: seven lines centered in twelve rows start at row 2,
-    // with the two spacers at rows 3 and 5.
     let mut wait = ManagedConnectorsWaitState::new(Some(TEAM));
     let tall = Rect::new(0, 0, 60, 12);
     let mut buf = Buffer::empty(tall);

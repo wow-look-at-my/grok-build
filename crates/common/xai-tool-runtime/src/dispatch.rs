@@ -1,15 +1,4 @@
 //! Object-safe `ToolDispatch` trait — the runtime contract for handling tool calls.
-//!
-//! `Tool` itself is not object-safe (it carries associated `Args` /
-//! `Output` types), so implementations expose a JSON-typed surface and rely on
-//! per-tool adapters to encode/decode at the boundary. The default
-//! `call_terminal` impl drains the stream so the common "I just want the
-//! result" path doesn't have to depend on `futures` internals.
-//!
-//! This crate is upstream of every concrete impl. Doc-comments here describe
-//! trait semantics in terms of "the runtime" or "the implementation" —
-//! concrete dispatch routers live downstream and are intentionally not named
-//! here.
 
 use async_trait::async_trait;
 use futures::StreamExt;

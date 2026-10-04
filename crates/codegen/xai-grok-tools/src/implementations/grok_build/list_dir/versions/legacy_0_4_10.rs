@@ -1,15 +1,8 @@
-//! Legacy (0.4.10) depth-threshold directory rendering.
-//!
-//! Extracted from an earlier revision of the codebase. The current renderer uses
-//! BFS character-budget expansion; this module preserves the old depth-based
-//! summarization algorithm for `contract_version = "legacy-0.4.10"`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-// ───────────────────────────────────────────────────────────────────────────
-// Configuration
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────── Configuration.
 
 const ROOT_SUMMARIZATION_THRESHOLD: usize = 1500;
 const SUBDIR_SUMMARIZATION_THRESHOLD: usize = 15;
@@ -47,8 +40,7 @@ impl RenderConfig {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Accumulator + helpers
-// ───────────────────────────────────────────────────────────────────────────
+// Accumulator + helpers.
 
 #[derive(Debug, Default)]
 struct DirAccum {
@@ -116,8 +108,7 @@ fn filename(path: &Path) -> String {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Tree structures
-// ───────────────────────────────────────────────────────────────────────────
+// Tree structures.
 
 #[derive(Debug)]
 struct ChildEntry {
@@ -306,7 +297,6 @@ fn render_with_fallback(root: &Path, collected: &Collected, cfg: &RenderConfig) 
 // Public entry point
 // ───────────────────────────────────────────────────────────────────────────
 
-/// Render a directory listing using the legacy (0.4.10) depth-threshold algorithm.
 ///
 /// Returns the body text (without the root path header line).
 pub(crate) fn render_legacy(root: &Path, max_output_bytes: usize) -> String {
@@ -362,8 +352,6 @@ mod tests {
         let body = render_legacy(tmp.path(), 40_000);
 
         // Exact archived output from the depth-threshold algorithm.
-        // Root files listed alphabetically, src/ expanded (< 15 children),
-        // util/ summarized (depth >= 2), tests/ expanded.
         let expected = "  - Cargo.toml\n  - README.md\n  - src/\n    - lib.rs\n    - main.rs\n    - util/\n      [1 file in subtree: 1 *.rs]\n  - tests/\n    - test_main.rs";
 
         assert_eq!(
@@ -385,15 +373,13 @@ mod tests {
         );
     }
 
-    /// The depth-based algorithm summarizes directories when child count
-    /// exceeds the threshold (15 for subdirs by default). Verify that a
-    /// large directory gets a summary line instead of full expansion.
+    /// Verify that a large directory gets a summary line instead of full
+    /// expansion.
     #[test]
     fn legacy_summarizes_large_subdirectory() {
         let tmp = TempDir::new().unwrap();
         let large_dir = tmp.path().join("many_files");
         std::fs::create_dir_all(&large_dir).unwrap();
-        // Create 20 files to exceed the SUBDIR_SUMMARIZATION_THRESHOLD (15).
         for i in 0..20 {
             std::fs::write(large_dir.join(format!("file_{i}.rs")), "").unwrap();
         }
@@ -419,8 +405,8 @@ mod tests {
         create_fixture_tree(tmp.path());
         let body = render_legacy(tmp.path(), 40_000);
 
-        // Every line should start with some number of "  " pairs followed by "- "
-        // or be a summary line (starts with spaces + "[").
+        // Every line should start with some number of " " pairs followed by
+        // "- " or be a summary line (starts with spaces + "[").
         for line in body.lines() {
             let trimmed = line.trim_start();
             let indent_chars = line.len() - trimmed.len();

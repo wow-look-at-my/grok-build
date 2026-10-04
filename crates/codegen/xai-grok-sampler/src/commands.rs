@@ -1,5 +1,4 @@
-//! `SamplerCommand` is `pub(crate)` because it is the wire between [`SamplerHandle`](crate::handle::SamplerHandle) and the actor task.
-//! External callers always go through `SamplerHandle`.
+//! `SamplerCommand` is `pub(crate)` because it is the wire between [`SamplerHandle`](crate::handle::SamplerHandle).
 
 use std::sync::Arc;
 

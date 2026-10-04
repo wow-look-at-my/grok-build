@@ -1,22 +1,10 @@
 //! System appearance detection for automatic day/night theming.
-//!
-//! Detection chain (each step only runs when the previous returns nothing):
-//! 1. `dark-light` desktop APIs: macOS `AppleInterfaceStyle`, Linux XDG portal `org.freedesktop.appearance.color-scheme`, Windows registry
-//! 2. Explicit env stamps, `GROK_APPEARANCE` / `LC_GROK_APPEARANCE` (SSH with tmux, wrap, headless).
-//!    See [`super::env_appearance`].
-//! 3. OSC 11 terminal background query, **startup-only**; see [`detect_with_osc11_fallback`].
-//!    The result is cached so runtime `detect()` / `resolve_auto` cannot be overwritten by stale `COLORFGBG`.
-//! 4. Inherited `COLORFGBG` guess, the last resort.
-//!
-//! Detection returns `None` when every step fails.
 
 use super::ThemeKind;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::watch;
 
-/// Startup OSC 11 result (`Some`/`None` after a probe); unset until [`detect_with_osc11_fallback`] runs.
-/// Runtime `detect` reuses it so a live OSC 11 polarity is not replaced by inherited `COLORFGBG`.
 static OSC11_STARTUP: OnceLock<Option<SystemAppearance>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +24,7 @@ impl SystemAppearance {
     }
 }
 
-/// Same chain as startup, but OSC 11 reuses the cached result instead of probing. Tests replace the whole chain via the mock.
+/// Tests replace the whole chain via the mock.
 #[must_use]
 pub fn detect() -> Option<SystemAppearance> {
     #[cfg(any(test, feature = "test-support"))]
@@ -47,8 +35,7 @@ pub fn detect() -> Option<SystemAppearance> {
     detect_without_mock()
 }
 
-/// Startup-only: OSC 11 needs raw-mode stdin and must not run once `EventStream` is active.
-/// The watcher uses [`detect`] and still prefers a cached OSC 11 hit over `COLORFGBG`.
+/// Startup-only: OSC needs raw-mode stdin and must not run once `EventStream` is active.
 #[must_use]
 pub fn detect_with_osc11_fallback() -> Option<SystemAppearance> {
     #[cfg(any(test, feature = "test-support"))]
@@ -118,14 +105,12 @@ pub fn to_theme_kind(
     }
 }
 
-/// Polling interval for system appearance detection.
-/// Test builds shorten it so polling tests complete quickly.
+/// Polling interval for system appearance detection. Test builds shorten it so polling tests complete quickly.
 #[cfg(not(test))]
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 #[cfg(test)]
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Polls via [`detect()`] only (no OSC 11) and never mutates `theme_cache::CURRENT` or `AUTO_MODE`.
 pub struct SystemAppearanceWatcher {
     rx: watch::Receiver<Option<SystemAppearance>>,
     _handle: tokio::task::JoinHandle<()>,
@@ -185,7 +170,6 @@ impl Drop for SystemAppearanceWatcher {
 use std::sync::Mutex;
 
 /// Mock override for `detect()` / `detect_with_osc11_fallback`.
-/// When set, both skip desktop, env, and OSC 11 so tests can control the watcher loop.
 #[cfg(any(test, feature = "test-support"))]
 static MOCK_APPEARANCE: Mutex<Option<Option<SystemAppearance>>> = Mutex::new(None);
 
@@ -207,7 +191,6 @@ mod tests {
     use super::*;
 
     /// Caller must hold `theme_cache::test_lock()`.
-    /// Parallel tests in `cache::tests` and `slash::commands::theme::tests` also mutate `MOCK_APPEARANCE` via `set_mock`/`clear_mock`.
     fn assert_mock_roundtrip(value: Option<SystemAppearance>) {
         set_mock(value);
         assert_eq!(detect(), value);

@@ -34,8 +34,7 @@ async fn esc_esc_clears_idle_prompt_into_the_stash() {
         .wait_for_text(draft, Duration::from_secs(10))
         .expect("draft renders in the composer");
 
-    // Wait for the confirm hint between the presses: it proves the pending clear is set
-    // A single `ESC ESC` byte pair collapses to one `Esc` in crossterm
+    // Wait for the confirm hint between the presses: it proves the pending clear is set A single `ESC ESC` byte pair collapses to one `Esc`.
     harness.inject_keys(keys::ESC).expect("first esc");
     harness
         .wait_for_text("press again to clear", Duration::from_secs(15))

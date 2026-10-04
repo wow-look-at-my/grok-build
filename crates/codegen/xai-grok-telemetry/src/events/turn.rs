@@ -17,8 +17,7 @@ pub struct TurnCompleted {
     pub duration_ms: u64,
     pub tool_call_count: u32,
     pub model_id: String,
-    /// External-stream-only `session.id` (`#[serde(skip)]`); lets an emit outside the ambient
-    /// `TelemetryCtx` carry it. `None` falls back to the task-local ctx.
+    /// External-stream-only `session.id` (`#[serde(skip)]`); lets an emit outside the ambient `TelemetryCtx` carry it.
     #[serde(skip)]
     pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -54,9 +53,7 @@ pub struct ShellTrueNoop {
     pub tool_name: String,
 }
 
-/// Harness nudged the model to break a run of identical tool calls. Pairs with [`ActionStationarityStop`]: the nudge
-/// fires first and once per run, the stop only if the run continues to the hard limit. `problematically_repeating` splits
-/// the two threshold tiers (tools whose identical repeats are never productive versus everything else).
+/// Harness nudged the model to break a run of identical tool calls.
 #[derive(Serialize)]
 pub struct ActionStationarityNudge {
     pub problematically_repeating: bool,

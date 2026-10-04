@@ -1,5 +1,4 @@
 //! Actor-level tests for the `/context` usage categories.
-//! They cover populated rows with counts, the compat harness suppressing the MCP row, and parity between the MCP snapshot and the injected reminder.
 use super::support::*;
 use super::*;
 use crate::session::tool_index::{ServerMetadata, ToolMetadata};
@@ -252,9 +251,9 @@ async fn subagent_session_does_not_list_workflows() {
         })
         .await;
 }
-/// This test pins the MCP row against drift.
-/// The estimated snapshot must equal the body `maybe_inject_mcp_reminder` injects in `Full` mode, minus the `<system-reminder>` wrapper.
-/// Composing the two texts differently (for example, dropping the tool usage hint from one side) fails this test.
+/// This test pins the MCP row against drift. The estimated snapshot must equal the body `maybe_inject_mcp_reminder` injects in `Full`
+/// mode, minus the `<system-reminder>` wrapper. Composing both texts differently (for example, dropping the tool usage hint from one
+/// side) fails this test.
 #[tokio::test(flavor = "current_thread")]
 async fn mcp_snapshot_matches_full_mode_injected_reminder() {
     let local = tokio::task::LocalSet::new();

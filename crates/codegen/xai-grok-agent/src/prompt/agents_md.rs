@@ -1,11 +1,4 @@
 //! AGENTS.md / Claude.md / rules directory discovery and loading.
-//!
-//! Searches from cwd to repo root, plus `~/.grok/`. Also discovers
-//! `*.md` files in rules directories: vendor-prefixed `.grok/rules/`,
-//! `.claude/rules/`, and `.cursor/rules/` in project directories, a
-//! plain `rules/` directly under the vendor-qualified home-scope roots
-//! (`~/.grok/rules/`, `~/.claude/rules/`, `~/.cursor/rules/`), and any
-//! user-configured `[paths] extra_rule_dirs` (scanned as home-scope rules).
 
 use std::path::{Path, PathBuf};
 
@@ -21,14 +14,12 @@ pub struct AgentConfigFile {
     /// The full absolute path to the config file
     pub file_path: String,
     pub content: String,
-    /// Where discovery found the file. Consumers read this instead of re-deriving scope from the path; a payload
-    /// written before the field existed deserializes as `Project`, the trust-gated default.
+    /// Where discovery found the file.
     #[serde(default)]
     pub source: InstructionSource,
 }
 
-/// Where a discovery root (and every file found under it) comes from; decides folder-trust gating, whether the
-/// repo's gitignore applies, and how the prompt and `grok inspect` scope the file.
+/// Where a discovery root (and every file found under it) comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstructionSource {
@@ -41,8 +32,8 @@ pub enum InstructionSource {
     Project,
 }
 
-/// `filenames` is the (compat-gated) recognized list, precomputed once by the caller so the cwd-to-root walk doesn't re-allocate it per directory.
-/// When all compat cells are on it equals the legacy `AGENT_FILENAMES` list exactly.
+/// `filenames` is the (compat-gated) recognized list, precomputed once by the
+/// caller so the cwd-to-root walk doesn't re-allocate it per directory.
 fn find_agent_files(dir: &Path, filenames: &[&str]) -> Vec<PathBuf> {
     filenames
         .iter()
@@ -389,13 +380,12 @@ pub fn format_agents_md_section(configs: &[AgentConfigFile]) -> Option<String> {
     render_agents_md(configs)
 }
 
-/// Verbatim leading bytes [`render_agents_md`] emits for every reminder block.
-/// Used by `xai-grok-shell` to structurally detect legacy untagged AGENTS.md copies (pre-`SyntheticReason::ProjectInstructions`) on resumed sessions.
+/// Verbatim leading bytes [`render_agents_md`] emits for every reminder
+/// block.
 pub const LEGACY_AGENTS_MD_REMINDER_PREFIX: &str =
     "\n\n<system-reminder>\nAs you answer the user's questions, you can use the following context";
 
 /// Open/close `system-reminder` (Grok) or `system_reminder` (Cursor/IDE), case-insensitive.
-/// Shared with unit tests so CI fails if the pattern is ever invalid or too narrow.
 const SYSTEM_REMINDER_TAG_PATTERN: &str = r"(?i)<(\s*/?\s*system[-_]reminder)";
 
 /// Literal pattern only: compile failure is a programmer bug, not a runtime input error.
@@ -470,7 +460,6 @@ mod tests {
         fs::write(tmp.path().join("AGENTS.md"), "# Instructions").unwrap();
 
         let files = find_agent_files(tmp.path(), &CompatConfig::default().agent_filenames());
-        // On case-insensitive filesystems (macOS), both "Agents.md" and "AGENTS.md" resolve to the same file, so we may get more than 1 result
         assert!(!files.is_empty());
         assert!(
             files
@@ -601,7 +590,6 @@ mod tests {
         );
     }
 
-    // ── Feature 2: Workspace user AGENTS.md via read_agents_config ───
 
     #[tokio::test]
     async fn read_agents_config_includes_workspace_user_agents_md() {
@@ -1049,8 +1037,10 @@ mod tests {
             /*project_trusted*/ true,
         )
         .await;
-        // Configured dirs come after every built-in home root and before project files. Frontmatter is stripped like
-        // any other rule; `AGENTS.md` inside an extra dir is just another `*.md` rule; only direct children are read.
+        // Configured dirs come after every built-in home root and before
+        // project files. Frontmatter is stripped like any other rule;
+        // `AGENTS.md` inside an extra dir is another `*.md` rule; only direct
+        // children are read.
         assert_eq!(
             vec![
                 "grok-home-rule",
@@ -1082,8 +1072,8 @@ mod tests {
         fs::write(repo.join(".grok/rules/p.md"), "project-rule").unwrap();
         fs::write(extra.join("r.md"), "configured-rule").unwrap();
 
-        // Untrusted: project roots are dropped, but a user-listed dir under the repo is a user surface and stays.
-        // The repo's gitignore covers that dir; the listing overrides it, as `[skills] paths` does.
+        // Untrusted: project roots are dropped, but a user-listed dir under
+        // the repo is a user surface and stays.
         let configs = read_agents_config_with_roots(
             repo.to_str().unwrap(),
             None,

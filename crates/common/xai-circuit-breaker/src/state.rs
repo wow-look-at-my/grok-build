@@ -1,6 +1,4 @@
-//! Breaker state types: state enum, outcome enum, and the `BreakerOpen`
-//! error returned by [`crate::CircuitBreaker::check`] when the breaker is
-//! refusing traffic.
+//! Breaker state types: state enum, outcome enum.
 
 use std::time::Duration;
 

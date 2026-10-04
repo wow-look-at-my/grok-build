@@ -379,8 +379,8 @@ async fn drain_interjection_expands_skill_slash_reference() {
                 "SKILL.md body with substituted args must ride along, got: {text}"
             );
 
-            // A steering interjection that only mentions the skill mid-text (no leading slash) stays untouched
-            // The same gating applies at turn start, where "don't run /commit yet" is not an invocation
+            // A steering interjection that only mentions the skill mid-text (no leading slash) stays untouched The same
+            // gating applies at turn start.
             actor.pending_interjections.push(PendingInterjection {
                 text: "don't run /find-session yet".to_string(),
                 attachments: vec![],
@@ -463,7 +463,6 @@ async fn cancelled_drain_restores_entries_for_stranded_flush() {
                     futures::poll!(drain.as_mut()).is_pending(),
                     "drain must hit an await before submitting the batch"
                 );
-                // Dropping the pending future here simulates the turn abort.
             }
 
             let restored: Vec<String> = actor

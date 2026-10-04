@@ -19,8 +19,6 @@ pub enum HunkTrackerCommand {
         content: String,
         prompt_index: usize,
         /// Content of the file before this write (if known).
-        /// Used as a fallback baseline when the file doesn't exist in git HEAD
-        /// (e.g., in worktrees created from dirty state).
         previous_content: Option<String>,
     },
 
@@ -40,8 +38,7 @@ pub enum HunkTrackerCommand {
     SetMode { mode: TrackingMode },
 
     /// Re-root the actor after a session cwd remount (path virtualization).
-    /// Reply fires after `file_states` keys have been rewritten so callers
-    /// can wait before recording writes under the new cwd.
+    /// Reply fires after `file_states` keys.
     SetWorkingDir {
         working_dir: PathBuf,
         reply: oneshot::Sender<()>,
@@ -140,8 +137,7 @@ pub enum HunkTrackerCommand {
     /// Reset session stats (e.g., after commit)
     ResetStats,
 
-    /// Refresh all baselines from the current git HEAD and re-read current
-    /// content from disk. Used after a git HEAD/index change to reconcile stale state.
+    /// Refresh all baselines from the current git HEAD and re-read current content from disk.
     RefreshAllBaselines,
 
     /// Take a snapshot of all hunk tracker state for preservation across
@@ -156,7 +152,6 @@ pub enum HunkTrackerCommand {
         reply: oneshot::Sender<HunkTurnDelta>,
     },
 
-    /// Restore a previously snapshotted state. Replaces all current file
-    /// states, turn index, and session stats.
+    /// Restore a snapshotted state. Replaces all current file states, turn index, and session stats.
     RestoreState(HunkTrackerSnapshot),
 }

@@ -1,8 +1,4 @@
 //! Each identifier is a newtype wrapper around `String`.
-//! A string rather than `Uuid` lets callers pick any id scheme (UUIDs, ULIDs, slugs) and keeps the wire format human-readable.
-//!
-//! The inner field is **not** public: construct ids via `new()`, `From<String>`, or `From<&str>`, and read them back via `as_str()` or `Display`.
-//! That keeps callers from poking arbitrary strings into the newtype and bypassing invariants we add later (e.g. non-empty, ASCII-only).
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -73,7 +69,6 @@ impl From<&str> for ToolCallId {
 }
 
 /// Unique hunk identifier produced by the hunk tracker.
-/// TODO: align with `xai_hunk_tracker::HunkId` when that wire surface moves here.
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct HunkId(pub(crate) String);

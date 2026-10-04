@@ -28,9 +28,8 @@ pub fn push_owned_lines(src: &[Line<'_>], out: &mut Vec<Line<'static>>) {
     }
 }
 
-/// True for a character unsafe to render from untrusted or server-supplied text.
-/// C0/C1 controls can inject terminal escapes; the bidi-control and zero-width format characters enable Trojan-Source spoofing.
-/// Every place that scrubs untrusted text (chip labels, toast error scrub, the settings editor input) calls this so the set never drifts.
+/// True for a character unsafe to render from untrusted or server-supplied
+/// text.
 pub fn is_unsafe_display_char(c: char) -> bool {
     c.is_control()
         || matches!(
@@ -44,9 +43,6 @@ pub fn is_unsafe_display_char(c: char) -> bool {
 }
 
 /// Largest byte index `<= index` that is a char boundary in `s`.
-///
-/// Re-exported from `xai_grok_tools::util` so the whole workspace shares one
-/// implementation of the boundary math.
 pub use xai_grok_tools::util::floor_char_boundary;
 
 /// Like [`crate::util::truncate_to_width`] but returns an owned `String`.
@@ -65,7 +61,6 @@ pub fn truncate_line(line: Line<'static>, max_width: usize) -> Line<'static> {
         return line;
     }
 
-    // Need room for the ellipsis (1 column).
     let budget = max_width.saturating_sub(1);
     let mut used = 0usize;
     let mut out: Vec<Span<'static>> = Vec::new();
@@ -259,7 +254,7 @@ mod tests {
             Span::raw("Edit "),
             Span::raw("very/long/path/to/file.rs"),
         ]);
-        // Truncating to 15 cuts inside the second span and yields "Edit very/long…"
+        // Truncating to multiple cuts inside the second span and yields "Edit very/long…"
         let result = truncate_line(line, 15);
         let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.ends_with('\u{2026}'));
@@ -320,8 +315,6 @@ mod tests {
 
     #[test]
     fn fit_line_does_not_split_emoji_grapheme() {
-        // The line is 4 columns wide: a and b, then the width-2 ⚠️ grapheme
-        // Clipping to 3 drops that grapheme whole and pads with one space
         let line = Line::from(vec![Span::raw("ab\u{26A0}\u{FE0F}")]);
         let out = fit_line_to_width(line, 3);
         assert_eq!(line_text(&out).width(), 3);
@@ -424,7 +417,6 @@ mod tests {
 
     #[test]
     fn cascade_truncate_desc_gone_meta_truncated() {
-        // Overhead 22 exceeds avail 20, so the description goes and meta is truncated to the 4 columns left
         let (t, d, a, m) = cascade_truncate(20, "type  ", "desc", " \u{2014} running", "  meta");
         assert_eq!(t, "type  ");
         assert_eq!(d, "");
@@ -434,7 +426,6 @@ mod tests {
 
     #[test]
     fn cascade_truncate_meta_and_activity_gone() {
-        // With avail 8, type takes 6, activity is truncated to the 2 columns left, and meta goes
         let (t, d, a, m) = cascade_truncate(8, "type  ", "desc", " \u{2014} running", "  meta");
         assert_eq!(t, "type  ");
         assert_eq!(d, "");
@@ -462,7 +453,6 @@ mod tests {
 
     #[test]
     fn cascade_truncate_unicode() {
-        // `✗` and `—` are each 1 display column wide
         let (t, d, a, m) = cascade_truncate(10, "\u{2717}  ", "description", " \u{2014} run", "");
         assert_eq!(t, "\u{2717}  ");
         assert_eq!(d, "\u{2026}");

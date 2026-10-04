@@ -19,7 +19,6 @@ pub type Result<T> = std::result::Result<T, SamplingError>;
 #[strum(serialize_all = "snake_case")]
 pub enum EmptyReason {
     /// The model emitted reasoning tokens but produced no visible content and no tool calls.
-    /// The stream completed normally (has `finish_reason`).
     ReasoningOnly,
     /// The stream carried at least one `choice` but the final assistant message has empty `content` and no tool calls (and no reasoning).
     NoVisibleContent,
@@ -37,7 +36,6 @@ pub struct EmptyResponseContext {
     pub reason: EmptyReason,
     /// Whether the response contained reasoning tokens.
     pub had_reasoning: bool,
-    /// Byte length of the accumulated `content` string (0 for truly empty).
     pub content_len: usize,
     /// Number of tool calls in the final response.
     pub tool_call_count: usize,
@@ -68,9 +66,7 @@ pub struct ResponseModelMetadata {
     pub models_etag: Option<String>,
 }
 
-/// Wire-credential provenance of a request that failed authentication. A 401 for a request that went out with no
-/// credential header is not evidence against the credential itself. Such a send is fail-closed: the bearer resolver had
-/// nothing wire-valid. Retry policies use this to avoid charging credential-rejection budgets for such sends.
+/// Wire-credential provenance of a request that failed authentication.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -80,7 +76,6 @@ pub enum SentCredential {
     /// The request went out with no credential header.
     Missing,
     /// Provenance unknown (synthesized or legacy errors).
-    /// Retry policies treat this like [`SentCredential::Sent`]: fail closed toward terminating rather than retrying forever.
     #[default]
     Unknown,
 }
@@ -122,12 +117,9 @@ impl SentCredential {
 }
 
 /// Display prefix of [`SamplingError::Serialization`].
-/// Shared with the variant's `#[error(...)]` template so [`SamplingError::serialization_from_rendered`] can never drift from what Display emits.
 const SERIALIZATION_DISPLAY_PREFIX: &str = "serialization error: ";
 
 /// Display text of [`SamplingError::MaxTokensTruncation`].
-/// Public: the pager sniffs it to recover the kind from rails predating the typed `errorKind` field.
-/// Sharing the const with the `#[error(...)]` template prevents drift.
 pub const MAX_TOKENS_TRUNCATION_MESSAGE: &str = "response truncated by max_tokens";
 
 #[derive(Debug, Error)]
@@ -157,12 +149,9 @@ pub enum SamplingError {
         model_metadata: Option<ResponseModelMetadata>,
         /// Parsed from the `Retry-After` response header (seconds).
         retry_after_secs: Option<u64>,
-        /// Parsed from the `x-should-retry` response header. `Some(true)`: transient, retry may help. `Some(false)`:
-        /// request-content error, don't retry. `None`: header absent (old server or non-proxy origin).
+        /// Parsed from the `x-should-retry` response header. `Some(true)`: transient, retry may help.
         should_retry: Option<bool>,
         /// The error envelope's `code` slot; `None` when the body has no envelope or carries no code.
-        /// Dedicated code slots (nested envelopes, Responses-stream error events) pass through verbatim.
-        /// The flat envelope's `code` slot is overloaded, so only semantic values surface from it.
         error_code: Option<ApiErrorCode>,
     },
     #[error("request stream error: {0}")]
@@ -176,25 +165,21 @@ pub enum SamplingError {
         code: Option<ApiErrorCode>,
     },
     /// Per-chunk idle timeout: no SSE chunk received from the model within the configured deadline.
-    /// NOT retryable: the model (or network path) is stuck, and replaying the same request would likely stall again.
     #[error("inference idle timeout after {elapsed_secs}s with no chunks")]
     IdleTimeout { elapsed_secs: u64 },
     #[error("empty response from model ({})", context.reason)]
     EmptyResponse { context: EmptyResponseContext },
     #[error("{text}", text = MAX_TOKENS_TRUNCATION_MESSAGE)]
     MaxTokensTruncation,
-    /// A confident server-reported doom loop on the attempt (mid-stream or on the completed response). Carries the raw
-    /// trigger labels (never generation content) and, for telemetry only, the stream chunk index the mid-stream abort fired
-    /// at. `aborted_at_chunk` is `None` when the signal was only seen on the completed response.
+    /// A confident server-reported doom loop on the attempt (mid-stream or on
+    /// the completed response).
     #[error("doom loop detected: {}", triggers.join(", "))]
     DoomLoopDetected {
         triggers: Vec<String>,
         aborted_at_chunk: Option<u64>,
     },
     /// The model's output rate stayed under the configured floor for a whole
-    /// measurement window. Retryable on the rate gate's own budget, separate
-    /// from the transport budget: the request is fine, the engine serving it
-    /// is not, and a fresh request usually lands on a healthy one.
+    /// measurement window.
     #[error(
         "output rate collapsed to {observed_tokens_per_sec:.1} tok/s over {window_secs}s (floor {floor_tokens_per_sec:.1})"
     )]
@@ -204,7 +189,6 @@ pub enum SamplingError {
         window_secs: u64,
     },
     /// The attempt produced no output within the time-to-first-token limit.
-    /// Retryable on the rate gate's budget, like `OutputRateCollapsed`.
     #[error("no output after {waited_secs}s (time-to-first-token limit {limit_secs}s)")]
     FirstTokenTimeout { waited_secs: u64, limit_secs: u64 },
 }
@@ -212,14 +196,9 @@ pub enum SamplingError {
 /// Semantic `error.code` the server stamps on invalid-image rejections, on both non-stream error bodies and mid-stream SSE error events.
 pub const INVALID_IMAGE_ERROR_CODE: &str = "invalid_image";
 
-/// Content path some upstream providers key codeless image rejections on (`.image.source.base64.data`/`.url`). Those
-/// arrive as `invalid_request_error` with no `error.code`, so [`INVALID_IMAGE_ERROR_CODE`] misses them. The fragment
-/// appears only when the request carried an image, so stripping is safe recovery.
+/// Content path some upstream providers key codeless image rejections on (`.image.source.base64.data`/`.url`).
 const IMAGE_CONTENT_PATH_MARKER: &str = ".image.source.";
 
-/// Size-error decision map for callers choosing a remedy: 413 status or byte-size code: strip inline images and retry
-/// once. Detected by [`SamplingError::is_payload_too_large`] and [`SamplingError::is_byte_size_overflow_coded`];
-/// Token-tier code or token/size text: fail fast via [`SamplingError::is_retry_vetoed`].
 pub fn is_size_overflow_error_code(code: &str) -> bool {
     is_byte_size_overflow_error_code(code)
         // Token-tier slugs: size overflows image stripping cannot remedy.
@@ -235,15 +214,14 @@ fn is_byte_size_overflow_error_code(code: &str) -> bool {
         || code.eq_ignore_ascii_case("request_too_large")
 }
 
-/// A wire `error.code`, parsed once at the boundary so classification compares variants instead of strings.
-/// `#[non_exhaustive]`: the next semantic code is a new variant, not another const and `||` chain.
+/// A wire `error.code`, parsed once at the boundary so classification
+/// compares variants instead of strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ApiErrorCode {
     /// The server rejected an image ([`INVALID_IMAGE_ERROR_CODE`]).
     InvalidImage,
     /// A size-overflow code ([`is_size_overflow_error_code`]).
-    /// Carries the verbatim wire code so serialization stays byte-identical.
     ContextOverflow(String),
     /// Any other wire code, preserved verbatim (Responses-stream error events pass arbitrary codes through).
     Other(String),
@@ -291,7 +269,6 @@ impl<'de> Deserialize<'de> for ApiErrorCode {
 
 impl SamplingError {
     /// Auth error of unknown wire provenance.
-    /// Used by paths that never sent a request (config validation, cancellation, actor teardown) or that lost the provenance (legacy round trips).
     pub fn auth_unknown(message: impl Into<String>) -> Self {
         Self::Auth {
             message: message.into(),
@@ -318,7 +295,8 @@ impl SamplingError {
         }
     }
 
-    /// Rebuild a `Serialization` error from a rendered message for non-`Clone` contexts; it must stay `Serialization` so it remains non-retryable.
+    /// Rebuild a `Serialization` error from a rendered message for
+    /// non-`Clone` contexts.
     pub fn serialization_message(msg: impl fmt::Display) -> Self {
         Self::Serialization(serde::de::Error::custom(msg))
     }
@@ -334,9 +312,6 @@ impl SamplingError {
     }
 
     pub fn is_auth_error(&self) -> bool {
-        // Only 401 Unauthorized means the credentials themselves were rejected and warrant a token refresh / re-auth 403
-        // Forbidden means the request was authenticated but the action is not permitted. That covers content-safety blocks,
-        // ZDR-blocked operations, and other policy denials unrelated to credentials.
         matches!(
             self,
             SamplingError::Auth { .. }
@@ -367,23 +342,21 @@ impl SamplingError {
         )
     }
 
-    /// `true` when the error looks like a connection reset or broken pipe during request upload.
-    /// That is the pattern nginx produces when it rejects an oversized payload by closing the connection instead of responding 413.
-    /// Timeouts and connect failures are excluded: those are unrelated to payload size and stripping images on them would lose context for no reason.
+    /// `true` when the error looks like a connection reset or broken pipe
+    /// during request upload.
     pub fn is_likely_body_rejected(&self) -> bool {
         match self {
             SamplingError::Http(err) => {
-                // `is_request()` covers broken-pipe / connection-reset during body upload
-                // `is_body()` covers stream-write failures
-                // Timeouts and connect errors are excluded: those are unrelated
+                // `is_request()` covers broken-pipe / connection-reset during body upload `is_body()` covers stream-write failures Timeouts.
                 (err.is_request() || err.is_body()) && !err.is_timeout() && !err.is_connect()
             }
             _ => false,
         }
     }
 
-    /// The server rejected the request: the conversation history contains `encrypted_content` from a model family the current model cannot decrypt.
-    /// Never retryable: the user must start a new session.
+    /// The server rejected the request: the conversation history contains
+    /// `encrypted_content` from a model family the current model cannot
+    /// decrypt.
     pub fn is_encrypted_content_error(&self) -> bool {
         matches!(
             self,
@@ -395,12 +368,8 @@ impl SamplingError {
         )
     }
 
-    /// The server rejected a replayed `thinking` block's signature, e.g.
-    /// "messages.1.content.0: Invalid `signature` in `thinking` block". The
-    /// signature is verified against the model that minted it, so a
-    /// conversation carried onto another model fails this way on every turn
-    /// until the blocks are dropped. Recovered by stripping reasoning and
-    /// retrying — the signature cannot be re-minted.
+    /// The server rejected a replayed `thinking` block's signature, e.g. "messages.1.content.0: Invalid `signature` in `thinking` block". The signature is verified against the model that minted it, so a conversation carried onto another model fails this way
+    /// on every turn until the blocks are dropped.
     pub fn is_thinking_signature_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -430,17 +399,8 @@ impl SamplingError {
 
     /// The provider rejected the request because the routed model/endpoint
     /// **mandates** reasoning and our body asked for it disabled or omitted,
-    /// e.g. OpenRouter's
-    /// "Reasoning is mandatory for this endpoint and cannot be disabled."
-    ///
-    /// This is a request-content error, not a transient one: re-sending the
-    /// same disabling body always fails. The recovery is to remap the
-    /// requested effort to the lowest non-disabled tier (via
-    /// [`wire_reasoning_effort`]) and retry.
-    ///
-    /// Matches the "reasoning is mandatory" fragment case-insensitively, so
-    /// provider wordings that keep that phrase (regardless of the trailing
-    /// "…for this endpoint and cannot be disabled.") are recognized.
+    /// e.g. OpenRouter's "Reasoning is mandatory for this endpoint and cannot
+    /// be disabled."
     pub fn is_reasoning_mandatory_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -458,7 +418,7 @@ impl SamplingError {
 
     /// The server rejected the request because an image could not be processed. [`INVALID_IMAGE_ERROR_CODE`] is the signal.
     /// Some provider passthroughs stamp neither, keying image rejections on the [`IMAGE_CONTENT_PATH_MARKER`] content path
-    /// instead. Recovery destroys request images, so unexpected statuses (422, 415,...) fail closed.
+    /// instead. fail closed.
     pub fn is_image_processing_error(&self) -> bool {
         match self {
             SamplingError::Api {
@@ -497,11 +457,9 @@ impl SamplingError {
     /// unroutable, so the recovery is the same strip but the cause is the
     /// model choice.
     ///
-    /// Providers disagree on both status and wording — OpenRouter answers 404
-    /// "No endpoints found that support image input", OpenAI answers 400
-    /// "Invalid content type. image_url is only supported by certain models" —
-    /// so this matches a phrase set case-insensitively across the statuses
-    /// providers actually use for it.
+    /// image_url is only supported by certain models" — so this matches a
+    /// phrase set case-insensitively across the statuses providers actually use
+    /// for it.
     pub fn is_image_input_unsupported_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -534,19 +492,9 @@ impl SamplingError {
     }
 
     /// The provider's schema rejected a message-level property it does not
-    /// define, e.g. Cerebras's
-    /// `wrong_api_format: messages.6.assistant.model_id: property
+    /// define, e.g. Cerebras's `wrong_api_format:
+    /// messages.6.assistant.model_id: property
     ///  'messages.6.assistant.model_id' is unsupported`.
-    ///
-    /// This is a request-content error, not a transient one: the property
-    /// lives in conversation *history*, so re-sending the same body fails
-    /// identically on every turn and every retry. The recovery is to drop the
-    /// named properties from the serialized body and retry, which this
-    /// classifier enables by identifying the error.
-    ///
-    /// Narrow on purpose: the provider's own `wrong_api_format` code AND an
-    /// "is unsupported" phrase must both appear, so an unrelated 400 that
-    /// merely mentions a property name is not mistaken for this.
     pub fn is_unsupported_message_property_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -563,8 +511,6 @@ impl SamplingError {
 
     /// Whether this error names `model_id` as an unsupported property, so the
     /// recovery can strip exactly what the provider objected to.
-    /// Case-insensitive; the property name is matched as a whole token so
-    /// `messages.6.assistant.model_id` hits and `model_identifier` does not.
     pub fn names_unsupported_model_id(&self) -> bool {
         self.unsupported_property_names()
             .is_some_and(|names| names.iter().any(|n| n == "model_id"))
@@ -593,11 +539,7 @@ impl SamplingError {
         };
         let mut names = Vec::new();
         for line in message.split('\n') {
-            // Each line is `<path>: property '<path>' is unsupported`, and may
-            // carry a client-side prefix before the path (`API error (status
-            // 400 Bad Request): wrong_api_format: <path>: property ...`).
-            // Anchoring on the `: property '` separator — rather than the
-            // first `:` — keeps the prefix from being read as the path.
+            // Each line is `<path>: property '<path>' is unsupported`.
             let line = line.to_ascii_lowercase();
             if !line.contains("is unsupported") {
                 continue;
@@ -605,8 +547,7 @@ impl SamplingError {
             let Some((path, _)) = line.split_once(": property '") else {
                 continue;
             };
-            // `<path>` may itself carry a `<prefix>: wrong_api_format: ` head;
-            // the property path is the final colon-separated segment.
+            // `<path>` may itself carry a `<prefix>: wrong_api_format: ` head.
             let path = path.rsplit(':').next().unwrap_or(path);
             // `messages.6.assistant.model_id` -> the final dot-segment.
             let Some(name) = path.trim().rsplit('.').next() else {
@@ -617,18 +558,13 @@ impl SamplingError {
                 names.push(name.to_owned());
             }
         }
-        // An unsupported-property error that names nothing is still this error
-        // class (caller strips what it knows how to strip); return an empty
-        // list rather than `None` so the class is not lost.
+        // An unsupported-property error that names nothing is still this error class (caller strips what it knows how to strip).
         Some(names)
     }
 
     /// The response stream died part-way through: the SSE connection dropped,
     /// or reqwest could not decode the body it was reading ("error decoding
-    /// response body"). The request itself is sound, so a fresh one usually
-    /// lands. The sampler gives this class its own retry budget — see
-    /// `xai_grok_sampler::STREAM_INTERRUPT_MAX_RETRIES` — so a network blip
-    /// never spends the transport budget the next 5xx needs.
+    /// response body").
     pub fn is_stream_interrupted(&self) -> bool {
         match self {
             SamplingError::EventStreamError(_) => true,
@@ -681,9 +617,8 @@ impl SamplingError {
         }
     }
 
-    /// True when this error is a context-window/size overflow (deterministic; don't retry the same payload). Exception: a 429
-    /// carrying `Retry-After` with no structured size code does not classify. Retry loops back off instead of fast-failing,
-    /// and the compaction classifier stays transient instead of stepping the input ladder.
+    /// True when this error is a context-window/size overflow (deterministic; don't retry the same payload). Retry loops back
+    /// off instead of fast-failing, and the compaction classifier stays transient instead of stepping the input ladder.
     pub fn is_context_length_error(&self) -> bool {
         match self {
             SamplingError::Api {
@@ -752,8 +687,8 @@ impl SamplingError {
     }
 
     /// Capacity / overload: HTTP 529, a 5xx whose message clearly says overloaded, or a stream error whose parsed
-    /// `error_type` is a capacity type. Proxies wrap stream overloads in a 500; the capacity types are `overloaded_error` and
-    /// `service_unavailable_error`. Never reachable from a 4xx or a request-shaped stream error, whatever the message text.
+    /// `error_type` is a capacity type. Never reachable from a 4xx or a request-shaped stream error, whatever the message
+    /// text.
     pub fn is_overloaded(&self) -> bool {
         match self {
             SamplingError::Api {
@@ -772,9 +707,8 @@ impl SamplingError {
         }
     }
 
-    /// Retry vetoes shared by every retry loop: the sampler actor's `classify_error` and one-shot callers like `/btw`.
-    /// `x-should-retry: false`: the server says the request content caused the failure, not something transient;
-    /// Context-length overflow: deterministic; re-sending the same payload always fails.
+    /// Retry vetoes shared by every retry loop: the sampler actor's
+    /// `classify_error` and one-shot callers like `/btw`.
     pub fn is_retry_vetoed(&self) -> bool {
         self.should_retry_header() == Some(false) || self.is_context_length_error()
     }
@@ -809,9 +743,7 @@ struct ErrorBody {
     code: Option<String>,
 }
 
-/// Flat error from the Grok proxy/gateway: `{"code": "...", "error": "..."}`. Flat bodies with a non-string code (e.g.
-/// `{"code":429,"error":"... [WKE=...]"}`) must keep failing this parse so they reach the provider fallback. The fallback
-/// strips `[WKE=...]` markers and lifts slugs; routing them through the rigid path would leak raw markers to users.
+/// Flat error from the Grok proxy/gateway: `{"code": "...", "error": "..."}`.
 #[derive(Debug, Deserialize)]
 struct FlatErrorResponse {
     error: String,
@@ -819,9 +751,8 @@ struct FlatErrorResponse {
     code: Option<String>,
 }
 
-/// Some provider dialects put non-strings in the nested `code` slot (e.g. `"code": 429`).
-/// A strict `Option<String>` would fail the whole envelope parse and demote a retryable stream error to a fatal `Serialization` error.
-/// Swallow non-string codes instead of rejecting the envelope.
+/// Some provider dialects put non-strings in the nested `code` slot (e.g.
+/// `"code": 429`).
 fn lenient_code<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> std::result::Result<Option<String>, D::Error> {
@@ -836,7 +767,6 @@ struct ParsedError {
     error_type: String,
     message: String,
     /// The envelope's `code` slot: nested envelopes pass through verbatim.
-    /// The flat envelope's slot is overloaded (gRPC kebab codes, type slots), so only semantic values surface from it.
     code: Option<ApiErrorCode>,
 }
 
@@ -867,8 +797,8 @@ fn try_parse_error(data: &str) -> Option<ParsedError> {
     None
 }
 
-/// Semantic `error.code` from a raw error body. Nested envelopes yield their code verbatim.
-/// The flat envelope overloads its `code` slot with gRPC kebab codes and type slots, so only exact semantic values surface from it.
+/// Semantic `error.code` from a raw error body. Nested envelopes yield their
+/// code verbatim.
 pub fn parse_error_code(bytes: &[u8]) -> Option<ApiErrorCode> {
     std::str::from_utf8(bytes)
         .ok()
@@ -880,16 +810,12 @@ pub fn parse_error_code(bytes: &[u8]) -> Option<ApiErrorCode> {
 pub const MAX_USER_ERROR_BODY_CHARS: usize = 280;
 
 /// Short status-based copy when the body is not a structured JSON error.
-///
-/// Edge proxies (Cloudflare 52x, 502/503/504) return HTML pages; we never sniff body text, so only the HTTP status drives this fallback.
 pub fn status_user_message(status: StatusCode) -> String {
     status_copy(status, "The server", "the server")
 }
 
-/// As [`status_user_message`], naming the service that answered.
-///
-/// Every provider shares this copy. So the name comes from the request, never
-/// from a constant: a fixed name blames a service the request never reached.
+/// As [`status_user_message`], naming the service that answered. Every
+/// provider shares this copy.
 pub fn status_user_message_from(status: StatusCode, service: &str) -> String {
     status_copy(status, service, service)
 }
@@ -989,13 +915,11 @@ pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String
     }
 }
 
-/// As [`user_facing_api_error_message`], naming the endpoint on a 404.
 ///
-/// A 404 says the URL that was called does not exist there, so the URL is the
-/// whole diagnosis -- and it is the one thing the caller cannot see. Servers
-/// answer it with an empty or contentless body, which leaves the bare message
-/// ("Request failed (HTTP 404).") describing nothing a user can act on. Other
-/// statuses are about the request, not the address, and keep their message.
+/// Servers answer it with an empty or contentless body, which leaves the bare
+/// message ("Request failed (HTTP 404).") describing nothing a user can act
+/// on. Other statuses are about the request, not the address, and keep their
+/// message.
 pub fn api_error_message_for_endpoint(status: StatusCode, bytes: &[u8], endpoint: &str) -> String {
     let host = reqwest::Url::parse(endpoint)
         .ok()
@@ -1091,8 +1015,6 @@ pub fn try_parse_stream_error(data: &str) -> Option<SamplingError> {
 /// Shared size-overflow text detector: a single definition (in the compaction engine) so the turn path and compaction loops can't drift.
 pub use xai_grok_compaction::is_context_length_error;
 
-/// Whether an HTTP status is worth retrying: the rule CCP publishes in `x-should-retry` (429 and any 5xx), minus Cloudflare's origin-TLS 525/526.
-/// Requests reach CCP through the Cloudflare edge, which answers with its own 52x pages when the origin is unreachable.
 pub fn is_retryable_api_status(status: StatusCode) -> bool {
     RetryPolicy::edge_client().should_retry(status.as_u16())
 }
@@ -1130,7 +1052,6 @@ pub fn is_retryable_reqwest(err: &reqwest::Error) -> bool {
 
     // A decode failure is a body that stopped arriving mid-read, not a
     // deterministic fault: reqwest renders it "error decoding response body".
-    // Calling it fatal ends a turn on one network blip.
     if err.is_decode() {
         return true;
     }
@@ -1671,9 +1592,9 @@ mod tests {
         );
     }
 
-    /// A 404 must name the URL. Without it the message is "Request failed
-    /// (HTTP 404)." -- true, and no help at all in telling a wrong base URL
-    /// from a wrong path from a model that is not served there.
+    /// Without it the message is "Request failed (HTTP 404)." -- true, and
+    /// no help at all in telling a wrong base URL from a wrong path from a
+    /// model that is not served there.
     #[test]
     fn a_404_names_the_endpoint_and_other_statuses_do_not() {
         let url = "https://api.example.com/v1/responses";
@@ -1684,8 +1605,6 @@ mod tests {
             "a 404 must name the endpoint that does not exist: {not_found}"
         );
 
-        // An empty body is the common 404 shape, and the status text alone
-        // carries no address.
         assert!(
             !user_facing_api_error_message(StatusCode::NOT_FOUND, b"").contains(url),
             "precondition: the plain message has no URL to begin with"
@@ -1762,9 +1681,8 @@ mod tests {
             other => panic!("expected StreamError, got {other:?}"),
         }
 
-        // Flat envelope with a non-string code: stays STRICT
-        // It must keep failing the rigid parse so the provider fallback runs
-        // That path strips `[WKE=...]` machine markers; the rigid path would leak them
+        // Flat envelope with a non-string code: stays STRICT It must keep
+        // failing the rigid parse.
         let bytes =
             br#"{"code":429,"error":"You ran out of credits. [WKE=personal-team-blocked:spending-limit]"}"#;
         assert_eq!(parse_error_code(bytes), None);
@@ -1845,9 +1763,8 @@ mod tests {
         assert!(msg.ends_with('\u{2026}'));
     }
 
-    /// Regression test: 403 Forbidden must NOT be classified as an auth error. Those cover content-safety blocks, ZDR-gated
-    /// operations, and other usage-policy blocks. Misclassifying these as auth errors triggers a pointless OIDC refresh and
-    /// surfaces as acp::Error::auth_required on the client.
+    /// Those cover content-safety blocks, ZDR-gated operations, and other usage-policy blocks. Misclassifying these as auth
+    /// errors triggers a pointless OIDC refresh and surfaces as acp::Error::auth_required on the client.
     #[test]
     fn forbidden_is_not_auth_error() {
         let err = SamplingError::Api {
@@ -1943,7 +1860,6 @@ mod tests {
 
     #[test]
     fn is_likely_body_rejected_is_http_only() {
-        // Coded 413 / invalid_image are ServerRejected, not this heuristic.
         let payload_too_large = SamplingError::Api {
             status: StatusCode::PAYLOAD_TOO_LARGE,
             message: "too large".into(),
@@ -1954,7 +1870,6 @@ mod tests {
         };
         assert!(!payload_too_large.is_likely_body_rejected());
         assert!(payload_too_large.is_payload_too_large());
-        // Pins the coupling between the Display template and the detector: the rendered status phrase makes any rendered 413 text-detectable
         assert!(is_context_length_error(&payload_too_large.to_string()));
 
         let invalid_image = SamplingError::Api {
@@ -2098,9 +2013,8 @@ mod tests {
     }
 
     /// The reported trap: OpenRouter's "Reasoning is mandatory for this
-    /// endpoint and cannot be disabled." must be recognized as a
-    /// reasoning-mandatory signal, not left as an opaque 400. The message
-    /// fragment is matched case-insensitively.
+    /// endpoint and cannot be disabled." The message fragment is matched
+    /// case-insensitively.
     #[test]
     fn openrouter_reasoning_mandatory_400_is_detected() {
         let err = SamplingError::Api {
@@ -2148,8 +2062,6 @@ mod tests {
 
     #[test]
     fn reasoning_mandatory_requires_the_phrase() {
-        // A 400 that disables reasoning but is not the mandatory phrase must
-        // not be misclassified.
         let err = SamplingError::Api {
             status: StatusCode::BAD_REQUEST,
             message: "reasoning_effort must be one of [minimal, low, medium]".into(),
@@ -2177,9 +2089,6 @@ mod tests {
         );
     }
 
-    /// The reported trap: OpenRouter answers a vision-less model with a 404,
-    /// which is otherwise a fatal status, so the images stayed in history and
-    /// every retry — including `/goal resume` — hit the same wall.
     #[test]
     fn image_input_unsupported_openrouter_404_detected() {
         let err = SamplingError::Api {
@@ -2228,8 +2137,6 @@ mod tests {
         }
     }
 
-    /// The other 404 this code path sees is a wrong model name, which stripping
-    /// images would not fix — it must stay fatal.
     #[test]
     fn image_input_unsupported_ignores_unrelated_errors() {
         for (status, message) in [
@@ -2372,8 +2279,6 @@ mod tests {
             api_400_with_code(unknown_wording, INVALID_IMAGE_ERROR_CODE)
                 .is_image_processing_error()
         );
-        // A 500 with a code: the shape every synthesized mid-stream failure takes (Responses-stream events and info round trips land on 500)
-        // The status gate must admit it or mid-stream recovery silently dies
         assert!(
             SamplingError::Api {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -2389,8 +2294,7 @@ mod tests {
             !api_400_with_code(unknown_wording, "context_length_exceeded")
                 .is_image_processing_error()
         );
-        // Deliberate: server prose without the code does not strip
-        // Any server new enough to emit these rejections stamps the code
+        // Deliberate: server prose without the code does not strip Any server new enough.
         assert!(!api_400("Invalid base64-encoded image.").is_image_processing_error());
     }
 
@@ -2483,7 +2387,6 @@ mod tests {
 
     #[test]
     fn transient_5xx_is_retryable_but_origin_tls_is_not() {
-        // Cloudflare edge pages (520-524, 530), upstream overload (529), and non-CF 5xx like 501/507; the rule is any 5xx, not a code list
         for code in [501u16, 507, 520, 521, 522, 523, 524, 529, 530] {
             assert!(
                 api_status_err(code).is_retryable(),
@@ -2559,10 +2462,8 @@ mod tests {
         );
     }
 
-    /// Narrowness: the classifier requires the provider's own code AND the
-    /// "is unsupported" phrase. An unrelated 400 that merely mentions a
-    /// property must not be caught — otherwise a genuine request bug would be
-    /// silently retried with fields stripped.
+    /// Narrowness: the classifier requires the provider's own code AND the "is
+    /// unsupported" phrase.
     #[test]
     fn unrelated_400_mentioning_a_property_is_not_matched() {
         for message in [

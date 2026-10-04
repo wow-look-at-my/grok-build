@@ -1,8 +1,4 @@
 //! Replay committed, handwritten bot-relay wire fixtures.
-//!
-//! These JSON files are the language-neutral artifact TS / Swift / Kotlin
-//! clients will later replay. They are not produced by serializing the Rust
-//! types. Harness locations: `fixtures/bot_relay/README.md`.
 
 use serde_json::{Value, json};
 use xai_tool_protocol::{
@@ -702,11 +698,7 @@ fn replay_sequence(raw: &str) -> SequenceFixture {
     }
 }
 
-/// Test-side model of a conforming receive path. Language harnesses must
-/// reproduce these observations rather than re-count tags / `frames.len()`.
-///
-/// - Every ingested frame is one observed event (`seq` is not a dedupe key).
-/// - A resync is observed only on an explicit `hub:resync_required`.
+/// Test-side model of a conforming receive path.
 struct ReferenceConsumer {
     observed_events: u64,
     observed_resyncs: u64,

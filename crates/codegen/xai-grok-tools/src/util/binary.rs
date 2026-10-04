@@ -31,7 +31,6 @@ pub fn is_binary(extension: &str, bytes: &[u8]) -> bool {
     }
 
     // High ratio of non-printable bytes → binary.
-    // Bytes 0-8 and 14-31 are control characters (excluding tab, newline, CR, etc.)
     let non_printable = sample
         .iter()
         .filter(|&&b| b < 9 || (14..=31).contains(&b))
@@ -112,7 +111,6 @@ mod tests {
 
     #[test]
     fn threshold_boundary_not_binary() {
-        // Exactly 30% non-printable → ratio = 0.30, NOT > 0.3 → not binary.
         let mut data: Vec<u8> = vec![0x01; 30];
         data.extend(vec![b'A'; 70]);
         assert_eq!(data.len(), 100);
@@ -124,7 +122,6 @@ mod tests {
 
     #[test]
     fn threshold_boundary_is_binary() {
-        // 31% non-printable → ratio = 0.31, > 0.3 → binary.
         let mut data: Vec<u8> = vec![0x01; 31];
         data.extend(vec![b'A'; 69]);
         assert_eq!(data.len(), 100);
@@ -136,7 +133,6 @@ mod tests {
 
     #[test]
     fn tabs_and_newlines_are_printable() {
-        // Bytes 9 (tab), 10 (LF), 13 (CR) should NOT count as non-printable.
         let data = b"\t\n\r\t\n\rHello World";
         assert!(!is_binary("", data));
     }

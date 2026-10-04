@@ -1,26 +1,4 @@
-//! Spawns the real pager binary in a PTY and measures the Ctrl+V (raw 0x16) paste path against the REAL macOS pasteboard (`pbcopy` / `osascript`):
-//!
-//! - `text` mode: `pbcopy` a sentinel, inject 0x16, and measure from inject until the sentinel is visible on screen.
-//! - `image` mode (agent surface only): put a PNG on the pasteboard, inject 0x16 followed immediately by a typed burst, and measure two latencies.
-//!   Responsiveness runs from inject until the burst is visible; it stays flat when the clipboard read/persist is off the UI thread.
-//!   Chip latency runs from inject until the `Image #` chip is visible.
-//!
-//! The bench is macOS-only at runtime (the real-clipboard Ctrl+V path only exists there).
-//! It compiles everywhere so `cargo bench --no-run` stays green on CI hosts.
-//! Only PTY input injection and screen scraping are used, so `--binary` can point at OLD pager artifacts for before/after comparisons.
-//!
-//! WARNING: overwrites the host clipboard.
-//! Prior TEXT contents are restored best-effort on exit; a prior image clipboard cannot be restored.
-//!
-//! ## Typical use
-//!
-//! ```bash
-//! cargo bench -p xai-grok-pager-pty-harness --bench paste_latency -- --iterations 10
-//!
-//! # Compare an old release artifact, text mode only, JSON to a file:
-//! cargo bench -p xai-grok-pager-pty-harness --bench paste_latency -- \
-//!   --binary ~/Downloads/grok-old --mode text --json /tmp/paste-old.json
-//! ```
+//! Spawns the real pager binary in a PTY and measures the Ctrl+V (raw 0x16) paste path against the REAL macOS pasteboard.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -38,7 +16,6 @@ use xai_grok_pager_pty_harness::{
 /// Ctrl+V byte; a plain PTY delivers it as the Ctrl+V paste chord.
 const CTRL_V: u8 = 0x16;
 
-/// Ctrl+\ as CSI-u (code 92, modifier 5); opens the dashboard.
 const CTRL_BACKSLASH: &[u8] = b"\x1b[92;5u";
 
 /// Response sentinel for the initial session turn each surface needs.
@@ -51,9 +28,7 @@ const TURN_SENTINEL: &str = "PASTEBENCHTURNDONE";
     long_about = None,
 )]
 struct Cli {
-    /// Path to the pager binary.
-    /// Defaults to auto-resolve (PAGER_BINARY env or a locally-built debug binary).
-    /// Works against old artifacts too.
+    /// Path to the pager binary. Defaults to auto-resolve (PAGER_BINARY env or a locally-built debug binary).
     #[arg(long)]
     binary: Option<PathBuf>,
 
@@ -81,8 +56,7 @@ struct Cli {
     #[arg(long, value_name = "PATH")]
     json: Option<PathBuf>,
 
-    /// Accepted for `cargo bench` compatibility (libtest-style argument).
-    /// We ignore it; this isn't a libtest harness.
+    /// Accepted for `cargo bench` compatibility (libtest-style argument). We ignore it; this isn't a libtest harness.
     #[arg(long, hide = true)]
     #[allow(dead_code)]
     bench: bool,
@@ -366,9 +340,7 @@ fn spawn_ready(
         harness
             .wait_for_text("+ New Agent", Duration::from_secs(10))
             .context("dashboard list")?;
-        // Opening from a session lands with the LIST focused (footer offers "Tab:input")
-        // Tab moves focus to the dispatch input so the clear keys between iterations reach it
-        // Ctrl+V itself is focus-agnostic
+        // Opening from a session lands with the LIST focused (footer offers "Tab:input") Tab moves focus to the dispatch input.
         harness.update(Duration::from_millis(300));
         if harness.contains_text("Tab:input") {
             harness
@@ -401,8 +373,8 @@ fn clear_input_or_respawn(
     if wait_absent(harness, stale, Duration::from_secs(2)) {
         return Ok(());
     }
-    // Backspace spam (the dashboard consumes Ctrl+U as half-page scroll before its dispatch input sees it)
-    // Chips delete atomically, so 64 presses cover any bench payload
+    // Backspace spam (the dashboard consumes Ctrl+U as half-page scroll
+    // before its dispatch input sees it) Chips delete atomically.
     harness
         .inject_keys(&[0x7f; 64])
         .context("Backspace clear")?;
@@ -410,8 +382,7 @@ fn clear_input_or_respawn(
         return Ok(());
     }
     if surface == Surface::Agent {
-        // With a draft present, the first Esc offers press-again-to-clear and the second Esc wipes the whole input
-        // This is only safe while a draft remains (Esc-Esc on an empty prompt opens the rewind picker), which the absent-checks ruled out
+        // With a draft present, the first Esc offers press-again-to-clear.
         harness.inject_keys(b"\x1b").context("Esc arm clear")?;
         harness.update(Duration::from_millis(250));
         harness.inject_keys(b"\x1b").context("Esc confirm clear")?;
@@ -428,7 +399,6 @@ fn clear_input_or_respawn(
     Ok(())
 }
 
-/// Tight-poll (5 ms slices, vs `wait_for_text`'s 50 ms) until `needle` is on screen, for low measurement quantization.
 fn wait_visible(harness: &mut PtyHarness, needle: &str, timeout: Duration) -> Result<()> {
     let deadline = Instant::now() + timeout;
     loop {

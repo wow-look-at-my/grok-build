@@ -10,9 +10,7 @@ use xai_grok_telemetry::region::Parent;
 use crate::host::HostOs;
 use crate::terminal::{TerminalName, terminal_context};
 
-/// Per-cwd git cache: the single source of truth for every git display in the pager. Keyed per directory so one
-/// directory's branch never leaks onto another's. A branch switch inside an agent thus reflects immediately instead
-/// of waiting out [`CWD_GIT_REFRESH_TTL`].
+/// Per-cwd git cache: the source of truth for every git display in the pager.
 type CwdCacheEntry = (Option<CwdGitInfo>, Instant);
 static CWD_GIT_CACHE: LazyLock<Mutex<HashMap<PathBuf, CwdCacheEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -20,9 +18,7 @@ static CWD_GIT_CACHE: LazyLock<Mutex<HashMap<PathBuf, CwdCacheEntry>>> =
 /// Minimum interval between off-thread refreshes for the same cwd, so a per-frame caller can't spawn a storm of git lookups.
 const CWD_GIT_REFRESH_TTL: Duration = Duration::from_secs(5);
 
-/// Upper bound on [`CWD_GIT_CACHE`] entries. The pager only displays a handful of directories at once (the process
-/// cwd and one per live agent). A long session that navigates many locations would otherwise grow the map without
-/// bound.
+/// Upper bound on [`CWD_GIT_CACHE`] entries.
 const CWD_GIT_CACHE_CAP: usize = 64;
 
 /// A branch switch inside an agent's session thus reflects in every view immediately instead of waiting out
@@ -51,9 +47,8 @@ pub fn update_from_notification(
     }
 }
 
-/// Eagerly warm [`CWD_GIT_CACHE`] for `cwd` off-thread, e.g. at pager startup and after a dashboard location change.
-/// The header / top bar then show the branch and worktree on the next frame instead of waiting for the first lazy refresh.
-/// No subprocess (libgit2 is filesystem-based) and a no-op when there is no tokio runtime, so callers stay infallible.
+/// Eagerly warm [`CWD_GIT_CACHE`] for `cwd` off-thread, e.g. at pager startup
+/// and after a dashboard location change.
 pub fn populate_from_cwd_async(cwd: PathBuf) {
     spawn_cwd_git_refresh(cwd);
 }
@@ -113,8 +108,8 @@ pub fn cwd_git_info_lazy(cwd: &Path) -> Option<CwdGitInfo> {
         None => (None, true),
     };
     if needs_refresh {
-        // Reserve the slot with a fresh timestamp before spawning
-        // This frame's other reads (and the next few frames) then don't spawn duplicate refreshes until this one lands or the TTL elapses
+        // Reserve the slot with a fresh timestamp before spawning This
+        // frame's other reads (and the next few frames).
         cwd_cache_insert(
             &mut cache,
             cwd.to_path_buf(),
@@ -145,7 +140,7 @@ fn spawn_cwd_git_refresh(cwd: PathBuf) {
     });
 }
 
-/// A `None` means either "not a git repo" or a transient libgit2 discovery failure, and the two are
+/// A `None` means either "not a git repo" or a transient libgit2 discovery failure, and both are
 /// indistinguishable here. The timestamp always advances so the throttle resets either way.
 fn apply_cwd_git_refresh(
     cache: &mut HashMap<PathBuf, CwdCacheEntry>,
@@ -302,9 +297,9 @@ fn collapse_home_path(path: &Path, home: Option<&Path>) -> String {
         .unwrap_or_else(|_| path.display().to_string())
 }
 
-/// Branch glyph for the git display, cached for process lifetime. The Powerline glyph (`\u{e0a0}`) is a Nerd
-/// Font-only Private Use Area codepoint, so it renders as "tofu" without a patched font. Where one can't be assumed
-/// we fall back to a glyph the platform's stock fonts cover.
+/// Branch glyph for the git display, cached for process lifetime. The
+/// Powerline glyph (`\u{e0a0}`) is a Nerd Font-only Private Use Area
+/// codepoint, so it renders as "tofu" without a patched font.
 pub(crate) fn branch_icon() -> &'static str {
     static ICON: OnceLock<&str> = OnceLock::new();
     ICON.get_or_init(|| {
@@ -319,7 +314,8 @@ pub(crate) fn branch_icon() -> &'static str {
 /// Pure decision function for [`branch_icon`] so tests can drive inputs without touching ambient env/host state.
 fn decide_branch_icon(nerd_fonts: Option<&str>, host: HostOs, brand: TerminalName) -> &'static str {
     const POWERLINE: &str = "\u{e0a0}";
-    // Windows console fonts lack `⎇`, so use `≡` (also in the legacy CP437 font).
+    // Windows console fonts lack `⎇`, so use `≡` (also in the CP437
+    // font).
     let fallback = if host == HostOs::Windows {
         "\u{2261}" // ≡
     } else {
@@ -333,9 +329,9 @@ fn decide_branch_icon(nerd_fonts: Option<&str>, host: HostOs, brand: TerminalNam
     }
 }
 
-/// Whether a Nerd Font (Private Use Area glyphs) is plausible for this host/terminal. An explicit `GROK_NERD_FONTS`
-/// override always wins: `0`/`false` means off, anything else means on. Otherwise PUA glyphs are assumed everywhere
-/// except Windows consoles and the macOS terminals that ship stock fonts (Apple Terminal, iTerm2).
+/// Whether a Nerd Font (Private Use Area glyphs) is plausible for this
+/// host/terminal. An explicit `GROK_NERD_FONTS` override always wins:
+/// `0`/`false` means off, anything else means on.
 fn decide_nerd_fonts(nerd_fonts: Option<&str>, host: HostOs, brand: TerminalName) -> bool {
     if let Some(val) = nerd_fonts {
         return !matches!(val, "0" | "false");

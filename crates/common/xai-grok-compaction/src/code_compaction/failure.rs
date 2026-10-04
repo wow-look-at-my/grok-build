@@ -23,8 +23,7 @@ pub fn is_context_length_error(message: &str) -> bool {
 }
 
 /// `needle` at message start or right after a ": " separator — where
-/// renderers put codes and reason phrases — so request content echoing it
-/// mid-prose doesn't match.
+/// renderers put codes and reason phrases.
 fn is_anchored(m: &str, needle: &str) -> bool {
     m.split(": ").any(|segment| segment.starts_with(needle))
 }
@@ -41,19 +40,13 @@ fn has_size_slug(m: &str) -> bool {
     .any(|slug| is_anchored(m, slug))
 }
 
-/// A 413 reason phrase directly after its status code — how HTTP statuses
-/// render ("413 Payload Too Large") — in the legacy, RFC 9110, and RFC-2616
-/// spellings. Adjacency keeps echoed prose and stray digit runs from
-/// matching.
 fn has_rendered_413_phrase(m: &str) -> bool {
     m.contains("413 payload too large")
         || m.contains("413 content too large")
         || m.contains("413 request entity too large")
 }
 
-/// "Input length (N tokens) exceeds the maximum allowed length (M tokens)";
-/// paired so field-length validation errors ("metadata value exceeds the
-/// maximum allowed length") don't classify as size.
+/// "Input length (N tokens) exceeds the maximum allowed length (M tokens)".
 fn has_input_length_pair(m: &str) -> bool {
     m.contains("input length") && m.contains("exceeds the maximum allowed length")
 }
@@ -81,7 +74,6 @@ mod tests {
             "API error (status 413 Payload Too Large): payload_too_large: Chat history exceeds the 800-message limit",
             "API error (status 400 Bad Request): exceed_context_size_error: request (300000 tokens) exceeds the model context size",
             "stream error (BAD_REQUEST): Input length (300000 tokens) exceeds the maximum allowed length (200000 tokens)",
-            // RFC 9110 and RFC-2616 spellings of 413's reason phrase.
             "API error (status 413 Content Too Large): Request failed (HTTP 413).",
             "upstream returned 413 Request Entity Too Large",
             "request exceeds the maximum allowed number of bytes (10485760)",
@@ -103,7 +95,6 @@ mod tests {
             "metadata value exceeds the maximum allowed length (512 characters)",
             // Echoed prose: mid-sentence, no start/": " anchor.
             "invalid_request_error: field description says request too large sometimes",
-            // Echoed 413 reason phrases without a "413" in the message.
             "invalid_request_error: user note says the payload too large banner is confusing",
             "invalid_request_error: field description mentions a content too large warning",
             "invalid_request_error: docs mention a request entity too large response",
@@ -111,8 +102,7 @@ mod tests {
             "invalid_request_error: user asked what context_length_exceeded means",
             "invalid_request_error: docs mention the payload_too_large code",
             "invalid_request_error: docs mention the request_too_large code",
-            // A stray digit run next to an echoed phrase, but not the
-            // rendered "413 <reason phrase>" adjacency.
+            // A stray digit run next to an echoed phrase, but not the rendered "413 <reason phrase>" adjacency.
             "invalid_request_error: line 413 of the doc mentions payload too large limits",
         ] {
             assert!(!is_context_length_error(msg), "should not match: {msg}");

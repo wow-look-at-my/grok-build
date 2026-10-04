@@ -1,17 +1,4 @@
-//! Vendor compatibility configuration for third-party agent surfaces
-//! (skills, rules, agents, MCPs, hooks, sessions).
-//!
-//! Historically the agent hard-coded the dir lists `[".grok", ".agents",
-//! ".claude", ".cursor"]` (and `RULES_DIRS` / `AGENT_FILENAMES`) across ~6
-//! call sites in three crates. This module now owns the canonical cell registry
-//! used by runtime resolution and diagnostics (env var → config TOML → remote
-//! setting → default ON).
-//!
-//! Two forms:
-//! - [`CompatConfigToml`] — raw, parsed from the `[compat]` TOML section. Each
-//!   cell is `Option<bool>` so `None` falls through to the resolution chain.
-//! - [`CompatConfig`] — resolved plain bools consumed at runtime. Every cell
-//!   defaults on.
+//! Vendor compatibility configuration for third-party agent surfaces (skills, rules, agents, MCPs, hooks, sessions).
 
 use serde::{Deserialize, Serialize};
 
@@ -254,7 +241,8 @@ impl Default for VendorCompat {
     }
 }
 
-/// Bare file names, no path separators: read_file matches them against `Path::file_name()`; `agent_filenames()` prepends them to the vendor-gated `.claude/` paths.
+/// Bare file names, no path separators: read_file matches them against
+/// `Path::file_name()`.
 pub(crate) const INSTRUCTION_FILENAMES: &[&str] = &[
     "Agents.md",
     "Claude.md",
@@ -286,9 +274,8 @@ impl CompatConfig {
         }
     }
 
-    /// Config directories that may contain `skills/` subdirectories, in priority order. `.grok` and `.agents` are always included; `.claude` and
-    /// `.cursor` are gated on their respective `skills` cell. Replaces the hard-coded `[".grok", ".agents", ".claude", ".cursor"]` in
-    /// `collect_skill_config_dirs`. When all cells are on, the returned list is identical to the historical constant.
+    /// Config directories that may contain `skills/` subdirectories, in priority order. `.grok` and `.agents` are always included; `.claude` and `.cursor` are gated on their
+    /// respective `skills` cell.
     pub fn skill_config_dirs(&self) -> Vec<&'static str> {
         let mut dirs = vec![".grok", ".agents"];
         if self.claude.skills {
@@ -300,9 +287,9 @@ impl CompatConfig {
         dirs
     }
 
-    /// Subdirectories scanned for `*.md` rules files. `.grok/rules` is always included;
-    /// `.claude/rules` and `.cursor/rules` are gated on their respective `rules` cell. Replaces the
-    /// hard-coded `RULES_DIRS` constant. When all cells are on, the returned list is identical.
+    /// Subdirectories scanned for `*.md` rules files. `.grok/rules` is always
+    /// included; `.claude/rules` and `.cursor/rules` are gated on their
+    /// respective `rules` cell.
     pub fn rules_dirs(&self) -> Vec<&'static str> {
         let mut dirs = vec![".grok/rules"];
         if self.claude.rules {
@@ -314,9 +301,9 @@ impl CompatConfig {
         dirs
     }
 
-    /// Filenames (and relative paths) recognized as project-instruction files. The generic names are always included; the
-    /// `.claude/`-prefixed entries are gated on `claude.agents`. Replaces the hard-coded `AGENT_FILENAMES` constant. When
-    /// `claude.agents` is on, the returned list is identical (same order).
+    /// Filenames (and relative paths) recognized as project-instruction
+    /// files. The generic names are always included; the `.claude/`-prefixed
+    /// entries are gated on `claude.agents`.
     pub fn agent_filenames(&self) -> Vec<&'static str> {
         let mut names = INSTRUCTION_FILENAMES.to_vec();
         if self.claude.agents {
@@ -326,9 +313,9 @@ impl CompatConfig {
         names
     }
 
-    /// Home-level vendor directories scanned for AGENTS.md / rules files (e.g. `~/.claude`, `~/.cursor`). `.claude` is
-    /// gated on `claude.agents` and `.cursor` on `cursor.agents`. Replaces the hard-coded `[".claude", ".cursor"]` home
-    /// scan. When both cells are on, the returned list is identical (same order).
+    /// Home-level vendor directories scanned for AGENTS.md / rules files
+    /// (e.g. `~/.claude`, `~/.cursor`). `.claude` is gated on `claude.agents`
+    /// and `.cursor` on `cursor.agents`.
     pub fn agents_home_dirs(&self) -> Vec<&'static str> {
         let mut dirs = Vec::new();
         if self.claude.agents {

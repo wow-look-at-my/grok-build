@@ -1,4 +1,4 @@
-//! When a write or edit tool touches a project `.grok/workflows/*.rhai` script, run the workflow validator on it and warn the model on failure.
+//! When a write or edit tool touches a project `.grok/workflows/*.rhai` script.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -8,7 +8,6 @@ use std::time::Duration;
 use xai_grok_tools::types::tool::ToolKind;
 
 /// Canonical path fields on write and edit tools.
-/// Client-facing names come from `${{ params.<kind>.<param> }}` via [`path_param_names_for_kind`].
 const CANONICAL_PATH_PARAMS: &[&str] = &["file_path", "path", "target_file"];
 
 const CHECK_TIMEOUT: Duration = Duration::from_millis(100);

@@ -1,10 +1,4 @@
 //! Interactive playground for the Ctrl+T todo pane (hide-done empty state).
-//!
-//! ```text
-//! cargo run -p xai-grok-pager --example todo_pane_playground
-//! ```
-//!
-//! Keys: h toggles hide/show done (same as the real pane), n/p switch scenarios, Esc/q quits.
 
 use std::io::{self, stdout};
 use std::time::Duration;

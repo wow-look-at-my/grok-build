@@ -1,10 +1,4 @@
-//! `web_fetch` tool — client-side URL fetching with improved HTML-to-markdown
-//! conversion and SSRF protection.
-//!
-//! Fetches a URL via `reqwest`, converts HTML to markdown via `htmd` (with
-//! `<script>`/`<style>`/etc. stripped), and returns content to the model.
-//! Prefers `text/markdown` in the Accept header so doc sites that serve markdown
-//! directly bypass the HTML conversion entirely.
+//! `web_fetch` tool — client-side URL fetching with improved HTML-to-markdown conversion and SSRF protection.
 
 mod artifact;
 mod cache;
@@ -22,12 +16,10 @@ pub use domain::{DomainMatcher, domain_from_url};
 pub use error::WebFetchError;
 
 // ───────────────────────────────────────────────────────────────────────────
-// Config enum (feature flag gating)
-// ───────────────────────────────────────────────────────────────────────────
+// Config enum (feature flag gating).
 
-/// Configuration for the `web_fetch` tool. When `Enabled`, the tool is registered and a
-/// `WebFetchClient` is injected into `Resources`. When `Disabled` (default), the tool is not
-/// registered.
+/// Configuration for the `web_fetch` tool. When `Enabled`, the tool is
+/// registered and a `WebFetchClient` is injected into `Resources`.
 #[derive(Debug, Clone, Default)]
 pub enum WebFetchConfig {
     #[default]
@@ -51,8 +43,7 @@ use crate::types::resources::SessionFolder;
 use crate::types::tool::{ToolKind, ToolNamespace};
 
 // ───────────────────────────────────────────────────────────────────────────
-// Input
-// ───────────────────────────────────────────────────────────────────────────
+// Input.
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct WebFetchInput {
@@ -61,9 +52,7 @@ pub struct WebFetchInput {
     pub url: String,
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Tool
-// ───────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────── Tool.
 
 #[derive(Debug, Default)]
 pub struct WebFetchTool;

@@ -7,8 +7,7 @@ use crate::slash::command::{
     CommandExecCtx, CommandResult, ScheduledTaskPreview, SlashCommand, slash_meta,
 };
 
-/// `LoopCommand::required_tools()` returns this; a module-level constant lets the trait method return a `'static` slice.
-/// The name comes from `xai-grok-tools`, so a tool rename shows up here as a compile error.
+/// `LoopCommand::required_tools()` returns this; a module-level constant lets the trait method return a `'static`.
 const LOOP_REQUIRED_TOOLS: &[&str] = &[SCHEDULER_CREATE_TOOL_NAME];
 
 pub struct LoopCommand;
@@ -97,8 +96,7 @@ impl SlashCommand for LoopCommand {
 
         let (interval_token, prompt) = parse_loop_args(args);
 
-        // Show a concrete cadence only for an unambiguous leading token; otherwise show a neutral placeholder
-        // The authoritative schedule arrives when the model calls scheduler_create, whose ScheduledTaskCreated replaces this provisional entry
+        // Show a concrete cadence only for an unambiguous leading token.
         let human_schedule = match interval_token {
             Some(token) => interval_to_human(token),
             None => "scheduling…".to_string(),

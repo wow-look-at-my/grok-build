@@ -1,7 +1,4 @@
 //! Wire row + mapper for durable `SessionUpdate::BackgroundTasks` snapshots.
-//!
-//! Incrementals (`task_backgrounded` / `task_completed`) stay on their own
-//! methods; this list is the full-state twin of `SessionUpdate::Plan`.
 
 use chrono::{DateTime, Utc};
 use xai_grok_tools::computer::types::TaskKind;
@@ -75,8 +72,7 @@ impl BackgroundTaskRow {
     }
 }
 
-/// Outcome of awaiting the snapshot listing. Distinguishes timeout (skip emit)
-/// from a missing backend (`Ok(None)` → authoritative clear).
+/// Outcome of awaiting the snapshot listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SnapshotListOutcome {
     Tasks(Vec<TaskSnapshot>),

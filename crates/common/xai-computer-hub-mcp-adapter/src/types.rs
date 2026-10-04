@@ -1,9 +1,4 @@
 //! MCP protocol types used by the adapter.
-//!
-//! These mirror the MCP specification's JSON-RPC shapes for server
-//! metadata, tool definitions, and call results. They are intentionally
-//! decoupled from any specific transport implementation so the bridge
-//! stays testable with in-memory mocks.
 
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +42,7 @@ pub struct McpCallResult {
 
 /// A single content block inside an [`McpCallResult`].
 ///
-/// Covers the three content types defined by the MCP specification:
+/// Covers those content types defined by the MCP specification:
 /// text, image (base64-encoded), and embedded resource.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]

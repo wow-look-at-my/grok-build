@@ -1,9 +1,4 @@
 //! Core bridge that connects an MCP server to the computer hub.
-//!
-//! [`McpBridge`] discovers tools from an [`McpTransport`] and registers
-//! them with a hub `ToolServer` via one `ToolServerHandler` per
-//! tool. Incoming hub calls are translated to MCP `tools/call` and the
-//! response is handed back in the MCP `CallToolResult` shape.
 
 use std::sync::Arc;
 
@@ -27,9 +22,6 @@ pub struct McpBridgeConfig {
 }
 
 /// Result of a successful [`McpBridge::connect`] call.
-///
-/// Contains the bridge handle and the server info returned during the
-/// MCP initialize handshake.
 pub struct McpBridgeHandle {
     /// The bridge managing the MCP-to-hub tool registrations.
     pub bridge: McpBridge,
@@ -47,17 +39,6 @@ impl std::fmt::Debug for McpBridgeHandle {
 }
 
 /// Bridges an MCP server's tools into the computer hub.
-///
-/// On construction the bridge performs the MCP `initialize` handshake,
-/// discovers tools via `tools/list`, and builds a handler
-/// for each one. Callers wire these handlers into a
-/// [`xai_computer_hub_sdk::ToolServerBuilder`] to register them
-/// with the hub.
-///
-/// Callers **must** call [`McpBridge::shutdown`] before dropping to
-/// close the underlying MCP transport cleanly. If the bridge is dropped
-/// without an explicit shutdown, a best-effort `close()` is spawned on
-/// the tokio runtime (mirroring `ToolServer`'s drop behavior).
 pub struct McpBridge {
     transport: Arc<dyn McpTransport>,
     handlers: Vec<Arc<McpToolHandler>>,
@@ -152,9 +133,8 @@ impl McpBridge {
         })
     }
 
-    /// Handlers to register with a [`xai_computer_hub_sdk::ToolServerBuilder`].
-    ///
-    /// Each handler implements `ToolServerHandler` for one MCP tool.
+    /// Handlers to register with a
+    /// [`xai_computer_hub_sdk::ToolServerBuilder`].
     pub fn handlers(&self) -> &[Arc<McpToolHandler>] {
         &self.handlers
     }
@@ -181,12 +161,7 @@ impl Drop for McpBridge {
         crate::metrics::mcp_tools_bridged_set(0);
         let transport = Arc::clone(&self.transport);
         if tokio::runtime::Handle::try_current().is_ok() {
-            // `Drop` cannot await, so the close has to run detached. Its own `Err`
-            // arm logs the failure it can report; the "nobody" a panic would tell
-            // is the transport, which is being torn down by this very drop, and the
-            // adapter's `shutdown` path is where a caller that still cares learns
-            // the outcome. `xai_grok_tools::util::detached` is unreachable here
-            // without a dependency cycle.
+            // `Drop` cannot await, so the close has to run detached.
             #[allow(clippy::disallowed_methods)]
             tokio::spawn(async move {
                 if let Err(err) = transport.close().await {
@@ -198,9 +173,6 @@ impl Drop for McpBridge {
 }
 
 /// Hub-facing handler for a single MCP tool.
-///
-/// Translates hub `tool_call_request` frames into MCP `tools/call`
-/// invocations and hands the result back in the MCP `CallToolResult` shape.
 pub struct McpToolHandler {
     tool_id: ToolId,
     definition: McpToolDefinition,
@@ -267,11 +239,6 @@ impl xai_computer_hub_sdk::ToolServerHandler for McpToolHandler {
 }
 
 /// Project an [`McpCallResult`] into the value handed to the hub.
-///
-/// The gateway renders the MCP `CallToolResult` shape one block per content
-/// entry (a `ToolOutputWire` serialised here gets wrapped again by the SDK
-/// and lands as one JSON text block). It needs a non-empty `content` array,
-/// so a side-effect-only result gets one empty text block.
 fn translate_mcp_result(mut result: McpCallResult) -> Result<Value, serde_json::Error> {
     if result.content.is_empty() {
         result.content.push(McpContent::Text {

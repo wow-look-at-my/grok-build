@@ -1,7 +1,4 @@
 //! Leader-mode (`grok agent --leader stdio`) test harness.
-//!
-//! The fixture owns only subprocess handles it created: one initial persistent leader and each returned stdio client.
-//! Lock-file PIDs are observations only; a detached replacement leader is never adopted or signaled.
 
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -24,12 +21,8 @@ const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const LEADER_RECONNECTED_METHOD: &str = "x.ai/leader_reconnected";
 
-/// Env var naming the binary that elects/hosts the leader in a two-binary (version-skew) test.
-/// Falls back to [`grok_binary`]'s resolution.
 pub const LEADER_BINARY_ENV: &str = "GROK_BINARY_LEADER";
 
-/// Env var naming the binary for the second (usually newer) client in a two-binary test.
-/// Falls back to [`grok_binary`]'s resolution.
 pub const CLIENT_BINARY_ENV: &str = "GROK_BINARY_CLIENT";
 
 fn role_binary(env_key: &str) -> PathBuf {
@@ -55,9 +48,7 @@ pub fn client_binary() -> PathBuf {
     role_binary(CLIENT_BINARY_ENV)
 }
 
-/// Owns the concrete initial persistent leader shared by a test's clients. A replacement leader spawned by the code under
-/// test is outside this fixture's ownership. [`Self::wait_for_new_leader`] may observe one for assertions but never
-/// signals the PID it reads.
+/// Owns the concrete initial persistent leader shared by a test's clients.
 pub struct LeaderFixture {
     inner: Arc<Mutex<LeaderFixtureState>>,
 }
@@ -101,9 +92,7 @@ impl Drop for FixtureClientRegistration {
     }
 }
 
-/// A `grok agent --leader stdio` client subprocess speaking ACP over pipes. It answers the agent with the
-/// default [`ClientPolicy`], reads its counters from the transcript, and runs every request under a scaled
-/// budget; a timeout, or a failed setup request, panics with the child's stderr.
+/// A `grok agent --leader stdio` client subprocess speaking ACP over pipes.
 pub struct LeaderStdioClient {
     connection: AgentConnection,
     process: TestProcess,
@@ -500,9 +489,7 @@ fn reap_exited_persistent_leader(
             format!("persistent leader pid {} did not exit", leader.pid),
         ));
     }
-    // macOS may report EPERM when the group contains only the unreaped zombie leader
-    // The direct child is already known exited; attempt descendant cleanup while its PGID is reserved, then release before consuming status
-    // Focused tests separately prove a live descendant is removed.
+    // macOS may report EPERM when the group contains only the unreaped zombie leader The direct child is already known exited.
     let _ = leader.tree.kill();
     leader.tree.release();
     leader.child.wait().map(|_| ())

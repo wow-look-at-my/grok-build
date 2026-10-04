@@ -1,6 +1,4 @@
 //! Terminal color support detection and color conversion utilities.
-//!
-//! Detects the terminal's color capabilities and downgrades RGB colors to the appropriate level when needed.
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -12,11 +10,9 @@ use anstyle::{Ansi256Color, AnsiColor, Color, RgbColor};
 pub enum ColorLevel {
     /// No color support (monochrome terminals)
     None,
-    /// Basic 16-color ANSI support (colors 0-15)
     Basic,
-    /// 256-color support (colors 0-255)
     Ansi256,
-    /// 24-bit truecolor RGB support (16 million colors)
+    /// 24-bit truecolor RGB support (colors)
     #[default]
     TrueColor,
 }
@@ -51,8 +47,7 @@ pub fn detect_color_level() -> ColorLevel {
         }
 
         let level = match supports_color::on(supports_color::Stream::Stdout) {
-            // Not a TTY (tests, piped), so default to TrueColor
-            // The pager is a TUI app that always runs inside a terminal; stdout may not be a TTY when the pager renders to stderr
+            // Not a TTY (tests, piped), so default to TrueColor The pager is a TUI app that always runs inside a terminal.
             None => ColorLevel::TrueColor,
             Some(level) => {
                 if level.has_16m {
@@ -67,8 +62,7 @@ pub fn detect_color_level() -> ColorLevel {
             }
         };
 
-        // The `supports-color` crate relies on COLORTERM=truecolor, but tmux/SSH/mosh often strip that variable
-        // When the crate reports only 256-color support, upgrade to TrueColor if env vars identify a known truecolor-capable terminal
+        // The `supports-color` crate relies on COLORTERM=truecolor.
         if level < ColorLevel::TrueColor && terminal_supports_truecolor() {
             return ColorLevel::TrueColor;
         }
@@ -120,8 +114,7 @@ fn terminal_supports_truecolor() -> bool {
 /// Process-wide upper bound on the effective color level, stored as the `ColorLevel` declaration-order discriminant.
 static COLOR_LEVEL_CAP: AtomicU8 = AtomicU8::new(ColorLevel::TrueColor as u8);
 
-/// When set, RGB syntax colors are remapped with [`polarity_safe_syntax_ansi`] instead of nearest-ANSI16 (see `xai-grok-pager-render` syntax docs).
-/// Used by pager minimal mode: the canvas is the terminal's own bg, so night-theme pastels quantized to White vanish on light profiles.
+/// When set, RGB syntax colors are remapped with [`polarity_safe_syntax_ansi`] instead of nearest-ANSI16.
 static POLARITY_SAFE_SYNTAX: AtomicU8 = AtomicU8::new(0);
 
 /// Set the process-wide upper bound on the effective color level.
@@ -130,9 +123,8 @@ pub fn set_color_level_cap(cap: ColorLevel) {
     COLOR_LEVEL_CAP.store(cap as u8, Ordering::Relaxed);
 }
 
-/// Enable dual-polarity-safe syntax color remapping (minimal / terminal-native).
-///
-/// [`adapt_color`] then maps near-gray RGB to "no color" (inherit terminal default fg) and chromatic RGB to base ANSI accents, never White.
+/// Enable dual-polarity-safe syntax color remapping (minimal /
+/// terminal-native).
 pub fn set_polarity_safe_syntax(enabled: bool) {
     POLARITY_SAFE_SYNTAX.store(u8::from(enabled), Ordering::Relaxed);
 }
@@ -240,7 +232,6 @@ pub fn polarity_safe_syntax_ansi(r: u8, g: u8, b: u8) -> Option<AnsiColor> {
     } else {
         (ri - gi) * 60 / chroma + 240
     };
-    // Magenta starts at 255° so Tokyo Night purple (#bb9af7, ~261°) lands Magenta rather than Blue; pure blues (~221°) stay Blue
     Some(match h {
         0..30 | 330..=360 => AnsiColor::Red,
         30..90 => AnsiColor::Yellow,
@@ -332,7 +323,7 @@ mod tests {
 
         // Medium gray
         let result = rgb_to_ansi256(RgbColor(128, 128, 128));
-        assert!(result.index() >= 232); // Indices 232 and up are the xterm grayscale ramp
+        assert!(result.index() >= 232);
     }
 
     #[test]
@@ -369,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_ansi256_to_ansi16_standard() {
-        // First 16 colors should map directly
+        // First colors should map directly
         assert_eq!(ansi256_to_ansi16(Ansi256Color(0)), AnsiColor::Black);
         assert_eq!(ansi256_to_ansi16(Ansi256Color(1)), AnsiColor::Red);
         assert_eq!(ansi256_to_ansi16(Ansi256Color(7)), AnsiColor::White);

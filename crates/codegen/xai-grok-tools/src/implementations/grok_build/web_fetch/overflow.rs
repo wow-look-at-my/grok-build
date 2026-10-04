@@ -167,16 +167,12 @@ impl OverflowHandler {
     }
 }
 
-/// First whole `f64` above the largest `usize` any supported target has: 2^64,
-/// one past `usize::MAX` on the 64-bit targets this builds for.
 const USIZE_CEILING: f64 = 18_446_744_073_709_551_616.0;
 
 pub(super) fn inline_budget(
     context_window_tokens: u64,
     max_markdown_length: usize,
 ) -> InlineBudget {
-    // The window's share is taken at f64 precision, which is exact below 2^53
-    // chars; every real context window is far under that.
     #[allow(clippy::cast_precision_loss)]
     let share =
         (truncate::estimate_chars(context_window_tokens) as f64) * WEB_FETCH_CONTEXT_PERCENT;

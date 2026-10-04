@@ -24,8 +24,8 @@ pub struct ListDirToolCallBlock {
 }
 
 impl ListDirToolCallBlock {
-    /// Pre-completed blocks have no meaningful local timing; `started_at` is `None`.
-    /// Timing is only set for blocks that enter a running UI state (via `set_last_running(true)` in `ScrollbackState`).
+    /// Pre-completed blocks have no meaningful local timing; `started_at` is
+    /// `None`.
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: path.into(),
@@ -66,9 +66,8 @@ impl ListDirToolCallBlock {
         self.error = error;
     }
 
-    /// Finalize elapsed time from `started_at`.
-    ///
-    /// Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set (already finalized).
+    /// Finalize elapsed time from `started_at`. Idempotent: no-op if `started_at` is `None` (pre-completed block) or if `elapsed_ms` is already set
+    /// (already finalized).
     pub fn finish(&mut self) {
         if self.elapsed_ms.is_some() {
             return;
@@ -172,7 +171,7 @@ impl BlockContent for ListDirToolCallBlock {
                         &self.output,
                         theme.primary(),
                     ) {
-                        // Indent output by 2 spaces
+                        // Indent output by multiple spaces
                         let mut spans = vec![Span::styled("  ".to_string(), theme.primary())];
                         spans.extend(rl.line.spans);
                         let mut block_line: BlockLine = Line::from(spans).into();

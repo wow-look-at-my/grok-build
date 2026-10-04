@@ -1,10 +1,4 @@
 //! A harness model slot brings its own sampler to a side call.
-//!
-//! `prepare_side_call` used to take the session's client and write the
-//! slot's model id onto it, which sends one model's id to another model's
-//! endpoint. The slot now resolves its own client from the catalog, and a
-//! slot that resolves to nothing keeps the session's client AND the session's
-//! model — never the pinned id on a client that cannot serve it.
 
 use super::support::*;
 use super::*;

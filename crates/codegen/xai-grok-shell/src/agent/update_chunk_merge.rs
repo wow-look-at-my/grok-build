@@ -25,15 +25,14 @@ fn default_max_items() -> u64 {
 }
 
 fn default_max_bytes() -> u64 {
-    1024 * 2 // 2 KB
+    1024 * 2
 }
 
 fn default_max_duration_ms() -> u64 {
-    10 // 10 ms
+    10
 }
 
-/// Low-level buffer for ACP text chunks (agent message/thought chunks). API: `consume_chunk(...) -> Option<SessionNotification>` returns a notification to send now, typically the previously buffered one.
-/// `None` means keep buffering. `flush() -> Option<SessionNotification>` returns any pending buffered notification to send.
+/// Low-level buffer for ACP text chunks (agent message/thought chunks).
 pub(crate) struct ReplayBuffer {
     settings: Option<BufferingSettings>,
     pending: Option<SessionNotification>,
@@ -110,7 +109,7 @@ impl ReplayBuffer {
         }
 
         if !incoming_notification_timestamp_in_range {
-            // Pop the previously pending notification and send it immediately
+            // Pop the pending notification and send it immediately
             let prev = self.pending.replace(incoming);
             if let Some(prev) = prev {
                 return Some((prev, None));
@@ -131,7 +130,6 @@ impl ReplayBuffer {
         match (force_send, first, second) {
             (_, pending, Some(next)) => {
                 // Merge wasn't allowed; send both immediately to preserve current chunk order.
-                // (Nothing remains buffered.)
                 self.pending_count = 0;
                 self.pending_bytes = 0;
                 Some((pending, Some(next)))
@@ -160,9 +158,8 @@ impl ReplayBuffer {
         }
     }
 
-    /// Two-by-two dispatch on protocol kind: Same kind on both sides: delegate to the per-kind merge function.
-    /// Different kinds: can't merge, force-flush prev and pass incoming through.
-    /// No prev: buffer the incoming chunk if it's of a bufferable kind, force-send otherwise.
+    /// Different kinds: can't merge, force-flush prev and pass incoming through. No prev: buffer the incoming
+    /// chunk if it's of a bufferable kind, force-send otherwise.
     fn merge(
         &mut self,
         prev: Option<SessionNotification>,
@@ -350,7 +347,7 @@ fn merge_meta(prev: Option<acp::Meta>, new: Option<acp::Meta>) -> Option<acp::Me
     }
 }
 
-/// Merge two consecutive ACP notifications.
+/// Merge consecutive ACP notifications.
 fn merge_acp_chunks(
     new: acp::SessionNotification,
     prev: acp::SessionNotification,
@@ -414,7 +411,7 @@ fn merge_acp_chunks(
     }
 }
 
-/// Merge two consecutive xAI notifications.
+/// Merge consecutive xAI notifications.
 fn merge_xai_chunks(
     prev: crate::extensions::notification::SessionNotification,
     new: crate::extensions::notification::SessionNotification,
@@ -463,9 +460,7 @@ fn merge_xai_chunks(
                     tool_index: prev_idx,
                     name: prev_name.or(new_name),
                     arguments_delta: merged_args,
-                    // The LATEST title wins, the opposite of the name. A name
-                    // is stated once and never changes; a title is restated
-                    // every time the arguments name the call more exactly.
+                    // The LATEST title wins, the opposite of the name.
                     title: new_title.or(prev_title),
                 },
                 meta: None,
@@ -488,8 +483,6 @@ fn merge_xai_chunks(
     }
 }
 
-/// Two `ToolCallDeltaChunk`s belong to the same tool call if their ids match (when both present), otherwise if their `tool_index`es match.
-/// Continuation chunks omit the id, so the index fallback is what stitches them to the initial chunk carrying the id and name.
 fn same_tool_call(
     prev_id: &Option<String>,
     new_id: &Option<String>,

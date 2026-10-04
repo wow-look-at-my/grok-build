@@ -1,11 +1,5 @@
-//! Minimal shell-token syntax for completion: find the token under the cursor and re-quote completed components to match how it was typed.
-//! Consumed by the file provider; the natural home for the $PATH provider's segmentation too, once it learns quoting.
-//!
-//! ## Scope (deliberately minimal)
-//!
-//! [`parse_current_token`] understands just enough POSIX-shell syntax to find the token under the cursor.
-//! It handles double/single quotes, backslash escapes, whitespace, the segment separators `|`/`;`/`&`, and the redirection operators `<`/`>`.
-//! It does NOT model the full grammar: no subshells or `$(…)`, no here-docs, no brace/glob expansion, no `~user` home lookup.
+//! Minimal shell-token syntax for completion: find the token under the cursor
+//! and re-quote completed components.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum QuoteStyle {
@@ -30,11 +24,8 @@ pub(super) struct CurrentToken {
     /// Byte offset of the still-open quote (meaningful when `quote != None`).
     pub(super) open_quote_idx: usize,
     /// Quote structure of the REPLACED component when no quote is open at the cursor.
-    /// It holds the style of a quote whose closer sits inside the component (at/after `dir_raw_end`).
-    /// The bool says whether its opener sits inside too (and so needs re-emitting). `None`: quote-free component.
     pub(super) closed_quote: Option<(QuoteStyle, bool)>,
     /// Byte-aligned with `value`: `true` where the char was consumed unquoted and unescaped.
-    /// Those are the only spellings the shell expands `~`/`$` in (`'$HOME'`, `\$HOME`, and `"~/…` are literal to it).
     pub(super) plain_mask: Vec<bool>,
     /// Completed tokens before this one in the current segment.
     pub(super) tokens_before: usize,
@@ -204,8 +195,8 @@ pub(super) fn parse_current_token(prefix: &str) -> CurrentToken {
                 Vec::new(),
             ),
         };
-    // A quote closed before the component boundary stays inside the raw dir (balanced, kept verbatim)
-    // Only closers the component consumed constrain how it re-renders
+    // A quote closed before the component boundary stays inside the raw dir
+    // (balanced, kept verbatim).
     let closed_quote = last_close.and_then(|(open, close, style)| {
         (close >= dir_raw_end).then_some((style, open >= dir_raw_end))
     });
@@ -236,14 +227,14 @@ pub(super) fn build_insert_token(
 ) -> String {
     let mut out = String::with_capacity(raw_dir.len() + name.len() + 4);
     out.push_str(raw_dir);
-    // A completed component starting with `-` would otherwise insert a flag-looking argument Tab on `rm ` could produce `rm -rf`, invisible when the single-candidate insta-accept skips the dropdown
-    // Quoting wouldn't help (`rm "-rf"` is still a flag to rm) Anchor bare names as explicit paths, deliberately stricter than bash
+    // A completed component starting with `-` will otherwise insert a
+    // flag-looking argument Tab on `rm ` can produce `rm -rf`.
     if raw_dir.is_empty() && name.starts_with('-') {
         out.push_str("./");
     }
-    // The quote context the component renders in: the quote still open at the cursor, or one the component CLOSED
-    // In `cat "My Dir/fi"`, raw_dir keeps the dangling opener, so dropping the closer would emit an unbalanced line
-    // A quote opened INSIDE the component (after the last `/`) is not part of `raw_dir`; re-emit it
+    // The quote context the component renders in: the quote still open at the
+    // cursor, or one the component CLOSED In `cat "My Dir/fi"`, raw_dir keeps
+    // the dangling opener.
     let (style, reopen) = match tok.quote {
         QuoteStyle::None => tok.closed_quote.unwrap_or((QuoteStyle::None, false)),
         open => (open, tok.open_quote_idx >= tok.dir_raw_end),
@@ -276,7 +267,6 @@ pub(super) fn build_insert_token(
 }
 
 /// Bash-ish set of characters that need a backslash outside quotes.
-/// Deliberately generous: over-escaping is harmless to the shell, under-escaping breaks the command.
 fn needs_backslash(c: char) -> bool {
     matches!(
         c,
@@ -306,7 +296,8 @@ fn needs_backslash(c: char) -> bool {
 }
 
 fn escape_unquoted(name: &str) -> String {
-    // Control chars (newlines…) can't be backslash-escaped portably (`\` then a newline is a line continuation); single-quote the whole component
+    // Control chars (newlines…) cannot be backslash-escaped portably (`\`
+    // then a newline is a line continuation).
     if name.chars().any(char::is_control) {
         return format!("'{}'", escape_single_quoted(name));
     }

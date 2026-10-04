@@ -1,16 +1,4 @@
-//! Probe that verifies a running workspace-server actually serves tools over the server connection (not just that it reached READY).
-//!
-//! Connects to the server as a client harness and binds the workspace-server's session (its `server_id` equals the sandbox `session_id`).
-//! Then invokes real tools and asserts the results:
-//!   - `run_terminal_command` echoes a nonce that must come back,
-//!   - `read_file` reads a file the first command wrote.
-//!
-//! Exits 0 and prints `PROBE_OK` on success; non-zero with a diagnostic on failure.
-//! Intended for sandbox end-to-end tests.
-//!
-//! The client connects to the *local* server the workspace-server reaches back to (e.g. `ws://localhost:10030/v1/tools`), using a bearer token.
-//! `servers.list` is scoped per-user on the server, so the bearer must resolve to the same user that owns the session; the
-//! access token from `~/.grok/auth.json` does (same identity).
+//! Probe that verifies a running workspace-server serves tools over the server connection (not that it reached READY).
 
 #![deny(clippy::indexing_slicing)]
 
@@ -103,8 +91,7 @@ async fn main() -> anyhow::Result<()> {
 
     let credential = AuthCredential::bearer(bearer(&args));
 
-    // The server connection can drop once right after connect (the SDK reconnects with backoff)
-    // build()'s eager session_open doesn't survive that first blip, so retry the connect and bind a few times
+    // The server connection can drop once right after connect (the SDK reconnects with backoff) build()'s eager session_open doesn't survive.
     let mut last_err = None;
     for attempt in 1..=8u32 {
         match connect_and_bind(&args, &credential).await {

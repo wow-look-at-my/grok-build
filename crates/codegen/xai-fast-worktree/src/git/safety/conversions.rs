@@ -34,7 +34,6 @@ pub(super) fn find_converted_path(worktree: &Path, snapshot: &str) -> Option<Kee
         {
             records.next();
         }
-        // Porcelain records are `XY <path>`: two status bytes, a space, path.
         let Some(path) = record.get(3..).filter(|path| !path.is_empty()) else {
             continue;
         };

@@ -1,12 +1,4 @@
 //! WebSocket relay sync for real-time session sharing.
-//!
-//! Features:
-//! - Connection state machine with Disconnected, Connecting, Connected states
-//! - The sync cursor persists to disk so a session can pick up after being offline
-//! - Status callbacks for TUI indicators
-//! - Sessions keep working when the relay is unavailable
-//!
-//! Reconnection is handled by `run_relay_loop` in the relay module.
 
 use crate::agent::relay::{RelayConfig, spawn_relay_connection};
 use crate::relay::types::AgentType;
@@ -32,9 +24,8 @@ pub(crate) fn build_share_url(session_id: &str) -> String {
     format!("{}/build/{}", base_url, session_id)
 }
 
-/// Connection state for the relay sync.
-/// Reconnection is handled internally by `run_relay_loop` in relay.rs.
-/// The sync task only observes the transitions from Disconnected through Connecting to Connected.
+/// Connection state for the relay sync. Reconnection is handled internally by
+/// `run_relay_loop` in relay.rs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConnectionState {
     /// Not connected to relay.
@@ -88,8 +79,6 @@ pub struct RelaySyncState {
 }
 
 /// Status of relay sync for a session.
-/// This status is based solely on the relay sync state file (`relay_sync.json`), not on comparing against `updates.jsonl` line counts.
-/// Those two numbers measure different things and can diverge (e.g., sessions created before relay sync was enabled, filtered event types).
 #[derive(Debug, Clone)]
 pub struct SyncStatus {
     /// Whether relay sync state file exists (i.e., relay sync was enabled for this session).
@@ -171,9 +160,8 @@ enum RelaySyncMsg {
     Shutdown,
 }
 
-/// Syncs session updates to the relay via WebSocket. Provides a non-blocking API for queuing notifications. WebSocket communication happens in a background task, so the main session loop never blocks.
-/// Reconnection is handled by `run_relay_loop` in relay.rs. This struct only manages the queue/flush lifecycle and connection state observation. The sync cursor persists to disk so a session can pick up after being offline
-/// Connection state observation via [`Self::connection_state`] Backpressure with configurable buffer limits
+/// Syncs session updates to the relay via WebSocket. Provides a non-blocking API for queuing notifications. WebSocket communication happens in a background task, so the main session loop never blocks. Reconnection is handled
+/// by `run_relay_loop` in relay.rs.
 pub struct RelaySync {
     /// Channel to send messages to the sync task.
     tx: mpsc::UnboundedSender<RelaySyncMsg>,
@@ -385,7 +373,7 @@ async fn relay_sync_task(
                         pending.push(*notification);
                     }
                     Some(RelaySyncMsg::Flush) => {
-                        // Don't flush until the initialize handshake is complete; the relay may reject or drop messages before then
+                        // Don't flush until the initialize handshake is complete.
                         if !initialized {
                             tracing::debug!(
                                 session_id = %session_id,
@@ -396,7 +384,6 @@ async fn relay_sync_task(
                         }
 
                         // Send pending notifications, preserving unsent items on failure.
-                        // We iterate by index so that on send failure the remaining items stay in `pending` instead of being consumed by drain
                         let mut sent_count = 0;
                         while sent_count < pending.len() {
                             let Some(notification) = pending.get(sent_count) else {
@@ -419,8 +406,7 @@ async fn relay_sync_task(
 
                             if to_relay_tx.send(json_rpc.to_string()).is_ok() {
                                 sent_count += 1;
-                                // The cursor tracks channel enqueue, not delivery
-                                // Events may be lost if the connection drops between enqueue and socket write
+                                // The cursor tracks channel enqueue, not delivery Events may be lost if the connection drops between enqueue.
                                 sync_state.update_cursor(event_id);
                             } else {
                                 tracing::debug!(
@@ -440,7 +426,6 @@ async fn relay_sync_task(
                         pending_count.fetch_sub(sent_count, std::sync::atomic::Ordering::Relaxed);
 
                         // Persist sync state synchronously to guarantee write ordering.
-                        // The file is small (~100 bytes) and flushes are infrequent.
                         if sent_count > 0
                             && let Some(dir) = &cfg.session_dir
                             && let Err(e) = sync_state.save(dir)
@@ -466,8 +451,8 @@ async fn relay_sync_task(
 }
 
 /// Resolve the event ID for a notification being flushed to the relay.
-/// Preserves the `eventId` from the notification's meta if present; otherwise generates a `{sessionId}-{counter}` ID via the global event_id counter.
-/// Event IDs stay monotonically increasing and comparable by the relay, avoiding gaps caused by random UUIDs.
+/// Preserves the `eventId` from the notification's meta if present; otherwise
+/// generates a `{sessionId}-{counter}` ID via the global event_id counter.
 fn resolve_event_id(notification: &acp::SessionNotification) -> String {
     notification
         .meta
@@ -600,8 +585,7 @@ mod tests {
         assert_eq!(ConnectionState::Connected.to_string(), "connected");
     }
 
-    // ===== Backoff Logic Tests =====
-    // These test the backoff helper which may be used in future reconnection strategies.
+    // ===== Backoff Logic Tests ===== These test the backoff helper which may be used.
 
     const INITIAL_BACKOFF_MS: u64 = 1000;
     const BACKOFF_MULTIPLIER: f64 = 2.0;
@@ -824,7 +808,6 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let session_dir = temp_dir.path();
 
-        // Create sync state showing 3 synced events
         let sync_state = RelaySyncState {
             relay_session_id: None,
             synced_count: 3,
@@ -953,7 +936,6 @@ mod tests {
         let mut initialized = false;
 
         let update_state = |_state: ConnectionState| {
-            // The actual state transition is verified via `initialized`.
         };
 
         let msg = serde_json::json!({

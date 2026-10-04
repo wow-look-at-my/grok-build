@@ -4,14 +4,10 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-// Diagnostic: a forced 1-line wheel-up parks a visible marker mid-stream. With no further input,
-// the parked marker must stay put while the turn is still live. This does not reproduce upstream
-// height growth/removal (unit tests cover that). It only pins below-tail and no-input stability.
+// Diagnostic: a forced 1-line wheel-up parks a visible marker mid-stream.
 
-/// 240 one-row markers far exceed the 50-row PTY: the up-burst cannot clamp at the top.
 const MARKER_COUNT: usize = 240;
 
-/// Rows wheeled up to exit follow (1 row per event under the forced env).
 const UP_EVENTS: usize = 12;
 
 /// Space-separated tail words after the marker block keep ACP traffic flowing.

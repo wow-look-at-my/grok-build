@@ -33,12 +33,11 @@
         );
     }
 
-    /// The watermark lasts one connection: the event loop resets it to 0 on leader reconnect.
     /// A re-elected shell's fresh (possibly lower) gen sequence then applies, and a second copy of the seed broadcast stays a no-op.
     #[test]
     fn announcements_update_applies_after_reconnect_watermark_reset() {
         let mut app = make_app_with_agent("sess-ann");
-        // The previous connection left a watermark ahead of the new shell's gens
+        // The connection left a watermark ahead of the new shell's gens
         app.announcements_last_gen = 9_999_999_999;
         // The event loop's leader-reconnected branch does this reset
         app.announcements_last_gen = 0;

@@ -1,48 +1,26 @@
-//! The interactive folder-trust prompt, an ACP round-trip (`x.ai/folder_trust/request`) from the agent to a GUI client (grok-desktop).
-//! It asks the client to decide trust for an untrusted workspace that has repo configs.
-//! On a grant it reloads the now-trusted project servers without a restart.
-//!
-//! Dormant in production: it fires only when the connected client advertised `x.ai/folderTrust.interactive`.
-//! The folder-trust feature flag must also be on, and the verdict must be [`xai_grok_workspace::folder_trust::TrustOutcome::Prompt`].
-//! No client advertises the capability until the desktop UI ships, so this is inert by default even with the feature flag on.
-//! The TUI and headless clients never advertise it (they gate trust themselves, client-side), so they are never double-prompted.
-//! The module is a child of `mvp_agent` and glob-imports it (`use super::*`).
-//!
-//! After a grant, MCP, plugins, and each session's own project hooks are hot-reloaded in place.
-//! The reload covers every session sharing the granted workspace (same `workspace_key`), each reloaded against its own cwd.
-//! Project LSP is not hot-reloaded: the LSP backend is baked into the tool bridge at build time and has no in-place reconfigure API.
-//! Repo-local `.grok/lsp.json` servers therefore start on the next session open (the durable grant makes that re-spawn trusted).
-//! Project instructions and native project skills apply on the next agent build; trusted plugin skills reconcile in place.
-//! `lsp` is still reported in the prompt's `configKinds` because it is a real reason the folder is gated; only the post-grant hot-reload skips it.
+//! The interactive folder-trust prompt, an ACP round-trip (`x.ai/folder_trust/request`) from the agent to a GUI client.
 
 use super::*;
 
 /// Max wait for a GUI client's trust decision before giving up (fail-closed); generous because a human is deciding.
-/// It bounds the detached task: a client that stays connected without answering (modal left open, a client bug) would otherwise hold it forever.
 const TRUST_PROMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// ACP `x.ai/folder_trust/request` payload, sent by the agent to the GUI client.
-/// Serialized as `camelCase` for the ACP JSON-RPC wire format.
+/// ACP `x.ai/folder_trust/request` payload, sent by the agent to the GUI
+/// client.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FolderTrustRequest {
     /// The session this prompt belongs to.
-    /// Required for leader Tier-2 routing: the leader delivers reverse-requests that are not interactions to the driver keyed on `params.sessionId`.
-    /// Omitting it makes the leader silently drop the message, so the prompt would never reach the client.
     pub session_id: String,
     /// The session cwd whose workspace is being gated.
     pub cwd: String,
     /// Display path of the canonical workspace key (the trust grant's scope).
     pub workspace: String,
-    /// The detected repo-local config kinds (e.g. `mcp`, `hooks`, `lsp`), shown by the prompt UI as the reasons the folder is gated.
-    /// Display-only: the trust gate does not read it, though both derive from the same scan.
-    /// `lsp` may appear: it is a real reason to prompt, but project LSP applies on the next session open rather than hot-reloading on grant.
+    /// The detected repo-local config kinds (e.g. `mcp`, `hooks`, `lsp`).
     pub config_kinds: Vec<String>,
 }
 
 /// Outcome of the trust prompt, sent by the GUI client to the agent.
-/// Fail-closed: any value other than `"trust"`, including unknown strings via `#[serde(other)]`, decodes to [`FolderTrustOutcome::Reject`].
-/// Only an explicit grant unblocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum FolderTrustOutcome {
@@ -87,17 +65,13 @@ impl MvpAgent {
             return;
         }
         let key = xai_grok_workspace::trust::workspace_key(cwd);
-        // Dedup: skip if this workspace was already prompted or decided (a reconnect) or has a prompt in flight (a concurrent sibling session)
-        // `insert` returns false when already present
-        // The set is owned by the agent, not the process, and is captured into the task so failure or timeout can release the key
+        // Dedup: skip if this workspace was already prompted or decided (a reconnect) or has a prompt in flight (a concurrent sibling session).
         let prompted = self.interactive_trust_prompted.clone();
         if !prompted.borrow_mut().insert(key.clone()) {
             return;
         }
 
-        // That matches the per-cwd `handle_reload_project_mcp_servers` and `broadcast_plugin_registry_to_sessions` `&self` can't be borrowed across the `spawn_local` boundary, so capture owned clones now
-        // A same-workspace session created while the modal is open is deduped (no second prompt) and absent here, so the grant won't reload it It stays gated until its own next session open, so the miss never over-exposes anything
-        // Re-querying at grant time would need the `sessions` map (a non-`Rc` `RefCell` field) shared into the detached task, which we cannot do
+        // That matches the per-cwd `handle_reload_project_mcp_servers`.
         let mut targets = Vec::new();
         self.session_registry.for_each_resident(|_, h| {
             if xai_grok_workspace::trust::workspace_key(std::path::Path::new(&h.info.cwd)) == key {
@@ -189,9 +163,9 @@ impl MvpAgent {
                 return;
             }
 
-            // Re-check the dedup key before granting `HooksAction::Untrust` removes this workspace's key (and revokes asynchronously) when the user untrusts
-            // If that fired while the modal was open, the key is gone: honor the untrust and drop this now-stale "trust" Re-persisting would restore a grant the user just revoked
-            // The single-threaded LocalSet makes this check and the grant atomic with respect to the untrust task (no await in between)
+            // Re-check the dedup key before granting `HooksAction::Untrust`
+            // removes this workspace's key (and revokes asynchronously) when
+            // the user untrusts If that fired.
             if !prompted.borrow().contains(&key) {
                 tracing::info!(
                     cwd = %cwd.display(),
@@ -256,7 +230,6 @@ impl MvpAgent {
 }
 
 /// One session to reload after a grant, with its own cwd.
-/// The MCP merge and plugin build then use the session's own project config (matching the per-cwd canonical reloaders), not the prompt's cwd.
 struct ReloadTarget {
     cmd_tx: tokio::sync::mpsc::UnboundedSender<crate::session::SessionCommand>,
     initial_client_mcp_servers: Vec<acp::McpServer>,
@@ -283,8 +256,9 @@ async fn reload_project_servers_after_grant(ctx: ReloadAfterGrant<'_>) {
     for target in ctx.targets {
         // Per-session cwd: a sibling session in a subdir of the granted workspace must get its own project config, not the prompt's
         let session_cwd = target.cwd.as_path();
-        // MCP: `merge_managed_mcp_servers` re-reads disk and runs `filter_untrusted_project_mcp`
-        // The filter now keeps project servers because the cached verdict was flipped to trusted (same workspace key)
+        // MCP: `merge_managed_mcp_servers` re-reads disk and runs
+        // `filter_untrusted_project_mcp` The filter now keeps project
+        // servers.
         let _ = crate::session::managed_mcp::merge_and_send_managed_mcp_update(
             &target.cmd_tx,
             session_cwd,
@@ -292,9 +266,8 @@ async fn reload_project_servers_after_grant(ctx: ReloadAfterGrant<'_>) {
             plugin_snapshot.as_deref(),
             ctx.compat,
         );
-        // Plugins (and plugin-contributed hooks) are built for this session's own cwd on the folder-trust verdict
-        // This mirrors `broadcast_plugin_registry_to_sessions`
-        // The grant and `resolve_and_record` above flipped the cached verdict to trusted
+        // Plugins (and plugin-contributed hooks) are built for this session's
+        // own cwd.
         let disk_cfg =
             crate::config::resolve_effective_plugins_config(session_cwd).to_discovery_config();
         let project_trusted = folder_trust::project_scope_allowed(session_cwd);
@@ -305,8 +278,8 @@ async fn reload_project_servers_after_grant(ctx: ReloadAfterGrant<'_>) {
         let _ = target
             .cmd_tx
             .send(crate::session::SessionCommand::ReloadPlugins { registry });
-        // This reloads the session's own project hooks (`.grok/hooks`, `.cursor/hooks.json`), which `ReloadPlugins` does not touch
-        // `reload_hooks_impl` re-discovers them against the actor's own `session_info.cwd` on the now-trusted verdict
+        // This reloads the session's own project hooks (`.grok/hooks`,
+        // `.cursor/hooks.json`).
         let _ = target
             .cmd_tx
             .send(crate::session::SessionCommand::ReloadHooks);
@@ -378,8 +351,7 @@ mod tests {
         let json = serde_json::to_value(&req).unwrap();
         assert!(json.get("configKinds").is_some());
         assert!(json.get("config_kinds").is_none());
-        // Leader Tier-2 routing reads `params.sessionId`; it must be present and non-empty
-        // Regression guard: without it the leader silently drops the request
+        // Leader Tier-2 routing reads `params.sessionId`.
         let Some(session_id) = json.get("sessionId").and_then(|v| v.as_str()) else {
             panic!("sessionId missing: {json:?}");
         };

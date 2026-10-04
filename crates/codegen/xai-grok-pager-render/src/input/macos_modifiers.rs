@@ -1,6 +1,4 @@
 //! Native macOS modifier key detection via CoreGraphics.
-//!
-//! Reads modifier state straight from the OS rather than from the PTY's key events.
 
 // CoreGraphics CGEventSourceFlagsState returns the current global modifier flags without requiring any special permissions
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -17,9 +15,6 @@ const K_CG_EVENT_FLAG_MASK_ALTERNATE: u64 = 0x0008_0000; // Option key
 const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 0x0010_0000;
 
 fn flags() -> u64 {
-    // SAFETY: CGEventSourceFlagsState is a stable, public CoreGraphics API
-    // available since macOS 10.4. Integer in, integer out, no pointers
-    // cross the boundary.
     unsafe { CGEventSourceFlagsState(K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE) }
 }
 

@@ -4,8 +4,7 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 
 use super::types::{SchedulerCommand, SchedulerHandle, scheduler_tool_error};
 
-/// Canonical tool name advertised by `SchedulerDeleteTool::id()`.
-/// See note on `SCHEDULER_CREATE_TOOL_NAME`.
+/// Canonical tool name advertised by `SchedulerDeleteTool::id()`. See note on `SCHEDULER_CREATE_TOOL_NAME`.
 pub const SCHEDULER_DELETE_TOOL_NAME: &str = "scheduler_delete";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]

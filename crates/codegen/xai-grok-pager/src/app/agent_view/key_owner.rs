@@ -35,13 +35,11 @@ impl BlockingCard {
     }
 }
 
-/// Who the keyboard reaches, in the order [`AgentView::handle_input`] asks for it.
-/// The fullscreen takeovers ahead of these (the subagent view, the media viewers, `/gboom`, and the modal stack) answer for themselves.
-/// They draw their own chrome, so they are not ranked here.
+/// Who the keyboard reaches, in the order [`AgentView::handle_input`] asks
+/// for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeyOwner {
     /// An open line viewer: the plan preview, or a file preview from the prompt.
-    /// Ranks below Permission (so followup can type) and above other cards; forwards keys to the plan-approval prompt when that has focus.
     LineViewer,
     BlockViewer,
     /// A blocking card with the keyboard. Permission outranks the line viewer
@@ -52,9 +50,8 @@ pub(crate) enum KeyOwner {
     Pane,
 }
 
-/// What `Esc` does on the focused card right now, one rung at a time: clear whatever the card has pending, then leave it.
-/// Every hint that names `Esc` on a card reads this, and every handler that owns the key dispatches on it ([`AgentView::handle_card_esc`]).
-/// The bar therefore cannot promise a rung the key does not take.
+/// What `Esc` does on the focused card right now, one rung at a time: clear
+/// whatever the card has pending, then leave it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EscStep {
     /// Close the `@` file-search dropdown over a card's text input.
@@ -66,7 +63,6 @@ pub(crate) enum EscStep {
     /// Unmark this question's answer.
     ClearSelection,
     /// Return to the dashboard, leaving the card pending.
-    /// Owned by the dashboard overlay's own cascade, which runs ahead of the router.
     BackOutOverlay,
     /// Hand the keyboard to the scrollback with the card still drawn.
     ParkFocus,
@@ -139,9 +135,9 @@ impl AgentView {
         }
     }
 
-    /// A card that is still drawn and still waiting, with the keyboard handed to the scrollback so the context behind it can be read.
-    /// The keyboard would come back to this card.
-    /// Asked through the same ranking as [`Self::key_owner`], because the scrollback's focus hint names where `Tab` goes.
+    /// A card that is still drawn and still waiting, with the keyboard handed
+    /// to the scrollback so the context behind it can be read. The keyboard
+    /// would come back to this card.
     pub(crate) fn parked_card(&self) -> Option<BlockingCard> {
         if self.active_pane != AgentPane::Scrollback {
             return None;
@@ -171,8 +167,7 @@ impl AgentView {
                 PermissionFocus::PatternEdit => EscStep::DiscardPatternEdit,
                 PermissionFocus::Options => EscStep::ParkFocus,
             },
-            // Never a dead end: Esc closes the panel and keeps the turn running
-            // Enter or keys 1-4 still pick a cancel-and-subagent choice
+            // Never a dead end: Esc closes the panel and keeps the turn running Enter.
             BlockingCard::CancelTurn => EscStep::KeepRunning,
             BlockingCard::Question => {
                 let qv = self.question_view.as_ref()?;
@@ -233,14 +228,11 @@ impl AgentView {
                     qv.clear_selection(active);
                 }
             }
-            // The dashboard overlay's cascade runs ahead of the router and takes this rung itself
-            // Reaching it here means the overlay declined, and the card keeps the key rather than letting it fall through to the turn-cancel policy
+            // The dashboard overlay's cascade runs ahead of the router and takes this rung itself Reaching it here means the overlay declined.
             EscStep::BackOutOverlay => {}
             EscStep::ParkFocus => self.park_focused_card(),
             EscStep::KeepRunning => {
-                // The bar promises "keep running"
-                // Mapping this to ContinueToRun would still cancel the parent turn (only the subagents would survive)
-                // Close the panel instead
+                // The bar promises "keep running" Mapping this to ContinueToRun would still cancel the parent turn (only the subagents would survive).
                 self.cancel_turn_view = None;
                 self.cancel_turn_buttons.clear();
             }
@@ -256,8 +248,6 @@ impl AgentView {
     }
 
     /// Hand the keyboard to the scrollback with the card still drawn.
-    /// Forced past the queued-prompt edit lock: opening a card stashes the composer and blanks it without leaving `EditingQueued`.
-    /// An unforced switch would read the blank as a dirty edit and answer the card's only keyboard exit with a "press Enter to save" toast.
     pub(crate) fn park_focused_card(&mut self) {
         self.set_active_pane(AgentPane::Scrollback, true);
     }

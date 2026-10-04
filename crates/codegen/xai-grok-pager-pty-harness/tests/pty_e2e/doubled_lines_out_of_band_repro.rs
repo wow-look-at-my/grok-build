@@ -1,16 +1,4 @@
 //! Doubled-lines regression guard via a simulated out-of-band screen reflow.
-//!
-//! The stack is `tmux -> nvim :terminal -> grok`: nvim/tmux repaint grok's pane out-of-band (no grok PTY resize).
-//! Grok's diff renderer only re-clears on a real size change, so the rows it doesn't own survive.
-//! You get doubled lines at the top/bottom until restart.
-//!
-//! The harness is a single faithful emulator and can't nest a real tmux/nvim.
-//! We SIMULATE the out-of-band reflow with `feed_screen`, which writes straight into the virtual terminal, bypassing grok.
-//! Then we check whether grok heals it.
-//! `NVIM` is set in grok's env so it sees the embedded-editor context the fix keys off (mirroring a real nvim `:terminal`).
-//!
-//! The fix: grok forces a full clear and repaint on `FocusGained` in editor/multiplexer contexts, so the injected row is gone after refocus.
-//! The final assertion guards that heal.
 
 use super::common::*;
 
@@ -24,7 +12,7 @@ async fn out_of_band_stale_row_heals_on_focus_gained() {
         .await
         .expect("start mock content");
 
-    // Mock-auth env, and pretend we're inside a neovim `:terminal` (sets the embedded-editor context the doubled-line fix gates on)
+    // Mock-auth env.
     let overrides: Vec<(String, String)> =
         vec![("NVIM".into(), "/tmp/grok-pty-harness-fake-nvim.sock".into())];
     let env_refs: Vec<(&str, &str)> = overrides
@@ -45,24 +33,20 @@ async fn out_of_band_stale_row_heals_on_focus_gained() {
 
     h.wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome screen");
-    // Let the initial draws land before injecting
-    // The Welcome logo shimmers, so the screen never stops repainting, but the col-1 marker below is safe
+    // Let the initial draws land before injecting The Welcome logo shimmers.
     h.update(Duration::from_millis(800));
     assert!(
         !h.contains_text(STALE_MARKER),
         "marker must be absent before injection"
     );
 
-    // Simulate the out-of-band reflow: write a stale row straight into the virtual screen at col 1.
-    // Col 1 is the static left margin grok's diff renderer doesn't repaint during the logo shimmer.
     h.feed_screen(format!("\x1b[6;1H{STALE_MARKER}").as_bytes());
     assert!(
         h.contains_text(STALE_MARKER),
         "marker should be on the virtual screen right after injection"
     );
 
-    // grok must not self-heal out-of-band content via ordinary diff redraws
-    // It only rewrites cells whose own model changed, so this row is stranded
+    // grok must not self-heal out-of-band content via ordinary diff redraws It only rewrites cells whose own model changed.
     h.update(Duration::from_millis(300));
     assert!(
         h.contains_text(STALE_MARKER),

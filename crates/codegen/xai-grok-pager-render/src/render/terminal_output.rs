@@ -1,10 +1,4 @@
 //! Bash/terminal tool output arrives as a raw PTY byte stream.
-//! It can contain ANSI SGR (colors/styles), cursor movement, line erases, and carriage returns (progress bars rewriting a line).
-//! ratatui paints text verbatim and does not interpret these, so without this module the scrollback shows literal escape codes like `[1m[36m`.
-//!
-//! [`render_terminal_lines`] feeds the stream through a minimal, line-oriented VTE emulator (built on the `vte` parser).
-//! It produces styled [`Line`]s plus de-escaped plain text: what a terminal would actually display.
-//! Unlike a screen/grid emulator it keeps an unbounded, fully-styled transcript that maps onto the pager's line model.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -13,7 +7,6 @@ use vte::{Params, Parser, Perform};
 use crate::theme::color_support::quantize;
 
 /// Bound transcript growth against pathological cursor jumps.
-/// Tool output is already truncated upstream; these only guard against escape-code abuse.
 const MAX_ROWS: usize = 50_000;
 const MAX_COLS: usize = 8_192;
 
@@ -257,7 +250,6 @@ fn first_param(params: &Params, default: u16) -> u16 {
     }
 }
 
-/// Map a 0-7 ANSI color index to a named ratatui color.
 fn ansi16(n: u16) -> Color {
     match n {
         0 => Color::Black,
@@ -271,7 +263,6 @@ fn ansi16(n: u16) -> Color {
     }
 }
 
-/// Map a 0-7 bright ANSI color index to a named ratatui color.
 fn ansi16_bright(n: u16) -> Color {
     match n {
         0 => Color::DarkGray,
@@ -310,7 +301,6 @@ fn ext_color(groups: &[&[u16]], i: &mut usize) -> Option<Color> {
     }
 }
 
-/// Parse the subparameter form of an extended color, e.g. `[5, n]` (256) or `[2, r, g, b]` (with an optional leading colorspace id).
 /// Returns an un-quantized color.
 fn parse_ext(sub: &[u16]) -> Option<Color> {
     match sub.first().copied()? {
@@ -426,7 +416,7 @@ mod tests {
 
     #[test]
     fn cursor_up_then_carriage_return_and_erase() {
-        // Write two lines, move up, overwrite the start, erase to end of line.
+        // Write a couple of lines, move up, overwrite the start, erase to end of line.
         assert_eq!(lines("line1\nline2\x1b[A\rXX\x1b[K"), vec!["XX", "line2"]);
     }
 
@@ -485,8 +475,8 @@ mod tests {
         assert_eq!(parse_ext(&[2, 1]), None);
     }
 
-    // Pipe capture is plain text plus line endings, never a ConPTY screen stream.
-    // CRLF and unsupported controls (DEC modes, OSC, cursor save) must be ignored without corrupting text.
+    // Pipe capture is plain text plus line endings, never a ConPTY screen
+    // stream.
 
     #[test]
     fn windows_crlf_line_endings() {
@@ -520,8 +510,8 @@ mod tests {
         );
     }
 
-    // Real Windows shell output samples
-    // Each pins a distinct parser behavior exercised by a sequence these shells actually emit on the wire
+    // Real Windows shell output samples Each pins a distinct parser behavior
+    // exercised by a sequence these shells emit on the wire
 
     // Git Bash / GNU `grep --color=always` wraps the match in a bold-red SGR with an interleaved EL (`\x1b[K`)
     // An empty-param reset (`\x1b[m`) closes it
@@ -544,9 +534,6 @@ mod tests {
         assert_eq!(b.style, Style::default());
     }
 
-    // PowerShell 7 (`$PSStyle`) emits 24-bit color in the semicolon form `\x1b[38;2;R;G;Bm`
-    // That drives the `ext_color` branch that consumes the following groups and advances `i`
-    // If that advance were wrong the trailing `0` param would reset and drop the color
     #[test]
     fn powershell_truecolor_psstyle() {
         let rendered = render_terminal_lines(
@@ -564,8 +551,6 @@ mod tests {
         assert_eq!(b.style, Style::default());
     }
 
-    // Progress output (cargo/npm/pip style under cmd/PowerShell) wipes the status line with EL mode 2 (`\x1b[2K`) regardless of cursor column
-    // The line is then rewritten, so the transcript collapses to the final line
     #[test]
     fn progress_erase_entire_line_collapses() {
         assert_eq!(lines("loading 99%\x1b[2K\rdone\n"), vec!["done"]);

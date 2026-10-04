@@ -489,8 +489,7 @@ async fn post_tool_use_and_failure_never_double_fire() {
         .await;
 }
 
-/// Stub tool whose result is an MCP error output (`Ok`, but `is_error`): the
-/// shape that routes to `PostToolUseFailure` instead of `PostToolUse`.
+/// Stub tool whose result is an MCP error output (`Ok`, but `is_error`).
 #[derive(Debug)]
 struct McpErrorResultTool;
 

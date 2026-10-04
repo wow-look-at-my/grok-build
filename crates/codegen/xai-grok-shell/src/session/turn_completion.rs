@@ -1,8 +1,4 @@
-//! Pure construction of the two turn-terminal signals.
-//!
-//! `TurnCompleted` is the persisted and replayed twin of the fire-and-forget `x.ai/session/prompt_complete` notification.
-//! It rides the `_x.ai/session/update` rail so a viewer that re-attaches mid-turn finalizes the turn from replay instead of stranding on "Waiting…".
-//! Both builders live here and derive their fields from [`crate::sampling::error::prompt_complete_fields`], so the two signals never disagree.
+//! Pure construction of both turn-terminal signals.
 
 use crate::extensions::notification::SessionUpdate;
 use xai_grok_sampler::SamplingErrorKind;

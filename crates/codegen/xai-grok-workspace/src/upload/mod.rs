@@ -53,7 +53,7 @@ static UPLOAD_SKIPPED_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
     )
     .unwrap()
 });
-/// Record a terminal upload outcome; call sites pair it with the matching [`record_upload_failed`] / [`record_upload_skipped`] when one applies.
+/// Record a terminal upload outcome.
 pub(crate) fn record_upload_outcome(phase: &str, outcome: &str) {
     UPLOAD_OUTCOME_TOTAL
         .with_label_values(&[phase, outcome])
@@ -138,7 +138,8 @@ pub(crate) fn spawn_queue_stats_sampler(
     });
     QueueStatsSamplerGuard { task }
 }
-/// Wraps the server [`AuthProvider`] as an [`AuthCredentialProvider`] and [`HttpAuth`] so the `StorageClient` can authenticate requests.
+/// Wraps the server [`AuthProvider`] as an [`AuthCredentialProvider`] and
+/// [`HttpAuth`].
 struct HubAuthCredentialProvider {
     auth: Arc<dyn AuthProvider>,
     /// Resolved workspace owner so `snapshot` can attribute uploads (and 401s) to the real `user_id`/`team_id`.
@@ -185,7 +186,8 @@ impl AuthCredentialProvider for HubAuthCredentialProvider {
         false
     }
 }
-/// [`StorageConfig`] implementation that proxies uploads through the configured proxy endpoint using the connection's auth credentials.
+/// [`StorageConfig`] implementation that proxies uploads through the
+/// configured proxy endpoint using the connection's auth.
 pub(crate) struct ProxyStorageConfig {
     method: UploadMethod,
     credentials: Arc<dyn AuthCredentialProvider>,
@@ -220,8 +222,8 @@ impl StorageConfig for ProxyStorageConfig {
         Some(self.credentials.clone())
     }
 }
-/// Adapts the workspace's [`ProxyStorageConfig`] to the upload queue's [`TraceExportSource`] contract.
-/// [`UploadQueue`] resolves fresh proxy credentials through it on every upload attempt.
+/// Adapts the workspace's [`ProxyStorageConfig`] to the upload queue's
+/// [`TraceExportSource`] contract.
 pub(crate) struct WorkspaceTraceExportSource {
     proxy_storage_config: Arc<ProxyStorageConfig>,
 }
@@ -400,7 +402,7 @@ mod tests {
         assert_eq!(snap.user_id.as_deref(), Some("user-headers"));
         assert_eq!(snap.team_id.as_deref(), Some("team-h"));
     }
-    /// `WorkspaceTraceExportSource` must delegate all four `TraceExportSource` hooks to the wrapped `ProxyStorageConfig`.
+    /// `WorkspaceTraceExportSource` must delegate all of them `TraceExportSource` hooks to the wrapped `ProxyStorageConfig`.
     #[tokio::test]
     async fn workspace_trace_export_source_delegates_all_methods() {
         let source = WorkspaceTraceExportSource::new(proxy_config());

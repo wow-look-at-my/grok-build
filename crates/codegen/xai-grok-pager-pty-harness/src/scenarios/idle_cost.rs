@@ -1,5 +1,4 @@
 //! After content settles, measure frames for N seconds of true idle.
-//! Catches the `needs_animation()` always-true bug: any frame recorded here means the pager is ticking when it shouldn't.
 
 use std::time::{Duration, Instant};
 

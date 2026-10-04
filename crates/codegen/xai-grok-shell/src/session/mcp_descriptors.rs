@@ -1,10 +1,4 @@
 //! Some templates read MCP metadata from an on-disk descriptor tree.
-//! This module keeps that tree current as servers connect.
-//! It (re)writes descriptors for connected servers on every MCP tool-set change, not just at the first turn.
-//!
-//! Local MCP writes are upsert-only: folders for servers removed mid-session are not pruned (the next session's first-turn build cleans them).
-//! Pruning while the client set changes asynchronously risks deleting a just-connected server's folder.
-//! Managed gateway writes converge to the admitted gateway catalog so disabled gateway tools are not discoverable from stale descriptor files.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};

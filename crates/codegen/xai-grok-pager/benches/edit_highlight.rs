@@ -1,25 +1,4 @@
 //! Criterion benchmarks: edit-diff syntax-highlight strategy costs.
-//!
-//! | Strategy | What runs |
-//! |----------|-----------|
-//! | `hunk_only` | Prod cold path: [`render_diff_hunks_highlighted`] |
-//! | `full_file_slice` | Prod upgrade compute: [`compute_file_scoped_styles`] |
-//! | `upgrade_once_per_file` | **Each iter:** full-file compute + one paint with those styles |
-//! | `paint_with_precomputed` | Styles computed in setup; timed path is paint only |
-//! | `prefix_per_hunk` | Non-product baseline: silent-prime `1..hunk_start` per hunk (small fixture only) |
-//!
-//! Groups: `edit_hl/matrix` (500L with prefix, 10kL without) and `edit_hl/upgrade` (amortized session paint vs one-shot upgrade vs cold control).
-//!
-//! Caps: 2 MiB / 50k lines (`EDIT_HL_MAX_BYTES` / `EDIT_HL_MAX_LINES`).
-//! Magnitudes: run this bench; numbers in module docs are not pass/fail thresholds.
-//!
-//! `compute_file_scoped_styles` stops at the last hunk line.
-//! These fixtures spread hunks to near EOF, so `full_file_slice` still measures roughly the whole file (the worst case a real upgrade pays).
-//!
-//! ```text
-//! cargo bench -p xai-grok-pager --bench edit_highlight
-//! cargo bench -p xai-grok-pager --bench edit_highlight -- edit_hl/upgrade
-//! ```
 
 use std::collections::HashMap;
 use std::hint::black_box;

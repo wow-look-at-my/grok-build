@@ -1,26 +1,10 @@
 //! File operation lock manager — serializes concurrent file operations.
-//!
-//!   diagnostics for each file. Multiple reads for *different* paths can proceed
-//!   concurrently; reads for the *same* path are serialized.
-//! - **Exclusive lock** (`wait_for_exclusive_lock`): used by `Write` and
-//!   `StrReplace` before mutating files. Blocks all per-path locks and
-//!   vice-versa.
-//!
-//! The queue is FIFO with priority inversion avoidance: per-path waiters
-//! will not jump ahead of a queued exclusive waiter, preventing writer
-//! starvation.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
 /// Shared file operation lock manager stored in tool shared resources.
-///
-/// The state sits behind a `parking_lot` mutex rather than an async one so that
-/// releasing a lock is a plain function call: `Drop` cannot await, and a release
-/// handed to the scheduler would leave the next acquirer waiting on a task
-/// instead of on the lock. The critical sections are bookkeeping only: no
-/// acquire, release, or handoff holds this lock across an await point.
 #[derive(Clone)]
 pub struct FileOperationLockManager {
     inner: Arc<parking_lot::Mutex<LockInner>>,
@@ -76,7 +60,7 @@ impl FileOperationLockManager {
         };
 
         if let Some(rx) = rx {
-            // Wait for our turn (ignore error — sender dropped means lock manager was dropped).
+            // Wait for our turn (ignore error — sender dropped means lock manager.
             let _ = rx.await;
         }
 
@@ -134,14 +118,7 @@ pub struct FileOperationLockGuard {
 impl Drop for FileOperationLockGuard {
     fn drop(&mut self) {
         let kind = std::mem::replace(&mut self.kind, LockKind::Exclusive);
-        // The release runs here rather than in a task of its own: whoever is
-        // queued behind this guard learns the lock is free from this call
-        // returning, and there is no detached failure for them to outlive.
-        //
-        // The unwind is still caught, because a guard dropped while another
-        // panic is unwinding would otherwise take the process with it. A failed
-        // release is the one state a waiter cannot recover from on its own, so
-        // it is withdrawn again and, if that fails too, said out loud.
+        // The release runs here rather than in a task of its own.
         let released = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.manager.release(&kind);
         }));
@@ -165,11 +142,6 @@ impl Drop for FileOperationLockGuard {
 
 impl FileOperationLockManager {
     /// Withdraw this guard's grant and hand the lock to whoever is next.
-    ///
-    /// Withdrawing is idempotent (removing a path nobody holds and clearing a
-    /// flag that is already down are both no-ops) and
-    /// [`LockInner::process_queue`] pops a waiter before granting to it, so
-    /// making the call twice cannot hand one lock to two holders.
     fn release(&self, kind: &LockKind) {
         let mut inner = self.inner.lock();
         match kind {
@@ -299,7 +271,7 @@ mod tests {
         assert!(*acquired.lock().await);
     }
 
-    /// Two writers on one path: the second is parked on what the first's `drop`
+    /// Writers on one path: the second is parked on what the first's `drop`
     /// promises, so the handoff has to be part of `drop` itself.
     ///
     /// The state is read with `try_lock` and no await in between, because a

@@ -1,5 +1,4 @@
-//! `is_workspace_unavailable` recognizer coverage, pinned against the real
-//! wire decode path (`error_from_envelope` / `tool_error_from_wire`).
+//! `is_workspace_unavailable` recognizer coverage, pinned against the real wire decode path.
 
 use serde_json::json;
 use xai_computer_hub_core::{error_from_envelope, is_workspace_unavailable, tool_error_from_wire};
@@ -29,8 +28,6 @@ const PHASES: [WorkspaceGonePhase; 2] = [
 
 fn envelope_for(wire: &ToolErrorWire) -> JsonRpcError {
     JsonRpcError {
-        // -32005 is the best-effort numeric companion (`tool_server_gone`);
-        // recognition keys on `data.details.code`, not the numeric.
         code: -32005,
         message: "workspace server gone".to_owned(),
         data: Some(serde_json::to_value(wire).unwrap()),
@@ -123,9 +120,8 @@ fn recognized_with_unknown_reason_and_phase() {
 
 #[test]
 fn decoded_custom_with_none_details_is_recognized_via_canonical_code() {
-    // Wire `details: None` decodes through `ToolError::custom`, which repopulates
-    // `details = {"code": subcode}`, so it IS recognized — contrast the hand-built
-    // no-details case in `custom_error_without_any_details_is_not_recognized`.
+    // Wire `details: None` decodes through `ToolError::custom`, which
+    // repopulates `details = {"code": subcode}`.
     let wire = ToolErrorWire::Custom {
         subcode: WORKSPACE_UNAVAILABLE_SUBCODE.to_owned(),
         message: "no structured details".to_owned(),
@@ -139,9 +135,7 @@ fn decoded_custom_with_none_details_is_recognized_via_canonical_code() {
 #[test]
 fn decoded_custom_without_code_key_is_not_recognized() {
     // The central correctness property: recognition keys on the surviving
-    // `details.code`, NOT the outer `Custom.subcode`. Here the outer subcode
-    // matches, but `with_details` overwrote the auto-populated `code`, so the
-    // decoded error must NOT be recognized.
+    // `details.code`, NOT the outer `Custom.subcode`.
     let wire = ToolErrorWire::Custom {
         subcode: WORKSPACE_UNAVAILABLE_SUBCODE.to_owned(),
         message: "details lack code".to_owned(),
@@ -166,8 +160,6 @@ fn different_custom_code_is_not_recognized() {
 
 #[test]
 fn numeric_only_tool_server_gone_without_data_is_not_recognized() {
-    // Recognition is by the data payload, never the numeric code: a bare -32005
-    // with no `data` decodes to a `jsonrpc_-32005` custom error, not recognized.
     let err = error_from_envelope(JsonRpcError {
         code: -32005,
         message: "tool server gone".to_owned(),
@@ -178,8 +170,7 @@ fn numeric_only_tool_server_gone_without_data_is_not_recognized() {
 
 #[test]
 fn custom_error_without_any_details_is_not_recognized() {
-    // Hand-built Custom with no `details` (no `code`) — unlike a wire `details:
-    // None`, nothing repopulates `code` here, so it is not recognized.
+    // Hand-built Custom with no `details` (no `code`) — unlike a wire `details: None`, nothing repopulates `code` here.
     let err = ToolError::new(ToolErrorKind::Custom, "no details at all");
     assert!(!is_workspace_unavailable(&err));
 }

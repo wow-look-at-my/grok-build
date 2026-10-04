@@ -1,13 +1,4 @@
-//! Drives the shipped `[jail]` config -> plan -> bwrap/Seatbelt builders end
-//! to end against a fixture `config.toml` under an isolated `$GROK_HOME`, and
-//! optionally writes the emitted plan + profile to a capture file (the goal's
-//! verification artifact).
-//!
-//! This is a *defaults/subsystem-level* test: it resolves the four defaults from
-//! a fixture home and materializes the real plan/builder output the jail would
-//! use. It does not exec a nested jail -- a sandboxed process cannot wrap itself
-//! again (that is a separate e2e concern, handled by `jail_bwrap_e2e.rs` on a
-//! real Linux host). The builder functions it drives are the shipped ones.
+//! Drives the shipped `[jail]` config -> plan -> bwrap/Seatbelt builders end to end against a fixture `config.toml`.
 
 #![cfg(unix)]
 
@@ -126,8 +117,7 @@ fn config_subprocess() {
         );
     }
 
-    // Emit machine-checkable markers so the parent can assert the override
-    // actually changed the materialized plan, not just the parsed defaults.
+    // Emit machine-checkable markers so the parent can assert the override changed the materialized plan.
     use std::fmt::Write;
     let mut markers = String::new();
     writeln!(markers, "MARK cwd_default={:?}", defaults.cwd).unwrap();

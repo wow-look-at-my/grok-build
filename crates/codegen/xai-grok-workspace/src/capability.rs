@@ -3,9 +3,8 @@
 use xai_grok_tools::registry::types::{ToolConfig, ToolServerConfig};
 use xai_grok_tools::types::tool::ToolKind;
 
-/// A partial order is defined via [`CapabilityMode::is_subset_of`]: `ReadOnly < ReadWrite < All` and `ReadOnly < Execute < All`.
-/// `ReadWrite` and `Execute` are *incomparable* (neither is a subset of the other).
-/// `fork_session` enforces `child <= parent`.
+/// A partial order is defined via [`CapabilityMode::is_subset_of`]: `ReadOnly
+/// < ReadWrite < All` and `ReadOnly < Execute < All`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityMode {
@@ -117,9 +116,8 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
     }
 
     match kind {
-        // Meta tools: always allowed.
-        // `SendMessage` is one of them: a read-only explorer still has to be
-        // able to answer the session that spawned it.
+        // Meta tools: always allowed. `SendMessage` is one of them: a read-only explorer still has to be able to answer
+        // the session that spawned it.
         Plan | EnterPlan | ExitPlan | AskUser | Skill | SearchTool | GoalUpdate | SendMessage => {
             true
         }
@@ -134,8 +132,7 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
             matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
         }
 
-        // Inspect class. `Ci` reads GitHub state and mutates nothing, so it
-        // belongs with the other read-only inspections.
+        // Inspect class.
         Lsp | ListDir | List | Ci => matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute),
 
         // Edit class.

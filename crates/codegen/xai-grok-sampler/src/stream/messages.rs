@@ -1,7 +1,4 @@
 //! Layer-2 stream transform for the Anthropic Messages API.
-//!
-//! Consumes a raw `MessageStreamEvent` stream and produces [`SamplingEvent`]s.
-//! Pure: no I/O, no shell coupling.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -56,8 +53,8 @@ fn wire_cost_ticks(
     })
 }
 
-/// The Anthropic Messages API reports content as a sequence of indexed blocks (text / thinking / tool_use), each with start / delta / stop events.
-/// We accumulate per-index and finalize each block on `ContentBlockStop`.
+/// The Anthropic Messages API reports content as a sequence of indexed blocks
+/// (text / thinking / tool_use), each with start / delta / stop events.
 struct BlockState {
     block_type: BlockType,
     text_acc: String,
@@ -114,26 +111,21 @@ pub fn stream_messages<'a>(
 
         // Final-message-level accumulators
         let mut final_model: Option<String> = None;
-        // Anthropic Messages API `input_tokens` is the uncached portion
-        // Cache hits and writes are reported in separate buckets and must be summed for the true total prompt size
+        // Anthropic Messages API `input_tokens` is the uncached portion Cache hits and writes are reported in separate buckets and must be summed.
         let mut final_input_tokens: u32 = 0;
         let mut final_cache_read_input_tokens: u32 = 0;
         let mut final_cache_creation_input_tokens: u32 = 0;
         let mut final_output_tokens: u32 = 0;
-        // Cumulative for the response, so last-write-wins — but a later event
-        // that omits the price must never erase one already reported.
+        // Cumulative for the response, so last-write-wins — but a later event.
         let mut final_cost_usd_ticks: Option<i64> = None;
         let mut final_stop_reason: Option<StopReason> = None;
         let mut final_stop_message: Option<String> = None;
         let mut final_message_id: Option<String> = None;
         let mut final_raw_stop_reason: Option<String> = None;
-        // The provider sends the matched stop sequence in `message_delta.stop_sequence` on a `stop_sequence`-terminated turn
-        // It is carried through so the headless `streaming-messages-json` consumer can echo it
+        // The provider sends the matched stop sequence in `message_delta.stop_sequence`.
         let mut final_stop_sequence: Option<String> = None;
 
-        // Assistant-response accumulators (built up as ContentBlockStop events fire)
-        // Reasoning is collected into a synthesized `rs::ReasoningItem`
-        // It is emitted as a sibling `ConversationItem::Reasoning` before the trailing Assistant
+        // Assistant-response accumulators (built up as ContentBlockStop events fire) Reasoning is collected.
         let mut assistant_text = String::new();
         let mut assistant_tool_calls: Vec<ToolCall> = Vec::new();
         let mut assistant_reasoning: Option<rs::ReasoningItem> = None;
@@ -190,8 +182,7 @@ pub fn stream_messages<'a>(
                         message.usage.cost.as_ref(),
                     )
                     .or(final_cost_usd_ticks);
-                    // Yield the real id, model, and input usage before any content
-                    // Partial-mode framing then emits them on the real `message_start` instead of a synthesized placeholder
+                    // Yield the real id, model, and input usage before any content Partial-mode framing then emits them on the real `message_start` instead.
                     yield SamplingEvent::ResponseStarted {
                         request_id: request_id.clone(),
                         message_id: message.id,
@@ -265,15 +256,13 @@ pub fn stream_messages<'a>(
                                 text_acc: String::new(),
                                 tool_name: name.clone(),
                                 tool_id: id.clone(),
-                                // Anthropic Messages API streams arguments via InputJsonDelta events
-                                // Starting from "{}" then appending fragments would produce invalid JSON
+                                // Anthropic Messages API streams arguments via InputJsonDelta events Starting.
                                 args_acc: String::new(),
                                 thinking_acc: String::new(),
                                 signature: String::new(),
                             },
                         );
 
-                        // Emit the initial id and name so subscribers can pre-allocate UI for the tool call before arguments stream in
                         yield SamplingEvent::ToolCallDelta {
                             request_id: request_id.clone(),
                             tool_index,
@@ -282,9 +271,7 @@ pub fn stream_messages<'a>(
                             arguments_delta: None,
                         };
                     }
-                    // Encrypted reasoning the model chose to redact
-                    // The `RedactedThinking` wire variant exists so a stream containing one deserializes instead of failing the whole event parse
-                    // Its opaque `data` blob is not forwarded as a `SamplingEvent`; no consumer claims redacted_thinking support
+                    // Encrypted reasoning the model chose to redact The `RedactedThinking` wire variant exists.
                     ContentBlock::RedactedThinking { .. } => {}
                     // Image / ToolResult are not expected in assistant streams.
                     _ => {}
@@ -362,8 +349,7 @@ pub fn stream_messages<'a>(
                                 }
                             }
                             BlockType::Thinking => {
-                                // Yield the encrypted signature at the thinking block's stop
-                                // Partial-mode framing can then emit `signature_delta` before its `content_block_stop`
+                                // Yield the encrypted signature at the thinking block's stop Partial-mode framing can then emit `signature_delta`.
                                 if !state.signature.is_empty() {
                                     yield SamplingEvent::ReasoningCompleted {
                                         request_id: request_id.clone(),
@@ -371,9 +357,7 @@ pub fn stream_messages<'a>(
                                     };
                                 }
                                 if !state.thinking_acc.is_empty() || !state.signature.is_empty() {
-                                    // Anthropic Messages API `Thinking` blocks uniquely carry an encrypted `signature` distinct from the text
-                                    // Either field may be empty
-                                    // Build directly rather than via `synthesized_reasoning_item` since the helper assumes a non-empty summary
+                                    // Anthropic Messages API `Thinking` blocks uniquely carry an encrypted `signature` distinct.
                                     let summary = if state.thinking_acc.is_empty() {
                                         vec![]
                                     } else {
@@ -439,8 +423,7 @@ pub fn stream_messages<'a>(
                             StopReason::Stop
                         }
                         messages::StopReason::ModelContextWindowExceeded => {
-                            // Output-side overflow on a successful stream maps to the Length stop class
-                            // Compact-on-error recovery needs an Api error carrying model metadata and a prompt-side overflow; neither exists here
+                            // Output-side overflow on a successful stream maps.
                             tracing::warn!(
                                 wire_stop_reason = "model_context_window_exceeded",
                                 "context window hit mid-generation; mapping to the Length stop class"
@@ -472,11 +455,9 @@ pub fn stream_messages<'a>(
                 }
 
                 MessageStreamEvent::MessageStop => {
-                    // Final message complete; the loop exits naturally when the underlying stream ends
                 }
 
                 MessageStreamEvent::Ping => {
-                    // Liveness only, no action; the inner timeout was already reset above by the successful `next()`
                 }
 
                 MessageStreamEvent::Error { error } => {
@@ -512,8 +493,7 @@ pub fn stream_messages<'a>(
             }
         }
 
-        // A `Length` stop is NOT failed here
-        // The transform completes with `stop_reason=Length` and `drive_l2` decides fail-vs-salvage per the request's `LengthPolicy`
+        // A `Length` stop is NOT failed here The transform completes with `stop_reason=Length` and `drive_l2` decides fail-vs-salvage.
 
         // ── Build the final response ─────────────────────────────────
         let model_id = final_model.unwrap_or_default();
@@ -535,9 +515,7 @@ pub fn stream_messages<'a>(
         };
 
         let stop_reason = if final_stop_reason == Some(StopReason::Length) {
-            // Length wins even over completed tool_use blocks
-            // The provider closes a block it cut mid-stream, so the trailing call's arguments may be silently truncated
-            // Fail-vs-salvage belongs to the `LengthPolicy` gate
+            // Length wins even over completed tool_use blocks The provider closes a block it cut mid-stream.
             final_stop_reason
         } else if !assistant_tool_calls.is_empty() {
             // Completed tool_use blocks win even over Refusal: the calls are real model output the agent loop must resolve
@@ -585,9 +563,7 @@ pub fn stream_messages<'a>(
             items,
             stop_reason,
             usage,
-            // Absent unless a gateway priced the call: Anthropic itself sends
-            // no price, and the shell derives one from the model's configured
-            // pricing rather than this reporting a number nobody quoted.
+            // Absent unless a gateway priced the call: Anthropic itself sends no price.
             cost_usd_ticks: final_cost_usd_ticks,
             message_chunks_emitted: message_chunk_count,
             doom_loop_signals: Vec::new(),

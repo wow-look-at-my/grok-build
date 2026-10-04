@@ -1,7 +1,4 @@
 //! `get_task_output` tool — output/status for one or many background tasks.
-//!
-//! Positive `timeout_ms` waits (multi-id = wait-all). Also provides helpers used
-//! by the legacy `wait_tasks` tool.
 
 pub mod terminal_command;
 pub mod wait_tasks;
@@ -25,21 +22,17 @@ use xai_tool_types::{
     MultiTaskOutputResult, TaskOutputOutput, TaskOutputResult, TaskOutputToolInput,
 };
 
-/// Default wait budget when a caller is already in wait mode but omitted `timeout_ms` (legacy
-/// `wait_tasks` / internal `capped_wait_timeout`). On `get_task_output`, omitting `timeout_ms` is a
-/// non-blocking snapshot — this constant is not applied unless a wait is active.
+/// Default wait budget when a caller is already in wait mode but omitted `timeout_ms`.
 pub(crate) const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The blocking-wait ceiling: `GROK_MAX_WAIT_BLOCK_MS`, else `MAX_WAIT_BLOCK_MS_DEFAULT`. The same
-/// value fills `{max_wait_ms}` in the descriptions, so a wait can never exceed what the model was
-/// told it may ask for.
+/// The blocking-wait ceiling: `GROK_MAX_WAIT_BLOCK_MS`, else
+/// `MAX_WAIT_BLOCK_MS_DEFAULT`.
 pub(crate) fn max_wait_block() -> Duration {
     Duration::from_millis(xai_tool_types::max_wait_block_ms())
 }
 
 /// Resolve a model-supplied `timeout_ms` into the effective blocking-wait
-/// duration: default when omitted, then clamped to `cap` so a single wait call
-/// can never wedge the turn for longer than the ceiling.
+/// duration: default when omitted, then clamped to `cap`.
 pub(crate) fn capped_wait_timeout(timeout_ms: Option<u64>, cap: Duration) -> Duration {
     let base = timeout_ms
         .map(Duration::from_millis)
@@ -224,8 +217,7 @@ impl TaskOutputTool {
             WaitHint::NotRequested
         };
         let snapshot = if waits {
-            // Cap the blocking wait so a large `timeout_ms` can't wedge the turn;
-            // the model is pinged on completion regardless (see `capped_wait_timeout`).
+            // Cap the blocking wait so a large `timeout_ms` can't wedge the turn.
             let timeout = capped_wait_timeout(timeout_ms, wait_cap);
             terminal.wait_for_completion(task_id, Some(timeout)).await
         } else {
@@ -467,13 +459,9 @@ pub(crate) async fn resolve_tasks(
         pending_subagent_ids,
     }
 }
-// Uses `TerminalBackend::wait_for_completion` for bash tasks (event-driven via the underlying `Notify`) and
-// `SubagentQueryRequest { block: true }` for subagents (blocks in the coordinator until the child session finishes).
-// No 200ms polling loop — wakeups happen on actual state transitions.
+// Uses `TerminalBackend::wait_for_completion` for bash tasks (event-driven via the underlying `Notify`).
 
-/// Aborts all wrapped helper-wait tasks when dropped. Aborting drops the underlying
-/// `wait_for_completion` future, whose dropped reply channel the terminal actor detects to keep
-/// `block_waited` accurate.
+/// Aborts all wrapped helper-wait tasks when dropped.
 struct AbortWaitsOnDrop(Vec<tokio::task::AbortHandle>);
 
 impl Drop for AbortWaitsOnDrop {
@@ -523,8 +511,7 @@ pub(crate) async fn wait_any_event_driven(
         return WaitOutcome::DeadlineElapsed;
     }
 
-    // Register waiter BEFORE spawns to avoid race: a spawned task could complete
-    // and call notify_waiters() before the Notified future exists.
+    // Register waiter BEFORE spawns to avoid race.
     use tokio::sync::Notify as TokioNotify;
     let done = std::sync::Arc::new(TokioNotify::new());
     let notified = done.notified();
@@ -541,10 +528,8 @@ pub(crate) async fn wait_any_event_driven(
         #[allow(clippy::disallowed_methods)]
         let wait = tokio::spawn(async move {
             // Guarded, because `done` is the only thing this caller can be
-            // woken by: a round that died mid-flight would leave the tool
-            // parked until its deadline on a wait that no longer exists.
-            // The panic is logged against the task and the caller is woken
-            // to re-read the real task state.
+            // woken by: a round that died mid-flight will leave the tool
+            // parked.
             let round = crate::util::detached::guarded(
                 "task output bash wait",
                 terminal.wait_for_completion(&id, Some(timeout)),
@@ -578,8 +563,7 @@ pub(crate) async fn wait_any_event_driven(
         }
     }
 
-    // Tear the helper waits down on every exit path: first completion,
-    // deadline, or cancellation of this future.
+    // Tear the helper waits down on every exit path: first completion, deadline, or cancellation of this future.
     let _guard = AbortWaitsOnDrop(waits);
 
     let outcome = tokio::select! {
@@ -634,8 +618,7 @@ pub(crate) async fn wait_all_event_driven(
         }
     }
 
-    // Tear the helper waits down on every exit path: all complete, deadline,
-    // or cancellation of this future (see `AbortWaitsOnDrop`).
+    // Tear the helper waits down on every exit path: all complete, deadline.
     let _guard = AbortWaitsOnDrop(handles.iter().map(|(_, h)| h.abort_handle()).collect());
 
     let all_fut = futures_util::future::join_all(
@@ -645,11 +628,7 @@ pub(crate) async fn wait_all_event_driven(
     );
     let outcome = tokio::select! {
         rounds = all_fut => {
-            // `CompletedEarly` is the claim that every task finished. A round
-            // that came back with a `JoinError` proved nothing about its task,
-            // so the claim is withheld: the caller re-reads every task anyway,
-            // and the deadline hint is the honest one for a task nobody could
-            // confirm.
+            // `CompletedEarly` is the claim that every task finished.
             let unconfirmed: Vec<(&str, String)> = rounds
                 .iter()
                 .filter(|(_, round)| round.is_err())
@@ -670,9 +649,6 @@ pub(crate) async fn wait_all_event_driven(
     finalize_wait_outcome(outcome, deadline)
 }
 
-// Historical fixture captured from the 0.4.10 implementation. In 0.4.10, get_task_output returned:
-// Err(ToolError::ProcessManagerError(format!("Task {} not found", input.task_id))) The meaningful customer-facing
-// message content is the inner string. Subagent wording is out of scope — subagents didn't exist in 0.4.10.
 
 /// Exact historical not-found message for `get_task_output` in legacy-0.4.10.
 fn render_legacy_task_output_not_found(task_id: &str) -> String {
@@ -1259,9 +1235,7 @@ mod tests {
             xai_tool_runtime::Tool::id(&tool).as_str(),
             "get_task_output"
         );
-        // The static fallback is the shared builder's default grok-build
-        // rendering (monitor + task + bash + read present): concrete names, no
-        // leftover template markers.
+        // The static fallback is the shared builder's default grok-build rendering (monitor + task + bash + read present): concrete names.
         let desc = ToolMetadata::description_template(&tool);
         assert!(desc.contains("monitor"));
         assert!(
@@ -1314,9 +1288,7 @@ mod tests {
         for (label, kinds) in cases {
             let tools: HashMap<ToolKind, String> =
                 kinds.iter().map(|(k, n)| (*k, n.to_string())).collect();
-            // Seed the param map for present tools the way `finalize` does, so
-            // the background sources / subagent header resolve via
-            // `param_for_kind` (which reads the param map, not the tool map).
+            // Seed the param map for present tools the way `finalize` does.
             let mut params: HashMap<ToolKind, HashMap<String, String>> = HashMap::new();
             for (k, _) in kinds.iter() {
                 match k {
@@ -2212,9 +2184,7 @@ mod tests {
         }
     }
 
-    // Legacy message parity fixture tests These tests verify exact historical wording for legacy-0.4.10. Fixture source: the historical 0.4.10
-    // task_output implementation. Historical 0.4.10 message (inner string from ToolError::ProcessManagerError): "Task {task_id} not found"
-    // Subagent wording is out of scope — subagents didn't exist in 0.4.10.
+    // Legacy message parity fixture tests These tests verify exact historical wording for legacy-0.4.10.
 
     #[tokio::test]
     async fn legacy_get_task_not_found_exact_historical_message() {
@@ -2248,8 +2218,7 @@ mod tests {
 
     #[tokio::test]
     async fn current_get_task_not_found_includes_discoverability() {
-        // Current (non-legacy) path must still include known task IDs
-        // or "No background tasks" text for discoverability.
+        // Current (non-legacy) path must still include known task IDs or "No background tasks" text.
         let resources = resources_with_terminal(None);
         let tool = TaskOutputTool;
 

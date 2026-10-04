@@ -1,7 +1,4 @@
 //! Display-refresh probe and motion cadence at TUI startup.
-//!
-//! Owns env cadence knobs, fail-closed probe planning (sync only when auto can change a clock), and paint-clock resolution.
-//! Also owns the terminal and display-refresh telemetry `spawn_blocking`. Keeps the event loop free of this policy code.
 
 use std::time::Duration;
 
@@ -22,7 +19,6 @@ pub struct MotionClocks {
     pub scroll_cadence: Duration,
 }
 
-/// Pure parse for cadence ms: trimmed empty or invalid input falls back to `default_ms`; the result clamps to 1..=100.
 fn parse_cadence_ms(raw: Option<&str>, default_ms: u64) -> u64 {
     raw.and_then(|v| {
         let t = v.trim();
@@ -37,7 +33,6 @@ fn parse_cadence_ms(raw: Option<&str>, default_ms: u64) -> u64 {
 }
 
 /// Read a cadence env knob: `(set, ms)`. `set` is true when the var is present.
-/// (Empty/invalid still counts as set and yields `default_ms` after the 1..=100 clamp.)
 fn cadence_ms_from_env(name: &str, default_ms: u64) -> (bool, u64) {
     match std::env::var(name) {
         Ok(raw) => (true, parse_cadence_ms(Some(&raw), default_ms)),

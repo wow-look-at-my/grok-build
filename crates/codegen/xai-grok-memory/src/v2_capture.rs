@@ -1,11 +1,4 @@
 //! Durable capture queue and immutable observation persistence for memory v2.
-//!
-//! The state database is the cross-process serialization point. Observation
-//! files are published before their outcome row, so a crash can leave orphan
-//! files; each file carries its job id and expected file count, allowing
-//! reconciliation to adopt only a complete, hash-consistent set. Outcomes are
-//! committed before indexing and indexed-cursor advancement, so reconciliation
-//! can deterministically replay that second crash window.
 
 use std::collections::BTreeMap;
 use std::io::{Read as _, Write as _};
@@ -325,10 +318,6 @@ impl V2CaptureStore {
     }
 
     /// Atomically expose observations captured by a non-active rollout.
-    ///
-    /// Shadow evaluation history is deliberately retained so promotion never
-    /// erases rollout evidence. The subsequent reconciliation makes the newly
-    /// exposed files claimable, indexed, and visible in the manifest.
     pub fn promote_hidden_observations_now(&self) -> Result<u64> {
         self.promote_hidden_observations(self.clock.now_unix_seconds())
     }
@@ -351,9 +340,8 @@ impl V2CaptureStore {
                 "cannot promote observations while a Dream lease is active".to_owned(),
             ));
         }
-        // Flip every already-enqueued hidden job, including pending and running
-        // work that has not produced observation files yet. Its pinned
-        // visibility is consulted when the eventual outcome is persisted.
+        // Flip every already-enqueued hidden job, including pending and
+        // running work that has not produced observation files yet.
         transaction.execute(
             "UPDATE capture_visibility SET is_exposed = 1 WHERE is_exposed = 0",
             [],
@@ -461,12 +449,9 @@ impl V2CaptureStore {
         self.claim_matching(request, None)
     }
 
-    /// Claim pending/failed work for one session.
-    ///
-    /// Session lifecycle workers use this form because the durable transcript
-    /// and UI sink they own are session-specific. The same SQLite transaction
-    /// and lease rules as [`Self::claim`] remain the cross-process
-    /// serialization point.
+    /// Claim pending/failed work for one session. Session lifecycle workers
+    /// use this form because the durable transcript and UI sink they own are
+    /// session-specific.
     pub fn claim_for_session(
         &self,
         session_id: &str,
@@ -831,8 +816,7 @@ impl V2CaptureStore {
         let mut connection = self.open_state()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         // Rendering and indexing intentionally happen without the queue write
-        // lock. Fence only the cheap atomic publish: a newer outcome must keep
-        // the manifest it generated instead of being replaced by this snapshot.
+        // lock.
         if read_capture_revision(&transaction)? != revision {
             transaction.commit()?;
             return Ok(());
@@ -1463,9 +1447,6 @@ fn reindex_content_with_retry(
                             if failure.code == rusqlite::ErrorCode::ConstraintViolation
                     ) =>
             {
-                // A peer may have inserted from the same stale index snapshot.
-                // Retry after its commit is visible; the attempt bound still
-                // fails closed on genuine index corruption.
             }
             Err(error) => return Err(error),
         }

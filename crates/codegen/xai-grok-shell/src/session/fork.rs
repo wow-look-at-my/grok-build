@@ -1,5 +1,4 @@
 //! Forks a saved session to a new working directory with a new session ID.
-//! This creates new session files but does not start the session.
 
 use crate::remote::BackendClient;
 const FORK_LOG: &str = "xai_fork";
@@ -24,17 +23,13 @@ pub struct ForkSessionRequest {
     pub new_model_id: Option<String>,
     #[serde(default)]
     pub target_prompt_index: Option<usize>,
-    /// Override `session_kind` in the forked summary. Defaults to `"fork"`.
-    /// Worktree forks set this to `"worktree"`.
+    /// Override `session_kind` in the forked summary. Defaults to `"fork"`. Worktree forks set this to `"worktree"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_kind: Option<String>,
     /// The workspace directory a worktree session was spawned from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_workspace_dir: Option<String>,
-    /// Carry the parent's still-running subagents into the fork (`/fork
-    /// --agents`). Default `false`: the fork takes the main thread's
-    /// conversation, and an agent the parent is still running stays the
-    /// parent's.
+    /// Carry the parent's still-running subagents into the fork (`/fork --agents`).
     #[serde(default)]
     pub include_agents: bool,
 }
@@ -53,7 +48,7 @@ pub struct ForkSessionResponse {
     pub new_model_id: Option<String>,
 }
 
-/// Uses a plain UUIDv7 with no prefix or source embedding, so IDs stay a constant 36 chars no matter how many fork rounds occur.
+/// Uses a plain UUIDv7 with no prefix or source embedding, so IDs stay a constant chars no matter how many fork rounds occur.
 fn generate_fork_session_id(_source_id: &str) -> String {
     uuid::Uuid::now_v7().to_string()
 }
@@ -99,8 +94,7 @@ pub async fn fork_session(
             .clone()
             .filter(|display| display != &request.new_cwd),
         skip_cwd_transform: request.session_kind.as_deref() == Some("worktree"),
-        // Carry the parent's compaction segment archive into the fork so the child retains pre-compaction history
-        // The live summary is already copied via chat_history.jsonl
+        // Carry the parent's compaction segment archive into the fork.
         copy_compaction_segments: true,
         carry_running_subagents: request.include_agents,
         ..Default::default()
@@ -114,9 +108,6 @@ pub async fn fork_session(
 
     let copy_ms = t0.elapsed().as_millis() as u64;
 
-    // Register the fork with the backend from a spawned task
-    // The local fork works without it: all fork state is in session files on disk, and the backend learns of the session when the task completes
-    // Spawning keeps the network round-trip (~200-400ms) off the critical path
     if let Some(am) = auth_manager {
         let sid = new_session_id.clone();
         let cwd = request.new_cwd.clone();

@@ -30,8 +30,8 @@ impl ModelsManager {
             }
             return;
         }
-        // Some models are a different model id at each effort, so swap in the id this effort asks for.
-        // Do this before the log, or the log records an id we are not sending.
+        // Some models are a different model id at each effort, so swap in the
+        // id this effort asks for.
         if let Some(routed) = self.model_for_effort(&sampling.model, effort) {
             sampling.model = routed;
         }
@@ -69,8 +69,8 @@ pub(crate) enum NewSessionEffort {
     None,
 }
 
-/// Precedence: an explicit `_meta.reasoningEffort` wins over the process-wide last-used or `[models].default_reasoning_effort` value.
-/// The catalog default is the last resort and is left on the sampling config when this returns `None`.
+/// Precedence: an explicit `_meta.reasoningEffort` wins over the process-wide
+/// last-used or `[models].default_reasoning_effort` value.
 pub(crate) fn resolve_new_session_effort_hint(
     meta_hint: Option<ReasoningEffort>,
     current: Option<ReasoningEffort>,

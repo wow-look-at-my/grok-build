@@ -1,5 +1,4 @@
-//! The single MCP policy verdict API: every shell consumer resolves verdicts here instead of
-//! assembling its own deny/allow/pin reasons.
+//! The MCP policy verdict API: every shell consumer resolves verdicts here instead.
 
 use std::path::{Path, PathBuf};
 
@@ -13,20 +12,16 @@ pub enum McpVerdict {
     Blocked(McpBlockReason),
 }
 
-/// Why policy blocks an MCP server, attributed to the blocking source. The
-/// `Display` strings (full policy path) are doctor/JSON/log payloads;
-/// [`Self::user_facing_reason`] is the refusal form — do not reword either.
+/// Why policy blocks an MCP server, attributed to the blocking source.
 #[derive(Debug, Clone)]
 pub enum McpBlockReason {
     /// Matches a `deniedMcpServers` entry.
     Deny { source: PathBuf },
     /// Missing from `allowedMcpServers` (or a managed-only lockdown's grant list).
     NotGranted { source: PathBuf },
-    /// The source blocks everything it binds (see `McpServerAllowlist::is_lockdown`),
-    /// so no allow entry could have granted the server.
+    /// The source blocks everything it binds (see `McpServerAllowlist::is_lockdown`).
     Lockdown { source: PathBuf },
-    /// Project-declared and not allowlisted under an
-    /// `enableAllProjectMcpServers = false` pin.
+    /// Project-declared and not allowlisted under an `enableAllProjectMcpServers = false` pin.
     ProjectPin { source: PathBuf },
 }
 
@@ -46,8 +41,8 @@ impl McpBlockReason {
         user_facing_policy_source(self.source())
     }
 
-    /// [`Display`](std::fmt::Display) with the blocking policy file reduced to its name — the
-    /// user-facing refusal form; doctor, `--json`, and tracing keep the full path.
+    /// [`Display`](std::fmt::Display) with the blocking policy file reduced
+    /// to its name — the user-facing refusal form.
     pub fn user_facing_reason(&self) -> String {
         self.reason_with(self.user_facing_source())
     }

@@ -1,9 +1,4 @@
 //! One-shot carry-over of a legacy curated `MEMORY.md` into v2 topic files.
-//!
-//! Legacy Dream wrote one self-contained `##` section per topic, so each
-//! section becomes a v2 topic. The legacy tree is only read, never modified.
-//! The source hash is recorded in the scope's `meta` table so a session start
-//! is a no-op until a legacy client rewrites the file again.
 
 use std::collections::HashSet;
 use std::io::Read as _;
@@ -20,11 +15,9 @@ use crate::v2_clock::V2Clock;
 
 const META_HASH_KEY: &str = "legacy_carryover_hash";
 const META_AT_KEY: &str = "legacy_carryover_at";
-/// Legacy Dream output was capped at 16k chars; anything far beyond that is
-/// not a curated file and is not worth flooding the index with.
+/// Legacy Dream output was capped at 16k chars.
 const MAX_SOURCE_BYTES: u64 = 1024 * 1024;
-/// Sections beyond this many are folded into one topic so the carried-over
-/// notes cannot consume the 64-entry manifest budget by themselves.
+/// Sections beyond this many are folded into one topic so the carried-over notes cannot consume the 64-entry manifest budget.
 const MAX_SEPARATE_SECTIONS: usize = 24;
 const MAX_DESCRIPTION_CHARS: usize = 160;
 const MAX_SLUG_CHARS: usize = 60;
@@ -113,8 +106,7 @@ pub fn carry_over_legacy_memory(
     let Some(content) = read_source(source)? else {
         return Ok(V2CarryoverOutcome::MissingSource);
     };
-    // Scaffold headings and `<!-- … -->` placeholders yield no topics, so an
-    // untouched or nearly untouched file is detected by content, not by size.
+    // Scaffold headings and `<!-- … -->` placeholders yield no topics, so an untouched or nearly untouched file is detected by content.
     let topics = split_into_topics(&content);
     if topics.is_empty() {
         return Ok(V2CarryoverOutcome::NothingToCarry);
@@ -231,9 +223,7 @@ fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
 enum TopicWrite {
     Created(u64),
     Appended(u64),
-    /// Deterministically not written: the name is tombstoned, the existing
-    /// topic already holds every paragraph, or the size cap would be exceeded.
-    /// Counts as done so the source hash can be recorded.
+    /// Deterministically not written: the name is tombstoned, the existing topic already holds every paragraph.
     Skipped,
 }
 
@@ -268,9 +258,7 @@ fn write_topic(
         }
     };
     let existing_text = String::from_utf8_lossy(&existing);
-    // Whole-paragraph dedupe so a legacy rewrite that only adds a paragraph
-    // appends that paragraph, not the whole section again. Appended paragraphs
-    // were heading-shifted, so compare both forms.
+    // Whole-paragraph dedupe so a legacy rewrite that only adds a paragraph appends that paragraph.
     let existing_paragraphs: HashSet<&str> = existing_text.split("\n\n").map(str::trim).collect();
     let new_paragraphs: Vec<&str> = topic
         .body
@@ -464,8 +452,7 @@ fn split_at_level(lines: &[Line<'_>], level: usize) -> Vec<Section> {
         }
     }
     sections.extend(current);
-    // Sub-headings of a `##` section start at `###`; promote them so the new
-    // topic's sections are `##` like Dream-written topics.
+    // Sub-headings of a `##` section start at `###`.
     let promotion = 1 - level as isize;
     for section in &mut sections {
         section.body = shift_headings(&section.body, promotion).trim().to_owned();
@@ -482,8 +469,6 @@ fn split_at_level(lines: &[Line<'_>], level: usize) -> Vec<Section> {
     sections
 }
 
-/// Shift heading levels by `delta` outside fenced code blocks, never below
-/// level 2 so a topic body has no second `#` title.
 fn shift_headings(content: &str, delta: isize) -> String {
     let mut out = String::with_capacity(content.len());
     for line in markdown_lines(content) {

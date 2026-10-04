@@ -1,5 +1,5 @@
 //! MCP server data types, status enum, response conversion, and section
-//! presentation helpers (labels, description lines, connectors URLs).
+//! presentation helpers.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpWireSource {
@@ -53,8 +53,7 @@ pub fn section_label(section: &McpSectionId, count: usize) -> String {
     }
 }
 
-/// Refresh binding on the MCP tab. The action-key table and the connectors wait overlay both read
-/// it so the list footer, the overlay footer, and telemetry cannot drift apart.
+/// Refresh binding on the MCP tab.
 pub const MCP_SERVERS_REFRESH_KEY: char = 'r';
 
 /// Base grok.com connectors URL (no team). Prefer [`managed_connectors_url`] when opening.
@@ -71,9 +70,9 @@ pub fn managed_connectors_url(team_id: Option<&str>) -> String {
     }
 }
 
-/// Display form of [`managed_connectors_url`] with the `https://` scheme dropped. Used for the
-/// Managed section subtitle so the URL is shorter and more likely to fit on one row; the. CtrlCtrl+O
-/// action still opens the full-scheme URL.
+/// Display form of [`managed_connectors_url`] with the `https://` scheme
+/// dropped. Used for the Managed section subtitle so the URL is shorter and
+/// more likely to fit on one row; the.
 pub fn managed_connectors_url_display(team_id: Option<&str>) -> String {
     let url = managed_connectors_url(team_id);
     url.strip_prefix("https://").unwrap_or(&url).to_string()
@@ -171,8 +170,7 @@ pub struct McpsServerSession {
     pub auth_required: bool,
     #[serde(default)]
     pub setup_required: bool,
-    /// Managed-policy verdict for a server the merge dropped (absent on
-    /// older shells and on live servers).
+    /// Managed-policy verdict for a server the merge dropped (absent on older shells and on live servers).
     #[serde(default)]
     pub blocked_reason: Option<String>,
 }
@@ -234,9 +232,7 @@ pub struct McpServerInfo {
     /// Plugin name parsed from `source_label` (`"plugin: …"`).
     pub plugin_name: Option<String>,
     pub is_managed_gateway: bool,
-    /// Why the server is unavailable. Shown on the row, because "unavailable"
-    /// on its own leaves an operator guessing at what a `command` that is not
-    /// installed did.
+    /// Why the server is unavailable.
     pub error: Option<String>,
 }
 

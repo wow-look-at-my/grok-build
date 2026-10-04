@@ -75,7 +75,7 @@ pub(in crate::app::dispatch) fn apply_persist_worktree_mode(
         effects.push(Effect::PersistWorktreeMode { mode, config_key });
     }
 }
-/// Build the two persistence options shared by the fork and new-session worktree question modals ("Always worktree" / "Never worktree").
+/// Build both persistence options shared by the fork and new-session worktree question modals ("Always worktree" / "Never worktree").
 pub(super) fn worktree_persist_options()
 -> [xai_grok_tools::implementations::grok_build::ask_user_question::QuestionOption; 2] {
     use xai_grok_tools::implementations::grok_build::ask_user_question::QuestionOption;
@@ -94,8 +94,8 @@ pub(super) fn worktree_persist_options()
         },
     ]
 }
-/// Open the local worktree question modal on the active agent.
-/// Refuses with a toast if a question (ACP or local) is already on screen, so two questions never collide.
+/// Open the local worktree question modal on the active agent. Refuses with a toast if a question (ACP or
+/// local) is already on screen, so questions never collide.
 fn open_fork_question(
     app: &mut AppView,
     directive: Option<String>,

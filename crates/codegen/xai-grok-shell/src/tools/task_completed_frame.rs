@@ -1,6 +1,4 @@
 //! Keeps `x.ai/task_completed` lines short enough for a client to read.
-//! That holds both when this build sends one and when replay reaches one an earlier build wrote.
-//! Bounding the output field alone does not bound the line: the wrapper and the JSON encoding go on top of it.
 
 use serde_json::Value;
 use serde_json::value::RawValue;
@@ -8,7 +6,6 @@ use xai_grok_tools::types::TaskSnapshot;
 
 use crate::extensions::notification::{SessionNotification, SessionUpdate};
 
-/// Half the 64 KiB a Python `asyncio` stream reader allows, the limit that reported this bug ("Separator is not found, and chunk exceed the limit").
 pub(crate) const FRAME_MAX_BYTES: usize = 32 * 1024;
 
 /// The method the bridge sends; the budget is derived from it.
@@ -25,7 +22,6 @@ pub(crate) fn jsonrpc_line_len(method: &str, params_len: usize) -> usize {
 pub(crate) const FIELD_MAX_BYTES: usize = 1024;
 
 /// The replay copy of [`compact`]'s field list.
-/// The path to the log is missing on purpose: a truncated pointer is worse than less output, so it is cut only as a last resort.
 const COMPACTED_FIELDS: [&str; 4] = ["command", "display_command", "description", "cwd"];
 
 fn body_budget() -> usize {
@@ -33,7 +29,6 @@ fn body_budget() -> usize {
 }
 
 /// A message body proven to fit the frame budget.
-/// [`within`] is the only constructor, so a return path that skips the measurement does not compile.
 pub(crate) struct FittedFrame(Box<RawValue>);
 
 impl FittedFrame {

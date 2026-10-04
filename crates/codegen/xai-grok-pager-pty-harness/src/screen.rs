@@ -1,15 +1,13 @@
 //! Layer 2a: Screen state tracking via `alacritty_terminal` (ptyctl).
-//!
-//! Parses raw PTY output through a headless terminal emulator and provides queries for what the user would see on screen.
 
 use ptyctl::styled::StyledLine;
 use ptyctl::term::{ScreenOpts, ScreenOutput, SessionListener, Terminal};
 
-/// Tracks the virtual terminal screen state by feeding raw PTY output through an `alacritty_terminal`-based headless terminal (via ptyctl).
+/// Tracks the virtual terminal screen state by feeding raw PTY output through
+/// an `alacritty_terminal`-based headless terminal.
 pub struct ScreenTracker {
     terminal: Terminal,
-    /// Receives terminal-generated replies (cursor-position reports, device attributes, color queries, …) the emulator emits while parsing input.
-    /// Drained by [`ScreenTracker::drain_responses`] so the harness can forward them back to the child (real terminals answer these automatically).
+    /// Receives terminal-generated replies (cursor-position reports, device attributes, color queries, …) the emulator emits.
     pty_write_rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
 }
 
@@ -95,8 +93,8 @@ impl ScreenTracker {
             .join("\n")
     }
 
-    /// Scrollback history plus the visible screen, joined oldest to newest: everything a user could see by scrolling up.
-    /// Output may be in either region depending on how much has accumulated.
+    /// Scrollback history plus the visible screen, joined oldest to newest:
+    /// everything a user could see by scrolling up.
     pub fn full_text(&self) -> String {
         let sb = self.scrollback_text();
         let screen = self.contents();
@@ -125,7 +123,6 @@ mod tests {
     /// Lines pushed above a small screen must be readable via the scrollback helpers.
     #[test]
     fn scrolled_off_lines_are_captured_by_scrollback_helpers() {
-        // 3-row screen; print 8 numbered lines so the first ones scroll off.
         let mut s = ScreenTracker::new(3, 20);
         for i in 1..=8 {
             s.feed(format!("line{i}\r\n").as_bytes());

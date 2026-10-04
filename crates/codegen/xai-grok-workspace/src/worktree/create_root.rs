@@ -1,6 +1,4 @@
 //! Session `-w` create: Grove parent probe before libgit2 discover.
-//!
-//! is enough to identify the parent.
 
 use std::path::{Path, PathBuf};
 

@@ -28,8 +28,7 @@ impl HunkTrackerHandle {
     /// Useful for tests and situations where hunk tracking is not needed.
     pub fn noop() -> Self {
         let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
-        // The receiver is dropped immediately, so all sends will return Err
-        // but since we use `let _ = send(...)` everywhere, this is fine.
+        // The receiver is dropped immediately, so all sends will return Err but since we use `let _ = send(...)` everywhere.
         Self { cmd_tx }
     }
 
@@ -39,9 +38,9 @@ impl HunkTrackerHandle {
         self.cmd_tx.is_closed()
     }
 
-    /// Record that an agent tool wrote to a file. This is fire-and-forget - doesn't wait for processing. `previous_content`
-    /// is the file content before this write (if known). It is used as a fallback baseline when the file doesn't exist in git
-    /// HEAD (e.g., in worktrees created from dirty state).
+    /// Record that an agent tool wrote to a file. This is fire-and-forget -
+    /// doesn't wait for processing. `previous_content` is the file content
+    /// before this write (if known).
     pub fn record_agent_write(
         &self,
         path: PathBuf,
@@ -209,9 +208,8 @@ impl HunkTrackerHandle {
         reply_rx.await.ok().flatten()
     }
 
-    /// Get all tracked file paths (agent + external), regardless of hunk state. Entries persist after the user
-    /// accepts/rejects every hunk. Use this for worktree replication where ALL changes matter, not just agent-attributed ones
-    /// (the agent may have created files via terminal commands like `echo`, `cp`, `mv`, etc.).
+    /// Get all tracked file paths (agent + external), regardless of hunk
+    /// state. Entries persist after the user accepts/rejects every hunk.
     pub async fn get_all_tracked_paths(&self) -> Vec<PathBuf> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let _ = self
@@ -275,8 +273,7 @@ impl HunkTrackerHandle {
     }
 
     /// Refresh all baselines from the current git HEAD and re-read current
-    /// content from disk. Call this after a git HEAD/index change to
-    /// reconcile stale baselines and fix phantom "file deleted" hunks.
+    /// content from disk.
     pub fn refresh_all_baselines(&self) {
         let _ = self.cmd_tx.send(HunkTrackerCommand::RefreshAllBaselines);
     }

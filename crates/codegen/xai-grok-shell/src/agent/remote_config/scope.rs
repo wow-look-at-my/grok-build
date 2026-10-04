@@ -13,9 +13,7 @@ fn origin_still_current(current_origin: &str, expected_origin: &str) -> bool {
 
 /// The identity half of the commit scope, shared by the settings and models
 /// commits: re-resolve disk auth through the load's config and compare, so a
-/// like-for-like check detects real credential changes only. An empty
-/// `expected_identity` (an unauthenticated fetch) stays current only while disk
-/// auth is still absent.
+/// like-for-like check detects real credential changes only.
 fn identity_still_current(
     expected_identity: &str,
     auth_config: Option<&GrokComConfig>,
@@ -32,11 +30,9 @@ fn identity_still_current(
 pub(in crate::agent::remote_config) enum Commit {
     /// Origin, policy, and identity all current: write the cache and serve.
     CacheAndServe,
-    /// Origin and policy current, identity not yet persisted to disk: serve in
-    /// memory this boot without writing the cache.
+    /// Origin and policy current, identity not yet persisted to disk: serve.
     ServeInMemory,
-    /// A policy repair is in flight: transient, so re-run a later warm rather
-    /// than record a sticky failure.
+    /// A policy repair is in flight: transient, so re-run a later warm rather than record a sticky failure.
     Retry,
     /// Origin or policy changed for good: abandon the fetch.
     Abandon,

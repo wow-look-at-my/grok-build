@@ -79,7 +79,7 @@ fn streaming_replay_applies_rewind_like_the_typed_path() {
     let u2 = acp_envelope(
         r#"{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"p2"}}"#,
     );
-    // Rewind to prompt 1 drops p2.
+    // Rewind to prompt drops p2.
     let rw = xai_envelope(
         r#"{"sessionUpdate":"rewind_marker","target_prompt_index":1,"created_at":"2024-01-01"}"#,
     );
@@ -202,8 +202,9 @@ fn prepare_replay_cursor_refused_when_tail_has_event_id_less_line() {
 
 #[test]
 fn prepare_replay_extracts_max_event_seq() {
-    // eventId is "{sessionId}-{counter}" and session ids contain dashes, so the counter is the suffix after the LAST '-'
-    // max_event_seq re-seeds the global event counter on resume so post-load live events stay monotonic and survive the client's eventId dedup
+    // eventId is "{sessionId}-{counter}" and session ids contain dashes, so
+    // the counter is the suffix after the LAST '-' max_event_seq re-seeds the
+    // global event counter on resume.
     let a1 = acp_envelope_with_meta(
         r#"{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"a"}}"#,
         r#"{"eventId":"019e-abcd-7","totalTokens":100}"#,
@@ -318,7 +319,7 @@ fn prepare_replay_drops_available_commands_update() {
     let raw = format!("{u}\n{acu}\n{a}\n");
 
     let prepared = prepare_replay_lines(&raw, None);
-    // ACU dropped; the two real updates kept in original order.
+    // ACU dropped; both real updates kept in original order.
     assert_eq!(prepared.lines.len(), 2);
     assert_eq!(prepared.total_live, 2);
     assert!(
@@ -374,11 +375,10 @@ fn prepare_replay_rewind_truncates_and_drops_acu() {
     let raw = format!("{u0}\n{acu}\n{a0}\n{rw}\n{u1}\n");
 
     let prepared = prepare_replay_lines(&raw, None);
-    // Rewind to 0 kills u0/a0; ACU dropped; only the new p1 survives.
+    // Rewind to multiple kills u0/a0; ACU dropped; only the new p1 survives.
     assert_eq!(prepared.lines.len(), 1);
     assert!(prepared.lines.first().is_some_and(|s| s.contains("p1")));
     assert_eq!(prepared.total_live, 1);
-    // last_tokens recomputed from the surviving timeline (p1 carries 9)
     assert_eq!(prepared.last_tokens, 9);
     assert!(prepared.mark_replay);
 }
@@ -576,8 +576,7 @@ fn prepare_replay_rewind_then_cursor_with_acu() {
     );
     let raw = format!("{u0}\n{a0}\n{acu0}\n{rw}\n{u1}\n{acu1}\n{a1}\n");
 
-    // Rewind to 0 kills u0/a0/acu0; the surviving live set is [u1(e2), acu1, a1(e3)]
-    // The cursor on e2 makes the tail [acu1, a1]; dropping acu1 leaves [a1]
+    // Rewind to multiple kills u0/a0/acu0; the surviving live set is [u1(e2), acu1, a1(e3)] The cursor on e2 makes the tail [acu1, a1].
     let prepared = prepare_replay_lines(&raw, Some("e2"));
     assert!(!prepared.mark_replay);
     assert_eq!(prepared.lines.len(), 1);
@@ -610,7 +609,6 @@ fn filter_delta_replay_drops_blank_acu_and_rewinds() {
     let raw = format!("{u1}\n\n{acu}\n{a1}\n{u2}\n{a2}\n{rw}\n");
 
     let live = filter_delta_replay_lines(&raw);
-    // Blank and ACU dropped; the rewind to prompt 1 truncates the dead branch (u2/a2) and consumes the marker, leaving only p1/a1
     assert_eq!(live.len(), 2);
     assert!(
         live.iter()

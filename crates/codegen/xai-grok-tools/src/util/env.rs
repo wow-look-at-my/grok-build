@@ -1,9 +1,4 @@
 //! Environment variable helpers and process isolation for terminal execution.
-//!
-//! All implementations now live in the lightweight [`xai_tty_utils`] crate
-//! so that every crate in the workspace can use them without pulling in the
-//! heavyweight `xai-grok-tools` dependency. This module re-exports the public
-//! API for backward compatibility.
 
 pub use xai_tty_utils::{detach_from_tty, pager_env};
 
@@ -28,9 +23,7 @@ pub fn parse_positive_env(var: &str, value: Option<String>) -> Option<usize> {
     parsed
 }
 
-/// Env var set on agent-spawned terminal processes so host tools (e.g. `x ban`) can distinguish agent invocations from
-/// human interactive shells. Note: the CLI also uses `GROK_AGENT` as an optional agent-definition selector for
-/// launching `grok` itself; child terminal processes only need the sentinel value `"1"`.
+/// Env var set on agent-spawned terminal processes so host tools (e.g. `x ban`) can distinguish agent invocations.
 pub const GROK_AGENT_ENV: &str = "GROK_AGENT";
 
 /// Sentinel value for [`GROK_AGENT_ENV`] on agent tool terminals.
@@ -42,7 +35,7 @@ pub fn apply_grok_agent_marker(cmd: &mut tokio::process::Command) {
     cmd.env(GROK_AGENT_ENV, GROK_AGENT_ENV_VALUE);
 }
 
-/// Expand the four plugin-path tokens (`${CLAUDE_PLUGIN_ROOT}` / `${GROK_PLUGIN_ROOT}` and `${CLAUDE_PLUGIN_DATA}` /
+/// Expand those plugin-path tokens (`${CLAUDE_PLUGIN_ROOT}` / `${GROK_PLUGIN_ROOT}` and `${CLAUDE_PLUGIN_DATA}` /
 /// `${GROK_PLUGIN_DATA}`) in `s`. Each pair is expanded only when its value is provided. Single source of truth for
 /// plugin agent bodies, plugin skill/command bodies, and plugin MCP/hook config substitution.
 pub fn substitute_plugin_tokens(

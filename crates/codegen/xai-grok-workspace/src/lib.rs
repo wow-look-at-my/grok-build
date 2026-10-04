@@ -1,10 +1,10 @@
-#![allow(clippy::cast_lossless)] // 5 hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // 66 hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // 3 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
-#![allow(clippy::expect_used)] // 14 hits predate the gate
-#![allow(clippy::string_slice)] // 40 hits predate the gate
-#![allow(clippy::unwrap_used)] // 39 hits predate the gate
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::string_slice)] // Hits predate the gate
+#![allow(clippy::unwrap_used)] // Hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -94,14 +94,11 @@ pub fn init_metrics() {
     hub_server::init_metrics();
     hub_auth::init_metrics();
 }
-/// Crate-wide lock serializing every test that mutates the process-global environment (`GROK_HOME`, `HOME`, …).
-/// nextest isolates each test in its own process, but `cargo test --lib` shares ONE process across threads.
-/// A per-module lock can't stop a peer test in another module clobbering `GROK_HOME` mid-test, so every env-mutating test module uses this one.
+/// Crate-wide lock serializing every test that mutates the process-global environment.
 #[cfg(test)]
 pub(crate) static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-/// Crate-shared RAII guard for a single process env var in tests: sets (or unsets) it on construction and restores the prior value on drop.
-/// Hold it together with [`ENV_TEST_LOCK`] for the test's lifetime, acquiring the lock FIRST so it drops LAST.
-/// The env restore (this guard) then runs before the lock releases, so no peer test observes the temporary value.
+/// Crate-shared RAII guard for a single process env var in tests: sets (or
+/// unsets) it on construction and restores the prior value on drop.
 #[cfg(test)]
 pub(crate) struct TestEnvGuard {
     key: &'static str,
@@ -131,9 +128,8 @@ impl Drop for TestEnvGuard {
         }
     }
 }
-/// Holds [`ENV_TEST_LOCK`] AND a set of [`TestEnvGuard`]s as ONE value; a test or fixture can return/bind it any way and stay correct.
-/// Struct fields drop in declaration order, so `_env` restores every env var BEFORE `_lock` releases the lock; no call site can reorder that.
-/// Acquire the lock first via [`lock`](Self::lock), then mutate env under it with the chained [`set`](Self::set) builder.
+/// Holds [`ENV_TEST_LOCK`] AND a set of [`TestEnvGuard`]s as ONE value; a
+/// test or fixture can return/bind it any way and stay correct.
 #[cfg(test)]
 pub(crate) struct LockedTestEnv {
     _env: Vec<TestEnvGuard>,
@@ -148,8 +144,8 @@ impl LockedTestEnv {
             _lock: ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner()),
         }
     }
-    /// Set `key` to `val` under the held lock, restoring the prior value on drop.
-    /// Intended for DISTINCT keys; the restore order across repeated `set`s of the SAME key is unspecified (guards restore in insertion order).
+    /// Set `key` to `val` under the held lock, restoring the prior value on
+    /// drop.
     pub(crate) fn set(mut self, key: &'static str, val: &std::path::Path) -> Self {
         self._env.push(TestEnvGuard::set(key, val));
         self
@@ -176,8 +172,7 @@ impl std::io::Write for VecWriter {
         Ok(())
     }
 }
-/// Serializes capture tests: `rebuild_interest_cache` is process-global, so
-/// two concurrent captures can drop each other's warns.
+/// Serializes capture tests: `rebuild_interest_cache` is process-global.
 #[cfg(test)]
 static CAPTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Run `f` while capturing WARN-level logs on this thread. `f` must be pure:

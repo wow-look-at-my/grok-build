@@ -26,8 +26,7 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
         ]
     }));
 
-    // Seed config.toml with the user's own default model
-    // Pin the leader socket under the shared GROK_HOME so every spawn elects or attaches to the same leader (mirrors `LeaderCluster`)
+    // Seed config.toml with the user's own default model Pin the leader socket under the shared GROK_HOME so every spawn elects or attaches.
     let grok_home = content.home().join(".grok");
     std::fs::create_dir_all(&grok_home).expect("create GROK_HOME");
     std::fs::write(
@@ -38,9 +37,7 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
     let socket = grok_home.join("leader-e2e.sock");
     let socket = socket.to_str().expect("socket path is utf-8").to_owned();
 
-    // Use session (OAuth) auth instead of the harness's default XAI_API_KEY
-    // The settings fetch requires `auth_manager.auth()`: in ApiKey/BYOK mode the pager never requests `/v1/settings`
-    // Without that request a remote campaign can never reach the pager (see `spawn_polling_session`'s doc)
+    // Use session (OAuth) auth instead of the harness's default XAI_API_KEY The settings fetch requires `auth_manager.auth()`.
     seed_fake_oauth(&content, "pty-campaign-leader");
     let binary = pager_binary().expect("resolve pager binary");
     let spawn = || -> PtyHarness {
@@ -61,14 +58,12 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
             .unwrap_or(false)
     };
 
-    // ── Phases 1 and 2: nudge on a new session; a pick records the dismissal in the TUI process
-    // Retries fresh TUI spawns (same leader) so a missed 2s prefetch window on a loaded runner can't hang the test
     let mut recorded = false;
     'attempts: for attempt in 0..3 {
         let mut h = spawn();
-        // A cold start (leader election plus booting an unoptimized binary) can miss the welcome paint within LEADER_TIMEOUT on a loaded runner
-        // The leader outlives this client, so a fresh spawn attaches to the already-running leader and paints promptly
-        // Retry as for a missed campaign, and panic only once all attempts are exhausted
+        // A cold start (leader election plus booting an unoptimized binary)
+        // can miss the welcome paint within LEADER_TIMEOUT on a loaded runner
+        // The leader outlives this client.
         if h.wait_for_text(WELCOME_SCREEN_SENTINEL, LEADER_TIMEOUT)
             .is_err()
         {
@@ -96,8 +91,7 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
                 break 'attempts;
             }
         }
-        // The regression under test: the pick persisted but the dismissal is missing
-        // With the app::run seed present this only happens when the prefetch missed on this spawn; retry once more before declaring failure
+        // The regression under test: the pick persisted.
         h.quit().expect("clean quit");
     }
     assert!(
@@ -105,9 +99,6 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
         "leader-mode TUI must record the remote campaign dismissal in {state_path:?}"
     );
 
-    // ── Phase 3: the dismissal is durable and the pick is persisted. The user's choice must be in config.toml, and
-    // the campaign value must never be written there. A fresh client on the same leader socket is deliberately not
-    // asserted on-screen here.
     let config = std::fs::read_to_string(grok_home.join("config.toml")).expect("read config.toml");
     assert!(
         config.contains(&format!("default = \"{CONFIG_MODEL}\"")),

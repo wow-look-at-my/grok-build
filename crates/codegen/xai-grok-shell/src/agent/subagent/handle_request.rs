@@ -30,10 +30,9 @@ static SUBAGENTS_ACTIVE: xai_grok_telemetry::activity::ActivityGauge =
     xai_grok_telemetry::activity::ActivityGauge::work(
         xai_grok_telemetry::activity::SUBAGENTS_ACTIVE_KEY,
     );
-/// Bounds each parent-side await in the child completion path. The parent's biased select polls its event channels ahead of `cmd_rx`, so a busy turn can starve `cmd_rx` and park a completed child (leaking its session thread, fs watchers, and fds) forever.
+/// Bounds each parent-side await in the child completion path.
 pub(super) const PARENT_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-/// `PARENT_ACK_TIMEOUT`-bounded acks in the completion path: usage fold,
-/// not-applied mark, list_tasks snapshot, notification reparent.
+/// `PARENT_ACK_TIMEOUT`-bounded acks in the completion path: usage fold, not-applied mark, list_tasks snapshot.
 const PARENT_ACK_SITES: u128 = 4;
 pub(super) fn agent_memory_scope_for_mode(
     scope: Option<xai_grok_agent::config::MemoryScope>,
@@ -47,8 +46,7 @@ const _: () = assert!(
     "sequential parent acks must fit the turn-freeze usage drain; a new \
      PARENT_ACK_TIMEOUT-bounded await must bump PARENT_ACK_SITES"
 );
-/// Bounds each read of the child session's own actors (chat state, signals) in the completion path. They are spawned on the child session's current-thread runtime, so a tool synchronously blocking that thread freezes them together with the session actor; teardown must still reach
-/// Shutdown on the cheap fallbacks.
+/// Bounds each read of the child session's own actors (chat state, signals) in the completion path.
 pub(super) const CHILD_ACTOR_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// One bounded query against a child-session actor, degrading to `fallback`
 /// when the actor never answers.
@@ -2106,10 +2104,7 @@ pub(crate) async fn run_shell_child(
     result.tool_calls = tool_calls;
     result.turns = turns;
     result.duration_ms = start.elapsed().as_millis() as u64;
-    // The child's OWN todo list, read while its session (and so its live
-    // `State<TodoState>`) is still bound here — the last moment the parent can
-    // see it. A `/goal` planner builds that list with `todo_write` as it works;
-    // this carries it back so the spawning session can merge it into its own.
+    // The child's OWN todo list, read while its session (and so its live `State<TodoState>`) is still bound here.
     result.todos = session_todo_contents(&ctx.workspace_ops, child_session_id.0.as_ref()).await;
     if let Some(trace_gcs_config) = gcs_upload_ctx.upload_method.as_ref().map(|method| {
         crate::session::repo_changes::TraceExportConfig {

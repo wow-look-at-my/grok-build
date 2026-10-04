@@ -1,5 +1,4 @@
-//! Decides what the row should become, from the config and the throttle, then applies it to [`crate::app::status_line`].
-//! Rendering is `views::status_line`.
+//! Decides what the row should become, from the config and the throttle.
 
 use std::time::Instant;
 
@@ -13,7 +12,6 @@ use super::status_line::{
 use crate::views::status_line::RowSize;
 
 /// The row's next state, decided before anything is touched.
-/// Owned rather than borrowed out of the config, so it can be applied through `&mut self`.
 enum StatusLineWork {
     Clear,
     Problem(String),
@@ -27,7 +25,7 @@ impl AppView {
     }
 
     /// Session the status row binds to. Welcome has no agent tab, so this is
-    /// None until reveal. Do not bind the hidden home session (invisible subprocess).
+    /// None until reveal.
     fn status_line_source_agent(&self) -> Option<crate::app::agent::AgentId> {
         self.active_view.agent_id()
     }
@@ -38,7 +36,6 @@ impl AppView {
     }
 
     /// A fullscreen subagent draws the whole frame.
-    /// Separate from [`Self::draws_a_row`]: the row comes back when the subagent closes, so nothing here may clear it or drop the resize it is owed.
     fn a_subagent_owns_the_frame(&self) -> bool {
         self.active_agent()
             .is_some_and(|agent| agent.active_subagent.is_some())
@@ -285,7 +282,7 @@ impl AppView {
         }
         let padding = self.current_ui.status_line.padding();
         if self.status_line.source() != self.active_view.agent_id() {
-            // Content settled for another agent says nothing about this one.
+            // Content settled for another agent says nothing about this.
             return StatusLineFrame::Reserved { padding };
         }
         match self.status_line.display() {
@@ -332,8 +329,7 @@ fn status_line_tick_demand(
         return TickDemand::None;
     }
     match run {
-        // Before the repaint terms below, which a settled row never raises
-        // Without this the watchdog gets no tick, and a task that dies holding the slot refuses every later run
+        // Before the repaint terms below, which a settled row never raises Without this the watchdog gets no tick.
         RunSlot::PastDeadline => return TickDemand::Slow,
         // A run answers through its own task result, so ticks add nothing while one may still arrive
         RunSlot::WithinDeadline => return TickDemand::None,

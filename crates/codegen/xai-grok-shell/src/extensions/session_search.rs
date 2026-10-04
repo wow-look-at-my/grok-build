@@ -1,14 +1,4 @@
 //! ACP extension handler for session search (`x.ai/session/search`).
-//!
-//! Exposes session full-text search as an ACP extension method.
-//! The client sends a query and receives ranked results across all (or workspace-filtered) past sessions.
-//!
-//! ```text
-//! JSON-RPC -> mvp_agent.ext_method()
-//!          -> session_search::handle()
-//!          -> storage::search::execute_search()
-//!          -> search_fts::SessionSearchIndex (SQLite FTS5)
-//! ```
 
 use std::io;
 
@@ -30,17 +20,16 @@ pub(crate) struct SearchSessionsRequest {
     /// Optional workspace directory to scope results to.
     #[serde(default)]
     pub cwd: Option<String>,
-    /// Maximum number of results to return. Defaults to 20.
+    /// Maximum number of results to return.
     #[serde(default = "default_limit")]
     pub limit: usize,
-    /// Offset for pagination. Defaults to 0.
+    /// Offset for pagination.
     #[serde(default)]
     pub offset: usize,
     /// Whether to include content snippets in results.
     #[serde(default)]
     pub include_content: bool,
     /// Headless policy (`"exclude"|"only"|"include"`).
-    /// Omission preserves legacy inclusive search; unknown explicit values fail closed to exclude.
     #[serde(default)]
     pub headless: Option<String>,
 }

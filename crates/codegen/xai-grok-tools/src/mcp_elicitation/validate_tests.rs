@@ -47,8 +47,7 @@ fn string_values_are_submitted_verbatim() {
         "required": ["note"]
     });
     let specs = parse_form_schema(&schema).unwrap();
-    // Whitespace is part of the value: it counts toward minLength and is
-    // preserved in the accepted content, exactly as the user reviewed it.
+    // Whitespace is part of the value: it counts toward minLength and is preserved in the accepted content.
     let content = validate_form(&specs, &draft_values(&specs, &["  ab  "])).unwrap();
     assert_eq!(content.get("note"), Some(&json!("  ab  ")));
     assert!(
@@ -225,7 +224,6 @@ fn large_integer_keeps_every_digit() {
         "required": ["id"]
     });
     let specs = parse_form_schema(&schema).unwrap();
-    // Above 2^53: an f64 round-trip would change the value.
     let content = validate_form(&specs, &draft_values(&specs, &["9007199254740993"])).unwrap();
     assert_eq!(content.get("id"), Some(&json!(9007199254740993_i64)));
 }
@@ -305,9 +303,6 @@ fn optional_empty_multi_select_is_omitted() {
     assert!(content.is_empty());
 }
 
-/// `required` only demands presence and `minItems` defaults to 0, so an
-/// empty required multi-select submits `[]` (an explicit `minItems: 1`
-/// is the schema's way to demand a selection).
 #[test]
 fn required_multi_select_submits_empty_array_without_min_items() {
     let schema = json!({

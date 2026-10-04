@@ -1,5 +1,4 @@
-//! Per-turn retry policy for 401s after an auth recovery attempt: recovery succeeded (resubmit), or
-//! failed transiently on a credential-less request — parked on the uncharged path to wait for a token.
+//! Per-turn retry policy for 401s after an auth recovery attempt: recovery succeeded (resubmit).
 
 use tokio_retry::strategy::ExponentialBackoff;
 use xai_grok_sampling_types::SentCredential;
@@ -8,8 +7,7 @@ use super::RecoveredStore;
 use crate::util::dual_clock::DualClock;
 use xai_grok_login::AuthManager;
 
-/// One blind wait inside [`pace_uncharged_resubmit`]: `notify_waiters` stores no permit and the
-/// adoption paths never notify, so re-check wire-validity and poll auth.json every slice.
+/// One blind wait inside [`pace_uncharged_resubmit`]: `notify_waiters` stores no permit and the adoption paths never notify.
 const PACE_WAIT_SLICE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Pace an uncharged resubmit: hold the escalating `delay`, releasing early only once a wire-valid
@@ -21,8 +19,7 @@ pub(crate) async fn pace_uncharged_resubmit(
 ) {
     use xai_grok_login::backend::{ActiveAuthBackend, AuthBackend};
     match (store, auth_manager) {
-        // Only an xAI authority stamps the token on the wire: elsewhere an early
-        // release would fire unpaced doomed sends straight into the runaway guard.
+        // Only an xAI authority stamps the token on the wire.
         (RecoveredStore::SessionToken, Some(am))
             if ActiveAuthBackend::default().is_xai_authority() =>
         {
@@ -65,11 +62,10 @@ pub(crate) fn human_duration(d: std::time::Duration) -> String {
     format!("{}h{}m", mins / 60, mins % 60)
 }
 
-/// Decision for one post-recovery 401 (see [`AuthRetrySchedule::on_recovered_401`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthRetryDecision {
-    /// No credential was on the wire, so no slot is charged: resubmit after the escalating
-    /// `delay`; `resubmit` is the 1-indexed count since the last successful response.
+    /// No credential was on the wire, so no slot is charged: resubmit after
+    /// the escalating `delay`.
     UnchargedResubmit {
         resubmit: u32,
         delay: std::time::Duration,
@@ -85,18 +81,17 @@ pub(crate) enum AuthRetryDecision {
     RunawayGuard { rejections: u32 },
 }
 
-/// The budget is per-incident (successes and suspend boundaries reset it, the latter capped) and only credentialed rejections charge it.
-/// Delays must be 1s/2s/4s. `ExponentialBackoff::from_millis(base)` raises `base` to the attempt number, so the base must stay small.
-/// `from_millis(1000)` yields 1s, then 16m40s, then 11.57 days of silent hang (a past field incident).
+/// The budget is per-incident (successes and suspend boundaries reset it, the
+/// latter capped) and only credentialed rejections charge it. Delays must be
+/// 1s/2s/4s. `ExponentialBackoff::from_millis(base)` raises `base` to the
+/// attempt number, so the base must stay small.
 pub(crate) struct AuthRetrySchedule {
     delays: std::iter::Take<ExponentialBackoff>,
     /// Slots charged this incident.
     attempt: u32,
     /// 401s seen this incident, total and the subset that provably carried a credential.
-    /// Feeds the exhaustion message so "real credential rejected" and "budget exhausted" cannot be conflated.
     incident_rejections: u32,
     incident_authenticated: u32,
-    /// Stamped by the incident's first charged 401; cleared by resets.
     incident_started: Option<DualClock>,
     /// Uncharged fail-closed rejections since the last successful response (survives suspend resets).
     uncharged_resubmits: u32,
@@ -109,16 +104,13 @@ pub(crate) struct AuthRetrySchedule {
 impl AuthRetrySchedule {
     /// Consecutive credentialed post-recovery 401s tolerated per incident before the turn fails.
     pub(crate) const MAX_RETRIES: u32 = 3;
-    /// Uncharged rejections tolerated without a success in between. Burn rate: ~1 per 16-min
-    /// sleep cycle (>13 h lid-closed survival), or ~1 per pace step awake (≥ ~45 min to fail).
+    /// Uncharged rejections tolerated without a success in between.
     pub(crate) const MAX_UNCHARGED_RESUBMITS: u32 = 50;
-    /// Suspend resets tolerated without an intervening successful response (about 8 sleep cycles of a continuously failing incident).
-    /// Beyond this the budget stops resetting and is allowed to exhaust.
+    /// Suspend resets tolerated without an intervening successful response.
     pub(crate) const MAX_SUSPEND_RESETS: u32 = 8;
     /// Cap on the escalating uncharged pace; a landing token wakes the wait early, so it costs no recovery latency.
     pub(crate) const UNCHARGED_PACE_CAP: std::time::Duration = std::time::Duration::from_secs(60);
-    /// Wall-vs-monotonic drift beyond which the machine must have slept:
-    /// well below a real sleep cycle (minutes), well above NTP step jitter.
+    /// Wall-vs-monotonic drift beyond which the machine must have slept: well below a real sleep cycle (minutes).
     const SUSPEND_DRIFT_MIN: std::time::Duration = std::time::Duration::from_secs(30);
 
     pub(crate) fn new() -> Self {
@@ -145,9 +137,6 @@ impl AuthRetrySchedule {
         self.uncharged_resubmits > 0
     }
 
-    /// Decision for one post-recovery 401. Charges a slot only when the
-    /// rejected request carried a credential (or its provenance is unknown
-    /// — fail closed toward terminating).
     pub(crate) fn on_recovered_401(&mut self, credential: SentCredential) -> AuthRetryDecision {
         self.on_recovered_401_at(credential, DualClock::now())
     }
@@ -191,9 +180,8 @@ impl AuthRetrySchedule {
         }
     }
 
-    /// Close the open incident if it spans a suspend (wall elapsed outgrew monotonic elapsed by [`Self::SUSPEND_DRIFT_MIN`]).
-    /// Separate wakes are independent 401 events.
-    /// Capped at [`Self::MAX_SUSPEND_RESETS`] per success-free stretch so a fault that persists across wakes exhausts instead of retrying forever.
+    /// Close the open incident if it spans a suspend (wall elapsed outgrew
+    /// monotonic elapsed by [`Self::SUSPEND_DRIFT_MIN`]).
     pub(crate) fn reset_if_incident_spans_suspend(&mut self) -> bool {
         self.reset_if_incident_spans_suspend_at(DualClock::now())
     }
@@ -227,7 +215,6 @@ impl AuthRetrySchedule {
     }
 
     /// A successful model response ends every open incident.
-    /// Restart the escalating schedule and clear the success-free-stretch counters (uncharged rejections, suspend resets).
     pub(crate) fn reset_on_success(&mut self) {
         *self = Self::new();
     }

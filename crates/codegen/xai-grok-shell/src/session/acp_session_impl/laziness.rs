@@ -2,8 +2,8 @@
 
 use super::*;
 
-/// Per-fire metadata captured at the top of `maybe_fire_laziness_check` when `--laziness-debug-log` is set.
-/// Passed through `maybe_write_laziness_debug_log` so every JSONL line references the same snapshot point.
+/// Per-fire metadata captured at the top of `maybe_fire_laziness_check` when
+/// `--laziness-debug-log` is set.
 pub(crate) struct LazinessFireMeta {
     pub session_id: String,
     pub todo_snapshot: Vec<DebugTodoSnapshot>,
@@ -13,20 +13,18 @@ pub(crate) struct LazinessFireMeta {
 /// The outcome of one classifier fire, used only to shape the JSONL debug line.
 /// Production code never matches on this; it uses `LazinessDecision` and `LazinessAbortReason` directly.
 pub(crate) enum LazinessFireOutcome {
-    /// User input, model switch, timeout, or sampler/HTTP failure before a verdict was produced.
-    /// `error_detail` is `Some` only for `ClassifierError` reasons (sampler/HTTP or `prepare_chat_completion` failure).
+    /// User input, model switch, timeout, or sampler/HTTP failure before a
+    /// verdict was produced.
     Aborted {
         reason: LazinessAbortReason,
         error_detail: Option<String>,
     },
     /// Sampler returned text but `parse_classifier_output` rejected it.
-    /// Both the raw text and the parse-error detail are kept for offline analysis.
     ParseError {
         raw_text: String,
         parse_error_detail: String,
     },
     /// Sampler returned text and it parsed cleanly.
-    /// `build_laziness_debug_line` computes the debug decision (`WouldNudge`, `NoNudgeLowConfidence`, or `NoNudgeNotStalled`) from `parsed`.
     Verdict {
         parsed: ClassifierOutput,
         raw_text: String,
@@ -139,11 +137,9 @@ pub(crate) fn classify_debug_decision(
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DebugDecision {
     /// Parsed verdict was `stalled_*` with confidence at or above the threshold.
-    /// Production would have injected a nudge here (subject to its cap, which debug mode ignores).
     WouldNudge,
     /// Parsed verdict was `not_stalled_*`. Production would have fired classifier telemetry only.
     NoNudgeNotStalled,
-    /// Parsed verdict was `stalled_*` but below the configured min-confidence threshold (default 0.7).
     NoNudgeLowConfidence,
     /// User input, model switch, timeout, or parse error before a verdict was produced. The `abort_reason` field names which.
     Aborted,
@@ -190,8 +186,7 @@ pub(crate) struct LazinessDebugLogLine {
     pub decision: DebugDecision,
     /// One of the `LAZINESS_ABORT_*` consts when `decision == Aborted`; `None` when the classifier produced a verdict.
     pub abort_reason: Option<&'static str>,
-    /// Verbatim failure text when the sampler call or response parsing failed, so an operator can see what the backend complained about.
-    /// `None` for clean classifier runs and for non-error aborts (user_input, model_switch, timeout).
+    /// Verbatim failure text when the sampler call or response parsing failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_detail: Option<String>,
     pub classifier_elapsed_ms: u64,
@@ -280,14 +275,12 @@ impl SessionActor {
         let cfg = self.models_manager.laziness_detector_for(&model_id);
         let debug_mode = self.laziness_debug_log.is_some();
 
-        // This gates the classifier fire only; the nudge cap check is inside `evaluate_laziness`
-        // `debug_mode` forces a fire even when per-model `enabled = false`
-        // That lets eval traffic be collected against any model without flipping its catalog entry
+        // This gates the classifier fire only.
         if !cfg.enabled && !debug_mode {
             return;
         }
-        // Idle predicate, the same conditions the Layer-2 notification drain consults
-        // Skipped in debug mode (the dev flag fires on every turn end to maximize eval-set coverage)
+        // Idle predicate, the same conditions the Layer-2 notification drain
+        // consults Skipped in debug mode.
         if !debug_mode {
             let state = self.state.lock().await;
             if !is_session_idle_for_injection(&state) {
@@ -321,8 +314,6 @@ impl SessionActor {
         let abort_snapshot = self.laziness_abort_snapshot();
 
         // Idle wait: polls the generation counters so user input or a model switch is observed within `poll_interval`.
-        // Snapshot-and-poll instead of `tokio::sync::Notify::notified()` avoids the stored-permit hazard A `notify_one()` issued before this task spawns would otherwise fire the abort arm on the very first poll.
-        // In debug mode the threshold is 0 so this loop is a no-op.
         let deadline = tokio::time::Instant::now() + idle_threshold;
         loop {
             let now = tokio::time::Instant::now();
@@ -351,8 +342,6 @@ impl SessionActor {
         }
 
         // Re-check idle after the sleep and snapshot `nudges_used`.
-        // Debug mode bypasses the idle gate (the dev flag forces a fire even mid-turn)
-        // It still reads the counter so `evaluate_laziness` sees the same state as production
         let nudges_used = {
             let state = self.state.lock().await;
             if !debug_mode && !is_session_idle_for_injection(&state) {
@@ -361,9 +350,6 @@ impl SessionActor {
             state.nudges_used_this_session
         };
 
-        // System(classifier prompt: "you are a strict JSON classifier, you are NOT the agent in the transcript") [1].
-        // The request body never contains a `ConversationItem::Assistant`, so the model has no assistant turn to continue.
-        // `items_sent` (surfaced to telemetry and the debug log) counts the source chat items the classifier saw, not the 2 wire items.
         let mut source_items = self.chat_state_handle.get_conversation().await;
         let window_start = laziness_window_start(
             &source_items,
@@ -379,17 +365,14 @@ impl SessionActor {
         let include_reasoning = cfg.include_reasoning.unwrap_or(LAZINESS_INCLUDE_REASONING);
         let transcript_text = flatten_transcript_for_classifier(&source_items, include_reasoning);
 
-        // Harness-truth signals: they come from the harness, not the agent, so a lazy agent cannot fabricate them to mask a stall.
-        // `outstanding_subagents`: live `spawn_subagent` calls that haven't returned.
-        // TodoState is deliberately not injected The todo list is agent-authored and can be fabricated alongside the prose, so including it would confirm the lie rather than catch it.
+        // Harness-truth signals: they come from the harness, not the agent.
         let backing_task_count = self.snapshot_backing_task_count_for_debug_log().await;
         // Refresh the count captured on `meta` above so the debug log matches what the classifier saw
         if let Some(m) = meta.as_mut() {
             m.backing_task_count = backing_task_count;
         }
-        // `turn_elapsed_seconds` is also harness-truth (snapped by the session actor at turn start), so the agent cannot fabricate it.
-        // The classifier cross-checks it against prose claims like "overnight run" or "N hours of work" `turn_elapsed_seconds_from_start_ms` handles negative deltas and absent timestamps.
-        // Sub-second deltas truncate to 0, which the classifier reads as an explicit "very recent" signal rather than an absent field.
+        // `turn_elapsed_seconds` is also harness-truth (snapped by the
+        // session actor at turn start), so the agent cannot fabricate it.
         let turn_start_ms = self
             .chat_state_handle
             .get_notification_meta()
@@ -412,8 +395,7 @@ impl SessionActor {
             )),
         ];
 
-        // Telemetry attribution headers match `run_memory_flush`
-        // Backend trace correlation can then distinguish "classifier fired in session X" from background traffic
+        // Telemetry attribution headers match `run_memory_flush` Backend trace correlation can then distinguish.
         let session_id_str = self.session_info.id.to_string();
         let mut request = ConversationRequest {
             items,
@@ -421,15 +403,10 @@ impl SessionActor {
             hosted_tools: vec![],
             tool_choice: None,
             // Set below, once the client that carries it is resolved.
-            // `model_id` stays the SESSION model everywhere else in this
-            // function: the per-model enable, the nudge budget and the
-            // telemetry all describe the model being judged, not the one
-            // doing the judging.
             model: None,
             temperature: Some(0.0),
             max_output_tokens: Some(LAZINESS_MAX_OUTPUT_TOKENS),
-            // `grok-4.5` and other tool-flavoured variants reject `reasoning_effort` with `400: Model does not support parameter reasoningEffort`
-            // Omitting it lets each model apply its own default, which suffices for one short JSON object
+            // `grok-4.5` and other tool-flavoured variants reject `reasoning_effort`.
             reasoning_effort: None,
             x_grok_conv_id: Some(format!("trace-classifier-{}", uuid::Uuid::new_v4())),
             x_grok_req_id: Some(format!("{LAZINESS_REQ_ID_PREFIX}{}", uuid::Uuid::new_v4())),
@@ -438,21 +415,10 @@ impl SessionActor {
             ..ConversationRequest::default()
         };
 
-        // Invisibility-critical: build a fresh `SamplingClient` via
-        // `prepare_chat_completion` and call `conversation_collect`
-        // directly. This is the same side-channel pattern
-        // `run_memory_flush`, `run_dream_model_call`, and
-        // `image_describe` use. The per-session `sampler_handle`
-        // would forward streaming events on the shared sampler
-        // channel — every `ChannelToken { Text }` becomes an ACP
-        // `AgentMessageChunk` → the pager UI renders mid-classifier
-        // reasoning + text deltas. `conversation_collect` does NOT
-        // publish on that channel, so the client sees nothing.
+        // Invisibility-critical: build a fresh `SamplingClient` via `prepare_chat_completion`.
         let slot_sampler = self.resolve_slot_sampler("laziness_classifier").await;
         // The model has to come from whichever client ends up carrying the
-        // request. A slot that resolved to nothing leaves the session's
-        // client, and the pinned id on that client reaches the session
-        // model's endpoint under a name it does not serve.
+        // request.
         request.model = Some(match &slot_sampler {
             Some((_, cfg)) => cfg.model.clone(),
             None => model_id.clone(),
@@ -557,7 +523,7 @@ impl SessionActor {
             Ok(p) => p,
             Err(parse_err) => {
                 let parse_error_detail = parse_err.to_string();
-                // Truncate raw to 200 chars for offline analysis.
+                // Truncate raw to multiple chars for offline analysis.
                 let snippet: String = raw_text.chars().take(200).collect();
                 tracing::debug!(
                     error = %parse_error_detail,
@@ -636,21 +602,16 @@ impl SessionActor {
             return;
         }
 
-        // Final injection step: hold the state lock from the idle re-check through the chat history push and the counter increment.
-        // `push_system_reminder` delegates to the non-blocking `chat_state_handle.push_user_message` (a channel send).
-        // It is safe to call under the `TokioMutex<State>` guard: no lock inversion, no deadlock.
+        // Final injection step: hold the state lock from the idle re-check through the chat history push.
         let mut state = self.state.lock().await;
-        // The abort check runs before the idle re-check A prompt that lands between sampler return and this lock acquire trips both: it fills `pending_inputs` and bumps `user_input_generation`.
-        // Checking abort first reports it via the typed `LazinessClassifierAborted` event instead of the idle re-check's silent return.
-        // The same ordering covers a model switch landing in that window.
+        // The abort check runs before the idle re-check A prompt that lands
+        // between sampler return and this lock acquire trips both.
         if let Some(reason) = self.laziness_abort_check(abort_snapshot) {
             self.emit_laziness_abort(reason);
             return;
         }
         if !debug_mode && !is_session_idle_for_injection(&state) {
-            // The idle predicate failed for a reason other than a fresh prompt or model switch
-            // For example a notification drain queued a synthetic input, or the user cancelled and `notifications_suppressed` is true
-            // Return silently: the condition we wanted to nudge no longer holds, and it is not a Laziness-typed abort either
+            // The idle predicate failed for a reason other than a fresh prompt or model switch For example a notification drain queued a synthetic input.
             return;
         }
         self.push_system_reminder(&nudge_text);
@@ -713,9 +674,8 @@ impl SessionActor {
             .unwrap_or_default()
     }
 
-    /// Count of outstanding background terminal tasks.
-    /// The gate's own count also includes the just-ended prompt's outstanding subagents.
-    /// Operators correlating debug log lines with gate decisions can read the session's events.jsonl for the full subagent state.
+    /// Count of outstanding background terminal tasks. The gate's own count
+    /// also includes the just-ended prompt's outstanding subagents.
     async fn snapshot_backing_task_count_for_debug_log(&self) -> usize {
         self.tool_bridge_handle()
             .list_background_tasks()

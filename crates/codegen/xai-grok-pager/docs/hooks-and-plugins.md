@@ -12,13 +12,13 @@ Grok Build supports **hooks** (event-driven shell commands) and **plugins** (bun
 
 ## Tabs
 
-The modal has three tabs: **Hooks**, **Plugins**, and **Marketplace**. Switch between them with `Tab` / `→` (forward) or `Shift+Tab` / `←` (backward).
+The modal has tabs: **Hooks**, **Plugins**, and **Marketplace**. Switch between them with `Tab` / `→` (forward) or `Shift+Tab` / `←` (backward).
 
 ---
 
 ## Hooks Tab
 
-Hooks are shell commands (or HTTP calls) that run automatically on events like `session_start`, `post_tool_use`, `notification`, etc. See [Creating Custom Hooks](custom-hooks.md) for how to write your own.
+Hooks are shell commands (or HTTP calls) that run automatically on events like `session_start`, `post_tool_use`, `notification`. Etc. See [Creating Custom Hooks](custom-hooks.md) for how to write your own.
 
 Hooks are grouped by source:
 - **Global hooks** — from `~/.grok/hooks/`
@@ -98,10 +98,7 @@ Each source shows its plugins with:
 
 ### Adding Marketplace Sources
 
-Press `a` on the Marketplace tab (or run `grok plugin marketplace add <source>`)
-with a git URL, a GitHub shorthand (`owner/repo`), or a local directory path
-(`/absolute`, `~/dir`, or `./relative`). Local paths are stored as `path`
-sources — handy for developing a marketplace from an existing checkout.
+Press `a` on the Marketplace tab (or run `grok plugin marketplace add <source>`) with a git URL, a GitHub shorthand (`owner/repo`), or a local directory path (`/absolute`, `~/dir`, or `./relative`). Local paths are stored as `path` sources — handy for developing a marketplace from an existing checkout.
 
 Sources land in `~/.grok/config.toml`:
 

@@ -1,7 +1,4 @@
 //! Headless single-turn mode (`grok -p "prompt"`).
-//!
-//! Runs the agent in-process and drives the ACP lifecycle (init, auth, session, prompt).
-//! Streams to stdout and exits via `CancellationToken`.
 use crate::acp::model_state::{EffortTokenError, ModelState};
 use crate::acp::spawn::{AgentShutdownGuard, SpawnedAgent, spawn_grok_shell};
 use crate::app::prompt_ack::{PromptAckDeadlines, PromptAckWatch};
@@ -1313,7 +1310,6 @@ pub async fn run_single_turn(
                     && prompt_result.is_some()
                     && !pending_bg.is_empty() =>
                 {
-                    // Wake to re-check the timeout at the top of the loop.
                 }
                 _ = tokio::time::sleep_until(ack_deadline), if prompt_ack.is_some() => {
                     let Some(watch) = prompt_ack.take() else {

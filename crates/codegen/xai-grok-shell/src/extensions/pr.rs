@@ -152,8 +152,7 @@ async fn gh_pr_view_by_branch(cwd: &str, branch: &str) -> Option<PrData> {
     .stdin(std::process::Stdio::null());
     xai_grok_tools::util::detach_command(&mut cmd);
     cmd.envs(xai_grok_tools::util::pager_env());
-    // gh colorizes even piped --json output under CLICOLOR_FORCE or GH_FORCE_TTY (inherited from terminal-launched dev environments)
-    // Forcing beats NO_COLOR in gh's precedence and gh has no --no-color flag; CLICOLOR_FORCE=0 is gh's documented off-switch
+    // gh colorizes even piped --json output under CLICOLOR_FORCE or GH_FORCE_TTY (inherited from terminal-launched dev environments).
     cmd.env("NO_COLOR", "1");
     cmd.env("CLICOLOR_FORCE", "0");
     cmd.env_remove("GH_FORCE_TTY");
@@ -180,9 +179,7 @@ async fn gh_pr_view_by_branch(cwd: &str, branch: &str) -> Option<PrData> {
     })
 }
 
-/// `gh pr checks --json` for `branch`. The exit code is the verdict (1: a
-/// check failed, 8: a check is pending) and the list is printed either way,
-/// so only an unparseable stdout reads as no checks.
+/// `gh pr checks --json` for `branch`.
 async fn gh_pr_checks(cwd: &str, branch: &str) -> Vec<PrCheck> {
     let mut cmd = tokio::process::Command::new("gh");
     cmd.args(["pr", "checks", branch, "--json", "name,state,conclusion"])

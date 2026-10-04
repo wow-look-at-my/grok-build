@@ -1,5 +1,4 @@
-//! One binary, one home: `grok_home()` memoizes the first read for the process, so tests that need a temp home have to share one.
-//! `#[serial]` keeps their env writes apart.
+//! One binary, one home: `grok_home()` memoizes the first read for the process.
 
 use std::sync::{Arc, OnceLock};
 
@@ -79,7 +78,7 @@ async fn deleting_a_session_clears_only_its_own_search_row() {
     let root = home();
     let index = start_index();
 
-    // All three up front: only the first search builds the index
+    // All of them up front: only the first search builds the index
     seed_session(root, "orphan", "/ws-a").await;
     seed_session(root, "elsewhere", "/ws-b").await;
     seed_session(root, "scoped", "/ws-c").await;

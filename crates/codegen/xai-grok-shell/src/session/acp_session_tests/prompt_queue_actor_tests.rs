@@ -307,9 +307,9 @@ fn combine_front_noop_when_front_carries_a_per_turn_override() {
     assert_eq!(dq_at(&pending, 1).prompt_id, "p2");
 }
 
-/// Two prompts arrive; the actor mailbox serializes them, so the order is FIFO.
-/// The agent drains the front; an edit against the already-drained item is a benign no-op that re-broadcasts the current queue.
-/// A stale-version edit is also a no-op; a correct-version remove empties the queue.
+/// Prompts arrive; the actor mailbox serializes them, so the order is FIFO. The agent drains the front; an edit against the
+/// already-drained item is a benign no-op that re-broadcasts the current queue. A stale-version edit is also a no-op; a
+/// correct-version remove empties the queue.
 #[tokio::test]
 async fn two_enqueues_drain_fifo_and_stale_edit_is_noop() {
     let local = tokio::task::LocalSet::new();
@@ -1134,7 +1134,7 @@ async fn edit_then_combine_uses_edited_text() {
         .await;
 }
 
-/// Two sequential edits: last write wins (the actor mailbox serializes them).
+/// Sequential edits: last write wins (the actor mailbox serializes them).
 #[tokio::test]
 async fn edit_queued_prompt_is_last_writer_wins() {
     let local = tokio::task::LocalSet::new();
@@ -3963,7 +3963,6 @@ async fn promoter_clears_committed_flag_and_handle_prompt_sets_it() {
             let (completion_tx, _completion_rx) = tokio::sync::mpsc::unbounded_channel();
             actor.clone().maybe_start_running_task(completion_tx).await;
 
-            // Abort the turn unpolled: polling `handle_prompt` here overflows the default 2 MB test-thread stack in debug builds
             {
                 let state = actor.state.try_lock().expect("no await since promote");
                 assert_eq!(state.running_prompt_id(), Some("m1"));
@@ -4139,25 +4138,14 @@ async fn rewind_if_pristine_never_pops_an_interjection_fallback_front() {
 
 /// Regression: the ASAP harvest's opening-pass skip must fire only on the
 /// true opening pass of the WHOLE turn, never on the opening pass of a later
-/// round within it (a goal round, an auto-recovery retry). `loop_index`
-/// alone cannot tell the two apart — each round calls
-/// `process_conversation_turn` fresh, resetting `loop_index` to 0 — so a
-/// `loop_index == 1` skip gated on nothing else silenced every automatic
-/// ASAP delivery for the rest of a goal turn: round 2 onward never harvested
-/// a single queued row, though manual send-now (a different code path)
-/// still worked. `first_round` carries the missing turn-scoped half.
+/// round within it (a goal round, an auto-recovery retry).
 #[test]
 fn harvest_gate_skips_only_the_turns_true_opening_pass() {
     use super::turn::should_harvest_before_request;
 
-    // Round 1, request 1: the turn has produced nothing yet — skip.
     assert!(!should_harvest_before_request(1, true));
-    // Round 1, request 2+: later requests in the same round always harvest.
     assert!(should_harvest_before_request(2, true));
     assert!(should_harvest_before_request(3, true));
-    // Round 2+ (a goal continuation, or an auto-recovery retry): loop_index
-    // resets to 1, but the turn already produced output in round 1 — this is
-    // the exact case that was silently skipped before the fix.
     assert!(should_harvest_before_request(1, false));
     assert!(should_harvest_before_request(2, false));
 }

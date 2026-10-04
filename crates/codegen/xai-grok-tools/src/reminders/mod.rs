@@ -1,18 +1,4 @@
 //! Cross-cutting reminders for tool outputs.
-//!
-//! Provides contextual hints wrapped in `<system-reminder>` tags that are
-//! appended to tool outputs before being sent to the model.
-//!
-//! Two categories of reminders:
-//! - **Per-tool reminders**: each tool implements the `Reminder` trait to
-//!   emit reminders based on its output (e.g., empty file warning).
-//! - **Cross-cutting reminders**: standalone structs registered on the
-//!   registry that fire after every tool call.
-//!
-//! This module contains the cross-cutting reminders:
-//! - [`LspDiagnosticsReminder`], [`SkillDiscoveryReminder`], [`TaskCompletionReminder`]
-//!
-//! All reminders are collected and appended in `call_new_tool()`.
 
 pub mod lsp_diagnostics;
 pub mod skill_discovery;
@@ -26,14 +12,11 @@ pub use task_completion::{TaskCompletionReminder, monitor_label};
 pub const DEFAULT_REMINDER_TAG: &str = "system-reminder";
 
 /// Wrap plain text in `<system-reminder>` tags (default hyphen variant).
-/// Input:  `"Some reminder text"`
-/// Output: `"<system-reminder>\nSome reminder text\n</system-reminder>"`
 pub fn wrap_reminder(text: &str) -> String {
     wrap_reminder_with_tag(text, DEFAULT_REMINDER_TAG)
 }
 
-/// Wrap plain text in a configurable reminder wrapper. Use [`DEFAULT_REMINDER_TAG`] unless the
-/// harness requires a different tag name (harness-specific tags live with the harness crate).
+/// Wrap plain text in a configurable reminder wrapper.
 pub fn wrap_reminder_with_tag(text: &str, tag: &str) -> String {
     format!("<{tag}>\n{text}\n</{tag}>")
 }
@@ -152,9 +135,10 @@ pub(crate) fn format_loop_iteration_prompt_with_tools(
     )
 }
 
-/// Append wrapped reminders to a tool output string. Returns output unchanged if reminders is empty. Each reminder is individually wrapped via
-/// [`wrap_reminder_with_tag`] using the given `tag`, then all are joined with `"\n\n"` and appended to the output with a `"\n\n"` separator.
-/// Use [`DEFAULT_REMINDER_TAG`] unless the harness requires a different tag name.
+/// Append wrapped reminders to a tool output string. Returns output unchanged
+/// if reminders is empty. Each reminder is individually wrapped via
+/// [`wrap_reminder_with_tag`] using the given `tag`, then all are joined with
+/// `"\n\n"` and appended to the output with a `"\n\n"` separator.
 pub fn format_with_reminders(output: String, reminders: Vec<String>, tag: &str) -> String {
     if reminders.is_empty() {
         return output;

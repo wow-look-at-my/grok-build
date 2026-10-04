@@ -842,7 +842,6 @@ async fn interrupted_wait_placeholder_keeps_pending_input() {
 }
 /// An auto-wake turn polls its own task's output, so the consumed id matches the front `task-completed-{id}` entry, which IS the in-flight turn.
 /// (`maybe_start_running_task` promotes the front without popping it.).
-/// Deleting it shifts whatever is queued behind (a real user prompt) to index 0, which the next interactive cancel resolves as Cancelled.
 #[tokio::test(flavor = "current_thread")]
 async fn sweep_never_drops_running_turns_own_slot() {
     let local = tokio::task::LocalSet::new();
@@ -882,7 +881,6 @@ async fn sweep_never_drops_running_turns_own_slot() {
         .await;
 }
 /// `queue_input`'s user-priority preempt is the second sweep over `pending_inputs` and needs the same guard.
-/// Otherwise the user prompt lands at index 0 and the next interactive cancel destroys it.
 #[tokio::test(flavor = "current_thread")]
 async fn user_prompt_preempt_keeps_running_synthetic_slot() {
     let local = tokio::task::LocalSet::new();
@@ -1155,9 +1153,9 @@ async fn task_output_running_does_not_drop_pending_input() {
         })
         .await;
 }
-/// Negative-case coverage for the exhaustive match in `consumed_completion_ids`.
-/// The compiler already enforces exhaustiveness via the match.
-/// These tests pin the no-op arms so a future contributor who adds a real id to one of them breaks a test.
+/// Negative-case coverage for the exhaustive match in
+/// `consumed_completion_ids`. The compiler already enforces exhaustiveness
+/// via the match.
 #[tokio::test(flavor = "current_thread")]
 async fn task_not_found_does_not_consume() {
     let out = ToolOutput::TaskOutput(TaskOutputOutput::TaskNotFound("missing".into()));
@@ -1501,7 +1499,7 @@ async fn reparented_record_is_noop_without_goal_harness() {
         })
         .await;
 }
-/// Three children finished in one idle window before the first wake ran.
+/// Children finished in one idle window before the first wake ran.
 #[tokio::test(flavor = "current_thread")]
 async fn wake_turn_digest_coalesces_unreported_siblings() {
     let local = tokio::task::LocalSet::new();
@@ -1886,7 +1884,8 @@ async fn set_goal_loop_active_resource_mirrors_into_gate() {
         })
         .await;
 }
-/// It lets the bash arm of the between-turn drain (`drain_between_turn_bash_completions` calling `list_tasks`) run without a real background command.
+/// It lets the bash arm of the between-turn drain
+/// (`drain_between_turn_bash_completions` calling `list_tasks`).
 #[derive(Debug)]
 struct OneTaskTerminal {
     tasks: Vec<xai_grok_tools::computer::types::TaskSnapshot>,

@@ -90,7 +90,6 @@ mod tests {
         let area = Rect::new(0, 0, 12, 4);
         let prompt = Rect::new(0, 2, 12, 2);
         let mut buf = Buffer::empty(area);
-        // Each CJK glyph is display width 2; char-count truncation would overfill.
         let msg = "你好世界测试文字更多内容";
         paint_welcome_toast(&mut buf, area, msg, Some(prompt));
         let y = prompt.y.saturating_sub(1);

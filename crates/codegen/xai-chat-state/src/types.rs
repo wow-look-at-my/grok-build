@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use xai_grok_sampling_types::{ConversationItem, SamplingConfig};
 
 /// Canonical marker for an injected memory-context block. Shared by emitter and upsert/detection.
-/// A drift would silently break dedup and let blocks accumulate in the prompt prefix.
-/// Assumes the literal never appears in a system prompt except as an injected block.
 pub const MEMORY_CONTEXT_OPEN_TAG: &str = "<memory-context>";
 
 /// Closing tag paired with [`MEMORY_CONTEXT_OPEN_TAG`].
@@ -35,7 +33,6 @@ pub struct ChatStateSnapshot {
     /// Accumulated token usage.
     pub total_tokens: u64,
     /// Bytes/4 estimate of the conversation as of the last `record_token_usage`.
-    /// `0` means unknown (pre-field snapshot); restore re-estimates instead.
     #[serde(default)]
     pub estimate_at_last_response: u64,
     /// File paths the agent has edited.
@@ -121,8 +118,6 @@ pub struct Credentials {
 }
 
 /// The messages captured during a single conversation turn.
-///
-/// Produced by `TakeTurnMessages` after a `BeginTurnCapture`/message-push cycle.
 #[derive(Debug, Clone)]
 pub struct TurnCapture {
     /// The ordered sequence of messages appended during this turn.
@@ -152,7 +147,6 @@ pub struct AutoCompactTrigger {
     pub total_tokens: u64,
     /// Model's context window size.
     pub context_window: NonZeroU64,
-    /// Current utilization as a percentage (0–100).
     pub utilization_percent: u8,
 }
 

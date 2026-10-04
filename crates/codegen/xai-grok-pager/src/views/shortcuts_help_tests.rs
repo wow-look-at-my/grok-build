@@ -45,7 +45,7 @@ fn hint_with_action(
     }
 }
 
-/// `DashboardCycleMode` carries Shift+Tab three times (the terminal encoding variants `BackTab` / `BackTab`+SHIFT / `Tab`+SHIFT).
+/// `DashboardCycleMode` carries Shift+Tab a few times (the terminal encoding variants `BackTab` / `BackTab`+SHIFT / `Tab`+SHIFT).
 /// The cheatsheet must collapse identically-rendered keys instead of showing "Shift+Tab / Shift+Tab / Shift+Tab".
 #[test]
 fn build_entries_dedupes_identically_rendered_alt_keys() {
@@ -717,7 +717,7 @@ fn build_entries_dims_dashboard_list_vs_overlay() {
 fn build_entries_overlay_stop_wins_dedup_and_shadows_cheatsheet_ctrl_x() {
     let registry = ActionRegistry::defaults();
     let ctrl_x = crate::key!('x', CONTROL);
-    // Match the two Ctrl+X rows by ActionId: the list and overlay stops carry different labels ("delete" vs "stop")
+    // Match both Ctrl+X rows by ActionId: the list and overlay stops carry different labels ("delete" vs "stop")
     let is_stop = |action_id: &Option<ActionId>| {
         matches!(
             action_id,
@@ -962,7 +962,6 @@ fn click_from_search_opens_detail_and_clears_query() {
     // Active search that still matches the hint row.
     state.set_query("send");
     state.search_active = true;
-    // Map a click at row 2 to the hint's position in the filtered view.
     let filtered = filter_entries(&entries, state.query(), false, &no_collapsed());
     let hint_pos = filtered
         .iter()
@@ -1724,7 +1723,6 @@ fn toggle_expand_outcome_for_hint_right_key() {
     let registry = ActionRegistry::defaults();
     let entries = build_entries(&all_contexts(), &registry);
     let mut state = build_initial_picker_state(&entries);
-    // Select first non-header row (Essentials section is first header at 0).
     state.selected = 1;
     let mut mode = browse_mode();
     let key = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);

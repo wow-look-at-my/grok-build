@@ -1,11 +1,4 @@
 //! Provider construction for the external stream: `SdkLoggerProvider` and `SdkMeterProvider`.
-//! Neither is registered globally, and nothing is shared with the internal `RefreshableSpanExporter` pipeline.
-//!
-//! The exporters are plain `opentelemetry_otlp` http/protobuf or gRPC/protobuf exporters.
-//! They are built with **only** the customer headers from `OTEL_EXPORTER_OTLP_HEADERS`.
-//! No code path here can attach `Authorization`, `X-XAI-Token-Auth`, or `x-userid`.
-//! Those header constants live in `otel_layer` and are not referenced by this module.
-//! No `AuthCredentialProvider` is ever read.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -63,12 +56,7 @@ impl DedicatedRuntime {
             };
             rt.block_on(async move {
                 while let Some(future) = rx.recv().await {
-                    // This is `opentelemetry_sdk::runtime::Runtime::spawn`: the
-                    // trait hands over a future whose Output is `()` and gives
-                    // back no handle to anybody, so there is no caller to receive
-                    // a join result. The batch processor that queued the export is
-                    // the "nobody" here -- it learns of a lost export through its
-                    // own next failure, not through this pump.
+                    // This is `opentelemetry_sdk::runtime::Runtime::spawn`: the trait hands over a future whose Output is `()` and gives back no handle.
                     #[allow(clippy::disallowed_methods)]
                     tokio::spawn(future);
                 }
@@ -81,7 +69,8 @@ impl DedicatedRuntime {
             tracing::error!(error = %e, "external OTEL gRPC runtime thread spawn failed; external telemetry disabled");
             return None;
         }
-        // Bounded: this runs on the startup path, and the host that refuses threads is the one least likely to schedule this one promptly
+        // Bounded: this runs on the startup path, and the host that refuses
+        // threads is the least likely to schedule this promptly
         match ready_rx.recv_timeout(Duration::from_secs(2)) {
             Ok(true) => Some(Self { tx }),
             _ => None,
@@ -168,7 +157,6 @@ fn temporality(pref: TemporalityPreference) -> Temporality {
 }
 
 /// Console (stderr) log exporter for local debugging (`OTEL_LOGS_EXPORTER=console`).
-/// Writes to **stderr** so stdout protocol channels (headless/stream-JSON) are never corrupted.
 #[derive(Debug)]
 struct StderrLogExporter;
 
@@ -232,7 +220,6 @@ impl opentelemetry_sdk::metrics::exporter::PushMetricExporter for StderrMetricEx
 }
 
 /// Customer headers as the HTTP OTLP builder's header map.
-/// These are the **only** headers the external HTTP exporters send (pinned by the header-isolation test below).
 fn customer_headers(headers: &[(String, String)]) -> std::collections::HashMap<String, String> {
     headers.iter().cloned().collect()
 }
@@ -277,8 +264,6 @@ fn ders_to_pem_bundle(ders: &[Vec<u8>]) -> Option<String> {
     Some(pem)
 }
 
-/// `opentelemetry-otlp` 0.32 must be handed an explicit `ClientTlsConfig` for `https://` endpoints. Its own fallback is
-/// `ClientTlsConfig::new()`, whose root store is empty in tonic 0.14 (`Endpoint::from_shared` never auto-enables roots).
 /// This keeps parity with the HTTP transport's embedded-roots reqwest client.
 fn grpc_tls_candidates(
     endpoint: &str,
@@ -286,9 +271,8 @@ fn grpc_tls_candidates(
     client_certificate_path: Option<&str>,
     client_key_path: Option<&str>,
 ) -> BuildResult<Vec<Option<ClientTlsConfig>>> {
-    // Mirror opentelemetry-otlp's own `is_https` detection exactly (the parsed URI scheme is https; see tonic/mod.rs)
-    // Every endpoint it treats as https gets an explicit config from us, so its empty-root-store `ClientTlsConfig::new()` fallback is unreachable
-    // Schemeless or non-http(s) endpoints get no TLS config here and fail closed inside the exporter ("invalid URL, scheme is missing")
+    // Mirror opentelemetry-otlp's own `is_https` detection exactly (the
+    // parsed URI scheme is https.
     let is_https = endpoint
         .parse::<http::Uri>()
         .ok()
@@ -306,8 +290,8 @@ fn grpc_tls_candidates(
     }
     let mut base =
         ClientTlsConfig::new().trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    // Process-wide `GROK_EXTRA_CA_BUNDLE` roots (fail-open by that crate's contract), matching the HTTP transport's client policy
-    // The same corporate CA must work on both transports
+    // Process-wide `GROK_EXTRA_CA_BUNDLE` roots (fail-open by that crate's
+    // contract).
     if let Some(extra_pem) = ders_to_pem_bundle(xai_grok_extra_ca::extra_root_ders()) {
         base = base.ca_certificate(Certificate::from_pem(extra_pem));
     }
@@ -407,12 +391,9 @@ impl OtlpExportFactory for OtlpLogExporterBuilder<'_> {
             OtlpExportTransport::HttpProtobuf(http_client) => {
                 opentelemetry_otlp::LogExporter::builder()
                     .with_http()
-                    // Pin http/protobuf: opentelemetry-otlp's default protocol is compile-time, feature-gated
-                    // `http-json` (unified into the Bazel build) flips the default to JSON, while a pure-cargo build defaults to protobuf
-                    // Pin explicitly so the contract holds on every build when HTTP transport is selected
+                    // Pin http/protobuf: opentelemetry-otlp's default protocol is compile-time.
                     .with_protocol(Protocol::HttpBinary)
-                    // The injected client owns the per-export timeout (see `BlockingOtlpClient`);
-                    // gRPC below has no such client and sets its own `.with_timeout`.
+                    // The injected client owns the per-export timeout (see `BlockingOtlpClient`).
                     .with_http_client(http_client.clone())
                     .with_endpoint(&self.cfg.logs_endpoint)
                     .with_headers(customer_headers(&self.cfg.logs_headers))
@@ -659,8 +640,7 @@ pub(crate) fn build(
         })
         .transpose()?;
 
-    // Console output is suppressed in the agent/headless entrypoints
-    // Wrapping harnesses routinely capture stderr for diagnostics, and interleaving periodic telemetry dumps there degrades those logs
+    // Console output is suppressed in the agent/headless entrypoints Wrapping harnesses routinely capture stderr for diagnostics.
     let console_ok = !matches!(cfg.client.app_entrypoint.as_str(), "agent" | "headless");
 
     let logger_provider = match cfg.logs_exporter {
@@ -775,7 +755,6 @@ mod tests {
         );
     }
 
-    /// Regression: with the opentelemetry-otlp 0.32 bump, the `tls-roots` feature stopped implying a TLS provider feature.
     /// Every `https://` gRPC endpoint was then rejected at exporter build time ("uses HTTPS but no TLS feature is enabled").
     /// That silently disabled the external stream; the exporters must build for https endpoints.
     #[test]

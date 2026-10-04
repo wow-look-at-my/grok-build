@@ -1,5 +1,4 @@
 //! Pure renderer over [`DiskUsageReport`].
-//! `xai_grok_config::grok_home()`, whose first call creates the home, must stay out of this module.
 
 use std::borrow::Cow;
 use std::io::Write;

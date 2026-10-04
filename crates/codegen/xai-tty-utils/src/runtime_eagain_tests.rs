@@ -1,17 +1,4 @@
-//! Proves the fault Ashok hit is gone: `pthread_create` returning `EAGAIN`
-//! must queue the task, not abort the process.
-//!
-//! Tokio only panics on `EAGAIN` when the blocking pool holds zero threads
-//! (`blocking/pool.rs`, `SpawnError::NoThreads`). Under `panic = abort` that
-//! kills every session. The cap plus keep-alive plus pre-warm keeps the pool
-//! non-empty, so the panic arm becomes unreachable.
-//!
-//! Two children run, and the control matters as much as the subject: if the
-//! default runtime does not die, the harness did not reproduce the fault and
-//! the pre-warmed result proves nothing.
-//!
-//! Privileges are dropped first. A process holding `CAP_SYS_RESOURCE` ignores
-//! `RLIMIT_NPROC`, so as root this test would pass without testing anything.
+//! Proves the fault Ashok hit is gone: `pthread_create` returning `EAGAIN` must queue the task, not abort the process.
 
 use super::{MAX_BLOCKING_THREADS, build_with_blocking_pool};
 use std::os::unix::process::ExitStatusExt;
@@ -83,8 +70,7 @@ fn run_child(prewarmed: bool) -> ! {
         println!("{SKIP} RLIMIT_NPROC is not enforced here");
         std::process::exit(0);
     }
-    // The default runtime has an empty pool, so this must create a thread and
-    // take the panic arm. The pre-warmed runtime hands it to an idle worker.
+    // The default runtime has an empty pool, so this must create a thread and take the panic arm.
     let got = rt.block_on(async { tokio::task::spawn_blocking(|| 42u32).await });
     println!("{SURVIVED} {got:?} pool={MAX_BLOCKING_THREADS}");
     std::process::exit(0);

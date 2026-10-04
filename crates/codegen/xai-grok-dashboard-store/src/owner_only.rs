@@ -1,9 +1,4 @@
 //! Owner-only enforcement for the database file and its journal siblings.
-//!
-//! SQLite creates files at umask defaults, so the store pre-creates the database 0600 before SQLite's first open and re-tightens modes on every load.
-//! On Windows the files keep the default profile ACLs.
-//! Nothing here follows a symlink.
-//! A link planted at the store path would otherwise redirect both SQLite's create and the chmod to an attacker-chosen target.
 
 use std::path::{Path, PathBuf};
 
@@ -28,7 +23,6 @@ pub(crate) fn require_regular_file(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Create the file 0600 via `O_CREAT|O_EXCL`.
 /// A concurrent creator winning the race is fine: it used the same mode, and the tighten pass follows.
 /// What exists must still be a regular file (see [`require_regular_file`]).
 pub(crate) fn create_owner_only(path: &Path) -> std::io::Result<()> {
@@ -46,7 +40,6 @@ pub(crate) fn create_owner_only(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Re-assert owner-only mode on an existing file (a restored or hand-copied 0644 database is tightened on load).
 /// Missing files are fine; a non-regular file or any other failure is a hard error, failing closed on a private store.
 /// Same pattern as `xai_grok_shell_base::util::secure_file`; depending on that crate is too heavy.
 pub(crate) fn tighten_owner_only(path: &Path) -> std::io::Result<()> {

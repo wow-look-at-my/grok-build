@@ -1,11 +1,4 @@
 //! `x.ai/prompt_history` extension handler.
-//!
-//! Returns the user-prompt history for a given cwd. Three paths:
-//! - **fast path** (no ids): reads the per-CWD `prompt_history.jsonl` file directly so Ctrl+R is instant; returns all sessions, most-recent-first.
-//! - **fast scoped path** (`filter_session_id`): the same file filtered to a single session, most-recent-first.
-//!   This is what the pager's up-arrow / Ctrl+R overlay uses to scope history to the current session.
-//! - **slow path** (`session_id`): rebuilds prompts from session storage in chronological order with stable per-session indices.
-//!   Not used by the pager; retained for clients that request session-scoped history this way.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -22,13 +15,9 @@ use crate::timed;
 struct PromptHistoryRequest {
     cwd: String,
     /// Optional session ID to filter to a specific session.
-    /// Routes to the session-storage "slow path" (chronological order, stable per-session indices).
-    /// Not used by the pager; see `filter_session_id`.
     #[serde(default)]
     session_id: Option<String>,
-    /// Optional session ID to restrict the **fast** per-CWD history file to a single session, keeping most-recent-first ordering.
-    /// Used by the pager's up-arrow / Ctrl+R overlay to scope history to the current session.
-    /// Takes precedence over `session_id` when both are set.
+    /// Optional session ID to restrict the **fast** per-CWD history file to a single session.
     #[serde(default)]
     filter_session_id: Option<String>,
 }
@@ -101,7 +90,7 @@ async fn load_session_prompts(
     cwd: &str,
     session_id: Option<&str>,
 ) -> Result<Vec<String>, acp::Error> {
-    // Load session summaries: either all for the cwd or just the specific session
+    // Load session summaries: either all for the cwd or the specific session
     let mut summaries = list_summaries(Some(cwd)).await.map_err(|e| {
         acp::Error::internal_error().data(format!("failed to load session history: {e}"))
     })?;
@@ -117,8 +106,7 @@ async fn load_session_prompts(
     let root_dir = crate::util::grok_home::grok_home();
     let storage = JsonlStorageAdapter::with_root(root_dir);
 
-    // Load prompts from sessions with bounded concurrency using stream
-    // Using `buffered` (not `buffer_unordered`) to preserve session order
+    // Load prompts from sessions with bounded concurrency using stream Using `buffered` (not `buffer_unordered`).
     use futures::stream::{self, StreamExt};
 
     // Limit concurrent file reads to avoid overwhelming the blocking thread pool
@@ -141,9 +129,8 @@ async fn load_session_prompts(
 
     all_prompts.dedup();
 
-    // DON'T reverse when filtering to a single session
-    // Chronological order keeps per-session prompt indices stable (0-indexed from the first prompt)
-    // Only reverse when showing all sessions (history search, most recent first)
+    // DON'T reverse when filtering to a single session Chronological order
+    // keeps per-session prompt indices stable.
     if session_id.is_none() {
         all_prompts.reverse();
     }

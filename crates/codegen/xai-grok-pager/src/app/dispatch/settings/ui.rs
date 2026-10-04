@@ -203,8 +203,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
                 false,
                 "OpenSettings dispatched while settings modal is already open — input routing bug"
             );
-            // Defensive close in release builds: a silent no-op is worse than one extra branch here
-            // Mirrors the same guard in `views/shortcuts_help.rs`
+            // Defensive close in release builds: a silent no-op is worse than one extra branch here Mirrors the same guard.
             agent.active_modal = None;
             return effects;
         }
@@ -270,9 +269,7 @@ pub(in crate::app::dispatch) fn dispatch_open_reset_confirm(
         return vec![];
     };
 
-    // Take the Settings modal state out so it can move into the confirmation variant
-    // If the active modal is anything else (routing bug), restore the original modal and bail
-    // The debug_assert surfaces the bug in tests; release builds degrade to a silent no-op rather than a panic
+    // Take the Settings modal state out so it can move into the confirmation variant If the active modal is anything else (routing bug).
     let prior = agent.active_modal.take();
     let settings_state = match prior {
         Some(ActiveModal::Settings { state }) => state,
@@ -296,9 +293,9 @@ pub(in crate::app::dispatch) fn dispatch_open_reset_confirm(
     vec![]
 }
 
-/// Reset looks up the registered default and shows an "Already at default" toast when the value would not change.
-/// Otherwise it maps the default to the typed `Action::SetX(default)` via `action_for_reset` and dispatches it recursively.
-/// The recursive dispatch runs the full setter pipeline (persist, toast, snapshot refresh) and is at most 2 frames deep.
+/// Reset looks up the registered default and shows an "Already at default" toast when the value would not change. Otherwise
+/// it maps the default to the typed `Action::SetX(default)` via `action_for_reset` and dispatches it recursively. The
+/// recursive dispatch runs the full setter pipeline (persist, toast, snapshot refresh) and is a bounded number of frames deep.
 pub(in crate::app::dispatch) fn dispatch_confirm_reset_setting(
     app: &mut AppView,
     choice: crate::views::modal::ResetSettingsResult,
@@ -312,8 +309,7 @@ pub(in crate::app::dispatch) fn dispatch_confirm_reset_setting(
         return vec![];
     };
 
-    // Take the ResetSettingsConfirm modal out, capturing the target key from the variant
-    // The variant is the single source of truth: the Action does not carry the key, so a future emitter cannot desync it
+    // Take the ResetSettingsConfirm modal out, capturing the target key from the variant The variant is the source of truth.
     let prior = agent.active_modal.take();
     let (key, settings_state) = match prior {
         Some(ActiveModal::ResetSettingsConfirm {
@@ -361,9 +357,7 @@ pub(in crate::app::dispatch) fn dispatch_confirm_reset_setting(
                 return vec![];
             };
 
-            // Gate idempotent reset: a value already at its default only shows a toast
-            // Not for the coding-data setter, which owns that decision: its local "opt-out" may be the unconfirmed fail-safe, so it writes anyway
-            // Nor for a `[features]` override, where reset deletes the key: a saved value equal to the default is still an override
+            // Gate idempotent reset: a value already at its default only shows a toast Not for the coding-data setter, which owns that decision.
             let pager_snapshot = build_pager_snapshot(app);
             let current_value =
                 crate::settings::current_value_for(key, &app.current_ui, &pager_snapshot);
@@ -391,7 +385,7 @@ pub(in crate::app::dispatch) fn dispatch_confirm_reset_setting(
                 ?default_value,
                 "resetting setting to default",
             );
-            // Recursive dispatch runs the full set_X pipeline (see the doc comment above); max depth is 2 frames
+            // Recursive dispatch runs the full set_X pipeline (see the doc comment above); max depth is frames
             dispatch(action, app)
         }
     }
@@ -411,20 +405,15 @@ pub(in crate::app::dispatch) fn dispatch_toggle_multiline(app: &mut AppView) -> 
 }
 
 /// Toggle compact mode (keybinding path).
-/// Delegates to the registry-driven `set_compact_mode` so the cache, modal snapshot, and `Effect::PersistSetting` all flow through one path.
 pub(in crate::app::dispatch) fn dispatch_toggle_compact_mode(app: &mut AppView) -> Vec<Effect> {
-    // Toggle the user value: `appearance.prompt.compact` is the derived render value, which auto-compact forces on short terminals regardless of it
+    // Toggle the user value: `appearance.prompt.compact` is the derived render value.
     let new = !app.current_ui.compact_mode;
     set_compact_mode(app, new)
 }
 
-// Propagate to every agent and nested subagent view and mirror the pager cache
-// Background and open subagent views pick up the change without a restart; `set_vim_mode_inner` is shared with the `SetVimMode` settings path
-// On the dashboard, j/k navigate the overview only when it holds focus
-// Turning vim on focuses the overview so the user can navigate immediately, mirroring the agent view's "normal mode"
-// A toast would route to the dashboard's red error slot
-/// Toggle timestamps (Ctrl+? keybinding path).
-/// Delegates to the registry-driven `set_timestamps` so persistence, the cache, and UI reconciliation all flow through a single code path.
+// Propagate to every agent and nested subagent view and mirror the pager
+// cache Background and open subagent views pick up the change without a
+// restart.
 pub(in crate::app::dispatch) fn dispatch_toggle_timestamps(app: &mut AppView) -> Vec<Effect> {
     let show = !app.appearance.show_timestamps;
     set_timestamps(app, show)
@@ -457,17 +446,14 @@ pub(in crate::app::dispatch) fn dispatch_toggle_mouse_capture(app: &mut AppView)
         app.escape_writer
             .emit_command(crossterm::event::DisableMouseCapture);
     }
-    // On legacy conhost, DisableMouseCapture restores the *pre-capture* stdin mode
-    // That mode may itself have QuickEdit off (a per-window profile or a stale mode from a crashed run)
-    // Assert it so "mouse off" actually hands the terminal native drag-select, the whole point of the toggle
+    // On legacy conhost, DisableMouseCapture restores the *pre-capture* stdin
+    // mode That mode may itself have QuickEdit off.
     #[cfg(windows)]
     if !enable {
         crate::app::win_native_selection::enable_native_selection();
     }
     crate::app::MOUSE_CAPTURE_ENABLED.store(enable, Ordering::Release);
-    // Use with_active_agent (not app.show_toast) so the toast lands on the view the user is looking at
-    // Off state: sticky banner on every agent/subagent view (capture is process-wide; the toast must survive subagent open/close and copy toasts)
-    // Ctrl+R only re-enables from scrollback
+    // Use with_active_agent (not app.show_toast) so the toast lands on the view the user is looking at Off state.
     let mut toast_applied = false;
     if enable {
         for agent in app.agents.values_mut() {
@@ -493,8 +479,8 @@ pub(in crate::app::dispatch) fn dispatch_toggle_mouse_capture(app: &mut AppView)
     );
 }
 
-/// Read the active agent's `multiline_mode` for the pager-local snapshot used in idempotent-reset detection.
-/// Returns `false` with no active agent: no Settings modal is open in that state, so the value does not matter.
+/// Read the active agent's `multiline_mode` for the pager-local snapshot used
+/// in idempotent-reset detection.
 fn agent_multiline_mode(app: &AppView) -> bool {
     if let ActiveView::Agent(id) = app.active_view
         && let Some(agent) = app.agents.get(&id)
@@ -534,9 +520,8 @@ fn agent_plan_mode(app: &AppView) -> bool {
     false
 }
 
-/// Read the active agent's currently-selected model display name; the `default_model` row's `current_value_for` uses it.
-/// Returns `None` when no agent is active or the catalog hasn't loaded yet (e.g. early startup).
-/// See [`agent_multiline_mode`] for the no-agent fallback rationale.
+/// Read the active agent's currently-selected model display name; the `default_model` row's `current_value_for` uses it. Returns `None` when no agent is active or the catalog hasn't loaded
+/// yet (e.g. early startup).
 fn agent_current_model_name(app: &AppView) -> Option<String> {
     if let ActiveView::Agent(id) = app.active_view
         && let Some(agent) = app.agents.get(&id)
@@ -675,9 +660,9 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("auto_light_theme", SettingValue::Enum(s)) => {
             Some(Action::SetAutoLightTheme((*s).to_owned()))
         }
-        // One arm per canonical, all dispatched through the typed `Action::SetPermissionMode(kind)`, not the legacy `Action::SetYoloMode(bool)`
-        // Only that arm is reachable through the normal reset flow
-        // The other arms are there so a changed registered default fires its matching arm rather than silently collapsing onto SetYoloMode
+        // One arm per canonical, all dispatched through the typed
+        // `Action::SetPermissionMode(kind)`, not the legacy
+        // `Action::SetYoloMode(bool)` Only.
         ("permission_mode", SettingValue::Enum("always-approve")) => Some(
             Action::SetPermissionMode(crate::app::actions::PermissionModeKind::AlwaysApprove),
         ),
@@ -773,8 +758,8 @@ pub(in crate::app::dispatch) fn action_for_reset(
     }
 }
 
-/// Toast shown by the [`apply_setting_rollback`] catch-all when a persisted setting has no rollback arm.
-/// Shared with `every_persisting_setting_has_rollback_arm` so the guard can't be silently defeated by a wording edit.
+/// Toast shown by the [`apply_setting_rollback`] catch-all when a persisted
+/// setting has no rollback arm.
 pub(crate) const ROLLBACK_NO_ARM_TOAST: &str =
     "Settings rolled back, but local state may be out of sync: restart to reload";
 
@@ -904,8 +889,7 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             {
                 agent.deferred_permission_mode = Some(kind.as_canonical());
             }
-            // Sync the per-session auto flag only for a permission_mode rollback
-            // Other rollback arms must not clobber it from the global canonical
+            // Sync the per-session auto flag only for a permission_mode rollback Other rollback arms must not clobber it.
             sync_active_auto_flag(app);
         }
         // default_model: best-effort rollback. If the prior model no longer resolves, leave the optimistic value and log.

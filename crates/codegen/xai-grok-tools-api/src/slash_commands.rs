@@ -1,10 +1,6 @@
-//! Canonical slash-command wording (`/loop`, `/imagine`, `/imagine-video`, `/goal`),
-//! shared by every front-end (Grok Build shell/pager and other hosts) so
-//! expansions cannot drift.
+//! Canonical slash-command wording (`/loop`, `/imagine`, `/imagine-video`, `/goal`), shared by every front-end.
 
-/// Canonical tool name advertised by the scheduler create tool. Gating code
-/// (shell `CommandAvailability`, pager `required_tools`, host command lists)
-/// keys `/loop` availability on this name.
+/// Canonical tool name advertised by the scheduler create tool.
 pub const SCHEDULER_CREATE_TOOL_NAME: &str = "scheduler_create";
 
 /// Usage hint shown when `/loop` is invoked with no arguments.
@@ -158,8 +154,7 @@ pub const WORKFLOW_TOOL_NAME: &str = "workflow";
 
 pub const GOAL_COMMAND_NAME: &str = "goal";
 
-/// Bare subcommand tokens reserved for goal lifecycle control rather than
-/// being treated as an objective, matching the shell's /goal grammar.
+/// Bare subcommand tokens reserved for goal lifecycle control rather than being treated as an objective.
 pub const GOAL_RESERVED_SUBCOMMANDS: &[&str] = &["status", "pause", "resume", "clear", "edit"];
 
 pub fn goal_usage_message() -> &'static str {

@@ -6,23 +6,6 @@
     dead_code
 )]
 //! OS-level sandboxing for Grok Build via [nono](https://crates.io/crates/nono).
-//!
-//! Applied once at process startup. Covers in-process `tokio::fs` calls and child processes.
-//! Network is left open at the process level (agent needs LLM API); child network is blocked per-subprocess via seccomp.
-//!
-//! The `enforce` feature (on by default) pulls in `nono` for kernel-enforced sandboxing (Landlock/Seatbelt).
-//! When disabled, the crate still provides lightweight helpers (`log_violation`, `should_restrict_child_network`, `child_net`).
-//! Those helpers compile on all targets including musl.
-//!
-//! ```rust,no_run
-//! use xai_grok_sandbox::{SandboxManager, ProfileName};
-//! use std::path::Path;
-//!
-//! let workspace = Path::new("/home/user/project");
-//! let mut sandbox = SandboxManager::new(ProfileName::Workspace, workspace);
-//! sandbox.apply(workspace).expect("sandbox apply failed");
-//! sandbox.install();
-//! ```
 #![deny(clippy::indexing_slicing)]
 mod allow_path;
 pub mod child_net;
@@ -91,9 +74,8 @@ struct GlobalSandboxState {
     applied: bool,
     restrict_network_at_known_linux_launches: bool,
 }
-/// The per-spawn seccomp filter is self-contained: it needs neither Landlock nor bwrap, so it keys on the resolved `restrict_network` alone.
-/// In the degraded states (Landlock unsupported, or `Sandbox::apply` failing inside bwrap) this filter is the only remaining enforcement.
-/// Keying on Landlock success would silently disable that session-long child-network control; keying on the config is the fail-closed direction.
+/// The per-spawn seccomp filter is self-contained: it needs neither Landlock
+/// nor bwrap.
 fn restrict_network_at_known_linux_launches(configured: bool) -> bool {
     configured && cfg!(target_os = "linux")
 }
@@ -118,9 +100,7 @@ pub fn set_configured_profile(name: impl Into<String>) {
 pub fn configured_profile_name() -> Option<&'static str> {
     CONFIGURED_PROFILE.get().map(|s| s.as_str())
 }
-/// The non-`off` sandbox profile this process was requested with, if any. This is the configured request, not a report
-/// that enforcement succeeded. `is_active()` can be false while the process is still confined (e.g. some Linux bwrap
-/// paths). A requested-but-unapplied profile already warns the user; keying on the request is the fail-closed choice.
+/// The non-`off` sandbox profile this process was requested with, if any.
 pub fn requested_confinement_profile() -> Option<&'static str> {
     configured_profile_name().filter(|name| profile_confines(name))
 }
@@ -130,18 +110,7 @@ fn profile_confines(name: &str) -> bool {
 }
 
 /// Whether this process is confined by a profile that restricts **writes** to
-/// the workspace, `$GROK_HOME` and the temp dirs (`workspace`, `read-only`,
-/// `strict`, the `pathbox` jail, or a custom profile that extends one of them).
-///
-/// The child-process spawn paths read this to decide whether a package runner
-/// (`uvx`, `npx`, …) needs its default cache locations redirected somewhere the
-/// profile can write: those tools default into `$HOME` (e.g. `~/.cache/uv`,
-/// `~/.npm`), which no built-in profile grants, so the runner dies at startup
-/// with EPERM and the MCP server never completes its handshake.
-///
-/// This is deliberately the *write* question, not "is a sandbox active". The
-/// `devbox` profile grants writes nearly everywhere (including `$HOME`), so its
-/// runners need no redirection and get none.
+/// the workspace.
 pub fn confines_home_writes() -> bool {
     if is_jailed() {
         return true;
@@ -150,18 +119,11 @@ pub fn confines_home_writes() -> bool {
 }
 
 /// Whether a profile name restricts writes away from un-remapped `$HOME`.
-///
-/// `devbox` grants writes to every top-level directory including `$HOME`, so it
-/// is the one confining-style profile that does not need cache redirection.
-/// `off`/`none` confine nothing. Anything unrecognized is treated as confining
-/// (fail closed): a custom profile inherits the write set of the built-in base
-/// it extends, and the built-in bases other than `devbox` all exclude `$HOME`.
 fn profile_confines_home_writes(name: &str) -> bool {
     match name.parse::<ProfileName>() {
         Ok(ProfileName::Off) | Ok(ProfileName::Devbox) => false,
         Ok(_) => true,
-        // An unknown name is a custom profile: it extends a built-in base and
-        // therefore inherits that base's write set.
+        // An unknown name is a custom profile: it extends a built-in base and therefore inherits that base's write set.
         Err(_) => true,
     }
 }
@@ -422,7 +384,6 @@ fn bwrap_blocked_source_for_path(path: &Path) -> Option<PathBuf> {
 fn bwrap_blocked_source_for_path(_path: &Path) -> Option<PathBuf> {
     None
 }
-/// chmod a placeholder to mode 000 so a bwrap bind-over yields EPERM on read.
 #[cfg(all(feature = "enforce", target_os = "linux"))]
 fn chmod_000(path: &Path) -> Option<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -530,9 +491,9 @@ fn requires_data_write_deny_for(
 fn data_path_requires_bind(path: &Path) -> bool {
     path.try_exists().unwrap_or(true)
 }
-/// Whether a `resolve_profile` failure must refuse startup. Any profile that enforces hook write-deny or its own deny
-/// list cannot proceed with an empty plan. Devbox resolution is infallible today, so that arm is defense in depth against
-/// a future fallible resolve step.
+/// Whether a `resolve_profile` failure must refuse startup. Any profile that
+/// enforces hook write-deny or its own deny list cannot proceed with an empty
+/// plan.
 #[cfg(all(feature = "enforce", target_os = "linux"))]
 fn resolve_failure_must_refuse(profile: &ProfileName, workspace: &Path) -> bool {
     requires_hook_write_deny(profile, workspace)
@@ -693,13 +654,6 @@ fn bwrap_reexec_plan(profile: &ProfileName, workspace: &Path) -> Option<BwrapDen
 
 /// Whether a bwrap re-exec follows for this profile, without building the
 /// command for it.
-///
-/// A caller has to know this BEFORE it hands anything to the image the exec
-/// produces, and building the command first is not an option: the command
-/// snapshots this process's environment the moment it sets its own marker, so
-/// anything the new image reads from the environment must already be there.
-/// That is why this shares [`bwrap_reexec_plan`] with the builder rather than
-/// repeating its conditions, which would drift apart.
 #[cfg(target_os = "linux")]
 pub fn bwrap_reexec_planned(profile: &ProfileName, workspace: &Path) -> bool {
     bwrap_reexec_plan(profile, workspace).is_some()
@@ -709,15 +663,8 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
-    /// The predicate and the builder must never disagree about whether an exec
-    /// follows.
-    ///
-    /// `apply_sandbox` asks the predicate BEFORE it starts the CI host worker,
-    /// and the answer decides whether the worker's fd is made exec-surviving.
-    /// A predicate that says yes where the builder then produces no command
-    /// leaves an inheritable fd, and its number in the environment, in a
-    /// session that went on to confine itself in place. Every child of that
-    /// session can then reach an unconfined `gh`.
+    /// The predicate and the builder must never disagree about whether an exec follows. `apply_sandbox` asks the predicate BEFORE it starts the CI host worker, and the answer decides whether the worker's fd is made exec-surviving. A predicate that says yes where the builder then produces no command leaves an inheritable fd, and its number in the environment, in a session that went on to confine
+    /// itself in place. Every child of that session can then reach an unconfined `gh`.
     #[test]
     #[cfg(target_os = "linux")]
     fn the_reexec_predicate_agrees_with_the_builder() {
@@ -1083,9 +1030,8 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn pathbox_needs_no_nono_hook_protection_but_is_confining() {
-        // The pathbox jail is the re-exec jail; it must not trip the nono hook
-        // write-deny manager, and it must report as a confining profile (fork-B:
-        // leader/workspace gates treat it like any real sandbox).
+        // The pathbox jail is the re-exec jail; it must not trip the nono
+        // hook write-deny manager.
         let ws = std::env::temp_dir().join(format!(
             "grok-pathbox-hw-{}",
             std::time::SystemTime::now()

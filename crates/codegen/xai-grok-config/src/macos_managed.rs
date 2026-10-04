@@ -1,9 +1,4 @@
 //! macOS MDM managed-preferences layer.
-//!
-//! Admins push a device profile with standard-base64 (padded) TOML under preference domain `ai.x.grok` (`requirements_toml_base64`).
-//! Only admin-*forced* values are read, so a local user can't forge it via their own preference domain.
-//! The layer is trusted on every launch, independent of network or cache.
-//! Off macOS the layer is `None`.
 
 #[cfg(target_os = "macos")]
 const MANAGED_PREFERENCES_DOMAIN: &str = "ai.x.grok";
@@ -15,8 +10,7 @@ pub const MDM_REQUIREMENTS_SOURCE: &str = "ai.x.grok:requirements_toml_base64";
 
 /// The MDM-forced requirements TOML, or `None` when none is forced (or not macOS).
 pub(crate) fn managed_preferences_requirements() -> Option<toml::Value> {
-    // Read once and cache for the process lifetime: the forced policy is fixed per launch, so a profile change isn't picked up until restart
-    // That is fine for a short-lived CLI, and it avoids re-crossing the CoreFoundation boundary
+    // Read once and cache for the process lifetime: the forced policy is fixed per launch.
     static CACHED: std::sync::OnceLock<Option<toml::Value>> = std::sync::OnceLock::new();
     CACHED
         .get_or_init(|| managed_requirements_from(read_forced_requirements))
@@ -24,8 +18,6 @@ pub(crate) fn managed_preferences_requirements() -> Option<toml::Value> {
 }
 
 /// Decode the forced requirements from a raw-string reader.
-/// Split from the FFI read (`read_forced_requirements`) so the decode path is unit-testable without CoreFoundation.
-/// The CFPreferences read/downcast itself stays FFI.
 fn managed_requirements_from(read: impl FnOnce() -> Option<String>) -> Option<toml::Value> {
     decode_managed_toml(&read()?)
 }
@@ -45,9 +37,7 @@ fn decode_managed_toml(encoded: &str) -> Option<toml::Value> {
         .decode(compact.as_bytes())
         .map_err(|e| tracing::warn!("managed preference is not valid base64: {e}"))
         .ok()?;
-    // A managed preference has to be UTF-8 TOML to mean anything: decoding a
-    // non-UTF-8 payload lossily would parse replacement characters instead of
-    // rejecting the profile, so `None` is the answer here.
+    // A managed preference has to be UTF-8 TOML to mean anything.
     #[allow(clippy::disallowed_methods)]
     let toml_str = String::from_utf8(decoded)
         .map_err(|e| tracing::warn!("managed preference is not valid UTF-8: {e}"))
@@ -83,8 +73,8 @@ fn read_forced_requirements() -> Option<String> {
     let cf_key = CFString::new(REQUIREMENTS_KEY);
     let cf_app = CFString::new(MANAGED_PREFERENCES_DOMAIN);
 
-    // Trust only admin-forced values: otherwise the lookup falls through to the per-user domain
-    // A local user can set that domain (`defaults write ai.x.grok`) to forge an `is_system`-trusted layer
+    // Trust only admin-forced values: otherwise the lookup falls through to
+    // the per-user domain A local user can set that domain.
     let forced = unsafe {
         CFPreferencesAppValueIsForced(cf_key.as_concrete_TypeRef(), cf_app.as_concrete_TypeRef())
     };
@@ -98,8 +88,6 @@ fn read_forced_requirements() -> Option<String> {
     if value_ref.is_null() {
         return None;
     }
-    // Type-check before reading as text: reading a non-CFString through CFString APIs is UB
-    // `wrap_under_create_rule` owns the +1, freeing it even if the downcast fails
     let value = unsafe { CFType::wrap_under_create_rule(value_ref) };
     value.downcast_into::<CFString>().map(|s| s.to_string())
 }

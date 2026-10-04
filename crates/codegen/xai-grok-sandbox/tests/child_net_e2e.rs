@@ -1,6 +1,4 @@
 //! E2E: the child network seccomp filter denies connecting to a unix socket regardless of when the socket was created.
-//! The launch-time socket bind masks only cover endpoints that existed at startup.
-//! So this per-spawn filter is what holds across daemon start and unlink/recreate.
 
 #![cfg(target_os = "linux")]
 
@@ -57,8 +55,7 @@ fn unique_socket_path() -> PathBuf {
 
 #[test]
 fn filtered_child_cannot_connect_to_socket_created_after_launch() {
-    // The socket appears only now, after this process (the "session") started
-    // That mirrors a daemon that starts or unlink/recreates its endpoint mid-session, which no launch-time bind mask can cover
+    // The socket appears only now, after this process (the "session") started That mirrors a daemon that starts.
     let sock = unique_socket_path();
     let _listener = std::os::unix::net::UnixListener::bind(&sock).expect("bind");
 

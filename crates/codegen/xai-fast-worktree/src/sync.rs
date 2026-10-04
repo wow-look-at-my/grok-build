@@ -1,26 +1,4 @@
 //! Sync a pre-created worktree to match a source repo's current state.
-//!
-//! This module provides the [`WorktreeSync`] API used by the worktree pool
-//! to bring a pre-allocated worktree up to date with the source repo's HEAD
-//! and dirty working tree state. It is designed for **linked** worktrees
-//! (shared object store), so `git reset --hard <commit>` always succeeds
-//! regardless of how far HEAD has diverged.
-//!
-//! All git operations use `gix` for HEAD resolution and `git` CLI for
-//! mutations (`reset`, `clean`, `status`). File copies use
-//! `reflink_copy::reflink_or_copy()` for CoW efficiency.
-//!
-//! ## Why CLI `git status` instead of `gix::status()`?
-//!
-//! The existing `git::status::get_modified_files()` uses `gix` natively via
-//! `repo.status()` / `index_worktree_iter`. However, it only reports
-//! *worktree-vs-index* differences — it does not distinguish the **staged
-//! (index) column** from the **worktree column** (the `XY` pair in porcelain
-//! output). For `sync_dirty_state` we need the full `XY` semantics to
-//! correctly handle cases like `XY = "D "` (staged deletion, file still on
-//! disk) vs `XY = " D"` (worktree deletion). The porcelain v2 format gives
-//! us both columns, rename detection with `origPath`, and unmerged entries
-//! — all NUL-delimited for safe path handling.
 
 use std::path::Path;
 
@@ -83,12 +61,9 @@ pub struct SyncReport {
     /// Whether dirty sync was skipped because pre-computed state was empty.
     pub dirty_skipped: bool,
 
-    // ── Per-phase timing (milliseconds) ─────────────────────────────────
-    /// Time to resolve HEAD commits on source + worktree (gix).
+    // ── Per-phase timing (milliseconds) ───────────────────────────────── Time to resolve HEAD commits on source + worktree.
     pub head_resolve_ms: u64,
-    /// Time for `git reset --hard` (0 if HEAD didn't move).
     pub reset_hard_ms: u64,
-    /// Time for `git clean -fd` (0 if skipped).
     pub clean_ms: u64,
     /// Time for dirty-state sync: `git status` + file copy/delete + staged replay.
     pub dirty_sync_ms: u64,
@@ -128,7 +103,6 @@ impl<'a> WorktreeSync<'a> {
         use std::time::Instant;
         let mut report = SyncReport::default();
 
-        // Phase 1: Resolve HEAD commits.
         let t = Instant::now();
         let source_head = get_head_commit(self.source).context("failed to get source HEAD")?;
         let worktree_head =
@@ -218,8 +192,7 @@ impl<'a> WorktreeSync<'a> {
                 report.dirty_skipped = true;
             }
             None => {
-                // None opts out of dirty sync. Production fallback uses
-                // `sync_worktree_opts` instead; kept as the API contract.
+                // None opts out of dirty sync.
                 report.dirty_skipped = true;
             }
         }
@@ -227,8 +200,7 @@ impl<'a> WorktreeSync<'a> {
         Ok(report)
     }
 
-    /// Copy dirty files and replay staged changes. Do not copy the source index:
-    /// its stat caches are from another filesystem and force a full re-hash.
+    /// Copy dirty files and replay staged changes.
     pub fn sync_dirty_state(&self) -> Result<SyncReport> {
         self.sync_dirty_state_timed()
     }
@@ -238,7 +210,6 @@ impl<'a> WorktreeSync<'a> {
         use std::time::Instant;
         let mut report = SyncReport::default();
 
-        // Sub-phase 1: git status on source.
         let t = Instant::now();
         let output = git_command()
             .args(["status", "--porcelain=v2", "-z", "--untracked-files=all"])
@@ -254,7 +225,6 @@ impl<'a> WorktreeSync<'a> {
             );
         }
 
-        // Sub-phase 2: Parse and apply status entries (file copies + deletions).
         if !output.stdout.is_empty() {
             let t = Instant::now();
             let result = apply_porcelain_v2_entries(&output.stdout, self.source, self.worktree)?;
@@ -262,7 +232,6 @@ impl<'a> WorktreeSync<'a> {
             report.dirty_files_copied = result.copied;
             report.files_deleted = result.deleted;
 
-            // Sub-phase 3: Replay staged changes on the worktree's index.
             if !result.staged_adds.is_empty() || !result.staged_deletes.is_empty() {
                 let t = Instant::now();
                 report.staged_entries = replay_staged_changes(
@@ -284,9 +253,7 @@ struct ApplyResult {
     copied: u64,
     /// Number of files deleted in worktree to match source.
     deleted: u64,
-    /// Staged adds: `(mode_in_index, hash_in_index, path)`. The porcelain `hI`
-    /// blob lets `--cacheinfo` set the index without reading the worktree —
-    /// required for `XY = "MM"`, where staged content differs from disk.
+    /// Staged adds: `(mode_in_index, hash_in_index, path)`.
     staged_adds: Vec<(String, String, String)>,
     /// Paths that need `git rm --cached` in the worktree (staged deletions).
     staged_deletes: Vec<String>,
@@ -336,8 +303,6 @@ fn apply_porcelain_v2_entries(
                 if x == b'D' {
                     staged_deletes.push(path.to_string());
                 } else {
-                    // Extract mode-in-index (field 4) and hash-in-index (field 7)
-                    // from the porcelain v2 line for `git update-index --cacheinfo`.
                     if let Some((mode, hash)) = extract_index_mode_hash(line) {
                         staged_adds.push((mode, hash, path.to_string()));
                     }
@@ -372,13 +337,13 @@ fn apply_porcelain_v2_entries(
             if let Some(orig_chunk) = chunks.next() {
                 let orig_path = std::str::from_utf8(orig_chunk)
                     .context("non-UTF-8 origPath in rename entry")?;
-                // Delete the old name from destination if it exists
+                // Delete the name from destination if it exists
                 let old_dest = worktree.join(orig_path);
                 if old_dest.exists() {
                     let _ = std::fs::remove_file(&old_dest);
                     deleted += 1;
                 }
-                // Stage the deletion of the old path
+                // Stage the deletion of the path
                 staged_deletes.push(orig_path.to_string());
             }
         } else if let Some(path) = line.strip_prefix("? ") {
@@ -386,7 +351,6 @@ fn apply_porcelain_v2_entries(
             copy_file_to_worktree(source, worktree, path)?;
             copied += 1;
         }
-        // Ignore `!` (ignored files) — we don't replicate those
     }
 
     Ok(ApplyResult {
@@ -397,38 +361,29 @@ fn apply_porcelain_v2_entries(
     })
 }
 
-/// `sub` (field 2) is `S...` for submodules. They are directories, so
-/// `reflink_or_copy` cannot handle them; `git reset --hard` already synced
-/// their committed state.
 fn is_submodule_entry(line: &str) -> bool {
     line.split(' ')
         .nth(2)
         .is_some_and(|sub| sub.starts_with('S'))
 }
 
-/// `(mI, hI)` from a porcelain v2 line: fields 4 and 7 for both ordinary and
-/// rename entries. `None` if the line is too short.
+/// `None` if the line is too short.
 fn extract_index_mode_hash(line: &str) -> Option<(String, String)> {
     let fields: Vec<&str> = line.splitn(10, ' ').collect();
     if fields.len() >= 8 {
-        // fields[4] = mI (mode in index), fields[7] = hI (hash in index)
         Some((fields.get(4)?.to_string(), fields.get(7)?.to_string()))
     } else {
         None
     }
 }
 
-/// Path after the porcelain header: 8 fields for ordinary, 9 for rename,
-/// 10 for unmerged. See git-status "Changed Tracked Entries".
+/// See git-status "Changed Tracked Entries".
 fn extract_ordinary_path(line: &str) -> &str {
     let prefix = if line.starts_with("2 ") {
-        // Rename: 9 space-separated header fields before path
         9
     } else if line.starts_with("u ") {
-        // Unmerged: 10 space-separated header fields before path
         10
     } else {
-        // Ordinary: 8 space-separated header fields before path
         8
     };
 
@@ -467,8 +422,7 @@ fn apply_file_change(
             *deleted += 1;
         }
     } else {
-        // File exists on disk in source (modified, added, type-changed,
-        // staged-deletion-but-still-on-disk, etc.) — copy it
+        // File exists on disk in source (modified, added, type-changed, staged-deletion-but-still-on-disk, etc.)
         copy_file_to_worktree(source, worktree, path)?;
         *copied += 1;
     }
@@ -565,8 +519,7 @@ fn copy_file_to_worktree(source: &Path, worktree: &Path, rel_path: &str) -> Resu
     let src_meta = match std::fs::symlink_metadata(&src_file) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Source entry disappeared between `git status` and copy — TOCTOU
-            // race. Expected when files are being actively edited.
+            // Source entry disappeared between `git status` and copy — TOCTOU race.
             tracing::debug!(path = %rel_path, "source file vanished before copy, skipping");
             return Ok(());
         }
@@ -588,7 +541,7 @@ fn copy_file_to_worktree(source: &Path, worktree: &Path, rel_path: &str) -> Resu
     }
 
     // Regular file: drop any existing dest first (reflink_or_copy can't
-    // overwrite). symlink_metadata detects a dangling-symlink dest, too.
+    // overwrite). symlink_metadata detects a dangling-symlink dest.
     if std::fs::symlink_metadata(&dst_file).is_ok() {
         let _ = std::fs::remove_file(&dst_file);
     }
@@ -938,8 +891,7 @@ mod tests {
     #[test]
     fn test_sync_staged_deletion_file_still_on_disk() {
         xai_test_utils::require_git!();
-        // Regression test: `git rm --cached` stages a deletion but
-        // leaves the file on disk. We should copy the file, not delete it.
+        // Regression test: `git rm --cached` stages a deletion but leaves the file on disk.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1042,7 +994,6 @@ mod tests {
     fn test_sync_branch_changed() {
         xai_test_utils::require_git!();
         // Source checks out a different branch after worktree was created.
-        // The worktree (detached) should sync to the new branch's HEAD.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1083,8 +1034,7 @@ mod tests {
     #[test]
     fn test_sync_multiple_commits_ahead() {
         xai_test_utils::require_git!();
-        // Source is many commits ahead of the worktree.
-        // git reset --hard should jump directly regardless of distance.
+        // Source is many commits ahead of the worktree. git reset --hard should jump directly regardless of distance.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1094,7 +1044,6 @@ mod tests {
 
         let worktree = create_linked_worktree(&source, "wt1");
 
-        // Make 5 more commits in source
         for i in 2..=6 {
             std::fs::write(source.join("file.txt"), format!("v{i}")).unwrap();
             std::fs::write(
@@ -1126,9 +1075,7 @@ mod tests {
     #[test]
     fn test_sync_staged_and_worktree_modifications_same_file() {
         xai_test_utils::require_git!();
-        // A file has BOTH staged changes (in the index) AND further worktree
-        // modifications on top. The sync should replicate the on-disk state
-        // (worktree version) and the index (staged version).
+        // A file has BOTH staged changes (in the index) AND further worktree modifications on top.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1199,8 +1146,7 @@ mod tests {
     #[test]
     fn test_skip_clean_commit_replication() {
         xai_test_utils::require_git!();
-        // Pool scenario: worktree created, source gets new commits, sync
-        // with skip_clean=true should still replicate them via reset --hard.
+        // Pool scenario: worktree created, source gets new commits.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1210,7 +1156,7 @@ mod tests {
 
         let worktree = create_linked_worktree(&source, "wt1");
 
-        // Source advances by 3 commits after worktree creation
+        // Source advances by multiple commits after worktree creation
         std::fs::write(source.join("file.txt"), "v2").unwrap();
         git_commit_all(&source, "commit 2");
         std::fs::write(source.join("new_file.txt"), "added in commit 3").unwrap();
@@ -1241,9 +1187,7 @@ mod tests {
     #[test]
     fn test_skip_clean_dirty_and_untracked_replication() {
         xai_test_utils::require_git!();
-        // Pool scenario: worktree is clean, source has dirty tracked files
-        // and new untracked files. skip_clean=true + copy_dirty=true should
-        // replicate both.
+        // Pool scenario: worktree is clean.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1284,8 +1228,7 @@ mod tests {
     #[test]
     fn test_skip_clean_commit_plus_dirty() {
         xai_test_utils::require_git!();
-        // Full pool scenario: source advanced by commits AND has dirty state
-        // on top. skip_clean=true + copy_dirty=true.
+        // Full pool scenario: source advanced by commits AND has dirty state on top. skip_clean=true + copy_dirty=true.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1330,8 +1273,6 @@ mod tests {
     fn test_skip_clean_staged_changes_replicated() {
         xai_test_utils::require_git!();
         // Pool scenario: source has staged (indexed) changes.
-        // skip_clean=true + copy_dirty=true should replay staged entries
-        // via git update-index.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1379,8 +1320,7 @@ mod tests {
     #[test]
     fn test_skip_clean_sequential_reuse() {
         xai_test_utils::require_git!();
-        // Simulates pool worktree reuse: create → sync → (simulate use) →
-        // source changes → sync again. Both syncs use skip_clean=true.
+        // Simulates pool worktree reuse: create → sync → (simulate use) → source changes → sync again.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1437,8 +1377,7 @@ mod tests {
     #[test]
     fn test_skip_clean_does_not_remove_leftover_untracked() {
         xai_test_utils::require_git!();
-        // skip_clean leaves leftover untracked files. Correct for the pool,
-        // which cleans a worktree before returning it to ready.
+        // skip_clean leaves leftover untracked files.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1471,8 +1410,7 @@ mod tests {
     #[test]
     fn test_skip_clean_deleted_tracked_file_replicated() {
         xai_test_utils::require_git!();
-        // Source deletes a tracked file. skip_clean=true + copy_dirty=true
-        // should replicate the deletion in the worktree.
+        // Source deletes a tracked file. skip_clean=true + copy_dirty=true should replicate the deletion.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1502,8 +1440,7 @@ mod tests {
     #[test]
     fn test_skip_clean_branch_switch_with_dirty() {
         xai_test_utils::require_git!();
-        // Source switches branches and has dirty state. skip_clean=true
-        // should handle the branch jump + dirty overlay.
+        // Source switches branches and has dirty state. skip_clean=true should handle the branch jump + dirty overlay.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1630,7 +1567,7 @@ mod tests {
     #[test]
     fn test_sync_from_precomputed_shared_across_two_worktrees() {
         xai_test_utils::require_git!();
-        // The core use case: collect once, apply to two worktrees.
+        // The core use case: collect once, apply to worktrees.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1669,8 +1606,7 @@ mod tests {
     #[test]
     fn test_sync_replicates_symlinks_not_regular_files() {
         xai_test_utils::require_git!();
-        // Dirty symlinks (valid and dangling) must land in the worktree as
-        // symlinks, never dereferenced to regular files and never skipped.
+        // Dirty symlinks (valid and dangling) must land in the worktree as symlinks.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();
@@ -1719,8 +1655,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_copy_file_replaces_dangling_symlink_dest_with_regular_file() {
-        // Dest holds a dangling symlink; copying a regular file over it must
-        // replace it — reflink can't overwrite and `exists()` misses a broken link.
+        // Dest holds a dangling symlink; copying a regular file over it must replace it — reflink can't overwrite.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("src");
         let worktree = temp.path().join("wt");
@@ -1747,8 +1682,7 @@ mod tests {
     #[test]
     fn test_sync_updates_modified_tracked_symlink_target() {
         xai_test_utils::require_git!();
-        // Re-pointing a tracked symlink in source must update the worktree dest
-        // to the new target while keeping it a symlink.
+        // Re-pointing a tracked symlink in source must update the worktree dest to the new target.
         let temp = TempDir::new().unwrap();
         let source = temp.path().join("source");
         std::fs::create_dir_all(&source).unwrap();

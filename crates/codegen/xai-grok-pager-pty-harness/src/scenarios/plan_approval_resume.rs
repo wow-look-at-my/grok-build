@@ -1,11 +1,4 @@
 //! Plan-approval chrome restored by the shell after quit and resume.
-//!
-//! When `exit_plan_mode` is parked and the user quits, the shell persists `awaiting_plan_approval = true` in `plan_mode.json`.
-//! On `--continue` the shell re-issues the `x.ai/exit_plan_mode` reverse-request, a real live ACP waiter.
-//! The pager then re-shows approval chrome through its normal path with no pager-side disk logic.
-//! Approving then leaves plan mode and starts the implement turn.
-//!
-//! This FAILS without the shell re-park: no reverse-request reaches the resumed pager, so no approval chrome appears.
 
 use std::path::Path;
 use std::time::Duration;
@@ -18,7 +11,6 @@ use crate::{ContentController, PtyHarness, pager_binary};
 const DEFAULT_ROWS: u16 = 50;
 const DEFAULT_COLS: u16 = 120;
 const WELCOME_TIMEOUT: Duration = Duration::from_secs(20);
-/// Turn 1 seeds the session before quit; turn 2 is the implement turn the shell injects after the resumed approval is approved.
 const SETUP_SENTINEL: &str = "GBT3703SETUP";
 const IMPLEMENT_SENTINEL: &str = "GBT3703IMPLEMENTED";
 
@@ -88,9 +80,7 @@ pub async fn assert_plan_approval_restored_after_resume() -> Result<()> {
     )
     .context("spawn resumed pager")?;
 
-    // The shell re-parks `exit_plan_mode` on resume, so approval chrome can open immediately and cover chat history
-    // Prefer the chrome markers (product signal) over SETUP_SENTINEL, which may not be visible under the plan viewer
-    // Without the shell re-park this times out.
+    // The shell re-parks `exit_plan_mode` on resume, so approval chrome can open immediately and cover chat history Prefer the chrome markers.
     resumed
         .wait_for_text("request changes", WELCOME_TIMEOUT)
         .context("restored approval 'request changes' after --continue")?;

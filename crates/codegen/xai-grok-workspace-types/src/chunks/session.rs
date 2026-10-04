@@ -5,8 +5,6 @@ use crate::identity::SessionId;
 use crate::types::{AgentSessionInfo, RewindPoint, RewindResult};
 
 /// Streaming chunk for a session-lifecycle call.
-///
-/// Most variants are unary; `SessionInfo` is streamed by `SessionLifecycleRequest::List` (one chunk per session).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum SessionChunk {

@@ -40,7 +40,7 @@ impl AgentView {
             path.to_path_buf()
         };
 
-        // Get the element ID of the last file ref element (just created).
+        // Get the element ID of the last file ref element ( created).
         let element_id = self
             .prompt
             .textarea
@@ -140,7 +140,8 @@ impl AgentView {
             return self.enter_plan_commenting();
         }
 
-        // Casual mode: same `c` / `s` shortcuts as plan approval so the footer hints actually work
+        // Casual mode: same `c` / `s` shortcuts as plan approval so the
+        // footer hints work
         if !in_plan_approval && self.is_plan_viewer() && key!('c').matches(key) {
             return self.enter_casual_plan_commenting();
         }
@@ -336,9 +337,7 @@ impl AgentView {
         if let Some(ref mut pav) = self.plan_approval_view {
             pav.focus = PlanApprovalFocus::Preview;
         }
-        // The modal can close mid-comment via [✗], click-outside, or any path that skips `cancel_casual_plan_commenting`
-        // Restore the pre-comment prompt text so the user's original text isn't lost behind the comment draft
-        // Mirrors `cancel_casual_plan_commenting`.
+        // The modal can close mid-comment via [✗], click-outside.
         if let Some(stashed) = self.casual_stashed_prompt.take() {
             self.prompt.restore(stashed);
         }
@@ -396,9 +395,7 @@ impl AgentView {
             return InputOutcome::Changed;
         };
 
-        // `popup_area` is the list-rendered area, excluding the divider and footer rows in plan modes
-        // Mouse events dispatch into `ListPaneState` against it
-        // The click-outside check uses `modal_area` so clicks on the divider or the space between footer buttons don't close the modal
+        // `popup_area` is the list-rendered area, excluding the divider.
         let popup_area = viewer.last_popup_area;
         let modal_area = viewer.last_modal_area;
 
@@ -484,8 +481,7 @@ impl AgentView {
                     if is_plan_preview {
                         return self.enter_casual_plan_commenting();
                     }
-                    // The comment button is only set on plan viewers, so the two arms above are exhaustive in practice
-                    // Return here to make the dead fall-through explicit and to match the abandon/approve hit patterns just above
+                    // The comment button is only set on plan viewers.
                     return InputOutcome::Changed;
                 }
                 if copy_btn_area.is_some_and(|a| a.contains((mouse.column, mouse.row).into())) {
@@ -500,8 +496,8 @@ impl AgentView {
                     }
                     return self.send_casual_plan_comments();
                 }
-                // Mermaid buttons are checked before click-to-comment
-                // The early return ends the `viewer` borrow so `handle_inline_media_click` can take `&mut self`
+                // Mermaid buttons are checked before click-to-comment The
+                // early return ends the `viewer` borrow.
                 let mermaid_hit = self
                     .inline_media_hits
                     .mermaid_buttons
@@ -552,7 +548,6 @@ impl AgentView {
                         self.prompt.set_text("");
                     }
                 }
-                // Forward below.
             }
             MouseEventKind::Moved => {
                 let mut changed = false;
@@ -676,8 +671,9 @@ impl AgentView {
                         let hi = start.max(end);
                         let range = lo..hi + 1;
                         if let Some(ref mut pav) = self.plan_approval_view {
-                            // Stash only on the first entry into commenting, same as enter_plan_commenting
-                            // A second gutter drag while Commenting must not replace the stashed prompt text
+                            // Stash only on the first entry into commenting,
+                            // same as enter_plan_commenting A second gutter
+                            // drag.
                             if pav.stashed_feedback_prompt.is_none() {
                                 pav.stashed_feedback_prompt = Some(self.prompt.stash());
                             }
@@ -757,9 +753,8 @@ impl AgentView {
                         })
                         .unwrap_or(false)
                 };
-                // Skip the click-to-comment trigger if the user is already composing a comment
-                // Without this guard, any click on a list row would re-enter commenting and re-stash the prompt, now holding the comment draft
-                // That clobbers the user's pre-comment text and makes any mouse click commit to a fresh comment instead of just moving the cursor
+                // Skip the click-to-comment trigger if the user is already
+                // composing a comment Without this guard.
                 let in_pav_commenting = self
                     .plan_approval_view
                     .as_ref()
@@ -957,9 +952,8 @@ impl AgentView {
         let Some(task) = self.session.bg_tasks.get(task_id) else {
             return false;
         };
-        // A task can lack a scrollback anchor: the completed-early race never pushes a block,
-        // and a scrollback swap can drop it. The viewer renders from the task's own stdout,
-        // so open it on the sentinel anchor instead of dead-clicking the [↗] button.
+        // A task can lack a scrollback anchor: the completed-early race never
+        // pushes a block, and a scrollback swap can drop it.
         let entry_id = task
             .scrollback_entry_id
             .unwrap_or_else(|| crate::scrollback::entry::EntryId::new(0));

@@ -113,9 +113,8 @@ pub fn link_current_span_to_meta(meta: &serde_json::Value) {
     link_span_to_meta(&tracing::Span::current(), meta);
 }
 
-/// OTel-parent `span` under `traceparent` with no tracing parent link, so the parent is not held
-/// open. Must run before `span` starts (first child or context read); returns `false` if it could
-/// not apply.
+/// OTel-parent `span` under `traceparent` with no tracing parent link, so the
+/// parent is not held open.
 pub fn set_parent_from_traceparent(span: &tracing::Span, traceparent: &str) -> bool {
     extract_context(traceparent).is_some_and(|cx| span.set_parent(cx).is_ok())
 }
@@ -130,15 +129,13 @@ fn extract_context(traceparent: &str) -> Option<opentelemetry::Context> {
     ctx.span().span_context().is_valid().then_some(ctx)
 }
 
-/// A held local trace setup: an in-process, non-exporting tracer plus the W3C propagator, installed
-/// for the current thread until this guard drops. The provider is kept alive alongside the
-/// subscriber so spans keep minting real span ids.
+/// A held local trace setup: an in-process, non-exporting tracer plus the W3C
+/// propagator, installed for the current thread until this guard drops.
 #[must_use]
 pub struct LocalTraceGuard {
     _provider: opentelemetry_sdk::trace::SdkTracerProvider,
     _subscriber: tracing::subscriber::DefaultGuard,
-    // With one registered dispatcher, tracing caches callsite interest from whichever thread hits
-    // the callsite first; a second one makes it consult the registered set.
+    // With one registered dispatcher, tracing caches callsite interest from whichever thread hits the callsite first.
     _interest_pin: tracing::Dispatch,
 }
 

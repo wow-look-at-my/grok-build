@@ -9,12 +9,10 @@ pub enum ChatStateEvent {
     /// Prompt index changed (session uses this to update hunk tracker attribution).
     PromptIndexChanged { new_index: usize },
 
-    /// Token count updated (session uses this for notification meta,
-    /// auto-compact threshold checks).
+    /// Token count updated (session uses this for notification meta, auto-compact threshold checks).
     TokensUpdated { total_tokens: u64 },
 
-    /// Conversation was replaced (compaction/rewind) — session may need to
-    /// reset idle-flush counters, memory injection flags, etc.
+    /// Conversation.
     ConversationReset { new_len: usize },
 
     /// Image byte-budget record for a built request (observability only).

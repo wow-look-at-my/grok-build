@@ -1,5 +1,4 @@
-//! The grok.com chat model catalog (`POST /rest/modes`): the models grok-web's chat picker shows, distinct from the CLI `/v1/models` build catalog.
-//! Transport only; the cache and the ACP mapping live in [`crate::agent::chat_modes`].
+//! The grok.com chat model catalog (`POST /rest/modes`): the models grok-web's chat picker shows.
 
 use std::sync::Arc;
 

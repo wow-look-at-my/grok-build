@@ -4,9 +4,7 @@ use std::path::Path;
 
 use tokio::io::AsyncReadExt;
 
-/// Far more than any tool shows the model, so this bounds memory only. The
-/// assertion pins the built-in budget; a runtime budget raised past this
-/// would see the prefix instead of the whole log.
+/// Far more than any tool shows the model, so this bounds memory only.
 pub(crate) const MAX_SNAPSHOT_BYTES: usize = 1024 * 1024;
 const _: () = assert!(MAX_SNAPSHOT_BYTES > crate::DEFAULT_TOOL_OUTPUT_BYTES);
 

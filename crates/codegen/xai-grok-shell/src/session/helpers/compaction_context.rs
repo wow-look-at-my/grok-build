@@ -1,11 +1,4 @@
-//! Rendering helpers for [`CompactionStateContext`] that depend on shell-specific types (`xai_grok_tools::MemoryBackend`, memory context).
-//!
-//! The core [`CompactionStateContext`] struct and its builder live in `xai_chat_state::compaction_utils`.
-//! This module adds system-reminder rendering that requires dependencies not available in `xai-chat-state`.
-//!
-//! The **common** active-agent section (Running Background Tasks: commands, loops, workflows, subagents) plus TODO is formatted by [`xai_grok_compaction::reminder`].
-//! That keeps grok-chat and grok-build in lockstep.
-//! Harness-only sections (edited files, AGENTS.md, skills, catalog workflows, MCP, memory) stay here.
+//! Rendering helpers for [`CompactionStateContext`] that depend on shell-specific types.
 
 use std::path::PathBuf;
 
@@ -20,9 +13,8 @@ use xai_grok_compaction::reminder::{
     TodoStatus, WorkflowRun,
 };
 
-/// Resolved model-facing tool names for the MCP usage hint in compaction reminders.
-/// Resolved at runtime via `TemplateRenderer` from `ToolKind::SearchTool` and `ToolKind::UseTool`.
-/// Never hard-code tool names; they can be renamed by the client.
+/// Resolved model-facing tool names for the MCP usage hint in compaction
+/// reminders.
 pub struct McpToolNames {
     /// Model-facing name of the search/discover tool (e.g. "search_tool").
     pub search: String,
@@ -31,8 +23,6 @@ pub struct McpToolNames {
 }
 
 /// Resolved model-facing tool names for the subagent reminder section.
-/// Both names are resolved at runtime via `TemplateRenderer` from `ToolKind::BackgroundTaskAction` and `ToolKind::KillTaskAction`.
-/// Never hard-code tool names; they can be renamed by the client.
 pub struct SubagentToolNames {
     /// Model-facing name of the poll/status tool (e.g. "get_task_output").
     pub poll: String,
@@ -141,9 +131,8 @@ fn to_system_reminder_inner(
         ));
     }
 
-    // Available skills (startup and dynamically discovered, from SkillManager)
-    // Reuse the standard listing renderer so the post-compaction listing matches the startup `<system-reminder>`
-    // The shared renderer has no hard-coded tool name and includes `Use when:` triggers and `Absolute path:`
+    // Available skills (startup and dynamically discovered, from
+    // SkillManager) Reuse the standard listing renderer.
     if let Some(listing) =
         xai_grok_tools::types::skill_discovery_tracker::format_compaction_skill_listing(skills)
     {

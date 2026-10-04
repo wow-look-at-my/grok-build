@@ -119,9 +119,7 @@ impl SessionActor {
                 .forward_fire_and_forget(notification);
         }
 
-        // The status row carries `workspace.branch`, and HEAD has just moved
-        // This sits inside the `git_head_enabled` gate above
-        // A client that did not ask for HEAD notifications refreshes its row at turn end instead
+        // The status row carries `workspace.branch`, and HEAD has moved This sits inside the `git_head_enabled` gate above A client that did not ask.
         self.emit_status_snapshot_detached();
     }
 
@@ -228,8 +226,7 @@ impl SessionActor {
             _ => None,
         };
         let mut state = self.state.lock().await;
-        // True only when this completion matched the front prompt and dequeued it
-        // The unknown-prompt branch below must NOT emit a terminal: a turn the Cancel path already finalized can leave a stale completion here
+        // True only when this completion matched the front prompt and dequeued it The unknown-prompt branch below must NOT emit a terminal.
         let mut owned_completion = false;
         let mut broadcast_queue = false;
         if state
@@ -242,8 +239,7 @@ impl SessionActor {
             };
             owned_completion = true;
             let _ = input.respond_to.send(result.clone()).ok();
-            // The completed prompt left the queue, so re-broadcast the authoritative queue
-            // That happens below, after `running_task` clears, so the wire's `running_prompt_id` does not advertise the finished turn
+            // The completed prompt left the queue, so re-broadcast the authoritative queue That happens below, after `running_task` clears.
             broadcast_queue = input.queue_meta.is_some();
         } else {
             tracing::warn!("Received completion for unknown prompt: {prompt_id}");
@@ -263,8 +259,9 @@ impl SessionActor {
             xai_message_delivery_core::TerminalCause::Completion,
         );
         broadcast_queue |= had_message_fallbacks;
-        // Owned (dequeued at the front) completions only
-        // The unknown-prompt branch above is a stale completion the Cancel path already finalized, and `RemovedFromQueue` never ran
+        // Owned (dequeued at the front) completions only The unknown-prompt
+        // branch above is a stale completion the Cancel path already
+        // finalized.
         let finalizes_turn = owned_completion
             && !matches!(
                 result,
@@ -288,9 +285,7 @@ impl SessionActor {
                 },
             );
         }
-        // The turn sets the queue hold at the block verdict (single writer)
-        // Completion handling only announces the hold, and only while it is still set
-        // A prompt that cleared the hold between the verdict and this completion must not be overridden here
+        // The turn sets the queue hold at the block verdict (single writer) Completion handling only announces the hold.
         let mut held_rows_notice: Option<usize> = None;
         if finalizes_turn
             && state.hook_block_held()
@@ -353,8 +348,8 @@ impl SessionActor {
                     }
                 }
             };
-            // `cancellationCategory` on the terminal `_meta` lets re-attaching viewers finalize with the same copy as the driver
-            // A hook-denied turn must not render as "cancelled by user"
+            // `cancellationCategory` on the terminal `_meta` lets
+            // re-attaching viewers finalize with the same copy as the driver.
             let cancellation_category = result
                 .as_ref()
                 .ok()
@@ -389,7 +384,7 @@ impl SessionActor {
     }
 
     /// Emit the durable, replayable `TurnCompleted` terminal, the single path shared by `handle_completion` and `cancel_running_task`.
-    /// `(stop_reason, agent_result)` come from `prompt_complete_fields`, the same source as `prompt_complete`, so the two signals never disagree.
+    /// `(stop_reason, agent_result)` come from `prompt_complete_fields`, the same source as `prompt_complete`, so both signals never disagree.
     /// `cancel_trigger` (when `Some`) rides the `_meta` as `cancelTrigger`; `"send_now"` marks a cancel-and-send end (marker suppressed).
     pub(super) async fn emit_turn_completed(
         &self,
@@ -415,9 +410,8 @@ impl SessionActor {
             extra.insert("cancellationContext".to_string(), ctx);
         }
         let extra_meta = (!extra.is_empty()).then_some(extra);
-        // Session-cumulative cost at the terminal: this is the last point in a
-        // turn where a subagent fold can still land after the final model call,
-        // so a client's idle total is only exact if it is refreshed here.
+        // Session-cumulative cost at the terminal: this is the last point in
+        // a turn where a subagent fold can still land.
         let session_cost_usd_ticks = self
             .chat_state_handle
             .try_get_session_usage()
@@ -467,7 +461,7 @@ impl SessionActor {
         self.emit_status_snapshot_detached();
     }
 
-    /// Telemetry error category; delegates to `stop_failure_error_type` so the two classifications cannot drift.
+    /// Telemetry error category; delegates to `stop_failure_error_type` so both classifications cannot drift.
     pub(super) fn classify_turn_error(err: &acp::Error) -> String {
         use xai_grok_hooks::event::StopFailureKind as K;
         match Self::stop_failure_error_type(err) {
@@ -487,7 +481,6 @@ impl SessionActor {
             .or_else(|| crate::sampling::error::error_code_from_data(err))
             .map(str::to_owned)
             .unwrap_or_else(|| category.clone());
-        // Only HTTP 400 is the backend's bad-request reason; 403 content-safety and 404 model/auth enrichment also fold into invalid_request but must not ship their bodies.
         let detail =
             (crate::sampling::error::http_status_from_error(err) == Some(400)).then(|| {
                 let named = crate::sampling::error::rewrite_service_names(
@@ -507,9 +500,7 @@ impl SessionActor {
         if crate::sampling::error::is_max_tokens_turn_error(err) {
             return K::MaxOutputTokens;
         }
-        // The HTTP status carried in `err.data` is more specific than the JSON-RPC code, so it is checked first 403 is content-safety, not auth.
-        // On the turn path it carries `http_status: 403` and folds into `invalid_request`.
-        // On the setup path it has no status, so `-32603` below makes it `server_error`.
+        // On the turn path it carries `http_status: 403` and folds into `invalid_request`. On the setup path it has no status, so `-32603` below makes it `server_error`.
         match crate::sampling::error::http_status_from_error(err) {
             Some(401) => return K::AuthenticationFailed,
             Some(429) | Some(503) | Some(529) => return K::RateLimit,
@@ -535,15 +526,9 @@ impl SessionActor {
         )
     }
 
-    /// Whether re-sending the same request could plausibly succeed.
-    ///
-    /// Every terminal sampler failure arrives as `-32603`, so the pause path
-    /// treats them all as infra and offers `/goal resume`. For a request the
-    /// server rejected on its content, that offer is a loop: resume rebuilds
-    /// the same conversation and earns the same rejection. The status is what
-    /// separates the two — 4xx is about what was sent, minus the ones that
-    /// clear on their own: 401 (a credential refresh runs between attempts),
-    /// 408/425 (timing), 429 (the wait is the remedy).
+    /// Whether re-sending the same request could plausibly succeed. Every
+    /// terminal sampler failure arrives as `-32603`, so the pause path treats
+    /// them all as infra and offers `/goal resume`.
     pub(super) fn retry_can_clear_turn_error(err: &acp::Error) -> bool {
         match crate::sampling::error::http_status_from_error(err) {
             Some(401 | 408 | 425 | 429) => true,
@@ -692,8 +677,6 @@ mod turn_error_fields_tests {
 
     #[test]
     fn non_400_errors_omit_detail() {
-        // 401 auth, 403 content-safety, 429 rate-limit, 500 server all fold into
-        // invalid_request/other but must never ship their (PII-bearing) bodies.
         for status in [401u16, 403, 429, 500] {
             let err = err_with_status("secret path /Users/someone/keys", status);
             let (_c, _code, detail) = SessionActor::turn_error_fields(&err);
@@ -713,8 +696,6 @@ mod goal_pause_message_tests {
         ))
     }
 
-    /// The reported trap: a content rejection (here the vision 404) offered
-    /// `/goal resume`, which rebuilt the same request and failed the same way.
     #[test]
     fn content_rejections_do_not_offer_a_bare_resume() {
         for status in [400u16, 403, 404, 413, 422] {

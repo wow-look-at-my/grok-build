@@ -1,10 +1,8 @@
-Your task is to create a detailed summary of the tool-call history above, paying close attention to preserving all information the assistant needs to continue its current task without losing context.
-This summary should be thorough in capturing technical details, code patterns, data points, and intermediate results that would be essential for continuing the current work.
+Your task is to create a detailed summary of the tool-call history above, paying close attention to preserving all information. The assistant needs to continue its current task without losing context. This summary must be thorough in capturing technical details, code patterns, data points, and intermediate results that will be essential for continuing the current work.
 
-CRITICAL: If the tool-call history contains a previous compaction summary (marked with "ConversationCompaction" or similar markers), you MUST incorporate ALL information from that previous summary into your new summary. Previous summaries contain essential context from earlier steps that would otherwise be lost.
+CRITICAL: If the tool-call history contains a previous compaction summary (marked with "ConversationCompaction" or similar markers), you MUST incorporate ALL information from that previous summary into your new summary. Previous summaries contain essential context from earlier steps that will otherwise be lost.
 
-Use your internal thinking channel to chronologically review each tool call and its result before producing the final summary, and ensure you've covered all necessary points.
-During that analysis, thoroughly identify:
+Use your internal thinking channel to chronologically review each tool call and its result before producing the final summary. Ensure you have covered all necessary points. During that analysis, thoroughly identify:
 - What was searched, read, or executed and why
 - Key findings, data points, and outcomes
 - Specific details like:
@@ -29,7 +27,7 @@ Your final summary must contain the following sections, in order:
 
 6. Current Progress: What has been completed and what remains to be done.
 
-Here's an example of how your output should be structured:
+Here is an example of how your output must be structured:
 
 <example>
 1. Task and Intent:
@@ -54,11 +52,9 @@ Here's an example of how your output should be structured:
    - [Action 1]: [Outcome]
    - [...]
 
-6. Current Progress:
-   [What is done, what remains]
-</example>
+6. Current Progress: [What is done, what remains] </example>
 
-Output the summary directly using the section headings above. Do not wrap the output in any XML tags or other markup — emit the six sections as plain text.
+Output the summary directly using the section headings above. Do not wrap the output in any XML tags or other markup — emit the sections as plain text.
 
 IMPORTANT:
 - Do NOT call any tools. Output the summary text only.

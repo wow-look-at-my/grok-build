@@ -19,8 +19,7 @@ use xai_grok_shell::agent::config::UiConfig;
 pub const MODAL_TITLE: &str = "Settings";
 
 /// Width of the `"─ "` leading decoration before the title in the modal's top border.
-/// Used to compute the breadcrumb hit-rect x offset.
-pub(super) const TITLE_LEADING_DECORATION_W: u16 = 2; // `─ `: 1 cell box-drawing + 1 cell space.
+pub(super) const TITLE_LEADING_DECORATION_W: u16 = 2;
 
 // Descriptions are expand-on-demand via Right/Left arrows; see `render_expanded_description`
 
@@ -34,7 +33,6 @@ pub(super) const STANDARD_MAX_WIDTH: u16 = 110;
 pub(super) const MAX_THOUGHTS_WIDTH_WIDENED_MARGIN: u16 = 8;
 
 /// Outcome of a key or mouse event.
-/// Separate from `InputOutcome` because the modal doesn't own `agent.active_modal`; close is the caller's responsibility.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum SettingsKeyOutcome {
@@ -42,8 +40,7 @@ pub enum SettingsKeyOutcome {
     Close,
     /// Forward to dispatch.
     Action(Action),
-    /// Forward two actions in order (first must resolve before second).
-    /// Used by `d`-reset-in-picker to revert preview before opening the reset-confirm overlay.
+    /// Forward actions in order (first must resolve before second).
     ActionPair(Action, Action),
     /// Close the modal and dispatch `Action` (deep-link Esc revert or Enter commit).
     ActionThenClose(Action),
@@ -75,9 +72,7 @@ pub enum SettingsModalMode {
         supports_preview: bool,
     },
     /// Group sub-sheet: a list of the group's children. `child_idx` is the
-    /// focused child. Space/Enter toggles a Bool child in place, and opens
-    /// the editor or picker of any other child, which returns to this sheet.
-    /// Esc returns to Browse.
+    /// focused child.
     PickingGroup {
         key: SettingKey,
         child_idx: usize,
@@ -224,31 +219,22 @@ pub struct SettingsModalState {
     /// Click-hit rect per row, parallel to `rows`.
     pub row_rects: Vec<Rect>,
     /// Click-hit rect for the value column on each row.
-    /// Bool rows toggle on click; Enum/String/Int rows open the sub-pane.
     pub value_hit_rects: Vec<Rect>,
     /// `(decrement_rect, increment_rect)` for the Int stepper's `‹`/`›` glyphs.
-    /// Zero-sized when not in Int editing mode.
     pub editor_adornment_rects: (Rect, Rect),
     /// Click-hit rect per choice in `PickingEnum`.
-    /// Each rect spans the full height of a choice (including wrapped description lines).
     pub picker_choice_rects: Vec<Rect>,
     /// Hit-rect for the breadcrumb title in sub-pane modes (`PickingEnum`/`EditingValue`).
-    /// Clicking anywhere on `Settings › <label>` cancels back to Browse.
-    /// `None` in Browse/FilterFocused. Cleared on mode transitions.
     pub settings_breadcrumb_rect: Option<Rect>,
     /// Hover flag for the breadcrumb; hovering adds an underline.
     pub breadcrumb_hovered: bool,
     /// Keys whose description is expanded (Right/l to expand, Left/h to collapse).
-    /// Multiple rows can be expanded simultaneously.
     pub expanded_keys: std::collections::HashSet<&'static str>,
     /// Row under the mouse cursor for hover highlighting.
-    /// Indexes `rows` in Browse, `picker_choice_rects` in PickingEnum, always `None` in EditingValue.
     pub hover_row: Option<usize>,
     /// When true, Esc/Enter from `PickingEnum` close the modal instead of returning to Browse.
-    /// Set by deep-link open (`OpenSettingsFocus` / `/privacy`); cleared on leave from the picker.
     pub close_on_picker_exit: bool,
-    /// The group sheet and child index that opened the current editor or
-    /// picker. Leaving that editor goes back to the sheet, not to Browse.
+    /// The group sheet and child index that opened the current editor or picker.
     pub(super) group_return: Option<(SettingKey, usize)>,
     /// Last left-click on a picker radio: `(choice index, when)`.
     pub(super) picker_last_click: Option<(usize, std::time::Instant)>,
@@ -723,9 +709,6 @@ impl SettingsModalState {
             (first, cur, supports_preview, resolved)
         };
 
-        // Resolve choices_idx from current value
-        // For DynamicEnum, a current value that no longer exists in the catalog falls back to index 1 (the first real entry past the sentinel)
-        // This avoids accidentally wiping the user's preference
         let is_dynamic_enum = matches!(
             self.registry.find(key).map(|m| &m.kind),
             Some(SettingKind::DynamicEnum { .. })
@@ -1053,8 +1036,9 @@ pub(super) fn action_for_enum_commit(key: SettingKey, choice: &'static str) -> O
             "always-approve" => Some(Action::SetPermissionMode(
                 crate::app::actions::PermissionModeKind::AlwaysApprove,
             )),
-            // Auto's feature gate is enforced in `set_permission_mode` (via `app.auto_mode_gate`, the same source the Shift+Tab cycle uses)
-            // The modal and the cycle thus never disagree; committing Auto when the gate is off degrades to Ask there
+            // Auto's feature gate is enforced in `set_permission_mode` (via
+            // `app.auto_mode_gate`, the same source the Shift+Tab cycle
+            // uses).
             "auto" => Some(Action::SetPermissionMode(
                 crate::app::actions::PermissionModeKind::Auto,
             )),
@@ -1208,9 +1192,7 @@ pub(super) fn validate_string(
     }
 }
 
-/// Soft product cap on static Enum choices (settings unit tests enforce it). This limit exists so
-/// catalogs stay intentionally curated rather than unbounded. Sized to fit the full Grok STT
-/// language list (25 codes + client-only `auto` = 26) with headroom.
+/// Soft product cap on static Enum choices (settings unit tests enforce it).
 pub(crate) const MAX_PICKER_CHOICES: usize = 32;
 
 /// The children of a group setting, or an empty slice if `key` is not a group.

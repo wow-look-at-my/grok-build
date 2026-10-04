@@ -1,27 +1,17 @@
-//! Signed deployment-config envelope: the wire contract between the
-//! cli-chat-proxy signer and the client verifier. Shared so a field rename
-//! breaks at compile time on both sides instead of silently failing verification.
+//! Signed deployment-config envelope: the wire contract between the cli-chat-proxy signer and the client verifier.
 
 use serde::{Deserialize, Serialize};
 
-/// The payload format version the server currently signs. Informational for
-/// now: no verifier gates on it (every version verifies the same); enforce a
-/// minimum only once the fleet has rotated past older generations.
-/// `0` = pre-versioned, `1` = first versioned payload, `2` = per-fetch `nonce`.
+/// The payload format version the server signs.
 pub const SIGNED_PAYLOAD_VERSION: u32 = 2;
 
-/// Domain-separation tags inside the signed bytes: both message types share one
-/// signing key, so each verifier requires its own tag (no cross-substitution).
+/// Domain-separation tags inside the signed bytes: both message types share one signing key.
 pub const MANAGED_POLICY_TYP: &str = "grok.managed_policy.v1";
 pub const MANAGED_IDENTITY_TYP: &str = "grok.managed_identity.v1";
 
 /// Client echoes its persisted envelope `nonce` on this header for the server probe.
 pub const MANAGED_CONFIG_NONCE_ECHO_HEADER: &str = "x-grok-managed-config-nonce";
 
-/// Shape of a server-minted nonce (16 random bytes as hex): what `fresh_nonce`
-/// produces and the only shape the client echoes (hex is HTTP-header-safe).
-/// Shared so a mint change cannot silently disable the echo: the proxy pins
-/// its mint against this, the client gates its echo on it.
 pub fn is_server_nonce_shape(nonce: &str) -> bool {
     nonce.len() == 32 && nonce.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -33,11 +23,9 @@ pub fn is_server_nonce_shape(nonce: &str) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignedPayload {
     /// Domain-separation tag; the verifier requires [`MANAGED_POLICY_TYP`].
-    /// `default` so untagged JSON parses — verification still rejects it.
     #[serde(default)]
     pub typ: String,
-    /// Payload format version ([`SIGNED_PAYLOAD_VERSION`]); `default` 0 so
-    /// pre-versioned sidecars parse and verify unchanged.
+    /// Payload format version ([`SIGNED_PAYLOAD_VERSION`]).
     #[serde(default)]
     pub version: u32,
     #[serde(default)]
@@ -48,23 +36,21 @@ pub struct SignedPayload {
     pub managed_config: Option<String>,
     #[serde(default)]
     pub requirements: Option<String>,
-    /// Strict (fail-closed) opt-in, carried in the SIGNED bytes so a local actor can't
-    /// flip enforcement. `default` false so an older/unsigned payload stays lenient.
+    /// Strict (fail-closed) opt-in, carried in the SIGNED bytes so a local actor can't flip enforcement.
     #[serde(default)]
     pub fail_closed: bool,
     /// Unix seconds after which the signature is no longer trusted.
     pub expires_at: u64,
     /// Per-response nonce in the signed bytes (echoed on [`MANAGED_CONFIG_NONCE_ECHO_HEADER`]).
-    /// `default` empty keeps pre-nonce sidecars verifiable.
     #[serde(default)]
     pub nonce: String,
     /// Identifies the signing key, so a rotation can be distinguished.
     pub key_id: String,
 }
 
-/// Server-signed claim that a principal is managed (+ fail-closed), persisted by
-/// the client as its OWN sidecar — so deleting the policy sidecar alone cannot
-/// downgrade the load-time gate to the forgeable marker.
+/// Server-signed claim that a principal is managed (+ fail-closed), persisted
+/// by the client as its OWN sidecar — so deleting the policy sidecar alone
+/// cannot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManagedIdentityClaim {
     /// Domain-separation tag — the verifier requires [`MANAGED_IDENTITY_TYP`].
@@ -72,8 +58,7 @@ pub struct ManagedIdentityClaim {
     pub typ: String,
     /// The managed principal (deployment or team id) this claim is bound to.
     pub principal: String,
-    /// Strict opt-in, same server source as the policy's; `default` false so an
-    /// older/partial claim never imposes.
+    /// Strict opt-in, same server source as the policy's; `default` false so an older/partial claim never imposes.
     #[serde(default)]
     pub fail_closed: bool,
     /// Unix seconds after which the claim is no longer trusted.
@@ -82,23 +67,19 @@ pub struct ManagedIdentityClaim {
     pub key_id: String,
 }
 
-/// One signed envelope carried alongside the legacy policy fields in the
-/// deployment-config response (additive: old clients ignore it). Also the
-/// shape the client persists as its on-disk signature sidecar.
+/// One signed envelope carried alongside the policy fields in the
+/// deployment-config response (additive: old clients ignore it).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignatureEnvelope {
     /// The exact JSON string that was signed (a serialized [`SignedPayload`]).
     pub signed_payload: String,
     /// Base64 (standard) Ed25519 signature over `signed_payload`'s UTF-8 bytes.
     pub signature: String,
-    /// Untrusted (outside the signed bytes): a hint for picking among multiple
-    /// envelopes, never for selecting the verifying key — only the signed
-    /// payload's `key_id` is authoritative.
+    /// Untrusted (outside the signed bytes): a hint for picking among multiple envelopes, never for selecting the verifying key.
     #[serde(default)]
     pub key_id: String,
 }
 
-/// Unix seconds now (saturating to 0 on a pre-epoch clock).
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -147,8 +128,6 @@ pub fn fail_closed_flag_status_from_value(requirements: &toml::Value) -> FailClo
 mod tests {
     use super::*;
 
-    /// The version field round-trips, and a pre-versioned payload (no `version`
-    /// key) defaults to 0 — old sidecars keep parsing.
     #[test]
     fn signed_payload_version_round_trips_and_defaults() {
         let versioned = SignedPayload {

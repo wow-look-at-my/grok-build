@@ -83,9 +83,9 @@ pub(super) fn claim_binds_to(
     served_principal == Some(claim.principal.as_str())
 }
 
-/// The sandbox write-deny class — all a verified refresh may stage past: Seatbelt/Landlock
-/// surface EPERM/EACCES (`PermissionDenied`), a bwrap ro-bind EROFS on open
-/// (`ReadOnlyFilesystem`) or EBUSY over the mountpoint (`ResourceBusy`). All else propagates.
+/// The sandbox write-deny class — all a verified refresh may stage past:
+/// Seatbelt/Landlock surface EPERM/EACCES (`PermissionDenied`), a bwrap
+/// ro-bind EROFS.
 pub(super) fn write_failure_is_deny(e: &std::io::Error) -> bool {
     matches!(
         e.kind(),

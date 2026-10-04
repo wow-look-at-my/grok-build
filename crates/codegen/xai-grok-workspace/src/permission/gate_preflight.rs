@@ -1,9 +1,4 @@
 //! Managed-policy preflight for one permission request.
-//!
-//! Evaluates the direct rule pass and both bash security gates once and keeps each gate's `Ask` provenance.
-//! A rule-match Ask is an actual policy match and stays a prompt; a fail-closed Ask means analysis could not decompose the command to check rules.
-//! In auto mode a fail-closed Ask defers to the classifier.
-//! The manager consumes this single result instead of correlating parallel booleans at every decision site.
 
 use std::path::Path;
 
@@ -18,8 +13,7 @@ pub struct GatePreflight {
     shell_file: Option<GateDecision>,
     /// A native path hit an unresolvable symlink under deny/ask file rules; blocks YOLO.
     native_symlink_fail_closed: bool,
-    /// In auto mode, a fail-closed gate Ask with no rule match lets the classifier run (Allow executes, Block denies within budget).
-    /// A rule-match Ask never defers.
+    /// In auto mode, a fail-closed gate Ask with no rule match lets the classifier run.
     defers_gate_ask: bool,
 }
 
@@ -47,8 +41,7 @@ impl GatePreflight {
             || matches!(shell_file, Some(GateDecision::AskRuleMatch));
         let fail_closed_ask = matches!(bash_command, Some(GateDecision::AskFailClosed))
             || matches!(shell_file, Some(GateDecision::AskFailClosed));
-        // WHY: a fail-closed Ask means analysis could not decompose the command to check rules, so the classifier arbitrates it
-        // A rule-match Ask is an actual policy match that stays a prompt (never waived by a model)
+        // WHY: a fail-closed Ask means analysis could not decompose the command to check rules.
         let defers_gate_ask = auto_mode && fail_closed_ask && !rule_match_ask;
         Self {
             direct,
@@ -91,7 +84,6 @@ impl GatePreflight {
     }
 
     /// Deferral is active: a fail-closed Ask may be classified.
-    /// A classifier Block denies within budget; it does not bind like a prompt and still spends budget.
     pub(crate) fn defers_gate_ask(&self) -> bool {
         self.defers_gate_ask
     }

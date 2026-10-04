@@ -26,7 +26,6 @@ async fn quit_fence_consumes_kitty_release() {
         "kitty pop must precede the DA1 query (pop at {pop_at}, query at {query_at})"
     );
 
-    // Well past the old 10 ms crossterm drain: only the fence can still consume this release
     harness.update(Duration::from_millis(100));
     harness
         .inject_keys(b"\x1b[99;5:3u")

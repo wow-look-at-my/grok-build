@@ -1,5 +1,4 @@
-//! Worker-door control commands over a real leader IPC server. No hub
-//! connection is made: every start here fails validation before the bridge is dialed.
+//! Worker-door control commands over a real leader IPC server.
 #![cfg(unix)]
 use std::time::Duration;
 use tempfile::TempDir;

@@ -1,16 +1,4 @@
 //! Runtime DA2 (Secondary Device Attributes) probe: `CSI > 0 c` is answered by `CSI > Pp ; Pv ; Pc c`.
-//! `Pv` is a version packed as `major * 10000 + minor * 100 + patch`.
-//!
-//! Alacritty is the reason this exists: it exports no version environment variable and refuses XTVERSION on principle.
-//! What it answers with is the `alacritty_terminal` library version; see [`unpack_version`].
-//!
-//! Unlike [`super::xtversion`] the reply is read at the fd rather than recognized by an event-loop filter, because no filter could see it.
-//! crossterm has no `CSI >` arm, so it errors and clears its buffer, dropping the intro and leaving digits indistinguishable from typing.
-//!
-//! The read owns stdin, so it must run after `enable_raw_mode()` and before crossterm's `EventStream` exists.
-//! A late reply that arrives partially is drained to quiet by [`super::probe`].
-//! A reply of which *no* byte arrives before the deadline is left for crossterm, which types it into the composer.
-//! `REPLY_TIMEOUT` is sized to keep that out of reach.
 
 use std::sync::OnceLock;
 #[cfg(unix)]
@@ -33,7 +21,6 @@ const QUERY: &[u8] = b"\x1b[>0c";
 #[cfg(unix)]
 const REPLY_TIMEOUT: Duration = Duration::from_millis(500);
 
-/// Rejects a packed value that cannot be a real release (major ≥ 100) instead of folding it into a plausible-looking version.
 #[cfg(any(unix, test))]
 const MAX_PACKED_VERSION: u32 = 999_999;
 
@@ -62,9 +49,8 @@ pub fn probe_at_startup() {
     query_and_read();
 }
 
-/// Deliberately narrow: Alacritty is the only brand whose version is otherwise unreachable.
-/// It is excluded from [`super::xtversion`]'s allowlist, which the synchronous read depends on.
-/// CSI-intercepting multiplexers skip: tmux answers DA2 as itself, and passthrough still returns the reply through it.
+/// Deliberately narrow: Alacritty is the only brand whose version is
+/// otherwise unreachable.
 fn gate_allows_probe(ctx: &super::TerminalContext) -> bool {
     ctx.brand == super::TerminalName::Alacritty && !ctx.multiplexer.intercepts_csi_queries()
 }
@@ -78,7 +64,6 @@ fn query_and_read() {
     }
     // Only the DA2 intro ends the read
     // Startup typeahead can already hold a `>` and a `c` (`ls > out.c`), and a late DA1 reply has the escape but a `?`
-    // Both are consumed instead, and the read continues to the reply
     let reply = super::probe::read_tty_reply(REPLY_TIMEOUT, |buf, byte| {
         byte == b'c' && buf.windows(3).any(|w| w == b"\x1b[>")
     });
@@ -117,7 +102,7 @@ fn parse_version(reply: &[u8]) -> Option<Da2Version> {
     unpack_version(packed)
 }
 
-/// Library crate version, not the app release (they diverged after 0.5). Reported as-is; upstream strips `-dev`.
+/// Reported as-is; upstream strips `-dev`.
 #[cfg(any(unix, test))]
 fn unpack_version(packed: u32) -> Option<Da2Version> {
     if packed == 0 || packed > MAX_PACKED_VERSION {
@@ -143,8 +128,6 @@ mod tests {
 
     #[test]
     fn packed_version_round_trips() {
-        // These are real `alacritty_terminal` versions, not the releases they ship in
-        // 0.21 is Alacritty 0.13.x; 0.25 is 0.15.1+ (0.15.0 still shipped 0.24.2).
         assert_eq!(
             parsed(b"\x1b[>0;2100;1c"),
             Some((2100, "0.21.0".to_owned()))

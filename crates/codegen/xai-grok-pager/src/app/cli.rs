@@ -36,7 +36,6 @@ pub enum Command {
         )]
         device_auth: bool,
         /// Authenticate for remote development environments (hidden).
-        /// Field is always present so match arms stay feature-unification-safe; clap registers `--devbox` only when that feature is enabled (`arg(skip)` otherwise → always false).
         #[arg(skip)]
         devbox: bool,
     },
@@ -61,7 +60,6 @@ pub enum Command {
     /// Share a session and print the share URL
     #[command(hide = true)]
     Share(crate::share_cmd::ShareArgs),
-    /// Run any command with local clipboard support (forwards OSC 52 to the system clipboard).
     #[cfg_attr(not(any(unix, windows)), command(hide = true))]
     #[command(long_about = "\
 Run any command inside a local PTY that forwards its clipboard to yours.
@@ -104,20 +102,15 @@ See ~/.grok/README.md for more information.
     #[command(name = "du", visible_alias = "disk-usage")]
     DiskUsage(crate::disk_usage_cmd::DiskUsageArgs),
     /// Expose this workspace to the Computer Hub (via the leader).
-    ///
-    /// Disabled by default and enabled server-side per account; set `GROK_WORKSPACE_COMMAND=1` to enable it locally for testing.
     #[command(hide = true)]
     Workspace(WorkspaceMgmtArgs),
-    /// Open the Agent Dashboard view at startup.
-    /// The dashboard shows every session, top-level and subagents.
-    /// Disabled when `[dashboard].enabled = false` in `~/.grok/config.toml` or when the `GROK_AGENT_DASHBOARD=0` env var is set.
+    /// Open the Agent Dashboard view at startup. The dashboard shows every session, top-level and subagents.
     Dashboard,
 }
 /// Arguments for the `wrap` subcommand: the command to run, then its args.
 #[derive(Debug, clap::Args, Clone)]
 pub struct WrapArgs {
     /// Command to run, followed by its arguments (e.g. `docker exec -it my-container bash`).
-    /// On Unix a single quoted string or an aliased command runs via `$SHELL -i -c`.
     #[arg(
         required = true,
         trailing_var_arg = true,
@@ -248,13 +241,9 @@ pub struct AgentArgs {
     #[arg(long = "agent-profile", value_name = "PATH")]
     pub agent_profile: Option<PathBuf>,
     /// Load a plugin from this directory for this process only (repeatable).
-    /// Highest-priority plugin scope; always trusted: hooks and MCP servers activate without a prompt.
-    /// Used by the Agent SDKs to inject per-connection plugins.
     #[arg(long = "plugin-dir", value_name = "DIR", value_hint = ValueHint::DirPath)]
     pub plugin_dirs: Vec<PathBuf>,
     /// Connect to a shared leader process instead of starting a new agent.
-    /// Allows multiple clients to share one backend.
-    /// Defaults to [cli] use_leader in config.toml.
     #[arg(long, conflicts_with = "no_leader")]
     pub leader: bool,
     /// Start a new agent even when config enables leader mode.
@@ -318,7 +307,6 @@ pub struct HeadlessArgs {
 /// Arguments for the `agent serve` subcommand.
 #[derive(Debug, clap::Args, Clone)]
 pub struct ServeArgs {
-    /// Address for the server to listen on
     #[arg(long, default_value = "127.0.0.1:2419")]
     pub bind: SocketAddr,
     /// Secret token for client authentication (auto-generated if not provided)
@@ -351,8 +339,6 @@ pub struct LeaderArgs {
     #[arg(long)]
     pub no_exit_on_disconnect: bool,
     /// Defer the grok.com relay WebSocket until the first headless IPC client registers.
-    /// Without this flag the leader connects the relay eagerly at startup.
-    /// Passed by leaders auto-spawned from interactive clients (TUI/IDE), which only need the relay if a headless client appears.
     #[arg(long)]
     pub relay_on_demand: bool,
     /// All environment URL overrides (passed from follower process)
@@ -388,8 +374,6 @@ pub struct PagerArgs {
     #[arg(long)]
     pub cwd: Option<PathBuf>,
     /// Use a custom leader socket path instead of the default `~/.grok/leader.sock`.
-    /// A local/branch build can thus run an isolated leader without colliding with the default one already running on the machine
-    /// Name it `~/.grok/leader-*.sock` to keep `grok leader list/kill` able to find it; any other location works but won't be auto-discovered
     #[arg(
         long = "leader-socket",
         value_name = "PATH",
@@ -468,12 +452,9 @@ pub struct PagerArgs {
     #[clap(long = "output-format", value_enum, default_value = "plain")]
     pub output_format: OutputFormat,
     /// Emit incremental `stream_event` lines (text/thinking deltas) alongside whole messages.
-    /// Only affects `--output-format streaming-messages-json`.
     #[clap(long = "include-partial-messages")]
     pub include_partial_messages: bool,
     /// JSON Schema for structured output. When set, the model is constrained to produce JSON matching this schema.
-    /// Implies --output-format json.
-    /// Example: --json-schema '{"type":"object","properties":{"name":{"type":"string"}}}'
     #[clap(long = "json-schema", value_name = "SCHEMA")]
     pub json_schema: Option<String>,
     /// Model ID to use.
@@ -491,12 +472,9 @@ pub struct PagerArgs {
     #[clap(long = "rules", alias = "append-system-prompt")]
     pub rules: Option<String>,
     /// Compaction mode [summary|transcript|segments].
-    /// `summary` adds no pointer; `transcript` points at the raw transcript; `segments` (default) persists per-segment markdown to grep.
-    /// Sets `GROK_COMPACTION_MODE`.
     #[clap(long = "compaction-mode", value_name = "MODE", hide = true)]
     pub compaction_mode: Option<String>,
     /// Segments verbatim detail [none|minimal|balanced|verbose] (default `verbose`).
-    /// Only affects `--compaction-mode segments`. Sets `GROK_COMPACTION_DETAIL`.
     #[clap(long = "compaction-detail", value_name = "DETAIL", hide = true)]
     pub compaction_detail: Option<String>,
     /// Override the agent's system prompt (compat alias: --system-prompt).
@@ -507,8 +485,6 @@ pub struct PagerArgs {
     )]
     pub system_prompt_override: Option<String>,
     /// Resume a session by ID or title, or the most recent if omitted.
-    /// Non-ID values match session titles for the current directory, ignoring letter case; UUID-shaped values always mean IDs.
-    /// Among duplicate titles a sole renamed match wins; otherwise the resume fails as ambiguous.
     #[arg(
         long = "resume",
         short = 'r',
@@ -526,12 +502,10 @@ pub struct PagerArgs {
         conflicts_with_all = ["continue_last_session"]
     )]
     pub load_session: Option<String>,
-    /// Set by [`Self::pin_local_resume_target`]: the resume target was resolved (or definitively missed) before the OS sandbox.
-    /// Materialization must therefore not re-run local title selection.
+    /// Set by [`Self::pin_local_resume_target`]: the resume target was resolved (or definitively missed).
     #[clap(skip)]
     pub resume_target_pinned: bool,
-    /// Sandbox profile of the title-pinned session, captured at pin time from the selected summary (outer `None` means no title pin happened).
-    /// The id-based peek cannot re-derive it: a legacy id duplicated across cwd dirs makes that lookup ambiguous.
+    /// Sandbox profile of the title-pinned session, captured at pin time from the selected summary.
     #[clap(skip)]
     pub(crate) pinned_resume_profile: Option<Option<String>>,
     /// Continue the most recent session for the current working directory.
@@ -542,33 +516,25 @@ pub struct PagerArgs {
         "load_session"]
     )]
     pub continue_last_session: bool,
-    /// Use a specific session UUID for a **new** conversation (must be a valid UUID and must not already exist under the target session directory).
-    /// With `--resume`/`--continue`, only valid together with `--fork-session` (names the forked session).
-    /// Does not resume existing sessions, use `--resume` / `--continue` instead.
+    /// Use a specific session UUID for a **new** conversation.
     #[arg(short = 's', long = "session-id", value_name = "SESSION_ID")]
     pub session_id: Option<String>,
     /// When resuming (`--resume` / `--continue`), create a new session ID instead of reusing the original (optionally set via `--session-id`).
     #[arg(long = "fork-session")]
     pub fork_session: bool,
     /// Start the session in a new git worktree, optionally named.
-    /// With `--resume` of a remote session, pass `--restore-code` to apply the snapshot codebase (conversation is restored either way).
     #[arg(short = 'w', long = "worktree", num_args = 0..= 1, default_missing_value = "")]
     pub worktree: Option<String>,
     /// Branch, tag, or commit to base the worktree on (with `--worktree`).
-    /// Defaults to the current HEAD of the source checkout when omitted.
     #[arg(long = "worktree-ref", visible_alias = "ref", requires = "worktree")]
     pub worktree_ref: Option<String>,
-    /// Restore the original session's repository snapshot when resuming.
-    /// Remote sessions require `--worktree` (never checks out into the current directory).
-    /// Without this flag, resume restores conversation only.
+    /// Restore the session's repository snapshot when resuming.
     #[arg(long = "restore-code", requires = "resume_session")]
     pub restore_code: bool,
     /// Disable plan mode.
     #[arg(long = "no-plan")]
     pub no_plan: bool,
     /// Own a local `workspace_server` (replaces remote sandbox). Requires `--chat`.
-    ///
-    /// Compiled only with `--features local-workspace` (not implied by `chat`).
     #[cfg(feature = "local-workspace")]
     #[arg(
         long = "local-workspace",
@@ -611,9 +577,7 @@ pub struct PagerArgs {
         hide = true
     )]
     pub no_memory: bool,
-    /// Run a memory flush after the headless turn (or instead of a prompt when resuming). Calls `x.ai/memory/flush` and waits for the flush LLM.
-    /// resuming). Calls `x.ai/memory/flush` and waits for the flush LLM.
-    /// Headless only: `/flush` as `-p` text is not a reliable flush trigger.
+    /// Run a memory flush after the headless turn (or instead of a prompt when resuming).
     #[arg(long = "memory-flush", hide = true)]
     pub memory_flush: bool,
     /// Agent name or definition file path.
@@ -647,14 +611,10 @@ pub struct PagerArgs {
     /// Disable web search and web fetch tools.
     #[arg(long = "disable-web-search")]
     pub disable_web_search: bool,
-    /// Exit as soon as the first agent turn ends, without waiting for pending background bash/monitor tasks or background subagents (headless only).
-    /// Use this for fast scripts that only need the first turn's text.
-    /// Does not wait for server-side auto-wake output or persistent monitors (those hit the timeout).
+    /// Exit as soon as the first agent turn ends.
     #[arg(long = "no-wait-for-background", hide = true)]
     pub no_wait_for_background: bool,
     /// Max seconds to wait for background work after the first turn ends (headless only).
-    /// Applies to bash/monitor `task_completed`, background subagents (`SubagentFinished`), and any still-running non-persistent work.
-    /// Persistent `monitor(persistent:true)` never completes and always waits the full timeout.
     #[arg(
         long = "background-wait-timeout",
         value_name = "SECS",
@@ -664,11 +624,7 @@ pub struct PagerArgs {
         value_parser = clap::value_parser!(u64).range(1..)
     )]
     pub background_wait_timeout_secs: u64,
-    /// Sandbox profile for filesystem and network access. `pathbox` selects the
-    /// re-exec jail (bwrap on Linux, Seatbelt on macOS) that binds only
-    /// `~/.grok`, a dedicated tmpfs, a read-only system base, and whatever
-    /// `--ro`/`--rw`/`--rn` name; any other value is a built-in or custom
-    /// grok-build sandbox profile. A `--sandbox` with NO value is invalid.
+    /// Sandbox profile for filesystem and network access.
     #[arg(
         long,
         env = "GROK_SANDBOX",
@@ -677,17 +633,13 @@ pub struct PagerArgs {
         default_missing_value = ""
     )]
     pub sandbox: Option<String>,
-    /// Bind PATH into the pathbox jail read-only. Repeatable. A later
-    /// `--ro`/`--rw` overrides an earlier one for the same path or for a path
-    /// inside it. Implies `--sandbox=pathbox`.
+    /// Bind PATH into the pathbox jail read-only. Repeatable.
     #[arg(long = "ro", value_name = "PATH")]
     pub sandbox_ro: Vec<PathBuf>,
     /// Bind PATH into the pathbox jail read-write. See `--ro` for precedence.
     #[arg(long = "rw", value_name = "PATH")]
     pub sandbox_rw: Vec<PathBuf>,
-    /// Hide PATH from the pathbox jail (acts as an active deny even when the
-    /// path sits under a visible `--ro`/`--rw` mount or the working directory).
-    /// Repeatable. Implies `--sandbox=pathbox`.
+    /// Hide PATH from the pathbox jail.
     #[arg(long = "rn", value_name = "PATH")]
     pub sandbox_rn: Vec<PathBuf>,
     /// Session storage mode: local or writeback.
@@ -708,9 +660,7 @@ pub struct PagerArgs {
     /// Enable client-side file writes.
     #[arg(long = "fs-write", hide = true)]
     pub fs_write: bool,
-    /// Enable the runtime turn-end TodoGate for this session.
-    /// Session-scoped (not persisted).
-    /// Highest precedence: overrides remote `todo_gate_enabled` and the built-in default (which is `false`).
+    /// Enable the runtime turn-end TodoGate for this session. Session-scoped (not persisted).
     #[arg(long = "todo-gate", hide = true)]
     pub todo_gate: bool,
     /// Set the installer field in config.toml.
@@ -752,11 +702,9 @@ pub enum SandboxStartup {
     /// Apply this profile. `None` means fall through to config/`off`.
     Apply(Option<String>),
     /// Resume requested a profile that differs from the one the session was created with.
-    /// Refused so resuming can't silently change the sandbox.
     Conflict { requested: String, saved: String },
 }
 /// How resume-selection flags resolve for sandbox profile lookup.
-/// Derived from [`PagerArgs::session_startup_intent`]; new-with-id is not a resume.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ResumeTarget {
     /// Resume (or fork-from) a specific session id.
@@ -850,9 +798,8 @@ impl PagerArgs {
     pub fn local_workspace_cwd(&self) -> Option<&std::path::Path> {
         self.local_workspace_cwd.as_deref()
     }
-    /// Get the session ID to resume, from either --resume or --load (hidden alias).
-    /// Returns `None` when `--resume` was used without a value (the empty-string sentinel).
-    /// Use [`resume_most_recent`] to detect that case.
+    /// Get the session ID to resume, from either --resume or --load (hidden
+    /// alias).
     pub fn session_to_resume(&self) -> Option<&str> {
         self.resume_session
             .as_deref()
@@ -903,16 +850,17 @@ impl PagerArgs {
             _ => ResumeTarget::None,
         }
     }
-    /// Resolve the sandbox profile to apply at startup, accounting for the profile the resumed session was created with.
-    /// `saved` is the resumed session's persisted profile (read once via [`Self::saved_resume_profile`]).
-    /// An explicit `--sandbox`/`GROK_SANDBOX` that differs from the saved profile is refused: changing a session's sandbox on resume would be unsafe.
+    /// Resolve the sandbox profile to apply at startup, accounting for the
+    /// profile the resumed session was created with. `saved` is the resumed
+    /// session's persisted profile (read once via
+    /// [`Self::saved_resume_profile`]).
     pub fn startup_sandbox_profile(&self, saved: Option<&str>) -> SandboxStartup {
         let explicit = self.sandbox.as_deref().filter(|s| !s.is_empty());
         Self::resolve_startup_sandbox(explicit, saved.map(String::from))
     }
-    /// `resume_target_pinned` records the pin so materialization never re-runs local title selection.
-    /// Re-selecting after the sandbox would race a concurrent rename/create.
-    /// Listing failures and ambiguity are hard errors here, reported before the sandbox (fail closed).
+    /// `resume_target_pinned` records the pin so materialization never
+    /// re-runs local title selection. Re-selecting after the sandbox would
+    /// race a concurrent rename/create.
     pub fn pin_local_resume_target(&mut self) -> anyhow::Result<()> {
         let cwd_buf = std::env::current_dir().ok();
         let cwd_str = cwd_buf.as_deref().map(|p| p.to_string_lossy());
@@ -1025,8 +973,6 @@ impl PagerArgs {
         }
     }
     /// The initial interactive prompt from the positional argument, trimmed.
-    /// Returns `None` when no positional prompt was given or it is only whitespace.
-    /// This is the `grok "<prompt>"` launch form; the headless `-p`/`--single` path is handled separately.
     pub fn initial_prompt(&self) -> Option<&str> {
         self.prompt
             .as_deref()

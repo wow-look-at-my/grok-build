@@ -37,8 +37,7 @@ pub struct HarnessToolsetContext<'a> {
     pub parent_model_agent_type: Option<&'a str>,
     pub file_tool_overrides: Option<&'a [ToolConfig]>,
 }
-/// Without the `cursor` feature no flavor is representable: the alternate flavors re-select toolset presets and templates that are compiled out.
-/// This stub keeps ungated call sites compiling.
+/// Without the `cursor` feature no flavor is representable.
 pub fn subagent_harness_flavor_is_representable(_agent_type: &str) -> bool {
     false
 }

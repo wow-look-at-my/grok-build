@@ -111,8 +111,7 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
             )
         }
         KeyCode::Enter => {
-            // Commit the focused choice; this is the only point in a picker's open-to-close cycle that fires
-            // `Effect::PersistSetting`.
+            // Commit the focused choice; this is the only point in a picker's open-to-close cycle.
             let close = std::mem::take(&mut state.close_on_picker_exit);
             if !close {
                 state.transition_to_browse();
@@ -156,8 +155,7 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
                 SettingsKeyOutcome::Changed
             }
         }
-        // `d` reset: close the picker, revert the preview if applicable, then open the reset-confirm overlay
-        // Consent choosers opt out entirely (no footer hint, no hidden shortcut); reset stays reachable from the browse row
+        // `d` reset: close the picker, revert the preview if applicable.
         KeyCode::Char('d')
             if key.modifiers.is_empty() && !crate::settings::is_consent_chooser(setting_key) =>
         {
@@ -400,8 +398,7 @@ fn handle_int_stepper(
         let cur = buffer.parse::<i64>().unwrap_or(min);
         let new = cur.saturating_add(delta).clamp(min, max);
         if new == cur {
-            // Already clamped, so no visible change
-            // Report Unchanged so the `clamps_to_min/max` tests can distinguish a no-op from a step
+            // Already clamped, so no visible change Report Unchanged so the `clamps_to_min/max` tests can distinguish a no-op.
             return SettingsKeyOutcome::Unchanged;
         }
         let new_buf = new.to_string();
@@ -409,8 +406,7 @@ fn handle_int_stepper(
         SettingsKeyOutcome::Changed
     };
 
-    // Only modifier-free or SHIFT+arrow events trigger the stepper
-    // Ctrl/Alt/etc belong to other editor features (selection extend, history) that the stepper has no notion of
+    // Only modifier-free or SHIFT+arrow events trigger the stepper Ctrl/Alt/etc belong to other editor features (selection extend, history).
     if !(key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT) {
         return SettingsKeyOutcome::Unchanged;
     }
@@ -421,12 +417,7 @@ fn handle_int_stepper(
             SettingsKeyOutcome::Changed
         }
         KeyCode::Enter => {
-            // Commit the raw buffer: parse as i64, clamp to [min,max], then
-            // dispatch. Stepper steps keep the buffer in-range, but typed
-            // digits may land out of range until the user Backspaces, so the
-            // clamp on commit is the guarantee that a dispatched value is
-            // always valid. An empty buffer parses to None and is treated as a
-            // no-op (nothing dispatches).
+            // Commit the raw buffer: parse as i64, clamp to [min,max], then dispatch.
             let clamped = buffer.parse::<i64>().ok().map(|i| i.clamp(min, max));
             state.transition_to_browse();
             match clamped.and_then(|i| action_for_int(setting_key, i)) {
@@ -441,11 +432,10 @@ fn handle_int_stepper(
                 }
             }
         }
-        // Digit typing: append the digit to the in-place buffer so the user can
-        // type e.g. `1000000` directly. The value is only clamped on commit
-        // (and when later stepping), so a number still being entered is never
-        // truncated mid-keystroke. Backspace drops the last digit, letting the
-        // user clear the seeded value before typing a fresh one.
+        // Digit typing: append the digit to the in-place buffer so the user
+        // can type e.g. `1000000` directly. The value is only clamped on
+        // commit (and when later stepping), so a number still being entered
+        // is never truncated mid-keystroke.
         KeyCode::Char(c) if key.modifiers.is_empty() && c.is_ascii_digit() => {
             // Cap buffer length to avoid unbounded growth from held keys.
             if buffer.chars().count() >= 12 {
@@ -473,9 +463,9 @@ fn handle_int_stepper(
         KeyCode::Right | KeyCode::Char('l') => apply_step(state, step_delta(1, true)),
         // Left / h: large step down.
         KeyCode::Left | KeyCode::Char('h') => apply_step(state, step_delta(-1, true)),
-        // `d` in the Int stepper dispatches `OpenResetConfirm` like Browse mode does
-        // Close the stepper first so dispatch finds `ActiveModal::Settings` (the dispatch arm panics in debug mode on a non-Settings modal)
-        // The stepper otherwise rejects letters, so intercepting `d` collides with nothing
+        // `d` in the Int stepper dispatches `OpenResetConfirm` like Browse
+        // mode does Close the stepper first so dispatch finds
+        // `ActiveModal::Settings`.
         KeyCode::Char('d') if key.modifiers.is_empty() => {
             state.transition_to_browse();
             SettingsKeyOutcome::Action(Action::OpenResetConfirm { key: setting_key })
@@ -571,8 +561,8 @@ fn changed_if(b: bool) -> SettingsKeyOutcome {
     }
 }
 
-/// When a sub-pane mouse handler returns `Unchanged` but the breadcrumb hover flipped, upgrade to `Changed` so the renderer repaints the breadcrumb.
-/// Non-`Unchanged` outcomes pass through so an `Action` or `Changed` from the inner handler keeps its meaning.
+/// When a sub-pane mouse handler returns `Unchanged` but the breadcrumb hover
+/// flipped, upgrade to `Changed` so the renderer repaints the breadcrumb.
 fn upgrade_if_breadcrumb_flipped(
     outcome: SettingsKeyOutcome,
     breadcrumb_flipped: bool,
@@ -702,8 +692,7 @@ fn handle_browse(state: &mut SettingsModalState, key: &KeyEvent) -> SettingsKeyO
                 Some((_, meta)) if matches!(meta.kind, SettingKind::Group { .. }) => {
                     SettingsKeyOutcome::Unchanged
                 }
-                // A locked row isn't the user's to change, by `d` any more than by Enter (which `try_enter_picking_enum` refuses)
-                // The dispatch-time guard would catch it anyway, but only after a confirm dialog for a change that cannot happen
+                // A locked row isn't the user's to change.
                 Some((key, _meta)) if state.row_lock(key).is_some() => {
                     SettingsKeyOutcome::Unchanged
                 }
@@ -736,15 +725,14 @@ fn handle_filter_focused(state: &mut SettingsModalState, key: &KeyEvent) -> Sett
             SettingsKeyOutcome::Changed
         }
         KeyCode::Enter => {
-            // Commit the filter: exit FilterFocused and return to Browse, preserving the query
-            // The user can then Space/Enter the focused filtered setting at once; clearing here would force re-navigating the full list
+            // Commit the filter: exit FilterFocused and return to Browse.
             state.transition_to_browse();
             SettingsKeyOutcome::Changed
         }
         KeyCode::Down => changed_if(state.advance_next()),
         KeyCode::Up => changed_if(state.advance_prev()),
         KeyCode::PageDown => {
-            // Match Browse mode's PageDown: advance 10 rows
+            // Match Browse mode's PageDown: advance several rows
             let mut moved = false;
             for _ in 0..10 {
                 moved |= state.advance_next();
@@ -834,9 +822,8 @@ pub fn handle_settings_mouse(
         }
     }
 
-    // Track hover for the breadcrumb hit-rect so the renderer can repaint the title with the brighter `accent_user` fg when the mouse is over it
-    // Without this cue the breadcrumb looks no different from the rest of the modal title
-    // Tracked here so a hover transition registers even when the row-list, picker, or editor mouse handlers below short-circuit on the Moved event
+    // Track hover for the breadcrumb hit-rect so the renderer can repaint the
+    // title with the brighter `accent_user` fg when the mouse is over it.
     let breadcrumb_hover_flipped = if matches!(kind, MouseEventKind::Moved) {
         let now_hovered = state
             .settings_breadcrumb_rect
@@ -844,8 +831,7 @@ pub fn handle_settings_mouse(
             .unwrap_or(false);
         let flipped = now_hovered != state.breadcrumb_hovered;
         state.breadcrumb_hovered = now_hovered;
-        // In sub-pane modes the mouse handlers don't update hover_row, so a flipped breadcrumb hover is the only thing that could redraw
-        // In Browse the row-list handler below already returns Changed when hover_row moves, so it runs as usual
+        // In sub-pane modes the mouse handlers do not update hover_row.
         flipped
     } else {
         false
@@ -913,14 +899,10 @@ pub fn handle_settings_mouse(
             {
                 return SettingsKeyOutcome::Unchanged;
             }
-            // Two-stage clicks. Click on a different row: only select, so the user can read the description
-            // first.
+            // Click on a different row: only select, so the user can read the description first.
             let Some(&row_rect) = state.row_rects.get(idx) else {
                 return SettingsKeyOutcome::Unchanged;
             };
-            // Col 0 of the row is the `▸`/`▾` triangle glyph. A click there toggles expansion without touching
-            // the value, matching the keyboard's Right/Left arrows. Two-line rows have `row_rect.height = 2`
-            // with the triangle on line 1 only.
             let on_triangle = column == row_rect.x && row == row_rect.y;
             // The 5-col indicator hit-rect sits on the value column on the right, not the left edge.
             let value_rect = state.value_hit_rects.get(idx).copied().unwrap_or_default();
@@ -1126,8 +1108,7 @@ fn handle_editor_mouse(
     } else {
         return SettingsKeyOutcome::Unchanged;
     };
-    // Synthesize the equivalent keyboard event so the step, clamp, and validation logic lives in one place (`handle_editing_value`)
-    // Mirrors the picker's choice-click approach
+    // Synthesize the equivalent keyboard event so the step, clamp.
     let synthetic = KeyEvent::new(
         match step_dir {
             StepDir::Up => KeyCode::Up,

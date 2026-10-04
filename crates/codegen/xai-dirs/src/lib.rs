@@ -1,17 +1,4 @@
-//! Home-directory resolution generally: USERPROFILE-first `home_dir`, plus
-//! grok-home (`$GROK_HOME` or `<home>/.grok`). Shared by `xai-grok-config`
-//! and `xai-fast-worktree`.
-//!
-//! Which function to call:
-//! - [`grok_home`]: the usual choice, a cached, created path to build on.
-//! - [`user_grok_home`]: `None` instead of a cwd fallback when no home resolves.
-//! - [`default_grok_home`]: the `<home>/.grok` default, ignoring `$GROK_HOME`, so callers can detect an override.
-//! - [`resolve_grok_home`]: a fresh, uncached resolve.
-//! - [`resolve_grok_home_with_source`]: [`resolve_grok_home`] plus where the path came from.
-//! - [`home_dir`]: the home directory itself, for sibling dot dirs (`~/.claude`, `~/.agents`, ...).
-//!
-//! TODO: collapse these getters by threading the path through config as an
-//! explicit value.
+//! Home-directory resolution generally: USERPROFILE-first `home_dir`, plus grok-home (`$GROK_HOME` or `<home>/.grok`).
 
 #![deny(clippy::indexing_slicing)]
 
@@ -20,8 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Where a resolved grok home came from, so "why did grok pick this
-/// directory?" is answerable in diagnostics without re-reading the
-/// environment at the asking site.
+/// directory?" is answerable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrokHomeSource {
     /// A non-empty `$GROK_HOME` override.
@@ -31,8 +17,6 @@ pub enum GrokHomeSource {
 }
 
 /// The user's home directory via [`std::env::home_dir`]: `HOME` on Unix, `USERPROFILE` on Windows.
-/// Not `dirs::home_dir()`: on Windows `dirs` ignores a redirected `USERPROFILE`.
-/// Every home-anchored path must come from this one function.
 #[allow(deprecated, clippy::disallowed_methods)] // the one sanctioned std::env::home_dir call
 pub fn home_dir() -> Option<PathBuf> {
     std::env::home_dir()
@@ -114,8 +98,7 @@ mod tests {
 
     #[test]
     fn env_used_verbatim_even_when_it_exists() {
-        // A real, existing dir whose canonical form differs (macOS symlinks
-        // `/var` -> `/private/var`): the env value must come back unchanged.
+        // A real, existing dir whose canonical form differs (macOS symlinks `/var` -> `/private/var`).
         let tmp = tempfile::tempdir().unwrap();
         let resolved = resolve_grok_home_from(Some(tmp.path().as_os_str()), None);
         assert_eq!(
@@ -139,9 +122,7 @@ mod tests {
 
     #[test]
     fn default_grok_home_has_no_verbatim_prefix() {
-        // The reason we canonicalize via dunce: std::fs::canonicalize yields
-        // `\\?\` verbatim paths on Windows that break git and byte-exact
-        // comparisons. No-op assertion on Unix.
+        // The reason we canonicalize via dunce.
         let home = default_grok_home();
         assert!(!home.to_string_lossy().starts_with(r"\\?\"));
         assert!(home.ends_with(".grok"));

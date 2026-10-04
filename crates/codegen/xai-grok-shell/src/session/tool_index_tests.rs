@@ -523,8 +523,8 @@ fn search_exact_match_case_insensitive() {
 
 #[test]
 fn search_exact_bare_name_ambiguous_returns_first_match() {
-    // Two servers register tools with the same bare name.
-    // `find()` returns the first match; the model might have wanted the second
+    // Servers register tools with the same bare name. `find()` returns the
+    // first match; the model might have wanted the second
     let tools = vec![
         ToolMetadata {
             qualified_name: "server_a__fetch".into(),
@@ -552,7 +552,6 @@ fn search_exact_bare_name_ambiguous_returns_first_match() {
         snap.results.first().map(|r| r.tool_name.as_str()),
         Some("server_a__fetch")
     );
-    // server_b__fetch is never returned; the model can't discover it without knowing the qualified name
 }
 
 // -- e2e tests with real Grafana + Mattermost tool data --
@@ -987,7 +986,7 @@ fn normalize_empty() {
 
 #[test]
 fn normalize_whitespace_only() {
-    // split_whitespace on "   " yields nothing, so extra is empty and the query passes through
+    // split_whitespace on " " yields nothing, so extra is empty and the query passes through
     assert_eq!(normalize_query("   "), "   ");
 }
 
@@ -1027,7 +1026,7 @@ fn normalize_kebab_query() {
 
 #[test]
 fn normalize_hyphenated_english_harmless() {
-    // "high-priority" triggers normalization but the result is harmless: it just appends "high priority", tokens already in the query
+    // "high-priority" triggers normalization but the result is harmless: it appends "high priority".
     let result = normalize_query("create a high-priority issue");
     assert!(result.starts_with("create a high-priority issue"));
 }
@@ -1407,9 +1406,8 @@ fn fmt_wrong_tool_name_falls_through() {
     );
 }
 
-// ── Needle-in-haystack: production-scale index ──────────────────.
-// Realistic fixture with ~55 tools across 5 servers (Slack 17, Notion 14, Grafana 9, Linear 8, GitHub 7).
-// Tests that BM25 finds the right tool via partial or natural-language queries when there are many competing documents.
+// ── Needle-in-haystack: production-scale index ──────────────────. Tests that
+// BM25 finds the right tool via partial or natural-language queries when there are many competing documents.
 
 fn production_haystack() -> Vec<ToolMetadata> {
     let tool = |qn: &str, server: &str, name: &str, desc: &str, params: &[&str]| ToolMetadata {
@@ -1422,7 +1420,7 @@ fn production_haystack() -> Vec<ToolMetadata> {
     };
 
     vec![
-        // ── grok_com_slack (17 tools) ───────────────────────────
+        // ── grok_com_slack (tools) ───────────────────────────
         tool(
             "grok_com_slack__slack_create_canvas",
             "grok_com_slack",
@@ -1542,7 +1540,7 @@ fn production_haystack() -> Vec<ToolMetadata> {
             "Update the content of an existing Slack canvas",
             &["canvas_id", "content"],
         ),
-        // ── notion (14 tools) ───────────────────────────────────
+        // ── notion (tools) ───────────────────────────────────
         tool(
             "notion__notion-create-comment",
             "notion",
@@ -1641,7 +1639,7 @@ fn production_haystack() -> Vec<ToolMetadata> {
             "Update a view configuration for a Notion database",
             &["view_id"],
         ),
-        // ── grafana-ai (9 tools) ────────────────────────────────
+        // ── grafana-ai (tools) ────────────────────────────────
         tool(
             "grafana-ai__SearchDashboards",
             "grafana-ai",
@@ -1705,7 +1703,7 @@ fn production_haystack() -> Vec<ToolMetadata> {
             "Get panel queries from a Grafana dashboard. Returns an array of panel queries with title, query expression, and datasource info.",
             &["uid"],
         ),
-        // ── linear (8 tools) ────────────────────────────────────
+        // ── linear (tools) ────────────────────────────────────
         tool(
             "linear__save_issue",
             "linear",
@@ -1762,7 +1760,7 @@ fn production_haystack() -> Vec<ToolMetadata> {
             "Get information about a Linear user",
             &["id"],
         ),
-        // ── github (7 tools) ────────────────────────────────────
+        // ── github (tools) ────────────────────────────────────
         tool(
             "github__create_pull_request",
             "github",
@@ -2040,8 +2038,7 @@ fn haystack_disambiguate_notion_create_comment_vs_linear() {
 #[test]
 fn haystack_wrong_server_prefix_finds_tool() {
     let index = Bm25ToolSearchIndex::new(make_snapshot(production_haystack()));
-    // Model hallucinated "grafana-ai__SearchDashboards" but correct server is different
-    // Not an exact match, so BM25 with the normalized query still finds the tool via "Search" and "Dashboards"
+    // Model hallucinated "grafana-ai__SearchDashboards" but correct server is different Not an exact match.
     let snap = index.search_snapshot("wrong_server__SearchDashboards", 5);
     assert_top_n(
         &snap,
@@ -2128,9 +2125,11 @@ fn haystack_total_tools() {
     assert_eq!(snap.total_hidden_tools, expected);
 }
 
-// ── Score comparison: before / after each rule ───────────────────.
-// Measures BM25 scores for the same queries under four configs: baseline = old to_document (only _ split) + raw query +doc_norm = new to_document (split_identifier) + raw query +query_norm = old to_document +.
-// Asserts that each rule independently improves the score for identifier-style queries and that the combined score is best.
+// ── Score comparison: before / after each rule
+// ───────────────────. Measures BM25
+// scores for the same queries under configs: baseline = old to_document (only
+// _ split) + raw query +doc_norm = new to_document (split_identifier) + raw
+// query +query_norm = old to_document +.
 
 /// Old to_document: only splits words containing `_`.
 fn to_document_baseline(t: &ToolMetadata) -> String {
@@ -2148,7 +2147,6 @@ fn to_document_baseline(t: &ToolMetadata) -> String {
     format!("{doc} {split}")
 }
 
-/// Search BM25 and return the score for `target`, or 0.0 if not found.
 fn bm25_score_for(tools: &[ToolMetadata], docs: Vec<String>, query: &str, target: &str) -> f32 {
     let engine = SearchEngineBuilder::<u32>::with_corpus(Language::English, docs).build();
     engine

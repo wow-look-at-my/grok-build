@@ -1,5 +1,4 @@
 //! These test-only helpers are public because the tests that need them are in other crates.
-//! Production code must not use this module.
 
 use super::{StatusLineConfig, StatusLineItem, StatusLineType};
 

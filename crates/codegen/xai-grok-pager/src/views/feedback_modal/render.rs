@@ -51,16 +51,14 @@ impl FeedbackModalState {
             });
         }
         let mut content = areas.content;
-        // Reserve one full-width row per supplied enum, but only while the composer keeps at
-        // least two rows; a too-small render drops the labels, never the draft.
+        // Reserve one full-width row per supplied enum, but only while the composer keeps a couple of rows; a too-small render drops the labels.
         let label_rows = fields.len() as u16;
         if label_rows > 0 && content.height >= label_rows + 2 {
             self.render_metadata_rows(buf, content, areas.inner_x, theme, &fields);
             content.y += label_rows;
             content.height -= label_rows;
         } else {
-            // No rows on screen (absent enums or a too-small render, e.g. after a resize):
-            // nothing is focusable, and a lingering focus would only hide the caret.
+            // No rows on screen (absent enums or a too-small render, e.g. after a resize): nothing is focusable.
             self.metadata_focus = None;
         }
         if self.enum_picker.is_some() {

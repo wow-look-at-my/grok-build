@@ -10,16 +10,14 @@ pub(crate) fn grok_home() -> PathBuf {
 }
 
 /// On-disk JSONL audit log under the sessions directory.
-///
-/// Strict writes it via the sessions directory grant (not a file grant on the grok home parent, which would follow a planted symlink).
 pub(crate) fn sandbox_events_log_path() -> PathBuf {
     grok_home().join("sessions").join("sandbox-events.jsonl")
 }
 
 // ── Device files & directories ──────────────────────────────────────────────
 
-/// Device files that need write access for normal tool operation. These are individual files (use `allow_file`, not
-/// `allow_path`). Directory nodes under `/dev` belong in [`DEVICE_DIRS`].
+/// Device files that need write access for normal tool operation. These are
+/// individual files (use `allow_file`, not `allow_path`).
 #[cfg(all(feature = "enforce", unix))]
 pub(crate) const DEVICE_FILES: &[&str] = &[
     "/dev/null",    // output sink — used by virtually every CLI tool
@@ -85,8 +83,8 @@ pub(crate) fn essential_writable_paths_strict(workspace: &Path) -> Vec<PathBuf> 
     paths
 }
 
-/// Writable directory paths for the read-only profile (minimal: just ~/.grok + temp).
-/// Device files are handled separately via `allow_file` in `to_capability_set_with_config`.
+/// Writable directory paths for the read-only profile (minimal: ~/.grok +
+/// temp).
 pub(crate) fn essential_writable_paths_minimal() -> Vec<PathBuf> {
     let mut paths = vec![grok_home()];
     paths.extend(temp_writable_paths());

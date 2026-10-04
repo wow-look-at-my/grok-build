@@ -18,7 +18,6 @@ pub(crate) struct ShellChildRuntime {
         xai_grok_tools::implementations::grok_build::task::root_control::AgentMessageGeneration,
     pub(crate) child_signals: crate::session::signals::SessionSignalsHandle,
     /// Held by the worker until promotion succeeds.
-    /// `None` means the caller still owns the join handle, so a cancel during promotion can wait for the actor to exit.
     pub(crate) _child_thread: Option<SessionThread>,
     pub(crate) receipt_sink: mpsc::Sender<PromptTurnReceipt>,
     #[cfg(test)]
@@ -94,11 +93,7 @@ impl ChildControl for ShellChildRuntime {
         cancel_shell_child_turn(&self.child_cmd_tx);
     }
 
-    /// Hand a mid-turn message to the child's own session actor, which buffers
-    /// it into the running turn without cutting the model stream in flight (or,
-    /// if the child has already gone idle, runs it as its next prompt). The
-    /// child keeps the work it is streaming and reads the text at its next
-    /// drain point.
+    /// Hand a mid-turn message to the child's own session actor.
     fn interject(&self, text: &str) {
         let _ = self
             .child_cmd_tx

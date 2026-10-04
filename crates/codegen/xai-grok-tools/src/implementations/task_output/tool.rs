@@ -1,5 +1,4 @@
-//! Task output tool — old `impl Tool` deleted.
-//! Helper functions remain for use by `grok_build/task_output/`.
+//! Task output tool — old `impl Tool` deleted. Helper functions remain for use by `grok_build/task_output/`.
 
 use crate::computer::types::TaskSnapshot;
 use crate::types::process_manager::format_system_time_rfc3339;
@@ -30,8 +29,8 @@ pub(crate) fn snapshot_to_result(
             )),
         )
     } else {
-        // Soft-wrap long lines for model comprehension. Output is already size-bounded (30KB via
-        // bash backend, 400KB safety net for ACP). Wrapping adds structure without losing content.
+        // Soft-wrap long lines for model comprehension. Output is already
+        // size-bounded (30KB via bash backend, 400KB safety net for ACP).
         (
             soft_wrap_lines(&s.output, DEFAULT_SOFT_WRAP_WIDTH),
             s.truncated,
@@ -51,13 +50,10 @@ pub(crate) fn snapshot_to_result(
         command: s.display_command.unwrap_or(s.command),
         status: if s.completed {
             if s.explicitly_killed {
-                // A user-initiated kill is not a failure; report a distinct
-                // status so callers don't treat an intentional kill as an
-                // error. Matches the subagent "cancelled" status.
+                // A user-initiated kill is not a failure.
                 "cancelled"
             } else if s.signal.as_deref() == Some("timeout") {
-                // Wrapper-timeout kill (backend sets the sentinel "timeout"
-                // signal); a generic "failed" would hide why the task died.
+                // Wrapper-timeout kill (backend sets the sentinel "timeout" signal).
                 "timed_out"
             } else if s.exit_code == Some(0) {
                 "completed"

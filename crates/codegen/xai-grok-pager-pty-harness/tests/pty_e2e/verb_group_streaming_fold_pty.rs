@@ -34,8 +34,7 @@ async fn verb_group_streaming_fold_pty() {
         })
         .collect();
     content.set_response(DONE_SENTINEL);
-    // Hold each scripted turn open (four SSE events at 350ms each, about 1.4s) so the poll below can catch the mid-run screen
-    // Cleared after the capture so the tail settles fast
+    // Hold each scripted turn open (SSE events at 350ms each, about 1.4s) so the poll below can catch the mid-run screen Cleared.
     content.set_chunk_delay(Some(Duration::from_millis(350)));
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -50,9 +49,6 @@ async fn verb_group_streaming_fold_pty() {
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit prompt");
 
-    // The FIRST read already folds into a singleton header ("Reading 1 file" or "Read 1 file")
-    // Two completed reads then keep the same header while turn 3 streams
-    // The negative conditions prove the run was still streaming: a poll that only saw the settled screen hits the DONE break and the asserts fail
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut saw_singleton = false;
     let mut saw_midflight = false;

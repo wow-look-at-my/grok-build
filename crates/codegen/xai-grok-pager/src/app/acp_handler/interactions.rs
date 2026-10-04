@@ -109,11 +109,12 @@ pub(crate) fn handle_ask_user_question(
         }
     };
 
-    // Route by the request's session id (like `session/update`), so a question raised by a BACKGROUND session lands on its own view
-    // The user may be on the dashboard or another session and never have entered this one; the question must not fail for that
+    // Route by the request's session id (like `session/update`), so a
+    // question raised by a BACKGROUND session lands on its own view The user
+    // may be on the dashboard or another session and never have entered this.
     let Some(id) = interaction_target_agent(app, &ext_req.session_id) else {
-        // No local view for this session. Do NOT send an error: that would FAIL the tool (rendered red).
-        // Leave the reverse-request unanswered; the agent keeps awaiting and the leader replays it when a client attaches via `session/load`
+        // No local view for this session. Do NOT send an error: that would
+        // FAIL the tool (rendered red).
         tracing::info!(
             session_id = %ext_req.session_id,
             "ask_user_question for a session with no local view; parked for leader replay-on-attach"
@@ -198,7 +199,7 @@ pub(crate) fn handle_ask_user_question(
 
     agent.prompt.set_text("");
 
-    // Stamp the "last activity" anchor so the dashboard's NeedsInput row shows time since this question arrived, not the previous turn's end
+    // Stamp the "last activity" anchor so the dashboard's NeedsInput row shows time since this question arrived.
     agent.last_active_at = Some(std::time::Instant::now());
 
     tracing::info!(
@@ -208,8 +209,7 @@ pub(crate) fn handle_ask_user_question(
         "Opened question view from ext_method"
     );
 
-    // Only the currently-displayed view needs an immediate redraw
-    // A question parked on a background agent shows up via the roster `NeedsInput` delta and renders when the user switches to that session
+    // Only the currently-displayed view needs an immediate redraw A question parked on a background agent shows up.
     is_active
 }
 
@@ -238,10 +238,9 @@ pub(super) fn handle_exit_plan_mode(
     };
 
     // 2. Route by the request's session id (like `session/update`), so a plan-approval raised by a BACKGROUND session lands on its own view.
-    // The user may not be focused on that session; the approval must not fail for that
+    // The user may not be focused on that session.
     let Some(id) = interaction_target_agent(app, &params.session_id) else {
         // No local view for this session. Do NOT error (that fails the tool).
-        // Leave the reverse-request unanswered and rely on the leader's replay-on-attach
         tracing::info!(
             session_id = %params.session_id,
             "exit_plan_mode for a session with no local view; parked for leader replay-on-attach"
@@ -272,22 +271,18 @@ pub(super) fn handle_exit_plan_mode(
     }
 
     // Dismiss competing overlays so plan approval owns the screen.
-    // - active_modal: draw returns before line_viewer (plan never paints); keys still route to the invisible plan viewer
-    // - block_viewer: draw returns on line_viewer (plan visible) but handle_scroll prefers block_viewer, so wheel hits the hidden Edit pane
     agent.active_modal = None;
     agent.dismiss_block_viewer();
 
     let source = plan_review_source_for_tool(&params.tool_call_id, agent);
 
-    // If the user was writing a casual comment when this new plan-approval request arrived, restore the prompt from before the comment
-    // The upcoming `stash()` then captures the user's original text rather than the in-progress comment draft
-    // Taking `casual_stashed_prompt` also clears it, so the stale draft cannot dangle into the next casual entry
+    // If the user was writing a casual comment when this new plan-approval
+    // request arrived.
     if let Some(stashed) = agent.casual_stashed_prompt.take() {
         agent.prompt.restore(stashed);
     }
 
-    // While a permission is open, the session draft is `permission_stashed_prompt` and the live composer holds the followup
-    // Otherwise the live composer is the session draft
+    // While a permission is open.
     let permission_still_open = !agent.permission_queue.is_empty();
     let session_draft = if let Some(perm_draft) = agent.permission_stashed_prompt.take() {
         let _permission_followup = agent.prompt.stash();
@@ -297,8 +292,10 @@ pub(super) fn handle_exit_plan_mode(
     };
 
     let had_session_draft = !session_draft.is_effectively_empty();
-    // Never prefill freeform while permission owns the keyboard: the followup would type into (and could send) the private session draft
-    // Set the deferred prefill flag instead so `restore_permission_stashes` applies it only when the queue actually drains
+    // Never prefill freeform while permission owns the keyboard: the followup
+    // would type into (and could send) the private session draft Set the
+    // deferred prefill flag instead so `restore_permission_stashes` applies
+    // it only when the queue drains
     if had_session_draft && !permission_still_open {
         agent.plan_freeform_prefill_deferred = false;
         agent.prompt.restore(session_draft.clone_for_live_prefill());

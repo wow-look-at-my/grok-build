@@ -1,25 +1,4 @@
-//! Video generation module. Hosts the shared [`VideoGenClient`] and the
-//! `image_to_video` and `reference_to_video` tools, which generate videos via
-//! the xAI Video Generation API and save them to the local filesystem so the
-//! model can reference them in code (e.g. `<video src="videos/hero.mp4">`).
-//!
-//! Architecture follows the same pattern as `image_gen`:
-//!
-//! - [`VideoGenConfig`] is built from session credentials by the host and
-//!   injected into the tool registry.
-//! - When `Enabled`, a [`VideoGenClient`] is constructed once and injected
-//!   into `Resources`. The tools read it at runtime via `resources.require()`.
-//! - When `Disabled`, the tools are not registered so the model never sees them.
-//!
-//! The generated video is written to `<session_folder>/videos/<n>.mp4`
-//! where `<n>` is a session-scoped counter (1, 2, 3, ... — 1 token each).
-//! The tools return the absolute path so the model can copy or move the
-//! video into the project working directory when it needs a persistent asset.
-//!
-//! Video generation is asynchronous:
-//! 1. POST to `/v1/videos/generations` → receive a `request_id`
-//! 2. Poll GET `/v1/videos/{request_id}` until status is `"done"`
-//! 3. Download video bytes from the API URL, or an optional presigned GET URL
+//! Video generation module.
 
 use base64::Engine as _;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
@@ -147,18 +126,13 @@ pub struct VideoGenClient {
     writer: super::storage::SessionFileWriter,
     zdr_video_output_s3: Option<ZdrVideoOutputS3Config>,
     bearer: super::media_bearer::MediaBearer,
-    /// Optional 401-attribution hook. Hosts wire this so a 401 from the Video Generation API emits
-    /// an `auth_401_attribution` event with `consumer` of `"VideoGen.start"` (start request) or
-    /// `"VideoGen.poll"` (poll request) for unified auth-failure telemetry.
+    /// Optional 401-attribution hook.
     attribution_callback: Option<SharedAttributionCallback>,
-    /// When `true`, the user is on a tier the Imagine server zero-limits
-    /// (free / X Basic). The video tools short-circuit before any HTTP call
-    /// and return the SuperGrok upsell prose. See [`VideoGenClient::is_tier_restricted`].
+    /// When `true`, the user is on a tier the Imagine server zero-limits (free / X Basic).
     tier_restricted: bool,
     /// See [`VideoGenConfig::Enabled`]'s `zdr_restricted`.
     zdr_restricted: bool,
-    /// Per-request session-id header; kept off `default_headers` so the
-    /// transport stays session-independent and cacheable.
+    /// Per-request session-id header; kept off `default_headers` so the transport stays session-independent.
     session_header: Option<HeaderValue>,
     defaults_have_session_header: bool,
 }
@@ -280,8 +254,7 @@ impl VideoGenClient {
     }
 
     /// Whether the current user's tier (free / X Basic) is zero-limited on
-    /// Imagine server-side. The video tools use this to short-circuit with the
-    /// SuperGrok upsell instead of issuing a doomed request.
+    /// Imagine server-side.
     pub(crate) fn is_tier_restricted(&self) -> bool {
         self.tier_restricted
     }
@@ -379,7 +352,6 @@ impl VideoGenClient {
         }
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            // 500 chars so the unknown-voice 400 keeps its full voice roster.
             let truncated: String = body.chars().take(500).collect();
             tracing::warn!(http_status = %status, "Video generation API error: {truncated}");
             return Err(video_http_error(status, &body));
@@ -741,13 +713,9 @@ pub enum VideoGenConfig {
         base_url: String,
         extra_headers: indexmap::IndexMap<String, String>,
         zdr_video_output_s3: Option<Box<ZdrVideoOutputS3Config>>,
-        /// `true` when the user is on a tier the Imagine server zero-limits (free / X Basic). The video tools stay advertised
-        /// but short-circuit at call time with the SuperGrok upsell prose. Set by the host from the subscription tier; always
-        /// `false` for team / API-key / workspace.
+        /// `true` when the user is on a tier the Imagine server zero-limits (free / X Basic).
         tier_restricted: bool,
-        /// `true` when `tools.disable_zdr_incompatible_tools` is set with no valid
-        /// `[tools.zdr_video_output_s3]` bucket. The video tools stay advertised but fail at call
-        /// time with [`ZDR_RESTRICTED_MESSAGE`] instead of being silently dropped.
+        /// `true` when `tools.disable_zdr_incompatible_tools` is set.
         zdr_restricted: bool,
     },
 }
@@ -758,14 +726,10 @@ impl VideoGenConfig {
     }
 }
 
-/// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user
-/// calls a video tool. The model relays it to the user; the deliberate `/imagine-video` slash
-/// command shows the SuperGrok upsell modal instead.
+/// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user calls a video tool. The model relays it to the user; the deliberate `/imagine-video` slash command shows the SuperGrok upsell modal instead.
 pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Video generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://grok.com/supergrok?referrer=grok-build. Do not retry this tool.";
 
-/// Error for video tool calls in a ZDR session with no output bucket.
-/// A verbatim tool *error* (unlike the [`TIER_RESTRICTED_UPSELL`] prose):
-/// paraphrasing a privacy-adjacent message risks distortion.
+/// Error for video tool calls in a ZDR session with no output bucket. A verbatim tool *error* (unlike the [`TIER_RESTRICTED_UPSELL`] prose): paraphrasing a privacy-adjacent message risks distortion.
 pub(crate) const ZDR_RESTRICTED_MESSAGE: &str = "Video generation tools are unavailable under zero data retention (ZDR). To enable, either turn off /privacy mode to disable ZDR or supply a user-hosted storage bucket (see https://docs.x.ai/build/settings/zdr-video-storage).";
 
 fn zdr_restricted_error() -> xai_tool_runtime::ToolError {
@@ -1724,7 +1688,7 @@ mod tests {
         );
         assert!(key.ends_with(".mp4"));
 
-        // Two calls produce different keys (UUID uniqueness).
+        // Calls produce different keys (UUID uniqueness).
         let a = zdr_video_object_key("v/");
         let b = zdr_video_object_key("v/");
         assert_ne!(a, b, "object keys must be unique across calls");

@@ -97,7 +97,6 @@ fn remove_managed_path(path: &std::path::Path) -> std::io::Result<bool> {
     }
 }
 
-/// Non-expired only: an expired token would just 401.
 pub(super) fn eligible_team_principal(auth: GrokAuth) -> Option<GrokAuth> {
     (auth.is_team_principal() && !xai_grok_login::is_expired(&auth)).then_some(auth)
 }
@@ -354,16 +353,15 @@ pub(super) fn apply_fetched(
     }
     let identity_changed = crate::config::managed_config_identity_changed_at(&home, new_principal);
     let wrote = match apply_managed_config(&home, body) {
-        // A switch's destructive half lands only with its constructive half: the policy
-        // files are converged above, so only the prior principal's sidecars go.
+        // A switch's destructive half lands only with its constructive half:
+        // the policy files are converged above.
         Ok(wrote) => {
             if identity_changed {
                 evict_prior_sidecars(&home);
             }
             wrote
         }
-        // Sandbox write-deny (trust-boundary set, H1-3969489): park the verified response
-        // for the next boot. Only the deny class stages, never unverified content.
+        // Only the deny class stages, never unverified content.
         Err(e) if verified.is_some() && write_failure_is_deny(&e) => {
             stage_refresh(&home, body, new_principal)?;
             tracing::info!(
@@ -387,8 +385,7 @@ pub(super) fn apply_fetched(
             xai_grok_config::signed_policy::write_managed_identity_sidecar(&home, &claim_sidecar)?;
         }
     }
-    // Marker last, still under the lock: post-release, a concurrent purge could delete
-    // the files it describes.
+    // Marker last, still under the lock: post-release, a concurrent purge could delete the files it describes.
     clear_squatting_dir(&home.join(xai_grok_config::MANAGED_CONFIG_CACHE_FILE));
     crate::config::mark_managed_config_synced_at(
         &home,

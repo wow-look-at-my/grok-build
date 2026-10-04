@@ -11,8 +11,6 @@ use std::time::{Duration, Instant};
 
 use crate::render::draw::EscapeWriter;
 
-/// Ghostty resets the OSC 9;4 progress indicator after ~15 s of silence.
-/// Re-send the sequence at this interval to keep it alive.
 const PROGRESS_KEEPALIVE: Duration = Duration::from_secs(5);
 
 pub use config::{
@@ -35,12 +33,10 @@ pub struct NotificationService {
     title_manager: title::TitleManager,
     protocol: protocol::NotificationProtocol,
     terminal_ctx: &'static crate::terminal::TerminalContext,
-    /// Whether the OSC 9;4 progress indicator is currently active.
     progress_active: bool,
     /// Last time the progress bar escape was emitted (keep-alive clock).
     progress_last_sent: Option<Instant>,
-    /// Whether we have already fired an `ApprovalRequired` terminal notification for the current batch of queued permissions.
-    /// Set to `true` after the first notification; cleared via [`clear_permission_notification`] when the queue drains to empty.
+    /// Whether we have already fired an `ApprovalRequired` terminal notification for the current batch.
     permission_notified: bool,
     /// Out-of-band escape queue for notification/shutdown escapes; see [`EscapeWriter`](crate::render::draw::EscapeWriter).
     escape_writer: EscapeWriter,
@@ -146,8 +142,6 @@ impl NotificationService {
             buf.push_str(&title_esc);
         }
 
-        // Drive OSC 9;4 tab progress bar
-        // Ghostty resets the indicator after ~15 s of silence, so we re-send it as a keep-alive
         if self.config.progress_bar {
             let should_be_active = state.is_busy;
             if should_be_active {
@@ -173,9 +167,8 @@ impl NotificationService {
         if buf.is_empty() { None } else { Some(buf) }
     }
 
-    /// Reset the tab title back to "grok" and clear the progress bar so neither lingers after exit. Enqueued, never
-    /// inline: `/quit` can land while the writer is parked holding the stderr lock, and the queue orders the reset
-    /// after any still-queued busy-title escape.
+    /// Reset the tab title back to "grok" and clear the progress bar so
+    /// neither lingers after exit.
     pub fn shutdown(&mut self) {
         let mut buf = self.title_manager.reset();
         self.clear_progress_into(&mut buf);
@@ -211,8 +204,6 @@ impl NotificationService {
         self.progress_last_sent = None;
     }
 
-    /// Whether the OSC 9;4 progress indicator is currently considered active.
-    /// Test-only: production callers drive progress exclusively via [`Self::on_tick`] / [`Self::build_idle_escapes`].
     #[cfg(test)]
     pub(crate) fn is_progress_active(&self) -> bool {
         self.progress_active

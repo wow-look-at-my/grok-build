@@ -24,8 +24,6 @@ const FIRE_PEAK_LEN: usize = 20;
 const FIRE_RESIDUE_LEN: usize = 5;
 
 /// Undo chord for the tip copy: always `ctrl+z`.
-/// Most macOS terminals capture Cmd by default and don't forward Cmd+Z to a raw-mode TUI, so Ctrl+Z is the chord delivered on every platform.
-/// The label is still derived from the real binding (not a literal): [`crate::input::key::is_undo_key`] accepts it, so it can't drift.
 fn undo_chord_label() -> String {
     KeyShortcut::new(KeyCode::Char('z'), KeyModifiers::CONTROL)
         .display()
@@ -51,9 +49,7 @@ pub fn undo_tip() -> EphemeralTip {
     .with_session_seen_cap(UNDO_TIP_SEEN_KEY, UNDO_TIP_SEEN_CAP)
 }
 
-/// The detector must be fed only user-initiated edits. Programmatic mutations (submit clears, queue restores, slash
-/// completions) must not be observed. The `last_len` resync absorbs any that slip through, so the next user edit
-/// does not fire on a peak the user did not build down from.
+/// The detector must be fed only user-initiated edits.
 #[derive(Debug, Default)]
 pub struct ClearDetector {
     /// High-water mark of the draft since the last fire or resync.
@@ -67,8 +63,7 @@ impl ClearDetector {
     /// Returns true when a substantial draft was just wiped.
     pub fn observe_user_edit(&mut self, before: usize, after: usize) -> bool {
         if before != self.last_len {
-            // Programmatic mutation since the last user edit: adopt the current draft as the baseline
-            // Firing here would use a peak the user did not build down from
+            // Programmatic mutation since the last user edit: adopt the current draft.
             self.peak_len = before;
         }
         let fired = self.peak_len >= FIRE_PEAK_LEN && after <= FIRE_RESIDUE_LEN;
@@ -128,7 +123,6 @@ mod tests {
     fn programmatic_clear_resyncs_without_firing() {
         let mut d = ClearDetector::default();
         type_to(&mut d, 0, 30);
-        // Submit wiped the draft outside the detector (unobserved); the next user edit starts from 0 and must not fire on the stale peak
         assert!(!d.observe_user_edit(0, 1));
         assert!(!d.observe_user_edit(1, 0), "tiny draft, no fire");
     }
@@ -136,7 +130,6 @@ mod tests {
     #[test]
     fn wiping_a_programmatically_restored_draft_fires() {
         let mut d = ClearDetector::default();
-        // A queue edit restored an 80-char draft (unobserved), then the user wipes it: the resync adopts 80 as the peak and the wipe fires
         assert!(d.observe_user_edit(80, 0));
     }
 
@@ -160,7 +153,7 @@ mod tests {
 
     #[test]
     fn undo_tip_chord_is_ctrl_z() {
-        // The label pins ctrl+z, the chord terminals actually deliver on every platform
+        // The label pins ctrl+z, the chord terminals deliver on every platform
         assert_eq!(undo_chord_label(), "ctrl+z");
         // The advertised chord is one is_undo_key accepts, so the label can't drift from the binding it documents
         assert!(crate::input::key::is_undo_key(

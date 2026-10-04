@@ -21,7 +21,7 @@ steps:
   - action: focus_prompt
   # The first printable char promotes the welcome prompt to a real session
   # (the agent view, where the undo-tip routing lives); the rest accumulate
-  # into that draft. 25 chars clears the detector's FIRE_PEAK_LEN (20).
+  # into that draft.
   - action: type_text
     text: "aaaaaaaaaaaaaaaaaaaaaaaaa"
   - action: wait

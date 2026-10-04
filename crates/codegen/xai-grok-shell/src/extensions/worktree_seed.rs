@@ -1,6 +1,4 @@
-//! Optional fetch-before and branch-after steps for
-//! `x.ai/git/worktree/create_from_worktree_sync`. Best effort: the worktree
-//! is created either way.
+//! Optional fetch-before and branch-after steps for `x.ai/git/worktree/create_from_worktree_sync`.
 
 use std::path::Path;
 use std::time::Duration;
@@ -21,8 +19,7 @@ const OUTPUT_CAP: u64 = 64 * 1024;
 #[derive(Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SeedOptions {
-    /// Remote-tracking ref (`origin/main`): fetched in the source repository
-    /// before the copy, and the start point of `branch`.
+    /// Remote-tracking ref (`origin/main`): fetched in the source repository before the copy, and the start point.
     #[serde(default)]
     pub base_ref: Option<String>,
     /// `git checkout -B` target in the new worktree.
@@ -297,8 +294,7 @@ async fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String,
 }
 
 /// A `run_git` future dropped mid-flight (the RPC was cancelled) still gives
-/// git the SIGTERM grace, so lock files in the source repository are released;
-/// `kill_on_drop` would SIGKILL the leader at once and leave them.
+/// git the SIGTERM grace.
 struct GracefulStop {
     group: std::sync::Arc<xai_tty_utils::ProcessGroup>,
     exited: bool,

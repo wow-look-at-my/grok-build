@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// SGR double-click (two press/release pairs) at 0-based (row, col).
+/// SGR double-click (press/release pairs) at 0-based (row, col).
 fn double_click_at(harness: &mut PtyHarness, row: u16, col: u16) {
     let dbl = format!(
         "{}{}{}{}",
@@ -31,8 +31,7 @@ fn double_click_text(harness: &mut PtyHarness, needle: &str) {
 #[cfg(unix)]
 async fn bash_full_output_double_click_fold_pty() {
     let content = ContentController::start().await.expect("start content");
-    // Double-click folds only in flash (fold/nav) mode
-    // Pin it so a parallel suite sibling that seeds hold/word_select cannot change the behavior
+    // Double-click folds only in flash (fold/nav) mode Pin it so a parallel suite sibling.
     seed_ui_config(&content, "keep_text_selection = \"flash\"");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} session ready."));
 
@@ -58,9 +57,8 @@ async fn bash_full_output_double_click_fold_pty() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("session ready");
 
-    // Success: 12 lines exceed the streaming window; all visible on finish. A middle line (L06)
-    // appears only after expand-on-finish. Do not gate on L01: that passes while still truncated and
-    // races the L03/L06/L09 asserts.
+    // Success: several lines exceed the streaming window; all visible on
+    // finish. A middle line (L06) appears only after expand-on-finish.
     harness
         .inject_keys(b"! printf 'L%02d\\n' $(seq 1 12)\r")
         .expect("submit bash-mode command");
@@ -91,8 +89,7 @@ async fn bash_full_output_double_click_fold_pty() {
     harness
         .wait_for_text("Ctrl+e:", Duration::from_secs(10))
         .expect("scrollback owns keys");
-    // Retry the fold gesture: a single SGR burst can miss under load
-    // The header cell may have moved between locate and inject, or multi-click state from an earlier accidental click may still be open
+    // Retry the fold gesture: a single SGR burst can miss under load The header cell may have moved between locate and inject.
     let fold_deadline = Instant::now() + Duration::from_secs(15);
     loop {
         double_click_text(&mut harness, "Run (user)");
@@ -111,7 +108,6 @@ async fn bash_full_output_double_click_fold_pty() {
         // MULTI_CLICK_TIMEOUT_MS is 300ms; clear before retrying.
         harness.update(Duration::from_millis(500));
     }
-    // MULTI_CLICK_TIMEOUT_MS is 300ms; clear it before the expand gesture so the second double-click is not counted as click 3/4 of the first
     harness.update(Duration::from_millis(500));
     // Re-locate: collapse shrinks the block and may move the header on screen.
     double_click_text(&mut harness, "Run (user)");

@@ -1,9 +1,4 @@
 //! Shared terminal-probe primitives: write a query, and raw-fd poll/read stdin until a terminator or deadline.
-//! XTVERSION uses only `write_query`; its reply is handled by the event loop's response filter.
-//!
-//! Safety invariants (timed-read paths):
-//! - Sole stdin reader: must run before crossterm's reader thread exists, or after that thread has been joined (both compete for stdin).
-//! - Keystrokes typed inside the read window are consumed and dropped; no portable re-injection exists (TIOCSTI is blocked), an accepted loss.
 
 use std::io::Write;
 use std::time::Duration;
@@ -25,7 +20,6 @@ pub(crate) fn write_query(query: &[u8]) -> bool {
     use std::io::IsTerminal;
 
     let write_result: std::io::Result<()> = xai_grok_shared::stderr::with_locked_stderr(|stderr| {
-        // fd 2 is /dev/null-redirected; the TTY check must run on the dup'd render fd inside the lock, not on std::io::stderr()
         if !stderr.is_terminal() {
             return Err(std::io::Error::other("TUI output is not a TTY"));
         }
@@ -99,9 +93,7 @@ fn write_all_until(fd: i32, buf: &[u8], deadline: std::time::Instant) -> bool {
     true
 }
 
-/// `O_NONBLOCK` on `fd` until drop. File-status flags live on the open file description, which the dup'd render fd shares
-/// with `TUI_STDERR_FD` and usually with fds 0/1/2, so the flag must be gone before the drain's blocking reads; the stderr
-/// lock held by the caller and the already joined writer thread mean nobody else writes meanwhile.
+/// `O_NONBLOCK` on `fd` until drop.
 #[cfg(unix)]
 struct NonblockingGuard {
     fd: i32,
@@ -157,8 +149,8 @@ fn remaining_millis_ceil(remaining: Duration) -> i32 {
     millis.min(i32::MAX as u128) as i32
 }
 
-/// The descriptor crossterm reads key events from (`tty_fd`): stdin when it is a terminal, else the controlling tty.
-/// A drain must read that same source; `grok </dev/null` would otherwise hit EOF at once and leave the reply to the shell.
+/// The descriptor crossterm reads key events from (`tty_fd`): stdin when it
+/// is a terminal, else the controlling tty.
 #[cfg(unix)]
 pub(crate) enum TtyInput {
     Stdin,
@@ -276,7 +268,6 @@ pub(crate) enum DrainEnd {
     Error,
 }
 
-/// `bytes` counts every consumed byte, terminator included; `tail_len` is the length the predicate reported (0 unless `Terminated`).
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DrainStats {
@@ -285,8 +276,7 @@ pub(crate) struct DrainStats {
     pub tail_len: usize,
 }
 
-/// A terminator must fit in the retained tail or it can never match; 64 covers every accepted DA1 reply, the longest real
-/// one being xterm's 35-byte `ESC [ ? 64;1;2;6;9;15;16;17;18;21;22;28 c`.
+/// A terminator must fit in the retained tail or it can never match.
 #[cfg(unix)]
 const DRAIN_TAIL_BYTES: usize = 64;
 
@@ -365,7 +355,6 @@ fn poll_read_byte(fd: i32, timeout_ms: i32) -> PollRead {
 
     loop {
         let mut byte = [0u8; 1];
-        // SAFETY: byte is a valid buffer of length 1.
         let n = unsafe { libc::read(fd, byte.as_mut_ptr().cast(), 1) };
         if n == 1 {
             return PollRead::Byte(byte[0]);

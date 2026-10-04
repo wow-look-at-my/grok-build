@@ -1,7 +1,4 @@
 //! Tool definition types for the model API.
-//!
-//! These types represent tool schemas sent to the model when tools are
-//! advertised for a turn.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

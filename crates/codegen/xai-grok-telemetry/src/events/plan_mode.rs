@@ -24,8 +24,7 @@ pub struct PlanModeToggled {
     pub trigger: PlanModeTrigger,
     pub turn_in_flight: bool,
     pub was_previously_active: bool,
-    /// Previous permission-mode label (`default` / `plan` / `bypass_permissions`)
-    /// for the external `from_mode` attr. `#[serde(skip)]`.
+    /// Previous permission-mode label (`default` / `plan` / `bypass_permissions`) for the external `from_mode` attr.
     #[serde(skip)]
     pub from_mode: Option<String>,
 }

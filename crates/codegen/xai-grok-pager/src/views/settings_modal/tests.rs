@@ -449,12 +449,10 @@ fn every_string_setting_has_action_for_string_arm() {
 }
 
 /// Every registered `SettingKind::DynamicEnum` setting must have a matching arm in `action_for_string` for the picker's Enter (commit) path.
-/// That includes the empty-canonical sentinel (row 0 of the picker is always "(no override)").
 #[test]
 fn every_dynamic_enum_setting_has_action_for_string_arm() {
     let reg = SettingsRegistry::defaults();
-    // Seed a synthetic catalog so the resolver path can produce a non-empty SetX action
-    // With an empty catalog only the empty-canonical arm runs, masking a missing SetX arm
+    // Seed a synthetic catalog so the resolver path can produce a non-empty SetX action With an empty catalog only the empty-canonical arm runs.
     use agent_client_protocol as acp;
     use std::sync::Arc;
     let snapshot = PagerLocalSnapshot {
@@ -468,9 +466,7 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
         if !matches!(meta.kind, SettingKind::DynamicEnum { .. }) {
             continue;
         }
-        // Discriminate on the Action variant, not just `is_some()`
-        // A refactor could swallow the typed `SetDefaultModel` into a generic `Action::DynamicSettingChanged(...)`
-        // That would pass `is_some()` while breaking the typed dispatch
+        // Discriminate on the Action variant, not `is_some()` A refactor could swallow the typed `SetDefaultModel`.
         let empty_action = action_for_string(meta.key, String::new(), &snapshot);
         let nonempty_action = action_for_string(meta.key, "Test Model".to_string(), &snapshot);
         match meta.key {
@@ -681,13 +677,8 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
     );
 }
 
-/// The default registry contains Appearance settings
-/// (3 bools + 3 enums + 1 int = 7 entries), the Editor entry
-/// `multiline_mode`, the Agent entries `permission_mode` and
-/// `plan_mode`, the Privacy entry `coding_data_sharing`, the
-/// Models entry `default_model`, and the Advanced entry `show_tips`.
-/// `default_reasoning_effort` and
-/// `auto_compact_threshold_percent` are not exposed in the modal.
+/// `default_reasoning_effort` and `auto_compact_threshold_percent`
+/// are not exposed in the modal.
 #[test]
 fn rows_contain_categories_and_settings_through_pr_14() {
     let prev_voice = crate::app::voice_mode_enabled();
@@ -713,8 +704,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             &SettingCategory::Agent,
             &SettingCategory::Privacy,
             &SettingCategory::Models,
-            // The Session category has no registered settings, so its header is not emitted
-            // Advanced category (first entry: `show_tips`)
+            // The Session category has no registered settings.
             &SettingCategory::Advanced,
         ]
     );
@@ -742,68 +732,51 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "dashboard_preview",
         // PAGER-owned page_flip_on_send (Appearance).
         "page_flip_on_send",
-        // PAGER-owned vim_mode (Appearance,
-        // paired with simple_mode).
-        // Theme enums.
+        // PAGER-owned vim_mode (Appearance, paired with simple_mode). Theme enums.
         "theme",
         "auto_dark_theme",
         "auto_light_theme",
-        // SHELL-owned render_mermaid (Appearance,
-        // declared after the theme enums).
+        // SHELL-owned render_mermaid (Appearance, declared after the theme enums).
         "render_mermaid",
         // Int in Appearance category.
         "max_thoughts_width",
         // SHELL-owned show_thinking_blocks (Appearance; live cache).
         "show_thinking_blocks",
-        // PAGER-owned respect_manual_folds (Appearance,
-        // persisted to pager.toml).
+        // PAGER-owned respect_manual_folds (Appearance, persisted to pager.toml).
         "respect_manual_folds",
         // SHELL-owned group_tool_verbs (Appearance; live cache).
         "group_tool_verbs",
-        // SHELL-owned collapsed_edit_blocks (Appearance; live cache,
-        // default OFF rollout flag).
+        // SHELL-owned collapsed_edit_blocks (Appearance; live cache, default OFF rollout flag).
         "collapsed_edit_blocks",
-        // SHARED-owned thinking_summaries (Appearance; below collapsed_edit_blocks,
-        // because the four rows above it are pinned into one adjacency chain).
+        // SHARED-owned thinking_summaries (Appearance.
         "thinking_summaries",
         // SHELL-owned display_refresh_auto_cadence (Appearance).
         "display_refresh_auto_cadence",
-        // Mouse — scroll + drag selection. The scroll
-        // classification/lines/direction knobs follow scroll_speed.
+        // Mouse — scroll + drag selection. The scroll classification/lines/direction knobs follow scroll_speed.
         "scroll_speed",
         "scroll_mode",
         "scroll_lines",
         "invert_scroll",
         "keep_text_selection",
-        // SHARED-owned combine_queued_prompts (Editor category; read by
-        // both the pager drain and the shell promote. Registered before
-        // multiline_mode, so it renders first).
+        // SHARED-owned combine_queued_prompts (Editor category; read by both the pager drain and the shell promote.
         "combine_queued_prompts",
         "follow_up_behavior",
         "confirm_before_rewind",
         // PAGER-owned multiline (Editor category).
         "multiline_mode",
-        // SHELL-owned prompt_suggestions (Editor; tab autocomplete
-        // ghost text, live cache).
+        // SHELL-owned prompt_suggestions (Editor; tab autocomplete ghost text, live cache).
         "prompt_suggestions",
-        // voice_keybind_enabled + voice_capture_mode + voice_stt_language
-        // hidden when the voice gate is off.
-        // SHELL-owned permission_mode (Agent category).
-        // PAGER-owned stop_gate_unfinished_todos (Agent category,
-        // declares before permission_mode).
+        // voice_keybind_enabled + voice_capture_mode + voice_stt_language hidden when the voice gate is off.
         "stop_gate_unfinished_todos",
         "stop_gate_ci_failing",
-        // The "Slow output" group. Its four rows show only inside its sheet.
+        // The "Slow output" group. Its rows show only inside its sheet.
         "output_rate_floor",
         "permission_mode",
-        // SHELL-owned remember_tool_approvals (Agent category,
-        // registered right after permission_mode).
+        // SHELL-owned remember_tool_approvals (Agent category, registered right after permission_mode).
         "remember_tool_approvals",
-        // SHELL-owned default_selected_permission (Agent category,
-        // colocated with permission_mode / plan_mode).
+        // SHELL-owned default_selected_permission (Agent category, colocated with permission_mode / plan_mode).
         "default_selected_permission",
-        // SHELL-owned ask_user_question timeout (Agent category,
-        // registered directly above plan_mode).
+        // SHELL-owned ask_user_question timeout (Agent category, registered directly above plan_mode).
         "toolset.ask_user_question.timeout_enabled",
         // PAGER-owned plan_mode (Agent category).
         "plan_mode",
@@ -811,8 +784,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "coding_data_sharing",
         // SHELL-owned default_model (Models category).
         "default_model",
-        // SHELL-owned `[features]` row (Models category, registered right
-        // after default_model).
+        // SHELL-owned `[features]` row (Models category, registered right after default_model).
         "subagent_model_inheritance",
     ];
     expected.extend(
@@ -821,14 +793,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             .map(|slot| slot.setting_key()),
     );
     expected.extend_from_slice(&[
-        // `auto_compact_threshold_percent` (Session category) is
-        // not exposed in the modal.
-        // Advanced category.
+        // `auto_compact_threshold_percent` (Session category) is not exposed in the modal. Advanced category.
         "show_tips",
-        // Per-tip contextual-hints GROUP row, repositioned right after
-        // `show_tips`. Its 3 child toggles
-        // (`contextual_hints.{undo,plan_mode,image_input}`) are hidden
-        // from the top-level list and reached via the sub-sheet.
+        // Per-tip contextual-hints GROUP row, repositioned right after `show_tips`.
         "contextual_hints",
         // SHELL-owned hunk_tracker_mode (Advanced; `off` disables it).
         "hunk_tracker_mode",
@@ -925,7 +892,7 @@ fn f2_closes_modal() {
 
 #[test]
 fn esc_in_browse_mode_falls_through_to_chrome() {
-    // Esc is intercepted UPSTREAM by `ModalWindow::handle_modal_key`; `handle_settings_key` does not match Esc anymore. See module docstring.
+    // Esc is intercepted UPSTREAM by `ModalWindow::handle_modal_key`; `handle_settings_key` does not match Esc.
     let mut s = make_state();
     let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
     assert!(matches!(
@@ -1015,7 +982,6 @@ fn mouse_click_on_bool_row_dispatches_toggle() {
         height: 10,
     };
     s.row_rects.resize(s.rows.len(), Rect::default());
-    // Row 0 is the Appearance header.
     let Some(slot) = s.row_rects.get_mut(0) else {
         panic!("row_rects[0] missing");
     };
@@ -1025,7 +991,6 @@ fn mouse_click_on_bool_row_dispatches_toggle() {
         width: 80,
         height: 1,
     };
-    // Row 1 is compact_mode.
     let Some(slot) = s.row_rects.get_mut(1) else {
         panic!("row_rects[1] missing");
     };
@@ -1143,7 +1108,6 @@ fn mouse_moved_over_row_sets_hover_row() {
         height: 10,
     };
     s.row_rects.resize(s.rows.len(), Rect::default());
-    // Row 0 is a header (Appearance); row 1 is the first setting (compact_mode). Place row 1 at y=1 so the hover-row position math is unambiguous.
     let Some(slot) = s.row_rects.get_mut(0) else {
         panic!("row_rects[0] missing");
     };
@@ -1206,7 +1170,6 @@ fn mouse_moved_outside_modal_clears_hover() {
         height: 1,
     };
 
-    // Seed hover at row 1.
     let _ = handle_settings_mouse(&mut s, MouseEventKind::Moved, 5, 1);
     assert_eq!(s.hover_row, Some(1));
 
@@ -1325,7 +1288,7 @@ fn picker_choice_mouse_hover_highlights_choice() {
         "picker_test_state must produce at least 2 choice rects",
     );
 
-    // Pre-condition: choices_idx = 0 (the initial focus). Hover over choice 1, distinct from the focused choice.
+    // Pre-condition: choices_idx = 0 (the initial focus).
     let Some(&target_rect) = s.picker_choice_rects.get(1) else {
         panic!("picker_choice_rects[1] missing");
     };
@@ -1347,7 +1310,6 @@ fn picker_choice_mouse_hover_highlights_choice() {
         "Moved over choice 1 must set hover_row = Some(1)",
     );
 
-    // Re-render and observe the shared list hover background on choice 1.
     let mut buf2 = Buffer::empty(area);
     render_picking_enum(&mut buf2, area, &s, &theme);
     let new_rects = take_picker_choice_rects();
@@ -1363,7 +1325,7 @@ fn picker_choice_mouse_hover_highlights_choice() {
         "hovered choice must paint the list hover background, got {:?}",
         cell1.style().bg,
     );
-    // Focused choice (index 0) keeps bg_visual; selection wins over hover. Verifies the `is_focused` branch precedence.
+    // Verifies the `is_focused` branch precedence.
     let Some(&rect0) = new_rects.first() else {
         panic!("choice rect 0 missing: {new_rects:?}");
     };
@@ -1469,9 +1431,7 @@ fn navigate_to_enum_row(s: &mut SettingsModalState) {
     panic!("no Enum-kind row found in default registry");
 }
 
-/// Scroll-wheel down emits 3 advances.
-/// From the initial selection (first setting), 3 settings forward must land on whatever is at position [first_setting + 3] in the registry.
-/// Resilient to future setting additions.
+/// Scroll-wheel down emits advances. Resilient to future setting additions.
 #[test]
 fn scroll_wheel_advances_selection() {
     let mut s = make_state();
@@ -1493,8 +1453,6 @@ fn scroll_wheel_advances_selection() {
         })
         .collect();
     let outcome = handle_settings_mouse(&mut s, MouseEventKind::ScrollDown, 5, 5);
-    // 3 advances from the first setting land at position 3, or the last setting if fewer than 4 are registered
-    // The advance_next no-op at the boundary absorbs extra advances
     let expected = setting_keys
         .get(3)
         .copied()
@@ -1533,7 +1491,6 @@ fn render_setting_row_emits_restart_pill_when_required() {
         width: 80,
         height: 1,
     };
-    // Arm 1: expanded, so the pill renders even at default value
     let mut buf = Buffer::empty(area);
     let theme = Theme::current();
     render_setting_row(
@@ -1544,7 +1501,7 @@ fn render_setting_row_emits_restart_pill_when_required() {
         10,    // max_label_w
         false, // is_selected
         &theme,
-        true,  // is_expanded, gate on
+        true,  // is_expanded.
         false, // is_hovered
         None,
     );
@@ -1559,7 +1516,6 @@ fn render_setting_row_emits_restart_pill_when_required() {
         "expanded row must contain the 'restart' pill: {rendered:?}"
     );
 
-    // Arm 2: edited but collapsed, so NO pill (the reported repro)
     let mut buf = Buffer::empty(area);
     render_setting_row(
         &mut buf,
@@ -1643,8 +1599,6 @@ fn editor_render_fixture(buffer: &str, cursor_byte: usize) -> SettingsModalState
         category: SettingCategory::Models,
         owner: crate::settings::SettingOwner::Shell,
         label: "Default model (synthetic)",
-        // Short description so it fits in 1 line even at the narrowest test width
-        // A wrapped description would push the input row down on narrow widths and break the cursor-pan tests' hardcoded input-row y position
         description: "Test.",
         keywords: &["test"],
         kind: SettingKind::String {
@@ -1773,8 +1727,7 @@ fn render_editing_value_cursor_pans_to_right_on_overflow_at_end() {
             break;
         }
     }
-    // The cursor lands at `visible_buffer_w` = `buffer_room - 1`, one cell before the rightmost edge (the cursor-reserve column)
-    // Strictly greater than 0 is the key assertion: the old bug pinned the cursor at the right edge REGARDLESS of cursor_byte
+    // The cursor lands at `visible_buffer_w` = `buffer_room - 1`.
     let col = found_cursor_col.expect("cursor must render");
     assert!(
         col > 0,
@@ -1827,7 +1780,7 @@ fn render_string_editor_keeps_narrow_graphemes_and_cursor_aligned() {
 }
 
 /// When the validator returns a non-None error, the buffer foreground turns red (`accent_error`).
-/// The validation-error row at y = header_rows + 1 renders the error message in accent_error.
+/// The validation-error row at y = header_rows + renders the error message in accent_error.
 #[test]
 fn render_editing_value_paints_validation_error_row_and_buffer_red() {
     // Use a buffer that fails KnownModel ("xyz" not in catalog).
@@ -1842,7 +1795,7 @@ fn render_editing_value_paints_validation_error_row_and_buffer_red() {
     let theme = Theme::current();
     render_editing_value(&mut buf, area, &mut s, &theme);
 
-    // Row 3 is the input. The buffer "xyz" sits at cols 0..3. Each char's foreground must be accent_error.
+    // Each char's foreground must be accent_error.
     for x in 0..3 {
         let cell = buf.cell((x, 3)).expect("cell must exist");
         assert_eq!(
@@ -1853,7 +1806,6 @@ fn render_editing_value_paints_validation_error_row_and_buffer_red() {
         );
     }
 
-    // Row 4 is the validation error.
     let mut err_row = String::new();
     for x in 0..area.width {
         if let Some(cell) = buf.cell((x, 4)) {
@@ -1866,9 +1818,8 @@ fn render_editing_value_paints_validation_error_row_and_buffer_red() {
     );
 }
 
-/// Empty buffer renders a low-contrast placeholder hint.
-/// The cursor block (`▏`) lands at col 0 and overdraws the placeholder's leading `<`.
-/// So the assertion targets the unique "empty: uses shell default" substring that survives the cursor overdraw.
+/// Empty buffer renders a low-contrast placeholder hint. So the assertion targets the unique "empty: uses shell
+/// default" substring that survives the cursor overdraw.
 #[test]
 fn render_editing_value_empty_buffer_shows_placeholder() {
     let mut s = editor_render_fixture("", 0);
@@ -1888,7 +1839,7 @@ fn render_editing_value_empty_buffer_shows_placeholder() {
             input_row.push_str(cell.symbol());
         }
     }
-    // Placeholder for KnownModel ends with "uses shell default>". The cursor at col 0 overdraws the leading `<`, so we match on the body substring.
+    // Placeholder for KnownModel ends with "uses shell default>".
     assert!(
         input_row.contains("uses shell default"),
         "empty buffer must render the KnownModel placeholder, got {input_row:?}",
@@ -1960,7 +1911,6 @@ fn int_stepper_fixture_for(key: &'static str, value: i64) -> SettingsModalState 
     s
 }
 
-/// Wide-range Int fixture (`max_thoughts_width`, steps ±5/±10).
 fn int_stepper_fixture(value: i64) -> SettingsModalState {
     int_stepper_fixture_for("max_thoughts_width", value)
 }
@@ -1975,15 +1925,15 @@ fn int_stepper_buffer(s: &SettingsModalState) -> String {
 fn int_step_sizes_table_pins_range_policy() {
     // (min, max, expected_small, expected_large)
     let cases = [
-        (1, 10, 1, 1),                       // scroll_lines (span 9)
-        (1, 100, 1, 5),                      // scroll_speed (span 99)
-        (40, 500, 5, 10),                    // max_thoughts_width (span 460)
+        (1, 10, 1, 1),
+        (1, 100, 1, 5),
+        (40, 500, 5, 10),
         (0, 0, 1, 1),                        // degenerate span
-        (1, 21, 1, 4),                       // span 20 still narrow: large = span/5
-        (1, 22, 1, 5),                       // span 21 → mid band
-        (1, 101, 1, 5),                      // span 100 still mid
-        (1, 102, 5, 10),                     // span 101 → wide band
-        (1, 1_000_001, 5, 10),               // span 1_000_000 still wide
+        (1, 21, 1, 4),
+        (1, 22, 1, 5),
+        (1, 101, 1, 5),
+        (1, 102, 5, 10),
+        (1, 1_000_001, 5, 10),
         (-1, i64::from(u32::MAX) - 1, 1, 5), // an uncapped field keeps unit steps
     ];
     for (min, max, want_small, want_large) in cases {
@@ -2004,7 +1954,6 @@ fn int_editing_value_up_arrow_increments_by_small_step() {
     assert_eq!(int_stepper_buffer(&s), "55");
 }
 
-/// Down arrow steps the wide-range Int by small step (−5).
 #[test]
 fn int_editing_value_down_arrow_decrements_by_small_step() {
     let mut s = int_stepper_fixture(50);
@@ -2022,7 +1971,6 @@ fn int_editing_value_right_arrow_increments_by_large_step() {
     assert_eq!(int_stepper_buffer(&s), "60");
 }
 
-/// Left arrow steps the wide-range Int by large step (−10).
 #[test]
 fn int_editing_value_left_arrow_decrements_by_large_step() {
     let mut s = int_stepper_fixture(50);
@@ -2031,7 +1979,6 @@ fn int_editing_value_left_arrow_decrements_by_large_step() {
     assert_eq!(int_stepper_buffer(&s), "40");
 }
 
-/// Narrow-range Int (`scroll_lines` 1..=10) uses unit steps on all arrows.
 #[test]
 fn scroll_lines_int_stepper_uses_unit_steps() {
     let mut s = int_stepper_fixture_for("scroll_lines", 3);
@@ -2049,7 +1996,6 @@ fn scroll_lines_int_stepper_uses_unit_steps() {
     assert_eq!(int_stepper_buffer(&s), "3");
 }
 
-/// Mid-range Int (`scroll_speed` 1..=100): Up/Down ±1, Left/Right ±5.
 #[test]
 fn scroll_speed_int_stepper_uses_unit_fine_and_five_coarse() {
     let mut s = int_stepper_fixture_for("scroll_speed", 50);
@@ -2102,7 +2048,6 @@ fn int_editing_value_vim_l_h_step_by_large() {
 /// Stepping past `max` is clamped to `max`; the outcome is `Unchanged` (no visible step) so a UI consumer can avoid re-render churn.
 #[test]
 fn int_editing_value_clamps_to_max() {
-    // max_thoughts_width registered max = 500.
     let mut s = int_stepper_fixture(500);
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
     assert!(
@@ -2115,7 +2060,6 @@ fn int_editing_value_clamps_to_max() {
 /// Stepping below `min` is clamped to `min`.
 #[test]
 fn int_editing_value_clamps_to_min() {
-    // max_thoughts_width registered min = 40.
     let mut s = int_stepper_fixture(40);
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     assert!(
@@ -2143,7 +2087,6 @@ fn int_editing_value_appends_digit_keys() {
 #[test]
 fn int_editing_value_backspace_removes_last_digit() {
     let mut s = int_stepper_fixture(50);
-    // Seed grew from 50 → 50700 in the append test; here start fresh.
     let outcome = handle_settings_key(
         &mut s,
         &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
@@ -2185,10 +2128,7 @@ fn int_editing_value_ignores_other_text_input_keys() {
 #[test]
 fn int_editing_value_typed_commit_dispatches_clamped_value() {
     use crossterm::event::KeyModifiers;
-    // scroll_lines: min 1, max 10.
     let mut s = int_stepper_fixture_for("scroll_lines", 3);
-    // Clear the seeded value, then type 7.
-    // "3" → "" (1 backspace for a single digit).
     let _ = handle_settings_key(
         &mut s,
         &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
@@ -2213,7 +2153,6 @@ fn int_editing_value_typed_commit_dispatches_clamped_value() {
 #[test]
 fn int_editing_value_typed_out_of_range_clamps_on_commit() {
     use crossterm::event::KeyModifiers;
-    // scroll_lines min 1. Type "0" then commit → clamps to 1.
     let mut s = int_stepper_fixture_for("scroll_lines", 3);
     let _ = handle_settings_key(
         &mut s,
@@ -2248,8 +2187,6 @@ fn int_editing_value_renders_stepper_ui() {
     let theme = Theme::current();
     render_editing_value(&mut buf, area, &mut s, &theme);
 
-    // Find the stepper row dynamically; the description word-wraps so the input row's y is no longer fixed at 3
-    // Scan rows top-down for the one that contains both stepper glyphs
     let mut stepper_row: Option<String> = None;
     for y in 0..area.height {
         let mut row = String::new();
@@ -2389,7 +2326,7 @@ fn int_editing_value_click_on_value_text_is_noop() {
     let theme = Theme::current();
     render_editing_value(&mut buf, area, &mut s, &theme);
     let (dec_rect, inc_rect) = s.editor_adornment_rects;
-    // Click between the two arrow rects.
+    // Click between both arrow rects.
     let middle_x = (dec_rect.x + inc_rect.x) / 2;
     let middle_y = dec_rect.y;
     let outcome = handle_settings_mouse(
@@ -2405,9 +2342,8 @@ fn int_editing_value_click_on_value_text_is_noop() {
     assert_eq!(int_stepper_buffer(&s), "120");
 }
 
-/// Esc in the theme picker dispatches a PREVIEW Action with the original canonical AND returns to Browse.
-/// The revert restores the live visual without persisting, since the picker's preview navs never persisted in the first place.
-/// Parameterised across all 3 theme enum keys.
+/// Esc in the theme picker dispatches a PREVIEW Action with the original canonical AND returns to Browse. The revert restores
+/// the live visual without persisting, since the picker's preview navs never persisted in the first place.
 #[test]
 fn picking_enum_esc_dispatches_preview_revert_for_each_key() {
     let cases: &[(&str, &str)] = &[
@@ -2466,9 +2402,8 @@ fn picking_enum_esc_returns_to_browse() {
 // When `action_for_enum` returns `None` for a key, the preview/revert dispatch returns
 // `SettingsKeyOutcome::Changed` rather than `Action(_)`.
 
-/// Static synthetic Enum metadata for picker tests.
-/// Choice display names are deliberately mid-length, sized close to the real theme catalog widths.
-/// The default-width (80) tests cover the happy path and dedicated narrow-width tests cover the truncation paths.
+/// Static synthetic Enum metadata for picker tests. Choice display names are deliberately mid-length, sized close
+/// to the real theme catalog widths.
 const TEST_ENUM_CHOICES: &[EnumChoice] = &[
     EnumChoice {
         canonical: "first",
@@ -2504,9 +2439,8 @@ fn synthetic_enum_meta() -> SettingMeta {
     }
 }
 
-/// Build a registry containing exactly one synthetic Enum entry and place the modal directly in PickingEnum mode at idx 0.
-/// Useful for testing the picker handler in isolation.
-/// `try_enter_picking_enum` is tested separately by `picker_test_state_in_browse()` and an Enter dispatch.
+/// Useful for testing the picker handler in isolation. `try_enter_picking_enum` is tested separately by
+/// `picker_test_state_in_browse()` and an Enter dispatch.
 fn picker_test_state() -> SettingsModalState {
     let entries = vec![synthetic_enum_meta()];
     let mut s = SettingsModalState::new(
@@ -2527,7 +2461,6 @@ fn picker_test_state_in_browse() -> SettingsModalState {
         UiConfig::default(),
         PagerLocalSnapshot::default(),
     )
-    // Selection lands on the first selectable row (the only setting, "test_enum") by `SettingsModalState::new`
 }
 
 /// Up/Down (and j/k aliases) in the picker advance `choices_idx` and clamp at list bounds.
@@ -2536,7 +2469,6 @@ fn picker_test_state_in_browse() -> SettingsModalState {
 fn picker_arrow_keys_advance_choices_idx() {
     let mut s = picker_test_state();
 
-    // Down: 0 to 1
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     assert!(
         matches!(outcome, SettingsKeyOutcome::Changed),
@@ -2547,7 +2479,6 @@ fn picker_arrow_keys_advance_choices_idx() {
         ref other => panic!("expected PickingEnum mode after Down, got {other:?}"),
     }
 
-    // j: 1 to 2 (last choice)
     let outcome = handle_settings_key(
         &mut s,
         &KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
@@ -2565,7 +2496,6 @@ fn picker_arrow_keys_advance_choices_idx() {
         "Down at last choice should be Unchanged"
     );
 
-    // Up: 2 to 1
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
     match s.mode() {
@@ -2573,7 +2503,6 @@ fn picker_arrow_keys_advance_choices_idx() {
         _ => panic!("expected PickingEnum mode after Up"),
     }
 
-    // k: 1 to 0
     let outcome = handle_settings_key(
         &mut s,
         &KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
@@ -2599,8 +2528,8 @@ fn picker_enter_returns_to_browse() {
     let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    // The synthetic `test_enum` key has no commit Action arm in `action_for_enum_commit`, so the outcome is `Changed`
-    // For real theme keys, the outcome is `Action(...)`; see the theme preview/commit e2e coverage in the e2e crate
+    // The synthetic `test_enum` key has no commit Action arm in
+    // `action_for_enum_commit`.
     assert!(
         matches!(outcome, SettingsKeyOutcome::Changed),
         "Enter for synthetic-key must produce Changed (no commit arm), got {outcome:?}"
@@ -2752,9 +2681,8 @@ fn deep_link_picker_esc_reverts_preview_and_closes() {
     assert!(!s.close_on_picker_exit);
 }
 
-/// The picker renders every choice in declaration order, top to bottom.
-/// Asserts each choice's `display` string and description appears on the expected row with the documented spacing.
-/// Layout: row 0 is the title, row 1 the description (subtitle), row 2 a gap, and rows 3..6 the choices.
+/// The picker renders every choice in declaration order, top to bottom. Asserts each choice's `display` string and
+/// description appears on the expected row with the documented spacing.
 #[test]
 fn picker_renders_choices_in_order() {
     let s = picker_test_state();
@@ -2778,26 +2706,22 @@ fn picker_renders_choices_in_order() {
         s
     };
 
-    // Row 0: title.
     assert!(
         row_text(0).contains("Test enum"),
         "title row must contain 'Test enum', got: {:?}",
         row_text(0)
     );
-    // Row 1: setting description subtitle.
     assert!(
         row_text(1).contains("Synthetic Enum entry"),
         "row 1 must contain setting description, got: {:?}",
         row_text(1)
     );
-    // Row 2: blank gap
     assert!(
         row_text(2).trim().is_empty(),
         "row 2 must be the blank gap, got: {:?}",
         row_text(2)
     );
-    // Rows 3..6: choices. Use full rendered layout for precise pinning (tighten substring match).
-    // " ○  First Option · First option description."
+    // Use full rendered layout for precise pinning (tighten substring match).
     let r3 = row_text(3);
     assert!(
         r3.contains("First Option") && r3.contains("First option description"),
@@ -2832,7 +2756,6 @@ fn picker_separates_focus_highlight_from_committed_marker() {
     render_picking_enum(&mut buf, area, &s, &theme);
 
     // Marker glyph at column `area.x + 1` of each choice row.
-    // Using `area.x + 1` rather than `1` so the helper survives a future renderer that passes a non-zero `area.x`
     let marker_at = |y: u16| -> String {
         buf.cell((area.x + 1, y))
             .map(|c| c.symbol().to_string())
@@ -2841,7 +2764,6 @@ fn picker_separates_focus_highlight_from_committed_marker() {
     let marker_fg = |buf: &Buffer, y: u16| -> Option<ratatui::style::Color> {
         buf.cell((area.x + 1, y)).and_then(|c| c.style().fg)
     };
-    // Layout: rows 3..5 are choices (with subtitle on row 1). Row 3 is the committed "first" (unfocused), row 4 the focused "second".
     assert_eq!(
         marker_at(3),
         "\u{25CF}",
@@ -2868,8 +2790,8 @@ fn picker_separates_focus_highlight_from_committed_marker() {
         );
     }
 
-    // Cell at the LAST column of each row carries the row bg independent of prefix-width tweaks
-    // Compare via `settings_list_row_bg` so terminal-native themes (Reset tokens elevated to DarkGray) pass too
+    // Cell at the LAST column of each row carries the row bg independent of
+    // prefix-width tweaks Compare via `settings_list_row_bg`.
     let bg_at = |y: u16| -> Option<ratatui::style::Color> {
         buf.cell((area.x + area.width - 1, y))
             .and_then(|c| c.style().bg)
@@ -3072,7 +2994,6 @@ fn browse_enter_on_enum_row_transitions_to_picking_enum() {
             ..
         } => {
             assert_eq!(key, "test_enum");
-            // No current_value_for arm, so fallback to idx 0
             assert_eq!(choices_idx, 0);
             assert_eq!(original_value, &SettingValue::Enum("first"));
         }
@@ -3100,13 +3021,9 @@ fn browse_enter_on_bool_row_does_not_enter_picking_enum() {
     );
 }
 
-/// `try_enter_picking_enum` directly: with a synthetic Enum where `value_for` returns the second
-/// choice's canonical, `choices_idx` must seed to 1.
 #[test]
 fn try_enter_picking_enum_seeds_choices_idx_from_current_value() {
-    // The synthetic "test_enum" key isn't in `current_value_for`
-    // So this pins the fallback only: false for non-Enum rows, and idx 0 with the first canonical for an unknown key
-    // Seeding idx > 0 needs a canonical in `current_value_for`'s match arms; no Enum key has one today
+    // The synthetic "test_enum" key isn't in `current_value_for` So this pins the fallback only: false for non-Enum rows.
     let mut s = picker_test_state_in_browse();
     assert!(s.try_enter_picking_enum());
     match s.mode() {
@@ -3209,7 +3126,6 @@ fn render_picker_at_height_2_renders_title_no_choices() {
         s
     };
     assert!(row_text(0).contains("Test enum"));
-    // Row 1 is the gap; must be blank.
     assert!(
         row_text(1).trim().is_empty(),
         "no choices should render at height=2 (only title fits), got: {:?}",
@@ -3222,7 +3138,7 @@ fn render_picker_at_height_2_renders_title_no_choices() {
 /// choices then stay renderable. This test pins that fallback at an intermediate height.
 #[test]
 fn render_picker_drops_description_when_wrap_block_exceeds_height() {
-    // Synthetic registry with a description that, at width=20, would wrap to at least 5 lines
+    // Synthetic registry with a description that, at width=20, would wrap to a few lines
     let long_desc = "This description is intentionally long enough \
                      that at narrow widths the wrap block will not \
                      fit alongside the choices.";
@@ -3248,7 +3164,6 @@ fn render_picker_drops_description_when_wrap_block_exceeds_height() {
     );
     assert!(s.try_enter_picking_enum());
 
-    // Height=4 at narrow width: title (1) + desc_would_be (at least 5) overflows; the gate drops the description. The choices should still render.
     let area = Rect {
         x: 0,
         y: 0,
@@ -3399,9 +3314,6 @@ fn picker_long_description_wraps_to_multiple_lines() {
         s
     };
 
-    // Line 1 of choice 0 ("Opt in"): symbol, display, separator, then the start of the description
-    // The setting-level description above the choices can wrap to a variable number of rows depending on copy length
-    // So locate choice 0's line 1 dynamically instead of assuming a fixed row
     let opt_in_row = (0..area.height)
         .find(|&y| row_text(y).contains("Opt in"))
         .expect("choice 0 line 1 ('Opt in') must render within the picker area");
@@ -3419,11 +3331,8 @@ fn picker_long_description_wraps_to_multiple_lines() {
         "choice 0 line 1 must start the description, got: {r3:?}"
     );
 
-    // The Opt-in description wraps to at least 2 lines at width 60. Continuation rows live BELOW choice 0's line 1 until the next choice starts.
     let cont_row = opt_in_row + 1;
     let r4 = row_text(cont_row);
-    // Continuation line must be indented past the description column
-    // Columns 0 and 1 (symbol cells on line 1) should be whitespace on the continuation line
     assert_eq!(
         buf.cell((0u16, cont_row)).map(|c| c.symbol()),
         Some(" "),
@@ -3466,7 +3375,6 @@ fn picker_long_description_wraps_to_multiple_lines() {
 }
 
 /// Short descriptions stay on ONE line; no continuation rows.
-/// Asserts the row directly below a choice's line 1 is either the next choice's line 1 (when there are more choices) or blank.
 #[test]
 fn picker_short_description_stays_one_line() {
     let entries = vec![SettingMeta {
@@ -3520,7 +3428,6 @@ fn picker_short_description_stays_one_line() {
         s
     };
 
-    // Choice 0 on row 3, choice 1 on row 4 (one line each).
     assert!(
         row_text(3).contains("Alpha") && row_text(3).contains("A."),
         "choice 0 must be one line, got row 3: {:?}",
@@ -3598,9 +3505,7 @@ fn picker_no_description_renders_symbol_and_display_only() {
     );
 }
 
-/// Multi-line choice hit-rect spans ALL its lines.
-/// Clicking on the continuation line of a wrapped choice moves the picker focus to that choice (same as clicking line 1).
-/// Mirrors the two-line row hit-rects in Browse mode.
+/// Multi-line choice hit-rect spans ALL its lines. Mirrors those-line row hit-rects in Browse mode.
 #[test]
 fn picker_multi_line_choice_hit_rect_spans_all_lines() {
     // Reuse the wrap fixture: long descriptions on both choices.
@@ -3644,11 +3549,9 @@ fn picker_multi_line_choice_hit_rect_spans_all_lines() {
     let mut buf = Buffer::empty(area);
     let theme = Theme::current();
     render_picking_enum(&mut buf, area, &s, &theme);
-    // Drain the per-choice rects so the mouse handler sees them
-    // The production caller does this via `render_settings_modal`
+    // Drain the per-choice rects so the mouse handler sees them The production caller does this.
     s.picker_choice_rects = take_picker_choice_rects();
 
-    // Sanity: each choice's rect has height at least 2 at width 60
     assert_eq!(
         s.picker_choice_rects.len(),
         2,
@@ -3675,7 +3578,6 @@ fn picker_multi_line_choice_hit_rect_spans_all_lines() {
         "choice rects must not overlap: rect0={rect0:?}, rect1={rect1:?}"
     );
 
-    // The initial focus is on choice 0. Click on the last line (a continuation line) of choice 1; the click should move focus to choice 1.
     let click_y = rect1.y + rect1.height - 1;
     let outcome = handle_settings_mouse(
         &mut s,
@@ -3700,12 +3602,9 @@ fn picker_multi_line_choice_hit_rect_spans_all_lines() {
     }
 }
 
-/// Picker scroll math accounts for variable per-choice height.
-/// With 5 choices each ~3 lines tall in a ~8-line viewport, focusing the LAST choice scrolls so it's visible.
-/// The earlier choices may shift off the top.
+/// Picker scroll math accounts for variable per-choice height. The earlier choices may shift off the top.
 #[test]
 fn picker_scroll_offset_accounts_for_variable_height() {
-    // Each description is at least 3 wrap lines wide at width=40
     let entries = vec![SettingMeta {
         key: "many_wrap",
         category: SettingCategory::Appearance,
@@ -3754,8 +3653,9 @@ fn picker_scroll_offset_accounts_for_variable_height() {
         PagerLocalSnapshot::default(),
     );
     s.transition_to_picking_enum("many_wrap", 4, SettingValue::Enum("c4"), true);
-    // Viewport: title + desc + gap = 3 rows of chrome + 8 rows of choices = 11 total
-    // With 5 choices × 3 lines = 15 total wrap-rows of content, only ~2 choices can fit per page
+    // Viewport: title + desc + gap = 3 rows of chrome + several rows of
+    // choices = 11 total With multiple choices × a few lines = 15 total
+    // wrap-rows.
     let area = Rect {
         x: 0,
         y: 0,
@@ -3780,7 +3680,6 @@ fn picker_scroll_offset_accounts_for_variable_height() {
         rect_c4.y + rect_c4.height <= area.y + area.height,
         "focused choice c4 must fit inside the viewport, got rect {rect_c4:?} vs area {area:?}"
     );
-    // Choice 0 (c0) should be scrolled off the top (rect zero).
     let Some(&rect_c0) = s.picker_choice_rects.first() else {
         panic!("picker_choice_rects[0] missing");
     };
@@ -3894,7 +3793,7 @@ fn render_picker_truncates_long_title_with_ellipsis() {
 /// When choices > visible_h, the picker renders an overflow indicator `… N more` on the last visible row.
 #[test]
 fn render_picker_shows_more_indicator_when_choices_overflow() {
-    // Build a registry with 8 choices (exceeds 4-row viewport at height=8)
+    // Build a registry with multiple choices (exceeds 4-row viewport at height=8)
     let entries = vec![SettingMeta {
         key: "long_enum",
         category: SettingCategory::Appearance,
@@ -3946,9 +3845,6 @@ fn render_picker_shows_more_indicator_when_choices_overflow() {
         PagerLocalSnapshot::default(),
     );
     s.transition_to_picking_enum("long_enum", 0, SettingValue::Enum("c0"), true);
-    // Total height 7 gives header_rows=3 (title+desc+gap) + 4 choice rows
-    // With 6 choices, 4 fit in the viewport minus 1 row reserved for overflow
-    // So 3 visible, 3 hidden, and the indicator reads "… 3 more"
     let area = Rect {
         x: 0,
         y: 0,
@@ -4153,7 +4049,7 @@ fn picker_double_click_selects_radio() {
     );
 }
 
-/// Two quick clicks on different radios move focus only; they are not a double-click.
+/// Quick clicks on different radios move focus only; they are not a double-click.
 #[test]
 fn picker_clicks_on_different_radios_do_not_select() {
     let mut s = enter_picker_for("coding_data_sharing");
@@ -4288,8 +4184,7 @@ fn picker_ignores_random_keypress() {
 /// Uses a snapshot with a populated `available_models` list so the `KnownModel` validator has data; an empty catalog short-circuits to "valid".
 #[test]
 fn editing_value_chars_mutate_buffer_and_invalid_enter_is_noop() {
-    // `default_model` is a `SettingKind::DynamicEnum`, so no production setting wires the String editor
-    // `editor_render_fixture`'s synthetic registry keeps the editor-mode contract under test
+    // `default_model` is a `SettingKind::DynamicEnum`, so no production setting wires the String editor `editor_render_fixture`'s.
     let mut s = editor_render_fixture("", 0);
     // Char 'a' goes into the buffer, so Changed
     let outcome = handle_settings_key(
@@ -4307,7 +4202,6 @@ fn editing_value_chars_mutate_buffer_and_invalid_enter_is_noop() {
          (catalog has 'Grok 4 Fast' only)",
     );
 
-    // Enter on a buffer that fails the KnownModel validator (catalog has 'Grok 4 Fast'; "a" doesn't match) is Unchanged; commit refused
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
         matches!(outcome, SettingsKeyOutcome::Unchanged),
@@ -4367,13 +4261,11 @@ fn string_editor_uses_canonical_edits_policy_and_live_validation() {
     assert!(matches!(state.mode(), SettingsModalMode::Browse));
 }
 
-/// `picker_choices_len` returns 0 for an unknown key, a non-Enum key, and a zero-choice Enum.
 #[test]
 fn picker_choices_len_handles_missing_and_non_enum() {
     let s = picker_test_state_in_browse();
     assert_eq!(picker_choices_len(&s, "unknown-key-xyzzy"), 0);
-    // The synthetic registry contains only "test_enum"; there's no Bool to test against without rebuilding
-    // Test the non-Enum case via the default registry instead
+    // The synthetic registry contains only "test_enum".
     let bool_state = make_state();
     assert_eq!(picker_choices_len(&bool_state, "compact_mode"), 0);
 }
@@ -4490,8 +4382,6 @@ fn advance_next_recovers_when_selection_is_hidden() {
     let mut s = make_state();
     // Apply a filter that hides compact_mode.
     s.set_query("stamp");
-    // Manually corrupt selected to a HIDDEN row (compact_mode is row 1, hidden by "stamp")
-    // This bypasses clamp_selected_to_visible and exercises the defensive arm
     let compact_idx = s
         .rows
         .iter()
@@ -4514,9 +4404,7 @@ fn advance_next_recovers_when_selection_is_hidden() {
 #[test]
 fn advance_prev_recovers_when_selection_is_hidden() {
     let mut s = make_state();
-    // The filter must match exactly one setting, so the "LAST visible" target is unambiguous
-    // `ascii` is a simple_mode keyword and hits nothing else (settings_e2e pins that)
-    // Corrupt `selected` to the now-hidden compact_mode; Up must land on simple_mode
+    // The filter must match exactly one setting.
     s.set_query("flowchart");
     let compact_idx = s
         .rows
@@ -4534,9 +4422,8 @@ fn advance_prev_recovers_when_selection_is_hidden() {
     assert_eq!(s.selected, mermaid_idx);
 }
 
-// The renderer reserves one empty visual line ABOVE every section header EXCEPT the one that lands
-// first in the viewport. These tests render the modal directly to a buffer and inspect the
-// y-positions of the rendered category labels.
+// The renderer reserves one empty visual line ABOVE every section header
+// EXCEPT the one that lands first in the viewport.
 
 /// Scan one row of the buffer and return its text content (no styles) with leading/trailing whitespace preserved.
 fn buf_row_text(buf: &Buffer, y: u16, x: u16, width: u16) -> String {
@@ -4591,8 +4478,8 @@ fn find_text_col(buf: &Buffer, y: u16, needle: &str) -> Option<u16> {
 #[test]
 fn section_headers_have_blank_line_above_except_first() {
     let mut s = make_state();
-    // Allocate a generous viewport so every category fits
-    // The default registry contains 6 categories with 16 settings; the blank lines push us to ~23 lines, fits in 60
+    // Allocate a generous viewport so every category fits The default
+    // registry contains categories with multiple settings.
     let area = Rect {
         x: 0,
         y: 0,
@@ -4603,8 +4490,7 @@ fn section_headers_have_blank_line_above_except_first() {
     let theme = Theme::current();
     render_rows(&mut buf, area, &mut s, &theme);
 
-    // Collect each category's expected label and the y position of its rendered label line
-    // Headers render with their full label (e.g. "Appearance"); we locate each header by searching for its label as the row content.
+    // Collect each category's expected label and the y position of its rendered label line Headers render with their full label.
     let mut header_ys: Vec<(u16, &'static str)> = Vec::new();
     for cat in SettingCategory::ALL {
         // Skip categories the default registry doesn't populate (e.g. Session; no settings registered).
@@ -4665,8 +4551,7 @@ fn first_section_header_has_no_leading_gap() {
     let theme = Theme::current();
     render_rows(&mut buf, area, &mut s, &theme);
 
-    // The very first row of the area must contain the first category's label
-    // Appearance is first in `SettingCategory::ALL` and is registered by `default_settings()`
+    // The first row of the area must contain the first category's label Appearance is first in `SettingCategory::ALL` and is registered.
     let first_row = buf_row_text(&buf, area.y, area.x, area.width);
     let appearance = SettingCategory::Appearance.label();
     assert!(
@@ -4718,12 +4603,8 @@ fn row_rects_shift_down_for_blank_lines_above_headers() {
     }
 }
 
-// The `row_layout` helper decides one-line vs two-line vs two-line-with-label-truncation based on
-// the full label width. These tests pin the behaviour at three width budgets that exercise each
-// layout variant.
 
 /// Unit test for the extracted `wrap_description` helper.
-/// Pins its behavior in one place so each of the three callers doesn't have to assert it indirectly through a modal-render check.
 #[test]
 fn wrap_description_empty_and_zero_width_return_empty() {
     assert!(wrap_description("", 80).is_empty());
@@ -4760,8 +4641,8 @@ fn wrap_description_splits_long_text_at_word_boundaries() {
 }
 
 fn synthetic_long_label_meta() -> SettingMeta {
-    // Fixed 31-cell label for the two-line threshold tests below
-    // The live `simple_mode` label ("Disable vim input mode", 22 cells) is too short to trigger the wrap path organically
+    // Fixed 31-cell label for those-line threshold tests below The live `simple_mode` label ("Disable vim input mode",
+    // cells) is too short to trigger the wrap path organically
     SettingMeta {
         key: "test-long-label",
         category: SettingCategory::Appearance,
@@ -4792,8 +4673,7 @@ fn synthetic_enum_chevron_meta() -> SettingMeta {
 }
 
 /// One-line total (with `off` + chrome = 38 cells) doesn't fit at width=35, so the row picks
-/// `TwoLine`. The label alone (with triangle + right pad = 34 cells) DOES fit, so it stays on line
-/// 1 without truncation.
+/// `TwoLine`.
 #[test]
 fn narrow_terminal_drops_value_to_second_line() {
     let meta = synthetic_long_label_meta();
@@ -4831,8 +4711,7 @@ fn narrow_terminal_drops_value_to_second_line() {
         line2.contains("off"),
         "value `off` must render on line 2 (right-aligned): {line2:?}"
     );
-    // Value should be right-aligned: the `off` text ends just before the (reserved-but-empty) chevron
-    // column AND the 1-cell right pad.
+    // Value should be right-aligned: the `off` text ends before the (reserved-but-empty) chevron column.
     let last_idx = line2.rfind("off").expect("line2 contains `off`");
     let slack = (ROW_CHEVRON_COL_W as usize) + (ROW_RIGHT_PAD_W as usize) + 1;
     assert!(
@@ -4889,8 +4768,6 @@ fn wide_terminal_keeps_value_on_first_line() {
     );
 }
 
-/// `row_layout`'s pathological-truncation branch: when even the label alone exceeds the row width, the label truncates with `…` on line 1.
-/// The value still drops to line 2.
 #[test]
 fn pathologically_narrow_truncates_label_with_ellipsis() {
     let meta = synthetic_long_label_meta();
@@ -4926,9 +4803,8 @@ fn pathologically_narrow_truncates_label_with_ellipsis() {
     );
 }
 
-/// Two-line rows expand `state.row_rects` to span BOTH lines so mouse clicks on either line trigger
-/// the same default action. `coding_data_sharing`'s label plus the value "Opt out", the chevron,
-/// and the row chrome are far wider than the width=28 we render at. So the row drops to two lines.
+/// `coding_data_sharing`'s label plus the value "Opt out", the chevron, and the row chrome are far
+/// wider than the width=28 we render at. So the row drops to a couple of lines.
 #[test]
 fn two_line_row_hit_rect_spans_both_lines() {
     let mut s = make_state();
@@ -4937,7 +4813,6 @@ fn two_line_row_hit_rect_spans_both_lines() {
         .iter()
         .position(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "coding_data_sharing"))
         .expect("coding_data_sharing must be registered");
-    // Render at a narrow width so coding_data_sharing forces a two-line layout
     let area = Rect {
         x: 0,
         y: 0,
@@ -4958,10 +4833,9 @@ fn two_line_row_hit_rect_spans_both_lines() {
         rect.height
     );
 
-    // Synthesize a click on line 2 of the row. The mouse handler should fire the default action (open the enum picker for coding_data_sharing).
+    // The mouse handler should fire the default action (open the enum picker for coding_data_sharing).
     s.list_area = area;
     let click_y = rect.y + 1;
-    // Click somewhere in the middle of line 2.
     let click_x = rect.x + rect.width / 2;
     // First click: only selects (since selection might not match). Force selection on first to make it a direct activation.
     let outcome = handle_settings_mouse(
@@ -4987,11 +4861,9 @@ fn two_line_row_hit_rect_spans_both_lines() {
     }
 }
 
-/// Expanded two-line rows render label (line 1), value (line 2), and the wrapped description on subsequent lines.
 #[test]
 fn two_line_row_with_expansion_renders_three_segments() {
     let mut s = make_state();
-    // The coding-data row's label + value (with chevron) won't fit on a 28-col line, forcing two-line layout
     let row_idx = s
         .rows
         .iter()
@@ -5018,7 +4890,7 @@ fn two_line_row_with_expansion_renders_three_segments() {
         "expanded two-line row must allocate ≥2 lines for the row itself, got height={}",
         rect.height
     );
-    // The row label is on line 1. A 28-col row truncates a long label, so match the head of the live copy rather than the whole string.
+    // A 28-col row truncates a long label, so match the head of the live copy rather than the whole string.
     let label_line = buf_row_text(&buf, rect.y, area.x, area.width);
     let label = s
         .registry
@@ -5034,16 +4906,12 @@ fn two_line_row_with_expansion_renders_three_segments() {
         label_line.contains(&head),
         "line 1 must contain the row label (head {head:?}): {label_line:?}"
     );
-    // The value (display: "Opt out" or similar) is on line 2.
     let value_line = buf_row_text(&buf, rect.y + 1, area.x, area.width);
-    // Value comes from displaying the canonical-to-display mapping, which uses the synthetic enum's "Third Option" canonical of "opt-out"
-    // The display fallback returns the canonical when the lookup misses
-    // Registry has the real `CodingDataSharing` choices, so display should be "Opt out"
+    // Value comes from displaying the canonical-to-display mapping.
     assert!(
         value_line.contains("Opt") || value_line.contains("opt") || value_line.contains("out"),
         "line 2 must contain the value text: {value_line:?}"
     );
-    // The expanded description renders on line 3 and below.
     let desc_line = buf_row_text(&buf, rect.y + 2, area.x, area.width);
     assert!(
         !desc_line.chars().all(|c| c == ' '),
@@ -5077,7 +4945,6 @@ fn group_row_renders_expanded_description() {
     let Some(&rect) = s.row_rects.get(row_idx) else {
         panic!("row_rects[{row_idx}] missing");
     };
-    // Line 1 is the group's chevron row (its label).
     let label_line = buf_row_text(&buf, rect.y, area.x, area.width);
     assert!(
         label_line.contains("Show contextual hints"),
@@ -5110,29 +4977,25 @@ fn group_row_renders_expanded_description() {
 /// `row_layout`'s width threshold: a label + value that exactly fits picks `OneLine`; one cell narrower picks `TwoLine`.
 #[test]
 fn row_layout_threshold_is_exact() {
-    let label = "Coding data sharing"; // 19 cells
-    let value = "Opt out"; // 7 cells
-    // chrome (triangle + gap + chevron + right pad) = 2 + 1 + 2 + 1 = 6 total = 19 + 7 + 6 = 32 cells (chevron-enabled)
+    let label = "Coding data sharing"; // Cells
+    let value = "Opt out"; // Cells
     assert_eq!(row_layout(32, label, value, false), RowLayout::OneLine);
     assert_eq!(row_layout(31, label, value, false), RowLayout::TwoLine);
 }
 
-/// Sanity: `row_layout` handles bool-without-chevron rows (Bool kind, no `›` suffix).
-/// The chevron column is reserved even for Bool rows, so the chrome cost is the same with and without the glyph.
-/// The renderer's Bool / Enum distinction is purely whether to paint the `›` glyph in that column.
+/// Sanity: `row_layout` handles bool-without-chevron rows (Bool kind, no
+/// `›` suffix). The chevron column is reserved even for Bool rows, so the
+/// chrome cost is the same with and without the glyph.
 #[test]
 fn row_layout_bool_without_chevron() {
-    let label = "Disable vim mode (experimental)"; // 31 cells
-    let value = "off"; // 3 cells
-    // chrome (triangle + gap + reserved chevron col + right pad) = 2 + 1 + 2 + 1 = 6 cells, identical to the chevron-enabled case
-    // total = 31 + 3 + 6 = 40 cells.
+    let label = "Disable vim mode (experimental)"; // Cells
+    let value = "off"; // Cells
     assert_eq!(row_layout(40, label, value, false), RowLayout::OneLine);
     assert_eq!(row_layout(39, label, value, false), RowLayout::TwoLine);
 }
 
-// User-feedback follow-up: always reserve a blank line between the "Tip · Ask Grok…" docs footer
-// and the keybindings hints. The chrome sets `footer_lines` to `predicted_hint_rows + 1`, so a
-// blank row always separates the tip from the first hint line.
+// User-feedback follow-up: always reserve a blank line between the "Tip ·
+// Ask Grok…" docs footer and the keybindings hints.
 
 /// Find the y of the buffer row containing `needle` (first match, scanning top to bottom). Returns `None` if no row matches.
 fn find_row_y(buf: &Buffer, area: Rect, needle: &str) -> Option<u16> {
@@ -5146,7 +5009,6 @@ fn find_row_y(buf: &Buffer, area: Rect, needle: &str) -> Option<u16> {
 }
 
 /// Return true if every cell strictly INSIDE the modal popup's vertical borders on the given row is whitespace.
-/// The modal borders (`│` at popup_area.x and at popup_area.x + width - 1) are excluded from the check.
 /// We test the gap-line interior, not the chrome glyphs.
 fn modal_interior_row_is_blank(buf: &Buffer, popup_area: Rect, y: u16) -> bool {
     let left = popup_area.x.saturating_add(1);
@@ -5164,13 +5026,10 @@ fn modal_interior_row_is_blank(buf: &Buffer, popup_area: Rect, y: u16) -> bool {
     true
 }
 
-/// Narrow modal: the Browse-mode hint string `↑/↓/j/k nav | g/G top/btm | …` wraps to 2+ lines.
 /// Without the fix the tip would sit directly above the first hint line; with the fix there's exactly one blank row between them.
 #[test]
 fn footer_has_blank_line_between_tip_and_hints_when_hints_wrap() {
     let mut s = make_state();
-    // 70-col viewport caps modal_width at max(70*0.70, 44) = 49, so footer_width ≈ 45
-    // Browse-mode hints are ~114 cells so they wrap to at least 2 rows
     let area = Rect {
         x: 0,
         y: 0,
@@ -5182,9 +5041,7 @@ fn footer_has_blank_line_between_tip_and_hints_when_hints_wrap() {
     let popup_area = s.window.popup_area.expect("modal must have rendered");
 
     let tip_y = find_row_y(&buf, area, "Tip").expect("tip row must render");
-    // Sanity-check that the hints actually wrap. Look for the first hint label (`nav`) AND the last
-    // (`F2/Esc`); they must land on different y if the hints wrapped. Use `j/k nav` (hint-unique)
-    // rather than `nav` alone, which also matches the `vim_mode` row's "navigation" keyword.
+    // Sanity-check that the hints wrap.
     let first_hint_y = find_row_y(&buf, area, "j/k nav").expect("first hint line must render");
     let last_hint_y = find_row_y(&buf, area, "F2/Esc").expect("close hint must render");
     assert!(
@@ -5213,8 +5070,7 @@ fn footer_has_blank_line_between_tip_and_hints_when_hints_wrap() {
 #[test]
 fn footer_has_blank_line_between_tip_and_hints_when_hints_dont_wrap() {
     let mut s = make_state();
-    // FilterFocused mode has 5 shortcuts totalling ~76 cells
-    // Fits on one row at any modal width supported by `render_settings_modal` (max_width=110)
+    // FilterFocused mode has shortcuts totalling cells Fits on one row at any modal width supported by `render_settings_modal`.
     s.focus_filter();
     let area = Rect {
         x: 0,
@@ -5227,8 +5083,7 @@ fn footer_has_blank_line_between_tip_and_hints_when_hints_dont_wrap() {
     let popup_area = s.window.popup_area.expect("modal must have rendered");
 
     let tip_y = find_row_y(&buf, area, "Tip").expect("tip row must render");
-    // FilterFocused-mode hints: `type to filter | ↑/↓ nav | Backspace edit | Enter commit | Esc clear`
-    // Verify both ends land on the SAME row (proves no wrap)
+    // FilterFocused-mode hints: `type to filter | ↑/↓ nav | Backspace edit | Enter commit | Esc clear` Verify both ends land on the SAME row.
     let first_hint_y = find_row_y(&buf, area, "type to filter").expect("first hint must render");
     let last_hint_y = find_row_y(&buf, area, "Esc clear").expect("last hint must render");
     assert_eq!(
@@ -5257,7 +5112,6 @@ fn footer_has_blank_line_between_tip_and_hints_when_hints_dont_wrap() {
 /// any width supported by the modal.
 #[test]
 fn footer_total_height_grows_when_hints_wrap() {
-    // Wide modal: FilterFocused-mode hints fit on 1 row. footer_lines = 1 (hints) + 1 (gap) = 2, matching the baseline.
     let wide_area = Rect {
         x: 0,
         y: 0,
@@ -5270,7 +5124,7 @@ fn footer_total_height_grows_when_hints_wrap() {
     render_settings_modal(&mut buf_wide, wide_area, &mut s_wide, false, None);
     let wide_list_height = s_wide.list_area.height;
 
-    // Narrow modal: same mode, hints wrap to exactly 2 rows. footer_lines = 2 (hints) + 1 (gap) = 3, one more than wide.
+    // Narrow modal: same mode, hints wrap to a couple of rows.
     let narrow_area = Rect {
         x: 0,
         y: 0,
@@ -5283,8 +5137,7 @@ fn footer_total_height_grows_when_hints_wrap() {
     render_settings_modal(&mut buf_narrow, narrow_area, &mut s_narrow, false, None);
     let narrow_list_height = s_narrow.list_area.height;
 
-    // Verify the wrap actually happens at the narrow width AND doesn't over-wrap to 3+ rows
-    // The assertion below would also fire if both renders had the same wrap count OR the narrow case wrapped further; a silent test bug
+    // Verify the wrap happens at the narrow width.
     let narrow_first_hint =
         find_row_y(&buf_narrow, narrow_area, "type to filter").expect("first hint");
     let narrow_last_hint = find_row_y(&buf_narrow, narrow_area, "Esc clear").expect("last hint");
@@ -5302,8 +5155,8 @@ fn footer_total_height_grows_when_hints_wrap() {
          last={wide_last_hint}"
     );
 
-    // The narrow render reserves one extra row at the bottom for the wrapped hint, so the row-list area is exactly one row shorter
-    // Equality (not "<=") rules out off-by-N regressions where future code reserves 2 rows instead of 1
+    // The narrow render reserves one extra row at the bottom for the wrapped
+    // hint.
     assert_eq!(
         narrow_list_height + 1,
         wide_list_height,
@@ -5341,7 +5194,6 @@ fn section_header_style_matches_palette() {
     }
     let header_y = header_y.expect("must find Appearance header");
 
-    // The label is rendered at col 1 (after the leading space) in the gray and BOLD style; matches the palette
     let cell = buf.cell((area.x + 1, header_y)).expect("cell at label col");
     assert_eq!(
         cell.fg, theme.gray,
@@ -5359,9 +5211,7 @@ fn section_header_style_matches_palette() {
         "section header row must contain `─` separator cells: {row_text:?}"
     );
 
-    // The separator cells must render in `theme.gray_dim` for palette parity
-    // Walk the row and find the first `─` cell; assert its fg color
-    // Mirrors the `search_bar_renders_divider_below` pattern.
+    // The separator cells must render in `theme.gray_dim` for palette parity Walk the row and find the first `─` cell.
     let mut sep_cell_fg = None;
     for x in area.x..area.x + area.width {
         if let Some(cell) = buf.cell((x, header_y))
@@ -5412,7 +5262,6 @@ fn search_bar_focused_style_matches_palette() {
         "search bar label prefix must use theme.gray"
     );
 
-    // Cursor cell at the input position (the label ` search: ` is 9 cells; cursor lands at col 9) is inverse-video: bg = text_primary, fg = bg_base
     let cursor_x = " search: ".width() as u16;
     let cursor_cell = buf.cell((area.x + cursor_x, area.y)).expect("cursor cell");
     assert_eq!(
@@ -5426,8 +5275,8 @@ fn search_bar_focused_style_matches_palette() {
 }
 
 /// An empty, unfocused search bar shows ` / to search` in `gray_dim`; same wording the palette
-/// uses. Sample multiple cells of the hint span (not just col 1). A regression that styled only the
-/// first few cells in gray_dim and left the rest at default would otherwise be missed.
+/// uses. A regression that styled only the first few cells in gray_dim and left the rest at default
+/// would otherwise be missed.
 #[test]
 fn search_bar_placeholder_matches_palette() {
     let area = Rect {
@@ -5458,7 +5307,7 @@ fn search_bar_placeholder_matches_palette() {
         txt.contains("/ to search"),
         "search bar placeholder must read `/ to search`, got: {txt:?}"
     );
-    // Sample BOTH ends of the hint span. The hint is " / to search" (12 cells); the first slash is at col 1 and the trailing `h` is at col 11.
+    // Sample BOTH ends of the hint span.
     let slash_cell = buf.cell((area.x + 1, area.y)).expect("col 1 cell (/)");
     assert_eq!(
         slash_cell.fg, theme.gray_dim,
@@ -5605,9 +5454,9 @@ fn bool_off_value_renders_in_dim_color() {
         on_cell.fg, theme.accent_user,
         "Bool(true) value must keep theme.accent_user color (active state)",
     );
-    // The per-cell asserts pin `on.fg == theme.accent_user` and `off.fg == theme.gray`
-    // Asserting the two THEME tokens also differ catches a token flip that would render on and off identically
-    // Extreme low-color terminals can collapse both tokens to `Color::Reset`, so assert only when they differ
+    // The per-cell asserts pin `on.fg == theme.accent_user` and `off.fg ==
+    // theme.gray` Asserting both THEME tokens also differ catches a token
+    // flip that will render.
     if theme.accent_user != theme.gray {
         assert_ne!(
             on_cell.fg, off_cell.fg,
@@ -5671,9 +5520,7 @@ fn chevron_column_is_at_constant_right_offset() {
         None,
     );
 
-    // The chevron column is a 2-cell block at `area.right - ROW_RIGHT_PAD_W - ROW_CHEVRON_COL_W` (i.e. `area.right - 3` in this fixture).
-    // The `›` glyph occupies the SECOND cell of the column (the first cell is a leading space that doubles as gap from the value)
-    // For Bool rows the column stays empty
+    // The chevron column is a 2-cell block at `area.right - ROW_RIGHT_PAD_W - ROW_CHEVRON_COL_W`.
     let glyph_x = area.x + area.width - ROW_RIGHT_PAD_W - 1;
     let bool_cell = buf_bool.cell((glyph_x, 0)).expect("bool col cell");
     assert_eq!(
@@ -5693,8 +5540,7 @@ fn chevron_column_is_at_constant_right_offset() {
         enum_cell.symbol(),
     );
 
-    // The value hit-rect's right edge must be the same for both rows; that's the required visual alignment
-    // Both rects end at `value_rect.x + value_rect.width` which equals `chevron_col_x + ROW_CHEVRON_COL_W`
+    // The value hit-rect's right edge must be the same for both rows.
     let bool_right = bool_rect.x + bool_rect.width;
     let enum_right = enum_rect.x + enum_rect.width;
     assert_eq!(
@@ -5703,8 +5549,8 @@ fn chevron_column_is_at_constant_right_offset() {
          edge (bool_right={bool_right}, enum_right={enum_right})",
     );
 
-    // Also exercise the SAME buffer with multiple rows stacked so we catch a regression where, e.g., only Bool rows compute the wrong chevron column
-    // Render Bool then Enum on consecutive rows and assert the chevron column lands at the same column for both
+    // Also exercise the SAME buffer with multiple rows stacked so we catch a
+    // regression where, e.g., only.
     let multi_area = Rect {
         x: 0,
         y: 0,
@@ -5745,9 +5591,7 @@ fn chevron_column_is_at_constant_right_offset() {
         false,
         None,
     );
-    // Bool row's `off` ends at column N; Enum row's `›` glyph lands at column M
-    // The contract: N == M's column minus 1 (the gap between value and chevron column)
-    // Equivalently, the chevron-column glyph position is the same on both rows
+    // Bool row's `off` ends at column N; Enum row's `›` glyph lands at column M The contract.
     let glyph_x_multi = multi_area.x + multi_area.width - ROW_RIGHT_PAD_W - 1;
     let enum_glyph_cell = buf_multi
         .cell((glyph_x_multi, 2))
@@ -5768,14 +5612,11 @@ fn chevron_column_is_at_constant_right_offset() {
     );
 }
 
-/// Two-line rows anchor the chevron column at the SAME right offset as one-line rows.
-/// Before the fix, line-2's chevron landed 1 cell further right than line-1's, producing a staircase in mixed-layout row lists.
 #[test]
 fn chevron_column_aligns_across_one_and_two_line_layouts() {
     let theme = Theme::current();
-    // `synthetic_enum_chevron_meta` has label "Coding data sharing" (19 chars) + value "choice_a" (8 chars)
-    // At width=25 the one-line total (2 + 19 + 1 + 8 + 2 + 1 = 33) exceeds the width, so the layout flips to TwoLine
-    // At width=60 the same row fits one-line.
+    // `synthetic_enum_chevron_meta` has label "Coding data sharing"
+    // (chars) + value "choice_a" (chars) At width=25 the one-line total.
     let area_two = Rect {
         x: 0,
         y: 0,
@@ -5814,9 +5655,7 @@ fn chevron_column_aligns_across_one_and_two_line_layouts() {
         false,
         None,
     );
-    // The column offset from the area's right edge is constant: `area.right - ROW_RIGHT_PAD_W - 1` is the `›` glyph position
-    // The chevron span " ›" is 2 cells; the second cell holds the glyph
-    // Computed independently for each area so the offset semantics is what we're testing
+    // The column offset from the area's right edge is constant.
     let glyph_x_two = area_two.x + area_two.width - ROW_RIGHT_PAD_W - 1;
     let glyph_x_one = area_one.x + area_one.width - ROW_RIGHT_PAD_W - 1;
     let two_line_cell = buf_two
@@ -5880,7 +5719,6 @@ fn docs_footer_tip_is_centered() {
     );
 
     // SHORT path: width that fits SHORT but not LONG.
-    // SHORT is "Tip · Ask Grok to change a setting" (34 cells); LONG is ~73 cells. width=40 lands in the SHORT band.
     let (row_short, tip_start_short, trailing_short) = render(40);
     assert!(
         row_short.contains("change a setting"),
@@ -5896,15 +5734,13 @@ fn docs_footer_tip_is_centered() {
          leading_ws={tip_start_short} vs trailing_ws={trailing_short}",
     );
 
-    // Truncated path: width too narrow even for SHORT
-    // The truncation prefix `Tip · …` should still render; the centering math operates on the truncated SHORT
+    // Truncated path: width too narrow even for SHORT The truncation prefix `Tip · …` should still render.
     let (row_tiny, tip_start_tiny, _trailing_tiny) = render(15);
     assert!(
         row_tiny.contains("Tip"),
         "even at width=15 the `Tip` prefix must render: {row_tiny:?}",
     );
-    // At width=15, the truncated SHORT fills most/all of the row; leading_ws could be 0 if the truncation is exactly 15 cells
-    // The contract: centering math doesn't crash and starts at a valid column (not negative)
+    // At width=15, the truncated SHORT fills most/all of the row.
     assert!(
         tip_start_tiny < 15,
         "tip start must be inside the row at width=15: {tip_start_tiny}",
@@ -5934,9 +5770,8 @@ fn tip_line_has_blank_row_above() {
         }
     }
     let tip_y = tip_y.expect("must find tip row");
-    // The row immediately above the tip must be blank inside the modal's content area
-    // Modal borders (`│`) at the left/right edges are expected
-    // We strip leading/trailing border characters before checking that the interior is all spaces
+    // The row immediately above the tip must be blank inside the modal's
+    // content area Modal borders (`│`).
     assert!(
         tip_y > 0,
         "tip row must not be at y=0 (no row above to check)",
@@ -5975,7 +5810,6 @@ fn enter_picker_for(key: &'static str) -> SettingsModalState {
 #[test]
 fn picker_description_word_wraps_no_ellipsis() {
     // Synthetic enum setting with a description forced to wrap.
-    // The description is ~140 chars; at width=30 with a small amount of chrome on either side, it MUST produce at least 4 description rows
     let long_desc = "This is a deliberately long description \
                      designed to force the word-wrap renderer \
                      across multiple rows so the test exercises \
@@ -6000,8 +5834,7 @@ fn picker_description_word_wraps_no_ellipsis() {
         UiConfig::default(),
         PagerLocalSnapshot::default(),
     );
-    // `SettingsModalState::new` snaps `selected` to the first non-header row; with our single-entry registry that's already the synthetic setting
-    // Skip `select_at` since it would no-op (and return false) when called on the already-selected row
+    // `SettingsModalState::new` snaps `selected` to the first non-header row.
     assert!(
         matches!(
             s.rows.get(s.selected),
@@ -6041,7 +5874,6 @@ fn picker_description_word_wraps_no_ellipsis() {
     );
 
     // 2. LAST word of description renders too; proves wrap reached the end (no mid-sentence truncation).
-    // The description ends with "fitting." so we look for that
     let last_word = long_desc.split_whitespace().last().unwrap_or("");
     assert!(
         all_text.contains(last_word),
@@ -6049,9 +5881,8 @@ fn picker_description_word_wraps_no_ellipsis() {
          (proves word-wrap reached the end): {all_text}",
     );
 
-    // Multiple description rows render. Find the title row (first row containing "Wrap test"). Then
-    // count consecutive subsequent rows containing non-empty, non-choice-marker text; those are the
-    // description rows. We expect at least 2.
+    // Multiple description rows render. Find the title row (first row
+    // containing "Wrap test").
     let title_y = rows
         .iter()
         .position(|r| r.contains("Wrap test"))
@@ -6115,9 +5946,7 @@ fn settings_breadcrumb_rect_set_in_sub_pane_modes() {
         rect.height, 1,
         "breadcrumb rect must be 1 row tall (sits on the chrome's top border)",
     );
-    // Width is the full breadcrumb `Settings › <label>`
-    // The leaf label varies by setting
-    // Assert it's strictly wider than `Settings` alone (proof that the rect extends past the prefix) AND at least MODAL_TITLE + " › "
+    // Width is the full breadcrumb `Settings › <label>` The leaf label varies by setting Assert it's strictly wider than `Settings` alone.
     let prefix_w = MODAL_TITLE.width() + " \u{203A} ".width();
     assert!(
         (rect.width as usize) > MODAL_TITLE.width(),
@@ -6254,8 +6083,8 @@ fn click_settings_breadcrumb_after_nav_reverts_to_original() {
         height: 30,
     };
     let mut s = enter_picker_for("theme");
-    // Navigate to a different theme so original != current.
-    // The picker exposes `choices_idx`; the registry's theme choices include at least 2 entries so we can safely advance
+    // Navigate to a different theme so original != current. The picker exposes `choices_idx`; the registry's theme
+    // choices include a couple of entries so we can safely advance
     let (orig_canonical_owned, advanced_idx) = match &s.mode() {
         SettingsModalMode::PickingEnum {
             choices_idx,
@@ -6270,8 +6099,6 @@ fn click_settings_breadcrumb_after_nav_reverts_to_original() {
         }
         other => panic!("expected PickingEnum, got {other:?}"),
     };
-    // Pick a different index
-    // The default theme is `groknight` (index 1 per the registry); advance to index 0 to ensure we're navigating to a different value
     let target_idx = if advanced_idx == 0 { 1 } else { 0 };
     match s.mode() {
         SettingsModalMode::PickingEnum {
@@ -6327,8 +6154,8 @@ fn d_key_in_picking_enum_dispatches_open_reset_confirm() {
                 key, "theme",
                 "OpenResetConfirm key must be the active picker setting",
             );
-            // Default theme is `groknight`
-            // Entering the picker captures `original_value = current value = groknight`, so the revert dispatches with that canonical
+            // Default theme is `groknight` Entering the picker captures
+            // `original_value = current value = groknight`.
             assert_eq!(
                 orig, "groknight",
                 "PreviewTheme revert must carry the original canonical",
@@ -6354,8 +6181,6 @@ fn d_key_in_int_stepper_dispatches_open_reset_confirm() {
         matches!(s.mode(), SettingsModalMode::EditingValue { .. }),
         "fixture must start in EditingValue",
     );
-    // Step Up so the pending buffer diverges from the default (`max_thoughts_width` default is 100)
-    // This leaves the buffer at "80", not at default, not at the seeded 75
     let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
     assert_eq!(
         int_stepper_buffer(&s),
@@ -6379,9 +6204,9 @@ fn d_key_in_int_stepper_dispatches_open_reset_confirm() {
         matches!(s.mode(), SettingsModalMode::Browse),
         "stepper must collapse to Browse before dispatching reset",
     );
-    // Pending buffer must be discarded; no lingering EditingValue payload
-    // The matches! above checks the discriminant
-    // This `!matches!` is the explicit assertion that we did NOT carry the in-flight buffer through the mode change
+    // Pending buffer must be discarded; no lingering EditingValue payload The
+    // matches! above checks the discriminant This `!matches!` is the explicit
+    // assertion.
     assert!(
         !matches!(&s.mode(), SettingsModalMode::EditingValue { .. }),
         "stepper's pending edit must NOT survive the d-reset \
@@ -6440,7 +6265,6 @@ fn click_outside_settings_breadcrumb_is_noop() {
     let rect = s
         .settings_breadcrumb_rect
         .expect("PickingEnum must populate breadcrumb rect");
-    // Click 1 cell PAST the rect's right edge; on the trailing ` ─` decoration or the empty modal interior
     let past_right_x = rect.x + rect.width + 2;
     let outcome = handle_settings_mouse(
         &mut s,
@@ -6459,7 +6283,6 @@ fn click_outside_settings_breadcrumb_is_noop() {
          got {:?}",
         s.mode(),
     );
-    // Click 1 cell BEFORE the rect's left edge; on the leading `─ ` decoration
     let before_left_x = rect.x.saturating_sub(1);
     let outcome2 = handle_settings_mouse(
         &mut s,
@@ -6573,7 +6396,6 @@ fn consent_chooser_drops_tip_and_reset() {
     );
 }
 
-/// The row-list-with-search-bar layout reserves row 1 (below the search bar) for a `─` divider in `gray_dim`; palette parity.
 #[test]
 fn search_bar_renders_divider_below() {
     let mut s = make_state();
@@ -6600,9 +6422,7 @@ fn search_bar_renders_divider_below() {
     let search_y = search_y.expect("must find search bar row");
     let divider_y = search_y + 1;
 
-    // The divider must span the full row width, not just the first cell
-    // Count `─` cells across the row's interior (excluding the modal borders) and assert at least half the width is `─`
-    // Also pin the color across multiple cells, not just the first
+    // The divider must span the full row width.
     let mut box_count = 0usize;
     let mut wrong_color_cells = 0usize;
     let mut first_box_cell_fg = None;
@@ -6625,8 +6445,7 @@ fn search_bar_renders_divider_below() {
         box_count > 0,
         "row immediately below search bar must contain `─` divider cells"
     );
-    // The divider spans the inner area between the modal borders; expect a substantial fraction of the row
-    // A regression that only painted the first 5 cells as `─` would fail this; palette parity is "full-width divider"
+    // The divider spans the inner area between the modal borders.
     assert!(
         box_count >= (area.width as usize) / 4,
         "divider must span ≥ 1/4 of the row width, got {box_count} cells \
@@ -6648,9 +6467,9 @@ fn search_bar_renders_divider_below() {
 // The preview block renders below the Int stepper inside the EditingValue sub-pane when the active
 // setting key is `max_thoughts_width`.
 
-/// Helper: render the EditingValue sub-pane for `max_thoughts_width` at a given starting buffer value into a fresh `Buffer` of the supplied area.
+/// Helper: render the EditingValue sub-pane for `max_thoughts_width` at a
+/// given starting buffer value into a fresh `Buffer` of the supplied area.
 /// Returns `(buf, state)`.
-/// The stepper renders at the top of `area`; the preview (if rendered) anchors to the bottom of `area`.
 fn render_max_thoughts_width_at(value: i64, area: Rect) -> (Buffer, SettingsModalState) {
     let mut s = int_stepper_fixture(value);
     let mut buf = Buffer::empty(area);
@@ -6670,7 +6489,6 @@ fn find_text_row(buf: &Buffer, area: Rect, needle: &str) -> Option<u16> {
     None
 }
 
-/// Test 1: the preview renders directly below the stepper with exactly 1 blank row of separation.
 /// The implementation no longer renders in-pane stepper hints.
 #[test]
 fn max_thoughts_width_preview_renders_below_stepper() {
@@ -6688,7 +6506,6 @@ fn max_thoughts_width_preview_renders_below_stepper() {
     // Locate the preview title row.
     let preview_y = find_text_row(&buf, area, "preview")
         .expect("`preview` title row must render below the stepper");
-    // Exact placement: 1 blank row between stepper and preview title, regardless of `area.height` (no bottom-anchoring)
     assert_eq!(
         preview_y,
         stepper_y + 2,
@@ -6711,9 +6528,7 @@ fn max_thoughts_width_preview_renders_below_stepper() {
     );
 }
 
-/// Test 2: the title row is bold, italic, lowercase `preview`.
 /// We sample the cell at the title row's `p` and assert the modifiers.
-/// Column 0 of the preview block holds the `p`, since the preview is left-aligned within `area`.
 #[test]
 fn max_thoughts_width_preview_title_is_bold_italic_lowercase() {
     let area = Rect {
@@ -6751,7 +6566,6 @@ fn max_thoughts_width_preview_title_is_bold_italic_lowercase() {
     );
 }
 
-/// Test 3: content rows carry `Modifier::ITALIC` (matches the scrollback's thinking-text style convention).
 #[test]
 fn max_thoughts_width_preview_content_is_italic() {
     let area = Rect {
@@ -6762,8 +6576,6 @@ fn max_thoughts_width_preview_content_is_italic() {
     };
     let (buf, _) = render_max_thoughts_width_at(85, area);
     let preview_y = find_text_row(&buf, area, "preview").expect("preview title must render");
-    // The first content row is the row immediately below the title
-    // Sample column 0; the first character of the wrapped sample text (`L` from "Let me trace through ...")
     let content_y = preview_y + 1;
     let cell = buf
         .cell((area.x, content_y))
@@ -6786,7 +6598,6 @@ fn max_thoughts_width_preview_content_is_italic() {
     );
 }
 
-/// Test 4: the title row distinguishes itself from the content rows via two independent signals.
 /// "Darker" is not the contract; on the dark themes `bg_visual` is lighter than `bg_highlight`, and
 /// only GrokDay renders the title darker.
 #[test]
@@ -6805,7 +6616,7 @@ fn max_thoughts_width_preview_title_styling_distinguishes_from_content() {
     let content_cell = buf
         .cell((area.x, preview_y + 1))
         .expect("content cell at column 0");
-    // Wiring assertion: rendered cells use the current-theme bg tokens (tautological under NO_COLOR; meaningful when truecolor is on)
+    // Wiring assertion: rendered cells use the current-theme bg tokens (tautological under NO_COLOR.
     let theme = Theme::current();
     assert_eq!(
         title_cell.bg, theme.bg_visual,
@@ -6840,9 +6651,7 @@ fn max_thoughts_width_preview_title_styling_distinguishes_from_content() {
         crate::theme::ThemeKind::RosePineMoon => crate::theme::Theme::rosepine_moon(),
         // Resolved via `Theme::current()` rather than a constructor because `theme::oscura` is a private module
         crate::theme::ThemeKind::OscuraMidnight => crate::theme::Theme::current(),
-        // Both bg tokens are Reset (bandless palette), so the two-tone
-        // assertion below does not apply — the preview reads via the
-        // underline cue instead.
+        // Both bg tokens are Reset (bandless palette).
         crate::theme::ThemeKind::Terminal => return,
         crate::theme::ThemeKind::Auto => crate::theme::Theme::groknight(),
     };
@@ -6853,7 +6662,6 @@ fn max_thoughts_width_preview_title_styling_distinguishes_from_content() {
     );
 }
 
-/// Test 5: content rows wrap at the pending value; no rendered content row's text width exceeds the pending stepper value.
 #[test]
 fn max_thoughts_width_preview_wraps_at_pending_value() {
     // `area.width` is comfortably wider than the pending value so the clamp path doesn't fire; we want to exercise the pure-pending wrap path
@@ -6876,8 +6684,6 @@ fn max_thoughts_width_preview_wraps_at_pending_value() {
         content_lines.push(trimmed.to_string());
     }
     // Strengthen the wrap-shape assertion.
-    // A regression that disabled wrap and rendered a single truncated line at 50 cols would satisfy `w <= 50` but fail `len >= 2`
-    // The ~189-char sample at pending=50 wraps to at least 3 rows in practice; we assert at least 2 to leave headroom for word-boundary jitter
     assert!(
         content_lines.len() >= 2,
         "wrap must produce at least 2 content rows at pending=50 for the \
@@ -6894,11 +6700,8 @@ fn max_thoughts_width_preview_wraps_at_pending_value() {
     }
 }
 
-/// Test 6: when the terminal area is narrower than the pending value, the preview clamps to
-/// `area.width`.
 #[test]
 fn max_thoughts_width_preview_clamps_when_terminal_narrower_than_value() {
-    // 60-wide area, pending = 85, so clamp to 60
     let area = Rect {
         x: 0,
         y: 0,
@@ -6914,9 +6717,6 @@ fn max_thoughts_width_preview_clamps_when_terminal_narrower_than_value() {
         "title row must NOT contain the `clamped` suffix anymore — the clamp \
          indicator moved to a note row below the content; title_row={title_row:?}",
     );
-    // No content line may exceed area.width = 60 cols
-    // Also assert at least 2 content rows to guard against a regression that swapped wrap for truncation
-    // We stop scanning at the first non-content line, either a blank gap or the new `note: clamped at …` row
     let mut clamped_lines: Vec<String> = Vec::new();
     for y in (preview_y + 1)..area.height {
         let row = buf_row_text(&buf, y, area.x, area.width);
@@ -6968,9 +6768,7 @@ fn clamped_preview_renders_note_below_content() {
          the wrap content now; row={title_row:?}",
     );
 
-    // Walk forward to find the note
-    // Wrap content runs on consecutive non-empty rows; then exactly one blank row serves as the visual gap; then the `note:` row sits below that gap
-    // Stop at the first row that breaks the "content then gap then note" pattern
+    // Walk forward to find the note Wrap content runs on consecutive non-empty rows; then exactly one blank row serves as the visual gap.
     let mut note_y: Option<u16> = None;
     let mut last_content_y: Option<u16> = None;
     let mut saw_blank_gap = false;
@@ -6983,14 +6781,14 @@ fn clamped_preview_renders_note_below_content() {
         }
         if trimmed.is_empty() {
             if saw_blank_gap {
-                // Two consecutive blank rows; content ended and we're past the note's slot too. Bail.
+                // Consecutive blank rows; content ended and we're past the note's slot too. Bail.
                 break;
             }
             saw_blank_gap = true;
             continue;
         }
-        // Non-blank, non-note row
-        // If we already saw the blank gap and now see content again, the layout violated the contract; bail without finding the note
+        // Non-blank, non-note row If we already saw the blank gap and now see
+        // content again, the layout violated the contract.
         if saw_blank_gap {
             break;
         }
@@ -7013,9 +6811,6 @@ fn clamped_preview_renders_note_below_content() {
         "note row must read `note: clamped at 60 cols`; got {note_row:?}",
     );
 
-    // Style assertions: the note cell at column 0 (the `n` of "note:") must carry `theme.text_secondary` fg
-    // It must have no bg tint past `theme.bg_base` and no modifier
-    // We sample the modifier directly; the fg/bg colors are theme-dependent but compared symbolically to the theme tokens in use
     let theme = Theme::current();
     let cell = buf
         .cell((area.x, note_y))
@@ -7042,8 +6837,7 @@ fn clamped_preview_renders_note_below_content() {
 /// The wrap content keeps rendering at the full vertical budget; content takes priority.
 #[test]
 fn clamped_note_omitted_when_insufficient_height() {
-    // The stepper consumes the first ~5 rows (title + 1-line desc + gap + stepper). At width 60 the
-    // wrap of the sample text produces at least 6 wrap lines.
+    // The stepper consumes the first a few rows (title + 1-line desc + gap + stepper).
     let mut tight_height: Option<u16> = None;
     for h in 5u16..30u16 {
         let area = Rect {
@@ -7060,8 +6854,6 @@ fn clamped_note_omitted_when_insufficient_height() {
         let note_present = find_text_row(&buf, area, "note: clamped").is_some();
         if !note_present {
             tight_height = Some(h);
-            // Sanity: verify wrap content still rendered for at least 1 row below the title
-            // The preview did render; the note was just omitted for room
             let content_y = preview_y + 1;
             let content = buf_row_text(&buf, content_y, area.x, area.width);
             assert!(
@@ -7071,9 +6863,8 @@ fn clamped_note_omitted_when_insufficient_height() {
             );
         }
     }
-    // Sanity-check: we found at least one height at which the note was omitted
-    // Otherwise the boundary fixture is useless; every height fits the note
-    // At the tightest such height verify the note really IS absent (a final explicit assertion in case the sweep's discovery logic silently breaks)
+    // Sanity-check: we found at least one height at which the note was
+    // omitted Otherwise the boundary fixture is useless.
     let tight = tight_height.expect(
         "the height sweep must find at least one short-but-rendered-preview height \
          at which the note is omitted — adjust the sweep range if the fixture changes",
@@ -7116,13 +6907,11 @@ fn unclamped_preview_omits_note() {
     );
 }
 
-/// Test 7: when the modal area is too short for the preview's minimum vertical budget, the preview is omitted.
-/// That budget is stepper header + 5 rows below (gap + title + 2 content + gap).
 /// The stepper still renders alone.
 #[test]
 fn max_thoughts_width_preview_omitted_when_modal_too_short() {
-    // The stepper alone consumes ~5 rows (title + wrapped desc + gap + stepper)
-    // Total area height = 7 leaves 2 rows remaining; below the 5-row preview minimum
+    // The stepper alone consumes a few rows (title + wrapped desc +
+    // gap + stepper) Total area height = 7 leaves a couple of rows remaining.
     let area = Rect {
         x: 0,
         y: 0,
@@ -7142,7 +6931,7 @@ fn max_thoughts_width_preview_omitted_when_modal_too_short() {
     );
 }
 
-/// Test 8: when the modal area is narrower than 30 cols, the preview is omitted. The stepper still renders alone.
+/// The stepper still renders alone.
 #[test]
 fn max_thoughts_width_preview_omitted_when_modal_too_narrow() {
     let area = Rect {
@@ -7158,7 +6947,6 @@ fn max_thoughts_width_preview_omitted_when_modal_too_narrow() {
     );
 }
 
-/// Test 9: the preview is gated on `setting_key == "max_thoughts_width"`.
 #[test]
 fn max_thoughts_width_preview_only_renders_for_max_thoughts_width_key() {
     let synthetic_meta = SettingMeta {
@@ -7203,8 +6991,6 @@ fn max_thoughts_width_preview_only_renders_for_max_thoughts_width_key() {
     );
 }
 
-/// Test 10: the preview re-wraps when the stepper value changes.
-/// We render at pending=50, capture the wrap shape (the set of content row strings), dispatch an Up keystroke to step to 55, re-render.
 /// Then we assert the wrap shape differs.
 #[test]
 fn max_thoughts_width_preview_updates_when_stepper_changes() {
@@ -7214,7 +7000,6 @@ fn max_thoughts_width_preview_updates_when_stepper_changes() {
         width: 120,
         height: 24,
     };
-    // Capture wrap shape at pending = 50.
     let (buf_50, _) = render_max_thoughts_width_at(50, area);
     let preview_y_50 =
         find_text_row(&buf_50, area, "preview").expect("preview must render at pending 50");
@@ -7228,7 +7013,6 @@ fn max_thoughts_width_preview_updates_when_stepper_changes() {
         wrap_50.push(trimmed);
     }
 
-    // Step Up (small step: +5); pending becomes 55
     let mut s = int_stepper_fixture(50);
     let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
     assert!(
@@ -7240,7 +7024,6 @@ fn max_thoughts_width_preview_updates_when_stepper_changes() {
         "55",
         "buffer must reflect the +5 step",
     );
-    // Re-render at pending = 55.
     let mut buf_55 = Buffer::empty(area);
     let theme = Theme::current();
     render_editing_value(&mut buf_55, area, &mut s, &theme);
@@ -7255,14 +7038,10 @@ fn max_thoughts_width_preview_updates_when_stepper_changes() {
         }
         wrap_55.push(trimmed);
     }
-    // The wrap shape must differ; at width 55 the line breaks land on different words than at width 50
     assert_ne!(
         wrap_50, wrap_55,
         "wrap shape at pending=50 must differ from wrap shape at pending=55",
     );
-    // Assert both renders actually wrap (at least 2 content rows)
-    // Without this a stub returning a single truncated row at each width would pass the `assert_ne!` above (different truncation points)
-    // It would skip the wrap mechanism entirely
     assert!(
         wrap_50.len() >= 2,
         "pending=50 wrap must produce ≥ 2 rows; got {}: {wrap_50:?}",
@@ -7275,14 +7054,9 @@ fn max_thoughts_width_preview_updates_when_stepper_changes() {
     );
 }
 
-/// Test 7b (boundary companion to Test 7): the preview *renders* at `area.height == header_rows + MAX_THOUGHTS_WIDTH_PREVIEW_MIN_HEIGHT`.
 /// It *omits* one row below that threshold.
-/// Without the just-above-threshold companion, a regression that bumped `MIN_HEIGHT` to 6 would leave Test 7 passing silently.
 #[test]
 fn max_thoughts_width_preview_renders_at_just_fits_height() {
-    // The stepper header (title + 1-row desc + gap + stepper) is 4 rows at width=80
-    // So total area height needs at least 4 + 5 = 9 rows for the preview to render
-    // We test both sides of the boundary
     let just_fits = Rect {
         x: 0,
         y: 0,
@@ -7312,7 +7086,6 @@ fn max_thoughts_width_preview_renders_at_just_fits_height() {
     );
 }
 
-/// Test 8b (boundary companion to Test 8): the preview *renders* at `area.width == MAX_THOUGHTS_WIDTH_PREVIEW_MIN_WIDTH` (= 30), and *omits* at 29.
 #[test]
 fn max_thoughts_width_preview_renders_at_just_fits_width() {
     let just_fits = Rect {
@@ -7339,9 +7112,7 @@ fn max_thoughts_width_preview_renders_at_just_fits_width() {
     );
 }
 
-/// At a wide terminal (200 cols), entering EditingValue mode for `max_thoughts_width` widens the rendered modal.
-/// The popup width becomes `terminal_width - MAX_THOUGHTS_WIDTH_WIDENED_MARGIN` (i.e. 192).
-/// The default sizing would otherwise produce a 70%-of-terminal = 140-wide modal.
+/// At a wide terminal (cols), entering EditingValue mode for `max_thoughts_width` widens the rendered modal.
 #[test]
 fn modal_widens_when_editing_max_thoughts_width() {
     let area = Rect {
@@ -7390,8 +7161,7 @@ fn modal_returns_to_default_width_when_leaving_edit_mode() {
         "preconditional sanity: widened path must produce a wider modal; got {wide}",
     );
 
-    // Transition back to Browse; re-render at the same terminal size and assert the modal width capped at STANDARD_MAX_WIDTH
-    // The standard width_pct=0.70 path produces 140, also above the cap, so the binding constraint is STANDARD_MAX_WIDTH
+    // Transition back to Browse; re-render at the same terminal size and assert the modal width capped.
     s.transition_to_browse();
     let mut buf_std = Buffer::empty(area);
     render_settings_modal(&mut buf_std, area, &mut s, false, None);
@@ -7411,9 +7181,9 @@ fn modal_returns_to_default_width_when_leaving_edit_mode() {
     );
 }
 
-/// At 100 cols (below STANDARD_MAX_WIDTH + WIDENED_MARGIN = 118), EditingValue for max_thoughts_width must NOT shrink the modal below standard size.
-/// The widening gate requires `widened_candidate > STANDARD_MAX_WIDTH`; otherwise the standard path applies.
-/// This preserves the "never shrink" guarantee for narrow terminals.
+/// At multiple cols (below STANDARD_MAX_WIDTH + WIDENED_MARGIN = 118), EditingValue for max_thoughts_width must NOT shrink the modal below standard
+/// size. The widening gate requires `widened_candidate > STANDARD_MAX_WIDTH`; otherwise the standard path applies. This preserves the "never shrink"
+/// guarantee for narrow terminals.
 #[test]
 fn modal_widening_respects_terminal_width_minimum() {
     let area = Rect {
@@ -7450,7 +7220,6 @@ fn modal_widening_respects_terminal_width_minimum() {
     );
 }
 
-/// At a wide terminal (180 cols) with a small pending value (85), the widened modal accommodates the full pending value without clamping.
 /// The preview renders at `pending_value` cells AND the `note: clamped at …` row is absent.
 #[test]
 fn preview_renders_at_full_width_when_modal_widened() {
@@ -7464,9 +7233,6 @@ fn preview_renders_at_full_width_when_modal_widened() {
     let mut buf = Buffer::empty(area);
     render_settings_modal(&mut buf, area, &mut s, false, None);
     let popup = s.window.popup_area.expect("modal must have rendered");
-    // The widened modal must accommodate pending=85 with no clamp
-    // The interior width = popup.width - 2 (borders), and the preview's effective width = min(pending, interior)
-    // With popup.width = 172 (180-8) the interior is 170 > 85, so no clamp
     assert!(
         popup.width > 85 + 2,
         "widened modal interior must be wider than pending=85 cells; \
@@ -7490,8 +7256,6 @@ fn preview_renders_at_full_width_when_modal_widened() {
 }
 
 /// Even with the modal widened, a pending value larger than the widened interior still clamps; the widening doesn't magically uncap the preview.
-/// On a 100-col terminal the widening is disabled (Test 3) so the modal stays standard.
-/// At the standard width the interior is ~94 cells, and a pending of 200 still clamps.
 #[test]
 fn preview_remains_clamped_when_pending_exceeds_widened_width() {
     let area = Rect {
@@ -7500,9 +7264,6 @@ fn preview_remains_clamped_when_pending_exceeds_widened_width() {
         width: 100,
         height: 40,
     };
-    // Pending = 200 (the registered MAX)
-    // Widening is disabled at terminal_width=100 (Test 3), so the modal stays at its standard width
-    // Either way, pending > interior so the preview clamps and the note must render
     let mut s = int_stepper_fixture(200);
     let mut buf = Buffer::empty(area);
     render_settings_modal(&mut buf, area, &mut s, false, None);

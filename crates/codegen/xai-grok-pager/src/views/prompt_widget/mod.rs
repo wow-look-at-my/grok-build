@@ -1,19 +1,4 @@
 //! Reusable prompt input widget.
-//!
-//! [`PromptWidget`] is a text input component built on [`TextArea`] that handles text editing, multiline input, and submit.
-//! It does NOT handle focus management (Esc, Tab) or render chrome (accent lines, selection boxes); those are the caller's responsibility.
-//! That split keeps this widget reusable across the agent view, the welcome screen, overlays, etc.
-//!
-//! ## Visual (as rendered by agent view with chrome)
-//!
-//! ```text
-//!                                            ← top vpad (configurable)
-//!  ❯ type here, text wraps                   ← prefix + TextArea
-//!    continuation of long input...            ← TextArea continuation
-//!  grok-3 · yolo                             ← info line (optional)
-//! ```
-//!
-//! The accent line (┃) and selection box are rendered by the caller.
 
 use std::path::Path;
 
@@ -93,12 +78,10 @@ pub enum PromptEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnterOutcome {
     /// A newline was inserted (Apple Terminal modifier rescue or backslash continuation).
-    /// The caller should return `InputOutcome::Changed`.
     NewlineInserted,
     /// Bare Enter with no active dropdown: the caller should perform its submit/save/advance action.
     Submit,
     /// Not an Enter key, or the file-search dropdown is open (let `handle_key()` deal with it).
-    /// The caller should fall through to `prompt.handle_key(key)`.
     PassThrough,
 }
 
@@ -130,9 +113,8 @@ fn file_search_has_selection(fs: &FileSearchState) -> bool {
     fs.selected() < fs.result_count()
 }
 
-/// Whether the in-app `Cmd+A` "select all in prompt" handler is supported for the given terminal
-/// brand. Gated to Ghostty only. The rest have in-terminal "Select All" behaviour we don't want to
-/// fight.
+/// Whether the in-app `Cmd+A` "select all in prompt" handler is supported for
+/// the given terminal brand. Gated to Ghostty only.
 fn cmd_a_select_all_supported(brand: crate::terminal::TerminalName) -> bool {
     matches!(brand, crate::terminal::TerminalName::Ghostty)
 }
@@ -147,59 +129,43 @@ pub struct PromptStyle {
     /// Vertical padding above the text content.
     pub vpad_top: u16,
     /// Whether to render chrome (accent line + hpad + background fill).
-    /// When true, the widget renders the full block layout (accent | hpad | content | hpad).
-    /// When false, the widget renders only content (for use in overlays).
     pub chrome: bool,
-    /// Layout config for chrome mode (accent + padding widths).
-    /// Only used when `chrome` is true.
+    /// Layout config for chrome mode (accent + padding widths). Only used when `chrome` is true.
     pub chrome_pad_left: u16,
     pub chrome_pad_right: u16,
     /// Background surface for the prompt; see [`PromptBg`].
     pub bg: PromptBg,
-    /// Override the accent line color.
-    /// When `Some`, uses this color instead of the default `accent_user` / `gray_dim`. Used for plan mode (golden).
+    /// Override the accent line color. When `Some`, uses this color instead of the default `accent_user` / `gray_dim`.
     pub accent_color_override: Option<ratatui::style::Color>,
     /// Override the border color (╭─╮│╰─╯).
-    /// When `Some`, uses this color instead of `prompt_border_active` / `prompt_border`. Used for plan mode.
     pub border_color_override: Option<ratatui::style::Color>,
-    /// Override the prefix character and its color.
-    /// When `Some((str, color))`, replaces the default `❯` prefix.
-    /// Used for bash mode (`"! "` in yellow).
+    /// Override the prefix character and its color. When `Some((str, color))`, replaces the default `❯` prefix.
     pub prefix_override: Option<(&'static str, ratatui::style::Color)>,
     /// Override the placeholder text shown when the textarea is empty (e.g. remember mode).
-    /// When `Some(text)`, uses this instead of the default `"Build anything"`.
     pub placeholder_override: Option<&'static str>,
     /// The main composer hides the empty-textarea placeholder on focus; the feedback box keeps it visible.
     pub placeholder_when_focused: bool,
     /// Compact mode (currently unused for info_block sizing).
     pub compact: bool,
     /// Show the accent line (`┃`) on the left edge of the chrome.
-    /// When false the line is hidden and its column reclaimed for content.
     pub show_accent_line: bool,
     /// Draw the prompt's border box (top `╭─╮` divider, side `│` borders, and bottom info divider).
-    /// Only consulted when `chrome` is true.
-    /// Defaults to `true` (the full-TUI boxed prompt); minimal mode sets it `false` for a cleaner, border-less input that still keeps the chrome padding.
     pub show_borders: bool,
     /// Session title inlined in the top border, aligned and styled like the bottom info line.
-    /// None (default) keeps the plain border. Set only by the agent view.
     pub title: Option<String>,
     /// Paint image-chip overlay into `overlay_area` (default true).
     pub image_preview: bool,
 }
 
-/// Background for the prompt widget. Paste chips bake `theme.paste_bg` (a badge color tuned for the
-/// default canvas) into their display `Line` at paste time. The background therefore says what kind
-/// of surface the prompt sits on, not just its color.
+/// Background for the prompt widget.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PromptBg {
     /// The standalone prompt's default fill (`theme.bg_base`).
     #[default]
     Default,
-    /// Explicit canvas color for prompts inlined in another widget whose surface matches the main prompt's (dashboard dispatch box, peek reply).
-    /// Chips keep their badge background.
+    /// Explicit canvas color for prompts inlined in another widget whose surface matches the main prompt's.
     Canvas(ratatui::style::Color),
     /// Inline panel color (question freeform input, permission follow-up).
-    /// Chip cells are repainted to blend into the panel.
     Panel(ratatui::style::Color),
 }
 
@@ -291,8 +257,7 @@ impl PromptStyle {
 pub struct PromptFlag<'a> {
     /// Display text for the flag.
     pub text: &'a str,
-    /// Optional color override.
-    /// When `Some`, the flag renders in this color (blended toward bg for subtlety). When `None`, uses the default gray.
+    /// Optional color override. When `Some`, the flag renders in this color (blended toward bg for subtlety).
     pub color: Option<ratatui::style::Color>,
     /// Whether to render with bold modifier.
     pub bold: bool,
@@ -325,8 +290,6 @@ pub fn mode_flags<'a>(
 }
 
 /// Optional info line rendered below the prompt text.
-///
-/// The default is blank: a caller that wants the bottom border without any info text passes it, and [`Self::is_blank`] then skips the text pass.
 #[derive(Default)]
 pub struct PromptInfo<'a> {
     /// Primary label to display on the info line (left side).
@@ -337,7 +300,6 @@ pub struct PromptInfo<'a> {
     pub multiline: bool,
     /// Optional usage warning displayed right-aligned (e.g. "5% usage left").
     pub usage_warning: Option<&'a str>,
-    /// When true the warning uses the yellow warning color (5% or less left); when false it uses dim grey text (5-10% left).
     pub usage_warning_critical: bool,
 }
 
@@ -403,8 +365,7 @@ fn wrap_voice_interim(text: &str, max_w: usize, max_rows: usize) -> Vec<String> 
 
 /// Result of rendering the prompt.
 pub struct PromptRenderResult {
-    /// Cursor position if the prompt wants a visible cursor.
-    /// `None` when unfocused.
+    /// Cursor position if the prompt wants a visible cursor. `None` when unfocused.
     pub cursor_pos: Option<(u16, u16)>,
     /// Terminal escape sequences to write after the ratatui cell flush (e.g. Kitty/iTerm2 inline image rendering for the image preview).
     pub post_flush_escapes: Option<crate::terminal::overlay::Escapes>,
@@ -435,8 +396,6 @@ impl Drop for StashedPrompt {
 }
 
 /// Feedback attachments in transit between the composer, the trace-consent card, and the send dispatch.
-///
-/// Owns its staged temp files: dropping without transferring them deletes them.
 #[derive(Debug, Default)]
 pub struct FeedbackImages(Vec<PastedImage>);
 
@@ -629,25 +588,20 @@ pub struct PromptWidget {
     /// Whether typing `@` may activate file-reference completion on this surface.
     file_search_enabled: bool,
     /// Pending request to open the line viewer.
-    /// Set by accept_file_search_for_viewer / Ctrl-L / : triggers, consumed by AgentView.
     pub(crate) pending_viewer_request: Option<ViewerRequest>,
     /// Prompt history panel state: search mode (`/history`) or browse mode (Up on an empty prompt).
     pub history_search: HistorySearchState,
     /// Slash command controller: derives completion state from the text and cursor.
-    /// Owned by the prompt; `AgentView` calls methods, never reaches in directly.
     pub(crate) slash_controller: crate::slash::SlashController,
     /// Slash command completion snapshot (for dropdown rendering).
     pub(crate) slash_state: crate::slash::SlashState,
     /// Mouse-hovered slash dropdown item index (`None` = no hover).
     pub(crate) slash_hovered: Option<usize>,
-    /// The user closed the dropdown with Esc. A command resync must not open it
-    /// again. The next `refresh_slash` clears this.
+    /// The user closed the dropdown with Esc. A command resync must not open it again.
     slash_dismissed: bool,
     /// Last input delta for the flight recorder (read by AgentView after handle_key).
     pub(crate) last_input_delta: crate::input_log::LastInputDelta,
     /// Live preview state for slash commands that support it.
-    /// Stores the display text of the previously-active value so we can revert on Esc.
-    /// `None` means no preview in progress.
     pub(crate) slash_preview_original: Option<String>,
 
     /// Shell command suggestion controller (ghost text + progressive matching).
@@ -656,7 +610,6 @@ pub struct PromptWidget {
     /// Predicted-next-prompt controller (tab autocomplete ghost text).
     pub(crate) prompt_suggestion: crate::views::prompt_suggestion::PromptSuggestionController,
     /// Per-frame gate for the prompt-suggestion ghost, set by `AgentView` before each draw or key dispatch.
-    /// False while a turn is running, in bash/remember input modes, or while editing a queued prompt.
     pub(crate) prompt_suggestion_active: bool,
 
     /// Images attached to the current prompt.
@@ -667,36 +620,28 @@ pub struct PromptWidget {
     hovered_image_element_id: Option<xai_ratatui_textarea::ElementId>,
     /// Image shown immediately after insertion without moving the edit cursor.
     post_insert_image_preview: Option<(xai_ratatui_textarea::ElementId, usize)>,
-    /// Monotonic counter for image display numbering (1-based).
-    /// Reset on prompt clear. Only increases within a single prompt lifetime.
+    /// Monotonic counter for image display numbering (1-based). Reset on prompt clear.
     pub image_counter: usize,
 
-    /// Compact mode lowers the paste-chip threshold from 4 lines to 2.
     compact: bool,
 
-    /// Whether the in-app Cmd+A handler is enabled (gated to Ghostty). Only Ghostty is supported
-    /// because. It's the only terminal in current use that can forward `Cmd+A`, needing just one
-    /// documented terminal-side step (`keybind = cmd+a=unbind`).
+    /// Whether the in-app Cmd+A handler is enabled (gated to Ghostty). Only Ghostty is supported because.
     cmd_a_select_all_enabled: bool,
 
     /// Detects user-initiated wipes of a substantial draft (undo tip).
     clear_detector: crate::tips::clear_detector::ClearDetector,
     /// Gate for the per-keystroke undo-tip clear detector.
-    /// Defaults off so the detector never runs until the resolved gate is propagated from `AppView`.
     contextual_hint_undo: bool,
     /// Gate for the per-keystroke plan-nudge keyword scan.
-    /// Independent of `contextual_hint_undo` so each tip can be toggled on its own.
     contextual_hint_plan_mode: bool,
     /// One-shot: the last `handle_key` wiped a substantial draft.
     undo_tip_fire: bool,
     /// One-shot: the last `handle_key` crossed the draft into mentioning a planning keyword (rising edge; see `handle_key`).
     plan_nudge_fire: bool,
-    /// One-shot: the last `handle_key` accepted an @-file completion, which can shrink a long `@query` into a short ref/chip.
-    /// That big shrink is NOT a user wipe, so the clear detector must skip observing it (it resyncs on the next genuine edit).
+    /// One-shot: the last `handle_key` accepted an @-file completion.
     completion_accepted: bool,
 }
 
-/// Prefix display width (`"❯ "` or `"> "`, both 2 columns).
 const PREFIX_WIDTH: u16 = crate::glyphs::PROMPT_ARROW_WIDTH;
 
 impl PromptWidget {
@@ -745,8 +690,7 @@ impl PromptWidget {
             plan_nudge_fire: false,
             completion_accepted: false,
         };
-        // Same fail-closed gate as AgentView: /dashboard is hidden in
-        // CommandRegistry::new until dashboard_enabled() reveals it.
+        // Same fail-closed gate as AgentView: /dashboard is hidden in CommandRegistry::new until dashboard_enabled().
         this.set_dashboard_visible(crate::views::dashboard::dashboard_enabled());
         this
     }
@@ -756,8 +700,8 @@ impl PromptWidget {
         Self::new_with_cwd(Path::new("."))
     }
 
-    /// Propagate the resolved per-tip gates (undo tip and plan nudge) from `AppView`.
-    /// When both are off, `handle_key` skips the per-keystroke scan entirely; otherwise each detector runs only when its own gate is on.
+    /// Propagate the resolved per-tip gates (undo tip and plan nudge) from
+    /// `AppView`.
     pub fn set_contextual_hints(&mut self, undo: bool, plan_mode: bool) {
         self.contextual_hint_undo = undo;
         self.contextual_hint_plan_mode = plan_mode;
@@ -888,20 +832,19 @@ impl PromptWidget {
         self.suggestions.dropdown.close();
     }
 
-    /// Move the completion dropdown selection (Up = -1, Down = +1), wrapping.
     pub fn completion_dropdown_move(&mut self, delta: isize) {
         self.suggestions.dropdown.move_selection(delta);
     }
 
-    /// Scroll the completion dropdown selection by `delta`, clamping at the ends (no wrap-around).
-    /// Used for mouse-wheel and page-key scrolling.
+    /// Scroll the completion dropdown selection by `delta`, clamping at the
+    /// ends (no wrap-around).
     pub fn completion_dropdown_scroll(&mut self, delta: isize) {
         self.suggestions.dropdown.scroll_selection(delta);
     }
 
     /// Accept the selected completion, resolved against the current draft.
-    /// Stale generations refuse and close; see [`SuggestionController::accept_completion`].
-    /// Also clears ghost text since the accepted completion replaces it.
+    /// Stale generations refuse and close; see
+    /// [`SuggestionController::accept_completion`].
     pub fn completion_dropdown_accept(&mut self) -> Option<CompletionSplice> {
         let result = self.suggestions.accept_completion(self.textarea.text());
         if result.is_some() {
@@ -960,9 +903,8 @@ impl PromptWidget {
         }
     }
 
-    /// Whether a completion range overlaps an atomic prompt element (paste chip, file ref, image chip).
-    /// Completion ranges are computed over the plain request text, but `TextArea::replace_range` expands any element overlap to the WHOLE element.
-    /// Accepting such a range would swallow the entire chip (paste data loss). Treated as a stale no-op.
+    /// Whether a completion range overlaps an atomic prompt element (paste
+    /// chip, file ref, image chip).
     fn completion_range_clips_element(&self, range: &std::ops::Range<usize>) -> bool {
         self.textarea
             .elements()
@@ -1032,7 +974,6 @@ impl PromptWidget {
     }
 
     /// Clear the undo/redo history (see [`TextArea::clear_history`]).
-    /// Pair with `set_text("")` when reusing the widget for a new logical context so an undo can't resurrect the previous draft.
     pub fn clear_history(&mut self) {
         self.textarea.clear_history();
     }
@@ -1128,11 +1069,10 @@ impl PromptWidget {
             self.slash_cancel_preview();
         }
         self.textarea.set_text(text);
-        // Suggestion state (ghost, dropdown items, pending fetches) is tied to a SPECIFIC draft
-        // Every wholesale content swap (empty or not) invalidates it, so nothing stale survives into (or lands over) the new text
+        // Suggestion state (ghost, dropdown items, pending fetches) is tied to a SPECIFIC draft Every wholesale content swap (empty or not).
         self.suggestions.invalidate_draft();
         if text.is_empty() {
-            // Split "drain Vec" from "reset counter" so the counter-reset is a single explicit line, not two redundant writes hidden in `clear()`
+            // Split "drain Vec" from "reset counter" so the counter-reset is a single explicit line, not redundant writes hidden in `clear()`
             crate::prompt_images::drain_and_cleanup(
                 crate::prompt_images::SessionPathPolicy::Preserve,
                 &mut self.images,
@@ -1147,9 +1087,8 @@ impl PromptWidget {
             // Safety net: ensure preview state is cleared even if slash_cancel_preview was a no-op (e.g. command not found after registry changes).
             self.slash_preview_original = None;
         } else if !chip_placeholder_regex().is_match(text) {
-            // Non-empty replacement with no chip placeholder match: any retained `PastedImage` records are now orphans (no chip in the buffer references them)
-            // Drop them to keep `drain_images()` honest and to release encoded bytes
-            // The counter is reset since no chips survive
+            // Non-empty replacement with no chip placeholder match: any
+            // retained `PastedImage` records are now orphans.
             crate::prompt_images::drain_and_cleanup(
                 crate::prompt_images::SessionPathPolicy::Preserve,
                 &mut self.images,
@@ -1170,9 +1109,7 @@ impl PromptWidget {
         self.pending_viewer_request = None;
     }
 
-    /// [`Self::set_text`] unless the buffer already holds exactly `text`. Skipping the no-op swap keeps
-    /// chip elements, images, and undo history intact when a view reloads the same draft (the question
-    /// view's freeform slots). Any real content change takes the normal reset path.
+    /// [`Self::set_text`] unless the buffer already holds exactly `text`.
     pub fn set_text_preserving(&mut self, text: &str) {
         if self.text() != text {
             self.set_text(text);
@@ -1209,8 +1146,7 @@ impl PromptWidget {
             snap.open && !snap.cursor_in_command && !snap.matches.is_empty()
         };
 
-        // Element placeholder text (e.g. `[Image #1]`) in the buffer confuses the slash system: spaces inside placeholders break command parsing.
-        // Build a clean text with all element content removed so the slash system only sees user-typed text
+        // Element placeholder text (e.g. `[Image #1]`) in the buffer confuses the slash system.
         let raw_text = self.textarea.text();
         let (clean_text, clean_cursor) =
             strip_all_elements(raw_text, self.textarea.cursor(), &self.textarea);
@@ -1241,8 +1177,7 @@ impl PromptWidget {
         tools: Option<&std::collections::HashSet<String>>,
         models: &crate::acp::model_state::ModelState,
     ) {
-        // Single rebuild_triggers() per generation bump: set_acp_state batches both mutations
-        // We don't pay two trigger rebuilds when the toolset arrived alongside fresh ACP commands
+        // Single rebuild_triggers() per generation bump: set_acp_state batches both mutations We don't pay trigger rebuilds.
         let registry = self.slash_controller.registry_mut();
         registry.set_acp_state(commands, tools.cloned());
         if self.slash_dismissed {
@@ -1251,15 +1186,14 @@ impl PromptWidget {
         self.refresh_slash(models);
     }
 
-    /// Suppress session-scoped slash commands (`/compact`, `/fork`, `/rewind`, …) from this prompt's completion.
-    ///
-    /// Used by the agent dashboard's dispatch input, which is session-less and should only offer pager-global commands.
+    /// Suppress session-scoped slash commands (`/compact`, `/fork`,
+    /// `/rewind`, …) from this prompt's completion.
     pub fn hide_session_scoped_commands(&mut self) {
         self.slash_controller.set_hide_session_scoped(true);
     }
 
-    /// Adopt the shared slash MRU store so this prompt's completion shares command recency with other agent prompts and the dashboard dispatch.
-    /// Injected by `AppView`, which owns the single process store.
+    /// Adopt the shared slash MRU store so this prompt's completion shares
+    /// command recency with other agent prompts and the dashboard dispatch.
     pub(crate) fn adopt_slash_mru(
         &mut self,
         mru: std::rc::Rc<std::cell::RefCell<crate::slash::mru::SlashMru>>,
@@ -1330,7 +1264,6 @@ impl PromptWidget {
         self.slash_dismissed = true;
     }
 
-    /// Move the slash dropdown selection (Up = -1, Down = +1), wrapping around.
     pub fn slash_move_selection(&mut self, delta: isize) {
         self.slash_controller
             .move_selection(&self.slash_state, delta);
@@ -1477,7 +1410,8 @@ impl PromptWidget {
             return;
         }
 
-        // Capture the original value on the first preview call via the command's preview_state() method (e.g., current theme name for /theme)
+        // Capture the value on the first preview call via the command's
+        // preview_state() method (e.g., current theme name for /theme)
         if self.slash_preview_original.is_none() {
             self.slash_preview_original = command.preview_state();
         }
@@ -1507,8 +1441,6 @@ impl PromptWidget {
     }
 
     /// Commit the preview (clear the saved original so cancel is a no-op).
-    ///
-    /// Called when the user accepts the completion (Enter/Tab) to prevent a revert on the subsequent dropdown close.
     pub fn slash_commit_preview(&mut self) {
         self.slash_preview_original = None;
     }
@@ -1523,9 +1455,8 @@ impl PromptWidget {
         self.file_search.is_visible()
     }
 
-    /// Whether the cursor is at a file ref element boundary (for shortcuts bar hint).
-    ///
-    /// Matches the same positions where `:` or Ctrl-L would trigger: at element start, at element end, but NOT after the trailing space.
+    /// Whether the cursor is at a file ref element boundary (for shortcuts bar hint). Matches the same positions where `:` or Ctrl-L would trigger: at element start, at element
+    /// end, but NOT after the trailing space.
     pub fn file_ref_near_cursor(&self) -> bool {
         let cursor = self.textarea.cursor();
         self.textarea
@@ -1625,8 +1556,7 @@ impl PromptWidget {
         let prefix_w = if style.show_prefix { PREFIX_WIDTH } else { 0 };
         let text_width = content_width.saturating_sub(prefix_w);
         // History browse live-populates the composer per selection move
-        // Freeze the box at its pre-open one-row height so stepping through entries of different heights doesn't resize the layout per keypress
-        // The first real edit detaches and the box resizes then
+        // Freeze the box at its pre-open one-row height so stepping through.
         let text_height = if self.history_search.is_browse() {
             1
         } else {
@@ -1716,8 +1646,8 @@ impl PromptWidget {
             // Undo clear-detector only when the undo tip is on.
             if self.contextual_hint_undo {
                 let wiped = self.clear_detector.observe_user_edit(before, after);
-                // Honesty guards: never advertise a recovery the textarea can't do, and never one that lost image payloads
-                // Ctrl+C's `set_text("")` drains both image lists (undo would restore dead chips), while kill-style wipes stash and restore fully
+                // Honesty guards: never advertise a recovery the textarea
+                // can't do.
                 let images_lost =
                     had_images && self.images.is_empty() && self.image_undo_stash.is_empty();
                 self.undo_tip_fire = wiped && !images_lost && self.textarea.can_undo();
@@ -1775,8 +1705,7 @@ impl PromptWidget {
                     return PromptEvent::Edited;
                 }
                 FileSearchKeyResult::AcceptAndOpenViewer => {
-                    // Accept the result as an element, then signal the caller (AgentView) to open the line viewer
-                    // We return Edited; the caller checks `wants_line_viewer` afterward
+                    // Accept the result as an element, then signal the caller (AgentView) to open the line viewer We return Edited.
                     self.accept_file_search_for_viewer();
                     self.completion_accepted = true;
                     return PromptEvent::Edited;
@@ -1786,13 +1715,12 @@ impl PromptWidget {
                     return PromptEvent::Edited;
                 }
                 FileSearchKeyResult::PassThrough => {
-                    // Fall through to normal key handling below.
                 }
             }
         }
 
-        // Esc/Tab: drop the highlight but decline the press so it still cancels or switches focus
-        // Modified Esc has no structural consumer; it falls through to the textarea catch-all, which clears the highlight WITH a repaint
+        // Esc/Tab: drop the highlight but decline the press so it still
+        // cancels or switches focus Modified Esc has no structural consumer.
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
             || (key.code == KeyCode::Esc && key.modifiers.is_empty())
         {
@@ -1823,9 +1751,8 @@ impl PromptWidget {
         }
         // Not at an element boundary: fall through to type ':' normally
 
-        // Newline: Shift/Alt+Enter, Apple Terminal CoreGraphics rescue (inside is_mod_enter),
-        // or a delivered SUPER+Enter (Kitty). SUPER is excluded from is_mod_enter (fullscreen
-        // on many terminals) and from bare-Enter send; insert here instead of textarea fallthrough.
+        // Newline: Shift/Alt+Enter, Apple Terminal CoreGraphics rescue
+        // (inside is_mod_enter), or a delivered SUPER+Enter (Kitty).
         if crate::input::is_mod_enter(key) || crate::input::is_delivered_super_enter(key) {
             self.insert_replacing_selection("\n");
             return PromptEvent::Edited;
@@ -1871,9 +1798,9 @@ impl PromptWidget {
             return PromptEvent::Ignored;
         }
 
-        // Cmd+A (macOS, Ghostty only): select all text in the prompt textarea. Gated to Ghostty. Every
-        // other macOS terminal binds `Cmd+A` to its own in-terminal "Select All" by default. We don't want
-        // to compete with that, or surprise users on terminals where the key doesn't even arrive.
+        // Cmd+A (macOS, Ghostty only): select all text in the prompt
+        // textarea. Gated to Ghostty. Every other macOS terminal binds
+        // `Cmd+A` to its own in-terminal "Select All" by default.
         if self.cmd_a_select_all_enabled && key!('a', SUPER).matches(key) {
             let len = self.textarea.text().len();
             if len == 0 {
@@ -1886,7 +1813,6 @@ impl PromptWidget {
         }
 
         // Everything else: delegate to textarea.
-        // Selection is rendered state: selection-only changes must report Edited or no frame is drawn.
         let old_text = self.textarea.text().to_owned();
         let old_cursor = self.textarea.cursor();
         let old_selection = self.textarea.selection_range();
@@ -1982,9 +1908,8 @@ impl PromptWidget {
                 FileSearchKeyResult::PassThrough
             }
         } else if key!(Right).matches(key) {
-            // Right Arrow: accept the highlighted suggestion without a terminating space, so the user can keep
-            // typing (e.g. drill into a nested directory). The selection invariant is maintained by
-            // `FileSearchState`. The explicit check keeps Right safe even if the invariant ever drifts.
+            // Right Arrow: accept the highlighted suggestion without a
+            // terminating space.
             if file_search_has_selection(&self.file_search) {
                 FileSearchKeyResult::AcceptedNoSpace
             } else {
@@ -2028,16 +1953,13 @@ impl PromptWidget {
         self.textarea.clear_selection();
 
         // File results behave exactly like Tab (insert plus trailing space)
-        // "Drill down" only makes sense for directories; there is nothing to nest into beneath a file
-        // So for file selections Right and Tab are intentionally identical
+        // "Drill down" only makes sense for directories.
         if !res.is_dir {
             self.accept_file_search_result_inner();
             return;
         }
 
-        // Directory result: drill down. Replace the path portion of the @-token (preserving the `!`
-        // hidden-mode prefix) with the full selected path, WITHOUT a trailing `/`. Dropping the slash
-        // drops the user out of dir-mode (which filters to dirs only).
+        // Directory result: drill down.
         let path_str = res.path.to_string();
         let path = normalize_display_path(&path_str);
 
@@ -2087,8 +2009,7 @@ impl PromptWidget {
                 }
             }
         } else {
-            // File accepted: create an atomic `KIND_FILE_REF` element plus trailing space
-            // Both Tab and Right Arrow reach this branch for file selections because there is nothing nested under a file to drill into
+            // File accepted: create an atomic `KIND_FILE_REF` element plus trailing space Both Tab and Right Arrow reach this branch.
             let path_str = res.path.to_string();
             let path = normalize_display_path(&path_str);
             let element_text = format!("@{path}");
@@ -2158,8 +2079,7 @@ impl PromptWidget {
         false
     }
 
-    /// Shared Enter-routing for any context where bare Enter submits. Apple Terminal CoreGraphics
-    /// modifier rescue (Shift+Enter arrives as bare Enter on terminals without the Kitty protocol).
+    /// Shared Enter-routing for any context where bare Enter submits.
     pub fn route_enter(&mut self, key: &KeyEvent) -> EnterOutcome {
         self.route_enter_with_newline_modifier(
             key,
@@ -2299,8 +2219,6 @@ impl PromptWidget {
         let replacing_selection = self.textarea.selection_range().is_some();
 
         // Repaste-to-expand: "paste didn't do what I want? paste again."
-        // Requires exact byte equality after the original insertion's canonicalization (normalize_line_breaks above and the textarea's tab expansion)
-        // E.g. a trailing-newline difference is a different paste and takes the normal path below.
         let expanded = self.textarea.expand_tabs(text);
         if !replacing_selection
             && let Some(elem) = self.paste_element_near_cursor()
@@ -2316,13 +2234,10 @@ impl PromptWidget {
             self.textarea.delete_selection();
         }
 
-        // Count actual content lines
-        // `.lines()` treats a trailing newline as optional, so "hello\n" counts as 1 line, exactly what we want
         let line_count = text.lines().count();
 
         let chip_min_lines = if self.compact { 2 } else { 4 };
-        // Chip when the paste is multi-line past the threshold, or large by byte size
-        // The label prefers size for large pastes (a 1 MB paste reads better as "1.0 MB" than "N lines"); smaller multi-line pastes keep the line count
+        // Chip when the paste is multi-line past the threshold.
         let by_lines = line_count >= chip_min_lines;
         let by_bytes = text.len() > PASTE_CHIP_DISPLAY_BYTES;
         if by_lines || by_bytes {
@@ -2341,9 +2256,7 @@ impl PromptWidget {
             self.sync_images_with_textarea();
         }
 
-        // Update the file search context so @-completion reacts to pasted text
-        // Without this, bracketed paste (terminal-level paste) skips the per-keystroke update_file_search_context() that handle_key does
-        // The fuzzy matcher query would stay stale until the next keystroke
+        // Update the file search context so @-completion reacts to pasted text Without this.
         self.update_file_search_context();
         PromptEvent::Edited
     }
@@ -2435,8 +2348,6 @@ impl PromptWidget {
         let stash_len_before = self.image_undo_stash.len();
 
         // Primary lookup keyed by `ElementId` (unique by construction).
-        // Keying by `display_number` would silently drop one record when two images share a number
-        // The warn branch below makes a future duplicate-id regression visible instead of hiding it
         let mut stored_by_id: HashMap<ElementId, PastedImage> =
             HashMap::with_capacity(self.images.len());
         for img in self.images.drain(..) {
@@ -2459,9 +2370,7 @@ impl PromptWidget {
             }
         }
 
-        // Fallback for elements restored by an undo/redo cycle. Keying by `display_number` is safe here
-        // because the monotonic counter never recycles numbers within a prompt lifetime.
-        // A same-number duplicate is no redo target but still owns files, so it stays in the stash.
+        // Fallback for elements restored by an undo/redo cycle.
         let mut stash_by_number: HashMap<usize, PastedImage> =
             HashMap::with_capacity(self.image_undo_stash.len());
         let mut stash_duplicates: Vec<PastedImage> = Vec::new();
@@ -2517,8 +2426,8 @@ impl PromptWidget {
             }
         }
 
-        // Images whose elements are gone move to the undo stash so they can be recovered if the user
-        // redoes. Cap the stash at `IMAGE_CAP * 2` so a long edit session can't unboundedly grow it.
+        // Images whose elements are gone move to the undo stash so they can
+        // be recovered if the user redoes.
         let mut new_stash: Vec<PastedImage> = stored_by_id
             .into_values()
             .chain(stash_by_number.into_values())
@@ -2551,12 +2460,10 @@ impl PromptWidget {
         {
             self.post_insert_image_preview = None;
         }
-        // Monotonic high-water mark within a prompt lifetime: the counter only ever advances upward
-        // Deleting a chip therefore never lets a later insert reuse a number that already appeared
-        // The counter is reset only by explicit prompt clears (`set_text("")`, Ctrl+C) which call [`crate::prompt_images::clear`]
+        // Monotonic high-water mark within a prompt lifetime.
         self.image_counter = self.image_counter.max(images_high_water(&self.images));
 
-        // Only log when the stored count or stash size actually changed, otherwise every post-paste keystroke would emit a debug line
+        // Only log when the stored count or stash size changed.
         let stash_len_after = self.image_undo_stash.len();
         let stored_changed = self.images.len() != stored_len_before;
         let stash_changed = stash_len_after != stash_len_before;
@@ -2622,9 +2529,7 @@ impl PromptWidget {
         self.images.iter().find(|img| img.element_id == id)
     }
 
-    /// Drain all prompt-side images for submission. Re-binds orphan `[Image #N]` text to the records
-    /// that name it, then reconciles against live `TextArea` elements so deleted chips are never
-    /// included. Returns the drained images; the prompt-side storage is left empty.
+    /// Drain all prompt-side images for submission.
     pub fn drain_images(&mut self) -> Vec<PastedImage> {
         self.post_insert_image_preview = None;
         self.reconciled_images();
@@ -2696,7 +2601,6 @@ impl PromptWidget {
     }
 
     /// Buffer text with `[Image #N]` chip placeholders removed.
-    /// For text-only consumers (e.g. question/permission feedback) that must not leak image tokens onto the wire.
     pub(crate) fn text_without_image_chips(&self) -> String {
         self.submitted_text_without_image_chips(self.textarea.text())
     }
@@ -2728,9 +2632,7 @@ impl PromptWidget {
             images.truncate(Self::IMAGE_CAP);
         }
 
-        // Emit a `tracing::warn!` with the existing image tracing target so the regression is visible
-        // without crashing the TUI. The lookup below still picks the first match so the visible binding is
-        // at least deterministic.
+        // Emit a `tracing::warn!` with the existing image tracing target.
         let mut by_number: Vec<(usize, ElementId)> = Vec::new();
         for elem in self.textarea.elements() {
             if elem.kind != KIND_IMAGE {
@@ -2868,9 +2770,7 @@ impl PromptWidget {
             .and_then(|range| self.textarea.get_range(range))
     }
 
-    /// Check if the cursor is currently on a paste element. The match is strict on-chip, mirroring the
-    /// Enter-to-expand targeting in [`Self::try_element_interaction`]. Returns the element's buffer
-    /// text if so.
+    /// Check if the cursor is on a paste element.
     pub fn paste_element_at_cursor(&self) -> Option<&str> {
         self.paste_text(self.textarea.element_at_cursor()?)
     }
@@ -2899,8 +2799,8 @@ impl PromptWidget {
     /// Double-click expands from either position (a click moves the cursor onto the chip first).
     fn paste_preview_hint(&self, theme: &Theme) -> Line<'static> {
         let dim = theme.muted();
-        // The chord deliberately deviates from the tips' text_secondary to a real accent
-        // Oscura/rosepine alias text_secondary and gray to the box's own content/border colors, so only an accent pops
+        // The chord deliberately deviates from the tips' text_secondary to a
+        // real accent Oscura/rosepine alias text_secondary.
         let chord = Style::default()
             .fg(theme.fuzzy_accent)
             .add_modifier(Modifier::BOLD);
@@ -2917,8 +2817,8 @@ impl PromptWidget {
         ])
     }
 
-    /// Inline (expand) element `id` into plain buffer text and refresh the @-completion context.
-    /// A single undoable step (see [`TextArea::inline_element`]).
+    /// Inline (expand) element `id` into plain buffer text and refresh the
+    /// @-completion context.
     fn expand_element(&mut self, id: ElementId) {
         self.textarea.inline_element(id);
         self.update_file_search_context();
@@ -3104,8 +3004,7 @@ impl PromptWidget {
         if style.show_prefix && text_area_rect.width > PREFIX_WIDTH {
             let (prefix_str, accent_color) =
                 if self.history_search.is_active() && !self.history_search.is_browse() {
-                    // Search-mode indicator, the highest prefix priority
-                    // Browse mode keeps the normal prefix: the composer holds the populated entry (a real draft), not a filter query
+                    // Search-mode indicator, the highest prefix priority Browse mode keeps the normal prefix.
                     ("? ", theme.accent_user)
                 } else if let Some((p, c)) = style.prefix_override {
                     // Caller override (e.g., bash mode `! ` in yellow).
@@ -3152,8 +3051,8 @@ impl PromptWidget {
         let (slash_active, slash_has_inline_ghost) = {
             let snap = self.slash_state.snapshot();
 
-            // Slash command-name highlight color
-            // Minimal mode is monochrome, so recolor to primary text (no visible accent); typed `/commands` then match the rest of the input
+            // Slash command-name highlight color Minimal mode is monochrome,
+            // so recolor to primary text (no visible accent).
             let slash_hl = if crate::views::modal_window::embedded() {
                 theme.text_primary
             } else {
@@ -3166,8 +3065,9 @@ impl PromptWidget {
                     .is_some_and(|before| before.trim().is_empty())
             });
 
-            // Leading `/` teals on dropdown or a recognized name. Mid-text teals only when
-            // the token actually runs (hoist) or is a skill/plugin mention.
+            // Leading `/` teals on dropdown or a recognized name. Mid-text
+            // teals only when the token runs (hoist) or is a skill/plugin
+            // mention.
             if snap.active
                 && (snap.command_recognized || (leading_invocation && snap.open))
                 && let Some(cmd_range) = &snap.command_range
@@ -3265,8 +3165,6 @@ impl PromptWidget {
                 }
             } else {
                 // Ghost preview of the interim inserted at the caret, or replacing the active selection.
-                // Uses the same selection-aware insertion point and spacing rule
-                // (crate::voice::space_voice_fragment) as the real insertion so preview and result cannot drift.
                 let text = self.textarea.text();
                 let (base, at, tail_at) = match self.textarea.selection_range() {
                     Some(sel) => (
@@ -3292,9 +3190,10 @@ impl PromptWidget {
                     let row_right = ta_area.x + ta_area.width;
                     let avail = row_right.saturating_sub(start_x) as usize;
                     if avail > 0 {
-                        // The textarea already painted the full draft: snapshot the cells after the insertion
-                        // point (selection end, or caret), paint the interim over the span, then re-blit that tail
-                        // shifted right by the ghost's width, so the prompt reads as pushed aside and a selection as replaced; a multi-row selection falls back to the caret row.
+                        // The textarea already painted the full draft:
+                        // snapshot the cells after the insertion point
+                        // (selection end, or caret), paint the interim over
+                        // the span.
                         let tail_x = self
                             .textarea
                             .screen_position_of(tail_at, ta_area, self.textarea_state)
@@ -3355,9 +3254,6 @@ impl PromptWidget {
             }
         }
 
-        // Bottom divider: ╰──────────grok-3 · flags──╯
-        // Guard on actual allocated height, not requested `info_block`
-        // During resize the layout may squeeze the info block to 0 rows, leaving chunks[2].y past the buffer boundary
         if info_block > 0
             && style.chrome
             && style.show_borders
@@ -3416,8 +3312,8 @@ impl PromptWidget {
             None
         };
 
-        // Ghost suffixes (shell completion / predicted prompt)
-        // Voice interim owns the end-of-text cells when shown, so skip both ghosts then
+        // Ghost suffixes (shell completion / predicted prompt) Voice interim owns the
+        // end-of-text cells when shown.
         if !voice_interim_shown {
             if let Some(ghost) = self.suggestions.ghost_text()
                 && self.textarea.cursor() == self.textarea.text().len()
@@ -3480,7 +3376,6 @@ impl PromptWidget {
             );
         }
 
-        // Clear ID 1 whenever this frame did not replace it.
         if post_flush_escapes.is_none() {
             post_flush_escapes = crate::terminal::overlay::clear();
         }
@@ -3497,9 +3392,7 @@ impl PromptWidget {
         let opacity = if focused { 0.6 } else { 0.4 };
         match crate::render::color::blend_color(bg, theme.text_secondary, opacity) {
             Some(fg) => Style::default().fg(fg).bg(bg),
-            // Profile palettes can't blend: the caption stays dim instead of
-            // dropping to gray, with the fg pinned over the border cells
-            // (accent-colored in plan mode) by muted_over_chrome.
+            // Profile palettes can't blend: the caption stays dim instead of dropping to gray.
             None => theme.muted_over_chrome().bg(bg),
         }
     }
@@ -3520,8 +3413,7 @@ impl PromptWidget {
             return;
         }
 
-        // When the prompt is unfocused, fade info-line content further toward bg so it follows the same focused/unfocused dimming as the prompt border
-        // Model name and flag color use a higher opacity than the separator so they remain readable
+        // When the prompt is unfocused, fade info-line content further toward bg so it follows the same focused/unfocused dimming.
         let sep_opacity = if focused { 1.0 } else { 0.6 };
         let flag_opacity = if focused { 0.75 } else { 0.5 };
 
@@ -3535,9 +3427,7 @@ impl PromptWidget {
         let sep_style = Style::default().fg(sep_fg).bg(bg);
         let flag_style = theme.muted().bg(bg);
 
-        // Left side: model name and flags. Wrap with leading/trailing spaces so the cells adjacent to the
-        // corner borders (╰ / ╯) are blanked out. They would otherwise show the underlying `─` glyphs from
-        // the bottom-border fill. That gives 1 cell of visual padding on each side.
+        // Left side: model name and flags.
         let pad_style = Style::default().bg(bg);
         let mut left_spans = vec![Span::styled(" ", pad_style)];
         if let Some(warning) = info.usage_warning {
@@ -3598,7 +3488,7 @@ impl PromptWidget {
             let left_line = Line::from(left_spans);
             let left_w = (left_line.width() as u16).min(area.width.saturating_sub(right_w + 1));
             // Right-align both parts: [left][gap][right]
-            let total_w = left_w + 1 + right_w; // 1 for gap
+            let total_w = left_w + 1 + right_w;
             let x = area.x + area.width.saturating_sub(total_w);
             buf.set_line_safe(x, area.y, &left_line, left_w);
             let rx = area.x + area.width.saturating_sub(right_w);

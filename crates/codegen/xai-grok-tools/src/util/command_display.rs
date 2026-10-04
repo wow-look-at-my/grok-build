@@ -1,20 +1,12 @@
 //! Display-only helpers for shell command chrome (activity titles, execute headers).
-//!
-//! Path equality for peel is **lexical** (segment-wise on `/` and `\`), not
-//! `canonicalize`d — so `/var` vs `/private/var` or symlink roots miss peel
-//! rather than false-peel. Callers should store session cwd in the same string
-//! form agents embed in `cd` tokens when possible.
-//!
-//! [`paths_equal_for_display`] is only meaningful **after** the absolute-shaped
-//! gate in [`peel_cd_prefix`]; segment equality alone would treat `proj` and
-//! `/proj` as equal, which must never drive a peel on its own.
 
 use std::borrow::Cow;
 use std::path::Path;
 
-/// Peel a leading `cd <session_cwd> &&|;` (or Windows `cd /d`) when the target equals session cwd so TUI chrome shows the real command first.
-/// Only absolute-shaped path tokens are considered (Unix `/…`, Windows `X:\` / `X:/`, or `\\` UNC) so relative `cd proj` cannot false-match
-/// `/proj`. Fail-closed on ambiguous quotes, empty remainder, pipes-only, or path mismatch.
+/// Peel a leading `cd <session_cwd> &&|;` (or Windows `cd /d`) when the
+/// target equals session cwd so TUI chrome shows the real command first. Only
+/// absolute-shaped path tokens are considered (Unix `/…`, Windows `X:\` /
+/// `X:/`, or `\\` UNC) so relative `cd proj` cannot false-match `/proj`.
 pub fn strip_redundant_session_cd<'a>(command: &'a str, session_cwd: &Path) -> Cow<'a, str> {
     let trimmed = command.trim_start();
     let inner = trim_wrapping_parens(trimmed).unwrap_or(trimmed);
@@ -358,8 +350,5 @@ mod tests {
             Path::new("/proj"),
             Path::new("/other")
         ));
-        // Relative vs absolute segment-"equality" is intentionally *not* asserted here (would trip
-        // the absolute-shaped debug_assert). Peel fail-closed coverage for `cd proj` vs session
-        // `/proj` lives in `matrix_no_peel_fail_closed`.
     }
 }

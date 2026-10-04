@@ -1,8 +1,4 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
-//
-// Pins the in-place edit-HL upgrade: the target line's styling must CHANGE on screen after the first (hunk-only) paint
-// A change proves the file-scoped repaint landed
-// The test also generates demo artifacts: the asciicast/HTML dumps under /tmp/edit_hl_video are kept for demo videos
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -91,8 +87,7 @@ fn write_asciicast(path: &Path, cols: u16, rows: u16, events: &[(f64, String)]) 
 async fn edit_hl_inplace_refresh_pty() {
     fs::create_dir_all(ARTIFACT_DIR).expect("artifact dir");
     let content = ContentController::start().await.expect("start content");
-    // No config is seeded: the collapsed_edit_blocks flag ships OFF, so Edit diffs arrive expanded
-    // This test asserts the on-screen restyle of the diff BODY and doubles as the e2e for the flag-off (legacy default) path
+    // No config is seeded: the collapsed_edit_blocks flag ships OFF.
 
     // ~2.5k pad lines: full-file HL takes hundreds of ms (visible upgrade).
     let pad = 2500usize;
@@ -176,9 +171,7 @@ async fn edit_hl_inplace_refresh_pty() {
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit prompt");
 
-    // Phase 1: hunk-only first paint. Capture the target line's styling at first sighting.
-    // The 2.5k pad keeps the full-file HL slow enough that this frame reliably precedes the upgrade
-    // Phase 2: in-place upgrade. Poll until the SAME line's styling changes.
+    // Capture the target line's styling at first sighting.
     let edit_deadline = Instant::now() + Duration::from_secs(90);
     let mut saw_edit = false;
     let mut first_styles: Option<String> = None;

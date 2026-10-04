@@ -1,29 +1,4 @@
 //! Per-prompt and per-session billing ledgers (not serialized).
-//!
-//! `total_tokens()` is input + output: Responses wire `total` is live context
-//! length. Compaction and other side calls never call `record_main_loop_call`.
-//!
-//! # Completeness ownership
-//!
-//! Wire incomplete is the OR of these stores (each has a distinct role):
-//!
-//! - **`UsageLedger.incomplete`** — durable on the bill snapshot. Set by nested
-//!   subagent incomplete fold, drain timeout, true apply-miss, and
-//!   `mark_usage_incomplete`. Monotonic for a ledger instance.
-//! - **Sticky (`subagent_usage_not_applied` on the coordinator)** — pin-scoped
-//!   **report** signal (session-only attribution or apply-miss report). Not a
-//!   second token sink; does not stain ledgers by itself.
-//! - **Foreground live IDs** — fold may still land; freeze drains ≤120s or fails
-//!   closed. Cancel skips multi-second drain (actor-loop safety).
-//! - **Background live** — never waits; prompt report incomplete immediately;
-//!   spend still folds into the session ledger at completion (no session-ledger
-//!   incomplete).
-//!
-//! Freeze and cancel share one outcome policy: ledger marks only on fail-closed;
-//! sticky and background_live are report-level only.
-//!
-//! Projection (`PromptUsage`) never invents tokens; it only ORs completeness
-//! and scrubs costs when partial or incomplete.
 
 use indexmap::IndexMap;
 use xai_grok_sampling_types::TokenUsage;
@@ -203,12 +178,10 @@ mod tests {
 
     #[test]
     fn ledger_session_total_is_exact_sum_of_reported_ticks() {
-        // The top-right session-cost indicator is the cumulative sum of every
-        // API-reported cost in the per-session ledger — not just the last
-        // call, and never polluted by unreported (zero-backfilled) calls.
+        // The top-right session-cost indicator is the cumulative sum of every API-reported cost in the per-session ledger — not the last call.
         let mut ledger = UsageLedger::default();
 
-        ledger.record_main_loop_call("m", &tu(1, 1), None, Some(0)); // wire 0 → unreported
+        ledger.record_main_loop_call("m", &tu(1, 1), None, Some(0));
         assert_eq!(ledger.totals.cost_usd_ticks, None);
         assert_eq!(ledger.totals.cost_missing_calls, 1);
 
@@ -216,11 +189,9 @@ mod tests {
         ledger.record_main_loop_call("a", &tu(50, 5), Some(50), Some(1_000));
         ledger.record_main_loop_call("b", &tu(20, 5), Some(50), Some(23_000));
 
-        // Exact integer sum of the three reported costs; the unreported and
-        // the zero-backfilled calls contribute nothing.
+        // Exact integer sum of those reported costs.
         assert_eq!(ledger.totals.cost_usd_ticks, Some(24_000));
-        // Every call's cost value (reported or not) feeds the same session
-        // total, so the per-session total aggregates across models.
+        // Every call's cost value (reported or not) feeds the same session total.
         assert_eq!(ledger.by_model["a"].cost_usd_ticks, Some(1_000));
         assert_eq!(ledger.by_model["b"].cost_usd_ticks, Some(23_000));
         assert_eq!(ledger.totals.model_calls, 4);

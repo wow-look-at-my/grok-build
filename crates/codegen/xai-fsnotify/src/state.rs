@@ -2,17 +2,13 @@
 
 use std::time::{Duration, Instant};
 
-/// Drop transient OS events for this window after a head-changing op;
-/// consumers refresh from scratch anyway.
+/// Drop transient OS events for this window after a head-changing op; consumers refresh from scratch anyway.
 pub(crate) const COOLDOWN_MS: u64 = 500;
 
 /// After a lock release, wait this long before declaring the operation complete.
-/// A lock reappearing within the window is the same operation, so rapid cycles merge into one pair.
 pub const SETTLE_MS: u64 = 500;
 
-/// Diagnostic threshold — fires a one-time warning when a lock is held
-/// longer than this. `git gc` on huge repos can exceed this legitimately;
-/// the state machine stays locked until the lock file disappears regardless.
+/// Diagnostic threshold — fires a one-time warning when a lock is held longer than this.
 const STALE_LOCK_SECS: u64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,7 +19,6 @@ pub(crate) enum LockState {
         since: Instant,
     },
     /// Lock released, operation not yet declared complete.
-    /// `head_at_start` and `since` carry from the first `Locked` entry so re-locks preserve the op-wide comparison.
     Settling {
         head_at_start: Option<String>,
         since: Instant,
@@ -64,8 +59,7 @@ pub(crate) fn drive(
             LockTransition::Started
         }
         // Same operation resumes: keep the op-start HEAD and `since` so the
-        // eventual Completed spans the whole merged op. No duplicate Started —
-        // consumers never saw a Completed, so their in-op flag never flipped.
+        // eventual Completed spans the whole merged op.
         (
             LockState::Settling {
                 head_at_start,

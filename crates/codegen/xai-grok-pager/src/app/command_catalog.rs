@@ -49,7 +49,6 @@ impl AgentSession {
         source: CommandCatalogSource,
     ) {
         let (added, removed) = command_name_diff(&self.available_commands, &commands);
-        // Bootstrap seeds generation 1, so the first shell-sent catalog gets the full listing
         let initial = self.available_commands_generation <= 1;
         if initial || !added.is_empty() || !removed.is_empty() {
             let names = initial.then(|| {

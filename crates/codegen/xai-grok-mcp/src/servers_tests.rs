@@ -166,8 +166,7 @@ async fn sandboxed_package_runner_gets_tmp_cache_env() {
             dir.starts_with(&scratch),
             "{name} must be mapped onto the injected scratch root, got {value}"
         );
-        // The whole point of the redirect: never back into the session's own
-        // state directory (nor the home tree a confining profile refuses).
+        // The whole point of the redirect: never back into the session's own state directory.
         let grok_home = xai_grok_tools::util::grok_home();
         assert!(
             !dir.starts_with(&grok_home),
@@ -228,9 +227,6 @@ async fn runner_cache_env_skips_unconfined_non_runners_and_explicit_config() {
     );
 
     // A variable explicitly REMOVED from the child must still be redirected.
-    // `get_envs` reports a removed variable as present-with-`None`; reading
-    // that as "already configured" silently skips the redirect and leaves
-    // the runner failing on the unwritable `$HOME` cache it was removed from.
     let mut cmd = Command::new("uvx");
     cmd.env_remove("UV_CACHE_DIR");
     apply_runner_cache_env(&mut cmd, "uvx", true, &scratch);
@@ -318,9 +314,7 @@ async fn shipped_runner_env_lets_a_real_runner_start_without_a_writable_home() {
         String::from_utf8_lossy(&baseline.stderr)
     );
 
-    // Now build the child exactly as the spawn site does: start from the
-    // baseline environment, then let the shipped function install its
-    // redirects.
+    // Now build the child exactly as the spawn site does: start from the baseline environment.
     let mut cmd = Command::new(&uv);
     cmd.arg("tool").arg("list").env("HOME", &readonly_home);
     for unset in [
@@ -1843,22 +1837,13 @@ enum CallToolBehavior {
         code: i32,
         hang_ms: u64,
     },
-    /// SEP-2322: first `tools/call` returns `input_required` with a form
-    /// elicitation and a `requestState`; the retry completes.
+    /// SEP-2322: first `tools/call` returns `input_required` with a form elicitation and a `requestState`.
     FormElicitThenOk,
-    /// SEP-2322 + transport recovery: round 0 returns `input_required`, the
-    /// retry fails with a recoverable JSON-RPC error, and the post-recovery
-    /// retry completes.
+    /// SEP-2322 + transport recovery: round multiple returns `input_required`.
     FormElicitThenErrorThenOk,
-    /// SEP-2322 URL mode: round 0 returns a URL elicitation + `requestState`,
-    /// round 1 returns a `requestState`-only `input_required` (out-of-band
-    /// interaction still pending), round 2 completes.
     UrlElicitThenStateOnlyThenOk,
     /// Structured-first: summary in `content`, payload in `structuredContent`.
     StructuredOk,
-    /// A stateless 2026-07-28 server (C# SDK default): answers `initialize`, but each POST is a
-    /// fresh instance, so `tools/call` fails with `code` unless `_meta` carries the elicitation
-    /// capability. Real servers send -32021 (missing capability) or -32022 (unsupported version).
     RequiresPerRequestCapabilities {
         code: i32,
     },
@@ -1877,8 +1862,7 @@ struct FakeMcpHandles {
     call_bodies: Arc<parking_lot::Mutex<Vec<serde_json::Value>>>,
     /// `MCP-Protocol-Version` header of each `tools/call`, parallel to `call_bodies`.
     call_version_headers: Arc<parking_lot::Mutex<Vec<Vec<String>>>>,
-    /// When set, replaces `FakeMcpOptions::discover` for later probes, so a test can turn a
-    /// legacy server modern between a handshake and a recovery.
+    /// When set, replaces `FakeMcpOptions::discover` for later probes.
     discover_override: Arc<parking_lot::Mutex<Option<DiscoverBehavior>>>,
 }
 
@@ -1899,18 +1883,15 @@ enum DiscoverBehavior {
     /// JSON-RPC method-not-found — the typical legacy SDK reaction.
     #[default]
     MethodNotFound,
-    /// A modern server: discover succeeds with 2026-07-28.
     Modern,
-    /// Legacy middleware that 500s the probe with a non-JSON body — one of the
-    /// malformed shapes that must still fall back to `initialize`.
+    /// Legacy middleware that 500s the probe with a non-JSON body — one of the malformed shapes that must still fall back.
     NonJsonServerError,
 }
 
 #[derive(Clone, Default)]
 struct FakeMcpOptions {
     discover: DiscoverBehavior,
-    /// When set, `initialize` is rejected with an "Unauthorized" JSON-RPC
-    /// error, for asserting that fallback errors keep their auth classification.
+    /// When set, `initialize` is rejected with an "Unauthorized" JSON-RPC error.
     init_unauthorized: bool,
     /// When set, `tools/list` never answers: the server connects, then stalls.
     list_tools_hangs: bool,
@@ -1963,9 +1944,9 @@ async fn fake_handle_post(
                 .and_then(|p| p.get("protocolVersion"))
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            // Version-strict servers (e.g. the C# SDK 2.x) reject an `initialize`
-            // naming a post-handshake revision instead of counter-offering.
-            // Mimic that so a reintroduced 2026-07-28 pin fails every test here.
+            // Version-strict servers (e.g. the C# SDK 2.x) reject an
+            // `initialize` naming a post-handshake revision instead of
+            // counter-offering.
             if requested == "2026-07-28" {
                 return axum::Json(err(
                     -32602,
@@ -2051,9 +2032,6 @@ async fn fake_handle_post(
                     axum::http::header::HeaderName::from_static("mcp-protocol-version"),
                 ));
             let meta_version = meta_protocol_version(&req);
-            // A legacy revision in the reserved `_meta` keys is -32022 on the C# and TypeScript
-            // SDKs (this is the C# text), -32600 on Python; a reintroduced legacy-session stamp
-            // must fail every legacy test here.
             if let Some(version) = meta_version
                 && version < "2026-07-28"
             {
@@ -2484,8 +2462,6 @@ async fn try_call_tool_http_invalid_params_not_recovered() {
     );
 }
 
-/// Regression test for the version-strict-server startup failure: the fake rejects `server/discover` with method-not-found AND rejects any
-/// `initialize` naming 2026-07-28. Startup must probe discover once, then fall back to a legacy `initialize` that names 2025-11-25 — never 2026-07-28, which SEP-2575 removed from the handshake.
 #[tokio::test(flavor = "multi_thread")]
 async fn handshake_falls_back_to_initialize_era_version_on_legacy_server() {
     let (url, handles) = spawn_fake_mcp(CallToolBehavior::AlwaysError { code: -32603 }).await;
@@ -2565,8 +2541,6 @@ async fn short_startup_budget_still_negotiates_modern_servers() {
     );
 }
 
-/// A short-budget client against a legacy server probes once, then runs the legacy
-/// `initialize` naming 2025-11-25.
 #[tokio::test(flavor = "multi_thread")]
 async fn short_startup_budget_probes_then_falls_back_to_initialize() {
     let (url, handles) = spawn_fake_mcp(CallToolBehavior::AlwaysError { code: -32603 }).await;
@@ -2583,9 +2557,6 @@ async fn short_startup_budget_probes_then_falls_back_to_initialize() {
     );
 }
 
-/// A legacy server whose middleware reacts to the probe with a malformed shape
-/// (non-JSON 500) must still handshake: the probe fails on its own transport and
-/// the legacy `initialize` runs on a fresh one.
 #[tokio::test(flavor = "multi_thread")]
 async fn junk_discover_response_still_handshakes_via_initialize() {
     let (url, handles) = spawn_fake_mcp_with(
@@ -2641,8 +2612,6 @@ async fn legacy_fallback_surfaces_the_initialize_error_for_classification() {
     );
 }
 
-/// A SEP-2575 modern server: `server/discover` negotiates 2026-07-28, no `initialize` is
-/// sent, and every request carries the client context in per-request `_meta`.
 #[tokio::test(flavor = "multi_thread")]
 async fn handshake_negotiates_modern_discover_without_initialize() {
     let (url, handles) = spawn_fake_mcp_modern(CallToolBehavior::HangThenOk { hang_ms: 0 }).await;
@@ -2770,11 +2739,6 @@ async fn legacy_tools_call_never_carries_reserved_meta_keys() {
     }
 }
 
-/// A 2026-07-28-era stateless server (C# SDK default) whose `server/discover` was
-/// unreachable for the first handshake: the legacy session's `tools/call` is rejected
-/// (-32021 missing capability, or -32022 unsupported protocol version), recovery re-probes,
-/// lands on the modern session, and the retry carries the rmcp-stamped envelope the server
-/// requires.
 #[tokio::test(flavor = "multi_thread")]
 async fn legacy_session_rejected_by_modern_server_upgrades_via_recovery() {
     for code in [-32021, -32022] {
@@ -2872,8 +2836,6 @@ async fn modern_server_requiring_per_request_capabilities_works_first_try() {
     assert_eq!(handles.calls.load(Ordering::Relaxed), 1);
 }
 
-/// Recovery that lands on a modern session carries 2026-07-28 in both `_meta` and the
-/// `MCP-Protocol-Version` header, while the legacy call before it carried neither.
 #[tokio::test(flavor = "multi_thread")]
 async fn recovery_onto_modern_session_adopts_modern_client_context() {
     let (url, handles) = spawn_fake_mcp(CallToolBehavior::ErrorThenOk { code: -32603 }).await;
@@ -2930,7 +2892,7 @@ async fn recovery_onto_modern_session_adopts_modern_client_context() {
 /// probe surfaces the failure instead of returning a legacy verdict.
 #[tokio::test(flavor = "multi_thread")]
 async fn probe_connect_failure_surfaces_instead_of_legacy_fallback() {
-    // A port that just stopped listening: connection refused at connect phase.
+    // A port that stopped listening: connection refused at connect phase.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
     drop(listener);
@@ -2971,7 +2933,7 @@ async fn probe_connect_failure_surfaces_instead_of_legacy_fallback() {
 #[test]
 fn max_startup_within_deadline_fits_the_probe_phase() {
     let probe = McpClient::DISCOVER_PROBE_TIMEOUT_SECS;
-    // Room for a full probe plus the legacy window: probe + startup == deadline.
+    // Room for a full probe plus the window: probe + startup == deadline.
     assert_eq!(McpClient::max_startup_within_deadline(30), 30 - probe);
     assert_eq!(McpClient::max_startup_within_deadline(2 * probe), probe);
     // Shorter deadlines split evenly: the probe timeout tracks the startup budget.
@@ -2998,8 +2960,7 @@ fn max_startup_within_deadline_fits_the_probe_phase() {
     }
 }
 
-/// End-to-end SEP-2322 form flow against the wire-level fake server:
-/// `tools/call` → `input_required` (form elicitation + `requestState`) → HITL accept via the
+/// End-to-end SEP-2322 form flow against the wire-level fake server.
 #[tokio::test(flavor = "multi_thread")]
 async fn try_call_tool_mrtr_form_elicitation_round_trip() {
     let (url, handles) = spawn_fake_mcp(CallToolBehavior::FormElicitThenOk).await;
@@ -3313,8 +3274,6 @@ async fn server_that_connects_then_never_lists_tools_times_out_within_its_budget
     .await
     .expect("the client bounds the list itself, well inside the outer guard");
 
-    // The list budget is the handshake's worst case (2 startup + 2 probe) plus a list window of
-    // at least the probe timeout (10); a handshake timeout would report 2.
     assert!(
         matches!(
             listed,
@@ -4446,9 +4405,7 @@ async fn is_healthy_pending_does_not_block_on_handshake() {
 
 #[test]
 fn make_client_info_pins_protocol_version() {
-    // The client info's version rides the legacy `initialize` handshake, so it must
-    // stay on the newest initialize-era revision: 2026-07-28 removed the handshake
-    // (SEP-2575), and version-strict servers reject an `initialize` naming it.
+    // The client info's version rides the legacy `initialize` handshake.
     assert_eq!(
         McpClient::make_client_info("test-srv", /* advertise_elicitation */ true).protocol_version,
         rmcp::model::ProtocolVersion::V_2025_11_25
@@ -5124,7 +5081,7 @@ fn unreachable_schedule_cleared_on_config_updates() {
         .expect("should detect change");
     assert_eq!(diff.removed, vec!["remove"]);
     assert!(!state.init_failed.contains_key("remove"));
-    // The removed server is no longer scheduled; the kept server still is
+    // The removed server is no longer scheduled.
     let taken: Vec<McpServerName> = state
         .take_unreachable_retry_candidates()
         .into_iter()

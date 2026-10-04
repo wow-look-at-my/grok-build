@@ -1,7 +1,6 @@
 # Slash Commands
 
-Type `/` on an empty prompt and a searchable dropdown of commands appears.
-A few worth knowing on day one:
+Type `/` on an empty prompt and a searchable dropdown of commands appears. A few worth knowing on day one:
 
 | Command | What it does |
 |---------|--------------|
@@ -17,20 +16,13 @@ A few worth knowing on day one:
 
 Two of those deserve a second look:
 
-- **`/compact`** takes an optional hint: `/compact keep the auth details`.
-  Check context usage anytime with `/context` — Grok also auto-compacts
-  when the window fills up.
-- **`/rewind`** (or **`/undo`**) rewinds the conversation to an earlier
-  turn, dropping later turns (file changes are left as-is).
+- **`/compact`** takes an optional hint: `/compact keep the auth details`. Check context usage anytime with `/context` — Grok also auto-compacts when the window fills up.
+- **`/rewind`** (or **`/undo`**) rewinds the conversation to an earlier turn, dropping later turns (file changes are left as-is).
 
 ## The command palette
 
-Press **`Ctrl+P`** (or `?` from the scrollback) to open the command palette —
-one searchable list of every command, shortcut, and skill. There's also a
-full shortcuts cheatsheet on `Ctrl+.` (use `Ctrl+X` if your terminal
-swallows it).
+Press **`Ctrl+P`** (or `?` from the scrollback) to open the command palette — one searchable list of every command, shortcut, and skill. There is also a full shortcuts cheatsheet on `Ctrl+.` (use `Ctrl+X` if your terminal swallows it).
 
-You don't need to memorize anything: `/` and `Ctrl+P` will always show you
-what's available.
+You do not need to memorize anything: `/` and `Ctrl+P` will always show you what is available.
 
 *Go deeper: `/docs Slash Commands`*

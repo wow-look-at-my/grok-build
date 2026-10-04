@@ -216,7 +216,6 @@ pub struct FixOutcome {
     changed_file: ChangedFile,
     activation: FixActivation,
     /// Shell used to plan/apply SSH-wrap.
-    /// Post-apply verification must use this rather than re-reading `$SHELL`, which may be missing or different.
     shell: Option<ShellKind>,
 }
 
@@ -411,13 +410,12 @@ enum TmuxEvidence {
     ColorPassthrough,
 }
 
-/// How a tmux remedy reaches its healthy state, which decides whether an existing line elsewhere in the config can defeat Grok's managed block.
+/// How a tmux remedy reaches its healthy state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TmuxRemedy {
     /// `set -g <option> <value>`: the last assignment wins, so a direct assignment in the user's own config must be classified before writing.
     Assignment,
     /// `set -as <option> …`: tmux accumulates these and Grok appends its block at the end of the file.
-    /// Earlier lines add to the fix rather than override it and are never a conflict.
     Accumulating,
 }
 
@@ -427,7 +425,6 @@ struct TmuxOptionSpec {
     option: &'static str,
     line: &'static str,
     /// Values that already satisfy the fix.
-    /// Empty for an accumulating remedy, whose health comes from the attached client, not from one option value.
     healthy_values: &'static [&'static str],
     remedy: TmuxRemedy,
     evidence: TmuxEvidence,
@@ -1155,7 +1152,6 @@ fn tmux_top_level_commands(
         };
         if escaped {
             if character == '\n' {
-                // tmux removes escaped newlines exactly; it does not insert a space.
             } else {
                 current.push(character);
             }

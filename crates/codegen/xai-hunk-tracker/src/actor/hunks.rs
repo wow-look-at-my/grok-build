@@ -80,8 +80,7 @@ impl HunkTrackerActor {
             _ => vec![],
         };
 
-        // Preserve hunk IDs and sources from matching old hunks
-        // Track claimed old hunk IDs to prevent duplicates when one old hunk splits into multiple
+        // Preserve hunk IDs and sources from matching old hunks Track claimed old hunk IDs to prevent duplicates when one old hunk splits.
         let mut claimed_old_ids: HashSet<HunkId> = HashSet::new();
 
         for new_hunk in &mut new_hunks {
@@ -96,12 +95,11 @@ impl HunkTrackerActor {
                 // Always preserve hunk ID for continuity
                 new_hunk.id = best_match.id.clone();
 
-                // If new edit is from agent: keep new source (latest prompt_index wins); If new edit is external but old was agent:
-                // preserve agent attribution; Otherwise: keep new source.
+                // If new edit is from agent: keep new source (latest
+                // prompt_index wins).
                 if new_hunk.source.is_external() && best_match.source.is_agent_edit() {
                     new_hunk.source = best_match.source;
                 }
-                // else: keep new_hunk.source as-is (agent edits always update attribution)
             }
         }
 
@@ -169,7 +167,6 @@ impl HunkTrackerActor {
                     });
                 }
                 Some(_) => {
-                    // Same content, same position - no event needed
                 }
                 None => {
                     // No exact match - check if there's any overlap
@@ -181,9 +178,8 @@ impl HunkTrackerActor {
                             hunk: new_hunk.clone(),
                         });
                     } else {
-                        // Hunk grew/merged/changed in place — ID was already preserved in recompute_hunks. Find the matching old hunk by ID
-                        // to get previous line counts for delta computation. Fall back to the overlapping hunk if no ID match (e.g., hunk
-                        // split/merge scenarios).
+                        // Hunk grew/merged/changed in place — ID was
+                        // already preserved in recompute_hunks.
                         let prev = old_hunks
                             .iter()
                             .find(|o| o.id == new_hunk.id)

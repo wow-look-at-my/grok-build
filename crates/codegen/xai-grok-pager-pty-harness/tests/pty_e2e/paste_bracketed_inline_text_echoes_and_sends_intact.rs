@@ -24,13 +24,12 @@ async fn paste_bracketed_inline_text_echoes_and_sends_intact() {
         .expect("welcome text");
     leave_home(&mut harness);
 
-    // Paste into the session composer (home stays up until the first send; this
-    // test covers the full-featured session prompt, including the drop classifier).
+    // Paste into the session composer (home stays up until the first send.
     harness
         .inject_keys(format!("\x1b[200~{LINE_A}\n{LINE_B}\x1b[201~").as_bytes())
         .expect("bracketed-paste two-line payload");
 
-    // Two lines are below the chip threshold: both echo inline, promptly.
+    // A couple of lines are below the chip threshold: both echo inline, promptly.
     harness
         .wait_for_text("PASTEECHOAAA", Duration::from_secs(2))
         .expect("first pasted line echoes inline in the prompt within 2s");

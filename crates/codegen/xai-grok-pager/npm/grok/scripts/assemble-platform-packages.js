@@ -1,22 +1,5 @@
 #!/usr/bin/env node
-// Assemble the six per-platform npm packages prior to `npm publish`.
-//
-// For each supported (platform, arch) target this:
-//   1. Brotli-compresses the built binary into `../grok-<platform>/bin/<bin>.br`
-//   2. Stamps the sub-package's version to match the meta package
-//
-// Each per-platform package is its own npm publish target. The meta package
-// (`@xai-official/grok`) lists all six as `optionalDependencies` pinned to
-// the same version; npm installs only the one matching the host's
-// `os` + `cpu` filters.
-//
-// Why brotli? npm's tarball ceiling is ~200 MB and the raw grok binary is
-// 100–150 MB per platform. Brotli at max quality cuts that to 30–40 MB,
-// leaves plenty of headroom for binary growth, and is decoded by Node's
-// built-in zlib.brotliDecompressSync (no native deps required).
-//
-// Source paths come from environment variables (set in CI) and fall back to
-// the default cargo target dirs for local testing.
+// Assemble those per-platform npm packages before `npm publish`.
 const fs = require('fs');
 const path = require('path');
 const { promisify } = require('util');
@@ -118,9 +101,7 @@ async function main() {
         },
     ];
 
-    // Compress in parallel — brotliCompress runs on the libuv thread pool so
-    // calls genuinely overlap (set UV_THREADPOOL_SIZE>=6 in CI for full
-    // parallelism; Node's default pool size is 4).
+    // Compress in parallel — brotliCompress runs on the libuv thread pool so calls genuinely overlap.
     const results = await Promise.all(targets.map(packPlatform));
     const failed = results.filter(r => !r).length;
     if (failed > 0) {

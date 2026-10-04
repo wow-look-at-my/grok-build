@@ -90,8 +90,9 @@ impl AgentView {
         InputOutcome::Unchanged
     }
     /// Focus the scrollback pane and open an incremental search over it.
-    /// Opens only if the pane switch succeeds: a dirty queued-prompt edit blocks the switch, and the search bar only works with scrollback focused.
-    /// `initial_query` (the `/find <word>` argument) is fed through the keystroke path, so a pre-filled search behaves like typing into the bar.
+    /// Opens only if the pane switch succeeds: a dirty queued-prompt edit
+    /// blocks the switch, and the search bar only works with scrollback
+    /// focused.
     pub(crate) fn open_scrollback_search(&mut self, initial_query: Option<&str>) {
         if self.set_active_pane(AgentPane::Scrollback, false) {
             self.scrollback_search = Some(ScrollbackSearchState::open());
@@ -113,8 +114,6 @@ impl AgentView {
         self.reveal_current_search_match();
         Some(InputOutcome::Changed)
     }
-    /// Bottom scrollback rows to reserve for the search UI (divider and bar): two when search is active.
-    /// The count clamps to the rows that actually exist, so a very short region never pushes the bar below the scrollback rect.
     pub(super) fn search_reserved_rows(scrollback_height: u16, search_active: bool) -> u16 {
         if search_active {
             scrollback_height.min(2)
@@ -186,9 +185,9 @@ impl AgentView {
             crate::input::line_editor::LineEditOutcome::Unhandled => InputOutcome::Unchanged,
         })
     }
-    /// Enqueue `query` for the background scan.
-    /// Results (and the reveal) arrive later via [`poll_scrollback_search`](Self::poll_scrollback_search).
-    /// The highlight updates immediately because it reads the UI-side matcher.
+    /// Enqueue `query` for the background scan. Results (and the reveal)
+    /// arrive later via
+    /// [`poll_scrollback_search`](Self::poll_scrollback_search).
     fn set_scrollback_search_query(&mut self, query: &str) {
         if let Some(search) = self.scrollback_search.as_mut() {
             search.update_query(query, &self.scrollback);
@@ -465,9 +464,7 @@ impl AgentView {
         self.dock_layout_for(dock.height)
             .item_at(row.checked_sub(dock.y)?)
     }
-    /// Spends the pending reveal. Every path that ends a frame calls this, so a takeover that never paints the dock cannot leave it budgeting rows nothing put on screen.
-    /// takeover that never paints the dock cannot leave it budgeting rows nothing
-    /// put on screen.
+    /// Spends the pending reveal.
     pub(crate) fn take_dock_row_request(&mut self) -> bool {
         std::mem::take(&mut self.dock_reveal_pending)
     }
@@ -535,7 +532,7 @@ impl AgentView {
         InputOutcome::Changed
     }
     /// Extra rows belong to one section. Revealing Watchers must drop Tasks'
-    /// raise so the two do not share the lift and shrink each other.
+    /// raise so both do not share the lift and shrink each other.
     fn set_dock_section_show_all(&mut self, section: crate::views::dock::Section) {
         match section {
             crate::views::dock::Section::Workflows => self.dock_workflows_show_all = true,
@@ -577,7 +574,8 @@ impl AgentView {
             self.dock_cursor.min(n - 1)
         };
     }
-    /// Pre-paint dock reconciliation, run from the draw state-update step rather than the paint pass. Section counts change from background events (task and subagent completion, queue refills), so a section that shrank back to the preview must drop its `show-all` and the cursor must stay in bounds even when no dock key was pressed since the change. Gated on the prior frame's `dock_on` so it does no work while the dock is off.
+    /// Pre-paint dock reconciliation, run from the draw state-update step
+    /// rather than the paint pass.
     pub(crate) fn reconcile_dock_before_paint(&mut self) {
         if self.dock_on {
             self.clamp_dock_overflow();
@@ -675,8 +673,7 @@ impl AgentView {
         self.cache_dock_stop_at(self.pane_areas.dock, &snapshot);
     }
     /// Re-derive `dock_hovered` from the last pointer position against `dock`
-    /// (this frame's dock rect) and the current viewport. Pass the live
-    /// `layout.dock` rather than reading `pane_areas.dock`, which still holds the previous frame's rect during paint.
+    /// (this frame's dock rect) and the current viewport.
     pub(crate) fn sync_dock_hover_from_pointer(&mut self, dock: ratatui::layout::Rect) {
         let (col, row) = self.last_mouse_pos;
         self.dock_hovered = dock

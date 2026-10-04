@@ -1,22 +1,16 @@
 //! Which host runs a workspace server, and what its credential lets the server do.
-//!
-//! A sandbox's credential reaches the Grok API; every other host's only serves the hub. The
-//! catalog table is shared with the sandbox, so the tools that would call the API with the
-//! server's own credential are cut per host here and nowhere else.
 
 use xai_computer_hub_sdk::SharedAuthProvider;
 use xai_grok_tools::registry::types::ToolServerConfig;
 
 use crate::session::tool_config::WorkspaceSessionContextFactory;
 
-/// The host running a workspace server. The sandbox binary announces [`Self::as_wire_str`] as the
-/// registration's `host_kind`; `grok-workspaced` announces its own kind and takes the default here.
+/// The host running a workspace server.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WorkspaceHostKind {
     /// A hosted sandbox.
     Sandbox,
-    /// A daemon on a user's or remote machine, whoever started it (Grok Desktop, the `grok` CLI,
-    /// or by hand). The fail-closed default for a caller that names no host.
+    /// A daemon on a user's or remote machine, whoever started it (Grok Desktop, the `grok` CLI, or by hand).
     #[default]
     Daemon,
 }
@@ -30,10 +24,8 @@ impl WorkspaceHostKind {
         }
     }
 
-    /// Whether the host's credential only serves the hub: every host but the sandbox. Such a host
-    /// advertises no tool that calls the API with that credential, hands the credential to none,
-    /// cannot upload, and refuses a bind that names no toolset (`missing_tool_config`) rather than
-    /// widen to its catalog: the binder decides its toolset.
+    /// Whether the host's credential only serves the hub: every host but the
+    /// sandbox.
     pub fn is_hub_only(self) -> bool {
         match self {
             WorkspaceHostKind::Sandbox => false,
@@ -41,10 +33,7 @@ impl WorkspaceHostKind {
         }
     }
 
-    /// Whether the server streams `FsChanged` for its root. A daemon's folder is edited outside
-    /// the agent (the user's editor, git) and a bound client wants to hear it; a sandbox's root
-    /// changes only through the agent's own tools, and arming an OS watcher per container would
-    /// cost a tree walk and a frame per write that no harness reads.
+    /// Whether the server streams `FsChanged` for its root.
     pub fn streams_fs_changes(self) -> bool {
         match self {
             WorkspaceHostKind::Sandbox => false,

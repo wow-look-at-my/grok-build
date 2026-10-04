@@ -1,45 +1,11 @@
 //! Cgroup v2 memory-high monitor for graceful OOM handling.
-//!
-//! Approach:
-//!
-//! 1. On startup we create a child cgroup under the current process's cgroup and
-//!    configure:
-//!    - `memory.high` = soft limit (the "desired" ceiling)
-//!    - `memory.max`  = soft limit + headroom (hard OOM kill boundary)
-//!
-//! 2. Before each spawned command, we write the child PID into `cgroup.procs` to
-//!    move it (and its entire process group) into the cgroup.
-//!
-//! 3. A background `MemoryHighMonitor` task watches `memory.events` via inotify.
-//!    When the kernel increments the `high` counter (meaning a process touched
-//!    `memory.high`), the monitor reads `memory.current` and — if RSS is still
-//!    above 90 % of `memory.high` — sends a `MemoryHighEvent` through a
-//!    `tokio::sync::watch` channel.
-//!
-//! 4. The terminal actor polls `monitor.try_recv()` on every tick.  When it
-//!    receives an event it kills the offending process group with SIGKILL and
-//!    reports exit-code **137** (128 + SIGKILL) with signal `"oom"`.
-//!
-//! The grok-tools process itself is **never** inside this cgroup — only spawned
-//! child commands are.  After the child exits the cgroup is empty until the next
-//! command.
-//!
-//! ## Platform
-//!
-//! Everything compiles on all platforms, but the actual cgroup + inotify logic is
-//! gated behind `#[cfg(target_os = "linux")]`.  On macOS / Windows the public
-//! constructors return `None` / no-op stubs so callers don't need `#[cfg]`.
 
 /// Exit code for processes killed due to memory pressure.
-/// Matches the POSIX convention: 128 + signal-number (SIGKILL = 9).
 pub const PROCESS_OOM_EXIT_CODE: i32 = 137;
 
 // ============================================================================
-// Public types (cross-platform)
-// ============================================================================
+// Public types (cross-platform).
 
-/// Event emitted when `memory.high` is breached and RSS is still above
-/// the 90 % buffer threshold.
 #[derive(Debug, Clone)]
 pub struct MemoryHighEvent {
     /// Current cgroup memory usage in bytes when the event fired.
@@ -51,12 +17,9 @@ pub struct MemoryHighEvent {
 /// Configuration for cgroup memory limits.
 #[derive(Debug, Clone)]
 pub struct CgroupMemoryConfig {
-    /// Soft memory limit (`memory.high`).  When a process inside the cgroup
-    /// exceeds this, the monitor fires.
+    /// Soft memory limit (`memory.high`). When a process inside the cgroup exceeds this, the monitor fires.
     pub memory_high_bytes: u64,
-    /// Extra headroom above `memory.high` before the kernel hard-kills
-    /// (`memory.max = memory_high_bytes + headroom_bytes`).
-    /// A reasonable default is 256 MiB.
+    /// Extra headroom above `memory.high` before the kernel hard-kills.
     pub headroom_bytes: u64,
 }
 
@@ -203,8 +166,7 @@ mod linux {
 
             tokio::fs::create_dir_all(&fs_path).await?;
 
-            // Enable memory + cpu controllers in the child cgroup's parent
-            // (the parent's subtree_control must list the controllers).
+            // Enable memory + cpu controllers in the child cgroup's parent.
             let parent = fs_path.parent().unwrap();
             let subtree_ctl = parent.join("cgroup.subtree_control");
             // Best-effort; may already be enabled or not permitted.
@@ -278,8 +240,6 @@ mod linux {
 
     // ── MemoryHighMonitor ────────────────────────────────────────────────
 
-    /// Watches `memory.events` via inotify and signals when the `high`
-    /// counter increments while RSS is still above 90% of the threshold.
     pub(crate) struct MemoryHighMonitor {
         rx: watch::Receiver<Option<MemoryHighEvent>>,
         /// Dropping this aborts the background task.
@@ -356,8 +316,6 @@ mod linux {
                     Err(_) => continue,
                 };
 
-                // Only fire if still above 90 % of threshold (avoids false
-                // positives from transient spikes the kernel already handled).
                 let buffer_threshold = memory_high_threshold.saturating_mul(9) / 10;
                 if memory_current >= buffer_threshold {
                     let event = MemoryHighEvent {
@@ -385,11 +343,10 @@ mod linux {
 }
 
 // ============================================================================
-// Cross-platform re-exports
-// ============================================================================
+// Cross-platform re-exports.
 
-/// Cgroup handle — owns the child cgroup's lifecycle. On Linux, this creates a real cgroupv2
-/// directory with memory limits. On other platforms, this is a no-op.
+/// Cgroup handle — owns the child cgroup's lifecycle. On Linux, this
+/// creates a real cgroupv2 directory with memory limits.
 pub struct CgroupGuard {
     #[cfg(target_os = "linux")]
     inner: Option<linux::CgroupHandle>,
@@ -468,8 +425,8 @@ impl CgroupGuard {
     }
 }
 
-/// Memory-high monitor — watches for memory pressure events. On Linux, uses inotify on
-/// `memory.events`. On other platforms, this is a no-op that never fires.
+/// Memory-high monitor — watches for memory pressure events. On Linux, uses
+/// inotify on `memory.events`.
 pub struct MemoryMonitor {
     #[cfg(target_os = "linux")]
     inner: Option<linux::MemoryHighMonitor>,

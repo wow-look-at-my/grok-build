@@ -18,8 +18,6 @@ const TRUNCATED_INLINE_LINES: usize = 3;
 pub struct WebFetchToolCallBlock {
     /// The fetched URL.
     pub url: String,
-    /// HTTP status code (e.g. 200, 404).
-    /// `Option` because the block exists pre-completion (pending/running state) before any response data arrives.
     pub status_code: Option<u16>,
     /// Content type (e.g. "markdown", "text/plain").
     pub content_type: Option<String>,

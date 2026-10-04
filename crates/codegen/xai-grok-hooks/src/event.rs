@@ -186,8 +186,6 @@ pub enum GateKind {
     Stop,
     PostTool,
     /// Prompt decision control (`decision: "block"` with `reason`, exit 2).
-    /// The block reason is user-facing, never model context.
-    /// Exit 2 blocks regardless of JSON, and the default timeout is 30s.
     Prompt,
 }
 
@@ -468,8 +466,7 @@ pub enum HookPayload {
     },
 
     PreToolUse {
-        /// For meta-dispatch tools (`use_tool`, the external MCP-call tool) this is the underlying tool (`server__tool`), not the dispatcher.
-        /// Matchers key on the real target.
+        /// For meta-dispatch tools (`use_tool`, the external MCP-call tool) this is the underlying tool (`server__tool`).
         #[serde(rename = "toolName")]
         tool_name: String,
         #[serde(rename = "toolUseId")]

@@ -142,8 +142,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             .or_else(|| {
                 self.queued
                     .iter()
-                    // Workflow spawns never queue; the filter matches the
-                    // completed/pending arms above should that ever bend.
+                    // Workflow spawns never queue.
                     .find(|queued| queued.request.id == id && !queued.request.owner.is_workflow())
                     .map(|queued| queued_snapshot(&queued.request, queued.queued_at.into_std()))
             })

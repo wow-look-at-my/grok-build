@@ -1,7 +1,4 @@
-//! Stateless permission-grant evaluation: safe-command lists, word-boundary prefix and glob grant matching,
-//! per-segment bash scrutiny with deny-wins, the ambient-git scan, the protected-target floor, and the
-//! MCP / web_fetch / session-grant pre-decisions.
-//! Holds no session state; callers pass a `PermissionState` snapshot.
+//! Stateless permission-grant evaluation: safe-command lists.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -86,7 +83,8 @@ pub(crate) fn mcp_pre_decision(
     None
 }
 
-/// Canonical key for a persisted web_fetch deny: the host lowercased with the trailing dot trimmed. Entry `example.com` still denies `www.example.com`, because `www.` is an ordinary subdomain label to the matcher.
+/// Canonical key for a persisted web_fetch deny: the host lowercased with the
+/// trailing dot trimmed.
 pub(crate) fn web_fetch_deny_key(host: &str) -> String {
     host.trim().trim_end_matches('.').to_lowercase()
 }
@@ -136,9 +134,10 @@ pub(crate) fn web_fetch_deny_pre_decision(
     )))
 }
 
-/// True when `words` is a `kubectl` invocation that selects a caller-controlled kubeconfig, endpoint, auth, or identity.
-/// A read verb like `get`/`logs`/`describe` is not side-effect-free once any of these flags point kubectl at attacker-supplied config/auth.
-/// Such invocations must not ride the safe-command auto-allow (nor a broader whitelist *prefix* grant, see `evaluate_bash`).
+/// True when `words` is a `kubectl` invocation that selects a
+/// caller-controlled kubeconfig, endpoint, auth, or identity. A read verb
+/// like `get`/`logs`/`describe` is not side-effect-free once any of these
+/// flags point kubectl at attacker-supplied config/auth.
 fn kubectl_has_unsafe_flag(words: &[String]) -> bool {
     if crate::permission::policy::normalized_command_head(words).as_deref() != Some("kubectl") {
         return false;
@@ -248,8 +247,8 @@ fn matches_command_prefix(cmd: &str, pattern: &str) -> bool {
     cmd == pattern || (cmd.starts_with(pattern) && cmd.as_bytes().get(pattern.len()) == Some(&b' '))
 }
 
-/// `git <read-only verb>` prefix match, derived from the single [`SAFE_GIT_SUBCOMMANDS`] verb table.
-/// String-level only (whitelist scope and fallback); the words paths decide via [`git_words_are_read_only_query`], which also rejects unsafe options.
+/// `git <read-only verb>` prefix match, derived from the single
+/// [`SAFE_GIT_SUBCOMMANDS`] verb table.
 fn is_safe_git_query_prefix(cmd: &str) -> bool {
     cmd.strip_prefix("git ").is_some_and(|rest| {
         SAFE_GIT_SUBCOMMANDS
@@ -281,13 +280,9 @@ fn is_safe_command_words_str(cmd: &str) -> bool {
         || matches_command_prefix(cmd, "uniq")
         || matches_command_prefix(cmd, "tr")
         || matches_command_prefix(cmd, "cut")
-        // Stdout-only; a redirect to a real file floors the script as a request-level `FileWrite` before the safe-list allow
-        // Without these, an `…; echo saved` tail makes the whole chain impossible to cover with a grant
+        // Stdout-only; a redirect to a real file floors the script as a request-level `FileWrite` before the safe-list allow Without these.
         || matches_command_prefix(cmd, "echo")
         || matches_command_prefix(cmd, "printf")
-    // CWE-863: `tee` is not safe-listed; it writes stdin to arbitrary files, so pipelines like `cat data | tee /target` could bypass edit permissions
-    //
-    // [`rg_has_unsafe_flag`] is checked at the words level; the string form here cannot see flag structure reliably after join
 }
 
 /// Commands which are always safe to execute and should never prompt the user.
@@ -302,9 +297,7 @@ const ALWAYS_SAFE_COMMANDS: &[&str] = &[
     "hostname",
     "uptime",
     "ps",
-    // Git read-only queries are NOT listed here
-    // They go through `exec_risk::git_words_are_read_only_query` (shared verb and unsafe-option tables) in `is_always_safe_command_words`
-    // Search commands
+    // Git read-only queries are NOT listed here They go through `exec_risk::git_words_are_read_only_query`.
     "grep",
     "rg",
     // Kubernetes read-only commands
@@ -353,8 +346,10 @@ fn is_always_safe_command_words(words: &[String]) -> bool {
     false
 }
 
-/// Whether an always-allow grant for `words` must pin to the exact full command instead of a narrower prefix. Dangerous verbs (`rm`, `git push`, …) qualify because enforcement honors them only as exact whole-command grants.
-/// Exec vehicles (interpreters, package runners, `sudo`/`ssh`) qualify because a bare `python3`/`sudo git` prefix would authorize any arguments.
+/// Whether an always-allow grant for `words` must pin to the exact full
+/// command instead of a narrower prefix. Dangerous verbs (`rm`, `git push`,
+/// …) qualify because enforcement honors them only as exact whole-command
+/// grants.
 fn always_allow_scope_pinned(words: &[String]) -> bool {
     // `sed` writes via script content (`-i`, `1w/path`), not a word prefix, so a `sed -n` prefix grant would silently cover those writes; pin it
     is_dangerous_command_words(words)
@@ -362,15 +357,13 @@ fn always_allow_scope_pinned(words: &[String]) -> bool {
         || crate::permission::policy::normalized_command_head(words).as_deref() == Some("sed")
 }
 
-/// Default always-allow whitelist scope (word count) for a parsed command. Scope narrowing applies only when the **full** invocation is safe-listed.
-/// Otherwise a non-auto-allowed form like `rg --pre …` would still scope to bare `rg`, and "Always allow" would re-open the preprocessor exec hole.
+/// Default always-allow whitelist scope (word count) for a parsed command.
+/// Scope narrowing applies only when the **full** invocation is safe-listed.
 pub fn default_always_allow_scope(words: &[String]) -> usize {
     if words.is_empty() {
         return 0;
     }
-    // Pinned commands (dangerous verbs, exec vehicles) offer only the full command A narrowed default like "Always allow:
-    // git push" would save a rule that can never match "Always allow: sudo git" or "python3" would authorize arbitrary
-    // arguments Wrapped/chained forms whose full-scope grant still cannot match get no row at all (`always_allow_row_is_effective`)
+    // Pinned commands (dangerous verbs, exec vehicles) offer only the full command A narrowed default like "Always allow: git push" would save.
     if always_allow_scope_pinned(words) {
         return words.len();
     }
@@ -394,8 +387,6 @@ fn gh_always_allow_scope(words: &[String]) -> Option<usize> {
 }
 
 /// Default "Never allow" scope (word count) for a parsed command.
-/// Denies honor prefixes for every command, so the dangerous full-command pin does not apply.
-/// "Never allow: git push" blocking all pushes is the point.
 pub fn default_always_deny_scope(words: &[String]) -> usize {
     if words.is_empty() {
         return 0;
@@ -424,8 +415,8 @@ fn base_scope(words: &[String]) -> usize {
     n
 }
 
-/// Narrowest always-allow scope (word count) the prompt may offer for a parsed command. Only the exact command the user saw may persist.
-/// Deny scopes are not pinned (see [`default_always_deny_scope`]).
+/// Narrowest always-allow scope (word count) the prompt may offer for a
+/// parsed command. Only the exact command the user saw may persist.
 pub fn minimum_always_allow_scope(words: &[String]) -> usize {
     if always_allow_scope_pinned(words) {
         return words.len();
@@ -457,15 +448,14 @@ fn is_dangerous_command_words(words: &[String]) -> bool {
         || matches_command_prefix(&joined, "git push")
 }
 
-/// Uses `matches_command_prefix` so user allow/deny entries enforce a word boundary after the prefix.
-/// That keeps a "git" entry from matching "gitleaks" (CWE-183).
-/// Metacharacters in a literal grant stay literal; glob patterns live in `allowed_bash_globs`, matched separately (see [`matches_bash_glob`]).
+/// Uses `matches_command_prefix` so user allow/deny entries enforce a word
+/// boundary after the prefix.
 fn matches_whitelist_prefix(segment_str: &str, allowed_prefix: &str) -> bool {
     matches_command_prefix(segment_str, allowed_prefix)
 }
 
-/// Whether a user-authored glob grant (`allowed_bash_globs`) authorizes `segment_str`.
-/// Uses the same matcher as the config `[permission]` rules and the pattern-editor preview, so what the user previewed is what auto-allows.
+/// Whether a user-authored glob grant (`allowed_bash_globs`) authorizes
+/// `segment_str`.
 fn matches_bash_glob(segment_str: &str, pattern: &str) -> bool {
     super::policy::bash_pattern_matches_command(pattern, segment_str)
 }
@@ -474,7 +464,6 @@ fn matches_bash_glob(segment_str: &str, pattern: &str) -> bool {
 #[derive(Debug)]
 pub(crate) enum SegmentEvaluation {
     /// All non-setup segments safe/always-safe or on an allow-prefix.
-    /// `via_session_grant`: at least one segment hit `allowed_bash_commands`.
     AutoAllow { via_session_grant: bool },
     /// Disallow-prefix matched; reject without prompting.
     Reject(String),
@@ -484,7 +473,6 @@ pub(crate) enum SegmentEvaluation {
         segments: Vec<String>,
     },
     /// Tree-sitter could not decompose the script (heredoc, `$(…)`, backtick, single `&` background, …).
-    /// Caller should fall back to a single conservative prompt with the full script.
     Unparseable,
 }
 
@@ -495,11 +483,8 @@ pub(crate) struct BashEvaluation {
     pub(crate) exact_grant: bool,
     all_segments_granted: bool,
     /// Canonical, ordered, deduplicated security findings for this request.
-    /// The single source for grant/sandbox floor disposition and classifier evidence.
-    /// `ExecOrAmbientGit` may be added later by the ambient git scan.
     pub(crate) assessment: BashSecurityAssessment,
-    /// An unsafe write target came from a redirect (`> f`), which allow-rule word matching cannot see; no configured allow rule may vouch for it.
-    /// `true` (fail closed) unless the script decomposed or was recovered as an eligible reader script.
+    /// An unsafe write target came from a redirect (`> f`), which allow-rule word matching cannot see.
     pub(crate) redirect_write: bool,
     /// Raw segment word lists for ambient cwd tracking (git present, flags clean).
     pub(crate) ambient_segments: Option<Vec<Vec<String>>>,
@@ -512,8 +497,7 @@ pub(crate) struct BashEvaluation {
 }
 
 fn unparseable_exec_risk(cmd: &str) -> bool {
-    // WHY: word-only decomposition failed; ambient git never ran
-    // Fail closed when the script may still invoke git so sandbox/Auto cannot auto-allow
+    // WHY: word-only decomposition failed; ambient git never ran Fail closed when the script may still invoke git.
     script_may_invoke_git(cmd)
 }
 
@@ -526,9 +510,10 @@ fn env_risk_finding(env_risk: EnvRisk) -> Option<ClassifierSecurityFinding> {
     }
 }
 
-/// A persisted deny matching the raw script text (word-boundary prefix, the deny regime everywhere else).
-/// Unparseable scripts never reach per-segment deny matching, so without this their "don't ask again" denies would be silently inert.
-/// Matching the raw text can only over-block (deny-safe).
+/// A persisted deny matching the raw script text (word-boundary prefix, the
+/// deny regime everywhere else). Unparseable scripts never reach per-segment
+/// deny matching, so without this their "don't ask again" denies would be
+/// silently inert.
 fn raw_deny_rejection(cmd: &str, state: &PermissionState) -> Option<SegmentEvaluation> {
     state
         .disallowed_bash_commands
@@ -650,8 +635,7 @@ pub(crate) fn evaluate_bash(
     for parsed in segments {
         let raw_words = parsed.words();
         ambient_raw.push(raw_words.to_vec());
-        // Peel wrapper commands like `timeout 30 …`, `env FOO=1 …`, `nice -n 5 …` so we classify the *inner* program
-        // Without this, `timeout 30 rm -rf /tmp/foo` would be treated as a benign `timeout` invocation and silently auto-allowed
+        // Peel wrapper commands like `timeout 30 …`, `env FOO=1 …`, `nice -n 5 …` so we classify the *inner* program Without this.
         let words = unwrap_wrappers(raw_words);
         let shell_words: Vec<ShellWord<'_>> = words.iter().map(ShellWord::from).collect();
         if words_are_opaque_shell(&shell_words) {
@@ -692,9 +676,9 @@ pub(crate) fn evaluate_bash(
             };
         }
 
-        // Pinned commands run whatever argv follows, so a prefix grant would widen
-        // `docker run nginx` must not match `... --privileged`, nor `sed -n 1p f` match `sed -n 1p f -e 'w /tmp/x'`.
-        // Their saved scope is the full command, so enforce it on the exact segment only
+        // Pinned commands run whatever argv follows, so a prefix grant would
+        // widen `docker run nginx` must not match `... --privileged`, nor
+        // `sed -n 1p f` match `sed -n 1p f -e 'w /tmp/x'`.
         let matched_command_grant = if always_allow_scope_pinned(words) {
             state.allowed_bash_commands.contains(s.as_str())
         } else {
@@ -717,8 +701,11 @@ pub(crate) fn evaluate_bash(
             continue;
         }
 
-        // kubectl config/auth flags, `rg --pre`, env-dumping `ps`, and git driver/write options must prompt even under a whitelist prefix or blanket grant
-        // Always-allow persists only the verb prefix, so that grant cannot cover these variants. An exact segment grant still auto-allows. Do not insert DangerousCommand; that would also block exact grants
+        // kubectl config/auth flags, `rg --pre`, env-dumping `ps`, and git
+        // driver/write options must prompt even under a whitelist prefix or
+        // blanket grant Always-allow persists only the verb prefix, so that
+        // grant cannot cover these variants. An exact segment grant still
+        // auto-allows.
         if (kubectl_has_unsafe_flag(words)
             || rg_has_unsafe_flag(words)
             || ps_dumps_environment(words)
@@ -854,8 +841,8 @@ pub(crate) fn protected_target(
     }
 }
 
-/// A broad grant must prompt rather than auto-allow when the request's assessment carries a grant-floor finding. Broad covers the session `allow_bash_execute` blanket, prefix/glob grants, and sandbox auto-allow.
-/// It also covers a broad configured policy Allow deferred to the confirmation floor.
+/// A broad grant must prompt rather than auto-allow when the request's
+/// assessment carries a grant-floor finding.
 pub(crate) fn bash_request_floor_requires_prompt(evaluation: Option<&BashEvaluation>) -> bool {
     evaluation.is_some_and(|e| !e.exact_grant && e.assessment.constrains_broad_grant())
 }
@@ -926,9 +913,8 @@ pub(crate) fn bash_grant_pre_decision(
                     .assessment
                     .contains(ClassifierSecurityFinding::DangerousCommand)
             {
-                // An exact whole-command grant is explicit user authority for THIS command, so the auto classifier must not silent-deny it
-                // (It would make auto mode stricter than ask mode for the same persisted grant.)
-                // Blanket/prefix grants stay excluded; a dangerous verb prefix like `git push` is never trusted
+                // An exact whole-command grant is explicit user authority for
+                // THIS command.
                 evaluation
                     .exact_grant
                     .then_some((Decision::Allow, reasons::SESSION_GRANT))

@@ -1,18 +1,4 @@
 //! Workspace-level locking for index operations.
-//!
-//! Provides both in-memory (same-process) and file-based (cross-process)
-//! coordination to prevent redundant index operations on the same workspace.
-//!
-//! ## Design
-//!
-//! - **In-memory locks**: Fast path for same-process deduplication using a global registry
-//! - **File locks**: Cross-process coordination using lock files with PID and timestamp
-//! - **Stale detection**: Locks are considered stale if the holding process is dead or timeout exceeded
-//!
-//! ## Lock Types
-//!
-//! - **Shared (Load)**: Multiple readers allowed, blocked during exclusive operations
-//! - **Exclusive (Save/Build/Refresh)**: Single writer, blocks all other operations
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -72,8 +58,7 @@ struct InMemoryLockState {
     exclusive: bool, // Whether an exclusive lock is held
 }
 
-/// Global registry of in-memory locks (same process).
-/// Uses DashMap for lock-free concurrent access.
+/// Global registry of in-memory locks (same process). Uses DashMap for lock-free concurrent access.
 static IN_MEMORY_LOCKS: Lazy<DashMap<PathBuf, InMemoryLockState>> = Lazy::new(DashMap::new);
 
 /// A guard that releases the lock when dropped.
@@ -139,7 +124,6 @@ pub fn try_lock(workspace: &Path, operation: IndexOperation) -> LockResult {
     let workspace = canonicalize_workspace(workspace);
     let lock_file_path = get_lock_file_path(&workspace);
 
-    // Step 1: Check/acquire in-memory lock (fast path for same process)
     if !try_acquire_in_memory_lock(&workspace, operation) {
         tracing::debug!(
             workspace = %workspace.display(),
@@ -152,7 +136,6 @@ pub fn try_lock(workspace: &Path, operation: IndexOperation) -> LockResult {
         };
     }
 
-    // Step 2: For exclusive operations, also acquire file lock (cross-process)
     if operation.is_exclusive() {
         match try_acquire_file_lock(&lock_file_path, operation) {
             Ok(()) => {
@@ -307,7 +290,6 @@ fn try_acquire_file_lock(
         if age < operation.stale_timeout() && is_process_alive(pid) {
             return Err((op, Some(pid)));
         }
-        // Lock is stale - we can take over
         tracing::debug!(
             lock_path = %lock_path.display(),
             stale_op = %op,
@@ -374,9 +356,6 @@ fn parse_lock_file(contents: &str) -> Option<(String, u32, SystemTime)> {
 /// Check if a process is still alive.
 #[cfg(unix)]
 fn is_process_alive(pid: u32) -> bool {
-    // kill with signal 0 checks if process exists without sending a signal
-    // Returns 0 if process exists and we have permission to send signals
-    // Returns -1 with ESRCH if process doesn't exist
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 

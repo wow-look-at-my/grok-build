@@ -44,7 +44,6 @@ fn generate_test_line(line_num: usize, terminal_width: usize) -> String {
         _ => unreachable!(),
     };
 
-    // Add newline prefix for cases 3-5, alternating between \n and \r\n
     if i % 6 >= 3 {
         line = format!("{}\n{}\r\n{line}", lipsum(2), lipsum(8));
     }

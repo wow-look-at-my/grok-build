@@ -19,8 +19,7 @@ use xai_hunk_tracker::{
 };
 
 // ═══════════════════════════════════════════════════════════════════════
-// Request Types
-// ═══════════════════════════════════════════════════════════════════════
+// Request Types.
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,16 +91,14 @@ pub(crate) struct GetSummaryRequest {
 pub struct GetHunksResponse {
     pub hunks: Vec<Arc<Hunk>>,
 
-    // === Explicit content status ===
-    /// Baseline content with explicit status; only present when requesting a specific path
+    // === Explicit content status === Baseline content with explicit status.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub baseline: Option<FileContentView>,
     /// Current content with explicit status; only present when requesting a specific path
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current: Option<FileContentView>,
 
-    // === Legacy fields for backward compatibility ===
-    /// Baseline content (git HEAD); legacy, use `baseline.content` instead
+    // === Legacy fields for backward compatibility === Baseline content (git HEAD); legacy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub baseline_content: Option<String>,
     /// Current content (on disk); legacy, use `current.content` instead
@@ -183,7 +180,6 @@ fn file_content_status_from_wire(w: FileContentStatusWire) -> FileContentStatus 
 struct HunkTrackerContext {
     handle: HunkTrackerHandle,
     /// When set, rewrite absolute worktree paths (starting with `real_cwd`) to `display_cwd` in API responses.
-    /// The client UI then shows the original project path, not the worktree path.
     real_cwd: String,
     display_cwd: Option<String>,
 }
@@ -709,7 +705,11 @@ mod tests {
         assert!(!b.staged);
     }
 
-    // ========================================================================= GetHunksResponse Serialization Tests ========================================================================= These tests verify the ACP get-hunks response serializes the explicit status fields (baseline, current) alongside the legacy fields
+    // =========================================================================
+    // GetHunksResponse Serialization Tests
+    // =========================================================================
+    // These tests verify the ACP get-hunks response serializes the explicit
+    // status fields (baseline, current) alongside the fields
 
     /// GetHunksResponse serializes Full status with all fields
     #[test]

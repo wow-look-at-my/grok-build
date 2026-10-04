@@ -1,33 +1,4 @@
 //! Process memory tracing: durable JSONL evidence for memory investigations.
-//!
-//! The pager's footprint problems (see `memory_release`) historically had to be diagnosed live with `vmmap` on whatever process was still running.
-//! vmmap mislabels the jemalloc heap as "CoreMedia Capture Data" because jemalloc tags its mmaps with `VM_MAKE_TAG(101)`, `VM_MEMORY_CM_REGWARP`.
-//! Post-hoc analysis was therefore blind, so this module records what actually happened, when, attributed to which code path:
-//!
-//! - **Samples**: footprint/RSS and allocator gauges every `GROK_MEMTRACE_INTERVAL_SECS` (default 30s) from a detached thread.
-//! - **Purges**: every `memory_release` call, tagged with the memory cliff that triggered it (`reason`), with before/after footprint and duration.
-//!   Over- or under-purging is thus visible per call site.
-//! - **Thresholds**: the physical footprint crossing a bucket (`GROK_MEMTRACE_THRESHOLD_MB`, default 1 GiB, doubling) fires the *threshold hook*.
-//!   A full allocator stats dump (jemalloc `malloc_stats_print`) is written next to the trace.
-//!   The GCS trace-upload pipeline attaches to the hook (see below).
-//!   Buckets re-arm once the footprint halves, so a long-lived process can evidence repeated growth cycles.
-//!
-//! ## Files
-//!
-//! `$GROK_HOME/memtrace/<start-ts>-<pid>.jsonl` (and a `.1` after 4 MiB rotation) plus `<stem>-jemalloc-<seq>.txt` threshold dumps.
-//! Files are created lazily on the first event so short-lived CLI invocations leave no debris.
-//! Traces contain **process memory numbers only** (no user content), so they are safe to ship for analysis.
-//!
-//! ## Hooks (installed by the composition-root binary, mirrors `memory_release`)
-//!
-//! The lib cannot depend on jemalloc; `xai-grok-pager-bin` installs:
-//! - [`install_allocator_stats_provider`]: cheap mallctl gauge reads
-//! - [`install_allocator_dump_provider`]: full `malloc_stats_print` text
-//! - [`install_threshold_hook`]: `(trace_path, crossed_bytes)`.
-//!   The GCS upload pipeline (WIP) attaches here to ship the trace and dump when a process gets big enough to care about.
-//!   Absent a hook, crossing is still recorded locally and logged via `tracing::warn!`.
-//!
-//! Everything is inert until [`start`] runs (tests use scoped sinks).
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -66,15 +37,12 @@ struct TraceEvent<'a> {
     /// "start" | "sample" | "purge" | "threshold" | "crash".
     kind: &'a str,
     /// macOS `phys_footprint` (resident dirty + compressed + swapped).
-    /// This is the number Activity Monitor "Memory" and `vmmap`'s "Physical footprint" show.
-    /// `None` where unavailable (Linux).
     #[serde(skip_serializing_if = "Option::is_none")]
     footprint_bytes: Option<u64>,
     /// Resident set size.
     #[serde(skip_serializing_if = "Option::is_none")]
     rss_bytes: Option<u64>,
     /// Live OS thread count, recorded for offline analysis (the threshold buckets key on footprint only).
-    /// A count that scales with work done (background tasks, subagents) instead of holding a flat baseline is a leak.
     #[serde(skip_serializing_if = "Option::is_none")]
     threads: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -86,7 +54,6 @@ struct TraceEvent<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     hook_installed: Option<bool>,
     /// Purge: the memory gauge before the purge, physical footprint where available (macOS), else RSS (Linux).
-    /// Pair with the event's `footprint_bytes`/`rss_bytes` (same precedence, sampled after) for the released delta.
     #[serde(skip_serializing_if = "Option::is_none")]
     gauge_before_bytes: Option<u64>,
     /// Purge duration in microseconds.
@@ -115,22 +82,18 @@ pub fn install_allocator_stats_provider(provider: fn() -> Option<AllocatorStats>
     let _ = STATS_PROVIDER.set(provider);
 }
 
-/// Install the full allocator dump provider (`malloc_stats_print` text), invoked only on threshold crossings.
-/// Idempotent; first caller wins.
+/// Install the full allocator dump provider (`malloc_stats_print` text),
+/// invoked only on threshold crossings.
 pub fn install_allocator_dump_provider(provider: fn() -> String) {
     let _ = DUMP_PROVIDER.set(provider);
 }
 
-/// Install the threshold hook: `(jsonl_trace_path, crossed_threshold_bytes)`. This is the attachment point for the
-/// GCS trace-upload pipeline. It fires at most once per bucket per growth cycle (buckets re-arm after the footprint
-/// halves). Idempotent; first caller wins.
+/// Install the threshold hook: `(jsonl_trace_path, crossed_threshold_bytes)`.
 pub fn install_threshold_hook(hook: fn(&Path, u64)) {
     let _ = THRESHOLD_HOOK.set(hook);
 }
 
 /// Threshold buckets that fire exactly once per growth cycle.
-/// A bucket fires when the footprint reaches it while armed, then stays disarmed until the footprint drops below half the bucket.
-/// The hysteresis keeps purge/regrow cycles near a boundary from spamming.
 struct Thresholds {
     buckets: Vec<u64>,
     armed: Vec<bool>,
@@ -139,7 +102,7 @@ struct Thresholds {
 impl Thresholds {
     fn new(first_bytes: u64, count: usize) -> Self {
         let mut buckets = Vec::with_capacity(count);
-        let mut b = first_bytes.max(64 << 20); // floor: 64 MiB
+        let mut b = first_bytes.max(64 << 20);
         for _ in 0..count {
             buckets.push(b);
             b = b.saturating_mul(2);
@@ -163,7 +126,7 @@ impl Thresholds {
     }
 }
 
-const ROTATE_BYTES_DEFAULT: u64 = 4 << 20; // 4 MiB, then one .1 rotation.
+const ROTATE_BYTES_DEFAULT: u64 = 4 << 20;
 static DUMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 struct Sink {
@@ -176,7 +139,6 @@ struct Sink {
 }
 
 /// Process-global sink.
-/// `RwLock` (not `OnceLock`) so tests can install scoped sinks; production installs exactly once via [`start`].
 static SINK: RwLock<Option<std::sync::Arc<Sink>>> = RwLock::new(None);
 
 fn now_ms() -> u64 {
@@ -223,8 +185,6 @@ impl Sink {
                 .bytes_written
                 .fetch_add(line.len() as u64 + 1, Ordering::Relaxed);
             if total > self.rotate_bytes {
-                // Rotate: rename the current file to .1, replacing any previous .1
-                // Reopen the live file eagerly so a reader between events never observes a missing trace
                 let mut rotated = self.path.clone().into_os_string();
                 rotated.push(".1");
                 let _ = std::fs::rename(&self.path, PathBuf::from(rotated));
@@ -346,8 +306,8 @@ fn with_sink(f: impl FnOnce(&Sink)) {
     }
 }
 
-/// Whether a trace sink is installed ([`start`] ran and `GROK_MEMTRACE` is not disabled, or a test sink is scoped in).
-/// Lets callers skip gauge sampling entirely when tracing is off.
+/// Whether a trace sink is installed ([`start`] ran and `GROK_MEMTRACE` is
+/// not disabled, or a test sink is scoped in).
 pub(crate) fn is_active() -> bool {
     match SINK.read() {
         Ok(g) => g.is_some(),
@@ -390,7 +350,6 @@ fn interval_from_env() -> Duration {
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(30);
     // Production floors at 5s so accidental tiny values don't spam samples.
-    // Test builds allow 1s so isolated regressions can finish quickly.
     let min_secs = if cfg!(test) { 1 } else { 5 };
     Duration::from_secs(secs.max(min_secs))
 }
@@ -625,8 +584,6 @@ pub(crate) mod test_support {
     use super::*;
 
     /// Install a scoped sink writing to `path` (tiny rotation cap, high thresholds).
-    /// Returns a guard restoring the previous sink on drop.
-    /// Tests using this must serialize on the `MEMTRACE_SINK` serial key; the sink is process-global.
     pub(crate) struct SinkGuard(Option<std::sync::Arc<Sink>>);
 
     impl Drop for SinkGuard {
@@ -664,7 +621,7 @@ mod tests {
 
     #[test]
     fn thresholds_fire_once_and_rearm_after_halving() {
-        let mut t = Thresholds::new(1 << 30, 3); // 1 GiB, 2 GiB, 4 GiB
+        let mut t = Thresholds::new(1 << 30, 3);
         assert!(t.observe(512 << 20).is_empty(), "below first bucket");
         assert_eq!(t.observe(1 << 30), vec![1 << 30], "first crossing fires");
         assert!(
@@ -676,7 +633,6 @@ mod tests {
             vec![2 << 30, 4 << 30],
             "one observation can cross several buckets"
         );
-        // Dropping below half of 1 GiB re-arms only that bucket
         assert!(t.observe(400 << 20).is_empty());
         assert_eq!(
             t.observe(1 << 30),
@@ -702,8 +658,8 @@ mod tests {
         let path = dir.path().join("t.jsonl");
         let _guard = test_support::install_test_sink(path.clone(), 256);
 
-        // Enough samples to exceed the 256-byte cap at least twice
-        // The post-rotation file is created lazily by the NEXT write, so the final sample guarantees both files exist
+        // Enough samples to exceed the 256-byte cap at least twice The
+        // post-rotation file is created lazily by the NEXT write.
         for _ in 0..16 {
             test_support::record_sample_for_tests();
         }

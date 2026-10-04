@@ -27,15 +27,16 @@ async fn leader_reattach_cancellation_roundtrips_durable_log() {
         .expect("A welcome");
     a.inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("A submit turn");
-    // Wait until the turn is clearly streaming (sentinel visible); this also closes the leader's rewind window so cancel is not confused with rewind
+    // Wait until the turn is streaming (sentinel visible); this also closes
+    // the leader's rewind window so cancel is not confused with rewind
     a.wait_for_text(&turn_sentinel(1), STREAM_TIMEOUT)
         .expect("A turn streaming");
 
     // Ctrl+C on an empty prompt cancels while streaming.
     a.inject_keys(keys::CTRL_C).expect("A press ctrl+c");
     a.update(Duration::from_millis(200));
-    // Generous budget: the heavy multi-client leader cluster drains the paced cancel slower than the single-client path
-    // Match the test's other waits (LEADER/STREAM_TIMEOUT) rather than the single-client 15s
+    // Generous budget: the heavy multi-client leader cluster drains the paced
+    // cancel slower.
     a.wait_for_text("Turn cancelled by user", STREAM_TIMEOUT)
         .expect("A turn cancelled marker");
 
@@ -48,8 +49,7 @@ async fn leader_reattach_cancellation_roundtrips_durable_log() {
         "cancelled turn must record stop_reason=cancelled, got {rec}"
     );
 
-    // The keep-alive viewer attaches AFTER the cancel so the leader survives A's exit
-    // Waiting for it to replay proves it is attached to the same session
+    // The keep-alive viewer attaches AFTER the cancel so the leader survives A's exit Waiting for it to replay proves it is attached.
     let mut keep = cluster.attach(&[]).expect("spawn keep-alive viewer");
     keep.wait_for_text(&turn_sentinel(1), LEADER_TIMEOUT)
         .expect("keep-alive replayed the cancelled transcript");
@@ -57,7 +57,7 @@ async fn leader_reattach_cancellation_roundtrips_durable_log() {
     // Reattach must replay from the durable log, not re-drive a turn: the mock must see no new inference request while C catches up
     let inference_before_reattach = inference_request_count(cluster.content());
 
-    // Fresh reattach while A is still up (see module comment), then prove the original driver's exit does not take C (or the transcript) down
+    // Fresh reattach while A is still up (see module comment).
     let mut c = cluster.attach(&[]).expect("spawn fresh reattach client C");
     c.wait_for_text(&turn_sentinel(1), LEADER_TIMEOUT)
         .expect("C replayed the cancelled transcript");
@@ -76,9 +76,7 @@ async fn leader_reattach_cancellation_roundtrips_durable_log() {
         c.screen_contents()
     );
 
-    // As in the completion test, a fresh reattach lands Idle either way, so the spinner checks guard regressions rather than prove the replay
-    // Bare substrings (not the full `…`-suffixed labels) are simple stable matches for the spinner labels
-    // The wait for the labels to disappear is bounded rather than a fixed settle
+    // As in the completion test, a fresh reattach lands Idle either way.
     wait_for_labels_absent(&mut c, &["Waiting", "Cancelling"], Duration::from_secs(5));
 
     assert!(

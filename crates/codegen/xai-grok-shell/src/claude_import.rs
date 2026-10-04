@@ -1,7 +1,4 @@
 // Scans Claude settings and generates TOML patches for .grok/config.toml.
-//
-// This module reuses the existing discovery and parsing functions from claude_compat.rs and util/config.rs
-// It does NOT modify the runtime Claude compat layer; that continues to work as before
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -164,9 +161,7 @@ fn format_item_summary(items: &[ImportableItem]) -> String {
     if !envs.is_empty() {
         out.push_str(&format!("  - {} environment variable(s)\n", envs.len()));
         for (key, value) in &envs {
-            // Redact the value: even keys like FOO_KEY can hide secrets (API tokens, credentials)
-            // The raw value still flows into the on-disk config.toml for actual use; only the human-facing summary suppresses it
-            // The length hint lets the user recognise their setting without exposing the contents in terminals, screenshots, or CI logs
+            // Redact the value: even keys like FOO_KEY can hide secrets (API tokens, credentials) The raw value still flows into the on-disk config.toml.
             out.push_str(&format!(
                 "      {} = <redacted, {} chars>\n",
                 key,
@@ -384,9 +379,8 @@ pub fn scan_importable_settings(cwd: &Path) -> ImportPlan {
 /// Scan `~/.claude/{skills,rules}` (global) and `<repo>/.claude/{skills,rules}` (project).
 /// Emits `PathEntry` items so the dirs survive the runtime cutoff.
 fn scan_claude_path_dirs(cwd: &Path, plan: &mut ImportPlan) {
-    // Track canonicalised global paths so the project scan below can dedup against them
-    // When the user runs `/import-claude` from `~`, the project root *is* the home directory
-    // The same `.claude/skills` would otherwise be added to both global and project scopes
+    // Track canonicalised global paths so the project scan below can dedup
+    // against them When the user runs `/import-claude` from `~`.
     let mut global_added: std::collections::HashSet<std::path::PathBuf> =
         std::collections::HashSet::new();
 
@@ -431,9 +425,7 @@ fn scan_claude_json_mcp_servers(cwd: &Path, plan: &mut ImportPlan) {
         return;
     }
 
-    // TODO: project-specific servers are incorrectly classified as global here
-    // `load_claude_json_mcp_servers_as_configs()` merges the top-level `mcpServers` in `~/.claude.json` with `projects.<cwd>.mcpServers` into one map
-    // The fix: call `load_claude_json_mcp_servers_from()` twice (user-level entries, then project entries), or expose a split variant in `config.rs`
+    // TODO: project-specific servers are incorrectly classified.
     for (name, config) in servers {
         plan.global_items.push(ImportableItem::McpServer {
             name,
@@ -455,8 +447,9 @@ fn scan_mcp_json_servers(cwd: &Path, plan: &mut ImportPlan) {
 
 // Repo Root Discovery
 
-/// Find the git repo root for project config writes.
-/// Uses `git2::Repository::discover` (matching `config/mod.rs:find_project_configs`) to find the repo root. Falls back to `cwd` if no git repo is found.
+/// Find the git repo root for project config writes. Uses
+/// `git2::Repository::discover` (matching
+/// `config/mod.rs:find_project_configs`) to find the repo root.
 pub fn find_project_root(cwd: &Path) -> PathBuf {
     git2::Repository::discover(cwd)
         .ok()
@@ -464,17 +457,16 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
         .unwrap_or_else(|| cwd.to_path_buf())
 }
 
-// Import Marker (Read Side) The marker `[claude_compat] imported = true` in `~/.grok/config.toml` is the signal that runtime fallback paths should stop reading `.claude/`.
-// The reader lives here so the hook, path, and permission gates all consult the same cached marker The writer is `mark_claude_imported` below
+// Import Marker (Read Side) The marker `[claude_compat] imported = true` in `~/.grok/config.toml` is the signal.
 
 /// Cached result of [`is_claude_import_marked`]; see its doc for the caching rationale and trade-offs.
-/// `RwLock<Option<bool>>` rather than `OnceLock<bool>` so tests can reset the state between cases.
-/// The fast path is a read lock and a cached `bool`, far below the cost of the uncached `read_to_string` and TOML parse.
 static MARKER_CACHE: std::sync::RwLock<Option<bool>> = std::sync::RwLock::new(None);
 
-/// Whether the current user has already imported Claude settings. Reads `[claude_compat] imported = true` from `~/.grok/config.toml` once per process and caches the result.
-/// When the marker is set, runtime fallbacks that read `.claude/` should be skipped; the user has migrated to native config. Resilient: returns `false` on missing file, missing section, parse error, or any other failure.
-/// Trade-off: a user who manually flips the marker mid-session must restart to see the change, acceptable because reverting after import is rare. That variant logs one line so users can see the cutoff fired.
+/// Whether the current user has already imported Claude settings. Reads
+/// `[claude_compat] imported = true` from `~/.grok/config.toml` once per
+/// process and caches the result. When the marker is set, runtime fallbacks
+/// that read `.claude/` should be skipped; the user has migrated to native
+/// config.
 pub(crate) fn is_claude_import_marked() -> bool {
     if let Some(v) = *MARKER_CACHE.read().expect("MARKER_CACHE poisoned") {
         return v;
@@ -486,7 +478,6 @@ pub(crate) fn is_claude_import_marked() -> bool {
 }
 
 /// Forcibly seed the cache with the freshly written marker value.
-/// The slash command calls this after `apply_import` writes the marker so gate checks reflect the new state without a restart.
 pub(crate) fn refresh_marker_cache(value: bool) {
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = Some(value);
 }
@@ -497,9 +488,10 @@ pub(crate) fn reset_marker_cache_for_test() {
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = None;
 }
 
-/// Like [`is_claude_import_marked`], but logs a one-time `info!` line on the first true result per process.
-/// `gate_name` identifies which call site fired the cutoff (useful for debugging which subsystem stopped reading `.claude/`).
-/// Call sites are runtime fallback paths in `claude_compat.rs`, `util/config.rs`, `util/hooks.rs`, and `agent/config.rs` that previously read `.claude/`.
+/// Like [`is_claude_import_marked`], but logs a one-time `info!` line on the
+/// first true result per process. `gate_name` identifies which call site
+/// fired the cutoff (useful for debugging which subsystem stopped reading
+/// `.claude/`).
 pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool {
     static LOGGED: OnceLock<()> = OnceLock::new();
     let marked = is_claude_import_marked();
@@ -567,8 +559,8 @@ fn write_import_marker(config_path: &Path) -> anyhow::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let tmp = config_path.with_extension("toml.tmp");
-    // Best-effort cleanup of the .tmp file if either write or rename fails
-    // A stale .tmp would otherwise survive next to the real config, and the next attempt would inherit a half-written file before the rename clobbers it
+    // Best-effort cleanup of the .tmp file if either write or rename fails A
+    // stale .tmp will otherwise survive next to the real config.
     if let Err(e) = std::fs::write(&tmp, &toml_str) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
@@ -580,9 +572,8 @@ fn write_import_marker(config_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Public entry point for the slash command: write the marker, log success, and seed the in-process cache so gate checks reflect it without restart.
-/// Called from `/import-claude` even when nothing was imported: the marker is the user's opt-in choice, not a side effect of having imported items.
-/// Re-entering a workspace with `.claude/` content must not re-engage the runtime fallbacks.
+/// Public entry point for the slash command: write the marker, log success,
+/// and seed the in-process cache so gate checks reflect it without restart.
 pub fn mark_claude_imported() -> anyhow::Result<()> {
     let path = crate::util::grok_home::grok_home().join("config.toml");
     write_import_marker(&path)?;
@@ -645,8 +636,7 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResul
         }
     }
 
-    // The slash command (`/import-claude`) is responsible for writing the `[claude_compat] imported = true` marker via `mark_claude_imported()`
-    // It does so regardless of `result.total()` so a user invocation that finds nothing to import still records the user's opt-in choice
+    // The slash command (`/import-claude`) is responsible for writing the `[claude_compat] imported = true` marker.
 
     Ok(result)
 }
@@ -964,8 +954,7 @@ fn apply_hooks_to_dir(hooks_dir: &Path, items: &[ImportableItem]) -> anyhow::Res
         .ok_or_else(|| anyhow::anyhow!("{}: hooks is not a JSON object", target.display()))?;
 
     let mut count = 0usize;
-    // `dirty` tracks whether we mutated the JSON in any way (including in-place timeout refreshes that don't add new entries)
-    // The file is re-written only when dirty, even when count == 0
+    // `dirty` tracks whether we mutated the JSON in any way (including in-place timeout refreshes that don't add new entries).
     let mut dirty = false;
     for item in new_hooks {
         let ImportableItem::Hook {
@@ -986,8 +975,7 @@ fn apply_hooks_to_dir(hooks_dir: &Path, items: &[ImportableItem]) -> anyhow::Res
                 anyhow::anyhow!("{}: hooks.{} is not a JSON array", target.display(), event)
             })?;
 
-        // Dedup on `(event, matcher, command)` If a matching entry already exists, update its `timeout` in place and skip adding a new group; otherwise append a new group below
-        // A re-import with a changed timeout therefore reflects in the output Invariant: `extract_hooks_from_settings_file` filters empty matcher strings to `None`, so the comparison only distinguishes `None` from `Some(s)`
+        // Dedup on `(event, matcher, command)` If a matching entry already exists, update its `timeout` in place and skip adding a new group.
         let mut updated = false;
         for g in groups.iter_mut() {
             let existing_matcher = g.get("matcher").and_then(|v| v.as_str());
@@ -1161,8 +1149,7 @@ mod tests {
         assert_eq!(parsed.tool, reparsed.tool);
         assert_eq!(parsed.pattern, reparsed.pattern);
 
-        // The Bash `:*` prefix idiom formats to the bare prefix (`Bash(sed)`), not the original string
-        // Reparsing must still yield an equivalent rule
+        // The Bash `:*` prefix idiom formats to the bare prefix (`Bash(sed)`).
         let parsed = parse_permission_rule("Bash(sed:*)", RuleAction::Deny).unwrap();
         assert_eq!(parsed.pattern.as_deref(), Some("sed"));
         let reparsed =
@@ -1345,8 +1332,7 @@ mod tests {
         assert!(is_claude_import_marked_at(&path));
     }
 
-    // The MARKER_CACHE is a process-global RwLock so these tests must run serially
-    // They each set the cache to true or false via the test helper, then call the gated function and assert on its early-return behavior
+    // The MARKER_CACHE is a process-global RwLock so these tests must run serially They each set the cache to true or false via the test helper.
     use serial_test::serial;
 
     /// RAII guard that resets the marker cache when dropped, so tests don't leak state into one another.
@@ -1566,11 +1552,7 @@ mod tests {
     fn gate_load_claude_env_returns_empty_when_marker_set() {
         let _g = MarkerGuard;
         refresh_marker_cache(true);
-        // Also set the env-var override so the workspace-resident marker
-        // reader (which can't see the shell-side cache) honours the gate.
-        // Without it this asserts nothing: the loader also returns empty when
-        // the machine simply has no `~/.claude` to read, so it passes on a
-        // clean host and fails on one that has the file.
+        // Also set the env-var override so the workspace-resident marker reader (which can't see the shell-side cache).
         unsafe { std::env::set_var("_GROK_CLAUDE_MARKER_OVERRIDE", "1") };
         let dir = tempfile::tempdir().unwrap();
         let env = xai_grok_workspace::permission::claude_settings::load_claude_env_with_project(
@@ -1691,8 +1673,7 @@ mod tests {
     #[test]
     #[serial]
     fn as_sources_gates_project_sources_on_trust() {
-        // Trust gating lives in `HookSourcePaths::as_sources`: project sources are dropped when untrusted and kept when trusted
-        // Assert on project sources (git_root-relative) since global sources use the real, non-injectable home
+        // Trust gating lives in `HookSourcePaths::as_sources`: project sources are dropped when untrusted and kept when trusted Assert.
         let _g = MarkerGuard;
         refresh_marker_cache(false);
         let dir = tempfile::tempdir().unwrap();
@@ -1728,9 +1709,7 @@ mod tests {
     #[test]
     #[serial]
     fn discover_hooks_honors_claude_compat_gate() {
-        // Pins the single load entry point every startup/reload site uses
-        // With `compat.claude.hooks = false` a project `.claude/settings.json` hook must NOT load; with it true it MUST
-        // A pager e2e is disproportionate: the spawn/agent_ops wiring just forwards the resolved compat into this entry point
+        // Pins the load entry point every startup/reload site uses.
         let _g = MarkerGuard;
         // The marker stays unset so the import cutoff doesn't independently skip `.claude`; this isolates the compat gate
         refresh_marker_cache(false);
@@ -1822,7 +1801,6 @@ mod tests {
     #[test]
     fn extract_hooks_empty_command_string_is_imported_as_is() {
         // Documented behavior: an empty command string is imported verbatim.
-        // Users editing `.claude/settings.json` to debug an empty-command entry will see it appear in the import summary, not silently disappear
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         std::fs::write(
@@ -2030,15 +2008,12 @@ extra_rule_dirs = ["/c/rules"]
 
     #[test]
     fn scan_claude_path_dirs_dedupes_global_and_project_when_same() {
-        // Simulate a workspace where project_root canonicalises to the home dir (the user runs /import-claude from ~ where .claude/ already lives)
-        // Without dedup, the same .claude/skills would land in both scopes.
+        // Simulate a workspace where project_root canonicalises to the home dir (the user runs /import-claude from ~ where .claude/ already lives).
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path();
         std::fs::create_dir_all(home.join(".claude").join("skills")).unwrap();
 
-        // Build a plan by directly invoking the scan with a synthetic plan and a cwd whose `find_project_root` returns the same `home` We can't easily mock `xai_dirs::home_dir()`, so this test focuses on the dedup *logic*
-        // It manually populates `global_items` first, then asserts that the project-side branch with the same path would skip
-        // Direct end-to-end coverage of the home-collision case requires `GROK_HOME` plumbing which is intentionally out of scope
+        // Build a plan by directly invoking the scan with a synthetic plan.
         let global = dunce::canonicalize(home.join(".claude").join("skills")).unwrap();
         let project = dunce::canonicalize(home.join(".claude").join("skills")).unwrap();
         assert_eq!(global, project, "sanity: paths canonicalize to the same");
@@ -2088,9 +2063,8 @@ extra_rule_dirs = ["/c/rules"]
         )
         .unwrap();
 
-        // Note: `resolve_permissions_with_provenance` ALSO reads requirements, managed settings, and the developer's real `~/.grok/config.toml`.
-        // We can't isolate `grok_home()` because it's `OnceLock`-cached.
-        // Instead, assert on rule *provenance*: no rule should originate from our tempdir's `.claude/settings.json`. The dev's real ~/.grok config rules (if any) are out of scope for this test.
+        // Note: `resolve_permissions_with_provenance` ALSO reads
+        // requirements, managed settings.
         let resolved =
             xai_grok_workspace::permission::resolution::resolve_permissions_with_provenance(
                 dir.path(),
@@ -2134,9 +2108,7 @@ extra_rule_dirs = ["/c/rules"]
     #[test]
     #[serial]
     fn gate_marker_cache_unset_means_uses_disk() {
-        // Sanity test: with the cache reset, `is_claude_import_marked()` must (a) not panic and (b) populate the cache for subsequent reads
-        // We intentionally **do not** assert a specific cached value: the dev's real `~/.grok/config.toml` may legitimately have the marker set during local testing, and we can't override `grok_home()`
-        // It's `OnceLock`-cached, so any prior test that calls it locks the value in for the entire process The `MarkerGuard` resets the cache after this test, so subsequent gate tests start clean
+        // Sanity test: with the cache reset, `is_claude_import_marked()` must (a) not panic and (b) populate the cache.
         let _g = MarkerGuard;
         reset_marker_cache_for_test();
         let _ = is_claude_import_marked();

@@ -1,8 +1,4 @@
-//! Dedicated binary: the external-stream `OnceLock` is process-global, so this
-//! construction canary cannot live in the lib test suite.
-//!
-//! The external stream is hard-disabled in this build, so even a valid double
-//! opt-in leaves it inactive and the prompt text never rides the event.
+//! Dedicated binary: the external-stream `OnceLock` is process-global.
 
 use xai_grok_telemetry::external::{self, ExternalOtelConfig};
 

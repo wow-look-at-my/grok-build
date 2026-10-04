@@ -1,8 +1,4 @@
-//! First-party tool normalization — the `ToolInput`-coupled projection on top
-//! of the [`crate::tool_taxonomy`] leaf. Projects the agent's **typed**
-//! [`ToolInput`] into the canonical input dict ([`canonical_input`]) and
-//! resolves identity from registered metadata ([`tool_identity_of`]). The typed
-//! value is the source of truth — robust to serde renames, exhaustiveness-checked.
+//! First-party tool normalization — the `ToolInput`-coupled projection on top of the [`crate::tool_taxonomy`] leaf.
 use crate::registry::types::FinalizedToolset;
 use crate::tool_taxonomy::field;
 pub use crate::tool_taxonomy::{CanonicalToolMeta, ToolIdentity};
@@ -37,9 +33,7 @@ pub fn merge_tool_meta(
         None => existing,
     }
 }
-/// Normalize a read offset to the 1-indexed canonical line. Readers allow negative (from-end) offsets, which have no 1-indexed equivalent and
-/// are dropped (consumers read `raw_input`); `0` coalesces to `1`. Shared by [`canonical_input`] and the harness ACP location line so a single
-/// tool-call event never exposes two different start lines.
+/// Normalize a read offset to the 1-indexed canonical line.
 pub fn norm_offset_i64(offset: Option<i64>) -> Option<u64> {
     match offset {
         Some(o) if o >= 0 => Some(o.max(1) as u64),

@@ -1,9 +1,4 @@
 //! Serializable registry-level errors.
-//!
-//! Variants here are for failures that occur **inside** the registry —
-//! mismatched session, server-id collisions, optimistic-concurrency stale
-//! generation. Wire-level transport errors (`tool_not_found`, etc.) live
-//! in [`crate::ToolErrorWire`].
 
 use serde::{Deserialize, Serialize};
 
@@ -25,19 +20,15 @@ pub enum RegistryError {
         reg_session: SessionId,
     },
 
-    /// `server_id` collides with an active server in this session owned by
-    /// a different connection. Fails the entire `register_*` batch with a
-    /// top-level JSON-RPC error.
+    /// `server_id` collides with an active server in this session owned by a different connection.
     #[error("server_id {server_id} collides with an active server in this session")]
     ServerIdCollision { server_id: ServerId },
 
-    /// `server_id` is already in use on this connection by an earlier
-    /// registration with a different tool set.
+    /// `server_id` is already in use on this connection by an earlier registration with a different tool set.
     #[error("server_id {server_id} already owned by an earlier registration on this connection")]
     ServerIdInUse { server_id: ServerId },
 
-    /// Description failed structural validation (e.g. derived `tool_id`
-    /// invalid, reserved prefix on a client-supplied `server_id`).
+    /// Description failed structural validation.
     #[error("invalid description: {message}")]
     InvalidDescription { message: String },
 

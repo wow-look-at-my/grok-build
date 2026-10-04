@@ -2,7 +2,6 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// `validate_requirements` runs at the very top of `main`, before the runtime/TUI, so fd 2 is still the real terminal.
 /// An invalid `fail_closed` version_override must abort startup with the update/admin guidance and exit 2, distinct from the gate's exit 1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
@@ -29,8 +28,7 @@ async fn requirements_version_failure_exits_2_with_guidance() {
     .expect("spawn pager");
 
     let msg = "Update Grok to a version the policy allows";
-    // The observed flake was an empty screen and empty raw output (the child had produced no bytes
-    // yet), not a wrong exit or guidance.
+    // The observed flake was an empty screen and empty raw output (the child had produced no bytes yet).
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut exit_code = None;
     while Instant::now() < deadline {
@@ -56,8 +54,7 @@ async fn requirements_version_failure_exits_2_with_guidance() {
                 PtyExitPoll::Running | PtyExitPoll::PendingStatus => {}
             }
             if exit_code.is_some() {
-                // The child exited before the guidance reached our side. Keep draining until the PTY reader
-                // delivers those buffered bytes (it will, then hit EOF) instead of a single fixed window.
+                // The child exited before the guidance reached our side.
                 let drain_deadline = Instant::now() + Duration::from_secs(10);
                 while !(harness.contains_text(msg)
                     || String::from_utf8_lossy(harness.raw_output()).contains(msg))

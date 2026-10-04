@@ -48,7 +48,6 @@ const RECOVERY_ALIGNED_PER_RUN: u64 = RECOVERY_ROW_BYTES[0].1 as u64
     + RECOVERY_ROW_BYTES[1].1 as u64
     + RECOVERY_ROW_BYTES[2].1 as u64;
 const RECOVERY_ALIGNED_PER_KNOWN_SLOT: u64 = RecoveryRunV1::COUNT as u64 * RECOVERY_ALIGNED_PER_RUN;
-// Unknown permits only terminal run 7; all three record kinds remain on that key.
 const RECOVERY_ALIGNED_UNKNOWN_TERMINAL: u64 = RECOVERY_ALIGNED_PER_RUN;
 // A crash can retain both sidecar images plus one torn row from the replacement.
 const COMPLETION_CRASH_OVERLAP_COPIES: u64 = 2;
@@ -279,7 +278,8 @@ pub(super) fn accepted_metadata(segments: u8, accepted_rows: u8) -> Result<u64, 
 const fn row_sum(table: &[(usize, usize)], indexes: &[usize], is_aligned: bool) -> u64 {
     let mut total = 0;
     let mut rest = indexes;
-    // Only const callers: a row id past `table` fails the build here, as the old index did.
+    // Only const callers: a row id past `table` fails the build here, as the
+    // index did.
     while let Some((&idx, tail)) = rest.split_first() {
         assert!(idx < table.len(), "row id past the accounting table");
         let row = match table.split_at_checked(idx) {

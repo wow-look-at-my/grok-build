@@ -39,8 +39,8 @@ async fn detect_fsmonitor_override_bounded(
         .unwrap_or(FsmonitorOverride::Disabled)
 }
 
-/// Implementers must return `None` on spawn failure, signal, or nonzero exit (only success stdout is meaningful).
-/// `detect_fsmonitor_override` treats every such `None` as unknown and falls back to disabled.
+/// Implementers must return `None` on spawn failure, signal, or nonzero exit
+/// (only success stdout is meaningful).
 trait FsmonitorProbeRunner: Send {
     fn run_probe(
         &mut self,
@@ -72,9 +72,8 @@ impl FsmonitorProbeRunner for GitProbeRunner<'_> {
 }
 
 async fn detect_fsmonitor_override(runner: &mut impl FsmonitorProbeRunner) -> FsmonitorOverride {
-    // Read the raw effective value first
-    // A `--type=bool` query converts every matching value, so a shadowed helper *pathname* would make a repo-local `true` fail to convert
-    // The raw read tells us which case we're in
+    // Read the raw effective value first A `--type=bool` query converts every
+    // matching value.
     let Some(config) = runner
         .run_probe(&["config", "--null", "--get", "core.fsmonitor"])
         .await
@@ -102,8 +101,8 @@ async fn detect_fsmonitor_override(runner: &mut impl FsmonitorProbeRunner) -> Fs
     {
         false
     } else {
-        // Uncommon spelling: ask git to convert it, `--fixed-value`-filtered to the raw string
-        // The filter stops a shadowed helper pathname from hijacking the conversion
+        // Uncommon spelling: ask git to convert it, `--fixed-value`-filtered
+        // to the raw string The filter stops a shadowed helper pathname.
         let typed_args = [
             "config",
             "--null",
@@ -122,9 +121,6 @@ async fn detect_fsmonitor_override(runner: &mut impl FsmonitorProbeRunner) -> Fs
         return FsmonitorOverride::Disabled;
     }
 
-    // Keep the built-in daemon only when git advertises it
-    // Git 2.35.1 and older read `true` as a hook *pathname* and would run a program named `true`; versions before 2.26 can hide tracked changes
-    // The feature line is the capability signal
     let Some(build_options) = runner.run_probe(&["version", "--build-options"]).await else {
         return FsmonitorOverride::Disabled;
     };

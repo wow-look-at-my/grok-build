@@ -1,17 +1,4 @@
 //! Workspace-scoped events (FS changes, server lifecycle, discovery, ...).
-//!
-//! `WorkspaceEvent` carries only **workspace-observed external state**.
-//! Examples: filesystem watcher fires, background subprocess (LSP / MCP) lifecycle, background indexing progress, config changes detected on disk.
-//!
-//! Sampler-caused state never goes here.
-//! Hunk events (`HunkRecorded`, `HunkAccepted`, `HunkRejected`) are deliberately absent.
-//! Hunks come from tool writes and `act_on_hunk` RPCs, both sampler-caused, so the sampler already has that state from the originating call.
-//! It can re-snapshot via `list_hunks()` if it needs to reconcile.
-//!
-//! `ToolsChanged` is included on this enum because the tool registry is a workspace state observation.
-//! An MCP server snapshot change (workspace-observed) and a sampler-initiated `update_tool_config` produce the same downstream effect.
-//! Either way, other subscribers and the sampler's UI need to re-fetch `tool_definitions`.
-//! Tool execution itself is **not** broadcast here; it stays on the sampler-caused tool-result path.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -26,11 +13,8 @@ use crate::types::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum WorkspaceEvent {
-    /// Filesystem watcher fired: every path that changed the same way within one settle window,
-    /// coalesced so a checkout is one frame per session rather than one per file (the producer
-    /// splits a window past ~1024 paths into several frames). A `Renamed` batch is `[from, to]`
-    /// when the watcher saw both halves, or the one path it saw; a rename across the root boundary
-    /// arrives as the half inside it, `Removed` (left the root) or `Created` (arrived).
+    /// Filesystem watcher fired: every path that changed the same way within
+    /// one settle window.
     FsChanged {
         /// Affected paths, relative to the workspace root. Paths outside it are never reported.
         paths: Vec<PathBuf>,
@@ -47,7 +31,6 @@ pub enum WorkspaceEvent {
     /// Git lock is held by an external process; reads may block until `until`.
     GitLockHeld {
         /// Best-effort wall-clock estimate of when the lock will be released.
-        /// Not an `Instant`: `std::time::Instant` is process-local and not `Serialize`, so it is meaningless to a receiver in another process.
         until: DateTime<Utc>,
     },
     /// Skill discovery found changes.
@@ -94,23 +77,22 @@ pub enum WorkspaceEvent {
     ProjectConfigChanged,
     /// Permission policy changed on disk.
     PermissionPolicyChanged,
-    /// A session's tool registry was rebuilt (tool-config swap or MCP snapshot re-resolve).
-    /// Subscribers should re-fetch definitions for the affected session.
+    /// A session's tool registry was rebuilt (tool-config swap or MCP
+    /// snapshot re-resolve).
     ToolsChanged {
         /// Affected session id.
         session_id: String,
     },
 }
 
-/// Topic discriminator for workspace events, used by `EventBus::subscribe_filtered` to skip uninteresting events.
-/// Filtering is delivery-only; it never changes the payload.
+/// Topic discriminator for workspace events, used by
+/// `EventBus::subscribe_filtered` to skip uninteresting events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceTopic {
     /// Filesystem-watcher events.
     Fs,
     /// VCS background events (HEAD moves, external git lock held).
-    /// Hunk events are not on the EventBus; see the module-level doc-comment.
     Vcs,
     /// Skill / plugin / hook discovery.
     Discovery,

@@ -1,4 +1,3 @@
-//! Layer 1: PTY management (spawn, inject keys, resize, drain output).
 
 use std::ffi::OsStr;
 use std::io::{self, Read, Write};
@@ -11,8 +10,7 @@ use portable_pty::{ExitStatus, PtySize, native_pty_system};
 use xai_grok_test_support::{TestProcessTree, TestSandbox, process_has_exited_without_reap};
 
 const PTY_DROP_REAP_TIMEOUT: Duration = Duration::from_millis(250);
-/// Grace after group SIGTERM before SIGKILL so a responsive child can run TERM cleanup. Wedged children fall through to SIGKILL.
-/// Detached-background reap is the pager quit path, not this grace.
+/// Grace after group SIGTERM before SIGKILL so a responsive child can run TERM cleanup.
 const PTY_DROP_TERM_GRACE: Duration = Duration::from_millis(500);
 const PTY_REAP_POLL: Duration = Duration::from_millis(10);
 const PENDING_STATUS_ERROR: &str = "exit observed but status unavailable";
@@ -143,7 +141,7 @@ impl PtyController {
             )?)
         };
         // Windows keeps portable-pty's spawn; Job enrollment is a best-effort
-        // post-spawn attachment, so a very short-lived descendant may escape
+        // post-spawn attachment, so a short-lived descendant may escape
         // before enrollment; diagnostics preserve that downgrade.
         #[cfg(windows)]
         let child = {
@@ -169,8 +167,7 @@ impl PtyController {
         #[cfg(windows)]
         let process_pid = child.process_id();
         let process_tree = process_pid.map(|pid| TestProcessTree::attach(pid, "grok PTY child"));
-        // Attachment failures remain recorded by TestProcessTree and show up in process_tree_diagnostics() on every harness timeout
-        // Drop the slave so we get EOF when the child exits.
+        // Attachment failures remain recorded by TestProcessTree and show up in process_tree_diagnostics().
         drop(pair.slave);
 
         let reader = pair.master.try_clone_reader()?;
@@ -312,8 +309,7 @@ impl PtyController {
     #[cfg(unix)]
     pub fn send_signal(&self, signal: i32) -> Result<()> {
         let pid = self.child_pid().context("no child pid to signal")?;
-        // SAFETY: libc::kill has no memory-safety preconditions, and child_pid()
-        // only yields a positive live-child pid (never the kill(0)/kill(-1) broadcast).
+        // SAFETY: libc::kill has no memory-safety preconditions.
         let rc = unsafe { libc::kill(pid as libc::pid_t, signal) };
         if rc != 0 {
             return Err(anyhow::Error::from(std::io::Error::last_os_error())).context("libc::kill");
@@ -416,9 +412,7 @@ impl PtyController {
         }
     }
 
-    /// Send SIGTERM to the child's whole process group. Returns whether the
-    /// signal was delivered (so Drop only spends its grace period when a
-    /// graceful exit is actually possible).
+    /// Send SIGTERM to the child's whole process group.
     fn terminate_tree_best_effort(&self) -> bool {
         self.process_tree
             .as_ref()
@@ -506,7 +500,7 @@ fn recover_consumed_status(status: io::Result<Option<ExitStatus>>) -> io::Result
     status?.ok_or_else(|| io::Error::other("PTY child status was consumed without being cached"))
 }
 
-/// Only [`Self::Running`] is live. [`Self::PendingStatus`] has already exited and cleaned descendants; portable-pty has not yielded status yet.
+/// Only [`Self::Running`] is live.
 #[must_use = "PTY exit state and poll errors must be handled explicitly"]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PtyExitPoll<T> {

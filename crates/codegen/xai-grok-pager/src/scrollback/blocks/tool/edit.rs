@@ -1,22 +1,4 @@
-//! # Progressive highlight
-//!
-//! First paint uses per-hunk syntect (fast).
-//! When the post-edit file is available and under size/line caps, a background worker upgrades to full-file-scoped styles.
-//! Mid-file multi-line scopes (e.g. a closing `"""`) then paint correctly.
-//!
-//! # Caps ([`EDIT_HL_MAX_BYTES`] / [`EDIT_HL_MAX_LINES`])
-//!
-//! Full-file HL costs up to **O(file lines)** in syntect, not O(hunk lines).
-//! The walk stops at the last hunk line, but a hunk near EOF pays for the whole file.
-//! Caps keep background work bounded so a multi-megabyte monorepo dump never freezes the worker or balloons the style map:
-//!
-//! | Gate | Default | On exceed |
-//! |------|---------|-----------|
-//! | File bytes | 2 MiB | stay [`EditHighlightPhase::HunkOnly`] |
-//! | Line count | 50_000 | stay hunk-only |
-//!
-//! Cost magnitudes: see `benches/edit_highlight`.
-//! Hunk-only first paint is cheap; full-file runs once per upgrade; the naïve prefix-per-hunk approach is not shipped.
+//! # Progressive highlight First paint uses per-hunk syntect (fast). When the post-edit file is available and under size/line caps.
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -41,19 +23,14 @@ use crate::syntax::{Syntect, get_syntect};
 use crate::theme::{Theme, ThemeKind};
 use xai_grok_pager_diff::{DiffHunk, diff_hunks_to_patch};
 
-/// Skip full-file HL when the post-edit file exceeds this size (2 MiB).
-/// Full-file syntect on multi-MB sources is poor background work vs staying hunk-only; see `benches/edit_highlight`.
 pub const EDIT_HL_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// Skip full-file HL when the post-edit file has more lines than this (50k).
-/// Larger files stay hunk-only so the worker never does an unbounded walk over a dump.
 pub const EDIT_HL_MAX_LINES: usize = 50_000;
 
 /// Content spans for one source line: FG styles only (height-neutral).
 pub type EditLineStyles = Vec<(Style, String)>;
 
 /// Progressive syntax-highlight state for an edit block.
-/// `HunkOnly` / `Pending` use per-hunk syntect; `FileScoped` maps full-file FG styles onto Equal/Insert hunk text (Deletes keep per-hunk syntect).
-/// Clone via [`Arc`].
 #[derive(Debug, Clone, Default)]
 pub enum EditHighlightPhase {
     #[default]
@@ -74,16 +51,11 @@ pub struct DiffRenderConfig {
     /// If true, add 2-char indent before line numbers.
     pub indent: bool,
     /// If true, background extends from line start (including gutter).
-    /// If false (default), background only covers the content area.
     pub gutter_bg: bool,
-    /// If true, skip indent columns in background (keep them clean).
-    /// If false, include indent in background.
+    /// If true, skip indent columns in background (keep them clean). If false, include indent in background.
     pub indent_bg: bool,
     /// Separator string between hunks.
-    /// Options: "───" (line), "…" (ellipsis), "⋯" (midline ellipsis), "" (none).
     pub hunk_separator: String,
-    /// Show two line-number columns (old and new) like GitHub's unified diff.
-    /// When false (default), show a single column with the new-file line number.
     pub dual_line_numbers: bool,
 }
 
@@ -190,8 +162,7 @@ fn render_diff_hunks_core(
         let layout = gutter_layout(hunk, config);
         let indent_width = if config.indent { INDENT.len() } else { 0 };
         let content_width = (width as usize).saturating_sub(layout.total);
-        // A diff interleaves two file versions; give each side its own highlighter so a multi-line construct can't leak across sides
-        // Equal lines render on the new side and advance both
+        // A diff interleaves file versions.
         let mut old_highlighter = syntect.highlight_lines_by_file_path(path);
         let mut new_highlighter = syntect.highlight_lines_by_file_path(path);
         for line in hunk {
@@ -232,8 +203,8 @@ fn render_diff_hunks_core(
     lines
 }
 
-/// Unchanged new-file lines hidden between two hunks, when computable. Each call's hunks are numbered against its
-/// own file snapshot, so a count would be wrong there.
+/// Unchanged new-file lines hidden between hunks, when computable. Each call's hunks are numbered against its own
+/// file snapshot, so a count would be wrong there.
 fn hunk_gap_lines(prev: &DiffHunk, next: &DiffHunk) -> Option<usize> {
     let prev_last = prev.iter().rev().find(|l| l.tag != ChangeTag::Delete)?.ln;
     let next_first = next.iter().find(|l| l.tag != ChangeTag::Delete)?.ln;
@@ -469,9 +440,9 @@ fn assemble_diff_line_outputs(
 /// Compute where background starts based on config.
 fn compute_bg_start(config: &DiffRenderConfig, gutter_width: usize, indent_width: usize) -> u16 {
     if config.gutter_bg {
-        // Gutter bg is on: check if we should skip indent
-        // indent_bg = true means skip indent (keep it clean)
-        // indent_bg = false means include indent in background
+        // Gutter bg is on: check if we should skip indent indent_bg = true
+        // means skip indent (keep it clean) indent_bg = false means include
+        // indent.
         if config.indent && config.indent_bg {
             indent_width as u16
         } else {
@@ -555,7 +526,6 @@ fn project_styles_onto_wrap_segments(
 
 /// Gutter layout computed from a hunk and config.
 struct GutterLayout {
-    /// Width of old-file column (0 in single mode).
     width_old: usize,
     /// Width of new-file column.
     width_new: usize,
@@ -616,7 +586,6 @@ fn render_gutter(
     }
 
     if layout.dual {
-        // Dual mode: two columns (old and new) like GitHub unified diff
         let w_old = layout.width_old;
         let w_new = layout.width_new;
         match line.tag {
@@ -757,7 +726,6 @@ pub struct EditToolCallBlock {
     pub prefix: &'static str,
     pub display_name: Option<String>,
     /// One-liner summary can't be trusted: the call touched multiple files, or the path fell back to the tool title.
-    /// It suppresses the diffstat suffix, and `ScrollbackState` keeps such blocks expanded.
     pub summary_untrusted: bool,
     /// Cached `(insertions, deletions)` count, computed eagerly from hunks.
     change_counts: (usize, usize),
@@ -939,9 +907,8 @@ impl EditToolCallBlock {
 
         let prefix = self.prefix;
 
-        // Build the suffix spans first so we can reserve space for them. The suffix (diffstat / "(N edits)") renders only
-        // on the collapsed one-liner. Untrusted summaries (multi-file, title-fallback path) never show counts that would
-        // only describe the first diff.
+        // Build the suffix spans first so we can reserve space for them. The suffix (diffstat / "(N edits)") renders
+        // only on the collapsed one-liner.
         let collapsed = matches!(
             surface,
             crate::render::tool_paths::ToolPathSurface::Collapsed
@@ -1226,7 +1193,7 @@ impl EditToolCallBlock {
 
         match ctx.mode {
             DisplayMode::Collapsed => {
-                // Collapsed: just header line. Path (span 1) is selectable.
+                // Collapsed: header line.
                 let line = self.header_line(
                     &theme,
                     muted_collapsed,
@@ -1236,8 +1203,6 @@ impl EditToolCallBlock {
                     cwd,
                     Some(ctx.content_width()),
                 );
-                // Spans: ["Edit ", path, optional suffix spans...]
-                // Only the path span (index 1) is selectable.
                 let path_end = if line.spans.len() > 2 {
                     2
                 } else {
@@ -1645,8 +1610,7 @@ mod tests {
             None,
             Some(80),
         );
-        // Spans: ["Edit ", basename, " +1", "/", "-1"]; path stays span 1 so the collapsed arm's selection/link invariant holds
-        // Sole pin of the exact diffstat suffix format
+        // Spans: ["Edit ", basename, " +1", "/", "-1"].
         assert_eq!(header.spans.len(), 5);
         let [s0, s1, s2, s3, s4] = header.spans.as_slice() else {
             panic!("expected 5 header spans: {:?}", header.spans);
@@ -1659,8 +1623,7 @@ mod tests {
         assert_eq!(s4.content.as_ref(), "-1");
         assert_eq!(s4.style.fg, Some(theme.diff_delete_fg));
 
-        // The suffix is collapsed-only: expanded and fullscreen headers stay bare; the hunks/body carry the information there
-        // Both suffix shapes (diffstat, "(N edits)" fallback) are gated
+        // The suffix is collapsed-only: expanded and fullscreen headers stay bare.
         let multi = block.clone().with_edit_count(3);
         for surface in [ToolPathSurface::Expanded, ToolPathSurface::Fullscreen] {
             let header = block.header_line(&theme, false, true, false, surface, None, None);
@@ -1708,8 +1671,7 @@ mod tests {
 
     #[test]
     fn collapsed_mode_renders_header_only() {
-        // The block's context-free default is Collapsed
-        // The effective expanded default is applied by ScrollbackState's materialize policy, pinned in state/mod.rs
+        // The block's context-free default is Collapsed The effective expanded default is applied by ScrollbackState's materialize policy.
         let block = EditToolCallBlock::new("src/foo.rs", vec![make_hunk()]);
         let entry = crate::scrollback::entry::ScrollbackEntry::new(
             crate::scrollback::block::RenderBlock::ToolCall(
@@ -1828,8 +1790,7 @@ mod tests {
 
         for path in cases {
             for width in 8..=48 {
-                // Mirrors production: expanded headers are prefix and path only
-                // (The diffstat suffix is collapsed-only, and collapsed headers never reach wrap_edit_header.)
+                // Mirrors production: expanded headers are prefix and path only.
                 let header = Line::from(vec![Span::raw("Edit "), Span::raw(path.to_owned())]);
                 let wrapped = wrap_edit_header(header, width, 2);
                 let mut reassembled = String::new();
@@ -1871,7 +1832,7 @@ mod tests {
         let block = EditToolCallBlock::new("src/lib.rs", vec![make_hunk()]);
         let ctx = test_ctx();
         let output = block.output(&ctx);
-        assert_eq!(output.lines.len(), 6); // header + empty + 4 diff
+        assert_eq!(output.lines.len(), 6);
     }
 
     #[test]
@@ -1886,8 +1847,8 @@ mod tests {
         assert!(nth(&output.lines, 4).background.is_some()); // insert
         assert_eq!(nth(&output.lines, 5).background, None); // equal
 
-        // Insert/delete shading is semantic, not a decorative panel
-        // It must survive minimal mode's flat rendering (EntryRenderer::flat_background), so it must never be marked `background_is_panel`
+        // Insert/delete shading is semantic, not a decorative panel It must
+        // survive minimal mode's flat rendering.
         assert!(
             output.lines.iter().all(|l| !l.background_is_panel),
             "diff shading must not be marked panel"
@@ -2128,7 +2089,6 @@ mod tests {
             let narrow = render_diff_hunk_highlighted(&hunk, path, &theme, 30, &config);
             assert!(narrow.len() > 1, "{label}: narrow render must wrap");
 
-            // Per-character styles survive the wrap, row 0 included.
             let narrow_stream = style_stream(&narrow);
             assert_eq!(
                 narrow_stream,
@@ -2331,7 +2291,6 @@ mod tests {
         let path = Path::new("test.txt");
         let outputs = render_diff_hunks_highlighted(&[hunk1, hunk2], path, &theme, 80, &config);
 
-        // Lines 2..=9 sit between the hunks: computable gap of 8.
         assert_eq!(outputs.len(), 3);
         assert!(nth(&outputs, 1).is_separator);
         assert_eq!(
@@ -2703,7 +2662,6 @@ mod tests {
         insta::assert_snapshot!("diff_multiple_hunks_dual", diff_outputs_to_string(&outputs));
     }
 
-    /// Three-line all-Insert Go hunk with a tab-indented body (new-file lines 1-3).
     fn go_tab_hunk() -> DiffHunk {
         vec![
             DiffLine {
@@ -2730,7 +2688,6 @@ mod tests {
     #[test]
     fn tabs_expanded_in_diff_lines() {
         // Simulates creating a new file with tab-indented content (e.g. Go, Makefile).
-        // All lines are Insert; tabs must be expanded to spaces so they're visible
         let hunk = go_tab_hunk();
 
         let theme = Theme::current();
@@ -2740,7 +2697,6 @@ mod tests {
 
         assert_eq!(outputs.len(), 3);
 
-        // Line 2's tab expands with the default tab_width of 4
         let line2 = line_to_string(&nth(&outputs, 1).line);
         assert!(
             !line2.contains('\t'),
@@ -2759,8 +2715,7 @@ mod tests {
         );
     }
 
-    // Asserts use **raw syntect RGB** (not ratatui FG after quantize)
-    // Under `NO_COLOR` quantize maps every RGB to Reset, which would make keyword vs string asserts tautological / false
+    // Asserts use **raw syntect RGB** (not ratatui FG after quantize) Under `NO_COLOR` quantize maps every RGB to Reset.
 
     type Rgb = (u8, u8, u8);
     type SyntectSpans = Vec<(Rgb, String)>;
@@ -2813,7 +2768,6 @@ mod tests {
             .collect()
     }
 
-    /// Full-file then slice: silent HL from line 1, return styles for all lines.
     /// Caller pins the theme via `pin_groknight_syntect` (lock is not reentrant).
     fn full_file_raw_styles(path: &Path, file_text: &str) -> Vec<SyntectSpans> {
         let syntect = get_syntect();
@@ -2874,7 +2828,7 @@ class ProcessQueueItem(BaseModel):
     }
 
     /// Regression: a `"""` opened on a removed line must not change how the added line highlights.
-    /// The two diff sides are highlighted independently.
+    /// Both diff sides are highlighted independently.
     #[test]
     fn delete_side_multiline_string_does_not_leak_into_insert() {
         let _guard = pin_groknight_syntect();
@@ -3099,7 +3053,7 @@ class ProcessQueueItem(BaseModel):
         let path = Path::new("probe.py");
         let file = "x = 1\ny = 2\n";
         let hunk = vec![DiffLine {
-            text: "x = 999\n".into(), // differs from disk line 1
+            text: "x = 999\n".into(),
             lo: 1,
             ln: 1,
             tag: ChangeTag::Insert,

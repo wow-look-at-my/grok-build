@@ -1,5 +1,5 @@
-#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
-#![allow(clippy::expect_used)] // 3 hits predate the gate
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::expect_used)] // Hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -476,7 +476,6 @@ fn ensure_control_caps(reg: &LeaderRegistration) -> Result<&LeaderCapabilities> 
         .ok_or_else(|| anyhow::anyhow!("Leader does not advertise capabilities (legacy version)"))
 }
 /// Env override for the `grok workspace` gate: any truthy value enables the command locally, a falsy one disables it.
-/// Either way it bypasses the remote settings flag.
 const WORKSPACE_COMMAND_ENV: &str = "GROK_WORKSPACE_COMMAND";
 /// One leader door's CLI identity, shared by `connect_leader_control` and `spawn_and_connect_leader`.
 struct LeaderDoorCli {
@@ -493,8 +492,6 @@ const WORKSPACE_DOOR: LeaderDoorCli = LeaderDoorCli {
     leader_mode_reason: "the workspace is shared via the leader",
 };
 /// Resolution of the `grok workspace` gate.
-/// `Unknown` is kept separate from `Disabled` so we don't tell the user the flag is off when the settings were never read.
-/// Both fail closed, but `Unknown` earns an honest message.
 #[derive(Debug, PartialEq, Eq)]
 enum WorkspaceGate {
     Enabled,
@@ -816,8 +813,7 @@ fn render_workspace_payload(payload: &ControlPayload, json: bool) {
 /// How to rebuild one session's `session/load` after a leader reconnect.
 #[derive(Default, Clone)]
 struct CachedSession {
-    /// Verbatim `session/load` request JSON (preferred replay form: preserves the client's exact cwd / mcpServers / meta).
-    /// `None` when the session was only ever created via `session/new`; the load is synthesized.
+    /// Verbatim `session/load` request JSON.
     load_request_json: Option<String>,
     /// `cwd` captured from `session/new` / `session/load` params.
     cwd: Option<String>,
@@ -825,16 +821,12 @@ struct CachedSession {
     mcp_servers_json: Option<String>,
 }
 /// ACP state cached from the stdio stream for replay after leader reconnect.
-/// Tracks EVERY session the external client has open (IDE clients drive multiple sessions over one bridge), not just the most recent one.
-/// A leader crash must restore all of them or the others die with "unknown session id" on their next prompt.
 #[derive(Default, Clone)]
 struct StdioReplayState {
     initialize_json: Option<String>,
     /// Sessions to restore on reconnect, keyed by session id, in first-seen order (Vec keeps replay order deterministic).
     sessions: Vec<(String, CachedSession)>,
     /// cwd/mcp from the most recent `session/new` REQUEST whose response has not been observed yet.
-    /// Folded into `sessions` when the response carrying the assigned session id arrives.
-    /// Never replayed while unconfirmed (the id is unknown; the client's own request died with the old leader and is its to retry).
     pending_new: Option<CachedSession>,
     /// Most recently created/loaded session id, reported in `x.ai/leader_reconnected` as the primary restored session.
     last_session_id: Option<String>,
@@ -853,8 +845,8 @@ impl StdioReplayState {
             self.last_session_id = None;
         }
     }
-    /// A resume names a session the client is already attached to, so an entry from its original `session/load` is the better one to replay.
-    /// That entry carries the client's `_meta`, which a synthesized load cannot reproduce.
+    /// A resume names a session the client is already attached to, so an
+    /// entry from its original `session/load` is the better one to replay.
     fn insert_session_if_new(&mut self, sid: &str, cached: CachedSession) {
         if !self.sessions.iter().any(|(id, _)| id == sid) {
             self.sessions.push((sid.to_string(), cached));
@@ -884,9 +876,8 @@ fn cached_session_from_params(
         },
     ))
 }
-/// Methods whose requests the replay cache reads.
-/// One list shared by the prefilter and the match below so the two cannot drift apart.
-/// Quoted JSON spellings so prose mentioning a method does not trigger a parse.
+/// Methods whose requests the replay cache reads. One list shared by the prefilter and the match below so both cannot drift apart. Quoted JSON spellings so prose mentioning a
+/// method does not trigger a parse.
 const CACHED_METHODS: &[&str] = &[
     "\"initialize\"",
     "\"session/new\"",
@@ -977,12 +968,9 @@ fn cache_incoming_session_id(msg: &str, state: &std::sync::Mutex<StdioReplayStat
         s.last_session_id = Some(sid.to_string());
     }
 }
-/// Synthetic JSON-RPC id for the `session/load` the bridge constructs itself (when the external client only ever sent `session/new`).
-/// A string id can never collide with a numeric id the external client may have in flight.
+/// Synthetic JSON-RPC id for the `session/load` the bridge constructs itself.
 const REPLAY_LOAD_REQUEST_ID: &str = "x.ai/leader-replay/session-load";
-/// Max silence between two messages from the leader during a replayed request.
-/// A `session/load` streams replay notifications continuously once it starts.
-/// The phase before the replay (MCP resolution, session file reads) can be quiet for a while on large sessions.
+/// Max silence between messages from the leader during a replayed request.
 const REPLAY_RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// Overall deadline for one replayed request's response.
 const REPLAY_RESPONSE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(180);
@@ -1204,7 +1192,7 @@ async fn forward_stdio_line_to_leader(
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
 }
-/// Emitted by both leader guards (server mode and leader-connect) so the two sites can't drift.
+/// Emitted by both leader guards (server mode and leader-connect) so both sites can't drift.
 const PLUGIN_DIR_LEADER_WARNING: &str = "grok: --plugin-dir is ignored in leader mode; run with --no-leader to \
      load per-process plugins";
 /// Run the `agent` subcommand, dispatching to the appropriate mode.
@@ -1591,8 +1579,8 @@ async fn run_agent_command(
         }
     }
 }
-/// Raise the per-process fd soft limit toward the hard limit. A 1024 limit fails with EMFILE under a ~100-session
-/// wave. Best-effort: never blocks startup (containers/cgroups may pin limits).
+/// Raise the per-process fd soft limit toward the hard limit. Best-effort: never blocks startup
+/// (containers/cgroups may pin limits).
 #[cfg(unix)]
 fn raise_fd_limit() {
     #[cfg(target_os = "macos")]
@@ -1679,8 +1667,6 @@ fn configure_process_env(mut args: PagerArgs) -> Result<PagerArgs> {
 const RUNTIME_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 const GROK_WORKER_THREADS_ENV: &str = "GROK_WORKER_THREADS";
 /// tokio defaults to one worker per logical CPU.
-/// On a host with hundreds of CPUs that can exhaust a cgroup thread budget at startup and abort under `panic = "abort"`.
-/// A terminal UI is I/O-bound, so cap at 8.
 const DEFAULT_MAX_WORKER_THREADS: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 /// How `GROK_WORKER_THREADS` resolved.
 #[derive(Debug, PartialEq, Eq)]
@@ -1921,18 +1907,12 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
-    // A `--sandbox` session starts on the host (outside the jail), where we
-    // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
-    // the jail. The worker is a re-entry of this binary that must run ONLY
-    // the worker loop and exit — before the jail re-exec, or it would try to
-    // sandbox itself and fork another worker.
+    // A `--sandbox` session starts on the host (outside the jail).
     if xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
         xai_grok_sandbox::ci_host::run_ci_host_worker();
         std::process::exit(0);
     }
-    // Before anything else: a `--sandbox=pathbox` (or any `--ro`/`--rw`/`--rn`
-    // path flag) replaces this process with itself inside bwrap or Seatbelt. Anything started first would run
-    // outside the jail, and telemetry would count the process twice.
+    // Before anything else: a `--sandbox=pathbox` (or any `--ro`/`--rw`/`--rn` path flag) replaces this process with itself inside bwrap.
     xai_grok_sandbox::jail::maybe_reexec_into_jail();
     xai_grok_telemetry::startup::mark_process_start();
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
@@ -1943,8 +1923,7 @@ fn main() {
     }
     let args = PagerArgs::parse_cli();
     // The pathbox CLI contract (bare --sandbox invalid, profile+path-flag mix
-    // invalid) is enforced first by the raw-argv jail pass; this is the
-    // belt-and-suspenders check for any path that reached clap without it.
+    // invalid) is enforced first by the raw-argv jail pass.
     if let Err(msg) = args.validate_sandbox() {
         eprintln!("error: {msg}");
         std::process::exit(2);

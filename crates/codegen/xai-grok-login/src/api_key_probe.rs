@@ -1,14 +1,4 @@
 //! Probes the first-party env key (`GET {xai_api_base_url}/api-key`) before `initialize` advertises `xai.api_key`.
-//! BYOK keys are never probed.
-//!
-//! The base URL is the caller's effective `endpoints.xai_api_base_url`, so the probe hits the same host turn traffic uses.
-//! That value comes from `GROK_XAI_API_BASE_URL` or `[endpoints] xai_api_base_url`.
-//!
-//! Unusable (an auth error, or a 200 with a blocked, disabled, or team_blocked flag) means the key is not advertised.
-//! Unknown (a timeout, a network error, or exhausted retries) fails open and the key is still advertised.
-//!
-//! The probe retries once within the wall budget on 429, 5xx, or transport errors.
-//! The default timeout is 400ms for the whole probe including retries; live round trips run about 250ms at p95.
 
 use std::time::{Duration, Instant};
 
@@ -17,8 +7,8 @@ use serde::Deserialize;
 /// Wall-clock budget for the entire probe, covering all attempts and backoff.
 pub const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_millis(400);
 
-/// Returns the last 12 chars of a key for diagnostic logs, never the full secret.
-/// This is a copy; importing it from `auth::model` would create an import cycle under Bazel.
+/// Returns the last chars of a key for diagnostic logs, never the full
+/// secret.
 fn key_suffix(t: &str) -> &str {
     t.len()
         .checked_sub(12)
@@ -27,8 +17,6 @@ fn key_suffix(t: &str) -> &str {
 }
 
 /// Whether `initialize` should HTTP-probe the first-party env key.
-/// Skip (and treat as usable) when: the kill switch is on: the key will not be advertised either way, BYOK is present: it is advertised without probing the first-party env key, no env key is set, `preferred_method` is pinned: OIDC never advertises the key, and ApiKey fails closed.
-/// A false-negative probe under an ApiKey pin would empty `auth_methods` with no login method to fall back to.
 pub fn should_probe_first_party_env_key(
     disable_api_key_auth: bool,
     has_byok: bool,
@@ -47,7 +35,6 @@ const RETRY_BACKOFF: Duration = Duration::from_millis(50);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApiKeyProbeVerdict {
     Usable,
-    /// An auth error, or a 200 with a blocked, disabled, or team_blocked flag.
     Unusable,
     /// A timeout, a network error, or exhausted retries; the probe fails open.
     Unknown,
@@ -91,7 +78,7 @@ fn classify_probe_attempt(status: u16, body: &[u8]) -> AttemptOutcome {
             Ok(info) if info.api_key_blocked || info.api_key_disabled || info.team_blocked => {
                 AttemptOutcome::Done(ApiKeyProbeVerdict::Unusable)
             }
-            // An unparseable 200 fails open in case the API response shape changed
+            // An unparseable fails open in case the API response shape changed
             Ok(_) | Err(_) => AttemptOutcome::Done(ApiKeyProbeVerdict::Usable),
         },
         // Permanent client and auth failures are not retried
@@ -99,7 +86,6 @@ fn classify_probe_attempt(status: u16, body: &[u8]) -> AttemptOutcome {
         // Rate limiting and server errors are retried once
         429 => AttemptOutcome::Retry,
         s if (500..600).contains(&s) => AttemptOutcome::Retry,
-        // Any other 4xx fails open (e.g. a 404 from test mocks that lack this route).
         _ => AttemptOutcome::Done(ApiKeyProbeVerdict::Unknown),
     }
 }
@@ -113,9 +99,8 @@ fn classify_probe_response(status: u16, body: &[u8]) -> ApiKeyProbeVerdict {
     }
 }
 
-/// Fails open on a timeout or transport error after retries; the raw key is never logged.
-///
-/// `api_base_url` must be the endpoint the env key is actually sent to (`endpoints.xai_api_base_url`), not a hardcoded public default.
+/// Fails open on a timeout or transport error after retries; the raw key is
+/// never logged.
 async fn probe_xai_api_key(key: &str, api_base_url: &str, timeout: Duration) -> ApiKeyProbeVerdict {
     let url = api_key_info_url(api_base_url);
     probe_xai_api_key_at_url(key, &url, timeout).await
@@ -192,9 +177,10 @@ async fn probe_xai_api_key_at_url(key: &str, url: &str, timeout: Duration) -> Ap
     last_verdict
 }
 
-/// Probes the env key when one is set; without an env key this returns false and the caller combines the result with BYOK.
-/// `api_base_url` is the caller's effective `endpoints.xai_api_base_url`, so the probe follows the same endpoint as turn traffic.
-/// In tests that is the mock server the fixtures already set via `GROK_XAI_API_BASE_URL`.
+/// Probes the env key when one is set; without an env key this returns false
+/// and the caller combines the result with BYOK. `api_base_url` is the
+/// caller's effective `endpoints.xai_api_base_url`, so the probe follows the
+/// same endpoint as turn traffic.
 pub async fn first_party_env_key_allows_advertise(api_base_url: &str, timeout: Duration) -> bool {
     let Ok(key) = crate::auth_method::read_xai_api_key_env() else {
         return false;

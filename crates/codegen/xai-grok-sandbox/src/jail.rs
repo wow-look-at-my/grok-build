@@ -1,74 +1,23 @@
-//! `--sandbox=pathbox` / `--ro`/`--rw`/`--rn`: replace this process with itself
-//! inside an OS jail ("pathbox").
-//!
-//! Linux uses `bwrap`, macOS uses `sandbox-exec`. The re-exec happens before
-//! any other startup work, so everything the session does — the agent, its
-//! tools, every child process — runs inside the jail.
-//!
-//! The mount list is ordered. A later `--ro`/`--rw` overrides an earlier one
-//! for the same path or for a path that contains it. `$GROK_HOME` (`~/.grok`)
-//! is bound read-write after the user mounts, so nothing can take it away. A
-//! `--rn` path is actively hidden (Deny) and, being applied last, hides even
-//! when it lives under a visible mount.
-//!
-//! The working directory is bound read-write by default, so the jail can write
-//! in the cwd without an explicit `--rw .`. An explicit `--ro .` or `--rw .`
-//! (or any user mount containing the cwd) overrides that default.
-//!
-//! The jail is selected by `--sandbox=pathbox` (the reserved name of the
-//! path-mount jail) or by any `--ro`/`--rw`/`--rn` on the line; a bare
-//! `--sandbox` with no value is invalid, and `--sandbox <other-profile>` is the
-//! built-in profile sandbox, never the jail.
-//!
-//! Both backends confine reads AND writes to the bound set: bwrap mounts only
-//! the base, the user mounts and `$GROK_HOME`, and the Seatbelt profile denies
-//! every file read and write and re-allows exactly that same set. A path no
-//! mount covers (a sibling repo, `$HOME` outside `~/.grok`) is unreadable and
-//! unwritable on macOS just as it is on Linux.
-//!
-//! The per-path defaults this jail applies — the working directory, `$GROK_HOME`,
-//! `/tmp` and the platform system base — are read from the `[jail]` table of
-//! `$GROK_HOME/config.toml` (see [`JailDefaults`]). This is a *default layer*:
-//! a session with no config, or no `[jail]` section, gets exactly the four
-//! release defaults below, and a command-line `--ro`/`--rw` always beats the
-//! config for the path it names. This jail-layer config is deliberately
-//! separate from the built-in **grok-build sandbox** (`~/.grok/sandbox.toml`,
-//! `[profiles.*]`, `SandboxProfile`, the nono/Seatbelt/Landlock deny manager in
-//! `profiles.rs`) — that file is never read here, and these defaults never
-//! touch its `deny`/`read_write` profile model.
+//! `--sandbox=pathbox` / `--ro`/`--rw`/`--rn`: replace this process with itself inside an OS jail ("pathbox").
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// Set on the jailed process. Its presence stops a second re-exec.
 pub const JAIL_ENV_VAR: &str = "__GROK_SANDBOX_JAIL";
-/// The marker `is_inside_bwrap` reads. Set too, so the profile bwrap path
-/// does not wrap an already-jailed process a second time.
+/// The marker `is_inside_bwrap` reads.
 const BWRAP_ENV_VAR: &str = "__GROK_INSIDE_BWRAP";
 /// Read-only system paths the jail binds so the process can execute at all.
 /// Bound first, so a user mount can override any of them.
-/// `/run` and `/var` are here because `/etc/resolv.conf` is a symlink into one
-/// of them on a systemd host, and a jail without it resolves no name at all.
 const SYSTEM_RO_BASE: &[&str] = &[
     "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt", "/run", "/var",
 ];
 
-/// Extra read-only system paths macOS needs that the Linux base omits.
-///
-/// bwrap binds the whole tree at the VFS layer, so Linux gets everything it
-/// needs from `SYSTEM_RO_BASE`. Seatbelt matches *canonical* paths, so macOS
-/// must name what the process genuinely reads that is not under the Linux base:
-/// - `/System` and `/Library` hold the shared dylibs the dynamic loader pulls
-///   in — a jail that does not allow reading them cannot load the binary at all.
-/// - `/private` is the real home of `/etc`, `/var` and `/tmp` (they are
-///   symlinks into it on macOS), and Seatbelt matches the real path, so it has
-///   to be allowed too.
+/// Extra read-only system paths macOS needs that the Linux base omits. bwrap binds the whole tree at the VFS layer.
 #[cfg(target_os = "macos")]
 const SYSTEM_RO_BASE_MACOS: &[&str] = &["/System", "/Library", "/private"];
 
-/// The read-only system base, platform-appropriate. Used by the Seatbelt
-/// profile so macOS confines reads over exactly the set of paths it needs to
-/// run, matching the tree bwrap mounts on Linux.
+/// The read-only system base, platform-appropriate.
 #[cfg(target_os = "macos")]
 fn system_ro_base() -> impl Iterator<Item = &'static str> {
     SYSTEM_RO_BASE
@@ -86,57 +35,35 @@ pub enum Access {
     Ro,
     /// Readable and writable.
     Rw,
-    /// Actively denied (hidden): not readable and not writable, even when an
-    /// ancestor is mounted in via `--ro`/`--rw` or exposed by a default.
+    /// Actively denied (hidden): not readable and not writable.
     Deny,
 }
 
-/// One mount the jail will make. Carries a `--ro`/`--rw`/`--rn` request, in
-/// command line order, OR the plan-injected working-directory mount
-/// `build_plan` puts at the front of [`JailPlan::mounts`] (bound read-write by
-/// default). A [`Access::Deny`] mount shadows any visible ancestor and is
-/// applied last by both backends.
+/// One mount the jail will make.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mount {
     pub access: Access,
     pub path: PathBuf,
 }
 
-/// How `/tmp` is exposed in the jail. Unlike the three `Access` toggles this is
-/// a tri-state, because the release default mounts a dedicated writable tmpfs
-/// there rather than binding the host tree (see [`system_ro_base`]/[`JAIL_TMP`]).
+/// How `/tmp` is exposed in the jail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TmpHandling {
-    /// A fresh, writable tmpfs over `/tmp`. On Linux this is a `--tmpfs` mount;
-    /// on macOS Seatbelt exposes a dedicated sandbox temp dir, so nothing binds
-    /// the host `/tmp`. The release default.
+    /// A fresh, writable tmpfs over `/tmp`.
     Tmpfs,
-    /// Bind the host `/tmp` in read-write. The knob the objective names for the
-    /// future "grant the git ssh control socket under `/tmp`" follow-up. The
-    /// existing [`Mount`]/`Access` grammar intentionally does not model this, so
-    /// we advertise a value an SSH control socket over host `/tmp` needs.
+    /// Bind the host `/tmp` in read-write.
     Rw,
     /// Bind the host `/tmp` read-only.
     Ro,
 }
 
 /// The per-path defaults the `--sandbox` re-exec jail applies where the
-/// command line is silent. This is the [`config.toml` `[jail]`] layer only —
-/// distinct from, and never read by, the built-in grok-build sandbox profiles
-/// (`sandbox.toml`). Read via [`JailDefaults::load`]; the release defaults match
-/// the historical jail byte for byte, so a session with no `[jail]` section is
-/// unchanged:
-///
-/// - [`cwd`](JailDefaults::cwd) — the working directory, `Access::Rw`
-/// - [`grok_home`](JailDefaults::grok_home) — `$GROK_HOME`, `Access::Rw`
-/// - [`tmp`](JailDefaults::tmp) — `/tmp`, [`TmpHandling::Tmpfs`]
-/// - [`system`](JailDefaults::system) — the platform system base, `Access::Ro`
+/// command line is silent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JailDefaults {
     /// Working-directory access when no user `--ro`/`--rw` covers it.
     pub cwd: Access,
-    /// `$GROK_HOME` access (kept, like today, bound after the user mounts — a
-    /// config-granted ro is honoured, a CLI flag cannot take it below that).
+    /// `$GROK_HOME` access.
     pub grok_home: Access,
     /// `/tmp` handling.
     pub tmp: TmpHandling,
@@ -177,12 +104,12 @@ fn default_key(name: &str) -> Option<DefaultKey> {
 }
 
 impl JailDefaults {
-    /// The four defaults from one `[jail]` config value. A key that is absent,
-    /// not a string, or holds a string we do not recognize keeps the release
-    /// default: a bad token is a no-op rather than a jail that silently grants
-    /// more (or refuses) than the user wrote meaningful words for. Unknown
-    /// section keys are ignored the same way — they may be reserved by `--sandbox`
-    /// profile config or written by a newer build.
+    /// The defaults from one `[jail]` config value. A key that is absent, not a
+    /// string, or holds a string we do not recognize keeps the release default: a
+    /// bad token is a no-op rather than a jail that silently grants more (or
+    /// refuses) than the user wrote meaningful words for. Unknown section keys are
+    /// ignored the same way — they may be reserved by `--sandbox` profile config
+    /// or written by a newer build.
     pub fn from_config(config: &toml::Value) -> JailDefaults {
         let mut defaults = JailDefaults::default();
         let Some(table) = config.get("jail").and_then(toml::Value::as_table) else {
@@ -212,11 +139,10 @@ impl JailDefaults {
     }
 
     /// Read the `[jail]` defaults from `<home>/config.toml`. A missing or
-    /// unparsable file yields the release defaults (fail open to the historical
-    /// behavior, never to a `[jail]`-free accident). The built-in grok-build
-    /// sandbox file `sandbox.toml` is deliberately never consulted here. The
-    /// caller may pass a blank `home` to force defaults (used by tests that drive
-    /// `build_plan` without a config fixture).
+    /// unparsable file yields the release defaults (fail open to the
+    /// historical behavior, never to a `[jail]`-free accident). The built-in
+    /// grok-build sandbox file `sandbox.toml` is deliberately never consulted
+    /// here.
     pub fn load(home: &Path) -> JailDefaults {
         let path = home.join("config.toml");
         let contents = match std::fs::read_to_string(&path) {
@@ -233,11 +159,9 @@ impl JailDefaults {
 /// What the command line asked the jail for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct JailRequest {
-    /// Whether a path-box jail was asked for: `--sandbox=pathbox` or any
-    /// `--ro`/`--rw`/`--rn` path flag.
+    /// Whether a path-box jail was asked for: `--sandbox=pathbox` or any `--ro`/`--rw`/`--rn` path flag.
     pub enabled: bool,
-    /// User mounts, in command-line order. Later entries win (a `--rn` deny is
-    /// applied after every visible bind regardless).
+    /// User mounts, in command-line order.
     pub mounts: Vec<Mount>,
 }
 
@@ -295,10 +219,7 @@ pub fn is_jailed() -> bool {
     std::env::var_os(JAIL_ENV_VAR).is_some()
 }
 
-/// The reserved name of the path-mount jail profile. Like the built-in sandbox
-/// profiles (`workspace`, `strict`, …) this is magic and un-overridable: a
-/// project/custom `sandbox.toml` profile cannot redefine it, and it is the only
-/// value of `--sandbox` that selects the re-exec jail (see [`parse_jail_args`]).
+/// The reserved name of the path-mount jail profile.
 pub const PATHBOX_PROFILE: &str = "pathbox";
 
 /// Read `--sandbox`, `--ro`, `--rw` and `--rn` off the raw command line.
@@ -356,7 +277,7 @@ where
             continue;
         }
         // `--sandbox` takes an optional value (clap `num_args = 0..=1`); mirror
-        // clap's "next non-flag token is the value" so the two agree.
+        // clap's "next non-flag token is the value" so both agree.
         if text == "--sandbox" {
             let has_value = args
                 .peek()
@@ -392,7 +313,7 @@ where
     }
 
     // Pre-clap mirror of the CLI contract, so we never run a jail the command
-    // line did not actually authorize.
+    // line did not authorize.
     if has_bare_sandbox {
         return Err(JailError::BareSandboxInvalid);
     }
@@ -435,20 +356,13 @@ where
 /// Everything the backend command needs, with each path already resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JailPlan {
-    /// User mounts, in order, canonicalized, with the working directory
-    /// mounted at the FRONT. The front cwd mount is bound read-write by
-    /// default (`Access::Rw`) so a bare `--sandbox` is usable without an
-    /// explicit `--rw .`; a user `--ro .`/`--rw .` (or any user mount that
-    /// contains the cwd) overrides that default, and being at the front means
-    /// a later, more-specific user mount still wins for a path both cover.
+    /// User mounts, in order, canonicalized, with the working directory mounted at the FRONT.
     pub mounts: Vec<Mount>,
     /// `$GROK_HOME`. Bound read-write after the user mounts.
     pub grok_home: PathBuf,
     /// The scratch directory the jail dedicates to this process.
     pub temp_dir: PathBuf,
-    /// An empty, read-only host directory used as the bwrap sink for `--rn`
-    /// denied paths (bound ro over each deny so nothing in them leaks). Never
-    /// used by the Seatbelt backend, which hides via profile rules instead.
+    /// An empty, read-only host directory used as the bwrap sink for `--rn` denied paths.
     pub deny_sink: PathBuf,
     /// The binary to run inside the jail.
     pub self_exe: PathBuf,
@@ -456,37 +370,13 @@ pub struct JailPlan {
     pub cwd: PathBuf,
     /// Arguments for the jailed binary, without `argv[0]`.
     pub args: Vec<OsString>,
-    /// The per-path defaults resolved from `[jail]` config (or the four release
-    /// defaults). The bwrap/Seatbelt builders read this for the access level of
-    /// `/tmp`, the system base and `$GROK_HOME`; the cwd default was already
-    /// applied by [`build_plan`] when it injected the front cwd mount.
+    /// The per-path defaults resolved from `[jail]` config (or those release defaults).
     pub defaults: JailDefaults,
-    /// The inherited fd of the unsandboxed CI host worker, when one was started
-    /// for this jail. It is an input to the backend builders, not something the
-    /// caller appends afterwards: bwrap reads its own options only up to the
-    /// `--` program separator, so a `--setenv` emitted after it becomes argv for
-    /// the jailed binary and the jail starts with no way to reach `gh` — the
-    /// dot's "no CI" state, with stray arguments on the pager's command line.
+    /// The inherited fd of the unsandboxed CI host worker, when one was started for this jail.
     pub ci_host_fd: Option<i32>,
 }
 
-/// Resolve a request into a plan. Every path must exist: a missing bind is a
-/// hole the caller cannot see. `defaults` is the config layer (see
-/// [`JailDefaults`]) that supplies the per-path access where the command line
-/// is silent; the runtime caller loads it via [`JailDefaults::load`], tests pass
-/// an explicit value so they never depend on the host's `config.toml`.
-///
-/// The working directory is bound read-write by default, so a jail built with
-/// the pathbox marker (`--sandbox=pathbox`) or a path flag can write in the
-/// cwd without an explicit `--rw .`. The
-/// effective cwd access is the LAST user mount that contains the cwd
-/// (`defaults.cwd` when none does), and that single cwd mount is placed at the
-/// FRONT of `plan.mounts`. Front-placement plus the effective access is what
-/// lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`,
-/// so the Seatbelt profile emits no stale write-allow for the cwd and bwrap
-/// binds it read-only. `parse_jail_args` is untouched — the default is a
-/// plan-level injection, not a flag. A user `--ro`/`--rw` that names (or
-/// contains) the cwd is checked first and always beats `defaults.cwd`.
+/// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent; the runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.toml`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`) or a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does), and that single cwd mount is placed at the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`, so the Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag. A user `--ro`/`--rw` that names (or contains) the cwd is checked first and always beats `defaults.cwd`.
 pub fn build_plan(
     request: &JailRequest,
     defaults: &JailDefaults,
@@ -520,8 +410,7 @@ pub fn build_plan(
     let cwd = std::env::current_dir().map_err(JailError::NoCwd)?;
     let cwd = dunce::canonicalize(&cwd).unwrap_or(cwd);
     // A `--rn` that contains or equals the cwd hides it, but the jail must
-    // chdir into the cwd to run — that combination is impossible, so refuse it
-    // with a message instead of a confusing unbound-cwd error.
+    // chdir into the cwd to run — that combination is impossible.
     if mounts
         .iter()
         .any(|mount| mount.access == Access::Deny && cwd.starts_with(&mount.path))
@@ -531,11 +420,7 @@ pub fn build_plan(
         });
     }
     // The effective cwd access comes from the LAST user mount that contains
-    // the cwd (`cwd.starts_with(mount.path)`); later mounts win in the ordered
-    // contract, so scanning reversed is what honors `--ro .` over an earlier
-    // `--rw /`. Deny mounts never cover the cwd here (they would have been
-    // refused above). With no covering mount, fall back to the config default
-    // (`Access::Rw` in the release, overridable to `Access::Ro` from `[jail]`).
+    // the cwd (`cwd.starts_with(mount.path)`).
     let cwd_access = mounts
         .iter()
         .rev()
@@ -550,9 +435,8 @@ pub fn build_plan(
         },
     );
     let temp_dir = dedicated_temp_dir()?;
-    // A host sink for `--rn` denoted paths: an empty dir bwrap binds read-only
-    // over each denied path so the subtree reads as empty and nothing leaks.
-    // Unused by the Seatbelt backend (which hides via profile rules).
+    // A host sink for `--rn` denoted paths: an empty dir bwrap binds
+    // read-only over each denied path so the subtree reads as empty.
     let deny_sink = crate::paths::grok_home()
         .join("sandbox-tmp")
         .join(std::process::id().to_string())
@@ -570,8 +454,7 @@ pub fn build_plan(
         cwd,
         args,
         defaults: *defaults,
-        // The CI host worker is spawned by the caller that is about to exec,
-        // moments before the jail is built (see `maybe_reexec_into_jail`).
+        // The CI host worker is spawned by the caller that is about to exec.
         ci_host_fd: None,
     };
     plan.check_cwd_is_bound()?;
@@ -624,37 +507,26 @@ fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
     Ok(path)
 }
 
-/// Build the `bwrap` command that runs the plan.
-///
-/// Order is the whole contract: the read-only system base first, then the
-/// user mounts as given, then `$GROK_HOME`. bwrap applies binds in order and
-/// a later one covers an earlier one, so this is what makes a later `--ro`
-/// beat an earlier `--rw`.
-///
+/// Build the `bwrap` command that runs the plan. Order is the whole contract:
+/// the read-only system base first, then the user mounts as given, then
+/// `$GROK_HOME`. bwrap applies binds in order and a later one covers an
+/// earlier one, so this is what makes a later `--ro` beat an earlier `--rw`.
 /// The access each synthesized bind carries comes from [`JailPlan::defaults`]
 /// where a user mount does not name it: the system base from `system`, `/tmp`
-/// from `tmp`, and `$GROK_HOME` from `grok_home`. All three default to the
+/// from `tmp`, and `$GROK_HOME` from `grok_home`. All of them default to the
 /// release behavior (ro base, tmpfs `/tmp`, rw `$GROK_HOME`), so a plan built
 /// with [`JailDefaults::default`] produces byte-identical argv to the jail
-/// before config existed.
-///
-/// Compiled under `cfg(test)` off Linux as well, because the emitted argv IS
-/// the contract (the option order is what makes a later bind win, and what
-/// keeps the CI host-worker fd an option rather than a program argument) and an
-/// ordering only one host can assert is one that regresses quietly everywhere
-/// else.
+/// before config existed. Compiled under `cfg(test)` off Linux as well,
+/// because the emitted argv IS the contract (the option order is what makes a
+/// later bind win, and what keeps the CI host-worker fd an option rather than
+/// a program argument) and an ordering only one host can assert is one that
+/// regresses quietly everywhere else.
 #[cfg(any(target_os = "linux", test))]
 pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
-    // No --die-with-parent: it kills the jail when bwrap's parent dies, and a
-    // session started from a script that exits right after is a live session.
+    // No --die-with-parent: it kills the jail when bwrap's parent dies.
     let mut cmd = std::process::Command::new("bwrap");
     cmd.arg("--cap-drop").arg("ALL");
-    // The platform read-only base. `--ro-bind-try` swallows an absent path;
-    // a config `system = "rw"` binds it read-write instead (the user's explicit
-    // choice to weaken the jail).
-    // `from_config` maps only "ro" and "rw" onto `system`, so a `Deny` cannot
-    // arrive from config. Read one as the read-only base: a jail with no system
-    // base execs nothing, so `Ro` is the floor this field can mean.
+    // The platform read-only base.
     let system_flag = match plan.defaults.system {
         Access::Ro | Access::Deny => "--ro-bind-try",
         Access::Rw => "--bind",
@@ -664,8 +536,7 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     }
     cmd.arg("--proc").arg("/proc");
     cmd.arg("--dev").arg("/dev");
-    // `--dev` builds a fresh /dev without /dev/shm, and a program that wants
-    // shared memory fails on the missing directory rather than on a denial.
+    // `--dev` builds a fresh /dev without /dev/shm, and a program that wants shared memory fails on the missing directory.
     cmd.arg("--tmpfs").arg("/dev/shm");
     match plan.defaults.tmp {
         // Release default: a fresh, writable tmpfs over /tmp.
@@ -673,8 +544,7 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
             cmd.arg("--tmpfs").arg(JAIL_TMP);
         }
         // Overrides bind the host /tmp in/out so a granted path (e.g. an ssh
-        // control socket) reaches the jailed process. bwrap creates the
-        // destination mountpoint, so a bare bind joins the fresh namespace.
+        // control socket).
         TmpHandling::Rw => {
             cmd.arg("--bind").arg(JAIL_TMP).arg(JAIL_TMP);
         }
@@ -690,17 +560,13 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
             Access::Rw => {
                 cmd.arg("--bind").arg(&mount.path).arg(&mount.path);
             }
-            // A deny is not bound here. It is applied last, after every
-            // visible bind, as an empty read-only sink over the path.
+            // A deny is not bound here.
             Access::Deny => {}
         }
     }
     // `$GROK_HOME`, bound after the user mounts. A config `grok_home = "ro"`
     // binds it read-only; the release default (`rw`) is unchanged. Because it
     // is bound last it survives a user `--ro` aimed at it either way.
-    // As with `system`, `from_config` maps only "ro" and "rw" onto `grok_home`,
-    // so a `Deny` cannot arrive from config. Bind one read-only: the session
-    // reads its own config out of `$GROK_HOME`.
     match plan.defaults.grok_home {
         Access::Rw => {
             cmd.arg("--bind").arg(&plan.grok_home).arg(&plan.grok_home);
@@ -715,9 +581,7 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
         .arg(&plan.self_exe)
         .arg(&plan.self_exe);
     // `--rn` denies hide their subtree *after* every visible bind so they
-    // shadow even a containing `--rw`/`--ro` ancestor: bind the empty read-only
-    // sink over each denied path. bwrap applies binds in order, so these last
-    // binds win for the paths they name.
+    // shadow even a containing `--rw`/`--ro` ancestor.
     for mount in &plan.mounts {
         if mount.access == Access::Deny {
             cmd.arg("--ro-bind").arg(&plan.deny_sink).arg(&mount.path);
@@ -727,11 +591,6 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     cmd.arg("--setenv").arg(JAIL_ENV_VAR).arg("1");
     cmd.arg("--setenv").arg(BWRAP_ENV_VAR).arg("1");
     // The host-worker fd, as a bwrap env setting and therefore BEFORE `--`.
-    // bwrap stops reading its own options at `--`, so an override emitted after
-    // it is not an override at all: it lands in the jailed binary's argv, which
-    // both loses the env var and injects stray arguments the pager must then
-    // tolerate. Emitting it here is what makes `GROK_CI_HOST_FD` visible inside
-    // the jail, which is the only way the dot reaches `gh` under `--sandbox`.
     if let Some(fd) = plan.ci_host_fd {
         cmd.arg("--setenv")
             .arg(crate::ci_host::CI_HOST_FD_ENV)
@@ -741,38 +600,16 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     cmd
 }
 
-/// Build the Seatbelt profile for the plan.
-///
-/// Seatbelt confines READS and WRITES here, mirroring bwrap. `(allow default)`
-/// keeps the process's non-file capabilities (network, process, sysctl) open,
-/// then `(deny file-read*)` and `(deny file-write*)` take every file access
-/// away, and the rules that follow give each kind of access back only for the
-/// paths the jail is supposed to expose:
-///
-/// - `/dev` (a terminal, a PTY, `/dev/null`) — read and write.
-/// - a `--rw` mount — read and write.
-/// - a `--ro` mount — read only.
-/// - the read-only system base (including the macOS `/System`, `/Library` and
+/// Build the Seatbelt profile for the plan. Seatbelt confines READS and WRITES here, mirroring bwrap. `(allow default)` keeps the process's non-file capabilities (network, process, sysctl) open, then `(deny file-read*)` and `(deny file-write*)` take every file access away, and the rules that follow give each kind of access back only for the paths the jail is supposed to expose: - `/dev` (a terminal, a PTY, `/dev/null`) — read and write. - a `--rw` mount — read and write. - a `--ro` mount — read only. - the read-only system base (including the macOS `/System`.
 ///   `/private` additions) — read only, or read and write when the config sets
 ///   `system = "rw"` (the user's explicit choice to weaken the jail).
 /// - `$GROK_HOME` and the sandbox temp dir — read and write, unless
 ///   `grok_home = "ro"` leaves `$GROK_HOME` readable only.
-/// - the binary itself (`self_exe`), which sandbox-exec execs by path.
-/// - metadata-only rules for the ANCESTORS of those paths, plus a read rule
+/// - the binary itself (`self_exe`), which sandbox-exec execs by path. - metadata-only rules for the ANCESTORS of those paths, plus a read rule
 ///   for `/`: path resolution walks the chain, so without them the grants
 ///   above are unreachable and the jail does not start at all (see the
 ///   comments at each rule).
-///
-/// Anything not in that set — e.g. a sibling repo under `$HOME` — is denied
-/// for both reads and writes, exactly as bwrap confines it on Linux. SBPL
-/// gives the last matching rule, so emitting the allows after the deny is what
-/// makes them win, and emitting the mounts in order is what makes a later flag
-/// beat an earlier one. Where a default from [`JailPlan::defaults`] is at play
-/// (system base, `$GROK_HOME`) the emitted rule still derives from the real
-/// shipped profile, so a config override changes exactly the rule the builder
-/// materializes. The `/tmp` [`TmpHandling`] is a bwrap mount concept; Seatbelt
-/// mounts nothing, so it has no rule here (the writable sandbox temp is the
-/// separate `temp_dir` allowed below).
+/// Anything not in that set — e.g. a sibling repo under `$HOME` — is denied for both reads and writes, exactly as bwrap confines it on Linux. SBPL gives the last matching rule, so emitting the allows after the deny is what makes them win, and emitting the mounts in order is what makes a later flag beat an earlier one. Where a default from [`JailPlan::defaults`] is at play (system base, `$GROK_HOME`) the emitted rule still derives from the real shipped profile, so a config override changes exactly the rule the builder materializes. The `/tmp` [`TmpHandling`] is a bwrap mount concept; Seatbelt mounts nothing, so it has no rule here (the writable sandbox temp is the separate `temp_dir` allowed below).
 #[cfg(target_os = "macos")]
 pub fn seatbelt_profile(plan: &JailPlan) -> String {
     let mut profile = String::from("(version 1)\n(allow default)\n");
@@ -780,13 +617,7 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     // A terminal, a PTY and /dev/null are reads and writes every tool makes.
     profile.push_str("(allow file-read* (subpath \"/dev\"))\n");
     profile.push_str("(allow file-write* (subpath \"/dev\"))\n");
-    // The root itself. A `(subpath "/usr")` grant covers that directory and
-    // everything under it but NOT `/`, and resolving any absolute path walks
-    // through the root — dyld's very first read is one. Measured on macOS
-    // 26.5: without this rule the deny above stands for `/`, sandbox-exec's
-    // own execvp fails, and the jailed process dies with SIGABRT and no
-    // output, so the jail cannot start AT ALL (not merely fail to reach `gh`).
-    // A read grant on `/` alone exposes no directory: it names one inode.
+    // The root itself.
     profile.push_str("(allow file-read* (literal \"/\"))\n");
     // Path resolution stats each ANCESTOR of every path it is handed, so a
     // grant whose ancestors are denied is unreachable in practice: `getcwd`
@@ -813,18 +644,16 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
             ));
         }
     }
-    // The binary sandbox-exec execs. bwrap binds it read-only explicitly; here
-    // it needs its own read grant, because $GROK_HOME and the system base do
-    // not cover a checkout or a `~/.local/bin` install.
+    // The binary sandbox-exec execs. bwrap binds it read-only explicitly.
     profile.push_str(&format!(
         "(allow file-read* (literal \"{}\"))\n",
         sbpl_escape(&plan.self_exe)
     ));
     // The read-only system base the process needs to run (dylibs, binaries,
     // config, and on macOS the real /private home of /etc, /var and /tmp).
-    // Emitted before the user mounts, matching bwrap's bind order (base first,
-    // then user mounts, then $GROK_HOME) so a user mount over a base path wins.
-    // A config `system = "rw"` additionally re-allows writes over the base.
+    // Emitted before the user mounts, matching bwrap's bind order (base
+    // first, then user mounts, then $GROK_HOME) so a user mount over a base
+    // path wins.
     for path in system_ro_base() {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
@@ -858,9 +687,8 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
         "(allow file-read* (subpath \"{}\"))\n",
         sbpl_escape(&plan.grok_home)
     ));
-    // `$GROK_HOME` is writable by release default; `grok_home = "ro"` leaves it
-    // readable only, matching the bwrap `--ro-bind`. Rule emitted after the
-    // mounts so nothing below it licks a rw grant back in for the home.
+    // `$GROK_HOME` is writable by release default; `grok_home = "ro"` leaves
+    // it readable only, matching the bwrap `--ro-bind`.
     if plan.defaults.grok_home == Access::Rw {
         profile.push_str(&format!(
             "(allow file-write* (subpath \"{}\"))\n",
@@ -910,8 +738,8 @@ pub fn seatbelt_command(plan: &JailPlan) -> std::process::Command {
     cmd.arg(&plan.self_exe).args(&plan.args);
     cmd.env(JAIL_ENV_VAR, "1");
     cmd.env("TMPDIR", &plan.temp_dir);
-    // Seatbelt inherits the environment, so the host-worker fd is delivered as
-    // a command env setting — never as an argument of the jailed program.
+    // Seatbelt inherits the environment, so the host-worker fd is delivered
+    // as a command env setting — never as an argument.
     if let Some(fd) = plan.ci_host_fd {
         cmd.env(crate::ci_host::CI_HOST_FD_ENV, fd.to_string());
     }
@@ -969,30 +797,18 @@ pub fn maybe_reexec_into_jail() {
         Ok(request) => request,
         Err(e) => fail(&e.to_string()),
     };
-    // Honor `GROK_SANDBOX=pathbox` (clap reads the same env into `--sandbox`,
-    // but the raw job must re-exec before clap runs, so it reads the env too).
+    // Honor `GROK_SANDBOX=pathbox`.
     let env_pathbox = std::env::var("GROK_SANDBOX").ok().as_deref() == Some(PATHBOX_PROFILE);
     if !request.enabled && !env_pathbox {
         return;
     }
-    // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.toml`
-    // (release defaults when there is no `[jail]` section), then drive the real
-    // plan/service builders so the config layer shapes the emitted jail.
+    // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.toml` (release defaults when there is no `[jail]` section).
     let defaults = JailDefaults::load(&crate::paths::grok_home());
     let mut plan = match build_plan(&request, &defaults, argv) {
         Ok(plan) => plan,
         Err(e) => fail(&e.to_string()),
     };
-    // Start the unsandboxed `gh` CI-status worker *before* the exec so its
-    // stream fd survives into the jail. The jailed pager reads `gh` results
-    // from it instead of reaching the host from inside the jail. `None` when
-    // the worker cannot start — the jailed dot then degrades to "off", which
-    // is the same graceful state as a missing `gh`.
-    //
-    // The fd goes on the PLAN, so the backend builder emits it among its own
-    // options. Appending it to the finished command put it after bwrap's `--`
-    // separator, which made it argv for the jailed binary instead of an env
-    // setting — see `JailPlan::ci_host_fd`.
+    // Start the unsandboxed `gh` CI-status worker *before* the exec so its stream fd survives into the jail.
     plan.ci_host_fd = crate::ci_host::spawn_ci_host(&plan.cwd);
     let mut cmd = match backend_command(&plan) {
         Ok(cmd) => cmd,
@@ -1034,7 +850,7 @@ mod tests {
         // The reserved pathbox name enables the jail with no mounts.
         assert!(parse(&["--sandbox=pathbox"]).enabled);
         assert!(parse(&["--sandbox", "pathbox"]).enabled);
-        // Any of the three path flags alone implies the pathbox jail.
+        // Any of those path flags alone implies the pathbox jail.
         assert!(parse(&["--rn", "/a"]).enabled);
         assert!(parse(&["--ro", "/a"]).enabled);
         assert!(parse(&["--rw", "/a"]).enabled);
@@ -1044,14 +860,12 @@ mod tests {
 
     #[test]
     fn bare_sandbox_is_invalid_everywhere() {
-        // A bare `--sandbox` (no value) no longer means "the jail" — it is an
-        // error even when path flags are present.
+        // A bare `--sandbox` (no value) no longer means "the jail" — it is an error even when path flags are present.
         assert!(parse_jail_args(argv(&["--sandbox"])).is_err());
         assert!(parse_jail_args(argv(&["--sandbox="])).is_err());
         assert!(parse_jail_args(argv(&["--sandbox", "--ro", "."])).is_err());
         assert!(parse_jail_args(argv(&["--rn", "/s", "--sandbox"])).is_err());
-        // `--sandbox` followed by a prompt/path token is the profile value, so
-        // with path flags it is the invalid profile+path mix, not a bare flag.
+        // `--sandbox` followed by a prompt/path token is the profile value, so with path flags it is the invalid profile+path mix.
         assert!(parse_jail_args(argv(&["--sandbox", "strict", "--ro", "."])).is_err());
     }
 
@@ -1194,7 +1008,7 @@ mod tests {
     /// The host-worker fd must reach the jailed process as a bwrap `--setenv`
     /// option, BEFORE the `--` program separator. Emitted after it, bwrap reads
     /// it as argv for the jailed binary instead — the env var then never
-    /// arrives (so the dot reports no CI) and the pager starts with three stray
+    /// arrives (so the dot reports no CI) and the pager starts with stray
     /// arguments.
     #[test]
     fn bwrap_hands_the_ci_host_fd_to_the_jail_before_the_program_separator() {
@@ -1245,12 +1059,12 @@ mod tests {
         );
     }
 
-    /// The defect this fixes, on the record. Prints the fixed argv, and beside
-    /// it the argv the pre-fix caller produced: the SAME builder for a plan with
-    /// no fd, with the identical override appended to the finished command.
-    /// There it sits after `--`, so bwrap hands it to the jailed binary as three
-    /// arguments and never sets the variable. Output only — the assertions live
-    /// in the tests above.
+    /// The defect this fixes, on the record. Prints the fixed argv, and beside it
+    /// the argv the pre-fix caller produced: the SAME builder for a plan with no
+    /// fd, with the identical override appended to the finished command. There it
+    /// sits after `--`, so bwrap hands it to the jailed binary as arguments and
+    /// never sets the variable. Output only — the assertions live in the tests
+    /// above.
     #[test]
     fn capture_ci_fd_argv() {
         let mut with_fd = plan_fixture(vec![]);
@@ -1309,12 +1123,9 @@ mod tests {
 
     /// Regression guards for the rules that make the jail startable at all.
     ///
-    /// Measured on macOS 26.5: with only the grants the profile used to emit,
-    /// sandbox-exec's own execvp of the target fails and the jailed process
-    /// dies with SIGABRT and no output — the jail does not start, so nothing
-    /// inside it (the CI dot included) can work. A read grant on `/` is what
-    /// fixes it, and metadata rules on each grant's ancestors are what let the
-    /// jailed process resolve paths it was handed.
+    /// A read grant on `/` is what fixes it, and metadata rules on each
+    /// grant's ancestors are what let the jailed process resolve paths it was
+    /// handed.
     #[test]
     #[cfg(target_os = "macos")]
     fn seatbelt_grants_the_root_and_ancestor_metadata_so_the_jail_can_start() {
@@ -1351,10 +1162,9 @@ mod tests {
             "the jailed binary must be readable by path: {profile}"
         );
 
-        // The two halves of the confinement must survive all of that: ancestor
+        // The halves of the confinement must survive all of that: ancestor
         // grants are metadata-only and name one directory each (never a
-        // subtree), and the read grant on `/` names the root rather than the
-        // whole filesystem.
+        // subtree).
         assert!(
             !profile.contains("(allow file-read-metadata (subpath"),
             "an ancestor must be granted as a literal, not a subtree: {profile}"
@@ -1410,9 +1220,7 @@ mod tests {
         let home = profile
             .find("(allow file-write* (subpath \"/home/u/.grok\"))")
             .expect("grok home rule");
-        // Last matching rule wins: the rw read comes before its own write, the
-        // ro read comes after the rw read, the base before both, and grok_home
-        // after everything.
+        // Last matching rule wins: the rw read comes before its own write.
         assert!(base_read < rw_read, "base must precede user mounts");
         assert!(rw_read < rw_write, "read then write for an rw mount");
         assert!(rw_read < ro_read, "user mounts keep their order");
@@ -1422,9 +1230,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn seatbelt_reads_cover_the_macos_system_base() {
-        // macOS needs /System, /Library and the real /private tree readable or
-        // the binary cannot dyld-load; without them the read-deny bricks the
-        // sandboxed process outright.
+        // macOS needs /System, /Library and the real /private tree readable or the binary cannot dyld-load.
         let plan = plan_fixture(Vec::new());
         let profile = seatbelt_profile(&plan);
         for path in ["/System", "/Library", "/private", "/usr", "/etc", "/opt"] {
@@ -1444,12 +1250,10 @@ mod tests {
         assert_eq!(sbpl_escape(Path::new("/a\"b")), "/a\\\"b");
     }
 
-    // ── cwd rw default ─────────────────────────────────────────────────────
-    //
+    // ── cwd rw default
+    // ─────────────────────────────────────────────────────
     // These drive the shipped functions end to end (`parse_jail_args` →
-    // `build_plan` → `bwrap_command` / `seatbelt_profile`) from the real
-    // working directory, so the assertions are about the actual cwd the jail
-    // would mount, not a hand-built `JailPlan`.
+    // `build_plan` → `bwrap_command` / `seatbelt_profile`).
 
     /// Run the shipped parse + plan against the real cwd, with the release
     /// (no-config) defaults so the assertions are independent of any host
@@ -1565,8 +1369,7 @@ mod tests {
 
     #[test]
     fn precedence_keeps_the_parse_contract_and_lets_the_user_win() {
-        // The default is a plan-level injection, not a flag: the parsed
-        // request must carry exactly the user's mounts, with no injected cwd.
+        // The default is a plan-level injection, not a flag: the parsed request must carry exactly the user's mounts.
         let request = parse(&["--sandbox=pathbox", "--ro", "."]);
         assert_eq!(
             request.mounts,
@@ -1599,8 +1402,8 @@ mod tests {
 
     #[test]
     fn capture_cwd_default_cases() {
-        // Prints the plan + platform backend for the three cases so the
-        // rw-vs-ro difference is visible in captured output, not just asserted.
+        // Prints the plan + platform backend for the cases so the rw-vs-ro
+        // difference is visible in captured output, not asserted.
         let cases: &[(&str, &[&str])] = &[
             ("pathbox (no mounts)", &["--sandbox=pathbox"]),
             ("pathbox --ro .", &["--sandbox=pathbox", "--ro", "."]),
@@ -1631,13 +1434,9 @@ mod tests {
         }
     }
 
-    // ── `[jail]` config defaults ──────────────────────────────────────────
-    //
-    // These drive the REAL shipped config→plan→profile path: `JailDefaults::load`
-    // reads the `[jail]` table off a fixture `config.toml` under an isolated
-    // `$GROK_HOME`, and the resulting `JailDefaults` is what the shipped
-    // `build_plan`/`seatbelt_profile`/`bwrap_command` consume. None of them re-
-    // implement the mapping under test.
+    // ── `[jail]` config defaults
+    // ──────────────────────────────────────────
+    // These drive the REAL shipped config→plan→profile path.
 
     /// Resolve the `[jail]` table of an in-memory config string.
     fn config_defaults(toml: &str) -> JailDefaults {
@@ -1655,8 +1454,7 @@ mod tests {
     #[test]
     fn no_config_yields_the_four_release_defaults() {
         assert_eq!(JailDefaults::default(), RELEASE);
-        // No `[jail]` section, or an empty file, still resolves to the release
-        // struct that every builder consumes.
+        // No `[jail]` section, or an empty file, still resolves to the release struct that every builder consumes.
         assert_eq!(config_defaults(""), RELEASE);
         assert_eq!(config_defaults("[permission]\nmode = \"accept\""), RELEASE);
         // An unknown `[jail]` key is not a recognized axis and is ignored.
@@ -1737,8 +1535,7 @@ mod tests {
 
     #[test]
     fn bogus_values_and_unknown_section_keys_fall_back_not_guess() {
-        // A misspelled value is a no-op (keeps the release access), never a jail
-        // the user did not literally ask for.
+        // A misspelled value is a no-op (keeps the release access), never a jail the user did not literally ask for.
         assert_eq!(config_defaults("[jail]\ncwd = \"reads-only\""), RELEASE);
         assert_eq!(config_defaults("[jail]\ntmp = \"bind-mode\"\n"), RELEASE);
         let d = config_defaults("[jail]\ncwd = \"ro\"\nsystem = \"wr\""); // one bad token
@@ -1757,8 +1554,7 @@ mod tests {
         );
     }
 
-    /// A throwaway directory for a fixture `config.toml`, under this process's
-    /// temp dir (never a shared fixed path), removed on drop.
+    /// A throwaway directory for a fixture `config.toml`, under this process's temp dir (never a shared fixed path), removed.
     struct FixtureHome(std::path::PathBuf);
     impl FixtureHome {
         fn new(tag: &str) -> Self {
@@ -1833,7 +1629,7 @@ mod tests {
 
     #[test]
     fn a_cli_flag_beats_the_config_cwd_default() {
-        // Config says ro, but --rw . on the line must win.
+        // Config says ro, but --rw. on the line must win.
         let ro_default = JailDefaults {
             cwd: Access::Ro,
             ..RELEASE
@@ -1849,7 +1645,7 @@ mod tests {
             Access::Rw,
             "--rw . must beat a config cwd=ro default"
         );
-        // Config says rw, but --ro . on the line must win.
+        // Config says rw, but --ro. on the line must win.
         let plan = build_plan(
             &parse(&["--sandbox=pathbox", "--ro", "."]),
             &RELEASE,
@@ -1883,8 +1679,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn seatbelt_grok_home_ro_keeps_read_and_drops_write() {
-        // The shipped profile with grok home ro must keep the home readable and
-        // emit NO write-allow for it (matching bwrap's --ro-bind).
+        // The shipped profile with grok home ro must keep the home readable and emit NO write-allow for it.
         let mut plan = plan_fixture(Vec::new());
         plan.defaults = JailDefaults {
             grok_home: Access::Ro,
@@ -1904,8 +1699,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn seatbelt_release_grok_home_is_writable_and_system_is_never_written() {
-        // Release defaults: grok home is writable, the system base is read-only
-        // (no write-allow over /usr, /System, ..., by default).
+        // Release defaults: grok home is writable.
         let plan = plan_fixture(Vec::new());
         let profile = seatbelt_profile(&plan);
         assert!(
@@ -1925,8 +1719,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn seatbelt_system_rw_makes_every_base_path_writable_too() {
-        // system = "rw" emits a write-allow over the whole platform base (the
-        // user's explicit weakening), while keeping the read side present.
+        // system = "rw" emits a write-allow over the whole platform base (the user's explicit weakening).
         let plan = plan_fixture(Vec::new());
         let ro_profile = seatbelt_profile(&plan);
 
@@ -1993,7 +1786,7 @@ mod tests {
 
     #[test]
     fn rn_on_the_working_directory_is_refused() {
-        // --rn . hides the cwd, but the jail must chdir into it, so refuse.
+        // --rn. hides the cwd, but the jail must chdir into it, so refuse.
         let request = parse(&["--rn", "."]);
         let plan = build_plan(&request, &JailDefaults::default(), argv(&["--rn", "."]));
         assert!(
@@ -2006,8 +1799,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn rn_binds_an_empty_read_only_sink_over_the_denied_path() {
         // bwrap has no "unmount": a --rn hides by binding an empty read-only
-        // sink over the exact path, grounded on the shared deny-sink dir. The
-        // deny bind must come after the ancestor grant so it shadows it.
+        // sink over the exact path, grounded on the shared deny-sink dir.
         let plan = plan_fixture(vec![
             Mount {
                 access: Access::Rw,

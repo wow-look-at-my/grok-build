@@ -1,15 +1,4 @@
 //! Shared hashing utilities for hashline anchor generation.
-//!
-//! Provides FNV-1a 32-bit hashing and whitespace-normalized line fingerprinting.
-//! Used by the `grok_build_hashline` anchor schemes.
-//!
-//! ## Normalization policy
-//!
-//! Before hashing, lines are normalized: leading/trailing whitespace is trimmed
-//! and internal whitespace runs are collapsed to a single ASCII space. This keeps
-//! anchors stable across formatter-only edits (indentation, trailing whitespace,
-//! tab/space normalization) while still distinguishing meaningful content changes
-//! (e.g. `return x` vs `returnx`).
 
 /// FNV-1a 32-bit offset basis.
 const FNV_OFFSET: u32 = 2_166_136_261;
@@ -17,8 +6,7 @@ const FNV_OFFSET: u32 = 2_166_136_261;
 /// FNV-1a 32-bit prime.
 const FNV_PRIME: u32 = 16_777_619;
 
-/// Compute FNV-1a 32-bit hash of raw bytes. This is the low-level primitive — callers that want
-/// whitespace-normalized fingerprints should use [`line_hash`] instead.
+/// Compute FNV-1a 32-bit hash of raw bytes.
 pub fn fnv1a_32(data: &[u8]) -> u32 {
     let mut h: u32 = FNV_OFFSET;
     for &byte in data {
@@ -28,9 +16,10 @@ pub fn fnv1a_32(data: &[u8]) -> u32 {
     h
 }
 
-/// Compute a whitespace-normalized FNV-1a 32-bit fingerprint of a single line. Normalization: `trim()` + collapse
-/// internal whitespace runs to a single ASCII space. The hash is computed over the normalized byte sequence. Returns
-/// the raw `u32` hash. Use [`encode_hash`] to convert to a compact letter-based anchor string.
+/// Compute a whitespace-normalized FNV-1a 32-bit fingerprint of a single
+/// line. Normalization: `trim()` + collapse internal whitespace runs to a
+/// single ASCII space. The hash is computed over the normalized byte
+/// sequence. Returns the raw `u32` hash.
 pub fn line_hash(line: &str) -> u32 {
     let mut h: u32 = FNV_OFFSET;
     let mut prev_ws = false;
@@ -52,9 +41,8 @@ pub fn line_hash(line: &str) -> u32 {
     h
 }
 
-/// Encode a 32-bit hash as `n` lowercase ASCII letters (a–z). Each letter is derived from a
-/// different byte region of the hash to spread entropy. The default anchor length for benchmarking
-/// is 3; 2 is retained as a control configuration. Panics if `len` is 0 or greater than 4.
+/// Encode a 32-bit hash as `n` lowercase ASCII letters (a–z). Each letter
+/// is derived from a different byte region of the hash to spread entropy.
 pub fn encode_hash(hash: u32, len: usize) -> String {
     assert!(len > 0 && len <= 4, "encode_hash: len must be 1..=4");
 
@@ -66,7 +54,6 @@ pub fn encode_hash(hash: u32, len: usize) -> String {
     result
 }
 
-/// Default anchor hash length (3 lowercase letters).
 pub const DEFAULT_HASH_LEN: usize = 3;
 
 #[cfg(test)]

@@ -1,5 +1,4 @@
-//! Each failure episode is announced once in the "MCP servers that failed to connect" section of the MCP system-reminder.
-//! `McpAnnounced::failed` tracks which episodes were announced.
+//! Each failure episode is announced once in the "MCP servers that failed to connect" section.
 use super::support::*;
 use super::*;
 fn http_server(name: &str) -> acp::McpServer {

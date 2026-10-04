@@ -5,13 +5,11 @@ use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::text::{Line, Span};
 
-/// The 6 channel values in the 256-color 6×6×6 cube.
 const CUBE_VALUES: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
-/// 0–15 xterm ANSI, 16–231 color cube, 232–255 grayscale. A customized terminal palette will differ.
+/// A customized terminal palette will differ.
 pub fn indexed_to_rgb(index: u8) -> (u8, u8, u8) {
     match index {
-        // Standard colors (0-7): common xterm defaults
         0 => (0, 0, 0),
         1 => (128, 0, 0),
         2 => (0, 128, 0),
@@ -20,7 +18,6 @@ pub fn indexed_to_rgb(index: u8) -> (u8, u8, u8) {
         5 => (128, 0, 128),
         6 => (0, 128, 128),
         7 => (192, 192, 192),
-        // Bright colors (8–15)
         8 => (128, 128, 128),
         9 => (255, 0, 0),
         10 => (0, 255, 0),
@@ -29,10 +26,8 @@ pub fn indexed_to_rgb(index: u8) -> (u8, u8, u8) {
         13 => (255, 0, 255),
         14 => (0, 255, 255),
         15 => (255, 255, 255),
-        // 6×6×6 color cube (16–231)
         16..=231 => {
             let n = index - 16;
-            // n is 0..=215, so each cube axis is 0..=5.
             let Some(&r) = CUBE_VALUES.get((n / 36) as usize) else {
                 return (0, 0, 0);
             };
@@ -44,7 +39,6 @@ pub fn indexed_to_rgb(index: u8) -> (u8, u8, u8) {
             };
             (r, g, b)
         }
-        // Grayscale ramp (232–255): value = 8 + (index − 232) × 10
         232..=255 => {
             let v = 8 + (index - 232) * 10;
             (v, v, v)
@@ -54,7 +48,6 @@ pub fn indexed_to_rgb(index: u8) -> (u8, u8, u8) {
 
 /// Nearest of the color cube and the grayscale ramp by squared Euclidean distance.
 pub fn nearest_indexed(r: u8, g: u8, b: u8) -> u8 {
-    // --- nearest in the 6×6×6 color cube (16–231) ---
     let ri = nearest_cube_channel(r);
     let gi = nearest_cube_channel(g);
     let bi = nearest_cube_channel(b);
@@ -70,8 +63,6 @@ pub fn nearest_indexed(r: u8, g: u8, b: u8) -> u8 {
     };
     let cube_dist = sq_dist(r, g, b, cube_r, cube_g, cube_b);
 
-    // --- nearest in the grayscale ramp (232–255) ---
-    // Ramp values: 8, 18, 28, …, 238  (24 entries)
     let lum = (r as u16 + g as u16 + b as u16) / 3;
     let gray_step = if lum <= 3 {
         0u8
@@ -90,7 +81,6 @@ pub fn nearest_indexed(r: u8, g: u8, b: u8) -> u8 {
     }
 }
 
-/// Find the nearest index (0–5) into [`CUBE_VALUES`] for a single channel.
 fn nearest_cube_channel(v: u8) -> u8 {
     let mut best = 0u8;
     let mut best_d = v.abs_diff(CUBE_VALUES[0]) as u16;
@@ -104,7 +94,7 @@ fn nearest_cube_channel(v: u8) -> u8 {
     best
 }
 
-/// Squared Euclidean distance between two RGB colors.
+/// Squared Euclidean distance between RGB colors.
 fn sq_dist(r1: u8, g1: u8, b1: u8, r2: u8, g2: u8, b2: u8) -> u32 {
     let dr = r1 as i32 - r2 as i32;
     let dg = g1 as i32 - g2 as i32;
@@ -121,7 +111,7 @@ fn color_to_rgb(color: Color) -> Option<(u8, u8, u8)> {
     }
 }
 
-/// `None` only for `Reset`. Named colors use xterm 0-15 defaults; a customized terminal palette will differ.
+/// `None` only for `Reset`.
 pub fn resolve_to_rgb(color: Color) -> Option<(u8, u8, u8)> {
     let idx: u8 = match color {
         Color::Rgb(r, g, b) => return Some((r, g, b)),
@@ -147,11 +137,8 @@ pub fn resolve_to_rgb(color: Color) -> Option<(u8, u8, u8)> {
     Some(indexed_to_rgb(idx))
 }
 
-/// Lerp from `base` (opacity 0) toward `original` (opacity 1).
 #[inline]
 pub fn blend_channel(base: u8, original: u8, opacity: f32) -> u8 {
-    // result = base + (original - base) * opacity
-    //        = base * (1 - opacity) + original * opacity
     let result = base as f32 * (1.0 - opacity) + original as f32 * opacity;
     result.round() as u8
 }
@@ -258,8 +245,7 @@ pub fn recede_area(buf: &mut Buffer, area: Rect, bg: Color, opacity: f32) {
         for x in area.x..area.x + area.width {
             if let Some(cell) = buf.cell_mut((x, y)) {
                 cell.modifier.insert(Modifier::DIM);
-                // Many terminals ignore faint when bold is set (the theme's
-                // bold prompts would stay at full weight): drop bold too.
+                // Many terminals ignore faint when bold is set (the theme's bold prompts would stay at full weight).
                 cell.modifier.remove(Modifier::BOLD);
             }
         }
@@ -308,7 +294,6 @@ mod tests {
         // Exact black and white hit the cube corners, not the grayscale ramp
         assert_eq!(nearest_indexed(0, 0, 0), 16);
         assert_eq!(nearest_indexed(255, 255, 255), 231);
-        // Exact cube hit: index 16 + 36*1 + 6*2 + 4
         assert_eq!(nearest_indexed(95, 135, 215), 68);
     }
 
@@ -332,21 +317,18 @@ mod tests {
 
     #[test]
     fn test_blend_channel_extremes() {
-        // opacity = 0: fully base
         assert_eq!(blend_channel(0, 255, 0.0), 0);
         assert_eq!(blend_channel(100, 200, 0.0), 100);
 
-        // opacity = 1: fully original
         assert_eq!(blend_channel(0, 255, 1.0), 255);
         assert_eq!(blend_channel(100, 200, 1.0), 200);
     }
 
     #[test]
     fn test_blend_channel_midpoint() {
-        // opacity = 0.5: halfway between
         assert_eq!(blend_channel(0, 100, 0.5), 50);
         assert_eq!(blend_channel(100, 200, 0.5), 150);
-        assert_eq!(blend_channel(0, 255, 0.5), 128); // 127.5 rounds to 128
+        assert_eq!(blend_channel(0, 255, 0.5), 128);
     }
 
     #[test]
@@ -375,8 +357,8 @@ mod tests {
 
     #[test]
     fn test_blend_color_indexed_returns_indexed() {
-        let base = Color::Indexed(232); // near-black (8, 8, 8)
-        let original = Color::Indexed(255); // near-white (238, 238, 238)
+        let base = Color::Indexed(232);
+        let original = Color::Indexed(255);
 
         let half = blend_color(base, original, 0.5).unwrap();
         assert!(matches!(half, Color::Indexed(_)));
@@ -393,7 +375,7 @@ mod tests {
     #[test]
     fn test_blend_color_mixed_returns_indexed() {
         let rgb = Color::Rgb(100, 100, 100);
-        let indexed = Color::Indexed(5); // magenta (128, 0, 128)
+        let indexed = Color::Indexed(5);
 
         // Indexed base, rgb original
         let result = blend_color(indexed, rgb, 0.5);
@@ -466,7 +448,6 @@ mod tests {
         // Only fade a 2x2 region in the middle
         fade_region(&mut buf, Rect::new(1, 1, 2, 2), base, 0.0);
 
-        // The (0, 0) corner sits outside the faded region
         assert_eq!(buf.cell((0, 0)).unwrap().fg, Color::Rgb(100, 100, 100));
 
         // The middle cells are inside it and fully faded
@@ -533,7 +514,6 @@ mod tests {
         );
 
         assert_eq!(buf.cell((0, 0)).unwrap().fg, Color::Rgb(75, 150, 0));
-        // The bg blend lands on 42.5 per channel and rounds to 43
         assert_eq!(buf.cell((0, 0)).unwrap().bg, Color::Rgb(43, 43, 43));
     }
 
@@ -588,7 +568,6 @@ mod tests {
             cell.set_bg(Color::Indexed(255));
         }
 
-        // Blend toward black: the cube's 16 is #000000, the grayscale ramp's 232 is only #080808
         let target = Color::Indexed(16);
         blend_area(
             &mut buf,

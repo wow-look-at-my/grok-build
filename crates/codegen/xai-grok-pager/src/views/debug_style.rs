@@ -1,14 +1,4 @@
 //! Theme-agnostic chrome for debug overlays (scroll HUD, FPS HUD).
-//!
-//! Debug overlays float above themed content and must read identically on every theme.
-//! Theme-relative styling fails on dark palettes.
-//! Oscura Midnight's base background is `#030304`.
-//! A panel that inherits the theme background, or paints low-contrast foregrounds like `Color::Gray`, blends straight into the frame behind it.
-//! These styles pin explicit ANSI-16 colors (never the theme palette, never `Color::Reset`, which defers to the terminal default).
-//! They build on [`Style::reset()`] so every painted cell also sheds the modifiers (bold/dim/italic/underline) of whatever themed text it covers.
-//!
-//! Contract: apply one of these styles to EVERY cell of the overlay rect, trailing padding included, so no themed cell bleeds through the panel.
-//! [`render_panel`] is the shared scaffold that enforces this; overlays build lines and call it rather than hand-painting cells.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

@@ -4,7 +4,6 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-/// First and last line tokens of the anchor block (turn 1's message).
 const ANCHOR_FIRST: &str = "SCROLLOUT_ALPHA";
 
 const ANCHOR_LAST: &str = "SCROLLOUT_OMEGA";
@@ -18,8 +17,6 @@ const FILLER_ROWS: usize = 120;
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn drag_select_autoscroll_full_scrollout_copy_pty() {
     let content = ContentController::start().await.expect("start content");
-    // Turn 1: a three-row anchor message (markdown hard breaks keep one row per source line)
-    // Turn 2: filler tall enough to scroll it fully out
     let mut anchor_turn = content.expect_agent_turn(
         "selection anchor turn",
         format!("{ANCHOR_FIRST} anchor first line  \nmiddle filler line  \n{ANCHOR_LAST} anchor last line"),
@@ -58,8 +55,6 @@ async fn drag_select_autoscroll_full_scrollout_copy_pty() {
     harness
         .wait_for_text(ANCHOR_LAST, Duration::from_secs(45))
         .expect("anchor message rendered");
-    // Rendered text alone doesn't prove turn 1 is over
-    // Submitting turn 2 while the pager still considers turn 1 live queues the prompt instead of sending it, and the filler wait below times out
     tokio::time::timeout(Duration::from_secs(10), anchor_turn.wait_satisfied())
         .await
         .expect("turn 1 completes before turn 2 send");
@@ -138,8 +133,7 @@ async fn drag_select_autoscroll_full_scrollout_copy_pty() {
         .inject_keys(drag.as_bytes())
         .expect("press and drag to bottom edge");
 
-    // Hold until the anchor block is PROVABLY out of `visible_blocks`. The mouse-up-time width lookup
-    // then cannot rescue the copy.
+    // Hold until the anchor block is PROVABLY out of `visible_blocks`.
     let out_deadline = Instant::now() + Duration::from_secs(30);
     while topmost_visible_marker(&harness).is_none_or(|m| m < 4) {
         assert!(

@@ -111,8 +111,8 @@ pub fn assert_path_column_aligned(text: &str, row_marker: &str) {
     }
     assert!(rows > 0, "no table rows matched {row_marker:?} in: {text}");
 }
-/// RAII guard for temporarily overriding an environment variable: captures the original value on construction and restores it on drop.
-/// Used by theme and persist tests to redirect `HOME`/`USERPROFILE` to temp directories without affecting the real user config.
+/// RAII guard for temporarily overriding an environment variable: captures
+/// the value on construction and restores it on drop.
 pub struct EnvVarGuard {
     key: &'static str,
     original: Option<std::ffi::OsString>,
@@ -138,9 +138,7 @@ impl Drop for EnvVarGuard {
         }
     }
 }
-/// Shared GROK_HOME boundary fixture for the resume-by-title startup and pre-sandbox tests. cwd-encoded dirnames
-/// are tempdir-unique, and cleanup runs on drop so it survives assertion panics. Callers must hold
-/// `[serial_test::serial(GROK_HOME)]`.
+/// Shared GROK_HOME boundary fixture for the resume-by-title startup and pre-sandbox tests. cwd-encoded dirnames are tempdir-unique.
 pub struct GrokHomeFixture {
     _home: tempfile::TempDir,
     cwd: tempfile::TempDir,
@@ -169,8 +167,8 @@ impl GrokHomeFixture {
             cleanup: Vec::new(),
         }
     }
-    /// Canonicalized so the summary cwd encoding matches what production path resolution sees (macOS tempdirs are symlinked).
-    /// Tests pass this through the explicit `*_for_cwd` parameters; the process cwd is never mutated.
+    /// Canonicalized so the summary cwd encoding matches what production path
+    /// resolution sees (macOS tempdirs are symlinked).
     pub fn cwd_str(&self) -> String {
         dunce::canonicalize(self.cwd.path())
             .expect("canonicalize cwd")

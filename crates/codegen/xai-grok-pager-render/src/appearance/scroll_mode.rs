@@ -1,9 +1,4 @@
 //! The `scroll_mode` user setting (`auto` | `wheel` | `trackpad`).
-//!
-//! Wheel-vs-trackpad detection is heuristic (terminal scroll events carry no magnitude).
-//! This setting lets a user force one classification when the heuristic is wrong for their setup.
-//! The pager's input layer maps it onto `ScrollInputMode` when building its scroll config.
-//! This crate only owns the persisted value type and its cache.
 
 /// Whether the pager auto-detects scroll input or forces one classification.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]

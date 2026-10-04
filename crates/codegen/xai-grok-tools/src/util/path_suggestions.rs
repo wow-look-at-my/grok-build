@@ -1,7 +1,4 @@
 //! Path-not-found enrichment hints for tool error messages.
-//!
-//! Enriches "does not exist" errors from `list_dir`, `read_file`,
-//! `search_replace`, and `grep` with actionable hints.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -13,8 +10,7 @@ const HINT_TIMEOUT: Duration = Duration::from_millis(100);
 const MAX_SIMILAR: usize = 3;
 /// Reduces noise from single-character names that would match on too many entries
 const MIN_LEAF_LEN: usize = 2;
-/// Minimum stem length for reverse substring matching (query contains entry).
-/// Prevents short stems from over-matching.
+/// Minimum stem length for reverse substring matching (query contains entry). Prevents short stems from over-matching.
 const MIN_REVERSE_STEM_LEN: usize = 4;
 
 /// Enrichment hints for a path that was not found.
@@ -22,8 +18,7 @@ const MIN_REVERSE_STEM_LEN: usize = 4;
 pub struct PathNotFoundHint {
     /// A corrected path from "dropped repo folder" detection.
     pub suggestion: Option<PathBuf>,
-    /// Up to [`MAX_SIMILAR`] entries from the parent directory whose names
-    /// are case-insensitive substring matches of the missing leaf.
+    /// Up to [`MAX_SIMILAR`] entries from the parent directory whose names are case-insensitive substring matches.
     pub similar: Vec<PathBuf>,
     /// Always-present CWD note for model re-orientation.
     pub cwd_note: String,
@@ -74,9 +69,7 @@ pub async fn path_not_found_hint(path: &Path, cwd: &Path, display_cwd: &Path) ->
     let (suggestion, similar) = match result {
         Ok(Ok(val)) => val,
         // Both arms leave the caller with no hint, which is what a hint is
-        // allowed to do. They are not the same event though: a probe that ran
-        // out of time is a slow disk, and a probe that unwound is a bug in the
-        // probe, so only the second one is reported.
+        // allowed to do.
         Ok(Err(join)) => {
             tracing::warn!(
                 task = "path not found hint",

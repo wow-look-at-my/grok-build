@@ -1,7 +1,3 @@
-//! Detects the terminal's color capabilities (truecolor / 256 / 16 / none).
-//! [`quantize_color`] downgrades a [`ratatui::style::Color`] to the highest level the terminal supports.
-//!
-//! The detected level is cached in a global [`OnceLock`]; call [`detect`] once at startup, then use [`get`] everywhere else.
 
 use std::sync::OnceLock;
 
@@ -18,13 +14,10 @@ pub enum ColorLevel {
     /// No color support (monochrome).
     #[strum(serialize = "none")]
     None,
-    /// Basic 16-color ANSI (SGR 30–37 / 90–97).
     #[strum(serialize = "basic")]
     Basic,
-    /// 256-color indexed palette (SGR 38;5;N).
     #[strum(serialize = "256")]
     Ansi256,
-    /// 24-bit truecolor RGB (SGR 38;2;R;G;B).
     #[strum(serialize = "truecolor")]
     TrueColor,
 }
@@ -58,8 +51,7 @@ static COLOR_LEVEL: OnceLock<ColorLevel> = OnceLock::new();
 static TEST_LEVEL_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(u8::MAX);
 
 /// Pin the detected color level for the test process (see
-/// [`TEST_LEVEL_OVERRIDE`]). The terminal-native lock cap still applies on
-/// top, so minimal-mode tests keep their Basic cap.
+/// [`TEST_LEVEL_OVERRIDE`]).
 #[cfg(any(test, feature = "test-support"))]
 pub fn set_level_for_test(level: ColorLevel) {
     TEST_LEVEL_OVERRIDE.store(level as u8, std::sync::atomic::Ordering::Relaxed);
@@ -78,8 +70,8 @@ fn test_level_override() -> Option<ColorLevel> {
     .find(|l| *l as u8 == v)
 }
 
-/// `NO_COLOR` forces [`ColorLevel::None`]. Non-TTY without it defaults to TrueColor (a TUI always runs in a terminal).
-/// Capped at [`ColorLevel::Basic`] while the terminal-native lock is engaged.
+/// `NO_COLOR` forces [`ColorLevel::None`]. Non-TTY without it defaults to
+/// TrueColor (a TUI always runs in a terminal).
 pub fn detect() -> ColorLevel {
     let raw = detect_raw();
     if crate::theme::cache::terminal_native_locked() {
@@ -116,8 +108,7 @@ fn detect_raw() -> ColorLevel {
             None => ColorLevel::TrueColor,
         };
 
-        // The `supports-color` crate relies on COLORTERM=truecolor, but tmux/SSH/mosh often strip that variable
-        // When the crate reports only 256-color support, upgrade to TrueColor if we can identify the emulator and know it handles 24-bit RGB
+        // The `supports-color` crate relies on COLORTERM=truecolor.
         if level < ColorLevel::TrueColor && terminal_supports_truecolor() {
             return ColorLevel::TrueColor;
         }
@@ -126,9 +117,8 @@ fn detect_raw() -> ColorLevel {
     })
 }
 
-/// This never consults stdout, because `grok doctor --json` is commonly piped.
-/// Stderr or an independently opened controlling terminal is sufficient evidence that the process is diagnosing that terminal.
-/// A fully headless invocation is honest about having no color evidence.
+/// This never consults stdout, because `grok doctor --json` is commonly
+/// piped.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StandaloneColorEvidence {
     Available(ColorLevel),
@@ -240,9 +230,8 @@ pub fn quantize(color: Color) -> Color {
 
 // ── Terminal-based truecolor inference ──────────────────────────────────
 
-/// Used as a fallback when `COLORTERM` is missing: inside tmux, SSH, or a bare `cmd.exe` / `powershell.exe` ConHost window.
-/// ConHost has supported VT-encoded 24-bit color since Windows 10 1709 (Fall Creators Update) but doesn't advertise it via COLORTERM.
-/// Without the fallback, themes there get quantized to the 16-color ANSI palette and the subtle bg/border/muted gradations collapse onto each other.
+/// Used as a fallback when `COLORTERM` is missing: inside tmux, SSH, or a
+/// bare `cmd.exe` / `powershell.exe` ConHost window.
 fn terminal_supports_truecolor() -> bool {
     terminal_supports_truecolor_brand(terminal_context().brand)
 }
@@ -263,17 +252,14 @@ fn terminal_supports_truecolor_brand(terminal: TerminalName) -> bool {
     ) {
         return true;
     }
-    // Native Windows: assume ConHost has VT processing enabled
-    // Pre-1709 hosts are effectively extinct and would gracefully degrade by ignoring the SGR 38;2;... sequences.
+    // Native Windows: assume ConHost has VT processing enabled Pre-1709 hosts are effectively extinct and would gracefully degrade.
     cfg!(target_os = "windows")
 }
 
-// ── 256 → 16 mapping ────────────────────────────────────────────────────
 
-/// Map a 256-color index to the nearest basic ANSI 16 color.
 fn indexed_to_ansi16(n: u8) -> Color {
     match n {
-        // First 16 indices already *are* the ANSI 16 colors.
+        // First indices already *are* the ANSI multiple colors.
         0 => Color::Black,
         1 => Color::Red,
         2 => Color::Green,
@@ -290,7 +276,6 @@ fn indexed_to_ansi16(n: u8) -> Color {
         13 => Color::LightMagenta,
         14 => Color::LightCyan,
         15 => Color::White,
-        // For 16–255, convert to RGB and find nearest ANSI 16 color.
         _ => {
             let (r, g, b) = indexed_to_rgb(n);
             rgb_to_ansi16(r, g, b)
@@ -298,9 +283,8 @@ fn indexed_to_ansi16(n: u8) -> Color {
     }
 }
 
-/// Nearest xterm ANSI 16 by squared-Euclidean distance. Fallback only; 16-color terminals are rare.
+/// Fallback only; 16-color terminals are rare.
 fn rgb_to_ansi16(r: u8, g: u8, b: u8) -> Color {
-    // Standard xterm ANSI 16 palette (same values used by indexed_to_rgb for 0–15).
     const PALETTE: [(u8, u8, u8, Color); 16] = [
         (0, 0, 0, Color::Black),
         (128, 0, 0, Color::Red),
@@ -317,7 +301,7 @@ fn rgb_to_ansi16(r: u8, g: u8, b: u8) -> Color {
         (0, 0, 255, Color::LightBlue),
         (255, 0, 255, Color::LightMagenta),
         (0, 255, 255, Color::LightCyan),
-        (255, 255, 255, Color::White), // index 15 = bright white
+        (255, 255, 255, Color::White),
     ];
 
     let mut best = Color::White;
@@ -446,7 +430,6 @@ mod tests {
 
     #[test]
     fn basic_quantizes_indexed_to_named() {
-        // Indexed(196) is (255,0,0), pure bright red in the cube
         let idx = Color::Indexed(196);
         let q = quantize_color(idx, ColorLevel::Basic);
         assert!(

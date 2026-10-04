@@ -104,7 +104,7 @@ Events fire at multiple cadences: once per session (`SessionStart`, `SessionEnd`
 | `PostCompact` | Conversation compaction completes. | No |
 | `SessionEnd` | The session ends. Carries `subagentType` for a child session, so a host can tell a child's teardown from its own. | No |
 
-`SubagentEnd` is accepted as an alias for `SubagentStop`. `PreToolUse` can block a tool call, `UserPromptSubmit` can block a prompt (see below), and `Stop`/`SubagentStop` can block the agent from stopping (see [Stop Decision Control](#stop-decision-control)). `PostToolUse` runs too late to block anything, but its stdout is read. It can feed the model feedback and replace the tool output the model sees (see [PostToolUse Output](#posttooluse-output)). Every other event is passive.
+`SubagentEnd` is accepted as an alias for `SubagentStop`. `PreToolUse` can block a tool call, `UserPromptSubmit` can block a prompt (see below). `Stop`/`SubagentStop` can block the agent from stopping (see [Stop Decision Control](#stop-decision-control)). `PostToolUse` runs too late to block anything, but its stdout is read. It can feed the model feedback and replace the tool output the model sees (see [PostToolUse Output](#posttooluse-output)). Every other event is passive.
 
 ### UserPromptSubmit Decision Control
 
@@ -405,7 +405,7 @@ Some turns report none of the three:
 
 - `reason`: the classified cause, and the value the matcher tests. `user_interrupt` (Ctrl+C, a client stop button, or a client `session/cancel`), `permission_rejected` (you declined a tool call), `permission_cancelled` (you dismissed the prompt), `max_turns`, `no_progress` (the agent bailed out after repeated no-op rounds), or `unknown` (a cancel the runtime can not classify, and the forward-compatible fallback). The matcher tests this field only, so a hook that wants every user-initiated stop matches the reasons it cares about and reads `cancelledBy`. This is from the payload. New reasons may be added over time, so treat an unrecognized value the way you treat `unknown`.
 - `cancelledBy`: `user` for an interrupt, a declined tool call, or a dismissed prompt. `runtime` for everything the agent decided itself, such as `max_turns` and `no_progress`. `unknown` when `reason` is `unknown`, because a cancel the runtime can not classify cannot claim the user was uninvolved. Derived from `reason`, so a new reason classifies automatically. Values may be added here too: treat one you do not recognize the way you treat `unknown`. This is rather than assuming anything that is not `user` was the runtime.
-- `cancelTrigger`: the gesture, when the client named one, clipped at many characters, since a gesture name is a token. The bundled pager sends `esc`, `ctrl_c`, `mouse` (the on-screen stop button), or `dashboard_stop`. Another client may send any string, and it is passed through verbatim. Every value here classifies as `user_interrupt`, including one that happens to spell an internal name such as `shutdown`. This is because a client asking to cancel is the user asking. Read `cancelledBy` from the payload rather than parsing this string. Omitted for a bare `session/cancel` and for every runtime-initiated reason.
+- `cancelTrigger`: the gesture, when the client named one, clipped at many characters, since a gesture name is a token. The bundled pager sends `esc`, `ctrl_c`, `mouse` (the on-screen stop button), or `dashboard_stop`. Another client may send any string. It is passed through verbatim. Every value here classifies as `user_interrupt`, including one that happens to spell an internal name such as `shutdown`. This is because a client asking to cancel is the user asking. Read `cancelledBy` from the payload rather than parsing this string. Omitted for a bare `session/cancel` and for every runtime-initiated reason.
 - `reasonDetails`: the same kind of detail `StopFailure` puts in `errorDetails`, when the runtime has one. For a declined tool call it is `<tool>: <why>`. Clipped at many characters, like `StopFailure`'s `errorDetails`.
 - `lastAssistantMessage`: whatever the turn had committed to the conversation at the interrupt, if any. A Ctrl+C during the final answer leaves the last committed text, or nothing if the turn never committed any. Clipped like the same field on `Stop` and `StopFailure`.
 - `subagentType`: the subagent's type when the turn ran inside one. As a result, a hook can tell a nested agent's stop from the session's. Absent in the main session.
@@ -485,7 +485,7 @@ registered as `{ "type": "command", "command": "bin/stop-gate.sh", "timeout": 30
 
 ### Passive Hooks
 
-For events like `SessionStart` or `Notification`, stdout is ignored. Just exit 0 on success. The exceptions are `PreToolUse` (see [Output (Blocking Hooks)](#output-blocking-hooks)), `Stop`/`SubagentStop` (see [Stop Decision Control](#stop-decision-control)), and `PostToolUse`, whose stdout is read even though it blocks nothing (see [PostToolUse Output](#posttooluse-output)).
+For events like `SessionStart` or `Notification`, stdout is ignored. Just exit 0 on success. The exceptions are `PreToolUse` (see [Output (Blocking Hooks)](#output-blocking-hooks)), `Stop`/`SubagentStop` (see [Stop Decision Control](#stop-decision-control)), and `PostToolUse`, whose stdout is read even though. It blocks nothing (see [PostToolUse Output](#posttooluse-output)).
 
 ### Environment Variables
 

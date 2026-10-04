@@ -1,8 +1,4 @@
 //! Content-free status, durable forgetting, and bounded retention for memory v2.
-//!
-//! `memory_state.sqlite` is the serialization point for every operation in this
-//! module. Tombstones are committed before files are removed, so all readers
-//! must treat the ledger as authoritative even during crash reconciliation.
 
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};

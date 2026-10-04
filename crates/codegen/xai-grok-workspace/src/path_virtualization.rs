@@ -1,9 +1,4 @@
 //! Per-session guest path virtualization and bind-time mount hooks.
-//!
-//! The model sees [`VISIBLE_ROOT`]; the guest tree is `real_root` (`/workspace/<conversation_id>`).
-//! Inbound also accepts [`ARTIFACTS_ALIAS`].
-//! A `..` walk out of `/workspace`, the artifacts alias, or the already-guest real root is clipped to `real_root`.
-//! True non-workspace absolutes (`/tmp`, `/home`) are left unchanged.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -19,7 +14,6 @@ pub const VISIBLE_ROOT: &str = "/workspace";
 /// Legacy model cwd; inbound alias of the session root.
 pub const ARTIFACTS_ALIAS: &str = "/workspace/artifacts";
 
-/// Two-way mapping between `visible_root` and `real_root` for one hub session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathVirtualization {
     visible_root: String,
@@ -40,10 +34,10 @@ impl PathVirtualization {
         })
     }
 
-    /// Build a mapping between two arbitrary absolute roots with no alias.
-    /// Returns `None` when either root is not a usable absolute path, or when
-    /// `real_root` is `visible_root` or lies under it: a real tree inside its
-    /// own visible tree would make [`Self::to_guest`] map paths back onto themselves.
+    /// Build a mapping between arbitrary absolute roots with no alias. Returns `None`
+    /// when either root is not a usable absolute path, or when `real_root` is
+    /// `visible_root` or lies under it: a real tree inside its own visible tree would
+    /// make [`Self::to_guest`] map paths back onto themselves.
     pub fn try_new(visible_root: impl AsRef<Path>, real_root: impl AsRef<Path>) -> Option<Self> {
         let visible = normalize_session_root(visible_root.as_ref().to_str()?)?;
         let real = normalize_session_root(real_root.as_ref().to_str()?)?;
@@ -311,7 +305,7 @@ fn rewrite_text_inbound<'a>(virt: &PathVirtualization, text: &'a str) -> Cow<'a,
     }
 }
 
-/// Advance one UTF-8 scalar at `i`. `i` is a char boundary because the scanners start at 0 and step by `char::len_utf8`.
+/// Advance one UTF-8 scalar at `i`.
 fn push_char_at(text: &str, i: usize, buf: Option<&mut String>) -> usize {
     let Some(ch) = text.get(i..).and_then(|s| s.chars().next()) else {
         return 1;
@@ -354,9 +348,8 @@ fn rewrite_json_strings(value: Value, rewrite: &dyn Fn(&str) -> Cow<str>) -> Val
     }
 }
 
-/// Write/edit bodies and search/monitor regexes mention `/workspace` as file content, not as a path argument.
-/// Rewriting them would persist the guest root on disk and break `search_replace` against the original bytes.
-/// grep and `notify_on_output` would miss on-disk text that still uses the visible root.
+/// Write/edit bodies and search/monitor regexes mention `/workspace` as file
+/// content, not as a path argument.
 fn is_content_like_json_key(key: &str) -> bool {
     matches!(
         key,

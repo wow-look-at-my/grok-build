@@ -265,7 +265,6 @@ mod tests {
         };
         let start = Instant::now();
         run_hook(&hook, &test_event());
-        // Wait for the spawned thread to finish (the clamp turns 0 into a 1s timeout)
         std::thread::sleep(Duration::from_millis(2500));
         let elapsed = start.elapsed();
         assert!(

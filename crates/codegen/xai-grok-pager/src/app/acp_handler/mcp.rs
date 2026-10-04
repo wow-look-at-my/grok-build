@@ -35,15 +35,13 @@ pub(super) fn handle_mcp_init_progress(notif: &acp::ExtNotification, app: &mut A
     is_active
 }
 
-/// So the sessionId branch is the primary path for current builds.
-/// Older shells / forward-compat (**`tools_changed` only**): a payload with no `sessionId` falls back to `app.active_view`.
-/// The sessionId branch (step 1) is thus the only matched-build path for `mcp_initialized`.
+/// So the sessionId branch is the primary path for current builds. Older shells / forward-compat (**`tools_changed`
+/// only**): a payload with no `sessionId` falls back to `app.active_view`.
 pub(super) fn handle_mcp_tools_changed(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let method = notif.method.as_ref();
 
-    // Both `x.ai/mcp_initialized` and (newer shell) `x.ai/mcp/tools_changed` carry `sessionId`
-    // Route by it so a background agent's notification updates *its* state, not whichever agent is foregrounded
-    // Unknown and subagent (child) sessions are dropped; a missing sessionId falls back to the active agent (legacy shells)
+    // Both `x.ai/mcp_initialized` and (newer shell) `x.ai/mcp/tools_changed`
+    // carry `sessionId` Route by it.
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Payload {
@@ -107,9 +105,9 @@ pub(super) fn handle_mcp_tools_changed(notif: &acp::ExtNotification, app: &mut A
     redraw
 }
 
-/// Per-agent coalescing test for [`Effect::FetchMcpsList`].
-/// An earlier approach used `matches!(e, FetchMcpsList { .. })`, which collapsed across agents.
-/// A pending fetch on agent A would drop the push for agent B.
+/// Per-agent coalescing test for [`Effect::FetchMcpsList`]. An earlier
+/// approach used `matches!(e, FetchMcpsList { . })`, which collapsed across
+/// agents.
 pub(super) fn agent_has_pending_mcps_fetch(app: &AppView, agent_id: AgentId) -> bool {
     app.pending_effects.iter().any(|e| {
         matches!(
@@ -149,8 +147,8 @@ pub(super) fn handle_mcp_server_status(notif: &acp::ExtNotification, app: &mut A
     let Some(modal) = agent.extensions_modal.as_mut() else {
         return false;
     };
-    // Cheap path: list still loading / errored
-    // Patching would produce incoherent state; the in-flight fetch will land a consistent snapshot momentarily
+    // Cheap path: list still loading / errored Patching will produce
+    // incoherent state.
     let TabDataState::Loaded(ref mut servers) = modal.mcps_data else {
         return false;
     };
@@ -160,9 +158,11 @@ pub(super) fn handle_mcp_server_status(notif: &acp::ExtNotification, app: &mut A
         McpServerStatus::Unavailable => McpServerDisplayStatus::Unavailable,
         McpServerStatus::NeedsAuth => McpServerDisplayStatus::NeedsAuth,
     };
-    // Decode `tools` loosely. Shell types this as `Option<serde_json::Value>` (always `null` today; reserved).
-    // If the value is present but not an array of `McpToolEntry`-shaped objects we drop ONLY the tools update and still apply the status
-    // The previous strict typing would have dropped the whole push on any shape mismatch
+    // Decode `tools` loosely. Shell types this as `Option<serde_json::Value>`
+    // (always `null` today; reserved). If the value is present but not an
+    // array of `McpToolEntry`-shaped objects we drop ONLY the tools update
+    // and still apply the status The strict typing would have dropped the
+    // whole push on any shape mismatch
     let new_tools = payload.tools.and_then(|raw| {
         match serde_json::from_value::<Vec<McpToolEntry>>(raw) {
             Ok(entries) => Some(
@@ -212,9 +212,9 @@ pub(super) fn handle_mcp_elicit_complete(notif: &acp::ExtNotification, app: &mut
 /// An attempt to route by `sessionId` therefore always fell back to `app.active_view` and re-created the multi-agent bug.
 /// Agents without an open modal drop the push (cheap path).
 pub(super) fn handle_mcp_servers_updated(_notif: &acp::ExtNotification, app: &mut AppView) -> bool {
-    // `_notif` is intentionally unread
-    // Do NOT "fix" this back to per-session routing without re-reading the rustdoc above
-    // Snapshot (agent_id, session_id, modal_open) up front so the mutable `pending_effects` borrow can proceed without aliasing `app.agents`
+    // `_notif` is intentionally unread Do NOT "fix" this back to per-session
+    // routing without re-reading the rustdoc above Snapshot (agent_id,
+    // session_id, modal_open) up front.
     let targets: Vec<(AgentId, acp::SessionId)> = app
         .agents
         .iter()

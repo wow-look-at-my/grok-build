@@ -1,5 +1,4 @@
-//! Decodes one OTLP export into the typed events the recorder keeps. The content type belongs to
-//! the HTTP post, so only `decode_post` checks it; `decode_protobuf` takes the message alone.
+//! Decodes one OTLP export into the typed events the recorder keeps.
 
 use base64::Engine as _;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;

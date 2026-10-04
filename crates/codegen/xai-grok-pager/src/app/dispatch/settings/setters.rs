@@ -51,8 +51,8 @@ pub(in crate::app::dispatch) fn set_multiline_mode(app: &mut AppView, new: bool)
     vec![]
 }
 
-/// State-only mutation for `render_mermaid`: update the process-wide cache so every block picks up the new value on the next frame.
-/// Rendering reads only the cache; the disk write goes through `PersistSetting`.
+/// State-only mutation for `render_mermaid`: update the process-wide cache so
+/// every block picks up the new value on the next frame.
 pub(super) fn set_render_mermaid_inner(kind: crate::appearance::RenderMermaid) {
     crate::appearance::cache::set_render_mermaid(kind);
 }
@@ -85,8 +85,8 @@ pub(in crate::app::dispatch) fn set_render_mermaid(
     }]
 }
 
-/// Mirror the canonical mode into `app.current_ui` so `current_value_for` stays in sync.
-/// Called by the commit path AND by [`apply_setting_rollback`](super::ui::apply_setting_rollback).
+/// Mirror the canonical mode into `app.current_ui` so `current_value_for`
+/// stays in sync.
 pub(super) fn set_hunk_tracker_mode_inner(app: &mut AppView, canonical: &str) {
     app.current_ui.hunk_tracker_mode = Some(canonical.to_string());
 }
@@ -117,8 +117,8 @@ pub(in crate::app::dispatch) fn set_hunk_tracker_mode(
     }]
 }
 
-/// Mirror the canonical voice-capture mode into `app.current_ui` so `current_value_for` stays in sync.
-/// Called by the commit path AND by [`apply_setting_rollback`](super::ui::apply_setting_rollback).
+/// Mirror the canonical voice-capture mode into `app.current_ui` so
+/// `current_value_for` stays in sync.
 pub(super) fn set_voice_capture_mode_inner(app: &mut AppView, canonical: &str) {
     app.current_ui.voice_capture_mode = Some(canonical.to_string());
 }
@@ -147,9 +147,9 @@ pub(in crate::app::dispatch) fn set_voice_capture_mode(
     }]
 }
 
-/// Mirror the voice-shortcut gate into `app.current_ui` and the process-global mirror.
-/// The event-loop chord intercept reads the former live; key routing and view code without an `AppView` read the latter.
-/// Called by the commit path AND by [`apply_setting_rollback`](super::ui::apply_setting_rollback).
+/// Mirror the voice-shortcut gate into `app.current_ui` and the
+/// process-global mirror. The event-loop chord intercept reads the live; key
+/// routing and view code without an `AppView` read the latter.
 pub(super) fn set_voice_keybind_enabled_inner(app: &mut AppView, new: bool) {
     app.current_ui.voice_keybind_enabled = Some(new);
     crate::app::VOICE_KEYBIND_ENABLED.store(new, std::sync::atomic::Ordering::Release);
@@ -182,18 +182,16 @@ pub(in crate::app::dispatch) fn set_voice_keybind_enabled(
 /// The value may be the client-only `"auto"` sentinel; the voice crate resolves it at connect time.
 /// Called by the commit path AND by [`apply_setting_rollback`].
 pub(super) fn set_voice_stt_language_inner(app: &mut AppView, canonical: &str) {
-    // Whether the effective language actually changes
-    // Re-pinning an unset or non-canonical `[ui]` mirror to the language already in effect must not recycle the pipeline
-    // That would cut off active dictation for nothing
+    // Whether the effective language changes Re-pinning an unset or
+    // non-canonical `[ui]` mirror to the language already.
     let language_changed =
         crate::settings::canonical_voice_stt_language(Some(&app.voice_config.language))
             != canonical;
     app.current_ui.voice_stt_language = Some(canonical.to_string());
     // Store the preference, not the resolved wire code, so `auto` re-resolves from the locale on each STT connect
     app.voice_config.language = canonical.to_string();
-    // A running pipeline holds the VoiceConfig it was spawned with Shut it down so the next capture starts one with the new language (the event loop respawns lazily whenever `voice_cmd_tx` is None)
-    // Shut it down so the next capture starts one with the new language (the event loop respawns lazily whenever `voice_cmd_tx` is None)
-    // Tear down any in-flight session first so the mic indicator clears immediately and the pipeline's channel-close is not misreported as "pipeline ended"
+    // A running pipeline holds the VoiceConfig it was spawned with Shut it
+    // down so the next capture starts one with the new language.
     if language_changed && let Some(tx) = app.voice_cmd_tx.take() {
         app.voice_reset();
         let _ = tx.try_send(xai_grok_voice::VoiceCommand::Shutdown);
@@ -208,7 +206,7 @@ pub(in crate::app::dispatch) fn set_voice_stt_language(
     value: String,
 ) -> Vec<Effect> {
     let canonical = crate::settings::canonical_voice_stt_language(Some(&value));
-    // `prev` is the live effective language so a failed persist rolls back to what's actually in effect
+    // `prev` is the live effective language so a failed persist rolls back to what's in effect
     let prev = crate::settings::canonical_voice_stt_language(Some(&app.voice_config.language));
     if prev == canonical && app.current_ui.voice_stt_language.as_deref() == Some(canonical) {
         return vec![];
@@ -237,8 +235,8 @@ pub(in crate::app::dispatch) fn set_voice_stt_language(
     }]
 }
 
-/// Propagates to every in-process agent so background subagents and side panes pick up the change without restart.
-/// The cache mirror lets new agents created later read the same value via `cache::load_vim_mode()` in `AgentView::new`.
+/// Propagates to every in-process agent so background subagents and side
+/// panes pick up the change without restart.
 
 /// Mirror the user-config layer in `current_ui` so the modal reflects it (the effective gate is resolved shell-side at session spawn).
 pub(super) fn set_remember_tool_approvals_inner(app: &mut AppView, new: bool) {
@@ -436,8 +434,10 @@ pub(in crate::app::dispatch) fn clear_subagent_model_inheritance(app: &mut AppVi
 
 pub(super) fn set_show_thinking_blocks_inner(app: &mut AppView, new: bool) {
     crate::appearance::cache::set_show_thinking_blocks(new);
-    // Thinking visibility reshapes verb-group runs (shown thoughts claim into folds) AND dense N-more runs (hidden thoughts stop counting toward truncation)
-    // Expansion ids therefore describe the OLD grouping shape even with `group_tool_verbs` off; drop them like `set_group_tool_verbs_inner`
+    // Thinking visibility reshapes verb-group runs (shown thoughts claim into
+    // folds) AND dense N-more runs (hidden thoughts stop counting toward
+    // truncation) Expansion ids therefore describe the grouping shape even
+    // with `group_tool_verbs` off.
     for agent in app.agents.values_mut() {
         agent.scrollback.clear_group_expansion();
         agent.scrollback.invalidate_heights();
@@ -505,8 +505,9 @@ pub(in crate::app::dispatch) fn set_thinking_summaries(
 
 pub(super) fn set_group_tool_verbs_inner(app: &mut AppView, new: bool) {
     crate::appearance::cache::set_group_tool_verbs(new);
-    // Expansion ids describe the OLD grouping shape
-    // Drop them so stale ids can't reopen a verb slot expanded or mark a coincident dense group expanded after the re-fold (see `clear_group_expansion`)
+    // Expansion ids describe the grouping shape Drop them so stale ids can't
+    // reopen a verb slot expanded or mark a coincident dense group expanded
+    // after the re-fold (see `clear_group_expansion`)
     for agent in app.agents.values_mut() {
         agent.scrollback.clear_group_expansion();
         agent.scrollback.invalidate_heights();
@@ -757,7 +758,7 @@ pub(super) fn set_scroll_lines_inner(app: &mut AppView, clamped: u8) {
 /// Clamps to `[1, 10]` to match the registry's `Int { min: 1, max: 10 }` bounds.
 pub(in crate::app::dispatch) fn set_scroll_lines(app: &mut AppView, raw: i64) -> Vec<Effect> {
     let clamped = raw.clamp(1, 10) as u8;
-    // `None` (never configured, so the profile default applies) counts as changed: an explicit user value must stick even when it matches the profile
+    // `None` (never configured, so the profile default applies) counts as changed.
     let prev = crate::appearance::cache::load_scroll_lines();
     if prev == Some(clamped) {
         return vec![];
@@ -774,8 +775,7 @@ pub(in crate::app::dispatch) fn set_scroll_lines(app: &mut AppView, raw: i64) ->
     vec![Effect::PersistSetting {
         key: "scroll_lines",
         value: crate::settings::SettingValue::Int(clamped as i64),
-        // prev=None (never configured) can't round-trip through SettingValue::Int
-        // Rolling back to an explicit 3 is the same deliberate one-way door as the `d`-reset path
+        // prev=None (never configured) can't round-trip through SettingValue::Int Rolling back.
         rollback_value: crate::settings::SettingValue::Int(prev.unwrap_or(3) as i64),
     }]
 }
@@ -821,8 +821,7 @@ pub(in crate::app::dispatch) fn set_default_selected_permission(
     new: String,
 ) -> Vec<Effect> {
     use crate::appearance::permission_cursor::DefaultSelectedPermission;
-    // All callers pass a registry canonical; parsing is total (unknown becomes `Default`), so a garbage input degrades to the safe "no preselection" value
-    // `debug_assert` catches a dispatch bug in tests without a parallel validator on the hot path
+    // All callers pass a registry canonical.
     let parsed = DefaultSelectedPermission::from_config_value(&new);
     debug_assert_eq!(
         parsed.as_canonical(),
@@ -866,21 +865,19 @@ pub(super) fn set_default_selected_permission_inner(
     app: &mut AppView,
     value: crate::appearance::permission_cursor::DefaultSelectedPermission,
 ) {
-    // Mirror to in-memory `UiConfig` so `current_value_for` stays in sync
-    // with the cache for the open settings modal.
+    // Mirror to in-memory `UiConfig` so `current_value_for` stays in sync with the cache for the open settings modal.
     app.current_ui.default_selected_permission = Some(value.as_canonical().to_string());
-    // Update the process-wide cache so the next permission prompt picks up
-    // the new value without a restart.
+    // Update the process-wide cache so the next permission prompt picks up the new value without a restart.
     crate::appearance::permission_cursor::set_default_selected_permission(value);
 }
 
-// Settings setters: unified dispatch for the settings modal and slash commands
-// `set_X_inner`: state-only mutation. Called on success AND rollback.
-// Rollback (`apply_setting_rollback`) calls inner only; it never re-emits
+// Settings setters: unified dispatch for the settings modal and slash
+// commands `set_X_inner`: state-only mutation. Called on success AND
+// rollback.
 
-/// State-only mutation for `compact_mode`.
-/// Stores the USER value in the in-memory `current_ui` snapshot (read by the modal) and the thread-local cache used by hot reads.
-/// Never touches disk; never emits effects.
+/// State-only mutation for `compact_mode`. Stores the USER value in the
+/// in-memory `current_ui` snapshot (read by the modal) and the thread-local
+/// cache used by hot reads.
 pub(super) fn set_compact_mode_inner(app: &mut AppView, new: bool) {
     app.current_ui.compact_mode = new;
     crate::appearance::cache::set(new);
@@ -956,8 +953,7 @@ pub(super) fn set_timeline_inner(app: &mut AppView, new: bool) {
 }
 
 pub(in crate::app::dispatch) fn set_timeline(app: &mut AppView, new: bool) -> Vec<Effect> {
-    // Gate on the displayed state (`appearance.show_timeline`, what the rail renders from and what `/timeline` toggles against)
-    // The separately hydrated `current_ui` could disagree and make the toggle no-op
+    // Gate on the displayed state (`appearance.show_timeline`, what the rail renders from and what `/timeline` toggles against).
     let prev = app.appearance.show_timeline;
     // Idempotency gate.
     if prev == new {
@@ -1099,8 +1095,7 @@ pub(super) fn set_follow_up_behavior_inner(
 ) {
     app.current_ui.follow_up_behavior = Some(new.as_canonical().to_string());
     crate::appearance::cache::set_follow_up_behavior(new);
-    // Same-process atomic only (tests / in-proc shell)
-    // The real agent is a separate process; it re-resolves Steer from config.toml mtime after the PersistSetting disk write lands
+    // Same-process atomic only (tests / in-proc shell) The real agent is a separate process.
     xai_grok_shell::util::config::set_follow_up_steer_cache(new.is_steer());
 }
 
@@ -1132,12 +1127,12 @@ pub(in crate::app::dispatch) fn set_follow_up_behavior(
     }]
 }
 
-// No idempotency gate: this fans out to every agent's `input_mode`
-// A newly-inserted agent may have a stale default, so we always propagate
-// The inner is per-agent idempotent
-// Contextual-hint tips: the `contextual_hints.*` per-tip toggles.
-// A toggle thus takes effect at runtime, not just on next launch
-// `write` is a non-capturing closure that coerces to `fn` so the tips share one inner
+// No idempotency gate: this fans out to every agent's `input_mode` A
+// newly-inserted agent may have a stale default, so we always propagate The
+// inner is per-agent idempotent Contextual-hint tips: the
+// `contextual_hints.*` per-tip toggles. A toggle thus takes effect at
+// runtime, not on next launch `write` is a non-capturing closure that coerces
+// to `fn` so the tips share one inner
 
 /// State-only mutation: write one tip's user-config Option, then re-resolve and fan the resolved gates out to `app` and every agent prompt.
 pub(super) fn set_contextual_hint_inner(
@@ -1299,9 +1294,8 @@ pub(in crate::app::dispatch) fn set_contextual_hint_ssh_wrap(
     )
 }
 
-// Theme settings: `theme`, `auto_dark_theme`, `auto_light_theme`.
-// `PreviewX` (preview): visual only, no persist/toast.
-// Auto-theme setters apply visually only when `theme="auto"` AND the system is in the matching mode; otherwise the value is just stored
+// Theme settings: `theme`, `auto_dark_theme`, `auto_light_theme`. `PreviewX`
+// (preview): visual only, no persist/toast.
 
 /// Format a "✓ <Label>: <value>" toast for theme-family settings.
 /// `value` is the user-friendly display name, not the canonical.
@@ -1309,9 +1303,9 @@ fn save_theme_toast(label: &str, value: &str) -> String {
     format!("\u{2713} {label}: {value}")
 }
 
-/// Apply a (non-auto) theme to the live display.
-/// Centralised so `set_theme_inner` and `preview_theme_inner` share the same visual-mutation path.
-/// Resolves `Auto` via `theme::cache::resolve_auto` (does NOT toggle `AUTO_MODE`); concrete kinds go through `Theme::apply_kind` directly.
+/// Apply a (non-auto) theme to the live display. Centralised so
+/// `set_theme_inner` and `preview_theme_inner` share the same visual-mutation
+/// path.
 fn apply_theme_kind_for_display(kind: crate::theme::ThemeKind) {
     if kind.is_auto() {
         let resolved = crate::theme::cache::resolve_auto();
@@ -1670,14 +1664,11 @@ pub(in crate::app::dispatch) fn set_default_model_inner(
         if !agent.session.models.available.contains_key(id) {
             return false;
         }
-        // Update the agent's session model state's current pointer
-        // Subsequent reads (e.g. `current_model_name` via the pager snapshot) then reflect the new selection without waiting for the ACP roundtrip.
-        // `set_current(_, None)` resets `reasoning_effort` to model default.
+        // Update the agent's session model state's current pointer Subsequent reads (e.g. `current_model_name` via the pager snapshot).
         agent.session.models.set_current(id.clone(), None);
     }
-    // Mirror the new default into the app-level model state too
-    // A later `/new` or `/clear` creates a fresh session by cloning `app.models` (`dispatch_new_session_inner_with_id`)
-    // Without this mirror, that new session (and the welcome card it commits) would show the previous default until the next `x.ai/models/update` roundtrip
+    // Mirror the new default into the app-level model state too A later
+    // `/new` or `/clear` creates a fresh session by cloning `app.models`.
     if app.models.available.contains_key(id) {
         app.models.set_current(id.clone(), None);
     }
@@ -1685,7 +1676,6 @@ pub(in crate::app::dispatch) fn set_default_model_inner(
 }
 
 /// Toast format for `default_model`, mirroring `save_theme_toast`.
-/// Renders the user-friendly model name (NOT the internal id) so the toast text matches what the user typed.
 fn save_default_model_toast(value: &str) -> String {
     format!("\u{2713} Default model: {value}")
 }
@@ -1706,7 +1696,8 @@ pub(in crate::app::dispatch) fn set_default_model(
         return vec![];
     };
 
-    // Snapshot the previous id and display name from the active agent's session (the same source `set_default_model_inner` mutates and the modal reads)
+    // Snapshot the id and display name from the active agent's session (the
+    // same source `set_default_model_inner` mutates and the modal reads)
     let (prev_id, session_id, available_has_new, new_display) = {
         let Some(agent) = app.agents.get(&aid) else {
             tracing::error!(
@@ -1752,9 +1743,7 @@ pub(in crate::app::dispatch) fn set_default_model(
     );
     app.show_toast(&save_default_model_toast(&new_display));
 
-    // Persist the **model ID** (catalog key), not the display name.
-    // would silently fail to resolve on the next startup.
-    // slugs that must not become the global Build `default_model`.
+    // Persist the **model ID** (catalog key), not the display name. would silently fail to resolve on the next startup.
     let mut effects: Vec<Effect> = Vec::new();
     if !xai_grok_shell::agent::chat_modes::process_chat_mode_enabled() {
         let new_id_str = new_id.0.to_string();
@@ -1769,8 +1758,6 @@ pub(in crate::app::dispatch) fn set_default_model(
         });
     }
 
-    // Best-effort session-level switch
-    // The `Effect::SwitchModel` pipeline handles its own deferred switch when no session id exists yet (see line 583 of this file)
     if let Some(sid) = session_id {
         // We already hold a reference path to the agent above; re-borrow mutably here to flip `model_switch_pending`
         if let Some(agent) = app.agents.get_mut(&aid) {
@@ -1784,8 +1771,6 @@ pub(in crate::app::dispatch) fn set_default_model(
             prev_model_id: prev_id.clone(),
         });
     } else if let Some(agent) = app.agents.get_mut(&aid) {
-        // No session id yet: stash for `EventLoop::on_session_created` to apply once the session id arrives
-        // Mirrors `Action::SwitchModel` line 586
         agent.session.deferred_model_switch = Some(crate::app::agent::DeferredModelSwitch {
             model_id: new_id,
             effort: None,
@@ -1849,8 +1834,8 @@ pub(in crate::app::dispatch) fn clear_default_model(app: &mut AppView) -> Vec<Ef
     }]
 }
 
-// The `web_search_model`, `session_summary_model`, and `default_reasoning_effort` setters were removed alongside their registry entries
-// Mirror fields and TOML schema stay for compat
+// The `web_search_model`, `session_summary_model`, and
+// `default_reasoning_effort` setters
 
 /// State-only mutation for one harness model slot. An empty `model_id`
 /// removes the entry, which is what the modal reads as "(no override)".
@@ -1941,9 +1926,8 @@ pub(in crate::app::dispatch) fn set_harness_model(
     }]
 }
 
-// max_thoughts_width is an Int-valued setting
-// The registry hands over an `i64`; it is clamped to `(min, max)` bounds and cast to `u16`
-// Live application goes through `app.current_ui.max_thoughts_width`
+// max_thoughts_width is an Int-valued setting The registry hands over an
+// `i64`.
 
 /// Clamp `i64` to the registered `max_thoughts_width` bounds.
 /// Bounds imported from `settings::defs` (single source of truth).
@@ -1955,7 +1939,6 @@ fn clamp_max_thoughts_width(value: i64) -> i64 {
 }
 
 /// State-only mutation for `max_thoughts_width`.
-/// Updates the `app.current_ui.max_thoughts_width` field; the renderer picks up the new value on the next frame.
 pub(super) fn set_max_thoughts_width_inner(app: &mut AppView, value: i64) {
     app.current_ui.max_thoughts_width = clamp_max_thoughts_width(value) as u16;
 }
@@ -1965,8 +1948,7 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
     let prev = app.current_ui.max_thoughts_width as i64;
     let clamped = clamp_max_thoughts_width(new);
     if prev == clamped {
-        // Idempotent fast-path: no-op for redundant writes.
-        // Matches the bool setters' idempotency contract
+        // Idempotent fast-path: no-op for redundant writes. Matches the bool setters' idempotency contract
         return vec![];
     }
     set_max_thoughts_width_inner(app, new);
@@ -1986,12 +1968,8 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
 }
 
 // ---------------------------------------------------------------------------
-// min_output_tokens_per_sec, output_rate_sustained_secs, output_rate_window_secs,
-// output_rate_max_retries, ttft_timeout_secs — the output-rate floor and the
-// time-to-first-token limit. `Option<u32>` in UiConfig,
-// `i64` on the registry surface. The config watcher tells every running
-// session to re-read the floor, so a change applies to its next model call.
-// ---------------------------------------------------------------------------
+// min_output_tokens_per_sec, output_rate_sustained_secs,
+// output_rate_window_secs.
 
 fn clamp_min_output_tokens_per_sec(value: i64) -> i64 {
     value.clamp(
@@ -2191,8 +2169,7 @@ pub(in crate::app::dispatch) fn set_ttft_timeout_secs(app: &mut AppView, new: i6
     }]
 }
 
-// The `auto_compact_threshold_percent` setter was removed alongside its registry entry
-// The mirror field stays for compat
+// The `auto_compact_threshold_percent` setter
 
 // show_tips is a SHELL-OWNED `Option<bool>` setter
 // Changes take effect on next session start (restart_required: true).
@@ -2221,8 +2198,7 @@ pub(in crate::app::dispatch) fn set_show_tips(app: &mut AppView, new: bool) -> V
     let prev_state = app.show_tips;
     let prev_effective = prev_state.unwrap_or(true);
     if prev_effective == new && prev_state.is_some() {
-        // Idempotent fast-path
-        // `.is_some()` lets the first commit of the default value persist (so the resolver sees user intent)
+        // Idempotent fast-path `.is_some()` lets the first commit of the default value persist.
         return vec![];
     }
     set_show_tips_inner(app, new);

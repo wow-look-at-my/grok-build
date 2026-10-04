@@ -6,9 +6,8 @@ const ENV_AGENT_ID: &str = "GROK_AGENT_ID";
 static AGENT_ID: OnceLock<String> = OnceLock::new();
 static AGENT_INSTANCE_ID: OnceLock<String> = OnceLock::new();
 
-/// Returns the stable agent ID: `GROK_AGENT_ID` if set, else the value cached in `$GROK_HOME/agent_id`.
-/// Otherwise a machine-derived UUID is computed once and persisted there.
-/// The first call in a process may block while the computation runs; [`prefetch_agent_id`] starts it early.
+/// Returns the stable agent ID: `GROK_AGENT_ID` if set, else the value cached
+/// in `$GROK_HOME/agent_id`.
 pub fn agent_id() -> String {
     AGENT_ID.get_or_init(load_or_compute_agent_id).clone()
 }
@@ -150,8 +149,6 @@ fn leaf_replaceable_through_parent(path: &std::path::Path) -> bool {
 }
 
 fn is_invalid_reparse_os_error(e: &std::io::Error) -> bool {
-    // ERROR_INVALID_REPARSE_DATA (4392): malformed Windows reparse. The leaf
-    // cannot be followed; replace it so a UUIDv4 fallback stays stable.
     cfg!(windows) && e.raw_os_error() == Some(4392)
 }
 

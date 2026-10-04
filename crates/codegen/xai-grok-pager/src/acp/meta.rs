@@ -1,7 +1,4 @@
 //! Strongly-typed notification metadata.
-//!
-//! Parses the `_meta` JSON from `SessionNotification` into a struct with typed fields.
-//! All fields are `Option`, so parsing degrades gracefully when grok-shell hasn't been updated or meta is absent.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -15,30 +12,22 @@ pub struct NotificationMeta {
     pub total_tokens: Option<u64>,
     /// UTC ms when this notification was sent (`agentTimestampMs`).
     pub agent_timestamp_ms: Option<i64>,
-    /// UTC ms when the current LLM streaming response started (`streamStartMs`).
-    /// Resets each tool-use loop iteration.
+    /// UTC ms when the current LLM streaming response started (`streamStartMs`). Resets each tool-use loop iteration.
     pub stream_start_ms: Option<i64>,
-    /// UTC ms when the current turn started (`turnStartMs`).
-    /// Constant for the entire turn.
+    /// UTC ms when the current turn started (`turnStartMs`). Constant for the entire turn.
     pub turn_start_ms: Option<i64>,
     /// Stable id for the prompt this notification belongs to (`promptId`).
-    /// The client passes a UUID in `PromptRequest._meta.promptId`; the agent echoes it on every notification it emits while processing that prompt.
-    /// Used to drop chunks for cancelled / rewound turns.
     pub prompt_id: Option<String>,
     /// Whether this notification is historical replay from `session/load`.
     pub is_replay: bool,
-    /// Raw `eventId` string (`"{sessionId}-{counter}"`). The agent resolves it by exact string match against persisted
-    /// lines, so the full id is kept.
+    /// Raw `eventId` string (`"{sessionId}-{counter}"`).
     pub event_id: Option<String>,
-    /// Monotonic per-process sequence parsed from `eventId` (`"{sessionId}-{counter}"`, see `xai-grok-shell
-    /// util::event_id`). Per-session events arrive in increasing order, so the pager keeps a highwater and drops
-    /// anything at or below it. such updates always apply.
+    /// Monotonic per-process sequence parsed from `eventId`.
     pub event_seq: Option<u64>,
 }
 
-/// Serializable counterpart of the replay stamp the agent injects on replayed notifications.
-/// [`NotificationMeta::from_json`] is the parse side. this is the build side. That spares those sites from
-/// hand-writing `json!` literals.
+/// Serializable counterpart of the replay stamp the agent injects on replayed
+/// notifications.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplayMetaStamp {
@@ -71,7 +60,6 @@ pub mod user_prompt_meta {
     /// Render the display text as a scheduled (cron) prompt.
     pub const DISPLAY_AS_CRON: &str = "displayAsCron";
     /// `[[start, end], …]` byte ranges of recognized slash tokens into the block's `text`.
-    /// Only meaningful when that text is displayed verbatim (never stamped alongside `displayText`).
     pub const SKILL_TOKEN_RANGES: &str = "skillTokenRanges";
     /// See [`xai_prompt_queue::COMBINED_DISPLAY_TEXTS_META`].
     pub const COMBINED_DISPLAY_TEXTS: &str = xai_prompt_queue::COMBINED_DISPLAY_TEXTS_META;
@@ -83,7 +71,6 @@ pub mod user_message_chunk_meta {
     /// Prompt index for rewind / attribution.
     pub const PROMPT_INDEX: &str = "promptIndex";
     /// When true, the chunk must not become a scrollback user prompt.
-    /// See [`xai_grok_shell::session::PromptOrigin::hide_user_echo_from_scrollback`].
     pub const HIDE_FROM_SCROLLBACK: &str = "hideFromScrollback";
     /// When true, the chunk is a persisted mid-turn interjection; replay renders its `displayText` as an interjection block.
     pub const INTERJECTION: &str = xai_grok_shell::session::storage::INTERJECTION_META_KEY;
@@ -92,7 +79,6 @@ pub mod user_message_chunk_meta {
 }
 
 /// Extract the numeric counter from an `eventId` (`"{sessionId}-{counter}"`).
-/// The counter is the part after the last `-` (session ids themselves contain `-`).
 pub fn event_id_counter(event_id: &str) -> Option<u64> {
     event_id
         .rsplit('-')

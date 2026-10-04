@@ -1,16 +1,11 @@
-//! Two-dimensional math layout box.
 
 use crate::buffers::unicode_display_width;
 
-/// Two-dimensional text box with an anchor row where horizontal flow attaches.
-/// Multi-row content (matrix-family environments) extends above/below the anchor row; subsequent output continues on the anchor row.
-/// This keeps a prefix, a matrix, and a suffix aligned:
 pub(super) struct MathBox {
     lines: Vec<String>,
     /// Row index that horizontal flow currently appends to.
     anchor: usize,
     /// First row belonging to the current visual line.
-    /// Rows before `floor` are completed lines from earlier `\\` breaks and must never be touched by box attachment.
     floor: usize,
     /// Flat mode (inline math): vertical layout is impossible, so row breaks render as `; ` and environments render single-row.
     pub(super) flat: bool,

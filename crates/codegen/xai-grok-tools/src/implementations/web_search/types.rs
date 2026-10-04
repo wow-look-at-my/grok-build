@@ -17,23 +17,16 @@ pub enum WebSearchConfig {
         extra_headers: IndexMap<String, String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         alpha_test_key: Option<String>,
-        /// Authoritative domain allowlist from `[toolset.web_search] allowed_domains`. When set, it governs the client-side
-        /// web_search tool and the model's own per-call `allowed_domains` is ignored (see `resolve_filters`), so a configured
-        /// policy cannot be bypassed. Mutually exclusive with `excluded_domains`.
+        /// Authoritative domain allowlist from `[toolset.web_search] allowed_domains`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         allowed_domains: Option<Vec<String>>,
-        /// Authoritative domain blocklist from `[toolset.web_search] excluded_domains`. Like `allowed_domains` it governs
-        /// outright: the model cannot un-block a domain by naming it in its own per-call `allowed_domains`, which is what makes
-        /// this a real block. Mutually exclusive with `allowed_domains`.
+        /// Authoritative domain blocklist from `[toolset.web_search] excluded_domains`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         excluded_domains: Option<Vec<String>>,
     },
-    /// Kagi's own search index instead of an LLM-synthesized answer.
-    ///
-    /// Kagi returns ranked, already-filtered results with snippets, so no
-    /// model call is made and no synthesis model has to be configured. Auth is
-    /// a Search API token (`Authorization: Bot <token>`), a different scheme and
-    /// credential from the Responses-API bearer the other arms use.
+    /// Kagi's own search index instead of an LLM-synthesized answer. Kagi
+    /// returns ranked, already-filtered results with snippets, so no model
+    /// call is made and no synthesis model has to be configured.
     Kagi {
         api_key: String,
         #[serde(default = "default_kagi_base_url")]

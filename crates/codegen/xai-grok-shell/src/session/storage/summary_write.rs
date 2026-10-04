@@ -1,13 +1,4 @@
 //! Concurrency-safe, field-correct writes to a session's `summary.json`.
-//!
-//! The same `summary.json` is mutated by several writers and, on reconnect, by more than one persistence actor.
-//! A whole-summary read-modify-write with no lock loses updates: a writer holding a stale read overwrites a concurrent writer's field on write-back.
-//! That silently reverted `last_active_at` and `num_messages`, and the active session sank in the `/resume` picker.
-//!
-//! [`SummaryPatch`] expresses *intent* (a partial update) rather than a whole-struct snapshot.
-//! [`apply_patch_locked`] applies it under an exclusive lock on a sidecar `summary.json.lock`.
-//! The lock file is never renamed, so the lock spans the entire read-modify-write.
-//! All writers funnel through it, so the read-modify-writes serialize across actors and processes.
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -21,8 +12,8 @@ use xai_grok_sampling_types::ReasoningEffort;
 use crate::session::persistence::{PersistedAgent, Summary};
 use crate::session::worktree::WorktreeIdentity;
 
-/// `Increment` is applied to the in-lock fresh read (never precomputed by the caller, which would re-open the race).
-/// `Set` is an absolute rewrite (compaction / rewind).
+/// `Increment` is applied to the in-lock fresh read (never precomputed by the
+/// caller, which would re-open the race).
 #[derive(Debug, Clone)]
 pub(crate) enum CounterOp {
     Increment(usize),
@@ -53,7 +44,6 @@ pub(crate) struct GitHeadPatch {
 }
 
 /// `next_trace_turn` is monotonic.
-/// `request_id` is applied only when this turn wins, so a stale lower-turn write cannot pair a high `next_trace_turn` with an older `request_id`.
 #[derive(Debug, Clone)]
 pub(crate) struct TraceTurnPatch {
     pub next_trace_turn: u64,
@@ -75,31 +65,19 @@ pub(crate) struct SummaryPatch {
     pub git_head: Option<GitHeadPatch>,
     pub collection_id: Option<String>,
     /// Set the session title unconditionally (last-writer-wins).
-    /// Used by the manual `/rename` (`/title`) path, which must always win.
-    /// Also marks the title manual (`Summary::title_is_manual`).
     pub generated_title: Option<String>,
     /// Set the session title only when the session has no title yet.
-    /// Used by automatic LLM title generation so it never overwrites a title the user set via `/rename`.
-    /// Ignored when `generated_title` is also set.
     pub generated_title_if_absent: Option<String>,
     /// Overwrite an existing *auto* title with a freshly regenerated one, but never a manual `/rename`.
-    /// Used by the early-session title refresh (turns 3 and 6).
-    /// Ignored when `generated_title` (manual) is also set.
     pub generated_title_regenerate: Option<String>,
     /// `/rename --auto`: clear the manual pin.
-    /// A successful clear blanks `generated_title` *and* `session_summary` so `display_title()` is empty and if-absent can adopt again.
-    /// A leftover pre-rename auto title would otherwise block regeneration.
     pub reset_title_to_auto: bool,
     pub cwd_switch_bookkeeping_generation: Option<u64>,
     /// Per-turn dashboard summary as `(text, prompt_id)`.
-    /// Outer `Some` applies (last-writer-wins); `Some(None)` clears it (conversation rewind removed the described work).
     pub last_turn_summary: Option<Option<(String, String)>>,
     /// Latest session recap preview.
-    /// Outer `Some` applies (last-writer-wins); `Some(None)` clears it (rewind removed the described turns).
-    /// Persisted so session lists can show a recap when available.
     pub last_recap: Option<Option<String>>,
     /// Stamp `session_kind` only when the summary has none yet.
-    /// Used by the session/new headless stamp; a kind already on disk (crash-recovered dir, concurrent writer) is never overwritten.
     pub session_kind_if_absent: Option<String>,
     /// The session's selected agent, applied as one unit (see [`Summary::set_agent`]).
     pub agent: Option<PersistedAgent>,
@@ -130,8 +108,8 @@ impl Summary {
             && generation > self.cwd_switch_bookkeeping_generation
         {
             self.cwd_switch_bookkeeping_generation = generation;
-            // An explicit chat counter op already owns the resulting count (append increments; history replacement sets)
-            // Without one, this patch repairs a line found on disk after an earlier summary failure
+            // An explicit chat counter op already owns the resulting count
+            // (append increments; history replacement sets) Without one
             if patch.chat_messages.is_none() {
                 self.num_chat_messages = self.num_chat_messages.saturating_add(1);
             }
@@ -179,13 +157,11 @@ impl Summary {
         }
         let mut absent_title_applied = false;
         if patch.reset_title_to_auto {
-            // Gate on a real pin (`manual_title_opt`), not a stale flag over a blank `generated_title`
-            // That would wipe a legitimate auto title living in `session_summary`
+            // Gate on a real pin (`manual_title_opt`), not a stale flag over a blank `generated_title` That would wipe a legitimate auto title living.
             let cleared_manual = self.manual_title_opt().is_some();
             if cleared_manual {
                 self.generated_title = None;
-                // Blank both fields so `display_title()` is empty and `set_generated_title_if_absent` can adopt again
-                // A leftover pre-rename auto title in `session_summary` would otherwise pin display forever
+                // Blank both fields so `display_title()` is empty and `set_generated_title_if_absent` can adopt again A leftover pre-rename auto title.
                 self.session_summary.clear();
             }
             self.title_is_manual = false;
@@ -223,8 +199,8 @@ impl Summary {
         }
     }
 
-    /// Replace an auto title with a refreshed one, updating the mirrored `session_summary` too so older clients that only read it see the new title.
-    /// Only called for non-manual titles, so no manual `/rename` is overwritten.
+    /// Replace an auto title with a refreshed one, updating the mirrored `session_summary` too so older clients that only
+    /// read it see the new title.
     fn set_title_overwrite(&mut self, title: &str) {
         self.generated_title = Some(title.to_owned());
         self.session_summary = title.to_owned();
@@ -263,15 +239,13 @@ pub(crate) fn repair_worktree_identity(
         if summary.session_kind.is_none() {
             summary.stamp_worktree_identity(identity);
         } else if summary.worktree_label.is_none() {
-            // Keep the existing kind: a fork on a worktree path is still a fork
-            // Only the display label was dropped when merge stopped calling lookup_worktree_label
+            // Keep the existing kind: a fork on a worktree path is still a fork Only the display label
             summary.worktree_label = Some(identity.label.clone());
         } else {
             return Ok(WorktreeIdentityRepair::AlreadyKinded(summary));
         }
-        // Deliberately not apply_patch: the stamp is metadata repair, not activity, so updated_at stays put.
-        // Bumping it would reshuffle listings (it is the sort key when last_active_at is absent).
-        // Restore the pre-write mtime so the candidate window still matches the unrepaired file A restore failure must not fail the heal: the stamp is already on disk and the caller would otherwise keep an untagged summary.
+        // Deliberately not apply_patch: the stamp is metadata repair, not
+        // activity, so updated_at stays put.
         let previous_mtime = std::fs::metadata(summary_path)
             .ok()
             .and_then(|meta| meta.modified().ok());

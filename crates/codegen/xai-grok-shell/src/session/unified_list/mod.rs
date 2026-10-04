@@ -39,8 +39,8 @@ pub(crate) fn facet_registry() -> &'static FacetRegistry {
 pub(crate) fn conversations_lane_enabled() -> bool {
     false
 }
-/// Env lane (desktop `GROK_SESSION_LIST_CONVERSATIONS`) OR process-wide `--chat` (`GROK_CHAT_MODE`); hard-off in release builds.
-/// The single predicate `MvpAgent::conversations_client()` keys on.
+/// Env lane (desktop `GROK_SESSION_LIST_CONVERSATIONS`) OR process-wide
+/// `--chat` (`GROK_CHAT_MODE`); hard-off in release builds.
 pub fn conversations_lane_active() -> bool {
     conversations_lane_enabled() || crate::agent::chat_modes::process_chat_mode_enabled()
 }
@@ -96,8 +96,6 @@ pub struct ListReq {
     #[serde(default)]
     pub cursor: Option<String>,
     /// Which directories the listing draws from. The wire carries the original `allowRelax` boolean.
-    /// `Only` is reachable only in code (ACP `session/list`), so "exact" and "relax" cannot be requested together.
-    /// A relaxed response sets `_meta["x.ai/listScope"]`, re-evaluated per page.
     #[serde(
         default,
         rename = "allowRelax",
@@ -105,14 +103,12 @@ pub struct ListReq {
     )]
     pub cwd_scope: CwdScope,
     /// `session_kind=headless` policy: `"exclude"` | `"only"` | `"include"`.
-    /// Omission preserves the legacy inclusive behavior; unknown explicit values fail closed to exclude.
     #[serde(default)]
     pub headless: Option<String>,
     #[serde(default, rename = "_meta")]
     pub meta: Option<serde_json::Value>,
 }
 /// Directory scope the returned sessions were drawn from.
-/// Wire form is the `as_str` value (`x.ai/listScope`), so no serde derive is needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum ListScope {
@@ -180,8 +176,6 @@ fn value_list(v: &serde_json::Value) -> Vec<serde_json::Value> {
     }
 }
 /// Rewrite `req` so the `kind` facet filter is exactly `["chat"]`.
-/// Used when process chat mode is on and the client omitted a recognized `kind` facet.
-/// Welcome history sends an explicit `kind` (`chat` / `build`) that must not be rewritten.
 pub(crate) fn force_kind_chat(req: &mut ListReq) {
     force_kind(req, SessionKind::Chat);
 }
@@ -414,8 +408,8 @@ fn relax_eligible(gate: RelaxGate) -> bool {
 fn lane_has_no_messages(rows: &[UnifiedRow]) -> bool {
     rows.iter().all(|r| r.legacy.num_messages == 0)
 }
-/// Policy emptied this cwd's local lane (`retain_session_lanes` dropped every remaining row).
-/// A partial drop that still leaves interactive husks must not block the stranded-cwd widen.
+/// Policy emptied this cwd's local lane (`retain_session_lanes` dropped every
+/// remaining row).
 fn policy_emptied_cwd_lane(dropped: bool, remaining: &[UnifiedRow]) -> bool {
     dropped && remaining.is_empty()
 }
@@ -1281,8 +1275,7 @@ mod tests {
                     )
                     .expect("summary");
                     summary.num_messages = 0;
-                    // Named empty: merge keeps it. An unnamed husk is the
-                    // optimistic-home shape and is dropped from the list.
+                    // Named empty: merge keeps it.
                     summary.session_summary = "husk".into();
                     summary
                 }],

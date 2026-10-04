@@ -1,40 +1,16 @@
 //! Unsandboxed `gh` host worker for `--sandbox` (pathbox) sessions.
-//!
-//! A jail re-execs the whole binary, so a `gh` spawned from the jailed process
-//! reaches neither the host credentials nor the network. The worker is started
-//! on the host moments before the re-exec and handed in as an open socketpair
-//! FD that survives `exec`. It runs `gh` and nothing else, and only the
-//! read-only commands in [`ALLOWED_COMMANDS`].
-//!
-//! Protocol (one `UnixStream`, newline-delimited, request/response):
-//!   request  : `gh-status <HEAD_BRANCH>\n`   - the CI dot's fixed query: the
-//!              raw `gh run list --json` array
-//!   request  : `gh-pr <BRANCH>\n`            - the shell's `x.ai/pr/status`
-//!              fixed query: one JSON object carrying the branch's pull
-//!              request (`gh pr view`) and its check runs (`gh pr checks`)
-//!   request  : `gh <JSON array of argv>\n`   - an allowlisted `gh` run
-//!   response : one line, or `.` when the request produced nothing usable
-//!              (unknown shape, bad token, `gh` failed, no such PR, or an
-//!              oversized reply).
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
-/// Env var set on the re-executed jailed binary naming the inherited fd of
-/// the host worker's stream. Its presence (>= 0) means "talk to the host
-/// worker rather than spawning `gh`". Survives `exec` because the fd itself
-/// is open across it.
+/// Env var set on the re-executed jailed binary naming the inherited fd of the host worker's stream.
 pub const CI_HOST_FD_ENV: &str = "GROK_CI_HOST_FD";
-/// Env var set on the host worker itself so a re-entry of `main` knows it is
-/// the worker and must not build another jail / worker. Never reaches the
-/// jailed process.
+/// Env var set on the host worker itself so a re-entry of `main` knows it is the worker.
 pub const CI_HOST_MARKER_ENV: &str = "GROK_CI_HOST_SUBPROCESS";
 
-/// The max size of a single worker response we accept. A run list is a few KB,
-/// but `gh run view --log-failed` is a whole job log, so this is what bounds
-/// how much one request may push into the jail.
-const MAX_RESPONSE_BYTES: usize = 1 << 20; // 1 MiB
+/// The max size of a single worker response we accept.
+const MAX_RESPONSE_BYTES: usize = 1 << 20;
 
 /// The most arguments one `gh` request may carry.
 const MAX_REQUEST_ARGS: usize = 32;
@@ -42,12 +18,8 @@ const MAX_REQUEST_ARGS: usize = 32;
 const MAX_ARG_BYTES: usize = 512;
 
 /// One allowlisted `gh` run, as the worker executed it.
-///
-/// Serialized as a single JSON line, so a log with embedded newlines rides the
-/// newline-delimited protocol without escaping games of our own.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GhHostResponse {
-    /// The process exit code, or -1 when `gh` was killed by a signal.
     pub code: i32,
     pub stdout: String,
     pub stderr: String,
@@ -77,9 +49,7 @@ const ALLOWED_COMMANDS: &[(&str, &str)] = &[
     ("auth", "status"),
 ];
 
-/// `gh api` takes no subcommand, so it is admitted on its own. What keeps it a
-/// read is [`ALLOWED_FLAGS`], which refuses every flag that carries a method
-/// or a body.
+/// `gh api` takes no subcommand, so it is admitted on its own.
 const ALLOWED_BARE_COMMANDS: &[&str] = &["api"];
 
 /// Every flag a request may carry. An allowlist rather than a deny-list
@@ -154,54 +124,24 @@ pub fn ci_host_fd() -> Option<i32> {
 
 /// Which fd a session's CI queries ride: the one this process started and
 /// published, else the one a jail handed in by name.
-///
-/// The published fd wins because a process that started its own worker is not
-/// going to be handed another, and a stale `CI_HOST_FD_ENV` (inherited by a
-/// child that did not get the fd itself) must never override the live one.
 fn resolve_fd(published: Option<i32>, from_env: Option<&str>) -> Option<i32> {
     published.or_else(|| from_env.and_then(|raw| raw.parse().ok()))
 }
 
-/// The worker fd a session started in THIS process, as
-/// [`start_ci_host_for_session`] publishes it.
-///
-/// The profile sandbox confines the session in place rather than re-execing it,
-/// so nothing carries the fd number across except this. It is deliberately not
-/// an env var: an `exec` that does not carry the fd would leave the number
-/// naming whatever descriptor the child opened next, and every child of the
-/// session would inherit the connection.
+/// The worker fd a session started in THIS process, as [`start_ci_host_for_session`] publishes it.
 static SESSION_CI_HOST_FD: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
 
 /// Start the host worker for a session that is confined in place, before the
-/// confinement is installed, and publish its fd to this process.
-///
-/// A confining profile sandbox (`--sandbox=workspace`, `read-only`, `strict`, a
-/// custom profile) is applied to the running session by `sandbox_init`. The
-/// macOS profile it installs denies the keychain mach services, so a `gh` that
-/// runs under it finds its account but no token and answers `401`; the same
-/// `gh` outside the confinement works. Forking the worker first is what puts an
-/// unconfined `gh` behind the session's queries, which is what the pathbox jail
-/// does with [`spawn_ci_host`].
-///
-/// `survives_exec` says whether an `exec` follows the hand-off (the Linux
-/// bwrap re-exec for a deny-carrying profile). Where one does, the fd is made
-/// exec-surviving and its NUMBER is exported as [`CI_HOST_FD_ENV`] for the
-/// re-executed image. Where none does (macOS, and Linux profiles that need no
-/// bwrap), the fd stays close-on-exec and the number moves through
-/// [`SESSION_CI_HOST_FD`] alone, so no child of the session inherits it.
-///
-/// Returns the fd, or `None` when a worker is not this process's to start: this
-/// process IS the worker, one is already published, or the process is already
-/// inside a jail that started its own.
+/// confinement is installed, and publish its fd to this process. A confining
+/// profile sandbox (`--sandbox=workspace`, `read-only`, `strict`, a custom
+/// profile) is applied to the running session by `sandbox_init`.
 pub fn start_ci_host_for_session(repo_root: &Path, survives_exec: bool) -> Option<i32> {
     if is_ci_host_subprocess() || ci_host_fd().is_some() || crate::is_jailed() {
         return None;
     }
     let fd = spawn_ci_host_with(repo_root, survives_exec)?;
     if survives_exec {
-        // The image that reads this is the session the exec replaces us with,
-        // and it is the fd's owner from then on.
-        // SAFETY: this runs on the startup path, before the session exists.
+        // The image that reads this is the session the exec replaces us with, and it is the fd's owner from then on.
         unsafe { std::env::set_var(CI_HOST_FD_ENV, fd.to_string()) };
     }
     let _ = SESSION_CI_HOST_FD.set(fd);
@@ -209,17 +149,6 @@ pub fn start_ci_host_for_session(repo_root: &Path, survives_exec: bool) -> Optio
 }
 
 /// Host-side spawn, called from `main` immediately before the jail re-exec.
-///
-/// Returns the fd the jailed process should inherit to reach the worker, or
-/// `None` when no worker could be started (the jailed pager then falls back
-/// to its normal in-jail `gh`, which degrades to "off" under the jail — the
-/// dot simply does not show, exactly as if `gh` were missing).
-///
-/// `repo_root` is where the worker runs `gh` (so `gh` discovers the remote
-/// from the git repo there), and what the worker uses as its cwd. Callers
-/// must only call this when a jail is about to be built; it is a no-op for
-/// the (already) jailed worker process re-entry (guarded by
-/// [`is_ci_host_subprocess`]).
 pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
     spawn_ci_host_with(repo_root, true)
 }
@@ -235,7 +164,7 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
     let exe = std::env::current_exe().ok()?;
     let (ours, theirs) = UnixStream::pair().ok()?;
     let our_fd: RawFd = ours.as_raw_fd();
-    // The pair is created close-on-exec. A jail is entered by exec, so without this the fd is gone before the jailed pager reads the env var that names it.
+    // The pair is created close-on-exec.
     if survives_exec {
         inherit_across_exec(our_fd)?;
     }
@@ -258,16 +187,12 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
         }
     }
 
-    // The worker is the process that outlives the jail by design: it is started on
-    // the host moments before the re-exec, it answers for the whole session, and it
-    // is torn down by `close_host_connection` (or by the worker's own EOF), not by a
-    // scope this binary could enrol it in -- the jailed child has no scope to give
-    // it. `xai_tty_utils` is not a dependency of this crate.
+    // The worker is the process that outlives the jail by design: it is
+    // started on the host moments before the re-exec.
     #[allow(clippy::disallowed_methods)]
     match cmd.spawn() {
         Ok(_) => {
-            // Leak `ours` so the fd stays open across the jail `exec`; the
-            // jailed process rebuilt from `GROK_CI_HOST_FD` owns it onward.
+            // Leak `ours` so the fd stays open across the jail `exec`.
             std::mem::forget(ours);
             Some(our_fd)
         }
@@ -282,12 +207,8 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
     }
 }
 
-/// Clear `FD_CLOEXEC` on `fd` so it stays open in the process this one execs into.
-///
-/// Public because it is half of the jail boundary's contract and the other half
-/// is a `Command` the tests drive: a socketpair is created close-on-exec, the
-/// jail is entered by exec, and a worker connection that does not survive that
-/// exec leaves the jailed pager reading a dead fd off `GROK_CI_HOST_FD`.
+/// Clear `FD_CLOEXEC` on `fd` so it stays open in the process this execs
+/// into.
 #[cfg(unix)]
 pub fn inherit_across_exec(fd: std::os::unix::io::RawFd) -> Option<()> {
     // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
@@ -299,35 +220,23 @@ pub fn inherit_across_exec(fd: std::os::unix::io::RawFd) -> Option<()> {
     (rc >= 0).then_some(())
 }
 
-/// Take the worker back from an exec that did not happen.
-///
-/// The hand-off clears `FD_CLOEXEC` and names the fd in the environment for the
-/// image an exec is about to produce. Where that exec fails and this process
-/// carries on instead, both have to be undone: the session is confined in place
-/// after all, and every child it spawns would otherwise inherit a live socket to
-/// an UNCONFINED `gh`, with the environment naming the number to read it on.
-///
-/// The session itself keeps the worker. It finds the fd through
-/// [`SESSION_CI_HOST_FD`], which no child of it can read.
+/// Take the worker back from an exec that did not happen. The hand-off clears
+/// `FD_CLOEXEC` and names the fd in the environment for the image an exec is
+/// about to produce.
 #[cfg(unix)]
 pub fn reclaim_from_failed_exec(fd: std::os::unix::io::RawFd) {
     // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     if flags >= 0 {
-        // SAFETY: see above.
+        // SAFETY:.
         unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
     }
     // SAFETY: this runs on the startup path, before the session exists.
     unsafe { std::env::remove_var(CI_HOST_FD_ENV) };
 }
 
-/// `pre_exec` helper: point stdin (0) and stdout (1) at the given fd.
-///
-/// Runs in the child just after fork, before exec, so it is async-signal-safe
-/// (only `dup2` here).
 #[cfg(unix)]
 fn dup2_to_stdin_stdout(fd: std::os::unix::io::RawFd) {
-    // SAFETY: `fd` is a valid open fd; dup2 of it to 0 and 1 is safe.
     unsafe {
         libc::dup2(fd, 0);
         libc::dup2(fd, 1);
@@ -336,20 +245,11 @@ fn dup2_to_stdin_stdout(fd: std::os::unix::io::RawFd) {
 
 /// Run the host CI worker: serve the fixed `gh` status query on stdin/stdout
 /// (both the inherited socket fd) until EOF, then return.
-///
-/// This is the *only* code the unsandboxed worker runs. It has no access to
-/// the jailed process's session, tools, or file system beyond `repo_root`
-/// (its cwd); the sole external action is the fixed `gh` invocation.
 pub fn run_ci_host_worker() {
     serve(std::io::stdin(), std::io::stdout());
 }
 
 /// Serve the worker protocol on one socket instead of stdin/stdout.
-///
-/// Production hands the worker its socket as fd 0 and fd 1, so it reads and
-/// writes the standard streams. A caller whose stdout carries something else
-/// (a test harness prints its own progress there, and every such line reaches
-/// the client as a fake answer) passes the socket here instead.
 #[cfg(unix)]
 pub fn run_ci_host_worker_on(stream: UnixStream) {
     let Ok(write_half) = stream.try_clone() else {
@@ -399,17 +299,13 @@ pub fn handle_request<W: Write>(line: &str, out: &mut W) {
         write_one_line(out, payload);
         return;
     }
-    // Unknown request: answer nothing usable so the jailed side
-    // degrades to "off" rather than hanging or trusting us.
+    // Unknown request: answer nothing usable so the jailed side degrades to "off" rather than hanging or trusting us.
     write_one_line(out, vec![b'.']);
 }
 
-/// Write one response as exactly one line.
-///
-/// The trim is what holds the framing. `gh run list --json` ends its stdout
-/// with a newline of its own, so appending one wrote a blank line after every
-/// answer. The caller then read that blank line as the NEXT answer, and every
-/// response after the first arrived one request behind.
+/// Write one response as exactly one line. The trim is what holds the
+/// framing. `gh run list --json` ends its stdout with a newline of its own,
+/// so appending one wrote a blank line after every answer.
 fn write_one_line<W: Write>(out: &mut W, mut payload: Vec<u8>) {
     while matches!(payload.last(), Some(b'\n' | b'\r')) {
         payload.pop();
@@ -443,8 +339,7 @@ fn response_from_output(output: std::process::Output) -> GhHostResponse {
     }
 }
 
-/// The last `max` bytes of `bytes`, decoded lossily. An oversized body keeps
-/// its tail: a failing job log ends where the error is, and a head-clipped log
+/// The last `max` bytes of `bytes`, decoded lossily. An oversized body keeps its tail: a failing job log ends where the error is, and a head-clipped log
 /// reports the setup steps instead.
 fn tail_lossy(bytes: &[u8], max: usize) -> String {
     let start = bytes.len().saturating_sub(max);
@@ -453,7 +348,7 @@ fn tail_lossy(bytes: &[u8], max: usize) -> String {
 
 /// Whether an argv is a read-only `gh` invocation this worker will run.
 ///
-/// Three gates, all of which must hold: the shape is bounded, every flag is in
+/// Gates, all of which must hold: the shape is bounded, every flag is in
 /// [`ALLOWED_FLAGS`], and the leading command is in [`ALLOWED_COMMANDS`] or
 /// [`ALLOWED_BARE_COMMANDS`].
 pub fn gh_args_allowed(args: &[String]) -> bool {
@@ -564,9 +459,7 @@ fn query_pr_checks(branch: &str) -> Option<Vec<u8>> {
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
-    // `gh pr checks` reports its verdict in the exit code (1: a check failed,
-    // 8: a check is pending) and still prints the full list. Only a `gh` that
-    // printed no array is an empty list.
+    // Only a `gh` that printed no array is an empty list.
     let checks = run_gh_safely(
         &["pr", "checks", branch, "--json", "name,state,conclusion"],
         &[0, 1, 8],
@@ -592,9 +485,7 @@ fn query_pr_checks(branch: &str) -> Option<Vec<u8>> {
 }
 
 /// Run a fixed-shape `gh` argument vector in the worker's cwd and return the
-/// raw stdout bytes when the exit code is one of `ok_codes`. Each query shape
-/// fixes its argv in this module; only a validated branch token comes from a
-/// request.
+/// raw stdout bytes when the exit code is one of `ok_codes`.
 fn run_gh_safely(args: &[&str], ok_codes: &[i32]) -> Option<Vec<u8>> {
     let output = spawn_gh(args.iter().copied())?;
     let code = output.status.code()?;
@@ -605,8 +496,7 @@ fn run_gh_safely(args: &[&str], ok_codes: &[i32]) -> Option<Vec<u8>> {
 }
 
 /// Keep a raw `gh` stdout body only when it is within the response cap and
-/// not empty, so a misbehaving `gh` cannot grow the jail's memory without
-/// bound or hand back an unusable blank line.
+/// not empty, so a misbehaving `gh` cannot.
 fn bounded_json(stdout: Vec<u8>) -> Option<Vec<u8>> {
     (stdout.len() <= MAX_RESPONSE_BYTES && !stdout.is_empty()).then_some(stdout)
 }
@@ -622,8 +512,7 @@ where
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    // `gh` colourises even piped `--json` output under CLICOLOR_FORCE or
-    // GH_FORCE_TTY, and forcing beats NO_COLOR in gh's precedence.
+    // `gh` colourises even piped `--json` output under CLICOLOR_FORCE or GH_FORCE_TTY.
     cmd.env("NO_COLOR", "1");
     cmd.env("CLICOLOR_FORCE", "0");
     cmd.env_remove("GH_FORCE_TTY");
@@ -631,8 +520,7 @@ where
 }
 
 /// A request may only carry a bounded, git-safe branch token — never a bare
-/// line a caller could turn into an argv injection. `gh` validates the branch
-/// server-side too, but the shape guard belongs here.
+/// line a caller could turn into an argv injection.
 fn valid_branch_token(branch: &str) -> bool {
     !branch.is_empty()
         && branch.len() <= 256
@@ -641,18 +529,7 @@ fn valid_branch_token(branch: &str) -> bool {
             .all(|b| b.is_ascii_graphic() && b != b'\n' && b != b'\r')
 }
 
-/// The inherited host-worker stream, opened once per fd and shared by every
-/// caller on it.
-///
-/// One connection, one mutex: the CI dot polls off a blocking thread while the
-/// agent's `ci` tool runs its own queries, and this protocol is one request
-/// then one response. Two callers writing at once interleave two requests into
-/// one socket and read each other's answers. Keyed by fd so a distinct
-/// connection (a session restart, or a test peer) gets its own lock.
-/// A reader is held with the connection rather than built per call. A
-/// `BufReader` reads ahead, so one built per call takes whatever followed the
-/// newline into a buffer it then drops, and the next call reads a truncated
-/// answer.
+/// The inherited host-worker stream, opened once per fd and shared by every caller on it.
 #[cfg(unix)]
 type HostStream = std::sync::Arc<std::sync::Mutex<BufReader<UnixStream>>>;
 
@@ -665,14 +542,11 @@ static HOST_STREAMS: std::sync::LazyLock<
 fn host_stream(fd: i32) -> Option<HostStream> {
     use std::os::unix::io::FromRawFd as _;
     use std::sync::{Arc, Mutex};
-    // A poisoned map answers `None`, which is this module's documented degradation
-    // path: the dot reads off rather than panicking inside the jailed session.
-    // `parking_lot::Mutex` is not a dependency here.
+    // A poisoned map answers `None`, which is this module's documented degradation path.
     #[allow(clippy::disallowed_methods)]
     let mut map = HOST_STREAMS.lock().ok()?;
     // SAFETY: `fd` names a real socket opened by `spawn_ci_host` on the host
-    // and inherited into this (jailed) process; we take ownership of that fd
-    // exactly once, here, and keep the stream alive for the whole session.
+    // and inherited into this (jailed) process.
     let stream = map.entry(fd).or_insert_with(|| {
         Arc::new(Mutex::new(BufReader::new(unsafe {
             UnixStream::from_raw_fd(fd)
@@ -687,8 +561,7 @@ fn host_stream(fd: i32) -> Option<HostStream> {
 #[cfg(unix)]
 fn exchange(fd: i32, request: &str) -> Option<Vec<u8>> {
     let stream = host_stream(fd)?;
-    // As above: a poisoned stream is one more transport failure, and every caller
-    // of `exchange` already degrades on `None`.
+    // As above: a poisoned stream is one more transport failure.
     #[allow(clippy::disallowed_methods)]
     let mut guard = stream.lock().ok()?;
     let mut line = String::with_capacity(request.len() + 1);
@@ -697,14 +570,11 @@ fn exchange(fd: i32, request: &str) -> Option<Vec<u8>> {
     guard.get_mut().write_all(line.as_bytes()).ok()?;
     guard.get_mut().flush().ok()?;
 
-    // One worker response is one line. A blank line is skipped rather than
-    // read as an answer: reading one would put every later answer a request
-    // behind, which is worse than the stray line it came from.
+    // One worker response is one line.
     let mut response = Vec::new();
     loop {
         response.clear();
         match guard.read_until(b'\n', &mut response) {
-            // 0 is a true EOF: the worker exited without answering.
             Ok(0) | Err(_) => return None,
             Ok(_) => {}
         }
@@ -719,13 +589,11 @@ fn exchange(fd: i32, request: &str) -> Option<Vec<u8>> {
 }
 
 /// Drop this process's handle on a host connection, closing our end of the
-/// socket. The worker's read loop then hits EOF and exits. A session holds its
-/// one connection for its whole life, so this is for a caller that owns the
-/// worker's lifetime, such as a test.
+/// socket. The worker's read loop then hits EOF and exits.
 #[cfg(unix)]
 pub fn close_host_connection(fd: i32) {
-    // Best-effort by contract: a poisoned map means the entry is already unreachable
-    // to any caller, and this only has to stop our own end from reading live.
+    // Best-effort by contract: a poisoned map means the entry is already
+    // unreachable to any caller.
     #[allow(clippy::disallowed_methods)]
     if let Ok(mut map) = HOST_STREAMS.lock() {
         map.remove(&fd);
@@ -733,17 +601,14 @@ pub fn close_host_connection(fd: i32) {
 }
 
 /// Jailed-side read: query the host worker over the inherited connection for
-/// `branch`. Returns the raw single-line JSON array, or `None` so the caller
-/// degrades to the "off" state (worker missing, failed, or unusable output).
+/// `branch`.
 #[cfg(unix)]
 pub fn query_ci_host(fd: i32, branch: &str) -> Option<Vec<u8>> {
     query_ci_host_shape(fd, "gh-status", branch)
 }
 
 /// Jailed-side read for the shell's `x.ai/pr/status`: ask the host worker for
-/// `branch`'s pull-request state and check runs (`gh-pr`). Returns the raw
-/// single-line JSON object, or `None` on the nothing-usable sentinel. It rides
-/// the same connection and lock as every other query on `fd`.
+/// `branch`'s pull-request state and check runs (`gh-pr`).
 #[cfg(unix)]
 pub fn query_ci_host_pr(fd: i32, branch: &str) -> Option<Vec<u8>> {
     query_ci_host_shape(fd, "gh-pr", branch)
@@ -794,8 +659,7 @@ pub fn run_gh(cwd: &Path, args: &[&str]) -> Option<GhHostResponse> {
 mod tests {
     use super::*;
 
-    /// A tiny `Write` that just captures bytes, so the worker handler is
-    /// tested without touching a real socket or `gh`.
+    /// A tiny `Write` that captures bytes, so the worker handler is tested without touching a real socket or `gh`.
     struct Sink(Vec<u8>);
     impl Write for Sink {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -820,8 +684,7 @@ mod tests {
     impl EnvGuard {
         fn set(key: &'static str, val: &str) -> Self {
             let prev = std::env::var_os(key);
-            // SAFETY: every test that mutates these vars is serialized on
-            // `ci_host_env`, so no other thread is reading the environment.
+            // SAFETY: every test that mutates these vars is serialized on `ci_host_env`.
             unsafe { std::env::set_var(key, val) };
             Self { key, prev }
         }
@@ -1033,7 +896,7 @@ mod tests {
 
     #[test]
     fn allowlist_refuses_every_write() {
-        // The worker is the one thing between a jailed session and a host `gh`
+        // The worker is the thing between a jailed session and a host `gh`
         // that can cancel a run or merge a pull request.
         for command in [
             vec!["run", "rerun", "12345"],
@@ -1059,8 +922,7 @@ mod tests {
 
     #[test]
     fn allowlist_keeps_gh_api_a_read() {
-        // `gh api` defaults to GET. The flags that change that are the reason
-        // the flag check is an allowlist and not a deny-list.
+        // `gh api` defaults to GET.
         assert!(gh_args_allowed(&args(&["api", "repos/o/r"])));
         for command in [
             vec!["api", "repos/o/r", "-X", "DELETE"],
@@ -1098,8 +960,7 @@ mod tests {
 
     #[test]
     fn worker_refuses_a_gh_request_the_allowlist_rejects() {
-        // The refusal happens on the worker, so a jailed session that wrote
-        // the request line by hand gets the same answer.
+        // The refusal happens on the worker.
         assert_eq!(answer(r#"gh ["run","cancel","1"]"#), b".\n");
         assert_eq!(answer(r#"gh ["pr","merge","42"]"#), b".\n");
         // Malformed JSON is a refusal too, never a panic.
@@ -1109,15 +970,11 @@ mod tests {
 
     #[test]
     fn a_payload_that_already_ends_in_a_newline_still_writes_one_line() {
-        // `gh run list --json` ends its stdout with a newline. Appending a
-        // second one wrote a blank line after the answer, and the caller read
-        // that blank line as the NEXT answer — so every response after the
-        // first arrived one request behind.
+        // `gh run list --json` ends its stdout with a newline.
         let mut sink = Sink(Vec::new());
         write_one_line(&mut sink, b"[{\"status\":\"completed\"}]\n".to_vec());
         assert_eq!(sink.0, b"[{\"status\":\"completed\"}]\n");
-        // A payload that trims away to nothing is the sentinel, never a blank
-        // line that would desynchronise the stream the same way.
+        // A payload that trims away to nothing is the sentinel.
         let mut blank = Sink(Vec::new());
         write_one_line(&mut blank, b"\n\n".to_vec());
         assert_eq!(blank.0, b".\n");
@@ -1128,8 +985,6 @@ mod tests {
         // The reader skips a blank line instead of reporting it as an answer,
         // so one stray newline on the wire cannot put every later caller a
         // request behind.
-        // The blank line rides the same answer, because a worker only writes
-        // after a request. That is how the real stray one reached the wire.
         let fd = peer(vec![
             "\n{\"code\":0,\"stdout\":\"first\",\"stderr\":\"\",\"truncated\":false}",
             r#"{"code":0,"stdout":"second","stderr":"","truncated":false}"#,
@@ -1149,13 +1004,8 @@ mod tests {
         assert_eq!(tail_lossy(b"short", 100), "short");
     }
 
-    /// Drive the jailed-side transport against an in-process peer speaking the
-    /// real worker protocol: one request line in, one answer line out.
-    ///
-    /// The socket is leaked so its fd stays open and unique for this process:
-    /// the transport's map keys on the fd NUMBER, and a reused number would
-    /// serve a later test the stale stream. Production never reuses a
-    /// session's single worker fd.
+    /// Drive the jailed-side transport against an in-process peer speaking
+    /// the real worker protocol.
     fn peer(answers: Vec<&'static str>) -> i32 {
         peer_expecting("", answers)
     }
@@ -1217,9 +1067,7 @@ mod tests {
 
     #[test]
     fn query_ci_host_pr_dot_sentinel_is_none() {
-        // A worker with no usable PR/checks answer (no PR for the branch, `gh`
-        // missing, etc.) sends `.`; the reader must surface nothing, never a
-        // half-parsed value.
+        // A worker with no usable PR/checks answer (no PR for the branch, `gh` missing, etc.) sends `.`; the reader must surface nothing.
         let fd = peer_expecting("gh-pr ", vec!["."]);
         assert_eq!(query_ci_host_pr(fd, "master"), None);
     }
@@ -1282,9 +1130,7 @@ mod tests {
 
     #[test]
     fn concurrent_callers_never_read_each_others_answers() {
-        // The dot polls off a blocking thread while the tool runs its own
-        // queries. Without the per-connection lock the two requests interleave
-        // into one socket and each reads the other's answer.
+        // The dot polls off a blocking thread while the tool runs its own queries.
         use std::os::unix::io::AsRawFd;
         let (ours, theirs) = UnixStream::pair().expect("pair");
         let fd = ours.as_raw_fd();

@@ -52,8 +52,7 @@ pub struct PtySession {
     pid: Option<u32>,
     /// Grid generation counter, bumped by the feeder after each `term.feed()`.
     generation_rx: watch::Receiver<u64>,
-    /// Weak so the feeder's exit still drops the sender, signalling "ended" to waiters;
-    /// lets `resize` bump the generation too (a resize changes the grid without output).
+    /// Weak so the feeder's exit still drops the sender, signalling "ended" to waiters.
     generation_tx: Weak<watch::Sender<u64>>,
     /// Last [`RAW_TAIL_CAP`] bytes of raw PTY output for wait-timeout diagnostics.
     raw_tail: Arc<std::sync::Mutex<VecDeque<u8>>>,
@@ -82,11 +81,10 @@ impl PtySession {
         // Channel for PTY reader -> terminal feeder.
         let (pty_read_tx, mut pty_read_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-        // Broadcast channel for WebSocket streaming (capacity: 256 chunks).
+        // Broadcast channel for WebSocket streaming (capacity: chunks).
         let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
 
         // Grid-generation watch for event-driven waits (watch over Notify: check-then-wait is lost-wakeup-free).
-        // The feeder holds the only strong Arc so its exit still drops the sender ("ended" signal).
         let (generation_tx, generation_rx) = watch::channel::<u64>(0);
         let generation_tx = Arc::new(generation_tx);
         let generation_tx_weak = Arc::downgrade(&generation_tx);
@@ -157,8 +155,7 @@ impl PtySession {
         let raw_tail_feeder = raw_tail.clone();
         tokio::spawn(async move {
             while let Some(bytes) = pty_read_rx.recv().await {
-                // Broadcast raw PTY output to all WebSocket subscribers.
-                // Ignore errors (no active subscribers is fine).
+                // Broadcast raw PTY output to all WebSocket subscribers. Ignore errors (no active subscribers is fine).
                 let _ = output_tx_feeder.send(bytes.clone());
 
                 push_raw_tail(&raw_tail_feeder, &bytes);
@@ -274,8 +271,8 @@ impl PtySession {
         // PTY first (fail-fast); the held terminal lock keeps the SIGWINCH redraw out of a stale grid.
         self.master.resize(cols, rows)?;
         term.resize(cols, rows);
-        // Bump after the grid resize (matching the feeder's post-feed ordering): reflow/clipping
-        // changes screen text, so in-flight waits must re-check — and StableMs must restart.
+        // Bump after the grid resize (matching the feeder's post-feed
+        // ordering): reflow/clipping changes screen text.
         if let Some(generation_tx) = self.generation_tx.upgrade() {
             generation_tx.send_modify(|g| *g += 1);
         }
@@ -566,8 +563,8 @@ pub(crate) mod tests {
 
         let outcome = wait.await.unwrap().unwrap();
         assert!(outcome.matched, "screen never stabilized: {outcome:?}");
-        // A full window must elapse after the resize; without the restart the wait
-        // matches off the original window, well under 800ms after the resize.
+        // A full window must elapse after the resize; without the restart the
+        // wait matches off the window, well under 800ms after the resize.
         assert!(
             resized_at.elapsed() >= Duration::from_millis(800),
             "stability window did not restart on resize (completed {:?} after it)",

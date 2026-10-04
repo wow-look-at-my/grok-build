@@ -1,5 +1,4 @@
-//! Coerce a proven string, object, or array mismatch in MCP arguments.
-//! The original call stays unchanged. An unsafe mismatch is not partially applied.
+//! Coerce a proven string, object, or array mismatch in MCP arguments. The call stays unchanged.
 use crate::session::mcp_servers::MCP_TOOL_NAME_DELIMITER;
 use crate::session::tool_index::ToolMetadata;
 use serde::de::{DeserializeSeed, Deserializer, Error, MapAccess, SeqAccess, Visitor};

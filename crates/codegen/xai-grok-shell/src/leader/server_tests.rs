@@ -4,7 +4,6 @@ use super::*;
 use tempfile::TempDir;
 
 /// Parse a raw payload for the parse-once helper APIs.
-/// Panics on invalid JSON: the routing loop parses once up front, so non-JSON payloads never reach the helpers (they forward or drop verbatim).
 fn pv(payload: &str) -> serde_json::Value {
     serde_json::from_str(payload).expect("test payload must be valid JSON")
 }
@@ -322,10 +321,8 @@ async fn relay_demand_signals_only_on_headless_registration() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // A Stdio (interactive) client registers: demand must stay false.
-    // Hold the connection open so the server doesn't exit on disconnect.
     let _stdio = connect_and_register_with_mode(&sock_path, "grok-tui", ClientMode::Stdio).await;
-    // The Registered server-event is processed asynchronously after the wire ack
-    // Give the server loop a beat before asserting the negative
+    // The Registered server-event is processed asynchronously after the wire ack Give the server loop a beat.
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
         !*relay_demand_rx.borrow(),
@@ -726,7 +723,7 @@ async fn initialize_preserves_existing_client_identifier() {
     .await
     .unwrap();
 
-    // Verify the forwarded message kept the original clientIdentifier
+    // Verify the forwarded message kept the clientIdentifier
     let received = acp_rx.recv().await.unwrap();
     let json: serde_json::Value = serde_json::from_str(&received).unwrap();
     assert_eq!(
@@ -870,8 +867,8 @@ fn extract_interaction_resolved_tool_call_id_matches_only_resolved() {
 
 #[test]
 fn session_load_request_id_matches_response_id_for_buffer_flush() {
-    // The live-buffer flush keys on the namespaced load-request id and matches it against the raw id echoed on the load response
-    // Pin that invariant: the id stored at request time equals the id seen at response time, and parse_response_id still recovers the client and id
+    // The live-buffer flush keys on the namespaced load-request id and
+    // matches it against the raw id echoed.
     let mut req = pv(
         r#"{"jsonrpc":"2.0","id":7,"method":"session/load","params":{"sessionId":"sess-x","cwd":"/tmp"}}"#,
     );
@@ -884,8 +881,8 @@ fn session_load_request_id_matches_response_id_for_buffer_flush() {
     // The rewritten payload carries exactly the namespaced id the loop stores.
     assert_eq!(j(&req, "/id"), stored_ns_id.as_str());
 
-    // The agent echoes the namespaced id verbatim on the response
-    // `parse_response_id` recovers (client, namespaced id) and restores the original id in place
+    // The agent echoes the namespaced id verbatim on the response `parse_response_id` recovers (client, namespaced id)
+    // and restores the id.
     let mut response = pv(&format!(
         r#"{{"jsonrpc":"2.0","id":"{stored_ns_id}","result":{{"models":[]}}}}"#
     ));
@@ -897,7 +894,7 @@ fn session_load_request_id_matches_response_id_for_buffer_flush() {
 
 #[test]
 fn live_buffer_holds_during_load_and_flushes_in_order() {
-    // Mirrors the request/intercept/flush/disconnect bookkeeping the leader loop performs on `pending_load_by_req` and `load_live_buffer`
+    // Mirrors the request/intercept/flush/disconnect bookkeeping the leader loop performs on `pending_load_by_req`.
     let client = ClientId(5);
     let sid = "sess-y".to_string();
     let mut pending_load_by_req: HashMap<String, (ClientId, String)> = HashMap::new();
@@ -957,8 +954,7 @@ fn live_chunk(sid: &str, seq: u64) -> String {
 
 #[test]
 fn event_seq_of_parses_acp_and_ext_and_handles_missing() {
-    // ACP session/update: eventId at params._meta.eventId
-    // The session id itself contains '-', so the suffix parse must split on the LAST '-'
+    // ACP session/update: eventId at params._meta.eventId The session id itself contains '-'.
     let acp = pv(r#"{"params":{"sessionId":"019e-aa","_meta":{"eventId":"019e-aa-42"}}}"#);
     assert_eq!(event_seq_of(&acp), Some(42));
     // ExtNotification (xAI): nested under params.params._meta.eventId.
@@ -980,7 +976,6 @@ fn buffer_flush_drops_replay_overlap_by_event_seq() {
     let mut load_live_buffer: HashMap<(ClientId, String), Vec<BufferedLive>> = HashMap::new();
     let mut load_replay_max_seq: HashMap<(ClientId, String), u64> = HashMap::new();
 
-    // Unicast replay path records the max seq delivered to this client (7..=21).
     for seq in 7..=21u64 {
         let json = pv(&live_chunk(&sid, seq));
         if let Some(s) = extract_session_id(&json)
@@ -992,8 +987,6 @@ fn buffer_flush_drops_replay_overlap_by_event_seq() {
     }
     assert_eq!(load_replay_max_seq.get(&(client, sid.clone())), Some(&21));
 
-    // Buffered-live holds the overlap (7..=21) AND the genuine tail (22,23).
-    // Mirrors the production intercept: the seq is computed at buffer time (from the already-parsed message) and stored alongside the payload
     let buf = load_live_buffer.entry((client, sid.clone())).or_default();
     for seq in 7..=23u64 {
         let payload = live_chunk(&sid, seq);
@@ -1024,7 +1017,6 @@ fn buffer_flush_drops_replay_overlap_by_event_seq() {
 }
 
 /// Edge case: a fresh process's very first event has `event_seq == 0`.
-/// The cutoff must be an `Option` (not a `> 0` sentinel), so a genuine max of 0 still drops the buffered-live seq-0 duplicate.
 #[test]
 fn buffer_flush_drops_replay_overlap_at_seq_zero() {
     let client = ClientId(5);
@@ -1032,7 +1024,6 @@ fn buffer_flush_drops_replay_overlap_at_seq_zero() {
     let mut load_live_buffer: HashMap<(ClientId, String), Vec<BufferedLive>> = HashMap::new();
     let mut load_replay_max_seq: HashMap<(ClientId, String), u64> = HashMap::new();
 
-    // Replay delivered exactly one event: seq 0.
     let json = pv(&live_chunk(&sid, 0));
     if let Some(s) = extract_session_id(&json)
         && let Some(n) = event_seq_of(&json)
@@ -1042,7 +1033,6 @@ fn buffer_flush_drops_replay_overlap_at_seq_zero() {
     }
     assert_eq!(load_replay_max_seq.get(&(client, sid.clone())), Some(&0));
 
-    // Buffered-live holds the seq-0 duplicate and the genuine tail (seq 1)
     let buf = load_live_buffer.entry((client, sid.clone())).or_default();
     for seq in [0u64, 1] {
         let payload = live_chunk(&sid, seq);
@@ -1483,7 +1473,6 @@ fn extract_yolo_mode_change_returns_none_for_other_methods() {
     assert_eq!(extract_yolo_mode_change(&pv(payload)), None);
 }
 
-/// Branch 1: an explicit `auto_mode` flag wins, even over `permission_mode`.
 #[test]
 fn extract_auto_mode_change_explicit_flag_wins() {
     let payload =
@@ -1499,7 +1488,6 @@ fn extract_auto_mode_change_explicit_flag_wins() {
     assert_eq!(extract_auto_mode_change(&pv(payload)), Some(false));
 }
 
-/// Branch 2: with no explicit flag, derive from `permission_mode`.
 #[test]
 fn extract_auto_mode_change_derives_from_permission_mode() {
     let payload = r#"{"jsonrpc":"2.0","method":"x.ai/yolo_mode_changed","params":{"permission_mode":"auto"}}"#;
@@ -1517,7 +1505,6 @@ fn extract_auto_mode_change_derives_from_permission_mode() {
     }
 }
 
-/// Branch 3: None when there's no auto signal.
 /// A wrong method, or a bare yolo toggle (no `auto_mode`, no `permission_mode`), must NOT change auto state.
 #[test]
 fn extract_auto_mode_change_returns_none_when_no_auto_signal() {
@@ -2318,7 +2305,7 @@ async fn client_count_decrements_on_disconnect() {
     let (sock_path, cancel, _acp_rx, client_count) =
         setup_test_server_with_client_count(&temp).await;
 
-    // Connect two clients
+    // Connect clients
     let (_reader1, mut writer1) = connect_and_register(&sock_path, "client-1").await;
     let (_reader2, _writer2) = connect_and_register(&sock_path, "client-2").await;
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -2405,7 +2392,7 @@ async fn client_count_not_incremented_before_registration() {
     let (_sock_path, cancel, _acp_rx, client_count) =
         setup_test_server_with_client_count(&temp).await;
 
-    // Connect but do NOT register, just open the TCP connection
+    // Connect but do NOT register, open the TCP connection
     let _stream = LeaderStream::connect(&_sock_path).await.unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -2581,7 +2568,6 @@ async fn dead_client_session_notification_not_leaked_to_other_client() {
     .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Disconnect client A
     drop(writer_a);
     drop(reader_a);
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2655,7 +2641,6 @@ async fn ext_notification_with_nested_session_id_routes_correctly() {
     .unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // ext/notification with nested sessionId for session A
     response_tx
         .send(r#"{"jsonrpc":"2.0","method":"_x.ai/session_notification","params":{"method":"x.ai/session_notification","params":{"sessionId":"sess-A","update":{"sessionUpdate":"retry_state","attempt":1,"maxRetries":3,"reason":"transient"}}}}"#.into())
         .unwrap();
@@ -2887,7 +2872,7 @@ async fn agent_busy_tracks_multiple_pending_requests() {
     .unwrap();
     let _: ServerMessage = read_message(&mut reader).await.unwrap();
 
-    // Send two requests
+    // Send requests
     write_message(
         &mut writer,
         &ClientMessage::Acp {
@@ -2950,8 +2935,7 @@ async fn agent_busy_tracks_multiple_pending_requests() {
 
 #[tokio::test]
 async fn agent_busy_clears_when_client_disconnects_mid_request() {
-    // agent_busy must clear even when the originating client disconnected before the response arrives
-    // The server still decrements pending_requests when routing the response, even though the client is gone
+    // agent_busy must clear even when the originating client disconnected.
     let temp = TempDir::new().unwrap();
     let sock_path = temp.path().join("busy_disconnect.sock");
 
@@ -3310,8 +3294,7 @@ async fn live_broadcast_during_load_is_buffered_then_flushed_after_response() {
 
     let (mut reader, mut writer) = connect_and_register(&sock_path, "viewer").await;
 
-    // Begin a load but do NOT respond yet, so the client is mid-load
-    // Read the forwarded request to learn its namespaced id for the response later
+    // Begin a load but do NOT respond yet.
     load_session(&mut writer, "sess-buf").await;
     let forwarded = tokio::time::timeout(Duration::from_secs(1), acp_rx.recv())
         .await
@@ -3361,17 +3344,16 @@ async fn live_broadcast_during_load_is_buffered_then_flushed_after_response() {
     cancel.cancel();
 }
 
-/// Two clients load the same session.
-/// A `session/notification` (no `id`) must reach BOTH, while a reverse-request (`id` and `method`) reaches ONLY the driver.
-/// The second client's `session/load` must not black out the first: it joins, it does not steal.
+/// Clients load the same session. A `session/notification` (no `id`) must reach BOTH, while a reverse-request (`id` and
+/// `method`) reaches ONLY the driver. The second client's `session/load` must not black out the first: it joins, it does
+/// not steal.
 #[tokio::test]
 async fn two_clients_one_session_broadcast_and_driver() {
     let temp = TempDir::new().unwrap();
     let (sock_path, cancel, response_tx, mut acp_rx) =
         setup_persistent_server_with_agent(&temp).await;
 
-    // Client A loads first and becomes driver
-    // Complete the load (echo a load response) so A leaves the buffering window and receives live broadcasts
+    // Client A loads first and becomes driver Complete the load (echo a load response) so A leaves the buffering window.
     let (mut reader_a, mut writer_a) = connect_and_register(&sock_path, "client-a").await;
     load_session(&mut writer_a, "sess-multi").await;
     complete_load(&mut acp_rx, &response_tx).await;
@@ -3401,8 +3383,7 @@ async fn two_clients_one_session_broadcast_and_driver() {
         "client B must receive the broadcast notification (no blackout), got {got_b:?}"
     );
 
-    // A NON-interaction reverse-request (has both id and method) goes to the driver (A) only
-    // (Interaction reverse-requests are shared; see `interaction_request_broadcasts_to_all_subscribers`.)
+    // A NON-interaction reverse-request (has both id and method) goes to the driver (A) only.
     let req = r#"{"jsonrpc":"2.0","id":42,"method":"fs/read_text_file","params":{"sessionId":"sess-multi","path":"/tmp/x"}}"#;
     response_tx.send(req.to_string()).unwrap();
 
@@ -3443,8 +3424,7 @@ async fn interaction_request_broadcasts_to_all_subscribers() {
     let _ = next_acp_payload(&mut reader_b).await;
     tokio::time::sleep(Duration::from_millis(30)).await;
 
-    // The agent raises an `ask_user_question` reverse-request in the gateway-WRAPPED wire form (`_x.ai/...` top-level, nested method and params)
-    // This is the shape that previously fell through to driver-only.
+    // The agent raises an `ask_user_question` reverse-request in the gateway-WRAPPED wire form (`_x.ai/...` top-level, nested method and params) This is the shape.
     let req = r#"{"jsonrpc":"2.0","id":501,"method":"_x.ai/ask_user_question","params":{"method":"x.ai/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-q","questions":[]}}}"#;
     response_tx.send(req.to_string()).unwrap();
 
@@ -3553,8 +3533,7 @@ async fn reattached_client_backfilled_into_child_routes() {
     drop(writer_a);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // A2 reconnects and reloads the parent
-    // No replayed spawn line is sent, so receiving child updates proves the response-time BACKFILL (not replay registration)
+    // A2 reconnects and reloads the parent No replayed spawn line is sent.
     let (mut reader_a2, mut writer_a2) = connect_and_register(&sock_path, "client-a").await;
     load_session(&mut writer_a2, "sess-sub").await;
     complete_load(&mut acp_rx, &response_tx).await;
@@ -3871,8 +3850,7 @@ async fn detached_live_finished_prunes_index_so_reattach_skips_dead_child() {
     response_tx.send(spawned_live.to_string()).unwrap();
     let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
 
-    // Every client disconnects, so the parent goes fully detached
-    // Eviction empties the subscriber/driver maps but keeps the `child_sessions` edge
+    // Every client disconnects, so the parent goes fully detached Eviction empties the subscriber/driver maps.
     drop(reader_a);
     drop(writer_a);
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -3922,8 +3900,7 @@ async fn mid_burst_disconnect_still_prunes_dead_child_route() {
     response_tx.send(spawned_replay).unwrap();
     let _ = next_acp_payload_matching(&mut reader_a, "subagent_spawned").await;
 
-    // Disconnect mid-burst: eviction empties the routes, the index edge stays
-    // The dead child's replayed finish then arrives orphaned
+    // Disconnect mid-burst: eviction empties the routes.
     drop(reader_a);
     drop(writer_a);
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -4159,8 +4136,7 @@ async fn pending_interaction_survives_disconnect_and_replays_on_reconnect() {
     let _ = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
     tokio::time::sleep(Duration::from_millis(30)).await;
 
-    // A FULLY disconnects (it is the only subscriber)
-    // Previously this dropped the interaction cache for the session
+    // A FULLY disconnects (it is the only subscriber) this dropped the interaction cache for the session
     drop(reader_a);
     drop(writer_a);
     tokio::time::sleep(Duration::from_millis(80)).await;
@@ -4219,7 +4195,7 @@ async fn resolved_interaction_not_replayed_to_late_joiner() {
     let _ = next_acp_payload(&mut reader_a).await;
     tokio::time::sleep(Duration::from_millis(30)).await;
 
-    // Raise then resolve the interaction (wrapped wire form), no other client attached yet
+    // Raise then resolve the interaction (wrapped wire form).
     let req = r#"{"jsonrpc":"2.0","id":701,"method":"_x.ai/ask_user_question","params":{"method":"x.ai/ask_user_question","params":{"sessionId":"sess-int","toolCallId":"tc-ev","questions":[]}}}"#;
     response_tx.send(req.to_string()).unwrap();
     let _ = next_acp_payload_matching(&mut reader_a, "ask_user_question").await;
@@ -4298,7 +4274,6 @@ async fn driver_disconnect_transfers_not_evicts() {
     );
 
     // A NON-interaction reverse-request now reaches B (driver transferred).
-    // (A non-interaction method exercises the driver-only path; interaction reverse-requests broadcast instead, see the shared-interaction tests.)
     let req = r#"{"jsonrpc":"2.0","id":7,"method":"fs/read_text_file","params":{"sessionId":"sess-xfer","path":"/tmp/x"}}"#;
     response_tx.send(req.to_string()).unwrap();
     let req_b = next_acp_payload(&mut reader_b).await;
@@ -4630,8 +4605,8 @@ fn inject_capabilities_injects_code_nav_into_session_load() {
     );
 }
 
-/// Verify leader-mode client isolation: two clients with different code-nav capabilities
-/// get independent `codeNavEnabled` values injected into their session/new requests.
+/// Verify leader-mode client isolation: clients with different code-nav capabilities get
+/// independent `codeNavEnabled` values injected into their session/new requests.
 #[test]
 fn inject_capabilities_two_clients_stay_isolated() {
     let web_caps = ClientCapabilities {
@@ -4896,12 +4871,11 @@ async fn subagent_child_session_not_leaked_to_other_client() {
 
 #[tokio::test]
 async fn leader_client_id_unicasts_to_target_only() {
-    // The agent stamps `_meta["x.ai/leaderClientId"]` onto every session/load replay line
-    // A notification carrying it must be routed to ONLY that client, even when another client is attached to the same session
+    // The agent stamps `_meta["x.ai/leaderClientId"]` onto every session/load replay line A notification carrying it must be routed to ONLY.
     let temp = TempDir::new().unwrap();
     let (sock_path, cancel, response_tx) = setup_persistent_server(&temp).await;
 
-    // Register two clients, capturing each one's assigned ClientId.
+    // Register clients, capturing each's assigned ClientId.
     async fn register_capture(
         sock_path: &std::path::Path,
         client_type: &str,
@@ -4961,8 +4935,7 @@ async fn leader_client_id_unicasts_to_target_only() {
 
 #[tokio::test]
 async fn leader_client_id_dropped_when_target_disconnected() {
-    // Regression: a replay line tagged for a client that disconnected mid-replay must be DROPPED, not fall through to the subscriber broadcast
-    // Other subscribers would render the full `isReplay` transcript into an uncleared scrollback (duplicated history)
+    // Regression: a replay line tagged for a client that disconnected mid-replay must be DROPPED.
     let temp = TempDir::new().unwrap();
     let (sock_path, cancel, response_tx) = setup_persistent_server(&temp).await;
 

@@ -1,6 +1,4 @@
 //! Inject rapid `j` keys against a large pre-rendered response, measure frame timing.
-//!
-//! What it stresses: `render_scrolled_entries_with_scratch`, partial-entry clipping (ScratchBuffer cell copy), `Buffer::diff()`.
 
 use std::time::{Duration, Instant};
 
@@ -20,12 +18,8 @@ pub async fn run(harness: &mut PtyHarness, content: &ContentController) -> Resul
     // 2. Wait for the pager's splash screen.
     wait_for_welcome(harness).await?;
 
-    // 3. Submit a prompt so the mock inference server returns the big response.
-    //    The pager is interactive: type a short prompt then hit Enter.
     harness.inject_keys(b"go\r")?;
 
-    // 4. Wait until the streamed response is on screen.
-    //    The response is `Lorem ipsum dolor ...`; look for a word we know will appear after streaming starts
     harness.wait_for_text("Lorem", Duration::from_secs(30))?;
 
     // 5. Let the full response settle, then reset timing to start clean.

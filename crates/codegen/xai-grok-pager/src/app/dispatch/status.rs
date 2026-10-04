@@ -19,8 +19,6 @@ pub(super) fn dispatch_share_session(app: &mut AppView) -> Vec<Effect> {
 }
 
 /// Monotonic generation for usage-modal fetches, shared by every surface that opens the modal.
-/// A reply from a previous open (modal closed and reopened) then can't overwrite newer results.
-/// `0` is reserved for background refreshes (startup/login `FetchAppBilling`), which never settle a modal.
 static USAGE_FETCH_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn next_usage_fetch_nonce() -> u64 {
@@ -98,7 +96,6 @@ pub(super) fn open_usage_info_modal(
             nonce,
         });
     }
-    // Silently refresh the cached billing mirrors the modal renders from
     if billing_reachable {
         state.billing_loading = true;
         effects.push(Effect::FetchBilling {
@@ -160,9 +157,8 @@ pub(super) fn set_coding_data_sharing_inner(app: &mut AppView, opted_in: bool) {
     app.coding_data_retention_opt_out = !opted_in;
 }
 
-/// Agent the coding-data ACP write is attributed to.
-/// Privacy is app-level, so the id only routes the result back.
-/// `AgentId(0)` is the synthetic stand-in for the welcome screen, where the banner is reachable before a session exists.
+/// Agent the coding-data ACP write is attributed to. Privacy is app-level, so
+/// the id only routes the result back.
 fn coding_data_sharing_agent_id(app: &AppView) -> AgentId {
     match app.active_view {
         ActiveView::Agent(id) => id,
@@ -230,7 +226,8 @@ pub(super) fn set_coding_data_sharing(
     let prev = !app.coding_data_retention_opt_out;
     log_coding_data_consent_selected(source, opted_in, prev);
 
-    // Coalesce on the pending write's own choice, not the mirror, which auth-meta refreshes rewrite mid-flight; a duplicate has nothing new to send
+    // Coalesce on the pending write's own choice, not the mirror, which
+    // auth-meta refreshes rewrite mid-flight.
     if app.coding_data_pending_opted_in() == Some(opted_in) {
         return vec![];
     }
@@ -248,8 +245,7 @@ pub(super) fn set_coding_data_sharing(
         rollback_to_opted_in,
     });
 
-    // Optimistic mutation
-    // Success is silent; only the refusals above and the failure handler toast
+    // Optimistic mutation Success is silent; only the refusals above and the failure handler toast
     set_coding_data_sharing_inner(app, opted_in);
     refresh_open_settings_modals(app);
 
@@ -377,13 +373,12 @@ pub(super) fn dispatch_open_gboom(app: &mut AppView) -> Vec<Effect> {
         );
         return vec![];
     }
-    // Close other media modals: they share the kitty placement id
-    // Drop the image viewer's in-flight loader too (its close path clears both; a leaked rx would mis-feed the next image viewer's poll loop)
+    // Close other media modals: they share the kitty placement id Drop the image viewer's in-flight loader too.
     agent.image_viewer = None;
     agent.image_load_rx = None;
     agent.video_viewer = None;
     let mut game = crate::gboom::GboomState::new();
-    // Deliberately `kitty_flags_pushed`, not `kitty_releases_reported`: the game pushes its own REPORT_ALL_KEYS layer over a downgraded base
+    // Deliberately `kitty_flags_pushed`, not `kitty_releases_reported`: the game pushes its own REPORT_ALL_KEYS layer.
     game.set_release_aware(crate::terminal::kitty_flags_pushed());
     agent.gboom = Some(game);
     vec![]
@@ -413,14 +408,14 @@ pub(super) fn handle_coding_data_sharing_updated(
     seq: u64,
 ) -> Vec<Effect> {
     if !is_current_coding_data_write(app, seq, agent_id) {
-        // The server accepted this older write, so the newer one falls back to it. Arrival order is not commit order: a delayed reply can overwrite a newer value here
+        // The server accepted this older write, so the newer one falls back
+        // to it.
         if let Some(pending) = app.coding_data_pending_write.as_mut() {
             pending.rollback_to_opted_in = opted_in;
         }
         return vec![];
     }
-    // Re-anchor mirror to server-confirmed value (defense-in-depth against server reshaping the boolean)
-    // `agent_id` discarded; privacy is app-level, not per-agent
+    // Re-anchor mirror to server-confirmed value (defense-in-depth against server reshaping the boolean) `agent_id` discarded.
     set_coding_data_sharing_inner(app, opted_in);
     refresh_open_settings_modals(app);
     tracing::info!(
@@ -539,7 +534,6 @@ pub(super) fn handle_context_info_complete(
             ));
             state.context_error = None;
         }
-        // Full mode with the modal closed: the result arrived after dismissal, so drop it
     }
     vec![]
 }

@@ -1,5 +1,4 @@
 //! Wire mirror of the `workspace.hook_registry` response.
-//! It is kept byte-identical to the upstream serde shape so this lean crate avoids the heavy `xai_grok_hooks` dep.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -131,7 +130,7 @@ impl<'de> Deserialize<'de> for HookEventNameWire {
 mod tests {
     use super::*;
 
-    /// Mirrors `event_name_deser_all_variants` in xai-grok-hooks; the two lists move together.
+    /// Mirrors `event_name_deser_all_variants` in xai-grok-hooks; both lists move together.
     #[test]
     fn hook_event_name_wire_snake_case_round_trip() {
         for (variant, wire) in [

@@ -1,5 +1,4 @@
-//! Display labels for the subagents a session has spawned, recorded on `SubagentSpawned` (a wake re-spawn
-//! overwrites) and resolved when a `send_subagent_message` row is built, since render time has no registry.
+//! Display labels for the subagents a session has spawned.
 
 use std::collections::HashMap;
 use std::sync::Arc;

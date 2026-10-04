@@ -7,13 +7,10 @@ use crate::app::app_view::AppView;
 use agent_client_protocol as acp;
 use xai_grok_telemetry::session_ctx::log_event;
 
-/// Max times the MCP list is re-read after an install while waiting for the just-installed plugin's MCP servers to reach a terminal state.
-/// Probes are ~1s apart (`Effect::RetryPluginCtaMcps`), so the budget bounds the wait at ~15s before a final no-auth verdict is forced.
+/// Max times the MCP list is re-read after an install while waiting for the just-installed plugin's MCP servers.
 pub(super) const CTA_MCP_POLL_MAX_ATTEMPTS: u32 = 15;
 
 /// Re-probes tolerated while the just-installed plugin shows *no* MCP servers at all.
-/// An empty plugin section thus means it ships none (skills-only).
-/// Settle quickly instead of polling the full budget (and paying the managed-config fetch on every read).
 pub(super) const CTA_MCP_ABSENT_MAX_ATTEMPTS: u32 = 1;
 
 /// Settle the CTA into its brief "installed" confirmation.
@@ -39,9 +36,8 @@ pub(super) fn cta_settle_installed(
     effects
 }
 
-/// One source wins so the candidates and the install target always come from it.
-/// Unset (the default) is two-tier: a URL-verified official source beats any name-only "xAI Official" match regardless of order.
-/// A name-only match then keeps mirrors registered under the official name working; first registered wins within a tier.
+/// One source wins so the candidates and the install target always come from it. A name-only match then keeps mirrors registered
+/// under the official name working; first registered wins within a tier.
 pub(super) fn plugin_cta_candidates(
     response: xai_hooks_plugins_types::MarketplaceListResponse,
     cta_marketplace: Option<&str>,
@@ -75,9 +71,9 @@ pub(super) fn plugin_cta_candidates(
     (candidates, Some(source.source_url_or_path))
 }
 
-/// Resolve the marketplace-relative path for a CTA plugin by name, used to rebuild a retryable `CtaPhase::Error` when a reload or MCP read after the install fails.
-/// Prefers the still-cached candidate entry.
-/// The `plugins/{name}` fallback assumes the conventional marketplace layout (a guess for a configured override source).
+/// Resolve the marketplace-relative path for a CTA plugin by name, used to
+/// rebuild a retryable `CtaPhase::Error` when a reload or MCP read after the
+/// install fails. Prefers the still-cached candidate entry.
 pub(super) fn cta_install_relative_path(
     candidates: &[xai_hooks_plugins_types::MarketplacePluginEntry],
     name: &str,
@@ -250,7 +246,7 @@ pub(super) fn handle_cta_plugin_reload_done(
     let Some(agent) = app.agents.get_mut(&agent_id) else {
         return vec![];
     };
-    // Stale guard: only act on the reload we are currently awaiting for this plugin
+    // Stale guard: only act on the reload we are awaiting for this plugin
     let CtaPhase::AwaitingReload { name } = &agent.plugin_cta.phase else {
         return vec![];
     };
@@ -306,7 +302,7 @@ pub(super) fn handle_plugin_cta_mcps_loaded(
     let Some(agent) = app.agents.get_mut(&agent_id) else {
         return vec![];
     };
-    // Stale guard: only act on the read we are currently awaiting for this plugin
+    // Stale guard: only act on the read we are awaiting for this plugin
     let CtaPhase::AwaitingMcps { name } = &agent.plugin_cta.phase else {
         return vec![];
     };
@@ -317,34 +313,28 @@ pub(super) fn handle_plugin_cta_mcps_loaded(
     let session_id = agent.session.session_id.clone();
     match result {
         Ok(servers) => {
-            // MCP servers re-initialize progressively after install
-            // A single early read can miss OAuth servers that only reach NeedsAuth seconds later
-            // Decide now only on a terminal verdict; otherwise keep polling until the plugin's servers settle or the attempt budget runs out
+            // MCP servers re-initialize progressively after install A single early read can miss OAuth servers.
             let section = McpSectionId::Plugin(name.clone());
             let needs_auth = servers.iter().any(|s| {
                 s.status == McpServerDisplayStatus::NeedsAuth && section_for(s) == section
             });
             let any_plugin_server = servers.iter().any(|s| section_for(s) == section);
-            // Settle (no auth) only on a clean verdict: every plugin server is Ready
-            // While any is still Initializing or Unavailable the verdict isn't final, so keep polling
-            // An OAuth server can briefly show as Unavailable before it flips to NeedsAuth needs_auth is handled above
+            // Settle (no auth) only on a clean verdict: every plugin server
+            // is Ready While any is still Initializing.
             let all_ready = servers
                 .iter()
                 .filter(|s| section_for(s) == section)
                 .all(|s| s.status == McpServerDisplayStatus::Ready);
             let settled = any_plugin_server && all_ready;
             let timed_out = agent.plugin_cta.mcp_attempt >= CTA_MCP_POLL_MAX_ATTEMPTS;
-            // Skills-only plugins show an empty plugin section even though the rest of the MCP list is populated
-            // (All plugin configs load together during the awaited reload that precedes this read.)
-            // Otherwise it would be mistaken for skills-only, skipping a slow MCP-bearing plugin's auth handoff
+            // Skills-only plugins show an empty plugin section even though
+            // the rest of the MCP list is populated.
             let absent_settle = !any_plugin_server
                 && !servers.is_empty()
                 && agent.plugin_cta.mcp_attempt >= CTA_MCP_ABSENT_MAX_ATTEMPTS;
             let mut effects = Vec::new();
             if needs_auth {
-                // Hand off into the Extensions modal on the MCP Servers tab with only the new plugin's section expanded
-                // Seed the MCP data from the read we already have (no flash)
-                // Emit the same tab fetches as a manual open so no other tab is left stuck Loading; the modal then owns the auth UX
+                // Hand off into the Extensions modal on the MCP Servers tab with only the new plugin's section expanded Seed the MCP data.
                 let mut modal = ExtensionsModalState::new(ExtensionsTab::McpServers);
                 modal.session_team_id = app.team_id.clone();
                 seed_mcps_section_collapse_for_cta(
@@ -430,8 +420,8 @@ pub(super) fn handle_plugin_cta_catalog_loaded(
                     plugin_cta_candidates(response, cta_marketplace);
                 agent.plugin_cta.candidates = candidates;
                 agent.plugin_cta.source_url_or_path = source_url_or_path;
-                // Cache the dismissed set once here so recomputing after the debounce never reads config.toml from the UI thread
-                // Only needed when enabled (the matcher short-circuits to Hidden before consulting it otherwise)
+                // Cache the dismissed set once here so recomputing after the debounce never reads config.toml from the
+                // UI thread Only needed when enabled.
                 if enabled {
                     agent.plugin_cta.dismissed = xai_grok_shell::config::dismissed_plugin_ctas();
                 }
@@ -485,9 +475,8 @@ pub(super) fn handle_plugin_cta_debounce_expired(
     if generation != agent.plugin_cta.debounce_generation {
         return vec![];
     }
-    // Preserve running or actionable install states across keystrokes
-    // The eventual install/reload/mcps result must never be swallowed by the stale guard
-    // `Installed` is included too: its `✓` confirmation is owned by the auto-dismiss timer
+    // Preserve running or actionable install states across keystrokes The
+    // eventual install/reload/mcps result must never be swallowed.
     if matches!(
         agent.plugin_cta.phase,
         CtaPhase::Installing { .. }

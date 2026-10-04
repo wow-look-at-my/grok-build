@@ -1,20 +1,4 @@
-//! Times OS watch registration for a project-tier `.claude` tree with a large `worktrees/` subtree (Bazel-like fan-out).
-//! Compares:
-//!
-//! - **scoped**: the current `SkillsFileWatcher::start_with_dirs` (vendor root non-recursive, skills/commands/workflows subtrees only)
-//! - **recursive_control**: full `RecursiveMode::Recursive` on `.claude`, the old project-tier behavior (on Linux, one inotify watch per directory)
-//!
-//! Fixture sizes stay comparable across scenarios.
-//! Medians land under `target/criterion/skills_watcher_startup/`.
-//!
-//! ```text
-//! cargo bench -p xai-grok-shell --bench skills_watcher_startup
-//! # optional scale:
-//! GROK_SKILLS_WATCHER_BENCH_DIRS=12000 cargo bench -p xai-grok-shell --bench skills_watcher_startup
-//! ```
-//!
-//! On macOS, recursive FSEvents is cheap so both arms may be close.
-//! On Linux inotify, `recursive_control` scales with directory count; `scoped` stays flat.
+//! Times OS watch registration for a project-tier `.claude` tree with a large `worktrees/` subtree.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,7 +21,6 @@ fn worktree_dir_count() -> usize {
         .unwrap_or(DEFAULT_WORKTREE_DIRS)
 }
 
-/// Creates dirs in nested groups of 100 so the tree has width and depth.
 fn make_nested_dirs(base: &Path, count: usize) {
     for i in 0..count {
         let dir = base.join(format!("g{}", i / 100)).join(format!("d{i}"));

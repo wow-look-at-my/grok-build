@@ -14,7 +14,6 @@ fn after_suspend(base: DualClock, wall_ahead: Duration) -> DualClock {
 }
 
 /// Pins the exact schedule.
-/// Guards against the `from_millis(1000)` mistake, where the 1000 became the exponent base and real delays came out as 1s, 16m40s, and 11.57 days.
 #[test]
 fn schedule_is_one_two_four_seconds_then_exhausted() {
     let mut schedule = AuthRetrySchedule::new();
@@ -45,7 +44,6 @@ fn schedule_is_one_two_four_seconds_then_exhausted() {
     assert_eq!(schedule.incident_counts(), (4, 4));
 }
 
-/// `SentCredential::Unknown` charges the budget like an authenticated 401, failing closed toward terminating.
 /// It is not reported as a proven credential rejection.
 #[test]
 fn unknown_credential_charges_but_is_not_counted_authenticated() {
@@ -66,7 +64,6 @@ fn expected_uncharged_delay(i: u32) -> Duration {
     (Duration::from_millis(500) * 2u32.pow(i.min(20))).min(AuthRetrySchedule::UNCHARGED_PACE_CAP)
 }
 
-/// Rule: a credential-less 401 never consumes a budget slot; only the runaway guard bounds it.
 #[test]
 fn missing_credential_never_charges_until_runaway_guard() {
     let mut schedule = AuthRetrySchedule::new();
@@ -96,7 +93,6 @@ fn missing_credential_never_charges_until_runaway_guard() {
 }
 
 /// A success resets everything: the escalating delays, the attempt numbering, and the runaway counter all restart.
-/// A 200 proves the session is not running away, so a productive multi-day turn can never accumulate into the guard.
 #[test]
 fn success_resets_budget_and_uncharged_counter() {
     let mut schedule = AuthRetrySchedule::new();

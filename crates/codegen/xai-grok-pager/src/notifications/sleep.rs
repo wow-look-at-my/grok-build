@@ -1,7 +1,4 @@
 //! Prevents the machine from idle-sleeping while an agent turn is in progress.
-//! macOS uses IOKit power assertions; Linux spawns `systemd-inhibit`.
-//!
-//! Threading: this lives on `AppView`, which is single-threaded and `!Send`, so fields use `Cell` and `RefCell` rather than atomics or mutexes.
 
 use std::cell::Cell;
 
@@ -14,7 +11,7 @@ pub struct SleepInhibitor {
     #[cfg(target_os = "linux")]
     child: std::cell::RefCell<Option<std::process::Child>>,
     active: Cell<bool>,
-    /// Set on the first `platform_inhibit` failure so a platform without an inhibitor (e.g. a container without systemd-inhibit) is not retried.
+    /// Set on the first `platform_inhibit` failure so a platform without an inhibitor (e.g. a container without systemd-inhibit).
     platform_unavailable: Cell<bool>,
     enabled: bool,
 }
@@ -61,7 +58,6 @@ impl SleepInhibitor {
         let assertion_type =
             core_foundation::string::CFString::from_static_string("NoIdleSleepAssertion");
 
-        // IOPMAssertionCreateWithName returns kIOReturnSuccess (0) on success.
         let result = unsafe {
             IOPMAssertionCreateWithName(
                 assertion_type.as_concrete_TypeRef(),
@@ -105,9 +101,7 @@ impl SleepInhibitor {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
         xai_tty_utils::detach_std_command(&mut cmd);
-        // The spawned process is the lock holder: `systemd-inhibit` keeps the idle-inhibit fd itself and runs `sleep
-        // infinity` as its child. Bind that pid to us so a crashed or killed grok (SIGKILL, `panic=abort` SIGABRT, no Drop
-        // runs) cannot leave it running forever.
+        // The spawned process is the lock holder.
         xai_tty_utils::kill_on_parent_death_std(&mut cmd);
         #[allow(clippy::disallowed_methods)] // bound by kill-on-parent-death; released each turn
         let result = cmd.spawn();
@@ -223,7 +217,6 @@ mod tests {
         let inhibitor = SleepInhibitor::new(true);
         inhibitor.inhibit();
         // On Linux, this spawns systemd-inhibit; on other platforms it's a no-op.
-        // Either way, the active flag tracks the intent.
         let was_active = inhibitor.active.get();
         inhibitor.release();
         assert!(!inhibitor.active.get());
@@ -238,7 +231,6 @@ mod tests {
         let inhibitor = SleepInhibitor::new(true);
         inhibitor.inhibit();
         drop(inhibitor);
-        // No assertion; the test only checks that drop neither panics nor leaks
     }
 
     #[cfg(target_os = "linux")]
@@ -251,7 +243,6 @@ mod tests {
             inhibitor.release();
             assert!(inhibitor.child.borrow().is_none());
         }
-        // If systemd-inhibit isn't available, active stays false and that's fine
     }
 
     #[cfg(target_os = "linux")]

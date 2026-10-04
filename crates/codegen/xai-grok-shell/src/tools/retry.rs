@@ -1,5 +1,4 @@
 //! The canonical implementation now lives in `xai_grok_tools::retry`.
-//! This module re-exports with backward-compatible aliases.
 
 pub use xai_grok_tools::retry::BackoffConfig as RetryConfig;
 pub use xai_grok_tools::retry::{BackoffConfig, execute_with_backoff};

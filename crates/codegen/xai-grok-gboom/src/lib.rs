@@ -1,15 +1,4 @@
 //! `/gboom` easter egg: a tiny single-level raycaster shooter rendered in the terminal via the kitty graphics protocol.
-//!
-//! Not production code: this is for fun and is not maintained to the standards in `crates/codegen/AGENTS.md`.
-//!
-//! Typing `/gboom` (and nothing else) opens a modal overlay, the same overlay the imagine-video player uses.
-//! It streams PNG frames, one full kitty `a=T` retransmission per frame, at the ~30 fps animation tick.
-//! The simulation steps with wall-clock `dt`, so gameplay speed is independent of the achieved frame rate.
-//!
-//! Controls: `W`/`↑` forward, `S`/`↓` back, `A`/`D` strafe, `←`/`→` turn, click or `Space`/`Enter` fire, `Esc`/`q` quit.
-//! Moving or dragging the mouse aims, inside the modal and only while Playing.
-//! Movement uses the continuous held-key model in [`game`], because terminals deliver no key-release events.
-//! It eases toward a steady target while a key is held, staying smooth regardless of the OS key-repeat cadence.
 
 #![deny(clippy::indexing_slicing)]
 #![allow(clippy::cast_lossless)]
@@ -32,11 +21,9 @@ use engine::{FireSim, FrameBuffer, Renderer};
 use game::{Control, Game};
 
 /// Maximum rendered frame width in pixels.
-/// Each frame is PNG-encoded and pushed through the PTY every tick (~100 KB, ~3 MB/s at 30 fps at this cap), within what the video player streams.
 const MAX_FRAME_W: usize = 480;
 /// Maximum rendered frame height in pixels.
 const MAX_FRAME_H: usize = 320;
-/// Assumed cell size in pixels for aspect mapping (cell aspect 0.5, consistent with `terminal::image::fit_image_to_cells`).
 const CELL_PX_W: usize = 8;
 const CELL_PX_H: usize = 16;
 /// Largest simulation step; longer gaps (lag, suspend) are clamped.
@@ -51,7 +38,6 @@ const MAX_MOUSE_AIM_DX: i32 = 12;
 const TEXT_OUTLINE: [u8; 3] = [16, 6, 6];
 
 /// Where the player is in the easter egg flow.
-/// Time spent in the current phase is tracked by `GboomState::phase_time` (reset on every transition).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
     Title,
@@ -116,9 +102,8 @@ impl GboomState {
         }
     }
 
-    /// On terminals that report key releases (Kitty keyboard protocol), latch keys on press/release so the player can move and turn at once.
-    /// Otherwise fall back to the timer model that bridges OS key repeats.
-    /// Defaults to off; the host sets it right after construction.
+    /// On terminals that report key releases (Kitty keyboard protocol), latch
+    /// keys on press/release so the player can move and turn at once.
     pub fn set_release_aware(&mut self, release_aware: bool) {
         self.game.set_release_aware(release_aware);
     }

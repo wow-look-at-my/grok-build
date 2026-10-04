@@ -1,13 +1,4 @@
 //! Cross-platform secure file operations.
-//!
-//! Creates files that only the current user can read or write, for sensitive data like authentication tokens.
-//!
-//! - **Unix**: mode 0o600 (owner read/write only)
-//! - **Windows**: an ACL that grants access only to the current user
-//!
-//! The data is stored in plaintext; OS file permissions are the only protection.
-//! A keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) or encryption would be stronger.
-//! The tokens stored this way are short-lived (7-30 days TTL with automatic refresh), so file permissions are enough for most use cases.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -29,15 +20,14 @@ pub fn write_secure_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     file.write_all(contents)?;
     file.flush()?;
 
-    // Re-assert owner-only bits: `OpenOptions::mode` only applies on create, so an existing world-readable file would otherwise keep open perms
+    // Re-assert owner-only bits: `OpenOptions::mode` only applies on create.
     ensure_owner_only_permissions(path)?;
 
     Ok(())
 }
 
-/// Opens a file for writing with secure permissions set during creation (Unix) or prepares it for permission setting after creation (Windows).
-/// Callers that write secret material should also call [`ensure_owner_only_permissions`] after the write (or use [`write_secure_file`]).
-/// `mode(0o600)` only applies when the file is newly created, not when truncating an existing path.
+/// Opens a file for writing with secure permissions set during creation
+/// (Unix) or prepares it for permission setting after creation (Windows).
 pub fn open_secure_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.truncate(true).write(true).create(true);
@@ -50,8 +40,9 @@ pub fn open_secure_file(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
-/// Ensure `path` is owner-read/write only (Unix `0o600` / Windows user ACL). Best-effort on missing files (`NotFound` is ignored). Other errors propagate so callers can fail closed when tightening a secret store.
-/// Use on **load** of credential files so a hand-copied or restored world-readable `auth.json` is tightened before the process continues.
+/// Ensure `path` is owner-read/write only (Unix `0o600` / Windows user ACL).
+/// Best-effort on missing files (`NotFound` is ignored). Other errors
+/// propagate so callers can fail closed when tightening a secret store.
 pub fn ensure_owner_only_permissions(path: &Path) -> io::Result<()> {
     match ensure_owner_only_permissions_inner(path) {
         Ok(()) => Ok(()),

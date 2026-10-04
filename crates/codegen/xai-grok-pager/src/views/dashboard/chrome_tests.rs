@@ -152,8 +152,7 @@ fn header_location_renders_from_staged_cwd() {
     let area = Rect::new(0, 0, 200, 1);
 
     let mut state = DashboardState::new();
-    // A distinct absolute path outside $HOME (rendered verbatim) that differs from the process cwd
-    // No git cache entry, so no branch span
+    // A distinct absolute path outside $HOME (rendered verbatim) that differs from the process cwd No git cache entry.
     state.cwd = std::path::PathBuf::from("/grok-staged-cwd-marker");
 
     let mut buf = Buffer::empty(area);
@@ -319,7 +318,7 @@ fn actions_labels_reflect_worktree_mode() {
 }
 
 /// The `Worktree Ctrl+w` hint is right-aligned, shows the registry's chord, and is a click target for the same toggle.
-/// Like the other two buttons, a click also moves the cursor onto it, so the focus cue and the footer follow the click.
+/// Like the other buttons, a click also moves the cursor onto it, so the focus cue and the footer follow the click.
 #[test]
 fn actions_worktree_hint_shows_chord_and_toggles_on_click() {
     let theme = Theme::current();
@@ -387,7 +386,6 @@ fn actions_row_keeps_worktree_and_drops_open_previous_with_divider() {
     let theme = Theme::groknight();
     let mut state = DashboardState::new();
     state.focus_open_session_button();
-    // `+ New Agent` (11) + gap (2) + `Worktree Ctrl+w` (15) = 28 fits; adding ` │ Open Previous /resume` (24) does not
     let area = Rect::new(0, 0, 40, 1);
     let mut buf = Buffer::empty(area);
     render_actions_only(&mut buf, area, &theme, &mut state, true);
@@ -456,7 +454,6 @@ fn actions_row_right_items_follow_strict_priority_at_every_width() {
         }
     }
 
-    // The exact armed bands from the width table: 46-47 used to show `Open Previous` with the toggle gone
     let armed_at = |width: u16| {
         let mut state = DashboardState::new();
         state.cwd_has_git_ancestor = true;
@@ -482,7 +479,6 @@ fn actions_row_right_items_follow_strict_priority_at_every_width() {
 #[test]
 fn render_header_paints_label_and_state_chips() {
     let theme = Theme::groknight();
-    // Wide rect so the location label never truncates regardless of how deep the test machine's checkout path is
     let area = Rect::new(0, 0, 400, 1);
     let mut buf = Buffer::empty(area);
     let mut state = DashboardState::new();
@@ -710,12 +706,11 @@ fn render_header_has_no_inactive_chip() {
 #[test]
 fn render_header_shows_location_label() {
     let theme = Theme::current();
-    // Wide rect so the location label never truncates regardless of how deep the test machine's checkout path is
     let area = Rect::new(0, 0, 400, 1);
     let mut state = DashboardState::new();
     let basename = cwd_basename();
 
-    // 0 agents: the location still shows
+    // Agents: the location still shows
     let mut buf = Buffer::empty(area);
     render_header_only(&mut buf, area, &theme, &[], &mut state);
     let c = buf_to_text(&buf);
@@ -724,7 +719,6 @@ fn render_header_shows_location_label() {
         "0-agent header must show the location (`{basename}`), got: {c:?}"
     );
 
-    // 1 agent.
     let mut buf = Buffer::empty(area);
     let rows = vec![header_test_row(1, RowState::Idle, "x")];
     render_header_only(&mut buf, area, &theme, &rows, &mut state);
@@ -739,9 +733,7 @@ fn render_header_shows_location_label() {
 #[test]
 fn render_header_location_label_never_overlaps_chips() {
     let theme = Theme::current();
-    // Narrow enough that a long path overflows the label budget once three chips are reserved.
-    // Last two components stay full after always-on shortening, so they must be long enough
-    // to still overflow — middle-component letters alone would fit the 60-col row.
+    // Narrow enough that a long path overflows the label budget once chips are reserved.
     let area = Rect::new(0, 0, 60, 1);
     let mut buf = Buffer::empty(area);
     let mut state = DashboardState::new();
@@ -766,7 +758,7 @@ fn render_header_location_label_never_overlaps_chips() {
         !content.contains("Choose"),
         "the hint goes before the path is cut"
     );
-    // The ellipsis ends the label; exactly three blank cells separate it from the first chip's glyph
+    // The ellipsis ends the label; exactly blank cells separate it from the first chip's glyph
     let row: String = (0..area.width)
         .map(|x| buf_cell(&buf, x, 0).symbol())
         .collect();
@@ -780,9 +772,9 @@ fn render_header_location_label_never_overlaps_chips() {
     );
 }
 
-/// Basename of the test process's cwd, the one deterministic fragment of the header's location label.
-/// The full label depends on global git caches (`git_info::*`) that parallel tests may touch.
-/// Every fallback path still renders a cwd display ending in the current directory's basename.
+/// Basename of the test process's cwd, the deterministic fragment of the
+/// header's location label. The full label depends on global git caches
+/// (`git_info::*`) that parallel tests may touch.
 fn cwd_basename() -> String {
     std::env::current_dir()
         .ok()

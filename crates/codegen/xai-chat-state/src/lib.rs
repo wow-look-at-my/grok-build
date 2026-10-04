@@ -1,33 +1,10 @@
-#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 3 hits predate the gate
-#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
-#![allow(clippy::expect_used)] // 1 hit predates the gate
-#![allow(clippy::unwrap_used)] // 3 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)] // Hits predate the gate
 
 //! xai-chat-state — Actor-based chat state management for xAI agents.
-//!
-//! This crate extracts conversation state management from `xai-grok-shell`'s
-//! `acp_session.rs` into a standalone actor. It follows the same actor pattern
-//! as `xai-hunk-tracker`:
-//!
-//! ```text
-//! ┌────────────────┐                  ┌──────────────────────────────────────┐
-//! │ SessionActor   │ ─── Command ───▶ │        ChatStateActor                │
-//! │  (push_user,   │                  │  (runs in dedicated tokio task)      │
-//! │   build_req)   │                  │                                      │
-//! └────────────────┘                  │  State (no locks needed):            │
-//!                                     │  - conversation: Vec<ConversationItem>│
-//! ┌────────────────┐                  │  - sampling_config: SamplingConfig   │
-//! │   Query (e.g.  │ ── Cmd+Oneshot ─▶│  - prompt_index: usize              │
-//! │  get_conv)     │ ◀── Response ────│  - total_tokens: u64                │
-//! └────────────────┘                  │                                      │
-//!                                     │         │ ChatStateEvent             │
-//!                                     │         ▼                            │
-//!                                     │  ┌──────────────────┐               │
-//!                                     │  │ event_tx         │───▶ Session   │
-//!                                     │  └──────────────────┘               │
-//!                                     └──────────────────────────────────────┘
-//! ```
 
 #![deny(clippy::indexing_slicing)]
 
@@ -61,6 +38,5 @@ pub use persistence::{
 };
 pub use types::*;
 pub use usage::{UsageLedger, UsageTotals};
-// Re-exported so `xai_chat_state::CompactionDetail` stays a working path for
-// existing callers.
+// Re-exported so `xai_chat_state::CompactionDetail` stays a working path for existing callers.
 pub use xai_compaction_transcript::CompactionDetail;

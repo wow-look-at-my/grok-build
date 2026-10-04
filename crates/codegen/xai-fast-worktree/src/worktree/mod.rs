@@ -28,8 +28,7 @@ pub fn is_grove_strategy(s: &str) -> bool {
         STRATEGY_GROVE_FUSE | STRATEGY_GROVE_NFS | STRATEGY_GROVE_PROJFS | STRATEGY_NFS
     )
 }
-/// The one decline both the Grove arm and the workspace's pre-dispatch rewrite
-/// can reach, so they account for the same source the same way.
+/// The one decline both the Grove arm and the workspace's pre-dispatch rewrite can reach.
 pub const SKIP_SOURCE_IS_GROVE_MOUNT: &str = "source is itself a Grove mount";
 /// Why the Grove arm declined. Every variant is a fallthrough: the next arm runs.
 /// `Display` is the wording that reaches the user through the strategy report.
@@ -40,8 +39,7 @@ pub enum GroveSkip {
     FuseUnavailable,
     #[cfg(target_os = "linux")]
     PrivateMountNamespace,
-    /// Windows-only: `ProjectedFSLib.dll` is absent (the `Client-ProjFS`
-    /// optional feature is off) or the build predates Windows 11 22H2.
+    /// Windows-only: `ProjectedFSLib.dll` is absent (the `Client-ProjFS` optional feature is off).
     #[cfg(windows)]
     ProjfsUnavailable,
     SourceIsGroveMount,
@@ -116,8 +114,7 @@ pub struct ArmSkip {
     pub arm: WorktreeArm,
     /// One line: a typed Grove decline, or a flattened error chain.
     pub detail: String,
-    /// Set when the Grove arm declined with a [`GroveSkip`]. Absent on snapshot-arm
-    /// failures and flattened error chains, which have no typed Grove decline.
+    /// Set when the Grove arm declined with a [`GroveSkip`].
     pub grove_skip: Option<GroveSkip>,
 }
 impl ArmSkip {
@@ -155,7 +152,6 @@ pub fn render_arm_skips(skips: &[ArmSkip]) -> String {
 pub struct CreateWorktreeResult {
     /// Path to the created worktree
     pub worktree_path: PathBuf,
-    /// Git commit the worktree is based on
     pub commit: String,
     /// Statistics from the file copy phase
     pub copy_stats: CopyStats,

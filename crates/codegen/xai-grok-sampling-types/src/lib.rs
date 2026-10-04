@@ -1,12 +1,8 @@
-#![allow(clippy::cast_precision_loss)] // 2 hits predate the gate
-#![allow(clippy::expect_used)] // 3 hits predate the gate
-#![allow(clippy::string_slice)] // 6 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::string_slice)] // Hits predate the gate
 
 //! Pure data types for the xAI sampling / chat-completion API layer.
-//!
-//! API-agnostic conversation, chat-completion request/response, streaming, and error types used across the xAI agent stack.
-//! It contains no I/O: no HTTP clients, no file system access.
-//! Downstream crates like `xai-chat-state` can depend on it without pulling in the full `xai-grok-shell`.
 
 #![deny(clippy::indexing_slicing)]
 #![allow(clippy::unwrap_used)]

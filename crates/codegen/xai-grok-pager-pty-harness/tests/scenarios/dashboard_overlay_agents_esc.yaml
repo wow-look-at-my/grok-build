@@ -35,8 +35,8 @@ steps:
   - action: screenshot
     name: dashboard-list
     note: Dashboard list after /dashboard, before Right-arrow attach.
-  # Down clamps at the last focusable. Three Downs land on the session row
-  # whether the cursor started on [+ New Agent] or on a previously selected row.
+  # Down clamps at the last focusable. Downs land on the session row whether the
+  # cursor started on [+ New Agent] or on a previously selected row.
   - action: keys
     keys: "<Down><Down><Down>"
   - action: wait

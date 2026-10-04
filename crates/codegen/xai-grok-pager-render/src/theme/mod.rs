@@ -1,11 +1,4 @@
 //! All colors come from the `Theme` struct. No hardcoded colors elsewhere.
-//! The default theme is GrokNight (neutral gray base with TokyoNight accents).
-//!
-//! ## Color support
-//!
-//! GrokNight is defined in `Color::Rgb` (truecolor).
-//! At startup, [`Theme::current()`] quantizes every color to the terminal's detected capability level via [`Theme::quantized`].
-//! Runtime-generated colors (syntax highlighting, blending) are also quantized via [`color_support::quantize`].
 
 pub mod cache;
 pub mod color_support;
@@ -32,8 +25,7 @@ pub enum ThemeKind {
     TokyoNight = 2,
     RosePineMoon = 3,
     OscuraMidnight = 5,
-    /// Every bg is `Reset` so the terminal canvas shows through; legible on both polarities without appearance detection.
-    /// Hidden and unparseable while `cache::terminal_theme_enabled()` is off.
+    /// Every bg is `Reset` so the terminal canvas shows through.
     Terminal = 6,
     /// Follow system appearance. Disk stores `"auto"`; `cache::CURRENT` holds only the resolved concrete kind. Excluded from [`ALL`].
     Auto = 4,
@@ -121,7 +113,8 @@ impl ThemeKind {
         }
     }
 
-    /// Whether this kind paints the terminal-native palette ([`Theme::terminal_default`]) instead of an RGB palette, and so needs the same polarity-safe rendering paths as minimal mode's lock.
+    /// Whether this kind paints the terminal-native palette
+    /// ([`Theme::terminal_default`]) instead of an RGB palette.
     #[must_use]
     pub fn is_terminal_native(self) -> bool {
         self == Self::Terminal
@@ -312,8 +305,7 @@ impl Theme {
             // Auto is resolved to a concrete theme before being stored; if reached, fall back to GrokNight
             ThemeKind::Auto => Self::groknight(),
         };
-        // Sample polarity before quantizing
-        // After quantization `bg_base` may land on a named or indexed entry whose luminance depends on the host palette
+        // Sample polarity before quantizing After quantization `bg_base` may land on a named or indexed entry whose luminance depends.
         let dark = base.is_dark();
         let adapted = if cfg!(target_os = "windows") {
             base.windows_contrast_boost(dark)
@@ -338,14 +330,13 @@ impl Theme {
     }
 
     /// Whether this theme paints no diff row bands (`diff_*_bg` is `Reset`).
-    /// In that case changed diff lines carry a whole-line red/green *foreground* instead of syntax highlighting on a colored band.
     #[must_use]
     pub fn diff_uses_line_fg(&self) -> bool {
         use ratatui::style::Color;
         self.diff_delete_bg == Color::Reset && self.diff_insert_bg == Color::Reset
     }
 
-    /// In-memory only; the event loop emits OSC 12. No-op while the terminal-native lock is engaged.
+    /// No-op while the terminal-native lock is engaged.
     pub fn apply_kind(kind: ThemeKind) -> ThemeKind {
         if cache::terminal_native_locked() {
             return cache::current_kind();
@@ -363,7 +354,6 @@ impl Theme {
         }
     }
 
-    /// Native ~12-unit RGB steps collapse under Windows display gamma; ConHost needs ~24-32 levels per channel.
     /// Prompt-block bg is asymmetric: a dark step on a light canvas weighs more, so that direction is pushed less.
     fn windows_contrast_boost(self, dark: bool) -> Self {
         use ratatui::style::Color;
@@ -405,8 +395,6 @@ impl Theme {
     }
 
     /// Style for shell command suggestion ghost text (dimmed italic).
-    /// Inherits [`Self::dim`]'s polarity-safe rule on terminal-native
-    /// palettes instead of painting bright black.
     pub fn ghost_text_style(&self) -> ratatui::style::Style {
         self.dim().add_modifier(ratatui::style::Modifier::ITALIC)
     }
@@ -424,32 +412,21 @@ impl Theme {
             == crate::theme::system_appearance::SystemAppearance::Dark
     }
 
-    /// ANSI16 has two grays; naive distance collapses pastel accents onto that ramp and erases state.
-    /// Pin chrome to the four neutrals and accents to hue-preserving slots (bright on dark, normal on light).
-    /// Canvas-blending surfaces pin to theme polarity, not `Reset`, or the terminal profile punches holes through them.
+    /// ANSI16 has grays; naive distance collapses pastel accents onto that ramp and erases state. Pin chrome to the
+    /// neutrals and accents to hue-preserving slots (bright on dark, normal on light). Canvas-blending surfaces pin to
+    /// theme polarity, not `Reset`, or the terminal profile punches holes through them.
     fn ansi16_chrome_overrides(self, dark: bool) -> Self {
         use ratatui::style::Color;
-        // Theme polarity canvas: what the body bg should look like
-        // Matches the natural quantize result for `bg_base` on both built-in themes
-        // The explicit pin gives themes whose bg RGB doesn't quantize cleanly the right polarity anyway
+        // Theme polarity canvas: what the body bg should look like Matches the natural quantize result for `bg_base`.
         let canvas_bg = if dark { Color::Black } else { Color::White };
-        // One palette step off the canvas: DarkGray (ANSI 8) on black, Gray (ANSI 7 / silver) on white
-        // ANSI16 has no slot between these and the canvas, so the elevation reads louder than the truecolor design
-        // But it's guaranteed visible on every 16-color terminal, including museum-grade `TERM=ansi` boxes
         let elevated_bg = if dark { Color::DarkGray } else { Color::Gray };
         // Max-contrast fg for focused chrome and assistant body.
         let high_contrast_fg = if dark { Color::White } else { Color::Black };
-        // Mid-tone fg for muted labels: silver on black, dark-gray on white
-        // This is the higher-contrast of the two muted slots, used for secondary text that still needs to read clearly
+        // Mid-tone fg for muted labels: silver on black, dark-gray on white This is the higher-contrast of both muted slots.
         let muted_fg = if dark { Color::Gray } else { Color::DarkGray };
-        // Low-contrast fg for genuinely dim chrome (soft modal/picker frames, the unselected `>` prompt indicator)
-        // The polarity is the INVERSE of `muted_fg`: DarkGray sits next to Black, Gray (silver) next to White
-        // A separate slot keeps dim chrome from reading at the same weight as secondary text
+        // Low-contrast fg for genuinely dim chrome (soft modal/picker frames, the unselected `>` prompt indicator) The polarity is the INVERSE.
         let dim_fg = if dark { Color::DarkGray } else { Color::Gray };
 
-        // ── Polarity-aware semantic hues ────────────────────────────
-        // Normal ANSI hues (idx 1-7) are designed at ~50% luminance and read well on light backgrounds
-        // Light variants (idx 9-15) are full saturation and read well on dark backgrounds
         let red = if dark { Color::LightRed } else { Color::Red };
         let green = if dark {
             Color::LightGreen
@@ -469,9 +446,7 @@ impl Theme {
         };
         let cyan = if dark { Color::LightCyan } else { Color::Cyan };
         Self {
-            // ── Elevated surfaces: one step off the canvas ──────────────
-            // Hover/highlight/visual-selection rows need to read as a distinct "raised" band against the body
-            // Without this every GrokNight bg field quantizes to Color::Black and these become invisible
+            // ── Elevated surfaces: one step off the canvas ────────────── Hover/highlight/visual-selection rows need to read.
             bg_light: elevated_bg,
             bg_highlight: elevated_bg,
             bg_hover: elevated_bg,
@@ -483,8 +458,6 @@ impl Theme {
             paste_bg: canvas_bg,
             scrollbar_bg: canvas_bg,
 
-            // Idle frame uses muted_fg: DarkGray (ANSI 8) is near-bg on many palettes and the frame vanishes.
-            // Hover stays DarkGray; selection is muted_fg; focus is high_contrast_fg.
             prompt_border: muted_fg,
             prompt_border_active: high_contrast_fg,
             selection_border: muted_fg,
@@ -493,23 +466,16 @@ impl Theme {
             // Scrollbar thumb stays visible against the canvas-matched track.
             scrollbar_fg: muted_fg,
 
-            // ── Foreground / text hierarchy ─────────────────────────────
-            // Prompt textarea and chrome captions use these directly
-            // blend_color cannot mix named ANSI, so they must already be readable slots
+            // ── Foreground / text hierarchy ───────────────────────────── Prompt textarea.
             text_primary: high_contrast_fg,
             text_secondary: muted_fg,
             md_text: high_contrast_fg,
-            // Selected user-prompt `>` (drives the user selection accent and the OSC 12 cursor color) takes max-contrast fg
-            // The selection pops against the canvas: White on dark, Black on light
             accent_user: high_contrast_fg,
-            // Two-tier grey: `gray`/`gray_bright` carry secondary text and need readable contrast, so they take `muted_fg`
-            // `gray_dim` is for genuinely faded chrome (modal frames, unselected `>` prompt indicator) and takes `dim_fg`
-            // Two tiers is the most ANSI16 can express without colliding with the elevated-bg slot
             gray: muted_fg,
             gray_bright: muted_fg,
             gray_dim: dim_fg,
 
-            // ANSI16 has 6 chromatic slots, so sub-hues fold onto the dominant family. Magenta covers the purple/violet accents.
+            // Magenta covers the purple/violet accents.
             accent_assistant: magenta,
             accent_thinking: magenta,
             accent_running: magenta,
@@ -525,8 +491,7 @@ impl Theme {
             accent_system: blue,
             accent_skill: blue,
             fuzzy_accent: blue,
-            // Cyan family: model name and the legacy `running` indicator (distinct from the magenta `accent_running` used for subagents).
-            // ANSI16 has no separate teal slot, so the truecolor teal model accent folds onto cyan here.
+            // Cyan family: model name and the legacy `running` indicator.
             accent_model: cyan,
             running: cyan,
             // The dark slot on both polarities: it reads on black and on white.
@@ -537,9 +502,6 @@ impl Theme {
             path: yellow,
             accent_plan: yellow,
 
-            // Markdown content: naive Basic quantize lands GrokNight md_code / md_muted / h4-h6 on DarkGray (ANSI 8)
-            // Many palettes tune that slot near the background, so inline code and table borders vanish in tmux over ssh
-            // `md_muted` uses muted_fg, not dim_fg: format_table also stacks DIM on table borders
             md_heading_h1: cyan,
             md_heading_h2: blue,
             md_heading_h3: magenta,
@@ -558,24 +520,23 @@ impl Theme {
     }
 }
 
-/// Gates OSC 112: an unprompted reset makes Ghostty latch the cursor color and stop tracking theme changes. Only undo what we painted.
+/// Only undo what we painted.
 static CURSOR_COLOR_APPLIED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// OSC 12 wants RGB even below truecolor, so every variant is resolved back. `Reset` yields `None` so the terminal keeps its profile cursor.
+/// `Reset` yields `None` so the terminal keeps its profile cursor.
 pub fn cursor_color_escape() -> Option<String> {
     let theme = Theme::current();
     let (r, g, b) = crate::render::color::resolve_to_rgb(theme.accent_user)?;
     Some(format!("\x1b]12;rgb:{r:02x}/{g:02x}/{b:02x}\x07"))
 }
 
-/// Write [`cursor_color_escape`] inline. Startup only, while no writer thread is live; once the event loop runs, its OSC 12/112 tracker is the single emitter (including screen-mode switches).
+/// Write [`cursor_color_escape`] inline.
 pub fn apply_cursor_color() {
     use std::io::Write;
     use std::sync::atomic::Ordering;
     let Some(escape) = cursor_color_escape() else {
-        // No RGB accent (terminal-native palette, NO_COLOR): undo our own
-        // paint if any, otherwise stay silent (see `CURSOR_COLOR_APPLIED`).
+        // No RGB accent (terminal-native palette, NO_COLOR): undo our own paint if any, otherwise stay silent.
         reset_cursor_color_if_applied();
         return;
     };
@@ -587,26 +548,20 @@ pub fn apply_cursor_color() {
 }
 
 /// [`reset_cursor_color`] gated on this session having painted the cursor
-/// (see [`CURSOR_COLOR_APPLIED`]), clearing the flag. Atomic swap, so
-/// panic- and signal-handler-safe.
+/// (see [`CURSOR_COLOR_APPLIED`]), clearing the flag.
 pub fn reset_cursor_color_if_applied() {
     if CURSOR_COLOR_APPLIED.swap(false, std::sync::atomic::Ordering::Relaxed) {
         reset_cursor_color();
     }
 }
 
-/// The OSC 112 escape that resets the terminal cursor color to its default.
 pub const CURSOR_COLOR_RESET_ESCAPE: &str = "\x1b]112\x07";
 
-/// Record that a cursor-color escape went out over the render wire (the event
-/// loop's queued emitter, which bypasses [`apply_cursor_color`]), keeping
-/// [`CURSOR_COLOR_APPLIED`] truthful for the teardown reset.
+/// Record that a cursor-color escape went out over the render wire.
 pub fn note_cursor_color_on_wire(applied: bool) {
     CURSOR_COLOR_APPLIED.store(applied, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Test-only access to [`CURSOR_COLOR_APPLIED`] so the OSC 12/112 gating is
-/// assertable without capturing the raw stderr fd.
 #[cfg(any(test, feature = "test-support"))]
 pub fn cursor_color_applied_for_test() -> bool {
     CURSOR_COLOR_APPLIED.load(std::sync::atomic::Ordering::Relaxed)
@@ -618,7 +573,6 @@ pub fn set_cursor_color_applied_for_test(v: bool) {
     CURSOR_COLOR_APPLIED.store(v, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Reset the terminal cursor color to the terminal's default via OSC 112.
 ///
 /// Called on shutdown to restore the user's original cursor appearance.
 pub fn reset_cursor_color() {
@@ -756,16 +710,13 @@ mod tests {
         assert_eq!(t.md_text, Color::White);
         assert_eq!(t.text_primary, Color::White);
         assert_eq!(t.text_secondary, Color::Gray);
-        // Two-tier grey: secondary text (`gray`) reads at the muted slot (silver), `gray_dim` at the dim slot (DarkGray)
-        // See `ansi16_overrides_gray_hierarchy_collapses_to_two_slots`
         assert_eq!(t.gray, Color::Gray);
         assert_eq!(t.gray_dim, Color::DarkGray);
     }
 
     #[test]
     fn ansi16_overrides_light_inverts_high_contrast_and_elevated_bg() {
-        // Light canvas inverts polarity: elevated bg reads darker (silver step from white), high-contrast fg is Black, muted fg is DarkGray
-        // The dim slot (`gray_dim`) flips to silver; see `ansi16_overrides_gray_hierarchy_collapses_to_two_slots`
+        // Light canvas inverts polarity: elevated bg reads darker (silver step from white), high-contrast fg is Black.
         use ratatui::style::Color;
         let t = Theme::grokday().ansi16_chrome_overrides(false);
         assert_eq!(t.bg_light, Color::Gray);
@@ -781,8 +732,7 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_preserve_bg_base() {
-        // `bg_base` belongs to the user's terminal session, not to us: we never overwrite it
-        // The polarity-pinned canvas surfaces are tested separately in `ansi16_overrides_canvas_matching_surfaces_use_theme_polarity`
+        // `bg_base` belongs to the user's terminal session, not to us.
         let base = Theme::groknight();
         let t = base.ansi16_chrome_overrides(true);
         assert_eq!(t.bg_base, base.bg_base);
@@ -790,9 +740,7 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_state_accents_pin_to_polarity_aware_hue() {
-        // running / completed / error must read as their hue family even at ANSI16
-        // A dark canvas takes bright (Light*) variants, a light canvas normal variants
-        // Without these pins the source pastel RGBs collapse onto silver/DarkGray and every state signal becomes the same gray
+        // running / completed / error must read as their hue family even at ANSI16 A dark canvas takes bright (Light*) variants.
         use ratatui::style::Color;
         let t_dark = Theme::groknight().ansi16_chrome_overrides(true);
         assert_eq!(t_dark.accent_error, Color::LightRed);
@@ -864,9 +812,7 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_magenta_family_shares_slot() {
-        // assistant turn, mid-stream thinking, running indicator, and context-overhead accent all use a purple/violet hue in truecolor
-        // ANSI16 has one magenta slot per polarity, so they all fold onto it together
-        // They live in different surfaces so the collision doesn't cause confusion
+        // assistant turn, mid-stream thinking, running indicator, and context-overhead accent all use a purple/violet hue.
         use ratatui::style::Color;
         let t = Theme::groknight().ansi16_chrome_overrides(true);
         assert_eq!(t.accent_assistant, Color::LightMagenta);
@@ -877,8 +823,7 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_yellow_family_absorbs_orange_and_gold() {
-        // ANSI16 has no orange or gold slot, so warm accents (command, warning, path, plan) all fold onto Yellow / LightYellow
-        // Preserving the warm hue family matters more than per-accent differentiation the palette cannot represent
+        // ANSI16 has no orange or gold slot.
         use ratatui::style::Color;
         let t_dark = Theme::groknight().ansi16_chrome_overrides(true);
         for f in [
@@ -904,7 +849,6 @@ mod tests {
     #[test]
     fn ansi16_overrides_cyan_family_absorbs_teal() {
         // ANSI16 has no teal slot; the model teal folds onto cyan.
-        // The `running` indicator (legacy cyan, distinct from the magenta `accent_running` used for subagents) also lives here.
         use ratatui::style::Color;
         let t = Theme::groknight().ansi16_chrome_overrides(true);
         assert_eq!(t.accent_model, Color::LightCyan);
@@ -928,8 +872,7 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_diff_fg_uses_polarity_aware_red_green() {
-        // Diff add/remove rely on fg color for their primary signal at ANSI16 (the subtle pastel bg tints don't survive quantization)
-        // Pin fg to red / green so deletes and inserts stay legible.
+        // Diff add/remove rely on fg color for their primary signal at ANSI16 (the subtle pastel bg tints don't survive quantization) Pin fg.
         use ratatui::style::Color;
         let t_dark = Theme::groknight().ansi16_chrome_overrides(true);
         assert_eq!(t_dark.diff_delete_fg, Color::LightRed);
@@ -942,8 +885,6 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_accent_user_uses_high_contrast() {
-        // accent_user drives the selected-user-prompt `>` color and the OSC 12 cursor color
-        // It's pinned to max-contrast fg in both polarities so the selection always pops: White on a dark canvas, Black on a light one
         use ratatui::style::Color;
         let t_dark = Theme::groknight().ansi16_chrome_overrides(true);
         assert_eq!(t_dark.accent_user, Color::White);
@@ -971,8 +912,7 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_canvas_matching_surfaces_use_theme_polarity() {
-        // Sunken bg, code-block bg, paste chip bg, and scrollbar track must match the theme polarity (Black for dark themes, White for light)
-        // Color::Reset would defer to the user's terminal canvas, which can disagree with the theme (e.g. GrokNight on a white-canvas terminal).
+        // Sunken bg, code-block bg, paste chip bg, and scrollbar track must match the theme polarity (Black for dark themes, White for light).
         use ratatui::style::Color;
         let t_dark = Theme::groknight().ansi16_chrome_overrides(true);
         assert_eq!(t_dark.bg_dark, Color::Black);
@@ -989,7 +929,7 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_border_hierarchy_is_distinct() {
-        // Dark: idle/selection share Gray so the frame survives palettes that tune ANSI 8 near-bg. Light: those sit on DarkGray; focus is Black.
+        // Light: those sit on DarkGray; focus is Black.
         use ratatui::style::Color;
         let t_dark = Theme::groknight().ansi16_chrome_overrides(true);
         assert_eq!(t_dark.hover_border, Color::DarkGray);
@@ -1021,7 +961,6 @@ mod tests {
 
     #[test]
     fn scrollbar_thumb_contrasts_with_track_in_all_themes() {
-        // Thumb must sit away from the canvas vs the track, by >=30 summed-RGB, or follow-mode's 40% blend hides the scrollbar.
         use ratatui::style::Color;
         let lum = |c: Color, field: &str, kind: ThemeKind| -> i32 {
             let Color::Rgb(r, g, b) = c else {
@@ -1036,8 +975,7 @@ mod tests {
                 ThemeKind::TokyoNight => Theme::tokyonight(),
                 ThemeKind::RosePineMoon => Theme::rosepine_moon(),
                 ThemeKind::OscuraMidnight => Theme::oscura_midnight(),
-                // Reset plus named ANSI entries: the scrollbar rides the
-                // terminal's own fg/bg contrast, so there is no RGB delta.
+                // Reset plus named ANSI entries: the scrollbar rides the terminal's own fg/bg contrast.
                 ThemeKind::Terminal => continue,
                 ThemeKind::Auto => unreachable!("ALL excludes Auto"),
             };
@@ -1085,7 +1023,7 @@ mod tests {
 
     #[test]
     fn ansi16_overrides_gray_hierarchy_collapses_to_two_slots() {
-        // ANSI16 has two greys. Bright and medium share muted_fg so secondary text stays readable; dim keeps the lower slot.
+        // ANSI16 has greys. Bright and medium share muted_fg so secondary text stays readable; dim keeps the lower slot.
         use ratatui::style::Color;
         let t_dark = Theme::groknight().ansi16_chrome_overrides(true);
         assert_eq!(t_dark.gray, Color::Gray);
@@ -1111,9 +1049,7 @@ mod tests {
         use ratatui::style::Color;
         // Truecolor pass-through.
         assert_eq!(resolve_to_rgb(Color::Rgb(12, 34, 56)), Some((12, 34, 56)));
-        // Indexed routes through indexed_to_rgb; index 16 is (0, 0, 0), the first cube cell
         assert_eq!(resolve_to_rgb(Color::Indexed(16)), Some(indexed_to_rgb(16)));
-        // Each named ANSI variant resolves to indexed_to_rgb(0..=15).
         let named = [
             (Color::Black, 0u8),
             (Color::Red, 1),
@@ -1209,9 +1145,6 @@ mod tests {
         assert_eq!("".parse::<ThemeKind>(), Err(()));
     }
 
-    /// OSC 12/112 gating on the terminal theme (Reset accent): apply never
-    /// marks the cursor as painted, and the swap-gated reset fires only when
-    /// this session actually painted it — clearing the flag exactly once.
     #[test]
     fn cursor_color_gating_stays_silent_on_reset_accent() {
         let _guard = cache::pin_theme();
@@ -1225,7 +1158,6 @@ mod tests {
             "Reset accent must never mark the cursor as painted"
         );
 
-        // Reset-accent undoes a prior OSC 12 exactly once. This leg emits one OSC 112 to fd 2; the harness does not capture it.
         set_cursor_color_applied_for_test(true);
         apply_cursor_color();
         assert!(

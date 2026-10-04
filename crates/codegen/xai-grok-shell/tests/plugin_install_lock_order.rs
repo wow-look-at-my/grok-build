@@ -1,5 +1,4 @@
-//! Regression: `install_plugin` must release the registry flock before the post-install config
-//! write — holding registry ⊃ config-init inverts the documented order and deadlocks writers.
+//! Regression: `install_plugin` must release the registry flock before the post-install config write.
 
 use std::time::{Duration, Instant};
 
@@ -15,8 +14,7 @@ fn wait_for(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
 
 #[test]
 fn install_releases_registry_lock_before_post_install_config_write() {
-    // One #[test] per binary: the env is process-global (same rule as
-    // acp_harness::run_agent_test).
+    // One #[test] per binary: the env is process-global (same rule as acp_harness::run_agent_test).
     let grok_home = tempfile::tempdir().expect("grok home");
     // SAFETY: no other threads are running yet.
     unsafe { std::env::set_var("GROK_HOME", grok_home.path()) };
@@ -46,8 +44,7 @@ fn install_releases_registry_lock_before_post_install_config_write() {
         "install never saved the registry"
     );
 
-    // While the installer waits on the held config-init flock, the registry flock must be free —
-    // the ABBA cross starves every other registry writer for the full timeout.
+    // While the installer waits on the held config-init flock.
     let lock_path = install_dir.join("registry.lock");
     let registry_lock_freed = wait_for(Instant::now() + Duration::from_millis(500), || {
         let file = std::fs::OpenOptions::new()

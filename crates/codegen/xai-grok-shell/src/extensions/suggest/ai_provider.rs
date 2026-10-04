@@ -46,8 +46,8 @@ fn build_suggestion(prefix: &str, raw: &str) -> Vec<RankedSuggestion> {
         return Vec::new();
     }
 
-    // If the model returned the full command (including prefix), use it as-is.
-    // Otherwise concatenate directly: the model output may start with a space or continuation that should be appended verbatim after the prefix
+    // If the model returned the full command (including prefix), use it
+    // as-is.
     let insert_text = if trimmed.starts_with(prefix) {
         trimmed.to_owned()
     } else if raw.starts_with(prefix) {
@@ -114,8 +114,7 @@ mod tests {
 
     #[test]
     fn build_suggestion_no_separator_concatenates_directly() {
-        // The model returned "commit" without a leading space, so nothing inserts a separator
-        // The model must include the space itself when one is needed
+        // The model returned "commit" without a leading space.
         let result = build_suggestion("git", "commit");
         assert_eq!(
             result.first().map(|r| r.insert_text.as_str()),

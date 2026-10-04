@@ -1,10 +1,4 @@
-//! The one bearer decision the Imagine image and video clients share.
-//!
-//! Direct calls to `api.x.ai` carry exactly one of: the per-request bearer an `ApiKeyProvider`
-//! resolves, or the static key the host configured. A provider outranks the static key, its
-//! typed refusal is final, and with neither source the request is refused rather than sent
-//! unauthenticated. Nothing is baked into a client's default headers, so a host cannot leak a
-//! token by configuring the client with the wrong one.
+//! The bearer decision the Imagine image and video clients share.
 
 use xai_tool_runtime::{ToolError, ToolErrorKind};
 

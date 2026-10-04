@@ -354,9 +354,7 @@ pub(crate) async fn upload_metadata(
     )
     .await;
 }
-/// Bound on one detached `subagent.json` upload: the direct storage clients
-/// carry no request timeout, so without this every spawn/completion against a
-/// tarpit endpoint leaks a parked task pinning an `AuthManager` Arc.
+/// Bound on one detached `subagent.json` upload: the direct storage clients carry no request timeout.
 const SUBAGENT_METADATA_UPLOAD_BOUND: std::time::Duration = std::time::Duration::from_secs(60);
 /// Uploads subagent session metadata to cloud storage as `subagent.json`.
 /// Path format: `{child_session_id}/subagent.json` (session-root, not turn-scoped).
@@ -670,7 +668,6 @@ pub(crate) struct SubagentSpawnedRef {
     pub(crate) child_session_id: String,
     pub(crate) subagent_type: String,
     /// Human-readable spawn description.
-    /// See [`crate::agent::subagent::SubagentSessionMetadata::description`] for why goal-role subagents need it serialized.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub(crate) description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -833,8 +830,8 @@ pub(crate) async fn upload_session_metadata(
     };
     upload_artifact_to_gcs(ctx, &gcs_path, &metadata_json, "application/json", artifact).await;
 }
-/// Uploads the session-scoped unified log to cloud storage. Path format: {session_id}/turn_{N}/unified_log.jsonl Called only from 401/404 auth-failure diagnostics, never per turn.
-/// Only entries belonging to the current session (matching `sid`) are included. The snapshot runs on a blocking thread since `snapshot_session_log` reads and parses the on-disk log file.
+/// Uploads the session-scoped unified log to cloud storage. Only entries belonging to the current session (matching `sid`) are included. The snapshot runs on a blocking thread since
+/// `snapshot_session_log` reads and parses the on-disk log file.
 pub(crate) async fn upload_unified_log(ctx: &PromptTraceContext, wait: UploadWait) {
     let session_id = ctx.session_info.id.0.to_string();
     let log_bytes = match tokio::task::spawn_blocking(move || {
@@ -936,8 +933,8 @@ pub(crate) async fn upload_turn_messages(
     );
     true
 }
-/// A failed `chat_history.jsonl` archive build, tagged with the manifest `reason`.
-/// The caller records the matching artifact-failure category (`serialize_failed` vs `archive_failed`), mirroring `upload_turn_messages`.
+/// A failed `chat_history.jsonl` archive build, tagged with the manifest
+/// `reason`.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) struct SessionStateBuildError {
@@ -992,9 +989,12 @@ fn compress_chat_history_archive(jsonl: Vec<u8>) -> Result<Vec<u8>, SessionState
     }
     Ok(archive_data)
 }
-/// Build a gzipped tar holding a single `chat_history.jsonl` entry from the in-memory conversation `messages`.
-/// The trace viewer renders a turn's conversation only from the `chat_history.jsonl` entry inside a session-state archive, parsed as JSONL.
-/// Harness sub-turns upload no other session state, so we emit that shape from the same items that feed `turn_messages.json`. Each `ConversationItem` is serialized compactly, one per `\n`-terminated line. Empty `messages` yield a zero-byte payload the viewer treats as "no history". Harness pairs always carry at least one message, so this is only a safety floor.
+/// Build a gzipped tar holding a single `chat_history.jsonl` entry from the
+/// in-memory conversation `messages`. The trace viewer renders a turn's
+/// conversation only from the `chat_history.jsonl` entry inside a
+/// session-state archive, parsed as JSONL. Harness sub-turns upload no other
+/// session state, so we emit that shape from the same items that feed
+/// `turn_messages.json`.
 pub(crate) async fn build_chat_history_session_state(
     messages: &[xai_grok_sampling_types::conversation::ConversationItem],
 ) -> Result<Vec<u8>, SessionStateBuildError> {
@@ -1019,15 +1019,13 @@ pub(crate) async fn upload_harness_session_archive(
 ) -> bool {
     false
 }
-/// Credential resolver for the queue worker. [`TraceExportSource::proxy_credentials`] supplies a refresh-aware [`ShellAuthCredentialProvider`].
-/// [`TraceExportSource::proxy_attribution`] supplies a [`StorageClientAttributionBridge`]. The queue worker attaches both to the resolved config before constructing the per-attempt `StorageClient`.
-/// The `proxy_*` methods delegate to [`crate::upload::gcs::WithAuth`] so the wiring stays in one place (the `TraceExportConfigWithAuth` adapter). The static `user_token` snapshot it carries is unused at the wire level (the provider returned by `proxy_credentials` always drives the bearer).
+/// Credential resolver for the queue worker.
 pub(crate) struct DynamicResolver {
     auth_manager: Arc<xai_grok_login::AuthManager>,
     base_config: TraceExportConfig,
 }
 impl DynamicResolver {
-    /// Build the auth-bearing wrapper used by all three `proxy_*` methods.
+    /// Build the auth-bearing wrapper used by all of them `proxy_*` methods.
     fn with_auth(&self) -> crate::upload::gcs::TraceExportConfigWithAuth {
         use crate::upload::gcs::WithAuth as _;
         self.base_config.with_auth(Some(self.auth_manager.clone()))
@@ -1108,9 +1106,8 @@ impl TraceExportSource for DynamicResolver {
         })
     }
 }
-/// The spill dir is shared by every session's queue in the process, so the reconcile runs at most once per verdict class.
-/// That is one recovery, and one purge that may escalate over it if data collection is disabled later in the same process.
-/// Re-auth to a ZDR account or a leader session carrying an opt-out can disable it mid-process.
+/// The spill dir is shared by every session's queue in the process, so the
+/// reconcile runs at most once per verdict class.
 static SPILL_RECONCILE_STATE: std::sync::atomic::AtomicU8 =
     std::sync::atomic::AtomicU8::new(SPILL_NOT_RUN);
 const SPILL_NOT_RUN: u8 = 0;
@@ -1395,9 +1392,10 @@ pub(crate) async fn upload_trace_artifact_blocking(
     }
     result
 }
-/// Only these accept shapes are durably owned by the queue (temp and recovery sidecar on disk, flushed by the turn-end wait or recovered next run).
-/// `FellBackToInline` is a fire-and-forget task the flush cannot see, and `Failed` was never handed off.
-/// Both need a real awaited attempt before the manifest may claim anything.
+/// Only these accept shapes are durably owned by the queue (temp and recovery
+/// sidecar on disk, flushed by the turn-end wait or recovered next run).
+/// `FellBackToInline` is a fire-and-forget task the flush cannot see, and
+/// `Failed` was never handed off.
 fn enqueue_outcome_is_durable(outcome: &EnqueueOutcome) -> bool {
     match outcome {
         EnqueueOutcome::Enqueued | EnqueueOutcome::Deduplicated => true,
@@ -2206,9 +2204,8 @@ pub(crate) mod tests {
             other => panic!("expected Direct, got {:?}", other),
         }
     }
-    /// `DynamicResolver` must supply `proxy_credentials` and `proxy_attribution`.
-    /// The queue worker's per-attempt `StorageClient` then gets a refresh-aware credential provider AND emits `auth_401_attribution` on 401.
-    /// Without these, the worker falls back to the static `user_token` snapshot baked into `TraceExportConfig` and emits no attribution.
+    /// `DynamicResolver` must supply `proxy_credentials` and `proxy_attribution`. Without these, the worker falls back to the static
+    /// `user_token` snapshot baked into `TraceExportConfig` and emits no attribution.
     #[test]
     fn dynamic_resolver_supplies_proxy_credentials_and_attribution() {
         use crate::session::repo_changes::UploadMethod;

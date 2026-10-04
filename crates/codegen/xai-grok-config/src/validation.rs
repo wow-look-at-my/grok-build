@@ -26,11 +26,10 @@ fn fail_closed_flag(requirements: &toml::Value) -> bool {
 }
 
 /// Env override for [`FAIL_CLOSED_KEY`]; only applies to `requirements.toml`.
-/// The name shares the `GROK_MANAGED_CONFIG_URL` prefix.
 pub(crate) const FAIL_CLOSED_ENV: &str = "GROK_MANAGED_CONFIG_FAIL_CLOSED";
 
-/// Where a requirements layer came from: a file on disk, or the macOS MDM managed-preferences layer (admin-forced, no file).
-/// The typed split keeps a caller from calling `exists()` on or reading a layer that has no path.
+/// Where a requirements layer came from: a file on disk, or the macOS MDM
+/// managed-preferences layer (admin-forced, no file).
 #[derive(Debug, Clone)]
 pub enum RequirementsSource {
     File(PathBuf),
@@ -38,8 +37,8 @@ pub enum RequirementsSource {
 }
 
 impl RequirementsSource {
-    /// The display and provenance label: a file path string, or the synthetic MDM source id (`ai.x.grok:…`).
-    /// For diagnostics and matching only; the MDM layer has no file, so this is a label (`Cow<str>`), never a `Path` to open.
+    /// The display and provenance label: a file path string, or the synthetic
+    /// MDM source id (`ai.x.grok:…`).
     pub fn label(&self) -> std::borrow::Cow<'_, str> {
         match self {
             Self::File(p) => p.to_string_lossy(),
@@ -54,7 +53,6 @@ pub struct RequirementsLayer {
     pub value: toml::Value,
     pub source: RequirementsSource,
     /// `true` means the root-owned system layer.
-    /// Security decisions must trust this flag, not re-derive it from the source, which is `GROK_HOME`-influenced and could carry `..`.
     pub is_system: bool,
 }
 
@@ -81,9 +79,8 @@ pub fn requirements_layers() -> Vec<RequirementsLayer> {
             });
         }
     }
-    // macOS MDM: OS-protected admin layer (forced values only)
-    // It is pushed last so it wins the deep-merge over the system file and cloud cache
-    // It is marked `is_system` so security decisions trust it like the root-owned layer
+    // macOS MDM: OS-protected admin layer (forced values only) It is pushed
+    // last so it wins the deep-merge over the system file.
     if let Some(value) = mdm_requirements_value() {
         out.push(RequirementsLayer {
             value,
@@ -109,7 +106,7 @@ pub(crate) fn load_requirements() -> Option<toml::Value> {
     load_user_requirements(user_grok_home().as_deref())
 }
 
-/// User requirements layer from `<home>/requirements.toml`, or `None` with no resolvable user home (rather than reading a cwd-relative `.grok`).
+/// User requirements layer from `<home>/requirements.toml`.
 fn load_user_requirements(home: Option<&Path>) -> Option<toml::Value> {
     load_requirements_layer(&home?.join("requirements.toml"))
 }
@@ -171,8 +168,8 @@ pub enum RequirementsError {
     },
 }
 
-/// `Ok(())` unless the layer opts into fail_closed AND has invalid `[[version_overrides]]` for the registered CLI version.
-/// Re-reads the file independently from [`load_requirements_layer`]; sharing the parse would couple the loader and validator APIs for little gain.
+/// `Ok(())` unless the layer opts into fail_closed AND has invalid
+/// `[[version_overrides]]` for the registered CLI version.
 pub(crate) fn validate_requirements_layer(path: &Path) -> Result<(), RequirementsError> {
     let Ok(v) = load_toml_file(path) else {
         return Ok(());
@@ -228,7 +225,6 @@ fn validate_user_requirements(home: Option<&Path>) -> Result<(), RequirementsErr
 }
 
 /// `fail_closed` for [`validate_requirements`]'s version check.
-/// The admin file flag is authoritative; the env can only TIGHTEN it (force-on), never loosen.
 fn resolve_fail_closed_mode(requirements: &toml::Value) -> bool {
     fail_closed_flag(requirements) || env_bool(FAIL_CLOSED_ENV) == Some(true)
 }

@@ -1,43 +1,7 @@
-#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
-#![allow(clippy::cast_possible_wrap)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 
 //! Lightweight process-spawning utilities for TTY safety.
-//!
-//! When a TUI/pager/raw-mode terminal owns the parent process's controlling
-//! TTY, every child process must be detached — otherwise it (or its
-//! grandchildren: npm, git, pinentry, ssh-agent …) can open `/dev/tty`
-//! directly and spew mouse escape codes, capability-probe replies, or
-//! credential prompts onto the live screen.
-//!
-//! This crate provides the minimal surface needed to make subprocess spawning
-//! safe. It is intentionally tiny so that **every** crate in the workspace
-//! can depend on it without pulling in heavyweight libraries.
-//!
-//! # Usage
-//!
-//! ```rust,no_run
-//! use xai_tty_utils::{detach_command, pager_env};
-//! use std::process::Stdio;
-//!
-//! let mut cmd = tokio::process::Command::new("git");
-//! cmd.args(["status", "--porcelain"]);
-//! detach_command(&mut cmd);
-//! cmd.stdin(Stdio::null());
-//! cmd.envs(pager_env());
-//! ```
-//!
-//! For `std::process::Command`:
-//!
-//! ```rust,no_run
-//! use xai_tty_utils::{detach_std_command, pager_env};
-//! use std::process::Stdio;
-//!
-//! let mut cmd = std::process::Command::new("git");
-//! cmd.args(["log", "--oneline"]);
-//! detach_std_command(&mut cmd);
-//! cmd.stdin(Stdio::null());
-//! cmd.envs(pager_env());
-//! ```
 
 // A panic on a teardown path leaks whatever it was about to free; tests panic freely.
 #![cfg_attr(
@@ -77,8 +41,7 @@ pub use process_resources::{
 mod process_scope;
 pub use process_scope::{ProcessScope, global_process_scope};
 
-/// How long a shell gets to exit on its own after a hangup, before it is
-/// killed.
+/// How long a shell gets to exit on its own after a hangup, before it is killed.
 pub const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 
 pub mod runtime;
@@ -87,9 +50,8 @@ pub mod runtime;
 // TTY detach — pre_exec building block
 // ---------------------------------------------------------------------------
 
-/// Detach from the controlling TTY by starting a new session. `Stdio::null()` only redirects fd 0; programs like `ssh`,
-/// `ssh-add`, and interactive shells (`zsh -i`) bypass it by opening `/dev/tty` directly. SAFETY: Must only be called
-/// inside a `pre_exec` hook (between `fork` and `exec`). Both `setsid()` and `setpgid()` are async-signal-safe (POSIX).
+/// Detach from the controlling TTY by starting a new session. SAFETY: Must
+/// only be called inside a `pre_exec` hook (between `fork` and `exec`).
 #[cfg(unix)]
 pub fn detach_from_tty() -> io::Result<()> {
     use nix::errno::Errno;
@@ -112,9 +74,10 @@ pub fn detach_from_tty() -> io::Result<()> {
     Ok(())
 }
 
-/// The score is inherited across `fork`, so a protected parent would otherwise shield everything it spawns, leaving a
-/// runaway command unkillable. Best-effort: failing the spawn is worse than keeping the inherited score. SAFETY: Safe
-/// between `fork` and `exec`: raw `open`/`write`/`close` only, which are async-signal-safe and allocation-free.
+/// The score is inherited across `fork`, so a protected parent would
+/// otherwise shield everything it spawns, leaving a runaway command
+/// unkillable. Best-effort: failing the spawn is worse than keeping the
+/// inherited score.
 #[cfg(target_os = "linux")]
 pub fn reset_oom_score_adj() -> io::Result<()> {
     const PATH: &[u8] = b"/proc/self/oom_score_adj\0";
@@ -137,15 +100,11 @@ pub fn reset_oom_score_adj() -> io::Result<()> {
     Ok(())
 }
 
-/// Set by the launcher of the cyber tool server, which itself runs under a
-/// protective (negative) `oom_score_adj`, so the commands it spawns stay
-/// ordinary OOM candidates instead of inheriting that protection.
+/// Set by the launcher of the cyber tool server, which itself runs under a protective (negative) `oom_score_adj`.
 #[cfg(unix)]
 pub const RESET_CHILD_OOM_ENV: &str = "GROK_TOOLS_RESET_CHILD_OOM";
 
-/// Lowering the score needs root/`CAP_SYS_RESOURCE`; the error distinguishes a real misconfiguration (`PermissionDenied`)
-/// from an expected non-procfs environment (`NotFound`). The score is inherited across `fork`, so a caller that gets `Ok`
-/// MUST arm [`RESET_CHILD_OOM_ENV`] or its whole subtree inherits the protection.
+/// Lowering the score needs root/`CAP_SYS_RESOURCE`.
 #[cfg(target_os = "linux")]
 pub fn protect_from_oom_kill() -> io::Result<()> {
     std::fs::write("/proc/self/oom_score_adj", "-900\n")
@@ -177,16 +136,14 @@ pub fn detach_pre_exec_hook() -> fn() -> io::Result<()> {
 // tokio::process::Command wrapper
 // ---------------------------------------------------------------------------
 
-/// Detach a `tokio::process::Command` from the parent's controlling TTY/console. Unix: `pre_exec` hook calling `setsid`
-/// (EPERM fallback: `setpgid`); Windows: `CREATE_NO_WINDOW`. Do NOT add `DETACHED_PROCESS` — it breaks stdio pipe
-/// inheritance for grandchildren (`cmd.exe` → `node`). Detach only: the child's `PATH` is left alone, so a caller that
-/// `env_clear`ed and installed its own keeps it. A spawn that resolves `git` by name adds [`prepend_bundled_git_path`]
-/// itself.
+/// Detach a `tokio::process::Command` from the parent's controlling
+/// TTY/console. Unix: `pre_exec` hook calling `setsid` (EPERM fallback:
+/// `setpgid`); Windows: `CREATE_NO_WINDOW`.
 pub fn detach_command(cmd: &mut tokio::process::Command) {
     #[cfg(unix)]
     {
-        // SAFETY: every hook `detach_pre_exec_hook` can return is async-signal-safe,
-        // and the env read that selects one happens here, before fork.
+        // SAFETY: every hook `detach_pre_exec_hook` can return is
+        // async-signal-safe, and the env read that selects one happens here.
         unsafe {
             cmd.pre_exec(detach_pre_exec_hook());
         }
@@ -198,13 +155,11 @@ pub fn detach_command(cmd: &mut tokio::process::Command) {
     }
 }
 
-/// Configure a short-lived search child ([`detach_command`], no stdin) that is
-/// killed and queued for reaping if its future is dropped (cancellation).
+/// Configure a short-lived search child ([`detach_command`], no stdin) that
+/// is killed and queued for reaping if its future is dropped.
 pub fn detach_search_command(cmd: &mut tokio::process::Command) {
     detach_command(cmd);
-    // `null_stdio`, not `Stdio::null()`: the latter opens `/dev/null` by path
-    // during spawn setup, so an unlinked device fails the spawn outright and
-    // takes out search for the rest of the process's life. See `null_stdio`.
+    // `null_stdio`, not `Stdio::null()`: the latter opens `/dev/null` by path during spawn setup.
     cmd.stdin(null_stdio());
     cmd.kill_on_drop(true);
 }
@@ -239,13 +194,11 @@ pub fn null_stdio() -> std::process::Stdio {
     std::process::Stdio::null()
 }
 
-/// Read-only descriptor for `path`, or `None` if it cannot be opened. Split out so the "the descriptor outlives the path"
-/// property can be tested against an ordinary file, without a mount namespace or root.
+/// Read-only descriptor for `path`, or `None` if it cannot be opened.
 #[cfg(unix)]
 fn open_null_fd(path: &std::path::Path) -> Option<std::os::fd::OwnedFd> {
-    // Read AND write, because one cached descriptor serves both directions: stdin reads EOF from it, stdout/stderr discard
-    // into it. This mirrors `Stdio::null()` itself, which opens `/dev/null` readable for stdin and writable for
-    // stdout/stderr. `OpenOptions` sets CLOEXEC, so the cached fd is not inherited wholesale.
+    // Read AND write, because one cached descriptor serves both directions:
+    // stdin reads EOF from it, stdout/stderr discard into it.
     std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -263,7 +216,6 @@ fn eof_pipe_fd() -> Option<std::os::fd::OwnedFd> {
 
     let mut fds = [0 as libc::c_int; 2];
 
-    // SAFETY: `fds` is a valid, writable two-element array for the call's duration.
     #[cfg(target_os = "linux")]
     let created = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
     // SAFETY: same.
@@ -302,16 +254,17 @@ fn eof_pipe_fd() -> Option<std::os::fd::OwnedFd> {
 // std::process::Command wrapper
 // ---------------------------------------------------------------------------
 
-/// This is the `std` counterpart of [`detach_command`] (which only works with `tokio::process::Command`). Use this when
-/// you need to spawn via `std::process::Command` — e.g. in synchronous code or `spawn_blocking`. Unix: `pre_exec` hook
-/// calling `setsid` (EPERM fallback: `setpgid`); Windows: `CREATE_NO_WINDOW`. Detach only; see [`detach_command`] for why
-/// the child's `PATH` is not touched.
+/// This is the `std` counterpart of [`detach_command`] (which only works with
+/// `tokio::process::Command`). Use this when you need to spawn via
+/// `std::process::Command` — e.g. in synchronous code or `spawn_blocking`.
+/// Unix: `pre_exec` hook calling `setsid` (EPERM fallback: `setpgid`);
+/// Windows: `CREATE_NO_WINDOW`.
 pub fn detach_std_command(cmd: &mut std::process::Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // SAFETY: every hook `detach_pre_exec_hook` can return is async-signal-safe,
-        // and the env read that selects one happens here, before fork.
+        // SAFETY: every hook `detach_pre_exec_hook` can return is
+        // async-signal-safe, and the env read that selects one happens here.
         unsafe {
             cmd.pre_exec(detach_pre_exec_hook());
         }
@@ -350,13 +303,7 @@ fn bind_to_parent_death(
         return Err(io::Error::last_os_error());
     }
     // Parent already gone (pdeathsig can no longer fire): exit instead of
-    // orphaning. A reparented child sees a ppid different from the pid the
-    // spawn site captured.
-    //
-    // Compared in the signed domain the kernel uses: `getppid` answers a
-    // `pid_t`, and a parent pid that does not fit one is not this process's
-    // parent, so it exits exactly as a value that failed to compare did.
-    // SAFETY: getppid/_exit are async-signal-safe and take no pointers.
+    // orphaning.
     let parent_matches =
         i32::try_from(parent_pid).is_ok_and(|parent| unsafe { libc::getppid() } == parent);
     if !parent_matches {
@@ -365,9 +312,8 @@ fn bind_to_parent_death(
     Ok(())
 }
 
-/// Never apply it to processes designed to outlive the client — leader daemons, workspace servers, backgrounded user
-/// tasks. Composable with [`detach_std_command`]: `pre_exec` hooks run in registration order, and `setsid`/`setpgid` do
-/// not clear the parent-death signal, so this can be applied before or after a `detach_*` helper.
+/// Never apply it to processes designed to outlive the client — leader
+/// daemons, workspace servers, backgrounded user tasks.
 pub fn kill_on_parent_death_std(cmd: &mut std::process::Command) {
     #[cfg(target_os = "linux")]
     kill_on_parent_death_std_with(cmd, libc::SIGTERM);
@@ -377,25 +323,23 @@ pub fn kill_on_parent_death_std(cmd: &mut std::process::Command) {
     }
 }
 
-/// SIGTERM (the default) lets the child run its graceful shutdown; pass `libc::SIGKILL` when the child must die even if
-/// it is wedged and cannot service a catchable signal — e.g. the PTY e2e pager children that leaked on CI precisely
-/// because they were unresponsive to the master-close SIGHUP. All caveats of [`kill_on_parent_death_std`] apply.
+/// SIGTERM (the default) lets the child run its graceful shutdown; pass
+/// `libc::SIGKILL` when the child must die even if it is wedged and cannot
+/// service a catchable signal — e.g. the PTY e2e pager children that leaked
+/// on CI precisely because they were unresponsive to the master-close SIGHUP.
 #[cfg(target_os = "linux")]
 pub fn kill_on_parent_death_std_with(cmd: &mut std::process::Command, signal: libc::c_int) {
     use std::os::unix::process::CommandExt;
     let parent_pid = std::process::id();
     let armed_thread = std::thread::current().id();
     // SAFETY: bind_to_parent_death calls only async-signal-safe libc
-    // functions and builds errors without allocating (see its docs for
-    // the debug-only TLS read). Satisfies the pre_exec contract.
+    // functions and builds errors without allocating.
     unsafe {
         cmd.pre_exec(move || bind_to_parent_death(parent_pid, armed_thread, signal));
     }
 }
 
-/// No-op elsewhere. Unlike the spawn-time helper there is no ppid race check: a direct parent at pid 1 is legitimate here
-/// (containers where the client is PID 1), so an already-dead parent is indistinguishable from that case. Always `Ok(())`
-/// on non-Linux platforms (no-op). Never from daemons designed to outlive their spawner.
+/// No-op elsewhere.
 pub fn kill_current_process_on_parent_death() -> io::Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -408,17 +352,15 @@ pub fn kill_current_process_on_parent_death() -> io::Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Process group lifecycle
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------- Process group lifecycle.
 
-/// Bound on waiting for an already-killed child (or its pipe readers) before abandoning it. Callers that must not block
-/// (tool futures, turn loops) wait at most this long, then abandon the corpse to the runtime's orphan reaper.
+/// Bound on waiting for an already-killed child (or its pipe readers) before abandoning it.
 pub const KILL_REAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// `None` covers both failure shapes — the bound expired (see [`KILL_REAP_TIMEOUT`]) and `wait()` itself erred (e.g. the
-/// child was already reaped elsewhere) — the caller's obligation is identical in either case: the kill signal is already
-/// delivered, there is no status to report, and the corpse is left to tokio's orphan reaper.
+/// `None` covers both failure shapes — the bound expired (see
+/// [`KILL_REAP_TIMEOUT`]) and `wait()` itself erred (e.g. the child was
+/// already reaped elsewhere) — the caller's obligation is identical in
+/// either case.
 pub async fn reap_killed_bounded(
     child: &mut tokio::process::Child,
     bound: std::time::Duration,
@@ -477,9 +419,7 @@ pub fn new_process_group(cmd: &mut tokio::process::Command) {
     }
 }
 
-/// A Unix process-group id validated as safe to pass to `killpg`. [`ProcessGroupId::new`] rejects all three, so holding
-/// one is a standing guarantee that `killpg` can only ever reach a real, foreign group — the highest-blast-radius
-/// primitive in process teardown is validated once, at enrollment, rather than re-checked at each call site.
+/// A Unix process-group id validated as safe to pass to `killpg`.
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProcessGroupId(u32);
@@ -497,8 +437,7 @@ impl ProcessGroupId {
             ));
         }
         // killpg_unix casts `pid as i32`; values > i32::MAX wrap to negative,
-        // and killpg with a negative pgid returns EINVAL on Linux/macOS. Reject
-        // here so the invariant is safe-by-construction, not safe-by-OS-quirk.
+        // and killpg with a negative pgid returns EINVAL on Linux/macOS.
         if pid > i32::MAX as u32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -520,21 +459,18 @@ impl ProcessGroupId {
     }
 }
 
-/// Unix: holds the validated group-leader id ([`ProcessGroupId`]); dispatches to `killpg(pgid, signal)`; Windows: holds a
-/// Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. On Windows, drop terminates every process in the job. On Unix,
-/// drop is a no-op — call [`kill`](Self::kill) or [`terminate`](Self::terminate) explicitly.
+/// Unix: holds the validated group-leader id ([`ProcessGroupId`]); dispatches
+/// to `killpg(pgid, signal)`; Windows: holds a Job Object with
+/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
 pub struct ProcessGroup {
-    /// `None` until a child is enrolled via [`Self::attach_pid`]; then `Some` holds a killpg-safe id. The pid is set once at
-    /// attach and never auto-cleared — PID-reuse safety comes from the *owner* dropping this group (its `Arc`) at reap, after
-    /// which nothing can `kill` it, not from this field resetting itself.
+    /// `None` until a child is enrolled via [`Self::attach_pid`]; then `Some` holds a killpg-safe id.
     #[cfg(unix)]
     leader: Option<ProcessGroupId>,
     #[cfg(unix)]
     tokio_owns_leader: bool,
     #[cfg(windows)]
     job: windows::Win32::Foundation::HANDLE,
-    /// Set for a shell that owns a terminal, whose job-control children only
-    /// die if the shell is asked to hang up first.
+    /// Set for a shell that owns a terminal.
     hangup_first: bool,
 }
 
@@ -723,8 +659,6 @@ impl ProcessGroup {
                 JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
                 SetInformationJobObject,
             };
-            // LimitFlags left at 0 (no kill-on-close), so the drop's `CloseHandle`
-            // no longer terminates the job's processes.
             let info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
             unsafe {
                 SetInformationJobObject(
@@ -738,9 +672,8 @@ impl ProcessGroup {
         }
     }
 
-    /// Whether any process still exists in this group. `None` where the platform cannot say (Windows, `EPERM`); treat it as
-    /// alive. Over-reports, never under-reports: an unreaped zombie is still a process, so it counts as live. Filtering
-    /// zombies out would let a reaped leader with a live descendant look empty.
+    /// Whether any process still exists in this group. `None` where the
+    /// platform cannot say (Windows, `EPERM`); treat it as alive.
     pub fn has_live_members(&self) -> Option<bool> {
         #[cfg(unix)]
         {
@@ -754,15 +687,13 @@ impl ProcessGroup {
 
     /// Whether any member of this group is still *running*, as opposed to a
     /// zombie that has already died and is only waiting to be reaped.
-    ///
     /// [`Self::has_live_members`] counts zombies, which is what you want when
     /// deciding whether to send another signal — signalling a zombie is
-    /// harmless, and skipping a kill because one looked dead is not. It is the
-    /// wrong question when *reporting* that a teardown left something behind:
-    /// an orphaned zombie means the kill worked and the reaper has not run
-    /// yet, so reporting it as a leak is a false alarm, and a check that cries
-    /// wolf gets ignored on the run where the number is real.
-    ///
+    /// harmless, and skipping a kill because one looked dead is not. It is
+    /// the wrong question when *reporting* that a teardown left something
+    /// behind: an orphaned zombie means the kill worked and the reaper has
+    /// not run yet, so reporting it as a leak is a false alarm, and a check
+    /// that cries wolf gets ignored on the run where the number is real.
     /// Linux reads the state straight out of `/proc`. Elsewhere there is no
     /// cheap way to enumerate a group, so this falls back to
     /// [`Self::has_live_members`] and keeps its over-reporting rather than
@@ -812,11 +743,7 @@ impl ProcessGroup {
         }
     }
 
-    /// Ask an interactive shell to hang up. Its job-control children each live
-    /// in their own process group, which no `killpg` here reaches; a shell is
-    /// supposed to forward the hangup to them on its way out, but it is not
-    /// reliable enough to be the only path — pair this with
-    /// [`Self::hangup_session_jobs`].
+    /// Ask an interactive shell to hang up.
     pub fn hangup(&self) -> io::Result<()> {
         #[cfg(unix)]
         {
@@ -831,21 +758,19 @@ impl ProcessGroup {
     }
 
     /// Deliver the hangup to the shell's job-control children directly, in
-    /// every process group of the shell's session but its own.
-    ///
-    /// A shell that answers [`Self::hangup`] forwards it to its jobs itself and
-    /// this is unnecessary. It exists for the escalation path: a shell still
-    /// running at the end of [`HANGUP_GRACE`] gets killed, and killing it
-    /// destroys the only process that can reach jobs sitting in groups of their
-    /// own. Delivering the hangup here first keeps the policy identical to the
-    /// shell's — a job that ignores SIGHUP still survives, which is the point of
-    /// `nohup` — where the alternative is leaking every job whenever the shell
-    /// is late.
-    ///
-    /// Only the leader's own session is touched, so a group whose leader never
-    /// called `setsid` (anything but a terminal shell) finds nothing to signal.
-    /// Linux reads the session out of `/proc`; elsewhere there is no cheap way
-    /// to enumerate one, and the shell's own forwarding is all there is.
+    /// every process group of the shell's session but its own. A shell that
+    /// answers [`Self::hangup`] forwards it to its jobs itself and this is
+    /// unnecessary. It exists for the escalation path: a shell still running
+    /// at the end of [`HANGUP_GRACE`] gets killed, and killing it destroys
+    /// the only process that can reach jobs sitting in groups of their own.
+    /// Delivering the hangup here first keeps the policy identical to the
+    /// shell's — a job that ignores SIGHUP still survives, which is the
+    /// point of `nohup` — where the alternative is leaking every job
+    /// whenever the shell is late. Only the leader's own session is touched,
+    /// so a group whose leader never called `setsid` (anything but a terminal
+    /// shell) finds nothing to signal. Linux reads the session out of
+    /// `/proc`; elsewhere there is no cheap way to enumerate one, and the
+    /// shell's own forwarding is all there is.
     pub fn hangup_session_jobs(&self) -> io::Result<()> {
         #[cfg(target_os = "linux")]
         {
@@ -902,8 +827,7 @@ impl ProcessGroup {
                     nix::sys::signal::Signal::SIGCONT,
                 ] {
                     match nix::sys::signal::killpg(target, signal) {
-                        // Exiting between the scan and the signal is not a
-                        // failure; it is the outcome being asked for.
+                        // Exiting between the scan and the signal is not a failure; it is the outcome being asked for.
                         Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
                         Err(e) => return Err(io::Error::from_raw_os_error(e as i32)),
                     }
@@ -921,8 +845,7 @@ impl ProcessGroup {
         }
     }
 
-    /// Whether teardown should hang this group up before killing it. Never on
-    /// Windows, where the hangup is a no-op and the Job Object takes the tree.
+    /// Whether teardown should hang this group up before killing it.
     pub fn wants_hangup(&self) -> bool {
         cfg!(unix) && self.hangup_first
     }
@@ -934,9 +857,7 @@ impl ProcessGroup {
 
     #[cfg(unix)]
     fn killpg_unix(&self, signal: nix::sys::signal::Signal) -> io::Result<()> {
-        // `leader` is `None` until a child is enrolled, and a `ProcessGroupId`
-        // is killpg-safe by construction (never 0/1/own-group), so this can only
-        // ever signal a real, foreign group.
+        // `leader` is `None` until a child is enrolled.
         let Some(leader) = self.leader else {
             return Ok(());
         };
@@ -1142,7 +1063,7 @@ pub fn pager_env() -> HashMap<String, String> {
         ("GIT_EDITOR".to_string(), noop_cmd().to_string()),
         ("GIT_SEQUENCE_EDITOR".to_string(), noop_cmd().to_string()),
         ("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()),
-        // Empty (== unset for gpg) so gpg-agent/pinentry can't grab the TUI's tty; with setsid detach, signing fails cleanly instead of corrupting the screen.
+        // Empty (== unset for gpg) so gpg-agent/pinentry can't grab the TUI's tty; with setsid detach.
         ("GPG_TTY".to_string(), String::new()),
     ])
 }
@@ -1155,9 +1076,8 @@ pub const GIT_AUTH_SUPPRESSION_ENVS: [(&str, &str); 4] = [
     ("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"),
 ];
 
-/// Git command with auth/LFS/SSH prompt suppression and `--no-optional-locks`. Respects `GIT_BIN_PATH` for hermetic git
-/// in Bazel test sandboxes. `--no-optional-locks` skips *optional* maintenance locks only. Required locks for the
-/// requested operation are still taken. Prefer this for readers (`status`, `cat-file`, `rev-parse`).
+/// Git command with auth/LFS/SSH prompt suppression and
+/// `--no-optional-locks`.
 pub fn git_command() -> std::process::Command {
     let mut cmd = git_command_base();
     cmd.arg("--no-optional-locks");
@@ -1165,8 +1085,6 @@ pub fn git_command() -> std::process::Command {
 }
 
 /// Like [`git_command`], but omits `--no-optional-locks`.
-/// Writers such as `fetch` may take optional maintenance locks besides required ones.
-/// Use this for mutating git that must not skip those locks under concurrent restore.
 pub fn git_command_locking() -> std::process::Command {
     git_command_base()
 }
@@ -1181,9 +1099,9 @@ fn git_command_base() -> std::process::Command {
             } else {
                 p
             };
-            // git-minimal spawns subcommands (`git stash` → `git update-index`) through its exec path, which is baked to a
-            // build-machine prefix. Helpers live next to the binary, so point the exec path there. Skip the host-fallback wrapper:
-            // host git must keep its own exec path.
+            // git-minimal spawns subcommands (`git stash` → `git
+            // update-index`) through its exec path, which is baked to a
+            // build-machine prefix.
             if p.file_name().is_some_and(|name| name == "git") {
                 hermetic_exec_path = p.parent().map(std::path::Path::to_path_buf);
             }
@@ -1226,63 +1144,46 @@ fn noop_cmd() -> &'static str {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stderr redirection — shield TUI output from C-library noise
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------- Stderr redirection — shield TUI output.
 
-/// The dup'd stderr fd that writes to the real terminal. Set once by [`redirect_native_stderr`]. Stored as
-/// [`OwnedFd`](std::os::unix::io::OwnedFd) for type safety; the [`OnceLock`](std::sync::OnceLock) keeps it alive for the
-/// entire process lifetime.
+/// The dup'd stderr fd that writes to the real terminal. Set once by [`redirect_native_stderr`].
 #[cfg(unix)]
 static TUI_STDERR_FD: std::sync::OnceLock<std::os::unix::io::OwnedFd> = std::sync::OnceLock::new();
 
-/// Redirect native stderr (fd 2) to `/dev/null` so that messages written directly to fd 2 by C libraries do not
-/// interleave with TUI escape sequences. After this call, all intentional terminal output should go through the `File`
-/// obtained from [`dup_tui_stderr`].
+/// After this call, all intentional terminal output should go through the `File` obtained from [`dup_tui_stderr`].
 pub fn redirect_native_stderr() {
     #[cfg(unix)]
     {
         use std::io::Write;
         use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 
-        // SAFETY: dup(2) is safe on fd 2 (stderr), which is always valid
-        // at process start.
         let duped = unsafe { libc::dup(2) };
         if duped < 0 {
             return; // best-effort; don't crash
         }
 
         // Store the duped fd (as OwnedFd) before redirecting.
-        // SAFETY: `duped` is a freshly dup'd, valid file descriptor.
         let owned = unsafe { OwnedFd::from_raw_fd(duped) };
         let _ = TUI_STDERR_FD.set(owned);
 
-        // Flush any buffered stderr data before redirecting fd 2 to
-        // /dev/null, so nothing is silently lost.
         let _ = std::io::stderr().flush();
 
-        // Open /dev/null and dup2 it onto fd 2.
         let devnull = match std::fs::OpenOptions::new().write(true).open("/dev/null") {
             Ok(f) => f,
             Err(_) => return,
         };
-        // SAFETY: devnull.as_raw_fd() is valid; fd 2 is a valid target.
         unsafe { libc::dup2(devnull.as_raw_fd(), 2) };
-        // devnull File is dropped here; fd 2 now points at /dev/null.
     }
 }
 
 /// Create a new owned `File` that writes to the real terminal stderr. Each caller gets their own fd that they can wrap in
 /// a `BufWriter`, pass to a thread, etc. Dropping the returned `File` closes only that caller's dup'd copy — the
-/// underlying terminal fd is never affected. If [`redirect_native_stderr`] was not called, this dups normal fd 2.
+/// underlying terminal fd is never affected.
 pub fn dup_tui_stderr() -> io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::io::{AsRawFd, FromRawFd};
         let source_fd = TUI_STDERR_FD.get().map(|fd| fd.as_raw_fd()).unwrap_or(2);
-        // SAFETY: source_fd is either the dup'd stderr (valid for the
-        // process lifetime via OnceLock<OwnedFd>) or 2 (normal stderr).
-        // dup() returns a new independently-owned fd.
         let new_fd = unsafe { libc::dup(source_fd) };
         if new_fd < 0 {
             return Err(io::Error::last_os_error());
@@ -1292,9 +1193,6 @@ pub fn dup_tui_stderr() -> io::Result<std::fs::File> {
     }
     #[cfg(not(unix))]
     {
-        // On Windows, `redirect_native_stderr` is a no-op, so fd 2 is always the real stderr. We use `try_clone()` on a
-        // temporarily created File to get an independently-owned handle via `DuplicateHandle` — avoiding the `from_raw_handle`
-        // footgun where `File` would take ownership of the process stderr handle and close it on drop.
         use std::os::windows::io::{AsRawHandle, FromRawHandle};
         let stderr_handle = unsafe {
             windows::Win32::System::Console::GetStdHandle(
@@ -1302,9 +1200,7 @@ pub fn dup_tui_stderr() -> io::Result<std::fs::File> {
             )
             .map_err(|e| io::Error::other(format!("GetStdHandle: {e}")))?
         };
-        // Create a temporary File from the raw handle, clone it (which
-        // calls DuplicateHandle internally), then forget the original so
-        // it doesn't close the process stderr handle.
+        // Create a temporary File from the raw handle, clone it (which calls DuplicateHandle internally).
         let temp = unsafe { std::fs::File::from_raw_handle(stderr_handle.0 as _) };
         let cloned = temp.try_clone();
         // Prevent `temp` from closing the process stderr handle.
@@ -1313,24 +1209,19 @@ pub fn dup_tui_stderr() -> io::Result<std::fs::File> {
     }
 }
 
-/// Restore fd 2 to point to the real terminal stderr. Call this before exiting so that any final messages (panic output,
-/// tracing flushes) reach the user's terminal rather than `/dev/null`.
 pub fn restore_native_stderr() {
     #[cfg(unix)]
     {
         use std::os::unix::io::AsRawFd;
         if let Some(fd) = TUI_STDERR_FD.get() {
-            // SAFETY: fd is the dup'd stderr (valid for process lifetime
-            // via OnceLock<OwnedFd>). dup2 atomically replaces fd 2 with
-            // a copy of fd.
+            // SAFETY: fd is the dup'd stderr (valid for process lifetime via OnceLock<OwnedFd>).
             unsafe { libc::dup2(fd.as_raw_fd(), 2) };
         }
     }
 }
 
-/// Returns `true` when running inside Windows Subsystem for Linux (WSL1/WSL2). Cached for process lifetime. Detection:
-/// the `WSL_DISTRO_NAME` / `WSL_INTEROP` env vars, with a `/proc/sys/kernel/osrelease` `microsoft`/`wsl` substring
-/// fallback that also catches WSL1 and env-stripped shells.
+/// Returns `true` when running inside Windows Subsystem for Linux
+/// (WSL1/WSL2). Cached for process lifetime.
 pub fn is_wsl() -> bool {
     static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *CACHE.get_or_init(detect_is_wsl)
@@ -1383,8 +1274,7 @@ mod tests {
             let child = cmd.spawn().expect("spawn sleep");
             let pid = child.id().expect("child pid");
 
-            // The pre_exec setsid lands between fork and exec; poll until the
-            // child leaves our process group (pins the detach property).
+            // The pre_exec setsid lands between fork and exec.
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pid as i32)))
                 .expect("getpgid")
@@ -1409,12 +1299,10 @@ mod tests {
         });
     }
 
-    /// `None` when lowering our own score below 0 is not permitted (it needs
-    /// `CAP_SYS_RESOURCE`).
     #[cfg(target_os = "linux")]
     fn child_oom_score_under(hook: fn() -> io::Result<()>) -> Option<String> {
         // Hold for the full lower/spawn/restore window so parallel cargo test
-        // cannot interleave sibling score mutations (same pattern as workspace-daemon).
+        // cannot interleave sibling score mutations.
         let _score_guard = TEST_OOM_SCORE_ADJ_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -1468,9 +1356,7 @@ mod tests {
         );
     }
 
-    /// Serializes every test that touches the process-global OOM state: [`RESET_CHILD_OOM_ENV`] and
-    /// `/proc/self/oom_score_adj` (mutated by both [`child_oom_score_under`] and `protect_from_oom_kill`). Under parallel
-    /// `cargo test` these must not interleave.
+    /// Serializes every test that touches the process-global OOM state.
     #[cfg(target_os = "linux")]
     static OOM_SCORE_ADJ_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -1495,8 +1381,7 @@ mod tests {
         let _env = OOM_SCORE_ADJ_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // SAFETY: test-process env mutation, serialized with the sibling test
-        // by the lock above; the var is removed before returning.
+        // SAFETY: test-process env mutation, serialized with the sibling test by the lock above; the var is removed.
         unsafe { std::env::set_var(RESET_CHILD_OOM_ENV, "1") };
         let hook = detach_pre_exec_hook();
         unsafe { std::env::remove_var(RESET_CHILD_OOM_ENV) };
@@ -1578,7 +1463,7 @@ mod tests {
         assert_eq!(group.has_live_members(), Some(false));
     }
 
-    /// The two questions a killed group gets asked, and why they differ: a
+    /// Both questions a killed group gets asked, and why they differ: a
     /// zombie is a process for `has_live_members` (so another kill is still
     /// worth sending) and NOT a leak for `has_running_members` (so a teardown
     /// that worked does not report that it failed).
@@ -1607,9 +1492,7 @@ mod tests {
         );
 
         group.kill().expect("kill group");
-        // `wait` returns once the child is dead, so from here it is a reaped
-        // process, not a zombie — take the zombie reading from a child we
-        // deliberately have not waited on yet.
+        // `wait` returns once the child is dead, so from here it is a reaped process.
         let mut zombie_cmd = std::process::Command::new("true");
         zombie_cmd
             .stdin(std::process::Stdio::null())
@@ -1676,8 +1559,7 @@ mod tests {
         let mut outsider = sleeper();
         let outsider_group = group_for(outsider.id());
 
-        // `set -m` is what puts the job in a group of its own; without it the
-        // job shares the shell's group and the caller's `killpg` would cover it.
+        // `set -m` is what puts the job in a group of its own.
         let mut cmd = std::process::Command::new("bash");
         cmd.arg("-c")
             .arg("set -m; sleep 1000 & echo $!; sleep 1000")
@@ -1763,12 +1645,9 @@ mod tests {
         );
     }
 
-    // The scenario needs a real intermediate parent process, so the test binary re-execs itself (the
-    // `stderr_redirect_roundtrip_subprocess` pattern): the driver spawns `pdeathsig_intermediate_entry`, which spawns a
-    // long-sleeping grandchild armed with the helper and exits; the driver then asserts the grandchild dies with it.
+    // The scenario needs a real intermediate parent process.
 
-    /// Env marker dispatching the re-exec'd test binary into the
-    /// intermediate-parent logic.
+    /// Env marker dispatching the re-exec'd test binary into the intermediate-parent logic.
     #[cfg(target_os = "linux")]
     const PDEATHSIG_INTERMEDIATE_ENV: &str = "__XAI_TTY_UTILS_PDEATHSIG_INTERMEDIATE";
 
@@ -1787,15 +1666,13 @@ mod tests {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        // Composability under test: detach (setsid) plus parent-death
-        // binding on the same command, in the documented order.
+        // Composability under test: detach (setsid) plus parent-death binding on the same command.
         detach_std_command(&mut cmd);
         kill_on_parent_death_std(&mut cmd);
         #[allow(clippy::disallowed_methods)] // test fixture; the test kills it
         let child = cmd.spawn().expect("spawn armed grandchild");
         println!("grandchild:{}", child.id());
-        // Do not reap: the grandchild must outlive this handle and die only
-        // via pdeathsig when this process exits.
+        // Do not reap: the grandchild must outlive this handle and die only via pdeathsig when this process exits.
         std::mem::forget(child);
         std::thread::sleep(std::time::Duration::from_millis(1000));
     }
@@ -1812,8 +1689,7 @@ mod tests {
             .arg("--nocapture")
             .arg("--test-threads=1")
             .env(PDEATHSIG_INTERMEDIATE_ENV, "1")
-            // The intermediate is a fresh libtest run of exactly one filtered test. Strip Bazel's per-shard env so a `shard_count`
-            // build can't partition that single test into another shard (running zero tests), and drop any inherited filter.
+            // The intermediate is a fresh libtest run of exactly one filtered test.
             .env_remove("TEST_SHARD_INDEX")
             .env_remove("TEST_TOTAL_SHARDS")
             .env_remove("TEST_SHARD_STATUS_FILE")
@@ -1824,8 +1700,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)] // test fixture; the test kills it
         let mut intermediate = cmd.spawn().expect("spawn intermediate test process");
 
-        // Substring-match, not line-prefix parsing: with `--nocapture` libtest prints the `test tests::…... ` header WITHOUT a
-        // trailing newline, so the reported pid shares its line with harness chrome.
+        // Substring-match, not line-prefix parsing: with `--nocapture` libtest prints the `test tests::…...
         let stdout = intermediate.stdout.take().expect("piped stdout");
         let mut reader = std::io::BufReader::new(stdout);
         let mut seen: Vec<String> = Vec::new();
@@ -1856,8 +1731,6 @@ mod tests {
         let alive = |pid: i32| match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
             Err(_) => false,
             Ok(stat) => {
-                // Field 3 (state) is the first token after the last ')' —
-                // comm can itself contain ')'.
                 let state = stat
                     .rsplit_once(')')
                     .and_then(|(_, rest)| rest.trim_start().chars().next());
@@ -1872,8 +1745,7 @@ mod tests {
         let status = intermediate.wait().expect("wait intermediate");
         assert!(status.success(), "intermediate test run failed: {status:?}");
 
-        // Parent gone — the armed grandchild must be SIGTERMed by the kernel
-        // (orphan → reparent → reap → ESRCH). Poll with a deadline.
+        // Parent gone — the armed grandchild must be SIGTERMed by the kernel.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while alive(grandchild_pid) && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -1901,8 +1773,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)] // test fixture; the test kills it
         let mut child = cmd.spawn().expect("spawn armed child");
 
-        // The binding must not kill a child whose parent (this process) is
-        // alive and whose ppid matches the captured pid.
+        // The binding must not kill a child whose parent (this process) is alive.
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert!(
             child.try_wait().expect("try_wait").is_none(),
@@ -1997,8 +1868,7 @@ mod tests {
         assert_eq!(env.get("GPG_TTY"), Some(&String::new()));
     }
 
-    // ── stderr redirect integration tests ────────────────────────. The redirect/dup/restore cycle mutates process-global
-    // state (fd 2 and a `OnceLock`), so the full flow runs in a subprocess to avoid polluting other tests.
+    // ── stderr redirect integration tests ────────────────────────.
 
     /// `dup_tui_stderr` returns a writable File even without prior redirect.
     #[test]
@@ -2032,13 +1902,11 @@ mod tests {
         use std::io::Write;
         use std::os::unix::io::AsRawFd;
 
-        // 1. After redirect, fd 2 points at /dev/null.
+        // 1. After redirect, fd points at /dev/null.
         redirect_native_stderr();
         let fd2_flags = unsafe { libc::fcntl(2, libc::F_GETFD) };
         assert!(fd2_flags >= 0, "fd 2 should be valid after redirect");
 
-        // Verify fd 2 is /dev/null by checking that writes succeed
-        // but reading the inode shows it's a different file.
         let mut stat_fd2: libc::stat = unsafe { std::mem::zeroed() };
         let r = unsafe { libc::fstat(2, &mut stat_fd2) };
         assert_eq!(r, 0, "fstat(2) should succeed");
@@ -2059,12 +1927,10 @@ mod tests {
         // First fd still works after second is dropped.
         tui.write_all(b"").expect("first fd survives second drop");
 
-        // 4. restore_native_stderr brings fd 2 back.
         restore_native_stderr();
         let fd2_after = unsafe { libc::fcntl(2, libc::F_GETFD) };
         assert!(fd2_after >= 0, "fd 2 should be valid after restore");
 
-        // Verify fd 2 is no longer /dev/null (inode changed).
         let mut stat_after: libc::stat = unsafe { std::mem::zeroed() };
         let r = unsafe { libc::fstat(2, &mut stat_after) };
         assert_eq!(r, 0, "fstat(2) after restore should succeed");
@@ -2112,8 +1978,7 @@ mod tests {
     async fn process_group_kill_reaps_grandchild_tree() {
         use tokio::io::{AsyncBufReadExt, BufReader};
 
-        // Leader = sh; it backgrounds a grandchild in the SAME group (sh does
-        // not `setsid` its children), prints the grandchild PID, then waits.
+        // Leader = sh; it backgrounds a grandchild in the SAME group (sh does not `setsid` its children), prints the grandchild PID.
         let mut cmd = tokio::process::Command::new("sh");
         cmd.args(["-c", "sleep 60 & echo $!; wait"]);
         cmd.stdout(std::process::Stdio::piped());
@@ -2147,8 +2012,7 @@ mod tests {
             .expect("leader should exit within 5s of group kill")
             .expect("wait ok");
 
-        // The grandchild (same group) must ALSO be reaped by the killpg — poll
-        // until gone (orphan → reparented to init → reaped → ESRCH).
+        // The grandchild (same group) must ALSO be reaped by the killpg — poll until gone.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while alive(gc_pid) && std::time::Instant::now() < deadline {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -2307,8 +2171,6 @@ mod tests {
         }
     }
 
-    /// [`ProcessGroupId`] rejects degenerate pids (0, 1, own group) at
-    /// construction so `killpg` can never broadcast outside a child's group.
     #[cfg(unix)]
     #[test]
     fn process_group_id_rejects_degenerate_and_own_group() {
@@ -2330,7 +2192,7 @@ mod tests {
             ProcessGroupId::new(u32::MAX).is_err(),
             "pid > i32::MAX must be refused (wrapping cast in killpg)"
         );
-        // A pid that is clearly foreign succeeds.
+        // A pid that is foreign succeeds.
         let foreign = if own == 2 { 3 } else { 2 };
         let id = ProcessGroupId::new(foreign).expect("foreign pgid should be accepted");
         assert_eq!(id.get(), foreign);

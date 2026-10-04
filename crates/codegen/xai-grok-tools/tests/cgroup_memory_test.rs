@@ -1,27 +1,4 @@
 //! Integration test for cgroup memory-high OOM handling.
-//!
-//! **Must be run on Linux with cgroupv2** and sufficient permissions to create
-//! child cgroups (typically root, or a user-session cgroup with delegation).
-//!
-//! Run with:
-//! ```bash
-//! # On a Linux machine (as root or with cgroup delegation):
-//! cargo test -p xai-grok-tools --test cgroup_memory_test -- --ignored --nocapture
-//!
-//! # If you need root:
-//! sudo -E cargo test -p xai-grok-tools --test cgroup_memory_test -- --ignored --nocapture
-//! ```
-//!
-//! The cgroup-dependent tests (1–5) are `#[ignore]`d by default so they don't
-//! run in CI where cgroup delegation is typically unavailable.  Test 6 (no-config)
-//! always runs.
-//!
-//! The tests exercise:
-//! 1. A command that stays under the memory limit → exits normally (exit 0)
-//! 2. A command that exceeds memory.high → killed with exit 137, signal "oom"
-//! 3. The session (backend) survives an OOM and can run another command after
-//! 4. Background tasks are also killed on OOM
-//! 5. A gradual allocator that slowly ramps up past the limit
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -34,11 +11,10 @@ use xai_grok_tools::notification::types::ToolNotificationHandle;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-/// Small memory limit for testing: 32 MiB high, 32 MiB headroom (64 MiB hard max).
 fn test_memory_config() -> CgroupMemoryConfig {
     CgroupMemoryConfig {
-        memory_high_bytes: 32 * 1024 * 1024, // 32 MiB
-        headroom_bytes: 32 * 1024 * 1024,    // 32 MiB headroom → 64 MiB hard max
+        memory_high_bytes: 32 * 1024 * 1024,
+        headroom_bytes: 32 * 1024 * 1024,
     }
 }
 
@@ -136,7 +112,6 @@ fn print_result(label: &str, result: &TerminalRunResult) {
 
 // ── Tests ────────────────────────────────────────────────────────────────
 
-/// Test 1: A command that stays well under the limit exits normally.
 #[tokio::test]
 #[ignore = "requires Linux cgroupv2 with delegation — run with: cargo test --test cgroup_memory_test -- --ignored --nocapture"]
 async fn test_under_limit_exits_normally() {
@@ -174,7 +149,6 @@ async fn test_under_limit_exits_normally() {
     eprintln!("✅ PASSED: under_limit_exits_normally");
 }
 
-/// Test 2: A command that allocates way more than the limit is killed with 137/oom.
 #[tokio::test]
 #[ignore = "requires Linux cgroupv2 with delegation"]
 async fn test_over_limit_gets_oom_killed() {
@@ -187,7 +161,6 @@ async fn test_over_limit_gets_oom_killed() {
     let backend = LocalTerminalBackend::with_memory_limit(test_memory_config());
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Allocate 128 MiB in Python — well above the 32 MiB high / 64 MiB max limits.
     let alloc_cmd = r#"python3 -c "
 import sys
 print('Allocating 128 MiB...', flush=True)
@@ -226,7 +199,6 @@ print('Allocation succeeded (should not reach here)', flush=True)
     eprintln!("✅ PASSED: over_limit_gets_oom_killed");
 }
 
-/// Test 3: After an OOM, the backend still works for subsequent commands.
 #[tokio::test]
 #[ignore = "requires Linux cgroupv2 with delegation"]
 async fn test_session_survives_oom() {
@@ -272,7 +244,6 @@ async fn test_session_survives_oom() {
     eprintln!("✅ PASSED: session_survives_oom");
 }
 
-/// Test 4: Background tasks are also subject to the memory limit.
 #[tokio::test]
 #[ignore = "requires Linux cgroupv2 with delegation"]
 async fn test_background_task_oom() {
@@ -332,7 +303,6 @@ time.sleep(60)
     eprintln!("✅ PASSED: background_task_oom");
 }
 
-/// Test 5: Gradual allocation that slowly ramps past the limit.
 /// This tests that the inotify monitor catches the memory.high event
 /// rather than relying on the kernel's hard memory.max kill.
 #[tokio::test]
@@ -347,7 +317,6 @@ async fn test_gradual_allocation_oom() {
     let backend = LocalTerminalBackend::with_memory_limit(test_memory_config());
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Allocate in 1 MiB chunks with a small delay — slowly ramps past 32 MiB.
     let gradual_cmd = r#"python3 -c "
 import time, sys
 chunks = []
@@ -384,7 +353,6 @@ print('Finished all allocations (should not reach here)', flush=True)
         "Should see some allocation progress before kill"
     );
 
-    // Should NOT have finished all 128 MiB
     assert!(
         !result.combined_output.contains("Finished all allocations"),
         "Should have been killed before finishing"
@@ -393,7 +361,6 @@ print('Finished all allocations (should not reach here)', flush=True)
     eprintln!("✅ PASSED: gradual_allocation_oom");
 }
 
-/// Test 6: No memory config → no cgroup enforcement, large alloc succeeds.
 /// This verifies the no-op path works correctly.
 #[tokio::test]
 async fn test_no_config_no_enforcement() {
@@ -403,7 +370,6 @@ async fn test_no_config_no_enforcement() {
     let backend = LocalTerminalBackend::new();
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Allocate 64 MiB — would be killed with a 32 MiB limit, but should succeed here
     let alloc_cmd = r#"python3 -c "
 data = bytearray(64 * 1024 * 1024)
 print('Allocated 64 MiB without limits')

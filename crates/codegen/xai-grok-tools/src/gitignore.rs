@@ -1,9 +1,4 @@
 //! Shared gitignore matching utility.
-//!
-//! Single source of truth for checking whether a path is ignored by
-//! `.gitignore` rules. Used by both the initial AGENTS.md discovery
-//! (`xai-grok-agent::prompt::ignore`) and the runtime tracker
-//! (`AgentsMdTracker`).
 
 use ignore::gitignore::Gitignore;
 use std::path::Path;
@@ -90,8 +85,7 @@ mod tests {
         let root = tmp.path();
         let root = &dunce::canonicalize(root).unwrap();
         let gi = build_gitignore(root, &["build/", "*.md"]);
-        // A path completely outside the git root should not be checked
-        // against the repo's .gitignore (e.g., ~/.grok/Agents.md).
+        // A path completely outside the git root should not be checked against the repo's .gitignore.
         let outside_path = std::path::PathBuf::from("/some/other/path/Agents.md");
         assert!(!is_ignored(&gi, &outside_path, Some(root)));
     }

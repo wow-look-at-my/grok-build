@@ -1,9 +1,4 @@
 //! Detects whether grok is running inside an editor's embedded `:terminal` (Neovim/Vim `:terminal`, Emacs `vterm`).
-//!
-//! Inside an editor `:terminal` the *immediate* terminal emulator is the editor's own libvterm, not tmux, even though `TMUX` is still inherited.
-//! A tmux DCS passthrough envelope (`\x1bPtmux;…\x1b\\`) is only understood by tmux.
-//! Emitting it into the editor's libvterm renders the wrapper as visible garbage text.
-//! Detection records this on [`super::TerminalContext`] so clipboard routing emits a plain OSC 52 sequence in that case instead.
 
 use std::collections::HashMap;
 
@@ -13,7 +8,6 @@ use super::env_get;
 pub enum EmbeddedEditor {
     /// Neovim `:terminal` (sets `NVIM`, or legacy `NVIM_LISTEN_ADDRESS`).
     Neovim,
-    /// Vim 8/9 `:terminal` (sets `VIM_TERMINAL`).
     Vim,
     /// Emacs (sets `INSIDE_EMACS`; `vterm` uses libvterm, same bug).
     Emacs,
@@ -21,9 +15,8 @@ pub enum EmbeddedEditor {
 
 /// Empty values are absent. A new marker must be added to the PTY harness strip list so the host terminal cannot leak into tests.
 pub fn embedded_editor_from_env(env: &HashMap<String, String>) -> Option<EmbeddedEditor> {
-    // The markers cannot tell the editor running inside tmux (where wrapping always renders garbage) from tmux running inside the editor
-    // We target the former; the latter still works because tmux forwards plain OSC 52
-    // NVIM_LISTEN_ADDRESS is legacy (modern nvim unsets it at startup); a stray/user-exported marker only degrades to plain OSC 52, never garbage
+    // The markers cannot tell the editor running inside tmux (where wrapping
+    // always renders garbage).
     if env_get(env, "NVIM").is_some() || env_get(env, "NVIM_LISTEN_ADDRESS").is_some() {
         return Some(EmbeddedEditor::Neovim);
     }

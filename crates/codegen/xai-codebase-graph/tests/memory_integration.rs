@@ -1,7 +1,4 @@
 //! Integration tests for indexing filters, batching, and cache round-trip.
-//!
-//! These tests create real file trees and exercise IndexManager / IndexBuilder
-//! contracts that are awkward to cover with tiny unit fixtures.
 
 use std::fs;
 use std::path::Path;
@@ -25,7 +22,7 @@ fn create_rust_files(dir: &Path, count: usize, defs_per_file: usize) {
 fn create_binary_files(dir: &Path, count: usize, size: usize) {
     for i in 0..count {
         let mut data = vec![0xFFu8; size];
-        // Ensure null byte in first 8000 bytes for binary detection
+        // Ensure null byte in first many bytes for binary detection
         data[50] = 0;
         fs::write(dir.join(format!("binary_{}.rs", i)), &data).unwrap();
     }
@@ -49,7 +46,6 @@ fn test_binary_files_no_memory_growth() {
     let handle = IndexManager::spawn(config);
     let _ = handle.get_file_count();
 
-    // Create 200 binary files with .rs extension, each 100KB
     create_binary_files(root, 200, 100_000);
 
     for i in 0..200 {
@@ -79,7 +75,7 @@ fn test_hidden_dir_files_not_indexed() {
     let handle = IndexManager::spawn(config);
     let _ = handle.get_file_count();
 
-    // Create 300 files under a hidden directory (simulating .claude worktree)
+    // Create multiple files under a hidden directory (simulating .claude worktree)
     let hidden = root.join(".claude").join("worktrees").join("session1");
     fs::create_dir_all(&hidden).unwrap();
     create_rust_files(&hidden, 300, 20);
@@ -131,8 +127,8 @@ fn test_builder_skips_binary_and_oversized_in_bulk() {
     let root = dir.path();
 
     // Mix of valid, binary, and oversized files
-    create_rust_files(root, 100, 5); // 100 valid files
-    create_binary_files(root, 50, 10_000); // 50 binary files
+    create_rust_files(root, 100, 5);
+    create_binary_files(root, 50, 10_000);
 
     // One oversized file
     let big = "fn x() {}\n".repeat(600_000); // ~6MB
@@ -142,9 +138,8 @@ fn test_builder_skips_binary_and_oversized_in_bulk() {
     let index = IndexBuilder::new().build(root).unwrap();
     let (files, defs, _refs) = index.stats();
 
-    // Only the 100 valid files should be indexed
     assert_eq!(files, 100);
-    assert!(defs >= 500); // 100 files × 5 defs
+    assert!(defs >= 500); // Files × defs
 }
 
 /// Verify that bounded merge-batching produces the same index as unbounded.
@@ -153,9 +148,9 @@ fn test_builder_skips_binary_and_oversized_in_bulk() {
 fn test_build_batch_size_produces_correct_index() {
     let dir = tempdir().unwrap();
     let root = dir.path();
-    create_rust_files(root, 200, 5); // 200 files, 1 000 defs
+    create_rust_files(root, 200, 5); // Files, defs
 
-    // Build with a very small batch size (10 files per merge batch)
+    // Build with a small batch size (files per merge batch)
     let batched = IndexBuilder::new()
         .with_build_batch_size(10)
         .build(root)
@@ -191,7 +186,7 @@ fn test_build_batch_size_produces_correct_index() {
 fn test_compact_then_save_load_roundtrip() {
     let dir = tempdir().unwrap();
     let root = dir.path();
-    create_rust_files(root, 50, 4); // 50 files, 200 defs
+    create_rust_files(root, 50, 4); // Files, defs
 
     // build() calls compact() internally via build_fast()
     let original = IndexBuilder::new().build(root).unwrap();

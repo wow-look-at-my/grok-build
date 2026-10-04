@@ -40,8 +40,7 @@ fn is_timeout_err(msg: &str) -> bool {
     msg.contains("timed out")
 }
 
-/// Opt-in for the hub prompt path where it is not on by construction: the sandbox guest. Daemon hosts
-/// ignore it (see `approval_gate_for`).
+/// Opt-in for the hub prompt path where it is not on by construction: the sandbox guest.
 pub const HITL_PERMISSION_LIVE_ENV: &str = "GROK_HITL_PERMISSION_LIVE";
 
 pub fn hitl_permission_live_enabled() -> bool {

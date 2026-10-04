@@ -11,8 +11,6 @@ use crate::types::Credentials;
 use crate::usage::UsageLedger;
 
 /// Bytes/4 estimate of the system prompt portion of a [`ConversationItem`].
-/// Returns 0 for non-system items so callers can pipe through whatever they
-/// have without unwrapping.
 pub fn estimate_system_message_tokens(item: &ConversationItem) -> u64 {
     match item {
         ConversationItem::System(s) => xai_token_estimation::estimate_tokens(&s.content),
@@ -53,31 +51,23 @@ pub fn estimate_tool_specs_tokens(tools: &[ToolSpec]) -> u64 {
         .sum()
 }
 
-/// Bytes/4 estimate for a single [`ConversationItem`].
-/// Images count at [`xai_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
-/// Shared so the per-variant arithmetic stays in one place.
+/// Bytes/4 estimate for a single [`ConversationItem`]. Images count at
+/// [`xai_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
 pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
-    // The arithmetic lives next to the item type, so the request builder that
-    // fits the output budget into the window counts the prompt the same way
-    // this actor's running total does.
+    // The arithmetic lives next to the item type, so the request builder that fits the output budget.
     xai_grok_sampling_types::estimate_item_tokens(item)
 }
 
-/// Estimate token footprint: text bytes / 4, images at the per-image
-/// constant defined by [`xai_token_estimation::IMAGE_TOKEN_ESTIMATE`].
 pub fn estimate_conversation_tokens(items: &[ConversationItem]) -> u64 {
     items.iter().map(estimate_item_tokens).sum()
 }
 
 /// grok-build's token counter for the shared compaction engine.
-/// Exposes the same bytes/4 estimate the triggers already use, so budgeting stays consistent.
-/// Other hosts may plug a real BPE tokenizer into the same seam.
 pub struct EstimatedItemTokenCounter;
 
 impl xai_grok_compaction::ItemTokenCounter<ConversationItem> for EstimatedItemTokenCounter {
     fn count_item_tokens(&self, item: &ConversationItem) -> u32 {
-        // The estimate is a `u64`; a single item never approaches `u32::MAX`
-        // tokens, but saturate rather than wrap if one somehow does.
+        // The estimate is a `u64`; a single item never approaches `u32::MAX` tokens.
         estimate_item_tokens(item).try_into().unwrap_or(u32::MAX)
     }
 }
@@ -114,47 +104,29 @@ pub(crate) struct ChatState {
     /// Prompt index at which the last compaction occurred.
     pub last_compaction_prompt_index: Option<usize>,
     /// Opaque credential secrets (api key, optional extra auth, client version).
-    /// Stored opaquely — the actor never interprets them.
     pub credentials: Credentials,
     /// Bytes/4 estimate of tokens added since the last `record_token_usage`.
-    /// Used by `check_preflight_overflow` to detect context window overflows
-    /// between model responses.
     pub estimated_tokens_since_model: u64,
-    /// Bytes/4 estimate of the conversation as of the last `record_token_usage`
-    /// (or last reseed). `total_tokens − estimate_at_last_response` is the
-    /// provider-side overhead carried across compaction.
+    /// Bytes/4 estimate of the conversation as of the last `record_token_usage` (or last reseed).
     pub estimate_at_last_response: u64,
     /// Per-turn token usage from the most recent model response, for `PromptResponse` `_meta`.
-    /// `None` means no model turn has completed (or a restore that did not persist it).
-    /// Always overwritten by the most recent turn — historical turns are not retained here.
     pub last_turn_usage: Option<TokenUsage>,
-    /// Billing for the open prompt (cleared on next prompt; not persisted).
     pub prompt_usage: Option<UsageLedger>,
-    /// Lifetime session billing (not persisted).
     pub session_usage: UsageLedger,
-    /// Offset-based turn capture state. `Some` = capture active, `None` = inactive.
-    /// Cleared on `TakeTurnMessages` (consumed), `BeginTurnCapture` (new turn),
-    /// and `TruncateToPromptIndex` (rewind abandons the turn).
+    /// Cleared on `TakeTurnMessages` (consumed), `BeginTurnCapture` (new turn), and `TruncateToPromptIndex`.
     pub(super) turn_capture: Option<TurnCaptureState>,
-    /// Accumulator for the in-progress harness-subagent trace phase.
-    /// Independent of `turn_capture` (the planner runs ahead of `BeginTurnCapture`)
-    /// and never enters the live `conversation`.
+    /// Independent of `turn_capture` (the planner runs ahead of `BeginTurnCapture`).
     pub(super) harness_trace_buffer: Vec<ConversationItem>,
-    /// Sealed harness trace turns awaiting drain by the agent.
     /// Uploaded as sibling `turn_{N}` artifacts so orchestrators can discover harness subagents.
-    /// Drained by `TakeHarnessTraceTurns` at the end of the user-facing turn.
     pub(super) harness_trace_turns: Vec<Vec<ConversationItem>>,
 }
 
-/// Tracks which conversation items belong to the current turn without cloning each push.
-/// Records `turn_start_offset`; take clones `conversation[offset..]` once.
-/// On mid-turn replace/restore, snapshot the tail into `pre_replacement_messages` before the old vec drops.
+/// Tracks which conversation items belong to the current turn without cloning
+/// each push.
 pub(super) struct TurnCaptureState {
     /// Index into `conversation` where this turn's messages start.
     pub turn_start_offset: usize,
-    /// Messages saved from before a conversation replacement (compaction,
-    /// snapshot restore).  Extended (not replaced) if multiple replacements
-    /// occur in one turn.
+    /// Messages saved from before a conversation replacement (compaction, snapshot restore).
     pub pre_replacement_messages: Vec<ConversationItem>,
     /// Whether compaction occurred during this capture.
     pub compaction_occurred: bool,
@@ -250,7 +222,6 @@ mod tests {
 
     #[test]
     fn reasoning_estimate_takes_max_of_text_and_encrypted_not_sum() {
-        // max(4000, 4000*3/4)/4 = 1000, not the (4000+4000)/4 = 2000 double-count.
         let mut r = xai_grok_sampling_types::synthesized_reasoning_item("x".repeat(4000));
         r.encrypted_content = Some("e".repeat(4000));
         assert_eq!(estimate_item_tokens(&ConversationItem::Reasoning(r)), 1000);
@@ -258,7 +229,6 @@ mod tests {
 
     #[test]
     fn reasoning_estimate_encrypted_only_scales_base64_down() {
-        // No visible text: base64-corrected size, 4000*3/4/4 = 750.
         let mut r = xai_grok_sampling_types::synthesized_reasoning_item("");
         r.summary.clear();
         r.encrypted_content = Some("e".repeat(4000));
@@ -275,7 +245,7 @@ mod tests {
     fn new_state_has_correct_defaults() {
         let state = ChatState::new(vec![], test_sampling_config());
         assert_eq!(state.prompt_index, 0);
-        assert_eq!(state.total_tokens, 0); // empty conversation → 0
+        assert_eq!(state.total_tokens, 0);
         assert!(state.conversation.is_empty());
         assert!(state.agent_edited_paths.is_empty());
         assert!(state.prompt_texts.is_empty());
@@ -296,7 +266,6 @@ mod tests {
 
     #[test]
     fn new_state_estimates_tokens_from_conversation() {
-        // 4000 bytes of text per item, bytes / 4 = 1000 tokens each
         let items = vec![
             ConversationItem::system("x".repeat(4000).as_str()),
             ConversationItem::user("y".repeat(4000).as_str()),
@@ -304,7 +273,7 @@ mod tests {
             ConversationItem::tool_result("call-1", "w".repeat(4000).as_str()),
         ];
         let state = ChatState::new(items, test_sampling_config());
-        assert_eq!(state.total_tokens, 4000); // 4 * (4000/4)
+        assert_eq!(state.total_tokens, 4000);
     }
 
     #[test]
@@ -321,13 +290,12 @@ mod tests {
 
     #[test]
     fn estimate_tool_definition_tokens_counts_name_desc_params() {
-        // Empty parameters serialize to "null" (4 bytes) in the JSON-string len
+        // Empty parameters serialize to "null" (a few bytes) in the JSON-string len
         let td = xai_grok_sampling_types::ToolDefinition::function(
             "search",
             Some("find a file"),
             serde_json::json!({}),
         );
-        // name=6 + desc=11 + params=`{}`.len()=2 = 19, /4 = 4
         assert_eq!(estimate_tool_definition_tokens(&td), 4);
     }
 
@@ -354,14 +322,12 @@ mod tests {
 
     #[test]
     fn estimate_messages_tokens_excludes_system_and_sums_rest() {
-        // 4000 bytes per item -> 1000 tokens each.
         let items = vec![
             ConversationItem::system("x".repeat(4000).as_str()),
             ConversationItem::user("y".repeat(4000).as_str()),
             ConversationItem::assistant("z".repeat(4000).as_str()),
             ConversationItem::tool_result("call-1", "w".repeat(4000).as_str()),
         ];
-        // Total = 4000 (4 items * 1000), system = 1000, messages = 3000.
         assert_eq!(estimate_conversation_tokens(&items), 4000);
         assert_eq!(estimate_messages_tokens(&items), 3000);
     }

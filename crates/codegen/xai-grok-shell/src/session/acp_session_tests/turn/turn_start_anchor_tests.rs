@@ -15,7 +15,7 @@ fn host_turn_stamps_fresh_turn_start() {
             let actor =
                 Arc::new(create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await);
 
-            // Stale anchor left by an inference turn 11 hours ago.
+            // Stale anchor left by an inference turn several hours ago.
             let stale_ms = chrono::Utc::now().timestamp_millis() - 11 * 60 * 60 * 1000;
             actor.chat_state_handle.record_turn_start(stale_ms);
 

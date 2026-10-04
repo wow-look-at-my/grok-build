@@ -1,5 +1,4 @@
 //! Re-exports of the crate-internal event types that live in `xai-grok-session-events`.
-//! The orphan-rule items (`From<&permission::Decision>` and the doom-loop categorizer) stay here since they need shell-local types.
 
 pub(crate) use xai_grok_session_events::tracker::EventTracker;
 pub(crate) use xai_grok_session_events::types::{
@@ -8,9 +7,6 @@ pub(crate) use xai_grok_session_events::types::{
     ToolCompletedSource, ToolOutcome, TurnOutcomeLabel,
 };
 
-// ── Laziness detector (Layer 3) discriminator vocabulary ─────────────.
-// Single source of truth for the `category` field on `Event::LazinessClassifierFired` / `LazinessNudgeFired`.
-// The abort reasons are emitted only via the `LAZINESS_ABORT_*` consts below; no string literals appear at any producer site.
 
 /// Stalled: the model emitted prose narration claiming progress without any real tool calls.
 pub(crate) const LAZINESS_STALLED_NARRATION: &str = "stalled_narration";
@@ -22,8 +18,7 @@ pub(crate) const LAZINESS_STALLED_PERMISSION_ASKING: &str = "stalled_permission_
 pub(crate) const LAZINESS_STALLED_NO_TODOS_BUT_TASK_IN_FLIGHT: &str =
     "stalled_no_todos_but_task_in_flight";
 
-/// Stalled: the agent declared completion or success but the transcript shows substantive claims unbacked by tool-call evidence.
-/// For example it claims running `make test` but no `make` tool_call appears, or claims an "overnight 8+ hour run" when elapsed time is minutes.
+/// Stalled: the agent declared completion or success but the transcript shows substantive claims unbacked.
 pub(crate) const LAZINESS_STALLED_FALSE_COMPLETION: &str = "stalled_false_completion";
 
 /// Not stalled: the model has genuinely completed its task.
@@ -44,7 +39,7 @@ pub(crate) const LAZINESS_ABORT_MODEL_SWITCH: &str = "model_switch";
 /// Aborted because the classifier exceeded its wall-clock budget.
 pub(crate) const LAZINESS_ABORT_TIMEOUT: &str = "timeout";
 
-/// Aborted because the classifier response failed to parse after the tolerant parser exhausted all three passes.
+/// Aborted because the classifier response failed to parse after the tolerant parser exhausted all passes.
 pub(crate) const LAZINESS_ABORT_CLASSIFIER_ERROR: &str = "classifier_error";
 
 // Compile-time guard against an accidentally-empty const breaking the dashboards' group-by
@@ -64,9 +59,9 @@ const _: () = assert!(
     "Laziness discriminator consts must be non-empty",
 );
 
-/// Closed set of categories the Layer-3 classifier can return.
-/// Mirrors the JSON schema in the classifier prompt; `serde` uses the `LAZINESS_*` strings above as the wire format (snake_case).
-/// The `laziness_category_round_trip` test asserts the variant-to-const pairing is one-to-one.
+/// Closed set of categories the Layer-3 classifier can return. Mirrors the
+/// JSON schema in the classifier prompt; `serde` uses the `LAZINESS_*`
+/// strings above as the wire format (snake_case).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum LazinessCategory {
@@ -93,7 +88,7 @@ impl LazinessCategory {
         }
     }
 
-    /// Four variants count as "stalled" and are eligible for a nudge.
+    /// Variants count as "stalled" and are eligible for a nudge.
     pub(crate) fn is_stalled(self) -> bool {
         match self {
             Self::StalledNarration
@@ -139,9 +134,7 @@ impl LazinessCategory {
     }
 }
 
-// ── TodoGate discriminator vocabulary ─────────────────────────────────.
-// Source of truth for the `reason` field on `Event::TodoGateFired`.
-// Producer wraps these via `TodoGateReason::as_str()` (acp_session.rs).
+// ── TodoGate discriminator vocabulary.
 
 /// The TodoGate fired because a content-only turn ended with one or more pending or unbacked in-progress todos.
 pub(crate) const TODO_GATE_IN_FLIGHT: &str = "in_flight";
@@ -168,9 +161,7 @@ pub(crate) fn prior_turn_interrupt_from_cancellation(
     }
 }
 
-// ── GoalClassifier discriminator vocabulary ───────────────────────────.
-// Single source of truth for the `reason` field on `Event::GoalClassifierFailOpen` / `Event::GoalClassifierFailClosed`.
-// The producer wraps the reason strings via the `as_const_str()` methods on `GoalClassifierFailOpenReason` / `GoalClassifierFailClosedReason`.
+// ── GoalClassifier discriminator vocabulary.
 
 /// Fail-open: legacy wire string; the runner does not emit it.
 pub(crate) const GOAL_CLASSIFIER_FAIL_OPEN_TIMEOUT: &str = "timeout";
@@ -187,12 +178,10 @@ pub(crate) const GOAL_CLASSIFIER_FAIL_OPEN_FILE_WRITE_FAILED: &str = "file_write
 /// Fail-open: the goal was no longer Active when the runner resolved its inputs (status changed during the spawn).
 pub(crate) const GOAL_CLASSIFIER_FAIL_OPEN_GOAL_NOT_ACTIVE: &str = "goal_not_active_at_resolve";
 
-/// Fail-closed: a second `update_goal(completed: true)` arrived while a verification stage was already in flight for this goal.
-/// Caller must not double-spawn.
+/// Fail-closed: a second `update_goal(completed: true)` arrived while a verification stage was already in flight.
 pub(crate) const GOAL_CLASSIFIER_FAIL_CLOSED_CONCURRENT: &str = "concurrent_in_flight";
 
 /// Fail-closed: the deferred-completion queue overflowed and the oldest entry was dropped to make room for a newer one.
-/// PARSE-class analogue of `ConcurrentInFlight` for the runaway-`completed: true` path.
 pub(crate) const GOAL_CLASSIFIER_FAIL_CLOSED_PENDING_QUEUE_FULL: &str = "pending_queue_full";
 
 #[allow(clippy::const_is_empty)]
@@ -239,8 +228,6 @@ impl GoalClassifierFailOpenReason {
 }
 
 /// PARSE-class fail-closed reasons.
-/// The verification stage routes per-skeptic parse failures (malformed terminal token, missing verdict JSON) through synthetic refute votes.
-/// The only live variants here are therefore the drain-path race guards (`ConcurrentInFlight`, `PendingQueueFull`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoalClassifierFailClosedReason {
     ConcurrentInFlight,
@@ -256,9 +243,7 @@ impl GoalClassifierFailClosedReason {
     }
 }
 
-// ── GoalPlanner discriminator vocabulary ──────────────────────────────.
-// The planner is fail-CLOSED by design (the opposite of the classifier).
-// Every reason here represents a path that pauses the goal; there is no fail-open analogue.
+// ── GoalPlanner discriminator vocabulary.
 
 /// Planner subagent coordinator channel was unreachable.
 pub(crate) const GOAL_PLANNER_FAIL_CLOSED_TRANSPORT: &str = "transport";
@@ -332,9 +317,7 @@ impl GoalPlannerFailClosedReason {
     }
 }
 
-// ── GoalStrategist discriminator vocabulary ───────────────────────────.
-// The strategist is fail-OPEN by design (the opposite of the planner).
-// Every reason here represents a path that is logged and then ignored; the goal keeps running The strategist is a best-effort advisory enhancement, never a gate.
+// ── GoalStrategist discriminator vocabulary.
 
 /// Strategist subagent coordinator channel was unreachable.
 pub(crate) const GOAL_STRATEGIST_FAILED_TRANSPORT: &str = "transport";
@@ -395,7 +378,6 @@ const _: () = assert!(
 );
 
 /// Why the plan.md-safety guard could not guarantee the contract.
-/// Drives the `reason` on `Event::GoalStrategistContractRestoreFailed`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoalStrategistRestoreFailReason {
     WriteFailed,
@@ -413,8 +395,7 @@ impl GoalStrategistRestoreFailReason {
     }
 }
 
-// ── GoalSummarizer discriminator vocabulary ───────────────────────────.
-// The summarizer is fail-OPEN by design: it runs ONCE after the goal is already verified-achieved, so every reason here is logged and ignored Goal completion is never blocked, paused, or un-achieved.
+// ── GoalSummarizer discriminator vocabulary ───────────────────────────. The summarizer is fail-OPEN by design.
 
 /// Summarizer subagent coordinator channel was unreachable.
 pub(crate) const GOAL_SUMMARIZER_FAIL_OPEN_TRANSPORT: &str = "transport";
@@ -457,15 +438,12 @@ impl GoalSummarizerFailReason {
     }
 }
 
-// ── GoalRoleModel discriminator vocabulary ────────────────────────────.
-// Source of truth for the `reason` field on `Event::GoalRoleModelFailOpen`.
-// Per-role model selection is fail-OPEN by design; the goal is never paused. An unknown model, an unusable toolset, or a harness flavor the subagent system can't represent degrades that role (or skeptic index).
+// ── GoalRoleModel discriminator vocabulary.
 
 /// Fail-open: the configured model id is not in the session's model catalog (`find_model_by_id` miss).
 pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_MODEL_UNKNOWN: &str = "model_unknown";
 
 /// Fail-open: the configured `agent_type` did not resolve (`describe_subagent_type` returned `Unknown`).
-/// The name is neither an existing subagent type nor an existing `/goal` harness name.
 pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_UNKNOWN: &str = "toolset_unknown";
 
 /// Fail-open: the `agent_type` exists but is not on the parent's allow-list (`describe_subagent_type` returned `NotAllowed`).
@@ -475,13 +453,12 @@ pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_NOT_ALLOWED: &str = "toolset_
 pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_DISABLED: &str = "toolset_disabled";
 
 /// Fail-open: the coordinator could not describe the toolset (channel closed, responder dropped, or timeout).
-/// `describe_subagent_type` returned `Unavailable`: infra-flakiness, distinct from the config-bug cases.
 pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_UNAVAILABLE: &str = "toolset_unavailable";
 
 /// Fail-open: the toolset built but lacks the capabilities the role requires (e.g. a verifier whose toolset cannot read/grep code).
 pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_TOOLSET_INCAPABLE: &str = "toolset_incapable";
 
-/// Fail-open: spawning the role with the configured pair returned a `SpawnError`; the spawn-and-retry-once wrapper retried on the current model.
+/// Fail-open: spawning the role with the configured pair returned a `SpawnError`.
 pub(crate) const GOAL_ROLE_MODEL_FAIL_OPEN_SPAWN_FAILED: &str = "spawn_failed";
 
 /// Fail-open: the `agent_type` resolves as a STRICT harness whose subagent
@@ -572,7 +549,7 @@ impl From<crate::session::goal_tracker::GoalClassifierVerdict> for GoalClassifie
     }
 }
 
-/// The two enums are intentional mirrors and live in different crates due to the orphan rule.
+/// Both enums are intentional mirrors and live in different crates due to the orphan rule.
 /// The exhaustive `match` here makes the compiler catch drift if either side adds a variant.
 impl From<crate::session::goal_tracker::GoalPauseReason> for GoalPauseReasonTelemetry {
     fn from(reason: crate::session::goal_tracker::GoalPauseReason) -> Self {
@@ -596,7 +573,7 @@ mod tests {
     #[test]
     fn prior_turn_interrupt_from_cancellation_maps_user_interrupts_only() {
         use xai_grok_sampling_types::PriorTurnInterrupt;
-        // The three user-interrupt causes map to a marker.
+        // Those user-interrupt causes map to a marker.
         assert_eq!(
             prior_turn_interrupt_from_cancellation(CancellationCategory::MidTurnAbort),
             Some(PriorTurnInterrupt::MidTurnAbort)
@@ -749,8 +726,9 @@ mod tests {
 
     #[test]
     fn laziness_abort_reason_consts_are_distinct() {
-        // Driven off `LazinessAbortReason::all()`, so this test only sees a new variant once it is added there
-        // The const array here is preserved separately so a desync between `as_const_str` and the `pub const` set is caught
+        // Driven off `LazinessAbortReason::all()`, so this test only sees a
+        // new variant once it is added there The const array here is
+        // preserved separately.
         let from_enum: std::collections::BTreeSet<&'static str> =
             crate::session::acp_session::LazinessAbortReason::all()
                 .iter()

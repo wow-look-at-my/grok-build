@@ -1,6 +1,4 @@
-//! The [`CircuitBreaker`] state machine: sliding-window-with-min-samples
-//! algorithm with three states (`Closed`, `Open`, `HalfOpen`) and an
-//! atomic-mirror lock-free fast-path for `is_open()`.
+//! The [`CircuitBreaker`] state machine: sliding-window-with-min-samples algorithm with states.
 
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -23,29 +21,17 @@ pub struct CircuitBreaker {
 pub(crate) struct CircuitBreakerInner {
     config: BreakerConfig,
     state: AtomicU8,
-    /// Monotonic baseline captured at construction; `opened_at_millis`
-    /// stores millisecond offsets from this instant, avoiding NTP
-    /// drift issues and letting `MockClock` drive cool-down windows.
+    /// Monotonic baseline captured at construction.
     baseline: Instant,
     opened_at_millis: AtomicU64,
     half_open_probes: AtomicUsize,
-    /// When the most recent half-open probe slot was claimed
-    /// (millisecond offset from `baseline`). A probe whose owner never
-    /// reaches `record()` — e.g. its future is dropped on caller
-    /// cancellation — would otherwise hold its slot forever and strand
-    /// the breaker in `HalfOpen`, shedding all traffic with no path
-    /// back to `Closed`. `try_half_open_probe` treats a claim older
-    /// than `open_duration` as abandoned and lets one caller reclaim
-    /// it, so a lost probe delays recovery by at most one cool-down.
+    /// When the most recent half-open probe slot was claimed (millisecond offset from `baseline`).
     probe_claimed_at_millis: AtomicU64,
-    /// Lock-free mirror of `state == Open`. Written after the
-    /// authoritative `state` store with `Release`; read with
-    /// `Relaxed` from the `is_open()` hot path.
+    /// Lock-free mirror of `state == Open`.
     is_open_fast: AtomicBool,
     window: Mutex<SlidingWindow>,
     clock: Arc<dyn Clock>,
-    /// Install-once-on-shared-inner so `with_observer` keeps working
-    /// after a clone (the registry hands out clones).
+    /// Install-once-on-shared-inner so `with_observer` keeps working after a clone (the registry hands out clones).
     observer: OnceLock<Arc<dyn Observer>>,
 }
 
@@ -156,10 +142,7 @@ impl CircuitBreaker {
         self.inner.is_open_fast.load(Ordering::Relaxed)
     }
 
-    /// Failure rate over the live sliding window (`0.0` for an empty
-    /// window). Evicts samples older than `window_duration` against
-    /// the breaker's clock before computing the rate so reads stay
-    /// time-window-accurate even when no `record()` fired recently.
+    /// Failure rate over the live sliding window (`0.0` for an empty window).
     pub fn error_rate(&self) -> f64 {
         let now = self.inner.clock.now();
         let mut window = self.lock_window();
@@ -188,12 +171,8 @@ impl CircuitBreaker {
         }
     }
 
-    /// The window is a ring of success/failure counters, and every section that
-    /// writes it is arithmetic, so a poison can only arrive from a caller's own
-    /// panic. Recovering the counters keeps tripping working; refusing to do so
-    /// would turn one bad request into a breaker that never observes anything
-    /// again. `parking_lot::Mutex` is the structural fix and is not a dependency
-    /// of this crate.
+    /// The window is a ring of success/failure counters, and every section
+    /// that writes it is arithmetic.
     #[allow(clippy::disallowed_methods)]
     fn lock_window(&self) -> std::sync::MutexGuard<'_, SlidingWindow> {
         self.inner.window.lock().unwrap_or_else(|e| e.into_inner())
@@ -215,21 +194,13 @@ impl CircuitBreaker {
         if elapsed >= self.inner.config.open_duration {
             if self.cas_state(BreakerState::Open, BreakerState::HalfOpen) {
                 self.inner.is_open_fast.store(false, Ordering::Release);
-                // Do NOT reset `half_open_probes` here. It is already 0:
-                // `trip()` zeroes it on entry to `Open` and nothing
-                // increments it while `Open`. Resetting after the CAS
-                // publishes `HalfOpen` races a loser thread that observes
-                // `HalfOpen` and claims a probe slot in the gap, which the
-                // reset would then clear — admitting two probes instead of
-                // one.
+                // Do NOT reset `half_open_probes` here.
                 self.observer().on_state_change(
                     BreakerState::Open,
                     BreakerState::HalfOpen,
                     "open_elapsed",
                 );
-                // Route through the shared probe-accounting path so
-                // the loser of the CAS race and the winner agree on
-                // the counter.
+                // Route through the shared probe-accounting path so the loser of the CAS race and the winner agree.
                 return self.try_half_open_probe();
             }
             // Lost CAS race — re-evaluate.
@@ -293,15 +264,7 @@ impl CircuitBreaker {
         }
         self.inner.half_open_probes.fetch_sub(1, Ordering::AcqRel);
 
-        // All probe slots are claimed. A claim is only released via
-        // `record()`; if a probe's owner was cancelled before recording
-        // (its future dropped mid-flight), the slot would be held forever
-        // and the breaker could never leave `HalfOpen`. Treat a claim
-        // older than `open_duration` as abandoned and let exactly one
-        // caller (the CAS winner) take it over. A slow-but-alive probe
-        // that outlives the lease may briefly coexist with its
-        // replacement; both outcomes are recorded, same as running with
-        // an extra probe slot.
+        // All probe slots are claimed.
         let lease_millis = self.inner.config.open_duration.as_millis() as u64;
         let claimed = self.inner.probe_claimed_at_millis.load(Ordering::Acquire);
         if now.saturating_sub(claimed) >= lease_millis
@@ -316,10 +279,7 @@ impl CircuitBreaker {
         }
 
         self.observer().on_probe_admission(false);
-        // Slot-exhausted rejection: callers that map this to HTTP
-        // `Retry-After` shouldn't advertise the full open-duration
-        // cool-down; advertise a small fixed backoff (capped to
-        // `open_duration`).
+        // Slot-exhausted rejection: callers that map this to HTTP `Retry-After` shouldn't advertise the full open-duration cool-down.
         const HALF_OPEN_PROBE_BACKOFF: Duration = Duration::from_millis(50);
         Err(BreakerOpen {
             retry_after: HALF_OPEN_PROBE_BACKOFF.min(self.inner.config.open_duration),

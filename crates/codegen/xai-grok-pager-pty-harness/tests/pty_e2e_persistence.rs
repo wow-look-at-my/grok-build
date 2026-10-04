@@ -1,6 +1,4 @@
 //! Session resume, persistence, storage recovery, background-task cleanup, and parked/wake lifecycle PTY coverage.
-//!
-//! All cases are ignored for ordinary Cargo runs; Bazel opts in and caps this process-heavy family at four concurrent libtest workers.
 
 // Shared support intentionally serves all PTY family crates.
 #[allow(dead_code, unused_imports)]

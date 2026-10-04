@@ -1,7 +1,4 @@
 //! Discovery shapes for skills carried by `OpsChunk::Skills` and `WorkspaceEvent::SkillsChanged`.
-//!
-//! NOTE: this `source`-keyed `SkillInfo` is **not** the wire shape of the `workspace.discover_skills` RPC.
-//! That RPC uses [`crate::rpc::skills::SkillInfo`] (`scope`-keyed).
 
 use serde::{Deserialize, Serialize};
 

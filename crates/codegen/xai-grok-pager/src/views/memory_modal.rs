@@ -1,17 +1,4 @@
 //! `/memory` browser modal: view-state, rendering, and input handling.
-//!
-//! A centered popup with ModalWindow chrome.
-//! Horizontally split into a searchable file list (left, ~40%) and a read-only content preview pane (right, ~60%).
-//! File list shows all memory files grouped by source (Global, Workspace, Sessions) with session logs in reverse chronological order.
-//! Selecting a file loads its content into the preview pane.
-//!
-//! Layout collapses to single-pane (list only) on narrow terminals (under 64 cols); `Enter` then
-//! opens the selected note over the whole content area.
-//!
-//! `/` enters filter mode (type to search names and note contents, Escape to exit).
-//! Dragging over the preview copies the selected text on release.
-//! `x` deletes with double-press confirmation: v2 topics and inbox observations via the shell's
-//! `x.ai/memory/forget` (tombstone + index + manifest update), legacy session logs by unlink.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -171,8 +158,7 @@ impl MemoryFileEntry {
     }
 }
 
-/// Status shown under the file list. Transient messages (copy outcomes) carry a tick countdown
-/// like the agent-view toast; the rest stay until the next action replaces them.
+/// Status shown under the file list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryStatusLine {
     pub text: String,
@@ -184,10 +170,8 @@ pub struct MemoryStatusLine {
 pub enum MemoryModalMode {
     Browse,
     /// Filter input is focused: all single-char keys go to the filter.
-    /// Only Escape (exit filter) and Enter (no-op / stay) remain active.
     FilterFocused,
     /// The preview has keyboard focus: arrows scroll the note; Esc/Enter return to the list.
-    /// When the split is hidden the preview covers the whole content area.
     PreviewFocused,
     ConfirmingDelete {
         idx: usize,
@@ -252,11 +236,9 @@ pub struct MemoryModalState {
     pub status: Option<MemoryStatusLine>,
     /// Whether the modal is rendered in fullscreen mode (persisted to config).
     pub fullscreen: bool,
-    /// Cached filtered indices.
-    /// Recomputed when `query` or `entries` change.
+    /// Cached filtered indices. Recomputed when `query` or `entries` change.
     filtered_cache: Vec<usize>,
     /// Lower-cased note contents for the filter, read once per listing on the first non-empty query.
-    /// `None` marks notes that could not be read (or are over the preview cap).
     content_cache: HashMap<PathBuf, Option<String>>,
     /// Scroll the preview to the first query match on the next render (set by `load_preview`).
     preview_jump_pending: bool,
@@ -353,7 +335,8 @@ impl MemoryModalState {
         self.entries = build_entries(listing.files);
         self.pending_delete = None;
         self.content_cache.clear();
-        // A confirm armed against the old list must not carry its index into the new one.
+        // A confirm armed against the list must not carry its index into the
+        // new one.
         if matches!(self.mode, MemoryModalMode::ConfirmingDelete { .. }) {
             self.mode = MemoryModalMode::Browse;
         }
@@ -410,7 +393,6 @@ impl MemoryModalState {
     }
 
     /// At least one entry is a note rather than a store-generated index.
-    /// v2 scope init always writes both `MEMORY.md` indexes, so a store with no notes still lists two files.
     pub fn has_notes(&self) -> bool {
         self.entries
             .iter()
@@ -1023,7 +1005,6 @@ fn render_notice(buf: &mut Buffer, area: Rect, markdown: &str, theme: &Theme) {
     });
 }
 
-/// Returns the number of rows used (0 or 1).
 fn render_status_line(
     buf: &mut Buffer,
     area: Rect,
@@ -1190,7 +1171,6 @@ fn render_file_list(buf: &mut Buffer, area: Rect, state: &mut MemoryModalState, 
             };
             buf.set_style(row_rect, Style::default().bg(bg));
 
-            // 1 col left pad, 2 col gap before the metadata column, 1 col right pad.
             let max_label_w = (content_width as usize).saturating_sub(meta_col_w + 4);
             let truncated_label: Cow<str> = if entry.label.width() > max_label_w {
                 let trunc = truncate_to_width(&entry.label, max_label_w.saturating_sub(1));
@@ -1282,7 +1262,6 @@ fn render_preview(buf: &mut Buffer, area: Rect, state: &mut MemoryModalState, th
     };
 
     // Reserve scrollbar column if needed (computed after first pass).
-    // We do a two-pass approach: first compute total at full width to decide if scrollbar is needed, then re-compute at narrowed width if so
     let full_width = area.width as usize;
     if full_width == 0 {
         return;
@@ -1505,8 +1484,7 @@ pub fn handle_memory_mouse(
     if state.shows_notice() {
         return InputOutcome::Unchanged;
     }
-    // Mouse input can move the selection and reload the preview hash; a pending confirm must
-    // not survive that, or the next `x` would pair the old row with the new hash.
+    // Mouse input can move the selection and reload the preview hash.
     if matches!(state.mode, MemoryModalMode::ConfirmingDelete { .. }) {
         state.mode = MemoryModalMode::Browse;
         state.status = None;
@@ -1948,7 +1926,6 @@ fn build_shortcuts(state: &MemoryModalState) -> Vec<Shortcut<'static>> {
 }
 
 /// Truncate a string to fit within `max_width` display columns.
-/// Delegates to `render::line_utils::byte_offset_at_width` to avoid duplicating the Unicode-width scanning logic.
 fn truncate_to_width(s: &str, max_width: usize) -> &str {
     let offset = crate::render::line_utils::byte_offset_at_width(s, max_width);
     s.get(..offset).unwrap_or("")
@@ -1990,8 +1967,6 @@ fn observation_key_label(file_name: &str) -> Option<String> {
     Some(format!("observation, {turns} (#{})", ordinal + 1))
 }
 
-/// Relative age in at most 3 columns (`<1m`, `27m`, `5h`, `99d`, `52w`, `99y`); no suffix, the
-/// metadata column position says what it is.
 fn format_modified(epoch_secs: Option<u64>, now_secs: u64) -> String {
     let Some(modified) = epoch_secs else {
         return "\u{2014}".to_string();
@@ -2006,7 +1981,7 @@ fn format_modified(epoch_secs: Option<u64>, now_secs: u64) -> String {
     if delta < 86400 {
         return format!("{}h", delta / 3600);
     }
-    // Units step up so the result stays within 3 columns.
+    // Units step up so the result stays a bounded number of columns.
     let days = delta / 86400;
     if days < 100 {
         return format!("{days}d");
@@ -2042,7 +2017,7 @@ mod tests {
         assert_eq!(format_modified(Some(now - 120), now), "2m");
         assert_eq!(format_modified(Some(now - 7200), now), "2h");
         assert_eq!(format_modified(Some(now - 172800), now), "2d");
-        // Never wider than 3 columns, so the padded metadata column stays aligned.
+        // Never wider than a few columns, so the padded metadata column stays aligned.
         for (secs, expected) in [
             (99 * 86400, "99d"),
             (100 * 86400, "14w"),
@@ -2188,7 +2163,6 @@ mod tests {
     fn new_selects_first_non_header() {
         let entries = build_test_entries();
         let state = MemoryModalState::new(entries);
-        // Index 0 is a header, so selection starts at index 1
         assert_eq!(state.selected, 1);
         let sel = state.selected_entry().unwrap();
         assert!(!sel.is_header);
@@ -2288,8 +2262,6 @@ mod tests {
         assert!(state.status.is_some());
     }
 
-    /// One topic with 60 numbered one-line paragraphs (rendered rows alternate text and blank);
-    /// paragraph 10 contains "the", paragraph 40 contains "the needle".
     fn long_note_state() -> (tempfile::TempDir, MemoryModalState) {
         use xai_grok_shell::extensions::notification::MemoryFileInfo;
         let dir = tempfile::tempdir().unwrap();
@@ -2331,7 +2303,6 @@ mod tests {
         );
         assert!(!text.contains("needle"), "{text}");
 
-        // A common first term must not pin the jump to its first occurrence (line 10).
         state.set_query("the needle");
         state.invalidate_filter();
         state.clamp_selected();
@@ -2375,7 +2346,7 @@ mod tests {
     #[test]
     fn narrow_modal_hides_preview_until_enter_opens_it_full_width() {
         let (_dir, mut state) = long_note_state();
-        // 70 columns: the modal content is under SPLIT_MIN_WIDTH, so only the list shows.
+        // Many columns: the modal content is under SPLIT_MIN_WIDTH, so only the list shows.
         let text = render_at(&mut state, 70, 30);
         assert!(text.contains("long.md"), "{text}");
         assert!(!text.contains("line 2"), "{text}");
@@ -2435,7 +2406,6 @@ mod tests {
         render_full(&mut state);
         let area = state.preview_text_area;
         assert!(area.width > 10 && area.height > 3, "{area:?}");
-        // Press on "line 2" (row 2), drag past the end of "line 3" (row 4), release.
         let down = MouseEventKind::Down(MouseButton::Left);
         assert!(matches!(
             handle_memory_mouse(&mut state, down, area.x, area.y + 2),
@@ -2571,7 +2541,6 @@ mod tests {
         assert!(!oversized.is_deletable());
     }
 
-    /// Two-press `x` sends the previewed bytes' hash to the shell and keeps the row until it answers.
     #[test]
     fn confirmed_delete_sends_forget_and_applies_reply() {
         let (dir, mut state) = v2_store_state();
@@ -2750,7 +2719,7 @@ mod tests {
         assert!(!text.contains("/dream"), "{text}");
         assert!(!text.contains("saved automatically"), "{text}");
 
-        // One real note brings the two-pane browser (indexes included) back.
+        // One real note brings those-pane browser (indexes included) back.
         let mut with_topic = MemoryModalState::new(build_entries(vec![
             manifest("global"),
             manifest("workspace"),
@@ -2859,8 +2828,7 @@ mod tests {
         ));
         assert!(state.memory_enabled);
 
-        // The reply's listing replaces the empty list without closing the modal, and drops any
-        // delete confirmation armed against the old list.
+        // The reply's listing replaces the empty list without closing the modal.
         state.mode = MemoryModalMode::ConfirmingDelete { idx: 0 };
         state.apply_toggle_result(Ok(MemoryToggleResponse {
             message: "Memory enabled for this session.".into(),
@@ -2892,8 +2860,8 @@ mod tests {
             Some("Memory enabled for this session.")
         );
 
-        // A refusal (Ok, state unchanged) with no listing still corrects the optimistic flip and
-        // renders as an error, since the result differs from what was requested.
+        // A refusal (Ok, state unchanged) with no listing still corrects the
+        // optimistic flip and renders as an error.
         assert!(matches!(
             handle_memory_key(&mut state, &plain_key('t')),
             InputOutcome::Action(Action::MemoryToggle { enabled: false })
@@ -2988,11 +2956,10 @@ mod tests {
 
     #[test]
     fn truncate_to_width_handles_multibyte() {
-        // CJK characters are 2 columns wide.
-        let s = "\u{4F60}\u{597D}world"; // 你好world: 2+2+5 = 9 cols
-        assert_eq!(truncate_to_width(s, 4), "\u{4F60}\u{597D}"); // Both CJK chars fit exactly in 4 columns
-        assert_eq!(truncate_to_width(s, 3), "\u{4F60}"); // 2 cols; the next char adds 2 and exceeds 3
-        assert_eq!(truncate_to_width(s, 9), s); // All 9 columns fit
+        let s = "\u{4F60}\u{597D}world";
+        assert_eq!(truncate_to_width(s, 4), "\u{4F60}\u{597D}"); // Both CJK chars fit exactly in a few
+        assert_eq!(truncate_to_width(s, 3), "\u{4F60}");
+        assert_eq!(truncate_to_width(s, 9), s); // All columns fit
     }
 
     #[test]
@@ -3015,10 +2982,8 @@ mod tests {
     fn select_at_skips_headers_and_updates() {
         let entries = build_test_entries();
         let mut state = MemoryModalState::new(entries);
-        // Initial selection is index 1 (first non-header).
         assert_eq!(state.selected, 1);
 
-        // Select the session entry at filtered index 3.
         assert!(state.select_at(3));
         assert_eq!(state.selected, 3);
         let sel = state.selected_entry().unwrap();
@@ -3048,7 +3013,6 @@ mod tests {
         state.list_area = Rect::new(5, 10, 30, 20);
         state.scroll_offset = 0;
 
-        // Click on row corresponding to filtered index 3 (entries_start_y = 11, row 3 is y=14)
         let result = handle_memory_mouse(
             &mut state,
             MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -3066,7 +3030,6 @@ mod tests {
         state.list_area = Rect::new(5, 10, 30, 20);
         state.scroll_offset = 0;
 
-        // Click on row 0 (header "Global" at y=11).
         let result = handle_memory_mouse(
             &mut state,
             MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -3292,7 +3255,6 @@ mod tests {
     #[test]
     fn apply_scrollbar_jump_edges() {
         let mut offset = 50;
-        // Top click gives offset 0
         apply_scrollbar_jump(10, Rect::new(0, 10, 1, 20), 100, 10, &mut offset);
         assert_eq!(offset, 0);
 

@@ -1,9 +1,4 @@
-//! Ratatui's `Buffer::set_line`, `set_span`, and `set_string` panic when given out-of-bounds coordinates (via `index_of`).
-//! During terminal resize races, computed widget areas can momentarily exceed the buffer; these helpers skip the write instead of panicking.
-//!
-//! Optional RTL reordering lives on [`Self::set_line_safe_bidi`] only.
-//! Scrollback and list content use it, and they own the column maps for search, selection, and links.
-//! Generic chrome (`set_line_safe`) stays in logical order so dropdowns and modals keep logical hit-testing.
+//! Ratatui's `Buffer::set_line`, `set_span`, and `set_string` panic when given out-of-bounds coordinates.
 
 use ratatui::buffer::Buffer;
 use ratatui::style::Style;
@@ -17,7 +12,6 @@ pub trait SafeBuf {
     fn set_line_safe(&mut self, x: u16, y: u16, line: &Line<'_>, width: u16);
 
     /// Like [`Self::set_line_safe`], but reorders the full line when `[scrollback.display] rtl_bidi` is on.
-    /// Use only where consumers map visual columns (scrollback, list content).
     fn set_line_safe_bidi(&mut self, x: u16, y: u16, line: &Line<'_>, width: u16);
 
     /// Like `Buffer::set_span`, skipping out-of-bounds `y` (no bidi reorder).

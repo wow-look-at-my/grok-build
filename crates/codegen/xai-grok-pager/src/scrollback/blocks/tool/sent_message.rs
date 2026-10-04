@@ -1,9 +1,4 @@
 //! Dedicated presentation for `send_subagent_message` tool calls.
-//!
-//! Destination and message arguments are inert literal text: they never enter generic media discovery, command interpretation, or Q&A parsing.
-//! `header_text()` (`Message <verb> <target>`) is the whole collapsed row, the export line, and the search anchor;
-//! the text and the reason for a rejected or unconfirmed send show only in the expanded body, where the text is
-//! copy-exact.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -29,9 +24,7 @@ const SENT_MESSAGE_TEXT_RANGE: u16 = 1;
 const HEADER_LABEL: &str = "Message ";
 const FALLBACK_NOUN: &str = "subagent";
 const PARENT_NOUN: &str = "parent";
-/// Trailing chars of a raw id: UUIDv7 prefixes are identical for ids minted within ~65 s, so the head would not tell two children apart.
 const SHORT_ID_CHARS: usize = 8;
-/// Admission is an in-memory call, so elapsed only shows for stalls; the floor also hides the ~0 ms a replay re-stamps.
 const MIN_SHOWN_ELAPSED_MS: i64 = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +60,8 @@ impl SentMessageTarget {
             Self::Unresolved { subagent_id } => {
                 let id = scrub_display(subagent_id);
                 match id.char_indices().nth_back(SHORT_ID_CHARS) {
-                    // The char just before the last `SHORT_ID_CHARS`; the tail starts after it.
+                    // The char before the last `SHORT_ID_CHARS`; the tail
+                    // starts after it.
                     Some((index, ch)) => {
                         let (_, tail) = id.split_at(index + ch.len_utf8());
                         Cow::Owned(format!("{FALLBACK_NOUN} \u{2026}{tail}"))

@@ -1,25 +1,18 @@
 //! Typed values for the workspace store: identifiers, enums stored as raw text, member rows, and write payloads.
-//!
-//! Validation follows "parse, don't validate": [`SessionId::new`] is the single validation point for ids.
-//! Every API taking a `SessionId` is therefore injection-safe by type.
-//! Enum values are typed in code but stored as raw text; values this binary does not know decode as `Other` and are written back byte-identical.
 
 use std::fmt;
 
 use crate::error::{Result, StoreError};
 
-/// Maximum number of workspace members.
-/// UI copy about the limit must derive from this constant.
+/// Maximum number of workspace members. UI copy about the limit must derive from this constant.
 pub const WORKSPACE_CAPACITY: usize = 256;
 
 /// Rank spacing for `pin_rank` / `order_rank`.
-/// Appending assigns `max_rank + RANK_GAP`; inserting between neighbors `a < b` takes `(a + b) / 2` (integer midpoint).
 pub const RANK_GAP: i64 = 1024;
 
 /// Byte cap for [`SessionId`] (one path component, like any filename).
 pub const MAX_SESSION_ID_BYTES: usize = 255;
-/// Byte cap for `cwd`.
-/// A longer path errors rather than truncates: a clipped path is corruption, not display damage.
+/// Byte cap for `cwd`. A longer path errors rather than truncates: a clipped path is corruption, not display damage.
 pub const MAX_CWD_BYTES: usize = 4096;
 /// Byte cap for `title`; over-long values truncate at a char boundary.
 pub const MAX_TITLE_BYTES: usize = 1024;
@@ -28,11 +21,9 @@ pub const MAX_MODEL_BYTES: usize = 256;
 /// Defensive byte cap for `last_turn_summary`; over-long values truncate at a char boundary.
 pub const MAX_SUMMARY_BYTES: usize = 8192;
 /// Byte cap for caller-supplied unknown enum values entering through `from_raw`.
-/// Values over the cap are rejected, never truncated; values read back from the store are exempt so passthrough stays unconditional.
 pub const MAX_ENUM_BYTES: usize = 64;
 
-/// One portable path component: non-empty, at most [`MAX_SESSION_ID_BYTES`] bytes, and valid as a file name on Unix and Windows.
-/// Constructed once at the boundary, so downstream joins of ids into filesystem paths cannot traverse or alias another id.
+/// One portable path component: non-empty, at most [`MAX_SESSION_ID_BYTES`] bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SessionId(String);
 
@@ -223,7 +214,6 @@ impl MemberOrigin {
     }
 
     /// Canonicalizes known text to a named variant.
-    /// [`StoreError::InvalidEnumValue`] when unknown text is empty, or [`StoreError::EnumValueTooLong`] when it exceeds [`MAX_ENUM_BYTES`].
     pub fn from_raw(raw: &str) -> Result<Self> {
         match raw {
             "local" => Ok(Self::Local),
@@ -292,7 +282,6 @@ pub struct MemberKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemberMetadata {
     /// Required and absolute for build members; optional for other kinds.
-    /// When present, at most [`MAX_CWD_BYTES`] bytes.
     pub cwd: Option<String>,
     /// Truncated to [`MAX_TITLE_BYTES`].
     pub title: Option<String>,
@@ -384,7 +373,6 @@ pub struct Member {
     pub is_worktree: bool,
     pub last_change_unix_ms: i64,
     /// `None` means unpinned; the rank is a gapped integer and lower sorts first.
-    /// Rank values carry no meaning beyond relative order: never assume density or a fixed origin.
     pub pin_rank: Option<i64>,
     /// `None` means no manual position; otherwise behaves like `pin_rank`.
     pub order_rank: Option<i64>,
@@ -395,10 +383,8 @@ pub struct Member {
 pub struct WorkspaceSnapshot {
     pub grouping: Grouping,
     /// Rows in primary-key order.
-    /// Ordering policy (pins, ranks, recency) belongs to the consumer; the store returns raw deterministic rows.
     pub members: Vec<Member>,
     /// `PRAGMA data_version` captured in the same read transaction.
-    /// A poller comparing against this value cannot miss a commit that landed between the snapshot and its first poll.
     pub data_version: i64,
 }
 
@@ -457,16 +443,14 @@ pub enum LayoutApplyOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InsertOutcome {
     Inserted,
-    /// Capacity was reached: the oldest unpinned members were deleted in the same transaction (normally one; more than one heals an overfull file).
-    /// Carries the evicted keys in unspecified order.
+    /// Capacity was reached: the oldest unpinned members. Carries the evicted keys in unspecified order.
     InsertedEvicting(Vec<MemberKey>),
     /// The key already existed: metadata columns were updated; `origin` and the rank columns were left untouched.
     UpdatedExisting,
 }
 
-/// What `remove_member` did.
-/// Removal is idempotent: removing an already-removed member is a success (`NotPresent`), never an error.
-/// Two windows racing the same archive both succeed.
+/// What `remove_member` did. Removal is idempotent: removing an
+/// already-removed member is a success (`NotPresent`), never an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoveOutcome {
     Removed,
@@ -479,10 +463,8 @@ pub enum RekeyOutcome {
     /// The row moved to the new id; its ranks traveled with it.
     Moved,
     /// A row with the target key already existed: it kept its origin and metadata.
-    /// Its NULL ranks were filled from the old row, and the old row was deleted.
     MergedIntoExisting,
     /// The member already has the target id; nothing was written.
-    /// This arm keeps a rekey to the member's own id out of the merge arm, whose final delete would destroy the row it just merged into.
     NoChange,
 }
 
@@ -492,7 +474,6 @@ pub enum SchemaState {
     /// The file is at this build's schema version; all operations work.
     Current,
     /// The file was written by a newer grok.
-    /// Reads remain available while its schema is read-compatible; every write returns [`StoreError::NewerSchema`].
     NewerReadOnly { user_version: u32 },
 }
 

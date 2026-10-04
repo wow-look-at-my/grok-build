@@ -11,7 +11,6 @@ pub enum HookOutcome {
 }
 
 /// Outcome of one `PreToolUse` gate callback.
-/// Only `Denied` blocks the tool; the rest (including the `TimedOut`/`TransportError`/`Malformed`/`UnknownDecision` fail-open paths) let it run.
 #[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum ClientHookGateOutcome {

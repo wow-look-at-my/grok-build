@@ -36,8 +36,7 @@ async fn paste_ctrl_v_image_keeps_ui_responsive_windows() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
 
-    // Ctrl+V then a typed burst in ONE injected buffer: the burst follows the chord with no settle delay
-    // The burst can only echo promptly if the paste's clipboard read, decode, and persist run off the event loop
+    // Ctrl+V then a typed burst in ONE injected buffer: the burst follows the chord with no settle delay The burst can only echo promptly.
     let start = Instant::now();
     let mut keys = vec![0x16];
     keys.extend_from_slice(ECHO.as_bytes());

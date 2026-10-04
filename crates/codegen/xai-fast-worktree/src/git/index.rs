@@ -31,9 +31,7 @@ pub(crate) fn copy_git_index(source: &Path, dest_worktree: &Path) -> Result<bool
             )
         })?;
 
-        // Split index: `sharedindex.<hash>` must sit beside the index. Linked
-        // worktrees keep it in the common git dir, so symlink it into dest or
-        // gix cannot resolve it.
+        // Split index: `sharedindex.<hash>` must sit beside the index.
         link_shared_indexes(&source_git_dir, &dest_git_dir)?;
 
         tracing::debug!(
@@ -51,13 +49,10 @@ pub(crate) fn copy_git_index(source: &Path, dest_worktree: &Path) -> Result<bool
 /// directory; linked worktrees store them in the common dir or the worktree
 /// git dir. No-op if split index is unused.
 fn link_shared_indexes(source_git_dir: &Path, dest_git_dir: &Path) -> Result<()> {
-    // Resolve the common dir: for a linked worktree the `commondir` file
-    // points to the shared `.git/`. For a regular repo the git dir IS the
-    // common dir.
+    // Resolve the common dir: for a linked worktree the `commondir` file points to the shared `.git/`.
     let source_common_dir = resolve_common_dir(source_git_dir);
 
-    // Always scan the common dir. A linked worktree may also have created
-    // shared index files in its own git dir.
+    // Always scan the common dir. A linked worktree may also have created shared index files in its own git dir.
     let mut dirs_to_scan: Vec<&Path> = vec![&source_common_dir];
     if source_git_dir != source_common_dir {
         dirs_to_scan.push(source_git_dir);
@@ -163,9 +158,8 @@ pub(crate) fn update_index_stats(
         return Ok(());
     }
 
-    // Guard against empty index files — gix-index panics when the file
-    // is 0 bytes because it tries to slice the trailing hash from an
-    // empty mmap (integer underflow in the slice range).
+    // Guard against empty index files — gix-index panics when the file is a
+    // couple of bytes.
     if index_path.metadata().map_or(true, |m| m.len() == 0) {
         tracing::debug!(
             path = %worktree_path.display(),
@@ -228,7 +222,6 @@ pub(crate) fn update_index_stats(
                 entry.stat.ino = metadata.ino() as u32;
                 entry.stat.uid = metadata.uid();
                 entry.stat.gid = metadata.gid();
-                // Note: mode is on the entry itself, not stat
             }
 
             #[cfg(not(unix))]
@@ -255,7 +248,7 @@ pub(crate) fn update_index_stats(
         }
     }
 
-    // Count how many entries were actually updated
+    // Count how many entries were updated
     let num_updated = updated_count;
 
     // Write the updated index

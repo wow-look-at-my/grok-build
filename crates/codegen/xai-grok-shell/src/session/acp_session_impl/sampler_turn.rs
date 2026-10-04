@@ -1,5 +1,4 @@
-//! Sampler-turn pipeline for `SessionActor`: tool definitions, model auth facts/gates and retry, and sampler config reconstruction.
-//! It also covers sampling-failure recovery and per-response usage recording.
+//! Sampler-turn pipeline for `SessionActor`: tool definitions, model auth facts/gates and retry.
 
 use super::*;
 use xai_grok_login::backend::{ActiveAuthBackend, AuthBackend};
@@ -19,15 +18,13 @@ pub(super) const MAX_OUTPUT_TOKEN_LIMIT_RETRIES: u32 = 5;
 pub(super) const MAX_TRANSIENT_TURN_RETRIES: u32 = 3;
 
 /// Cumulative resubmit cap for the whole prompt.
-/// Long agentic prompts re-earn the per-step budget every successful sample, so without this a partial outage multiplies retries by round count.
-/// Auto-recovery, stop-hook continuations, and the goal loop re-enter `process_conversation_turn` within one prompt and would reset a local.
 pub(super) const MAX_TRANSIENT_RETRIES_PER_PROMPT: u32 = 10;
 
 /// Floor of the per-episode wall clock; `transient_retry_window` is the effective bound.
 pub(super) const TRANSIENT_RETRY_WINDOW_FLOOR: std::time::Duration =
     std::time::Duration::from_secs(10 * 60);
 
-/// Checked at each failure; a stalled retry burns a detector cycle, so `2 * idle_timeout` keeps at least two admissible.
+/// Checked at each failure; a stalled retry burns a detector cycle, so `2 * idle_timeout` keeps at least admissible.
 pub(super) fn transient_retry_window(idle_timeout: std::time::Duration) -> std::time::Duration {
     TRANSIENT_RETRY_WINDOW_FLOOR.max(idle_timeout.saturating_mul(2))
 }
@@ -86,7 +83,6 @@ pub(super) fn transient_retry_eligible(error: &xai_grok_sampler::SamplingErrorIn
     use xai_grok_sampler::SamplingErrorKind;
     if error.should_retry == Some(false)
         || xai_grok_sampling_types::is_context_length_error(&error.message)
-        // Deterministic rejection however the proxy wrapped it (400 or 500); the sampler's own classifier already stripped images and gave up
         || matches!(
             error.error_code,
             Some(xai_grok_sampling_types::ApiErrorCode::InvalidImage)
@@ -97,7 +93,6 @@ pub(super) fn transient_retry_eligible(error: &xai_grok_sampler::SamplingErrorIn
     match error.kind {
         // `clone_error` erases reqwest retryability, so all Http kinds retry here (bounded)
         SamplingErrorKind::IdleTimeout | SamplingErrorKind::Http => true,
-        // The canonical retryable-status rule; 429 is excluded explicitly because it classifies as `RateLimited`
         SamplingErrorKind::Api => error.status_code.is_some_and(|status| {
             status != 429
                 && reqwest::StatusCode::from_u16(status)
@@ -120,8 +115,6 @@ pub(super) const OUTPUT_TOKEN_LIMIT_REMINDER: &str = "Your response was cut off 
      Please break your work into smaller pieces. Continue from where you left off.";
 
 /// Consecutive Length-salvaged tool-call samples within one prompt.
-/// Each salvage grows the context, so under a hard window cap an unbounded streak could loop forever once compaction stops freeing room.
-/// Past the cap the turn fails like it did before salvage existed.
 #[derive(Default)]
 pub(super) struct LengthSalvageStreak {
     consecutive: u32,
@@ -133,7 +126,6 @@ pub(super) enum LengthSalvageAction {
     /// Not a Length-salvaged tool-call sample; the streak resets.
     NotSalvage,
     /// Execute the salvaged calls.
-    /// `inject_reminder` is set on the first salvage of a streak (the reminder stays in context afterwards).
     Proceed { inject_reminder: bool },
     /// The streak exceeded [`MAX_OUTPUT_TOKEN_LIMIT_RETRIES`]; fail the turn.
     Exhausted,
@@ -156,12 +148,10 @@ impl LengthSalvageStreak {
     }
 }
 
-/// 403 is deliberately excluded because it means "authenticated but forbidden" (content-safety blocks, ZDR-gated requests, remote settings gates).
-/// String fallbacks remain for tools that report auth failures without going through the structured `HttpFailure` path.
-/// Examples: JSON-only `invalid_token` payloads, BYOK key-validation messages.
+/// String fallbacks remain for tools that report auth failures without going through the structured `HttpFailure` path. Examples: JSON-only
+/// `invalid_token` payloads, BYOK key-validation messages.
 pub(super) fn is_auth_tool_error(err: &xai_tool_runtime::ToolError) -> bool {
-    // When the error carries a structured HTTP status code in details, trust it as the authoritative signal
-    // This replaces the legacy `HttpFailure { status, .. }` variant matching.
+    // When the error carries a structured HTTP status code in details.
     if let Some(details) = &err.details
         && let Some(status) = details
             .get(HTTP_STATUS_DETAILS_KEY)
@@ -182,7 +172,6 @@ struct SessionTokenAuthGate {
     is_session_based: bool,
     model_byok: crate::agent::auth_method::ModelByok,
     /// Whether the request targets a first-party host.
-    /// Lets an `Unknown` BYOK status still refresh against cli-chat-proxy / `*.x.ai` without risking a session-token leak to a third-party BYOK endpoint.
     endpoint_is_first_party: bool,
 }
 
@@ -426,9 +415,7 @@ impl SessionActor {
     }
 
     pub(super) async fn prepare_tool_definitions_inner(&self) -> Vec<ToolDefinition> {
-        // Clone `ToolBridge` under a *short* `agent` RefCell borrow, then await on the Arc
-        // Never hold `self.agent.borrow()` across `.await`
-        // Prefire runs `spawn_local` on the same LocalSet as the turn loop, so a parked borrow here would panic if turn/compact/cancel also borrowed it
+        // Clone `ToolBridge` under a *short* `agent` RefCell borrow, then await.
         let bridge = self.agent.borrow().tool_bridge().clone();
 
         // Local mode: tool search is always enabled
@@ -442,9 +429,9 @@ impl SessionActor {
         filter_cursor_tools_by_plan_mode(defs, plan_active)
     }
 
-    /// Messages-backed models never see `use_tool`'s file forms: the Anthropic Messages API rejects the schema's
-    /// root-level union (`oneOf`) with HTTP 400, which fails every turn. Checked per request because a model switch
-    /// mid-session keeps the finalized toolset.
+    /// Messages-backed models never see `use_tool`'s file forms: the
+    /// Anthropic Messages API rejects the schema's root-level union (`oneOf`)
+    /// with HTTP 400, which fails every turn.
     pub(crate) async fn mcp_file_forms_hidden(&self) -> bool {
         self.chat_state_handle
             .get_sampling_config()
@@ -530,7 +517,6 @@ impl SessionActor {
                 self.set_chat_api_key(new_key).await;
             }
             xai_grok_login::ProviderRefreshOutcome::Unchanged => {}
-            // A genuine mint failure; the 401 arm handles the rejection.
             xai_grok_login::ProviderRefreshOutcome::MintFailed => {
                 tracing::warn!(
                     session_id = %self.session_info.id.0,
@@ -553,9 +539,7 @@ impl SessionActor {
         }
     }
 
-    /// 401 arm for a provider-backed model: re-run the helper once and resubmit.
     /// A missing key means the cold mint failed and the request went out unauthenticated, so mint instead.
-    /// Returns `false` when the fresh-mint guard blocked the re-run or the helper failed; the 401 then becomes a terminal error.
     async fn try_provider_401_recovery(&self, provider: &xai_grok_login::AuthProviderRef) -> bool {
         let rejected_key = self.chat_state_handle.get_credentials().await.api_key;
         let recovered = match rejected_key {
@@ -684,9 +668,7 @@ impl SessionActor {
             });
         let creds = self.chat_state_handle.get_credentials().await;
         let model_facts = self.model_auth_facts(cfg.model.as_str());
-        // Gate on the stable session classifier, not `creds.auth_type`; see `crate::agent::auth_method::session_token_auth_gate`
-        // `cfg.base_url` keeps an `Unknown` BYOK status refreshable against first-party xAI hosts
-        // That avoids leaking the session token to a third-party endpoint
+        // Gate on the stable session classifier, not `creds.auth_type`.
         let auth_method = self.auth_method_id.load();
         let gate =
             SessionTokenAuthGate::new(auth_method.as_deref(), model_facts.byok, &cfg.base_url);
@@ -784,10 +766,9 @@ impl SessionActor {
                 .map(|a| a.user_id),
             origin_client: self.origin_client.clone(),
             // Attribute sampler 401s against the bearer sent on the wire.
-            // `None` for sessions spawned without an `AuthManager` (BYOK direct, certain test fixtures)
             attribution_callback: self.attribution_callback.clone(),
-            // Per-request bearer override is only valid for session-token auth.
-            // Explicit API-key/env-key models must keep their configured bearer and must not be overwritten by the interactive session token
+            // Per-request bearer override is only valid for session-token
+            // auth.
             bearer_resolver: if use_bearer_resolver {
                 self.auth_manager.as_ref().map(|am| {
                     xai_grok_login::credential_provider::WireValidBearerResolver::shared(am.clone())
@@ -809,20 +790,17 @@ impl SessionActor {
     /// A channel bridges the `Send` permission actor.
     /// The heuristic runs only when the side-query errors or returns unparseable text.
     pub(crate) async fn wire_permission_auto_llm_classifier(self: &Arc<Self>) {
-        // `is_auto_mode()` is only true when the gated `set_auto_mode` call sites (spawn and SetAutoMode) flipped the permission manager to auto
-        // This guard already prevents wiring whenever the feature gate is off
+        // `is_auto_mode()` is only true when the gated `set_auto_mode` call
+        // sites (spawn and SetAutoMode) flipped the permission manager.
         if !self.permissions.is_auto_mode() {
             return;
         }
-        // Idempotency: if a side-query worker is already wired, don't spawn another.
-        // Reconnect (load_session) and repeated SetAutoMode { enabled: true } can call this again
-        // Re-wiring would leak the prior spawn_local worker blocked on a dropped receiver while a new task handles requests
+        // Idempotency: if a side-query worker is already wired, don't spawn
+        // another.
         if self.permissions.has_llm_side_query() {
             return;
         }
-        // Resolve the `[auto_mode]` config (local config, then remote, then the built-in default)
-        // When auto mode is enabled and unconfigured, the classifier uses the current model at low reasoning effort (if the model supports it)
-        // It uses the `just_command` prompt; local config and remote settings override these
+        // Resolve the `[auto_mode]` config (local config, then remote, then the built-in default) When auto mode is enabled and unconfigured.
         let auto_cfg = crate::util::config::resolve_auto_mode_config_from_disk();
         let session_model = self
             .chat_state_handle
@@ -830,9 +808,7 @@ impl SessionActor {
             .await
             .map(|c| c.model)
             .unwrap_or_default();
-        // `[auto_mode] classifier_model` is the older, narrower spelling and
-        // stays ahead of the `[models] permission_classifier` slot, so a
-        // config that already sets it keeps the model it named.
+        // `[auto_mode] classifier_model` is the older, narrower spelling.
         let classifier_slug = auto_cfg.classifier_model.clone().or_else(|| {
             self.harness_models
                 .get("permission_classifier")
@@ -842,9 +818,7 @@ impl SessionActor {
             Some(slug) => self.resolve_auto_classifier_sampler(slug).await,
             None => None,
         };
-        // Built-in defaults: the just_command prompt, and low effort if the model ACTUALLY used supports it
-        // That model is the resolved aux model, else the session model we fall back to when the slug is unset/unresolvable
-        // Explicit config overrides
+        // Built-in defaults: the just_command prompt, and low effort if the model used supports it That model is the resolved aux model.
         let models = self.models_manager.models();
         let effective_supports_re = crate::agent::config::effective_classifier_supports_re(
             aux_classifier_sampler
@@ -915,13 +889,12 @@ impl SessionActor {
                         // Thinking modes can reject explicit temperature or output limits, so retain provider defaults; the schema bounds output
                         temperature: None,
                         max_output_tokens: None,
-                        // Structured output: constrain the model to the {thinking, shouldBlock, reason} schema
-                        // The response is then guaranteed parseable (parity with forced-classify tooling)
+                        // Structured output: constrain the model to the
+                        // {thinking, shouldBlock.
                         json_schema: Some(
                             xai_grok_workspace::permission::classifier_output_json_schema(),
                         ),
-                        // Resolved `[auto_mode]` effort: explicit config/remote, else the built-in `Low` default when the model supports it
-                        // None means the provider default
+                        // Resolved `[auto_mode]` effort: explicit config/remote, else the built-in `Low` default.
                         reasoning_effort: classifier_reasoning_effort,
                         x_grok_conv_id: Some(format!("perm-classifier-{}", uuid::Uuid::new_v4())),
                         x_grok_req_id: Some(format!("xai-perm-auto-{}", uuid::Uuid::new_v4())),
@@ -990,14 +963,9 @@ impl SessionActor {
             creds.client_version.clone(),
         )
     }
-    /// Resolve a dedicated sampler for a harness model slot.
-    ///
-    /// `None` means the slot inherits the session model, and the caller
-    /// keeps the client and config it already has. The config comes from the
-    /// catalog rather than from the session's own, so the backend, the
-    /// context window and the credentials all match the model the slot
-    /// names. Overriding only the model id on the session's config would
-    /// send one model's id to another model's endpoint.
+    /// Resolve a dedicated sampler for a harness model slot. `None` means the
+    /// slot inherits the session model, and the caller keeps the client and
+    /// config it already has.
     pub(crate) async fn resolve_slot_sampler(
         &self,
         slot: &str,
@@ -1213,9 +1181,8 @@ impl SessionActor {
         );
     }
 
-    /// The failed request's usage never arrived: fail the task budget closed (budgeted children) or mark the session totals incomplete.
-    /// Send-only, not spawned: the mark must be in the actor's mailbox before the completing turn's billing epilogue reads the ledger.
-    /// It must also land before a queued prompt promotes and resets the ledger.
+    /// The failed request's usage never arrived: fail the task budget closed
+    /// (budgeted children) or mark the session totals incomplete.
     fn mark_turn_usage_unaccounted(self: &Arc<Self>) {
         if self.tool_context.task_output_token_budget.is_some() {
             self.tool_context.fail_task_output_usage_closed();
@@ -1225,9 +1192,7 @@ impl SessionActor {
         }
     }
 
-    /// Park eligibility for a credential-less 401: kill switch on, provably no credential on the
-    /// wire, a self-healing remedy (manual-login stays terminal). One predicate so the two
-    /// fail-closed gates cannot drift.
+    /// One predicate so both fail-closed gates cannot drift.
     fn uncharged_401_park_eligible(
         &self,
         am: &xai_grok_login::AuthManager,
@@ -1260,9 +1225,9 @@ impl SessionActor {
         }
     }
 
-    /// Classify a terminal sampler failure and decide recovery.
-    /// `transient`: turn-loop retry state (the loop owns the counters).
-    /// `park`: already parked — a still-credential-less 401 re-parks without a recovery dispatch.
+    /// Classify a terminal sampler failure and decide recovery. `transient`: turn-loop retry state
+    /// (the loop owns the counters). `park`: already parked — a still-credential-less re-parks
+    /// without a recovery dispatch.
     pub(crate) async fn handle_sampling_failure(
         self: &Arc<Self>,
         error: xai_grok_sampler::SamplingErrorInfo,
@@ -1273,9 +1238,8 @@ impl SessionActor {
     ) -> Result<SamplerFailureRecovery, acp::Error> {
         use xai_grok_sampler::SamplingErrorKind;
 
-        // On an in-flight salvage continuation, a max-tokens failure or a probable context overflow is not terminal.
-        // Return before the budgeted-child rewrites so the marker survives for workflow children.
-        // The request's usage never arrived; account for it fail-closed.
+        // On an in-flight salvage continuation, a max-tokens failure or a
+        // probable context overflow is not terminal.
         let encrypted_content_mismatch = matches!(error.kind, SamplingErrorKind::Api)
             && error.status_code == Some(400)
             && error.message.contains("encrypted_content");
@@ -1294,9 +1258,8 @@ impl SessionActor {
                 error.status_code,
                 SamplingErrorKind::MaxTokensTruncation,
             );
-            // Two populations for rollout sizing: either the continuation was unsalvageable at the cap, or the request no longer fit.
-            // Unsalvageable means empty or a truncated tool-call tail; the sampler folds both into `MaxTokensTruncation` `terminal_error_data` returns the object shape for `MaxTokensTruncation`.
-            // Guard rather than index-assign so a shape change cannot panic here.
+            // Populations for rollout sizing: either the continuation was unsalvageable at the cap, or the request no longer fit. Unsalvageable means empty or a truncated tool-call tail; the sampler folds both into `MaxTokensTruncation` `terminal_error_data` returns the
+            // object shape for `MaxTokensTruncation`.
             if let Some(obj) = data.as_object_mut() {
                 obj.insert(
                     crate::sampling::error::SALVAGE_CAUSE_KEY.to_owned(),
@@ -1354,9 +1317,9 @@ impl SessionActor {
                 self.chat_state_handle.update_sampling_config(cfg);
             }
             // A context-window-exceeded error can recur immediately after a
-            // compaction (the very next resubmit overflows again) when
-            // whatever made the conversation too big survives compaction —
-            // e.g. a single recent item that alone is near the window size.
+            // compaction (the next resubmit overflows again) when whatever
+            // made the conversation too big survives compaction — e.g. a
+            // single recent item that alone is near the window size.
             // Compacting a SECOND time in a row cannot fix that (there is
             // nothing further for the summarizer to reduce), so the ladder
             // below only ever compacts once per overflow: the next attempt
@@ -1412,9 +1375,10 @@ impl SessionActor {
             }
         }
 
-        // Telemetry and notification for terminal failures
-        // The drainer already recorded `record_error_typed` from the `SamplingEvent::Failed` event
-        // Here we send the `RetryState::Failed` notification, which the drainer intentionally skips because it would fire mid-retry
+        // Telemetry and notification for terminal failures The drainer
+        // already recorded `record_error_typed` from the
+        // `SamplingEvent::Failed` event Here we send the `RetryState::Failed`
+        // notification.
         let detailed_message = if error.kind == SamplingErrorKind::IdleTimeout {
             crate::sampling::error::idle_timeout_user_message(self.inference_idle_timeout.as_secs())
         } else {
@@ -1465,9 +1429,8 @@ impl SessionActor {
             return Err(acp_err);
         }
 
-        // Auth-401 recovery only applies to refreshable session-token auth (the stable gate, not `creds.auth_type`).
-        // A static api-key isn't refreshable, so retrying re-sends the same rejected bearer and 401-loops the turn See `crate::agent::auth_method::session_token_auth_gate`.
-        // One sampling-config snapshot drives every arm-4 decision, so the provider resolution and the gate can't disagree mid-model-switch.
+        // Auth-401 recovery only applies to refreshable session-token auth
+        // (the stable gate, not `creds.auth_type`).
         let (failed_model_id, failed_base_url) = self
             .chat_state_handle
             .get_sampling_config()
@@ -1475,8 +1438,6 @@ impl SessionActor {
             .map(|c| (c.model, c.base_url))
             .unwrap_or_default();
 
-        // Provider-backed models recover via arm 4c below
-        // The provider is resolved before the eligibility check so its warnings stay quiet for a 401 that 4c handles
         let auth_provider =
             if matches!(error.kind, SamplingErrorKind::Auth) || error.status_code == Some(401) {
                 self.model_auth_provider(&failed_model_id)
@@ -1512,15 +1473,13 @@ impl SessionActor {
             eligible
         };
 
-        // A provider-backed model is BYOK, so its gate is inactive and the session arm (4b) can't fire; provider recovery (4c) is exclusive
-        // Assert it so a future gate change trips here, not double-recovers.
+        // A provider-backed model is BYOK, so its gate is inactive and the
+        // session arm (4b) cannot fire.
         debug_assert!(
             !(auth_recovery_eligible && auth_provider.is_some()),
             "a provider-backed model must not be session-recovery-eligible"
         );
 
-        // Observability: a 401 that did NOT classify as `Auth` kind bypasses the session arm 4b; only provider-backed models recover (4c)
-        // Make that decision visible; it is otherwise indistinguishable from a failed refresh in the unified log
         if !matches!(error.kind, SamplingErrorKind::Auth)
             && error.status_code == Some(401)
             && auth_provider.is_none()
@@ -1535,12 +1494,14 @@ impl SessionActor {
             );
         }
 
-        // Last-resort recovery used to short-circuit on whatever is in memory, so it reported success with the bearer the server had just rejected.
-        // That bearer was resubmitted until the turn's retry budget ran out. Recovery already walks disk adoption and the authority first.
+        // Last-resort recovery used to short-circuit on whatever is in
+        // memory, so it reported success with the bearer the server had
+        // rejected. That bearer was resubmitted until the turn's retry budget
+        // ran out. Recovery already walks disk adoption and the authority
+        // first.
         if auth_recovery_eligible && let Some(ref am) = self.auth_manager {
-            // Already parked and still credential-less: re-park without a recovery dispatch.
-            // A parked turn makes at most one recovery attempt (the pre-park one): each dispatch is up to two counted.
-            // IdP attempts and `OidcRefresher` escalates five into a process-wide permanent verdict, so 50 parked cycles must not drive refreshes — the escalation-aware proactive loop owns refresh while parked.
+            // Already parked and still credential-less: re-park without a
+            // recovery dispatch.
             if park.is_parked() && self.uncharged_401_park_eligible(am, error.credential) {
                 return Ok(self.park_uncharged_401(error.credential, true));
             }
@@ -1571,14 +1532,12 @@ impl SessionActor {
                     "credential": error.credential,
                 })),
             );
-            // The 401 says nothing about the missing credential: park instead of failing the turn.
-            // Do not add `prepare_sampler_for_turn` here — a prepare's refresh would count against the shared escalation budget.
             if self.uncharged_401_park_eligible(am, error.credential) {
                 return Ok(self.park_uncharged_401(error.credential, false));
             }
         }
 
-        // 4c. Auth failure or bare 401 on a provider-backed model (gateway 401s can classify under other error kinds).
+        // 4c.
         if let Some(ref provider) = auth_provider
             && self.try_provider_401_recovery(provider).await
         {
@@ -1593,7 +1552,6 @@ impl SessionActor {
         //     Budgeted workflow children stay terminal (guards above)
         if transient_retry_eligible(&error) && transient.enabled {
             if transient.budget_remaining(transient_retry_window(self.inference_idle_timeout)) {
-                // Count intercepted attempts; section 5 sees only the final one.
                 if matches!(error.kind, SamplingErrorKind::IdleTimeout) {
                     self.signals_handle().record_idle_timeout();
                 }
@@ -1644,8 +1602,8 @@ impl SessionActor {
                     reason = ctx.reason,
                 );
                 // Stamp the doomloop magnitude onto the out-of-band capture
-                // `streaming_partial.json` then records reasoning-token volume even when the reasoning text itself was clipped at the byte cap
-                // This runs on the turn loop before the turn-end take, so the counts are included when the capture is uploaded
+                // `streaming_partial.json` then records reasoning-token
+                // volume even when the reasoning text itself was clipped.
                 {
                     let mut cap = self.streaming_turn_capture.lock();
                     cap.reasoning_tokens = ctx.reasoning_tokens;
@@ -1687,7 +1645,7 @@ impl SessionActor {
             return Err(acp::Error::internal_error().data(msg));
         }
 
-        // 5d. Enriched error for 404 model-not-found and 401 auth errors.
+        // 5d.
         //     Includes auth mode, client version, and available models.
         let is_model_404 =
             error.status_code == Some(404) && detailed_message.contains("does not exist");
@@ -1775,23 +1733,7 @@ impl SessionActor {
             )),
         )
     }
-    /// Deterministically shrink the session's conversation to fit
-    /// `context_window` tokens, without an LLM call: drop oldest whole turns,
-    /// then truncate the newest unit in place if it alone still exceeds the
-    /// budget (`xai_chat_state::compaction_utils::fit_conversation_to_budget`).
-    ///
-    /// Only reached from [`Self::handle_sampling_failure`] as the fallback
-    /// after a compaction already ran once for the current overflow and the
-    /// very next sample overflowed again — see `ContextOverflowRecovery`.
-    /// Targets 70% of the window (mirrors the compaction input ladder's own
-    /// `InputStage::Lossy` budget) so the resubmit has real headroom rather
-    /// than landing exactly on the edge.
-    /// Rewrite the conversation to plain text so the current model can read it.
-    ///
-    /// Returns false when the history holds nothing to convert — the caller
-    /// then has a rejection this cannot explain, and says so rather than
-    /// resubmitting the same bytes forever. That is also the loop bound: one
-    /// flattening leaves nothing for a second to find.
+    /// Deterministically shrink the session's conversation to fit `context_window` tokens, without an LLM call: drop oldest whole turns, then truncate the newest unit in place if it alone still exceeds the budget (`xai_chat_state::compaction_utils::fit_conversation_to_budget`). Only reached from [`Self::handle_sampling_failure`] as the fallback after a compaction already ran once for the current overflow and the next sample overflowed again — see `ContextOverflowRecovery`. Rewrite the conversation to plain text so the current model can read it. Returns false when the history holds nothing to convert — the caller then has a rejection this cannot explain, and says so rather than resubmitting the same bytes forever. That is also the loop bound: one flattening leaves nothing for a second to find.
     async fn flatten_history_for_this_model(self: &Arc<Self>) -> bool {
         let conversation = self.chat_state_handle.get_conversation().await;
         if !xai_grok_sampling_types::conversation::needs_flattening(&conversation) {
@@ -1875,7 +1817,7 @@ impl SessionActor {
         park: TurnParkState,
     ) -> Result<SamplerTurnOutcome, acp::Error> {
         // Per-turn auth refresh + sampler config push. Mirrors
-        // `prepare_chat_completion(false)` from the legacy path.
+        // `prepare_chat_completion(false)` from the path.
         if !park.is_parked() {
             self.prepare_sampler_for_turn().await;
         }
@@ -1951,18 +1893,14 @@ impl SessionActor {
         };
 
         let request_id_str = request_id.as_str().to_string();
-        // Publish the in-flight id so a `SessionCommand::Interject` arriving
-        // mid-stream can cancel THIS request for an asap injection (the turn
-        // loop then drains the interjection and resubmits instead of waiting
-        // for the stream to finish).
+        // Publish the in-flight id so a `SessionCommand::Interject` arriving mid-stream can cancel THIS request for an asap injection.
         *self.in_flight_sampler_request_id.lock() = Some(request_id.clone());
         let collected = {
             let gate_span = region!("turn.sampling_gate", Parent::Inherit);
             let _permit = acquire_subagent_sampling_permit(&self.sampling_gate).await;
             gate_span.close();
             let sampling_span = region!("turn.sampling", Parent::Inherit);
-            // The sampler task has no tracing ancestor; this parents its HTTP span under the region
-            // without holding it open.
+            // The sampler task has no tracing ancestor.
             request.traceparent = xai_grok_otel::span_traceparent(sampling_span.span());
             self.sampler_handle
                 .submit_and_collect_with_metadata(request_id.clone(), request)
@@ -1972,9 +1910,7 @@ impl SessionActor {
         let recovery_attempts = collected.doom_loop_recovery_attempts;
         let recovery_attempt_count = u32::try_from(recovery_attempts.len()).unwrap_or(u32::MAX);
         {
-            // Cancel clears ownership before resetting the tally
-            // Holding the ownership lock through reconciliation makes that boundary atomic
-            // Either metadata lands before cancel and is then cleared, or cancel wins and this stale result cannot rebook the next turn
+            // Cancel clears ownership before resetting the tally Holding the ownership lock through reconciliation makes.
             let ownership = self.turn_stream_drained.lock();
             let counted = crate::session::doom_loop_telemetry::reconcile_request_metadata(
                 &mut self.doom_loop_turn_tally.lock(),
@@ -1993,15 +1929,12 @@ impl SessionActor {
                 *self.in_flight_sampler_request_id.lock() = None;
                 // A successful sample means whatever the last overflow
                 // recovery action did (compact, or deterministically shrink)
-                // was enough; a future overflow gets its own fresh compact
-                // attempt rather than inheriting this one's history.
+                // was enough.
                 self.compaction
                     .context_overflow_recovery
                     .set(crate::session::compaction_config::ContextOverflowRecovery::None);
-                // Clear a stale asap-injection flag: the cancel may have arrived
-                // after the stream already completed, in which case there is
-                // nothing to cancel — the interjection is drained at the next
-                // loop boundary as usual.
+                // Clear a stale asap-injection flag: the cancel may have
+                // arrived after the stream already completed.
                 self.interjection_cancel_requested
                     .store(false, std::sync::atomic::Ordering::SeqCst);
                 // Current span is the turn span (this fn is inline-awaited from process_conversation_turn, no own #[instrument])
@@ -2061,8 +1994,8 @@ impl SessionActor {
                             .record_doom_loop_accepted_after_budget(confident_triggers);
                     }
                 }
-                // A queued terminal event already released ownership when it was acknowledged above
-                // Without one, release ownership after authoritative metadata accounting
+                // A queued terminal event already released ownership when it
+                // was acknowledged above Without one.
                 if !terminal_event_queued {
                     self.turn_stream_drained.lock().remove(&request_id);
                 }
@@ -2074,7 +2007,6 @@ impl SessionActor {
             Err(rich_err) => {
                 *self.in_flight_sampler_request_id.lock() = None;
                 // Detector labels are already merged from the awaited result.
-                // Wait briefly for the UI/error event rail, then fail open so a stuck drainer cannot prevent recovery or turn teardown
                 let original = xai_grok_sampler::SamplingErrorInfo::from(&rich_err);
                 let outcome = if terminal_event_queued {
                     self.wait_for_stream_drain(
@@ -2237,8 +2169,7 @@ impl SessionActor {
     pub(crate) async fn refresh_token_if_expired(&self) {
         if let Some(ref am) = self.auth_manager {
             let creds = self.chat_state_handle.get_credentials().await;
-            // Gate on the stable classifier, not `creds.auth_type`; this also heals a transient `ApiKey` flip by writing the refreshed token into `creds.api_key` below
-            // See `crate::agent::auth_method::session_token_auth_gate`
+            // Gate on the stable classifier, not `creds.auth_type`.
             let (model_id, base_url) = self
                 .chat_state_handle
                 .get_sampling_config()
@@ -2256,14 +2187,12 @@ impl SessionActor {
                             creds.api_key = Some(key);
                             self.chat_state_handle.update_credentials(creds);
                         }
-                        // Re-enable auth-suppressed compact; waiting for a 200 deadlocks over-window
+                        // Re-enable auth-suppressed compact; waiting for a deadlocks over-window
                         self.clear_auth_compact_suppression();
                         return;
                     }
                     Err(e) => {
-                        // Session path applied and failed
-                        // Never fall through to JWT/config.toml reload (that branch is BYOK-only)
-                        // Hard-expired: strip the chat-state seed so default headers cannot carry a dead AT (resolver is wire-valid only)
+                        // Session path applied and failed Never fall through to JWT/config.toml reload (that branch is BYOK-only) Hard-expired.
                         let hard_expired = !am.has_usable_token();
                         if hard_expired && creds.api_key.is_some() {
                             let mut cleared = creds;
@@ -2514,15 +2443,8 @@ impl SessionActor {
         }
     }
 
-    /// Build a partial assistant `ConversationItem` from the text the model
-    /// had already streamed, so a resubmit after an asap-injection cancel or
-    /// a max-tokens truncation sees the streamed text instead of silently
-    /// losing it. Returns `None` when the model streamed nothing yet (clean
-    /// resubmit, nothing to preserve).
-    ///
-    /// Only the text channel is preserved: a tool call the model was still
-    /// emitting arguments for never completed (the sampler returns no
-    /// `Completed` on cancel), so there is nothing well-formed to commit.
+    /// Build a partial assistant `ConversationItem` from the text the model had already streamed, so a resubmit after an asap-injection cancel or a max-tokens truncation sees the streamed text instead of silently losing it. Returns `None` when the model streamed nothing yet (clean resubmit, nothing to preserve). Only the text channel is preserved: a tool call the model was still emitting arguments for never completed (the sampler
+    /// returns no `Completed` on cancel), so there is nothing well-formed to commit.
     async fn partial_assistant_from_capture(&self) -> Option<ConversationItem> {
         let capture = self.streaming_turn_capture.lock();
         let text = capture.response_text.clone();
@@ -2553,9 +2475,9 @@ fn prefer_non_empty<T>(
         .or_else(|| seed.filter(|s| !is_empty(s)))
 }
 
-/// Acquire the turn-sampling permit for this session, or `None` when the gate is `None` (ungated).
-/// A subagent's excess turns queue on `acquire_owned`; the permit releases on drop.
-/// The semaphore is never closed, so `.ok()` fails open to ungated for this turn.
+/// Acquire the turn-sampling permit for this session, or `None` when the gate
+/// is `None` (ungated). A subagent's excess turns queue on `acquire_owned`;
+/// the permit releases on drop.
 async fn acquire_subagent_sampling_permit(
     gate: &Option<Arc<tokio::sync::Semaphore>>,
 ) -> Option<tokio::sync::OwnedSemaphorePermit> {

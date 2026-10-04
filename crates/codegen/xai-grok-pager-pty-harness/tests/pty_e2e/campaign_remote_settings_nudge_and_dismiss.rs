@@ -18,8 +18,7 @@ async fn campaign_remote_settings_nudge_and_dismiss() {
     .await
     .expect("start content with two models");
 
-    // Serve the campaign from the settings endpoint
-    // This replaces the preset settings, so `allow_access` must be restated or the pager parks on the upsell screen
+    // Serve the campaign from the settings endpoint.
     content.server().set_settings(json!({
         "allow_access": true,
         "campaigns": [
@@ -36,8 +35,7 @@ async fn campaign_remote_settings_nudge_and_dismiss() {
     )
     .expect("write config.toml");
 
-    // Use session (OAuth) auth, not the harness's default XAI_API_KEY: the settings fetch requires `auth_manager.auth()`
-    // In ApiKey/BYOK mode the pager never requests `/v1/settings`, so a remote campaign could never arrive (see `spawn_polling_session`'s doc)
+    // Use session (OAuth) auth, not the harness's default XAI_API_KEY: the settings fetch requires `auth_manager.auth()`.
     seed_fake_oauth(&content, "pty-campaign-remote");
     let binary = pager_binary().expect("resolve pager binary");
     let spawn = || -> PtyHarness {
@@ -52,7 +50,6 @@ async fn campaign_remote_settings_nudge_and_dismiss() {
         .expect("spawn pager")
     };
 
-    // ── Phases 1 and 2: the campaign applies to a new session; a pick dismisses. ──
     {
         let mut h = spawn();
         h.wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
@@ -92,7 +89,6 @@ async fn campaign_remote_settings_nudge_and_dismiss() {
         h.quit().expect("clean quit");
     }
 
-    // ── Phase 3: reboot against the SAME settings; the config model wins. ──
     {
         let mut h = spawn();
         h.wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
@@ -104,8 +100,7 @@ async fn campaign_remote_settings_nudge_and_dismiss() {
                     h.screen_contents()
                 )
             });
-        // Give the settings fetch time to land, then prove a fresh session still resolves to the user's model
-        // The dismissed campaign never re-applies, even once the fetch has put it back in the cache
+        // Give the settings fetch time to land, then prove a fresh session still resolves to the user's model The dismissed campaign never re-applies.
         let _ = h.inject_keys(b"/new\r");
         h.update(Duration::from_millis(4000));
         h.wait_for_text(CONFIG_MODEL, Duration::from_secs(10))

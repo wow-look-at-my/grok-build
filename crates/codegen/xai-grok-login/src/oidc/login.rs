@@ -1,6 +1,4 @@
-//! Interactive login: the callback HTTP server, opening the browser, the stdin paste fallback, and the race between the two input paths.
-//!
-//! See [`super::protocol`] for OIDC mechanics and [`super::super::AuthManager`] for credential persistence.
+//! Interactive login: the callback HTTP server, opening the browser, the stdin paste fallback, and the race between both input paths.
 
 use std::collections::HashMap;
 use std::io::IsTerminal;
@@ -24,12 +22,10 @@ use super::protocol::{
 };
 
 /// Maximum time to wait for the browser OAuth callback (or manual paste of the code).
-/// 10 minutes is long enough for users who step away briefly during login.
 const AUTH_CALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// Parse user-pasted input into `(code, state)`.
-/// Accepts two formats: Full callback URL: `http://127.0.0.1:PORT/callback?code=XXX&state=YYY`
-/// Bare authorization code: `abc123`
+/// Parse user-pasted input into `(code, state)`. Accepts formats: Full callback URL:
+/// `http://127.0.0.1:PORT/callback?code=XXX&state=YYY` Bare authorization code: `abc123`
 fn parse_pasted_input(input: &str) -> Result<Callback, OidcError> {
     let input = input.trim();
     if input.is_empty() {
@@ -352,9 +348,9 @@ pub async fn run_login_flow(
     run_login_flow_with_config(oidc, auth_manager, channels).await
 }
 
-/// Run the OIDC login flow with an explicit [`OidcAuthConfig`]. Also used by the OAuth2 provider path via [`OAuth2ProviderConfig::as_oidc`].
-/// The flow races two input paths: **Path A**: A loopback HTTP server on `127.0.0.1` that receives the IdP redirect. **Path B**: Stdin paste: the user manually pastes the callback URL or bare auth code.
-/// Path B is essential for remote VMs where the browser runs on a different machine and the `127.0.0.1` redirect cannot reach the CLI process. `channels`: with `Some`, the auth URL goes to the TUI and pasted codes come back; with `None`, print to stderr and read stdin (CLI mode).
+/// Run the OIDC login flow with an explicit [`OidcAuthConfig`]. Also used by the OAuth2 provider path via [`OAuth2ProviderConfig::as_oidc`]. The flow races input paths: **Path A**: A loopback HTTP server on `127.0.0.1` that receives the IdP redirect. **Path B**: Stdin paste: the
+/// user manually pastes the callback URL or bare auth code. Path B is essential for remote VMs where the browser runs on a different machine and the `127.0.0.1` redirect cannot reach the CLI process. `channels`: with `Some`, the auth URL goes to the TUI and pasted codes come
+/// back; with `None`, print to stderr and read stdin (CLI mode).
 pub async fn run_login_flow_with_config(
     oidc: &OidcAuthConfig,
     auth_manager: &Arc<AuthManager>,
@@ -373,8 +369,8 @@ pub async fn run_login_flow_with_config(
     let state = uuid::Uuid::now_v7().to_string();
     let nonce = uuid::Uuid::now_v7().to_string();
 
-    // In local-dev mode, use a fixed callback port so the redirect_uri is stable and can be pre-registered with the local OAuth2 provider
-    // In production the OS picks a random available port
+    // In local-dev mode, use a fixed callback port so the redirect_uri is
+    // stable and can be pre-registered with the local OAuth2 provider.
     let callback_port: u16 = if super::super::config::use_local_auth() {
         56121
     } else {
@@ -404,7 +400,7 @@ pub async fn run_login_flow_with_config(
     let has_client_ui = code_rx.is_some();
 
     if has_client_ui {
-        // Client provides its own auth UI; just open the browser.
+        // Client provides its own auth UI; open the browser.
         if let Err(e) = webbrowser::open(&auth_url) {
             tracing::debug!(error = %e, "OIDC: failed to open browser");
         }
@@ -469,12 +465,10 @@ pub async fn run_login_flow_with_config(
         "OIDC: token exchange complete"
     );
 
-    // Resolve the actual principal chosen on the consent screen. The shell's config may not have principal_type set (personal login), but the user might pick "Team" on the consent screen
-    // The server encodes the chosen principal in the access token JWT If the config doesn't specify a principal, peek at the token to discover it
+    // Resolve the actual principal chosen on the consent screen.
     let token_principal = peek_access_token_principal(&tokens.access_token);
 
     // The authorize URL only pre-selects; verify the token's principal here.
-    // Match the principal id even if `principal_type` is absent.
     let principal_policy = login_principal_policy(auth_manager.grok_com_config());
     enforce_login_principal(
         principal_policy.as_ref(),

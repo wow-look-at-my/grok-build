@@ -2,7 +2,6 @@ use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
 
 /// Bare text that means quit outside slash resolution (`/quit` / `/exit`).
-/// The agent prompt's send path and the dashboard dispatch both use this, so vim/shell muscle memory (`:wq`, `:q`, `exit`, …) stays one list.
 pub(crate) fn is_exit_alias(text: &str) -> bool {
     matches!(
         text.trim().to_ascii_lowercase().as_str(),

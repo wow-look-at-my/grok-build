@@ -4,8 +4,9 @@ use crate::send::contributors::command::{
     CommandAction, CommandContributor, CommandInvocation, CommandSpec,
 };
 
-/// `?Send` twin of [`CommandContributor`] for single-threaded hosts like grok build's TUI agent, whose session state is `Rc`/`RefCell`-based and can
-/// never satisfy the `Send` bounds the send flavor bakes into its boxed hook futures.
+/// `?Send` twin of [`CommandContributor`] for single-threaded hosts like grok
+/// build's TUI agent, whose session state is `Rc`/`RefCell`-based and can
+/// never satisfy.
 #[async_trait(?Send)]
 pub trait LocalCommandContributor {
     fn advertised_commands(&self) -> Vec<CommandSpec>;

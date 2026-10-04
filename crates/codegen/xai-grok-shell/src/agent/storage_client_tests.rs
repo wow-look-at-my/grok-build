@@ -1,6 +1,4 @@
 //! Tests for StorageClient retry logic.
-//!
-//! Uses a local axum server to simulate various HTTP error scenarios and verify that the client handles retries correctly.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -23,7 +21,7 @@ use xai_file_utils::storage_client::{RetryConfig, StorageClient};
 #[derive(Clone, Default)]
 struct TestServerState {
     request_count: Arc<AtomicU32>,
-    /// Number of 429 responses to return before succeeding
+    /// Number of multiple responses to return before succeeding
     fail_count: Arc<AtomicU32>,
     /// Optional Retry-After header value in seconds
     retry_after_secs: Option<u32>,
@@ -48,7 +46,6 @@ impl TestServerState {
     }
 }
 
-/// Handler that returns 429 for the first N requests, then succeeds.
 async fn upload_handler_429(
     State(state): State<TestServerState>,
     _headers: HeaderMap,
@@ -81,7 +78,6 @@ async fn upload_handler_429(
         .into_response()
 }
 
-/// Handler that returns 500 for the first N requests, then succeeds.
 async fn upload_handler_500(
     State(state): State<TestServerState>,
     _headers: HeaderMap,
@@ -105,7 +101,6 @@ async fn upload_handler_500(
         .into_response()
 }
 
-/// Handler that always returns 400 (non-retryable).
 async fn upload_handler_400(
     State(state): State<TestServerState>,
     _headers: HeaderMap,
@@ -116,7 +111,6 @@ async fn upload_handler_400(
     (StatusCode::BAD_REQUEST, r#"{"error": "bad request"}"#).into_response()
 }
 
-/// Handler that always returns 429 (never succeeds).
 async fn upload_handler_always_429(
     State(state): State<TestServerState>,
     _headers: HeaderMap,
@@ -209,7 +203,7 @@ async fn test_upload_retries_on_429() {
         .await;
 
     assert!(result.is_ok());
-    assert_eq!(state.get_request_count(), 3); // The two failures and the final success.
+    assert_eq!(state.get_request_count(), 3); // Both failures and the final success.
 }
 
 #[tokio::test]
@@ -229,7 +223,7 @@ async fn test_upload_retries_on_500() {
         .await;
 
     assert!(result.is_ok());
-    assert_eq!(state.get_request_count(), 3); // The two failures and the final success.
+    assert_eq!(state.get_request_count(), 3); // Both failures and the final success.
 }
 
 #[tokio::test]
@@ -269,13 +263,13 @@ async fn test_upload_respects_max_retries() {
         .await;
 
     assert!(result.is_err());
-    // The initial request and the three configured retries
+    // The initial request and those configured retries
     assert_eq!(state.get_request_count(), 4);
 }
 
 #[tokio::test]
 async fn test_upload_respects_retry_after_header() {
-    let state = TestServerState::new(1).with_retry_after(1); // 1 second Retry-After
+    let state = TestServerState::new(1).with_retry_after(1);
     let addr = start_test_server(state.clone(), upload_handler_429).await;
 
     let client = StorageClient::new(&format!("http://{}/v1", addr), "test-token")
@@ -292,7 +286,6 @@ async fn test_upload_respects_retry_after_header() {
     let elapsed = start.elapsed();
 
     assert!(result.is_ok());
-    // Retry-After asked for 1 second; 900ms leaves slack for timer imprecision
     assert!(
         elapsed >= Duration::from_millis(900),
         "Expected delay >= 900ms due to Retry-After, got {:?}",
@@ -302,7 +295,7 @@ async fn test_upload_respects_retry_after_header() {
 
 #[tokio::test]
 async fn test_exponential_backoff_increases_delay() {
-    let state = TestServerState::new(3); // Fail 3 times, then succeed
+    let state = TestServerState::new(3); // Fail a few times.
     let addr = start_test_server(state.clone(), upload_handler_429).await;
 
     let client = StorageClient::new(&format!("http://{}/v1", addr), "test-token")
@@ -322,7 +315,7 @@ async fn test_exponential_backoff_increases_delay() {
 
     assert!(result.is_ok());
 
-    // Three failures before success give backoff delays of 50ms, 100ms, and 200ms, at least 350ms in total
+    // Failures before success give backoff delays of 50ms, 100ms, and 200ms, at least 350ms in total
     assert!(
         elapsed >= Duration::from_millis(300),
         "Expected delay >= 300ms for exponential backoff, got {:?}",
@@ -330,4 +323,3 @@ async fn test_exponential_backoff_increases_delay() {
     );
 }
 
-// ============================================================================

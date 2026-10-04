@@ -1,19 +1,4 @@
 //! Dense live-tail paint for the middle of the dashboard peek box.
-//!
-//! Reads the agent's leased [`ScrollbackState`] without mutating fold state, layout cache, follow mode, or view mode.
-//! The dashboard lease (`begin_peek_viewport`) already forced follow and AllTurns so the viewport can be restored on attach.
-//!
-//! Compared to the full [`ScrollbackPane`]: no sticky headers, no vertical padding, no gap rows, no horizontal accent or padding chrome.
-//! Foldable entries render Collapsed; messages keep their full expanded body.
-//!
-//! Layout, top to bottom:
-//! 1. Last user prompt pinned (1 line), when present and height allows
-//! 2. Top `…` when the current-turn body is truncated from above
-//! 3. Pure tail of content **after** the last user (current turn only)
-//!
-//! The body is **always** the current turn when a last user exists (including when the list-first min box leaves only ~3 middle rows).
-//! The pin is dropped only when the middle has no rows left for it.
-//! After a fresh user send with no agent lines yet, the middle is the pin over empty rows; prior turns are not pulled up.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -357,7 +342,6 @@ mod tests {
 
     #[test]
     fn dense_tail_min_box_middle_is_current_turn_with_pin() {
-        // The list-first min box leaves ~3 middle rows after the status, reply, and blank rows
         let mut sb = ScrollbackState::new();
         sb.push(ScrollbackEntry::new(RenderBlock::user_prompt("old")));
         sb.push(ScrollbackEntry::new(RenderBlock::agent_message(

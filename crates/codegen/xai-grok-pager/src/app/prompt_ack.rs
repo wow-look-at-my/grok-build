@@ -1,11 +1,4 @@
 //! Bounded wait for the agent's first acknowledgment of a sent prompt.
-//!
-//! A `session/prompt` RPC has no deadline of its own, so this bounds only the *acknowledgment*: the first
-//! `x.ai/queue/changed`, `session/update`, or turn end that names the prompt id. Shared by the TUI reconcile
-//! (`dispatch::reconcile_overdue_prompt_acks`) and the headless runner.
-//!
-//! Invariant: a [`PromptAckWatch`] exists on an agent only while `current_prompt_id == watch.prompt_id`
-//! and the pane is `TurnRunning` or `TurnCancelling`; every turn-end path clears it.
 
 use std::time::{Duration, Instant};
 
@@ -14,9 +7,7 @@ use serde::Serialize;
 const PROMPT_ACK_TIMEOUT_ENV: &str = "GROK_PROMPT_ACK_TIMEOUT_SECS";
 /// Status-line notice ("waiting for the agent to accept…") before the hard deadline.
 pub(crate) const PROMPT_ACK_SOFT_NOTICE: Duration = Duration::from_secs(10);
-/// Sized above the shell's first-prompt worst case, which acknowledges only after its whole
-/// preamble: the templated delivery-tools prefix wait (60 s + 10 s), a settings refresh (up to
-/// 16.5 s), an auth refresh, and two actor round trips. Resumed sessions acknowledge in under a second.
+/// Sized above the shell's first-prompt worst case, which acknowledges only after its whole preamble.
 pub(crate) const DEFAULT_PROMPT_ACK_TIMEOUT: Duration = Duration::from_secs(120);
 /// Clamp floor; the watch can be shortened but never disabled.
 pub(crate) const MIN_PROMPT_ACK_TIMEOUT_SECS: u64 = 5;

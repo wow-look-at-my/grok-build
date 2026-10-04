@@ -1,8 +1,4 @@
-//! Hub [`AuthProvider`] from `~/.grok/auth.json` for the standalone
-//! `workspace_server` binary: loopback `ws://` uses a plain bearer, otherwise an auto-refreshing OIDC provider that persists rotated tokens.
-//!
-//! The in-leader `grok workspace` exposure does NOT use this path.
-//! It gets an in-memory provider from the leader's `AuthManager` (see `LeaderAuthProvider`) so it never races the leader's own auth.json writer.
+//! Hub [`AuthProvider`] from `~/.grok/auth.json` for the standalone `workspace_server` binary: loopback `ws://` uses a plain bearer.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -27,7 +23,6 @@ pub(crate) fn init_metrics() {
 }
 
 /// Plain bearer for the loopback / local-dev path (no OIDC refresh).
-/// Carries the owner identity from the same auth.json entry so the workspace can derive `WorkspaceIdentity` without a second read.
 struct BearerWithIdentity {
     token: String,
     identity: AuthIdentity,
@@ -92,18 +87,15 @@ pub struct LoginSession {
     /// The `auth.json` scope key the entry lives under; refreshes are persisted back to it.
     pub scope_key: String,
     pub identity: AuthIdentity,
-    /// Whether the entry carries the client id the OIDC refresher needs. Without it the session can
-    /// only serve a loopback hub on its static bearer.
+    /// Whether the entry carries the client id the OIDC refresher needs.
     pub refreshable: bool,
 }
 
-/// The session [`provider`] would serve from `auth_path`, or `None` when there is no file or no OIDC
-/// entry in it (signed out). Same selection as the provider, so a caller that checks before building
-/// it, or watches the file afterwards, sees exactly the entry the provider uses.
-///
-/// # Errors
-///
-/// The file cannot be read (for any reason other than not existing) or parsed.
+/// The session [`provider`] would serve from `auth_path`, or `None` when
+/// there is no file or no OIDC entry in it (signed out). Same selection as
+/// the provider, so a caller that checks before building it, or watches the
+/// file afterwards, sees exactly the entry the provider uses. # Errors The
+/// file cannot be read (for any reason other than not existing) or parsed.
 pub fn login_session(auth_path: &Path) -> anyhow::Result<Option<LoginSession>> {
     let Some(entries) = read_auth_entries_if_present(auth_path)? else {
         return Ok(None);
@@ -188,9 +180,7 @@ enum OidcProviderKind {
     Proactive,
 }
 
-/// Resolves, with the cause, once the provider's refresh has been rejected for good and the
-/// token it serves will expire unreplaced; pending forever for a provider that never refreshes
-/// ([`ProactiveOidcAuthProvider::refresh_ended`]).
+/// Resolves, with the cause, once the provider's refresh has been rejected for good and the token it serves will expire unreplaced.
 pub type RefreshEnded = Pin<Box<dyn Future<Output = String> + Send>>;
 
 fn never_ends() -> RefreshEnded {
@@ -264,7 +254,7 @@ fn build_oidc_provider(
 
     let mut builder = OidcAuthProviderBuilder::new(&entry.key, refresh_token, issuer, client_id);
 
-    // The workspace derives `WorkspaceIdentity` from `AuthProvider::identity()`, so pass the owner identity along (no separate auth.json read)
+    // The workspace derives `WorkspaceIdentity` from `AuthProvider::identity()`.
     builder = builder.user_id(&entry.user_id);
     if let Some(ref pt) = entry.principal_type {
         builder = builder.principal_type(pt);
@@ -289,13 +279,10 @@ fn build_oidc_provider(
 }
 
 /// How long [`lock_auth_file`] polls for the shared `auth.json.lock` before skipping the persist.
-/// Covers the shell's normal refresh hold (~1 s); the shell's worst-case 45 s budget is deliberately not waited out.
-/// Losing one persist is recoverable (see [`write_refreshed_token`]); stalling the persist thread for a minute is not worth it.
 const AUTH_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// RAII flock on the sibling `auth.json.lock`, the same advisory lock every grok-shell `auth.json` writer takes.
-/// Polls `try_lock` rather than a blocking `flock` to bound the wait.
-/// Never breaks a held lock: a stale holder here would be the shell mid-refresh, exactly the writer we must not race.
+/// RAII flock on the sibling `auth.json.lock`, the same advisory lock every
+/// grok-shell `auth.json` writer takes.
 struct AuthFileLockGuard {
     _file: std::fs::File,
 }
@@ -360,12 +347,11 @@ pub(crate) fn write_refreshed_token(
     owner_user_id: &str,
     event: &RefreshEvent,
 ) -> anyhow::Result<()> {
-    // Read-modify-write under the shared advisory lock
-    // An unlocked write races the shell's own refresh writer: whichever writes second rolls back the other's freshly rotated refresh token on disk
-    // That guarantees a future `invalid_grant` for every session sharing the file
+    // Read-modify-write under the shared advisory lock An unlocked write
+    // races the shell's own refresh writer.
     let Some(_lock) = lock_auth_file(path) else {
-        // The rotated token still serves this process from memory, so warn rather than fail
-        // Disk now trails the IdP by one rotation; a fresh process that picks it up will present a spent token
+        // The rotated token still serves this process from memory, so warn
+        // rather than fail Disk now trails the IdP by one rotation.
         tracing::warn!(
             timeout = ?AUTH_LOCK_TIMEOUT,
             "auth.json.lock busy; skipping refreshed-token persist (disk left one rotation behind)"
@@ -428,7 +414,6 @@ pub(crate) fn write_refreshed_token(
     Ok(())
 }
 
-/// Atomically replace `path`: temp file (0600 on Unix), fsync, then rename.
 /// Avoids the window where a truncate-in-place rewrite would leave auth.json partially written.
 fn write_json_atomic(path: &Path, value: &serde_json::Value) -> anyhow::Result<()> {
     use std::io::Write;
@@ -1135,6 +1120,5 @@ mod tests {
         }
         let id = auth.identity().expect("loopback identity present");
         assert_eq!(id.user_id, "u1");
-        // Loopback never calls `build_oidc_provider`, so the proactive flag cannot change the static-bearer path
     }
 }

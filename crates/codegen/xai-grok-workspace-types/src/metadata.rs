@@ -1,10 +1,3 @@
-//! [`Metadata`] is a string-keyed map intended to mirror gRPC metadata 1:1 when the call goes over the wire.
-//! It carries per-call context like session ids, trace context, and deadlines.
-//!
-//! `Extensions` (the typed in-process map) is in-process only and not serialized, so it is not defined here.
-//! It lives in the runtime `xai-grok-workspace` crate alongside the transport implementations.
-//!
-//! [grpc-spec]: https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -25,12 +18,9 @@ pub const META_CLIENT_ID: &str = "x-workspace-client-id";
 pub const META_PROMPT_INDEX: &str = "x-workspace-prompt-index";
 
 /// Standard metadata key for the gRPC call deadline.
-/// The `grpc-timeout` header is a unit-suffixed string per the gRPC HTTP/2 spec, not a bare millisecond count.
 pub const META_GRPC_TIMEOUT: &str = "grpc-timeout";
 
 /// All standard metadata keys defined by this crate, in declaration order.
-///
-/// Useful for tests that need to assert uniqueness or for callers that want to scrub well-known keys from a metadata map.
 pub const STANDARD_META_KEYS: &[&str] = &[
     META_SESSION_ID,
     META_TRACEPARENT,
@@ -41,8 +31,6 @@ pub const STANDARD_META_KEYS: &[&str] = &[
 ];
 
 /// String-keyed metadata headers.
-///
-/// Backed by a `BTreeMap` so serialization order is deterministic, which matters for snapshot tests and for stable wire-bytes hashing.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Metadata(pub BTreeMap<String, String>);

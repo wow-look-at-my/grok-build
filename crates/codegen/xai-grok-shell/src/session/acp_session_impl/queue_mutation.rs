@@ -37,8 +37,6 @@ impl InputOrigin {
 }
 
 /// Authorization for generic queue controls.
-///
-/// Two capabilities (visible, editable) rather than an enum, so a protected row (visible, not editable) needs no dead variant in lower stack layers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct QueueMutationPolicy {
     visible: bool,

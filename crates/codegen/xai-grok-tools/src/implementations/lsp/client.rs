@@ -54,29 +54,21 @@ pub struct LspClient {
     pub lifecycle_id: u64,
     pub socket: async_lsp::ServerSocket,
     pub diagnostics: DiagnosticsStore,
-    /// What we have told this server about each open document. Shared, because
-    /// the pull tasks and the `publishDiagnostics` handler both need to know
-    /// which version an answer is about.
+    /// What we have told this server about each open document.
     pub documents: Documents,
-    /// What the server asked for during the handshake: how to sync text, and
-    /// whether it wants to hear about saves.
+    /// What the server asked for during the handshake: how to sync text, and whether it wants to hear about saves.
     pub policy: ServerPolicy,
-    /// Pull-model diagnostics. Roslyn is pull-only and never publishes, so
-    /// without asking we would never see a single C# diagnostic.
+    /// Pull-model diagnostics.
     pub pull: PullDiagnostics,
     /// The server's own signal that its answers are out of date.
     pub refresh: RefreshTarget,
     pub main_loop: tokio::task::JoinHandle<()>,
     pub stderr_task: Option<tokio::task::JoinHandle<()>>,
     pub child_process: Option<std::process::Child>,
-    /// Strong owner of the server child's process group. The session [`ProcessScope`] holds only a
-    /// `Weak`, so dropping this on clean teardown stops the scope from reaping a reused PID. `None`
-    /// for the socket transport (no child) or if group creation failed.
+    /// Strong owner of the server child's process group.
     process_group: Option<Arc<ProcessGroup>>,
     pub shutdown_timeout: std::time::Duration,
     /// Registrations we accepted without turning them into OS watches.
-    /// The router holds the clone that records them; this field is consulted
-    /// on every disk event to decide whether to notify.
     watched_files: WatchedFiles,
 }
 
@@ -89,9 +81,7 @@ impl std::fmt::Debug for LspClient {
 }
 
 impl Drop for LspClient {
-    /// Teardown backstop. `LspBackendAdapter`'s graceful shutdown only runs when a tokio runtime is
-    /// current, so killing the child here avoids orphaning one language-server process per session.
-    /// Idempotent with `shutdown`, which takes the same fields first.
+    /// Teardown backstop.
     fn drop(&mut self) {
         self.reap_children();
     }
@@ -120,9 +110,7 @@ fn create_client_main_loop(
             router.notification::<lsp_types::notification::PublishDiagnostics>(
                 move |_state, params| {
                     let uri = params.uri.as_str();
-                    // `version` is the revision the server analyzed. Servers that name it are taken
-                    // at their word; the rest are credited with the text we had most recently sent,
-                    // which is all arrival order can tell us.
+                    // `version` is the revision the server analyzed.
                     diagnostics.record_push(
                         uri,
                         params.diagnostics,
@@ -287,8 +275,7 @@ impl LspClient {
         let diagnostics = DiagnosticsStore::new();
         let documents = Documents::new();
         let refresh = RefreshTarget::new();
-        // Same root initialize advertises, so relative patterns cannot drift
-        // from the per-server workspace_folder.
+        // Same root initialize advertises, so relative patterns cannot drift from the per-server workspace_folder.
         let watched_files = WatchedFiles::new(config.effective_root(workspace_root).to_path_buf());
         let (main_loop, mut server) = create_client_main_loop(
             &server_name,
@@ -342,8 +329,7 @@ impl LspClient {
         tokio::task::yield_now().await;
 
         if !policy.advertises_pull {
-            // Not proof of absence: Roslyn implements the handler without
-            // always advertising it, so it gets asked anyway.
+            // Not proof of absence: Roslyn implements the handler without always advertising it.
             tracing::debug!(server = %server_name, "server advertises no diagnostic provider; asking anyway");
         }
         let pull = PullDiagnostics::new(
@@ -353,8 +339,7 @@ impl LspClient {
             documents.clone(),
             diagnostics_notify,
         );
-        // From here a refresh request has somewhere to go. Before it, there is
-        // nothing open to re-pull.
+        // From here a refresh request has somewhere to go. Before it, there is nothing open to re-pull.
         refresh.publish(pull.clone());
 
         Ok(Self {
@@ -401,8 +386,7 @@ impl LspClient {
             Some(scope) => scope.register(&group),
             None => true,
         };
-        // Keep the strong Arc either way so `Drop`/`shutdown` reap the tree —
-        // including the already-killed leader in the closed-scope case.
+        // Keep the strong Arc either way so `Drop`/`shutdown` reap the tree — including the already-killed leader.
         self.process_group = Some(group);
         enrolled
     }
@@ -522,8 +506,7 @@ impl LspClient {
 
     pub fn close_all_documents(&mut self) {
         for uri_str in self.documents.take_all() {
-            // What the server said about a document it no longer has open, and
-            // the result id naming it, go together.
+            // What the server said about a document it no longer has open, and the result id naming it, go together.
             self.diagnostics.forget(&uri_str);
             let Ok(uri) = Url::parse(&uri_str) else {
                 continue;
@@ -541,9 +524,9 @@ impl LspClient {
     }
 
     pub async fn shutdown(mut self) {
-        // Dead transport — a crashed server, or the session scope's SIGKILL-on-close (see
-        // grok-shell `take_session`) landing before this Drop-spawned graceful task ran. The
-        // shutdown/exit handshake can only fail, so skip it (and its warnings) and just reap.
+        // Dead transport — a crashed server, or the session scope's
+        // SIGKILL-on-close (see grok-shell `take_session`) landing before
+        // this Drop-spawned graceful task ran.
         if self.main_loop.is_finished() {
             tracing::debug!(server = %self.server_name, "LSP transport already down; skipping shutdown handshake");
             self.reap_children();
@@ -618,9 +601,7 @@ impl LspClient {
                     related_information: Some(true),
                     ..Default::default()
                 }),
-                // Pull diagnostics. Some servers — Roslyn among them — only answer `textDocument/diagnostic` and never publish, so without this we would see
-                // no diagnostics from them at all. `dynamic_registration: false` is deliberate: it makes Roslyn advertise one static provider instead of
-                // registering a separate provider per diagnostic source, which would turn every document into six pulls and six cache entries.
+                // Pull diagnostics.
                 diagnostic: Some(DiagnosticClientCapabilities {
                     dynamic_registration: Some(false),
                     related_document_support: Some(false),
@@ -632,14 +613,12 @@ impl LspClient {
                 ..Default::default()
             }),
             workspace: Some(WorkspaceClientCapabilities {
-                // A pull-model server cannot volunteer that its answers have changed unless we say
-                // we can hear it. Without this, a Roslyn that finishes analyzing a solution after
-                // we asked has no way to tell us, and we are left guessing how long to wait.
+                // A pull-model server cannot volunteer that its answers have
+                // changed unless we say we can hear it.
                 diagnostic: Some(DiagnosticWorkspaceClientCapabilities {
                     refresh_support: Some(true),
                 }),
-                // Claim the watches so Roslyn does not create a FileSystemWatcher
-                // per NuGet-cache directory. See `watched_files`.
+                // Claim the watches so Roslyn does not create a FileSystemWatcher per NuGet-cache directory.
                 did_change_watched_files: Some(watched_files::client_capability()),
                 ..Default::default()
             }),
@@ -678,11 +657,7 @@ impl LspClient {
         let update = self.documents.plan(&uri_str);
         let version = update.version();
 
-        // Recorded before the send, not after. A server can publish about this
-        // revision on another thread while this one is still inside the send,
-        // and a versionless publish is credited with the newest version we have
-        // sent. Read a moment too early it is credited with no version at all,
-        // settles nothing, and the report is never shown.
+        // Recorded before the send, not after.
         let previous = self
             .documents
             .commit(&uri_str, version, language_id, new_end);
@@ -703,9 +678,7 @@ impl LspClient {
                 version,
                 previous_end,
             } => {
-                // We always resend the whole file. A server that asked for incremental sync still requires a range on every change
-                // event — Roslyn dereferences it unconditionally and tears its request queue down without one — so the full
-                // replacement is expressed as a range covering the previous revision.
+                // We always resend the whole file.
                 let range = self.policy.full_replacement_range(previous_end);
                 tracing::debug!(
                     server = %self.server_name, uri = %uri, version, ranged = range.is_some(),
@@ -726,10 +699,7 @@ impl LspClient {
         };
 
         if let Err(e) = sent {
-            // The record describes the text the *server* has. Left advanced
-            // over a send that never went out, it would aim every later
-            // incremental range at a revision the server never received — the
-            // same protocol violation the range exists to avoid.
+            // The record describes the text the *server* has.
             self.documents.restore(&uri_str, previous);
             tracing::debug!(server = %self.server_name, error = %e, "failed to send document update");
             return None;

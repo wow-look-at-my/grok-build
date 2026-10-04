@@ -1,5 +1,4 @@
 //! The typed record of everything the agent sent the client, in arrival order.
-//! Round trips are recorded once answered, so a held request appears when the client releases it.
 
 use agent_client_protocol as acp;
 use serde_json::Value;
@@ -28,8 +27,7 @@ pub enum TranscriptEntry {
 /// The recorder the connection handler appends to. Accessors hand out point in time snapshots.
 #[derive(Default)]
 pub(crate) struct Transcript {
-    /// The watch is both the lock over the entries and what wakes `wait_until`; each wait subscribes its own
-    /// receiver.
+    /// The watch is both the lock over the entries and what wakes `wait_until`; each wait subscribes its own receiver.
     entries: watch::Sender<Vec<TranscriptEntry>>,
 }
 

@@ -1,6 +1,4 @@
 //! PTY, flag-file driven like `endline_park_is_markerless`.
-//! The script: a short wait that expires (park #1), foreground work between the parks, then a long wait on the same task (park #2).
-//! Asserts neither park writes a transcript row and only the real turn end pushes the single "Worked for X".
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -12,7 +10,6 @@ const CANCEL_HINT: &str = "Ctrl+c:cancel";
 #[cfg(unix)]
 const MIDWORK: &str = "between-parks content";
 
-/// Final scripted answer after park #2's wait returns.
 #[cfg(unix)]
 const FINAL: &str = "REPARK_FINAL_ANSWER";
 
@@ -30,7 +27,6 @@ async fn reparked_wait_stays_markerless() {
         format!("while [ ! -e {} ]; do /bin/sleep 0.2; done", flag.display())
     };
 
-    // Tool call 1: the flag-gated background command.
     let bg_args = json!({
         "command": gated_loop(&park_flag),
         "description": "flag-gated command",
@@ -40,7 +36,6 @@ async fn reparked_wait_stays_markerless() {
     let _background_turn =
         expect_tool_turn(&content, "call_repark_bg", "run_terminal_command", bg_args);
 
-    // Tool call 2: the flag-gated foreground hold for id extraction.
     let id_hold_args = json!({
         "command": gated_loop(&id_ready_flag),
         "description": "hold for id extraction"
@@ -53,7 +48,6 @@ async fn reparked_wait_stays_markerless() {
         id_hold_args,
     );
 
-    // Fallback for the post-wait continuation once park #2's wait returns.
     content.set_response(FINAL);
 
     let binary = pager_binary().expect("resolve pager binary");
@@ -89,7 +83,6 @@ async fn reparked_wait_stays_markerless() {
         )
     });
 
-    // Tool call 3, park #1: a short wait that expires with the task still running
     let short_wait_args = json!({
         "task_ids": [task_id],
         "timeout_ms": 4_000
@@ -102,7 +95,6 @@ async fn reparked_wait_stays_markerless() {
         short_wait_args,
     );
 
-    // Tool call 4: foreground work between the parks (`MIDWORK` is the on-screen sentinel).
     let midwork_args = json!({
         "command": "echo repark-midwork-done",
         "description": MIDWORK
@@ -115,7 +107,6 @@ async fn reparked_wait_stays_markerless() {
         midwork_args,
     );
 
-    // Tool call 5, park #2: the long wait on the same still-running task
     let long_wait_args = json!({
         "task_ids": [task_id],
         "timeout_ms": 600_000

@@ -30,8 +30,7 @@ pub(crate) fn map_event_kind(kind: &EventKind) -> Option<FsEventKind> {
 
 pub(crate) fn merge_events(events: impl IntoIterator<Item = DebouncedEvent>) -> Vec<RawFsEvent> {
     let mut by_path: HashMap<PathBuf, FsEventKind> = HashMap::new();
-    // Rename events preserve original path ordering from the OS ([old, new]),
-    // so they bypass the HashMap merge and are emitted directly.
+    // Rename events preserve original path ordering from the OS ([old, new]).
     let mut rename_events: Vec<RawFsEvent> = Vec::new();
 
     for event in events.into_iter() {

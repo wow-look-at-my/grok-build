@@ -1,5 +1,4 @@
-//! One tool call turn, with no reasoning and no text, in each endpoint's format, and the shapes a
-//! failure answers with, built over the frame that opens a reply in each format.
+//! One tool call turn, with no reasoning and no text, in each endpoint's format, and the shapes a failure answers with, built over the frame.
 
 use serde_json::json;
 
@@ -24,7 +23,6 @@ fn chat_completion_role_chunk(model: &str) -> SseEvent {
     )
 }
 
-/// The `response.created` frame that opens a Responses API reply, numbered 0.
 fn responses_api_created_frame(model: &str) -> SseEvent {
     SseEvent::data(
         json!({

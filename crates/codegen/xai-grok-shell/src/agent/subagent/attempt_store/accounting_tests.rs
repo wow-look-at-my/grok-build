@@ -75,7 +75,6 @@ fn segment_formulas_cover_zero_one_and_maximum() {
 
 #[test]
 fn completion_directory_covers_zero_one_and_maximum() {
-    // Exact path composes account_completion / account_recovery (97_218 / 78_013 at S=33).
     // Aligned path uses canonical ROW_BYTES `.1` limits; unknown recovery is one run.
     for (segments, exact_high_water, aligned_high_water) in [
         (0, 263_142, 263_232),

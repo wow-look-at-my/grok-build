@@ -1,7 +1,4 @@
 //! Build script for bundling ripgrep for the xai-grok-tools crate.
-//!
-//! - If `GROK_TOOLS_BUNDLE_RG_PATH` is set, always bundle it
-//! - Otherwise, only bundle in release builds
 use std::env;
 use std::fs;
 use std::io;
@@ -11,7 +8,6 @@ const RG_VER: &str = "15.0.0";
 const BFS_VER: &str = "4.1";
 const UGREP_VER: &str = "7.7.0";
 const FD_VER: &str = "10.4.2";
-// fd stopped publishing x86_64-apple-darwin assets after 10.3.0.
 const FD_VER_MACOS_X64: &str = "10.3.0";
 
 /// Pinned SHA-256 of each `(version, triple)` fd release tarball we embed.
@@ -60,8 +56,7 @@ fn bundle_fd() -> Result<(), Box<dyn std::error::Error>> {
     let gen_dir = PathBuf::from(env::var("OUT_DIR")?).join("bundle-fd");
     fs::create_dir_all(&gen_dir)?;
 
-    // The consuming vendor extraction is unix-only — never bundle on
-    // Windows targets, mirroring the bfs/ugrep skip.
+    // The consuming vendor extraction is unix-only — never bundle on Windows targets, mirroring the bfs/ugrep skip.
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os == "windows" {
         return Ok(());
@@ -219,8 +214,8 @@ fn bundle_search_tool(
     println!("cargo:rerun-if-env-changed={override_env}");
     println!("cargo:rustc-check-cfg=cfg(bundle_{name})");
 
-    // The consumer (`embedded_search_tools`) is `#[cfg(unix)]`, so embedding on a
-    // Windows target is dead weight — skip (mirrors the ripgrep Windows skip).
+    // The consumer (`embedded_search_tools`) is `#[cfg(unix)]`, so embedding
+    // on a Windows target is dead weight — skip.
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         return Ok(());
     }
@@ -260,9 +255,7 @@ fn bundle_rg() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Skip auto-bundling on Windows: ripgrep ships .zip on Windows (not .tar.gz) and we have no zip-extraction path. Returning here BEFORE
-    // emitting `cargo:rustc-cfg=bundle_rg` keeps include_bytes! macros gated on cfg(bundle_rg) compiled-out, so the runtime falls back to `rg` on
-    // PATH. Users install ripgrep separately (winget / scoop). An explicit GROK_TOOLS_BUNDLE_RG_PATH still bundles regardless of target.
+    // Skip auto-bundling on Windows: ripgrep ships .zip on Windows (not .tar.gz) and we have no zip-extraction path.
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os == "windows" && path_override.is_none() {
         return Ok(());

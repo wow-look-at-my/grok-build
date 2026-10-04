@@ -1,19 +1,4 @@
 //! rmcp transport bridge over the ACP reverse channel.
-//!
-//! In-process SDK MCP servers (the official `grok-agent-sdk`'s `@tool` / `create_sdk_mcp_server`) run in the SDK-host process, not behind a socket.
-//! The agent reaches them by sending each MCP JSON-RPC message to the client as a reverse `x.ai/mcp/sdk_call` request and feeding the response back.
-//! This module adapts that request/response channel into an rmcp transport.
-//! An in-process server then reuses the same `RunningService` tool-dispatch path as HTTP/stdio servers for tool calls.
-//!
-//! Half-duplex (v1 limitation): the bridge carries ONLY client-to-server requests and their responses.
-//! Server-to-client traffic is NOT bridged.
-//! Neither notifications (`notifications/*`) nor server-initiated requests such as `sampling/createMessage` or `roots/list` are delivered.
-//! Elicitation is not advertised on this transport, so compliant servers never send it.
-//! Tools that depend on those features will not work over this transport yet.
-//! The duplex streams below exist to decouple slow tool calls (one task per request), not to deliver a second message direction.
-//!
-//! The invoker is abstract ([`AcpReverseInvoker`]) so this crate stays free of the ACP gateway types.
-//! The host (shell) supplies an impl backed by its gateway.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,9 +8,8 @@ use rmcp::transport::async_rw::AsyncRwTransport;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
-/// Sends one MCP JSON-RPC message to an in-process server over the ACP reverse channel (`x.ai/mcp/sdk_call`) and returns its JSON-RPC response.
-/// This is fail-closed: a missing tool server is a real error, unlike a hook gate.
-/// `timeout` bounds the single round trip so a missing or hung client fails this reverse call instead of stalling the agent's tool loop forever.
+/// Sends one MCP JSON-RPC message to an in-process server over the ACP
+/// reverse channel (`x.ai/mcp/sdk_call`) and returns its JSON-RPC response.
 #[async_trait::async_trait]
 pub trait AcpReverseInvoker: Send + Sync + 'static {
     async fn invoke(
@@ -39,12 +23,10 @@ pub trait AcpReverseInvoker: Send + Sync + 'static {
 /// rmcp transport for an in-process server reached over ACP reverse-RPC.
 pub type AcpBridgeTransport = AsyncRwTransport<RoleClient, DuplexStream, DuplexStream>;
 
-/// Duplex buffer for the bridge.
-/// MCP messages are small; this only needs to hold one in-flight message comfortably.
+/// Duplex buffer for the bridge. MCP messages are small; this only needs to hold one in-flight message comfortably.
 const BRIDGE_BUF: usize = 256 * 1024;
 
 /// Capacity of the server-to-client response channel.
-/// The only producers are the invoke tasks, one per outstanding rmcp request, and rmcp bounds those, so this buffer never realistically blocks.
 const RESPONSE_CHANNEL_CAP: usize = 128;
 
 /// JSON-RPC "Internal error" code, used for every error this bridge synthesizes.
@@ -59,9 +41,8 @@ pub fn acp_bridge_transport(
 ) -> AcpBridgeTransport {
     let (agent_read, pump_write) = tokio::io::duplex(BRIDGE_BUF); // server -> client
     let (pump_read, agent_write) = tokio::io::duplex(BRIDGE_BUF); // client -> server
-    // Nothing joins with the pump: it owns both duplex halves, so its death is
-    // the bridge's death, and a round-trip that never completes is the only
-    // thing rmcp would notice. Guarded so the log names the bridge that died.
+    // Nothing joins with the pump: it owns both duplex halves, so its death is the bridge's death, and a round-trip that never completes is
+    // the only thing rmcp would notice.
     #[allow(clippy::disallowed_methods)]
     tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
         "acp mcp bridge pump",
@@ -125,9 +106,9 @@ async fn read_requests(
                 continue;
             }
         };
-        // An id-less message is a notification (no response), and the SDK peer rejects reverse `x.ai/mcp/sdk_call`s without a JSON-RPC id
-        // So id-less messages are logged and discarded locally.
-        // Safe only because the SDK `Server` is lenient about never receiving `initialized` (a documented v1 limit)
+        // An id-less message is a notification (no response), and the SDK
+        // peer rejects reverse `x.ai/mcp/sdk_call`s without a JSON-RPC id So
+        // id-less messages are logged and discarded locally.
         let Some(id) = message.get("id").filter(|id| !id.is_null()).cloned() else {
             tracing::debug!(
                 %message,
@@ -139,10 +120,7 @@ async fn read_requests(
         let server_id = server_id.clone();
         let responses_tx = responses_tx.clone();
         invokes.spawn(async move {
-            // This task is the only thing that will ever answer `id`. A round
-            // that unwound without being caught leaves rmcp waiting for a
-            // response whose task is already gone, so the panic is turned into
-            // the same JSON-RPC error an `Err` from the invoker produces.
+            // This task is the only thing that will ever answer `id`.
             let round = xai_grok_tools::util::detached::guarded(
                 "acp mcp bridge reverse invoke",
                 invoker.invoke(&server_id, message, invoke_timeout),
@@ -264,7 +242,6 @@ mod tests {
             .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
             .await
             .unwrap();
-        // ...so the first line we read back is the request's response (id 1), proving the notification was silently consumed
         to_server
             .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n")
             .await
@@ -363,7 +340,6 @@ mod tests {
                 _timeout: Duration,
             ) -> Result<Value, String> {
                 let id = message.get("id").cloned().unwrap_or(Value::Null);
-                // id 1 is slow, id 2 is fast.
                 if id == 1 {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
@@ -392,7 +368,6 @@ mod tests {
             .await
             .unwrap();
 
-        // The fast request (id 2) returns before the slow one (id 1).
         assert_eq!(
             read_line(&mut reader)
                 .await
@@ -413,7 +388,7 @@ mod tests {
     /// The pre-fix `select!` reaped the invoke and cleared the partially-read line, desyncing the stream; the cancellation-safe read does not.
     #[tokio::test]
     async fn chunked_request_survives_an_invoke_completing_mid_read() {
-        /// id 1 completes after a short delay; everything else returns immediately.
+        /// id multiple completes after a short delay; everything else returns immediately.
         struct DelayInvoker;
         #[async_trait::async_trait]
         impl AcpReverseInvoker for DelayInvoker {
@@ -443,19 +418,16 @@ mod tests {
         let mut to_server = test_write;
         let mut reader = BufReader::new(test_read);
 
-        // In-flight invoke (id 1): its task will finish ~50ms from now.
         to_server
             .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"slow\"}\n")
             .await
             .unwrap();
 
-        // Begin a second request (id 2) but withhold its closing brace and newline, so the reader blocks mid-message while id 1's invoke completes
         to_server
             .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,")
             .await
             .unwrap();
         to_server.flush().await.unwrap();
-        // Let id 1's invoke complete *during* the pending chunked read.
         tokio::time::sleep(Duration::from_millis(120)).await;
         to_server
             .write_all(b"\"method\":\"chunked\"}\n")
@@ -463,7 +435,6 @@ mod tests {
             .unwrap();
         to_server.flush().await.unwrap();
 
-        // Both responses must arrive (order may vary), and id 2 parsed with no desync from the mid-read completion of id 1
         let first = read_line(&mut reader).await;
         let second = read_line(&mut reader).await;
         let mut ids = [
@@ -629,8 +600,7 @@ mod tests {
             ) -> Result<Value, String> {
                 let _drop_flag = DropFlag(self.dropped.clone());
                 self.started.store(true, Ordering::SeqCst);
-                // Far longer than the per-call timeout AND the test's wait budget
-                // So a "completed" or "timed out" outcome can only mean it wasn't aborted
+                // Far longer than the per-call timeout AND the test's wait budget So a "completed".
                 tokio::time::sleep(Duration::from_secs(3600)).await;
                 self.completed.store(true, Ordering::SeqCst);
                 Ok(Value::Null)
@@ -661,7 +631,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Wait until the invoke has actually started before tearing down.
+        // Wait until the invoke has started before tearing down.
         for _ in 0..200 {
             if started.load(Ordering::SeqCst) {
                 break;
@@ -697,8 +667,7 @@ mod tests {
         );
     }
 
-    /// A mock SDK MCP **server** behind the reverse channel.
-    /// This mirrors the real on-wire shapes.
+    /// A mock SDK MCP **server** behind the reverse channel. This mirrors the real on-wire shapes.
     struct MockSdkServer;
 
     #[async_trait::async_trait]
@@ -767,8 +736,8 @@ mod tests {
             Duration::from_secs(60),
         );
 
-        // `()` is rmcp's minimal `ClientHandler`
-        // `serve` runs the real initialize handshake over our bridge transport and yields a live `RunningService`
+        // `()` is rmcp's minimal `ClientHandler` `serve` runs the real
+        // initialize handshake over our bridge transport.
         let client =
             ().serve(transport)
                 .await
@@ -801,8 +770,7 @@ mod tests {
             .clone();
         assert_eq!(text, "hello bridge");
 
-        // Clean teardown: cancelling drops rmcp's duplex end; the pump observes EOF and self-terminates
-        // The abort mechanics are covered by `teardown_aborts_in_flight_invokes`
+        // Clean teardown: cancelling drops rmcp's duplex end.
         client.cancel().await.expect("clean teardown");
     }
 }

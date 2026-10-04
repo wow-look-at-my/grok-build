@@ -53,7 +53,7 @@ impl SymbolOccurrence {
 /// Uses Arc<str> to avoid extra allocation when merging into index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolAlias {
-    /// The alias name (e.g., imported as)
+    /// The alias name (e.g..
     pub alias: Arc<str>,
     /// The original symbol name
     pub original: Arc<str>,

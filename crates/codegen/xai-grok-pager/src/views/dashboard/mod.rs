@@ -1,25 +1,4 @@
 //! The agent dashboard lists every top-level agent, grouped by state, with peek, attach, and dispatch actions.
-//!
-//! Owned by `AppView::dashboard` (`Option<DashboardState>`); active only when `app.active_view == ActiveView::AgentDashboard`.
-//! State survives the user closing and reopening the dashboard within a single pager process (the `Option` is reset only on shutdown).
-//!
-//! ## Module layout
-//!
-//! - [`state`]: public `DashboardState`, `DashboardRowId`, `RowState`, `Grouping`, `Filter`, `FilterValue`, `PersistedDashboard`.
-//! - [`row`]: `DashboardRow`, `build_rows_with_roster()`, classifiers, sort.
-//! - [`row_activity`]: parent activity, secondary-line text, and live-work badge counts.
-//! - [`row_title`]: title, subtitle, and chip painting for wide and narrow rows.
-//! - [`layout`]: pure rect computation.
-//! - [`render`]: `Widget`-style rendering routine.
-//! - [`chrome`]: the header row and the primary actions row above the list.
-//! - [`actions_focus`]: the keyboard cursor on the actions row and its `←`/`→` walk.
-//! - [`peek`]: peek panel state and rendering.
-//! - [`usage_modal`]: input routing for the dashboard-hosted `/usage` modal.
-//!
-//! ## Lifetime
-//!
-//! Rows are rebuilt every render frame off `app.agents`; nothing is cached.
-//! The per-row sort key (state and last_change_at) is recomputed each frame; with single-digit agent counts in one pager process this is free.
 
 mod actions_focus;
 pub(crate) mod animation;
@@ -79,9 +58,8 @@ pub fn overlay_cycle_order(
         .collect()
 }
 
-/// The env override wins (`GROK_AGENT_DASHBOARD=0` turns the dashboard off), else the persisted `[dashboard].enabled` flag (default `true`).
-/// The slash command and CLI subcommand check this before opening; on `false` they print a toast and stay where they are.
-/// `var_os` avoids the per-call allocation of `var`.
+/// The env override wins (`GROK_AGENT_DASHBOARD=0` turns the dashboard off),
+/// else the persisted `[dashboard].enabled` flag (default `true`).
 pub fn dashboard_enabled() -> bool {
     if std::env::var_os("GROK_AGENT_DASHBOARD")
         .as_deref()
@@ -92,12 +70,8 @@ pub fn dashboard_enabled() -> bool {
     state::load_persisted_enabled().unwrap_or(true)
 }
 
-/// Command to name in the "use /X to switch between sessions" session
-/// banners (the `/new` session-created banner and the fork marker).
-///
-/// `/dashboard` when the feature is enabled; `None` when it is off — the tip
-/// would point at a refused command, so callers fall back to a plain
-/// session-id banner.
+/// Command to name in the "use /X to switch between sessions" session banners
+/// (the `/new` session-created banner and the fork marker).
 pub(crate) fn session_switch_hint_command() -> Option<&'static str> {
     dashboard_enabled().then_some("/dashboard")
 }
@@ -115,8 +89,6 @@ mod tests {
     #[test]
     fn switch_hint_follows_dashboard_flag() {
         // SAFETY: the test temporarily mutates a process-wide env var.
-        // `serial_test`'s lock ensures no other test marked with the same
-        // `GROK_AGENT_DASHBOARD` key reads it concurrently.
         unsafe { std::env::set_var("GROK_AGENT_DASHBOARD", "0") };
         assert_eq!(session_switch_hint_command(), None);
         unsafe { std::env::remove_var("GROK_AGENT_DASHBOARD") };

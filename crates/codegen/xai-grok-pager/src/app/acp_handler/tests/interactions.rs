@@ -108,8 +108,7 @@
 
     #[test]
     fn exec_vehicle_permission_enqueues_a_persisting_default_scope() {
-        // An exec-vehicle bash prompt that offers the scoped "Always allow:" row must open on a default scope that persists a grant
-        // That scope is the full command, not a bare `python3` prefix (which the ←/→ arrows could not repair)
+        // An exec-vehicle bash prompt that offers the scoped "Always allow:" row must open on a default scope that persists a grant.
         use std::sync::Arc;
         use xai_grok_workspace::permission::bash_command_splitting::BashCommandHighlights;
 
@@ -171,9 +170,7 @@
 
     #[test]
     fn ask_user_question_routes_to_background_session_not_active_view() {
-        // Repro of the dashboard bug: a session started but not entered asks a question
-        // Active view is agent A (sess-A); the question is for the BACKGROUND agent B (sess-B)
-        // It must land on B, not fail or land on A
+        // Repro of the dashboard bug: a session started but not entered asks a question Active view is agent A (sess-A).
         let mut app = make_app_with_agent("sess-A");
         insert_agent(&mut app, AgentId(1), Some("sess-B"));
         assert_eq!(app.active_view, ActiveView::Agent(AgentId(0)));
@@ -596,9 +593,7 @@
 
     #[test]
     fn ask_user_question_unknown_session_parks_without_error() {
-        // No local view for the session, and the active agent HAS a session_id (so the race-window fallback does not fire)
-        // The reverse-request must be left UNANSWERED (dropped), NOT failed with an error, which would render the tool red
-        // The leader's replay on attach handles it later
+        // No local view for the session, and the active agent HAS a session_id (so the race-window fallback does not fire).
         let mut app = make_app_with_agent("sess-A");
 
         let (tx, mut rx) = tokio::sync::oneshot::channel();
@@ -666,8 +661,7 @@
 
     #[test]
     fn permission_for_unknown_session_id_is_cancelled() {
-        // No agent owns the session and the active agent already has a session_id (so the race-window fallback does not fire)
-        // The permission must be cancelled rather than queued anywhere
+        // No agent owns the session and the active agent already has a session_id (so the race-window fallback does not fire).
         let mut app = make_app_with_agent("sess-A");
         insert_agent(&mut app, AgentId(1), Some("sess-B"));
         // make_app_with_agent already activated AgentId(0); no switch needed.

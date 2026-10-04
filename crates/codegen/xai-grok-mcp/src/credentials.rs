@@ -1,9 +1,4 @@
 //! Persistent credential storage for MCP server OAuth tokens.
-//!
-//! Credentials are stored in `$GROK_HOME/mcp_credentials.json`, keyed by a composite key derived from the server name and URL.
-//! This keeps MCP OAuth tokens isolated from the user's xAI auth (`auth.json`).
-//!
-//! Stores rmcp's `StoredCredentials` type directly, the same type that rmcp's `AuthorizationManager` uses internally.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -58,8 +53,6 @@ pub enum McpCredentialError {
 const CREDENTIALS_FILENAME: &str = "mcp_credentials.json";
 
 /// On-disk credential store: `$GROK_HOME/mcp_credentials.json`.
-///
-/// Stores rmcp `StoredCredentials` per MCP server, keyed by `"{server_name}:{server_url}"`.
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct McpCredentialStore {
     #[serde(flatten)]
@@ -80,9 +73,8 @@ impl McpCredentialStore {
         format!("{}:{}", server_name, server_url)
     }
 
-    /// Load the credential store from the default path (`$GROK_HOME/mcp_credentials.json`).
-    ///
-    /// Returns an empty store if the file does not exist.
+    /// Load the credential store from the default path (`$GROK_HOME/mcp_credentials.json`). Returns an empty store if the
+    /// file does not exist.
     pub fn load_default() -> Result<Self> {
         match Self::default_path() {
             Some(path) => Self::load_from(&path),
@@ -187,9 +179,8 @@ impl McpCredentialStore {
         self.entries.remove(&Self::key(server_name, server_url));
     }
 
-    /// Remove a server's credentials and persist, under the cross-process file lock (reload and merge, remove, then atomic save).
-    /// The locked counterpart of [`Self::remove`] and [`Self::save_default`] for callers that persist the removal.
-    /// An unlocked whole-file rewrite can drop other processes' concurrent writes for unrelated servers.
+    /// Remove a server's credentials and persist, under the cross-process
+    /// file lock (reload and merge, remove, then atomic save).
     pub fn remove_and_save(&mut self, server_name: &str, server_url: &Url) -> Result<()> {
         let key = Self::key(server_name, server_url);
         self.locked_mutate_and_save(&move |store: &mut Self| {
@@ -283,7 +274,6 @@ fn write_owner_only_atomic(path: &Path, content: &str) -> Result<()> {
 }
 
 /// Last access token an adapter served.
-/// Reauth compares the store against this to tell a fresh token apart from one this client already failed with.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ObservedAccessToken(Arc<parking_lot::Mutex<Option<String>>>);
 
@@ -368,9 +358,7 @@ impl rmcp::transport::auth::CredentialStore for McpCredentialStoreAdapter {
         let name = self.server_name.clone();
         let url = self.server_url.clone();
         tokio::task::spawn_blocking(move || {
-            // Under the same flock as `insert_and_save`: this is a whole-file read-modify-write
-            // An unlocked snapshot here could silently drop *other servers'* entries another process wrote concurrently
-            // Their just-rotated refresh tokens would go with them
+            // Under the same flock as `insert_and_save`: this is a whole-file read-modify-write An unlocked snapshot here could silently drop *other.
             let mut store = McpCredentialStore::load_default().unwrap_or_default();
             store
                 .remove_and_save(&name, &url)
@@ -427,8 +415,6 @@ mod tests {
         assert!(loaded.get("test", &url).is_some());
     }
 
-    /// Raw JSON fixture in the exact shape rmcp 0.17 persisted to `$GROK_HOME/mcp_credentials.json`.
-    /// Existing credential files must keep loading across rmcp upgrades (2.1's `OAuthTokenResponse` gained vendor extra token fields).
     /// So this must be a string literal, never JSON serialized by the current code.
     #[test]
     fn legacy_on_disk_fixture_still_deserializes() {
@@ -486,9 +472,7 @@ mod tests {
 
     #[test]
     fn save_and_load_from_file() {
-        // Unique dir: a hardcoded `$TMP/grok-mcp-credentials-test` is shared
-        // across `--runs_per_test` shards on the same worker, so a sibling
-        // can delete the file between `exists()` and `read_to_string`.
+        // Unique dir: a hardcoded `$TMP/grok-mcp-credentials-test` is shared across `--runs_per_test` shards on the same worker.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test_creds.json");
 

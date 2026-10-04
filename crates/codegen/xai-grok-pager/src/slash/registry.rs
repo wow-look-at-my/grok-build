@@ -1,12 +1,4 @@
 //! Command registry: maps command names/aliases to `SlashCommand` implementations.
-//!
-//! Design choices:
-//!
-//! - `String` keys throughout (not `&'static str`) for ACP command support.
-//! - `CommandSource` tracks provenance (Builtin vs Acp) for replacement logic.
-//! - `set_acp_commands()` replaces ACP-sourced entries without touching builtins.
-//! - ACP names that collide with a builtin trigger or blocked name are skipped.
-//! - `rebuild_triggers()` regenerates the trigger list after mutations.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -14,9 +6,8 @@ use std::sync::Arc;
 use super::acp_command::{AcpSlashCommand, SkillMeta};
 use super::command::{CommandProvenance, SlashCommand, WorkflowChoice};
 
-/// Shell ACP names the pager never offers (unified `/hooks` / `/plugins` UI, plus `/help`).
-/// These must stay covered by [`xai_grok_shell::session::PAGER_COMMAND_KEYS`].
-/// A skill of the same name is then advertised already qualified instead of being dropped here when the matching shell gate is off.
+/// Shell ACP names the pager never offers (unified `/hooks` / `/plugins` UI,
+/// plus `/help`).
 pub(crate) const BLOCKED_ACP_NAMES: &[&str] = &[
     "help",
     "hooks-add",
@@ -103,9 +94,7 @@ impl CommandTrigger {
     }
 }
 
-/// Pager builtins that shadow a shell builtin of the same name and stay hidden until the shell's
-/// catalog advertises it. Any backend advertising one must implement the matching `x.ai/memory/*`
-/// extension method.
+/// Pager builtins that shadow a shell builtin of the same name and stay hidden until the shell's catalog advertises it.
 const SHELL_GATED_COMMANDS: &[&str] = &["memory", "flush", "dream"];
 
 /// Owns the command objects and provides lookup by name/alias.
@@ -118,26 +107,20 @@ pub struct CommandRegistry {
     /// Commands hidden by name (not shown in dropdown, not executable).
     hidden: HashSet<String>,
     /// Commands hidden from the completion menu ONLY (no dropdown row, no ghost / palette trigger).
-    /// They stay resolvable for dispatch via [`Self::get_for_dispatch`]: a fully-typed invocation still executes.
-    /// Registry-level analogue of the per-command `SlashCommand::visible()` gate (the `/gboom` mechanism) for state the command object cannot see.
     menu_hidden: HashSet<String>,
-    /// Commands denied for this user, e.g. `/usage` tier-restricted on the free / X Basic tiers. Kept separate from
-    /// `hidden` so the per-command `set_*_visible` setters can never un-hide a restricted command. The deny list always
-    /// wins over every other visibility gate.
+    /// Commands denied for this user, e.g. `/usage` tier-restricted on the free / X Basic tiers.
     restricted: HashSet<String>,
-    /// Names of tools the connected agent has advertised. Fail-closed. Otherwise the user could submit `/loop` from the
-    /// home screen and start a session whose model can't actually run it.
+    /// Names of tools the connected agent has advertised. Fail-closed.
     available_tools: Option<HashSet<String>>,
     /// Launchable workflow definitions from the last ACP catalog sync.
-    /// Extracted from `_meta.workflowSource` on the incoming list (including names skipped as reserved/claimed) so `/workflow` can suggest them.
     saved_workflows: Vec<WorkflowChoice>,
     /// Names the last sync dropped: a sorted `reserved` run, then a sorted `duplicate` run.
     skipped_acp_names: Vec<String>,
 }
 
 impl CommandRegistry {
-    /// Build a registry from builtin commands.
-    /// Panics if two builtin commands share the same canonical name or alias.
+    /// Build a registry from builtin commands. Panics if builtin commands
+    /// share the same canonical name or alias.
     pub fn new(builtins: Vec<Arc<dyn SlashCommand>>) -> Self {
         let n = builtins.len();
         let sources = vec![CommandSource::Builtin; n];
@@ -151,8 +134,7 @@ impl CommandRegistry {
         hidden.insert("auto".to_string());
         // Memory commands follow the shell's own gate: shown once the ACP catalog advertises them.
         hidden.extend(SHELL_GATED_COMMANDS.iter().map(|name| name.to_string()));
-        // `/share` starts menu-hidden (still dispatchable) until `set_share_visible(true)`
-        // Menu-only so a typed `/share` can show a client disable message rather than PassThrough
+        // `/share` starts menu-hidden (still dispatchable) until `set_share_visible(true)` Menu-only.
         let mut menu_hidden = HashSet::new();
         menu_hidden.insert("share".to_string());
         let mut reg = Self {
@@ -180,23 +162,21 @@ impl CommandRegistry {
         self.rebuild_triggers();
     }
 
-    /// Look up a command by canonical name or alias, applying EVERY visibility gate (completion-menu rules).
-    /// Returns `None` for hidden, menu-hidden, and restricted commands, and for those whose `required_tools()` are not all in the advertised toolset.
-    /// Dispatch call sites that execute a fully-typed submission must use [`Self::get_for_dispatch`] instead, which ignores the menu-only gate.
+    /// Look up a command by canonical name or alias, applying EVERY
+    /// visibility gate (completion-menu rules).
     pub fn get(&self, key: &str) -> Option<&Arc<dyn SlashCommand>> {
         self.get_for_dispatch(key)
             .filter(|cmd| !self.menu_hidden.contains(cmd.name()))
     }
 
-    /// Look up a command by canonical name or alias for EXECUTION of a typed invocation, ignoring the menu-only gate
-    /// (`menu_hidden`). `menu_hidden` means "don't OFFER this in completion", not "this command doesn't exist". A
-    /// fully-typed submission must still reach the pager's own handler rather than fall through as an unknown command.
+    /// Look up a command by canonical name or alias for EXECUTION of a typed
+    /// invocation, ignoring the menu-only gate (`menu_hidden`). `menu_hidden`
+    /// means "don't OFFER this in completion", not "this command doesn't
+    /// exist".
     pub fn get_for_dispatch(&self, key: &str) -> Option<&Arc<dyn SlashCommand>> {
         let mut found = self.key_to_index.get(key);
         if found.is_none() && key.chars().any(|c| c.is_uppercase()) {
-            // Dispatch-tier resolution is case-insensitive: a typed /TODO or
-            // /Todo must reach the lowercase-named `todo` command so the
-            // typed case survives to `run_with_token` (urgent /TODO).
+            // Dispatch-tier resolution is case-insensitive: a typed /TODO or /Todo must reach the lowercase-named `todo` command.
             found = self.key_to_index.get(&key.to_ascii_lowercase());
         }
         self.dispatchable(found)
@@ -216,7 +196,6 @@ impl CommandRegistry {
     }
 
     /// Normalize a deny-list entry: trim, strip one leading `/`, lowercase.
-    /// Lets callers write `usage`, `/usage`, or `Usage` interchangeably.
     fn normalize_deny_name(name: &str) -> String {
         name.trim().trim_start_matches('/').to_lowercase()
     }
@@ -267,9 +246,8 @@ impl CommandRegistry {
         names
     }
 
-    /// True when `cmd.required_tools()` is empty, or the toolset is known and every required tool is in the advertised set.
-    ///
-    /// When `available_tools == None` (pre-session bootstrap), commands with non-empty `required_tools()` are hidden; see the field doc.
+    /// True when `cmd.required_tools()` is empty, or the toolset is known and
+    /// every required tool is in the advertised set.
     fn tools_satisfied(&self, cmd: &Arc<dyn SlashCommand>) -> bool {
         let required = cmd.required_tools();
         if required.is_empty() {
@@ -295,7 +273,6 @@ impl CommandRegistry {
     }
 
     /// Look up a command by its `triggers()` index.
-    /// Used by the slash controller to resolve a `CommandTrigger.command_index` back to the underlying `SlashCommand` for visibility filtering.
     pub fn commands_by_index(&self, index: usize) -> Option<&Arc<dyn SlashCommand>> {
         self.commands.get(index)
     }
@@ -321,9 +298,8 @@ impl CommandRegistry {
         self.rebuild_triggers();
     }
 
-    /// Commands whose `required_tools()` aren't all in `tools` are hidden from the dropdown and `get()`. API note: once
-    /// `Some` has been set this method only replaces the set. It cannot transition the registry back to the `None`
-    /// "tool list unknown, show everything" bootstrap state. In practice the drain pipeline never delivers a clear.
+    /// Commands whose `required_tools()` aren't all in `tools` are hidden
+    /// from the dropdown and `get()`.
     pub fn set_available_tools(&mut self, tools: HashSet<String>) {
         self.apply_available_tools(tools);
         self.rebuild_triggers();
@@ -333,9 +309,9 @@ impl CommandRegistry {
         self.available_tools = Some(tools);
     }
 
-    /// Show or hide `/share` in the completion menu.
-    /// Menu-only: when not visible the command is absent from dropdown / triggers but still resolves via [`Self::get_for_dispatch`].
-    /// A fully typed `/share` thus reaches the pager handler (e.g. temporary client disable) instead of falling through as an unknown command.
+    /// Show or hide `/share` in the completion menu. Menu-only: when not
+    /// visible the command is absent from dropdown / triggers but still
+    /// resolves via [`Self::get_for_dispatch`].
     pub fn set_share_visible(&mut self, visible: bool) {
         self.hidden.remove("share");
         if visible {
@@ -347,8 +323,6 @@ impl CommandRegistry {
     }
 
     /// Show or hide the `/dashboard` command (feature-flag gating).
-    /// The command is hidden by default (see [`Self::new`]) and revealed here when the dashboard feature flag (`dashboard_enabled()`) is on.
-    /// When hidden it won't appear in the dropdown or be executable.
     pub fn set_dashboard_visible(&mut self, visible: bool) {
         self.set_command_visible("dashboard", visible);
     }
@@ -365,14 +339,13 @@ impl CommandRegistry {
     }
 
     /// Show or hide the `/voice` command (runtime voice gate).
-    /// Hidden by default in [`Self::new`]; revealed when the gate is on (startup default on, or after a remote kill switch is lifted).
     pub fn set_voice_visible(&mut self, visible: bool) {
         self.set_command_visible("voice", visible);
     }
 
-    /// Gate `/auto` on the auto permission-mode feature.
-    /// When `available` is false, `/auto` is hard-hidden (fail-closed: neither offered nor executable).
-    /// `/always-approve` is always offered; both commands are true toggles and stay on the menu while already active.
+    /// Gate `/auto` on the auto permission-mode feature. When `available` is
+    /// false, `/auto` is hard-hidden (fail-closed: neither offered nor
+    /// executable).
     pub fn set_auto_mode_available(&mut self, available: bool) {
         if available {
             self.hidden.remove("auto");
@@ -407,9 +380,9 @@ impl CommandRegistry {
         self.rebuild_triggers();
     }
 
-    /// Replace all ACP-sourced commands with a new set. Builtin commands are preserved. ACP names that collide with a
-    /// builtin trigger or blocked name are skipped. The shell advertises colliding skills already qualified
-    /// (`acme:login`). Triggers a full `rebuild_triggers()`.
+    /// Replace all ACP-sourced commands with a new set. Builtin commands are
+    /// preserved. ACP names that collide with a builtin trigger or blocked
+    /// name are skipped.
     pub fn set_acp_commands(&mut self, commands: &[agent_client_protocol::AvailableCommand]) {
         self.apply_acp_commands(commands);
         self.rebuild_triggers();
@@ -513,8 +486,8 @@ impl CommandRegistry {
     }
 
     /// Regenerate trigger list and key-to-index map from the current commands.
-    /// Called after any mutation (construction, ACP sync).
-    /// Panics if two builtin commands share an alias (programmer error).
+    /// Called after any mutation (construction, ACP sync). Panics if builtin
+    /// commands share an alias (programmer error).
     fn rebuild_triggers(&mut self) {
         self.key_to_index.clear();
         self.triggers.clear();
@@ -535,13 +508,10 @@ impl CommandRegistry {
                 continue;
             }
 
-            // Menu-hidden commands keep their key entries (so `get_for_dispatch()` resolves a typed invocation) but emit no triggers
-            // This is the inverse of the restricted trade-off below
+            // Menu-hidden commands keep their key entries (so `get_for_dispatch()` resolves a typed invocation).
             let menu_only = self.menu_hidden.contains(canonical);
 
             // Restricted commands (per-user deny list, e.g. tier restrictions) deliberately stay listed.
-            // They keep their triggers/key entries so the dropdown, ghost completion, and palette show them like any other command (discoverability)
-            // Execution is blocked by `get()`'s `restricted_match` filter; invoking one shows the SuperGrok upsell instead
 
             // Insert canonical key.
             self.key_to_index.insert(canonical.to_string(), idx);
@@ -643,9 +613,7 @@ mod tests {
     #[test]
     fn dispatch_lookup_matches_a_lowercase_name_case_insensitively() {
         // A typed /TODO or /Todo must reach the (lowercase-named) todo
-        // command, and the case-sensitive typed token must survive to
-        // `run_with_token`. This pins the dispatch-key behavior that makes
-        // `/TODO` urgent rather than an unknown command.
+        // command, and the case-sensitive typed token must survive.
         let cmd: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
             name: "todo",
             aliases: &[],
@@ -694,7 +662,6 @@ mod tests {
             aliases: &["quit", "q"],
         });
         let registry = CommandRegistry::new(vec![cmd]);
-        // 1 canonical + 2 aliases = 3 triggers.
         assert_eq!(registry.triggers().len(), 3);
         assert_eq!(registry.command_count(), 1);
     }
@@ -1007,7 +974,6 @@ mod tests {
     }
 
     // ── Builtin/skill name collisions ───────────────────────────────
-    //
     fn login_builtin() -> Arc<dyn SlashCommand> {
         Arc::new(DummyCommand {
             name: "login",
@@ -1069,8 +1035,7 @@ mod tests {
         )]);
         assert_eq!(registry.command_count(), 1);
         assert!(registry.is_builtin("login"));
-        // The colliding ACP "Login" was skipped, so dispatch never resolves it;
-        // case-insensitive dispatch still reaches the builtin `login`.
+        // The colliding ACP "Login" was skipped, so dispatch never resolves it.
         assert!(registry.get("local:login").is_none());
         assert!(registry.get("Login").is_some());
     }
@@ -1194,8 +1159,7 @@ mod tests {
             required: &["scheduler_create"],
         });
         let reg = CommandRegistry::new(vec![gated]);
-        // Tool list not yet known: fail-closed
-        // The user can't submit /loop from the home screen and start a session whose model can't actually run scheduler_create
+        // Tool list not yet known: fail-closed The user can't submit /loop from the home screen.
         assert!(reg.get("loop").is_none());
         assert!(!reg.triggers().iter().any(|t| t.canonical == "loop"));
     }
@@ -1243,7 +1207,7 @@ mod tests {
         });
         let mut reg = CommandRegistry::new(vec![gated]);
 
-        // Only one of two tools present: hidden
+        // Only one of tools present: hidden
         reg.set_available_tools(tool_set(["a"]));
         assert!(reg.get("multi").is_none());
 

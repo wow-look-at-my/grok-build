@@ -24,9 +24,7 @@ pub(crate) fn get_modified_files(source: &Path) -> Result<ModifiedFilesResult> {
     let repo = gix::discover(source).context("failed to discover git repository")?;
     let modified: DashSet<PathBuf> = DashSet::new();
 
-    // Guard against empty index files — gix-index panics when the file
-    // is 0 bytes because it tries to slice the trailing hash from an
-    // empty mmap (integer underflow in the slice range).
+    // Guard against empty index files — gix-index panics when the file is a couple of bytes because it tries to slice the trailing hash.
     let index_path = repo.git_dir().join("index");
     if index_path.metadata().map_or(true, |m| m.len() == 0) {
         tracing::debug!(
@@ -71,7 +69,7 @@ pub(crate) fn get_modified_files(source: &Path) -> Result<ModifiedFilesResult> {
                 entry.rela_path.to_string()
             }
             Item::Rewrite { dirwalk_entry, .. } => {
-                // Rewrite = file was renamed (tracked as modified)
+                // Rewrite = file
                 modified_count += 1;
                 dirwalk_entry.rela_path.to_string()
             }

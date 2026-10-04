@@ -1,5 +1,4 @@
 //! Builds a BM25 index over registered MCP tools and searches it.
-//! The index is rebuilt on each search call (sub-millisecond for tens to low hundreds of tools).
 
 use std::sync::Arc;
 
@@ -110,18 +109,16 @@ impl ToolMetadata {
     }
 }
 
-/// Per-server metadata (name and optional description from the MCP initialize handshake's `instructions` field).
-/// Tool count is derived from `ToolMetadataSnapshot::tools` at read time.
-/// Disabled tools are unregistered from the bridge before the snapshot is rebuilt, so the count never includes them.
+/// Per-server metadata (name and optional description from the MCP initialize
+/// handshake's `instructions` field).
 #[derive(Debug, Clone)]
 pub(crate) struct ServerMetadata {
     pub name: String,
     pub description: Option<String>,
 }
 
-/// A snapshot of MCP tool metadata, shared between the session and the search index.
-///
-/// Updated when MCP tools are registered or re-initialized.
+/// A snapshot of MCP tool metadata, shared between the session and the search
+/// index.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ToolMetadataSnapshot {
     pub tools: Vec<ToolMetadata>,
@@ -131,7 +128,6 @@ pub(crate) struct ToolMetadataSnapshot {
 
 /// Holds a shared snapshot of MCP tool metadata behind a `std::sync::Mutex`.
 /// The lock is held only to clone the snapshot (fast, no I/O).
-/// `search_snapshot()` is a sync trait method called from async context.
 pub(crate) struct Bm25ToolSearchIndex {
     snapshot: Arc<Mutex<ToolMetadataSnapshot>>,
 }
@@ -158,7 +154,6 @@ impl ToolSearchIndex for Bm25ToolSearchIndex {
         }
 
         // Fast path: exact match on qualified name or bare tool name.
-        // When the model already knows the tool name (e.g. "grafana-ai__SearchDashboards" or "SearchDashboards"), skip BM25 entirely.
         let query_lower = query.trim().to_lowercase();
         if let Some(exact) = snapshot.tools.iter().find(|t| {
             t.qualified_name.to_lowercase() == query_lower

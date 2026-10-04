@@ -1,22 +1,12 @@
 //! Unicode block progress bar at 1/8th-cell resolution via the LEFT fractional blocks `▏▎▍▌▋▊▉█`.
-//!
-//! Consolas (the default ConHost font) is missing the narrow ones (U+258F..=U+2589, microsoft/terminal#387).
-//! On legacy ConHost we substitute the shade glyphs `░▒▓` from CP437 instead.
-//! Same eighth-resolution input; the cell just reads as a density pattern rather than a true left-justified bar.
-//!
-//! ```ignore
-//! render_progress_bar(buf, x, y, 5, 0.42, fg_color, bg_color);
-//! ```
 
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 
-/// LEFT-fractional block glyphs, indexed 0..=8 (0 is empty, 8 is full).
 const BLOCKS: [&str; 9] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
 
 /// Shade substitutes used on hosts that can't render the LEFT-fractional blocks.
-/// Same index domain as [`BLOCKS`] so call sites stay uniform.
 const SHADES: [&str; 9] = ["", "░", "░", "░", "▒", "▒", "▓", "▓", "█"];
 
 /// Per-cell partial-fill glyph table: `BLOCKS` everywhere except legacy ConHost, where we substitute `SHADES`.
@@ -120,7 +110,6 @@ mod tests {
         let area = Rect::new(0, 0, 10, 1);
         let mut buf = Buffer::empty(area);
         render_progress_bar(&mut buf, 0, 0, 4, 0.5, Color::White, Color::Black);
-        // 50% of 4 cells = 2 full blocks
         assert_eq!(buf.cell((0, 0)).map(|c| c.symbol()), Some("█"));
         assert_eq!(buf.cell((1, 0)).map(|c| c.symbol()), Some("█"));
         assert_eq!(buf.cell((2, 0)).map(|c| c.symbol()), Some(" "));
@@ -131,21 +120,15 @@ mod tests {
     fn test_partial_block() {
         let area = Rect::new(0, 0, 10, 1);
         let mut buf = Buffer::empty(area);
-        // 12.5% of 4 cells = 0.125*4*8 = 4 eighths = a half block on cell 0
         render_progress_bar(&mut buf, 0, 0, 4, 0.125, Color::White, Color::Black);
-        assert_eq!(buf.cell((0, 0)).map(|c| c.symbol()), Some("▌")); // 4/8 = half
+        assert_eq!(buf.cell((0, 0)).map(|c| c.symbol()), Some("▌"));
         assert_eq!(buf.cell((1, 0)).map(|c| c.symbol()), Some(" "));
     }
 
     #[test]
     fn cell_breakdown_keeps_eighths_resolution() {
-        // 0.5 * 4 * 8 = 16 eighths, so 2 full + 0 remainder
         assert_eq!(cell_breakdown(4, 0.5), (2, 0));
-        // 0.125 * 4 * 8 = 4 eighths, so 0 full + 4 remainder
         assert_eq!(cell_breakdown(4, 0.125), (0, 4));
-        // 0.03 * 5 * 8 = 1.2, which rounds to 1 eighth, so 0 full + 1 remainder
-        // On legacy that picks SHADES[1] = "░"; on truecolor it picks BLOCKS[1] = "▏"
-        // Either way ~3% does NOT light a full cell
         assert_eq!(cell_breakdown(5, 0.03), (0, 1));
         // An out-of-range value is clamped
         assert_eq!(cell_breakdown(4, 2.0), (4, 0));
@@ -153,7 +136,7 @@ mod tests {
 
     #[test]
     fn shades_and_blocks_tables_match_in_length() {
-        // The two glyph tables must share the same index domain so call sites can swap them without branching on the host
+        // Both glyph tables must share the same index domain so call sites can swap them without branching on the host
         assert_eq!(BLOCKS.len(), SHADES.len());
         assert_eq!(BLOCKS[0], SHADES[0]); // both empty
         assert_eq!(BLOCKS[8], SHADES[8]); // both full block

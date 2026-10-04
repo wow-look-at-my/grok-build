@@ -1,5 +1,4 @@
 //! Ambient session context for telemetry: product events and Mixpanel via [`log_event`].
-//! `session_id` and `turn_number` are injected from the task-local [`TelemetryCtx`] active for the duration of a session.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,7 +15,6 @@ pub struct TelemetryCtx {
     pub session_id: String,
     pub prompt_index: Arc<tokio::sync::Mutex<usize>>,
     /// Per-prompt correlation UUID for the external OTEL stream (`prompt.id`, events only, never metrics).
-    /// Set at turn start where `prompt_index` increments; `None` outside a prompt.
     pub prompt_id: Arc<parking_lot::Mutex<Option<String>>>,
 }
 
@@ -37,8 +35,8 @@ pub(crate) struct ExternalCtxSnapshot {
     pub prompt_id: Option<String>,
 }
 
-/// Rotate the per-prompt correlation UUID at turn start (where `prompt_index` increments). No-op outside a session ctx scope.
-/// The id is attached as `prompt.id` to external OTEL events only.
+/// Rotate the per-prompt correlation UUID at turn start (where `prompt_index`
+/// increments). No-op outside a session ctx scope.
 pub fn begin_prompt_id() {
     let _ = TELEMETRY_CTX.try_with(|c| {
         *c.prompt_id.lock() = Some(uuid::Uuid::new_v4().to_string());
@@ -62,12 +60,9 @@ tokio::task_local! {
 }
 
 /// The `session_id` field name the debug-log firehose router keys on.
-/// `debug_log::SessionIdVisitor` stashes a `SessionId` extension on any span carrying this field; the span *name* plays no part in routing.
-/// Shared so the `info_span!` here and the router in `debug_log` can't silently drift; a rename trips `session_span_exposes_router_field` below.
 pub(crate) const SESSION_ID_FIELD: &str = "session_id";
 
 /// Build the per-session tracing span the firehose router routes by.
-/// The field name MUST be the literal `session_id` (tracing field names can't be a const); the test below pins it against [`SESSION_ID_FIELD`].
 fn session_span(session_id: &str) -> tracing::Span {
     tracing::info_span!("session", session_id = %session_id)
 }
@@ -101,8 +96,8 @@ where
     })
 }
 
-/// Selects the analytics event-name prefix so shell and workspace events are distinguishable on the wire.
-/// Both origins share this emitter and the `event_value` derivation in [`crate::client`].
+/// Selects the analytics event-name prefix so shell and workspace events are
+/// distinguishable on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumCount)]
 pub enum EmitterOrigin {
     /// `xai-grok-shell` (and the pager/TUI that emit through it).
@@ -112,12 +107,10 @@ pub enum EmitterOrigin {
 }
 
 impl EmitterOrigin {
-    /// [`crate::client::event_value`] iterates this to strip the prefix an event name carries; the `const _` assertion below keeps it complete.
-    /// The prefixes are mutually exclusive (pinned by `client`'s `emitter_prefixes_are_mutually_exclusive` test), so at most one entry matches.
+    /// [`crate::client::event_value`] iterates this to strip the prefix an event name carries.
     pub const ALL: [EmitterOrigin; 2] = [EmitterOrigin::Shell, EmitterOrigin::Workspace];
 
     /// Analytics event-name prefix for this origin.
-    /// [`crate::client::event_value`] strips the same prefix to derive the wire `event_value`, so the two must stay in lockstep.
     pub fn event_prefix(self) -> &'static str {
         match self {
             EmitterOrigin::Shell => "grok-shell-",
@@ -126,12 +119,10 @@ impl EmitterOrigin {
     }
 }
 
-/// A variant missing from [`EmitterOrigin::ALL`] makes `ALL.len()` diverge from the `strum::EnumCount` count and trips this assertion.
-/// That keeps `client::event_value` from silently skipping a new origin's prefix.
+/// A variant missing from [`EmitterOrigin::ALL`] makes `ALL.len()` diverge from the `strum::EnumCount` count.
 const _: () = assert!(EmitterOrigin::ALL.len() == <EmitterOrigin as strum::EnumCount>::COUNT);
 
 /// Product analytics event (type-safe). Only fires in `Enabled` mode.
-/// Unconditionally fans out to the external OTEL stream first; that gate is `external::is_active()`, independent of `TelemetryMode`.
 pub fn log_event<T: TelemetryEvent>(data: T) {
     crate::external::emit(&data);
     if !client::is_enabled() {
@@ -141,8 +132,6 @@ pub fn log_event<T: TelemetryEvent>(data: T) {
 }
 
 /// Like [`log_event`], but awaits delivery on the current runtime.
-/// Fire-and-forget posts die with the session runtime on pager/embedded `/exit`, where [`drain_at_session_exit`] is a no-op.
-/// The process-exit drain cannot see this runtime either. Use for the last emit on that path.
 pub async fn log_event_now<T: TelemetryEvent>(data: T) {
     crate::external::emit(&data);
     if !client::is_enabled() {
@@ -151,9 +140,8 @@ pub async fn log_event_now<T: TelemetryEvent>(data: T) {
     emit_event_now(T::NAME, data).await;
 }
 
-/// Emit one event to the external stream always and to the product events/Mixpanel funnel only when `internal_enabled`.
-/// Callers use this when their internal sink is gated more strictly than [`log_event`]'s `Enabled` check (the shell's `Enabled && !ZDR`).
-/// [`log_event`] already fans out externally, so the branch keeps the external emit exactly-once and never sends an internal record under ZDR.
+/// Emit one event to the external stream always and to the product
+/// events/Mixpanel funnel only when `internal_enabled`.
 pub fn log_event_dual<T: TelemetryEvent>(internal_enabled: bool, data: T) {
     if internal_enabled {
         log_event(data);
@@ -162,9 +150,8 @@ pub fn log_event_dual<T: TelemetryEvent>(internal_enabled: bool, data: T) {
     }
 }
 
-/// Session lifecycle event (type-safe). Fires in both `Enabled` and `SessionMetrics` modes.
-/// Emits with the [`EmitterOrigin::Shell`] prefix; workspace-side callers use [`log_session_event_with_origin`].
-/// Unconditionally fans out to the external OTEL stream first (independent gate; see [`log_event`]).
+/// Session lifecycle event (type-safe). Fires in both `Enabled` and `SessionMetrics` modes. Emits with the [`EmitterOrigin::Shell`] prefix; workspace-side callers use
+/// [`log_session_event_with_origin`].
 pub fn log_session_event<T: TelemetryEvent>(data: T) {
     crate::external::emit(&data);
     if !client::is_session_metrics_enabled() {
@@ -173,9 +160,9 @@ pub fn log_session_event<T: TelemetryEvent>(data: T) {
     emit_event_with_origin(EmitterOrigin::Shell, T::NAME, data);
 }
 
-/// Session lifecycle event tagged with the emitting [`EmitterOrigin`]. No external fan-out here: the external stream is
-/// Shell-origin only, and workspace-side callers invoke this directly. An `external = …` macro arm on a workspace-only
-/// event therefore has no effect (pinned by a test in `external::tests`).
+/// Session lifecycle event tagged with the emitting [`EmitterOrigin`]. No
+/// external fan-out here: the external stream is Shell-origin only, and
+/// workspace-side callers invoke this directly.
 pub fn log_session_event_with_origin<T: TelemetryEvent>(origin: EmitterOrigin, data: T) {
     if !client::is_session_metrics_enabled() {
         return;
@@ -197,7 +184,6 @@ pub async fn emit_event_now<T: Serialize + Send + 'static>(
 }
 
 /// Posts spawned by [`emit_event_with_origin`] that haven't finished.
-/// Emission is fire-and-forget so it never blocks a turn; a process exiting right after emitting drops the event (see [`drain_pending`]).
 static PENDING_EVENTS: AtomicUsize = AtomicUsize::new(0);
 
 /// Decrement on every exit path, including a panicking, cancelled, or never-polled post.

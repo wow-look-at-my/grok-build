@@ -1238,9 +1238,6 @@ async fn flush_and_ack_propagates_session_file_sync_error_through_the_ack() {
     actor.stop().await;
 }
 
-/// Baselines on APFS (M-series laptop SSD), 50 iterations, medians:
-/// prompt-send FlushAndAck round-trip ~26 ms (max ~48 ms);.
-/// idle FlushAndAck ~30-40 us with zero file syncs (was ~5 ms for the fixed 5-file set before dirty tracking);.
 #[tokio::test]
 #[ignore = "manual durability-cost measurement; run with --ignored --nocapture and RUST_MIN_STACK=8388608"]
 async fn measure_prompt_barrier_idle_barrier_and_summary_rewrite_cost() {
@@ -1948,9 +1945,7 @@ async fn reset_title_to_auto_then_generated_title_is_adopted() {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 
-    // ClearTitle is save_session_data then upsert_session on the remote-sync
-    // task; the POST can become visible before the PUT is recorded under load.
-    // The sync task sends the row PUT only after the data POST's response.
+    // ClearTitle is save_session_data then upsert_session on the remote-sync task.
     let upsert_path = format!("/sessions/{SESSION_ID}");
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     let upserted_title = loop {
@@ -2297,8 +2292,7 @@ mod prompt_file_tests {
 
         let path = get_prompt_file_path_in(home.path(), &info, 0);
 
-        // The chain below prompts/ is ensure_owner_only_session_dir_in's job, pinned by ensure_owner_only_session_dir_tightens_chain
-        // Only the prompts/ level is this path's own creation
+        // The chain below prompts/ is ensure_owner_only_session_dir_in's job.
         let prompts_dir = path.parent().unwrap();
         assert_eq!(unix_mode(prompts_dir), 0o700, "prompts dir must be 0700");
     }
@@ -2417,7 +2411,7 @@ mod prompt_file_tests {
     #[test]
     fn hash_encoded_cwd_marker_is_synced_before_parent_dir_sync() {
         let home = tempfile::TempDir::new().unwrap();
-        // URL-encoded form exceeds 255 bytes, so encode writes `.cwd`.
+        // URL-encoded form exceeds many bytes, so encode writes `.cwd`.
         let long_cwd = format!("/Users/test/{}", "中".repeat(80));
         let info = Info {
             id: agent_client_protocol::SessionId::new("cwd-marker-sync"),

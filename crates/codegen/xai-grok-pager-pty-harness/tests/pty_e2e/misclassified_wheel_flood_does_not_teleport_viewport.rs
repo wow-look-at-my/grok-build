@@ -4,29 +4,21 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-// Regression: wheel-path cap (a misclassified flood must not teleport). The parent capped only
-// confirmed-trackpad flushes. That assumption fails under misclassification (a trackpad the brand
-// table prices as ept=3 that never promotes).
+// Regression: wheel-path cap (a misclassified flood must not teleport).
 
 /// Marker count: tall enough that even the parent's uncapped 360-row jump cannot clamp at the transcript top (which would mask its teleport).
 const MARKER_COUNT: usize = 700;
 
-/// 60 back-to-back reports: 360 rows of demand at 6x speed, several times more than the capped pipeline can deliver inside one stream's lifetime.
 const BURST_EVENTS: usize = 60;
 
 /// Teleport signature threshold on rows scrolled per painted frame.
-/// Capped delivery is bounded by 25 (see header); the parent's uncapped flood averages >= ~90.
-/// 30 splits the bands with margin on both sides.
 const MAX_ROWS_PER_FRAME: f64 = 30.0;
 
 /// The flood must visibly scroll.
-/// Even a fully batched arrival delivers the first-event flush (6), the promotion flush (12) and a capped finalize flush (>= 6).
-/// 20 leaves slack for odd viewport rounding.
 const TRAVEL_FLOOR: usize = 20;
 
-/// **Misclassified-flood teleport regression.**
-/// A dense wheel-classified flood at high scroll speed must deliver its travel in viewport-capped per-frame steps.
-/// It must never land as one uncapped multi-hundred-row jump.
+/// **Misclassified-flood teleport regression.** A dense wheel-classified flood at high scroll speed must deliver
+/// its travel in viewport-capped per-frame steps.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn misclassified_wheel_flood_does_not_teleport_viewport() {

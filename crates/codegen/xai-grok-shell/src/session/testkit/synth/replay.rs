@@ -1,5 +1,4 @@
 //! Session synthesis for replay and load tests.
-//! Writes `updates.jsonl` and `rewind_points.jsonl` directly, for exact control over ACU redundancy and rewind points.
 
 use std::path::{Path, PathBuf};
 
@@ -25,7 +24,7 @@ fn parse_or<T: std::str::FromStr>(key: &str, found: Option<String>, default: T) 
 /// Generation parameters; fields double as the defaults for [`SessionSpec::from_env_prefixed`].
 pub struct SessionSpec {
     pub turns: usize,
-    /// `available_commands_update`s persisted per turn: the redundant catalog a real session re-advertises on every skill or subagent boundary.
+    /// `available_commands_update`s persisted per turn: the redundant catalog a real session re-advertises on every skill.
     pub acu_per_turn: usize,
     pub catalog_commands: usize,
     pub catalog_desc_len: usize,
@@ -37,7 +36,6 @@ pub struct SessionSpec {
 }
 
 impl Default for SessionSpec {
-    /// Baseline yielding a ~20 MB `updates.jsonl`; callers override the knobs they scale up.
     fn default() -> Self {
         Self {
             turns: 60,

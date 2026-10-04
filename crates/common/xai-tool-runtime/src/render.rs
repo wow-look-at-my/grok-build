@@ -1,53 +1,4 @@
 //! Model-facing output extraction.
-//!
-//! Tool outputs carry both structured data (for agent/client logic) and
-//! a model-facing representation as MCP content blocks. [`ToolOutput`]
-//! is the trait that the runtime uses to extract the model-facing part.
-//!
-//! The default [`ToolOutput`] implementation serialises the output
-//! to JSON, then walks the structure looking for embedded
-//! [`ContentBlock`]-shaped values (images, resources). These are
-//! promoted to proper content block types; everything else becomes
-//! [`ContentBlock::Text`].
-//!
-//! Use [`extract_content_blocks`] directly when you need the same
-//! conversion on an arbitrary [`serde_json::Value`].
-//!
-//! # Example — custom model output
-//!
-//! ```rust
-//! use serde::Serialize;
-//! use xai_tool_runtime::render::ToolOutput;
-//! use xai_tool_runtime::ContentBlock;
-//!
-//! #[derive(Serialize)]
-//! struct BashOutput {
-//!     stdout: String,
-//!     exit_code: i32,
-//!     model_output: Vec<ContentBlock>,
-//! }
-//!
-//! impl ToolOutput for BashOutput {
-//!     fn model_output(&self) -> Vec<ContentBlock> {
-//!         self.model_output.clone()
-//!     }
-//! }
-//! ```
-//!
-//! # Example — default (automatic MCP extraction)
-//!
-//! Types that don't override `model_output()` get automatic extraction.
-//! Embedded images and resources are promoted; the rest is JSON text:
-//!
-//! ```rust
-//! use serde::Serialize;
-//! use xai_tool_runtime::render::ToolOutput;
-//!
-//! #[derive(Serialize)]
-//! struct SimpleOutput { answer: String }
-//! impl ToolOutput for SimpleOutput {}
-//! // model sees: ContentBlock::Text { text: r#"{"answer":"..."}"# }
-//! ```
 
 use std::sync::Arc;
 
@@ -62,40 +13,32 @@ use crate::tool::ContentBlock;
 /// chat-completion response generation into a single trait.
 pub trait ToolOutput: Serialize {
     /// Returns the model-facing content blocks for this output.
-    ///
-    /// Return an empty `Vec` to signal "use automatic extraction" — the
-    /// runtime will call [`extract_content_blocks`] on the serialised
-    /// JSON value instead.
     fn model_output(&self) -> Vec<ContentBlock> {
         Vec::new()
     }
 
     /// Build a chat-completion response frame from this tool output (sent to client),
-    /// if applicable.  Returns `None` by default.
+    /// if applicable. Returns `None` by default.
     fn chat_completion_output(&self) -> Option<ToolChatCompletionResponse> {
         None
     }
 }
 
-/// Blanket impl so `serde_json::Value` can be used directly as a
-/// `Tool::Output` (handy for stub/test tools and pass-through proxies).
+/// Blanket impl so `serde_json::Value` can be used directly as a `Tool::Output`.
 impl ToolOutput for Value {}
 
 /// `String` is a common output type for simple tools.
 impl ToolOutput for String {}
 
-/// Lets `xai_tool_types::TaskOutputOutput` be used directly as a `Tool::Output`
-/// (handy for stub/test tools and pass-through proxies).
+/// Lets `xai_tool_types::TaskOutputOutput` be used directly as a `Tool::Output`.
 impl ToolOutput for xai_tool_types::TaskOutputOutput {}
 impl ToolOutput for xai_tool_types::GrepSearchOutput {}
 impl ToolOutput for xai_tool_types::WebSearchOutput {}
 
-/// Lets `xai_tool_types::SubagentCompletedOutput` be used directly as a
-/// `Tool::Output` (the `task` tool's structured completion output).
+/// Lets `xai_tool_types::SubagentCompletedOutput` be used directly as a `Tool::Output`.
 impl ToolOutput for xai_tool_types::SubagentCompletedOutput {}
 
-/// Lets `xai_tool_types::KillTaskOutput` be used directly as a `Tool::Output`
-/// (the `kill_task` tool's typed result / not-found output).
+/// Lets `xai_tool_types::KillTaskOutput` be used directly as a `Tool::Output`.
 impl ToolOutput for xai_tool_types::KillTaskOutput {}
 
 /// Delegate through `Box<T>` so boxed outputs (e.g. large response
@@ -131,8 +74,7 @@ pub struct ToolChatCompletion {
     /// Text body of the response.
     #[serde(default)]
     pub message: String,
-    /// Tag discriminator: `"final"`, `"raw_function_result"`,
-    /// `"tool_usage_card"`, `"tool_partial_output"`, etc.
+    /// Tag discriminator: `"final"`, `"raw_function_result"`, `"tool_usage_card"`, `"tool_partial_output"`, etc.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_tag: Option<String>,
     /// Identifies the tool-usage card this result belongs to.
@@ -147,12 +89,10 @@ pub struct ToolChatCompletion {
     /// Code execution result.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code_execution_result: Option<ToolCodeExecutionResult>,
-    /// Where an applied `edit_file` replacement landed; the gix reducer
-    /// lifts it into `ToolResult.edit_file`.
+    /// Where an applied `edit_file` replacement landed; the gix reducer lifts it into `ToolResult.edit_file`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edit_file_result: Option<EditFileAnchor>,
-    /// Catch-all for additional fields the tool wants to set. Merged
-    /// into the proto `ChatCompletion` by the downstream converter.
+    /// Catch-all for additional fields the tool wants to set.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, Value>,
 }
@@ -160,8 +100,7 @@ pub struct ToolChatCompletion {
 /// File position of an applied `edit_file` replacement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditFileAnchor {
-    /// 1-based line of the snippet's first line. Identical before and after
-    /// the edit because a single replacement leaves the prefix untouched.
+    /// 1-based line of the snippet's first line.
     pub start_line: u32,
 }
 
@@ -182,8 +121,7 @@ pub struct ToolCodeExecutionResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ToolStreamError {
     pub message: String,
-    /// Opaque typed-error payload. The downstream chat layer
-    /// deserialises this into the concrete proto enum variant.
+    /// Opaque typed-error payload. The downstream chat layer deserialises this into the concrete proto enum variant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub typed_error: Option<Value>,
 }
@@ -191,23 +129,12 @@ pub struct ToolStreamError {
 /// Extract MCP-compatible [`ContentBlock`]s from a serialised JSON value.
 ///
 /// Strategies are tried in order — first match wins:
-///
-/// | # | Shape | Result |
-/// |---|-------|--------|
-/// | 1 | Value is itself a `ContentBlock` (`{"type":"text",…}`) | `vec![block]` |
-/// | 2 | Array containing ≥ 1 `ContentBlock` | each element: block or text |
-/// | 3 | Object with `"content": [...]` (MCP `CallToolResult`) | `structuredContent` (if any) as JSON text, followed by the content array |
-/// | 4 | Object with mixed fields | block-shaped fields extracted, rest as JSON text |
-/// | 5 | Anything else | `ContentBlock::Text` with the stringified value |
 pub fn extract_content_blocks(value: &Value) -> Vec<ContentBlock> {
     // 1. Value IS a single ContentBlock.
     if let Some(block) = try_parse_block(value) {
         return vec![block];
     }
 
-    // 2. Array: convert each element (block-shaped -> block, else -> text).
-    //    Only enter this path when at least one element looks like a
-    //    ContentBlock so plain arrays like [1,2,3] fall through to text.
     if let Some(arr) = value.as_array()
         && !arr.is_empty()
         && arr.iter().any(looks_like_content_block)
@@ -247,8 +174,6 @@ pub fn extract_content_blocks(value: &Value) -> Vec<ContentBlock> {
             return blocks;
         }
 
-        // 4. Mixed object -> pull block-shaped field values out; collect
-        //    the remaining fields into a single JSON text block.
         let mut extracted = Vec::new();
         let mut remainder = serde_json::Map::new();
 
@@ -278,19 +203,14 @@ pub fn extract_content_blocks(value: &Value) -> Vec<ContentBlock> {
     vec![value_to_block(value)]
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------- Internal helpers.
 
-/// The `ContentBlock` enum is `#[serde(tag = "type", rename_all =
-/// "snake_case")]`, so a JSON object can only be a content block when
-/// it has `"type"` set to one of these three values.
+/// The `ContentBlock` enum is `#[serde(tag = "type", rename_all = "snake_case")]`.
 const CONTENT_BLOCK_TYPES: &[&str] = &["text", "image", "resource"];
 
-/// Cheap check: could `value` plausibly deserialise as a
-/// [`ContentBlock`]?  Only objects with a `"type"` field whose value
-/// is one of the known discriminators pass.  This avoids a full
-/// `from_value(clone())` on the vast majority of values.
+/// Cheap check: could `value` plausibly deserialise as a [`ContentBlock`]?
+/// Only objects with a `"type"` field whose value is one of the known
+/// discriminators pass.
 fn looks_like_content_block(value: &Value) -> bool {
     value
         .as_object()
@@ -299,10 +219,7 @@ fn looks_like_content_block(value: &Value) -> bool {
         .is_some_and(|t| CONTENT_BLOCK_TYPES.contains(&t))
 }
 
-/// Try to parse `value` as a [`ContentBlock`].  Returns `None`
-/// immediately when the value doesn't pass the cheap
-/// [`looks_like_content_block`] check, avoiding clone + full
-/// deserialisation for non-matching shapes.
+/// Try to parse `value` as a [`ContentBlock`].
 fn try_parse_block(value: &Value) -> Option<ContentBlock> {
     if !looks_like_content_block(value) {
         return None;
@@ -346,11 +263,9 @@ fn classify_field(value: &Value) -> FieldShape {
     FieldShape::Other
 }
 
-/// Convert a single `Value` to a `ContentBlock`.
-///
-/// Uses the cheap [`try_parse_block`] check first; on failure wraps
-/// the value as `ContentBlock::Text`.  Strings are used verbatim (no
-/// extra JSON quoting); all other types go through `Value::to_string`.
+/// Convert a single `Value` to a `ContentBlock`. Uses the cheap
+/// [`try_parse_block`] check first; on failure wraps the value as
+/// `ContentBlock::Text`.
 fn value_to_block(value: &Value) -> ContentBlock {
     try_parse_block(value).unwrap_or_else(|| ContentBlock::Text {
         text: match value {
@@ -360,9 +275,7 @@ fn value_to_block(value: &Value) -> ContentBlock {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Type-erased extractor (used by the toolbox registry)
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------- Type-erased extractor.
 
 /// Type-erased model output extractor.
 pub type ModelOutputExtractor = Arc<dyn Fn(&Value) -> Option<Vec<ContentBlock>> + Send + Sync>;
@@ -407,7 +320,6 @@ mod tests {
 
     // ── extract_content_blocks unit tests ──────────────────────────
 
-    // Strategy 1: single ContentBlock
     #[test]
     fn extract_single_text_block() {
         let v = json!({"type": "text", "text": "hi"});
@@ -463,7 +375,6 @@ mod tests {
         );
     }
 
-    // Strategy 2: array of blocks
     #[test]
     fn extract_array_of_blocks() {
         let v = json!([
@@ -509,7 +420,6 @@ mod tests {
         );
     }
 
-    // Strategy 3: object with "content" key
     #[test]
     fn extract_content_field() {
         let v = json!({
@@ -530,7 +440,6 @@ mod tests {
         assert!(matches!(blocks[1], ContentBlock::Image { .. }));
     }
 
-    // Strategy 3 + structuredContent (MCP CallToolResult)
     #[test]
     fn extract_content_with_structured_content_surfaces_id() {
         let v = json!({
@@ -577,7 +486,6 @@ mod tests {
         assert_eq!(blocks[0], ContentBlock::Text { text: "ok".into() });
     }
 
-    // Strategy 4: mixed object with block-shaped field values
     #[test]
     fn extract_mixed_object_separates_blocks_and_remainder() {
         let v = json!({
@@ -588,8 +496,7 @@ mod tests {
         let blocks = extract_content_blocks(&v);
         // Remainder (summary + count) as JSON text, then the image.
         assert_eq!(blocks.len(), 2);
-        // First block is the remainder text (field order in JSON objects
-        // is not guaranteed, so just check it's Text and non-empty).
+        // First block is the remainder text.
         assert!(matches!(&blocks[0], ContentBlock::Text { text } if text.contains("summary")));
         assert!(matches!(&blocks[1], ContentBlock::Image { .. }));
     }
@@ -604,14 +511,13 @@ mod tests {
             ],
         });
         let blocks = extract_content_blocks(&v);
-        // results field → 2 blocks extracted, metadata → remainder text.
+        // results field → blocks extracted, metadata → remainder text.
         assert_eq!(blocks.len(), 3);
         assert!(matches!(&blocks[0], ContentBlock::Text { text } if text.contains("metadata")));
         assert_eq!(blocks[1], ContentBlock::Text { text: "a".into() });
         assert_eq!(blocks[2], ContentBlock::Text { text: "b".into() });
     }
 
-    // Strategy 5: fallback
     #[test]
     fn extract_plain_string() {
         let blocks = extract_content_blocks(&json!("hello world"));

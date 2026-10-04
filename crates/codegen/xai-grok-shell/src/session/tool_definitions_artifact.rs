@@ -1,9 +1,4 @@
 //! `{session_dir}/tool_definitions.json`: the function tools a session sent the model on its latest sampling iteration.
-//!
-//! The file is the Chat-Completions-shaped array the wire carries (`{ "type": "function", "function": { … } }`): value-equal
-//! to the request's `tools[]` and byte-identical to the uploaded trace copy. Hosted backend-search tools are not `ToolSpec`s
-//! and never appear; an empty toolset is written as `[]` even though the wire omits the key. An unchanged toolset costs no
-//! directory resolution or I/O, and a reader never observes a torn file (`write_bytes_atomic`).
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io;
@@ -19,7 +14,6 @@ use crate::session::info::Info;
 pub const TOOL_DEFINITIONS_FILENAME: &str = "tool_definitions.json";
 
 /// Content hash of the artifact last written for a session, kept in the `ToolBridge` resources.
-/// Absent until the first successful write; an agent rebuild starts from a fresh resource map, so its first iteration rewrites.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ToolDefinitionsArtifactHash(u64);
 
@@ -35,21 +29,15 @@ fn tool_definitions_hash(specs: &[ToolSpec]) -> u64 {
     hasher.finish()
 }
 
-/// The artifact body: `definitions` pretty-printed.
-///
-/// # Errors
-///
-/// A serialization failure surfaces as `InvalidData`.
+/// The artifact body: `definitions` pretty-printed. # Errors A serialization
+/// failure surfaces as `InvalidData`.
 fn tool_definitions_bytes(definitions: &[ToolDefinition]) -> io::Result<Vec<u8>> {
     serde_json::to_vec_pretty(definitions)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-/// Writes an artifact body into `dir` atomically.
-///
-/// # Errors
-///
-/// Any `io::Error` from `write_bytes_atomic`.
+/// Writes an artifact body into `dir` atomically. # Errors Any `io::Error`
+/// from `write_bytes_atomic`.
 fn write_tool_definitions_bytes(dir: &Path, bytes: &[u8]) -> io::Result<()> {
     crate::session::storage::write_bytes_atomic(&dir.join(TOOL_DEFINITIONS_FILENAME), bytes)
 }
@@ -69,12 +57,9 @@ async fn write_tool_definitions_artifact(info: Info, bytes: Vec<u8>) -> io::Resu
     .map_err(io::Error::other)?
 }
 
-// TODO: surface this through a `grok inspect --tools` reader.
-/// Reads the artifact back.
-///
-/// # Errors
-///
-/// `NotFound` when the session has not sampled yet, any other read error as-is, and `InvalidData` for a malformed file.
+// TODO: surface this through a `grok inspect --tools` reader. Reads the
+// artifact back. # Errors `NotFound` when the session has not sampled yet,
+// any other read error as-is, and `InvalidData` for a malformed file.
 pub fn load_tool_definitions_from_dir(dir: &Path) -> io::Result<Vec<ToolDefinition>> {
     let json = std::fs::read(dir.join(TOOL_DEFINITIONS_FILENAME))?;
     serde_json::from_slice(&json).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))

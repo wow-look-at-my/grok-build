@@ -1,7 +1,4 @@
 //! Pure OIDC protocol mechanics: PKCE, discovery, token exchange, refresh_tokens, JWT validation, principal extraction.
-//!
-//! No `AuthManager` mutation here.
-//! The login orchestration is in [`super::login`]; refresh primitives are in [`super::refresh`].
 use super::super::config::{ForceLoginTeam, GrokComConfig, OAuth2ProviderConfig, OidcAuthConfig};
 use super::super::{AuthMode, GrokAuth};
 use base64::Engine;
@@ -84,7 +81,8 @@ const ALLOWED_ID_TOKEN_ALGS: &[jsonwebtoken::Algorithm] = &[
     jsonwebtoken::Algorithm::ES384,
     jsonwebtoken::Algorithm::EdDSA,
 ];
-/// Optionally attach an extra access header when the optional non-production feature is enabled and the request targets a matching first-party host.
+/// Optionally attach an extra access header when the optional non-production
+/// feature is enabled.
 pub fn with_alpha_test_key(builder: reqwest::RequestBuilder, url: &str) -> reqwest::RequestBuilder {
     let _ = url;
     builder
@@ -170,8 +168,7 @@ pub fn peek_access_token_principal_id(access_token: &str) -> Option<String> {
 
     impl PrincipalIdClaim {
         /// The keys `principal_id` is read under; the same pair
-        /// `MinimalClaims::PRINCIPAL_ID_KEYS` folds. Written out again because
-        /// each of these types is local to its own peek function.
+        /// `MinimalClaims::PRINCIPAL_ID_KEYS` folds.
         const PRINCIPAL_ID_KEYS: xai_tool_types::Aliases =
             xai_tool_types::Aliases::new("principal_id", &["principalId"]);
     }
@@ -202,9 +199,8 @@ pub fn peek_access_token_principal_id(access_token: &str) -> Option<String> {
         .principal_id
         .filter(|s| !s.is_empty())
 }
-/// Resolved allowed-team set from `force_login_team_uuid`, or `None` (unrestricted).
-/// Legacy `oauth2.principal_id` only pre-selects the consent team; it is not an enforcement gate.
-/// Pure for testing.
+/// Resolved allowed-team set from `force_login_team_uuid`, or `None`
+/// (unrestricted).
 pub fn resolve_login_principal_policy(
     force_login_team_uuid: Option<&ForceLoginTeam>,
 ) -> Option<ForceLoginTeam> {
@@ -314,11 +310,8 @@ pub(super) struct Discovery {
     pub(super) id_token_signing_alg_values_supported: Option<Vec<String>>,
 }
 /// RFC 8414 says discovery clients SHOULD cache.
-/// 1h is short enough that an endpoint move propagates within an agent session.
-/// It is long enough that a discovery-endpoint outage no longer blocks token refresh once the doc is cached.
 const DISCOVERY_CACHE_TTL: StdDuration = StdDuration::from_secs(3600);
 /// Per-issuer cache of `(Discovery, fetched_at)`.
-/// Process-global because the discovery doc is identity-free; multiple AuthManagers pointed at the same IdP share one entry.
 static DISCOVERY_CACHE: LazyLock<RwLock<HashMap<String, (Discovery, Instant)>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 pub(super) async fn discover(issuer: &str) -> anyhow::Result<Discovery> {
@@ -481,9 +474,8 @@ pub(super) async fn exchange_code(
     }
     Ok(resp.json().await?)
 }
-/// Retry gate for `refresh_tokens`.
-/// Defers to `classify_terminal` (the single source of truth): only a recognized terminal code (`invalid_grant`, `invalid_client`) stops retries.
-/// Everything else (5xx, 429, bare 4xx, or an unrecognized/RFC-transient code) is retried.
+/// Retry gate for `refresh_tokens`. Defers to `classify_terminal` (the single source of truth): only a recognized terminal code (`invalid_grant`,
+/// `invalid_client`) stops retries.
 fn is_transient_refresh_error(err: &anyhow::Error) -> bool {
     let Some(OidcError::TokenRefreshHttp { status, body }) = err.downcast_ref::<OidcError>() else {
         return true;
@@ -499,7 +491,6 @@ fn is_transient_refresh_error(err: &anyhow::Error) -> bool {
         .and_then(super::refresh::classify_terminal)
         .is_none()
 }
-/// Up to 3 attempts (1 + 2 retries), 200ms-2s jittered exponential backoff.
 /// Bounded so a hard outage still surfaces to the user promptly via the existing `RefreshOutcome::TransientFailure` path.
 fn refresh_retry_policy() -> backon::ExponentialBuilder {
     backon::ExponentialBuilder::default()
@@ -624,9 +615,7 @@ pub(super) struct IdTokenClaims {
 }
 
 impl IdTokenClaims {
-    /// The keys [`first_name`](Self::first_name) is read under. `given_name` is
-    /// the OIDC standard claim; an IdP that also carries this program's own
-    /// spelling says one thing twice.
+    /// The keys [`first_name`](Self::first_name) is read under.
     pub(super) const FIRST_NAME_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("first_name", &["given_name"]);
     /// The keys [`last_name`](Self::last_name) is read under; `family_name` is
@@ -1259,7 +1248,6 @@ mod tests {
         );
         server.abort();
     }
-    /// `refresh_tokens` retries on a transient 503 and succeeds on the next attempt.
     /// Without backon, a single IdP blip during refresh surfaces to the user as a chat failure.
     #[tokio::test]
     async fn refresh_tokens_retries_on_transient_5xx() {
@@ -1411,12 +1399,8 @@ mod wire_alias_tests {
     use super::super::test_helpers::ensure_crypto_provider;
     use super::{IdTokenClaims, peek_access_token_principal, peek_access_token_principal_id};
 
-    /// A token carrying exactly the claims given, signed with a throwaway
-    /// secret. `insecure_decode` reads the body and checks nothing about the
-    /// signature, so the claim names in `claims` are what the reader sees. The
-    /// header names a real algorithm because a `Header` whose `alg` is not one
-    /// of `jsonwebtoken::Algorithm`'s variants fails to parse, and the reader
-    /// gives up before it looks at any claim.
+    /// A token carrying exactly the claims given, signed with a throwaway secret. `insecure_decode` reads the body and checks nothing about the signature, so the claim names in `claims` are what the reader sees. The header names a real algorithm because a `Header` whose `alg` is not one of `jsonwebtoken::Algorithm`'s variants fails to
+    /// parse, and the reader gives up before it looks at any claim.
     fn token_with(claims: &str) -> String {
         ensure_crypto_provider();
         let value: serde_json::Value =

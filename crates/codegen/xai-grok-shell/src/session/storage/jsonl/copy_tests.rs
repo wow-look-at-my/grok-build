@@ -140,7 +140,6 @@ async fn copy_session_data_fork_truncates_live_branch_inclusive() {
         .await
         .unwrap();
 
-    // Prompt 1 was rewound and retried: P1-dead/A1-dead is the dead branch.
     for update in [
         fork_user_chunk(sid, "P0", 0),
         fork_agent_chunk(sid, "A0"),
@@ -178,8 +177,6 @@ async fn copy_session_data_fork_truncates_live_branch_inclusive() {
         (target_info, options)
     };
 
-    // Fork at live prompt 1: keeps P0, A0, P1b, A1b in both files
-    // A raw run count would cut inside the dead branch instead
     let (target_info, options) = fork_at(1, "fork-at-1");
     let result = adapter
         .copy_session_data(&source_info, &target_info, options)
@@ -201,7 +198,6 @@ async fn copy_session_data_fork_truncates_live_branch_inclusive() {
         "fork must end at the live branch's A1b, got {last:?}"
     );
 
-    // Prompt 0 is kept inclusive; an exclusive cut would copy an empty model context here
     let (target_info, options) = fork_at(0, "fork-at-0");
     let result = adapter
         .copy_session_data(&source_info, &target_info, options)
@@ -499,8 +495,7 @@ async fn torn_line_inside_user_run_splits_the_run_for_prompt_cut() {
         .copy_session_data(&source_info, &target_info, options)
         .await
         .unwrap();
-    // P1b re-counts as a turn after the torn split, so the cut lands before it: P0, A0, P1a survive
-    // The contiguous-run cut would have kept 5
+    // P1b re-counts as a turn after the torn split, so the cut lands before it: P0, A0.
     assert_eq!(result.updates_copied, 3, "P0 + A0 + P1a");
 }
 
@@ -548,7 +543,7 @@ async fn copy_session_data_copies_compaction_segments_when_enabled() {
             .unwrap();
     }
 
-    // Two compaction segments produce compaction/{segment_000.md, segment_001.md, INDEX.md}
+    // Compaction segments produce compaction/{segment_000.md, segment_001.md, INDEX.md}
     let seg = |s: &str| CompactionSegmentFile {
         items: vec![ConversationItem::user("a"), ConversationItem::user("b")],
         summary: s.to_string(),
@@ -682,7 +677,7 @@ async fn copy_session_data_copies_referenced_compaction_checkpoints() {
         .init_session(&source_info, default_model_id())
         .await
         .unwrap();
-    // Two records referencing the same file (e.g. a chained fork) must still produce one copy.
+    // Records referencing the same file (e.g. a chained fork) must still produce one copy.
     for _ in 0..2 {
         adapter
             .append_update(&source_info, &checkpoint_record("ckpt-a"))
@@ -789,7 +784,7 @@ async fn target_prompt_index_truncation_gates_checkpoint_copy() {
         id: acp::SessionId::new("ckpt-dst"),
         cwd: "/target/workspace".to_string(),
     };
-    // Truncating to prompt 0 keeps [P0, ckpt-early] and drops the rest.
+    // Truncating to prompt keeps [P0, ckpt-early] and drops the rest.
     let result = adapter
         .copy_session_data(
             &source_info,
@@ -1582,8 +1577,8 @@ async fn filtered_copy_clears_pending_relocation() {
 }
 
 /// Each sidecar flag gates exactly its own file: one fork per flag disables only that flag and asserts only its file is missing.
-/// A transposed flag or path in the `copy_sidecar_file` call sites fails.
-/// A defaults fork then proves all five copy with their contents intact.
+/// A transposed flag or path in the `copy_sidecar_file` call sites fails. A defaults fork then proves all of them copy with
+/// their contents intact.
 #[tokio::test]
 async fn sidecar_flags_gate_their_files_independently() {
     let tmp = TempDir::new().unwrap();
@@ -1991,7 +1986,7 @@ async fn fork_truncation_clears_announced_failure_episodes() {
     );
 }
 
-/// An overlong line is discarded without consuming an index, so the two copy passes stay aligned.
+/// An overlong line is discarded without consuming an index, so both copy passes stay aligned.
 #[test]
 fn capped_line_reader_discards_overlong_lines_without_shifting_indexes() {
     fn collect(input: &[u8], cap: usize) -> Vec<(usize, Vec<u8>)> {

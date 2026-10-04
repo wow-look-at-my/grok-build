@@ -1,5 +1,5 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
-    //! Hook notifications: success leaves no trace, a failed run gets one bulleted `HookOutcome` line, a deny gets none here (the shell's annotation carries it).
+    //! Hook notifications: success leaves no trace, a failed run gets one bulleted `HookOutcome` line.
     use super::*;
     use crate::acp::tracker::WaitingReason;
     use xai_grok_shell::extensions::notification::{HookRunEntryDto, HookRunStatusDto};

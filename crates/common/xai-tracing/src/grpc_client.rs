@@ -18,17 +18,7 @@ pub type TracedChannel = Trace<
     MakeClientSpan,
 >;
 
-/// Wraps the input channel with a tracing layer. This function can be used to create a traced gRPC
-/// client as follows:
-///
-/// ```rust
-/// use tonic::transport::Endpoint;
-/// use std::str::FromStr;
-/// use xai_tracing::traced_channel;
-///
-/// let channel = Endpoint::from_str("http://foo").unwrap();
-/// //let client = SomeClient::new(traced_channel(channel));
-///```
+/// Wraps the input channel with a tracing layer.
 pub fn traced_channel(channel: Channel) -> TracedChannel {
     ServiceBuilder::new()
         .layer(TraceLayer::new_for_grpc().make_span_with(MakeClientSpan))
@@ -228,9 +218,7 @@ mod tests {
     }
 
     // With no dispatcher active, the client span must not be created —
-    // `tracing`'s `log` compat would downgrade it into `grpc_request; ...`
-    // log spam in processes that only configure a `log` logger.
-    // See `crate::dispatcher_active`.
+    // `tracing`'s `log` compat would downgrade it.
     #[test]
     fn make_client_span_without_dispatcher_is_none() {
         assert!(MakeClientSpan.make_span(&post_req()).is_none());

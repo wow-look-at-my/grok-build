@@ -1,17 +1,4 @@
 //! Best-effort conversion of LaTeX math to Unicode plain text.
-//!
-//! Converts TeX math source (the content of `$...$`, `$$...$$`, `\(...\)`, `\[...\]`) into a readable Unicode approximation for terminal display:
-//!
-//! - Greek letters and symbol commands (`\alpha` → `α`, `\le` → `≤`, …)
-//! - Superscripts/subscripts (`x^2` → `x²`, `a_1` → `a₁`) with `^(...)`/`_(...)` fallback when a char has no Unicode script form
-//! - Fractions (`\frac{1}{2}` → `½`, `\frac{a+b}{c}` → `(a+b)/c`)
-//! - Roots (`\sqrt{x}` → `√x`, `\sqrt[3]{x}` → `∛x`)
-//! - Alphabets (`\mathbb{R}` → `ℝ`, `\mathcal{L}` → `ℒ`, `\mathbf{v}` → `𝐯`)
-//! - Accents via combining marks (`\hat{x}` → `x̂`, `\vec{v}` → `v⃗`)
-//! - Environments (`aligned`, `cases`, `pmatrix`, …) → multi-line layout
-//!
-//! The converter never panics and always produces *some* output (unknown commands degrade to their bare name).
-//! Callers decide whether to use the conversion or fall back to raw TeX source.
 
 mod commands;
 mod cursor;
@@ -27,16 +14,14 @@ use cursor::Cursor;
 use math_box::MathBox;
 
 /// Inputs larger than this are not converted (callers fall back to raw display).
-/// Guards the streaming hot path: the tail is re-rendered on every chunk, so conversion cost must stay trivially small.
 pub(crate) const MAX_MATH_SOURCE_LEN: usize = 4096;
 
 /// Hard cap on group-nesting recursion.
-/// Inputs deeper than this render their remaining content flatly rather than recursing further.
 const MAX_DEPTH: usize = 32;
 
-/// Convert inline math to a single-line Unicode string.
-/// Row separators (`\\`) collapse to `; ` and multi-row environments render single-row, so inline math never introduces a line break mid-paragraph.
-/// Returns `None` when the source is too large to convert (see [`MAX_MATH_SOURCE_LEN`]).
+/// Convert inline math to a single-line Unicode string. Row separators (`\\`)
+/// collapse to `; ` and multi-row environments render single-row, so inline
+/// math never introduces a line break mid-paragraph.
 pub(crate) fn latex_to_unicode_inline(src: &str) -> Option<String> {
     if src.len() > MAX_MATH_SOURCE_LEN {
         return None;

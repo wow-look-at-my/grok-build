@@ -45,7 +45,6 @@ pub enum WorkspaceOpsRequest {
         /// Free-form query string.
         query: String,
         /// Maximum number of chunks to return.
-        /// `u32`, not `usize`: host-dependent `usize` would codegen to `uint64` on the wire.
         limit: u32,
     },
     /// Append content to the memory store.

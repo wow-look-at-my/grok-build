@@ -39,7 +39,6 @@ pub enum Commands {
         #[arg(short = 'e', long = "env", value_name = "KEY=VAL")]
         env: Vec<String>,
 
-        /// TCP port to listen on (0 = auto-assign)
         #[arg(short, long, default_value = "0")]
         port: u16,
 
@@ -153,7 +152,6 @@ pub enum Commands {
     },
 
     /// Wait for a screen condition (event-driven, no polling).
-    /// Exit codes: 0 matched, 1 timeout (failure JSON on stdout), 2 usage/connection error
     #[command(arg_required_else_help = true)]
     #[command(group(clap::ArgGroup::new("condition").required(true)))]
     Wait {
@@ -176,7 +174,6 @@ pub enum Commands {
         #[arg(long, value_name = "MS", group = "condition")]
         stable_ms: Option<u64>,
 
-        /// Timeout in seconds (server caps at 120)
         #[arg(short, long, default_value = "10")]
         timeout: u64,
     },
@@ -193,7 +190,6 @@ pub enum Commands {
 #[derive(clap::Args)]
 #[group(required = true, multiple = false)]
 pub struct Target {
-    /// Remote host address (e.g. 127.0.0.1:8080)
     #[arg(short = 'H', long)]
     pub host: Option<String>,
 

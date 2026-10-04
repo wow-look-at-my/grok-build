@@ -1,18 +1,4 @@
-//! Provides a dedicated tracing target (`xai_memory`) with an optional
-//! file logger that writes to `~/.grok/logs/memory.log`.
-//!
-//! ## When to use
-//!
-//! Use `tracing::info!(target: memory_log::TARGET, ...)` at memory system points such as config resolution, storage init, flush, and search.
-//! These events are always emitted (zero cost when the layer is absent).
-//!
-//! ## Enabling (debug builds)
-//!
-//! ```bash
-//! # build with memory logging enabled, then:
-//! GROK_MEMORY_LOG=0 grok                # disable even when enabled
-//! tail -f ~/.grok/logs/memory.log      # watch in another terminal
-//! ```
+//! Provides a dedicated tracing target (`xai_memory`) with an optional file logger that writes.
 
 /// Tracing target for all memory system operations.
 pub const TARGET: &str = "xai_memory";

@@ -222,8 +222,7 @@ fn symlinked_sentinel_is_rejected_and_replaced() {
         "unexpected error: {err}"
     );
 
-    // Creation must replace the symlink with a real directory
-    // A plain create_dir_all would silently keep the symlink and bwrap would mount its target
+    // Creation must replace the symlink with a real directory A plain create_dir_all would silently keep the symlink.
     let ensured = ensure_sentinel_dir_under(&parent).expect("ensure replaces the symlink");
     let meta = std::fs::symlink_metadata(&ensured).unwrap();
     assert!(

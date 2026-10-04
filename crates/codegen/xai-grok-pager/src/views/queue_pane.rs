@@ -1,8 +1,4 @@
 //! Queue pane: renders queued prompts in a `ListPane`.
-//!
-//! Similar to [`super::todo_pane::TodoPane`] but for queued prompts.
-//! Shows `#1`, `#2`, … prefixes (positional, 1-based) with the first line of each prompt's text.
-//! Multiline prompts show a `(+N lines)` indicator.
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -33,7 +29,7 @@ pub(crate) fn visible_held_server_row(
 /// Where a rendered queue row originates, which determines how an edit (delete / reorder) is routed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueRowOrigin {
-    /// A client-local `pending_prompts` entry (skill/image/bash/cron/etc., or any idle-drained prompt). Edits mutate the local queue directly.
+    /// A client-local `pending_prompts` entry (skill/image/bash/cron/etc., or any idle-drained prompt).
     Local,
     /// A server-authoritative `shared_prompt_queues` entry (plain prompt queued while running). Edits route to the agent as `x.ai/queue/*`.
     Server,
@@ -45,7 +41,6 @@ pub struct QueueRowRef {
     pub origin: QueueRowOrigin,
     /// The server `prompt_id` for `Server` rows; `None` for `Local` rows.
     pub server_id: Option<String>,
-    /// The server queue-entry version (for versioned removes); 0 for local.
     pub version: u64,
 }
 
@@ -53,7 +48,6 @@ pub struct QueueRowRef {
 #[derive(Debug, Clone)]
 pub struct QueuedPromptEntry {
     /// Stable selection ID. For local rows this is the `QueuedPrompt.id` monotonic counter.
-    /// For server rows it is a stable hash of the server `prompt_id` (so `ListPane` selection works uniformly across origins).
     pub id: u64,
     /// 1-based positional index for display (`#1`, `#2`, …).
     pub position: usize,
@@ -69,7 +63,6 @@ pub struct QueuedPromptEntry {
     origin: QueueRowOrigin,
     /// Server `prompt_id` for `Server` rows; `None` for local rows.
     server_id: Option<String>,
-    /// Server queue-entry version (for versioned removes); 0 for local.
     version: u64,
     /// Mutation/send capabilities under the pane's `QueueMutation`.
     capabilities: ServerRowCapabilities,
@@ -77,13 +70,12 @@ pub struct QueuedPromptEntry {
     styled: Line<'static>,
 }
 
-/// Stable 64-bit id derived from a server `prompt_id` string, so server rows have a `u64` selection id like local rows.
-/// Collision with local monotonic counters (small integers) is astronomically unlikely.
+/// Stable 64-bit id derived from a server `prompt_id` string, so server rows
+/// have a `u64` selection id like local rows.
 fn synth_server_id(prompt_id: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     prompt_id.hash(&mut h);
-    // Set the top bit so a synthesized id can never equal a small local monotonic counter (which start at 0 and increment by 1)
     h.finish() | (1 << 63)
 }
 
@@ -91,8 +83,8 @@ fn synth_server_id(prompt_id: &str) -> u64 {
 const PROTECTED_MARKER: &str = " · protected";
 
 /// Map a shared-queue wire `kind` string to the local display kind only.
-/// Server-only capabilities are projected separately by [`ServerRowCapabilities`].
-/// Unknown kinds fall back to a plain prompt.
+/// Server-only capabilities are projected separately by
+/// [`ServerRowCapabilities`].
 pub fn kind_from_wire(kind: &str) -> QueueEntryKind {
     match kind {
         "bash" => QueueEntryKind::BashCommand,
@@ -103,13 +95,6 @@ pub fn kind_from_wire(kind: &str) -> QueueEntryKind {
 
 /// Whether a server-queue row may be folded into a RUNNING turn as steering
 /// text.
-///
-/// Mirrors the shell's `SessionActor::deliverable_mid_turn` by asking the same
-/// rule ([`xai_prompt_queue::is_slash_invocation`]): a non-prompt kind owns its
-/// turn, and so does a slash invocation — the shell's drain expands skills but
-/// resolves no builtin, so folding `/cmd args` in would hand the model the
-/// literal command text. Such a row stays queued and runs as its own turn,
-/// where the shell resolves it.
 pub fn wire_row_is_steering_text(entry: &QueueEntryWire) -> bool {
     kind_from_wire(&entry.kind) == QueueEntryKind::Prompt
         && !xai_prompt_queue::is_slash_invocation(&entry.text)
@@ -129,7 +114,7 @@ impl QueuedPromptEntry {
         let line_count = prompt.text.lines().count();
         let capabilities = ServerRowCapabilities::for_local(mutation);
 
-        // Build initial styled line (will be rebuilt with proper width later).
+        // Build initial styled line (.
         let styled = Self::build_styled(&first_line, line_count, prompt.kind, None, capabilities);
 
         Self {
@@ -281,7 +266,7 @@ impl QueuedPromptEntry {
             QueueEntryKind::BashCommand => {
                 // Bash commands: `! ` prefix in yellow (theme.command), command text in yellow.
                 let display_text = if let Some(max_w) = content_max_width {
-                    // Reserve 2 chars for "! " prefix.
+                    // Reserve multiple chars for "! " prefix.
                     truncate_str(first_line, max_w.saturating_sub(2))
                 } else {
                     first_line.to_string()
@@ -342,9 +327,8 @@ use crate::render::{PreviewConfig, PreviewStyle, render_preview_overlay};
 use super::list_pane::{ListPane, ListPaneConfig, ListPaneState, ListPaneStyle, WrapMode};
 use super::overlay::OverlayState;
 
-/// Event returned by [`QueuePane::handle_key`] signaling intent to the caller. The queue pane never
-/// mutates business state (the prompt queue) directly. It signals intent via these events, and
-/// `AgentView::handle_queue_key` performs the actual mutation on `AgentSession::pending_prompts`.
+/// Event returned by [`QueuePane::handle_key`] signaling intent to the
+/// caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueueEvent {
     /// Delete the selected prompt from the queue.
@@ -362,8 +346,8 @@ pub enum QueueEvent {
 /// Maximum height (in lines) the queue pane will request.
 const MAX_QUEUE_HEIGHT: u16 = 3;
 
-/// Hit-test and hover state for one per-row action button (`[edit]`, `[Send now]`, `[cancel]`).
-/// Rect and row binding are rebound on every `QueuePane::render`; hover persists across frames so a stationary pointer keeps its highlight.
+/// Hit-test and hover state for one per-row action button (`[edit]`, `[Send
+/// now]`, `[cancel]`).
 #[derive(Default)]
 struct RowActionButton {
     /// Screen rect from the last render; `None` when the button didn't render.
@@ -433,15 +417,13 @@ impl RowActionButton {
 /// from `AgentSession::pending_prompts`. Owns `ListPaneState` for scroll, selection, and rendering
 /// state.
 pub struct QueuePane {
-    /// Styled entries for `ListPane` rendering.
-    /// Rebuilt from the queue at the start of each `render()` call.
+    /// Styled entries for `ListPane` rendering. Rebuilt from the queue at the start of each `render()` call.
     entries: Vec<QueuedPromptEntry>,
     /// List pane state (scroll, selection, search, layout cache).
     pub list_state: ListPaneState,
     /// Visual style for the list pane framework.
     list_style: ListPaneStyle,
-    /// Theme kind at the last render. Used to detect a theme switch and refresh `list_style`, whose `selection_bg` is captured from the theme.
-    /// (Otherwise the focused-row highlight keeps the previous theme's `bg_highlight`, e.g. GrokNight's dark band leaking into GrokDay.)
+    /// Theme kind at the last render.
     last_theme: ThemeKind,
     /// Shared visibility/focus state.
     pub overlay: OverlayState,
@@ -455,8 +437,7 @@ pub struct QueuePane {
     delete_button: RowActionButton,
     /// `[edit]` (queued-row edit) action button.
     edit_button: RowActionButton,
-    /// Entry id of the row currently under the mouse cursor, if any.
-    /// Drives the hover affordance: the hovered row reveals its action buttons just like the selected row does when the pane is focused.
+    /// Entry id of the row under the mouse cursor, if any.
     hovered_row_id: Option<u64>,
     /// Content area from the last `render`, used to hit-test which row the mouse is over (for `hovered_row_id`).
     last_inner: Option<Rect>,
@@ -610,8 +591,8 @@ impl QueuePane {
         self.prev_len = 0;
     }
 
-    /// Desired height in lines for layout computation. Returns 0 when hidden or empty. Otherwise:
-    /// `min(queue.len(), MAX_QUEUE_HEIGHT)`.
+    /// Desired height in lines for layout computation. Otherwise: `min(queue.len(),
+    /// MAX_QUEUE_HEIGHT)`.
     pub fn desired_height(&self) -> u16 {
         if !self.is_visible() {
             return 0;
@@ -743,9 +724,7 @@ impl QueuePane {
         let capped = lines.signum() * lines.abs().min(max);
         self.list_state
             .handle_scroll_event(capped, col, row, &self.entries);
-        // Rows move under a stationary cursor while wheel-scrolling, but hover is otherwise only refreshed on `Moved` events
-        // Re-resolve the hovered row from the pointer's current position against the just-updated scroll offset
-        // The hover bg and action buttons then track the row now under the pointer instead of the pre-scroll entry
+        // Rows move under a stationary cursor while wheel-scrolling.
         self.update_row_hover(col, row);
     }
 
@@ -805,8 +784,8 @@ impl QueuePane {
         self.edit_button.clear_hover()
     }
 
-    /// Update which row the mouse is hovering over (the row, not just its delete button).
-    /// Drives the action-button reveal on hover. Returns `true` if the hovered row changed (caller should redraw).
+    /// Update which row the mouse is hovering over (the row, not its delete button). Drives the action-button reveal on hover. Returns `true` if the hovered row
+    /// changed (caller should redraw).
     pub fn update_row_hover(&mut self, col: u16, row: u16) -> bool {
         let new_id = self.row_id_at(col, row);
         if new_id != self.hovered_row_id {
@@ -864,8 +843,7 @@ impl QueuePane {
         overlay_area: Option<Rect>,
         can_send_now: bool,
     ) {
-        // Detect a theme switch and refresh the list style. Without this it would keep the theme active at
-        // construction (default GrokNight, dark) after the user switches.
+        // Detect a theme switch and refresh the list style.
         let current_theme = Theme::current_kind();
         if current_theme != self.last_theme {
             self.last_theme = current_theme;
@@ -879,8 +857,6 @@ impl QueuePane {
         }
 
         // Rebuild styled content with proper width for truncation.
-        // Account for prefix width: "#N " where N is the position (1-based).
-        // Max position determines prefix width: #1-#9 take 3 chars, #10-#99 take 4, etc
         let max_pos = self.entries.len();
         let prefix_width = 2 + digit_count(max_pos); // "#" + digits + " "
         let content_width = (inner.width as usize).saturating_sub(prefix_width);
@@ -888,9 +864,7 @@ impl QueuePane {
             entry.rebuild_styled_for_width(content_width as u16);
         }
 
-        // When the queue overflows, the ListPane reserves its scrollbar in the last column of its render area
-        // That column is where the right-aligned action buttons ([cancel]) sit
-        // Render the list one column wider (borrowing right outer padding) to push the scrollbar just past the buttons instead of underneath them
+        // When the queue overflows, the ListPane reserves its scrollbar.
         let list_area = if self.entries.len() as u16 > inner.height {
             Rect {
                 width: inner.width + 1,
@@ -906,8 +880,8 @@ impl QueuePane {
             .style(self.list_style)
             .render(list_area, buf, &mut self.list_state);
 
-        // Hover affordance: paint the same dim row-hover bg the scrollback and dock use.
-        // Selection wins: skip when the hovered row is the focused selection, which already carries the (stronger) selection bg.
+        // Hover affordance: paint the same dim row-hover bg the scrollback
+        // and dock use.
         let hovered_idx = self
             .hovered_row_id
             .and_then(|id| self.entries.iter().position(|e| e.id == id));
@@ -920,7 +894,6 @@ impl QueuePane {
             && hovered_idx != selected_idx
         {
             // Skip when the hovered row is scrolled outside the viewport (e.g. a stale hover after a wheel-scroll).
-            // A plain saturating_sub would collapse an above-viewport row to row 0 and mis-paint it
             let item_y = self.list_state.layout().virtual_y(idx);
             if let Some(rel) = item_y.checked_sub(self.list_state.scroll_offset())
                 && rel < inner.height as usize
@@ -932,9 +905,7 @@ impl QueuePane {
             }
         }
 
-        // Action buttons (optional [Send now], then [edit], then [cancel], right-aligned)
-        // They render for the row under the mouse (hover affordance) or, when the pane is focused, the selected row
-        // Hover takes precedence so mouse users can act on any row without focusing/selecting it first
+        // Action buttons (optional [Send now], then [edit], then [cancel], right-aligned) They render for the row under the mouse.
         self.send_now.reset();
         self.delete_button.reset();
         self.edit_button.reset();
@@ -953,8 +924,6 @@ impl QueuePane {
         {
             use crate::render::SafeBuf;
             let theme = Theme::current();
-            // Skip when the action row is scrolled outside the viewport
-            // A plain saturating_sub would otherwise bind the buttons to row 0 and mis-route clicks to an off-screen entry
             let item_y = self.list_state.layout().virtual_y(idx);
             if let Some(rel) = item_y.checked_sub(self.list_state.scroll_offset())
                 && rel < inner.height as usize
@@ -962,8 +931,6 @@ impl QueuePane {
                 let screen_y = inner.y + rel as u16;
                 let btn_style = Style::default().fg(theme.gray);
                 // Right-to-left walk. A button renders only when its whole label fits at or right of `inner.x`.
-                // Saturating toward 0 would paint into the left gutter and overlap already-placed buttons
-                // A `checked_sub` underflow means the label doesn't fit, not that x is 0
                 let mut right = inner.x + inner.width;
                 let fits = |right: u16, w: u16| right.checked_sub(w).filter(|&x| x >= inner.x);
 
@@ -987,9 +954,7 @@ impl QueuePane {
                 let interject_w = interject_label.len() as u16;
                 let show_send_now = can_send_now && entry.capabilities.can_send_now();
 
-                // [edit] always paints; keyboard `e` works either way. Flush to
-                // neighbours so the queued message cannot leak through a gap.
-                // Drop [edit] if [Send now] fits alone but not with [edit].
+                // [edit] always paints; keyboard `e` works either way.
                 let edit_label = "[edit]";
                 let edit_w = edit_label.len() as u16;
                 let send_now_fits_alone = show_send_now && fits(right, interject_w).is_some();
@@ -1022,7 +987,6 @@ impl QueuePane {
             }
         }
 
-        // Multiline preview overlay: show when focused and selected entry has 2+ lines.
         if focused
             && let Some(overlay) = overlay_area
             && let Some(text) = self.selected_text()
@@ -1093,7 +1057,7 @@ mod tests {
             .join("\n")
     }
 
-    /// The two ways a row ends up protected: the wire kind on the session's own queue, and any row on a mirror.
+    /// Both ways a row ends up protected: the wire kind on the session's own queue, and any row on a mirror.
     fn protected_panes() -> [(QueuePane, &'static str); 2] {
         let mut parent_message = wire("parent-message-msg-1", "status update", 1);
         parent_message.kind = String::from("parent_agent_message");
@@ -1232,7 +1196,6 @@ mod tests {
             ],
             span_texts(&protected)
         );
-        // 13 text columns plus the 12-column marker need 25: at 24 the text yields down to the marker's width
         protected.rebuild_styled_for_width(24);
         assert_eq!(
             vec![String::from("status upda…"), String::from(PROTECTED_MARKER)],
@@ -1241,7 +1204,6 @@ mod tests {
         protected.rebuild_styled_for_width(23);
         assert_eq!(vec![String::from("status update")], span_texts(&protected));
 
-        // Multiline: " (+1 line)" (10) is reserved first, so the marker needs 10 + 12 + 12 = 34
         let mut multiline = QueuedPromptEntry::from_server(
             &wire("p2", "status update\nmore", 2),
             2,
@@ -1370,7 +1332,6 @@ mod tests {
 
         local.clear();
         pane.overlay.visible = false;
-        // Reproduce the bug state: prev_len left at 1, no empty sync, hi swapped for hi2
         pane.prev_len = 1;
         local.push_back(local_prompt(2, "hi2"));
         pane.sync_from_merged(&local, &[], None, None, &Default::default());
@@ -1559,7 +1520,6 @@ mod tests {
         let mut server = vec![wire("p1", "server one", 0), wire("p2", "server two", 1)];
         pane.sync_from_merged(&local, &server, None, None, &Default::default());
 
-        // entries: [server p1, server p2, local 7]
         let ids = pane.entry_ids();
         assert_eq!(ids.len(), 3);
         let (p1_id, p2_id, local_id) = (*at(&ids, 0), *at(&ids, 1), *at(&ids, 2));
@@ -1600,12 +1560,10 @@ mod tests {
         pane.sync_from_merged(&local, &[], None, None, &Default::default());
         assert_eq!(pane.entry_ids(), vec![1, 2, 3]);
 
-        // Deleting the middle row slides the following row (3) into the slot
         pane.list_state.select_by_id(2);
         pane.select_after_delete(2);
         assert_eq!(pane.selected_id(), Some(3));
 
-        // Apply and re-sync, then delete the last row; it clamps to the new last (1)
         local.retain(|p| p.id != 2);
         pane.sync_from_merged(&local, &[], None, None, &Default::default());
         assert_eq!(pane.entry_ids(), vec![1, 3]);
@@ -1745,7 +1703,6 @@ mod tests {
 
     #[test]
     fn test_truncation_preserves_suffix() {
-        // Width of 25: "first line" (10) + " (+4 lines)" (11) = 21, fits
         let styled = QueuedPromptEntry::build_styled(
             "first line",
             5,
@@ -1757,7 +1714,6 @@ mod tests {
         assert!(text.contains("first line"));
         assert!(text.contains("(+4 lines)"));
 
-        // Width of 20: the first line must be truncated to fit the suffix
         let styled = QueuedPromptEntry::build_styled(
             "first line here",
             5,
@@ -1777,7 +1733,7 @@ mod tests {
             "hello world",
             10,
             QueueEntryKind::Prompt,
-            Some(15), // " (+9 lines)" is 11 chars, leaving 4 for content
+            Some(15),
             editable(),
         );
         let text: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -1952,12 +1908,10 @@ mod tests {
     }
 
     /// On panes too narrow for the full `[Send now][edit][cancel]` chain, a button that can't fit right of the content area's left edge is dropped.
-    /// Saturating toward 0 would land rects outside `inner` and overlap.
     /// Overlaps mis-route clicks: send-now is hit-tested before edit, so overlapped cells would fire it.
     #[test]
     fn narrow_pane_drops_buttons_that_do_not_fit() {
         let layout_cfg = crate::appearance::LayoutConfig::default();
-        // Probe the left padding once so the width sweep spans inner widths from 1 (nothing fits) past 24 (the full chain fits)
         let pad_left = {
             let mut pane = QueuePane::new();
             let mut local = std::collections::VecDeque::new();
@@ -2085,8 +2039,8 @@ mod tests {
             Some(hover_bg),
             "hover bg spans the full row width"
         );
-        // When the terminal has real colors the non-hovered row is visibly distinct
-        // In headless tests every bg quantizes to `Reset`, so the difference is only asserted when the hover bg is a real color
+        // When the terminal has real colors the non-hovered row is visibly
+        // distinct In headless tests every bg quantizes to `Reset`.
         if hover_bg != ratatui::style::Color::Reset {
             assert_ne!(buf.cell((inner.x, inner.y)).map(|c| c.bg), Some(hover_bg));
         }
@@ -2132,8 +2086,6 @@ mod tests {
         }
     }
 
-    /// Regression: a stale hover on a row that has scrolled *above* the viewport must not bind the action buttons to row 0.
-    /// Binding to row 0 would mis-route a click to an off-screen entry; the bounds check skips it.
     #[test]
     fn hovered_row_scrolled_above_viewport_binds_no_buttons() {
         let mut pane = QueuePane::new();
@@ -2144,13 +2096,10 @@ mod tests {
         pane.sync_from_merged(&local, &[], None, None, &Default::default());
         let ids = pane.entry_ids();
 
-        // Viewport height 3 (MAX_QUEUE_HEIGHT) with 5 rows is scrollable
-        // The buffer is wider than the queue area (mirroring the outer padding), so the scrollbar column one past the area stays in-bounds
         let area = Rect::new(0, 0, 80, 3);
         let mut buf = Buffer::empty(Rect::new(0, 0, 82, 3));
         let layout_cfg = crate::appearance::LayoutConfig::default();
 
-        // Establish layout, then scroll so rows 0 and 1 sit above the top and leave a stale hover on the now-off-screen first row
         pane.render(area, &mut buf, true, &layout_cfg, None, true);
         pane.list_state.set_scroll_offset(2);
         pane.hovered_row_id = Some(*at(&ids, 0));
@@ -2210,7 +2159,6 @@ mod tests {
         let ids = pane.entry_ids();
         pane.list_state.select_by_id(*at(&ids, 0));
 
-        // Queue area is 80 wide; the buffer is wider (outer padding) so the scrollbar column just past the area is in-bounds
         let area = Rect::new(0, 0, 80, 3);
         let mut buf = Buffer::empty(Rect::new(0, 0, 82, 3));
         let layout_cfg = crate::appearance::LayoutConfig::default();
@@ -2241,7 +2189,7 @@ mod tests {
         pane.sync_from_merged(&local, &[], None, None, &Default::default());
         let ids = pane.entry_ids();
 
-        // 5 rows in a height-3 pane is scrollable. The buffer is wider than the area so the overflow scrollbar column stays in-bounds.
+        // A few rows in a height-3 pane is scrollable. The buffer is wider than the area so the overflow scrollbar column stays in-bounds.
         let area = Rect::new(0, 0, 80, 3);
         let mut buf = Buffer::empty(Rect::new(0, 0, 82, 3));
         let layout_cfg = crate::appearance::LayoutConfig::default();
@@ -2253,7 +2201,6 @@ mod tests {
         assert_eq!(pane.hovered_row_id, Some(*at(&ids, 0)));
 
         // Wheel-scroll down one line with the cursor held over the top row.
-        // The entry now under the pointer is the second one, and hover must refresh to it WITHOUT a separate mouse-move event
         pane.handle_scroll(1, inner.x, inner.y);
         assert_eq!(
             pane.hovered_row_id,

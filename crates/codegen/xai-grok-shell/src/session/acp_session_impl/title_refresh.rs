@@ -1,9 +1,4 @@
 //! Early-session auto-title refresh on `SessionActor`.
-//!
-//! The first title comes from the fast first-prompt path ([`crate::session::summary::SummaryGenerator`]).
-//! This side-call refreshes it from the whole conversation at [`crate::session::helpers::session_summary::TITLE_REFRESH_TURNS`] and then freezes.
-//! A weak first prompt therefore doesn't leave the session mistitled.
-//! The refresh is best-effort and generation-guarded; a manual `/rename` always wins (enforced by the `RegenerateTitle` persistence path).
 
 use super::*;
 
@@ -24,9 +19,8 @@ impl SessionActor {
         if self.next_title_refresh_idx.get() >= session_summary::TITLE_REFRESH_TURNS.len() {
             return;
         }
-        // One refresh at a time: a whole-conversation title doesn't need the very latest turn.
-        // Letting the in-flight call finish (rather than aborting and respawning every turn) guarantees the checkpoint is eventually consumed.
-        // The check is `is_finished` (not just `is_some`) so a panicked task can't wedge the slot shut.
+        // One refresh at a time: a whole-conversation title doesn't need the
+        // latest turn.
         if self
             .title_refresh_task
             .borrow()
@@ -63,8 +57,8 @@ impl SessionActor {
         );
     }
 
-    /// Bumps the generation so a task that finishes after the abort neither persists its result nor consumes a checkpoint.
-    /// Called on rewind (the snapshot is now stale) and shutdown (free the actor `Arc`); a new prompt deliberately does not abort it.
+    /// Bumps the generation so a task that finishes after the abort neither
+    /// persists its result nor consumes a checkpoint.
     pub(crate) fn abort_title_refresh(&self) {
         self.title_refresh_generation
             .set(self.title_refresh_generation.get().wrapping_add(1));
@@ -100,8 +94,9 @@ impl SessionActor {
         );
         if let Some(title) = title {
             tracing::info!(turns, chars = title.len(), "session title refreshed");
-            // The persistence actor overwrites an auto title but never a manual `/rename` (checked under the summary lock)
-            // It notifies clients only when the write lands
+            // The persistence actor overwrites an auto title but never a
+            // manual `/rename` (checked under the summary lock) It notifies
+            // clients only.
             let _ = self
                 .notifications
                 .persistence_tx

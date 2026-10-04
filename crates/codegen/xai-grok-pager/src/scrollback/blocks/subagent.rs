@@ -1,13 +1,4 @@
 //! Scrollback entries for the subagent lifecycle.
-//!
-//! Similar to BgTaskBlock: always collapsed, an animated bullet while running, a colored bullet when done.
-//! Enter / Ctrl-F opens the subagent view.
-//!
-//! Two modes:
-//! - **Blocking** (sync): one `Started` block; it blinks while running and turns green/red when done. Text: `Subagent "description"`
-//! - **Background** (async): the `Started` block stays forever (turns gray) and a separate `Completed`/`Failed` block is added when done.
-//!   Started text: `Subagent started: "description"`
-//!   Completed text: `Subagent completed in 43s: "description"`
 
 use std::time::Duration;
 
@@ -59,8 +50,7 @@ pub struct SubagentBlock {
     pub is_background: bool,
     /// Lifecycle kind.
     pub kind: SubagentBlockKind,
-    /// Live activity label from the child session's turn tracker. The user sees interactive progress without opening
-    /// the subagent view.
+    /// Live activity label from the child session's turn tracker.
     pub activity_label: Option<String>,
 }
 
@@ -153,7 +143,7 @@ impl SubagentBlock {
 
 /// Truncate description and wrap in quotes for display.
 fn quoted_desc(desc: &str, max_width: usize) -> String {
-    // Reserve 2 chars for quotes
+    // Reserve multiple chars for quotes
     if max_width <= 2 {
         return "\u{201C}\u{2026}\u{201D}".to_string(); // "…"
     }
@@ -164,9 +154,9 @@ fn quoted_desc(desc: &str, max_width: usize) -> String {
 impl BlockContent for SubagentBlock {
     fn output(&self, ctx: &BlockContext) -> BlockOutput {
         let theme = Theme::current();
-        // When selected, lift only the bold "Subagent" label to `text_primary` so it reads as undimmed
-        // This mirrors `read.rs` and `search.rs`, which bump only the label and leave the rest at `muted`
-        // The detail text (verb, description, meta) stays muted in every state
+        // When selected, lift only the bold "Subagent" label to
+        // `text_primary` so it reads as undimmed This mirrors `read.rs` and
+        // `search.rs`.
         let bold = if ctx.is_selected {
             theme.primary().add_modifier(Modifier::BOLD)
         } else {

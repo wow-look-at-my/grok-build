@@ -1,5 +1,4 @@
-//! Per-event process resource snapshot; each CPU share covers the interval since the previous derived window.
-
+//! Per-event process resource snapshot; each CPU share covers the interval since the derived window.
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -143,7 +142,6 @@ fn log_read_failure_once(logged: &'static std::sync::Once, reading: &'static str
     });
 }
 
-/// Deliberately unclamped: a multi-threaded burst exceeds 100.
 fn share_percent(cpu_delta: Duration, elapsed: Duration) -> f64 {
     cpu_delta.as_secs_f64() / elapsed.as_secs_f64() * 100.0
 }

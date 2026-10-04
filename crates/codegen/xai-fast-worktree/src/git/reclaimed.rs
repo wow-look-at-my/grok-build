@@ -54,8 +54,7 @@ fn answer(worktree: &Path, safety: Safety) -> Reclaim {
 fn name_discarded_commits(worktree: &Path) -> std::io::Result<usize> {
     let repo = match gix::open(worktree) {
         Ok(repo) => repo,
-        // Only a definitively-absent `.git` means "nothing to name"; a stat
-        // error is "couldn't tell" and must surface as Err (caller keeps).
+        // Only a definitively-absent `.git` means "nothing to name".
         Err(_) if safety::git_entry_definitely_absent(worktree) => return Ok(0),
         Err(error) => return Err(std::io::Error::other(error)),
     };

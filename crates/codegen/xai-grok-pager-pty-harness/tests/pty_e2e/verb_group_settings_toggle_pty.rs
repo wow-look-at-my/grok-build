@@ -76,8 +76,7 @@ fn toggle_group_tool_calls(harness: &mut PtyHarness, want_on: bool) {
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn verb_group_settings_toggle_pty() {
     let content = ContentController::start().await.expect("start content");
-    // Pin ON via the CONFIG tier, not the env var. An env pin could not be overridden by the modal's
-    // config write if anything re-resolves the full chain mid-test (e.g. a settings update).
+    // Pin ON via the CONFIG tier, not the env var.
     seed_ui_config(&content, "group_tool_verbs = true");
 
     // Seed real files under the isolated HOME so the reads succeed.

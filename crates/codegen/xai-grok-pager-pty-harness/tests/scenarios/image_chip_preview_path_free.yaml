@@ -27,7 +27,7 @@ steps:
     text: "path_preview.png"
   - action: screenshot
     name: image-chip-preview-after-paste
-    note: Path-free Image #1 chip with metadata/path preview (no graphics protocol).
+    note: Path-free Image
   - action: keys
     keys: "PREVIEW_DISMISSED_64280529"
   - action: assert_contains

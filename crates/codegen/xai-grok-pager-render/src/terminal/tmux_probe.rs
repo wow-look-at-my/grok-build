@@ -2,7 +2,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 const TMUX_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
-/// After the leader exits, the group teardown and pipe drains get this much extra time, so a near-deadline success does not become a drain timeout.
+/// After the leader exits, the group teardown and pipe drains get this much extra time.
 const POST_EXIT_CLEANUP_GRACE: Duration = Duration::from_millis(300);
 /// How long a signalled process group may take to empty before it is killed.
 const GROUP_EXIT_GRACE: Duration = Duration::from_millis(100);
@@ -206,8 +206,8 @@ fn query_option_support_with(runner: &dyn TmuxCommandRunner, option: &str) -> Tm
     }
 }
 
-/// Client features resolved at attach; this, not pane `COLORTERM`, decides whether 24-bit SGR survives tmux.
-/// Empty is unknown, not negative: pre-3.2 has no `terminal-features`, and a clientless server has nothing to report.
+/// Client features resolved at attach; this, not pane `COLORTERM`, decides
+/// whether 24-bit SGR survives tmux.
 pub fn query_client_features() -> TmuxQueryResult<String> {
     query_client_features_with(&LiveTmuxCommandRunner)
 }
@@ -505,9 +505,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)] // test fixture; the test kills it
         let mut child = cmd.spawn().expect("spawn sigterm-ignoring child");
         group.attach_std(&child).expect("attach");
-        // The shell installs its trap ~0.3ms after exec. Signal before that
-        // and it dies to the default SIGTERM, leaving a zombie that still
-        // reports live — the test then passes without exercising SIGKILL.
+        // The shell installs its trap ~0.3ms after exec.
         std::thread::sleep(Duration::from_millis(250));
 
         let started = std::time::Instant::now();
@@ -519,8 +517,7 @@ mod tests {
             "an occupied group must still get the full grace, took {elapsed:?}"
         );
 
-        // Bounded: without SIGKILL this fails in seconds rather than blocking
-        // the run on `sleep 1000`.
+        // Bounded: without SIGKILL this fails in seconds rather than blocking the run on `sleep 1000`.
         let reap_deadline = std::time::Instant::now() + Duration::from_secs(5);
         let status = loop {
             match child.try_wait().expect("poll child") {

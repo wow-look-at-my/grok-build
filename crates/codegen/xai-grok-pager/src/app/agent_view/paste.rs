@@ -13,8 +13,9 @@ use crate::views::prompt_widget::{PromptEvent, PromptWidget};
 #[cfg(test)]
 use crossterm::event::{Event, KeyEvent};
 impl AgentView {
-    /// Insert a plain-text (caption) clipboard paste into the prompt, matching the bracketed arm's whitespace policy and slash/suggestion refresh.
-    /// The image/file-url portion of a paste is handled by the deferred probe.
+    /// Insert a plain-text (caption) clipboard paste into the prompt,
+    /// matching the bracketed arm's whitespace policy and slash/suggestion
+    /// refresh.
     fn insert_prompt_plain_text(
         &mut self,
         clipboard_text: Option<&str>,
@@ -311,8 +312,8 @@ impl AgentView {
             }
         }
     }
-    /// Take the kind of any action held back while the paste probes were in flight.
-    /// The caller resumes it (via [`Self::resume_deferred_send`]) only when it actually reissues, so a dropped reissue keeps the draft intact.
+    /// Take the kind of any action held back while the paste probes were in
+    /// flight.
     pub(crate) fn take_deferred_send_after_paste(&mut self) -> Option<AgentDeferredSend> {
         if self.paste_probe_in_flight != 0 {
             return None;
@@ -363,9 +364,9 @@ impl AgentView {
             crate::wrap_clipboard_image::WrapImagePaste::NoImage => InputOutcome::Unchanged,
         })
     }
-    /// Parse a paste payload as one or more drop-style file paths and route each entry.
-    /// Image paths become `[Image #N]` chips; non-image paths get inserted as decoded absolute path text.
-    /// Route a popup pane's `Event::Paste(text)` through the drop classifier and fall back to a plain text paste into the shared prompt buffer.
+    /// Parse a paste payload as one or more drop-style file paths and route
+    /// each entry. Image paths become `[Image #N]` chips; non-image paths get
+    /// inserted as decoded absolute path text.
     pub(in crate::app) fn route_popup_paste(&mut self, text: &str) -> InputOutcome {
         if let Some((outcome, _)) = self.try_handle_dropped_paths_paste(text) {
             return outcome;
@@ -428,7 +429,6 @@ impl AgentView {
             return None;
         }
         /// Upper bound on the size of a paste payload the drop classifier will scan.
-        /// 10 MB matches `MAX_SEND_BYTES` for individual image attachments: above any realistic drop, below any log/code paste worth iterating.
         const DROP_CLASSIFIER_MAX_BYTES: usize = 10 * 1024 * 1024;
         if text.len() >= DROP_CLASSIFIER_MAX_BYTES {
             return None;
@@ -493,9 +493,8 @@ impl AgentView {
         };
         Some((InputOutcome::Changed, completion))
     }
-    /// **Does NOT call `refresh_slash`.**
-    /// Refreshing at the caller keeps a drop of N images plus one path to a single refresh instead of N+1.
-    /// Callers that wrap an undo group around a batch of inserts use this to defer opening the group until at least one mutation lands.
+    /// **Does NOT call `refresh_slash`.** Callers that wrap an undo group around a batch of inserts use this to defer opening the group
+    /// until at least one mutation lands.
     fn handle_image_paste_from_data(
         &mut self,
         mut pasted: crate::prompt_images::PastedImage,
@@ -1162,9 +1161,9 @@ pub(super) mod paste_key_tests {
             "expected cap toast to be the last toast shown; got {toast_msg:?}"
         );
     }
-    /// Drive `agent` through the canonical drop-classifier assertions for one `Event::Paste` arm.
-    /// The `setup` closure puts the agent into whatever state the dispatcher needs to route paste through the target arm (focus, queue, viewer, etc.).
-    /// All four arms share these assertions; a single helper keeps the four bodies from drifting apart.
+    /// Drive `agent` through the canonical drop-classifier assertions for one `Event::Paste` arm. The `setup` closure puts the agent into whatever
+    /// state the dispatcher needs to route paste through the target arm (focus, queue, viewer, etc.). All arms share these assertions; a single helper
+    /// keeps the bodies from drifting apart.
     fn assert_event_paste_arm_decodes_non_image(
         arm_name: &str,
         setup: impl FnOnce(&mut AgentView),
@@ -1672,9 +1671,9 @@ pub(super) mod paste_key_tests {
             );
         }
     }
-    /// The real painter (`paint_diagram_affordances`) lays the row from the single layout source of truth.
-    /// A leading dim `◇ mermaid` label comes first, then the three always-clickable buttons shifted right past the label.
-    /// Each button registers a hit-rect carrying the source.
+    /// The real painter (`paint_diagram_affordances`) lays the row from the single layout source of truth. A leading dim
+    /// `◇ mermaid` label comes first, then those always-clickable buttons shifted right past the label. Each button
+    /// registers a hit-rect carrying the source.
     #[test]
     fn paints_affordance_row_with_label_and_registers_all_buttons() {
         use crate::scrollback::blocks::mermaid_content::{AffordanceKind, affordance_row};
@@ -1877,7 +1876,6 @@ pub(super) mod paste_key_tests {
         assert_eq!(below.items.height, item_rows);
     }
     /// Minimal ("embedded") dropdown chrome is flush-left: no outer horizontal padding around the panel and no content inset for the item rows.
-    /// The dropdown's `❯` marker therefore sits at column 0 under the prompt's.
     /// The full TUI keeps the layout hpad and the 1-col item inset in its boxed panel.
     #[test]
     #[serial_test::serial]

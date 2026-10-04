@@ -3,8 +3,7 @@ use super::{
     parse_mcp_qualified_name, parse_mcp_tool_name, qualify_mcp_tool_name, validate_tool_name,
 };
 
-/// Prefixes that differ by 6 chars. Tools of length 32..=37 then overflow the
-/// 64-char provider budget on the longer prefix only (`31+2+n` vs `25+2+n`).
+/// Prefixes that differ by multiple chars.
 const LONG_SERVER: &str = "sL_xxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 const SHORT_SERVER: &str = "sS_xxxxxxxxxxxxxxxxxxxxxx";
 
@@ -60,8 +59,7 @@ fn qualified_mcp_name_parser_rejects_malformed_names() {
 
 #[test]
 fn qualify_rejects_provider_invalid_segments_not_qualified_length() {
-    // parse/ToolId accept a digit-leading server segment; catalog admission does
-    // not — the qualified key would start with a digit.
+    // parse/ToolId accept a digit-leading server segment.
     assert!(parse_mcp_qualified_name("123__lookup").is_some());
     assert!(xai_tool_protocol::ToolId::new("123__lookup").is_ok());
     assert!(matches!(

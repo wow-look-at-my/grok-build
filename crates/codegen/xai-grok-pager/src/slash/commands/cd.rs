@@ -1,8 +1,4 @@
 //! `/cd [path]`: change the working directory new dashboard sessions spawn in.
-//!
-//! With no argument it opens the dashboard's location picker; with a path it changes directly.
-//! Both only work on the dashboard: anywhere else the dispatcher prints a toast pointing the user at `/dashboard`.
-//! See `dispatch_dashboard_open_location_picker` and `dispatch_dashboard_change_location`.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
@@ -16,7 +12,6 @@ impl SlashCommand for CdCommand {
         usage: "/cd [path]",
         takes_args: true,
         // `/cd` only makes sense on the dashboard (it changes where the dashboard dispatches new agents).
-        // Hide it from completion everywhere else (the agent view and the welcome screen)
         dashboard_only: true,
         arg_placeholder: "path",
     }

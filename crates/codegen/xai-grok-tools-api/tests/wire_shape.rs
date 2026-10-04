@@ -1,9 +1,4 @@
 //! Serde wire-shape pin tests.
-//!
-//! `ToolConfigEntry` is serialized into session-bind metadata and backend
-//! JSONB config storage. These tests pin the exact JSON shape so a
-//! field rename/retype in `grok-tools.proto` cannot silently break those
-//! wire contracts (the producer and consumer live in separate services).
 
 use xai_grok_tools_api::ToolConfigEntry;
 
@@ -102,8 +97,7 @@ fn explicit_null_optional_fields_deserialize_as_none() {
 #[test]
 fn explicit_null_map_is_rejected() {
     // The map field is not `Option`-typed: `null` is not coerced to an empty
-    // map. Producers must omit the key or emit `{}`. Pin the rejection so a
-    // codegen change that silently starts accepting `null` is caught.
+    // map. Producers must omit the key or emit `{}`.
     let result: Result<ToolConfigEntry, _> = serde_json::from_value(serde_json::json!({
         "id": "GrokBuild:read_file",
         "params_name_overrides": null,

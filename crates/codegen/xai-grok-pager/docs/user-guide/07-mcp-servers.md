@@ -8,7 +8,7 @@ MCP (Model Context Protocol) servers extend Grok with external tool integrations
 
 An MCP server is a process that exposes tools to Grok over a standardized protocol. When you configure an MCP server, its tools become available to the model alongside Grok's built-in tools. The model can discover and call these tools during a session.
 
-For example, a GitHub MCP server might expose tools like `create_issue`, `list_pull_requests`, and `search_code`. A database server might expose `query`, `list_tables`, and `describe_schema`.
+For example, a GitHub MCP server can expose tools like `create_issue`, `list_pull_requests`, and `search_code`. A database server can expose `query`, `list_tables`, and `describe_schema`.
 
 See the [MCP specification](https://modelcontextprotocol.io) for protocol details.
 
@@ -16,15 +16,9 @@ See the [MCP specification](https://modelcontextprotocol.io) for protocol detail
 
 ## MCP servers under a sandbox profile
 
-A stdio MCP server is often launched through a **package runner** — `uvx kagimcp`,
-`npx -y some-server`, `bunx`. The runner downloads the package into a cache of its
-own before the server starts, and every one of those caches defaults under your
-home directory (`~/.cache/uv`, `~/.npm`, `~/.bun/install`).
+A stdio MCP server is often launched through a **package runner** — `uvx kagimcp`, `npx -y some-server`, `bunx`. The runner downloads the package into a cache of its own before the server starts. This is every one of those caches defaults under your home directory (`~/.cache/uv`, `~/.npm`, `~/.bun/install`).
 
-No write-confining sandbox profile grants your home directory. `workspace`,
-`read-only` and `strict` allow writes only to the working directory, `~/.grok/`
-and the temp dirs. So under any of them the runner cannot create its cache, exits
-during startup, and the MCP client reports only a closed pipe:
+No write-confining sandbox profile grants your home directory. `workspace`, `read-only` and `strict` allow writes only to the working directory, `~/.grok/` and the temp dirs. So under any of them the runner cannot create its cache, exits during startup, and the MCP client reports only a closed pipe:
 
 ```text
 error: Failed to initialize cache at `/Users/you/.cache/uv`
@@ -37,22 +31,14 @@ MCP server 'kagi' handshake failed: ... Broken pipe (os error 32),
 when send initialize request
 ```
 
-Grok handles this for you: when a session is write-confined and a stdio MCP server
-is launched by a known package runner, those cache locations are mapped onto the
-session's writable temp storage before the child starts. Caches are scratch state,
-so they live on scratch storage and are discarded with it; nothing is written to
-your home directory, and the profile's write set does not widen.
+Grok handles this for you: when a session is write-confined and a stdio MCP server is launched by a known package runner. Those cache locations are mapped onto the session's writable temp storage before the child starts. Caches are scratch state, so they live on scratch storage and are discarded with it. Nothing is written to your home directory, and the profile's write set does not widen.
 
-Two details worth knowing:
+Details worth knowing:
 
-- **The redirect applies to the MCP child only.** A runner you invoke yourself
-  through `bash` keeps its normal caches.
-- **Your own config wins.** If the server's `env` already sets one of these
-  variables (for example an explicit `UV_CACHE_DIR`), Grok leaves that value
-  alone.
+- **The redirect applies to the MCP child only.** A runner you invoke yourself through `bash` keeps its normal caches.
+- **Your own config wins.** If the server's `env` already sets one of these variables (for example an explicit `UV_CACHE_DIR`), Grok leaves that value alone.
 
-`devbox` is unaffected: it already grants writes to your home directory, so its
-runners need no redirection. The same is true of an unsandboxed session.
+`devbox` is unaffected: it already grants writes to your home directory, so its runners need no redirection. The same is true of an unsandboxed session.
 
 ---
 
@@ -60,7 +46,7 @@ runners need no redirection. The same is true of an unsandboxed session.
 
 MCP servers are configured in `~/.grok/config.toml` under `[mcp_servers.<name>]` sections.
 
-To distribute MCP servers to a team, or to restrict which servers users may run (`allowedMcpServers` / `deniedMcpServers` in `requirements.toml` / `managed_config.toml`, with Claude `managed-settings.json` advisory for foreign-defined servers), see [Distribute across an organization](09-plugins.md#distribute-across-an-organization) in the Plugins guide.
+To distribute MCP servers to a team, or to restrict which servers users may run (`allowedMcpServers` / `deniedMcpServers` in `requirements.toml` / `managed_config.toml`, with Claude `managed-settings.json` advisory for foreign-defined servers), see [Distribute across an organization](09-plugins.md#distribute-across-an-organization). This is in the Plugins guide.
 
 ### stdio Transport (Local Process)
 
@@ -113,16 +99,7 @@ url = "https://mcp.example.com/api"
 headers = { "Authorization" = "Bearer token" }
 ```
 
-MCP data-plane requests (JSON-RPC and SSE) and the anonymous-access probe carry a
-default `User-Agent: grok-cli/<version>` header, where `<version>` is the Grok binary
-version. OAuth discovery, client registration, and token requests are issued by the
-rmcp OAuth client and keep its own behavior (no default `User-Agent`). A valid
-`User-Agent` entry in the server's `headers` overrides the default; an invalid
-configured `User-Agent` value is dropped by header parsing (with a warning), so such a
-server still receives the default. Exception: Figma MCP servers (server name `figma`,
-legacy managed name `grok_com_figma`, or a `figma.com` host — all case-insensitive)
-send the bare token `grok-cli` with no version unless the config supplies its own
-`User-Agent`.
+MCP data-plane requests (JSON-RPC and SSE) and the anonymous-access probe carry a default `User-Agent: grok-cli/<version>` header, where `<version>` is the Grok binary version. OAuth discovery, client registration, and token requests are issued by the rmcp OAuth client and keep its own behavior (no default `User-Agent`). A valid `User-Agent` entry in the server's `headers` overrides the default. An invalid configured `User-Agent` value is dropped by header parsing (with a warning), so such a server still receives the default. Exception: Figma MCP servers (server name `figma`, legacy managed name `grok_com_figma`, or a `figma.com` host — all case-insensitive) send the bare token `grok-cli` with no version unless the config supplies its own `User-Agent`.
 
 ### Streamable HTTP with Session ID
 
@@ -172,17 +149,17 @@ grok mcp doctor github        # Check one server
 grok mcp doctor --json        # Machine-readable output
 ```
 
-The transport defaults to `stdio`; pass `--transport http` or `--transport sse` for remote servers.
+The transport defaults to `stdio`. Pass `--transport http` or `--transport sse` for remote servers.
 
-By default `grok mcp add` writes to `~/.grok/config.toml` (`--scope user`). Use `--scope project` to write to `.grok/config.toml` in the current directory instead, which can be committed and shared with your team (see [Project-Scoped MCP Servers](#project-scoped-mcp-servers)). Header and environment variable values are stored verbatim, so reference secrets as `${VAR}` instead of pasting them into a committed project config (see [Example Configurations](#example-configurations)). `grok mcp list` shows servers from both scopes, marking project-scoped ones with `(project)` and disabled ones with `(disabled)`.
+By default `grok mcp add` writes to `~/.grok/config.toml` (`--scope user`). Use `--scope project` to write to `.grok/config.toml` in the current directory instead, which can be committed and shared. This is with your team (see [Project-Scoped MCP Servers](#project-scoped-mcp-servers)). Header and environment variable values are stored verbatim, so reference secrets as `${VAR}` instead of pasting them. This is into a committed project config (see [Example Configurations](#example-configurations)). `grok mcp list` shows servers from both scopes, marking project-scoped ones with `(project)` and disabled ones with `(disabled)`.
 
-`grok mcp remove` searches both scopes and exits 0 after removing the server. It exits 1 when the name is not found, or when the name is defined in both user and project scope — pass `--scope` to say which one to remove.
+`grok mcp remove` searches both scopes and exits 0 after removing the server. It exits 1 when the name is not found, or when the name is defined in both user and project scope. Pass `--scope` to say which one to remove.
 
 `grok mcp enable` / `disable` persist the personal on/off state to user `~/.grok/config.toml` (`disabled_mcp_servers`, and `[mcp_servers.<name>].enabled` when that entry exists). Scope:
 
 - **Known names:** user/project Grok TOML, names already on the disabled list, compat sources (`.mcp.json`, Claude, Cursor), and **plugin** MCP servers (same discovery as doctor/`/mcps`).
-- **Enable only:** if the cwd-nearest project definition has sticky `enabled = false`, that single key is cleared (comments preserved); disable never rewrites project configs.
-- **Not full `/mcps` parity:** gateway connectors (`managed_gateway:…`, stored under `disabled_mcp_tools.__managed_gateway_connectors`) stay Space-only in the TUI. Idempotent; unknown names exit 1.
+- **Enable only:** if the cwd-nearest project definition has sticky `enabled = false`, that single key is cleared (comments preserved). Disable never rewrites project configs.
+- **Not full `/mcps` parity:** gateway connectors (`managed_gateway:…`, stored under `disabled_mcp_tools.__managed_gateway_connectors`) stay Space-only in the TUI. Idempotent. Unknown names exit 1.
 
 Breaking changes from earlier releases: `--env` now takes one `KEY=value` per flag (use `-e A=1 -e B=2`, not `--env A=1 B=2`), and server names may only contain letters, numbers, hyphens, and underscores.
 
@@ -225,7 +202,7 @@ Project-scoped files contribute `[mcp_servers]`, `[plugins]`, and `[permission]`
 
 ## Tool Naming
 
-MCP tools are namespaced with the server name to avoid collisions. The catalog key is `server__tool` (two underscores):
+MCP tools are namespaced with the server name to avoid collisions. The catalog key is `server__tool` (underscores):
 
 - Server `filesystem` with tool `read_file` becomes `filesystem__read_file`
 - Server `github` with tool `create_issue` becomes `github__create_issue`
@@ -244,7 +221,7 @@ Grok admits a listed tool into the session catalog when all of these hold (`xai-
 
 A rejected tool is skipped. The log line is `Skipping MCP tool` with the reason. The rest of that server's tools still load.
 
-The **64-character** cap is a provider **function-name** budget. It applies to the meta-tools `search_tool` and `use_tool` themselves. It does **not** apply to catalog keys. A `server__tool` name longer than 64 characters stays in the catalog. The model still calls it through `use_tool` with that full name. Grok used to drop those tools at 64 characters. It no longer does.
+The **64-character** cap is a provider **function-name** budget. It applies to the meta-tools `search_tool` and `use_tool` themselves. It does **not** apply to catalog keys. A `server__tool` name longer than many characters stays in the catalog. The model still calls it through `use_tool` with that full name. Grok used to drop those tools at many characters. It no longer does.
 
 The server name in `[mcp_servers.<name>]` / `grok mcp add` is the catalog prefix. A name that starts with a digit is a valid TOML key. Catalog admission still rejects it (`InvalidServerName`). Rename the server so it starts with a letter or underscore.
 
@@ -263,7 +240,7 @@ You can enable or disable MCP servers without restarting Grok (TUI `/mcps` or CL
 Open the MCP servers modal in the TUI:
 
 - Run `/mcps` as a slash command
-- Or press `Ctrl+L` (non–VS Code family) and navigate to the MCP Servers tab; on VS Code family use `/plugins` or `/mcp` and open the MCP Servers tab
+- Or press `Ctrl+L` (non–VS Code family) and navigate to the MCP Servers tab. On VS Code family use `/plugins` or `/mcp` and open the MCP Servers tab
 
 From the modal you can:
 
@@ -272,18 +249,13 @@ From the modal you can:
 - Expand a server to view the tools it provides
 - Refresh the list with `r` after you edit `config.toml`
 - Authenticate an OAuth server with `i`
-- Add a server with `a`, or remove a local server with `x` (the modal asks for confirmation; press lowercase `y` to remove, or any other key to cancel)
+- Add a server with `a`, or remove a local server with `x` (the modal asks for confirmation. Press lowercase `y` to remove, or any other key to cancel)
 
-A server that could not be started shows `[unavailable]` with the reason on the
-row — expand it to read the whole message. The common one is a `command` that is
-not installed: `uvx`/`npx` servers report
-`No such file or directory (os error 2)`. `initializing` means the handshake is
-still running; it is bounded by `startup_timeout_sec` (30s by default), so a row
-that stays there is a slow server, not a stuck one.
+A server that can not be started shows `[unavailable]` with the reason on the row — expand it to read the whole message. The common one is a `command` that is not installed: `uvx`/`npx` servers report `No such file or directory (os error 2)`. `initializing` means the handshake is still running. It is bounded by `startup_timeout_sec` (30s by default), so a row that stays there is a slow server, not a stuck one.
 
 ### Tool Discovery
 
-The model has access to two built-in tools for working with MCP servers:
+The model has access to multiple built-in tools for working with MCP servers:
 
 - `search_tool` — Discover available integration tools across all enabled MCP servers. Use this to find tools by name or description.
 - `use_tool` — Call an integration tool discovered via `search_tool`. Specify the fully-qualified tool name (e.g., `github__create_issue`).
@@ -315,13 +287,13 @@ Path("/tmp/mcp-call.json").write_text(
 )
 ```
 
-Nested JSON strings are not decoded again; remote `file` and `tool_input_file` keys remain server data. Do not mix forms, delegate to another file, or name a native tool. On-disk invocation keys stay canonical even when wrapper parameters are renamed.
+Nested JSON strings are not decoded again. Remote `file` and `tool_input_file` keys remain server data. Do not mix forms, delegate to another file, or name a native tool. On-disk invocation keys stay canonical even when wrapper parameters are renamed.
 
 Sources must be complete regular UTF-8 JSON objects, at most **8 MiB**. Malformed/trailing JSON, duplicate envelope keys, missing fields, null paths, and non-object invocation arguments are rejected. Each prepared batch permits **16 MiB** of source input and **32 MiB** of serialized effective invocations, including hook rewrites. File operations have a **10-second** deadline excluding permission waits. These limits do not change ordinary read windows, guarantee remote acceptance, or interrupt kernel I/O.
 
-Read authorization and path, memory, symlink, and opted-in ignored-file restrictions apply before loading; transport reads do not satisfy read-before-edit. Target hooks then see loaded arguments, and separate MCP approval shows the resolved target and source. Hooks may rewrite arguments, not retarget or load another file. Authentication retries reuse the approved snapshot even if the file changes. History retains the authored reference; capped hooks/approvals see effective arguments. Server echoes and hook-added context remain unchanged.
+Read authorization and path, memory, symlink, and opted-in ignored-file restrictions apply before loading. Transport reads do not satisfy read-before-edit. Target hooks then see loaded arguments, and separate MCP approval shows the resolved target and source. Hooks may rewrite arguments, not retarget or load another file. Authentication retries reuse the approved snapshot even if the file changes. History retains the authored reference. Capped hooks/approvals see effective arguments. Server echoes and hook-added context remain unchanged.
 
-ACP client filesystems do not yet support bounded acquisition and reject file mode without agent-local fallback. File-backed invocation is supported only through Rust-shell `use_tool`; other embedding hosts reject unresolved file inputs, and direct MCP APIs remain unchanged.
+ACP client filesystems do not yet support bounded acquisition and reject file mode without agent-local fallback. File-backed invocation is supported only through Rust-shell `use_tool`. Other embedding hosts reject unresolved file inputs, and direct MCP APIs remain unchanged.
 
 ---
 
@@ -414,7 +386,7 @@ tool_timeout_sec = 120
 tool_timeouts = { slow_analysis = 300, quick_lookup = 10 }
 ```
 
-On Windows, npm installs launchers like `npx`, `npm`, `pnpm`, and `yarn` as `.cmd` batch shims (there is no `npx.exe`). Grok resolves a bare `command` such as `npx` to its real launcher path on `PATH` (honoring `PATHEXT`) before spawning, so these work without manually wrapping them in `cmd /c`. A `command` given as an absolute path or one containing a path separator is used as-is.
+On Windows, npm installs launchers like `npx`, `npm`, `pnpm`, and `yarn` as `.cmd` batch shims (there is no `npx.exe`). Grok resolves a bare `command` such as `npx` to its real launcher path on `PATH` (honoring `PATHEXT`) before spawning. As a result, this is these work without manually wrapping them in `cmd /c`. A `command` given as an absolute path or one containing a path separator is used as-is.
 
 ---
 
@@ -441,7 +413,7 @@ See the [MCP Server Registry](https://github.com/modelcontextprotocol/servers) f
 
 ## Subagents and MCP
 
-When the same server name appears in both `config.toml` / `.mcp.json` and the active agent’s `mcpServers` frontmatter, **agent.md wins** (including HTTP headers). The overlay is re-applied on config hot-reload, plugin reload, and agent switch so a disk rematerialize cannot restore the toml headers. Switching agents replaces the overlay with the new seat only: servers the new agent omits are dropped, and an agent with no `mcpServers` clears the prior overlay.
+When the same server name appears in both `config.toml` / `.mcp.json` and the active agent’s `mcpServers` frontmatter, **agent.md wins** (including HTTP headers). The overlay is re-applied on config hot-reload, plugin reload, and agent switch so a disk rematerialize cannot restore the toml headers. Switching agents replaces the overlay with the new seat only. Servers the new agent omits are dropped, and an agent with no `mcpServers` clears the prior overlay.
 
 Subagents inherit the parent session’s connected MCP servers by default, including plugin-sourced agents. Use agent frontmatter `mcpInheritance` to restrict that set (`all`, `none`, `named`, or `except`). Details are in [Subagents — MCP inheritance](16-subagents.md#mcp-inheritance).
 
@@ -475,16 +447,16 @@ tail -f ~/.grok/logs/mcp/filesystem.stderr.log
 
 ### Blocked by organization policy
 
-If native TOML policy or Claude `managed-settings.json` sets `deniedMcpServers`, a nonempty `allowedMcpServers`, or `allowManagedMcpServersOnly`, Grok drops non-matching servers at merge time and logs `MCP server blocked by managed settings policy`. Native grok layers bind every server; the Claude file binds foreign-defined servers only. `grok inspect` shows the lists, lockdown scope, and each remaining server. Details and examples: [Restrict which MCP servers can run](09-plugins.md#restrict-which-mcp-servers-can-run).
+If native TOML policy or Claude `managed-settings.json` sets `deniedMcpServers`, a nonempty `allowedMcpServers`, or `allowManagedMcpServersOnly`, Grok drops non-matching servers at merge time and logs `MCP server blocked by managed settings policy`. Native grok layers bind every server. The Claude file binds foreign-defined servers only. `grok inspect` shows the lists, lockdown scope, and each remaining server. Details and examples: [Restrict which MCP servers can run](09-plugins.md#restrict-which-mcp-servers-can-run).
 
 ### A listed tool never appears
 
 The server starts and `tools/list` returns the tool, but `/mcps` and `search_tool` omit it.
 
-1. Check `Skipping MCP tool` in `GROK_LOG_FILE` / `--debug`. The reason names the rule that failed (invalid server name, invalid tool name, ambiguous `__`, or catalog key longer than 256 characters).
+1. Check `Skipping MCP tool` in `GROK_LOG_FILE` / `--debug`. The reason names the rule that failed (invalid server name, invalid tool name, ambiguous `__`, or catalog key longer than many characters).
 2. Confirm the server config key starts with a letter or underscore. A digit-leading key never enters the catalog. A key that ends with `_` is skipped as an ambiguous `___` name.
 3. Confirm the tool name uses only `[A-Za-z0-9_-]`. Dots and colons in the raw MCP name are skipped.
-4. Do not shorten a `server__tool` key to 64 characters. Catalog keys may be up to 256. The 64-character cap is only for `search_tool` / `use_tool` as function names. See [Tool Naming](#tool-naming).
+4. Do not shorten a `server__tool` key to many characters. Catalog keys may be up to 256. The 64-character cap is only for `search_tool` / `use_tool` as function names. See [Tool Naming](#tool-naming).
 
 This is separate from a tool that is missing on the **first** prompt because the handshake is still running. Send a second prompt after the server is up, or run `grok mcp doctor`.
 

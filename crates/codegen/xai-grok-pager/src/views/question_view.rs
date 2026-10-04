@@ -1,13 +1,4 @@
 //! Question view state and helpers.
-//!
-//! When the agent calls `AskUserQuestion`, the pager takes over the prompt
-//! area and shows a structured question UI. This module contains:
-//!
-//! - [`QuestionViewState`]: all state for the question overlay
-//! - [`QuestionSelection`]: per-question selection tracking
-//! - [`QuestionFocus`]: navigation vs input mode
-//!
-//! No rendering or input handling here; this is pure data and helpers.
 
 use std::collections::HashSet;
 use std::time::Instant;
@@ -70,11 +61,9 @@ pub enum CursorMotion {
 /// Focus mode within the question view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuestionFocus {
-    /// Cursor is on an option row or the free-form row (not typing).
-    /// j/k navigate, Enter selects or enters input mode.
+    /// Cursor is on an option row or the free-form row (not typing). j/k navigate, Enter selects or enters input mode.
     Navigation,
-    /// User is typing in the TextArea (input mode).
-    /// @-dropdown may be open. Esc exits back to Navigation.
+    /// User is typing in the TextArea (input mode). @-dropdown may be open. Esc exits back to Navigation.
     InputMode,
 }
 
@@ -87,33 +76,23 @@ pub enum LocalQuestionKind {
         row_id: u64,
     },
     /// Modal opened by `/fork` to resolve the worktree question.
-    /// On submit, the selected option index plus the carried directive are translated into an [`crate::app::actions::Action::ForkAnswered`].
     Fork {
         /// Optional directive supplied via `/fork <directive>`.
-        /// Stashed here so the modal can carry it across the synchronous return path back to `dispatch_fork_resolved` without a global mailbox.
         directive: Option<String>,
-        /// Whether `/fork --agents` asked for the parent's running
-        /// subagents. Carried across the modal for the same reason the
-        /// directive is.
+        /// Whether `/fork --agents` asked for the parent's running subagents.
         include_agents: bool,
     },
     /// Modal opened by `/new` to resolve the worktree question.
-    /// On submit, the selected option index is translated into an [`crate::app::actions::Action::NewSessionAnswered`].
     NewSession,
-    /// Modal shown when the user hits the credit/rate limit (403). Options map to upsell URLs (upgrade
-    /// tier when not max-tier, buy credits / PAYG) plus "Try Again". `choices` maps each option index
-    /// to a telemetry choice variant.
     CreditLimitUpsell {
         choices: Vec<xai_grok_telemetry::events::CreditLimitChoice>,
     },
-    /// SuperGrok upsell modal: the free-usage paywall (429 with `subscription:free-usage-exhausted`) or a tier-restricted slash command invocation.
-    /// Upgrade options carry their URL in the option `id`.
     FreeUsageUpsell {
         /// Telemetry source for `SuperGrokUpsellClicked`; distinguishes the paywall from the restricted-command upsell.
         source: xai_grok_telemetry::events::SuperGrokUpsell,
     },
-    /// Modal shown when the shell rejects a model switch due to agent type incompatibility.
-    /// Carries the target model and effort so the answer handler can create a new session with it.
+    /// Modal shown when the shell rejects a model switch due to agent type
+    /// incompatibility.
     AgentTypeMismatch {
         model_id: agent_client_protocol::ModelId,
         effort: Option<xai_grok_shell::sampling::types::ReasoningEffort>,
@@ -150,42 +129,30 @@ pub struct QuestionViewState {
     /// Scroll offset (visual lines) per question.
     pub per_question_scroll: Vec<u16>,
     /// Per-question freeform text (additional context).
-    /// Each question has its own text so switching tabs doesn't mix content.
     pub per_question_freeform: Vec<String>,
     /// Whether the per-question freeform answer is "selected" (included in submission).
-    /// Toggled by Space, auto-set when exiting InputMode with text.
-    /// Independent of the text content; text is preserved on untoggle.
     pub per_question_freeform_selected: Vec<bool>,
 
-    // Recomputed on resize / question switch.
-    /// Cached cap on description lines in chrome (capped in non-fullscreen).
+    // Recomputed on resize / question switch. Cached cap on description lines in chrome (capped in non-fullscreen).
     pub cached_desc_cap: u16,
     /// Cached cap on preview lines in chrome (capped in non-fullscreen).
     pub cached_preview_cap: u16,
 
-    // ACP response channel. Stashed ACP response sender. When the user submits/cancels, the pager
-    // serializes the response and sends it here. `take()` ensures we never send twice.
+    // ACP response channel. Stashed ACP response sender. When the user
+    // submits/cancels, the pager serializes the response and sends it here.
     pub response_tx:
         Option<tokio::sync::oneshot::Sender<AcpResult<agent_client_protocol::ExtResponse>>>,
     /// Mode context from the ext-method request.
-    /// Controls whether the bottom panel (Chat about this / Skip interview) is shown.
     pub mode: AskUserQuestionMode,
     /// Bottom panel selection index (plan mode only).
-    /// `None` means the options list has focus; `Some(0)` is Chat about this and `Some(1)` is Skip interview.
     pub bottom_panel_index: Option<usize>,
-    /// `Some` when this question was opened locally (e.g. by `/fork`) instead of by an ACP
-    /// `x.ai/ask_user_question` request. `None` for ACP questions. Mutually exclusive with
-    /// `response_tx`: a local question never has an ACP sender.
+    /// `Some` when this question was opened locally (e.g. by `/fork`) instead.
     pub local_kind: Option<LocalQuestionKind>,
     /// When this question view was created. Used to pause the turn timer while the user is answering questions.
-    /// The time spent in the question view is subtracted from the turn elapsed display.
     pub opened_at: Instant,
     /// Wall-clock twin of `opened_at` (UTC ms).
-    /// `Instant` does not advance across a suspend, so a pause netted against the wall-anchored turn span must itself be measured on the wall clock.
-    /// Otherwise a suspend during an open question would read as worked time.
     pub opened_at_wall_ms: i64,
     /// When `true`, the freeform "Other" input row is hidden.
-    /// Used by locally-driven questions (e.g. the credit-limit upsell) that only offer fixed options with no free-text fallback.
     pub no_freeform: bool,
 }
 
@@ -253,9 +220,7 @@ impl QuestionViewState {
         }
     }
 
-    /// Builder-style helper to attach a [`LocalQuestionKind`]. Used by `open_fork_question` to mark a
-    /// freshly-built `QuestionViewState` as locally-driven. Submit/cancel then routes through the
-    /// synchronous `Action` path instead of the ACP `response_tx`.
+    /// Builder-style helper to attach a [`LocalQuestionKind`].
     pub fn with_local_kind(mut self, kind: LocalQuestionKind) -> Self {
         self.local_kind = Some(kind);
         self
@@ -267,7 +232,6 @@ impl QuestionViewState {
         self
     }
 
-    /// Number of items for a given question: options plus 1 free-form row (unless `no_freeform` is set).
     pub fn total_items(&self, question_idx: usize) -> usize {
         let freeform = if self.no_freeform { 0 } else { 1 };
         self.questions
@@ -389,8 +353,8 @@ impl QuestionViewState {
         }
     }
 
-    /// Height of the freeform line that [`option_heights`] and [`total_options_height`] always include.
-    /// The line is never rendered when `no_freeform` is set; subtract this from those totals wherever they feed layout or scroll limits.
+    /// Height of the freeform line that [`option_heights`] and
+    /// [`total_options_height`] always include.
     pub fn phantom_freeform_h(&self) -> u16 {
         if self.no_freeform { 1 } else { 0 }
     }
@@ -455,9 +419,8 @@ pub fn scroll_offset_for_item_delta(
     cursor: usize,
     phantom_freeform_h: u16,
 ) -> u16 {
-    // Line-based scrolling: add delta directly to the scroll offset, clamped to [0, max_scroll]. Each
-    // visual line (including wrapped description lines) is independent, so we scroll by individual
-    // lines instead of jumping whole items.
+    // Line-based scrolling: add delta directly to the scroll offset, clamped
+    // to [max_scroll].
     let max_scroll = total_options_height(question, content_w, cursor)
         .saturating_sub(phantom_freeform_h)
         .saturating_sub(viewport_height);
@@ -555,7 +518,7 @@ pub fn compute_max_label_w(options: &[QuestionOption], content_w: usize) -> usiz
         .min(cap)
 }
 
-/// Visual height of a single option row. Unfocused: always 1 line (collapsed `label description…`).
+/// Visual height of a single option row.
 pub fn option_visual_height(
     option: &QuestionOption,
     content_w: usize,
@@ -630,13 +593,12 @@ fn chrome_height_with_dynamic_caps(
     let preview_gap = if preview_lines > 0 { 1 } else { 0 };
     let label_gap = if label_gap_suppressed(question) { 0 } else { 1 };
 
-    // vpad(1) + label + label_gap(1) + description (if any)
-    //   + [preview_gap(1) + preview_lines if preview exists] + gap(1)
+    // vpad(1) + label + label_gap(1) + description (if any).
     1 + label_lines + label_gap + desc_lines + preview_gap + preview_lines + 1
 }
 
-/// A card with no description and no options has nothing under its label, so the blank line meant to separate them would leave it unevenly padded.
-/// [`chrome_height_with_dynamic_caps`] and [`render_question_chrome`] must agree on it.
+/// A card with no description and no options has nothing under its label, so
+/// the blank line meant to separate them would leave it unevenly padded.
 fn label_gap_suppressed(question: &Question) -> bool {
     let (_, desc) = split_question_label_desc(&question.question);
     desc.is_empty() && question.options.is_empty()
@@ -823,8 +785,7 @@ impl QuestionViewState {
                 continue;
             }
 
-            // Build the per-question label vec: one element for single-select, multiple for multi-select, or `["Other"]` for freeform-only
-            // The wire format carries these as separate elements so downstream cursor-shape resolvers do not have to re-split a comma-joined string
+            // Build the per-question label vec.
             let label_vec: Vec<String> = if labels.is_empty() && has_freeform {
                 vec!["Other".to_string()]
             } else {
@@ -910,9 +871,7 @@ pub fn question_view_height(state: &mut QuestionViewState, screen_h: u16, conten
         return 0;
     };
 
-    // `total_options_height` unconditionally counts a 1-line freeform row
-    // When `no_freeform` is set that row is never rendered, so subtract it from the totals below
-    // Otherwise the panel keeps a clickable dead row under the last option
+    // `total_options_height` unconditionally counts a 1-line freeform row When `no_freeform` is set that row is never rendered.
     let phantom_freeform = state.phantom_freeform_h();
     let freeform_h: u16 = 1 - phantom_freeform;
     let min_options_space = MIN_VISIBLE_OPTION_ROWS + freeform_h;
@@ -982,7 +941,6 @@ pub fn question_view_height(state: &mut QuestionViewState, screen_h: u16, conten
             .min(DEFAULT_MAX_CHROME_DESC_LINES)
             .min(actual_desc_lines);
         let remaining = content_budget.saturating_sub(effective_desc_cap);
-        // Reserve 1 row for the preview gap (blank separator) when preview text exists and there is any remaining budget for preview lines
         let preview_gap_allowance = if state.focused_preview().is_some() && remaining > 0 {
             1u16
         } else {
@@ -1011,8 +969,6 @@ pub fn question_view_height(state: &mut QuestionViewState, screen_h: u16, conten
     total.min(cap)
 }
 
-/// Shortcut label for an option index: 1-9 then a-z. Returns `'1'`..`'9'` for indices 0..8,
-/// `'a'`..`'z'` for 9..34. Returns `None` for indices 35 and above.
 pub fn option_shortcut_label(idx: usize) -> Option<char> {
     match idx {
         0..=8 => Some((b'1' + idx as u8) as char),
@@ -1021,9 +977,7 @@ pub fn option_shortcut_label(idx: usize) -> Option<char> {
     }
 }
 
-/// Map a pressed key character to an option index. Maps `'1'`..`'9'` to 0..8 and `'a'`..`'f'` to
-/// 9..14. Only a-f are mapped as shortcuts to avoid conflicts with navigation keys. (g=top,
-/// h=prev-question, j=down, k=up, l=next-question, n=next, s=skip).
+/// Map a pressed key character to an option index.
 pub fn option_index_for_key(c: char) -> Option<usize> {
     match c {
         '1'..='9' => Some((c as usize) - ('1' as usize)),
@@ -1032,19 +986,16 @@ pub fn option_index_for_key(c: char) -> Option<usize> {
     }
 }
 
-/// Horizontal padding: 3 left (accent + pad) + 2 right (scrollbar gutter).
 pub const QUESTION_VIEW_HPAD: u16 = 5;
 
-/// Prefix width for option rows. The shortcut column is always 1 character wide (1-9, a-z),
-/// followed by a space, then the marker/radio/checkbox, then a space: Multi: `X [✓] ` = 1 + 1 + 3 +
-/// 1 = 6. Single: `X (●) ` = 1 + 1 + 3 + 1 = 6.
+/// Prefix width for option rows.
 pub fn option_prefix_w(_question: &Question) -> usize {
     6 // both multi and single use 3-char markers
 }
 
 /// Width available for inline prompt text given the full area width.
 pub fn inline_text_width(area_width: u16) -> u16 {
-    const LEFT_PAD: u16 = 3; // accent column + 2 padding
+    const LEFT_PAD: u16 = 3;
     const OPTION_PREFIX_W: u16 = 6; // shortcut + marker ("z [x] ")
     const PROMPT_INDICATOR_W: u16 = 2; // "❯ "
     area_width.saturating_sub(LEFT_PAD + OPTION_PREFIX_W + PROMPT_INDICATOR_W)
@@ -1070,8 +1021,7 @@ fn rendered_option_description_lines(option: &QuestionOption, width: usize) -> V
 
     let mut renderer = StreamingMarkdownRenderer::new(md_style::style(), true);
     renderer.push(&option.description);
-    // finish() (not render()) so the LaTeX-delimiter normalizer flushes any
-    // trailing held-back bytes for this complete, one-shot description.
+    // finish() (not render()) so the LaTeX-delimiter normalizer flushes any trailing held-back bytes for this complete.
     renderer.finish(Some(get_syntect()));
     let view = renderer.view();
     let lines_owned: Vec<Line<'static>> = view
@@ -1147,9 +1097,9 @@ pub fn build_flat_option_lines(
         };
         let embed =
             crate::views::modal_window::embedded_row_style(theme, is_cursor_item && panel_focused);
-        // Full TUI: the focused row (keyboard cursor) gets a distinct selection bg, but only when the panel itself owns focus
-        // When unfocused, drop the cursor-row bg so it reads as "no active selection"
-        // A hovered row (mouse) gets a subtle blend; a normal row gets the dark bg
+        // Full TUI: the focused row (keyboard cursor) gets a distinct
+        // selection bg, but only when the panel itself owns focus When
+        // unfocused.
         let row_bg = match embed {
             Some(e) => e.bg,
             None if is_cursor_item && panel_focused => theme.bg_visual,
@@ -1460,8 +1410,8 @@ fn build_freeform_line(
         None
     };
 
-    // Multi-select: [x]/[ ] checkboxes.  Single-select: (●)/(○) radio buttons.
-    // Both are 3 display cells, same as option rows
+    // Multi-select: [x]/[ ] checkboxes. Single-select: (●)/(○) radio
+    // buttons.
     let marker: String = if is_multi {
         (if is_selected { "[x]" } else { "[ ]" }).to_string()
     } else if is_selected {
@@ -1480,7 +1430,6 @@ fn build_freeform_line(
     } else {
         Style::default().fg(fg(theme.gray)).bg(row_bg)
     };
-    // Stable shortcut "z": always 1 character, matching option labels
     let num_str = "z".to_string();
     let num_style = Style::default().fg(fg(theme.accent_user)).bg(row_bg);
     let marker_with_space = format!("{marker} ");
@@ -1528,9 +1477,7 @@ fn build_freeform_line(
     Line::from(spans).style(style)
 }
 
-/// Render the complete question view into the given area. `area` is the region above the textarea
-/// allocated for the question chrome and option rows. The accent `┃` line and background are
-/// rendered here. Return value from [`render_question_view`] with layout info for mouse handling.
+/// Render the complete question view into the given area.
 pub struct QuestionViewRenderResult {
     /// Y coordinate where the scrollable options area starts (after chrome header).
     pub options_start_y: u16,
@@ -1584,8 +1531,9 @@ pub fn render_question_view(
     // Vertical padding at the top.
     y += 1;
 
-    // Clip to the panel bottom: the accounted height and the rendered height can disagree (wrap-width drift, stale caps)
-    // The chrome must degrade to truncation instead of writing past the area; set_line past the buffer bottom aborts the TUI
+    // Clip to the panel bottom: the accounted height and the rendered height
+    // can disagree (wrap-width drift, stale caps) The chrome must degrade to
+    // truncation instead of writing.
     y = render_question_chrome(
         buf,
         content_x,
@@ -1620,8 +1568,7 @@ pub fn render_question_view(
         .copied()
         .unwrap_or(false);
 
-    // The freeform row is always rendered sticky at the bottom (not in the scrollable list), unless in InputMode where the inline prompt replaces it
-    // When `no_freeform` is set the row is hidden entirely.
+    // The freeform row is always rendered sticky at the bottom (not in the scrollable list).
     let sticky_freeform = !is_input_mode && !state.no_freeform;
     let freeform_h: u16 = if sticky_freeform { 1 } else { 0 };
 
@@ -1682,8 +1629,8 @@ pub fn render_question_view(
         }
     }
 
-    // Unfocus dim: when the user has navigated to the scrollback (or any other pane), blend foregrounds toward `bg_light` so the panel recedes
-    // Mirrors the unfocused prompt widget pattern (`prompt_widget.rs:1948`)
+    // Unfocus dim: when the user has navigated to the scrollback (or any
+    // other pane), blend foregrounds toward `bg_light`.
     if !focused {
         crate::render::color::recede_area(buf, area, theme.bg_light, 0.66);
     }
@@ -1772,8 +1719,7 @@ fn render_question_chrome(
 ) -> u16 {
     let mut cur_y = y;
     let w = width as usize;
-    // Never write below the panel or the buffer
-    // The area itself should already be inside the buffer, but a mis-sized area must degrade to truncation, not an abort
+    // Never write below the panel or the buffer The area itself should already be inside the buffer.
     let max_y = max_y.min(buf.area.bottom());
 
     // Split into label (first paragraph) and description (rest).
@@ -1820,9 +1766,7 @@ fn render_question_chrome(
             if cur_y >= max_y {
                 return cur_y;
             }
-            // Always render the real content line first
-            // When truncated and there is room for content plus an indicator (cap >= 2), the indicator lands after the second-to-last real line
-            // When cap == 1 we show the single content line without an indicator; there is no room for both
+            // Always render the real content line first When truncated and there is room for content plus an indicator (cap >= 2).
             buf.set_line(x, cur_y, &line, width);
             cur_y += 1;
             if is_truncated && desc_cap >= 2 && desc_rendered == desc_cap.saturating_sub(2) {
@@ -1842,7 +1786,6 @@ fn render_question_chrome(
         let preview_style = Style::default().fg(theme.gray).bg(theme.bg_light);
 
         // Count total preview lines first to determine truncation.
-        // Uses Span::raw to match chrome_height (style doesn't affect wrapping).
         let mut total_preview_count = 0u16;
         for text_line in preview_text.lines() {
             let raw = Line::from(vec![Span::raw(text_line.to_string())]);
@@ -1875,8 +1818,6 @@ fn render_question_chrome(
                 if cur_y >= max_y {
                     return cur_y;
                 }
-                // Always render the real content line first
-                // Append the truncation indicator only when cap >= 2 so at least one real preview line is visible above it
                 buf.set_line(x, cur_y, line, width);
                 cur_y += 1;
                 preview_rendered += 1;
@@ -1967,7 +1908,7 @@ mod tests {
                     vec![gb3747_question()],
                     StashedPrompt::default(),
                 );
-                let inner_width = w.saturating_sub(4); // hpad_left 2 + hpad_right 2
+                let inner_width = w.saturating_sub(4);
                 // Pre-fix draw() bug: full inner width (no HPAD subtraction).
                 let qv_h = question_view_height(&mut state, h, inner_width as usize);
                 let question_footer_h: u16 = 3;
@@ -2015,7 +1956,7 @@ mod tests {
             let area = Rect::new(0, 0, area_w, 200);
             let mut buf = Buffer::empty(area);
             let result = render_question_view(&mut buf, area, &state, None, &theme, true);
-            // chrome_height counts vpad(1) + label + gap + desc + preview + bottom gap(1); options_start_y sits after exactly that
+            // chrome_height counts vpad(1) + label + gap + desc + preview + bottom gap(1).
             assert_eq!(
                 result.options_start_y - area.y,
                 expected_chrome,
@@ -2074,7 +2015,6 @@ mod tests {
             true,
         );
 
-        // Cursor row (option 0): every colored span carries the accent, and the row stays transparent
         let cursor_line = &at(&lines, 0);
         assert!(
             cursor_line
@@ -2229,7 +2169,6 @@ mod tests {
             QuestionSelection::Multi(s) if s.is_empty()
         ));
 
-        // Cursors all start at 0
         assert!(state.per_question_cursor.iter().all(|&c| c == 0));
         assert!(state.per_question_scroll.iter().all(|&s| s == 0));
     }
@@ -2239,11 +2178,9 @@ mod tests {
         let q = make_question("Pick?", &["A", "B", "C"], true);
         let mut state = QuestionViewState::new("tc".into(), vec![q], StashedPrompt::default());
 
-        // Toggle on
         state.toggle_option(0, 1);
         assert_eq!(state.selected_labels(0), vec!["B"]);
 
-        // Toggle another on
         state.toggle_option(0, 0);
         let mut labels = state.selected_labels(0);
         labels.sort();
@@ -2329,7 +2266,6 @@ mod tests {
                 id: None,
             },
         ];
-        // content_w=80 gives cap 48. The longest label is 63, so it is capped at 48.
         assert_eq!(compute_max_label_w(&options, 80), 48);
     }
 
@@ -2349,7 +2285,7 @@ mod tests {
                 id: None,
             },
         ];
-        // content_w=80 gives cap 48. Both fit; the longest is "World!" at 6.
+        // Both fit; the longest is "World!"
         assert_eq!(compute_max_label_w(&options, 80), 6);
     }
 
@@ -2369,7 +2305,6 @@ mod tests {
                 id: None,
             },
         ];
-        // content_w=100 gives cap 60. The longest label is 50, so it fits and the column is 50.
         assert_eq!(compute_max_label_w(&options, 100), 50);
     }
 
@@ -2482,10 +2417,8 @@ mod tests {
         let q = make_question("Pick?", &["A", "B"], false);
         let mut state = QuestionViewState::new("tc".into(), vec![q], StashedPrompt::default());
 
-        // Cursor at 0 is on option A, not freeform
         assert!(!state.is_on_freeform_row());
 
-        // Cursor at 2 with options.len() == 2, so this is the freeform row
         state.set_cursor(2);
         assert!(state.is_on_freeform_row());
     }
@@ -2507,7 +2440,7 @@ mod tests {
     fn total_items_counts_options_plus_freeform() {
         let q = make_question("Pick?", &["A", "B", "C"], false);
         let state = QuestionViewState::new("tc".into(), vec![q], StashedPrompt::default());
-        assert_eq!(state.total_items(0), 4); // 3 options + 1 freeform
+        assert_eq!(state.total_items(0), 4);
     }
 
     /// `no_freeform` questions (e.g. the SuperGrok upsell) have no "Other" row, so activating freeform input must be impossible.
@@ -2601,7 +2534,6 @@ mod tests {
 
     #[test]
     fn chrome_height_short_question() {
-        // Short question, no description: vpad(1) + label(1) + gap(1) + gap(1) = 4.
         let q = make_question("Which database engine?", &["A"], false);
         assert_eq!(
             chrome_height(
@@ -2618,7 +2550,6 @@ mod tests {
 
     #[test]
     fn chrome_height_option_less_question_drops_the_label_gap() {
-        // Nothing under the label to separate it from, so the gap goes: vpad(1) + label(1) + gap(1) = 3.
         let q = make_question("How can we improve Grok Build?", &[], false);
         assert_eq!(
             chrome_height(
@@ -2643,7 +2574,7 @@ mod tests {
         );
         let desc_part = "Choose the primary data store for the backend service.";
         // vpad(1) + label(1) + gap(1) + desc lines + gap(1)
-        let desc_lines = desc_part.len().div_ceil(80).max(1) as u16; // 1 line at width 80
+        let desc_lines = desc_part.len().div_ceil(80).max(1) as u16;
         assert_eq!(
             chrome_height(
                 &q,
@@ -2659,7 +2590,6 @@ mod tests {
 
     #[test]
     fn chrome_height_wraps_long_question() {
-        // 60-char question at width 40 wraps to 2 lines: vpad(1) + label(2) + gap(1) + gap(1) = 5.
         let q = make_question(
             "Which database engine should we use for the backend service?",
             &["A"],
@@ -2676,7 +2606,6 @@ mod tests {
             ),
             5
         );
-        // Same question at width 80 fits on 1 line: 4.
         assert_eq!(
             chrome_height(
                 &q,
@@ -2692,8 +2621,6 @@ mod tests {
 
     #[test]
     fn chrome_height_wraps_extra_long_question() {
-        // At width 75 (typical terminal with chrome): ┃ Given the requirements for high availability,
-        // horizontal.
         let q = make_question(
             "Given the requirements for high availability, horizontal scaling, \
              and strict ACID compliance, which database engine and replication \
@@ -2701,7 +2628,6 @@ mod tests {
             &["PostgreSQL", "CockroachDB", "TiDB"],
             false,
         );
-        // Word-wrap at width 75: 3 lines, so vpad(1) + label(3) + gap(1) + gap(1) = 6
         assert_eq!(
             chrome_height(
                 &q,
@@ -2713,7 +2639,6 @@ mod tests {
             ),
             6
         );
-        // Word-wrap at width 40: 6 lines (word boundaries prevent mid-word splits), so vpad(1) + label(6) + gap(1) + gap(1) = 9
         assert_eq!(
             chrome_height(
                 &q,
@@ -2725,7 +2650,6 @@ mod tests {
             ),
             9
         );
-        // Word-wrap at width 200: 1 line, so vpad(1) + label(1) + gap(1) + gap(1) = 4
         assert_eq!(
             chrome_height(
                 &q,
@@ -2741,7 +2665,6 @@ mod tests {
 
     #[test]
     fn chrome_height_with_preview() {
-        // Short question + preview: vpad(1) + label(1) + gap(1) + preview_gap(1) + preview(1) + gap(1) = 6.
         let q = make_question("Which database?", &["A"], false);
         let preview = "commit abc123: fix the bug";
         assert_eq!(
@@ -2759,10 +2682,8 @@ mod tests {
 
     #[test]
     fn chrome_height_with_long_preview() {
-        // Preview that wraps across 2 lines at width 40.
         let q = make_question("Confirm?", &["A"], false);
         let preview = "fix(auth): resolve token refresh race condition in middleware";
-        // Word-wrap at width 40: 2 lines, so vpad(1) + label(1) + gap(1) + preview_gap(1) + preview(2) + gap(1) = 7
         assert_eq!(
             chrome_height(
                 &q,
@@ -2782,9 +2703,7 @@ mod tests {
         let q = make_question("Confirm?", &["A"], false);
         let preview =
             "fix(auth): token refresh\n\nResolves the race condition\nin the middleware layer";
-        // .lines() yields 4 segments (including one empty line).
-        // word_wrap_line returns 1 line for each, so 4 preview lines total.
-        // vpad(1) + label(1) + gap(1) + preview_gap(1) + preview(4) + gap(1) = 9
+        // .lines() yields segments (including one empty line).
         assert_eq!(
             chrome_height(
                 &q,
@@ -2845,14 +2764,11 @@ mod tests {
         };
         let mut state = QuestionViewState::new("tc".into(), vec![q], StashedPrompt::default());
 
-        // Cursor at 0: option A has preview
         assert_eq!(state.focused_preview(), Some("preview content"));
 
-        // Cursor at 1: option B has no preview
         state.set_cursor(1);
         assert_eq!(state.focused_preview(), None);
 
-        // Cursor at 2: freeform row, no preview
         state.set_cursor(2);
         assert_eq!(state.focused_preview(), None);
     }
@@ -2926,8 +2842,8 @@ mod tests {
 
     #[test]
     fn chrome_height_caps_long_description() {
-        // 10-line description using CommonMark hard breaks (`  \n`) so each logical line renders as its own visual line
-        // A bare `\n` between text lines is a soft break and collapses to a space
+        // 10-line description using CommonMark hard breaks (` \n`) so each
+        // logical line renders as its own visual line A bare `\n` between.
         let q = make_question(
             "Q?\n\nline1  \nline2  \nline3  \nline4  \nline5  \nline6  \nline7  \nline8  \nline9  \nline10",
             &["A"],
@@ -2960,8 +2876,7 @@ mod tests {
 
     #[test]
     fn chrome_height_preview_cap_zero_no_gap() {
-        // When preview_cap=0 and !fullscreen, preview contributes 0 lines and no gap
-        // This matches render_question_chrome, which guards the gap on capped_count > 0
+        // When preview_cap=0 and !fullscreen, preview contributes a couple of lines and no gap This matches render_question_chrome.
         let q = make_question("Pick?", &["A"], false);
         let preview = "some preview text";
         let with_preview = chrome_height(&q, 80, Some(preview), false, 5, 0);
@@ -2971,7 +2886,6 @@ mod tests {
 
     #[test]
     fn chrome_height_desc_cap_one() {
-        // Edge case: desc_cap=1 should still show exactly 1 description line.
         let q = make_question("Q?\n\nline1\nline2\nline3", &["A"], false);
         let h = chrome_height(&q, 80, None, false, 1, 6);
         // vpad(1) + label(1) + gap(1) + desc(1) + gap(1) = 5
@@ -2992,7 +2906,7 @@ mod tests {
 
     #[test]
     fn question_view_height_large_terminal_uses_static_caps() {
-        // On a big terminal (80 rows), static caps work and at least MIN_VISIBLE_OPTION_ROWS options are visible
+        // On a big terminal (many rows), static caps work and at least MIN_VISIBLE_OPTION_ROWS options are visible
         let mut state = make_state_for_height(
             "Which database?",
             &["PostgreSQL", "MySQL", "SQLite", "CockroachDB", "TiDB"],
@@ -3021,7 +2935,7 @@ mod tests {
 
     #[test]
     fn question_view_height_small_terminal_reduces_caps() {
-        // On a small terminal (24 rows) with a long description, dynamic fallback should reduce the desc/preview caps
+        // On a small terminal (many rows) with a long description, dynamic fallback should reduce the desc/preview caps
         let mut state = make_state_for_height(
             "Which database?\n\nline1\nline2\nline3\nline4\nline5\nline6\nline7\nline8",
             &["PostgreSQL", "MySQL", "SQLite", "CockroachDB", "TiDB"],

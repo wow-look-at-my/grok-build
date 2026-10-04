@@ -1,6 +1,4 @@
 //! Terminal-usage projection for `streaming-messages-json`.
-//! Reshapes the turn's aggregate ledger into `result.usage` (`message.usage` shape) and the per-model `modelUsage` map.
-//! Kept apart so the token/cost/model math is self-contained.
 
 use serde_json::{Value, json};
 

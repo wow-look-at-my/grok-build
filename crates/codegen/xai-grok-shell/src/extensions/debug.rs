@@ -1,11 +1,4 @@
 //! `x.ai/debug/*` extension handlers for local client testing.
-//!
-//! These methods bypass heuristics, sampling, cooldowns, and enabled checks.
-//! Client engineers can exercise a notification and its response without real experiments, real sessions, or real model inference.
-//!
-//! - `trigger_feedback`: fire a synthetic `FeedbackRequestNotification`.
-//! - `arm_auto_compact`: make the next turn trigger auto-compaction unconditionally, regardless of context window usage.
-//! - `agent`: agent-process diagnostics (registry counts).
 
 use agent_client_protocol as acp;
 
@@ -47,9 +40,7 @@ struct DebugTriggerParams {
 }
 
 impl DebugTriggerParams {
-    /// The keys `session_id` is read under. ACP params are camelCase, which is
-    /// what the container's own renaming reads the field as; the snake_case
-    /// spelling arrives from shell-side callers.
+    /// The keys `session_id` is read under.
     const SESSION_ID_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("sessionId", &["session_id"]);
 }

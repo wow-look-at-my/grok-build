@@ -1,7 +1,4 @@
 //! Generates a compact git status for the system prompt.
-//!
-//! Uses the git CLI for performance: libgit2's status is 5-10x slower than the native git binary on large repos due to inefficient index refresh.
-//! Output is prioritized by change type and limited to ~1k characters.
 
 use crate::file_system::FsError;
 use crate::file_system::fsmonitor::FsmonitorOverride;
@@ -23,8 +20,6 @@ pub async fn git_status(working_directory: impl Into<PathBuf>) -> Result<String,
     .map_err(|e| FsError::Other(format!("git status task failed: {e}")))?
 }
 
-/// Matches Node's default `execFile` `maxBuffer` (1 MiB).
-/// `git status` output at or above the cap is treated as an error, so the repo is dropped from the status result entirely (never truncated).
 const GIT_STATUS_BUFFER_LIMIT: usize = 1024 * 1024;
 
 /// Whether `git status` stdout is large enough that the repo is dropped (`>= 1 MiB`).
@@ -32,7 +27,6 @@ fn git_status_exceeds_buffer(stdout_len: usize) -> bool {
     stdout_len >= GIT_STATUS_BUFFER_LIMIT
 }
 
-/// Collapse runs of two or more spaces to one (porcelain two-column status); newlines untouched.
 fn collapse_status_spaces(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev_space = false;
@@ -77,7 +71,6 @@ pub async fn git_status_short_pinned(
         .current_dir(&working_directory)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
-    // GIT_OPTIONAL_LOCKS=0: a session-triggered status must not fight the user's git on index.lock.
     cmd.env("GIT_OPTIONAL_LOCKS", "0");
 
     let output = super::process::output_killing_group_on_drop(cmd)

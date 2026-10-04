@@ -1,7 +1,4 @@
 //! The *how* of external emission: content gates, secret scrubbing and truncation, ctx injection, and metric-increment conversion.
-//!
-//! The per-event *what*, which field becomes which attribute, lives in [`super::schema`].
-//! The `telemetry_event!` macro's `external = …` arm wires it in.
 
 use opentelemetry::KeyValue;
 use opentelemetry::logs::{AnyValue, LogRecord as _, Logger as _, Severity};
@@ -10,9 +7,7 @@ use super::ExternalTelemetry;
 use super::metrics::{Instruments, MetricIncrement};
 use super::schema::{AttrValue, ExternalKey, ExternalRecord};
 
-/// Scrub and truncate one string attribute value.
-/// Every string passes the secret/path scrub; prompt, response, tool_input, tool_output, and full_command get the 60 KB content cap; tool_parameters preview and error_message get the 4 KB preview cap; everything else the standard 512-to-128 value truncation.
-/// This is defense in depth only: the export-time validators in [`super::redact`] enforce the result.
+/// Scrub and truncate one string attribute value. This is defense in depth only: the export-time validators in [`super::redact`] enforce the result.
 fn scrub_string(key: ExternalKey, s: String) -> String {
     let scrubbed = crate::redact_common::redact_to_owned(&s);
     match key {
@@ -81,8 +76,7 @@ pub(crate) fn emit_record(ext: &ExternalTelemetry, mut record: ExternalRecord) {
         }
     }
 
-    // Ambient ctx: a mapping-supplied `session.id` wins
-    // The ctx is a fallback for in-session events (the session-start sites are spawned outside the ctx scope and carry their own ids)
+    // Ambient ctx: a mapping-supplied `session.id` wins The ctx is a fallback for in-session events.
     let ctx = crate::session_ctx::external_ctx_snapshot();
     let mapped_session_id = record
         .attrs
@@ -162,8 +156,7 @@ fn add_increment(
     session_id: Option<&str>,
     identity: &super::IdentityAttrs,
 ) {
-    // Identity/cardinality attrs shared by every instrument
-    // `prompt.id` is deliberately never attached to metrics
+    // Identity/cardinality attrs shared by every instrument `prompt.id` is deliberately never attached to metrics
     let mut attrs: Vec<KeyValue> = Vec::with_capacity(8);
     if ext.include_session_id_on_metrics
         && let Some(sid) = session_id.filter(|s| !s.is_empty())

@@ -460,8 +460,8 @@ fn cta_impressions_respect_slot_gate_and_paint() {
     app.log_announcement_cta_impressions();
     assert!(app.announcement_cta_impressions_logged.is_empty());
 }
-/// Frame occluders (the goal-detail class) leave rects armed and block clicks at dispatch time.
-/// Impressions follow the same rule as OSC 8 links: an occluded CTA is not counted until an overlay-free frame shows it clean.
+/// Frame occluders (the goal-detail class) leave rects armed and block clicks at dispatch time. Impressions follow the same
+/// rule as OSC multiple links: an occluded CTA is not counted until an overlay-free frame shows it clean.
 #[test]
 fn cta_impressions_suppressed_while_rect_occluded() {
     use crate::app::app_view::ActiveView;
@@ -1794,8 +1794,8 @@ fn find_agent_by_session_id_finds_inactive_agent() {
         Some(acp::SessionId::new("sess-B"))
     );
 }
-/// Verifies that the dispatcher routes each Action to its own setter (catches a copy-paste registration bug where two setters were swapped).
-/// The original 5-setting matrix shrank to 2 after the user-feedback drop of `session_picker_grouped` / `load_envrc` / `use_leader`.
+/// Verifies that the dispatcher routes each Action to its own setter (catches
+/// a copy-paste registration bug where setters were swapped).
 #[test]
 fn pr13_show_tips_setter_writes_its_mirror() {
     let mut app = test_app_with_agent();
@@ -2095,9 +2095,9 @@ fn build_rows_working_anchor_is_turn_started_at() {
         "expected ~5s (turn_started_at anchor), got {elapsed:?}",
     );
 }
-/// Defensive test for the fallback path when both `turn_started_at` and `last_active_at` are `None`.
-/// The row's `last_change_at` projects the *frozen* process-wide `fallback_epoch`.
-/// Two consecutive builds therefore yield stable values (within sampling jitter) rather than re-anchoring at `now` and showing "0s" every frame.
+/// Defensive test for the fallback path when both `turn_started_at` and `last_active_at` are `None`. The row's `last_change_at` projects the
+/// *frozen* process-wide `fallback_epoch`. Consecutive builds therefore yield stable values (within sampling jitter) rather than re-anchoring at
+/// `now` and showing "0s" every frame.
 #[test]
 fn build_rows_fallback_anchor_is_frozen_when_last_active_at_is_none() {
     use crate::views::dashboard::build_rows_with_roster;

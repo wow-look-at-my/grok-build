@@ -1,8 +1,4 @@
 //! Shared upload utilities for session persistence and agent telemetry.
-//!
-//! This module provides a unified interface for uploading bytes to cloud storage,
-//! supporting direct upload (via service account), proxy upload (via cli-chat-proxy),
-//! and S3-compatible backends.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -17,8 +13,6 @@ use crate::storage_client::{
     Auth401AttributionCallback, ExistsResult, StaticGrokAuth, StorageClient, UploadResponse,
 };
 
-/// Threshold for switching to multipart upload (50 MB).
-/// Larger files use signed-URL multipart (parts go directly to storage) instead of streaming through the proxy.
 pub const MULTIPART_UPLOAD_THRESHOLD: u64 = 50 * 1024 * 1024;
 
 /// Construct a `StorageClient` for proxy-mode uploads.
@@ -49,7 +43,6 @@ fn build_proxy_client_with_fallback(
 impl StorageConfig for crate::TraceExportConfig {
     fn bucket_url(&self) -> &str {
         // For proxy mode, bucket_url may be None (proxy determines it from ACLs).
-        // Return a placeholder that won't be used.
         self.bucket_url.as_deref().unwrap_or("gs://placeholder")
     }
 
@@ -64,20 +57,15 @@ pub trait StorageConfig {
     fn bucket_url(&self) -> &str;
     fn upload_method(&self) -> &UploadMethod;
     /// Optional refresh-aware credentials for proxy-mode uploads.
-    /// When `Some`, upload helpers use `StorageClient::with_provider` so 401 retries can refresh.
-    /// Default `None` for configs that ship a static user-token only.
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         None
     }
-    /// Optional 401-attribution callback. When `Some(_)`, the constructed
-    /// `StorageClient` also calls `with_attribution(...)` so the embedding
-    /// application records auth-attribution telemetry for proxy 401s.
+    /// Optional 401-attribution callback.
     fn proxy_attribution(&self) -> Option<Arc<dyn Auth401AttributionCallback>> {
         None
     }
-    /// Optional HTTP client for proxy-mode uploads. `None` falls back to `reqwest::Client::new()`.
-    /// Production should return the shell-tuned client (HTTP/2 keep-alive, aggressive pool eviction).
-    /// Upload queues rely on that tuning to avoid stale-connection retries during backoff.
+    /// Optional HTTP client for proxy-mode uploads. `None` falls back to
+    /// `reqwest::Client::new()`.
     fn proxy_http_client(&self) -> Option<reqwest::Client> {
         None
     }
@@ -184,9 +172,8 @@ fn proxy_storage_client<C: StorageConfig>(config: &C) -> Option<StorageClient> {
     }
 }
 
-/// Existing paths among `paths` in one round trip (keep it under 100 paths: the proxy sub-batches
-/// at 100 and reports a failed sub-batch as missing). Direct and S3 answer `ProbeFailed` so a
-/// caller can never read the absence of a probe as "absent". No retries.
+/// Direct and S3 answer `ProbeFailed` so a caller can never read the absence of a probe as
+/// "absent". No retries.
 pub async fn batch_check_exists<C: StorageConfig, S: AsRef<str>>(
     config: &C,
     paths: &[S],
@@ -214,9 +201,8 @@ pub async fn check_exists<C: StorageConfig>(
     }
 }
 
-/// Like [`upload_bytes`], but proxy mode uses a pre-signed PUT so data bypasses the proxy.
-/// Avoids nginx `proxy-body-size` and the Cloudflare 100 MB limit for arbitrarily large payloads.
-/// Direct mode is identical to `upload_bytes`.
+/// Like [`upload_bytes`], but proxy mode uses a pre-signed PUT so data bypasses the proxy. Direct
+/// mode is identical to `upload_bytes`.
 pub async fn upload_bytes_signed<C: StorageConfig>(
     config: &C,
     object_path: &str,
@@ -537,8 +523,7 @@ async fn upload_file_direct(
     let file = TokioFile::open(file_path)
         .await
         .with_context(|| format!("Failed to open file: {}", file_path.display()))?;
-    // ReaderStream<TokioFile> yields io::Result<Bytes>; io::Error satisfies
-    // upload_streamed_object's S::Error: Into<Box<dyn Error + Send + Sync>> bound directly.
+    // ReaderStream<TokioFile> yields io::Result<Bytes>.
     let stream = ReaderStream::new(file);
 
     let mut media = Media::new(object_path.to_string());
@@ -599,7 +584,7 @@ async fn upload_bytes_via_proxy(
 ) -> anyhow::Result<String> {
     use crate::storage_client::RetryConfig;
 
-    // Conservative retry config handles storage-backend 429 errors during autoscaling.
+    // Conservative retry config handles storage-backend errors during autoscaling.
     let storage_client = build_proxy_client_with_fallback(
         proxy_base_url,
         user_token,
@@ -623,8 +608,8 @@ async fn upload_bytes_via_proxy(
     Ok(format!("gs://{}/{}", response.bucket, response.path))
 }
 
-/// Uploads bytes via a pre-signed PUT URL from the proxy. Data bypasses the proxy entirely.
-/// The proxy is contacted once to mint the URL. Use when the payload may exceed the 4 MB ingress limit.
+/// Uploads bytes via a pre-signed PUT URL from the proxy. Data bypasses the proxy entirely. The proxy
+/// is contacted once to mint the URL.
 pub async fn upload_bytes_via_signed_url(
     proxy_base_url: &str,
     user_token: &str,
@@ -710,8 +695,7 @@ mod tests {
 
     #[tokio::test]
     async fn upload_file_proxy_missing_file_returns_error() {
-        // upload_file_via_proxy checks metadata before connecting — should fail
-        // fast with a descriptive error if the temp file was deleted mid-flight.
+        // upload_file_via_proxy checks metadata before connecting — should fail fast with a descriptive error.
         let config = proxy_config();
         let result = upload_file(
             &config,
@@ -731,8 +715,7 @@ mod tests {
 
     #[tokio::test]
     async fn upload_file_direct_missing_file_returns_error() {
-        // Direct mode tries to authenticate first — bucket URL parse should succeed,
-        // but the file open will fail later. We only care it returns an error, not panics.
+        // Direct mode tries to authenticate first — bucket URL parse should succeed, but the file open will fail later. We only care it returns an error.
         let config = direct_config();
         let result = upload_file(
             &config,
@@ -796,7 +779,6 @@ mod tests {
             _body: Body,
         ) -> impl IntoResponse {
             s.multipart_called.store(true, Ordering::SeqCst);
-            // 400 = non-retryable: client fails fast without backoff delays
             (StatusCode::BAD_REQUEST, r#"{"error":"test"}"#)
         }
 
@@ -821,8 +803,6 @@ mod tests {
 
     #[tokio::test]
     async fn upload_file_via_proxy_uses_multipart_for_large_files() {
-        // Large file (just over 50 MB threshold) should hit the multipart init endpoint.
-        // Uses set_len() to create a sparse file — no actual disk write.
         let (addr, state) = start_dispatch_test_server().await;
         let config = proxy_config_with_url(format!("http://{}/v1", addr));
 
@@ -855,7 +835,6 @@ mod tests {
 
     #[tokio::test]
     async fn upload_file_via_proxy_uses_streaming_for_small_files() {
-        // Small file (1 KB) should hit the simple storage endpoint, not multipart.
         let (addr, state) = start_dispatch_test_server().await;
         let config = proxy_config_with_url(format!("http://{}/v1", addr));
 

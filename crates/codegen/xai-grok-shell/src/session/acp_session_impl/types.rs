@@ -11,8 +11,7 @@ pub(crate) enum McpReminderMode {
     Full,
 }
 
-/// Which credential store the resubmit should wait on. Waiting on the session token for a
-/// provider-key 401 would hold the full pace for a refresh irrelevant to the rejected credential.
+/// Which credential store the resubmit should wait on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecoveredStore {
     /// `AuthManager` session token (devbox re-mint, OIDC refresh); `wait_for_token_refresh` is meaningful.
@@ -40,28 +39,17 @@ impl TurnParkState {
 /// Recovery decision returned by `SessionActor::handle_sampling_failure` for the sampler-based turn loop.
 #[derive(Debug)]
 pub(crate) enum SamplerFailureRecovery {
-    /// Compaction ran.
-    /// The turn loop should rebuild the request from the compacted conversation and resubmit.
+    /// Compaction ran. The turn loop should rebuild the request from the compacted conversation and resubmit.
     CompactAndResubmit,
-    /// A context-overflow error hit again immediately after a compaction
-    /// (`ContextOverflowRecovery::Compacted`), so compaction alone did not
-    /// fit the conversation. Rather than compact a second time in a row —
-    /// which cannot help when a single item alone accounts for the overflow
-    /// — the conversation was deterministically shrunk (oldest turns
-    /// dropped, the newest truncated in place) via
-    /// `fit_conversation_to_budget`. The turn loop should resubmit.
+    /// A context-overflow error hit again immediately after a compaction (`ContextOverflowRecovery::Compacted`).
     ReduceAndResubmit,
-    /// Resubmit through the auth-retry schedule: recovery succeeded, or the parked
-    /// credential-less case. `credential` is the rejected request's wire provenance;
-    /// credential-less sends are never charged against the per-incident budget.
+    /// Resubmit through the auth-retry schedule: recovery succeeded, or the
+    /// parked credential-less case.
     RefreshAuthAndResubmit {
         credential: xai_grok_sampling_types::SentCredential,
         store: RecoveredStore,
     },
-    /// The model refused the history as provider-bound state it cannot read
-    /// (an `encrypted_content` blob, a thinking signature it did not mint).
-    /// `flatten_conversation` rewrote the history to plain text, so the turn
-    /// loop should resubmit it.
+    /// The model refused the history as provider-bound state it cannot read.
     FlattenAndResubmit,
     /// Transient failure: back off and resubmit instead of killing the turn.
     /// Retries are bounded.
@@ -81,10 +69,7 @@ pub(crate) enum SamplerTurnOutcome {
         Box<xai_grok_sampler::InferenceLatencyStats>,
     ),
     CompactAndResubmit,
-    /// Mirrors [`SamplerFailureRecovery::ReduceAndResubmit`]: the
-    /// conversation was deterministically shrunk (not re-compacted) because
-    /// a compaction already ran for this overflow and did not fit. The turn
-    /// loop resubmits the same as `CompactAndResubmit`.
+    /// Mirrors [`SamplerFailureRecovery::ReduceAndResubmit`]: the conversation was deterministically shrunk (not re-compacted).
     ReduceAndResubmit,
     /// Retry through the auth-retry schedule. Mirrors
     /// [`SamplerFailureRecovery::RefreshAuthAndResubmit`].
@@ -92,28 +77,15 @@ pub(crate) enum SamplerTurnOutcome {
         credential: xai_grok_sampling_types::SentCredential,
         store: RecoveredStore,
     },
-    /// Mirrors [`SamplerFailureRecovery::FlattenAndResubmit`]: the history was
-    /// rewritten to plain text because the model refused the provider state in
-    /// it. The turn loop resubmits, the same as `CompactAndResubmit`.
+    /// Mirrors [`SamplerFailureRecovery::FlattenAndResubmit`]: the history was rewritten to plain text.
     FlattenAndResubmit,
     /// The in-flight model request was cancelled because a user interjection
-    /// arrived mid-stream — the "asap injection" path. The turn loop drains
-    /// the interjection and resubmits immediately rather than waiting for the
-    /// (potentially long) stream to finish. `partial` is the text the model
-    /// had already streamed, preserved as a committed assistant message so the
-    /// resubmitted request sees `partial assistant turn + user interjection`
-    /// (Claude-Code-style mid-stream steering). `None` when nothing was
-    /// streamed yet (clean resubmit, nothing to preserve).
+    /// arrived mid-stream — the "asap injection" path.
     CancelledForInterjection {
         partial: Option<ConversationItem>,
     },
     /// The provider cut the response off at its output-token cap
-    /// (`StopReason::Length`). The sampler treats this as fatal and
-    /// non-retryable at the transport layer (resending the identical
-    /// request would truncate again), so the turn loop resubmits with a
-    /// reminder to continue instead. `partial` is the text streamed before
-    /// the cutoff, preserved the same way as `CancelledForInterjection`;
-    /// `None` when nothing was streamed yet.
+    /// (`StopReason::Length`).
     MaxTokensTruncated {
         partial: Option<ConversationItem>,
     },
@@ -124,7 +96,6 @@ pub(crate) enum SamplerTurnOutcome {
     },
 }
 
-/// How a completed turn stopped, mapped 1:1 to `acp::StopReason`.
 /// A refusal that also exhausted the salvage budget reports `Refusal`.
 pub(crate) enum CompletedStop {
     EndTurn,
@@ -137,8 +108,6 @@ pub(crate) enum CompletedStop {
 /// Outcome of `process_conversation_turn`, distinguishing normal completion from cancellation.
 pub(crate) enum TurnOutcome {
     /// The model finished responding (no more tool calls).
-    /// `tools_called` lists the tools invoked this turn, for completion-requirement tracking.
-    /// `structured_output` is the schema-validated `--json-schema` output (`None` without a schema; `Some(Err)` on parse or validation failure).
     Completed {
         tools_called: Vec<String>,
         structured_output: Option<Result<serde_json::Value, String>>,
@@ -154,7 +123,6 @@ pub(crate) enum TurnOutcome {
     /// The `--max-turns` limit was reached after a tool-execution cycle.
     MaxTurnsReached { limit: usize },
     /// Silent EndTurn after stationarity or true-noop thrash.
-    /// Distinct from Completed so the recovery, goal, and stop-hook paths cannot re-open the sampling loop.
     StationarityEnded,
 }
 
@@ -164,7 +132,6 @@ pub(crate) enum ToolLoop {
     NonExistingTool,
     ToolParsingError,
     /// User clicked "No" on a permission prompt.
-    /// Carries the rejection reason and tool name so callers (e.g. subagent result) can report what was rejected.
     PermissionReject {
         tool_name: String,
         reason: String,
@@ -172,18 +139,14 @@ pub(crate) enum ToolLoop {
     /// The user cancelled the turn (e.g. Cmd+C during a permission prompt).
     Cancelled,
     /// User provided a followup message instead of approving the tool execution.
-    /// The string contains the followup message to be added as a user turn.
     FollowupMessage(String),
     /// A user-configured `pre_tool_use` hook blocked this tool call.
-    /// Non-terminal: the deny reason is fed back and the turn continues (see `execute_tool_calls`).
-    /// Only `hook_name` is retained, for the per-tool telemetry and annotation.
     HookDenied {
         hook_name: String,
     },
 }
 
 /// Why the TodoGate fired.
-/// Single variant today; kept as an enum so any new reason has to go through the same `as_str` to `TODO_GATE_*` const mapping.
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TodoGateReason {
@@ -192,8 +155,6 @@ pub enum TodoGateReason {
 }
 
 /// Outcome of `evaluate_todo_gate`.
-/// `Nudge` carries the rendered reminder text and the typed reason so the producer can emit telemetry without re-deriving the reason from the input.
-/// Exposed as `pub` solely so the replay-trace integration test in `tests/trace_replay.rs` can match against the decision.
 #[doc(hidden)]
 pub enum TodoGateDecision {
     /// Gate is satisfied; the turn may end.
@@ -206,8 +167,6 @@ pub enum TodoGateDecision {
 }
 
 /// Why `maybe_fire_laziness_check` aborted before producing a verdict.
-/// Maps 1:1 to the `LAZINESS_ABORT_*` telemetry consts via `as_const_str()`.
-/// Mirrors the `TodoGateReason` pattern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LazinessAbortReason {
     UserInput,
@@ -217,7 +176,6 @@ pub(crate) enum LazinessAbortReason {
 }
 
 /// Reasons the tolerant classifier-output parser can fail.
-/// Each carries enough context to log without leaking the potentially long raw response; the caller logs the raw text separately, truncated.
 #[derive(Debug)]
 pub(crate) enum ClassifierParseError {
     /// Strict JSON, fence-stripped JSON, and brace-extracted JSON all failed to parse; the response is not recoverable.
@@ -244,7 +202,6 @@ pub(crate) enum LazinessDecision {
 }
 
 /// Closed set of reasons `evaluate_laziness` returned `NoNudge`.
-/// Each maps to a distinct dashboard slice; the consistency test below asserts the producer never invents a new reason without extending this enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NoNudgeReason {
     /// Classifier returned one of the `not_stalled_*` categories.
@@ -252,23 +209,17 @@ pub(crate) enum NoNudgeReason {
     /// Confidence below the configured (or default) threshold.
     LowConfidence,
     /// Per-session cap was `0` (observation-only) or the cap has been reached.
-    /// Both cases mean "fire telemetry but inject no nudge".
     CapExhausted,
-    /// Defensive: the caller should not have invoked `evaluate_laziness` when `cfg.enabled = false`, but if it did, return this rather than panic.
+    /// Defensive: the caller should not have invoked `evaluate_laziness` when `cfg.enabled = false`, but if it did.
     FeatureDisabled,
 }
 
 /// Distinguishes turn-end drains from mid-turn drains.
-/// Turn-end is the safe boundary to fire the verification stage, since no model inference is running.
-/// Mid-turn `update_goal(completed: true)` calls are deferred so the verifier-skeptic subagents never race the parent's sampler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DrainPurpose {
     /// End-of-turn drain.
-    /// Verification-eligible completions fire the verification stage (if enabled, Active, and not already running).
-    /// Deferred completions from prior mid-turn drains are processed FIFO ahead of the regular channel.
     TurnEnd,
     /// Mid-turn drain (e.g. on `SubagentSpawned`).
-    /// Verification-eligible completions are deferred to `pending_classifier_completions` for processing at the next turn-end.
     MidTurn,
 }
 
@@ -280,16 +231,14 @@ pub(crate) enum DrainSource {
 }
 
 /// Reason a NotAchieved verdict was synthesized without invoking the sampler.
-/// Used by `account_not_achieved_without_sampler` to label the synthetic details file and (in future variants) emit distinct telemetry.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum NotAchievedSyntheticReason {
     /// A second `update_goal(completed: true)` arrived while a classifier was already running for this goal.
     ConcurrentInFlight,
 }
 
-/// Decision for one in-turn goal round (see [`SessionActor::run_goal_round_end`]).
-/// `Continue` keeps the turn alive and runs another round with the carried directive injected.
-/// `EndTurn` ends the turn because the goal resolved (achieved, paused, blocked) or this isn't a goal turn.
+/// Decision for one in-turn goal round (see
+/// [`SessionActor::run_goal_round_end`]).
 pub(crate) enum GoalRoundDecision {
     Continue(String),
     EndTurn,
@@ -302,9 +251,8 @@ pub(crate) enum StopGateDecision {
     KeepWorking { feedback: String },
 }
 
-/// Serialized onto `streaming_partial.json` so trace inspection can tell whether the abort interrupted thinking, response text, or a tool call.
-/// `Completed` always fires before the turn loop dispatches tools, so a streaming partial can only be tied to one of the model's own emission phases.
-/// Interruptions during tool execution are covered by the canonical `record_assistant_response` path instead.
+/// Serialized onto `streaming_partial.json` so trace inspection can tell
+/// whether the abort interrupted thinking, response text.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CapturePhase {

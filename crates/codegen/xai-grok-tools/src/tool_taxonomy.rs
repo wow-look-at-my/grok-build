@@ -1,11 +1,4 @@
-//! Tool taxonomy — the harness-independent vocabulary, identity, and canonical
-//! `_meta` envelope.
-//!
-//! Depends only on `ToolKind`/`ToolNamespace` + `serde`/`serde_json` (no
-//! `ToolInput`, proto, or runtime). A future `xai-tool-taxonomy` leaf crate
-//! would need those two (dependency-free) enums moved here too — coherence ties
-//! the inherent impls to the enum definitions. The `ToolInput`-coupled
-//! projection lives in [`crate::normalization`].
+//! Tool taxonomy — the harness-independent vocabulary, identity, and canonical `_meta` envelope.
 use crate::types::tool::{ToolKind, ToolNamespace};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -21,12 +14,9 @@ pub mod field {
     pub const DIRECTORY: &str = "directory";
     pub const PATTERN: &str = "pattern";
 }
-/// The single `_meta` key holding the canonical tool identity as one nested
-/// object (mirroring `x.ai/mcp_tool`). Consumers deserialize it into
-/// [`CanonicalToolMeta`].
+/// The single `_meta` key holding the canonical tool identity as one nested object (mirroring `x.ai/mcp_tool`).
 pub const TOOL_META_KEY: &str = "x.ai/tool";
-/// Version of the canonical tool `_meta` contract. Bump on any breaking change
-/// to keys or value shapes so consumers can adapt.
+/// Version of the canonical tool `_meta` contract.
 pub const TOOL_META_VERSION: u32 = 1;
 impl ToolKind {
     /// Unified, harness-independent display label for this semantic kind. A pure function of the kind, so equivalent tools
@@ -116,8 +106,7 @@ impl ToolKind {
             | ToolKind::Monitor
             | ToolKind::GoalUpdate
             | ToolKind::Workflow
-            // Reads nothing and writes nothing here. It hands text to another
-            // session, which is a mutation of that session's conversation.
+            // Reads nothing and writes nothing here.
             | ToolKind::SendMessage
             | ToolKind::Feedback
             | ToolKind::Other => false,
@@ -145,9 +134,9 @@ pub const WRITING_TOOL_WIRE_NAMES: &[(&str, ToolKind)] = &[
     ("reference_to_video", ToolKind::ReferenceToVideo),
     ("ask_user_question", ToolKind::AskUser),
 ];
-/// [`ToolKind`] of a wire name in [`WRITING_TOOL_WIRE_NAMES`]. Keyed by wire name because that is
-/// all a client has while `tool_call_delta_chunk`s stream. Best-effort by design: wire names are
-/// client-renameable, so unknown names return `None` and callers fall back to showing the raw name.
+/// [`ToolKind`] of a wire name in [`WRITING_TOOL_WIRE_NAMES`]. Keyed by wire
+/// name because that is all a client has while `tool_call_delta_chunk`s
+/// stream.
 pub fn writing_tool_kind(wire_name: &str) -> Option<ToolKind> {
     WRITING_TOOL_WIRE_NAMES
         .iter()
@@ -175,9 +164,8 @@ impl schemars::JsonSchema for ToolKind {
         })
     }
 }
-/// Canonical identity for a tool call, resolved from a tool's registered metadata by its
-/// client-facing wire name. Harness-independent. `tool_kind` is the authoritative
-/// `metadata.kind()`.
+/// Canonical identity for a tool call, resolved from a tool's registered
+/// metadata by its client-facing wire name. Harness-independent.
 #[derive(Debug, Clone, Copy)]
 pub struct ToolIdentity {
     pub tool_kind: ToolKind,
@@ -185,9 +173,9 @@ pub struct ToolIdentity {
     pub presentation_name: &'static str,
     pub read_only: bool,
 }
-/// Tool-identity envelope under [`TOOL_META_KEY`]. `label` joins equivalent tools; `input` is a
-/// projection (bulky edit/write fields stay on `raw_input`). `version` bumps only on removal or
-/// meaning change; a new `namespace` fails strict decode so typed consumers must update.
+/// Tool-identity envelope under [`TOOL_META_KEY`]. `label` joins equivalent
+/// tools; `input` is a projection (bulky edit/write fields stay on
+/// `raw_input`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CanonicalToolMeta {
     pub version: u32,
@@ -235,8 +223,7 @@ impl CanonicalToolMeta {
     }
 }
 /// The published JSON Schema (draft-07) for the [`CanonicalToolMeta`] wire
-/// envelope (`schema/tool_meta.schema.json`). Non-Rust consumers codegen from
-/// it; kept in sync with the type by `tool_meta_schema_is_up_to_date`.
+/// envelope (`schema/tool_meta.schema.json`).
 pub fn tool_meta_json_schema_str() -> &'static str {
     include_str!("../schema/tool_meta.schema.json")
 }

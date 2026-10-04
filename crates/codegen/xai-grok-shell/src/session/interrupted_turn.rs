@@ -1,5 +1,4 @@
-//! Records, at session load, a turn the previous process never finished so it does not look like a silent stop.
-
+//! Records, at session load, a turn the process never finished so it does not look like a silent stop.
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::Path;
 

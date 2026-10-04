@@ -1,5 +1,4 @@
 //! `x.ai/session/state` reads a session's metadata columns.
-//! `x.ai/session/import` writes them, with the transcript, to recreate a session on another host.
 
 use std::path::{Path, PathBuf};
 
@@ -85,8 +84,7 @@ pub(crate) async fn handle_import(args: &acp::ExtRequest) -> ExtResult {
     };
     let dir = crate::session::persistence::session_dir(&info);
 
-    // resolve_session_dir requires summary.json to count a session as present
-    // An interrupted import (dir created, summary not yet written) is therefore recreated on retry rather than skipped forever
+    // resolve_session_dir requires summary.json to count a session as present An interrupted import (dir created, summary not yet written).
     let has_local_session = resolve_session_dir(&request.session_id, &request.cwd).is_some();
     if !has_local_session {
         let Some(summary_value) = request.state.get_mut(SUMMARY_COLUMN) else {
@@ -104,7 +102,8 @@ pub(crate) async fn handle_import(args: &acp::ExtRequest) -> ExtResult {
         if Summary::deserialize(&*summary_value).is_err() {
             return Err(acp::Error::invalid_params().data("summary column is not a valid summary"));
         }
-        // Write the `.cwd` sidecar for hash-based (long-path) dirs so the session stays recoverable by id, not just by (id, cwd)
+        // Write the `.cwd` sidecar for hash-based (long-path) dirs so the
+        // session stays recoverable by id, not by (id, cwd)
         crate::util::grok_home::ensure_sessions_cwd_dir(&request.cwd)
             .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
         write_import(&dir, &request.state, &request.updates, &request.session_id)

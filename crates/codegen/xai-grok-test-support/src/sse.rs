@@ -1,6 +1,4 @@
 //! SSE stream generators for mock inference endpoints.
-//!
-//! These produce the exact wire format that the grok sampling client expects, validated against the real sampling client.
 
 use axum::response::sse::Event;
 use serde_json::json;
@@ -128,8 +126,8 @@ pub fn messages_api_script_with_reasoning(
     ]
 }
 
-/// Generate ChatCompletions SSE events that stream `text` word-by-word, collapsing whitespace.
-/// Use [`chat_completion_events_exact`] when the receiver must reconstruct `text` byte-for-byte.
+/// Generate ChatCompletions SSE events that stream `text` word-by-word,
+/// collapsing whitespace.
 pub fn chat_completion_events(text: &str, model: &str) -> Vec<Event> {
     scripted_to_axum(chat_completion_script(text, model))
 }
@@ -143,8 +141,8 @@ pub(crate) fn chat_completion_script(text: &str, model: &str) -> Vec<SseEvent> {
     )
 }
 
-/// Like [`chat_completion_events`] but byte-exact: concatenating the deltas reproduces `text` byte-for-byte.
-/// Fenced code blocks (mermaid etc.) need their newlines to parse as a block, which `split_whitespace` would destroy.
+/// Like [`chat_completion_events`] but byte-exact: concatenating the deltas
+/// reproduces `text` byte-for-byte.
 pub fn chat_completion_events_exact(text: &str, model: &str) -> Vec<Event> {
     scripted_to_axum(chat_completion_script_exact(text, model))
 }
@@ -154,8 +152,8 @@ pub fn chat_completion_script_exact(text: &str, model: &str) -> Vec<SseEvent> {
     chat_completion_script_from_deltas(&chat_completion_deltas(text), model, "stop")
 }
 
-/// Split `text` into deltas that reconstruct it byte-for-byte: the first carries no leading space; each subsequent one is ` {word}`.
-/// Splitting on single spaces only keeps newlines and tabs inside the words.
+/// Split `text` into deltas that reconstruct it byte-for-byte: the first
+/// carries no leading space; each subsequent one is ` {word}`.
 pub(crate) fn chat_completion_deltas(text: &str) -> Vec<String> {
     space_prefixed_deltas(text.split(' '))
 }
@@ -289,8 +287,8 @@ pub fn chat_completion_script_with_reasoning(
     ]
 }
 
-/// Generate Responses API SSE events that stream `text` word-by-word, collapsing whitespace.
-/// Use [`responses_api_events_exact`] when the receiver must reconstruct `text` byte-for-byte.
+/// Generate Responses API SSE events that stream `text` word-by-word,
+/// collapsing whitespace.
 pub fn responses_api_events(text: &str, model: &str) -> Vec<Event> {
     scripted_to_axum(responses_api_script(text, model))
 }
@@ -304,7 +302,8 @@ pub(crate) fn responses_api_script(text: &str, model: &str) -> Vec<SseEvent> {
     responses_api_script_from_deltas(&deltas, text, model)
 }
 
-/// Like [`responses_api_events`] but byte-exact: concatenating the deltas reproduces `text` byte-for-byte (newlines and whitespace runs preserved).
+/// Like [`responses_api_events`] but byte-exact: concatenating the deltas
+/// reproduces `text` byte-for-byte.
 pub fn responses_api_events_exact(text: &str, model: &str) -> Vec<Event> {
     scripted_to_axum(responses_api_script_exact(text, model))
 }
@@ -314,7 +313,8 @@ pub fn responses_api_script_exact(text: &str, model: &str) -> Vec<SseEvent> {
     responses_api_script_from_deltas(&responses_api_deltas(text), text, model)
 }
 
-/// `split_inclusive(' ')` keeps each chunk's trailing space, so concatenating the chunks reconstructs `text` byte-for-byte (newlines included).
+/// `split_inclusive(' ')` keeps each chunk's trailing space, so concatenating
+/// the chunks reconstructs `text` byte-for-byte.
 fn responses_api_deltas(text: &str) -> Vec<String> {
     text.split_inclusive(' ').map(str::to_owned).collect()
 }
@@ -795,9 +795,7 @@ pub fn responses_api_reasoning_and_text_events(
     events
 }
 
-/// SSE `event:` name and payload `type` of the non-standard doom-loop check event (`xai_grok_sampling_types::DOOM_LOOP_CHECK_EVENT_TYPE`).
-/// Hardcoded like every other wire string in this file.
-/// The shell integration tests pin the two spellings against each other by absorbing built frames through the real client.
+/// SSE `event:` name and payload `type` of the non-standard doom-loop check event.
 const DOOM_LOOP_CHECK_EVENT: &str = "response.doom_loop_check";
 
 /// One named `response.doom_loop_check` frame carrying the (cumulative) trigger set, in the inference API's wire shape.
@@ -860,8 +858,8 @@ pub fn responses_api_doom_loop_check_events(
     with_terminal_doom_loop_field(events, triggers)
 }
 
-/// Generate a reasoning-and-text turn whose terminal `response.completed` carries `doom_loop_check.triggers`, with no mid-stream check frame.
-/// This is the terminal-only copy of the signal; the turn itself mirrors [`responses_api_reasoning_and_text_events`].
+/// Generate a reasoning-and-text turn whose terminal `response.completed`
+/// carries `doom_loop_check.triggers`, with no mid-stream check frame.
 pub fn responses_api_doom_loop_terminal_only_events(
     triggers: &[&str],
     reasoning: &str,
@@ -874,9 +872,10 @@ pub fn responses_api_doom_loop_terminal_only_events(
     )
 }
 
-/// Splice one named `response.doom_loop_check` frame with an arbitrary `data:` payload into a reasoning-and-text turn, after `response.created`.
-/// The payload may be a byte-exact wire fixture or a deliberately malformed variant.
-/// The payload's own `sequence_number` (if any) is its business; clients never validate sequence continuity.
+/// Splice one named `response.doom_loop_check` frame with an arbitrary
+/// `data:` payload into a reasoning-and-text turn, after `response.created`.
+/// The payload may be a byte-exact wire fixture or a deliberately malformed
+/// variant.
 pub fn responses_api_with_doom_loop_frame(
     check_frame_data: &str,
     reasoning: &str,
@@ -925,9 +924,8 @@ fn completed_frame_index(events: &[SseEvent]) -> usize {
         .expect("turn builders always emit a response.completed frame")
 }
 
-/// Splice one named `response.doom_loop_check` frame in just before the first frame of `before_type`, composing over any
-/// turn builder. An armed client observes the signal and aborts on that next frame, so the caller chooses which frame the
-/// abort lands on. Pass `response.function_call_arguments.delta` to abort on tool activity
+/// Splice one named `response.doom_loop_check` frame in before the first frame of `before_type`, composing over any turn builder. An armed client observes the signal and aborts on that next frame, so the caller
+/// chooses which frame the abort lands on.
 pub fn with_doom_loop_frame_before_type(
     events: Vec<SseEvent>,
     check_frame_data: &str,
@@ -980,9 +978,8 @@ pub(crate) fn renumber_sequence_numbers(mut events: Vec<SseEvent>) -> Vec<SseEve
     events
 }
 
-/// Splice one named `response.doom_loop_check` frame in just before a turn's terminal `response.completed`, composing over any turn builder.
-/// The frame is the last thing an armed client sees before the terminal frame, so the signal lands with the turn's items complete.
-/// Append a non-terminal event after it (as [`responses_api_with_doom_loop_frame_after_text`] does) to exercise the mid-stream abort instead.
+/// Splice one named `response.doom_loop_check` frame in before a turn's
+/// terminal `response.completed`, composing over any turn builder.
 pub fn with_doom_loop_frame_before_completed(
     events: Vec<SseEvent>,
     check_frame_data: &str,
@@ -1174,7 +1171,7 @@ mod tests {
         assert_eq!(chat_completion_deltas(text).concat(), text);
         assert_eq!(responses_api_deltas(text).concat(), text);
 
-        // The reconstruction preserves the fence as a real, newline-delimited code block (the property diagram detection depends on)
+        // The reconstruction preserves the fence as a real.
         assert!(
             chat_completion_deltas(text)
                 .concat()

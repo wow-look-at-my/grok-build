@@ -1,11 +1,4 @@
 //! File watcher for detecting external memory edits.
-//!
-//! Watches `~/.grok/memory/` for `.md` file changes (create, modify, remove) and accumulates the affected paths.
-//! The search path checks [`is_dirty`] before each query and syncs the index for all dirty paths:
-//! - **created / modified** files are reindexed via `MemoryIndex::reindex_file`
-//! - **deleted** files have their stale chunks removed via `MemoryIndex::delete_path`
-//!
-//! [`is_dirty`]: MemoryFileWatcher::is_dirty
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -16,8 +9,6 @@ use arc_swap::ArcSwap;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 /// Watches the memory directory for `.md` file changes.
-/// The notify thread inserts dirty paths via `rcu` and the search path swaps them out, so neither side takes a lock.
-/// The separate `dirty` flag lets `is_dirty` answer with one atomic load and no allocation.
 pub struct MemoryFileWatcher {
     dirty_files: Arc<ArcSwap<HashSet<PathBuf>>>,
     dirty: Arc<AtomicBool>,

@@ -991,9 +991,6 @@ fn duration_or_reads_the_override_as_milliseconds() {
     );
 }
 
-/// Pins that validate and describe read DIFFERENT env vars: one ops knob
-/// must not silently undo the 10s/2s budget split (a legacy 2000 pin on the
-/// validate var must not cap describe, and vice versa).
 #[test]
 fn validate_and_describe_timeouts_have_separate_overrides() {
     assert_ne!(VALIDATE_TYPE_TIMEOUT_ENV_VAR, DESCRIBE_TYPE_TIMEOUT_ENV_VAR);

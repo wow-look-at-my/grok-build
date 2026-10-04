@@ -9,8 +9,7 @@ fn getter_does_not_fetch_while_policy_repair_is_pending() {
     let home = common::isolated_home();
     common::block_on(async {
         let server = common::start_seeded_mock(home.path()).await;
-        // A team principal with no serving managed policy: repair is pending,
-        // so the getter must return ineligible without egress.
+        // A team principal with no serving managed policy: repair is pending.
         let scope = xai_grok_login::GrokComConfig::default().auth_scope();
         let auth = serde_json::json!({
             scope: {

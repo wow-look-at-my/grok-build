@@ -1,11 +1,4 @@
-//! Extension handlers for `x.ai/compact_conversation`, `x.ai/memory/flush`, `x.ai/memory/rewrite`,
-//! `x.ai/memory/list`, `x.ai/memory/toggle`, and `x.ai/memory/forget`.
-//! `memory/rewrite` turns a raw memory note into structured markdown with a one-shot LLM call.
-//! `memory/list` and `memory/toggle` back the `/memory` modal without running a prompt turn, so
-//! opening it or flipping memory writes nothing to scrollback.
-//! `memory/forget` deletes one note from the `/memory` modal through the store's tombstone path.
-//! `memory/flush` and `memory/dream` back the pager-local `/flush` and `/dream` commands; each
-//! returns a typed disposition so the client can render the outcome.
+//! Extension handlers for `x.ai/compact_conversation`, `x.ai/memory/flush`, `x.ai/memory/rewrite`, `x.ai/memory/list`.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -267,7 +260,6 @@ pub struct MemoryToggleResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled_reason: Option<MemoryDisabledReason>,
     /// Files after the toggle, so an open modal can refresh without a second round trip.
-    /// `None` when the store could not be listed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listing: Option<MemoryListing>,
 }

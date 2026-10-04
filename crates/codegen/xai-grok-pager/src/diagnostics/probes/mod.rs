@@ -68,7 +68,6 @@ pub struct DoctorProbeSnapshot<'a> {
 }
 
 /// Whether the caller will read the colour-passthrough fact.
-/// Only `view()` reads it, and the startup path never calls `view()`, so probing there spends ~116ms before first paint on a value that is dropped.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ColorPassthroughProbe {
     Skip,

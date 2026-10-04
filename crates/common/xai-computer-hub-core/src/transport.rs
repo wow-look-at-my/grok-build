@@ -1,9 +1,4 @@
-//! Object-safe `Transport` trait plus the `Principal` value carried across
-//! authorize/call boundaries.
-//!
-//! [`TransportKind`] is re-exported from [`xai_tool_protocol`] so the wire
-//! and dispatch layers share one canonical enum and there is no duplicate
-//! `Local` / `Remote` definition to keep in sync.
+//! Object-safe `Transport` trait plus the `Principal` value carried across authorize/call boundaries.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -14,28 +9,18 @@ use xai_tool_runtime::{ToolCallContext, ToolError, ToolStream, TypedToolOutput};
 pub use xai_tool_protocol::TransportKind;
 
 /// Authenticated identity bound to a transport at handshake time.
-///
-/// The transport authorises **once** at connect; subsequent dispatch calls
-/// carry no extra credentials. `session_ids` is plural because a JWT may
-/// authorise more than one session (multi-tenant tooling sessions sharing
-/// a single user identity); the router narrows by [`SessionId`] at the
-/// per-call boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Principal {
     /// Authenticated user identity.
     pub user_id: UserId,
 
-    /// Sessions this principal is authorised to act on. Empty when the
-    /// transport authorises a user but has not yet bound a session
-    /// (e.g. a fresh harness connection that has not opened a session).
+    /// Sessions this principal is authorised to act on.
     pub session_ids: Vec<SessionId>,
 
     /// OAuth-style scopes granted to this principal, e.g. `"tool.invoke"`.
     pub scopes: Vec<String>,
 
-    /// Token audiences claimed by the credential, e.g. the router's
-    /// expected `aud` values. Used by callers that need defence-in-depth
-    /// audience checks beyond what the transport already validated.
+    /// Token audiences claimed by the credential, e.g. the router's expected `aud` values.
     pub audiences: Vec<String>,
 }
 
@@ -81,32 +66,15 @@ impl Principal {
 }
 
 /// Object-safe transport for dispatching tool calls.
-///
-/// Implementations come in two flavours: [`TransportKind::Local`] resolves
-/// against an in-process registry, while [`TransportKind::Remote`] forwards
-/// a `tool_call_request` over a [`crate::ConnectionClient`].
 #[async_trait]
 pub trait Transport: Send + Sync + std::fmt::Debug {
-    /// Whether the underlying transport is local (in-process) or remote
-    /// (forwarded over a connection).
+    /// Whether the underlying transport is local (in-process) or remote (forwarded over a connection).
     fn kind(&self) -> TransportKind;
 
     /// One-time authorisation handshake.
-    ///
-    /// Local transports return a principal derived from the bound OS user
-    /// (or whatever ambient identity the host process provides). Remote
-    /// transports return the principal extracted from a validated
-    /// credential. Subsequent [`Self::call`] invocations reuse this
-    /// principal — the router never re-authorises per call.
     async fn authorize(&self) -> Result<Principal, ToolError>;
 
     /// Dispatch a tool call.
-    ///
-    /// The returned [`ToolStream`] follows the runtime invariant: zero or
-    /// more `Progress` items followed by exactly one `Terminal`. A
-    /// not-found result is reported as a single-item terminal stream
-    /// carrying [`ToolError::NotFound`]; transport-level disconnects
-    /// surface as [`ToolError::NetworkError`].
     async fn call(
         &self,
         tool_id: ToolId,

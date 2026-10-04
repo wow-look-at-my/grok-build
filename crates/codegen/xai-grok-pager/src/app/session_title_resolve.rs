@@ -1,10 +1,4 @@
 //! Resume-by-title selection shared by startup paths.
-//!
-//! The composition root pins an explicit non-id resume target to its canonical session id BEFORE the irreversible OS sandbox
-//! ([`super::cli::PagerArgs::pin_local_resume_target`]).
-//! That way the saved-profile peek and materialization act on one immutable target instead of racing a concurrent rename between two title lookups.
-//! Materialization keeps [`select_by_title`] as the authoritative error source (ambiguity / no-match).
-//! It is also the fallback for callers that bypass pinning.
 
 use xai_grok_shell::session::persistence::{RecentSessionSelection, Summary};
 
@@ -14,14 +8,13 @@ pub(crate) fn is_uuid_shaped(arg: &str) -> bool {
 }
 
 /// Canonical key for title equality: trimmed `str::to_lowercase`.
-/// Plain case-insensitive equality, not full Unicode caseless matching.
 fn title_key(s: &str) -> String {
     s.trim().to_lowercase()
 }
 
-/// Hint appended to every terminal failure for a non-id resume target.
-/// The title miss stays visible even when remote restore produces the final error.
-/// Debug formatting: the arg is arbitrary user text.
+/// Hint appended to every terminal failure for a non-id resume target. The
+/// title miss stays visible even when remote restore produces the final
+/// error.
 pub(crate) fn title_miss_hint(arg: &str) -> String {
     format!(
         "no session id or title matched {arg:?} for this directory; \
@@ -79,12 +72,11 @@ pub(crate) fn select_by_title<'a>(
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum PinnedResumeTarget {
     /// Nothing local resolved (UUID-shaped, no cwd, junk, or ambiguous title): leave the raw arg alone.
-    /// Materialization owns the authoritative error / remote path.
     Unresolved,
     /// Resolved as a local id (possibly the restored child of a remote id).
     Id(String),
-    /// Resolved by title to this session. The selected summary's persisted sandbox profile rides along.
-    /// Re-deriving the profile from the id is ambiguous when a legacy id is duplicated across cwd dirs.
+    /// Resolved by title to this session. The selected summary's persisted
+    /// sandbox profile rides along.
     Title {
         id: String,
         sandbox_profile: Option<String>,
@@ -135,9 +127,10 @@ pub(crate) fn presandbox_resume_target(
         .unwrap_or(PinnedResumeTarget::Unresolved))
 }
 
-/// `local_miss_target` is `Some(arg)` only when materialization deferred exactly this target after missing local id/title resolution.
-/// Provenance is threaded, never inferred from id shape, so a resolved legacy non-UUID id gets no false no-match hint.
-/// `detail` must already be user-sanitized: sanitizing the composed message would collapse disk-full chains whole and erase the appended hint.
+/// `local_miss_target` is `Some(arg)` only when materialization deferred
+/// exactly this target after missing local id/title resolution. Provenance is
+/// threaded, never inferred from id shape, so a resolved legacy non-UUID id
+/// gets no false no-match hint.
 pub(crate) fn worktree_resume_failure_message(
     local_miss_target: Option<&str>,
     detail: &str,

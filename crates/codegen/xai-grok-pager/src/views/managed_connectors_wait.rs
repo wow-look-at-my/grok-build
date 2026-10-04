@@ -1,8 +1,4 @@
 //! Wait overlay after opening grok.com/connectors from the MCP tab.
-//!
-//! Covers the list until the user refreshes (R) or dismisses (Esc). Shared by Needs Auth and
-//! Ctrl+O / URL click. Owns the overlay's paint and its key/mouse routing; the extensions modal
-//! only decides when the overlay is active and applies the returned outcome.
 
 use std::sync::Arc;
 
@@ -21,7 +17,7 @@ use crate::views::modal_window::{fill_overlay_content, word_wrap};
 #[path = "managed_connectors_wait_tests.rs"]
 mod tests;
 
-/// Footer shortcut id: dismiss this overlay (`esc back`). 98 cycles tabs; 99 closes the modal.
+/// Footer shortcut id: dismiss this overlay (`esc back`).
 pub(crate) const WAIT_BACK_SHORTCUT_ID: usize = 97;
 
 /// Overlay state for one wait: the URL it was opened with plus per-frame hover/hit rects.

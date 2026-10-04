@@ -3,8 +3,7 @@ use std::sync::OnceLock;
 
 use tokio_util::sync::CancellationToken;
 
-/// The server set a piece of MCP work was started for. Only `McpState` hands one out and only `McpState` cancels it,
-/// so an uncancelled `Generation` is the current one.
+/// The server set a piece of MCP work was started for.
 #[derive(Clone, Debug)]
 pub struct Generation {
     token: CancellationToken,

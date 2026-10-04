@@ -1,7 +1,4 @@
 //! `/hooks` and `/plugins`: open the hooks/plugins modal.
-//!
-//! These commands always open the tabbed modal.
-//! All hook/plugin management (install, uninstall, trust, etc.) is done through the modal's UI; no subcommands are passed through to the shell.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

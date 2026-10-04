@@ -1,6 +1,4 @@
-//! [`GrokStdioClient`] drives `grok agent stdio`: it owns the child, the [`AgentConnection`] over its pipes,
-//! and runs every request under a scaled budget; a timeout, or a failed setup request or cancel, panics with
-//! the child's stderr.
+//! [`GrokStdioClient`] drives `grok agent stdio`: it owns the child, the [`AgentConnection`] over its pipes.
 
 use std::path::Path;
 use std::pin::pin;
@@ -22,8 +20,7 @@ const PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
 /// `session/load` replays history and is slower under Rosetta (macos-x86_64 lifecycle CI), where 20s flaked.
 const LOAD_SESSION_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// How [`GrokStdioClient::spawn_with_options`] starts the agent. [`SpawnOptions::new`] is the sandbox alone,
-/// with no overrides and a policy that allows every permission and dismisses every question.
+/// How [`GrokStdioClient::spawn_with_options`] starts the agent.
 pub struct SpawnOptions {
     agent: AgentProcessOptions,
     policy: ClientPolicy,
@@ -55,9 +52,8 @@ impl SpawnOptions {
         self
     }
 
-    /// Keys removed from the sandbox baseline after the mock URL and `with_extra_env` are applied.
-    /// Use this to drop a baseline variable a scenario must run without, such as the mock's
-    /// `XAI_API_KEY`, so a login-only or missing-credential case is exercised faithfully.
+    /// Keys removed from the sandbox baseline after the mock URL and
+    /// `with_extra_env` are applied.
     #[must_use]
     pub fn with_removed_env(
         mut self,
@@ -87,9 +83,8 @@ impl SpawnOptions {
         self
     }
 
-    /// Budget for `prompt` and `ext_method`, so a caller that wraps the turn in its own deadline
-    /// records the timeout instead of the client panicking at the shorter default first. Setup
-    /// requests keep the default request budget.
+    /// Budget for `prompt` and `ext_method`, so a caller that wraps the turn
+    /// in its own deadline records the timeout instead.
     #[must_use]
     pub fn with_turn_budget(mut self, budget: Duration) -> Self {
         self.turn_budget = Some(budget);
@@ -97,8 +92,8 @@ impl SpawnOptions {
     }
 }
 
-/// Spawn and drive it inside a `tokio::task::LocalSet`; the connection's tasks are spawned locally. The child
-/// is killed on drop, before its sandbox goes.
+/// Spawn and drive it inside a `tokio::task::LocalSet`; the connection's
+/// tasks are spawned locally.
 pub struct GrokStdioClient {
     connection: AgentConnection,
     process: TestProcess,
@@ -289,9 +284,8 @@ impl GrokStdioClient {
         .await
     }
 
-    /// Send `session/cancel`, then answer every request this session holds under `HoldUntilCancel` with
-    /// `cancelled`. Resolves once every released reply is recorded in the transcript; panics with the agent's
-    /// stderr if the notification cannot be sent or a held request is not answered within the request budget.
+    /// Send `session/cancel`, then answer every request this session holds
+    /// under `HoldUntilCancel` with `cancelled`.
     pub async fn cancel(&self, session_id: &acp::SessionId) {
         timed_ok(
             &self.process,

@@ -1,7 +1,4 @@
 //! Session summary (title) generation.
-//!
-//! Checks whether a summary exists, generates one via the LLM, persists it, syncs to remote, updates the session registry, and notifies the client.
-//! The persistence actor just calls [`SummaryGenerator::update`]; all state transitions are internal.
 
 use crate::extensions::notification::{SessionNotification, SessionUpdate as XaiSessionUpdate};
 use crate::sampling::Client as OaiCompatClient;
@@ -20,12 +17,10 @@ enum State {
 }
 
 pub(crate) struct SummaryConfig {
-    /// `None` when no title model can be reached. The title then comes from
-    /// the user's own text.
+    /// `None` when no title model can be reached. The title then comes from the user's own text.
     pub(crate) sampling_client: Option<OaiCompatClient>,
     pub(crate) model: String,
     /// Channel back to the persistence actor for sequential storage writes.
-    /// Weak: a strong sender here would keep the actor's own channel and task alive.
     pub(crate) persistence_tx: mpsc::WeakUnboundedSender<PersistenceMsg>,
 }
 
@@ -82,10 +77,7 @@ impl SummaryGenerator {
                             );
                         }
 
-                        // Route the result through the persistence channel. The
-                        // actor persists it (only if the session has no title yet)
-                        // and notifies the client there, so a title rejected for
-                        // racing a manual `/rename` never reaches the client.
+                        // Route the result through the persistence channel.
                         match persistence_tx.upgrade() {
                             Some(tx) => {
                                 let _ = tx.send(PersistenceMsg::GeneratedTitle(title));

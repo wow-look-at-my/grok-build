@@ -1,8 +1,4 @@
 //! Connects the heap-profile monitor to [`MvpAgent`].
-//!
-//! Sites that reapply the full remote settings call [`MvpAgent::reconfigure_heap_profile_monitor`].
-//! The scoped kill-switch reconfigures only the jemalloc fields.
-//! It never rewrites `remote_settings` wholesale, never calls `re_resolve_runtime_fields`, and never re-initializes telemetry.
 
 use super::*;
 use crate::heap_profile::{SCOPED_KILL_SWITCH_INTERVAL, build_upload_handles};

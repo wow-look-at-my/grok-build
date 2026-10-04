@@ -1,7 +1,4 @@
 //! Closing a session reaps the children enrolled in its process scope, and leaves other sessions' children alone.
-//!
-//! The reap runs on the agent thread via `take_session`, so it works even if the actor wedged.
-//! End-to-end reaping of specific subsystems is covered by those subsystems' own tests.
 
 use std::time::Duration;
 

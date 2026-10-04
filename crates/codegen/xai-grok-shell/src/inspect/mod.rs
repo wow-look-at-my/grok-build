@@ -1,8 +1,4 @@
 //! `grok inspect`: configuration introspection.
-//!
-//! Shows everything Grok discovers in the current directory.
-//! That covers project instructions, permissions, hooks, skills, agents, plugins, MCP servers, LSP config, and config.toml sources.
-//! Supports `--json` for machine output.
 
 mod compat;
 
@@ -61,7 +57,7 @@ pub(crate) struct InspectReport {
     pub grok_version: String,
     pub cwd: String,
     pub project_root: Option<String>,
-    /// Folder-trust verdict for `cwd`: when false, repo-local project hooks, plugins, MCP/LSP, instructions, and skills are gated out of the listings below.
+    /// Folder-trust verdict for `cwd`: when false, repo-local project hooks, plugins, MCP/LSP, instructions.
     pub project_trusted: bool,
     pub project_instructions: Vec<InstructionFile>,
     pub permissions: PermissionsReport,
@@ -89,7 +85,6 @@ pub(crate) struct InstructionFile {
     pub scope: Scope,
     pub file_type: String,
     pub size_bytes: usize,
-    /// Estimated token count (chars / 4).
     pub approx_tokens: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vendor: Option<String>,
@@ -106,8 +101,7 @@ pub(crate) struct InstructionFile {
 pub(crate) enum ManagedOnlyScope {
     /// No source pins the lockdown.
     Off,
-    /// Only the advisory Claude file pins it: binds foreign-defined servers,
-    /// grok-native servers exempt.
+    /// Only the advisory Claude file pins it: binds foreign-defined servers, grok-native servers exempt.
     Advisory,
     /// A grok TOML layer pins it: binds every server.
     Enforced,
@@ -154,32 +148,26 @@ pub(crate) struct PermissionsReport {
     pub loaded: usize,
     pub skipped: Vec<SkippedRule>,
     pub mcp_server_allowlist: Vec<String>,
-    /// Sources whose MCP policy is a full lockdown: every server they bind is
-    /// blocked, even if a valid sibling key still contributes allow entries.
+    /// Sources whose MCP policy is a full lockdown: every server they bind is blocked.
     pub mcp_lockdown_sources: Vec<LockdownSource>,
     /// `allowManagedMcpServersOnly` lockdown and how it binds.
     pub mcp_managed_servers_only: ManagedOnlyScope,
     pub marketplace_allowlist: Vec<String>,
-    /// Sources whose strict marketplace list has zero usable URLs (explicit
-    /// `[]`, malformed, or every entry unsupported): a marketplace lockdown.
+    /// Sources whose strict marketplace list has zero usable URLs (explicit `[]`, malformed, or every entry unsupported).
     pub marketplace_lockdown_sources: Vec<LockdownSource>,
     /// Marketplaces pinned via managed `extraKnownMarketplaces` (`name (url[@ref])`).
-    /// Always emitted, like the allowlists above, so the JSON schema is stable.
     pub managed_marketplaces: Vec<String>,
     /// Platform path for managed-settings.json vendor policy (None on unsupported OS).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub managed_settings_path: Option<String>,
     /// Whether that file exists on disk.
-    /// Always emitted, so a JSON consumer can distinguish "absent" from "present" without string-matching.
     pub managed_settings_exists: bool,
-    /// Whether the runtime actually loaded that file into policy (`exists` can be true while this is false for an unreadable/malformed file).
-    /// Always emitted.
+    /// Whether the runtime loaded that file into policy.
     pub managed_settings_active: bool,
     /// One row per active policy clamp; other requirements-pinned fields are not listed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub enforced: Vec<EnforcedPolicy>,
-    /// A Claude managed-settings `disableBypassPermissionsMode` request, which grok deliberately does not enforce ([`claude_bypass_lock_request`](xai_grok_workspace::permission::resolution::claude_bypass_lock_request)).
-    /// Always emitted so "no request" is distinguishable from an old binary.
+    /// A Claude managed-settings `disableBypassPermissionsMode` request, which grok deliberately does not enforce.
     pub claude_bypass_lock_advisory: bool,
 }
 
@@ -191,9 +179,7 @@ pub(crate) struct EnforcedPolicy {
     pub setting: EnforcedSetting,
     /// The enforced value.
     pub enabled: bool,
-    /// Provenance label: the full path of the policy file that set it
-    /// (requirements layer for alwaysApprove, managed-settings.json for
-    /// telemetry/feedback), or the diskless macOS MDM source id.
+    /// Provenance label: the full path of the policy file that set it.
     pub source: String,
 }
 
@@ -219,9 +205,8 @@ pub(crate) struct SkippedRule {
     pub reason: String,
 }
 
-/// Enterprise login-hardening policy resolved from `[grok_com_config]` (TOML and env).
-/// Shown so admins can verify the deployment loaded it.
-/// The team pin is admin policy, not a secret, so it is shown verbatim.
+/// Enterprise login-hardening policy resolved from `[grok_com_config]` (TOML
+/// and env). Shown so admins can verify the deployment loaded it.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LoginPolicyReport {
@@ -267,8 +252,7 @@ pub(crate) struct SkillEntry {
     /// Bare name this skill lost (`login`, `commit`, …).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collides_with: Option<String>,
-    /// Qualified invocation when [`Self::collides_with`] is set.
-    /// Absent when that name is contested too.
+    /// Qualified invocation when [`Self::collides_with`] is set. Absent when that name is contested too.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invocable_as: Option<String>,
 }
@@ -342,8 +326,7 @@ pub(crate) struct LspServerEntry {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConfigSources {
-    /// Built by the same resolvers the runtime uses (`ConfigLayers`, `requirements_layers`), so system and MDM layers and precedence are included.
-    /// A layer counts as empty only after the loader strips keys like version_overrides and fail_closed.
+    /// Built by the same resolvers the runtime uses (`ConfigLayers`, `requirements_layers`).
     pub layers: Vec<ConfigLayer>,
 }
 
@@ -354,8 +337,7 @@ pub(crate) struct ConfigLayer {
     /// Logical role of the layer: "system-managed", "managed", "user", "system-requirements", "requirements", "mdm", or "project".
     pub role: String,
     pub path: String,
-    /// "empty" or "parse error" when the on-disk file does not contribute effective config (after the real loader's processing).
-    /// Omitted when the layer is present and contributes.
+    /// "empty" or "parse error" when the on-disk file does not contribute effective config.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -398,8 +380,7 @@ async fn build_report(cwd: &Path) -> InspectReport {
         .ok()
         .and_then(|r| r.workdir().map(|p| p.to_path_buf()));
 
-    // Route through the live folder-trust gate rather than a raw store read; no session resolve has run for a one-shot `inspect`
-    // `remote = None`: env/user/managed opt-out is honored, but a remote kill-switch is not consulted on this report-only path
+    // Route through the live folder-trust gate rather than a raw store read.
     crate::agent::folder_trust::resolve_and_record(cwd, None, false);
     let project_trusted = crate::agent::folder_trust::project_scope_allowed(cwd);
 
@@ -410,8 +391,7 @@ async fn build_report(cwd: &Path) -> InspectReport {
         .unwrap_or_default();
     plugins_cfg.merge_claude_enabled_plugins(Some(cwd));
     let mut plugin_config = plugins_cfg.to_discovery_config();
-    // Project plugins gate on the same folder-trust verdict as hooks and the live session/doctor sites
-    // The listing's `enabled` flags therefore match runtime gating
+    // Project plugins gate on the same folder-trust verdict as hooks.
     let discovered_plugins = xai_grok_agent::plugins::discover_plugins(
         Some(cwd),
         &plugin_config,
@@ -581,8 +561,6 @@ async fn list_instructions(
         .and_then(|repo| repo.workdir().map(Path::to_path_buf))
         .unwrap_or_else(|| cwd.to_path_buf());
 
-    // Phase 2 cutoff: when imported, stop classifying `.claude/rules/` paths as rules
-    // Equivalent dirs come in via `[paths] extra_rule_dirs`
     let imported = crate::claude_import::is_claude_import_marked();
 
     configs
@@ -681,8 +659,7 @@ async fn list_permissions(cwd: &Path, project_trusted: bool) -> PermissionsRepor
         })
         .collect();
 
-    // Independent of the rule resolver: a managed-settings.json containing only
-    // e.g. disableBypassPermissionsMode still surfaces its path and effects.
+    // Independent of the rule resolver: a managed-settings.json containing only e.g. disableBypassPermissionsMode still surfaces its path.
     let managed_settings_path =
         crate::config::claude_managed_settings_probe_path().map(|p| p.display().to_string());
     let managed_settings_exists =
@@ -690,7 +667,8 @@ async fn list_permissions(cwd: &Path, project_trusted: bool) -> PermissionsRepor
     // `source_path` is set only when the file was read and parsed successfully, so it signals "actually loaded" rather than merely present
     let managed_settings_active = ms.features.source_path.is_some();
 
-    // The resolution carries the always-approve pin it applied, even when nothing resolves, so the enforced row and the resolved rules can't disagree about the pin. This covers only the pin: `ms.features` rows come from a separate `managed_settings()` read.
+    // The resolution carries the always-approve pin it applied, even when
+    // nothing resolves, so the enforced row.
     let resolution::ProvenanceResolution {
         yolo_lock,
         resolved,
@@ -810,9 +788,7 @@ fn list_hooks(
     discovered_plugins: &[xai_grok_agent::plugins::DiscoveredPlugin],
 ) -> Vec<HookEntry> {
     let all_on = xai_grok_tools::types::compat::CompatConfig::default();
-    // Route through the same assembly as session startup
-    // Config-layer hooks (config.toml / managed_config.toml / requirements.toml) then appear in `/hooks` status alongside file hooks
-    // Each carries its provenance name prefix
+    // Route through the same assembly as session startup Config-layer hooks (config.toml / managed_config.toml / requirements.toml).
     let config_layers = xai_grok_config::hook_config_layers();
     let (registry, _errors) =
         crate::util::hooks::assemble_hooks(&config_layers, git_root, &all_on, project_trusted);
@@ -821,8 +797,7 @@ fn list_hooks(
         .all_hooks()
         .into_iter()
         .map(|h| {
-            // Classify via the shared `hook_origin` (typed provenance and the file-tier name prefix), the same classifier telemetry uses
-            // That way admin/system hooks are not mislabeled and inspect cannot diverge from telemetry
+            // Classify via the shared `hook_origin` (typed provenance and the file-tier name prefix), the same classifier telemetry uses.
             use xai_grok_hooks::config::HookOrigin as O;
             // Config-layer hooks store the layer's directory in `source_dir`; rejoin the tier's filename so inspect shows the actual config file
             let config_file = |name: &str| h.source_dir.join(name);
@@ -1030,8 +1005,7 @@ fn list_plugins(discovered: &[xai_grok_agent::plugins::DiscoveredPlugin]) -> Vec
                 path: p.root.display().to_string(),
                 enabled: p.trusted,
                 provides: PluginProvides {
-                    // Count the SKILL.md files discovered (root-level or in subdirs), not the number of configured skill dirs
-                    // The reported count then matches what the skills registry loads
+                    // Count the SKILL.md files discovered (root-level or in subdirs).
                     skills: xai_grok_agent::plugins::registry::skill_md_paths(&p.skill_dirs).len(),
                     agents: p.agent_dirs.len(),
                     hooks: p.hooks_path.is_some(),
@@ -1092,7 +1066,7 @@ fn list_mcp_servers(
                 };
             let subject = crate::session::managed_mcp::mcp_subject(&server, &source, &project);
             // The verdict mirrors the merge's deny/allow and project-MCP pin
-            // so the report matches what actually loads.
+            // so the report matches what loads.
             let disabled_reason = match ms.mcp_verdict(&server, subject) {
                 resolution::McpVerdict::Blocked(reason) => Some(reason.to_string()),
                 resolution::McpVerdict::Allowed => None,
@@ -1153,9 +1127,7 @@ fn list_lsp_servers(
         &inline_names,
     );
 
-    // Folder-trust gate, display-only: inspect never spawns servers
-    // Mark the repo-local (project-scoped) entries a session would skip in an untrusted clone, so the listing matches the live gate
-    // `remote = None` mirrors `grok mcp doctor` (no loaded RemoteSettings in a standalone command)
+    // Folder-trust gate, display-only: inspect never spawns servers Mark the repo-local (project-scoped) entries a session would skip.
     crate::agent::folder_trust::resolve_and_record(cwd, None, false);
     let project_allowed = crate::agent::folder_trust::project_scope_allowed(cwd);
 
@@ -1263,9 +1235,7 @@ fn list_config_sources(cwd: &Path) -> ConfigSources {
         }
     }
 
-    // macOS MDM managed preferences: a synthetic, admin-forced requirements layer with no file on disk
-    // It comes from requirements_layers() (keyed on the synthetic label), and the in-memory value decides contribution rather than a path probe
-    // Absent on non-macOS or when no profile is forced
+    // macOS MDM managed preferences: a synthetic.
     let rt_layers = crate::config::requirements_layers();
     if let Some(mdm) = rt_layers
         .iter()
@@ -1369,7 +1339,6 @@ fn print_section<T>(
     Ok(())
 }
 
-/// Print items in a two-column layout: name on the left, source label on the right.
 fn print_columns<T>(
     out: &mut impl Write,
     title: &str,

@@ -1,5 +1,4 @@
 //! `[[campaigns]]` overlays. Priority (first id wins): requirements > remote > user > managed > system_managed.
-//! They apply after the layer merge.
 
 use serde::{Deserialize, Serialize};
 
@@ -36,8 +35,7 @@ pub fn take_campaigns(config: &mut toml::Value) -> Vec<ConfigOverrideEntry<Campa
     match take_patch_array::<CampaignMeta>(config, CAMPAIGNS_KEY) {
         Ok(entries) => entries,
         Err(_) => {
-            // Log only the category: a `toml::de::Error` Display echoes the offending value, so `campaigns = "sk-secret"` would leak into logs
-            // Mirrors `VersionOverrideError::redacted`
+            // Log only the category: a `toml::de::Error` Display echoes the offending value.
             tracing::warn!("campaigns: failed to deserialize (details omitted); ignoring entries");
             Vec::new()
         }
@@ -266,7 +264,6 @@ mod tests {
 
     #[test]
     fn apply_highest_priority_wins_on_leaf_conflict() {
-        // Two *distinct* ids both set models.default; the higher-priority source (earlier in the merged list) must win the leaf
         let req = [CampaignEntry {
             id: "req".into(),
             patch: models_default_patch("from-req"),
@@ -339,8 +336,8 @@ mod tests {
                 panic!("expected one campaign: {entries:?}");
             };
             assert_eq!(first.id, "c1");
-            // The id key (either spelling) must be consumed by the meta, never land in the patch
-            // A leaked key would deep-merge a junk top-level `id` into every effective config
+            // The id key (either spelling) must be consumed by the meta,
+            // never land in the patch A leaked key will deep-merge a junk.
             assert!(
                 first.patch.get("id").is_none() && first.patch.get("campaign_id").is_none(),
                 "id keys must not leak into the patch: {src}"

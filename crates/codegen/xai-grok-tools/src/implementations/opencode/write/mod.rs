@@ -1,6 +1,4 @@
 //! OpenCode `write` tool — writes entire file contents to disk.
-//!
-//! Creates parent directories as needed and emits `FileWritten` notifications.
 
 use crate::notification::types::FileWritten;
 
@@ -200,7 +198,7 @@ impl xai_tool_runtime::Tool for WriteTool {
         };
 
         // Counter span: lines written (diffed against prior content so an
-        // overwrite only counts the lines that actually changed).
+        // overwrite only counts the lines that changed).
         let (lines_added, lines_removed) =
             crate::types::output::line_diff(&old_string, &new_string);
         tracing::info_span!(
@@ -535,7 +533,5 @@ mod tests {
 
     #[test]
     fn notification_fields() {
-        // Notification verification requires capturing handle.
-        // Covered at integration layer.
     }
 }

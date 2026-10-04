@@ -67,7 +67,6 @@ async fn drain_interjections_pushes_synthetic_user_message_after_tool_result() {
         .await;
 }
 
-/// Each buffered interjection drains as its own standalone synthetic user message, in FIFO order: Ctrl+Enter twice yields two tagged user rows.
 /// None of them may touch the tool result at the conversation tail.
 #[tokio::test]
 async fn drain_multiple_interjections_pushes_one_user_message_each_in_order() {

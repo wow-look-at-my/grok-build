@@ -1,7 +1,4 @@
 //! Self-contained terminal renderer for Mermaid diagrams.
-//!
-//! Renders `graph`/`flowchart`, `sequenceDiagram`, and `stateDiagram` blocks as Unicode box-drawing art.
-//! Unsupported diagram types fall back to the raw source in a framed box.
 
 use std::collections::HashMap;
 
@@ -32,9 +29,7 @@ const GAP_Y: usize = 2;
 /// Node labels wrap to at most this many display columns per line, and at most this many lines (overflow is truncated with an ellipsis).
 const WRAP_WIDTH: usize = 24;
 const MAX_LINES: usize = 4;
-/// Identifier-boundary characters preferred as break points when a single word is too wide to fit, so it is not sliced mid-segment.
-/// Mirrors `TOKEN_BREAK_CHARS` in `third_party/mermaid-to-svg/src/text_wrap.rs`.
-/// The two renderers are deliberately independent, so keep these two in sync.
+/// Identifier-boundary characters preferred as break points when a single word is too wide to fit.
 const LABEL_BREAK_CHARS: [char; 4] = ['_', '-', '.', '/'];
 /// Sentinel marking the trailing column of a wide glyph (never emitted).
 const CONT: char = '\u{0}';
@@ -500,8 +495,7 @@ fn clean_label(raw: &str) -> String {
     } else {
         unquoted.to_string()
     };
-    // Decode after tag-stripping so `<b>` is removed as markup while `&lt;b&gt;` survives as a literal `<b>`
-    // One decode at the single return covers both paths
+    // Decode after tag-stripping so `<b>` is removed as markup while `&lt;b&gt;` survives as a literal `<b>` One decode.
     decode_html_entities(&text)
 }
 
@@ -1366,9 +1360,6 @@ fn split_er_relationship(st: &str) -> Option<(&str, Option<&str>)> {
 }
 
 /// Split a 6-byte ER relationship token into its cardinality and line parts.
-///
-/// The guard below rejects anything that is not exactly six ASCII bytes, so
-/// every byte offset in the body is a char boundary.
 #[allow(clippy::string_slice)] // the body only runs on an all-ASCII token
 fn parse_er_op(tok: &str) -> Option<(&'static str, &'static str, LineKind)> {
     if !tok.is_ascii() || tok.len() != 6 {
@@ -4182,8 +4173,8 @@ mod tests {
 
     #[test]
     fn generic_types_are_not_stripped_as_html() {
-        // `<String>` / `<i32>` / `<id>` look like tags but are not HTML formatting tags, so they must survive
-        // Only b/i/code/span/… etc. and <br> are stripped.
+        // `<String>` / `<i32>` / `<id>` look like tags but are not HTML
+        // formatting tags.
         let g = parse_graph(
             "flowchart TD\n  A[\"Returns Vec<String>\"] --> B[\"Option<i32> for <id>\"]",
         )
@@ -4229,8 +4220,7 @@ mod tests {
 
     #[test]
     fn direct_push_sinks_decode_entities() {
-        // Entities contain `;`, which split_statements treats as a separator, so they reach a sink intact only inside quotes
-        // Assert through the real parsers where such quoting works
+        // Entities contain `;`, which split_statements treats as a separator.
         let g = parse_state(
             "stateDiagram-v2\n  state \"work &lt;job&gt;\" as J\n  Idle --> Run: \"on &lt;go&gt;\"\n  Run: \"d &lt;e&gt;\"",
         )
@@ -4262,8 +4252,7 @@ mod tests {
         assert!(s.items.iter().any(|it| matches!(it,
             SeqItem::Divider { text } if text.contains("c <x>") && !text.contains("&lt;"))));
 
-        // Class members and ER attributes have no clean quoted form (splitter fragments unquoted `;`; ER drops quoted text as a comment)
-        // Exercise those decodes directly at push_member and push_er_attribute
+        // Class members and ER attributes have no clean quoted form (splitter fragments unquoted `;`; ER drops quoted text as a comment).
         let mut member = ClassInfo::default();
         push_member(&mut member, "+run &lt;R&gt;");
         assert_eq!(member.attrs, vec!["+run <R>".to_string()]);
@@ -4429,7 +4418,7 @@ mod tests {
                 "line must break on a boundary: {line:?}"
             );
         }
-        // Nothing is lost: the wrapped lines reconstruct the original word.
+        // Nothing is lost: the wrapped lines reconstruct the word.
         assert_eq!(lines.concat(), "mark_filter_restore_context");
     }
 
@@ -4439,15 +4428,13 @@ mod tests {
         let lines = wrap_label(&token, WRAP_WIDTH, MAX_LINES);
         // The token has no boundary char, so the wrap hard-breaks per char across multiple lines
         assert!(lines.len() >= 2, "must hard-break: {lines:?}");
-        // 40 narrow chars fit in MAX_LINES or fewer lines, so nothing is truncated or lost
         assert_eq!(lines.concat(), token);
     }
 
     #[test]
     fn flowchart_long_identifier_breaks_on_boundary_not_mid_segment() {
         let out = plain("graph TD\n A[mark_filter_restore_context] --> B[Done]");
-        // The boundary-respecting pieces are present in the rendered art
-        // `wrap_label_breaks_long_identifier_on_boundary` proves the break is on a boundary and lossless, so no exact-offset check here
+        // The boundary-respecting pieces are present.
         assert!(out.contains("mark_filter_restore_"), "{out}");
         assert!(out.contains("context"), "{out}");
     }
@@ -4466,7 +4453,7 @@ mod tests {
             lines.iter().skip(1).any(|l| !l.contains(LABEL_BREAK_CHARS)),
             "a later line must be a per-char break: {lines:?}"
         );
-        // 43 cols is less than MAX_LINES*WRAP_WIDTH, so it must not truncate; fully lossless
+        // Cols is less than MAX_LINES*WRAP_WIDTH, so it must not truncate; fully lossless
         assert_eq!(lines.concat(), token);
     }
 

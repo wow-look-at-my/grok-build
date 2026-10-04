@@ -13,8 +13,8 @@ pub struct TurnInputFragment {
     pub text: String,
 }
 
-/// Contributes model-visible input fragments into the active turn when the host pulls at its sampling chokepoint.
-/// Fragments land in the same turn, never a new one.
+/// Contributes model-visible input fragments into the active turn when the
+/// host pulls at its sampling chokepoint.
 #[async_trait]
 pub trait TurnInputContributor: Send + Sync {
     async fn contribute_turn_input(&self, _input: &TurnInputContext) -> Vec<TurnInputFragment> {

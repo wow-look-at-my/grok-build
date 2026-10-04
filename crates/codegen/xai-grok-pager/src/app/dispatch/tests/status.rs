@@ -9,7 +9,7 @@ use super::*;
 fn send_while_idle_with_nonempty_shared_queue_routes_to_server() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
-    // Two prompts already queued on the server (as a broadcast would leave things): populate the authoritative map and mirror it into the agent
+    // Prompts already queued on the server (as a broadcast would leave things): populate the authoritative map and mirror it into the agent
     app.push_optimistic_prompt_echo("test-session", "q1", "a", "prompt");
     app.push_optimistic_prompt_echo("test-session", "q2", "b", "prompt");
     {
@@ -46,7 +46,6 @@ fn send_while_idle_with_nonempty_shared_queue_routes_to_server() {
         agent.session.current_prompt_id.is_none(),
         "must not set current_prompt_id locally for a server-queued prompt"
     );
-    // Echoed into the shared queue behind the existing entries (position 3)
     let q = app
         .shared_prompt_queue("test-session")
         .expect("optimistic echo present");
@@ -418,7 +417,6 @@ fn coding_data_sharing_failed_scrubs_long_error_messages() {
     let mut app = test_app_with_agent();
     app.coding_data_retention_opt_out = true;
     let id = AgentId(0);
-    // A roughly 500-char error simulating a stack trace / HTML 502 page
     let huge_error = "a".repeat(500);
     let seq = app.coding_data_write_seq;
     let _ = dispatch(
@@ -530,10 +528,10 @@ fn scrub_error_for_toast_unit() {
     assert_eq!(scrub_error_for_toast(""), "");
     assert_eq!(scrub_error_for_toast("ok"), "ok");
     assert_eq!(scrub_error_for_toast("network timeout"), "network timeout");
-    // At-threshold (120 chars) still passes through.
+    // At-threshold (chars) still passes through.
     let len_120 = "x".repeat(120);
     assert_eq!(scrub_error_for_toast(&len_120), len_120);
-    // Over-threshold (121 chars) is cut, counting chars, not bytes.
+    // Over-threshold (chars) is cut, counting chars, not bytes.
     let len_121 = "x".repeat(121);
     assert_eq!(
         scrub_error_for_toast(&len_121),
@@ -553,8 +551,9 @@ fn scrub_error_for_toast_unit() {
         scrub_error_for_toast("hi\rthere"),
         "server error (see logs for details)"
     );
-    // Format-category (Cf) chars also trigger scrub: bidi overrides, zero-width joiner / space, BOM
-    // This prevents Trojan-Source-style spoofing: a toast that reads as one thing while the bytes encode another via a RIGHT-TO-LEFT OVERRIDE
+    // Format-category (Cf) chars also trigger scrub: bidi overrides,
+    // zero-width joiner / space, BOM This prevents Trojan-Source-style
+    // spoofing.
     assert_eq!(
         scrub_error_for_toast("opt\u{202E}-out"),
         "server error (see logs for details)",
@@ -778,7 +777,7 @@ fn hydrated_denial_locks_open_settings_row_and_closes_chooser() {
     assert!(app.coding_data_retention_opt_out);
 }
 
-/// A late answer for the previous account must not land on the new one; two users without an email are not the same account, nor is the same user re-signed-in as a User principal.
+/// A late answer for the previous account must not land on the new one; users without an email are not the same account, nor is the same user re-signed-in as a User principal.
 #[test]
 fn hydration_answer_for_another_account_is_dropped() {
     for (asked_email, now_email, now_team_principal) in [
@@ -1138,9 +1137,6 @@ fn superseded_opt_in_success_is_kept_when_later_opt_out_fails() {
     assert!(app.coding_data_pending_write.is_none());
 }
 
-/// Covered: write 2 succeeds and the stale write 1 reply (either kind) must not set the mirror or toast; both writes fail and
-/// write 2 must fall back to the opt-in it inherited from write 1, not to write 1's optimistic out.
-/// Not covered: write 2 fails, then write 1 succeeds — the pending write is already gone, so that success is dropped (deferred).
 #[test]
 fn stale_reply_after_newer_success_or_double_failure_keeps_opt_in() {
     let welcome_toast = |app: &AppView| app.welcome_toast.as_ref().map(|(m, _)| m.clone());
@@ -1148,7 +1144,6 @@ fn stale_reply_after_newer_success_or_double_failure_keeps_opt_in() {
         let mut app = privacy_banner_ready_app();
         app.coding_data_retention_opt_out = false;
 
-        // Write 1: Settings opt-out from currently in.
         let write1 = dispatch(Action::SetCodingDataSharing { opted_in: false }, &mut app);
         assert!(
             write1.iter().any(|e| matches!(
@@ -1162,7 +1157,6 @@ fn stale_reply_after_newer_success_or_double_failure_keeps_opt_in() {
         );
         assert_eq!(app.coding_data_write_seq, 1);
 
-        // Write 2: the user opts in from settings, and it answers first.
         let _ = dispatch(Action::SetCodingDataSharing { opted_in: true }, &mut app);
         assert_eq!(app.coding_data_write_seq, 2);
         let newer_reply = if newer_ok {
@@ -1186,7 +1180,6 @@ fn stale_reply_after_newer_success_or_double_failure_keeps_opt_in() {
         assert_eq!(app.privacy_banner_acked.is_some(), newer_ok);
         let toast_before = welcome_toast(&app);
 
-        // Write 1 finally answers, either way it can.
         let stale_reply = if stale_failed {
             TaskResult::CodingDataSharingFailed {
                 agent_id: AgentId(0),

@@ -1,15 +1,4 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
-//
-// Wire-format coverage for keyboard selection: raw escape sequences are injected exactly as terminals emit them
-// That proves the chain from crossterm parse through key routing to the textarea per ENCODING, the thing that actually varies across terminals
-// Tiers:
-// - `CSI 1;{m}{ABCDHF}` modified arrows and Home/End (m = 1 + shift1/alt2/ctrl4/super8):
-//   Terminal.app, iTerm2, VTE, Windows Terminal, tmux passthrough
-// - `CSI {code};{m}u` kitty CSI-u letters: KKP terminals only (Ghostty, Kitty, WezTerm)
-//   This is the only tier that can carry SUPER, so all Cmd chords live here; non-KKP emulators never produce these bytes (inert, not broken)
-// - `ESC [ Z` BackTab and `\t`: everywhere.
-// Selections aren't visible in `screen_contents()`, so cases assert through behavior
-// Typing over a highlight replaces it; typing after a drop inserts
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -72,7 +61,7 @@ fn select_and_type_over(
     );
 }
 
-/// `CSI 1;2D` (Shift+Left), the universal tier; five presses select "world".
+/// `CSI 1;2D` (Shift+Left), the universal tier; presses select "world".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn legacy_shift_arrow_selects_and_type_replaces() {
@@ -241,8 +230,8 @@ async fn backtab_with_selection_cycles_mode_and_drops_highlight() {
         .wait_for_text("Switched to mode: Plan", Duration::from_secs(10))
         .expect("mode cycled on the same press");
     harness.inject_keys(b"X").expect("type after BackTab");
-    // The highlight was dropped, so "X" INSERTS at the former head (start of "beta" after a leftward extension) instead of replacing the word
-    // A surviving highlight would produce "alpha X" with "beta" gone
+    // The highlight was dropped, so "X" INSERTS at the head (start of "beta"
+    // after a leftward extension) instead.
     harness
         .wait_for_text("alpha Xbeta", Duration::from_secs(5))
         .expect("char inserted at the head, not replaced — highlight was dropped");

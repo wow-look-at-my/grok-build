@@ -3,8 +3,7 @@
 
     #[test]
     fn voice_kill_switch_clears_pending_spawn() {
-        // A `/voice` queued a lazy spawn; then the remote flag turns off
-        // The teardown must drop the queued spawn so the event loop won't consume it and show a misleading "could not start" toast
+        // A `/voice` queued a lazy spawn; then the remote flag turns off The teardown must drop the queued spawn so the event loop won't consume it.
         let mut app = make_app_with_agent("sess-1");
         app.voice_mode_enabled = true;
         app.voice_ui_active = true;
@@ -134,8 +133,7 @@
 
     #[test]
     fn settings_update_clearing_group_tool_verbs_reverts_to_default() {
-        // Expected values come from the same chain the handler resolves, so the test holds regardless of host config/env
-        // A local `[ui]` or env override legitimately beats the remote tier on both legs
+        // Expected values come from the same chain the handler resolves.
         let requirements = xai_grok_shell::config::load_merged_requirements();
         let user_config = xai_grok_shell::config::load_from_disk().ok();
         let managed_config = xai_grok_shell::config::load_managed_config().ok();
@@ -167,9 +165,7 @@
             "remote Some(true) must re-resolve into the cache"
         );
 
-        // Seed the cache opposite to the expected outcome (the latched remote enable) so only a real re-resolve can pass
-        // The update must revert it to the local/default resolution instead of skipping the field
-        // An old payload without the field takes this same path
+        // Seed the cache opposite to the expected outcome (the latched remote enable) so only a real re-resolve can pass The update must revert it.
         crate::appearance::cache::set_group_tool_verbs(!expect_cleared);
         assert!(handle_ext_notification(
             &group_tool_verbs_settings_update(None),
@@ -186,8 +182,7 @@
 
     #[test]
     fn settings_update_clearing_collapsed_edit_blocks_reverts_to_default() {
-        // Expected values come from the same chain the handler resolves, so the test holds regardless of host config/env
-        // A local `[ui]` or env override legitimately beats the remote tier on both legs
+        // Expected values come from the same chain the handler resolves.
         let requirements = xai_grok_shell::config::load_merged_requirements();
         let user_config = xai_grok_shell::config::load_from_disk().ok();
         let managed_config = xai_grok_shell::config::load_managed_config().ok();
@@ -219,9 +214,7 @@
             "remote Some(true) must re-resolve into the cache"
         );
 
-        // Seed the cache opposite to the expected outcome (the latched remote enable) so only a real re-resolve can pass
-        // The update must revert it to the local/default resolution instead of skipping the field
-        // An old payload without the field takes this same path
+        // Seed the cache opposite to the expected outcome (the latched remote enable) so only a real re-resolve can pass The update must revert it.
         crate::appearance::cache::set_collapsed_edit_blocks(!expect_cleared);
         assert!(handle_ext_notification(
             &collapsed_edit_blocks_settings_update(None),
@@ -263,8 +256,7 @@
             &mut app
         ));
         if !crate::appearance::cache::load_collapsed_edit_blocks() {
-            // A host-level env/config override outranked the remote value, so no real flip occurred and the re-fold didn't run
-            // Nothing to assert on this machine (CI runs with clean layers)
+            // A host-level env/config override outranked the remote value.
             return;
         }
         assert_eq!(
@@ -303,8 +295,7 @@
             &mut app
         ));
         if crate::appearance::cache::load_group_tool_verbs() {
-            // A host-level env/config override outranked the remote value, so no real flip occurred and the cleanup path didn't run
-            // Nothing to assert on this machine (CI runs with clean layers)
+            // A host-level env/config override outranked the remote value.
             return;
         }
         let sb = &mut app.agents.get_mut(&AgentId(0)).unwrap().scrollback;
@@ -322,15 +313,13 @@
 
     #[test]
     fn auto_gate_killswitch_clears_all_agents_regardless_of_active_mirror() {
-        // Two agents both in auto; the active tab's global mirror reads "ask" (a tab switch or Shift+Tab re-anchored it away from auto)
-        // A mid-session gate kill-switch (`auto_permission_mode_enabled=false`) must clear the per-session auto flag on BOTH agents
-        // The old code gated this fan-out on `current_ui.permission_mode == "auto"`, so it skipped background agents
+        // Agents both in auto; the active tab's global mirror reads "ask" (a tab switch or Shift+Tab re-anchored it away from auto).
         let mut app = make_app_two_agents();
         app.auto_mode_gate = true;
         for agent in app.agents.values_mut() {
             agent.session.auto_mode = true;
         }
-        // Active tab's mirror is NOT "auto", the old bug's skip condition
+        // Active tab's mirror is NOT "auto", the bug's skip condition
         app.current_ui.permission_mode = Some("ask".into());
 
         let killswitch = acp::ExtNotification::new(
@@ -354,12 +343,10 @@
 
     #[test]
     fn auto_gate_killswitch_notifies_agents_to_leave_auto() {
-        // The kill-switch must tell live sessions to leave Auto, else the agent keeps classifier-approving while the UI shows "Ask"
-        // Every live Auto tab receives its own notification
-        // It omits `yolo_mode` so a sibling always-approve tab is preserved
+        // The kill-switch must tell live sessions to leave Auto.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = AppView::new(tx, ModelState::default(), Vec::new(), crate::render::draw::EscapeWriter::disconnected());
-        // Two auto agents and one always-approve sibling, all with live sessions
+        // Auto agents and one always-approve sibling, all with live sessions
         app.agents.insert(AgentId(0), make_agent(Some("sess-0")));
         app.agents.insert(AgentId(1), make_agent(Some("sess-1")));
         app.agents.insert(AgentId(2), make_agent(Some("sess-yolo")));

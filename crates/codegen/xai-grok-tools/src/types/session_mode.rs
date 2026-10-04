@@ -1,13 +1,7 @@
 //! Canonical session-mode enum shared between the agent and pager.
-//!
-//! ACP carries the mode as an opaque [`acp::SessionModeId`] (`Arc<str>`).
-//! This enum is the typed counterpart both crates parse into / serialize
-//! out of, so plan-mode state is driven by the closed set of variants
-//! instead of by ad-hoc string matching at each boundary.
 
 /// Wire representation is the snake-cased variant name (`default`, `plan`,
-/// `ask`) via [`strum`]. Unknown ids parse back to [`SessionMode::Default`]
-/// so newer modes added on the agent side don't brick older pagers.
+/// `ask`) via [`strum`].
 #[derive(Debug, Clone, PartialEq, Eq, strum::EnumString, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum SessionMode {

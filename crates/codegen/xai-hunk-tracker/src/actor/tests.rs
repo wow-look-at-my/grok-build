@@ -180,9 +180,7 @@ impl TestHarness {
         let _ = self.handle.get_all_hunks().await;
     }
 
-    /// Create a `feature` branch with `picks` one-file commits off the current
-    /// HEAD, advance the base branch by one commit (so a rebase has work), and
-    /// leave `feature` checked out. Returns the base branch name.
+    /// Create a `feature` branch with `picks` one-file commits off the current HEAD, advance the base branch by one commit (so a rebase has work).
     fn feature_branch(&self, picks: usize) -> String {
         xai_test_utils::git::make_feature_branch(&self.working_dir, picks)
     }
@@ -292,7 +290,6 @@ async fn test_multiple_edits_different_regions_separate_hunks() {
         "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n",
     );
 
-    // Edit line 2
     harness.agent_write(
         "foo.rs",
         "line 1\nmodified 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n",
@@ -300,7 +297,6 @@ async fn test_multiple_edits_different_regions_separate_hunks() {
     );
     harness.settle().await;
 
-    // Edit line 9 (far enough to be separate)
     harness.agent_write(
         "foo.rs",
         "line 1\nmodified 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nmodified 9\nline 10\n",
@@ -444,11 +440,9 @@ async fn test_hunks_have_prompt_index() {
 async fn test_session_summary_groups_by_turn() {
     let mut harness = TestHarness::new();
 
-    // Turn 0: create file1
     harness.agent_write("file1.rs", "turn 0 content\n", 0);
     harness.settle().await;
 
-    // Turn 1: create file2
     harness.agent_write("file2.rs", "turn 1 content\n", 1);
     harness.settle().await;
 
@@ -580,7 +574,6 @@ line 10
 "#,
     );
 
-    // Turn 0 change on line 2
     harness.agent_write(
         "mixed_summary.rs",
         r#"line 1
@@ -598,7 +591,6 @@ line 10
     );
     harness.settle().await;
 
-    // Turn 1 change on line 9 (far enough to be separate)
     harness.agent_write(
         "mixed_summary.rs",
         r#"line 1
@@ -786,7 +778,6 @@ line 10
 "#,
     );
 
-    // Agent modifies line 2 (prompt_index = 0)
     harness.agent_write(
         "foo.rs",
         r#"line 1
@@ -816,7 +807,6 @@ line 10
         _ => panic!("Expected AgentEdit source before external edit"),
     }
 
-    // External edit to a DIFFERENT part of the file (line 9)
     harness.external_write(
         "foo.rs",
         r#"line 1
@@ -840,7 +830,7 @@ line 10
         "Should have 2 hunks: agent + external"
     );
 
-    // Find the original agent hunk by ID
+    // Find the agent hunk by ID
     let agent_hunk = hunks_after
         .iter()
         .find(|h| h.id == agent_hunk_id)
@@ -873,7 +863,6 @@ line 10
     // Verify the new hunk is ExternalEditOnAgentFile (since the file is now an agent-tracked file)
     match &external_hunk.source {
         crate::types::HunkSource::ExternalEditOnAgentFile => {
-            // Good - new hunk on agent file should be ExternalEditOnAgentFile
         }
         crate::types::HunkSource::External => {
             panic!("New external hunk on agent file should have ExternalEditOnAgentFile source");
@@ -1075,7 +1064,6 @@ line 10
 "#,
     );
 
-    // Make 2 separate changes
     harness.agent_write(
         "multi.rs",
         r#"line 1
@@ -1161,7 +1149,6 @@ line 12
 "#,
     );
 
-    // Make 3 separate changes
     harness.agent_write(
         "seq.rs",
         r#"line 1
@@ -1184,7 +1171,6 @@ line 12
     let hunks = harness.get_all_hunks().await;
     assert_eq!(hunks.len(), 3, "Should have 3 hunks");
 
-    // Accept hunk A
     let hunk_a = hunks
         .iter()
         .find(|h| h.new_text.contains("HUNK_A"))
@@ -1250,7 +1236,7 @@ line 12
 "#,
     );
 
-    // Make 3 changes: we'll accept first, reject second, leave third
+    // Make multiple changes: we'll accept first, reject second, leave third
     harness.agent_write(
         "mixed.rs",
         r#"line 1
@@ -1335,7 +1321,6 @@ line 5
 "#,
     );
 
-    // Turn 0: Agent edits line 2
     harness.agent_write(
         "attribution.rs",
         r#"line 1
@@ -1348,7 +1333,6 @@ line 5
     );
     harness.settle().await;
 
-    // Turn 1: Agent edits the SAME region (overlapping change)
     harness.agent_write(
         "attribution.rs",
         r#"line 1
@@ -1498,7 +1482,6 @@ async fn test_repro_bulk_reject_mixed_hunk_types() {
         "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n",
     );
 
-    // Insert before line 2, modify line 5, delete line 9
     harness.agent_write(
         "mixed_reject.rs",
         "line 1\nINSERTED\nline 2\nline 3\nline 4\nMODIFIED_5\nline 6\nline 7\nline 8\nline 10\n",
@@ -1532,8 +1515,8 @@ async fn test_repro_bulk_reject_mixed_hunk_types() {
     assert_eq!(remaining.len(), 0, "All hunks should be rejected");
 }
 
-/// Multi-file bulk reject: reject all hunks across 3 files.
-/// Verifies every file is reverted independently.
+/// Multi-file bulk reject: reject all hunks across multiple
+/// files. Verifies every file is reverted independently.
 #[tokio::test]
 async fn test_repro_bulk_reject_multiple_files() {
     let mut harness = TestHarness::new();
@@ -1582,7 +1565,7 @@ async fn test_repro_bulk_reject_multiple_files() {
 
 /// Bulk accept on a file where only SOME hunks belong to the target turn. Non-target hunks must survive the batch
 /// operation. Note: When the agent writes a full file, recompute_hunks assigns all new hunks the source of that write. To
-/// get hunks on different turns in the same file, we use two separate files.
+/// get hunks on different turns in the same file, we use separate files.
 #[tokio::test]
 async fn test_repro_turn_action_preserves_other_turns() {
     let mut harness = TestHarness::new();
@@ -1590,11 +1573,9 @@ async fn test_repro_turn_action_preserves_other_turns() {
     harness.write_baseline("turn0.rs", "line 1\nline 2\nline 3\n");
     harness.write_baseline("turn1.rs", "line 1\nline 2\nline 3\n");
 
-    // Turn 0: change file turn0.rs
     harness.agent_write("turn0.rs", "line 1\nTURN0\nline 3\n", 0);
     harness.settle().await;
 
-    // Turn 1: change file turn1.rs
     harness.agent_write("turn1.rs", "line 1\nTURN1\nline 3\n", 1);
     harness.settle().await;
 
@@ -1605,7 +1586,6 @@ async fn test_repro_turn_action_preserves_other_turns() {
         "Setup: should have 2 hunks from different turns"
     );
 
-    // Accept only turn 0
     let result = harness.handle.turn_action(0, HunkAction::Accept).await;
     assert!(
         result.is_ok(),
@@ -1700,9 +1680,8 @@ async fn test_git_baseline_takes_precedence_over_previous_content() {
     // Commit a baseline to git
     harness.write_baseline("committed.txt", "original line 1\noriginal line 2\n");
 
-    // Agent edits the file. previous_content doesn't match git HEAD
-    // (e.g., maybe the file was externally modified before this write).
-    // The git HEAD baseline should be used, NOT previous_content.
+    // Agent edits the file. previous_content doesn't match git HEAD (e.g.,
+    // maybe the file was externally modified before this write).
     harness.agent_write_with_previous(
         "committed.txt",
         "original line 1\nmodified line 2\n",
@@ -1760,8 +1739,7 @@ async fn test_accept_all_then_git_restore_shows_clean() {
     let hunks = harness.get_all_hunks().await;
     assert!(hunks.is_empty(), "Should have no hunks after accepting all");
 
-    // Simulate `git restore .` — write git HEAD content back to disk
-    // and notify the hunk tracker via handle_file_change
+    // Simulate `git restore .` — write git HEAD content back to disk and notify the hunk tracker.
     harness.external_write("restore_test.rs", baseline);
     harness.settle().await;
 
@@ -1787,7 +1765,7 @@ async fn test_accept_then_external_edit_preserves_accept() {
 
     harness.write_baseline("preserve_test.rs", baseline);
 
-    // Agent modifies the file (2 hunks)
+    // Agent modifies the file (hunks)
     harness.agent_write("preserve_test.rs", modified, 0);
     harness.settle().await;
 
@@ -1804,8 +1782,7 @@ async fn test_accept_then_external_edit_preserves_accept() {
     harness.external_write("preserve_test.rs", externally_edited);
     harness.settle().await;
 
-    // The accepted hunks should NOT reappear. Only the new external
-    // addition ("line 6 new") should show as a hunk.
+    // The accepted hunks should NOT reappear. Only the new external addition ("line 6 new") should show as a hunk.
     let hunks = harness.get_all_hunks().await;
     assert_eq!(
         hunks.len(),
@@ -1833,7 +1810,6 @@ async fn test_binary_file_survives_baseline_refresh() {
     git(&harness.working_dir, &["commit", "-m", "add dummy"]);
 
     // Write a binary file externally (AllDirty mode tracks it).
-    // This file is NOT committed, so git status reports it as untracked/dirty.
     let binary_path = harness.working_dir.join("data.bin");
     std::fs::write(&binary_path, b"\x00\x01\x02\x03\xff").unwrap();
     harness.handle.handle_file_change(binary_path.clone());
@@ -1849,7 +1825,6 @@ async fn test_binary_file_survives_baseline_refresh() {
     );
 
     // Trigger refresh_all_baselines with a HEAD change (commit unrelated file).
-    // The binary file stays uncommitted/dirty so it should survive.
     let txt2 = harness.working_dir.join("other.txt");
     std::fs::write(&txt2, "trigger\n").unwrap();
     git(&harness.working_dir, &["add", "other.txt"]);
@@ -1874,12 +1849,10 @@ async fn test_content_changed_emitted_on_overlapping_agent_edit() {
     // Create a baseline file with some content
     harness.write_baseline("content.rs", "line1\nline2\nline3\nline4\nline5\n");
 
-    // Agent modifies lines 2-3 (prompt 0)
     harness.agent_write("content.rs", "line1\nchanged2\nchanged3\nline4\nline5\n", 0);
     harness.settle().await;
     harness.drain_events(); // consume initial events
 
-    // Agent edits the same region again, expanding it (prompt 1)
     harness.agent_write(
         "content.rs",
         "line1\nchanged2_v2\nchanged3_v2\nnew_line\nline4\nline5\n",
@@ -1932,7 +1905,6 @@ async fn test_content_changed_external_edit_on_agent_hunk() {
 
     harness.write_baseline("ext.rs", "aaa\nbbb\nccc\n");
 
-    // Agent modifies line 2
     harness.agent_write("ext.rs", "aaa\nBBB\nccc\n", 0);
     harness.settle().await;
     harness.drain_events();
@@ -1979,17 +1951,16 @@ async fn test_content_changed_external_edit_on_agent_hunk() {
 async fn test_content_changed_prev_lookup_uses_overlap_fallback() {
     let mut harness = TestHarness::new();
 
-    // Baseline with 20 lines
+    // Baseline with several lines
     let baseline: String = (1..=20).map(|i| format!("line{i}\n")).collect();
     harness.write_baseline("overlap.rs", &baseline);
 
-    // Agent writes: change line 3 and line 17 (two separate hunks far apart)
     let mut v1: Vec<String> = (1..=20).map(|i| format!("line{i}\n")).collect();
     if let Some(slot) = v1.get_mut(2) {
-        *slot = "CHANGED3\n".to_string(); // line 3
+        *slot = "CHANGED3\n".to_string();
     }
     if let Some(slot) = v1.get_mut(16) {
-        *slot = "CHANGED17\n".to_string(); // line 17
+        *slot = "CHANGED17\n".to_string();
     }
     harness.agent_write("overlap.rs", &v1.join(""), 0);
     harness.settle().await;
@@ -2003,8 +1974,6 @@ async fn test_content_changed_prev_lookup_uses_overlap_fallback() {
     );
     harness.drain_events();
 
-    // Agent writes again: change line 3 AND line 4 (expanding the first hunk
-    // so it's different content). Also change line 17 differently.
     let mut v2: Vec<String> = (1..=20).map(|i| format!("line{i}\n")).collect();
     if let Some(slot) = v2.get_mut(2) {
         *slot = "CHANGED3_V2\n".to_string();
@@ -2020,9 +1989,8 @@ async fn test_content_changed_prev_lookup_uses_overlap_fallback() {
 
     let events = harness.drain_events();
 
-    // We should see HunkContentChanged events with prev_lines_added > 0.
     // At least one of them should have come from the overlap fallback path
-    // (the old hunk whose ID was claimed by a different new hunk).
+    // (the hunk whose ID was claimed by a different new hunk).
     let content_changed: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
@@ -2134,8 +2102,7 @@ async fn test_transition_too_large_to_full_external_edit() {
     harness.handle.handle_file_change(file_path.clone());
     let _ = harness.handle.get_all_hunks().await;
 
-    // Verify: file still tracked, but still no hunks because baseline is TooLarge
-    // (can't diff Full current against TooLarge baseline)
+    // Verify: file still tracked.
     let tracked = harness.handle.get_all_tracked_paths().await;
     assert!(
         tracked.contains(&file_path),
@@ -2251,7 +2218,6 @@ async fn test_too_large_survives_baseline_refresh() {
     );
 
     // Trigger refresh_all_baselines by making a git commit (on other files).
-    // huge.txt stays uncommitted so it remains dirty.
     let other = harness.working_dir.join("other.txt");
     std::fs::write(&other, "x\n").unwrap();
     git(&harness.working_dir, &["add", "other.txt"]);
@@ -2604,7 +2570,7 @@ async fn test_hunks_cleared_when_file_becomes_too_large() {
         "File should remain tracked even when TooLarge"
     );
 
-    // Trying to accept the old hunk should fail with HunkNotFound
+    // Trying to accept the hunk should fail with HunkNotFound
     let result = harness
         .handle
         .hunk_action(hunk_id, HunkAction::Accept)
@@ -2650,7 +2616,7 @@ async fn test_hunks_cleared_when_file_becomes_binary() {
         "File should remain tracked even when Binary"
     );
 
-    // Trying to reject the old hunk should fail with HunkNotFound
+    // Trying to reject the hunk should fail with HunkNotFound
     let result = harness
         .handle
         .hunk_action(hunk_id, HunkAction::Reject)
@@ -3041,8 +3007,7 @@ async fn test_deleted_file_cleaned_up_after_commit() {
     harness.handle.refresh_all_baselines();
     harness.settle().await;
 
-    // Should be cleaned up: both baseline (Missing in new HEAD) and
-    // current (Missing on disk) are Missing → is_clean → removed
+    // Should be cleaned up: both baseline (Missing in new HEAD) and current (Missing on disk).
     let hunks_after = harness.get_all_hunks().await;
     assert!(
         hunks_after.is_empty(),
@@ -3113,8 +3078,7 @@ async fn test_soft_reset_staged_new_file_visible() {
     harness.handle.refresh_all_baselines();
     harness.settle().await;
 
-    // ast.py should now be visible: it's on disk and in the index,
-    // but not in the new HEAD → should show as a new file
+    // ast.py should now be visible: it's on disk and in the index.
     let hunks = harness.get_all_hunks().await;
     assert_eq!(
         hunks.len(),
@@ -3153,8 +3117,7 @@ async fn test_soft_reset_staged_modified_file_visible() {
     harness.handle.refresh_all_baselines();
     harness.settle().await;
 
-    // config.py should show a modification hunk:
-    // baseline = "debug = False\n" (from HEAD), current = "debug = True\n" (on disk)
+    // config.py should show a modification hunk: baseline = "debug = False\n" (from HEAD).
     let hunks = harness.get_all_hunks().await;
     assert_eq!(
         hunks.len(),
@@ -3243,15 +3206,13 @@ async fn test_soft_reset_staged_deletion_visible() {
     git(&harness.working_dir, &["commit", "-m", "delete foo.txt"]);
 
     // Soft reset: HEAD moves back to the commit where foo.txt existed.
-    // Index still has the deletion staged (foo.txt NOT in index), worktree has no foo.txt.
     git(&harness.working_dir, &["reset", "--soft", "HEAD^"]);
 
     // Trigger baseline refresh
     harness.handle.refresh_all_baselines();
     harness.settle().await;
 
-    // foo.txt should show a deletion hunk:
-    // baseline = "content to delete\n" (from HEAD), current = Missing (file not on disk)
+    // foo.txt should show a deletion hunk: baseline = "content to delete\n" (from HEAD).
     let hunks = harness.get_all_hunks().await;
     assert_eq!(
         hunks.len(),
@@ -3285,16 +3246,14 @@ async fn test_mixed_reset_modified_files_visible() {
     git(&harness.working_dir, &["add", "README.md"]);
     git(&harness.working_dir, &["commit", "-m", "update README"]);
 
-    // Mixed reset (default mode): HEAD moves back, index reset to HEAD,
-    // worktree keeps "# Hello World\n"
+    // Mixed reset (default mode): HEAD moves back, index reset to HEAD, worktree keeps "# Hello World\n"
     git(&harness.working_dir, &["reset", "HEAD~1"]);
 
     // Trigger baseline refresh (simulates git state change detection)
     harness.handle.refresh_all_baselines();
     harness.settle().await;
 
-    // README.md should show a modification hunk:
-    // baseline = "# Hello\n" (from HEAD), current = "# Hello World\n" (on disk)
+    // README.md should show a modification hunk: baseline = "# Hello\n" (from HEAD).
     let hunks = harness.get_all_hunks().await;
     assert_eq!(
         hunks.len(),
@@ -3328,8 +3287,7 @@ async fn test_mixed_reset_new_file_visible() {
     git(&harness.working_dir, &["add", "game.py"]);
     git(&harness.working_dir, &["commit", "-m", "add game.py"]);
 
-    // Mixed reset: HEAD moves back to before game.py existed,
-    // index matches HEAD (no game.py), worktree still has game.py
+    // Mixed reset: HEAD moves back to before game.py existed, index matches HEAD (no game.py).
     git(&harness.working_dir, &["reset", "HEAD~1"]);
 
     // Trigger baseline refresh
@@ -3484,8 +3442,7 @@ async fn test_get_all_file_contents_mixed_staged_and_unstaged() {
     git(&harness.working_dir, &["add", "staged.txt"]);
     git(&harness.working_dir, &["commit", "-m", "add staged.txt"]);
 
-    // Soft reset undoes the staged.txt commit — staged.txt remains in
-    // the index (staged) but HEAD no longer contains it.
+    // Soft reset undoes the staged.txt commit — staged.txt remains in the index (staged).
     git(&harness.working_dir, &["reset", "--soft", "HEAD^"]);
 
     // Modify unstaged.txt on disk (worktree-only, not staged)
@@ -3652,16 +3609,14 @@ async fn test_dirty_binary_file_survives_refresh() {
 async fn test_clean_lfs_pointer_file_removed_by_refresh() {
     let harness = TestHarness::with_mode(TrackingMode::AllDirty);
 
-    // Commit an LFS pointer as the git blob.
-    // On disk the file contains the same pointer text (no smudge in test env).
+    // Commit an LFS pointer as the git blob. On disk the file contains the same pointer text (no smudge in test env).
     let lfs_path = harness.working_dir.join("model.bin");
     let pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:abc123\nsize 12345\n";
     std::fs::write(&lfs_path, pointer).unwrap();
     git(&harness.working_dir, &["add", "model.bin"]);
     git(&harness.working_dir, &["commit", "-m", "add lfs pointer"]);
 
-    // Track it via handle_file_change. Both baseline and current will be
-    // LfsPointer (same content on disk and in git HEAD).
+    // Track it via handle_file_change.
     harness.handle.handle_file_change(lfs_path.clone());
     let _ = harness.handle.get_all_hunks().await;
 
@@ -3702,8 +3657,6 @@ async fn test_dirty_lfs_file_survives_refresh() {
     git(&harness.working_dir, &["commit", "-m", "add lfs pointer"]);
 
     // Modify the file on disk (now dirty per git status).
-    // Without real git-lfs, replacing the pointer text with binary content
-    // makes git see the file as modified.
     std::fs::write(&lfs_path, b"\x89PNG\x00\x00\x00binary content").unwrap();
 
     // Track it
@@ -3946,16 +3899,14 @@ async fn test_refresh_all_baselines_runs_for_agent_only_with_tracked_file() {
         "baseline should come from HEAD"
     );
 
-    // Restore f.txt to its HEAD content (now clean). The bare write does not
-    // notify the actor, so the stale hunk persists until a refresh re-reads disk.
+    // Restore f.txt to its HEAD content (now clean).
     std::fs::write(harness.working_dir.join("f.txt"), "v1\n").unwrap();
 
     // repo_sync_state is still its default, so the refresh always runs the body.
     harness.handle.refresh_all_baselines();
     harness.settle().await;
 
-    // A non-empty AgentOnly tracker must not be skipped: the refresh re-reads
-    // disk, sees f.txt is clean, and clears the hunk.
+    // A non-empty AgentOnly tracker must not be skipped: the refresh re-reads disk, sees f.txt is clean.
     let hunks = harness.get_all_hunks().await;
     assert!(
         hunks.is_empty(),
@@ -4147,8 +4098,7 @@ async fn test_coalescing_produces_correct_final_state() {
 
     harness.write_baseline("coal.rs", "original\n");
 
-    // Write the file multiple times rapidly and send multiple change events
-    // before the actor processes any of them.
+    // Write the file multiple times rapidly and send multiple change events before the actor processes any of them.
     std::fs::write(harness.working_dir.join("coal.rs"), "v1\n").unwrap();
     harness
         .handle
@@ -4271,7 +4221,7 @@ async fn test_non_coalescable_commands_processed_directly() {
 async fn test_snapshot_turn_delta_is_per_turn() {
     let mut harness = TestHarness::new();
 
-    // Two turns touch two different files.
+    // Turns touch different files.
     harness.agent_write("a.rs", "fn a() {}\n", 0);
     harness.agent_write("b.rs", "fn b() {}\n", 1);
     harness.settle().await;
@@ -4322,9 +4272,7 @@ async fn test_snapshot_turn_delta_is_per_turn() {
     assert!(empty.file_states.is_empty() && empty.hunk_ids.is_empty());
 }
 
-/// Count of `BaselineUpdated` events in a drained batch. The real `refresh_all_baselines` scan path emits one per
-/// still-tracked file, while the unchanged-git-state skip path returns before emitting anything — so this distinguishes
-/// "real scan" from "skip" through the public event channel, independent of tracing configuration or runner environment.
+/// Count of `BaselineUpdated` events in a drained batch.
 fn baseline_updates(events: &[HunkEvent]) -> usize {
     events
         .iter()
@@ -4448,8 +4396,8 @@ fn direct_actor(working_dir: &Path, mode: TrackingMode) -> HunkTrackerActor {
     )
 }
 
-/// Init a repo with the three dirty kinds a scoped scan must detect —
-/// modified tracked, untracked (incl. one in a subdirectory), staged — plus
+/// Init a repo with those dirty kinds a scoped scan must detect — modified
+/// tracked, untracked (incl. one in a subdirectory), staged — plus
 /// out-of-scope dirty noise. Returns the repo tempdir.
 fn scoped_scan_fixture() -> tempfile::TempDir {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -4540,8 +4488,7 @@ async fn agent_only_refresh_scopes_scan_to_tracked_paths() {
     let wd = temp.path();
     let mut actor = direct_actor(wd, TrackingMode::AgentOnly);
 
-    // Agent creates an untracked file (survival depends on the scoped scan
-    // still reporting it dirty) and modifies a tracked one.
+    // Agent creates an untracked file (survival depends on the scoped scan still reporting it dirty).
     std::fs::write(wd.join("agent_new.txt"), "agent created\n").unwrap();
     actor
         .record_agent_write(wd.join("agent_new.txt"), "agent created\n".into(), 0, None)
@@ -4574,8 +4521,7 @@ async fn agent_only_refresh_scopes_scan_to_tracked_paths() {
         );
     }
 
-    // Same repo state through the AllDirty pipeline: the full scan sees the
-    // noise (mode-switch and startup paths must keep discovering).
+    // Same repo state through the AllDirty pipeline: the full scan sees the noise.
     let mut all_dirty = direct_actor(wd, TrackingMode::AllDirty);
     all_dirty.refresh_all_baselines().await;
     assert!(
@@ -4637,8 +4583,7 @@ async fn agent_only_empty_scope_refresh_clears_stale_caches() {
         "precondition: the full scan must report the staged file"
     );
 
-    // The staged change gets committed: HEAD and index move, and the cached
-    // staged entry is now factually wrong.
+    // The staged change gets committed: HEAD and index move, and the cached staged entry is now factually wrong.
     git(wd, &["commit", "-m", "commit the staged change"]);
 
     actor.refresh_all_baselines().await;
@@ -4649,8 +4594,7 @@ async fn agent_only_empty_scope_refresh_clears_stale_caches() {
         actor.git_dirty_cache
     );
 
-    // The committed repo_sync_state short-circuits the next refresh; the
-    // caches must still be consistent (empty), not resurrected staleness.
+    // The committed repo_sync_state short-circuits the next refresh.
     actor.refresh_all_baselines().await;
     assert!(
         actor.git_staged_cache.is_empty() && actor.git_dirty_cache.is_empty(),
@@ -4669,8 +4613,7 @@ async fn hunks_survive_rebase_and_refresh_all_baselines() {
     harness.write_baseline("src/lib.rs", "fn lib() {}\nfn keep() {}\n");
     let base = harness.feature_branch(2);
 
-    // Agent modifies a tracked file and creates an untracked file; neither is
-    // touched by the rebase's picks.
+    // Agent modifies a tracked file and creates an untracked file; neither is touched by the rebase's picks.
     harness.agent_write("src/lib.rs", "fn lib() {}\nfn changed() {}\n", 0);
     harness.agent_write("agent_new.txt", "agent created\n", 0);
     harness.settle().await;
@@ -4707,8 +4650,7 @@ async fn hunks_survive_rebase_and_refresh_all_baselines() {
     assert!(created.old_text.is_none());
     assert_eq!(created.new_text, "agent created\n");
 
-    // A second refresh with unchanged git state takes the skip path,
-    // which emits no events at all.
+    // A second refresh with unchanged git state takes the skip path, which emits no events at all.
     harness.handle.refresh_all_baselines();
     harness.settle().await;
     assert_eq!(

@@ -1,23 +1,13 @@
 //! Client-side error taxonomy.
-//!
-//! Wire-level [`xai_tool_protocol::ToolErrorWire`] variants and JSON-RPC
-//! error envelopes are mapped into the smaller [`ClientError`] vocabulary
-//! at the SDK boundary so consumers can match on a single enum without
-//! re-deriving the numeric/string code mapping.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::Url;
 use xai_tool_protocol::{IdError, JsonRpcError, ToolCallId, ToolErrorWire};
 
-/// The most of an unknown code that is kept as spelled (the same cap as the IdP body excerpt in
-/// the daemon's `cause`): the 403 body is a stranger's bytes, and the code reaches the user's
-/// message, the daemon's last log line and its stop marker, each of which is one line.
+/// The most of an unknown code that is kept as spelled (the same cap as the IdP body excerpt in the daemon's `cause`).
 pub const MAX_REFUSAL_CODE_LEN: usize = 500;
 
-/// The policy the hub named when it refused an upgrade: the `code` of its 403 body. A code this
-/// build does not know is kept as it was spelled — collapsed to one line and cut at
-/// [`MAX_REFUSAL_CODE_LEN`] — so a newer hub's policy still reaches the user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefusalCode {
@@ -84,13 +74,11 @@ struct RefusalBody {
 /// Errors surfaced by the client SDK.
 #[derive(Debug, Error)]
 pub enum ClientError {
-    /// WebSocket transport failure: failed to connect, dropped socket,
-    /// or in-flight request interrupted by a reconnect cycle.
+    /// WebSocket transport failure: failed to connect, dropped socket.
     #[error("network error: {0}")]
     NetworkError(String),
 
-    /// Wire-protocol violation: malformed JSON, unexpected method,
-    /// hello/hello_ack mismatch, or unsupported `protocol_version`.
+    /// Wire-protocol violation: malformed JSON, unexpected method.
     #[error("protocol error: {0}")]
     ProtocolError(String),
 
@@ -98,26 +86,17 @@ pub enum ClientError {
     #[error("auth error: {0}")]
     AuthError(String),
 
-    /// Server rejected the WebSocket upgrade with an HTTP auth status
-    /// (401/403). Non-retryable: replaying the same credential is
-    /// rejected identically, so the reconnect loop classifies this as
-    /// fatal instead of retrying forever. `refusal` is the policy a 403
-    /// body names, when it names one.
     #[error("handshake auth failed: HTTP {status}")]
     HandshakeAuthFailed {
         status: u16,
         refusal: Option<RefusalCode>,
     },
 
-    /// `register_tool` / `register_session` ack reported a conflict
-    /// (cross-connection contention or an already-bound entry the
-    /// caller did not expect).
+    /// `register_tool` / `register_session` ack reported a conflict.
     #[error("registration conflict: {0}")]
     RegistrationConflict(String),
 
-    /// Outbound mpsc full or call-site bounded wait elapsed before the
-    /// frame could be enqueued. Distinct from [`Self::NetworkError`]:
-    /// the socket may still be healthy.
+    /// Outbound mpsc full or call-site bounded wait elapsed before the frame could be enqueued.
     #[error("backpressure: {0}")]
     BackpressureError(String),
 
@@ -129,9 +108,7 @@ pub enum ClientError {
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
 
-    /// Wrapped wire-format tool error; surfaces the upstream
-    /// [`ToolErrorWire`] variant verbatim for callers that need to
-    /// switch on the stable string code.
+    /// Wrapped wire-format tool error; surfaces the upstream [`ToolErrorWire`] variant verbatim for callers that need to switch.
     #[error(transparent)]
     Wire(ToolErrorWire),
 
@@ -139,24 +116,13 @@ pub enum ClientError {
     #[error("server closed connection: {0}")]
     Closed(String),
 
-    /// Refused to send credentials over an insecure `ws://` scheme to a
-    /// non-loopback host. Local-loopback (`127.0.0.1`, `::1`,
-    /// `localhost`) is the only exception; every other host MUST be
-    /// reached over `wss://` so the bearer token never crosses the
-    /// network in plaintext.
+    /// Refused to send credentials over an insecure `ws://` scheme to a non-loopback host.
     #[error(
         "insecure scheme: refusing to send credentials over plaintext ws:// to non-loopback host {url}"
     )]
     InsecureScheme { url: Url },
 
-    /// Caller passed a `ToolCallId` that already keys an in-flight
-    /// dispatch on the same connection. The prior call's progress
-    /// waiter and response correlation are left intact; this error
-    /// surfaces synchronously so the second caller can retry with a
-    /// fresh id. Mint a fresh [`ToolCallId::new_v7`] (or use
-    /// [`xai_tool_runtime::ToolCallContext::default`], which does so)
-    /// per call. This is client misuse, not a transport or server
-    /// failure.
+    /// Caller passed a `ToolCallId` that already keys an in-flight dispatch on the same connection.
     #[error("call_id {call_id} already in flight on this connection")]
     CallIdInUse { call_id: ToolCallId },
 }
@@ -184,8 +150,8 @@ impl ClientError {
         }
     }
 
-    /// `true` when a `data`-less envelope collapsed to the given `jsonrpc_<code>`
-    /// subcode (see [`Self::from_jsonrpc_error`]); shared by the bind recognizers.
+    /// `true` when a `data`-less envelope collapsed to the given
+    /// `jsonrpc_<code>` subcode (see [`Self::from_jsonrpc_error`]).
     fn has_collapsed_jsonrpc_subcode(&self, subcode: &str) -> bool {
         matches!(
             self,
@@ -199,9 +165,8 @@ impl ClientError {
         self.has_collapsed_jsonrpc_subcode("jsonrpc_-32601")
     }
 
-    /// `true` for the server's `-32013` "server found but bind did not complete" error
-    /// (the `ServerBindOutcome::Unavailable` cases). Recognized so the harness
-    /// re-provisions this recoverable case, distinct from [`Self::is_server_not_found`].
+    /// `true` for the server's `-32013` "server found but bind did not
+    /// complete" error (the `ServerBindOutcome::Unavailable` cases).
     pub fn is_tool_unavailable(&self) -> bool {
         self.has_collapsed_jsonrpc_subcode("jsonrpc_-32013")
     }
@@ -330,8 +295,6 @@ mod tests {
         }
     }
 
-    /// The hub names the policy behind a 403 as `{"code": ...}`; an older hub's text body, or a
-    /// code this SDK does not know, is a refusal with no code.
     #[test]
     fn handshake_403_carries_the_refusal_code_the_body_names() {
         let refusal = |body: Option<&str>| match ClientError::from_handshake_error(
@@ -371,9 +334,8 @@ mod tests {
         );
     }
 
-    /// The 403 body is a stranger's bytes, and the code reaches one-line places: the user's
-    /// message, the daemon's last log line, its stop marker. An oversized, multi-line code is kept
-    /// as one line of at most `MAX_REFUSAL_CODE_LEN` characters and an ellipsis.
+    /// An oversized, multi-line code is kept as one line of at most `MAX_REFUSAL_CODE_LEN`
+    /// characters and an ellipsis.
     #[test]
     fn an_unknown_refusal_code_is_bounded_and_one_line() {
         let oversized = format!(
@@ -394,8 +356,7 @@ mod tests {
         assert!(code.ends_with('…'), "{code}");
         assert_eq!(code.lines().count(), 1);
 
-        // Within the bound, the code is the hub's word to the character; a known code with
-        // stray whitespace around it is still unknown (the hub did not spell it).
+        // Within the bound, the code is the hub's word to the character.
         let short = ClientError::from_handshake_error(http_upgrade_error_with_body(
             403,
             Some(r#"{"code":"a_b-c.d"}"#),
@@ -438,7 +399,6 @@ mod tests {
 
     #[test]
     fn is_server_not_found_recognizes_bare_minus_32601() {
-        // data-less -32601 -> custom subcode.
         let err = ClientError::from_jsonrpc_error(JsonRpcError {
             code: -32601,
             message: "server abc not found for user".to_owned(),
@@ -495,8 +455,7 @@ mod tests {
 
     #[test]
     fn sdk_reexported_recognizer_matches_decoded_error() {
-        // SDK-only consumers reach the recognizer through the SDK re-export and
-        // the core decode path.
+        // SDK-only consumers reach the recognizer through the SDK re-export and the core decode path.
         let err = xai_computer_hub_core::error_from_envelope(workspace_gone_envelope());
         assert!(crate::is_workspace_unavailable(&err));
     }

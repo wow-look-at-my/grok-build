@@ -171,14 +171,11 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
             println!("\nTotal: {}", resp.results.len() + remote_shown);
         }
         SessionsCommand::Delete { id } => {
-            // Always attempt the remote delete when authenticated and not ZDR; `list` and `search` likewise query remote
-            // unconditionally. Gating on storage mode is impossible here: the CLI builds config without remote settings. ZDR
-            // teams never upload, so there is nothing remote to delete.
+            // Always attempt the remote delete when authenticated and not ZDR.
             let needs_remote = auth.as_ref().is_some_and(|a| !a.is_zdr_team());
 
-            // Pass `cwd = None` so the session is found by id regardless of which workspace it was created in
-            // The local delete still uses the resolved per-session cwd
-            // No search handle: the eviction inside prunes the row from another process's index, so a delete never needs one of its own
+            // Pass `cwd = None` so the session is found by id regardless of
+            // which workspace it was created in The local delete still uses.
             let deletion = xai_grok_shell::session::persistence::delete_session_history(
                 &id,
                 None,

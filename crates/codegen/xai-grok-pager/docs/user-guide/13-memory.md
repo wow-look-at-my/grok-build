@@ -1,6 +1,6 @@
 # Cross-Session Memory
 
-Memory lets Grok recall facts, decisions, and patterns from earlier sessions. Grok indexes the information you save and searches it automatically, so a new session can reuse relevant context.
+Memory lets Grok recall facts, decisions, and patterns from earlier sessions. Grok indexes the information you save and searches it automatically. As a result, a new session can reuse relevant context.
 
 ---
 
@@ -17,27 +17,13 @@ Memory is experimental and disabled by default.
 
 ### How memory is organized
 
-Memory has two scopes. Global memory holds facts that apply across all your
-projects; workspace memory holds facts about one repository. Clones and
-worktrees of the same repository share one workspace scope.
+Memory has scopes. Global memory holds facts that apply across all your projects. Workspace memory holds facts about one repository. Clones and worktrees of the same repository share one workspace scope.
 
-Each scope keeps its knowledge as ordinary Markdown files. `topics/` holds
-curated notes, one file per subject, and is what Grok reads at the start of a
-session. New facts captured after each turn, including a turn you stop before it
-finishes, land as small observations that a later consolidation pass (`/dream`)
-folds into topics. A bounded generated
-index of both scopes is injected into the model's context once per session so
-it can decide which topics to open.
+Each scope keeps its knowledge as ordinary Markdown files. `topics/` holds curated notes, one file per subject, and is what Grok reads at the start of a session. New facts captured after each turn, including a turn you stop before it finishes. Land as small observations that a later consolidation pass (`/dream`) folds into topics. A bounded generated index of both scopes is injected into the model's context once per session so it can decide which topics to open.
 
-Notes you recorded with earlier versions of Grok Build are carried over
-automatically the first time a workspace is opened after updating: each section
-of the earlier notes becomes a topic, and sections whose name already matches a
-topic are appended to it under a "From earlier sessions" heading. The earlier
-files are left in place unchanged.
+Notes you recorded with earlier versions of Grok Build are carried over automatically the first time a workspace is opened after updating. Each section of the earlier notes becomes a topic, and sections whose name already matches a topic are appended to it under a "From earlier sessions" heading. The earlier files are left in place unchanged.
 
-Memory product telemetry contains only fixed enums, booleans, counts, and
-durations. It never includes prompts, statements, topic names, keywords,
-paths, model output, or free-form errors.
+Memory product telemetry contains only fixed enums, booleans, counts, and durations. It never includes prompts, statements, topic names, keywords, paths, model output, or free-form errors.
 
 ---
 
@@ -68,25 +54,19 @@ export GROK_MEMORY=0
 
 ### Mid-Session Toggle
 
-Toggle memory on or off during a session without restarting: open `/memory`
-and press `t`.
+Toggle memory on or off during a session without restarting: open `/memory` and press `t`.
 
-The toggle is session-scoped -- it does not persist to `config.toml`, and it works in both directions: a session that started with `[memory] enabled = true` can turn memory off, and a session that started with `[memory] enabled = false` can turn it on. New sessions follow `config.toml` again. Toggling off removes access to memory tools and the memory instructions in the system prompt but keeps existing files on disk. Toggling on re-initializes memory storage, registers the memory tools, restores the memory instructions, and injects the memory index on the next turn. Turning memory on waits for any turn in progress to finish.
+The toggle is session-scoped -- it does not persist to `config.toml`. It works in both directions. A session that started with `[memory] enabled = true` can turn memory off, and a session that started with `[memory] enabled = false` can turn it on. New sessions follow `config.toml` again. Toggling off removes access to memory tools and the memory instructions in the system prompt but keeps existing files on disk. Toggling on re-initializes memory storage, registers the memory tools, restores the memory instructions, and injects the memory index on the next turn. Turning memory on waits for any turn in progress to finish.
 
-The toggle cannot override the process-wide force-disable (`--no-memory` or `GROK_MEMORY=0`); those hide `/memory` for the whole session.
+The toggle cannot override the process-wide force-disable (`--no-memory` or `GROK_MEMORY=0`). Those hide `/memory` for the whole session.
 
 ### Priority Order
 
-1. A process-wide force-disable (`--no-memory` compatibility flag or
-   `GROK_MEMORY=0`) turns memory off.
-2. An explicit `[memory] enabled = false` in effective TOML turns memory off,
-   including anything enabled by managed remote settings. The `/memory` `t`
-   toggle can still turn it on for the current session.
-3. Otherwise memory is enabled by `GROK_MEMORY=1`, `[memory] enabled = true`,
-   or a managed remote setting.
+1. A process-wide force-disable (`--no-memory` compatibility flag or `GROK_MEMORY=0`) turns memory off.
+2. An explicit `[memory] enabled = false` in effective TOML turns memory off, including anything enabled by managed remote settings. The `/memory` `t` toggle can still turn it on for the current session.
+3. Otherwise memory is enabled by `GROK_MEMORY=1`, `[memory] enabled = true`, or a managed remote setting.
 
-Staged-rollout and kill-switch controls for operators are documented in the
-internal hardening notes, not here.
+Staged-rollout and kill-switch controls for operators are documented in the internal hardening notes, not here.
 
 ---
 
@@ -104,7 +84,7 @@ When a session ends, Grok saves a structured metadata summary to that session's 
 - Topics: the first few substantive user prompts from the session, up to five.
 - The session date and time (UTC).
 
-Grok builds the summary from conversation metadata without an LLM call, without added latency. Grok skips the save for trivial sessions -- those with fewer than three substantive prompts, or fewer than 50 bytes of user text.
+Grok builds the summary from conversation metadata without an LLM call, without added latency. Grok skips the save for trivial sessions -- those with a bounded number of substantive prompts, or a bounded number of bytes of user text.
 
 The summary does not record tool usage, file paths, or shell commands. The session ID forms part of the log filename. To turn automatic saves off, set `session.save_on_end = false`. For richer capture of decisions, patterns, and reasoning, use `/flush`.
 
@@ -131,13 +111,13 @@ Use `/flush` when you want to preserve important context:
 
 ### Remember
 
-Ask Grok to remember something, and it appends the note to a `MEMORY.md` file -- the workspace file for project-specific items, or the global `~/.grok/memory/MEMORY.md` for cross-project preferences:
+Ask Grok to remember something, and it appends the note to a `MEMORY.md` file -- the workspace file for project-specific items, or the global `~/.grok/memory/MEMORY.md`. This is for cross-project preferences:
 
 ```
 > remember to always open PR links after pushing
 ```
 
-Grok records entries as durable statements under organized headings, such as `## Preferences`, `## Project Context`, or `## Debugging`. The file watcher reindexes the change on the next memory search, so the new entry is searchable within the current session.
+Grok records entries as durable statements under organized headings, such as `## Preferences`, `## Project Context`, or `## Debugging`. The file watcher reindexes the change on the next memory search. As a result, the new entry is searchable within the current session.
 
 You can also save a note directly with the `/remember` command:
 
@@ -145,7 +125,7 @@ You can also save a note directly with the `/remember` command:
 /remember always open PR links after pushing
 ```
 
-Run `/remember` with no text to enter remember mode, where the next line you type becomes the note. Either way, Grok opens a review panel showing the note (with an optional rewritten version you can toggle with `Tab`); the note is written only after you confirm. On save, Grok shows `Memory saved to ~/.grok/memory/MEMORY.md`.
+Run `/remember` with no text to enter remember mode, where the next line you type becomes the note. Either way, Grok opens a review panel showing the note (with an optional rewritten version you can toggle with `Tab`). The note is written only after you confirm. On save, Grok shows `Memory saved to ~/.grok/memory/MEMORY.md`.
 
 ### Forget
 
@@ -202,11 +182,11 @@ The modal uses a split-pane layout: the file list on the left, a read-only conte
 | `Ctrl+F` | Toggle fullscreen |
 | `Esc` | Close the modal, or leave filter or preview focus |
 
-The filter matches note names and note contents; separate words all have to match. When you filter, the preview scrolls to the first match. If nothing matches, the list says so; `Backspace` clears the filter.
+The filter matches note names and note contents. Separate words all have to match. When you filter, the preview scrolls to the first match. If nothing matches, the list says so. `Backspace` clears the filter.
 
-The preview pane is read-only. Scroll it with the mouse wheel, by dragging its scrollbar, or with the keyboard after `Enter`. Drag across the preview text to copy that text to the clipboard; a brief message under the file list confirms every copy. Generated `MEMORY.md` indexes cannot be deleted.
+The preview pane is read-only. Scroll it with the mouse wheel, by dragging its scrollbar, or with the keyboard after `Enter`. Drag across the preview text to copy that text to the clipboard. A brief message under the file list confirms every copy. Generated `MEMORY.md` indexes cannot be deleted.
 
-When the memory modal's content area is under 64 columns, the modal shows the file list only and hides the size column; press `Enter` to read the selected note full-width and `Esc` to return to the list.
+When the memory modal's content area is under 64 columns, the modal shows the file list only and hides the size column. Press `Enter` to read the selected note full-width and `Esc` to return to the list.
 
 You can also open `/memory` from the command palette.
 
@@ -236,7 +216,7 @@ Dream reorganizes individual session logs and memory entries into a coherent, de
 
 ### Auto-Dream
 
-Dream also runs automatically. By default, Grok checks the consolidation gates at launch and periodically during a session, and runs Dream once enough time has passed and enough sessions have accumulated:
+Dream also runs automatically. By default, Grok checks the consolidation gates at launch and periodically during a session, and runs Dream once enough time has passed. Enough sessions have accumulated:
 
 ```toml
 [memory.dream]
@@ -270,14 +250,14 @@ Memory is also searched after auto-compaction to recover relevant context that m
 
 ## Memory Search
 
-Grok searches memory automatically, but you can also trigger searches manually in the chat:
+Grok searches memory automatically. However, you can also trigger searches manually in the chat:
 
 ```
 Search memory for "auth middleware patterns"
 Read my workspace MEMORY.md
 ```
 
-The model has access to two memory tools:
+The model has access to multiple memory tools:
 - `memory_search` -- Search across all memory
 - `memory_get` -- Read a specific memory file by path
 
@@ -287,7 +267,7 @@ The default embedding model is unset, so memory starts in full-text-only mode. I
 
 ### Source Weights
 
-Each memory source has a weight multiplier applied to its score. All sources default to `1.0`, and you can adjust any of them under `[memory.search.source_weights]`:
+Each memory source has a weight multiplier applied to its score. All sources default to `1.0`. You can adjust any of them under `[memory.search.source_weights]`:
 
 | Source | Weight | Description |
 |--------|--------|-------------|
@@ -425,7 +405,7 @@ You configure pruning under `[compaction]`, not `[memory]`, because it is a comp
 
 ## Memory Staleness
 
-When a session memory is old, Grok attaches a staleness note to it in search results. Older results get a stronger reminder to verify the current state before you rely on them. These notes help you spot stored facts that might no longer be accurate. Global and workspace memories never receive staleness notes, because they hold curated long-term knowledge.
+When a session memory is old, Grok attaches a staleness note to it in search results. Older results get a stronger reminder to verify the current state before you rely on them. These notes help you spot stored facts that can no longer be accurate. Global and workspace memories never receive staleness notes, because they hold curated long-term knowledge.
 
 ---
 

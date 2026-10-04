@@ -1,8 +1,4 @@
 //! Persona detail/edit modal: structured view of a persona with inline editing.
-//!
-//! Opened by pressing Enter on a persona in the `/config-agents` Personas tab.
-//! Renders all persona TOML fields in labeled sections.
-//! Editable personas (user/project scope) support inline field editing; bundled personas are read-only.
 
 use std::path::{Path, PathBuf};
 
@@ -459,7 +455,6 @@ pub fn render_persona_detail(
                 let max_collapsed = 8usize;
                 let is_long = total > max_collapsed;
 
-                // Reserve 1 line for the hint at the bottom.
                 let avail_lines = (max_y.saturating_sub(y)) as usize;
                 let viewport_h = if is_long {
                     avail_lines.saturating_sub(1) // room for hint

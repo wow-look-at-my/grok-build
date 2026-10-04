@@ -1,7 +1,4 @@
-//! Best-effort transport prewarm: dial an origin once per pool-idle window
-//! through the shared client, bounded by [`PREWARM_TIMEOUT`], carrying no
-//! credentials. Every non-warmed outcome releases the origin's claim so a
-//! later dial can retry.
+//! Best-effort transport prewarm: dial an origin once per pool-idle window through the shared client, bounded by [`PREWARM_TIMEOUT`].
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, PoisonError};

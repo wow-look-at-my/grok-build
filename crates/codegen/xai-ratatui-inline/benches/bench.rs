@@ -11,7 +11,6 @@ use serde_json::json;
 use xai_ratatui_inline::{LinkSpan, Terminal, split_into_line_segments};
 
 fn generate_colored_json_content() -> String {
-    // Create a complex JSON structure with 50+ lines when pretty printed
     let data = json!({
         "users": (0..10).map(|i| json!({
             "id": i,
@@ -139,9 +138,7 @@ fn dirty_terminal(
     let _ = t.flush_with_links();
     t.swap_buffers();
 
-    // Current frame: mostly unchanged ('a'), a few changed rows ('b') — a
-    // realistic partial redraw. The diff still visits every cell, which is where
-    // the per-cell link resolution cost lives.
+    // Current frame: mostly unchanged ('a'), a few changed rows ('b') — a realistic partial redraw.
     fill_rows(&mut t, 'a', 0..height, width);
     fill_rows(&mut t, 'b', 0..height.min(3), width);
 
@@ -161,9 +158,6 @@ fn dirty_terminal(
     t
 }
 
-/// Benchmarks the OSC 8 hyperlink render path on a 256x100 viewport: the plain
-/// `flush` baseline, `flush_with_links` with no links (early-exit fast path),
-/// and `flush_with_links` with 50 links (the link-aware diff + emit).
 fn bench_flush_with_links(c: &mut Criterion) {
     const W: u16 = 256;
     const H: u16 = 100;

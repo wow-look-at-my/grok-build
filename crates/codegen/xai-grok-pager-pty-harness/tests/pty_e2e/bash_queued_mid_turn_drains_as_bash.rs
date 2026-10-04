@@ -53,7 +53,6 @@ async fn bash_queued_mid_turn_drains_as_bash() {
         .wait_for_text("QBASH_%s_OK", Duration::from_secs(10))
         .expect("bash command visible as a queued row");
 
-    // Empty Enter is send-now (cancel-and-send): the shell silently cancels turn 1 and runs the bash row as its own next turn immediately
     harness.inject_keys(b"\r").expect("empty Enter send-now");
     harness
         .wait_for_text("QBASH_MIDTURN_OK", Duration::from_secs(30))
@@ -62,14 +61,14 @@ async fn bash_queued_mid_turn_drains_as_bash() {
         .wait_for_text("Run (user)", Duration::from_secs(15))
         .expect("Run (user) chrome for the promoted bash turn");
 
-    // Bash rows never render a user-prompt block (the execute block IS the visual entry)
-    // A "❯ !printf…" block would mean the row went to the model as text instead of executing
+    // Bash rows never render a user-prompt block (the execute block IS the
+    // visual entry) A "❯ !printf…" block would mean the row went to the
+    // model.
     assert!(
         !harness.contains_text("\u{276F} !printf"),
         "bash row must not render a user-prompt block\nscreen:\n{}",
         harness.screen_contents()
     );
-    // The send-now cancel of turn 1 is silent.
     assert!(
         !harness.contains_text("Turn cancelled by user"),
         "send-now cancel must not render a cancelled marker\nscreen:\n{}",

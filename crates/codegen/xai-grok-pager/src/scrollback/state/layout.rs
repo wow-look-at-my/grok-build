@@ -9,9 +9,8 @@ pub(super) enum SettlementFollowPolicy {
     Defer,
 }
 
-/// A width-stable anchor for the content at the viewport top, captured before a width rebuild so the same content
-/// can be re-pinned afterward. The position is stored as `(entry, logical_line, sub_rows)` rather than an absolute
-/// wrapped-row count. It covers vpad and mid-paragraph anchors, but is exact only for a non-wrapping anchor line.
+/// A width-stable anchor for the content at the viewport top, captured before
+/// a width rebuild.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ScrollAnchor {
     entry_idx: usize,
@@ -19,19 +18,15 @@ pub(crate) struct ScrollAnchor {
     sub_rows: i64,
 }
 
-/// Unlike [`ScrollAnchor`] it is keyed by stable [`EntryId`], because the arming mutation is exactly what shifts
-/// indices. Its raw row offset is only meaningful at an unchanged width, so width changes re-anchor via
-/// [`ScrollAnchor`]'s logical-line mapping instead.
+/// Unlike [`ScrollAnchor`] it is keyed by stable [`EntryId`], because the
+/// arming mutation is exactly what shifts indices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct StructuralScrollAnchor {
     /// Entry at the viewport top when the arming mutation happened.
     id: EntryId,
-    /// Wrapped rows from that entry's top down to the viewport top, measured over the entry's full layout span (content rows plus trailing gap).
-    /// This matches `entry_at_virtual_row`'s attribution of gap rows to the entry above, so a top parked on a gap row stays a gap row.
+    /// Wrapped rows from that entry's top down to the viewport top, measured over the entry's full layout span.
     rows_into_span: usize,
     /// `scroll_offset` at arm time.
-    /// A mismatch at consume time means explicit navigation moved the viewport between the mutation and its frame.
-    /// The anchor is then stale and must not override that.
     armed_scroll_offset: usize,
 }
 
@@ -43,17 +38,14 @@ pub(super) struct LayoutCache {
     /// Per-entry layout info (height and gap_after).
     pub(super) entries: Vec<EntryLayoutInfo>,
     /// Truncated height of each entry (for sticky header min_height).
-    /// Separate from EntryLayoutInfo because it's only needed during PromptDescriptor building, not during rendering.
     pub(super) entry_truncated_heights: Vec<u16>,
-    /// Whether each entry's cached `height`/`truncated_height` is an exact measurement (`true`) or a cheap estimate
-    /// (`false`). Entries are measured exactly only when they enter (or are near) the viewport.
+    /// Whether each entry's cached `height`/`truncated_height` is an exact measurement (`true`) or a cheap estimate.
     pub(super) measured: Vec<bool>,
     /// Virtual Y position of each entry (cumulative heights and gaps).
     pub(super) virtual_y: Vec<usize>,
     /// Prompt descriptors for sticky layout computation.
     pub(super) prompt_descriptors: Vec<PromptDescriptor>,
-    /// Group spans computed by the last fold pass: the authoritative model the per-entry flags in `entries` are projected from (see `state::groups`).
-    /// Stale between an incremental append and the next structural rebuild, exactly like those flags.
+    /// Group spans computed by the last fold pass.
     pub(super) groups: Vec<groups::GroupSpan>,
     /// Width used to compute this cache.
     pub(super) width: u16,
@@ -81,7 +73,7 @@ impl LayoutCache {
 
         let slice = self.virtual_y.get(valid_range.clone())?;
 
-        // partition_point returns the first index where virtual_y > content_y, so the entry we want is the one before that
+        // partition_point returns the first index where virtual_y > content_y.
         let pos = slice.partition_point(|&y| y <= content_y);
         if pos == 0 {
             return None;
@@ -102,8 +94,8 @@ impl LayoutCache {
 
 impl ScrollbackState {
     /// Invalidate and rebuild the layout cache from scratch.
-    /// `ensure_layout_cache` skips work when the width and entry count are unchanged.
-    /// An in-place display-mode or group change must therefore null the cache first for the next read to see fresh heights, gaps, and totals.
+    /// `ensure_layout_cache` skips work when the width and entry count are
+    /// unchanged.
     pub(super) fn rebuild_layout(&mut self) {
         #[cfg(test)]
         {
@@ -119,32 +111,28 @@ impl ScrollbackState {
 
     // These methods provide read-only access to cached layout data.
 
-    /// Get cached height for a single entry.
-    /// Returns None if cache is invalid or index out of bounds.
-    /// Call prepare_layout() before render to ensure cache is valid.
+    /// Get cached height for a single entry. Returns None if cache is invalid
+    /// or index out of bounds.
     pub fn get_cached_entry_height(&self, idx: usize) -> Option<u16> {
         self.layout_cache
             .as_ref()
             .and_then(|c| c.entries.get(idx).map(|e| e.height))
     }
 
-    /// Group spans computed by the last fold pass: the model behind every group header and hidden row (see [`groups::GroupSpan`]).
-    /// Empty when the layout cache is invalid; call `prepare_layout()` first.
+    /// Group spans computed by the last fold pass: the model behind every
+    /// group header and hidden row (see [`groups::GroupSpan`]).
     pub fn group_spans(&self) -> &[groups::GroupSpan] {
         self.layout_cache
             .as_ref()
             .map_or(&[], |c| c.groups.as_slice())
     }
 
-    /// The group span containing the entry at `idx`, if the last fold pass folded it (header, hidden member, or visible tail of a truncation run).
-    /// Same freshness contract as [`Self::group_spans`].
+    /// The group span containing the entry at `idx`.
     pub fn span_at(&self, idx: usize) -> Option<&groups::GroupSpan> {
         groups::span_containing(self.group_spans(), idx)
     }
 
     /// Check if an entry is hidden by group truncation (height=0 in cache).
-    /// Returns false if the cache is missing or the index is out of bounds
-    /// (conservative: treat uncached entries as visible).
     pub(super) fn is_entry_hidden(&self, idx: usize) -> bool {
         self.layout_cache
             .as_ref()
@@ -189,9 +177,8 @@ impl ScrollbackState {
         self.layout_cache.as_ref().map(|c| c.entries.as_slice())
     }
 
-    /// Get cached virtual Y positions for all entries.
-    /// Each entry's virtual Y is its cumulative position in the scrollable content.
-    /// Returns None if cache is invalid.
+    /// Get cached virtual Y positions for all entries. Each entry's virtual Y
+    /// is its cumulative position in the scrollable content.
     pub fn get_cached_virtual_y(&self) -> Option<&[usize]> {
         self.layout_cache.as_ref().map(|c| c.virtual_y.as_slice())
     }
@@ -298,9 +285,7 @@ impl ScrollbackState {
             ));
         }
 
-        // Content entry: compute from virtual_y coordinates
-        // Keep the cumulative positions in usize (tall sessions exceed u16::MAX)
-        // The final screen y / height are viewport-relative and provably fit in u16
+        // Content entry: compute from virtual_y coordinates Keep the cumulative positions in usize (tall sessions exceed u16::MAX).
         let base_y = *cache.virtual_y.get(visible_range.start)?;
         let entry_start = *cache.virtual_y.get(entry_idx)? - base_y;
         let entry_height = cache.entries.get(entry_idx)?.height;
@@ -364,9 +349,8 @@ impl ScrollbackState {
 
     // Lazy viewport height measurement (see `rebuild_layout_cache` for the estimate side; these upgrade on/near-screen entries to exact heights)
 
-    /// Virtual-space `(top, bottom)` of the viewport (relative to entry 0).
-    /// `top` is the current scroll position, `bottom` is one past the last visible row.
-    /// `None` when the cache is absent, the visible range is empty, or the cache is stale (range start past `virtual_y`).
+    /// `top` is the current scroll position, `bottom` is one past the last visible row. `None` when the cache is absent,
+    /// the visible range is empty, or the cache is stale (range start past `virtual_y`).
     pub(super) fn viewport_virtual_bounds(&self) -> Option<(usize, usize)> {
         let cache = self.layout_cache.as_ref()?;
         let range = self.visible_entry_range();
@@ -379,8 +363,8 @@ impl ScrollbackState {
         Some((top, bottom))
     }
 
-    /// Maximum valid `scroll_offset`: content height that doesn't fit the viewport.
-    /// `scroll_offset` is always clamped to `[0, max_scroll_offset()]`.
+    /// Maximum valid `scroll_offset`: content height that doesn't fit the
+    /// viewport.
     pub(super) fn max_scroll_offset(&self) -> usize {
         self.total_height
             .saturating_sub(self.viewport_height as usize)
@@ -390,8 +374,7 @@ impl ScrollbackState {
     /// same content can then be re-pinned to the viewport top via [`restore_scroll_anchor`]. That conversion survives
     /// the entry's own re-wrapping (the whole transcript can be one giant entry).
     pub(super) fn capture_scroll_anchor(&self) -> Option<ScrollAnchor> {
-        // `entry_at_virtual_row` resolves the viewport-top entry deterministically, including a gap row, which it attributes to the entry above
-        // (`entry_at_content_y` would return None in a gap; this path has no such special case.)
+        // `entry_at_virtual_row` resolves the viewport-top entry deterministically, including a gap row.
         let (top_content_y, _) = self.viewport_virtual_bounds()?;
         let entry_idx = self.entry_at_virtual_row(top_content_y)?;
         let cache = self.layout_cache.as_ref()?;
@@ -424,9 +407,7 @@ impl ScrollbackState {
             logical_line,
             sub_rows,
         } = anchor;
-        // Re-resolve the logical line's start row at the new width; this is what makes a re-wrapping top entry re-anchor correctly
-        // The wrapped rows above the anchor line grow/shrink, and the rebuilt start rows account for that
-        // `sub_rows` is width-stable for a non-wrapping line
+        // Re-resolve the logical line's start row at the new width.
         let Some(width) = self.layout_cache.as_ref().map(|c| c.width) else {
             return;
         };
@@ -451,8 +432,8 @@ impl ScrollbackState {
                 .unwrap_or(last_content_row);
             (new_line_start, line_last_row.max(new_line_start))
         };
-        // Clamp the intra-line offset to the anchor line's wrapped extent at the new width
-        // A re-wrapped (now shorter) anchor line then can't push the viewport top past itself into the next logical line
+        // Clamp the intra-line offset to the anchor line's wrapped extent at
+        // the new width A re-wrapped (now shorter) anchor line then cannot.
         let new_rows_into_entry =
             (new_line_start as i64 + sub_rows).clamp(0, line_last_row as i64) as usize;
 
@@ -541,9 +522,7 @@ impl ScrollbackState {
         let Some(entry_idx) = self.index_of_id(anchor.id) else {
             return;
         };
-        // The rebuild reset every height to a cheap estimate, while `rows_into_span` was measured against the entry's
-        // exact pre-mutation layout. Otherwise the span clamp in the re-pin would squeeze an exact row against a transient
-        // under-estimate. The viewport would jump within an entry whose content never changed.
+        // The rebuild reset every height to a cheap estimate.
         self.measure_span_and_rebuild(entry_idx, entry_idx, width);
         self.repin_viewport_top_to_entry(entry_idx, anchor.rows_into_span);
     }
@@ -605,13 +584,12 @@ impl ScrollbackState {
         Some((start, end))
     }
 
-    /// Whether the entry at `idx` falls inside the current viewport window (visible rows plus the small below-margin from `measurement_window`).
-    /// Conservative: with no layout yet (before the first draw / after an invalidation), every entry counts as visible.
-    /// Animation gating then never starves a redraw it can't reason about.
+    /// Whether the entry at `idx` falls inside the current viewport window
+    /// (visible rows plus the small below-margin from `measurement_window`).
     pub(super) fn entry_index_in_viewport(&self, idx: usize) -> bool {
-        // A wedged offset (viewport top at/past the content end, e.g. after a shrink under a follow pin) yields a degenerate window with no entry.
-        // Treat it like an absent layout so animation gating can't mute the redraws that heal the state
-        // (A legit page-flip pin keeps `scroll_offset < total_height` via the re-clamp in `follow_scroll_to_bottom`, so it never hits this arm.)
+        // A wedged offset (viewport top at/past the content end, e.g. after a
+        // shrink under a follow pin) yields a degenerate window with no
+        // entry.
         if self.scroll_offset >= self.total_height {
             return true;
         }
@@ -646,9 +624,9 @@ impl ScrollbackState {
         evicted
     }
 
-    /// Full entry render-area width (accent, padding, content) for a viewport of `width`.
-    /// This is the width handed to `EntryRenderer`, which subtracts chrome itself to reach the content width.
-    /// Centralizes the layout round-trip so the reveal row mapping, exact height measurement, and prompt-descriptor layout can't drift apart.
+    /// Full entry render-area width (accent, padding, content) for a viewport
+    /// of `width`. This is the width handed to `EntryRenderer`, which
+    /// subtracts chrome itself to reach the content width.
     pub(super) fn entry_area_width(&self, width: u16) -> u16 {
         let simulated_area = Rect::new(0, 0, width, 1);
         HorizontalLayout::new(simulated_area, &self.appearance.scrollback.layout)
@@ -657,8 +635,7 @@ impl ScrollbackState {
     }
 
     /// Measure exact heights for not-yet-measured entries in `[start, end]`. Returns `(entry_index, height_delta)` for
-    /// each estimate replaced by an exact height. Hidden (group-truncated, height 0) and synthetic group-header rows
-    /// render no markdown, so they are skipped. Their height is owned by group truncation, not measurement.
+    /// each estimate replaced by an exact height. Their height is owned by group truncation, not measurement.
     fn measure_window_exact(&mut self, width: u16, start: usize, end: usize) -> Vec<(usize, i32)> {
         // Pre-scan: bail before building a Theme and layout when every in-window entry is already measured or non-rendered (hidden / group-header)
         {
@@ -696,8 +673,6 @@ impl ScrollbackState {
             let Some(info) = cache.entries.get(idx).copied() else {
                 continue;
             };
-            // Estimated entries always have height >= 1, so a height of 0 here means group truncation hid this entry
-            // Synthetic-only headers need no block render; an expanded verb header also owns member 0 rows
             if info.height == 0 || (info.is_group_header() && !info.is_expanded_verb_header()) {
                 continue;
             }
@@ -714,8 +689,9 @@ impl ScrollbackState {
                 slot.height = exact_height;
             }
             changes.push((idx, delta));
-            // Truncated height only feeds prompt sticky-header min_height, so only prompts pay for the extra Truncated-mode render
-            // Others keep their seeded value (unused for non-prompts)
+            // Truncated height only feeds prompt sticky-header min_height, so
+            // only prompts pay for the extra Truncated-mode render Others
+            // keep their seeded value.
             if entry.block.is_user_prompt()
                 && let Some(slot) = cache.entry_truncated_heights.get_mut(idx)
             {
@@ -767,8 +743,8 @@ impl ScrollbackState {
                     self.scroll_offset = self.max_scroll_offset();
                 }
             } else {
-                // Top-anchored: the first visible entry's offset is unchanged (nothing above it was measured), so scroll stays put
-                // Only clamp if the content shrank past the end
+                // Top-anchored: the first visible entry's offset is unchanged
+                // (nothing above it was measured).
                 let max_offset = self
                     .total_height
                     .saturating_sub(self.viewport_height as usize);
@@ -872,9 +848,9 @@ impl ScrollbackState {
         );
     }
 
-    /// Measure everything a scroll-to-target computation reads.
-    /// That is the window around the target, plus (in SingleTurn mode) the turn's sticky prompt at the visible range start.
-    /// The sticky prompt drives the sticky-header height in the scroll math but can sit far above the target window.
+    /// Measure everything a scroll-to-target computation reads. That is the
+    /// window around the target, plus (in SingleTurn mode) the turn's sticky
+    /// prompt at the visible range start.
     pub(super) fn measure_scroll_target(&mut self, target: usize, width: u16) {
         self.measure_around_entry(target, width);
         if self.view_mode == ViewMode::SingleTurn {
@@ -914,8 +890,8 @@ impl ScrollbackState {
         }
     }
 
-    /// Get scroll info for scrollbar rendering. Returns `(scroll_offset, viewport_height, total_height)`. The two
-    /// cumulative quantities are `usize` (tall sessions exceed `u16::MAX`);. `viewport_height` stays `u16`.
+    /// Get scroll info for scrollbar rendering. Returns `(scroll_offset,
+    /// viewport_height, total_height)`.
     pub fn scroll_info(&self) -> (usize, u16, usize) {
         (self.scroll_offset, self.viewport_height, self.total_height)
     }
@@ -952,9 +928,8 @@ impl ScrollbackState {
             return;
         };
         let range = self.visible_entry_range();
-        // Sum entry heights and gap_after in the visible range
-        // Per-entry heights are u16; accumulate into usize so a long session (many entries / tall content) is not truncated
-        // The last entry's gap_after (always 1) is the trailing gap for the selection box, so the sum is correct as-is
+        // Sum entry heights and gap_after in the visible range Per-entry
+        // heights are u16.
         let Some(entries) = cache.entries.get(range) else {
             return;
         };
@@ -1007,9 +982,9 @@ impl ScrollbackState {
                 *slot = true;
             }
 
-            // A measured prompt's exact truncated height feeds sticky min_height. Refresh it unconditionally, matching the
-            // sibling measure paths. The height can be unchanged while the seed is still the conservative MAX. Cheap: prompts
-            // are rarely re-dirtied.
+            // A measured prompt's exact truncated height feeds sticky
+            // min_height. Refresh it unconditionally, matching the sibling
+            // measure paths.
             if entry.block.is_user_prompt()
                 && let Some(slot) = cache.entry_truncated_heights.get_mut(idx)
             {
@@ -1091,20 +1066,16 @@ impl ScrollbackState {
             return 0;
         };
 
-        // Find the earliest changed index
-        // All virtual_y entries after it need shifting by the cumulative delta up to that point
-        // For the common streaming case (one entry at the end), this loop touches zero virtual_y entries
+        // Find the earliest changed index All virtual_y entries after it need shifting by the cumulative delta up to that point.
         let earliest_idx = changes.iter().map(|&(idx, _)| idx).min().unwrap_or(0);
 
-        // Build a cumulative delta: for each position from earliest_idx onward, the delta is the sum of all changes at or before that position
-        // Sort changes by index to apply them in order.
+        // Build a cumulative delta: for each position from earliest_idx onward.
         let mut sorted_changes = changes.to_vec();
         sorted_changes.sort_unstable_by_key(|&(idx, _)| idx);
 
         let total_delta: i32 = sorted_changes.iter().map(|&(_, d)| d).sum();
 
-        // Apply deltas to virtual_y
-        // Walk from earliest_idx+1 to the end, accumulating the delta as we pass each change point
+        // Apply deltas to virtual_y Walk from earliest_idx+1 to the end.
         let mut change_iter = sorted_changes.iter().peekable();
         let mut cumulative_delta: i64 = 0;
 
@@ -1126,12 +1097,11 @@ impl ScrollbackState {
             cumulative_delta += d as i64;
         }
 
-        // Now shift virtual_y[earliest_idx+1..] and update prompt_descriptors
         for idx in (earliest_idx + 1)..cache.virtual_y.len() {
             // Check if this index has its own height change
             if change_iter.peek().is_some_and(|&&(cidx, _)| cidx == idx) {
                 let &(_, d) = change_iter.next().unwrap();
-                // Apply delta from earlier changes first, then add this one
+                // Apply delta from earlier changes first, then add this
                 if let Some(slot) = cache.virtual_y.get_mut(idx) {
                     *slot = (*slot as i64 + cumulative_delta) as usize;
                 }
@@ -1146,8 +1116,8 @@ impl ScrollbackState {
             if pd.entry_idx > earliest_idx {
                 pd.y_virtual = (pd.y_virtual as i64 + total_delta as i64) as usize;
             } else if pd.entry_idx == earliest_idx {
-                // The prompt itself didn't move, but its full_height may have changed
-                // Update from the cache, which update_dirty_entry_heights already patched
+                // The prompt itself didn't move, but its full_height may have
+                // changed Update from the cache.
                 if let Some(info) = cache.entries.get(pd.entry_idx) {
                     pd.full_height = info.height;
                 }
@@ -1189,8 +1159,7 @@ impl ScrollbackState {
             || cache.measured.len() != new_idx
             || new_idx >= self.entries.len()
         {
-            // Cache is out of sync (concurrent state mutation, bug, or batch).
-            // Bail out and let the caller invalidate.
+            // Cache is out of sync (concurrent state mutation, bug, or batch). Bail out and let the caller invalidate.
             return false;
         }
 
@@ -1215,9 +1184,9 @@ impl ScrollbackState {
         let is_foldable = new_entry.block.is_foldable();
         let new_display_mode = new_entry.display_mode;
 
-        // Recompute the previous entry's gap_after now that it's no longer the trailing entry
-        // The defensive check above guarantees `new_idx < self.entries.len()`, so when `new_idx > 0` the previous entry is in range
-        // We still use `if let Some(...)` to keep the access panic-free
+        // Recompute the entry's gap_after now that it is no longer the
+        // trailing entry The defensive check above guarantees `new_idx <
+        // self.entries.len()`, so when `new_idx > 0`.
         if new_idx > 0
             && let Some((_, prev_entry)) = self.entries.get_index(new_idx - 1)
             && let Some(prev) = new_idx.checked_sub(1)
@@ -1226,7 +1195,8 @@ impl ScrollbackState {
             slot.gap_after = gap_after_between(prev_entry, new_entry);
         }
 
-        // Compute the new entry's virtual_y (start position) using the previous entry's (now-correct) gap_after
+        // Compute the new entry's virtual_y (start position) using the
+        // entry's (now-correct) gap_after
         let new_y = if let Some(prev) = new_idx.checked_sub(1) {
             let Some(&vy) = cache.virtual_y.get(prev) else {
                 return false;
@@ -1239,7 +1209,7 @@ impl ScrollbackState {
             0
         };
 
-        // Append the new entry. It's now the trailing entry, so gap_after = 1.
+        // Append the new entry.
         cache.entries.push(EntryLayoutInfo {
             height,
             gap_after: 1,
@@ -1278,8 +1248,7 @@ impl ScrollbackState {
         let mut cache = self.layout_cache.take().unwrap_or_default().take();
         cache.width = width;
 
-        // Pass 1: Compute a cheap height estimate for every entry (no markdown render / word-wrap). This keeps the
-        // bulk-load rebuild O(history) in cheap arithmetic instead of O(history) markdown renders.
+        // This keeps the bulk-load rebuild O(history) in cheap arithmetic instead of O(history) markdown renders.
         for entry in self.entries.values() {
             let renderer = EntryRenderer::new(entry, &theme)
                 .with_appearance_ref(&self.appearance)
@@ -1292,16 +1261,15 @@ impl ScrollbackState {
                 group_collapse_header: false,
                 verb_group_header: false,
             });
-            // Truncated height only feeds prompt sticky-header min_height, and is an estimate until the entry is measured
-            // Seed it with the MAX so an as-yet-unmeasured pinned prompt never under-reserves and overlaps its content
-            // The exact value is filled in on measurement
+            // Truncated height only feeds prompt sticky-header min_height,
+            // and is an estimate until the entry is measured Seed it with the
+            // MAX.
             cache
                 .entry_truncated_heights
                 .push(MAX_TRUNCATED_HEADER_HEIGHT);
             cache.measured.push(false);
         }
 
-        // Pass 2: Compute gap_after using the pairwise grouping rule.
         Self::recompute_gap_after(&self.entries, &mut cache.entries);
 
         // Pass 2b: Apply verb-group folding and group truncation
@@ -1313,7 +1281,6 @@ impl ScrollbackState {
             &self.expanded_groups,
         );
 
-        // Pass 3: Build virtual_y and prompt descriptors from heights and gaps
         let mut y: usize = 0;
         for (idx, entry_layout) in cache.entries.iter().enumerate() {
             cache.virtual_y.push(y);
@@ -1391,7 +1358,7 @@ impl ScrollbackState {
     /// agrees with the truncation pass's claimed-entry and turn-marker breaks.
     pub fn group_range_of(&self, idx: usize, collapsed_only: bool) -> Range<usize> {
         // A verb-group run is its own group regardless of `collapsed_only`
-        // Members are collapsed by construction; the run stays the toggle / collapse / selection unit while expanded
+        // Members are collapsed by construction.
         if let Some(range) = self.verb_group_span_range(idx) {
             return range;
         }
@@ -1417,9 +1384,9 @@ impl ScrollbackState {
         start..end
     }
 
-    /// Whether the entry at `i` joins a dense (non-verb) run walk. Sharing it means their run shapes can't drift apart.
-    /// Verb-claimed entries never join: truncation breaks its runs at claimed entries. A turn-terminal marker never
-    /// joins ([`groups::can_join_dense_run`]), matching the truncation pass.
+    /// Whether the entry at `i` joins a dense (non-verb) run walk. Sharing it
+    /// means their run shapes can't drift apart. Verb-claimed entries never
+    /// join: truncation breaks its runs at claimed entries.
     pub(super) fn joins_dense_run(&self, i: usize, collapsed_only: bool) -> bool {
         if let Some((_, e)) = self.entries.get_index(i) {
             groups::can_join_dense_run(e, collapsed_only) && self.verb_group_range_of(i).is_none()
@@ -1534,9 +1501,8 @@ impl ScrollbackState {
     }
 }
 
-/// Blank rows between two adjacent visible entries: consecutive collapsed tool chrome stacks with no gap.
-/// Membership is [`groups::can_join_dense_run`] in collapsed-only mode, so the gap and dense-run
-/// boundaries stay in step; a stop-hook-collapsed turn marker therefore never glues to the next row.
+/// Blank rows between adjacent visible entries: consecutive collapsed
+/// tool chrome stacks with no gap.
 fn gap_after_between(prev: &ScrollbackEntry, next: &ScrollbackEntry) -> u16 {
     if groups::can_join_dense_run(prev, /*collapsed_only=*/ true)
         && groups::can_join_dense_run(next, /*collapsed_only=*/ true)

@@ -8,7 +8,7 @@ Skills are reusable prompt packages that extend Grok with task-specific instruct
 
 A skill is a directory that contains a `SKILL.md` file. Its markdown body tells Grok how to handle a specific type of task: step-by-step instructions, conventions, and tool-usage patterns.
 
-Use a skill for a repeatable procedure that's too specific for AGENTS.md but too long to retype. Grok activates a skill only when it applies to your current task.
+Use a skill for a repeatable procedure that is too specific for AGENTS.md but too long to retype. Grok activates a skill only when it applies to your current task.
 
 ---
 
@@ -30,9 +30,9 @@ Grok deduplicates skills by name -- a higher-priority location overrides a lower
 
 Flat `*.md` files under a `commands/` directory become user-invocable slash commands (filename stem = command name), matching Claude Code's legacy custom-command layout.
 
-Skill and command discovery does **not** use `.gitignore`. Paths under known skill roots (`.grok/`, `.agents/`, `.claude/`, `.cursor/`) always load when present on disk — teams often ignore `.claude/**` as local-only config while still expecting `/frontend`-style project commands to work. To hide a skill, use `[skills] ignore` in config (not repo ignore rules).
+Skill and command discovery does **not** use `.gitignore`. Paths under known skill roots (`.grok/`, `.agents/`, `.claude/`, `.cursor/`) always load when present on disk. Teams often ignore `.claude/**` as local-only config while still expecting `/frontend`-style project commands to work. To hide a skill, use `[skills] ignore` in config (not repo ignore rules).
 
-Grok scans the Claude and Cursor skill directories by default. To stop scanning a vendor, set its `skills` cell to `false` under `[compat.cursor]` or `[compat.claude]` in `~/.grok/config.toml`, or set the `GROK_CURSOR_SKILLS_ENABLED` or `GROK_CLAUDE_SKILLS_ENABLED` environment variable to `false`. See [Configuration](05-configuration.md#harness-compatibility) for details. Grok always filters out known vendor-shipped default skills (such as Cursor's `shell`, `canvas`, and `statusline`), regardless of these settings.
+Grok scans the Claude and Cursor skill directories by default. To stop scanning a vendor, set its `skills` cell to `false` under `[compat.cursor]` or `[compat.claude]`. This is in `~/.grok/config.toml`, or set the `GROK_CURSOR_SKILLS_ENABLED` or `GROK_CLAUDE_SKILLS_ENABLED` environment variable to `false`. See [Configuration](05-configuration.md#harness-compatibility) for details. Grok always filters out known vendor-shipped default skills (such as Cursor's `shell`, `canvas`, and `statusline`), regardless of these settings.
 
 ### Additional Skill Directories
 
@@ -45,7 +45,7 @@ ignore = ["~/my-team-skills/wip"]     # Paths to exclude (hidden entirely)
 disabled = ["wip-skill"]              # Skill names to keep listed but inactive
 ```
 
-Each entry in `paths` is a `SKILL.md` file or a directory that Grok walks recursively. `ignore` hides a skill completely; `disabled` keeps it in the list but excludes it from the system prompt and from invocation. `paths` and `ignore` take filesystem paths and support `~` expansion; `disabled` takes skill names.
+Each entry in `paths` is a `SKILL.md` file or a directory that Grok walks recursively. `ignore` hides a skill completely. `disabled` keeps it in the list but excludes it from the system prompt and from invocation. `paths` and `ignore` take filesystem paths and support `~` expansion. `disabled` takes skill names.
 
 `[paths] extra_skill_dirs` is written by `/import-claude`. It does not inject skills. Put extra directories in `[skills] paths`.
 
@@ -125,7 +125,7 @@ The `/create-skill` command walks you through building a new skill interactively
 
 When you run `/create-skill`, Grok:
 
-1. **Gathers requirements.** Grok asks for the skill name, the scope to save it under, and a description of the workflow you want to capture. Use a name with lowercase letters, digits, and hyphens (2–64 characters, starting and ending with a letter or digit).
+1. **Gathers requirements.** Grok asks for the skill name, the scope to save it under, and a description of the workflow you want to capture. Use a name with lowercase letters, digits, and hyphens (2–many characters, starting and ending with a letter or digit).
 
 2. **Drafts the description.** Grok writes a `description` that states what the skill does, the phrases that trigger it, and the slash command name. You approve or edit the draft before continuing.
 
@@ -177,7 +177,7 @@ When a skill's name collides with another skill or a built-in command, Grok keep
 /acme:login          # A plugin skill named "login" (built-in /login is unchanged)
 ```
 
-Typing `/login` in the slash menu shows both rows, with a right-aligned **built-in** or **skill · plugin-name** badge so you can tell them apart. Rename the skill (or its directory) if you want the bare `/name` for the skill instead.
+Typing `/login` in the slash menu shows both rows, with a right-aligned **built-in** or **skill · plugin-name** badge. As a result, you can tell them apart. Rename the skill (or its directory) if you want the bare `/name` for the skill instead.
 
 `grok inspect` tags colliding skills with `[collides with /login → /acme:login]`.
 
@@ -200,7 +200,7 @@ grok inspect --json   # Machine-readable report
 
 In the human-readable output, the Skills section lists each skill's name and its source -- `project`, `user`, `bundled`, `config` (a `[skills].paths` entry), `server` (skills synced from the skill store in managed workspaces), or `plugin: <name>`. Grok tags any skill disabled via `[skills].disabled` or from a disabled vendor surface with `[disabled]`.
 
-The report honors your `[skills]` config the same way a live session does: skills from `paths` are listed, skills under an `ignore` prefix are hidden, and skills named in `disabled` stay listed but tagged `[disabled]`.
+The report honors your `[skills]` config the same way a live session does. Skills from `paths` are listed, skills under an `ignore` prefix are hidden, and skills named in `disabled` stay listed but tagged `[disabled]`.
 
 The `--json` report includes the full detail for each skill: its `name`, `description`, `source` (with the path to the SKILL.md file), and `userInvocable` flag. Skills whose bare slash name is contested — by a built-in command or by another skill — also include `collidesWith` (the contested name) and `invocableAs` (the qualified command to type).
 
@@ -208,7 +208,7 @@ The `--json` report includes the full detail for each skill: its `name`, `descri
 
 ## Bundled and Plugin Skills
 
-Grok distributes platform skills separately from your personal skills. Bundled skills are cached under `~/.grok/bundled/skills/`; Grok never writes them into `~/.grok/skills/`. A same-named local, repo, or user skill overrides the bundled copy. `grok inspect` labels each definition by its actual source. (A plugin skill of the same name does not override a native skill; it stays available under its qualified `plugin:name` form.)
+Grok distributes platform skills separately from your personal skills. Bundled skills are cached under `~/.grok/bundled/skills/`. Grok never writes them into `~/.grok/skills/`. A same-named local, repo, or user skill overrides the bundled copy. `grok inspect` labels each definition by its actual source. (A plugin skill of the same name does not override a native skill. It stays available under its qualified `plugin:name` form.)
 
 Skills can also come from plugins. When you install a plugin that includes skills, they appear alongside your user and project skills. `grok inspect` labels each plugin-provided skill with its source as `plugin: <name>`.
 
@@ -218,7 +218,7 @@ See the [Plugins guide](09-plugins.md) for more on installing plugins that provi
 
 ## Best Practices
 
-1. **Write specific descriptions.** The description drives automatic invocation. "Create git commits" is too vague; "Create well-formatted git commits following conventional commit standards. Use when the user wants to commit changes or asks for /commit." works better.
+1. **Write specific descriptions.** The description drives automatic invocation. "Create git commits" is too vague. "Create well-formatted git commits following conventional commit standards. Use when the user wants to commit changes or asks for /commit." works better.
 
 2. **Include concrete steps.** Skills work best when they give Grok a clear, ordered procedure to follow.
 

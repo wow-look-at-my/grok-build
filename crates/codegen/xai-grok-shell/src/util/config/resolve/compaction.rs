@@ -35,7 +35,13 @@ pub(crate) fn resolve_compaction_tool_choice_from(
 
 pub(crate) const ENV_AUTO_COMPACT_THRESHOLD_PERCENT: &str = "GROK_AUTO_COMPACT_THRESHOLD_PERCENT";
 
-/// Precedence (highest first): env `GROK_AUTO_COMPACT_THRESHOLD_PERCENT` user TOML `[model.<id>].auto_compact_threshold_percent` (`cfg.config_models`, the merge of user and managed `[model.<id>]` sections) user TOML `[session].auto_compact_threshold_percent` remote settings per-model `ModelInfo.auto_compact_threshold_percent` (kept out of `ConfigModelOverride::apply` so the user and remote per-model tiers stay distinct) remote settings global `RemoteSettings.auto_compact_threshold_percent` default `DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT`
+/// Precedence (highest first): env `GROK_AUTO_COMPACT_THRESHOLD_PERCENT` user
+/// TOML `[model.<id>].auto_compact_threshold_percent` (`cfg.config_models`,
+/// the merge of user and managed `[model.<id>]` sections) user TOML
+/// `[session].auto_compact_threshold_percent` remote settings per-model
+/// `ModelInfo.auto_compact_threshold_percent` (kept out of
+/// `ConfigModelOverride::apply` so the user and remote per-model tiers stay
+/// distinct).
 pub(crate) fn resolve_auto_compact_threshold_percent(
     cfg: &crate::agent::config::Config,
     model_id: &str,
@@ -89,7 +95,6 @@ pub(crate) fn resolve_auto_compact_threshold_percent_from_tiers(
 }
 
 /// Fleet p99 of successful compactions is ~181s (≈225s at 400K+ input).
-/// So 300s clears the legit tail with margin while cutting a runaway from the ~600s deadline.
 pub const DEFAULT_COMPACTION_WALL_CLOCK_BUDGET_SECS: u64 = 300;
 
 /// Below this, a configured budget is almost certainly a misconfig (fleet success p99 ~181s); logged at `warn`, not clamped.
@@ -125,7 +130,7 @@ mod compaction_wall_clock_budget_tests {
     fn default_global_disable_and_no_clamp() {
         assert_eq!(resolve(None), 300); // client default
         assert_eq!(resolve(Some(450)), 450); // server global wins
-        assert_eq!(resolve(Some(0)), 0); // 0 explicitly disables (no clamp)
+        assert_eq!(resolve(Some(0)), 0);
         assert_eq!(resolve(Some(5)), 5); // low values pass through (warned, not clamped)
     }
 }

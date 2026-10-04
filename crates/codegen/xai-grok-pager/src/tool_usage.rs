@@ -1,8 +1,4 @@
 //! Tool usage statistics aggregation for the pager.
-//!
-//! Stats are computed over visible scrollback blocks only (ToolCallBlock variants).
-//! Thinking blocks and non-tool RenderBlock variants are excluded.
-//! Time tracking is deferred.
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;

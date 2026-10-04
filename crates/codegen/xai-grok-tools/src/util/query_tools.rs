@@ -1,13 +1,4 @@
 //! `$PATH`-aware helper for steering messages that suggest shell tools.
-//!
-//! Hints that recommend concrete binaries (`jq`, `python3`, `sed`, …) must
-//! only name tools that actually exist on the tool server, with no
-//! "if available" hedge. Consumers call [`QueryTools::detect`] once and build
-//! an example clause via [`examples_clause`]; when nothing relevant is
-//! installed the clause is empty so the surrounding hint reads cleanly.
-//!
-//! Shared by the `use_tool` MCP-dump steer and the `search_replace`
-//! Unicode-confusable hint.
 
 /// Query tools present on the tool server's `$PATH`, each `Some(name)` when
 /// detected; see [`xai_grok_config::shell::is_command_available`].

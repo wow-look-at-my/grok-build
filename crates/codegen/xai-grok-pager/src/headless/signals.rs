@@ -1,5 +1,4 @@
-//! Signals for the one-shot `grok -p` run. The streams are installed before the agent starts,
-//! because until they exist the default disposition kills the run instead of exiting `128 + signal`.
+//! Signals for the one-shot `grok -p` run.
 
 use std::io;
 use std::sync::Arc;

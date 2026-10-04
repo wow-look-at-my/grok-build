@@ -1,11 +1,4 @@
 //! Bash PreToolUse-style guards for git-repo file deletion and history rewrite.
-//!
-//! Policy (also documented in the user-guide and system prompt):
-//! - Never `rm` a non-ignored file in a git repo (tracked or untracked).
-//!   Commit first, then `git rm`.
-//! - Do not hide a deletion with `git commit --amend` after `git rm`,
-//!   `git reset --hard`, `git filter-branch` / `filter-repo`, or a force-push
-//!   of rewritten history.
 use crate::implementations::editor_infra::duplicate_write::find_git_root;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -245,8 +238,7 @@ fn split_statements(command: &str) -> Vec<&str> {
             if c == q {
                 quote = None;
             } else if c == '\\' {
-                // Escaped character: skip it whole, whatever its width, so the
-                // scan never steps into the middle of a multi-byte char.
+                // Escaped character: skip it whole, whatever its width, so the scan never steps into the middle.
                 chars.next();
             }
             continue;
@@ -265,8 +257,6 @@ fn split_statements(command: &str) -> Vec<&str> {
             0
         };
         if sep_len > 0 {
-            // `i` is a `char_indices` offset of an ASCII separator and `start`
-            // is 0 or such an offset plus the separator's width.
             #[allow(clippy::string_slice)]
             let stmt = command[start..i].trim();
             if !stmt.is_empty() {
@@ -276,7 +266,6 @@ fn split_statements(command: &str) -> Vec<&str> {
             continue;
         }
     }
-    // Same walk: `start` is a separator boundary or 0.
     #[allow(clippy::string_slice)]
     let stmt = command[start..].trim();
     if !stmt.is_empty() {
@@ -512,7 +501,7 @@ mod tests {
         assert_eq!(bash_command_violation(with_dash, tmp.path()), None);
     }
 
-    /// A `\` escape skipping two raw bytes must not step into a multi-byte
+    /// A `\` escape skipping raw bytes must not step into a multi-byte
     /// char either (the quoted-region `i += 2` had the same hazard).
     #[test]
     fn split_survives_backslash_before_a_multibyte_char() {

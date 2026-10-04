@@ -1,15 +1,4 @@
 //! Host clipboard image paste mediated by `grok wrap`.
-//!
-//! On a full remote paste miss (no image/text/file URLs) with `osc52_sink_active()`, remote emits a private OSC on stderr.
-//! Wrap injects a bracketed-paste frame on PTY stdin for the normal paste-chip path.
-//!
-//! # Trust model
-//!
-//! Answering the private request OSC is effectively an image clipboard *read* for the wrapped session.
-//! Any process that can write to the PTY (not only the inner `grok`) can solicit the host pasteboard.
-//! That is intentional and acceptable for `grok wrap`: the user opted into wrap on their own host, and the answer stays inside their session.
-//! The remote also only requests when `osc52_sink_active()` (wrap already set `GROK_OSC52_SINK` / `LC_GROK_OSC52_SINK`).
-//! Do not generalize this pattern to untrusted multiplexers without an explicit allowlist.
 
 use base64::Engine as _;
 use xai_grok_pager_render::clipboard::{ImageData, osc52_sink_active};
@@ -33,9 +22,6 @@ pub const MAGIC_IMG: &str = "GROK_WRAP_IMG";
 /// Host has no image (`GROK_WRAP_NONE`; not a prefix of [`MAGIC_IMG`]).
 pub const MAGIC_NONE: &str = "GROK_WRAP_NONE";
 
-/// Max decoded image bytes on this path (OSC 52 text limits unchanged).
-/// Retina screenshots are often multi-MB PNG; 4 MiB was too small and silently became [`MAGIC_NONE`].
-/// 20 MiB covers typical screenshots; host inject may JPEG-recompress if still over budget.
 pub const MAX_WRAP_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 
 /// Result of decoding a wrap-injected bracketed paste.
@@ -138,7 +124,6 @@ pub fn encode_wrap_image_response(image: Option<&ImageData>) -> Vec<u8> {
 }
 
 /// Max pixel area when decoding oversized clipboard images for recompression.
-/// ~48MP is large enough for retina screenshots without allowing a decompression bomb.
 const MAX_WRAP_DECODE_PIXELS: u64 = 48 * 1024 * 1024;
 
 /// Keep encoded bytes under [`MAX_WRAP_IMAGE_BYTES`], JPEG-recompressing if needed.

@@ -1,13 +1,4 @@
 //! Public event types — the wire contract for `xai-fsnotify`.
-//!
-//! Pure data: no I/O, no tokio, no intra-crate deps. Safe to lift into a
-//! sibling `-types` crate for WASM/no-tokio consumers.
-//!
-//! All variants are `#[non_exhaustive]`; add additively. The workspace
-//! translator (in `xai-grok-workspace`) maps these to
-//! `WorkspaceEvent`s and enriches `GitOperationCompleted { head_changed:
-//! true }` with `commit + branch + vcs` via a git shell-out — that I/O
-//! belongs at the workspace layer, not on the OS-watcher hot path.
 
 use std::path::PathBuf;
 
@@ -17,9 +8,7 @@ use std::path::PathBuf;
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum FsEvent {
-    /// Workspace file changes; all paths share `kind`. Paths under
-    /// `git_dir` are excluded (metadata surfaces as `GitMetaChanged`,
-    /// `.lock` files are dropped).
+    /// Workspace file changes; all paths share `kind`.
     FilesChanged {
         paths: Vec<PathBuf>,
         kind: FsEventKind,
@@ -29,17 +18,14 @@ pub enum FsEvent {
     GitMetaChanged { kind: GitMetaKind },
 
     /// VCS lock activity observed, or an event for a lock that is already gone (fast ops finish inside one batch).
-    /// State is in flux until the matching `GitOperationCompleted` arrives.
     GitOperationStarted,
 
     /// The lock has been gone for [`crate::SETTLE_MS`]: rapid lock cycles merge into one operation.
-    /// `head_changed` reports whether `.git/HEAD` differs from its value when the operation's first lock appeared.
     GitOperationCompleted { head_changed: bool },
 }
 
-/// Aligned with `xai_grok_workspace_types::FsEventKind` (identity map at
-/// the workspace boundary). `notify::EventKind::{Access, Any, Other}` are
-/// filtered upstream and never surface here.
+/// Aligned with `xai_grok_workspace_types::FsEventKind` (identity map at the
+/// workspace boundary).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
 )]

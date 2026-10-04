@@ -1,6 +1,4 @@
 //! Unit tests for [`super::oidc_refresher::OidcRefresher`].
-//! They were extracted from `oidc_refresher.rs` so the implementation reads top-to-bottom.
-//! The module is wired in via `#[path = "oidc_refresher_tests.rs"] mod tests;`.
 
 use super::*;
 use crate::{GrokAuth, GrokComConfig};
@@ -135,8 +133,7 @@ async fn oidc_refresher_e2e_proactive_returns_cached_when_valid() {
     mgr.hot_swap(valid);
 
     let refresher = OidcRefresher::new(mgr.clone());
-    // PreRequest with a valid token: the refresher finds no expired_auth (token is valid) and no disk token, so it returns TransientFailure
-    // The PreRequest fast-path is handled by refresh_chain (not the refresher).
+    // PreRequest with a valid token: the refresher finds no expired_auth (token is valid) and no disk token.
     let result = refresher.refresh(RefreshReason::PreRequest).await;
     assert!(
         matches!(result, RefreshOutcome::TransientFailure { .. }),
@@ -154,8 +151,6 @@ async fn oidc_refresher_e2e_force_refreshes_locally_valid_token() {
         AuthManager::new(dir.path(), GrokComConfig::default()).with_proxy_base_url(&base_url),
     );
 
-    // Seed a valid (not yet expired) OIDC token
-    // force=true simulates the reactive 401 path: the server rejected a token that looks locally valid (e.g. clock skew, server-side revocation).
     // The refresher should still attempt an OIDC refresh.
     let valid = GrokAuth {
         key: "still-valid-token".into(),
@@ -196,7 +191,7 @@ async fn oidc_refresher_e2e_near_expiry_within_buffer_refreshes() {
         AuthManager::new(dir.path(), GrokComConfig::default()).with_proxy_base_url(&base_url),
     );
 
-    // Token expires in 3 minutes, inside the 5-minute buffer
+    // Token expires in a few minutes, inside the 5-minute buffer
     // current() will return None, but expired_auth() will return it.
     let near_expiry = GrokAuth {
         key: "about-to-expire-token".into(),
@@ -321,7 +316,6 @@ async fn oidc_refresher_attributes_the_refresh_token_it_spent_on_invalid_grant()
 /// When the near-expiry token has a refresh_token but the IdP rejects the refresh (e.g. refresh_token revoked), silent refresh must fail.
 #[tokio::test]
 async fn oidc_refresher_e2e_near_expiry_idp_rejects_refresh() {
-    // Start a mock that rejects refresh requests with 401
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base_url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     let base_for_discovery = base_url.clone();
@@ -367,8 +361,7 @@ async fn oidc_refresher_e2e_near_expiry_idp_rejects_refresh() {
     };
     mgr.hot_swap(near_expiry);
 
-    // Permanent invalid_grant discards both the access and refresh tokens (no grace re-serve of the pre-refresh snapshot)
-    // Grace remains for *transient* refresh failures only
+    // Permanent invalid_grant discards both the access and refresh tokens (no grace re-serve of the pre-refresh snapshot) Grace remains.
     mgr.set_refresher(std::sync::Arc::new(OidcRefresher::new(mgr.clone())));
     let err = mgr.auth().await.unwrap_err();
     assert!(
@@ -519,7 +512,7 @@ async fn oidc_refresher_e2e_invalid_client_adopts_valid_sibling_disk_token() {
     let json = serde_json::to_string_pretty(&store).unwrap();
     std::fs::write(dir.path().join("auth.json"), json).unwrap();
 
-    // In-memory auth has the OLD client_id that the server rejects.
+    // In-memory auth has the client_id that the server rejects.
     let expired = GrokAuth {
         key: "old-token".into(),
         create_time: Utc::now() - Duration::hours(2),
@@ -587,8 +580,7 @@ async fn oidc_refresh_picks_up_valid_disk_token() {
     };
     write_auth_to_disk(dir.path(), &scope, &fresh_on_disk);
 
-    // Disk-token pickup is now refresh_chain's responsibility.
-    // Go through auth() which calls refresh_chain.
+    // Disk-token pickup is now refresh_chain's responsibility. Go through auth() which calls refresh_chain.
     let result = mgr.auth().await;
     assert_eq!(
         result.unwrap().key,
@@ -732,7 +724,7 @@ async fn lock_timeout_falls_through_to_refresh() {
     use fs2::FileExt;
     lock_file.lock_exclusive().unwrap();
 
-    // Use a very short timeout so the test doesn't wait 30s.
+    // Use a short timeout so the test doesn't wait 30s.
     let _lock = mgr
         .try_lock_auth_file_async(
             std::time::Duration::from_millis(100),
@@ -1097,7 +1089,7 @@ async fn refresher_disk_retry_is_one_shot() {
         "exactly two IdP calls — disk-token retry must NOT recurse"
     );
 
-    // This test calls the refresher directly (not refresh_chain); disk is unchanged because refresh_chain is responsible for the permanent clear
+    // This test calls the refresher directly (not refresh_chain).
     assert!(
         mgr.read_disk_auth().is_some(),
         "refresher must not touch disk; clearing is refresh_chain's responsibility"
@@ -1273,8 +1265,7 @@ async fn sleep_gate_e2e_in_flight_refresh_completes_across_imminent_sleep() {
 
     idp_hit.notified().await;
 
-    // `set_system_sleep_imminent` holds the OS sleep ack until the in-flight refresh drains
-    // Drive it off the runtime (as the real OS power-listener thread does) so the runtime can complete the refresh while it waits
+    // `set_system_sleep_imminent` holds the OS sleep ack until the in-flight refresh drains Drive it off the runtime.
     let sleeper = mgr.clone();
     let ack = std::thread::spawn(move || sleeper.set_system_sleep_imminent(true));
     release.notify_one();
@@ -1324,7 +1315,7 @@ fn transient_blip_budget_is_scoped_to_the_credential() {
     let refresher = OidcRefresher::new(Arc::new(EmptySnapshot));
     let key_a = Some("cred-a".to_owned());
 
-    // Accrue blips up to just under the escalation threshold on credential A.
+    // Accrue blips up to under the escalation threshold on credential A.
     for _ in 0..MAX_CONSECUTIVE_TRANSIENT_FAILURES - 1 {
         assert!(matches!(
             refresher.record_transient_failure("blip".into(), key_a.clone(), false),

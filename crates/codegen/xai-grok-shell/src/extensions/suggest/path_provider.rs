@@ -31,9 +31,8 @@ impl PathProvider {
     }
 }
 
-/// The command token being typed, via the canonical tokenizer.
-/// Quotes hide separators (`echo "a | gr` is quoted data, not a command position) and the cursor must sit in the segment's first word.
-/// Mirroring the file provider, flag-looking tokens never complete.
+/// The command token being typed, via the canonical tokenizer. Quotes hide separators (`echo "a | gr` is quoted data, not a command position) and the cursor must sit in the segment's first word. Mirroring the file
+/// provider, flag-looking tokens never complete.
 fn extract_command_token(prefix: &str) -> Option<CurrentToken> {
     let tok = parse_current_token(prefix);
     if tok.tokens_before != 0 || tok.after_redirect || tok.value.is_empty() {

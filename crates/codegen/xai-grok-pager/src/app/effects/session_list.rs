@@ -1,6 +1,4 @@
-//! One parser serves the resume picker ([`super::Effect::FetchSessionList`]) and the dashboard's
-//! non-leader idle-session fallback ([`super::Effect::FetchDashboardSessions`]), so both surfaces
-//! label rows identically.
+//! One parser serves the resume picker ([`super::Effect::FetchSessionList`]) and the dashboard's non-leader idle-session fallback.
 use super::helpers::extract_first_user_prompt;
 use crate::app::app_view::SessionPickerEntry;
 use crate::app::foreign_sessions::is_foreign_picker_source;
@@ -92,7 +90,7 @@ pub(super) async fn parse_session_picker_entries_blocking(
     .await
     .map_err(|error| format!("session list parse task failed: {error}"))?
 }
-/// Sessions older than 30 days, and sessions with no usable user prompt (empty `summary` after fallbacks), are dropped.
+/// Sessions older than many days, and sessions with no usable user prompt (empty `summary` after fallbacks), are dropped.
 ///
 /// `resolve_local` receives the candidate ids for `presence` and returns the subset that exists on disk; each call is a full `~/.grok/sessions` walk.
 fn parse_session_picker_entries_with(

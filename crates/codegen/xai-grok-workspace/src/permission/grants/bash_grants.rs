@@ -1,6 +1,6 @@
-//! Translation between what a permission prompt showed the user and what becomes a persisted bash grant key.
-//! Grant keys are dequoted word joins; `evaluate_bash` matches them per segment by word-boundary prefix.
-//! Whole-script exact grants additionally require the join (or the raw text) to cover the entire script.
+//! Translation between what a permission prompt showed the user and what
+//! becomes a persisted bash grant key. Grant keys are dequoted word joins;
+//! `evaluate_bash` matches them per segment by word-boundary prefix.
 
 use crate::permission::bash_command_splitting::{
     BashCommandHighlights, PlainCommand, is_setup_command, primary_command_from_script,
@@ -136,15 +136,12 @@ pub fn always_allow_row_is_effective(cmd: &str) -> bool {
         return false;
     };
     let scope = super::default_always_allow_scope(&h.highlighted_words);
-    // The default cursor scope must itself persist a grant
-    // The prompt's left/right arrows and the enqueue invariant use this same predicate, so "row shown" and "default scope persists" cannot diverge
-    // An argv-ambiguous default that only some other scope's join happens to save must not show a row Enter can't honor
+    // The default cursor scope must itself persist a grant The prompt's
+    // left/right arrows and the enqueue invariant use this same predicate.
     if !always_allow_scope_persists(&h, scope) {
         return false;
     }
-    // A FRESH scratch state keeps the verdict independent of any live grant the prompt doesn't show
-    // `always_allow_scope_persists` guarantees this save inserts a key
-    // The pre-classifier gate below is the real test of whether that key lets the whole script replay
+    // A FRESH scratch state keeps the verdict independent.
     let mut scratch = PermissionState::default();
     let Some(scope_words) = h.highlighted_words.get(..scope) else {
         return false;
@@ -224,7 +221,6 @@ mod tests {
 
     #[test]
     fn metacharacter_words_never_mint_chain_colliding_grants() {
-        // The dequoted join respells a dangerous two-segment chain, so only the raw text may persist and the chain never gains an exact grant
         const CMD: &str = r#"git commit -m "fix;git" push --force"#;
         const COLLIDING_CHAIN: &str = "git commit -m fix;git push --force";
 
@@ -240,9 +236,7 @@ mod tests {
 
     #[test]
     fn scope_persistence_matches_what_persist_would_store() {
-        // Argv-ambiguous intermediate scope: a quoted arg with a space followed by another word
-        // The full command persists (raw fallback), the ambiguous middle count does not, the unambiguous prefixes do
-        // (`git show` is deliberately a non-vehicle, non-dangerous head so the scope floors to one word and intermediate prefixes remain offerable.)
+        // Argv-ambiguous intermediate scope: a quoted arg with a space followed by another word The full command persists (raw fallback).
         const CMD: &str = r#"git show -e "A B" file"#;
         let h = primary_command_from_script(CMD).unwrap();
         assert_eq!(h.highlighted_words.len(), 5);
@@ -311,9 +305,7 @@ mod tests {
             bash_grant_segments("cargo build && git push --force"),
             vec!["cargo build".to_owned()]
         );
-        // Exec-vehicle segments never mint standalone (prefix-matching) grants either
-        // A `docker run nginx` key would prefix-match `docker run nginx --privileged`
-        // The chain still replays via the raw whole-script key
+        // Exec-vehicle segments never mint standalone (prefix-matching).
         assert_eq!(
             bash_grant_segments("docker run nginx && echo done"),
             vec!["echo done".to_owned()]
@@ -346,8 +338,7 @@ mod tests {
         ));
         assert!(!always_allow_row_is_effective("FOO=1 git push origin main"));
         assert!(!always_allow_row_is_effective("env FOO=1 make"));
-        // Chains whose primary-scoped grant leaves another segment prompting get no row even with zero findings
-        // The simulation catches what finding-class enumeration missed (`ls` is auto-safe; granting it cannot stop `npm publish` from prompting)
+        // Chains whose primary-scoped grant leaves another segment prompting get no row even.
         assert!(!always_allow_row_is_effective("ls && npm publish"));
         assert!(!always_allow_row_is_effective(
             "git status && git push origin main"
@@ -355,8 +346,7 @@ mod tests {
         // Unparseable scripts have no primary command and no honorable row.
         assert!(!always_allow_row_is_effective("echo $(date)"));
         // A pipe whose primary carries a space-bearing arg is still honorable
-        // The DEFAULT scope (verb and flags, no ambiguous word) persists and the safe-listed tail (`head`) replays
-        // The row must be offered even though the WIDEST join is argv-ambiguous
+        // The DEFAULT scope (verb and flags, no ambiguous word) persists.
         assert!(always_allow_row_is_effective(
             r#"terraform plan -var "x=1 2" | head"#
         ));

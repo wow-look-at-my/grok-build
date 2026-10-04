@@ -1,6 +1,4 @@
-//! Plays each scripted [`Conversation`] forward one request at a time. Only a reply advances the
-//! script, so a resend repeats it and a pin takes over and supersedes an in-progress turn; a failure
-//! answers in place without advancing, so a retry meets the same position. A departure is a [`ScriptViolation`].
+//! Plays each scripted [`Conversation`] forward one request at a time.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -98,8 +96,6 @@ impl FailureBudget {
     }
 }
 
-/// One of an entry's failures chosen for a request; `repetition` counts from 1 and numbers a doom
-/// loop's replay.
 struct ChosenFailure {
     index: usize,
     failure: Failure,
@@ -234,11 +230,9 @@ struct ReplayingScript {
     entries: ScriptEntries,
     /// Requests that reached the script, the count a pinned entry names.
     requests: usize,
-    /// Entries whose reply was served or whose turn a pin took over; each counts once, so a
-    /// resumed turn a pin already superseded cannot hide a later turn that never answered.
+    /// Entries whose reply was served or whose turn a pin took over.
     accounted: BTreeSet<usize>,
-    /// The subset of `accounted` a pin took over mid tool call; the pinned turn stands in for
-    /// their reply.
+    /// The subset of `accounted` a pin took over mid tool call; the pinned turn stands in for their reply.
     superseded: BTreeSet<usize>,
     progress: Progress,
     failures: Vec<EntryFailures>,
@@ -572,8 +566,8 @@ pub(crate) struct ConversationReplay {
 }
 
 impl ConversationReplay {
-    /// Two scripts for one conversation, or two turns of a script pinned to one request, panic here
-    /// rather than at serve time.
+    /// Scripts for one conversation, or turns of a script pinned to one request, panic here rather
+    /// than at serve time.
     pub(crate) fn set(&self, conversations: impl IntoIterator<Item = Conversation>) {
         let mut named = BTreeMap::new();
         let mut waiting = Vec::new();

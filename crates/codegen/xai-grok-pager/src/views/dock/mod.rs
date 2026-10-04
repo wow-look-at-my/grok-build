@@ -1,5 +1,4 @@
-//! Consolidated dock above the prompt: one header per non-empty section.
-//! Experimental, gated by remote `dock_enabled`.
+//! Consolidated dock above the prompt: one header per non-empty section. Experimental, gated by remote `dock_enabled`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -17,17 +16,14 @@ mod layout;
 
 pub use layout::{DockLayout, MaxRows, SectionSlots, desired_height, is_show_all_needed};
 
-/// Rows the dock takes at rest. A section opened with `show N more` lifts this
-/// (see [`DockCounts::max_rows`]) so its rows are all reachable.
+/// Rows the dock takes at rest.
 pub const MAX_DOCK_ROWS: u16 = 8;
 
 const HEADER_INDENT: &str = " ";
 /// Same gutter as the header chevron, so a one-item section is not nested.
 const ROW_INDENT: &str = " ";
 const MORE_INDENT: &str = "   ";
-/// Lines the queue body's `#N` markers up with the column its header's title
-/// starts in. The header spends three columns on its chevron and the queue pane
-/// already insets its own content by two, so the dock adds the last one.
+/// Lines the queue body's `#N` markers up with the column its header's title starts in.
 const QUEUE_BODY_INDENT: u16 = 1;
 const STOP_LABEL: &str = "[stop]";
 
@@ -36,8 +32,7 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(test)]
 thread_local! {
-    /// Per-thread override so a test can turn the dock on without racing
-    /// parallel draw-based tests through the process-global flag.
+    /// Per-thread override so a test can turn the dock.
     static ENABLED_OVERRIDE: std::cell::Cell<Option<bool>> =
         const { std::cell::Cell::new(None) };
 }
@@ -69,8 +64,7 @@ pub struct DockRow {
     pub killable: bool,
     /// Loops only paint `[↗]` when a linked child still exists to open.
     pub openable: bool,
-    /// Active work (subagents, background commands, monitors) animates the
-    /// leading dot spinner; scheduled loops keep a static diamond.
+    /// Active work (subagents, background commands, monitors) animates the leading dot spinner.
     pub spinning: bool,
 }
 
@@ -124,9 +118,7 @@ pub enum DockItem {
     RevealRemaining(Section),
 }
 
-/// Painted kill-control geometry for one frame. Click handling snapshots this
-/// rect with the row's kill identity; a later click is ignored unless the
-/// cell still resolves to that same identity.
+/// Painted kill-control geometry for one frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DockStopHit {
     pub rect: Rect,
@@ -151,11 +143,9 @@ pub struct DockCounts {
     pub tasks_show_all: bool,
     pub watchers_show_all: bool,
     pub queue_body_rows: u16,
-    /// First row each section paints. Sections scroll inside their own band, so
-    /// a scroll never moves a header.
+    /// First row each section paints. Sections scroll inside their own band, so a scroll never moves a header.
     pub offsets: SectionSlots<usize>,
-    /// Rows the dock may take. [`MAX_DOCK_ROWS`] at rest; the caller raises it
-    /// for a section the user opened, bounded by the space around the dock.
+    /// Rows the dock may take.
     pub max_rows: MaxRows,
 }
 
@@ -183,12 +173,9 @@ pub struct DockData {
     /// See [`DockCounts::max_rows`].
     pub max_rows: MaxRows,
     pub hovered: Option<DockItem>,
-    /// True when the pointer sits on the action row's kill control. The
-    /// `[stop]`/`[x]` label then paints red on direct hover only and stays gray
-    /// at rest, matching the Tasks pane.
+    /// True when the pointer sits on the action row's kill control.
     pub stop_hovered: bool,
-    /// Drives the leading dot-spinner frame on active rows. Sourced from the
-    /// Tasks-pane animation tick so the dock animates in lockstep with it.
+    /// Drives the leading dot-spinner frame on active rows.
     pub spinner_tick: u64,
 }
 
@@ -243,8 +230,7 @@ pub fn queue_body_rect(area: Rect, data: &DockData) -> Rect {
     if data.queued == 0 || height == 0 {
         return Rect::default();
     }
-    // The queue pane paints its own `#N` markers; line them up with the header
-    // title above them so the dock reads as one list.
+    // The queue pane paints its own `#N` markers.
     let indent = QUEUE_BODY_INDENT.min(area.width);
     Rect {
         x: area.x + indent,
@@ -317,9 +303,7 @@ pub fn render(buf: &mut Buffer, area: Rect, theme: &Theme, data: &DockData) {
             }
             DockItem::RevealRemaining(section) => {
                 let selected = selected_at(item_index);
-                // Rows the section holds but is not showing. Scrolling the band
-                // changes which rows those are, never how many, so the count
-                // stays put while the user moves through the section.
+                // Rows the section holds but is not showing.
                 let hidden = layout.hidden_rows(section);
                 let arrow = crate::glyphs::disclosure_open();
                 let indent_len = MORE_INDENT.len().min(area.width.saturating_sub(1) as usize);
@@ -872,7 +856,7 @@ mod tests {
     fn active_rows_animate_the_dot_spinner() {
         let theme = Theme::tokyonight();
         let area = Rect::new(0, 0, 60, 2);
-        // Leading marker sits just past the row indent.
+        // Leading marker sits past the row indent.
         let icon_x = ROW_INDENT.width() as u16;
         let frames = crate::glyphs::dot_spinner_frames();
 
@@ -928,8 +912,7 @@ mod tests {
             tasks_show_all: true,
             focused: true,
             cursor: 1,
-            // A row index the layout no longer paints: the stale hover must fall
-            // back to the cursor rather than swallowing its kill control.
+            // A row index the layout no longer paints: the stale hover must fall back to the cursor.
             hovered: Some(DockItem::Row(Section::Tasks, 99)),
             ..DockData::default()
         };
@@ -970,7 +953,7 @@ mod tests {
         assert_eq!(at(7), None, "past the end / queue body");
     }
 
-    /// Ten tasks and two watchers: more rows than the dock can paint.
+    /// Tasks and watchers: more rows than the dock can paint.
     fn crowded() -> DockData {
         DockData {
             tasks: (0..10)
@@ -1135,8 +1118,7 @@ mod tests {
         let theme = Theme::tokyonight();
         let mut data = crowded();
         data.tasks_show_all = true;
-        // Room for four more rows than the resting height: the section opens as
-        // far as it can and keeps the rest behind a scroll.
+        // Room for more rows than the resting height: the section opens as far as it can.
         data.max_rows = MaxRows::new(MAX_DOCK_ROWS + 4);
         let layout = DockLayout::new(&data.counts());
         assert!(layout.rows_below(Section::Tasks) > 0);
@@ -1203,9 +1185,6 @@ mod tests {
         assert_eq!(resting, MAX_DOCK_ROWS);
         let tasks_at_rest = DockLayout::new(&data.counts()).visible_rows(Section::Tasks);
 
-        // Typical terminal: `dock_max_rows` stays at 8 (`above_prompt / 2 <= 8`).
-        // The 2-row floor is 3, so stacking the raise on the floor alone
-        // would drop desired_height from 8 to 3.
         data.tasks_show_all = true;
         assert!(
             desired_height(&data) >= resting,
@@ -1335,7 +1314,7 @@ mod tests {
              scroll does not change: {painted:#?}"
         );
 
-        // 99 clamps to the last band; the summary then points back up.
+        // Clamps to the last band; the summary then points back up.
         data.offsets.set(Section::Tasks, 99);
         let mut buf = Buffer::empty(area);
         render(&mut buf, area, &theme, &data);
@@ -1386,8 +1365,7 @@ mod tests {
                 0,
                 "{section:?} paints a header with nothing under it: {painted:#?}"
             );
-            // Whatever a section cannot show, it says so: the reported bug was a
-            // `Watchers 2` header over one row with no sign of the second.
+            // Whatever a section cannot show, it says so: the reported bug was a `Watchers 2` header over one row with no sign.
             let hidden = layout.rows_below(section);
             assert!(
                 hidden == 0

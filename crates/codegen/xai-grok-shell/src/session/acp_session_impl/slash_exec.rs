@@ -20,8 +20,7 @@ impl SessionActor {
             BuiltinAction::SetYolo { enabled } => {
                 let was = self.permissions.is_yolo_mode();
                 self.permissions.set_yolo_mode(enabled);
-                // Report the ACTUAL state: the manager clamps a requested ON to OFF under the always-approve pin
-                // Echoing `enabled` would report a turn-on (event, telemetry, and the log line) that never happened
+                // Report the ACTUAL state: the manager clamps a requested ON to OFF under the always-approve pin Echoing `enabled` would report a turn-on.
                 let actual = self.permissions.is_yolo_mode();
                 if let Some(actual) = yolo_toggle_report(was, actual) {
                     self.emit_event(crate::session::events::Event::YoloToggled { enabled: actual });
@@ -749,8 +748,9 @@ impl SessionActor {
                 }
                 ok_end_turn(0, None)
             }
-            // GoalSet is handled directly in handle_prompt, before this function is called
-            // The turn then flows through to model inference instead of ending immediately
+            // GoalSet is handled directly in handle_prompt, before this
+            // function is called The turn then flows through to model
+            // inference instead.
             BuiltinAction::GoalSet { .. } => {
                 unreachable!("GoalSet is intercepted in handle_prompt")
             }

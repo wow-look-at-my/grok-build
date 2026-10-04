@@ -1,11 +1,5 @@
 #!/bin/sh
 # stop-verify.sh — keep the agent working until the build passes.
-#
-# A Stop hook runs when the agent is about to finish its turn. Emitting a
-# block decision feeds the reason back to the model and runs another round;
-# the built-in cap ends the turn after 8 continuations. Set a generous
-# timeout on the hook (see stop-verify.json), since a timed-out hook fails
-# open and lets the agent stop.
 
 INPUT=$(cat)
 

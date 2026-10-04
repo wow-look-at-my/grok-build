@@ -157,7 +157,7 @@ impl ReadDetail {
         }
     }
 
-    /// `multiple` when two caps hit. One hit plus an unevaluated applicable cap stays unknown.
+    /// `multiple` when caps hit. One hit plus an unevaluated applicable cap stays unknown.
     /// Unknown and unobserved, with no evaluated disposition, is unknown rather than none.
     pub fn limit_kind(&self) -> ReadLimitKind {
         let mut hits = 0usize;

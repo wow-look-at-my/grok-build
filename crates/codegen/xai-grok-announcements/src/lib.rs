@@ -1,6 +1,4 @@
 //! Shared announcement types, persistence, and formatting for Grok CLI apps.
-//!
-//! This crate provides the common logic used by `xai-grok-shell` and `xai-grok-pager` for handling announcements (banner notifications).
 
 #![deny(clippy::indexing_slicing)]
 
@@ -39,9 +37,8 @@ pub struct RemoteAnnouncement {
     pub persistent: Option<bool>,
 }
 
-/// Optional call-to-action on an announcement (clients render it as a clickable link/button).
-/// The server only emits it with both fields non-empty and the url https; parsing here stays tolerant like the parent struct.
-/// `caption` is optional dim helper text after the button; absent means none.
+/// Optional call-to-action on an announcement (clients render it as a
+/// clickable link/button).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts", ts(export, optional_fields = nullable))]
@@ -72,9 +69,10 @@ pub struct AnnouncementsRefreshed {
 // Persistence
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Stable per-announcement hide key: the trimmed non-empty `id`, else a content-derived fallback so id-less items are still hideable.
-/// The fallback joins title/message with the unprintable unit separator (\x1f), so distinct title/message splits cannot collide.
-/// Real ids cannot plausibly match the fallback.
+/// Stable per-announcement hide key: the trimmed non-empty `id`, else a
+/// content-derived fallback so id-less items are still hideable. The fallback
+/// joins title/message with the unprintable unit separator (\x1f), so
+/// distinct title/message splits cannot collide.
 pub fn announcement_hide_key(a: &RemoteAnnouncement) -> String {
     match a.id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(id) => id.to_string(),
@@ -180,9 +178,9 @@ pub fn filter_expired_at(
         .collect()
 }
 
-/// Whether `expires_at` parses and is at/behind `now`; missing/unparseable never expires.
-/// Strict `dt > now` keeps an item live only before its expiry.
-/// Each call is allocation-free, so draw-time consumers can check every frame.
+/// Whether `expires_at` parses and is at/behind `now`; missing/unparseable
+/// never expires. Strict `dt > now` keeps an item live only before its
+/// expiry.
 pub fn is_expired_at(a: &RemoteAnnouncement, now: DateTime<Utc>) -> bool {
     if let Some(exp) = &a.expires_at
         && let Ok(dt) = DateTime::parse_from_rfc3339(exp)

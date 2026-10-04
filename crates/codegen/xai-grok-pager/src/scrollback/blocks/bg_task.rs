@@ -1,6 +1,4 @@
-//! Three kinds: Started, Completed, Failed.
-//! All render as always-collapsed, groupable blocks with dimmed colored bullets (same dimming as execute blocks).
-//! Enter / Ctrl-F opens the block viewer with stdout from the central store.
+//! Kinds: Started, Completed, Failed.
 
 use std::time::Duration;
 
@@ -31,7 +29,6 @@ pub enum BgTaskKind {
 }
 
 /// The block is always collapsed, not foldable, groupable, and selectable.
-/// Enter / Ctrl-F opens the block viewer with stdout from the central store.
 #[derive(Debug, Clone)]
 pub struct BgTaskBlock {
     /// The command that was run.
@@ -117,9 +114,8 @@ impl BgTaskBlock {
 impl BlockContent for BgTaskBlock {
     fn output(&self, ctx: &BlockContext) -> BlockOutput {
         let theme = Theme::current();
-        // When selected, lift only the bold "Task" label to `text_primary` so it reads as undimmed
-        // This mirrors `read.rs` / `search.rs`, which bump only the label and leave the rest at `muted`
-        // The detail text (verb and description) stays muted in every state
+        // When selected, lift only the bold "Task" label to `text_primary` so
+        // it reads as undimmed This mirrors `read.rs` / `search.rs`.
         let bold = if ctx.is_selected {
             theme.primary().add_modifier(Modifier::BOLD)
         } else {
@@ -130,8 +126,8 @@ impl BlockContent for BgTaskBlock {
         // Collapse newlines for single-line display (ratatui drops '\n' as zero-width, merging adjacent lines without spacing)
         let command = self.command.replace('\n', " ");
 
-        // Prefer description over raw command for the collapsed one-line display.
-        // The full command is always available in the block viewer (preamble).
+        // Prefer description over raw command for the collapsed one-line
+        // display.
         let display = match &self.description {
             Some(d) if !d.trim().is_empty() => d.replace('\n', " "),
             _ => command,
@@ -240,8 +236,7 @@ impl BlockContent for BgTaskBlock {
         let theme = Theme::current();
         let mut lines = Vec::new();
 
-        // Description first (primary text), then a blank separator, then the `$ command` with bash syntax highlighting
-        // When there is no description, the command stands alone with no leading blank row
+        // Description first (primary text), then a blank separator, then the `$ command` with bash syntax highlighting When there is no description.
         let description = self
             .description
             .as_deref()
@@ -249,8 +244,7 @@ impl BlockContent for BgTaskBlock {
             .filter(|s| !s.is_empty());
 
         if let Some(desc) = description {
-            // Trim trailing whitespace per line and collapse runs of blank lines to a single blank
-            // Multi-line descriptions can carry noisy internal blank rows that would otherwise stretch the preamble
+            // Trim trailing whitespace per line and collapse runs of blank lines.
             let mut prev_blank = false;
             for line in desc.lines() {
                 let trimmed = line.trim_end();
@@ -270,9 +264,7 @@ impl BlockContent for BgTaskBlock {
             lines.push(Line::from(""));
         }
 
-        // Multi-line `$ command` must be separate ratatui Lines: a single Line drops '\n' as zero-width and smashes `cmd1\ncmd2` into `cmd1cmd2`
-        // The smashed form shows when expanding a started bg task in the block viewer
-        // Match execute / permission-panel soft-wrap so physical newlines and long lines render the same way as foreground shell tool calls
+        // Multi-line `$ command` must be separate ratatui Lines.
         push_shell_command_preamble_lines(&mut lines, &self.command, ctx.width as usize, &theme);
 
         Some(Text::from(lines))
@@ -490,7 +482,6 @@ mod tests {
         let block = BgTaskBlock::started("ls", "t1")
             .with_description(Some("First   \n\n\n\nSecond  ".into()));
         let plain = preamble_plain(&block);
-        // First, single blank (collapsed from 3 internal blanks), Second, separator blank, command
         assert_eq!(plain, vec!["First", "", "Second", "", "$ ls"]);
     }
 

@@ -2,8 +2,6 @@ use regex::Regex;
 use xai_grok_tools::types::{claude_names_for, grok_names_for};
 
 /// A compiled hook matcher for tool names.
-/// The pattern semantics are chosen so that `matcher` entries in hooks migrated from other agent CLIs keep firing unchanged:
-/// an empty pattern or `"*"` matches every tool; a "simple" pattern (a plain name or `|`-list) is an **exact** match against each name (after external-to-Grok alias expansion), NOT a regex; anything else is an **unanchored** regex, also tested against the tool's external aliases, so e.g. `^Bash$` matches `run_terminal_command`.
 #[derive(Debug, Clone)]
 pub struct HookMatcher {
     kind: MatcherKind,
@@ -13,7 +11,6 @@ pub struct HookMatcher {
 enum MatcherKind {
     All,
     /// Matches no tool names.
-    /// Used when a configured matcher fails to compile after deserialization; fail closed rather than widen to match-all.
     Never,
     Exact(Vec<String>),
     Regex(Regex),
@@ -34,7 +31,6 @@ impl HookMatcher {
     }
 
     /// Matcher that never matches.
-    /// Prefer this over `None` on a [`HookSpec`] when a pattern was configured but could not be compiled (fail-closed).
     pub(crate) fn never() -> Self {
         Self {
             kind: MatcherKind::Never,

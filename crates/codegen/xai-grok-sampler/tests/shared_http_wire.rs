@@ -67,7 +67,6 @@ fn pin_env() {
         support::pin_env();
         let fixture = &*TLS_FIXTURE;
         // SAFETY: Every test in this process calls `pin_env` before building a client.
-        // `PIN` serializes the one mutation while concurrent tests wait.
         unsafe { std::env::set_var("GROK_EXTRA_CA_BUNDLE", &fixture.ca_path) };
     });
 }
@@ -309,8 +308,8 @@ async fn start_mtls_server(tls: &TestTlsMaterial, state: Arc<TestTlsServerState>
 async fn configured_identity_completes_a_required_mtls_handshake() {
     pin_env();
     let fixture = &*TLS_FIXTURE;
-    // Initialize the sampler's approved rustls provider before the test server
-    // builds its own rustls config in this feature-unified test binary.
+    // Initialize the sampler's approved rustls provider before the test
+    // server builds its own rustls config.
     drop(
         SamplingClient::new(test_config("https://localhost", "test-token"))
             .expect("initialize sampler TLS policy"),

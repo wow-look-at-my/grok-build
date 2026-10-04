@@ -4,9 +4,8 @@ use tokio::sync::{mpsc, oneshot};
 use crate::extensions::notification::SessionNotification as XaiSessionNotification;
 use acp::SessionNotification as AcpSessionNotification;
 
-/// The buffer debounces and merges everything, then `emit_buffered` emits it without firing per-chunk hooks or persistence writes.
-/// The two variants stay separate because ACP and xAI chunks merge under different rules and wire envelopes.
-/// One-shot xAI events (RetryState, ImageCompressed, HookExecution, etc.) instead take `send_xai_notification` for per-event hooks and persistence.
+/// The buffer debounces and merges everything, then `emit_buffered` emits it
+/// without firing per-chunk hooks or persistence writes.
 #[derive(Debug, Clone)]
 pub(crate) enum SessionNotification {
     Acp(Box<AcpSessionNotification>),

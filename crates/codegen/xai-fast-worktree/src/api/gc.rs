@@ -134,8 +134,7 @@ fn recheck_holds(
     }
 }
 
-// Deliberately larger than the pass budget: a pass judges at most one slow
-// worktree and lets its gate run over rather than truncating the safety check.
+// Deliberately larger than the pass budget: a pass judges at most one slow worktree and lets its gate run.
 const GATE_TIMEOUT_IN_PASS: Duration = Duration::from_secs(120);
 
 const _: () = assert!(
@@ -147,9 +146,7 @@ fn judge_one(path: &Path, source_repo: &Path, pass: Pass) -> Verdict {
     if path.exists() {
         decide_removal(path, source_repo, pass.gate_timeout)
     } else if std::fs::symlink_metadata(path).is_ok() {
-        // A dangling symlink where the worktree was: the link is still on disk
-        // but its target is gone (`exists()` above followed it and saw nothing).
-        // It holds no repo content, so remove the link rather than leak it.
+        // A dangling symlink where the worktree was: the link is still on disk but its target is gone.
         Verdict::NoRepo
     } else {
         Verdict::AlreadyGone
@@ -214,9 +211,7 @@ pub struct GcReport {
     pub dead_removed: u64,
     pub expired_removed: u64,
     pub skipped_alive: u64,
-    /// Expired records whose kind never age-expires (e.g. `Manual`). Liveness is
-    /// not consulted; counted separately from `skipped_alive` (which covers a
-    /// live pid, a live CWD, or a protected path).
+    /// Expired records whose kind never age-expires (e.g. `Manual`).
     #[serde(default)]
     pub never_expiring: u64,
     #[serde(default)]
@@ -230,8 +225,7 @@ pub struct GcReport {
     /// Reclaimable worktrees the pass ran out of time to judge (budget exhausted).
     #[serde(default)]
     pub not_judged: u64,
-    /// Worktrees the gate cleared but whose discarded commits could not be
-    /// named, so they were kept rather than removed.
+    /// Worktrees the gate cleared but whose discarded commits could not be named.
     #[serde(default)]
     pub unnamed: u64,
     #[serde(default)]
@@ -302,9 +296,7 @@ fn worktree_holds_in_use_path(rec: &crate::db::WorktreeRecord, in_use: &[PathBuf
     !in_use.is_empty() && rec_cwd_within(rec, in_use)
 }
 
-/// Single verdict on whether an age pass may reclaim a worktree. Every other
-/// eligibility check (the main loop, the post-gate recheck) routes through here
-/// so the rules (and the `force` override) live in exactly one place.
+/// Single verdict on whether an age pass may reclaim a worktree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Eligibility {
     /// Kind never age-expires (e.g. `Manual` with a `never` TTL).
@@ -527,9 +519,7 @@ fn reclaim_expired_worktrees(
         }
         let path = Path::new(&rec.path);
         if dest_must_not_stat(path) {
-            // Any kernel mount: never exists()/gate. judge_one and dispose_of
-            // stat dest; remove_worktree also symlink_metadata after the NFS
-            // arm. Unmounted leftover dirs fall through for dest reuse.
+            // Any kernel mount: never exists()/gate. judge_one and dispose_of stat dest.
             report.skipped_alive += 1;
             continue;
         }
@@ -563,14 +553,11 @@ fn reclaim_expired_worktrees(
             hook(Entered::AfterGate);
         }
         // Re-check after the gate (can run for minutes): a session that
-        // re-registered with a live creator_pid must not be removed. The CWD
-        // list is the pass-start snapshot, so a later bare chdir is not seen.
+        // re-registered with a live creator_pid must not be removed.
         if !opts.force && recheck_holds(db, &rec, now, live_cwds, opts, report).is_break() {
             continue;
         }
-        // Re-judge immediately before the irreversible removal: the first
-        // verdict is up to GATE_TIMEOUT_IN_PASS old and liveness cannot see work
-        // written into the worktree since. Only a fresh verdict may delete.
+        // Re-judge immediately before the irreversible removal: the first verdict is up to GATE_TIMEOUT_IN_PASS old.
         let verdict = judge_one(path, rec.source_repo.as_path(), pass);
         if settle(&verdict, path, report).is_break() {
             continue;

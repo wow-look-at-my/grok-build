@@ -1,26 +1,4 @@
 //! Session announcement banner: one slot, critical always wins over promo.
-//!
-//! Critical layout (always 2 rows when shown):
-//! ```text
-//! ! Title                                  [hide]   (prefix+title error red, [hide] dim + clickable)
-//!   Message…  hide: /announcements hide            (message default fg, CTA dim gray)
-//! ```
-//!
-//! The message row indents past the `! ` prefix so its column matches the title's; the CTA keeps its full reserved width and the message truncates.
-//!
-//! Promo layout (1 row, only when no critical is selected; caption pinned-only, hide affordances dismissible-only, so they never co-occur):
-//! ```text
-//! [Label] {cta.caption}                                    (pinned)
-//! [Label]        hide: /announcements hide  [hide]    (dismissible)
-//! ```
-//!
-//! The `[Label]` button is the promo's CTA (semantic warning yellow, clickable); it is omitted when the announcement has no usable CTA.
-//! A pinned (non-dismissible) promo also paints its dim `cta.caption` helper text (e.g. "or use Ctrl+O") after the button when one is configured.
-//! The caption drops whole when it can't fit, or while a permission prompt owns the chord.
-//! The promo `message` is not painted here (it renders on the roomy welcome hero instead).
-//! Both hide affordances sit right-aligned (dismissible promos only).
-//!
-//! `dismissible: false` suppresses every hide affordance on either kind and the text reclaims the reserved columns (absent or `true` means hideable).
 
 use std::collections::BTreeSet;
 
@@ -43,9 +21,9 @@ const TITLE_PREFIX: &str = "! ";
 /// Columns between title/message text and the right-hand button/CTA.
 const GAP: usize = 2;
 
-/// Columns the `[label]` button (and the optional ` {caption}`) wants.
-/// This is the reservation every surface subtracts from its own budget so the adjacent text (message/path/location) truncates first.
-/// Excludes any surface-specific lead space (callers add their own).
+/// Columns the `[label]` button (and the optional ` {caption}`) wants. This
+/// is the reservation every surface subtracts from its own budget so the
+/// adjacent text (message/path/location) truncates first.
 pub(crate) fn upgrade_cta_reserve(label: &str, caption: Option<&str>) -> u16 {
     use unicode_width::UnicodeWidthStr;
     let cap_w = caption.map_or(0, |c| UnicodeWidthStr::width(c) + 1);
@@ -79,8 +57,7 @@ pub(crate) fn render_cta_button(
         return None;
     }
     let cta_style = if hovered {
-        // hover_overlay: bg_hover band on RGB, reverse video on the
-        // terminal theme (bg_hover is Reset there).
+        // hover_overlay: bg_hover band on RGB, reverse video on the terminal theme (bg_hover is Reset there).
         theme.hover_overlay().fg(theme.warning)
     } else {
         Style::default().fg(theme.warning).bg(theme.bg_base)
@@ -122,9 +99,8 @@ fn is_live_critical(
     is_critical(a) && !xai_grok_announcements::is_expired_at(a, now)
 }
 
-/// Promo twin of [`is_live_critical`].
-/// A CTA is NOT required: a promo without one is still a valid 1-line message row.
-/// (The selection already guarantees a visible message, so it skips items with nothing to render.)
+/// Promo twin of [`is_live_critical`]. A CTA is NOT required: a promo without
+/// one is still a valid 1-line message row.
 fn is_live_promo(
     a: &xai_grok_announcements::RemoteAnnouncement,
     now: chrono::DateTime<chrono::Utc>,
@@ -141,16 +117,15 @@ fn is_live_session_announcement(
     is_live_critical(a, now) || is_live_promo(a, now)
 }
 
-/// Hideable unless the server says otherwise: absent/`true` = dismissible (back-compat with every pre-flag announcement).
-/// Only an explicit `false` pins the banner.
-/// Shared by the selection gate, both painters, and the hide dispatch so the meanings cannot drift.
+/// Hideable unless the server says otherwise: absent/`true` = dismissible
+/// (back-compat with every pre-flag announcement).
 pub fn is_dismissible(a: &xai_grok_announcements::RemoteAnnouncement) -> bool {
     a.dismissible != Some(false)
 }
 
-/// The hidden-ids filter the selection gates share.
-/// It applies only to dismissible items: an explicit `dismissible: false` stays selectable even with its hide key stored.
-/// Flipping the flag server-side thus resurrects a previously-hidden banner (the remote config stays source of truth).
+/// The hidden-ids filter the selection gates share. It applies only to
+/// dismissible items: an explicit `dismissible: false` stays selectable even
+/// with its hide key stored.
 fn is_hidden(
     a: &xai_grok_announcements::RemoteAnnouncement,
     hidden_ids: &BTreeSet<String>,
@@ -183,8 +158,8 @@ fn usable_cta(a: &xai_grok_announcements::RemoteAnnouncement) -> Option<(&str, &
 }
 
 /// The CTA's optional dim helper caption (`cta.caption`), trimmed-non-empty.
-/// Decorative only: deliberately independent of [`usable_cta`] so a caption can never gate, resurrect, or invalidate the button.
-/// Each surface combines this with its own pinned/chord gates; no button painted means no caption shown.
+/// Decorative only: deliberately independent of [`usable_cta`] so a caption
+/// can never gate, resurrect, or invalidate the button.
 pub(crate) fn usable_cta_caption(a: &xai_grok_announcements::RemoteAnnouncement) -> Option<&str> {
     let caption = a.cta.as_ref()?.caption.as_deref()?.trim();
     (!caption.is_empty()).then_some(caption)
@@ -279,7 +254,6 @@ pub(crate) fn promo_cta<'a>(
 }
 
 /// The `[label]` button's target: the promo owner + its validated url.
-/// The url-only projection of [`promo_cta`] the click dispatch (url + announcement id for telemetry) and the OSC 8 emission share.
 pub fn promo_cta_target<'a>(
     announcements: &'a [xai_grok_announcements::RemoteAnnouncement],
     hidden_ids: &BTreeSet<String>,
@@ -287,8 +261,8 @@ pub fn promo_cta_target<'a>(
     promo_cta(announcements, hidden_ids).map(|(owner, _label, url)| (owner, url))
 }
 
-/// Hide keys of every live (non-expired) session-surfaced announcement (critical or promo): the set `/announcements show` clears.
-/// Matches the selection's meaning of visible; prune owns cleanup of keys for expired-but-still-listed items.
+/// Hide keys of every live (non-expired) session-surfaced announcement
+/// (critical or promo): the set `/announcements show` clears.
 pub fn session_announcement_hide_keys(
     announcements: &[xai_grok_announcements::RemoteAnnouncement],
 ) -> Vec<String> {
@@ -318,7 +292,6 @@ pub fn has_session_announcements(
         .any(|a| is_live_session_announcement(a, now))
 }
 
-/// Height for the session banner (0 when the selection is empty): 2 when a critical is shown (title row + message row), 1 for the promo row.
 /// Derived from [`first_session_announcement`] so slot precedence lives in exactly one function.
 pub fn session_banner_height(
     announcements: &[xai_grok_announcements::RemoteAnnouncement],
@@ -401,8 +374,8 @@ pub fn render_banner(
     }
 }
 
-/// The selected critical announcement, two lines. The CTA width is reserved up front so a long
-/// message truncates with `…` instead of pushing the CTA off-screen.
+/// The selected critical announcement, a couple of lines. The CTA width is reserved up front
+/// so a long message truncates with `…` instead of pushing the CTA off-screen.
 fn render_critical_rows(
     area: Rect,
     buf: &mut Buffer,
@@ -485,8 +458,8 @@ fn render_critical_rows(
         let mut remaining = max_w.saturating_sub(prefix_w);
         let cta_w = UnicodeWidthStr::width(HIDE_CTA);
 
-        // Reserve the CTA (plus gap) up front: the message truncates, never the CTA
-        // Non-dismissible reserves nothing; the message reclaims the full row past the prefix (`W−2`)
+        // Reserve the CTA (plus gap) up front: the message truncates, never
+        // the CTA Non-dismissible reserves nothing.
         let msg_budget = if dismissible {
             remaining.saturating_sub(cta_w + GAP)
         } else {
@@ -556,7 +529,6 @@ fn render_promo_row(
     let row = area.y;
     let mut hits = BannerHits::default();
 
-    // Non-dismissible: neither hide affordance paints and `right_reserved` stays 0, so the button reclaims the right-hand columns
     let mut right_reserved = 0usize;
     if is_dismissible(ann) {
         hits.hide = paint_hide_button(buf, area, row, hide_hovered, &theme);
@@ -577,8 +549,8 @@ fn render_promo_row(
         }
     }
 
-    // Left side: the [Label] CTA button (and the pinned-only `cta.caption`), clear of the reserved right-hand hide block
-    // The shared painter owns the style, the truncation, and dropping the caption whole
+    // Left side: the [Label] CTA button (and the pinned-only `cta.caption`),
+    // clear.
     let remaining = if right_reserved > 0 {
         max_w.saturating_sub(right_reserved + GAP)
     } else {
@@ -587,7 +559,8 @@ fn render_promo_row(
     if remaining > 0
         && let Some((label, _url)) = usable_cta(ann)
     {
-        // Caption only for a pinned promo whose `Ctrl+O` actually opens the CTA (suppressed while a permission prompt owns the chord)
+        // Caption only for a pinned promo whose `Ctrl+O` opens the CTA
+        // (suppressed while a permission prompt owns the chord)
         let caption = (caption_allowed && !is_dismissible(ann))
             .then(|| usable_cta_caption(ann))
             .flatten();
@@ -832,7 +805,6 @@ mod tests {
         let mut buf = Buffer::empty(area);
         let hits = render_banner(area, &mut buf, &anns, &no_hidden(), false, false, true);
 
-        // Row 0: `! Title` left, `[hide]` right-aligned; row 1: message indented to the title column, then the dim CTA after a gap
         let row0 = buf_row(&buf, area, 0);
         assert!(row0.starts_with("! Outage"), "row0={row0:?}");
         assert!(row0.ends_with(HIDE_BUTTON), "row0={row0:?}");
@@ -891,7 +863,6 @@ mod tests {
         let area = Rect::new(0, 0, 40, 2);
         let mut buf = Buffer::empty(area);
         render_banner(area, &mut buf, &anns, &no_hidden(), false, false, true);
-        // Width 40 minus the 2-col indent and the 25-col CTA plus 2-col gap leaves 11 message columns
         assert_eq!(
             buf_row(&buf, area, 1),
             "  0123456789…  hide: /announcements hide"
@@ -1120,12 +1091,9 @@ mod tests {
         let hits = render_banner(area, &mut buf, &anns, &no_hidden(), false, false, true);
 
         assert_eq!(hits.hide, None, "no [hide] target on a pinned banner");
-        // Title budget 40 minus 2 leaves 38: 37 chars plus the ellipsis fill to the right edge
         let row0 = buf_row(&buf, area, 0);
         assert_eq!(row0, format!("! {}…", "T".repeat(37)));
         assert!(!row0.contains(HIDE_BUTTON), "row0={row0:?}");
-        // Message budget 40 minus 2 leaves 38: the 20-char message fits whole, no hide CTA
-        // (The dismissible twin truncates it to 11 columns at this width.)
         assert_eq!(buf_row(&buf, area, 1), "  0123456789ABCDEFGHIJ");
     }
 
@@ -1169,7 +1137,7 @@ mod tests {
             "caption suppressed when not allowed"
         );
 
-        // No caption configured: the pinned row stays a bare button even with `caption_allowed` (nothing hardcoded fills in)
+        // No caption configured.
         let mut bare = promo("p", &"M".repeat(60), Some(("Go", "https://x.ai")));
         bare.dismissible = Some(false);
         let mut buf = Buffer::empty(area);
@@ -1277,8 +1245,8 @@ mod tests {
         assert!(promo_cta(&[promo("n", "msg", None)], &no_hidden()).is_none());
     }
 
-    /// The shared CTA-button painter (used by all four surfaces) clamps the button to `max_width` and returns the clickable button rect.
-    /// It never overpaints past `max_width`; that keeps the in-session header / dashboard CTA from writing over the right-aligned chips.
+    /// The shared CTA-button painter (used by all surfaces) clamps the button to `max_width` and returns the clickable button rect. It
+    /// never overpaints past `max_width`; that keeps the in-session header / dashboard CTA from writing over the right-aligned chips.
     #[test]
     fn render_cta_button_clamps_to_max_width() {
         let theme = Theme::current();
@@ -1331,7 +1299,6 @@ mod tests {
     #[test]
     fn upgrade_cta_reserve_counts_button_and_caption() {
         assert_eq!(upgrade_cta_reserve("Go", None), 4); // `[Go]`
-        // `[Go]` (4) + leading space (1) + caption width (5).
         assert_eq!(upgrade_cta_reserve("Go", Some("hello")), 4 + 1 + 5);
     }
 
@@ -1371,7 +1338,6 @@ mod tests {
         );
     }
 
-    /// The one CTA gate fails closed on schemes outside the Standard open allowlist: no painted button, no OSC 8 target, no dispatch url.
     /// The promo renders no button (its message is never painted on the banner).
     #[test]
     fn usable_cta_rejects_unsafe_schemes() {
@@ -1431,7 +1397,6 @@ mod tests {
         assert!(row0.ends_with(HIDE_BUTTON), "row0={row0:?}");
         assert!(row0.contains(HIDE_CTA), "row0={row0:?}");
 
-        // [Label] is 15 cols at x 0; [hide] right-aligns at 80 minus 6 = 74; the hide CTA sits one gap left of it (74 minus 2 minus 25 = 47)
         assert_eq!(hits.cta, Some(Rect::new(0, 0, 15, 1)), "[Label] hit rect");
         assert_eq!(hits.hide, Some(Rect::new(74, 0, 6, 1)), "[hide] hit rect");
 
@@ -1468,7 +1433,6 @@ mod tests {
     }
 
     /// The budget is reserved first: the hide affordances keep their full width and only the `[Label]` button truncates when the row is tight.
-    /// (Dismissible promo, width 50: the 25+2+6 hide block is reserved, leaving ~15 cols for the button.)
     #[test]
     fn render_promo_row_truncates_button_never_affordances() {
         let anns = [promo(

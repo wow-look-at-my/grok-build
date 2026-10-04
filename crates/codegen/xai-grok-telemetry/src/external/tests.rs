@@ -1,6 +1,4 @@
-//! External-stream tests: pinned allowlists, per-event schema snapshots, canary leak tests, gate enforcement, and the tighten-only remote policy.
-//! Everything asserting wire shape goes through the in-memory exporters *behind the export-time validators*.
-//! The tests therefore pin what actually leaves the process.
+//! External-stream tests: pinned allowlists, per-event schema snapshots, canary leak tests, gate enforcement.
 
 use super::config::ContentGates;
 use super::schema::{self, AttrValue, ExternalKey, ExternalRecord, MetricIncrement};
@@ -648,7 +646,6 @@ fn api_request_cost_and_cache_creation_export_attrs_and_metrics() {
             cached_prompt_tokens: None,
             cache_creation_tokens: Some(40),
             context_tokens: None,
-            // 5e9 ticks is $0.50, which exports as 500_000 micros
             cost_usd_ticks: Some(5_000_000_000),
         },
     );
@@ -674,7 +671,7 @@ fn api_request_cost_and_cache_creation_export_attrs_and_metrics() {
 #[test]
 fn one_failed_turn_increments_error_count_exactly_once() {
     let stream = build(gates_off());
-    // The turn-error path emits all three for a rate-limited failure.
+    // The turn-error path emits all of them for a rate-limited failure.
     emit_event_into(
         &stream,
         &events::RateLimitHit {
@@ -1269,7 +1266,7 @@ fn contextual_tip_maps_every_tip_and_action() {
 #[test]
 fn unmapped_events_produce_nothing() {
     use crate::events::TelemetryEvent as _;
-    // ~70 events without an `external = …` arm cost nothing and export nothing.
+    // Events without an `external = …` arm cost nothing and export nothing.
     let ev = events::SlashCommandUsed {
         command: "secret command".into(),
         args_provided: true,
@@ -1277,9 +1274,9 @@ fn unmapped_events_produce_nothing() {
     assert!(ev.external_record().is_none());
 }
 
-/// Events emitted exclusively via `EmitterOrigin::Workspace` (`log_session_event_with_origin`) must not carry an external
-/// mapping. The fan-out hook deliberately lives only in the Shell-origin wrappers. The workspace-only events today are
-/// the xai-grok-workspace sampler events.
+/// Events emitted exclusively via `EmitterOrigin::Workspace`
+/// (`log_session_event_with_origin`) must not carry an external mapping. The
+/// fan-out hook deliberately lives only in the Shell-origin wrappers.
 #[test]
 fn workspace_only_events_have_no_external_mapping() {
     use crate::events::TelemetryEvent as _;
@@ -1801,8 +1798,7 @@ fn assistant_response_gate_exports_text() {
 
 #[test]
 fn assistant_response_with_url_does_not_drop_at_validator() {
-    // A2 laptop canary: gated `response` often contains https://… after the model replies. Emit scrubs; the validator must
-    // not treat the already- scrubbed origin as still-dirty (`redact_secrets` returns Owned whenever MATCH_ANY hits).
+    // A2 laptop canary: gated `response` often contains https://… after the model replies.
     let stream = build(gates_all_on());
     let text = "listed files; see https://example.com/docs?token=CANARY for help";
     emit_event_into(

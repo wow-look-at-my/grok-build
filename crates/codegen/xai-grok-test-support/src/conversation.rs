@@ -1,5 +1,4 @@
-//! Foreground requests with the same [`ConversationKey`] are one conversation, so a parent and its
-//! subagent child are told apart and a resumed child continues its own.
+//! Foreground requests with the same [`ConversationKey`] are one conversation.
 
 use std::fmt;
 use std::sync::Arc;
@@ -15,7 +14,6 @@ use crate::tools::Tool;
 
 const SYSTEM_MESSAGE_PREVIEW_CHARS: usize = 80;
 
-/// Conversations are numbered from 1 in the order the mock first saw each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ConversationId(usize);
 
@@ -42,9 +40,7 @@ impl fmt::Display for ConversationId {
 pub(crate) enum ConversationKey {
     /// Sent for every session, so a prompt re rendered mid session stays in its conversation.
     SessionId(String),
-    /// What a route that sends no session id opens every request with. A subagent child can
-    /// inherit its parent's system prompt, so the tools and the opening message are in the key
-    /// too: they are all that tells a child from its parent, and two children from each other.
+    /// What a route that sends no session id opens every request with.
     Opening {
         system_message: String,
         tools: Vec<String>,
@@ -95,8 +91,7 @@ impl fmt::Display for ConversationKey {
     }
 }
 
-/// A conversation as the mock saw it, read at one moment; every reader works on the requests the
-/// agent sent, so the reply that ended the conversation is in none of them.
+/// A conversation as the mock saw it, read at one moment.
 #[derive(Debug, Clone)]
 pub struct ReadConversation {
     id: ConversationId,

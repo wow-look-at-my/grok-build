@@ -15,7 +15,7 @@ fn open_upsell_max_card(app: &mut AppView, mode: CreditLimitUpsellMode) {
     open_credit_limit_upsell(agent, mode, true);
 }
 
-/// Return the `QuestionViewState` from agent 0. Panics if absent.
+/// Panics if absent.
 fn agent_qv(app: &AppView) -> &crate::views::question_view::QuestionViewState {
     app.agents
         .get(&AgentId(0))
@@ -555,7 +555,6 @@ fn is_credit_limit_error_matches_legacy_403_and_pool_402() {
         Some(403),
         "status 403: run out of credits"
     ));
-    // A 402 Payment Required always counts as a credit/spend limit, whatever the message says
     assert!(is_credit_limit_error(Some(402), "anything"));
     assert!(is_credit_limit_error(
         None,
@@ -567,7 +566,6 @@ fn is_credit_limit_error_matches_legacy_403_and_pool_402() {
     ));
     assert!(!is_credit_limit_error(Some(403), "content safety blocked"));
     assert!(!is_credit_limit_error(Some(500), "internal server error"));
-    // Pool phrases alone without 402/403 status do not match.
     assert!(!is_credit_limit_error(
         None,
         "usage balance exhausted without status"
@@ -868,8 +866,7 @@ fn billing_fetched_none_balance_clears_cached() {
     // Seed a known balance and polling, as a prior successful fetch would
     dispatch_billing(&mut app, Some(test_bal(80.0)), true, None);
     app.billing_poll_wanted = true;
-    // A response carrying no billing config clears the cached balance and polling so the status bar agrees with the "No billing data" message
-    // Parse/transport failures route to BillingError, not here
+    // A response carrying no billing config clears the cached balance and polling so the status bar agrees.
     dispatch_billing(&mut app, None, false, None);
     assert!(
         app.credit_balance.is_none(),
@@ -1121,7 +1118,6 @@ fn billing_error_non_silent_pushes_error_message() {
 
 #[test]
 fn free_usage_error_detected_by_embedded_code() {
-    // parse_error_bytes flattens the 429 body to "<code>: <message>".
     assert!(is_free_usage_exhausted_error(
         "API error (status 429 Too Many Requests): \
          subscription:free-usage-exhausted: You have used all your free usage."
@@ -1213,7 +1209,7 @@ fn free_usage_failure_opens_paywall_modal() {
     let prompt_id = test_agent(&app, id).session.current_prompt_id.clone();
     assert!(prompt_id.is_some(), "send must mint a prompt id");
 
-    // 2 and 3. Real notification sequence through the production handler.
+    // Real notification sequence through the production handler.
     {
         let agent = app.agents.get_mut(&id).unwrap();
         apply_session_event_for_test(
@@ -1281,7 +1277,7 @@ fn free_usage_translate_local_submit_maps_options() {
     }
 }
 
-/// Submitting a tier-restricted command opens the three-option SuperGrok upsell and neither runs the command nor leaks the text to the model.
+/// Submitting a tier-restricted command opens those-option SuperGrok upsell and neither runs the command nor leaks the text to the model.
 #[test]
 fn restricted_command_submit_opens_three_option_upsell() {
     let mut app = test_app_with_agent();
@@ -1414,7 +1410,8 @@ fn unknown_non_restricted_command_still_passes_through() {
 #[serial_test::serial(GROK_TEST_OPEN_URL_FILE)]
 #[test]
 fn open_url_shows_manual_url_when_browser_unavailable() {
-    // Point `GROK_TEST_OPEN_URL_FILE` at a path whose parent dir does not exist so the write fails and `open_url` returns false (BrowserUnavailable)
+    // Point `GROK_TEST_OPEN_URL_FILE` at a path whose parent dir does not
+    // exist so the write fails and `open_url` returns false.
     let bad = std::env::temp_dir().join(format!(
         "grok-open-url-missing-{}/out.txt",
         std::process::id()
@@ -1559,7 +1556,6 @@ fn credit_limit_upsell_submit_shows_url_when_browser_unavailable() {
         .question_view
         .take()
         .expect("expected credit-limit upsell modal");
-    // Select option 1, "Buy more credits" (credits / usage URL)
     set_first_selection(&mut qv, QuestionSelection::Single(Some(1)));
     let kind = LocalQuestionKind::CreditLimitUpsell {
         choices: vec![
@@ -1614,7 +1610,6 @@ fn billing_fetched_clears_usage_modal_loading() {
 fn background_billing_reply_does_not_settle_modal_loading() {
     let mut app = test_app_with_agent();
     dispatch(Action::ShowUsage, &mut app);
-    // A turn-end refresh (nonce 0) lands while the modal's own fetch is in flight: mirrors update, but the modal's loading/error flags don't
     dispatch(
         Action::TaskComplete(TaskResult::BillingError {
             agent_id: AgentId(0),

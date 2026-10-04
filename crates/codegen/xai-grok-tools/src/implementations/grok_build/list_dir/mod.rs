@@ -1,23 +1,4 @@
 //! `list_dir` tool — new architecture (`Tool` trait).
-//!
-//! This is the new-architecture implementation of the directory listing tool.
-//! It reads `Cwd` from `Resources` and `max_output_chars` from its own
-//! `Params<ListDirParams>` instead of receiving them via `ToolContext`.
-//!
-//! Seeds depth-1 children (capped at `MAX_SEED_ITEMS`) before the budgeted deep walk
-//! so a fat early sibling cannot starve later top-level dirs (`MAX_GLOBAL_ITEMS`
-//! applies only to depth ≥ 2). Then BFS-expands dirs within the char budget
-//! (`continue` on fat dirs). When either seed or walk hits its item limit, the
-//! agent-visible cutoff notice is emitted (copy unchanged from `main`).
-//!
-//! Partial-output case: when `walk_truncated` is true, a sibling surfaced by the
-//! seed may be listed by name only while its descendants are absent (the walk cap
-//! was exhausted inside an earlier sibling). The agent-visible notice copy is
-//! intentionally left identical to `main`; this behavior is documented in the
-//! CHANGELOG rather than via new model-facing wording.
-//!
-//! Under `legacy-0.4.10`, the old depth-threshold algorithm is used instead
-//! (see `versions::legacy_0_4_10` module).
 mod versions;
 use crate::types::output::{ListDirContent, ListDirOutput};
 #[allow(unused_imports)]
@@ -37,18 +18,16 @@ pub struct ListDirInput {
     pub target_directory: String,
 }
 /// Per-tool configuration for `list_dir`, stored as `Params<ListDirParams>`
-/// in Resources. Set via `SetToolOptions` / gRPC or at registration time.
+/// in Resources.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListDirParams {
     /// BFS expansion stops when this budget would be exceeded.
-    /// Defaults to `DEFAULT_MAX_OUTPUT_CHARS` (10,000) to match the Python
     pub max_output_chars: Option<usize>,
 }
 crate::register_resource!("grok_build", "ListDir", ListDirParams);
-/// Exact historical invalid-directory message for `list_dir` in legacy-0.4.10. Historical fixture
-/// captured from an earlier (0.4.10) revision of this tool. Historical 0.4.10 collapsed nonexistent
-/// paths, file paths, and other invalid-directory failures into the same generic message.
+/// Exact historical invalid-directory message for `list_dir` in
+/// legacy-0.4.10.
 fn render_legacy_list_dir_error(path: &Path) -> String {
     format!("Error: {} is not a valid directory", path.display())
 }
@@ -82,8 +61,7 @@ fn compute_display_path(display_base: &std::path::Path, target: &str) -> std::pa
 }
 #[derive(Debug, Default)]
 pub struct ListDirTool;
-/// Default character budget for directory listing output.
-/// Matches the Python SWE tool's `lim_characters` default.
+/// Default character budget for directory listing output. Matches the Python SWE tool's `lim_characters` default.
 const DEFAULT_MAX_OUTPUT_CHARS: usize = 10_000;
 /// Show top-N extension buckets in collapsed-directory summary lines.
 const TOP_K_EXTENSIONS: usize = 3;
@@ -101,12 +79,8 @@ fn root_truncation_notice(renderer: Option<&TemplateRenderer>) -> String {
         .and_then(|r| r.render(ROOT_TRUNCATION_NOTICE_TEMPLATE).ok())
         .unwrap_or_else(|| ROOT_TRUNCATION_NOTICE_FALLBACK.to_string())
 }
-/// Hard cap on deep-walk (depth ≥ 2) items; depth-1 seed is not counted. Matches
-/// the Python SWE tool's `MAX_GLOBAL_ITEMS`.
 const MAX_GLOBAL_ITEMS: usize = 100_000;
-/// Cap on depth-1 seed entries so a pathological flat root (millions of direct children) cannot fully materialize into
-/// `DirNode` before the char budget truncates. Independent in role from `MAX_GLOBAL_ITEMS`, but pinned equal to it (see
-/// guard below) so the cutoff notice's shared count stays correct whichever cap triggers truncation.
+/// Cap on depth-1 seed entries so a pathological flat root (millions of direct children) cannot fully materialize into `DirNode`.
 const MAX_SEED_ITEMS: usize = 100_000;
 const _: () = assert!(MAX_SEED_ITEMS == MAX_GLOBAL_ITEMS);
 #[derive(Debug, Default)]
@@ -318,7 +292,7 @@ fn seed_depth1_children(
     }
     false
 }
-/// Depth-1 seed first, then deep walk; only depth ≥ 2 counts toward `max_items`.
+/// Depth-1 seed first, then deep walk; only depth ≥ counts toward `max_items`.
 fn build_tree(root: &Path, respect_gitignore: bool) -> (DirNode, bool) {
     build_tree_with_limit(root, respect_gitignore, MAX_GLOBAL_ITEMS)
 }

@@ -66,7 +66,7 @@ fn a_multi_megabyte_log_fits_and_points_at_the_file() {
     assert!(snapshot.output.contains("/tmp/bg-1.log"));
 }
 
-/// Limiting the output field alone misses this: JSON encoding makes each of these bytes six times larger.
+/// Limiting the output field alone misses this: JSON encoding makes each of these bytes several times larger.
 #[test]
 fn escaped_output_fits_too() {
     let mut notification = notification(&"\u{7}".repeat(30 * 1024));

@@ -1,6 +1,4 @@
 //! What an [`AgentView`] is: the root of its session, or a child mirrored from a subagent.
-//! The role is set once, by [`AgentView::insert_subagent_view`]; every child-specific read site
-//! derives its answer from it here instead of keeping a second flag that could drift.
 
 use crate::app::agent_view::AgentView;
 use agent_client_protocol as acp;

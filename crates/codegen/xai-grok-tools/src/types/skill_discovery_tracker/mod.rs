@@ -1,10 +1,4 @@
 //! Session-scoped skill lifecycle manager.
-//!
-//! `SkillManager` owns the full skill lifecycle: startup baseline, dynamic
-//! discoveries, combined projections, pending updates, and announcement
-//! dedup. The session actor never stores skill state; it triggers state
-//! transitions via the `ToolBridge` and executes the resulting
-//! `SkillUpdateEffects`.
 
 mod conditional;
 mod listing;
@@ -25,18 +19,13 @@ use listing::{
 
 pub use listing::{XmlRenderMode, format_announcement_xml, format_compaction_skill_listing};
 
-/// Why a `SkillUpdateEffects` was produced. Lets the session distinguish dynamic discoveries (the
-/// model navigated into a directory containing a new `SKILL.md`) from baseline changes (session
-/// start, plugin reload, `/clear`). Some templates suppress one but not the other.
+/// Why a `SkillUpdateEffects` was produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SkillUpdateKind {
-    /// New skills discovered dynamically while the session is running
-    /// (path-driven discovery from a tool call). Default because it is
-    /// the safe choice if a future caller forgets to set this.
+    /// New skills discovered dynamically while the session is running (path-driven discovery from a tool call).
     #[default]
     Discovery,
-    /// Startup baseline established (or replaced via plugin reload /
-    /// `/clear`).
+    /// Startup baseline established (or replaced via plugin reload / `/clear`).
     BaselineChange,
 }
 
@@ -46,26 +35,19 @@ pub enum SkillUpdateKind {
 pub struct SkillListingSnapshot {
     /// The rendered listing, including the XML envelope in XML mode.
     pub text: String,
-    /// Number of skills that qualified for the listing. Under extreme
-    /// budget pressure the names-only tier can drop trailing entries from
-    /// `text` while they remain counted here.
+    /// Number of skills that qualified for the listing.
     pub skill_count: usize,
 }
 
-/// Conversation/UI side-effects the session must perform after a skill update. The tools layer handles all skill-domain logic (projections,
-/// dedup, writing `AvailableSkills`). This struct carries only the effects that require session capabilities: injecting a `<system-reminder>`
-/// message and refreshing slash command advertisement. Slash command data is read from `bridge.slash_skills()`, not from this struct.
+/// Conversation/UI side-effects the session must perform after a skill
+/// update.
 #[derive(Debug, Clone, Default)]
 pub struct SkillUpdateEffects {
     /// If `Some`, inject this text as a `<system-reminder>` user message.
-    /// Used for both dynamic discovery announcements and baseline change
-    /// notifications. The system prompt is never mutated for skills.
     pub system_reminder: Option<String>,
     /// If true, send updated slash commands to the client.
-    /// The session reads the skill list from `bridge.slash_skills()`.
     pub send_available_commands: bool,
-    /// Why this update was produced. Lets harnesses suppress one kind
-    /// without suppressing the other — see [`SkillUpdateKind`].
+    /// Why this update was produced.
     pub kind: SkillUpdateKind,
 }
 
@@ -74,16 +56,13 @@ pub struct SkillUpdateEffects {
 /// dynamic discovery, projections, announcements, compaction, and /clear.
 #[derive(Debug, Clone, Default)]
 pub struct SkillManager {
-    /// Skills loaded at session start (or refreshed on plugin reload).
-    /// This is the non-dynamic baseline.
+    /// Skills loaded at session start (or refreshed on plugin reload). This is the non-dynamic baseline.
     startup_skills: Vec<SkillInfo>,
 
     /// Directories already stat'd (prevents re-checking on future tool calls).
     pub checked_dirs: HashSet<PathBuf>,
 
     /// Real cwd path prefix to rewrite for model-visible display.
-    /// When set (forked sessions), announcement formatting replaces
-    /// this prefix with `display_cwd` so the model never sees overlay paths.
     real_cwd_prefix: Option<String>,
     /// Display cwd to substitute for `real_cwd_prefix` in announcements.
     display_cwd: Option<String>,
@@ -94,8 +73,7 @@ pub struct SkillManager {
     /// Canonical paths of discovered skills (for fast dedup on insert).
     discovered_canonical_paths: HashSet<PathBuf>,
 
-    /// Skill names already announced via system-reminder (prevents
-    /// duplicate reminder text).
+    /// Skill names already announced via system-reminder (prevents duplicate reminder text).
     announced_names: HashSet<String>,
 
     /// Git root for upward path walking (canonicalized).
@@ -108,35 +86,25 @@ pub struct SkillManager {
 
     has_pending_discovery: bool,
 
-    /// Chat budget for skill listing system-reminders.
-    /// Falls back to `DEFAULT_CHAR_BUDGET` when `None`.
+    /// Chat budget for skill listing system-reminders. Falls back to `DEFAULT_CHAR_BUDGET` when `None`.
     listing_budget_chars: Option<usize>,
 
-    /// Client-facing name of the skill tool (resolved from `TemplateRenderer`).
-    /// Falls back to `"Skill"` when not set.
+    /// Client-facing name of the skill tool (resolved from `TemplateRenderer`). Falls back to `"Skill"` when not set.
     skill_tool_name: Option<String>,
 
-    /// Client-facing name of the read tool (resolved from `TemplateRenderer`).
-    /// Falls back to `"Read"` when not set. Used in the `<available_skills>`
-    /// description attribute of mid-session XML skill announcements.
+    /// Client-facing name of the read tool (resolved from `TemplateRenderer`). Falls back to `"Read"` when not set.
     read_tool_name: Option<String>,
 
-    /// When true, `take_pending()` formats announcements as XML instead of
-    /// markdown.
+    /// When true, `take_pending()` formats announcements as XML instead of markdown.
     use_xml_format: bool,
 
-    /// Resolved vendor-compat config governing which vendor dirs dynamic
-    /// skill discovery scans. Defaults to all-on (historical behavior).
-    /// Set by the bridge at seed time; read by `SkillDiscoveryReminder`.
+    /// Resolved vendor-compat config governing which vendor dirs dynamic skill discovery scans.
     pub(crate) compat: CompatConfig,
 
-    /// `paths:`-gated skills held back from the listing until a matching file
-    /// is touched, plus their activation state. See [`ConditionalSkills`].
+    /// `paths:`-gated skills held back from the listing until a matching file is touched, plus their activation state.
     conditional: ConditionalSkills,
 
-    /// Every skill name from session-start discovery, set once by `ToolRegistryBuilder::finalize`
-    /// from the unfiltered `SessionContext.skills` and never rewritten by later seeds or baseline
-    /// reloads. The `paths:` gate never applies here.
+    /// Every skill name from session-start discovery, set once by `ToolRegistryBuilder::finalize`.
     discovery_snapshot_names: Vec<String>,
 
     /// Last listing hash, so a lost `announced_names` set cannot re-inject the same block.
@@ -176,8 +144,7 @@ fn listing_content_hash(text: &str) -> u64 {
 enum PendingKind {
     /// Nothing announced yet (session start / `/clear`). Full listing needed.
     BaselineChange,
-    /// Baseline rescanned while the previous listing is still in context;
-    /// only these skills need announcing.
+    /// Baseline rescanned while the listing is still in context; only these skills need announcing.
     BaselineAdded(Vec<SkillInfo>),
 }
 
@@ -250,8 +217,7 @@ fn render_listing(
     params: &ListingRenderParams<'_>,
 ) -> Option<String> {
     if params.use_xml_format {
-        // Same envelope as the startup preamble, so startup and
-        // mid-session listings share one structure.
+        // Same envelope as the startup preamble, so startup and mid-session listings share one structure.
         let read_tool = params.read_tool_name;
         let envelope_open = format!(
             "<agent_skills>\n\
@@ -302,15 +268,12 @@ impl SkillManager {
     }
 
     /// Set the resolved vendor-compat config used by dynamic skill discovery.
-    /// Must be called at session start (alongside `seed`) so the
-    /// `SkillDiscoveryReminder` gates vendor dirs correctly.
     pub fn set_compat(&mut self, compat: CompatConfig) {
         self.compat = compat;
     }
 
-    /// Pre-populate `announced_names` from persisted state. Must be called BEFORE `seed()`. When
-    /// `announced_names` is non-empty, `seed()` skips setting `pending = BaselineChange`,
-    /// preventing duplicate skill listing injection on session resume.
+    /// Pre-populate `announced_names` from persisted state. Must be called
+    /// BEFORE `seed()`.
     pub fn restore_announced_names(&mut self, names: HashSet<String>) {
         self.announced_names = names;
     }
@@ -356,9 +319,7 @@ impl SkillManager {
         let unconditional = self.conditional.take_unconditional(startup_skills);
         let has_skills = !unconditional.is_empty();
         self.startup_skills = unconditional;
-        // Only set pending if announced_names is empty (fresh session). When announced_names is
-        // non-empty (restored from persistence), the model's conversation history already contains
-        // the skill listing from the previous session — no re-announcement needed.
+        // Only set pending if announced_names is empty (fresh session).
         if has_skills && self.announced_names.is_empty() {
             self.pending = Some(PendingKind::BaselineChange);
         }
@@ -554,8 +515,7 @@ impl SkillManager {
         } else {
             SkillUpdateKind::BaselineChange
         };
-        // Take the announced set out of `self` so `render_listing` can
-        // borrow `self` immutably alongside it; restored below.
+        // Take the announced set out of `self` so `render_listing` can borrow `self` immutably alongside it.
         let mut announced = std::mem::take(&mut self.announced_names);
         let skills_owned = match &pending {
             None => None,
@@ -589,9 +549,8 @@ impl SkillManager {
         }
         self.announced_names = announced;
 
-        // Disabled skills are omitted from the listing via `s.enabled` in `format_announcement` /
-        // `format_announcement_xml`. Do not append a separate "must not be used" name footer — it
-        // wastes tokens and looks like skills with no description.
+        // Disabled skills are omitted from the listing via `s.enabled` in
+        // `format_announcement` / `format_announcement_xml`.
 
         let effects = SkillUpdateEffects {
             system_reminder,
@@ -612,22 +571,18 @@ impl SkillManager {
         })
     }
 
-    /// Get the display-deduped skill list for slash commands. Combines startup + discovered,
-    /// deduplicates by canonical path and name (discovered wins). This is the authoritative source
-    /// for slash command advertisement.
+    /// Get the display-deduped skill list for slash commands.
     pub fn slash_skills(&self) -> Vec<SkillInfo> {
         dedupe_by_canonical_path_and_name(&self.discovered_skills, &self.startup_skills)
     }
 
     /// Set the full-discovery snapshot (see `discovery_snapshot_names`).
-    /// Write-once by design: the only caller is `ToolRegistryBuilder::finalize`.
     pub(crate) fn set_discovery_snapshot_names(&mut self, names: Vec<String>) {
         self.discovery_snapshot_names = names;
     }
 
-    /// Every skill name from session-start discovery. Set only by
-    /// `ToolRegistryBuilder::finalize`; empty for a manager seeded
-    /// without it.
+    /// Every skill name from session-start discovery. Set only by `ToolRegistryBuilder::finalize`; empty for a manager
+    /// seeded without it.
     pub fn discovery_snapshot_names(&self) -> &[String] {
         &self.discovery_snapshot_names
     }
@@ -638,8 +593,7 @@ impl SkillManager {
     pub fn listing_snapshot(&self) -> Option<SkillListingSnapshot> {
         let skills =
             dedupe_by_canonical_path_and_name(&self.discovered_skills, &self.startup_skills);
-        // A throwaway set keeps `self.announced_names` untouched and, once
-        // filled by the renderer's filter pass, counts the qualifying skills.
+        // A throwaway set keeps `self.announced_names` untouched and, once filled by the renderer's filter pass.
         let mut qualified = HashSet::new();
         let text = render_listing(&skills, &mut qualified, &self.render_params())?;
         Some(SkillListingSnapshot {
@@ -705,9 +659,7 @@ impl SkillManager {
         best.map(|(_, scope)| scope)
     }
 
-    /// Reset discovery state for compaction. Clears `announced_names` so the reminder will re-announce on the next file access after compaction,
-    /// and clears `checked_dirs` so dynamically discovered skills can be re-discovered if the model navigates back into the same directories. Does
-    /// NOT clear `discovered_skills` (those are preserved for the compaction context and slash commands).
+    /// Reset discovery state for compaction.
     pub fn on_compaction(&mut self) {
         self.announced_names.clear();
         self.checked_dirs.clear();
@@ -1429,7 +1381,7 @@ mod tests {
     }
 
     /// When the startup baseline is replaced with the same set of skill
-    /// paths, no pending reconciliation should be queued.  This prevents
+    /// paths, no pending reconciliation should be queued. This prevents
     /// duplicate `<system-reminder>` injections when a bundle sync completes
     #[test]
     fn update_startup_baseline_same_paths_skips_pending() {
@@ -1497,8 +1449,7 @@ mod tests {
 
     #[test]
     fn seed_produces_system_reminder_not_prompt_mutation() {
-        // Invariant: startup skills are delivered via system-reminder,
-        // never via system prompt mutation.
+        // Invariant: startup skills are delivered via system-reminder, never via system prompt mutation.
         let mut mgr = SkillManager::new();
         mgr.seed(
             None,
@@ -1599,7 +1550,6 @@ mod tests {
     #[test]
     fn compaction_does_not_produce_pending() {
         // Compaction clears announced_names but does NOT queue a pending.
-        // Re-announcement happens when the reminder re-fires after compaction.
         let mut mgr = SkillManager::new();
         mgr.seed(
             None,
@@ -1620,9 +1570,7 @@ mod tests {
 
     #[test]
     fn effects_never_contains_skill_data() {
-        // SkillUpdateEffects must not carry skill-domain payloads. The only fields are session-side
-        // knobs: a rendered reminder text, a bool for slash command refresh, and a kind
-        // discriminator so harnesses can suppress one update kind without the other.
+        // SkillUpdateEffects must not carry skill-domain payloads.
         let mut mgr = SkillManager::new();
         mgr.seed(
             None,
@@ -1637,8 +1585,6 @@ mod tests {
         let _ = effects.system_reminder;
         let _ = effects.send_available_commands;
         let _ = effects.kind;
-        // If this test compiles, SkillUpdateEffects has no extra fields
-        // leaking skill-domain data into the shell.
     }
 
     /// Pin the kind discriminator so harnesses that suppress one reminder kind (e.g. a harness
@@ -1710,9 +1656,7 @@ mod tests {
 
     #[test]
     fn on_clear_then_drain_produces_startup_listing() {
-        // After /clear, draining the pending must produce a system-reminder
-        // with the startup baseline skills. This proves /clear followed by
-        // apply_pending_skill_update() gives the model visibility.
+        // After /clear, draining the pending must produce a system-reminder with the startup baseline skills.
         let mut mgr = SkillManager::new();
         mgr.seed(
             None,
@@ -1738,8 +1682,7 @@ mod tests {
 
     #[test]
     fn on_clear_idempotent_on_empty_tracker() {
-        // Fresh tracker: on_clear is a no-op on empty state,
-        // but still queues a baseline-change pending.
+        // Fresh tracker: on_clear is a no-op on empty state, but still queues a baseline-change pending.
         let mut mgr = SkillManager::new();
         mgr.seed(
             None,
@@ -1765,11 +1708,10 @@ mod tests {
         let skills: Vec<SkillInfo> = (0..50)
             .map(|i| {
                 let mut s = make_skill(&format!("skill-{i}"), &format!("/s/{i}/SKILL.md"));
-                s.description = "A".repeat(300); // 300 chars each, well over budget
+                s.description = "A".repeat(300); // Chars each, well over budget
                 s
             })
             .collect();
-        // 128k context window → budget = 128_000 * 4 * 0.5 = 256000 chars
         let context_window: u64 = 128_000;
         let expected_budget =
             listing_budget_chars(context_window, SKILL_BUDGET_CONTEXT_PERCENT).unwrap();
@@ -1793,8 +1735,6 @@ mod tests {
                 s
             })
             .collect();
-        // 300 token context window → budget = 300 * 4 * 0.5 = 600 chars.
-        // 200 skills with 500-char descriptions can't fit.
         let context_window: u64 = 300;
         let expected_budget =
             listing_budget_chars(context_window, SKILL_BUDGET_CONTEXT_PERCENT).unwrap();
@@ -1816,7 +1756,6 @@ mod tests {
             make_skill("commit", "/s/commit/SKILL.md"),
             make_skill("review", "/s/review/SKILL.md"),
         ];
-        // 200k context window → 12000 char budget, 2 skills fit easily.
         mgr.seed(None, None, skills, None, Some(200_000), None);
         let r = mgr.take_pending_reconciliation().unwrap();
         let text = r.effects.system_reminder.unwrap();
@@ -1932,8 +1871,7 @@ mod tests {
 
     #[test]
     fn restore_then_seed_produces_no_pending() {
-        // Core resume test: when announced_names is restored before seed(),
-        // seed() skips setting pending = BaselineChange.
+        // Core resume test: when announced_names is restored before seed().
         let mut mgr = SkillManager::new();
         mgr.restore_announced_names(HashSet::from(["startup".to_string()]));
         mgr.seed(
@@ -2002,7 +1940,7 @@ mod tests {
         // No pending from seed
         assert!(mgr.take_pending_reconciliation().is_none());
 
-        // Discover a new skill — should produce announcement for just the new one
+        // Discover a new skill — should produce announcement for the new one
         mgr.add_discovered(vec![make_skill("new", "/s/new/SKILL.md")]);
         let r = mgr.take_pending_reconciliation().unwrap();
         let text = r.effects.system_reminder.unwrap();
@@ -2027,15 +1965,13 @@ mod tests {
             None,
             None,
         );
-        // Announce the baseline, then discover one more skill, so
-        // `announced_names` holds both.
+        // Announce the baseline, then discover one more skill, so `announced_names` holds both.
         let _ = mgr.take_pending_reconciliation().unwrap();
         mgr.add_discovered(vec![make_skill("beta", "/s/beta/SKILL.md")]);
         let _ = mgr.take_pending_reconciliation().unwrap();
         let announced_before = mgr.announced_names().clone();
 
-        // The snapshot renders the whole set: announce-time dedup must not
-        // apply, and the announce state must survive untouched.
+        // The snapshot renders the whole set: announce-time dedup must not apply.
         let snapshot = mgr.listing_snapshot().unwrap();
         assert_eq!(snapshot.skill_count, 2);
         assert!(snapshot.text.contains("alpha"), "{}", snapshot.text);

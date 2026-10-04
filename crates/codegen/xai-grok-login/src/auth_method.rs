@@ -1,19 +1,11 @@
 //! First-party API-key environment primitives.
-//!
-//! Only the env-key checks the auth subsystem itself needs live here. The ACP
-//! `auth_methods` list-building surface (`build_auth_methods`,
-//! `AuthMethodsBuildInputs`, `should_advertise_xai_api_key`, ...) stays in
-//! `xai_grok_shell::agent::auth_method`, which depends on shell's `ModelEntry`.
 
 use std::sync::RwLock;
 
 /// Env var that, when set, advertises `xai.api_key` as a viable auth method.
-///
-/// Kept as a constant so test code and the production check stay in sync.
 pub const XAI_API_KEY_ENV_VAR: &str = "XAI_API_KEY";
 
 /// Legacy env var name.
-/// Checked as a fallback when `XAI_API_KEY` is not set, so existing deployments that use the old name keep working.
 pub const LEGACY_XAI_API_KEY_ENV_VAR: &str = "GROK_CODE_XAI_API_KEY";
 
 /// Runtime-loaded keys live here instead of the process env: `set_var` races C `getenv` on other threads (DNS, libgit2).
@@ -46,8 +38,6 @@ pub fn read_env_var(name: &str) -> Result<String, std::env::VarError> {
 }
 
 /// Read the API key from the runtime override or the environment.
-///
-/// Checks `XAI_API_KEY` first, then falls back to the legacy `GROK_CODE_XAI_API_KEY` for backward compatibility.
 pub fn read_xai_api_key_env() -> Result<String, std::env::VarError> {
     read_env_var(XAI_API_KEY_ENV_VAR).or_else(|_| std::env::var(LEGACY_XAI_API_KEY_ENV_VAR))
 }

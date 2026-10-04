@@ -1,9 +1,4 @@
 //! Resume admission for a copied child transcript.
-//!
-//! Spawn injects the system prompt, AGENTS.md, and the resume task before the
-//! first compact can run, so a copy that fills the window is not safe.
-//! Budgeted children skip `check_auto_compact_needed`, so a fat transcript
-//! that needs compact must abort instead of arming a no-op flag.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -56,8 +51,7 @@ impl ResumeWindowPolicy {
 pub(super) enum ResumeForceCompact {
     NotNeeded,
     Arm,
-    /// Over the auto-compact threshold, but a budgeted child never runs
-    /// `check_auto_compact_needed`, so arming `force_compact` would no-op.
+    /// Over the auto-compact threshold, but a budgeted child never runs `check_auto_compact_needed`.
     AbortBudgeted,
 }
 
@@ -68,7 +62,6 @@ pub(super) fn arm_force_compact(force_compact: &AtomicBool, should_force: bool) 
 }
 
 /// Leading items to preserve across compaction on resume: the System head only, so the resumed body (the child's own work) stays compactable.
-/// Returns 0 when there's no leading System; the spawn path then inserts one and bumps the prefix to 1.
 pub(super) fn resume_inherited_prefix_len(
     conversation: &[xai_grok_sampling_types::conversation::ConversationItem],
 ) -> usize {

@@ -1,4 +1,4 @@
-//! Feedback image policy shared by the send paths ([`select_feedback_images`], so a dropped image never drops the report) and the draft-image readers for the modal's Drafts tab.
+//! Feedback image policy shared by the send paths ([`select_feedback_images`], so a dropped image never drops the report).
 
 use std::path::Path;
 

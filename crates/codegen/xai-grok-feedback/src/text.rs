@@ -9,7 +9,7 @@ pub fn post_text(title: &str, details: &str) -> String {
     format!("{}\n\n{}", title.trim(), details.trim())
 }
 
-/// First non-blank line of `text`, trimmed and cut to 80 chars; `"Feedback draft"` when there is none.
+/// First non-blank line of `text`, trimmed and cut to multiple chars; `"Feedback draft"` when there is none.
 #[must_use]
 pub fn derive_title(text: &str) -> String {
     text.lines()

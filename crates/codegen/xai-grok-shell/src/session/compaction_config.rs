@@ -11,35 +11,19 @@ use std::sync::atomic::Ordering;
 
 /// Auto-compaction is gated whenever `auto_compact_suppressed` is not [`SUPPRESS_NONE`].
 pub(crate) const SUPPRESS_NONE: u8 = 0;
-/// Resolvable failure (`other`, `schema`): suppressed for the current turn,
-/// then cleared at the next turn start so compaction self-heals once the cause
-/// clears.
+/// Resolvable failure (`other`, `schema`): suppressed for the current turn, then cleared at the next turn start.
 pub(crate) const SUPPRESS_TURN: u8 = 1;
-/// Fatal failure (size) retrying can never fix: survives turn boundaries,
-/// cleared only when the context budget changes — a successful compaction, a
-/// rewind (context shrank), or a model switch (a larger window may now fit).
+/// Fatal failure (size) retrying can never fix.
 pub(crate) const SUPPRESS_STICKY: u8 = 2;
 /// Credit block: suppress until a model `200` (credits aren't client-observable).
-/// Survives turns; context changes can't fix it.
-/// Token refresh must not clear this.
 pub(crate) const SUPPRESS_UNTIL_SUCCESS: u8 = 3;
-/// Auth-expired auto-compact: suppress until login/token refresh, not until 200.
-/// Waiting for a sample deadlocks when context is already over the window.
 pub(crate) const SUPPRESS_AUTH: u8 = 4;
 
-/// A `/compact` the user asked for while a turn was running.
-///
-/// Compaction REPLACES the conversation wholesale
-/// (`replace_conversation_for_compaction`), so running it beside a live turn
-/// destroys every tool call and response that turn appends after the snapshot.
-/// The turn instead runs this at its next pre-sampling boundary, where no model
-/// call is in flight, and at turn end if it reaches no further boundary.
+/// A `/compact`.
 pub(crate) struct PendingManualCompact {
     /// The command's argument, from `/compact <instructions>`.
     pub instructions: Option<String>,
-    /// The waiting `x.ai/compact_conversation` caller. Held until the
-    /// compaction actually runs, so the client reports the real outcome
-    /// instead of a success for work that has not happened.
+    /// The waiting `x.ai/compact_conversation` caller.
     pub respond_to: tokio::sync::oneshot::Sender<Result<(), agent_client_protocol::Error>>,
 }
 
@@ -50,28 +34,21 @@ pub(crate) struct PreviousModelInfo {
     pub context_window: u64,
 }
 
-/// Cached result of an **async** (background / prefire) pass-1 sample for two-pass compaction.
-/// Held on the session actor between the background pass-1 and the synchronous pass-2 apply at compaction time.
 #[derive(Clone, Debug)]
 pub(crate) struct AsyncCompactionCache {
     /// The NOTE₁ text a successor assistant can use (extracted `<summary>` or full pass-1 output).
     pub note1: String,
-    /// Number of leading conversation items pass-1 summarized (the prefix boundary in the LIVE conversation as of pass-1 time).
-    /// The pass-2 tail is `conversation[prefix_len..]`.
+    /// Number of leading conversation items pass-1 summarized.
     pub prefix_len: usize,
     /// Fingerprint of `conversation[..prefix_len]` at pass-1 time.
-    /// Pass-2 only applies NOTE₁ when the current conversation still has this exact prefix.
     pub fingerprint: u64,
     /// Model slug pass-1 ran under; invalidated on model switch.
     pub model_slug: String,
     /// Wall time pass-1 took (ms): latency that ran off the critical path when prefire finished before compact.
-    /// Not counted in telemetry TTFT unless the user waited on an in-flight pass-1.
     pub pass1_latency_ms: u64,
 }
 
 /// Holder count (not a bool): prefire and compact can overlap.
-/// The first `enter` installs a token; nested enters reuse it; `in_flight` stays true until the last scope drops.
-/// A normal turn stop is a no-op when idle.
 #[derive(Default)]
 pub(crate) struct CompactCancelGate {
     token: RefCell<tokio_util::sync::CancellationToken>,
@@ -118,20 +95,19 @@ impl CompactCancelGate {
     }
 }
 
-/// `SessionActor` is `!Send` and single-threaded; the `AtomicBool` is only used for its ergonomic `compare_exchange` (no cross-thread sharing).
-/// The `RefCell`s need no locking (the `JoinHandle` is from `spawn_local`, so it is local to this LocalSet and never crosses threads).
+/// `SessionActor` is `!Send` and single-threaded; the `AtomicBool` is only
+/// used for its ergonomic `compare_exchange` (no cross-thread sharing).
 #[derive(Default)]
 pub(crate) struct PrefireState {
     /// Set while a background pass-1 sample is running, so the per-turn trigger never spawns a second concurrent job.
     in_flight: AtomicBool,
     cache: RefCell<Option<AsyncCompactionCache>>,
-    /// Pass-2 awaits this when compaction fires before prefire finished, so a still-running pass-1 is used rather than discarded for a single-pass.
+    /// Pass-2 awaits this when compaction fires before prefire finished.
     handle: RefCell<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl PrefireState {
     /// Try to claim the single in-flight slot.
-    /// Returns `true` iff this caller won the race and should spawn pass-1 (the caller must later call [`Self::finish`]).
     pub(crate) fn try_begin(&self) -> bool {
         self.in_flight
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
@@ -176,13 +152,7 @@ impl PrefireState {
 }
 
 /// Which recovery action `handle_sampling_failure` last took for a
-/// context-window-exceeded sampling error, reset to [`Self::None`] on the
-/// next successful sample. Read/set only from `handle_sampling_failure`;
-/// exists so two consecutive overflow failures never both attempt
-/// compaction — compaction cannot help a second time when the same content
-/// (e.g. one item alone at the window size) is still there after the first
-/// attempt, so the second attempt must deterministically shrink the sent
-/// conversation instead, and a third must give up rather than retry forever.
+/// context-window-exceeded sampling error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ContextOverflowRecovery {
     /// No overflow recovery attempted since the last successful sample.
@@ -190,29 +160,22 @@ pub(crate) enum ContextOverflowRecovery {
     None,
     /// The last attempt ran LLM-based compaction.
     Compacted,
-    /// The last attempt deterministically shrank the conversation
-    /// (`fit_conversation_to_budget`) because compaction already ran once
-    /// for this overflow and did not fit.
+    /// The last attempt deterministically shrank the conversation (`fit_conversation_to_budget`) because compaction already ran once.
     Reduced,
 }
 
 pub(crate) struct CompactionConfig {
-    /// Context window usage percentage (0-100) at which auto-compact triggers.
-    /// `Cell` so the value can be re-resolved at model-switch time without holding `&mut self` on the actor.
     pub threshold_percent: Cell<u8>,
     /// Debug: when set, next auto-compact check triggers unconditionally.
     pub force_compact: Arc<AtomicBool>,
     /// See [`PendingManualCompact`]. `Cell` because `SessionActor` is `!Send`.
-    /// Default `None`: nothing is pending until a `/compact` lands mid-turn.
     pub pending_manual_compact: Cell<Option<PendingManualCompact>>,
-    /// Auto-compaction suppression state (`SUPPRESS_*`) after a deterministic
-    /// failure; the gates early-return unless `SUPPRESS_NONE`. Manual `/compact` ignores it.
+    /// Auto-compaction suppression state (`SUPPRESS_*`) after a deterministic failure; the gates early-return.
     pub auto_compact_suppressed: AtomicU8,
     /// Locks the context window when `GROK_DEBUG_CONTEXT_WINDOW` is set.
     pub context_window_override: Option<std::num::NonZeroU64>,
     pub count: AtomicU64,
     /// Set at turn end; consumed at next turn start for model-switch compaction.
-    /// `Cell` because `SessionActor` is `!Send`.
     pub previous_model: Cell<Option<PreviousModelInfo>>,
     /// The resolved mode; `Segments` carries its detail level inline.
     pub compaction_mode: xai_chat_state::CompactionMode,
@@ -220,7 +183,7 @@ pub(crate) struct CompactionConfig {
     pub verbatim_input: bool,
     pub tool_choice: crate::util::config::CompactionToolChoice,
     pub prefire: PrefireState,
-    /// Sticky once a forked session releases its inherited prefix under compaction pressure (see `run_compact_inner`), so it stops re-pinning it.
+    /// Sticky once a forked session releases its inherited prefix under compaction pressure (see `run_compact_inner`).
     pub prefix_released: AtomicBool,
     /// User/stop cancel for the current compact generation.
     pub cancel: CompactCancelGate,
@@ -229,9 +192,7 @@ pub(crate) struct CompactionConfig {
 }
 
 impl CompactionConfig {
-    /// Whether AUTO compaction is suppressed. The single gate shared by every
-    /// automatic trigger so a doomed compact request can't re-fire on a
-    /// sibling path; manual `/compact` stays exempt.
+    /// Whether AUTO compaction is suppressed.
     pub(crate) fn is_suppressed(&self) -> bool {
         self.auto_compact_suppressed.load(Ordering::Relaxed) != SUPPRESS_NONE
     }

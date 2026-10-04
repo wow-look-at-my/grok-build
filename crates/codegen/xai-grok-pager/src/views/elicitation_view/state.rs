@@ -1,5 +1,4 @@
-//! The stage is a data-carrying enum: [`ElicitationStage::Form`] and [`ElicitationStage::UrlConsent`] own the pending ACP responder.
-//! [`ElicitationStage::UrlWaiting`] exists only after the response was sent, so the stage itself encodes whether the card still owes a response.
+//! The stage is a data-carrying enum.
 
 use agent_client_protocol as acp;
 use xai_acp_lib::AcpResult;
@@ -39,8 +38,7 @@ pub struct ElicitationViewState {
     pub action_focus: ElicitationActionFocus,
     /// First visible body row; the renderer clamps it and keeps the cursor row in view.
     pub scroll: usize,
-    /// The composer draft this card displaced, or `None` when an earlier card (permission/question/plan approval) already held the session draft.
-    /// In that case the live composer was not ours to stash, and closing must not restore over whatever that card put back.
+    /// The composer draft this card displaced.
     pub stashed_prompt: Option<StashedPrompt>,
 }
 
@@ -60,7 +58,6 @@ pub struct FormStage {
 pub struct UrlConsentStage {
     pub display: UrlDisplay,
     /// Why the URL cannot be opened (bad syntax, non-http(s) scheme, embedded credentials).
-    /// `Some` disables Accept, so the server can then only receive Decline or Cancel, never a false `accept`.
     pub invalid: Option<String>,
     pub elicitation_id: String,
     pub response_tx: Option<ElicitResponseTx>,
@@ -79,9 +76,8 @@ pub struct UrlDisplay {
     pub punycode_host: bool,
 }
 
-/// The editable value of one form field.
-/// Exactly one shape is valid per [`ElicitFieldKind`], so the variant carries only that shape.
-/// A boolean cannot hold a draft, a text field cannot hold selections.
+/// The editable value of one form field. Exactly one shape is valid per
+/// [`ElicitFieldKind`], so the variant carries only that shape.
 pub enum FieldValueUi {
     /// String / Number / Integer: the raw text draft.
     Text {
@@ -568,7 +564,8 @@ impl ElicitationViewState {
     }
 
     pub fn append_char(&mut self, c: char) {
-        // Drafts echo back onto the terminal; reject pasted escapes and bidi/format characters here, the one place characters enter
+        // Drafts echo back onto the terminal; reject pasted escapes and
+        // bidi/format characters here, the place characters enter
         if c.is_control() || crate::render::line_utils::is_unsafe_display_char(c) {
             return;
         }

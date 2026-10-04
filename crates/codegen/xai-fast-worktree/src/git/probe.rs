@@ -170,8 +170,7 @@ pub(crate) fn run_with_timeout(
         .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // spawn (not output) so the run can be bounded: git_command() already
-    // detached the child, and the timeout path below kills its process group.
+    // spawn (not output) so the run can be bounded: git_command() already detached the child.
     #[allow(clippy::disallowed_methods)]
     let mut child = command.spawn()?;
     let writer = child.stdin.take().map(|mut pipe| {
@@ -225,8 +224,6 @@ pub(crate) fn run_with_timeout(
             Ok((Stream::Stderr, read)) => stderr = read,
             Err(_) => {
                 // The child exited but a grandchild still holds the pipes.
-                // Signalling the pgid is safe: that live grandchild keeps the
-                // group non-empty, so the group id cannot have been recycled.
                 if let Some(group) = group
                     && let Err(error) = kill_group(group)
                 {

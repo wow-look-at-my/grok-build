@@ -1,6 +1,4 @@
 //! TOML loading, layered merging, and `$VAR` expansion.
-//!
-//! The merged result is the **default** config; requirements layers sit on top via [`crate::validation`].
 
 use std::path::Path;
 
@@ -14,8 +12,7 @@ fn parse_toml_source(path: &Path, source: &str) -> std::io::Result<toml::Value> 
         return Ok(toml::Value::Table(toml::map::Map::new()));
     }
     toml::from_str::<toml::Value>(source).map_err(|e| {
-        // The detail is built from the span, never from Display: Display echoes the offending source line, which may carry a secret
-        // Safe to log and to return to a client
+        // The detail is built from the span, never from Display: Display echoes the offending source line.
         let detail = toml_error_detail(source, &e);
         tracing::error!(file = %path.display(), "config toml has syntax errors: {detail}");
         std::io::Error::other(detail)
@@ -38,9 +35,8 @@ pub fn load_toml_file(path: &Path) -> std::io::Result<toml::Value> {
     Ok(v)
 }
 
-/// A snippet-free description of a TOML parse error: `"TOML parse error at line L, column C: <what>"` (or just the message when there's no span).
-/// Never includes the offending source line (`Display` echoes it and it may carry a secret), so this is safe to log or return to a client.
-/// Shared with the trace `config_files` artifact so the redaction rule lives in one place.
+/// A snippet-free description of a TOML parse error: `"TOML parse error at
+/// line L, column C: <what>"` (or the message when there's no span).
 pub fn toml_error_detail(src: &str, e: &toml::de::Error) -> String {
     match e.span() {
         Some(span) => {
@@ -81,9 +77,7 @@ pub fn load_config_file(path: &Path) -> std::io::Result<toml::Value> {
 }
 
 pub fn load_from_disk() -> std::io::Result<toml::Value> {
-    // Live `$GROK_HOME`: `user_grok_home()` / `grok_home()` are OnceLock and miss
-    // EnvGuard/tests (same reason user `config.toml` persist resolves live). A
-    // stale cache would read a different file than the last settings write.
+    // Live `$GROK_HOME`: `user_grok_home()` / `grok_home()` are OnceLock and miss EnvGuard/tests.
     load_user_config_layer(resolve_grok_home().as_deref(), USER_CONFIG_FILENAME)
 }
 
@@ -103,7 +97,6 @@ pub const TRUSTED_FOLDERS_FILENAME: &str = "trusted_folders.toml";
 pub const SANDBOX_CONFIG_FILENAME: &str = "sandbox.toml";
 
 /// Legacy project-hook trust list (`$GROK_HOME/trusted-hook-projects`).
-/// Migrated into [`TRUSTED_FOLDERS_FILENAME`] on the next unsandboxed start.
 pub const TRUSTED_HOOK_PROJECTS_FILENAME: &str = "trusted-hook-projects";
 
 /// Plugin trust list (`$GROK_HOME/trusted-plugins`).
@@ -113,9 +106,9 @@ pub fn load_managed_config() -> std::io::Result<toml::Value> {
     load_user_config_layer(user_grok_home().as_deref(), MANAGED_CONFIG_FILENAME)
 }
 
-/// Load a user-tier config layer from `<home>/<filename>`.
-/// With no resolvable user home, returns an empty table rather than reading a cwd-relative `.grok/<filename>`.
-/// The cwd fallback would silently promote an untrusted project `.grok` to the user tier.
+/// Load a user-tier config layer from `<home>/<filename>`. With no resolvable
+/// user home, returns an empty table rather than reading a cwd-relative
+/// `.grok/<filename>`.
 fn load_user_config_layer(home: Option<&Path>, filename: &str) -> std::io::Result<toml::Value> {
     match home {
         Some(g) => load_config_file(&g.join(filename)),
@@ -143,7 +136,6 @@ pub struct ManagedConfigLayer {
 
 /// All `managed_config.toml` layers in apply order (system first, user last).
 /// Absent layers are skipped; unparsable layers are skipped with a warning.
-/// One bad layer never drops the others.
 pub fn managed_config_layers() -> Vec<ManagedConfigLayer> {
     managed_config_layers_at(system_config_dir().as_deref(), user_grok_home().as_deref())
 }
@@ -176,8 +168,6 @@ pub fn managed_config_layers_at(
 }
 
 /// A hook's origin (held by `xai_grok_hooks::HookSpec::layer`).
-/// Defined here, not in `xai-grok-hooks`, since the dep direction is `xai-grok-hooks -> xai-grok-config`.
-/// This crate sets the config tiers; `File`/`Plugin` are set downstream.
 #[derive(
     Debug,
     Clone,
@@ -198,7 +188,7 @@ pub enum HookProvenance {
     Managed,
     /// System-tier `requirements.toml` (root-owned, e.g. `/etc/grok`).
     Requirements,
-    /// `$GROK_HOME/requirements.toml` while its bytes match the server-signed envelope (see [`crate::signed_policy::signed_requirements_attest`]).
+    /// `$GROK_HOME/requirements.toml` while its bytes match the server-signed envelope.
     SignedRequirements,
     /// `$GROK_HOME/requirements.toml` without a signed attestation (user-writable).
     UserRequirements,
@@ -209,7 +199,6 @@ pub enum HookProvenance {
     /// A plugin-contributed hook.
     Plugin,
     /// A tier this build doesn't recognize (e.g. a newer peer's provenance over the wire).
-    /// Forward-tolerant so an unknown value degrades to a conservative origin instead of failing the whole `HookRegistry` decode.
     #[serde(other)]
     Unknown,
 }
@@ -223,10 +212,6 @@ impl Default for HookProvenance {
 
 impl HookProvenance {
     /// Admin policy tiers; the user cannot disable or skip their hooks.
-    /// Every disable path must consult this predicate rather than re-derive the rule from names or paths.
-    /// Root-owned tiers qualify by OS ownership, `SignedRequirements` by the server's signature over the exact bytes.
-    /// `Managed` stays disableable even though the same envelope signs `managed_config.toml`: that file is distribution (defaults the user may override), requirements is enforcement.
-    /// The unsigned `$GROK_HOME` tiers never qualify, since the user owns that directory.
     pub fn is_managed_policy(self) -> bool {
         matches!(
             self,
@@ -262,9 +247,10 @@ impl HookProvenance {
         .find(|tier| tier.config_label() == Some(label))
     }
 
-    /// Authority rank for duplicate resolution: when byte-identical hooks arrive from several tiers, the highest-ranked copy keeps its provenance.
-    /// Deliberately NOT the config-merge precedence (where user overrides managed).
-    /// Merge precedence answers "whose VALUE wins"; this answers "whose copy of one identical hook is authoritative": ownership, not recency.
+    /// Authority rank for duplicate resolution: when byte-identical hooks
+    /// arrive from several tiers, the highest-ranked copy keeps its
+    /// provenance. Deliberately NOT the config-merge precedence (where user
+    /// overrides managed).
     pub fn authority_rank(self) -> u8 {
         match self {
             Self::SystemManaged => 7,
@@ -346,9 +332,8 @@ impl HookConfigLayer {
     }
 }
 
-/// All config-layer `hooks` blocks, highest authority first (matching [`effective_config_base`]).
-/// Read WITHOUT env-expansion and never merged (hooks combine additively downstream).
-/// Absent or unparsable layers are skipped with a warning so one bad layer can't drop the others.
+/// All config-layer `hooks` blocks, highest authority first (matching
+/// [`effective_config_base`]).
 pub fn hook_config_layers() -> Vec<HookConfigLayer> {
     hook_config_layers_at(system_config_dir().as_deref(), user_grok_home().as_deref())
 }
@@ -385,8 +370,8 @@ pub fn hook_config_layers_at(
     system_dir: Option<&Path>,
     user_home: Option<&Path>,
 ) -> Vec<HookConfigLayer> {
-    /// One candidate config-hook layer: which directory and filename to read, the provenance to stamp on hooks found there,
-    /// and the provenance it is upgraded to when the file's bytes carry a signed attestation.
+    /// One candidate config-hook layer: which directory and filename to read,
+    /// the provenance to stamp on hooks found there.
     struct LayerSpec<'a> {
         dir: Option<&'a Path>,
         filename: &'a str,
@@ -459,15 +444,16 @@ pub fn hook_config_layers_at(
             }
             _ => provenance,
         };
-        // The root-owned tiers' exemption rests on OS ownership: a misconfigured system dir would silently create non-disableable hooks, so make it loud; classification stays unchanged (root ownership is the documented requirement, not portably verifiable)
+        // The root-owned tiers' exemption rests on OS ownership: a
+        // misconfigured system dir would silently create non-disableable
+        // hooks.
         if matches!(
             provenance,
             HookProvenance::SystemManaged | HookProvenance::Requirements
         ) {
             warn_unless_root_owned(&path);
         }
-        // No `$VAR` expansion: a literal `${VAR}` must reach the hook runner, which does the single expansion (expanding here would double-expand)
-        // A syntax error is already logged with redacted detail by `parse_toml_source`
+        // No `$VAR` expansion: a literal `${VAR}` must reach the hook runner.
         let Ok(mut value) = parse_toml_source(&path, &source) else {
             continue;
         };

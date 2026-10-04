@@ -1,12 +1,4 @@
 //! Queued-prompt editing (`PromptMode::EditingQueued`) state machine.
-//!
-//! Extracted from `agent_view.rs` as a sibling `impl AgentView` block (same pattern as xai-grok-shell's `compaction.rs`).
-//! Covers entry from the queue pane, editing-mode key intercepts, the dirty-edit focus lock, and the exit/cleanup paths.
-//!
-//! Stash invariant: `stashed_prompt` is set exactly once on entry (`enter_queue_edit`) and `take()`n exactly once on exit.
-//! `exit_editing_mode` is the sole restore owner: every exit (including lost-row cancel) restores the draft exactly once.
-//!
-//! A dirty pane switch is blocked and never arms the undrawn `EditConfirm` modal, which would otherwise capture all input invisibly.
 
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -19,7 +11,6 @@ use super::agent_view::{AgentPane, AgentView, PromptInputMode};
 use super::app_view::InputOutcome;
 
 /// Toast for an edit attempted on an optimistic queue row whose enqueue RPC has not confirmed.
-/// Shared by the keyboard and mouse edit paths, which both funnel through `enter_queue_edit`.
 pub(in crate::app) const STILL_QUEUEING_TOAST: &str = "Still queueing, try again in a moment";
 
 /// State of the prompt widget's editing context.
@@ -30,14 +21,10 @@ pub enum PromptMode {
     /// Editing a queued prompt.
     EditingQueued {
         /// Stable selection ID of the prompt being edited.
-        /// For local rows this is the `QueuedPrompt.id` monotonic counter.
-        /// For server rows it is the synthesized `QueuedPromptEntry.id` (a hash of `server_id`) so [`AgentView::queue`] selection works uniformly.
         id: u64,
         /// Snapshot of the original text (for dirty detection).
         original: String,
-        /// When `Some`, this is a server-authoritative shared-queue row and `server_id` is the agent's stable `prompt_id`.
-        /// Save routes through `Action::QueueEditShared` instead of mutating the local `pending_prompts` mirror.
-        /// The `x.ai/queue/changed` rebroadcast paints the result.
+        /// When `Some`, this is a server-authoritative shared-queue row.
         server_id: Option<String>,
         /// Kind snapshot for the interject guard's vanished-row fallback.
         kind: crate::app::agent::QueueEntryKind,
@@ -82,9 +69,10 @@ impl AgentView {
         {
             let dirty = self.prompt.text() != original;
             if dirty {
-                // Block the switch; never arm `EditConfirm` here (it has no draw arm, so it would capture all input invisibly)
-                // Resolve with Enter/Esc
-                // Clear the overlay-focus flip toggle callers set before switching.
+                // Block the switch; never arm `EditConfirm` here (it has no
+                // draw arm, so it would capture all input invisibly) Resolve
+                // with Enter/Esc Clear the overlay-focus flip toggle callers
+                // set.
                 match target {
                     AgentPane::Queue => self.queue.overlay.focused = false,
                     AgentPane::Todo => self.todo.overlay.focused = false,
@@ -94,9 +82,7 @@ impl AgentView {
                 self.show_toast("Editing a queued prompt: press Enter to save, Esc to discard");
                 return Some(false); // blocked, no modal armed
             }
-            // Clean edit: silently exit editing mode
-            // With a hook-block hold in place the card comes back (it stays on screen while the user works in the target pane)
-            // The exit refocuses the composer and clears the caller's overlay-focus flip; restore it for the target
+            // Clean edit: silently exit editing mode With a hook-block hold in place the card comes back.
             self.exit_editing_mode();
             self.set_active_pane(target, true);
             match target {
@@ -122,11 +108,10 @@ impl AgentView {
             let was_drain_blocked = self.drain_blocked();
             match result {
                 EditConfirmResult::Cancel => {
-                    // Dismiss dialog, stay in editing mode.
-                    // (active_modal already taken)
                 }
                 EditConfirmResult::Save => {
-                    // Empty edit: keep the original row text; a queued prompt must never be blanked by Save
+                    // Empty edit: keep the row text; a queued prompt must
+                    // never be blanked by Save
                     if self.prompt.text().trim().is_empty() {
                         self.exit_editing_mode();
                         self.set_active_pane(pending_target, true);
@@ -217,9 +202,8 @@ impl AgentView {
     /// Enter editing mode for the queue row selected via `QueueEvent::EditSelected` (called from `handle_queue_key`).
     pub(super) fn enter_queue_edit(&mut self, id: u64, is_server: bool, row: Option<QueueRowRef>) {
         use crate::app::agent::QueueEntryKind;
-        // Optimistic echo whose enqueue RPC has not confirmed: the shell has no row to hold yet
-        // Toast instead of silently dropping the keypress, and wait for the confirming `x.ai/queue/changed` before allowing the edit
-        // Both gates enforce the same unconfirmed-row rule, so a change to one likely applies to the other
+        // Optimistic echo whose enqueue RPC has not confirmed: the shell has
+        // no row to hold yet Toast instead of silently dropping the keypress.
         if let Some(sid) = row.as_ref().and_then(|r| r.server_id.as_deref())
             && self.optimistic_queue_ids.contains(sid)
         {
@@ -289,7 +273,6 @@ impl AgentView {
                 Some(self.prompt.stash())
             };
             // Load queued text and enter editing mode.
-            // Set prompt_input_mode based on entry kind so the prompt renders with the correct visual (yellow `!` prefix for bash entries)
             self.prompt
                 .restore(crate::views::prompt_widget::StashedPrompt::from_submission(
                     text.clone(),
@@ -347,7 +330,8 @@ impl AgentView {
             )
         {
             let mut submission = self.prompt.stash();
-            // A vanished server row has no version to check, so it carries no removal and dispatch just runs the command
+            // A vanished server row has no version to check, so it carries no
+            // removal and dispatch runs the command
             let server = server_id.as_ref().and_then(|sid| {
                 self.queue
                     .row_ref(id)
@@ -367,8 +351,7 @@ impl AgentView {
                     .collect();
                 submission.disarm_image_cleanup(&retained);
             }
-            // Release the hold: the action's `QueueRemove` runs inside `drain_and_process`, before `pending_effects` flush, so it goes out first
-            // A remove rejected on a stale version then returns the row to combine
+            // Release the hold: the action's `QueueRemove` runs inside `drain_and_process`, before `pending_effects` flush.
             self.exit_editing_mode();
             return InputOutcome::Action(Action::RunEditedQueuedCommand {
                 local_id: id,
@@ -379,8 +362,7 @@ impl AgentView {
         match server_id {
             Some(server_id) => {
                 let new_text = self.prompt.text().to_string();
-                // Server-origin row: route the edit through the agent (LWW); the rebroadcast updates every client's mirror, so don't mutate locally
-                // Keep the hold until the edit lands; see `exit_editing_mode_keeping_hold`
+                // Server-origin row: route the edit through the agent (LWW).
                 self.exit_editing_mode_keeping_hold();
                 InputOutcome::Action(Action::QueueEditShared {
                     id: server_id,
@@ -413,12 +395,9 @@ impl AgentView {
                     entry.images = std::mem::take(&mut images);
                     entry.chip_elements = chip_elements;
                     entry.skill_token_ranges = skill_token_ranges;
-                    // Clear stale wire_blocks: edited text may no longer match the original skill invocation
-                    // Pager builtins never get here (`is_complete_builtin_invocation` routed them to dispatch)
-                    // ACP, skill, and unknown `/…` text is left for the agent's resolve(), which does not know pager builtins
+                    // Clear stale wire_blocks: edited text may no longer match the skill invocation Pager builtins never get here.
                     entry.wire_blocks = None;
-                    // display_as_skill rides wire_blocks (see its field doc)
-                    // Clear both together, or the drain keeps stale skill styling over the ranges
+                    // display_as_skill rides wire_blocks (see its field doc) Clear both together.
                     entry.display_as_skill = false;
                 }
                 crate::prompt_images::drain_and_cleanup(
@@ -447,9 +426,10 @@ impl AgentView {
         }
     }
 
-    /// Interject-key intercept while editing a queued row, delegated from the `ActionId::InterjectPrompt` registry arm in `handle_prompt_key`.
-    /// Falling through would strand `EditingQueued` with the row still queued (dirty-modal loop, blocked drain).
-    /// `None` means not editing; the arm proceeds with its normal interject handling.
+    /// Interject-key intercept while editing a queued row, delegated from the
+    /// `ActionId::InterjectPrompt` registry arm in `handle_prompt_key`.
+    /// Falling through would strand `EditingQueued` with the row still queued
+    /// (dirty-modal loop, blocked drain).
     pub(super) fn interject_editing_queued_intercept(&mut self) -> Option<InputOutcome> {
         if let PromptMode::EditingQueued {
             id,
@@ -481,12 +461,7 @@ impl AgentView {
         }
         // The EDITED text is what goes out, so it is what must be classified:
         // `queue_row_prompt_like` below reads the STORED row, which can be
-        // steering text while the composer holds a command. An interjection (or
-        // a `newText` override) reaches the running turn as ordinary user text —
-        // only a prompt's LEADING token is ever resolved as a command — so the
-        // model would read the literal `/cmd args` and the command would never
-        // run. Save the edit instead: the row keeps its own turn, and the shell
-        // resolves the command when that turn starts.
+        // steering text while the composer holds a command.
         if xai_prompt_queue::is_slash_invocation(&text) {
             self.show_toast("Can't send this mid-turn — it runs when the current turn ends");
             return self.save_edited_queued_row(id, server_id, true);
@@ -509,11 +484,11 @@ impl AgentView {
                     self.prompt.images.clear();
                     self.show_toast("Images can't be attached when editing a shared queued prompt");
                 }
-                // new_text carries the edit; without it the agent would interject the original server-side text
+                // new_text carries the edit; without it the agent would interject the server-side text
                 let expected_version = self.queue.row_ref(id).map(|r| r.version);
                 match expected_version {
                     Some(expected_version) => {
-                        // Hold until interject clears it; release would re-kick promote of the original text
+                        // Hold until interject clears it; release would re-kick promote of the text
                         self.exit_editing_mode_keeping_hold();
                         InputOutcome::Action(Action::QueueInterjectShared {
                             id: server_id,
@@ -521,7 +496,7 @@ impl AgentView {
                             new_text: Some(text),
                         })
                     }
-                    // Row vanished from the mirror: just interject the text
+                    // Row vanished from the mirror: interject the text
                     None => {
                         self.exit_editing_mode();
                         InputOutcome::Action(Action::Interject {
@@ -555,9 +530,8 @@ impl AgentView {
         }
     }
 
-    /// Whether the next turn is held because the user is editing the front prompt.
-    /// Local rows (`server_id: None`): idle and the edited id is `pending_prompts` front.
-    /// Server rows (`server_id: Some(sid)`): idle and `sid` is the front of `shared_queue` (wire excludes the running turn, so index 0 is next).
+    /// Whether the next turn is held because the user is editing the front prompt. Local rows (`server_id: None`): idle and the edited id is
+    /// `pending_prompts` front.
     pub(crate) fn drain_blocked(&self) -> bool {
         let PromptMode::EditingQueued { id, server_id, .. } = &self.prompt_mode else {
             return false;
@@ -586,21 +560,18 @@ impl AgentView {
         ) {
             return;
         }
-        // Restore the pre-edit draft; keeping the orphaned edit text would look "duplicated" (the row is now the running turn)
-        // A concurrent-removal edit is lost
+        // Restore the pre-edit draft; keeping the orphaned edit text would look "duplicated" (the row is now the running turn).
         self.exit_editing_mode();
         self.show_toast("Queued prompt is no longer in the queue");
     }
 
-    /// Exit editing mode: restore stashed text, clear mode, focus the composer.
-    /// No-op unless `EditingQueued`. The default exit; releases the server-side combine hold (cancel, lost-row, modal paths).
-    /// Always resets `prompt_input_mode` to `Normal` so it doesn't leak into subsequent normal prompt entry.
+    /// Exit editing mode: restore stashed text, clear mode, focus the
+    /// composer. No-op unless `EditingQueued`.
     pub(super) fn exit_editing_mode(&mut self) {
         self.exit_editing_mode_inner(true);
     }
 
-    /// Exit editing without emitting `QueueReleaseEdit`; the server-row save path's `QueueEditShared` clears the hold on the shell instead.
-    /// Releasing here would flush first (via `pending_effects`) and let combine merge the row on stale text before the edit lands.
+    /// Exit editing without emitting `QueueReleaseEdit`.
     fn exit_editing_mode_keeping_hold(&mut self) {
         self.exit_editing_mode_inner(false);
     }
@@ -632,13 +603,11 @@ impl AgentView {
     fn finish_editing_exit(&mut self) {
         self.prompt_mode = PromptMode::Normal;
         self.prompt_input_mode = PromptInputMode::Normal;
-        // Editing is over, so a pending EditConfirm is meaningless; left behind it would eat all input without ever rendering
-        // Other modal variants are untouched
+        // Editing is over.
         if matches!(self.active_modal, Some(ActiveModal::EditConfirm { .. })) {
             self.active_modal = None;
         }
-        // Focus the composer: on the queue pane the next Enter re-opens the row edit instead of sending
-        // Pane-switch exits (modal confirm, clean-edit pane switch) re-target their own pane right after this
+        // Focus the composer: on the queue pane the next Enter re-opens the row edit instead of sending Pane-switch exits.
         self.set_active_pane(AgentPane::Prompt, true);
     }
 }
@@ -1280,7 +1249,7 @@ mod tests {
         );
     }
 
-    /// Fail-closed: only a complete builtin invocation at position 0 is hijacked. Everything else saves as text.
+    /// Everything else saves as text.
     #[test]
     fn incomplete_unknown_and_mid_text_slash_edits_still_save_as_text() {
         // `/btw` alone requires args; `/nope` is unknown (agent pass-through); a mid-text token is not an invocation
@@ -1946,7 +1915,6 @@ mod tests {
         assert!(matches!(agent.prompt_mode, PromptMode::Normal));
 
         // Scoping: a non-EditConfirm modal survives the exit untouched.
-        // Re-enter edit mode so the guarded body (not the idempotency early-return) is what leaves the palette alone
         agent.prompt_mode = editing_lone_local();
         agent.active_modal = Some(ActiveModal::CommandPalette {
             entries: crate::views::modal::default_palette_entries(agent.sharing_enabled),
@@ -2292,7 +2260,6 @@ mod tests {
         let mut agent = make_running_agent();
         let registry = non_vscode_registry();
 
-        // The local row carries a stored image numbered 1 and its placeholder.
         let mut row_img = crate::prompt_images::from_clipboard_data(&crate::clipboard::ImageData {
             data: vec![9, 9, 9],
             mime_type: "image/png".into(),

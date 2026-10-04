@@ -12,7 +12,6 @@ use xai_grok_tools::implementations::grok_build::web_fetch::domain::normalize_do
 mod bash_commands;
 
 /// A security-gate escalation with `Ask` provenance.
-/// The bash-command and shell-file gates only escalate (rule `Allow` is dropped), so these three arms cover every gate outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GateDecision {
     /// A deny rule matched.
@@ -24,8 +23,8 @@ pub(crate) enum GateDecision {
 }
 
 impl GateDecision {
-    /// Collapse provenance back to the plain [`Decision`] the pre-provenance gates returned.
-    /// Both Ask arms become `Decision::Ask`, so consumers of the public wrappers observe identical decisions.
+    /// Collapse provenance back to the plain [`Decision`] the pre-provenance
+    /// gates returned.
     pub(crate) fn into_decision(self) -> Decision {
         match self {
             Self::Reject(reason) => Decision::Reject(reason),
@@ -77,13 +76,10 @@ pub struct CompiledPolicy {
     /// True if any Read/Edit/Any deny/ask rule exists (Grep-only excluded), so the shell file-access gate should run.
     pub(crate) has_file_restrictions: bool,
     /// True if any Bash/Any deny/ask rule exists, so the per-segment Bash command gate should run.
-    /// Read by `evaluate_bash_command_policy`.
     has_bash_command_restrictions: bool,
-    /// True if any Bash/Any allow rule exists, so the per-segment Bash allow gate should run.
-    /// Read by `evaluate`.
+    /// True if any Bash/Any allow rule exists, so the per-segment Bash allow gate should run. Read by `evaluate`.
     has_bash_allow_rules: bool,
     /// Per-rule [`rule_is_catchall`] verdicts, index-aligned with `config.rules`/`matchers`.
-    /// Precomputed so the auto-mode narrow-allow check doesn't re-probe every rule on every request.
     catchall: Vec<bool>,
 }
 
@@ -125,9 +121,8 @@ impl CompiledPolicy {
         }
     }
 
-    /// Evaluate managed Bash/Any deny/ask rules against every chained segment, not just the leading command.
-    /// Wrappers are peeled and `bash -c` is recursed; escalation only (`Reject`/`Ask`, never `Allow`).
-    /// A script that can't be decomposed fails closed to `Ask`.
+    /// Evaluate managed Bash/Any deny/ask rules against every chained
+    /// segment, not the leading command.
     pub fn evaluate_bash_command_policy(&self, cmd: &str) -> Option<Decision> {
         self.evaluate_bash_command_gate(cmd)
             .map(GateDecision::into_decision)
@@ -203,15 +198,14 @@ impl CompiledPolicy {
         decision
     }
 
-    /// Evaluate using deny > ask > allow precedence (order-independent).
-    /// Path rules use lexical collapse (no session cwd).
-    /// Prefer [`Self::evaluate_with_cwd`] for Read/Edit/Grep when a workspace cwd is known.
+    /// Evaluate using deny > ask > allow precedence (order-independent). Path
+    /// rules use lexical collapse (no session cwd).
     pub fn evaluate(&self, access: &AccessKind) -> Option<Decision> {
         self.evaluate_with_cwd(access, None)
     }
 
-    /// Like [`Self::evaluate`], but joins relative tool paths to `cwd` before the path-glob match.
-    /// Native Read/Edit/Grep also re-check the followed symlink target for deny/ask only (allow on the target is not granted).
+    /// Like [`Self::evaluate`], but joins relative tool paths to `cwd` before
+    /// the path-glob match.
     pub fn evaluate_with_cwd(&self, access: &AccessKind, cwd: Option<&Path>) -> Option<Decision> {
         self.evaluate_with_cwd_details(access, cwd).0
     }
@@ -319,9 +313,10 @@ impl CompiledPolicy {
         None
     }
 
-    /// Whether narrow allow rules alone authorize this Bash command ([`AllowRuleScope::NarrowOnly`]).
-    /// A scoped rule may skip the classifier; a blanket `Bash(*)` or exec-vehicle rule stays suspended. Untrusted project rules are already dropped.
-    /// Meaningful only after a full `Allow`; non-Bash access has no static findings so it bypasses without this check.
+    /// Whether narrow allow rules alone authorize this Bash command
+    /// ([`AllowRuleScope::NarrowOnly`]). A scoped rule may skip the
+    /// classifier; a blanket `Bash(*)` or exec-vehicle rule stays suspended.
+    /// Untrusted project rules are already dropped.
     pub(crate) fn narrow_allow_authorizes(&self, access: &AccessKind) -> bool {
         let AccessKind::Bash(cmd) = access else {
             return false;
@@ -339,9 +334,8 @@ impl CompiledPolicy {
             return false;
         }
         let narrow_only = scope == AllowRuleScope::NarrowOnly;
-        // An exec-vehicle head makes any rule effectively a code-execution grant (`Bash(python:*)` is one `-c` away from arbitrary code)
-        // It never counts as narrow, so the classifier stays in the loop
-        // The `-c` shells are also floored by `shell_dash_c_script`; this list covers the vehicles that floor does not model
+        // An exec-vehicle head makes any rule effectively a code-execution
+        // grant (`Bash(python:*)` is one `-c` away from arbitrary code).
         if narrow_only && head_is_exec_vehicle(words) {
             return false;
         }
@@ -384,10 +378,9 @@ pub(crate) enum InlineShellScript {
     NotInline,
     /// Trusted literal `-c` script at this word index.
     Literal(usize),
-    /// Confirmed or potential `-c` shape whose script cannot be recursed into (dynamic head/operand, missing script, ambiguous options after `-c`).
+    /// Confirmed or potential `-c` shape whose script cannot be recursed.
     Untrusted,
     /// Unmodeled/ambiguous options without evidence of `-c` string reinterpretation (e.g. `bash --version`).
-    /// Security gates still Ask; the auto-mode opaque-shell floor does not, since only `Literal` / `Untrusted` re-interpret a command string.
     Unrecognized,
 }
 
@@ -417,8 +410,7 @@ pub(crate) fn shell_dash_c_script(words: &[ShellWord<'_>]) -> InlineShellScript 
     let mut i = 1usize;
     let mut saw_c = false;
     let mut unrecognized = false;
-    // After `-c`, fail closed as Untrusted
-    // Before `-c`, Unrecognized (security Ask without claiming string reinterpretation for the opaque-shell floor)
+    // After `-c`, fail closed as Untrusted Before `-c`, Unrecognized.
     let ambiguous = |saw_c: bool| {
         if saw_c {
             InlineShellScript::Untrusted
@@ -472,8 +464,7 @@ pub(crate) fn shell_dash_c_script(words: &[ShellWord<'_>]) -> InlineShellScript 
                 i += 1;
                 continue;
             }
-            // Unmodeled long option: keep scanning for a later `-c` so `bash --verbose -c '…'` stays potential-inline
-            // Bare `bash --version` / `bash --help` become Unrecognized (not opaque)
+            // Unmodeled long option: keep scanning for a later `-c`.
             if saw_c {
                 return InlineShellScript::Untrusted;
             }
@@ -524,10 +515,8 @@ pub(crate) fn shell_dash_c_script(words: &[ShellWord<'_>]) -> InlineShellScript 
 }
 
 /// [`tool_filter_matches`], minus the widenings that must not cut both ways.
-///
-/// An `Edit` rule reaches a `Tool` only as a **tool-wide** lockdown (`Edit` / `Edit(*)`):
-/// deny/ask, never allow. A path glob (`Edit(src/**)`, `Edit(scheduler_create)`) is a path,
-/// not a tool id — comparing it to `scheduler_create` would match or miss the wrong thing.
+/// An `Edit` rule reaches a `Tool` only as a **tool-wide** lockdown (`Edit` /
+/// `Edit(*)`): deny/ask, never allow.
 fn rule_reaches(access: &AccessKind, rule: &PermissionRule) -> bool {
     if matches!(access, AccessKind::Tool(_)) && rule.tool == ToolFilter::Edit {
         return matches!(rule.action, RuleAction::Deny | RuleAction::Ask)
@@ -545,13 +534,9 @@ fn tool_filter_matches(access: &AccessKind, filter: &ToolFilter) -> bool {
     match filter {
         ToolFilter::Any => true,
         ToolFilter::Bash => matches!(access, AccessKind::Bash(_)),
-        // An Edit rule also *classifies* as reaching Tool (see [`rule_reaches`]): only a
-        // tool-wide deny/ask is a lockdown. Path globs stay on `Edit` paths.
-        // Session/folder edit grants stay on `Edit` alone.
+        // An Edit rule also *classifies* as reaching Tool (see [`rule_reaches`]).
         ToolFilter::Edit => matches!(access, AccessKind::Edit(_) | AccessKind::Tool(_)),
-        // A Read rule also governs the Grep tool: grep reads file contents, so a managed `Read` deny/ask on a path must block grepping it
-        // Otherwise grep is a read-bypass
-        // Grep-specific rules still use `Grep`
+        // A Read rule also governs the Grep tool: grep reads file contents.
         ToolFilter::Read => matches!(access, AccessKind::Read(_) | AccessKind::Grep { .. }),
         ToolFilter::Grep => matches!(access, AccessKind::Grep { .. }),
         ToolFilter::Mcp => matches!(access, AccessKind::MCPTool { .. }),
@@ -561,8 +546,8 @@ fn tool_filter_matches(access: &AccessKind, filter: &ToolFilter) -> bool {
     }
 }
 
-/// Callers pick at the call site: [`Self::Any`] is the ordinary conjunctive allow gate.
-/// Auto mode uses [`Self::NarrowOnly`] to decide what may resolve before its classifier.
+/// Callers pick at the call site: [`Self::Any`] is the ordinary conjunctive
+/// allow gate.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AllowRuleScope {
     /// Every allow rule.
@@ -586,12 +571,11 @@ const EXEC_VEHICLE_HEADS: &[&str] = &[
     "docker", "podman",
 ];
 
-/// Interpreter families with versioned spellings: `python` also covers `python3`, `python3.13`, and `python3.13t` (free-threaded).
-/// Only a version-like suffix counts; a bare prefix match would match unrelated tools (`nodemon`, `phpunit`) and cost their narrow rules the bypass.
+/// Interpreter families with versioned spellings: `python` also covers `python3`, `python3.13`.
 const EXEC_VEHICLE_HEAD_FAMILIES: &[&str] = &["python", "node", "ruby", "perl", "php", "lua"];
 
-/// Whether the program head executes code handed to it: basename, lowercased, `.exe` stripped, against [`EXEC_VEHICLE_HEADS`] or a versioned family.
-/// `pub(crate)` so [`minimum_always_allow_scope`] floors these to the full command like dangerous verbs.
+/// Whether the program head executes code handed to it: basename, lowercased,
+/// `.exe` stripped, against [`EXEC_VEHICLE_HEADS`] or a versioned family.
 pub(crate) fn normalized_command_head(words: &[String]) -> Option<String> {
     let head = words
         .first()?
@@ -619,7 +603,7 @@ pub(crate) fn head_is_exec_vehicle(words: &[String]) -> bool {
 }
 
 /// Whether a bash glob matches every [`bash_probes`] probe (same set as [`rule_is_catchall`]), so `*`, `**`, `?*` are refused.
-/// Shared with the pattern editor's save gate so the two cannot drift.
+/// Shared with the pattern editor's save gate so both cannot drift.
 pub fn bash_glob_is_catchall(pattern: &str) -> bool {
     bash_probes().iter().all(|access| match access {
         AccessKind::Bash(cmd) => bash_pattern_matches_command(pattern, cmd),
@@ -672,14 +656,12 @@ fn bash_allow_pattern_matches(
 }
 
 /// Would a `Bash(pattern)` allow rule match `command`?
-/// Matches the same way as config `[permission]` bash allow rules and session glob grants: word-boundary prefix or freeform glob.
-/// `*` matches everything; blank after trim matches nothing.
 pub fn bash_pattern_matches_command(pattern: &str, command: &str) -> bool {
     bash_command_matches_pattern(command, pattern, None)
 }
 
-/// Whether a pattern grants an unscoped range of commands, for the editor's non-blocking "very broad" warning.
-/// Broad here means a bare `*`, or a single token with no argument boundary (`gh`, `gh*`) that covers every invocation of a program.
+/// Whether a pattern grants an unscoped range of commands, for the editor's
+/// non-blocking "very broad" warning.
 pub fn bash_pattern_is_broad(pattern: &str) -> bool {
     let pattern = pattern.trim();
     if pattern.is_empty() {
@@ -726,8 +708,8 @@ fn pattern_matches(access: &AccessKind, cr: &CompiledRule<'_>, cwd: Option<&Path
                 || subagent_id.starts_with(pattern)
         }
         AccessKind::Tool(name) => {
-            // Path-scoped Edit rules can reach here only if `rule_reaches` is restored
-            // to the old "every Edit deny/ask" widening. Their pattern is a path.
+            // Path-scoped Edit rules can reach here only if `rule_reaches` is
+            // restored to the old "every Edit deny/ask" widening.
             if cr.rule.tool == ToolFilter::Edit {
                 return false;
             }
@@ -737,7 +719,6 @@ fn pattern_matches(access: &AccessKind, cr: &CompiledRule<'_>, cwd: Option<&Path
 }
 
 /// Match Read/Edit/Grep after lexical normalize and cwd-join.
-/// Rooted patterns drop `..` and exist only under the cwd, so `Read(./**)` cannot be escaped by traversal; unrooted `*` / leading `**` keep any-depth meaning.
 fn path_context_matches(path: &str, cr: &CompiledRule<'_>, cwd: Option<&Path>) -> bool {
     path_match_forms(path, cwd)
         .iter()
@@ -784,8 +765,8 @@ fn absolute_normalized_path(path: &str, cwd: Option<&Path>) -> PathBuf {
     normalize_lexically(&joined)
 }
 
-/// A leading `~` is expanded to home by the tools *after* this gate, so it must never be treated as cwd-relative.
-/// A manufactured `./~/…` would satisfy `./**` while escaping to home; tilde paths are matched literally, as patterns treat `~`.
+/// A leading `~` is expanded to home by the tools *after* this gate, so it
+/// must never be treated as cwd-relative.
 fn is_tilde_path(path: &Path) -> bool {
     matches!(
         path.components().next(),
@@ -1707,7 +1688,7 @@ mod tests {
                 "high-confidence env -S must reject denied payload: {cmd}"
             );
         }
-        // Transparent-prefix depth: eight peels reach the command; a ninth Asks.
+        // Transparent-prefix depth: peels reach the command; a ninth Asks.
         use crate::permission::bash_command_splitting::MAX_TRANSPARENT_PREFIX_DEPTH;
         let nested_exec = |depth: usize| format!("{}id", "exec ".repeat(depth));
         assert!(
@@ -2396,8 +2377,7 @@ mod tests {
     #[test]
     fn tilde_paths_never_match_workspace_allows() {
         let cwd = Path::new("/workspace/project");
-        // Tools expand a leading `~` to the real home AFTER this gate runs, so a tilde path must never gain cwd-relative spellings
-        // A `./~/…` spelling would satisfy `./**` while the read escapes the workspace
+        // Tools expand a leading `~` to the real home AFTER this gate runs.
         let rule = read_allow("./**");
         for path in ["~/secrets/key.pem", "~", "~other/refs"] {
             assert!(

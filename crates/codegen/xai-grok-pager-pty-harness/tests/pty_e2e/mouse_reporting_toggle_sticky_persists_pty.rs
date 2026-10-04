@@ -31,9 +31,8 @@ async fn mouse_reporting_toggle_sticky_persists_pty() {
     let toggle_visible =
         |h: &PtyHarness| sticky_visible(h) || h.contains_text("Mouse reporting on");
 
-    // Tab TOGGLES focus, so never re-press it blindly: a lagged frame would bounce focus back to the
-    // prompt. The closure returns if the scrollback already owns keys; otherwise it presses Tab once
-    // and waits for the footer's "Space:prompt" to render.
+    // Tab TOGGLES focus, so never re-press it blindly: a lagged frame would
+    // bounce focus back to the prompt.
     let focus_scrollback = |h: &mut PtyHarness| {
         if h.contains_text("Space:prompt") {
             return;
@@ -42,8 +41,7 @@ async fn mouse_reporting_toggle_sticky_persists_pty() {
         let _ = h.wait_for_text("Space:prompt", Duration::from_secs(10));
     };
 
-    // Fire Ctrl+R up to three times, re-confirming scrollback focus before each press
-    // If startup left capture off, the first press shows the on toast and the next press turns it off sticky
+    // Fire Ctrl+R a bounded number of times, re-confirming scrollback focus before each press If startup left capture off.
     let mut saw_toggle = false;
     for _ in 0..3 {
         focus_scrollback(&mut harness);

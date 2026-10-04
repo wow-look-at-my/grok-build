@@ -1,16 +1,4 @@
 //! Filesystem scanning for plugin directories.
-//!
-//! Discovers plugins from multiple sources in priority order:
-//! 1. CLI `--plugin-dir` paths (scope: `CliOverride`)
-//! 2. `.grok/plugins/*/` (scope: `Project`, walked from cwd to worktree root)
-//! 3. `.claude/plugins/*/` (scope: `Project`, compat)
-//! 4. `~/.grok/plugins/*/` (scope: `User`)
-//! 5. `~/.claude/plugins/*/` (scope: `User`, compat)
-//!    `~/.grok/installed-plugins/*/` (scope: `User`, marketplace installs)
-//!    Installed plugins from `~/.claude/plugins/installed_plugins.json` (scope: `User`)
-//! 6. Paths from `[plugins].paths` in config (scope: `ConfigPath`)
-//!
-//! Deduplicates by canonical path and resolves name conflicts via the canonical source precedence.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -94,7 +82,6 @@ pub enum PluginOrigin {
 }
 
 /// Stable internal identity for a plugin.
-/// Format: `<scope>/<hex8>/<name>`, where hex8 is the first 8 hex chars of SHA-256 of the canonical plugin root.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PluginId(pub String);
 
@@ -221,9 +208,10 @@ fn project_plugins_dir_origin(plugins_dir: &Path) -> PluginOrigin {
     }
 }
 
-/// Project plugin parent dirs along the walk from `cwd` to the git worktree root, plus that root.
-/// Outside a git repo only `cwd` is checked. The folder-trust gate reuses this chain so detection cannot drift from discovery.
-/// The returned root lets marketplace resolve reuse it instead of resolving the repo a second time.
+/// Project plugin parent dirs along the walk from `cwd` to the git worktree
+/// root, plus that root. Outside a git repo only `cwd` is checked. The
+/// folder-trust gate reuses this chain so detection cannot drift from
+/// discovery.
 pub fn project_plugin_dirs(cwd: Option<&Path>) -> (Vec<PathBuf>, Option<PathBuf>) {
     let Some(cwd) = cwd else {
         return (Vec::new(), None);
@@ -232,8 +220,8 @@ pub fn project_plugin_dirs(cwd: Option<&Path>) -> (Vec<PathBuf>, Option<PathBuf>
     (project_plugin_dirs_in(&chain.dirs), chain.git_root)
 }
 
-/// Existing project plugin parent dirs (`.grok/plugins`, `.claude/plugins`) under each dir of a precomputed [`crate::repo::RepoDirChain`].
-/// The folder-trust gate reuses its one shared chain here so detection and discovery can never drift.
+/// Existing project plugin parent dirs (`.grok/plugins`, `.claude/plugins`)
+/// under each dir of a precomputed [`crate::repo::RepoDirChain`].
 pub fn project_plugin_dirs_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
     crate::repo::existing_subdirs_along(chain_dirs, &[".grok/plugins", ".claude/plugins"])
 }
@@ -268,8 +256,8 @@ pub fn discover_plugins(
         }
     }
 
-    // 2-3. Project plugins (.grok/plugins/, .claude/plugins/).
-    // Scan the same dirs the folder-trust gate detects, via the shared `project_plugin_dirs` walk, so discovery and gating can never drift
+    // Project plugins (.grok/plugins/, .claude/plugins/). Scan the same dirs the folder-trust gate detects, via the shared
+    // `project_plugin_dirs` walk, so discovery and gating can never drift
     if let Some(cwd) = cwd {
         let (project_dirs, git_root) = project_plugin_dirs(Some(cwd));
         for plugins_dir in project_dirs {
@@ -306,8 +294,7 @@ pub fn discover_plugins(
         }
     }
 
-    // 4-5. User plugins: $GROK_HOME/plugins, legacy ~/.grok/plugins, ~/.claude/plugins.
-    // Gate the grok plugins dir on user_grok_home() so a project's .grok/plugins is never scanned as user-global when no home resolves
+    // User plugins: $GROK_HOME/plugins, legacy ~/.grok/plugins, ~/.claude/plugins.
     let grok = xai_grok_config::user_grok_home();
     let plugin_dirs = user_plugin_dirs(xai_dirs::home_dir().as_deref(), grok.as_deref());
     for (plugins_dir, origin) in plugin_dirs {
@@ -346,7 +333,6 @@ pub fn discover_plugins(
     // 5b. Installed plugins (from install registry's managed directory)
     {
         // Installed plugins are always User scope (auto-trusted).
-        // The user explicitly installed them via marketplace or CLI, so they should be trusted regardless of install_dir location
         let registry = super::install_registry::InstallRegistry::load();
         collect_installed_plugins(
             &registry,
@@ -872,7 +858,7 @@ mod tests {
             home.join(".claude").join("plugins"),
             PluginOrigin::UserClaude
         )));
-        // Plugins are not discovered from the legacy ~/.grok tree.
+        // Plugins are not discovered from the ~/.grok tree.
         assert!(
             !dirs
                 .iter()
@@ -1313,7 +1299,7 @@ mod tests {
     fn name_conflict_higher_priority_wins() {
         let tmp = tempfile::tempdir().unwrap();
 
-        // Create two plugins with the same name but different scopes
+        // Create plugins with the same name but different scopes
         let cli_dir = tmp.path().join("cli");
         std::fs::create_dir_all(&cli_dir).unwrap();
         std::fs::write(cli_dir.join("plugin.json"), r#"{"name": "my-plugin"}"#).unwrap();
@@ -1506,9 +1492,7 @@ mod tests {
 
     #[test]
     fn discover_real_project_plugin_gated_on_project_trusted() {
-        // Drives discover_plugins end to end with a repo-local `.grok/plugins/<x>/` plugin that has an MCP component
-        // The plugin is trusted iff the folder-trust verdict (project_trusted) allows it
-        // The plugin is found by name so any user-scoped plugins on the test host are irrelevant
+        // Drives discover_plugins end to end with a repo-local `.grok/plugins/<x>/` plugin.
         let tmp = tempfile::tempdir().unwrap();
         let plugin_dir = tmp.path().join(".grok").join("plugins").join("proj-mcp");
         std::fs::create_dir_all(&plugin_dir).unwrap();

@@ -30,8 +30,7 @@ use super::types::{
 
 const MAX_SCHEDULED_TASKS: usize = 50;
 const DURABILITY_BARRIER_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long a fire waits for the coordinator to record the child as pending or
-/// queued before assuming the signal is lost rather than refused.
+/// How long a fire waits for the coordinator to record the child as pending or queued before assuming the signal is lost.
 const SPAWN_REGISTRATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 enum LoopFireOutcome {
@@ -249,9 +248,8 @@ impl SchedulerActor {
             let (needs_wiring, wired) = {
                 let res = self.resources.lock().await;
                 let soon = Utc::now() + chrono::Duration::seconds(2);
-                // Every fire is a subagent now, so a due one-shot needs the wiring just as much as
-                // a recurring task; leaving it out let it fire, skip, and sleep another interval on
-                // its stale `last_fired_at`.
+                // Every fire is a subagent now, so a due one-shot needs the
+                // wiring as much as a recurring task.
                 let needs_wiring = res
                     .get::<State<SchedulerState>>()
                     .is_some_and(|s| s.tasks.iter().any(|t| t.next_wake_at() <= soon));
@@ -420,9 +418,8 @@ impl SchedulerActor {
         if is_expired {
             state.tasks.remove(idx);
             drop(res);
-            // Flush the absence before announcing, so a crash in the debounce window cannot resurrect and re-expire the task on
-            // restart. Best-effort (non-durable semantics): on failure the removal proceeds with a warn. The re-lock is race-free;
-            // only this actor task mutates scheduler state.
+            // Flush the absence before announcing, so a crash in the debounce
+            // window cannot resurrect and re-expire the task on restart.
             if let Err(error) = self.persist_resources().await {
                 tracing::warn!(
                     task_id = %task_id,
@@ -528,9 +525,7 @@ impl SchedulerActor {
                 let state = res.get_or_default::<State<SchedulerState>>();
                 state.tasks.retain(|t| t.id != task_id);
             }
-            // Flush the absence before announcing. The handoff above can await long enough for a
-            // debounce to write `last_fired_at` while the task is still present, which on restart
-            // leaves the one-shot overdue and free to fire a second time.
+            // Flush the absence before announcing.
             if let Err(error) = self.persist_resources().await {
                 tracing::warn!(
                     task_id = %task_id,
@@ -611,9 +606,8 @@ impl SchedulerActor {
                         }
                     }
                 } else {
-                    // Coordinator channel closed — cannot verify whether the previous iteration is
-                    // still running. Skip rather than treating this as "no previous snapshot",
-                    // which could fall through to Foreground inject and double-execute.
+                    // Coordinator channel closed — cannot verify whether
+                    // the iteration is still running.
                     tracing::warn!(
                         task_id = %task_id,
                         previous_subagent = %prev_id,
@@ -755,8 +749,7 @@ impl SchedulerActor {
             await_to_completion: false,
             fork_context: false,
             owner: SubagentOwner::Task,
-            // A child of the actor's token, so shutdown cancels a fire the
-            // coordinator still has queued at the concurrent limit.
+            // A child of the actor's token, so shutdown cancels a fire the coordinator still has queued.
             cancel_token: self.cancel_token.child_token(),
             spawn_root: Default::default(),
             tool_call_id: None,
@@ -807,9 +800,7 @@ impl SchedulerActor {
                     return LoopFireOutcome::Skipped;
                 }
             }
-            // Registration is synchronous inside the coordinator, so a timeout means it is wedged
-            // rather than that the child was refused. Treating that as a fire is the safe half: a
-            // one-shot that ran is never resurrected to run twice.
+            // Registration is synchronous inside the coordinator.
             _ = tokio::time::sleep(SPAWN_REGISTRATION_TIMEOUT) => {
                 tracing::warn!(
                     task_id = %task_id,
@@ -822,7 +813,7 @@ impl SchedulerActor {
         let guard_task_id = task_id.to_string();
         let spawned_id = subagent_id.clone();
         // Guarded: clearing the chain anchor is what stops a loop from
-        // resuming the child that just failed, and this is the only place that
+        // resuming the child that failed, and this is the only place that
         // clears it. The handle itself has no waiter: the round it watches is
         // reported to the session by other means.
         #[allow(clippy::disallowed_methods)]
@@ -868,9 +859,8 @@ impl SchedulerActor {
                 return;
             }
             let now = Utc::now();
-            // Iteration order matters: the pager sorts the tasks pane by created_at, but every re-announced task gets a synthetic
-            // `Instant::now()` on the pager side, so the relative order is determined by the order we send notifications here.
-            // Keep state.tasks as a Vec so insertion order survives.
+            // Iteration order matters: the pager sorts the tasks pane by
+            // created_at.
             state
                 .tasks
                 .iter()
@@ -935,9 +925,8 @@ impl SchedulerActor {
                     return;
                 };
                 if let Some(prompt) = prompt {
-                    // A new prompt is a new job: the next fire starts a fresh transcript. The
-                    // anchor is kept (not cleared) so the in-flight guard still sees a running old
-                    // iteration — clearing it here would let the next fire double-spawn.
+                    // A new prompt is a new job: the next fire starts a fresh
+                    // transcript.
                     if prompt != task.prompt {
                         task.chain_reset_pending = true;
                         task.iterations_since_fresh = 0;
@@ -980,7 +969,7 @@ impl SchedulerActor {
                     let _ = reply.send(Ok(false));
                     return;
                 };
-                // A replay create may exist even for a currently non-durable task.
+                // A replay create may exist even for a non-durable task.
                 if self.notification_handle.durable_targets() == DurableNotificationTargets::None {
                     let _ = reply.send(Err(SchedulerError::NoDurableNotificationConsumer));
                     return;
@@ -1501,8 +1490,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("resources_state.json");
 
-        // "First process": a due, non-durable recurring task exists; persist
-        // the resources the way the tool bridge does after a tool call.
+        // "First process": a due, non-durable recurring task exists.
         let persistence = Arc::new(crate::persistence::ResourcesPersistence::new(path.clone()));
         let mut task = ScheduledTask::new(1, "babysit the pipeline".into(), true, false);
         task.id = "loop-1".into();
@@ -1637,9 +1625,6 @@ mod tests {
         resources.register_state::<SchedulerState>();
         wire_drained_subagents(&mut resources);
 
-        // Simulate session restore: scheduler state already contains two
-        // recurring tasks before the actor spawns. Both intervals are far
-        // enough in the future that neither will fire during the test.
         let state = resources.get_or_default::<State<SchedulerState>>();
         let mut task_a = ScheduledTask::new(300, "task A".into(), true, false);
         task_a.id = "restored-A".to_string();
@@ -1666,8 +1651,8 @@ mod tests {
 
         tokio::spawn(actor.run());
 
-        // The first two events on the channel must be ScheduledTaskCreated
-        // for the two restored tasks, in insertion order.
+        // The first events on the channel must be ScheduledTaskCreated for
+        // both restored tasks, in insertion order.
         let n1 = tokio::time::timeout(Duration::from_secs(2), notif_rx.recv())
             .await
             .expect("first notification")
@@ -1696,8 +1681,7 @@ mod tests {
         assert_eq!(c1.generation, c2.generation);
         assert_eq!((c1.revision, c2.revision), (0, 0));
 
-        // No further events should arrive within a short window: tasks are
-        // not yet due and no commands are in flight.
+        // No further events should arrive within a short window: tasks are not yet due and no commands are in flight.
         let extra = tokio::time::timeout(Duration::from_millis(150), notif_rx.recv()).await;
         assert!(
             extra.is_err(),
@@ -1712,8 +1696,7 @@ mod tests {
     async fn announces_no_tasks_when_state_empty() {
         let (_handle, cancel, mut notif_rx) = make_test_actor();
 
-        // Brand-new session: state.tasks is empty, the re-announce step must
-        // be a silent no-op.
+        // Brand-new session: state.tasks is empty, the re-announce step must be a silent no-op.
         let result = tokio::time::timeout(Duration::from_millis(150), notif_rx.recv()).await;
         assert!(
             result.is_err(),
@@ -2096,9 +2079,7 @@ mod tests {
             .expect("channel closed")
     }
 
-    /// Stands in for the coordinator's registration signal. A fire that never sees one reads the
-    /// dropped sender as a pre-start reject and skips, so every fake coordinator in these tests has
-    /// to admit the spawn the way the real one does.
+    /// Stands in for the coordinator's registration signal.
     async fn next_subagent_event(rx: &mut mpsc::UnboundedReceiver<SubagentEvent>) -> SubagentEvent {
         let mut event = next_event(rx).await;
         ack_spawn_registration(&mut event);
@@ -2351,7 +2332,6 @@ mod tests {
         };
         let first_id = first.id.clone();
 
-        // Patch the prompt while iteration 1 is still running.
         let (up_tx, up_rx) = tokio::sync::oneshot::channel();
         handle
             .0
@@ -2364,7 +2344,7 @@ mod tests {
             .unwrap();
         up_rx.await.unwrap().unwrap();
 
-        // Next tick still queries the old iteration; Running must skip.
+        // Next tick still queries the iteration; Running must skip.
         let SubagentEvent::Query(q1) = next_subagent_event(&mut subagent_rx).await else {
             panic!("expected Query after prompt update");
         };
@@ -2427,8 +2407,7 @@ mod tests {
     #[tokio::test]
     async fn failed_spawn_resets_chain_state() {
         let (handle, cancel, _notif_rx, mut subagent_rx) = make_test_actor_with_subagents();
-        // One-hour interval, backdated to fire exactly once: the assertion
-        // window cannot be raced by a second fire re-pointing the anchor.
+        // One-hour interval, backdated to fire exactly once: the assertion window cannot be raced.
         let mut task = ScheduledTask::new(3600, "watch ci".into(), true, false);
         task.created_at = chrono::Utc::now() - chrono::Duration::seconds(3610);
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -2454,8 +2433,7 @@ mod tests {
             },
         );
 
-        // The watcher clears the anchor AND the fresh-chain counter so the
-        // next fire starts clean.
+        // The watcher clears the anchor AND the fresh-chain counter so the next fire starts clean.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
             let (list_tx, list_rx) = tokio::sync::oneshot::channel();
@@ -2500,8 +2478,7 @@ mod tests {
             .unwrap();
         up_rx.await.unwrap().unwrap();
 
-        // Coordinator gone: the next fire's guard query and spawn send both
-        // fail, taking the rollback path.
+        // Coordinator gone: the next fire's guard query and spawn send both fail, taking the rollback path.
         drop(subagent_rx);
 
         // Wait for the failed fire's rollback to land in state.

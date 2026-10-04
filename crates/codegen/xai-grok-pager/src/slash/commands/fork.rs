@@ -1,9 +1,4 @@
 //! `/fork`: branch the current session into a peer top-level agent.
-//!
-//! The command parses optional flags (`--worktree`, `--no-worktree`) and an optional free-form directive.
-//! It returns [`Action::Fork`](crate::app::actions::Action::Fork) carrying a [`ForkArgs`] payload.
-//! The placeholder construction, modal routing, and effect emission live in `dispatch::dispatch_fork`.
-//! The fork itself is dispatched in `dispatch_fork_resolved`, after the worktree question is resolved and the placeholder spawn succeeds.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};
@@ -14,27 +9,19 @@ pub struct ForkArgs {
     /// `None` -> open the worktree question modal (the user is asked every time. the choice is never persisted).
     pub worktree_override: Option<bool>,
     /// Optional first prompt for the new session. Whitespace-trimmed.
-    /// `None` when the user typed `/fork` (with or without flags) and no directive text; the new agent then opens with no first prompt.
     pub directive: Option<String>,
     /// `--agents`: carry the parent's still-running subagents into the fork.
-    /// Off by default -- a fork takes the main thread's conversation, and an
-    /// agent the parent is still running stays the parent's.
     pub include_agents: bool,
 }
 
-/// Parse the raw argument string after `/fork`.
-///
-/// Recognised flags appear at the start; everything after the last flag
-/// is the directive. Unknown flags are deliberately treated as the
-/// start of the directive (so `/fork --foo bar` becomes a directive
-/// `--foo bar`) -- the parser is conservative because the args are
-/// user-typed text and we do not want to reject directives that happen
-/// to begin with `--`.
-///
-/// Errors:
-/// - `--worktree` and `--no-worktree` cannot both appear.
-/// - a flag cannot be repeated.
-/// - `--at <turn>` returns a friendly "not supported in this version"
+/// Parse the raw argument string after `/fork`. Recognised flags appear at
+/// the start; everything after the last flag is the directive. Unknown flags
+/// are deliberately treated as the start of the directive (so `/fork --foo
+/// bar` becomes a directive `--foo bar`) -- the parser is conservative
+/// because the args are user-typed text and we do not want to reject
+/// directives that happen to begin with `--`. Errors: - `--worktree` and
+/// `--no-worktree` cannot both appear. - a flag cannot be repeated. - `--at
+/// <turn>` returns a friendly "not supported in this version"
 ///   message: the shell already supports the underlying parameter (see
 ///   `xai_grok_shell::session::fork::ForkSessionRequest::target_prompt_index`)
 ///   and a turn-picker UI is planned; this version deliberately rejects
@@ -256,8 +243,7 @@ mod tests {
 
     #[test]
     fn parse_unknown_token_is_treated_as_directive_start() {
-        // Conservative behaviour: a bareword that isn't a recognised flag becomes the directive
-        // `/fork --foo bar` is not rejected as a typo; the model receives `--foo bar` as its first prompt
+        // Conservative behaviour: a bareword that isn't a recognised flag becomes the directive `/fork --foo bar` is not rejected as a typo.
         let parsed = parse_fork_args("--foo bar").expect("unknown flag parse");
         assert_eq!(parsed.worktree_override, None);
         assert_eq!(parsed.directive.as_deref(), Some("--foo bar"));

@@ -1,10 +1,4 @@
 //! Tests for the "MCP servers currently connecting" reminder rendering (`format_mcp_connecting_reminder`).
-//!
-//! The delivery-tool wording exists because some headless clients deliver output ONLY through MCP tools.
-//! Telling the model to "proceed without" a still-connecting server made it answer in plain text that no user ever saw.
-//! The wording is gated on the explicit `startupHints.deliveryTools` opt-in, NOT on `nonInteractive`.
-//! Defaults therefore stay unchanged for every client that does not declare delivery tools.
-//! SDK/stdio consumers read plain-text responses; subagents report to their parent.
 
 use agent_client_protocol as acp;
 use xai_grok_mcp::servers::McpInitStrategy;
@@ -56,8 +50,7 @@ async fn apply_attach_policy_tracks_the_current_attachment() {
             assert!(actor.delivery_tools.borrow().is_empty());
             assert!(!actor.attach_non_interactive.get());
 
-            // Headless attachment re-applies Blocking and its delivery tools, and the OAuth-interactivity flag follows the attachment
-            // A headless re-attach must not run interactive browser OAuth on the MCP re-init
+            // Headless attachment re-applies Blocking and its delivery tools.
             actor.apply_attach_policy(&crate::session::StartupHints {
                 non_interactive: true,
                 delivery_tools: vec!["srv__post".to_string()],
@@ -113,7 +106,6 @@ async fn apply_attach_policy_rearms_connecting_reminder_only_on_change() {
         .await;
 }
 
-/// Turn futures overflow the default test stack; run them on 16 MiB like `turn/disk_full_tests.rs`.
 fn block_on_session_turn<F, Fut>(f: F)
 where
     F: FnOnce() -> Fut + Send + 'static,
