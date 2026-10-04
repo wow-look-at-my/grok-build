@@ -680,6 +680,7 @@ pub struct RawScrollbackDisplayConfig {
     pub line_under_last_entry: bool,
     /// Accent character for collapsed groupable blocks. Default: "❙".
     pub collapsed_accent_char: Option<String>,
+    /// Accent dimming blend.
     pub dim_accent: Option<f32>,
     /// Group selection box mode. true = "split" (Mode B), false = "always" (Mode A). Default: true.
     pub group_selection_split: Option<bool>,
@@ -729,7 +730,9 @@ impl Default for RawScrollbackDisplayConfig {
 pub struct RawLayoutConfig {
     /// Vertical padding (top/bottom) for outer viewport.
     pub outer_vpad: u16,
+    /// Outer left padding.
     pub outer_hpad_left: u16,
+    /// Outer right padding.
     pub outer_hpad_right: u16,
     /// Padding after accent line, before content.
     pub block_pad_left: u16,
@@ -783,6 +786,7 @@ impl Default for RawScrollbarConfig {
 pub struct RawScrollConfig {
     /// Minimum lines of context to keep above/below selected entry.
     pub margin: u16,
+    /// Minimum scroll size.
     pub min_page_fraction: u8,
     /// Scroll indicators: the ▼ below scrollback and the ▲ under the sticky prompt header.
     pub follow_indicator: RawFollowIndicator,
