@@ -1917,29 +1917,29 @@ mod mid_turn_esc_hint_tests {
             &ActionRegistry::defaults(),
         )
     }
-    /// Esc never cancels a running turn; it names the registry cancel key instead, in every mode and from either pane.
+    /// Esc cancels a running turn in every mode, from either pane, with no toast, and keeps the draft.
     #[test]
-    fn mid_turn_esc_shows_ctrl_c_hint_instead_of_cancelling() {
+    fn mid_turn_esc_cancels_the_turn() {
         for (vim_mode, pane) in [
             (false, AgentPane::Prompt),
             (true, AgentPane::Prompt),
             (false, AgentPane::Scrollback),
+            (true, AgentPane::Scrollback),
         ] {
             let mut agent = running_agent(vim_mode);
             agent.active_pane = pane;
             agent.prompt.set_text("draft");
             let outcome = press_esc(&mut agent);
             assert!(
-                matches!(outcome, InputOutcome::Changed),
-                "vim={vim_mode} pane={pane:?}: expected Changed, got {outcome:?}"
+                matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+                "vim={vim_mode} pane={pane:?}: expected CancelTurn, got {outcome:?}"
             );
             assert_eq!(
-                Some("Press Ctrl+c to cancel the turn"),
-                agent.active_toast_message(),
+                Some(crate::app::actions::CancelTrigger::Esc),
+                agent.cancel_trigger_hint,
                 "vim={vim_mode} pane={pane:?}"
             );
-            assert_eq!(None, agent.cancel_trigger_hint);
-            assert!(agent.session.state.is_turn_running());
+            assert_eq!(None, agent.active_toast_message(), "no Ctrl+C reminder");
             assert_eq!("draft", agent.prompt.text(), "the draft is preserved");
         }
     }

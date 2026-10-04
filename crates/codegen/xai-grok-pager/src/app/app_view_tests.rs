@@ -630,8 +630,7 @@ fn needs_animation_gates_prompt_history_tick_delivery() {
         app.needs_animation(),
         "an open prompt history overlay must request animation ticks"
     );
-    // Drive `tick()` and check the count separately, on a wall-clock
-    // deadline.
+    // Drive `tick()` and check the count separately, on a wall-clock deadline.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut delivered = false;
     while std::time::Instant::now() < deadline {
@@ -2194,9 +2193,10 @@ fn expected_tier_restricted_commands() -> Vec<String> {
         .map(|n| (*n).to_string())
         .collect()
 }
-/// The present/absent assertions must exercise the deny list, not incidental fail-closed hiding:
-/// `/imagine`, `/imagine-video` are `required_tools()`-gated, so advertise their tools (otherwise the registry fail-closes them).
-/// `/voice` is fail-closed hidden until the remote flag turns it on, so reveal it via the registry directly.
+/// The present/absent assertions must exercise the deny list, not incidental
+/// fail-closed hiding: `/imagine`, `/imagine-video` are
+/// `required_tools()`-gated, so advertise their tools (otherwise the registry
+/// fail-closes them).
 fn advertise_media_tools(app: &mut AppView) {
     app.welcome_prompt
         .slash_controller
@@ -2775,7 +2775,7 @@ fn welcome_consent_answers_and_links_are_reachable_by_key_and_click() {
     }
 }
 /// What the renderer reports is the only thing standing between a click and an acceptance.
-/// The three answers it can give have to land in the state exactly.
+/// Those answers it can give have to land in the state exactly.
 #[test]
 fn consent_paint_records_what_the_renderer_reported() {
     use crate::app::consent::{ConsentLegibility, ConsentNotice, ConsentState};
@@ -3497,11 +3497,12 @@ fn ctrl_c_running_prompt_with_text_clears_text_and_preserves_turn() {
 /// Mid-turn Esc is swallowed at the app level too: no `CancelTurn`, no armed double-press, no trigger stamp, draft intact, and a toast naming Ctrl+C.
 /// Covers both panes, vim on and off.
 #[test]
-fn esc_mid_turn_hints_ctrl_c_instead_of_cancelling() {
+fn esc_mid_turn_cancels_the_turn() {
     for (vim_mode, pane) in [
         (false, crate::views::agent::ActivePane::Prompt),
         (true, crate::views::agent::ActivePane::Prompt),
         (false, crate::views::agent::ActivePane::Scrollback),
+        (true, crate::views::agent::ActivePane::Scrollback),
     ] {
         let mut app = test_app_with_agent();
         let id = super::super::agent::AgentId(0);
@@ -3513,29 +3514,20 @@ fn esc_mid_turn_hints_ctrl_c_instead_of_cancelling() {
         let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
         let ctx = format!("vim={vim_mode} pane={pane:?}");
         assert!(
-            matches!(outcome, InputOutcome::Changed),
-            "{ctx}: mid-turn Esc must swallow, got {outcome:?}"
+            matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+            "{ctx}: mid-turn Esc must cancel, got {outcome:?}"
         );
         assert!(
             app.pending_action.is_none(),
             "{ctx}: must not arm idle clear"
         );
-        assert!(
+        assert_eq!(
+            Some(crate::app::actions::CancelTrigger::Esc),
             app.agents
                 .get(&id)
                 .unwrap_or_else(|| panic!("missing map entry"))
-                .cancel_trigger_hint
-                .is_none(),
-            "{ctx}: no cancel trigger"
-        );
-        assert!(
-            app.agents
-                .get(&id)
-                .unwrap_or_else(|| panic!("missing map entry"))
-                .session
-                .state
-                .is_turn_running(),
-            "{ctx}"
+                .cancel_trigger_hint,
+            "{ctx}: the cancel carries the Esc trigger"
         );
         assert_eq!(
             "draft while streaming",
@@ -3547,21 +3539,19 @@ fn esc_mid_turn_hints_ctrl_c_instead_of_cancelling() {
                 .text(),
             "{ctx}: the draft is preserved"
         );
-        assert_eq!(
-            Some("Press Ctrl+c to cancel the turn"),
+        assert!(
             app.agents
                 .get(&id)
                 .unwrap_or_else(|| panic!("missing map entry"))
                 .toast
-                .as_ref()
-                .map(|(msg, _)| msg.as_str()),
-            "{ctx}: the toast names the cancel key"
+                .is_none(),
+            "{ctx}: no Ctrl+C reminder"
         );
     }
 }
-/// A manual `/compact` in flight (CommandRunning) and a streaming wake turn (pane state Idle) get the same hint, not a cancel.
+/// Esc also cancels a manual `/compact` in flight and a streaming wake turn (pane state Idle).
 #[test]
-fn esc_during_compact_or_wake_turn_hints_instead_of_cancelling() {
+fn esc_during_compact_or_wake_turn_cancels() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     let agent = app.agents.get_mut(&id).unwrap();
@@ -3572,32 +3562,15 @@ fn esc_during_compact_or_wake_turn_hints_instead_of_cancelling() {
     agent.active_pane = crate::views::agent::ActivePane::Prompt;
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc while /compact runs must swallow, got {outcome:?}"
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "Esc while /compact runs must cancel, got {outcome:?}"
     );
-    assert!(
+    assert_eq!(
+        Some(crate::app::actions::CancelTrigger::Esc),
         app.agents
             .get(&id)
             .unwrap_or_else(|| panic!("missing map entry"))
             .cancel_trigger_hint
-            .is_none()
-    );
-    assert!(
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .session
-            .state
-            .is_compact_running()
-    );
-    assert_eq!(
-        Some("Press Ctrl+c to cancel the turn"),
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .toast
-            .as_ref()
-            .map(|(msg, _)| msg.as_str())
     );
     let mut app = test_app_with_agent();
     let agent = app.agents.get_mut(&id).unwrap();
@@ -3608,37 +3581,19 @@ fn esc_during_compact_or_wake_turn_hints_instead_of_cancelling() {
     agent.active_pane = crate::views::agent::ActivePane::Prompt;
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc during a wake turn must swallow, got {outcome:?}"
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "Esc during a wake turn must cancel, got {outcome:?}"
     );
     assert!(
         app.pending_action.is_none(),
         "must not arm idle clear/rewind"
     );
-    assert!(
+    assert_eq!(
+        Some(crate::app::actions::CancelTrigger::Esc),
         app.agents
             .get(&id)
             .unwrap_or_else(|| panic!("missing map entry"))
             .cancel_trigger_hint
-            .is_none()
-    );
-    assert!(
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .running_wake_turn
-            .as_ref()
-            .is_some_and(|wake| !wake.cancel_sent),
-        "the wake turn keeps streaming"
-    );
-    assert_eq!(
-        Some("Press Ctrl+c to cancel the turn"),
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .toast
-            .as_ref()
-            .map(|(msg, _)| msg.as_str())
     );
 }
 /// While "Cancelling…" Esc is swallowed silently: it neither re-sends the cancel nor hints at Ctrl+C (which escalates toward quit in this state).
@@ -3684,7 +3639,7 @@ fn esc_cancel_grace_holds_rewind_arm_then_expires() {
             "earlier",
         ));
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
+    assert!(matches!(outcome, InputOutcome::Action(Action::CancelTurn)));
     assert!(
         app.agents
             .get(&id)
@@ -3815,7 +3770,7 @@ fn idle_empty_no_messages_esc_is_swallowed() {
     );
 }
 #[test]
-fn mouse_send_retires_armed_clear_so_next_esc_swallows() {
+fn mouse_send_retires_armed_clear_so_next_esc_cancels() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     {
@@ -3836,23 +3791,8 @@ fn mouse_send_retires_armed_clear_so_next_esc_swallows() {
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc after a mouse-send must swallow mid-turn, got {outcome:?}",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::ClearPrompt)),
-        "the retired ClearPrompt arm must not fire",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "Esc must not cancel mid-turn",
-    );
-    assert!(
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .cancel_trigger_hint
-            .is_none()
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "Esc after a mouse-send must cancel mid-turn, not fire the retired ClearPrompt arm, got {outcome:?}",
     );
     assert!(app.pending_action.is_none());
 }
@@ -3881,34 +3821,23 @@ fn assert_submit_path_retires_clear_arm(action: Action) {
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc after a non-keyed submit must swallow mid-turn, got {outcome:?}",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "Esc must not cancel mid-turn",
-    );
-    assert!(
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .cancel_trigger_hint
-            .is_none()
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "Esc after a non-keyed submit must cancel mid-turn, got {outcome:?}",
     );
     assert!(app.pending_action.is_none());
 }
 #[test]
-fn submit_follow_up_retires_armed_clear_so_next_esc_swallows() {
+fn submit_follow_up_retires_armed_clear_so_next_esc_cancels() {
     assert_submit_path_retires_clear_arm(Action::SubmitFollowUp("follow up".into()));
 }
 #[test]
-fn slash_preserving_send_retires_armed_clear_so_next_esc_swallows() {
+fn slash_preserving_send_retires_armed_clear_so_next_esc_cancels() {
     assert_submit_path_retires_clear_arm(Action::SendSlashCommandPreservingDraft(
         "/compact".into(),
     ));
 }
 #[test]
-fn revise_plan_retires_armed_clear_so_next_esc_swallows() {
+fn revise_plan_retires_armed_clear_so_next_esc_cancels() {
     assert_submit_path_retires_clear_arm(Action::RevisePlan("add a rollback".into()));
 }
 #[test]
@@ -3930,23 +3859,8 @@ fn stale_idle_clear_arm_never_fires_on_busy_agent() {
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc on a busy agent must swallow, not fire the stale clear arm, got {outcome:?}",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::ClearPrompt)),
-        "the stale ClearPrompt arm must not fire on a running turn",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "Esc must not cancel mid-turn",
-    );
-    assert!(
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .cancel_trigger_hint
-            .is_none()
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "Esc on a busy agent must cancel, not fire the stale clear arm, got {outcome:?}",
     );
     assert!(
         app.pending_action.is_none(),
@@ -3976,12 +3890,8 @@ fn stale_idle_rewind_arm_never_fires_on_busy_agent() {
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnRunning;
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc on a busy agent must swallow, not fire the stale rewind arm, got {outcome:?}",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "Esc must not cancel mid-turn",
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "Esc on a busy agent must cancel, not fire the stale rewind arm, got {outcome:?}",
     );
     assert!(
         app.pending_action.is_none(),
@@ -4010,15 +3920,8 @@ fn stale_idle_clear_arm_never_fires_on_wake_turn() {
         .note_streaming_wake_turn("p-wake");
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "Esc on a wake turn must swallow, not fire the stale clear arm, got {outcome:?}",
-    );
-    assert!(
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .cancel_trigger_hint
-            .is_none()
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "Esc on a wake turn must cancel, not fire the stale clear arm, got {outcome:?}",
     );
     assert!(
         app.pending_action.is_none(),
@@ -4053,14 +3956,14 @@ fn esc_consumed_by_policy_disarms_esc_d_combo() {
         agent.vim_mode = true;
     }
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(matches!(outcome, InputOutcome::Changed));
+    assert!(matches!(outcome, InputOutcome::Action(Action::CancelTurn)));
     assert!(
         app.agents
             .get(&id)
             .unwrap_or_else(|| panic!("missing map entry"))
             .esc_pressed_at
             .is_none(),
-        "mid-turn swallow Esc must disarm the Esc→d combo",
+        "mid-turn cancel Esc must disarm the Esc→d combo",
     );
 }
 #[test]
@@ -6058,9 +5961,9 @@ fn voice_target_on_agent_entered_from_dashboard() {
         "entering a session from the dashboard must not auto-stop the mic"
     );
 }
-/// Attach a popup overlay onto a freshly-built `test_app_with_agent` and return the attached agent id.
-/// Convenience for the popup-handle-input tests.
-/// `attach_popup` exists so the `handle_input`/`dispatch_scroll` tests in this file can stand up a popup'd state in two lines.
+/// Attach a popup overlay onto a freshly-built `test_app_with_agent` and return the attached agent id. Convenience for the
+/// popup-handle-input tests. `attach_popup` exists so the `handle_input`/`dispatch_scroll` tests in this file can stand up a
+/// popup'd state in a couple of lines.
 fn attach_popup(app: &mut AppView) -> super::super::agent::AgentId {
     app.active_view = ActiveView::AgentDashboard;
     let id = super::super::agent::AgentId(0);
@@ -6152,7 +6055,7 @@ fn overlay_esc_dismisses_btw_before_dashboard_backout() {
 /// It must NOT detach to the dashboard and NOT cancel.
 /// The empty-prompt back-out is idle-gated, so Esc falls through to `try_handle_esc_policy` and the mid-turn swallow.
 #[test]
-fn overlay_esc_running_turn_empty_prompt_swallows_not_backout() {
+fn overlay_esc_running_turn_empty_prompt_cancels_not_backout() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     app.active_view = ActiveView::Agent(id);
@@ -6167,23 +6070,15 @@ fn overlay_esc_running_turn_empty_prompt_swallows_not_backout() {
     assert!(agent.prompt.text().is_empty());
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "running-turn overlay Esc (empty prompt) must swallow, not detach/cancel, got {outcome:?}",
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "running-turn overlay Esc (empty prompt) must cancel, not detach, got {outcome:?}",
     );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "Esc must not cancel mid-turn",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::DashboardOverlayExit)),
-        "Esc must not detach mid-turn",
-    );
-    assert!(
+    assert_eq!(
+        Some(crate::app::actions::CancelTrigger::Esc),
         app.agents
             .get(&id)
             .unwrap_or_else(|| panic!("missing map entry"))
             .cancel_trigger_hint
-            .is_none()
     );
     assert!(app.pending_action.is_none());
 }
@@ -6191,7 +6086,7 @@ fn overlay_esc_running_turn_empty_prompt_swallows_not_backout() {
 /// The neutral back-out is idle-gated.
 /// The fixture is otherwise neutral (so the gate, not a missing-neutral, is what suppresses detach).
 #[test]
-fn overlay_esc_running_turn_scrollback_swallows_not_backout() {
+fn overlay_esc_running_turn_scrollback_cancels_not_backout() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     app.active_view = ActiveView::Agent(id);
@@ -6207,28 +6102,20 @@ fn overlay_esc_running_turn_scrollback_swallows_not_backout() {
     assert!(agent.no_esc_consumer_pending());
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "running-turn overlay Esc (scrollback) must swallow, not detach/cancel, got {outcome:?}",
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "running-turn overlay Esc (scrollback) must cancel, not detach, got {outcome:?}",
     );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
-        "Esc must not cancel mid-turn",
-    );
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::DashboardOverlayExit)),
-        "Esc must not detach mid-turn",
-    );
-    assert!(
+    assert_eq!(
+        Some(crate::app::actions::CancelTrigger::Esc),
         app.agents
             .get(&id)
             .unwrap_or_else(|| panic!("missing map entry"))
             .cancel_trigger_hint
-            .is_none()
     );
 }
-/// Overlay in non-vim mode: mid-turn Esc hints at Ctrl+C (matching full-screen), and still must not detach to the dashboard.
+/// Overlay in non-vim mode: mid-turn Esc cancels (matching full-screen), and still must not detach to the dashboard.
 #[test]
-fn overlay_esc_running_turn_non_vim_hints_not_backout() {
+fn overlay_esc_running_turn_non_vim_cancels_not_backout() {
     let mut app = test_app_with_agent();
     let id = super::super::agent::AgentId(0);
     app.active_view = ActiveView::Agent(id);
@@ -6242,24 +6129,15 @@ fn overlay_esc_running_turn_non_vim_hints_not_backout() {
     agent.vim_mode = false;
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "running-turn overlay Esc must swallow with a hint, not detach/cancel, got {outcome:?}",
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "running-turn overlay Esc must cancel, not detach, got {outcome:?}",
     );
-    assert!(
+    assert_eq!(
+        Some(crate::app::actions::CancelTrigger::Esc),
         app.agents
             .get(&id)
             .unwrap_or_else(|| panic!("missing map entry"))
             .cancel_trigger_hint
-            .is_none()
-    );
-    assert_eq!(
-        Some("Press Ctrl+c to cancel the turn"),
-        app.agents
-            .get(&id)
-            .unwrap_or_else(|| panic!("missing map entry"))
-            .toast
-            .as_ref()
-            .map(|(msg, _)| msg.as_str())
     );
 }
 #[test]
@@ -6280,8 +6158,8 @@ fn overlay_esc_wake_turn_scrollback_does_not_backout() {
     assert!(agent.is_bare_scrollback() && agent.no_input_overlay_pending());
     let outcome = app.handle_input(&key_event(KeyCode::Esc, KeyModifiers::NONE));
     assert!(
-        matches!(outcome, InputOutcome::Changed),
-        "vim-mode wake Esc must swallow, not detach, got {outcome:?}",
+        matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+        "vim-mode wake Esc must cancel, not detach, got {outcome:?}",
     );
 }
 /// Overlay while TurnCancelling: Esc is swallowed (neither re-sends the cancel nor detaches).
@@ -6935,7 +6813,6 @@ fn overlay_esc_exits_when_question_nav_unselected() {
         "backing out must leave the question overlay pending",
     );
 }
-/// Multi-question Q&A: on question 2+ a bare `Esc` must NOT back out.
 /// The flow isn't at its top, so `Esc` stays in-flow (the question view handles it) and `Left` can still walk back.
 /// Only `active_tab == 0` is the back-out top.
 #[test]
@@ -6966,7 +6843,6 @@ fn overlay_esc_does_not_exit_on_later_multi_question() {
         "Esc on question 2+ of a multi-question Q&A must stay in-flow, got {outcome:?}",
     );
 }
-/// ...but from question 1 (the top of a multi-question flow) with nothing selected, a bare `Esc` still backs out, leaving the Q&A pending.
 #[test]
 fn overlay_esc_exits_at_first_multi_question() {
     let (mut app, id) = neutral_overlay_app();
@@ -7584,9 +7460,14 @@ fn handle_input_scroll_inside_popup_forwards_to_agent() {
         "scroll outside popup must advance the dashboard viewport",
     );
 }
-/// When the attached agent emits `Action::ExitSession` via the synchronous outcome path, the popup is closed but the agent stays in `app.agents`.
-/// This test pins only the synchronous-outcome branch.
-/// We can't easily synthesize an `ExitSession` from `agent.handle_input` without a real prompt event sequence, so the test exercises the popup-close intercept by feeding a key that lands in the agent's prompt and observing the popup state after the intercept runs. Concretely: we drive an Esc key (which the popup-close fast-path catches BEFORE the agent intercept). To prove the `ExitSession` branch independently, we directly invoke the intercepted-outcome path with a stub: set `attached_agent`, then call the same close routine the intercept would call. This is the smallest behavioural pin available without a full prompt-mode setup.
+/// When the attached agent emits `Action::ExitSession` via the synchronous
+/// outcome path, the popup is closed but the agent stays in `app.agents`.
+/// This test pins only the synchronous-outcome branch. We can't easily
+/// synthesize an `ExitSession` from `agent.handle_input` without a real
+/// prompt event sequence, so the test exercises the popup-close intercept by
+/// feeding a key that lands in the agent's prompt and observing the popup
+/// state after the intercept runs. Concretely: we drive an Esc key (which the
+/// popup-close fast-path catches BEFORE the agent intercept).
 #[test]
 fn handle_input_exit_session_action_closes_popup() {
     let mut app = test_app_with_agent();
