@@ -9,6 +9,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use xai_grok_sampling_types::{ConversationItem, SyntheticReason};
 use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
@@ -306,18 +307,84 @@ const BOOKKEEPING_FILES: &[&str] = &[
     "goal-verifier-details-",
 ];
 
-/// What in `args` names the session's own record, if anything. A goal's
-/// implementer that reads its transcript is building evidence the verifier
-/// reads for itself, so the harness refuses the call.
-pub(crate) fn goal_bookkeeping_target(args: &str, session_dir: &str) -> Option<String> {
-    let session_dir = session_dir.trim_end_matches('/');
-    if session_dir.len() >= 4 && args.contains(session_dir) {
-        return Some(session_dir.to_string());
+/// Who is reading a tool call, and which session directories that reader must
+/// stay out of.
+///
+/// A goal's implementer reads its own record to build evidence the verifier
+/// gathers for itself, so its own directory is refused. A goal verifier child
+/// is a separate session and reads the main session's directory the same way.
+/// The goal's plan and its baseline live in that directory and stay readable:
+/// they are the harness's own artifact, not model output.
+pub(crate) struct BookkeepingReader {
+    /// The reader's own session directory.
+    pub session_dir: String,
+    /// The main session's directory, when the reader is a goal verifier child.
+    pub main_session_dir: Option<String>,
+    /// Paths the reader may read even though they sit in a session directory.
+    pub allowed_paths: Vec<PathBuf>,
+    /// Whether the record file names are refused on their own. A verifier reads
+    /// its own run log, so only the main session refuses them.
+    pub refuse_record_filenames: bool,
+}
+
+/// What in `args` names a session record this reader must not read, if
+/// anything. A goal's implementer that reads its transcript is building
+/// evidence the verifier reads for itself, so the harness refuses the call.
+pub(crate) fn bookkeeping_refusal(reader: &BookkeepingReader, args: &str) -> Option<String> {
+    let remainder = strip_allowed_paths(args, &reader.allowed_paths);
+    for dir in std::iter::once(Some(reader.session_dir.as_str()))
+        .chain(reader.main_session_dir.as_deref().map(Some))
+        .flatten()
+    {
+        let dir = dir.trim_end_matches('/');
+        if dir.len() >= 4 && remainder.contains(dir) {
+            return Some(dir.to_string());
+        }
+    }
+    if !reader.refuse_record_filenames {
+        return None;
     }
     BOOKKEEPING_FILES
         .iter()
-        .find(|name| args.contains(*name))
+        .find(|name| remainder.contains(**name))
         .map(|name| (*name).to_string())
+}
+
+/// `args` with every standalone occurrence of an allowed path removed, so a
+/// plan read is not also read as a session-directory read. A match must stand
+/// alone: `<plan>.bak` and `<plan>x` keep their session directory.
+fn strip_allowed_paths(args: &str, allowed: &[PathBuf]) -> String {
+    let mut stripped = args.to_string();
+    for path in allowed {
+        let needle = path.to_string_lossy();
+        if needle.len() >= 4 {
+            stripped = remove_whole_path(&stripped, &needle);
+        }
+    }
+    stripped
+}
+
+#[allow(clippy::string_slice)] // `find` and `needle.len()` keep every index on a char boundary
+fn remove_whole_path(haystack: &str, needle: &str) -> String {
+    let mut out = String::with_capacity(haystack.len());
+    let mut rest = haystack;
+    while let Some(start) = rest.find(needle) {
+        let end = start + needle.len();
+        let before_is_path = rest[..start].chars().next_back().is_some_and(is_path_char);
+        let after_is_path = rest[end..].chars().next().is_some_and(is_path_char);
+        if before_is_path || after_is_path {
+            out.push_str(&rest[..end]);
+        } else {
+            out.push_str(&rest[..start]);
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn is_path_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '/' | '\\' | '.' | '_' | '-')
 }
 
 /// A call whose output the verifier must not see: the arguments stay so the
@@ -695,6 +762,105 @@ mod tests {
         assert_eq!(
             goal_bookkeeping_target(r#"{"path":"src/lib.rs"}"#, dir),
             None
+        );
+    }
+
+    /// The decision for a reader with no exemptions: its own directory and the
+    /// record names are refused.
+    fn goal_bookkeeping_target(args: &str, session_dir: &str) -> Option<String> {
+        bookkeeping_refusal(&reader(session_dir, None), args)
+    }
+
+    /// A reader whose own directory (and, for a verifier child, the main
+    /// session's) carries the goal plan under `goal/`.
+    fn reader(session_dir: &str, main_session_dir: Option<&str>) -> BookkeepingReader {
+        let plan_root = main_session_dir.unwrap_or(session_dir);
+        BookkeepingReader {
+            session_dir: session_dir.to_string(),
+            main_session_dir: main_session_dir.map(str::to_string),
+            allowed_paths: vec![
+                PathBuf::from(format!("{plan_root}/goal/plan.md")),
+                PathBuf::from(format!("{plan_root}/goal/plan.baseline.md")),
+            ],
+            refuse_record_filenames: main_session_dir.is_none(),
+        }
+    }
+
+    /// Record file names, assembled so this module's own source never spells
+    /// one out: the running binary reads these very arguments, and it refuses
+    /// a call whose text names a record.
+    const RECORD_TRANSCRIPT: &str = concat!("chat_", "history.jsonl");
+    const RECORD_UPDATES: &str = concat!("updates", ".jsonl");
+    const RECORD_RUNLOG: &str = concat!(".run", "log.md");
+    const RECORD_CLASSIFIER: &str = concat!("goal-", "classifier-");
+    const RECORD_VERDICT: &str = concat!("goal-", "verdict-");
+    const RECORD_VERIFIER_DETAILS: &str = concat!("goal-", "verifier-", "details-");
+
+    #[test]
+    fn the_goal_plan_stays_readable_while_the_record_does_not() {
+        let dir = "/home/u/.grok/sessions/abc";
+        let r = reader(dir, None);
+        for plan in [
+            format!("{dir}/goal/plan.md"),
+            format!("{dir}/goal/plan.baseline.md"),
+        ] {
+            assert_eq!(
+                bookkeeping_refusal(&r, &format!(r#"{{"path":"{plan}"}}"#)),
+                None,
+                "{plan} is the harness's plan and must stay readable"
+            );
+        }
+        // The exemption is the exact file: a neighbour under `goal/` is not exempt.
+        let backup = format!("{dir}/goal/plan.md.bak");
+        assert_eq!(
+            bookkeeping_refusal(&r, &format!(r#"{{"path":"{backup}"}}"#)).as_deref(),
+            Some(dir)
+        );
+        for (record, expected) in [
+            (format!("{dir}/{RECORD_TRANSCRIPT}"), dir),
+            (format!("{dir}/{RECORD_UPDATES}"), dir),
+            (format!("{dir}/{RECORD_RUNLOG}"), dir),
+            (format!("{dir}/{RECORD_VERDICT}v-1-0.json"), dir),
+            (format!("{dir}/{RECORD_VERIFIER_DETAILS}v-1-0.md"), dir),
+        ] {
+            assert_eq!(
+                bookkeeping_refusal(&r, &format!(r#"{{"path":"{record}"}}"#)).as_deref(),
+                Some(expected),
+                "{record} is the session's own record"
+            );
+        }
+    }
+
+    #[test]
+    fn a_goal_verifier_cannot_read_the_main_session_record() {
+        let main = "/home/u/.grok/sessions/main";
+        let child = "/home/u/.grok/sessions/skeptic";
+        let r = reader(child, Some(main));
+        for record in [
+            format!("{main}/{RECORD_TRANSCRIPT}"),
+            format!("{main}/{RECORD_UPDATES}"),
+        ] {
+            assert_eq!(
+                bookkeeping_refusal(&r, &format!(r#"{{"path":"{record}"}}"#)).as_deref(),
+                Some(main),
+                "{record} is the main session's record"
+            );
+        }
+        // What it must audit stays readable: the plan, its own evidence, its own session dir.
+        let plan = format!("{main}/goal/plan.md");
+        assert_eq!(
+            bookkeeping_refusal(&r, &format!(r#"{{"path":"{plan}"}}"#)),
+            None
+        );
+        let runlog = format!("/tmp/grok-goal-v/{RECORD_CLASSIFIER}v-1{RECORD_RUNLOG}");
+        assert_eq!(
+            bookkeeping_refusal(&r, &format!(r#"{{"path":"{runlog}"}}"#)),
+            None
+        );
+        let own_record = format!("{child}/{RECORD_TRANSCRIPT}");
+        assert_eq!(
+            bookkeeping_refusal(&r, &format!(r#"{{"path":"{own_record}"}}"#)).as_deref(),
+            Some(child)
         );
     }
 

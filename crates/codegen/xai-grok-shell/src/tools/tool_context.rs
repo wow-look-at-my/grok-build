@@ -199,6 +199,10 @@ pub struct ToolContext {
     /// `send_message`. Set on a child's context at spawn; `None` for a
     /// top-level session, which has no parent to message.
     pub parent_messenger: Option<xai_grok_tools::implementations::grok_build::ParentMessenger>,
+    /// The main session's directory, set on a `/goal` verifier child, whose tool
+    /// calls must never read that session's record. `None` for every other
+    /// session, the main session included.
+    pub goal_main_session_dir: Option<std::path::PathBuf>,
     pub subagent_coordinator_sender: Option<
         xai_grok_tools::implementations::grok_build::task::backend::SubagentCoordinatorSender,
     >,
@@ -324,6 +328,7 @@ impl ToolContext {
             subagent_depth: 0,
             subagent_event_tx: None,
             parent_messenger: None,
+            goal_main_session_dir: None,
             subagent_coordinator_sender: None,
             lsp: None,
             lsp_server_names: Vec::new(),
@@ -421,6 +426,7 @@ mod tests {
                 subagent_depth: 0,
                 subagent_event_tx: None,
                 parent_messenger: None,
+                goal_main_session_dir: None,
                 subagent_coordinator_sender: None,
                 lsp: None,
                 lsp_server_names: Vec::new(),

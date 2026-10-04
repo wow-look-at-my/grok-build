@@ -773,6 +773,11 @@ impl GoalTracker {
         self.orchestration.as_ref().and_then(|o| o.token_budget)
     }
 
+    /// The directory the goal's artifacts (and the plan under `goal/`) live in.
+    pub(crate) fn session_dir(&self) -> &PathBuf {
+        &self.session_dir
+    }
+
     fn goal_dir(&self) -> PathBuf {
         self.session_dir.join("goal")
     }

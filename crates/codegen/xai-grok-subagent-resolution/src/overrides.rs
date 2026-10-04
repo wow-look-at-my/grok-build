@@ -222,6 +222,7 @@ mod tests {
             foreground_wait_budget_ms: None,
             output_schema: None,
             loop_task_id: None,
+            goal_verifier: false,
         }
     }
 
