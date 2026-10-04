@@ -2931,7 +2931,7 @@ mod tests {
             ConversationItem::interjection("also do this"), // mid-turn
             ConversationItem::assistant("A0"),
             ConversationItem::scheduler_fired("loop fired"),
-            ConversationItem::system_reminder("reminder"),   // mid-turn
+            ConversationItem::system_reminder("reminder"), // mid-turn
             ConversationItem::assistant("A1"),
             ConversationItem::user("P2"),
         ];

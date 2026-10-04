@@ -1,4 +1,3 @@
-
 use super::TerminalName;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, strum::Display)]
@@ -169,7 +168,6 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
         },
     }
 }
-
 
 /// iTerm2, Ghostty, and Kitty honor it; others ignore it silently.
 pub struct SetPointerCursor;

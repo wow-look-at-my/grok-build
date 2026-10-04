@@ -476,7 +476,6 @@ async fn test_inference_metrics_multi_response_aggregation() {
 
     let snap = handle.snapshot().await.unwrap();
 
-
     // TDigest gives approximate percentiles
     let p50 = snap.itl_p50_ms.unwrap();
     let p99 = snap.itl_p99_ms.unwrap();

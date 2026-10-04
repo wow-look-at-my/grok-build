@@ -23,7 +23,6 @@ use xai_grok_auth::AuthCredentialProvider;
 
 use crate::circuit_breaker_observer::TracingObserver;
 
-
 const STORAGE_BREAKER_NAME: &str = "storage_breaker";
 
 fn storage_breaker_config() -> BreakerConfig {

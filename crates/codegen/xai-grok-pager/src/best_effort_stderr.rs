@@ -1,4 +1,3 @@
-
 use std::io::Write;
 
 /// Write `line` and a newline to `w`; `false` when the write failed.

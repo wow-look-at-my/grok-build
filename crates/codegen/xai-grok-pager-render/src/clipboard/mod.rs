@@ -2116,7 +2116,6 @@ mod tests {
     // Extended clipboard route matrix (final hardening)
     // =====================================================================
 
-
     #[test]
     fn clipboard_route_byobu_screen_no_tmux_buffer_no_osc52() {
         let route = resolve_clipboard_route(&byobu_screen_ctx());

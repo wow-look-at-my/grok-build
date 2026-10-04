@@ -27,10 +27,7 @@ pub enum SessionLifecycleRequest {
         idx: u64,
     },
     /// Rewind a session to a target prompt index. Response: `SessionChunk::RewindResult`.
-    Rewind {
-        session: SessionId,
-        target: u64,
-    },
+    Rewind { session: SessionId, target: u64 },
     /// Enumerate the available rewind points for a session. Response: `SessionChunk::RewindPoints`.
     GetRewindPoints(SessionId),
 }

@@ -98,4 +98,3 @@ impl SourceMap {
         self.segments.clear();
     }
 }
-

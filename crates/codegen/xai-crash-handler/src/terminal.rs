@@ -46,8 +46,7 @@ pub fn restore_in_signal_handler() {
 }
 
 #[cfg(not(any(unix, windows)))]
-pub fn restore_in_signal_handler() {
-}
+pub fn restore_in_signal_handler() {}
 
 #[cfg(test)]
 mod tests {

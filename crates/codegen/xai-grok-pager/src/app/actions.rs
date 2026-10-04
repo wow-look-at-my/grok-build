@@ -1240,7 +1240,9 @@ pub enum Effect {
         chat_kind: bool,
     },
     /// Change the process working directory (dashboard location picker, `/cd`).
-    SetWorkingDir { path: std::path::PathBuf },
+    SetWorkingDir {
+        path: std::path::PathBuf,
+    },
     /// Create a git worktree and then create or load an ACP session in it.
     /// When `load_session_id` is `Some`, loads that session in the new worktree instead of creating a fresh one (`--resume` with `--worktree`).
     CreateWorktreeSession {
@@ -1320,7 +1322,9 @@ pub enum Effect {
     /// Fetch the local on-disk session list (dormant/idle sessions) for the dashboard via `x.ai/session/list`.
     FetchDashboardSessions,
     /// Lazily open dashboard v2's process-owned SQLite store and read its initial snapshot off the event-loop thread.
-    LoadWorkspaceSnapshot { db_path: std::path::PathBuf },
+    LoadWorkspaceSnapshot {
+        db_path: std::path::PathBuf,
+    },
     /// Apply one mutation; [`TaskResult::WorkspaceWriteCompleted`] carries the handle and mutation back.
     WriteWorkspace {
         store: xai_grok_dashboard_store::WorkspaceStore,
@@ -1430,9 +1434,13 @@ pub enum Effect {
         hidden_ids: std::collections::BTreeSet<String>,
     },
     /// Persist `[privacy].privacy_banner_acked` (RFC 3339 dismiss time).
-    PersistPrivacyBannerAcked { acked_at: String },
+    PersistPrivacyBannerAcked {
+        acked_at: String,
+    },
     /// Persist a plugin CTA dismissal to `[plugin_cta].dismissed`.
-    PersistPluginCtaDismissed { plugin_id: String },
+    PersistPluginCtaDismissed {
+        plugin_id: String,
+    },
     /// Persist the consent answer to `[consent]` in config.toml.
     PersistConsentAnswer {
         account: Option<String>,
@@ -1441,9 +1449,14 @@ pub enum Effect {
         acked: bool,
     },
     /// Files the acceptance server side; the local marker is what stops the re-prompt if it fails.
-    RecordConsentUpstream { notice_id: String, version: i32 },
+    RecordConsentUpstream {
+        notice_id: String,
+        version: i32,
+    },
     /// Persist memory modal fullscreen preference to `[hints]` in config.toml.
-    PersistMemoryFullscreen { fullscreen: bool },
+    PersistMemoryFullscreen {
+        fullscreen: bool,
+    },
     /// Persist the dashboard's `[dashboard]` configuration to `~/.grok/config.toml`.
     PersistDashboard(crate::views::dashboard::PersistedDashboard),
     /// Persist a per-command worktree mode preference to `[hints]` in
@@ -1498,7 +1511,9 @@ pub enum Effect {
         prompt_id: String,
     },
     /// Toggle plan mode: fire-and-forget signal to the shell.
-    TogglePlanMode { session_id: acp::SessionId },
+    TogglePlanMode {
+        session_id: acp::SessionId,
+    },
     /// Remove a server-owned queued prompt: fire-and-forget `x.ai/queue/remove`.
     /// The agent re-broadcasts the authoritative queue.
     QueueRemove {
@@ -1512,7 +1527,9 @@ pub enum Effect {
         ordered_ids: Vec<String>,
     },
     /// Clear the caller's server-owned queued prompts: fire-and-forget `x.ai/queue/clear`.
-    QueueClear { session_id: acp::SessionId },
+    QueueClear {
+        session_id: acp::SessionId,
+    },
     /// Replace the text of a server-owned queued prompt in place:
     /// fire-and-forget `x.ai/queue/edit`.
     QueueEdit {
@@ -1539,7 +1556,9 @@ pub enum Effect {
         new_text: Option<String>,
     },
     /// Deliver every server-owned queued prompt into the running turn NOW: fire-and-forget `x.ai/queue/deliver_now`.
-    QueueDeliverNow { session_id: acp::SessionId },
+    QueueDeliverNow {
+        session_id: acp::SessionId,
+    },
     /// Set the session mode via ACP `session/set_mode`.
     SetSessionMode {
         session_id: acp::SessionId,
@@ -1581,9 +1600,14 @@ pub enum Effect {
         force_interactive: bool,
     },
     /// Poll for auth URL from the agent (ext request).
-    PollAuthUrl { request_seq: u64 },
+    PollAuthUrl {
+        request_seq: u64,
+    },
     /// Submit a manually-pasted auth code (ext request).
-    SubmitAuthCode { request_seq: u64, code: String },
+    SubmitAuthCode {
+        request_seq: u64,
+        code: String,
+    },
     /// Fetch MCP server list from the shell (x.ai/mcp/list).
     FetchMcpsList {
         agent_id: AgentId,
@@ -1863,18 +1887,26 @@ pub enum Effect {
     /// Log out via `x.ai/auth/logout` (shell clears auth.json and in-memory state).
     Logout,
     /// Cancel an in-flight interactive auth on the shell (`x.ai/auth/cancel`).
-    CancelAuth { request_seq: u64 },
+    CancelAuth {
+        request_seq: u64,
+    },
     /// Re-check subscription status via `x.ai/auth/check_subscription`.
-    CheckSubscription { verify: Option<u64> },
+    CheckSubscription {
+        verify: Option<u64>,
+    },
     /// `x.ai/auth/hydrate_team_capability` for `identity`; the answer is dropped if the account changed meanwhile.
     HydrateTeamCapability {
         identity: crate::app::app_view::AuthIdentity,
     },
-    CreditLimitRecheck { agent_id: AgentId },
+    CreditLimitRecheck {
+        agent_id: AgentId,
+    },
     /// Schedule a 5s timer that fires `TaskResult::PaywallCheckTick`.
     SchedulePaywallCheck,
     /// Schedule `TaskResult::GateVerifyTimeout { generation }` after [`crate::app::subscription::GATE_VERIFY_TIMEOUT`].
-    ScheduleGateVerifyTimeout { generation: u64 },
+    ScheduleGateVerifyTimeout {
+        generation: u64,
+    },
     /// Log out then authenticate sequentially in one task.
     SwitchAccount {
         request_seq: u64,
@@ -1882,7 +1914,9 @@ pub enum Effect {
         use_oauth: bool,
     },
     /// Clear the auth copy feedback after a delay if its generation is still current.
-    ScheduleClearAuthCopyFeedback { generation: u64 },
+    ScheduleClearAuthCopyFeedback {
+        generation: u64,
+    },
     /// Register the current session in the active-session registry
     /// (`~/.grok/active_sessions.json`).
     RegisterActiveSession {
@@ -1890,7 +1924,9 @@ pub enum Effect {
         cwd: String,
     },
     /// Unregister a session from the active-sessions registry (clean exit).
-    UnregisterActiveSession { session_id: acp::SessionId },
+    UnregisterActiveSession {
+        session_id: acp::SessionId,
+    },
     /// Quit the application.
     Quit,
     /// Toggle coding data sharing via ACP.
@@ -1989,9 +2025,15 @@ pub enum Effect {
     /// Re-fetch remote settings to check subscription gate.
     RefreshGate,
     /// Spawn a debounce sleep task for shell suggestions.
-    DebounceSuggestions { agent_id: AgentId, generation: u64 },
+    DebounceSuggestions {
+        agent_id: AgentId,
+        generation: u64,
+    },
     /// Spawn a debounce sleep task for plugin-CTA keyword matching.
-    DebouncePluginCta { agent_id: AgentId, generation: u64 },
+    DebouncePluginCta {
+        agent_id: AgentId,
+        generation: u64,
+    },
     /// Send an ACP `x.ai/suggest` request to the shell.
     /// `agent_id` is echoed on the result so the response routes to the agent that fetched, not whatever view is active when it lands.
     FetchShellSuggestions {

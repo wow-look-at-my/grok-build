@@ -301,8 +301,7 @@ pub fn clean_processed_sessions(sessions_dir: &Path, stems: &[String]) -> Vec<St
 
         match std::fs::remove_file(&path) {
             Ok(()) => cleaned.push(stem.clone()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
                 tracing::warn!(
                     target: LOG,

@@ -1527,7 +1527,6 @@ fn kitty_skip_vte_brand() {
     assert_eq!(ctx.kitty_skip_reason(), Some("vte"));
 }
 
-
 #[test]
 fn shift_enter_unavailable_legacy_vte_version() {
     let ctx = TerminalContext {

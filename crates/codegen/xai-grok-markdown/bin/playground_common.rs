@@ -91,5 +91,9 @@ pub const fn md_style(text: anstyle::Style) -> MarkdownStyle {
 pub fn get_syntect() -> &'static Syntect {
     use std::sync::OnceLock;
     static SYNTECT: OnceLock<Syntect> = OnceLock::new();
-    SYNTECT.get_or_init(|| Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme")))
+    SYNTECT.get_or_init(|| {
+        Syntect::new(include_bytes!(
+            "../../xai-grok-pager-render/assets/tokyo-night.tmTheme"
+        ))
+    })
 }

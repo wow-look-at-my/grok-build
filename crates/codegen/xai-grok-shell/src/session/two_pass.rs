@@ -1,4 +1,3 @@
-
 use xai_chat_state::compaction_utils::format_compact_summary_content;
 use xai_chat_state::estimate_item_tokens;
 use xai_grok_sampling_types::ConversationItem;

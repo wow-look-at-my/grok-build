@@ -1976,8 +1976,7 @@ pub fn collect_tool_metadata(iter: impl Iterator<Item = io::Result<SessionUpdate
                             }
                         }
                     }
-                    acp::SessionUpdate::ToolCallUpdate(_) => {
-                    }
+                    acp::SessionUpdate::ToolCallUpdate(_) => {}
                     _ => {}
                 }
             }

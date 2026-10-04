@@ -216,18 +216,15 @@ impl ReplayState {
                     _ => {}
                 }
             }
-            SessionUpdate::Acp(notification) => {
-                match &notification.update {
-                    agent_client_protocol::SessionUpdate::UserMessageChunk(chunk) => {
-                        self.handle_user_chunk(chunk);
-                    }
-                    agent_client_protocol::SessionUpdate::AgentMessageChunk(chunk) => {
-                        self.handle_agent_chunk(chunk);
-                    }
-                    _ => {
-                    }
+            SessionUpdate::Acp(notification) => match &notification.update {
+                agent_client_protocol::SessionUpdate::UserMessageChunk(chunk) => {
+                    self.handle_user_chunk(chunk);
                 }
-            }
+                agent_client_protocol::SessionUpdate::AgentMessageChunk(chunk) => {
+                    self.handle_agent_chunk(chunk);
+                }
+                _ => {}
+            },
         }
     }
 

@@ -1,4 +1,3 @@
-
 use std::time::Duration;
 
 use xai_grok_sampler::{SamplingErrorInfo, SamplingErrorKind};

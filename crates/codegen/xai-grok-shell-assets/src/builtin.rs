@@ -1,6 +1,7 @@
 //! Built-in files extracted to `~/.grok/` on startup.
 
-const BUILTIN_FILES: &[(&str, &str)] = &[("README.md", include_str!("../README.md"))];
+const BUILTIN_FILES: &[(&str, &str)] =
+    &[("README.md", include_str!("../../xai-grok-shell/README.md"))];
 
 /// Extract built-in metadata files to `~/.grok/` on startup.
 /// User skills under `~/.grok/skills/` are never managed here. Platform skills are delivered separately through the bundled skill cache.

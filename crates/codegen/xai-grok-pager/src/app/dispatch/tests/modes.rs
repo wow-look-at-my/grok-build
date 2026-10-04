@@ -771,8 +771,7 @@ fn set_yolo_mode_on_with_no_allow_once_option_sends_cancelled() {
         Ok(Ok(acp::RequestPermissionResponse {
             outcome: acp::RequestPermissionOutcome::Cancelled,
             ..
-        })) => {
-        }
+        })) => {}
         Ok(Ok(acp::RequestPermissionResponse {
             outcome:
                 acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome {

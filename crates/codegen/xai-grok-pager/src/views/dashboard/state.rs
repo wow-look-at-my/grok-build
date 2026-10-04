@@ -2837,8 +2837,7 @@ impl DashboardState {
                     }
                     return InputOutcome::Changed;
                 }
-                PromptEvent::Ignored => {
-                }
+                PromptEvent::Ignored => {}
             }
         }
 

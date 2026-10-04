@@ -1268,8 +1268,7 @@ impl SessionSignalsActor {
                 SignalEvent::RecordLocRevert {
                     lines_added_reverted: _,
                     lines_removed_reverted: _,
-                } => {
-                }
+                } => {}
 
                 // === Turn Delta Events ===
                 SignalEvent::TakeTurnEndSnapshot {

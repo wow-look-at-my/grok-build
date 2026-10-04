@@ -16,7 +16,7 @@ use xai_grok_pager::scrollback::{
 };
 use xai_grok_pager::theme::Theme;
 
-static BENCH_MD: &str = include_str!("bench.md");
+static BENCH_MD: &str = include_str!("../../xai-grok-markdown/fuzz/seeds/render_all/bench.md");
 
 const VIEWPORT_WIDTH: u16 = 120;
 const VIEWPORT_HEIGHT: u16 = 50;

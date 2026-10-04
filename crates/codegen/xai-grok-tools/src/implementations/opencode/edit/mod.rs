@@ -1152,6 +1152,4 @@ mod tests {
             other => panic!("Expected EditsApplied, got {:?}", other),
         }
     }
-
-
 }

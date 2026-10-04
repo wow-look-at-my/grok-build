@@ -1445,9 +1445,7 @@ fn reindex_content_with_retry(
                         &error,
                         rusqlite::Error::SqliteFailure(failure, _)
                             if failure.code == rusqlite::ErrorCode::ConstraintViolation
-                    ) =>
-            {
-            }
+                    ) => {}
             Err(error) => return Err(error),
         }
     }

@@ -16,8 +16,7 @@ pub fn parse_keys(input: &str) -> Result<Vec<u8>> {
         let ev = Event::Key(event);
         match ev.encode(&mut buf, Encoding::Xterm) {
             Ok(n) => bytes.extend_from_slice(&buf[..n]),
-            Err(e) if e.kind() == io::ErrorKind::Unsupported => {
-            }
+            Err(e) if e.kind() == io::ErrorKind::Unsupported => {}
             Err(e) => return Err(e.into()),
         }
     }

@@ -166,8 +166,7 @@ impl HunkTrackerActor {
                         new_line_info: new_hunk.line_info.clone(),
                     });
                 }
-                Some(_) => {
-                }
+                Some(_) => {}
                 None => {
                     // No exact match - check if there's any overlap
                     let has_overlap = old_hunks.iter().any(|o| hunks_overlap(o, new_hunk));

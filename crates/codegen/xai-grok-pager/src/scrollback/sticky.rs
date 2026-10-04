@@ -572,7 +572,6 @@ mod tests {
 
     #[test]
     fn test_gradual_collapse_trace() {
-
         let prompts = vec![PromptDescriptor {
             entry_idx: 0,
             y_virtual: 0,

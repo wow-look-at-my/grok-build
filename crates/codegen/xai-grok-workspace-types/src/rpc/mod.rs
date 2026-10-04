@@ -5,7 +5,6 @@ use serde::de::DeserializeOwned;
 
 pub mod agents_md;
 pub mod code_nav;
-pub mod deploy;
 pub mod envelope;
 pub mod export;
 pub mod export_github;

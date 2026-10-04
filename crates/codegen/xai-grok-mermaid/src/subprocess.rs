@@ -123,8 +123,7 @@ fn reap_process_group(child: &Child) {
 }
 
 #[cfg(not(unix))]
-fn reap_process_group(_child: &Child) {
-}
+fn reap_process_group(_child: &Child) {}
 
 #[cfg(test)]
 mod tests {

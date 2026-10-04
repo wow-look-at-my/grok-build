@@ -186,8 +186,7 @@ impl MemoryIndex {
             .ok();
 
         match stored_dims {
-            Some(ref s) if s.parse::<usize>().ok() == Some(dimensions) => {
-            }
+            Some(ref s) if s.parse::<usize>().ok() == Some(dimensions) => {}
             Some(ref s) => {
                 // Dimension mismatch, recreate vec table
                 tracing::warn!(
@@ -306,8 +305,7 @@ impl MemoryIndex {
             seen_ids.insert(chunk_id.clone());
 
             match existing.get(&chunk_id) {
-                Some(old) if old.hash == hash => {
-                }
+                Some(old) if old.hash == hash => {}
                 Some(old) => {
                     // Changed: update chunk, delete stale FTS entry, insert new one
                     tx.execute(

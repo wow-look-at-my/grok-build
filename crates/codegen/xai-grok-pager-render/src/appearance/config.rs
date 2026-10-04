@@ -1480,7 +1480,7 @@ fn lookup_named_color(name: &str) -> Result<Color, String> {
         "BG_LIGHT" | "BG_HIGHLIGHT" => Color::Rgb(30, 30, 30), // #1e1e1e
         "BG_DARK" => Color::Rgb(17, 17, 17),
         "BG_TERMINAL" | "BG_NIGHT" => Color::Rgb(10, 10, 10), // #0a0a0a
-        "BG_VISUAL" => Color::Rgb(30, 32, 45),      // blue-tinted selection
+        "BG_VISUAL" => Color::Rgb(30, 32, 45),                // blue-tinted selection
         "BG_SEARCH" => Color::Rgb(48, 48, 52),
 
         // Accent colors (TokyoNight Night)
@@ -1509,7 +1509,7 @@ fn lookup_named_color(name: &str) -> Result<Color, String> {
         "FG_DARK" | "TEXT_SECONDARY" => Color::Rgb(200, 200, 200),   // #c8c8c8
         "FG_GUTTER" => Color::Rgb(65, 65, 65),
         "COMMENT" | "MUTED" | "TEXT_MUTED" => Color::Rgb(98, 98, 98),
-        "DARK3" => Color::Rgb(90, 90, 90),                           // #5a5a5a
+        "DARK3" => Color::Rgb(90, 90, 90), // #5a5a5a
         "DARK5" | "TOOL" => Color::Rgb(120, 120, 120),
 
         // Semantic colors

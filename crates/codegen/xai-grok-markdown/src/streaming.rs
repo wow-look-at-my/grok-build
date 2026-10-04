@@ -61,8 +61,7 @@ fn count_trailing_blank_lines(text: &str) -> usize {
                     break;
                 }
             }
-            Some(b' ' | b'\t') => {
-            }
+            Some(b' ' | b'\t') => {}
             Some(_) | None => {
                 // Non-whitespace character, or past the buffer: stop
                 break;

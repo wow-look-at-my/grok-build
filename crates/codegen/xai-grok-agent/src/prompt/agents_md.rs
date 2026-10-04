@@ -590,7 +590,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn read_agents_config_includes_workspace_user_agents_md() {
         let tmp = tempfile::tempdir().unwrap();

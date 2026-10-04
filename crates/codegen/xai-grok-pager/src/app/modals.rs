@@ -1417,8 +1417,7 @@ impl AgentView {
                                 window: crate::views::modal_window::ModalWindowState::new(),
                             });
                         }
-                        _ => {
-                        }
+                        _ => {}
                     }
                     if closed_session_picker {
                         return InputOutcome::Action(Action::SessionPickerClosed);

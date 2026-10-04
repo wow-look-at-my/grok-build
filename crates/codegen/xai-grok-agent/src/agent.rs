@@ -171,8 +171,7 @@ impl Agent {
 
     /// Update completion and retry policies from a new definition. Does not
     /// rebuild the tool registry or re-render prompts.
-    pub async fn update_policies_from_definition(&self, _def: &AgentDefinition) {
-    }
+    pub async fn update_policies_from_definition(&self, _def: &AgentDefinition) {}
 
     /// Re-render the system prompt from current ToolBridge state (tool name overrides, disabled tools).
     /// Called by hosts after mid-session tool-override updates.

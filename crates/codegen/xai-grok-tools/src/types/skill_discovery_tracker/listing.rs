@@ -1182,7 +1182,6 @@ mod tests {
         assert!(text.len() <= DEFAULT_CHAR_BUDGET + 50); // allow small slack for overflow line
     }
 
-
     #[test]
     fn tier1_full_descriptions_when_within_budget() {
         let desc = "A".repeat(100);
@@ -1224,7 +1223,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn tier2_shortens_descriptions_to_fit_budget() {
         // Skills with 200-char descriptions.
@@ -1254,7 +1252,6 @@ mod tests {
         assert!(text.contains("…"));
         assert!(text.len() <= budget + 50);
     }
-
 
     #[test]
     fn tier3_names_only_under_extreme_budget() {

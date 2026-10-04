@@ -1,4 +1,3 @@
-
 use std::path::Path;
 
 /// Exact historical read failure message for `read_file` in legacy-0.4.10.

@@ -983,7 +983,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn chunk_rejects_anchor_without_context() {
         let lines = sample_lines();
@@ -1018,7 +1017,6 @@ mod tests {
         };
         assert_eq!(scheme.validate(&truncated, &lines), ValidationResult::Stale);
     }
-
 
     #[test]
     fn chunk_find_shifted_after_insert_above() {
@@ -1078,7 +1076,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn chunk_ambiguity_with_repeated_lines() {
         let lines = vec!["same content"; 10];
@@ -1125,7 +1122,6 @@ mod tests {
             "Checkpoint chaining should produce different contexts for adjacent identical lines"
         );
     }
-
 
     #[test]
     fn custom_hash_len_2() {

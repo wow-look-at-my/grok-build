@@ -47,7 +47,9 @@ pub struct SubagentEntry {
 pub enum SubagentSource {
     Builtin(BuiltinAgentName),
     /// User-defined agent from project, user, or bundled discovery.
-    UserDefined { scope: AgentScope },
+    UserDefined {
+        scope: AgentScope,
+    },
 }
 
 // ── all_subagents ────────────────────────────────────────────────────

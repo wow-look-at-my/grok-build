@@ -776,7 +776,6 @@ fn test_cleanup_orphaned_overlay_snapshots() {
         !meta_path.exists(),
         "orphaned metadata should be deleted after cleanup"
     );
-
 }
 
 /// Verify that metadata written during overlay worktree creation survives

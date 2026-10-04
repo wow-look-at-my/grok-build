@@ -5386,8 +5386,7 @@ fn a_long_body_shows_its_newest_lines_at_a_fixed_height() {
         "the newest line is the one on screen"
     );
     assert_eq!(
-        block.summary,
-        "390 B",
+        block.summary, "390 B",
         "the size is what the tail alone cannot say"
     );
 }

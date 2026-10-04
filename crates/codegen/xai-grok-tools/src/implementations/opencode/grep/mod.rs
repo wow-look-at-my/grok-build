@@ -1016,6 +1016,4 @@ mod tests {
         );
         assert!(output.match_count >= 1, "should have at least 1 match");
     }
-
-
 }

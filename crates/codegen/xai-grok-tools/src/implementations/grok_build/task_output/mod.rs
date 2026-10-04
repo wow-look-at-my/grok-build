@@ -649,7 +649,6 @@ pub(crate) async fn wait_all_event_driven(
     finalize_wait_outcome(outcome, deadline)
 }
 
-
 /// Exact historical not-found message for `get_task_output` in legacy-0.4.10.
 fn render_legacy_task_output_not_found(task_id: &str) -> String {
     format!("Task {} not found", task_id)

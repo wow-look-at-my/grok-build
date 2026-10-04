@@ -355,7 +355,6 @@ async fn normal_completion_persists_turn_completed_after_buffered_delta_flush() 
                 "the terminal must not ride the buffered Update rail, or a power loss \
                  after the turn's flush barrier could keep the content but drop the terminal"
             );
-
         })
         .await;
 }

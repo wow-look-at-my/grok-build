@@ -862,8 +862,7 @@ line 10
 
     // Verify the new hunk is ExternalEditOnAgentFile (since the file is now an agent-tracked file)
     match &external_hunk.source {
-        crate::types::HunkSource::ExternalEditOnAgentFile => {
-        }
+        crate::types::HunkSource::ExternalEditOnAgentFile => {}
         crate::types::HunkSource::External => {
             panic!("New external hunk on agent file should have ExternalEditOnAgentFile source");
         }

@@ -19,7 +19,6 @@ use xai_tool_types::{KillTaskOutput, KillTaskResult, KillTaskToolInput};
 #[derive(Debug, Default)]
 pub struct KillTaskTool;
 
-
 /// Exact historical not-found message for `kill_task` in legacy-0.4.10.
 fn render_legacy_kill_task_not_found(task_id: &str) -> String {
     format!("Task {} not found", task_id)

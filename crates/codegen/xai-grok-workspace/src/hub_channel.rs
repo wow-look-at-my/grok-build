@@ -110,5 +110,4 @@ mod tests {
             "Known variant should return None"
         );
     }
-
 }

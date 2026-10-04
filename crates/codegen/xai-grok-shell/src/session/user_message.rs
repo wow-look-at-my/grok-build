@@ -69,4 +69,3 @@ fn resolve_shell_display() -> String {
             .to_string()
     }
 }
-

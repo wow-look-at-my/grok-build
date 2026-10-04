@@ -2527,7 +2527,6 @@ mod tests {
         assert_eq!(read_back, payload);
     }
 
-
     #[test]
     fn osc52_sequence_plain() {
         assert_eq!(osc52_sequence("hi", false), b"\x1b]52;c;aGk=\x07".to_vec());

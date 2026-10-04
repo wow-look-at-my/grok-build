@@ -1597,11 +1597,7 @@ fn overlay_max_screen_y_clips_links() {
 #[test]
 fn overlay_content_line_offset_skips_header_lines() {
     // Simulates BtwBlock: header, separator, then markdown body
-    let output = make_block_output(&[
-        ("/btw question", None),
-        ("", None),
-        ("body text", None),
-    ]);
+    let output = make_block_output(&[("/btw question", None), ("", None), ("body text", None)]);
     let links = [make_hyperlink(0, 0..4, "https://body.com", 1)];
     let mut overlay = LinkOverlay::new();
     map_hyperlinks_to_overlay(&links, &output, 0, 0, 10, 0, 2, &[], None, &mut overlay);

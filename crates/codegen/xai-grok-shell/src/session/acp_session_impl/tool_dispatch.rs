@@ -290,8 +290,8 @@ impl SessionActor {
             env: self.tool_context.session_env.as_ref().clone(),
             timeout: BASH_MODE_TIMEOUT,
             output_byte_limit: 1_048_576,
-            stream: true,                 // Enable streaming for bash mode
-            output_file: None,            // No file logging for interactive bash mode
+            stream: true,      // Enable streaming for bash mode
+            output_file: None, // No file logging for interactive bash mode
         };
 
         let result = self.tool_context.terminal.run(request).await;

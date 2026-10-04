@@ -586,8 +586,7 @@ mod tests {
             .unwrap();
 
         match result {
-            ReadFileOutput::FileContent(_fc) => {
-            }
+            ReadFileOutput::FileContent(_fc) => {}
             other => panic!("Expected FileContent, got {:?}", other),
         }
     }
