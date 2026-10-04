@@ -13,12 +13,20 @@ use xai_grok_sandbox::ci_state::{self, CiStatus};
 
 pub const CI_TOOL_NAME: &str = "ci";
 
-/// How long one `wait` call may block before reporting what it last saw.
-const DEFAULT_WAIT_SECS: u64 = 300;
-const MAX_WAIT_SECS: u64 = 1800;
-/// Gap between polls while waiting. `gh run list` is one API call, and a
-/// workflow's state does not move faster than this.
+/// How long a background `wait` watches before it reports what it last saw.
+const DEFAULT_WAIT_SECS: u64 = 3600;
+const MAX_WAIT_SECS: u64 = 14_400;
+/// Gap between polls while waiting.
 const WAIT_POLL_SECS: u64 = 15;
+/// Extra life for the waiter's task past the watch budget.
+const WAIT_TASK_MARGIN_SECS: u64 = 120;
+
+/// Exit codes of the background wait's task.
+const WAIT_EXIT_PASSING: i32 = 0;
+const WAIT_EXIT_FAILING: i32 = 1;
+const WAIT_EXIT_STILL_RUNNING: i32 = 2;
+const WAIT_EXIT_NO_RUNS: i32 = 3;
+const WAIT_EXIT_QUERY_FAILED: i32 = 4;
 
 /// How much of a failing log one call returns. The log's tail is what carries
 /// the error, so an oversized body is cut from the front.
@@ -41,7 +49,7 @@ pub enum CiAction {
     Status,
     /// List the branch's recent runs with their ids, workflows and states.
     Runs,
-    /// Block until the branch's runs settle, then report the state.
+    /// Watch the branch's runs in the background. The session is woken with the state when they settle.
     Wait,
     /// Return the failing steps' logs for a run.
     Logs,
@@ -52,7 +60,7 @@ pub enum CiAction {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiInput {
     #[schemars(
-        description = "What to ask about CI. `status` folds the branch's runs into one state; `runs` lists them with their ids; `wait` blocks until they settle; `logs` returns the failing steps' output for a run; `checks` reports the pull request's checks."
+        description = "What to ask about CI. `status` folds the branch's runs into one state; `runs` lists them with their ids; `wait` watches them in the background and wakes you with the state when they settle; `logs` returns the failing steps' output for a run; `checks` reports the pull request's checks."
     )]
     pub action: CiAction,
 
@@ -80,7 +88,7 @@ pub struct CiInput {
 
     #[serde(default)]
     #[schemars(
-        description = "How long `wait` may block, in seconds. Defaults to 300, capped at 1800. A wait that runs out reports the state it last saw rather than failing."
+        description = "How long `wait` watches, in seconds. Defaults to 3600, capped at 14400. A wait that runs out reports the state it last saw rather than failing."
     )]
     pub timeout_secs: Option<u64>,
 }
@@ -113,6 +121,9 @@ pub struct CiOutput {
     /// Whether the returned text had its head cut off.
     #[serde(default)]
     pub truncated: bool,
+    /// The background task a `wait` started. Its completion carries the settled state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     /// What the caller should understand from this answer.
     pub summary: String,
 }
@@ -356,7 +367,7 @@ fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
             "CI is FAILING on {branch}. Read the failing logs (action `logs`), fix the cause, and push again."
         ),
         CiStatus::Yellow => format!(
-            "CI is still running on {branch}. Work on something else, or call `wait` to block until it settles."
+            "CI is still running on {branch}. Call `wait` to watch it in the background, and keep working."
         ),
         CiStatus::Off => match repo {
             Some(repo) => format!(
@@ -386,7 +397,11 @@ impl crate::types::tool_metadata::ToolMetadata for CiTool {
     }
 
     fn description_template(&self) -> &str {
-        "Read GitHub CI state for the branch you are working on: fold it to one state, list runs, block until they settle, read a failing run's logs, or report a pull request's checks. Read-only, and it works inside the sandbox, where `gh` run from a shell does not."
+        "Read GitHub CI state for the branch you are working on: fold it to one state, list runs, watch them in the background until they settle, read a failing run's logs, or report a pull request's checks. Read-only, and it works inside the sandbox, where `gh` run from a shell does not.\n\n`wait` returns at once. It starts a background task, and you are woken with the settled state when CI finishes. Keep working: do not poll, sleep, or call `status` in a loop."
+    }
+
+    fn emitted_notifications(&self) -> &'static [&'static str] {
+        &["BashExecutionBackgrounded", "TaskCompleted"]
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -430,44 +445,77 @@ impl xai_tool_runtime::Tool for CiTool {
         let resources = shared_resources(&ctx)?;
         let cwd = resolve_cwd(&ctx, &resources).await?;
 
-        // Every query shells out, so the whole call runs off the async
-        // executor rather than blocking a reactor thread.
-        tokio::task::spawn_blocking(move || run_blocking(&cwd, input))
-            .await
-            .map_err(|error| {
-                xai_tool_runtime::ToolError::custom(
-                    "ci_join",
-                    format!("ci query panicked: {error}"),
-                )
-            })?
+        // Every query shells out, so each runs off the async executor rather than blocking a reactor thread.
+        let action = input.action;
+        let timeout_secs = input.timeout_secs;
+        let (query, output) = off_executor(move || {
+            let query = resolve_query(&cwd, &input)?;
+            let output = match input.action {
+                CiAction::Status | CiAction::Runs | CiAction::Wait => query.status()?,
+                CiAction::Logs => {
+                    logs_output(&query.cwd, &query.branch, query.repo(), input.run_id.as_deref())?
+                }
+                CiAction::Checks => checks_output(&query.cwd, &query.branch, query.repo()),
+            };
+            Ok((query, output))
+        })
+        .await?;
+
+        // A wait on a branch that already settled has its answer now.
+        if action != CiAction::Wait || output.settled {
+            return Ok(output);
+        }
+        start_background_wait(&ctx, &resources, query, timeout_secs, output).await
     }
 }
 
-/// The whole tool, off the executor and free of async: a blocking `gh` call
-/// per poll, which is also what makes it directly testable.
-fn run_blocking(
+/// Run blocking `gh` work on the blocking pool.
+async fn off_executor<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, xai_tool_runtime::ToolError> + Send + 'static,
+) -> Result<T, xai_tool_runtime::ToolError> {
+    tokio::task::spawn_blocking(work).await.map_err(|error| {
+        xai_tool_runtime::ToolError::custom("ci_join", format!("ci query panicked: {error}"))
+    })?
+}
+
+/// One branch of one repository, as every action asks about it.
+#[derive(Debug, Clone)]
+struct CiQuery {
+    cwd: std::path::PathBuf,
+    branch: String,
+    repo: Option<String>,
+    limit: u32,
+}
+
+impl CiQuery {
+    fn repo(&self) -> Option<&str> {
+        self.repo.as_deref()
+    }
+
+    fn status(&self) -> Result<CiOutput, xai_tool_runtime::ToolError> {
+        status_output(&self.cwd, &self.branch, self.limit, self.repo())
+    }
+}
+
+/// The branch and repository the input names, read from git where it names none.
+fn resolve_query(
     cwd: &std::path::Path,
-    input: CiInput,
-) -> Result<CiOutput, xai_tool_runtime::ToolError> {
-    let branch = match input.branch.clone().or_else(|| current_branch(cwd)) {
-        Some(branch) => branch,
-        None => {
-            return Err(xai_tool_runtime::ToolError::custom(
-                "ci_no_branch",
-                "Could not determine the current branch. Pass `branch` explicitly.",
-            ));
-        }
+    input: &CiInput,
+) -> Result<CiQuery, xai_tool_runtime::ToolError> {
+    let Some(branch) = input.branch.clone().or_else(|| current_branch(cwd)) else {
+        return Err(xai_tool_runtime::ToolError::custom(
+            "ci_no_branch",
+            "Could not determine the current branch. Pass `branch` explicitly.",
+        ));
     };
-    let limit = input.limit.unwrap_or(DEFAULT_RUN_LIMIT);
     let repo = query_repo(cwd, input.repo.as_deref())
         .map_err(|reason| xai_tool_runtime::ToolError::custom("ci_bad_repo", reason))?;
-    let repo = repo.as_deref();
-    match input.action {
-        CiAction::Status | CiAction::Runs => status_output(cwd, &branch, limit, repo),
-        CiAction::Wait => wait_output(cwd, &branch, limit, repo, input.timeout_secs),
-        CiAction::Logs => logs_output(cwd, &branch, repo, input.run_id.as_deref()),
-        CiAction::Checks => Ok(checks_output(cwd, &branch, repo)),
-    }
+    Ok(CiQuery {
+        cwd: cwd.to_path_buf(),
+        branch,
+        repo,
+        limit: input.limit.unwrap_or(DEFAULT_RUN_LIMIT),
+    })
 }
 
 /// A failed `gh` query is the tool's error, never an empty answer.
