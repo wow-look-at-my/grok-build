@@ -2257,6 +2257,80 @@ pub(in crate::app::dispatch) fn set_ttft_timeout_secs(app: &mut AppView, new: i6
     }]
 }
 
+fn clamp_thinking_summary_history_window_secs(value: i64) -> i64 {
+    value.clamp(
+        crate::settings::defs::THINKING_SUMMARY_HISTORY_WINDOW_SECS_MIN,
+        crate::settings::defs::THINKING_SUMMARY_HISTORY_WINDOW_SECS_MAX,
+    )
+}
+
+fn clamp_thinking_summary_history_min_count(value: i64) -> i64 {
+    value.clamp(
+        crate::settings::defs::THINKING_SUMMARY_HISTORY_MIN_COUNT_MIN,
+        crate::settings::defs::THINKING_SUMMARY_HISTORY_MIN_COUNT_MAX,
+    )
+}
+
+pub(super) fn set_thinking_summary_history_window_secs_inner(app: &mut AppView, value: i64) {
+    app.current_ui.thinking_summary_history_window_secs =
+        Some(clamp_thinking_summary_history_window_secs(value) as u32);
+}
+
+pub(in crate::app::dispatch) fn set_thinking_summary_history_window_secs(
+    app: &mut AppView,
+    new: i64,
+) -> Vec<Effect> {
+    let prev = i64::from(app.current_ui.thinking_summary_history_window_secs_value());
+    let clamped = clamp_thinking_summary_history_window_secs(new);
+    if prev == clamped {
+        return vec![];
+    }
+    set_thinking_summary_history_window_secs_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = "thinking_summary_history_window_secs",
+        value = clamped,
+        "setting changed",
+    );
+    app.show_toast(&format!("\u{2713} Thinking-summary lookback: {clamped}s"));
+    vec![Effect::PersistSetting {
+        key: "thinking_summary_history_window_secs",
+        value: crate::settings::SettingValue::Int(clamped),
+        rollback_value: crate::settings::SettingValue::Int(prev),
+    }]
+}
+
+pub(super) fn set_thinking_summary_history_min_count_inner(app: &mut AppView, value: i64) {
+    app.current_ui.thinking_summary_history_min_count =
+        Some(clamp_thinking_summary_history_min_count(value) as u32);
+}
+
+pub(in crate::app::dispatch) fn set_thinking_summary_history_min_count(
+    app: &mut AppView,
+    new: i64,
+) -> Vec<Effect> {
+    let prev = i64::from(app.current_ui.thinking_summary_history_min_count_value());
+    let clamped = clamp_thinking_summary_history_min_count(new);
+    if prev == clamped {
+        return vec![];
+    }
+    set_thinking_summary_history_min_count_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = "thinking_summary_history_min_count",
+        value = clamped,
+        "setting changed",
+    );
+    app.show_toast(&format!("\u{2713} Thinking-summary minimum: {clamped}"));
+    vec![Effect::PersistSetting {
+        key: "thinking_summary_history_min_count",
+        value: crate::settings::SettingValue::Int(clamped),
+        rollback_value: crate::settings::SettingValue::Int(prev),
+    }]
+}
+
 // The `auto_compact_threshold_percent` setter was removed alongside its registry entry
 // The mirror field stays for compat
 
