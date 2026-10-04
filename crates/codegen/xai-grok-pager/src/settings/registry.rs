@@ -575,6 +575,12 @@ pub fn current_value_for(
         // Resolved once per session in the shell; the pager keeps the `[ui]`
         // mirror so the row reads back what the next session will do.
         "thinking_summaries" => Some(SettingValue::Bool(ui.thinking_summaries_enabled())),
+        "thinking_summary_history_window_secs" => Some(SettingValue::Int(i64::from(
+            ui.thinking_summary_history_window_secs_value(),
+        ))),
+        "thinking_summary_history_min_count" => Some(SettingValue::Int(i64::from(
+            ui.thinking_summary_history_min_count_value(),
+        ))),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints: `None` (inherit) reads as the default ON
         "contextual_hints.undo" => {
@@ -1135,6 +1141,20 @@ mod tests {
                         "thinking_summaries default drifts from UiConfig::default()"
                     );
                     assert!(*default, "thinking_summaries must default ON");
+                }
+                ("thinking_summary_history_window_secs", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.thinking_summary_history_window_secs_value()),
+                        "thinking_summary_history_window_secs default drifts from UiConfig::default()",
+                    );
+                }
+                ("thinking_summary_history_min_count", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.thinking_summary_history_min_count_value()),
+                        "thinking_summary_history_min_count default drifts from UiConfig::default()",
+                    );
                 }
                 // group_tool_verbs: Option<bool>; None reads as true (client default)
                 ("group_tool_verbs", SettingKind::Bool { default }) => {

@@ -246,3 +246,171 @@ async fn a_session_resolved_with_the_switch_off_asks_nothing() {
         })
         .await;
 }
+
+/// A second thinking block's summary call carries the first summary as the
+/// direction block, and the first call carries none. Driven through the real
+/// side call, so the assertion is on the bytes the model was sent.
+#[tokio::test]
+async fn a_second_summary_carries_the_first_as_its_direction_block() {
+    use crate::session::helpers::thinking_summary::ThinkingSummaryHistory;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, mut grx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            actor.thinking_summaries_enabled = true;
+            // Two seconds between calls, so the default window covers both.
+            actor.thinking_summary_history = ThinkingSummaryHistory::new(120, 5);
+            let actor = std::sync::Arc::new(actor);
+
+            let server = MockInferenceServer::start().await.unwrap();
+            server.set_response("Offset bug is in the caller");
+            aim_at(&actor, &server).await;
+
+            actor.spawn_thinking_summary(
+                &response_carrying_thinking("First: read the parser offset."),
+                Some(1_000),
+            );
+            let first = take_thinking_summary(&mut grx)
+                .await
+                .expect("the first summary must be broadcast");
+            assert_eq!(
+                first.get("summary").and_then(|v| v.as_str()),
+                Some("Offset bug is in the caller")
+            );
+
+            actor.spawn_thinking_summary(
+                &response_carrying_thinking("Second: weigh the retry budget."),
+                Some(2_000),
+            );
+            let second = take_thinking_summary(&mut grx)
+                .await
+                .expect("the second summary must be broadcast");
+            assert_eq!(
+                second.get("summary").and_then(|v| v.as_str()),
+                Some("Offset bug is in the caller")
+            );
+
+            let bodies = server.request_bodies();
+            assert_eq!(bodies.len(), 2, "one summary call per response");
+            let first_body = bodies[0].to_string();
+            assert!(
+                !first_body.contains("<previous_summaries>"),
+                "the first summary of a session has no prior block: {first_body}"
+            );
+            let second_body = bodies[1].to_string();
+            assert!(
+                second_body.contains("<previous_summaries>"),
+                "the second summary must be given the prior block: {second_body}"
+            );
+            assert!(
+                second_body.contains("- Offset bug is in the caller"),
+                "the prior block must carry the first summary's text: {second_body}"
+            );
+            assert!(
+                second_body.contains("Second: weigh the retry budget."),
+                "the current reasoning must still be the reasoning block: {second_body}"
+            );
+        })
+        .await;
+}
+
+/// Past the window, with the count floor at zero, no prior summary reaches the
+/// next call. The same two calls under a count floor do carry it, so the window
+/// is what excluded it.
+#[tokio::test]
+async fn a_summary_past_the_window_is_left_out_and_the_count_floor_carries_it() {
+    use crate::session::helpers::thinking_summary::ThinkingSummaryHistory;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            for (window_secs, min_count, expect_prior) in [(2u32, 0u32, false), (0, 1, true)] {
+                let (gateway_tx, mut grx) =
+                    tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+                let (persistence_tx, _prx) =
+                    tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+                let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+                actor.thinking_summaries_enabled = true;
+                actor.thinking_summary_history =
+                    ThinkingSummaryHistory::new(window_secs, min_count);
+                let actor = std::sync::Arc::new(actor);
+
+                let server = MockInferenceServer::start().await.unwrap();
+                server.set_response("Reuse the retry helper");
+                aim_at(&actor, &server).await;
+
+                // Nine seconds apart: outside a 2 s window, inside a 120 s one.
+                actor.spawn_thinking_summary(
+                    &response_carrying_thinking("First pass at the retry loop."),
+                    Some(1_000),
+                );
+                take_thinking_summary(&mut grx)
+                    .await
+                    .expect("the first summary must be broadcast");
+                actor.spawn_thinking_summary(
+                    &response_carrying_thinking("Second pass at the retry loop."),
+                    Some(10_000),
+                );
+                take_thinking_summary(&mut grx)
+                    .await
+                    .expect("the second summary must be broadcast");
+
+                let bodies = server.request_bodies();
+                assert_eq!(bodies.len(), 2, "one summary call per response");
+                let second_body = bodies[1].to_string();
+                assert_eq!(
+                    second_body.contains("<previous_summaries>"),
+                    expect_prior,
+                    "window={window_secs}s count_floor={min_count}: {second_body}"
+                );
+            }
+        })
+        .await;
+}
+
+/// Both halves at zero leave the call with no history at all, so a session can
+/// turn the block off without turning the summaries off.
+#[tokio::test]
+async fn zero_window_and_zero_count_leave_the_summary_call_stateless() {
+    use crate::session::helpers::thinking_summary::ThinkingSummaryHistory;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, mut grx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            actor.thinking_summaries_enabled = true;
+            actor.thinking_summary_history = ThinkingSummaryHistory::new(0, 0);
+            let actor = std::sync::Arc::new(actor);
+
+            let server = MockInferenceServer::start().await.unwrap();
+            server.set_response("Env var overrides config file");
+            aim_at(&actor, &server).await;
+
+            actor.spawn_thinking_summary(
+                &response_carrying_thinking("Check precedence of the config value."),
+                Some(1_000),
+            );
+            take_thinking_summary(&mut grx)
+                .await
+                .expect("the first summary must be broadcast");
+            actor.spawn_thinking_summary(
+                &response_carrying_thinking("Check precedence again."),
+                Some(2_000),
+            );
+            take_thinking_summary(&mut grx)
+                .await
+                .expect("the second summary must be broadcast");
+
+            let bodies = server.request_bodies();
+            assert_eq!(bodies.len(), 2, "one summary call per response");
+            assert!(
+                !bodies[1].to_string().contains("<previous_summaries>"),
+                "zero window and zero count must not attach a prior block: {bodies:?}"
+            );
+        })
+        .await;
+}

@@ -1,5 +1,7 @@
 //! Prompt helpers for the summary under a long thinking block.
 
+use std::collections::VecDeque;
+
 use crate::sampling::ConversationResponse;
 use crate::session::helpers::chat::floor_char_boundary;
 use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
@@ -9,6 +11,9 @@ pub(crate) const THINKING_SUMMARY_MAX_CHARS: usize = 320;
 pub(crate) const THINKING_SUMMARY_MAX_OUTPUT_TOKENS: u32 = 4096;
 const INPUT_HEAD_CHARS: usize = 16_000;
 const INPUT_TAIL_CHARS: usize = 32_000;
+/// Upper bound on the per-session summary history, so a long session cannot
+/// grow it without limit. Only the newest entries are ever selected.
+pub(crate) const THINKING_SUMMARY_HISTORY_CAPACITY: usize = 64;
 
 /// The words of every reasoning item in the response, in order.
 pub(crate) fn response_thinking_text(response: &ConversationResponse) -> String {
@@ -40,9 +45,91 @@ pub(crate) fn summarizable_thinking(thinking: &str) -> Option<String> {
     ))
 }
 
-/// The single user message sent to the summary model.
-pub(crate) fn thinking_summary_instruction(thinking: &str) -> String {
-    format!(
+/// The prior summaries a call at `now_ms` may see: everything inside
+/// `window_secs` of it, together with the most recent `min_count`. The union
+/// keeps a few predecessors in view through a slow stretch where the time
+/// window alone would select nothing, and covers a rapid-fire burst without
+/// having to count it. Oldest first. A zero window and a zero count select
+/// nothing.
+pub(crate) fn select_prior_summaries(
+    entries: &VecDeque<(i64, String)>,
+    now_ms: i64,
+    window_secs: u32,
+    min_count: u32,
+) -> Vec<String> {
+    if entries.is_empty() || (window_secs == 0 && min_count == 0) {
+        return Vec::new();
+    }
+    let window_ms = i64::from(window_secs) * 1000;
+    let count_floor = entries.len().saturating_sub(min_count as usize);
+    entries
+        .iter()
+        .enumerate()
+        .filter(|(idx, (ts, _))| {
+            let in_window = window_secs > 0 && now_ms.saturating_sub(*ts) <= window_ms;
+            in_window || *idx >= count_floor
+        })
+        .map(|(_, (_, text))| text.clone())
+        .collect()
+}
+
+/// The thinking summaries one session has produced, oldest first, keyed by the
+/// `stream_start_ms` of the call each describes, plus how far back the next
+/// call may draw on them. Per-actor: a subagent and its parent each keep their
+/// own chain, so one session's summaries never reach another's prompt.
+pub(crate) struct ThinkingSummaryHistory {
+    window_secs: u32,
+    min_count: u32,
+    /// At least [`THINKING_SUMMARY_HISTORY_CAPACITY`], and never under the
+    /// configured count floor, so a raised `min_count` is honored in full
+    /// instead of being silently trimmed.
+    capacity: usize,
+    entries: parking_lot::Mutex<VecDeque<(i64, String)>>,
+}
+
+impl Default for ThinkingSummaryHistory {
+    fn default() -> Self {
+        Self::new(
+            crate::agent::config::UiConfig::THINKING_SUMMARY_HISTORY_WINDOW_SECS_DEFAULT,
+            crate::agent::config::UiConfig::THINKING_SUMMARY_HISTORY_MIN_COUNT_DEFAULT,
+        )
+    }
+}
+
+impl ThinkingSummaryHistory {
+    pub(crate) fn new(window_secs: u32, min_count: u32) -> Self {
+        Self {
+            window_secs,
+            min_count,
+            capacity: (min_count as usize).max(THINKING_SUMMARY_HISTORY_CAPACITY),
+            entries: parking_lot::Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// The summaries the call at `stream_start_ms` should be given, oldest first.
+    pub(crate) fn prior_for(&self, stream_start_ms: i64) -> Vec<String> {
+        select_prior_summaries(
+            &self.entries.lock(),
+            stream_start_ms,
+            self.window_secs,
+            self.min_count,
+        )
+    }
+
+    /// Record a produced summary, keeping the buffer bounded.
+    pub(crate) fn record(&self, stream_start_ms: i64, summary: String) {
+        let mut entries = self.entries.lock();
+        entries.push_back((stream_start_ms, summary));
+        while entries.len() > self.capacity {
+            entries.pop_front();
+        }
+    }
+}
+
+/// The single user message sent to the summary model. `prior` holds the recent
+/// summaries for this session, oldest first, and is empty for the first one.
+pub(crate) fn thinking_summary_instruction(thinking: &str, prior: &[String]) -> String {
+    let mut out = String::from(
         "Below is the private reasoning a coding assistant wrote before it acted. \
          Write a terse gist of what it worked out or decided: 5 to 20 words, \
          a fragment, like a commit subject.\n\n\
@@ -60,10 +147,31 @@ pub(crate) fn thinking_summary_instruction(thinking: &str) -> String {
          - \"The assistant reads the failing test output to understand why the build is red.\" \
            -> \"Build red from missing mold linker\"\n\
          - \"The user wants a new flag, so the assistant plans to add it to the CLI args and wire it through.\" \
-           -> \"Add --dry-run flag, thread it to executor\"\n\n\
-         Plain text only. No preamble, labels, markdown or quotes. Do not call tools.\n\n\
-         <reasoning>\n{thinking}\n</reasoning>"
-    )
+           -> \"Add --dry-run flag, thread it to executor\"\n",
+    );
+    if !prior.is_empty() {
+        out.push_str(
+            "\nEarlier summaries from this session are listed below, oldest first. They are \
+             context for DIRECTION only: read them to see where the work is heading, and to \
+             avoid repeating a point one of them already made.\n\
+             Do not quote, copy, or lightly reword any of them. Each summary must describe \
+             only the reasoning below, in this block's own words.\n\n\
+             <previous_summaries>\n",
+        );
+        for line in prior {
+            out.push_str("- ");
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str("</previous_summaries>\n");
+    }
+    out.push_str(
+        "\nPlain text only. No preamble, labels, markdown or quotes. Do not call tools.\n\n",
+    );
+    out.push_str("<reasoning>\n");
+    out.push_str(thinking);
+    out.push_str("\n</reasoning>");
+    out
 }
 
 /// Clean the raw model output into a short plain-text summary.
@@ -125,10 +233,127 @@ mod tests {
 
     #[test]
     fn instruction_carries_the_reasoning() {
-        let text = thinking_summary_instruction("check the parser first");
+        let text = thinking_summary_instruction("check the parser first", &[]);
         assert!(text.contains("<reasoning>\ncheck the parser first\n</reasoning>"));
         assert!(text.contains("5 to 20 words"));
         assert!(text.contains("never \"The assistant\""));
+        assert!(
+            !text.contains("<previous_summaries>"),
+            "the first summary of a session must carry no history block"
+        );
+    }
+
+    #[test]
+    fn instruction_frames_prior_summaries_as_direction_and_forbids_reuse() {
+        let text = thinking_summary_instruction(
+            "now weigh the retry budget",
+            &[
+                "Offset bug is in the caller".to_string(),
+                "Reuse the retry helper".to_string(),
+            ],
+        );
+        assert!(text.contains("<previous_summaries>"));
+        assert!(text.contains("- Offset bug is in the caller"));
+        assert!(text.contains("- Reuse the retry helper"));
+        assert!(text.contains("</previous_summaries>"));
+        assert!(
+            text.contains("DIRECTION"),
+            "the block must say what the prior summaries are for"
+        );
+        assert!(
+            text.contains("avoid repeating"),
+            "the block must ask the model not to repeat a prior point"
+        );
+        assert!(
+            text.contains("Do not quote, copy, or lightly reword"),
+            "the block must forbid echoing a prior summary's wording"
+        );
+        // The current reasoning still ends the message and is the only <reasoning> block.
+        assert!(text.ends_with("<reasoning>\nnow weigh the retry budget\n</reasoning>"));
+        assert_eq!(text.matches("<reasoning>").count(), 1);
+    }
+
+    #[test]
+    fn selection_takes_the_union_of_the_window_and_the_count_floor() {
+        let entries: VecDeque<(i64, String)> = (0..6)
+            .map(|i| (1_000 * i, format!("summary {i}")))
+            .collect();
+        // Window of 2.5s at t=5000 keeps entries at 3000..=5000; the count
+        // floor of 5 keeps everything from index 1 up. Union, oldest first.
+        let selected = select_prior_summaries(&entries, 5_000, 2, 5);
+        assert_eq!(
+            selected,
+            vec![
+                "summary 1".to_string(),
+                "summary 2".to_string(),
+                "summary 3".to_string(),
+                "summary 4".to_string(),
+                "summary 5".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn count_floor_carries_a_slow_session_where_the_window_is_empty() {
+        let entries: VecDeque<(i64, String)> = (0..3)
+            .map(|i| (i * 600_000, format!("summary {i}")))
+            .collect();
+        // Ten minutes between calls, a 2s window selects none by time; the
+        // floor of 2 still carries the two newest.
+        let selected = select_prior_summaries(&entries, 1_200_000, 2, 2);
+        assert_eq!(
+            selected,
+            vec!["summary 1".to_string(), "summary 2".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_count_floor_above_the_default_capacity_is_kept_in_full() {
+        let requested = THINKING_SUMMARY_HISTORY_CAPACITY + 10;
+        let history = ThinkingSummaryHistory::new(0, requested as u32);
+        for i in 0..(requested + 5) {
+            history.record(1_000 * i as i64, format!("summary {i}"));
+        }
+        let all = history.prior_for((requested + 4) as i64 * 1_000);
+        assert_eq!(
+            all.len(),
+            requested,
+            "a raised min-count must not be silently trimmed to the default capacity"
+        );
+        assert_eq!(all.last().unwrap(), &format!("summary {}", requested + 4));
+    }
+
+    #[test]
+    fn zero_window_and_zero_count_select_nothing() {
+        let entries: VecDeque<(i64, String)> =
+            (0..4).map(|i| (100 * i, format!("summary {i}"))).collect();
+        assert!(select_prior_summaries(&entries, 400, 0, 0).is_empty());
+        assert!(select_prior_summaries(&VecDeque::new(), 400, 120, 5).is_empty());
+    }
+
+    #[test]
+    fn history_records_in_order_and_bounds_itself() {
+        let history = ThinkingSummaryHistory::new(120, 5);
+        for i in 0..3 {
+            history.record(1_000 * i, format!("summary {i}"));
+        }
+        assert_eq!(
+            history.prior_for(2_000),
+            vec![
+                "summary 0".to_string(),
+                "summary 1".to_string(),
+                "summary 2".to_string(),
+            ]
+        );
+        for i in 3..(THINKING_SUMMARY_HISTORY_CAPACITY + 10) {
+            history.record(i as i64 * 1_000, format!("summary {i}"));
+        }
+        let all = history.prior_for((THINKING_SUMMARY_HISTORY_CAPACITY + 9) as i64 * 1_000);
+        assert_eq!(all.len(), THINKING_SUMMARY_HISTORY_CAPACITY);
+        assert_eq!(
+            all.last().unwrap(),
+            &format!("summary {}", THINKING_SUMMARY_HISTORY_CAPACITY + 9)
+        );
     }
 
     #[test]

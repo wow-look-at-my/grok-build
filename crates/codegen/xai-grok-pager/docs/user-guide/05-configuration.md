@@ -78,6 +78,13 @@ thinking_summaries = true              # under a collapsed thinking block, show 
                                        # [models].thinking_summary. A session reads it when it starts, so
                                        # a change applies to the next session (/settings > Summarize
                                        # thinking)
+thinking_summary_history_window_secs = 120 # how far back a thinking block's summary may look for
+                                       # earlier summaries from the same session, so it keeps the
+                                       # work's direction instead of repeating an earlier gist
+                                       # (default: 120 seconds; 0 drops the time half)
+thinking_summary_history_min_count = 5 # always include this many of the most recent summaries, even
+                                       # when they are older than the window above (default: 5; a 0
+                                       # here and a 0 window leave each summary stateless)
 group_tool_verbs = true                # fold runs of read/search/list tool calls and subagent rows
                                        # — and finished thoughts among them — into one row (default: true)
 collapsed_edit_blocks = false          # show edits as one-line +N/-M diffstat summaries and merge

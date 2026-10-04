@@ -188,6 +188,15 @@ pub struct UiConfig {
     /// Summarize each thinking block and show the summary under its collapsed header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_summaries: Option<bool>,
+    /// How far back, in seconds, the thinking-summary call may look for earlier
+    /// summaries to steer the direction of the new one. `None` = 120. A `0`
+    /// here and a `0` min-count leave the summary call with no history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_summary_history_window_secs: Option<u32>,
+    /// Include at least this many of the most recent summaries even when they
+    /// are older than the window above. `None` = 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_summary_history_min_count: Option<u32>,
     /// Fold runs of consecutive non-destructive tool calls (reads, searches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_tool_verbs: Option<bool>,
@@ -350,6 +359,8 @@ impl Default for UiConfig {
             selection_highlight_duration_ms: None,
             show_thinking_blocks: None,
             thinking_summaries: None,
+            thinking_summary_history_window_secs: None,
+            thinking_summary_history_min_count: None,
             group_tool_verbs: None,
             collapsed_edit_blocks: None,
             prompt_suggestions: None,
@@ -421,6 +432,26 @@ impl UiConfig {
     pub fn thinking_summaries_enabled(&self) -> bool {
         self.thinking_summaries
             .unwrap_or(Self::THINKING_SUMMARIES_DEFAULT)
+    }
+
+    /// Default for [`Self::thinking_summary_history_window_secs`] when unset.
+    /// A rapid-fire burst of model calls is covered by the count floor below;
+    /// this bounds how stale a summary may be when the session has been idle.
+    pub const THINKING_SUMMARY_HISTORY_WINDOW_SECS_DEFAULT: u32 = 120;
+
+    /// Default for [`Self::thinking_summary_history_min_count`] when unset.
+    /// Keeps a few predecessors in view through a slow stretch where the time
+    /// window alone would select nothing.
+    pub const THINKING_SUMMARY_HISTORY_MIN_COUNT_DEFAULT: u32 = 5;
+
+    pub fn thinking_summary_history_window_secs_value(&self) -> u32 {
+        self.thinking_summary_history_window_secs
+            .unwrap_or(Self::THINKING_SUMMARY_HISTORY_WINDOW_SECS_DEFAULT)
+    }
+
+    pub fn thinking_summary_history_min_count_value(&self) -> u32 {
+        self.thinking_summary_history_min_count
+            .unwrap_or(Self::THINKING_SUMMARY_HISTORY_MIN_COUNT_DEFAULT)
     }
 
     /// Default for [`Self::min_output_tokens_per_sec`] when unset. Well under
@@ -619,6 +650,20 @@ mod tests {
             ..Default::default()
         };
         assert!(!off.thinking_summaries_enabled());
+    }
+
+    #[test]
+    fn thinking_summary_history_defaults_are_two_minutes_and_five() {
+        let ui = UiConfig::default();
+        assert_eq!(ui.thinking_summary_history_window_secs_value(), 120);
+        assert_eq!(ui.thinking_summary_history_min_count_value(), 5);
+        let set = UiConfig {
+            thinking_summary_history_window_secs: Some(0),
+            thinking_summary_history_min_count: Some(3),
+            ..Default::default()
+        };
+        assert_eq!(set.thinking_summary_history_window_secs_value(), 0);
+        assert_eq!(set.thinking_summary_history_min_count_value(), 3);
     }
 
     #[test]

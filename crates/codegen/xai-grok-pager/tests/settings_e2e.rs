@@ -50,6 +50,8 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "output_rate_window_secs",
     "output_rate_max_retries",
     "ttft_timeout_secs",
+    "thinking_summary_history_window_secs",
+    "thinking_summary_history_min_count",
     "scroll_speed",
     "scroll_mode",
     "scroll_lines",
@@ -2104,6 +2106,8 @@ fn registry_kind_membership_through_pr_14() {
             "output_rate_window_secs",
             "scroll_lines",
             "scroll_speed",
+            "thinking_summary_history_min_count",
+            "thinking_summary_history_window_secs",
             "ttft_timeout_secs"
         ],
         "Int kind membership drift (PR 8)",
@@ -2217,6 +2221,10 @@ fn defaults_round_trip_through_registry() {
             "output_rate_window_secs" => SettingValue::Int(10),
             "output_rate_max_retries" => SettingValue::Int(2),
             "ttft_timeout_secs" => SettingValue::Int(120),
+            // The thinking-summary history ships with a two-minute lookback and a
+            // five-summary floor, so a rapid-fire run keeps a short direction chain.
+            "thinking_summary_history_window_secs" => SettingValue::Int(120),
+            "thinking_summary_history_min_count" => SettingValue::Int(5),
             "scroll_speed" => SettingValue::Int(50),
             "scroll_mode" => SettingValue::Enum("auto"),
             "scroll_lines" => SettingValue::Int(3),

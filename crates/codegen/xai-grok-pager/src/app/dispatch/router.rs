@@ -92,8 +92,9 @@ use super::settings::setters::{
     set_respect_manual_folds, set_scroll_lines, set_scroll_mode, set_scroll_speed,
     set_show_thinking_blocks, set_show_tips, set_simple_mode, set_stop_gate_ci_failing,
     set_stop_gate_unfinished_todos, set_subagent_model_inheritance, set_theme,
-    set_thinking_summaries, set_timeline, set_timestamps, set_ttft_timeout_secs, set_vim_mode,
-    set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
+    set_thinking_summaries, set_thinking_summary_history_min_count,
+    set_thinking_summary_history_window_secs, set_timeline, set_timestamps, set_ttft_timeout_secs,
+    set_vim_mode, set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
 };
 use super::settings::ui::{
     dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_howto_guides,
@@ -1173,6 +1174,12 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetOutputRateWindowSecs(v) => set_output_rate_window_secs(app, v),
         Action::SetOutputRateMaxRetries(v) => set_output_rate_max_retries(app, v),
         Action::SetTtftTimeoutSecs(v) => set_ttft_timeout_secs(app, v),
+        Action::SetThinkingSummaryHistoryWindowSecs(v) => {
+            set_thinking_summary_history_window_secs(app, v)
+        }
+        Action::SetThinkingSummaryHistoryMinCount(v) => {
+            set_thinking_summary_history_min_count(app, v)
+        }
         Action::SetShowTips(v) => set_show_tips(app, v),
         Action::SetDisplayRefreshAutoCadence(v) => set_display_refresh_auto_cadence(app, v),
         Action::PreviewTheme(v) => preview_theme(app, v),

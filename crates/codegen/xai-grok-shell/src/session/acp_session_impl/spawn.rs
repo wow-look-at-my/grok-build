@@ -2106,6 +2106,15 @@ pub(crate) async fn spawn_session_actor(
         title_refresh_generation: std::cell::Cell::new(0),
         next_title_refresh_idx: std::cell::Cell::new(initial_title_refresh_idx),
         thinking_summaries_enabled: effective_config.ui.thinking_summaries_enabled(),
+        thinking_summary_history:
+            crate::session::helpers::thinking_summary::ThinkingSummaryHistory::new(
+                effective_config
+                    .ui
+                    .thinking_summary_history_window_secs_value(),
+                effective_config
+                    .ui
+                    .thinking_summary_history_min_count_value(),
+            ),
         session_turn_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),

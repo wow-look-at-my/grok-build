@@ -324,6 +324,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 turn_summary_enabled: false,
                 title_refresh_enabled: false,
                 thinking_summaries_enabled: false,
+                thinking_summary_history: Default::default(),
                 session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
                 streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -885,6 +886,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 turn_summary_enabled: false,
                 title_refresh_enabled: false,
                 thinking_summaries_enabled: false,
+                thinking_summary_history: Default::default(),
                 session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
                 streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -1257,6 +1259,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 turn_summary_enabled: false,
                 title_refresh_enabled: false,
                 thinking_summaries_enabled: false,
+                thinking_summary_history: Default::default(),
                 session_turn_active: std::sync::Arc::new(
                     std::sync::atomic::AtomicBool::new(false),
                 ),
@@ -2839,6 +2842,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 turn_summary_enabled: false,
                 title_refresh_enabled: false,
                 thinking_summaries_enabled: false,
+                thinking_summary_history: Default::default(),
                 session_turn_active: std::sync::Arc::new(
                     std::sync::atomic::AtomicBool::new(false),
                 ),

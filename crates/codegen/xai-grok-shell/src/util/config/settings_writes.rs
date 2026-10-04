@@ -477,6 +477,19 @@ pub async fn set_ttft_timeout_secs(value: i64) -> Result<()> {
     update_config(|cfg| cfg.ui.ttft_timeout_secs = Some(value)).await
 }
 
+/// Persist `[ui].thinking_summary_history_window_secs`; `0` drops the time half
+/// of the history selection.
+pub async fn set_thinking_summary_history_window_secs(value: i64) -> Result<()> {
+    let value = to_u32_at_least(value, 0);
+    update_config(|cfg| cfg.ui.thinking_summary_history_window_secs = Some(value)).await
+}
+
+/// Persist `[ui].thinking_summary_history_min_count`; `0` drops the count half.
+pub async fn set_thinking_summary_history_min_count(value: i64) -> Result<()> {
+    let value = to_u32_at_least(value, 0);
+    update_config(|cfg| cfg.ui.thinking_summary_history_min_count = Some(value)).await
+}
+
 /// Persist `[ui].scroll_speed` via `update_config`.
 /// Defensively clamps to `[1, 100]` at the shell boundary.
 pub async fn set_scroll_speed(value: i64) -> Result<()> {

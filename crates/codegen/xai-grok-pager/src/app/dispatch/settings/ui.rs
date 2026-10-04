@@ -15,6 +15,7 @@ use super::setters::{
     set_scroll_mode_inner, set_scroll_speed_inner, set_show_thinking_blocks_inner,
     set_show_tips_inner, set_simple_mode_inner, set_stop_gate_ci_failing_inner,
     set_stop_gate_unfinished_todos_inner, set_theme_inner, set_thinking_summaries_inner,
+    set_thinking_summary_history_min_count_inner, set_thinking_summary_history_window_secs_inner,
     set_timeline_inner, set_timestamps, set_timestamps_inner, set_ttft_timeout_secs_inner,
     set_vim_mode_inner, set_voice_capture_mode_inner, set_voice_keybind_enabled_inner,
     set_voice_stt_language_inner,
@@ -766,6 +767,12 @@ pub(in crate::app::dispatch) fn action_for_reset(
             Some(Action::SetOutputRateMaxRetries(*i))
         }
         ("ttft_timeout_secs", SettingValue::Int(i)) => Some(Action::SetTtftTimeoutSecs(*i)),
+        ("thinking_summary_history_window_secs", SettingValue::Int(i)) => {
+            Some(Action::SetThinkingSummaryHistoryWindowSecs(*i))
+        }
+        ("thinking_summary_history_min_count", SettingValue::Int(i)) => {
+            Some(Action::SetThinkingSummaryHistoryMinCount(*i))
+        }
         // coding_data_sharing: "opt-in" / "opt-out" map to bool; both arms are needed (registry default is "opt-out")
         ("coding_data_sharing", SettingValue::Enum("opt-in")) => {
             Some(Action::SetCodingDataSharing { opted_in: true })
@@ -1027,6 +1034,12 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             set_output_rate_max_retries_inner(app, *i)
         }
         ("ttft_timeout_secs", SettingValue::Int(i)) => set_ttft_timeout_secs_inner(app, *i),
+        ("thinking_summary_history_window_secs", SettingValue::Int(i)) => {
+            set_thinking_summary_history_window_secs_inner(app, *i)
+        }
+        ("thinking_summary_history_min_count", SettingValue::Int(i)) => {
+            set_thinking_summary_history_min_count_inner(app, *i)
+        }
         // scroll_speed: direct inner call (clamp handled by inner).
         ("scroll_speed", SettingValue::Int(i)) => set_scroll_speed_inner(app, *i as u8),
         // scroll_mode: restore the cache mirror to the canonical value.
