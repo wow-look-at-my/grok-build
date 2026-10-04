@@ -2472,8 +2472,8 @@ async fn verification_stage_panel_refutes_returns_not_achieved() {
 }
 
 #[tokio::test]
-async fn verification_stage_skeptic0_medium_refute_does_not_short_circuit() {
-    // A medium-confidence refute is NOT decisive: the full panel runs.
+async fn verification_stage_skeptic0_medium_refute_short_circuits() {
+    // A medium-confidence refute is decisive. The cold skeptics would clear it, but they must never run.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("medium", None),
         MockResponse::not_refuted(),
@@ -2539,8 +2539,8 @@ async fn verification_stage_all_blocking_refuters_returns_blocked() {
 
 #[tokio::test]
 async fn verification_stage_mixed_blocking_and_fixable_stays_not_achieved() {
-    // Skeptic refutes medium (so the panel runs) with a contradiction; skeptic refutes with an ordinary fixable gap A
-    // model-fixable gap remains, so the verdict is NotAchieved, NOT Blocked
+    // Skeptic blocks on a contradiction, so the panel runs. The verdict is therefore
+    // NotAchieved, not Blocked.
     let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("medium", Some("contradiction")),
         MockResponse::refuted_with("high", None),
@@ -2642,7 +2642,7 @@ async fn verification_stage_multi_refuter_all_blocking_returns_blocked() {
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
         2,
-        "medium skeptic 0 must fan out the full panel",
+        "a blocking skeptic 0 must fan out the full panel",
     );
     assert!(
         result.skeptic0_session_id.is_some(),
@@ -2665,9 +2665,8 @@ async fn verification_stage_multi_refuter_all_blocking_returns_blocked() {
 
 #[tokio::test]
 async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
-    // A synthetic refute (transport failure, confidence Unknown) is NOT a
-    // high-confidence refute, so it must fan out the full panel rather than
-    // short-circuit. Its retry fails too.
+    // A synthetic refute from a transport failure carries no verdict.
+    // So it fans out to the cold panel. Its retry fails too.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::transport_error(),
         MockResponse::transport_error(),
