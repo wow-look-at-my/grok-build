@@ -1024,7 +1024,7 @@ impl AgentView {
         if let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
             && matches!(self.active_pane, AgentPane::Prompt | AgentPane::Scrollback)
-            && let Some(outcome) = self.try_handle_esc_policy(key, registry)
+            && let Some(outcome) = self.try_handle_esc_policy(key)
         {
             return outcome;
         }
