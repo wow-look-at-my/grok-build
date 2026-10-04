@@ -161,6 +161,14 @@ async fn a_goal_verifier_cannot_read_the_main_session_record() {
                 "a bare record name must be refused: {bare}"
             );
 
+            // Climbing out of the scratch root does not hide the record it reaches.
+            let escaping = format!("/tmp/grok-goal-v/../../elsewhere/{RECORD_TRANSCRIPT}");
+            let escaped = read_once(&actor, "escaping", &escaping).await;
+            assert!(
+                escaped.contains("Refused: this call touches"),
+                "an escaping path must not hide the record: {escaped}"
+            );
+
             // The harness's own artifacts in the goal scratch root stay readable.
             let scratch_id = format!("{:012x}", std::process::id());
             let scratch = crate::session::goal_tracker::goal_scratch_root(&scratch_id);

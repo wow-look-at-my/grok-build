@@ -298,6 +298,9 @@ fn only_prints_literals(command: &str) -> bool {
 }
 
 /// Names of the session's own record. The implementer never needs them.
+/// The first [`MAIN_SESSION_OUTPUT_FILE_COUNT`] are the session's generated
+/// outputs, which every reader refuses; the entries after them name the
+/// harness's own evidence files, which a goal verifier child reads.
 const BOOKKEEPING_FILES: &[&str] = &[
     "chat_history.jsonl",
     "updates.jsonl",
@@ -306,6 +309,12 @@ const BOOKKEEPING_FILES: &[&str] = &[
     "goal-verdict-",
     "goal-verifier-details-",
 ];
+
+/// How many leading entries of [`BOOKKEEPING_FILES`] are the main session's
+/// generated outputs, its transcript and its update stream. A goal verifier
+/// child refuses those wherever they are spelled, and reads the harness's own
+/// evidence files that follow them.
+const MAIN_SESSION_OUTPUT_FILE_COUNT: usize = 2;
 
 /// Who is reading a tool call, and which session directories that reader must
 /// stay out of.
@@ -322,25 +331,17 @@ pub(crate) struct BookkeepingReader {
     pub main_session_dir: Option<String>,
     /// Paths the reader may read even though they sit in a session directory.
     pub allowed_paths: Vec<PathBuf>,
-    /// A verifier reads the run log, patch and verdict the harness wrote into
-    /// the goal's scratch root, so paths under it stay readable.
-    pub allow_goal_scratch: bool,
-    /// Whether the record file names are refused on their own, which catches a
-    /// record spelled without the session directory around it.
-    pub refuse_record_filenames: bool,
+    /// Whether the harness evidence names are refused on their own. A verifier
+    /// reads the run log and verdict files the harness wrote for it, so only
+    /// the main session refuses them.
+    pub refuse_harness_evidence_names: bool,
 }
 
 /// What in `args` names a session record this reader must not read, if
 /// anything. A goal's implementer that reads its transcript is building
 /// evidence the verifier reads for itself, so the harness refuses the call.
 pub(crate) fn bookkeeping_refusal(reader: &BookkeepingReader, args: &str) -> Option<String> {
-    let mut remainder = strip_allowed_paths(args, &reader.allowed_paths);
-    if reader.allow_goal_scratch {
-        remainder = strip_paths_containing(
-            &remainder,
-            crate::session::goal_tracker::GOAL_SCRATCH_DIR_PREFIX,
-        );
-    }
+    let remainder = strip_allowed_paths(args, &reader.allowed_paths);
     for dir in std::iter::once(Some(reader.session_dir.as_str()))
         .chain(reader.main_session_dir.as_deref().map(Some))
         .flatten()
@@ -350,12 +351,23 @@ pub(crate) fn bookkeeping_refusal(reader: &BookkeepingReader, args: &str) -> Opt
             return Some(dir.to_string());
         }
     }
-    if !reader.refuse_record_filenames {
-        return None;
+    let (generated_outputs, harness_evidence) =
+        BOOKKEEPING_FILES.split_at(MAIN_SESSION_OUTPUT_FILE_COUNT);
+    if let Some(name) = first_refused_name(generated_outputs, &remainder) {
+        return Some(name);
     }
-    BOOKKEEPING_FILES
+    if reader.refuse_harness_evidence_names
+        && let Some(name) = first_refused_name(harness_evidence, &remainder)
+    {
+        return Some(name);
+    }
+    None
+}
+
+fn first_refused_name(names: &[&str], args: &str) -> Option<String> {
+    names
         .iter()
-        .find(|name| remainder.contains(**name))
+        .find(|name| args.contains(**name))
         .map(|name| (*name).to_string())
 }
 
@@ -387,38 +399,6 @@ fn remove_whole_path(haystack: &str, needle: &str) -> String {
             out.push_str(&rest[..start]);
         }
         rest = &rest[end..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// `args` with every whole path that runs through `marker` blanked, so a
-/// read of the goal's own scratch root is not also read as a record read.
-#[allow(clippy::string_slice)] // every index moves by `len_utf8` or lands on a `find` match
-fn strip_paths_containing(args: &str, marker: &str) -> String {
-    if marker.is_empty() {
-        return args.to_string();
-    }
-    let mut out = String::with_capacity(args.len());
-    let mut rest = args;
-    while let Some(start) = rest.find(marker) {
-        let mut token_start = start;
-        while let Some(c) = rest[..token_start].chars().next_back() {
-            if !is_path_char(c) {
-                break;
-            }
-            token_start -= c.len_utf8();
-        }
-        let mut token_end = start + marker.len();
-        while let Some(c) = rest[token_end..].chars().next() {
-            if !is_path_char(c) {
-                break;
-            }
-            token_end += c.len_utf8();
-        }
-        out.push_str(&rest[..token_start]);
-        out.push(' ');
-        rest = &rest[token_end..];
     }
     out.push_str(rest);
     out
@@ -823,13 +803,10 @@ mod tests {
                 PathBuf::from(format!("{plan_root}/goal/plan.md")),
                 PathBuf::from(format!("{plan_root}/goal/plan.baseline.md")),
             ],
-            allow_goal_scratch: main_session_dir.is_some(),
-            refuse_record_filenames: true,
+            refuse_harness_evidence_names: main_session_dir.is_none(),
         }
     }
-
-    /// Record file names, assembled so this module's own source never spells
-    /// one out: the running binary reads these very arguments, and it refuses
+    /// Record file names, assembled so this module's own source never spells    /// one out: the running binary reads these very arguments, and it refuses
     /// a call whose text names a record.
     const RECORD_TRANSCRIPT: &str = concat!("chat_", "history.jsonl");
     const RECORD_UPDATES: &str = concat!("updates", ".jsonl");
@@ -837,8 +814,6 @@ mod tests {
     const RECORD_CLASSIFIER: &str = concat!("goal-", "classifier-");
     const RECORD_VERDICT: &str = concat!("goal-", "verdict-");
     const RECORD_VERIFIER_DETAILS: &str = concat!("goal-", "verifier-", "details-");
-    /// The goal scratch root's directory prefix, as `goal_scratch_root` builds it.
-    const PREFIX: &str = crate::session::goal_tracker::GOAL_SCRATCH_DIR_PREFIX;
 
     #[test]
     fn the_goal_plan_stays_readable_while_the_record_does_not() {
@@ -896,7 +871,7 @@ mod tests {
             bookkeeping_refusal(&r, &format!(r#"{{"path":"{plan}"}}"#)),
             None
         );
-        let scratch = format!("/tmp/{PREFIX}v/{RECORD_CLASSIFIER}v-1{RECORD_RUNLOG}");
+        let scratch = format!("/tmp/grok-goal-v/{RECORD_CLASSIFIER}v-1{RECORD_RUNLOG}");
         assert_eq!(
             bookkeeping_refusal(&r, &format!(r#"{{"path":"{scratch}"}}"#)),
             None,
@@ -920,6 +895,20 @@ mod tests {
             bookkeeping_refusal(&r, &format!(r#"{{"path":"{RECORD_UPDATES}"}}"#)).as_deref(),
             Some(RECORD_UPDATES)
         );
+        // Climbing out of the scratch root does not hide the record it reaches.
+        for record in [RECORD_TRANSCRIPT, RECORD_UPDATES] {
+            let escape = format!("/tmp/grok-goal-v/../../elsewhere/{record}");
+            assert_eq!(
+                bookkeeping_refusal(&r, &format!(r#"{{"path":"{escape}"}}"#)).as_deref(),
+                Some(record),
+                "an escaping path still names the record it reaches"
+            );
+            let into_main = format!("/tmp/grok-goal-v/../..{main}/{record}");
+            assert!(
+                bookkeeping_refusal(&r, &format!(r#"{{"path":"{into_main}"}}"#)).is_some(),
+                "an escaping path into the main session is refused"
+            );
+        }
     }
 
     #[test]

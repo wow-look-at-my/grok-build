@@ -1460,8 +1460,7 @@ impl SessionActor {
                 main_session_dir: Some(main.to_string_lossy().into_owned()),
                 allowed_paths: vec![plan.plan_path(), plan.plan_baseline_path()],
                 // The run log, patch and verdict the harness wrote for it.
-                allow_goal_scratch: true,
-                refuse_record_filenames: true,
+                refuse_harness_evidence_names: false,
             });
         }
         let tracker = self.goal_tracker.lock();
@@ -1472,8 +1471,7 @@ impl SessionActor {
             session_dir: tracker.session_dir().to_string_lossy().into_owned(),
             main_session_dir: None,
             allowed_paths: vec![tracker.plan_path(), tracker.plan_baseline_path()],
-            allow_goal_scratch: false,
-            refuse_record_filenames: true,
+            refuse_harness_evidence_names: true,
         })
     }
 
