@@ -33,20 +33,6 @@ env:
     {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
-  # The prose gate runs first and alone, so it is answered in the minute rather than at publish.
-  source-checks:
-    name: Source checks
-    # ubuntu-latest, not the 22.04 the build jobs pin: slopfix ships as a Cosmo APE whose MZ magic the older image's Mono binfmt handler claims.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: write
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: wow-look-at-my/slopfix@master
-
   fmt:
     name: Rustfmt
     runs-on: ubuntu-22.04
@@ -54,6 +40,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Mono's entry answers the MZ magic a Cosmopolitan APE also carries, so the kernel never reaches the ELF header behind it.
+      - name: Drop the binfmt entry that claims MZ
+        run: |
+          set -euo pipefail
+          for entry in /proc/sys/fs/binfmt_misc/*; do
+            if [ -f "$entry" ] && grep -q '^magic 4d5a' "$entry"; then
+              echo -1 | sudo tee "$entry" >/dev/null
+              echo "removed $(basename "$entry")"
+            fi
+          done
+
+      - uses: wow-look-at-my/slopfix@master
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
