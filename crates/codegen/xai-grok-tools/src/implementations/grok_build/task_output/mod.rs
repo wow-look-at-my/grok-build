@@ -191,6 +191,46 @@ pub(crate) fn task_output_requires_expr() -> Expr<ToolRequirement> {
 pub struct TaskOutputTool;
 
 impl TaskOutputTool {
+    /// The standard output of an `lpi` invocation, or nothing when it fails.
+    async fn run_lpi(argv: &[String]) -> Option<String> {
+        let (program, args) = argv.split_first()?;
+        let output = tokio::process::Command::new(program)
+            .args(args)
+            .output()
+            .await
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    /// A reading of a task's own log, when `lpi` can give one. A running task is
+    /// read as it stands. A task that finished successfully seeds the model when
+    /// none exists, because reading needs one and an unfinished log is
+    /// truncated.
+    async fn lpi_reading(snapshot: &crate::computer::types::TaskSnapshot) -> Option<String> {
+        if !crate::lpi_progress::available() {
+            return None;
+        }
+        let key = crate::lpi_progress::key_for(&snapshot.cwd, &snapshot.command);
+        let log = snapshot.output_file.as_path();
+
+        let Some(stdout) = Self::run_lpi(&crate::lpi_progress::read_argv(&key, log, None)).await
+        else {
+            if snapshot.completed && snapshot.exit_code == Some(0) {
+                let _ = Self::run_lpi(&crate::lpi_progress::learn_argv(&key, log)).await;
+            }
+            return None;
+        };
+
+        let reading = stdout
+            .lines()
+            .rev()
+            .find_map(crate::lpi_progress::parse_snapshot)?;
+        Some(crate::lpi_progress::progress_line(&reading))
+    }
+
     async fn run_single_task(
         &self,
         task_id: &str,
@@ -245,6 +285,13 @@ impl TaskOutputTool {
                 let res = resources.lock().await;
                 resolved_max_output_bytes(&res, "get_command_or_subagent_output", output_byte_limit)
             };
+
+            // A reading of the task's own log, folded in as the tool's own line.
+            let mut snapshot = snapshot;
+            if let Some(line) = Self::lpi_reading(&snapshot).await {
+                snapshot.output.push_str(&format!("\n[lpi {line}]"));
+            }
+
             return Ok(TaskOutputOutput::Result(apply_running_wait_hint(
                 snapshot_to_result(snapshot, &read_file_name, max_output_bytes),
                 wait_hint,

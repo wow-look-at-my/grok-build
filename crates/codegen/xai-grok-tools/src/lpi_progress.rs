@@ -81,6 +81,35 @@ pub fn read_argv(key: &str, log: &Path, db: Option<&Path>) -> Vec<String> {
     argv
 }
 
+/// The model key for a command run in a directory, so runs of the same shape in
+/// the same project share a model.
+pub fn key_for(cwd: &str, command: &str) -> String {
+    use std::hash::{Hash, Hasher};
+
+    let head: String = command
+        .split_whitespace()
+        .next()
+        .unwrap_or("command")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .collect();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    cwd.hash(&mut hasher);
+    head.hash(&mut hasher);
+    format!("grok-{head}-{:x}", hasher.finish())
+}
+
+/// The argument vector that folds a finished run into its model.
+pub fn learn_argv(key: &str, log: &Path) -> Vec<String> {
+    vec![
+        "lpi".to_string(),
+        "learn".to_string(),
+        "--key".to_string(),
+        key.to_string(),
+        log.to_string_lossy().into_owned(),
+    ]
+}
+
 /// The one-line reading for a snapshot, for a caller to surface.
 pub fn progress_line(snapshot: &Snapshot) -> String {
     let mut line = format!("progress {:.0}%", snapshot.progress * 100.0);
@@ -191,6 +220,24 @@ mod tests {
                 "/tmp/lpidb",
                 "/logs/1.log"
             ]
+        );
+    }
+
+    #[test]
+    fn a_key_separates_projects_and_command_shapes() {
+        let make_a = key_for("/proj/a", "make -j8");
+        // Flags do not make a different model; the project and the program do.
+        assert_eq!(make_a, key_for("/proj/a", "make"));
+        assert_ne!(make_a, key_for("/proj/b", "make"));
+        assert_ne!(make_a, key_for("/proj/a", "cargo build"));
+        assert!(make_a.starts_with("grok-make-"), "{make_a}");
+    }
+
+    #[test]
+    fn the_learner_names_the_key_and_the_log() {
+        assert_eq!(
+            learn_argv("k", Path::new("/logs/1.log")),
+            vec!["lpi", "learn", "--key", "k", "/logs/1.log"]
         );
     }
 
