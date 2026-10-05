@@ -1966,7 +1966,7 @@ fn int_step_sizes_table_pins_range_policy() {
         (1, 10, 1, 1),
         (1, 100, 1, 5),
         (40, 500, 5, 10),
-        (0, 0, 1, 1), // degenerate span
+        (0, 0, 1, 1),                        // degenerate span
         (1, 21, 1, 4),
         (1, 22, 1, 5),
         (1, 101, 1, 5),
