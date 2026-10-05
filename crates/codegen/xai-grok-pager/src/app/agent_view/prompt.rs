@@ -218,16 +218,6 @@ impl AgentView {
                         self.prompt.slash_close();
                         slash_accepted_send = true;
                     } else {
-                        // Whether to wait for an argument is the registry's
-                        // two-bit contract, not the trailing space: insert_text
-                        // gets one whenever a command ACCEPTS args, so keying
-                        // off it also stalls on `/login` and `/compact`, whose
-                        // args are optional and which run fine without them.
-                        //
-                        // Ask that of the LINE the accept produced, never of
-                        // the row on its own: an argument row's insert_text is
-                        // a bare value (`cursor-model`), which parses as no
-                        // command at all and reads as forever-incomplete.
                         let had_selection = snap.selection().is_some();
                         self.prompt.slash_commit_preview();
                         self.prompt.accept_slash_completion(&self.session.models);
@@ -239,9 +229,7 @@ impl AgentView {
                         if chains {
                             return InputOutcome::Changed;
                         }
-                        // The accepted text carries the space that was there to
-                        // type an argument into. Nothing is going to be typed
-                        // into it, so it would ride along into the command line.
+                        // The accepted text carries the space that was there to type an argument into.
                         let sent = self.prompt.text().trim_end().to_owned();
                         self.prompt.set_text(&sent);
                         self.prompt.set_cursor(sent.len());
@@ -566,16 +554,8 @@ impl AgentView {
                         self.prompt_input_mode = PromptInputMode::Normal;
                         return InputOutcome::Action(action);
                     }
-                    // Empty (or backslash continuation). Mid-turn + a queued
-                    // follow-up: bare Enter interrupts the running turn and
-                    // hands the model everything queued, so the interrupt needs
-                    // no chord.
-                    // Skip while editing a queued row (edit-mode Enter is
-                    // handled earlier for non-empty; empty must stay a no-op).
-                    // Guard on an actually-empty composer: try_send() also
-                    // returns None after a backslash continuation, which leaves
-                    // the (non-empty) draft in place — that Enter must only
-                    // insert the newline, not fire a queued follow-up.
+                    // Empty (or backslash continuation). Mid-turn + a queued follow-up: bare Enter interrupts the running turn and hands the model everything queued, so the interrupt needs no chord. Skip while editing a queued row (edit-mode Enter
+                    // is handled earlier for non-empty; empty must stay a no-op).
                     if matches!(self.prompt_mode, PromptMode::Normal)
                         && self.prompt.text().trim().is_empty()
                         && let Some(outcome) = if self.session.state.is_turn_running() {

@@ -1,19 +1,9 @@
 //! The harness model slots: every place the harness picks a model.
-//!
-//! A slot is one job the harness sends to a model. Each slot has a
-//! `[models]` key in `config.toml`, an environment variable, and a row in
-//! the settings modal. Nothing in the harness may choose a model that is
-//! not a slot here. A new model call adds a slot in the same change.
-//!
-//! An unset slot INHERITS the session model, except where
-//! [`ModelSlot::compiled_default`] names one. A slot that inherits costs
-//! nothing and follows a `/model` switch.
 
 /// One model-choosing job in the harness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelSlot {
-    /// Stable id. It is the `[models]` key, the settings-modal key suffix,
-    /// and the environment variable's lowercase tail.
+    /// Stable id.
     pub id: &'static str,
     /// Settings-modal row label.
     pub label: &'static str,
@@ -34,20 +24,13 @@ pub enum SlotFallback {
     SessionModel,
     /// A compiled default from `default_models.json`.
     Compiled,
-    /// A default the consumer owns, with its own guards. The slot resolves
-    /// to nothing and the consumer's existing fallback runs. Used where the
-    /// default is not simply a model id — `prompt_suggestion` picks between
-    /// a client hint and a built-in, and drops the call when the model is
-    /// outside the catalog.
+    /// A default the consumer owns, with its own guards.
     ConsumerDefault,
 }
 
 impl ModelSlot {
-    /// The settings-modal registry key for this slot.
-    ///
-    /// The key is a `&'static str` because the registry stores metadata
-    /// without allocating. [`slot_setting_keys`] holds the one static
-    /// string per slot; this looks it up by id.
+    /// The settings-modal registry key for this slot. The key is a `&'static
+    /// str` because the registry stores metadata without allocating.
     pub fn setting_key(&self) -> &'static str {
         slot_setting_keys()
             .iter()

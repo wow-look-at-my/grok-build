@@ -26,12 +26,8 @@ const GOAL_HISTORY_MAX: usize = 64;
 
 // Phase / Status enums
 
-/// How a goal decides that it is done.
-///
-/// `Full` runs the planner and sends a completion candidate to the
-/// skeptic panel. `Lite` runs neither.
-/// only check: its `candidate_complete` ends the goal, and any other
-/// verdict sends the model back with the evaluator's reason.
+/// How a goal decides that it is done. `Full` runs the planner and sends a
+/// completion candidate to the skeptic panel.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GoalMode {
@@ -366,7 +362,7 @@ fn append_skeptic_reports(scratch_root: &std::path::Path, dest: &std::path::Path
 }
 
 /// The goal model's private scratch dir (`<scratch_root>/implementer`).
-/// The implementer writes throwaway files here. Nothing in it is evidence.
+/// implementer writes throwaway files here.
 pub(crate) fn implementer_scratch_dir(verifier_id: &str) -> PathBuf {
     goal_scratch_root(verifier_id).join("implementer")
 }
@@ -384,8 +380,7 @@ pub struct GoalOrchestration {
     pub status: GoalStatus,
     pub phase: GoalPhase,
     pub token_budget: Option<i64>,
-    /// How the goal is checked. A snapshot from an older shell has no
-    /// mode and reads as `Full`, which is what it ran under.
+    /// How the goal is checked.
     #[serde(default)]
     pub mode: GoalMode,
     pub elapsed_ms: u64,
@@ -467,11 +462,6 @@ pub struct GoalOrchestration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skeptic0_session_id: Option<String>,
     /// Skeptic index → `{model, agent_type}` assignment of the LAST panel.
-    /// Every panel reassigns from the current pool; this copy only tells the
-    /// next panel whether skeptic 0 changed model, and so cannot continue its
-    /// run. Empty ⇒ all skeptics inherited the session model. Persists across
-    /// snapshot save/restore like `skeptic0_session_id`, and is reset on the
-    /// same terminal transitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skeptic_model_assignment: Vec<crate::util::config::GoalRoleModel>,
     /// Normalized gap fingerprint of the previous `NotAchieved` rejection (see `goal_classifier::gap_fingerprint`).
@@ -513,19 +503,11 @@ pub struct GoalOrchestration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub changes_baseline_commit: Option<String>,
 
-    /// Session prompt index at goal creation. The run log
-    /// (`goal_classifier::run_log`) keeps only tool calls on a turn at or
-    /// after it, so a run from before the goal is not read as the goal's
-    /// evidence. `None` on snapshots that predate the field: the whole
-    /// conversation is logged.
+    /// Session prompt index at goal creation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_prompt_index: Option<usize>,
 
-    /// Path to the goal's plan markdown (`<session_dir>/goal/plan.md`,
-    /// via [`GoalTracker::plan_path`]). `None` until a planner writes
-    /// one. `is_some()` is the single source of truth for "this goal
-    /// has a plan" — gates setup-time fire, the resume-retry path,
-    /// and the load-time reconciler. Persisted across restart.
+    /// Path to the goal's plan markdown (`<session_dir>/goal/plan.md`, via [`GoalTracker::plan_path`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_file: Option<PathBuf>,
 
@@ -535,21 +517,11 @@ pub struct GoalOrchestration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_baseline_file: Option<PathBuf>,
 
-    /// True once the harness has populated the session's todo list from the
-    /// published plan (the planner's own list, or the plan body when the
-    /// planner named nothing). Seeding happens at plan publication only, so
-    /// this is the guard that keeps a retry / resume / re-entry from adding a
-    /// second copy of every step. Persisted, so the guard survives a restart;
-    /// the append is additionally deduped by content, so a lost flag cannot
-    /// duplicate either.
+    /// True once the harness has populated the session's todo list from the published plan.
     #[serde(default)]
     pub plan_todos_seeded: bool,
 
-    /// True once the harness created and squat-verified the scratch root AND
-    /// the implementer subdir, so prompts can honestly say the dir exists.
-    /// `#[serde(skip)]`: recomputed by `from_snapshot` on every reload (the
-    /// sole reload path), so a persisted value would be dead-on-read — same as
-    /// the recomputed/transient `live_*` fields below.
+    /// True once the harness created and squat-verified the scratch root AND the implementer subdir.
     #[serde(skip)]
     pub scratch_dir_ready: bool,
 
@@ -619,10 +591,7 @@ pub struct GoalTracker {
 #[derive(Debug)]
 pub(crate) struct GoalPlannerRunState {
     pub(crate) cancel: tokio_util::sync::CancellationToken,
-    /// Filled by the planner's spawn with the coordinator id of the live
-    /// planner child. Send Now reads it to address the user's context at the
-    /// running planner — nothing is restarted (see
-    /// [`GoalTracker::planner_subagent_id`]).
+    /// Filled by the planner's spawn with the coordinator id of the live planner child.
     pub(crate) subagent_id: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
@@ -653,9 +622,7 @@ impl GoalTracker {
         snapshot.verifying_in_flight = false;
         // No harness subagent survives a restart, so no role is running.
         snapshot.current_subagent_role = None;
-        // Token records anchoring a resumed skeptic-0's marginal accounting
-        // are in-memory only; a post-restart resume would re-count its full
-        // prior cumulative as fresh spend. Cold-spawn instead.
+        // Token records anchoring a resumed skeptic-0's marginal accounting are in-memory only.
         snapshot.skeptic0_session_id = None;
         // `verifier_id` is snapshot-controlled and embedded in paths later fed to `remove_dir_all`
         // A non-canonical id (e.g. `/../`) could escape the temp root.
@@ -726,8 +693,7 @@ impl GoalTracker {
 
     /// Coordinator id of the planner child spawned for the registered run, or
     /// `None` when no run is registered or its spawn has not published an id
-    /// yet. A run that finished clears with [`Self::take_planner_run`], so a
-    /// stale id is never addressed after the planner is gone.
+    /// yet.
     pub(crate) fn planner_subagent_id(&self) -> Option<String> {
         self.planner_run
             .as_ref()
@@ -1025,8 +991,7 @@ impl GoalTracker {
             o.plan_baseline_file = None;
             // Same for the seed guard: a later goal seeds its own plan.
             o.plan_todos_seeded = false;
-            // Terminal transition: reset all strategist state so a
-            // recreated/reactivated goal never inherits a stale count or note.
+            // Terminal transition: reset all strategist state so a recreated/reactivated goal never inherits a stale count.
             o.reset_strategist_fields();
             o.reset_evaluator_blocker_fields();
             // The achieved ack points the user at the details file, so it must outlive the scratch-root removal below

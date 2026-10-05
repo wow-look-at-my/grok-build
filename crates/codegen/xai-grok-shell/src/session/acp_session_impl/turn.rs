@@ -19,13 +19,6 @@ const STRUCTURED_OUTPUT_TOOL: &str = "StructuredOutput";
 const STRUCTURED_OUTPUT_MAX_RETRIES: u32 = 3;
 /// Whether the harvest that folds queued follow-ups into the running turn
 /// should run before this model request.
-///
-/// `loop_index` alone marks the opening pass of a call to
-/// `process_conversation_turn` — but a goal round or an auto-recovery retry
-/// calls that function fresh, resetting `loop_index` to 0, so its own
-/// `loop_index == 1` looks identical to the true start of the turn.
-/// `first_round` is the part of "opening pass of the WHOLE turn" that
-/// survives across those calls: only the very first round passes `true`.
 pub(crate) fn should_harvest_before_request(loop_index: u32, first_round: bool) -> bool {
     loop_index > 1 || !first_round
 }
@@ -1324,12 +1317,7 @@ impl SessionActor {
             let mut round_trace = trace_gcs_config;
             let mut round_artifact = artifact_tracker;
             let mut stop_continuations_this_turn: u32 = 0;
-            // Each goal round and auto-recovery retry calls
-            // `process_conversation_turn_with_recovery` fresh, so its own
-            // opening-pass skip (via `loop_index`) cannot tell a later
-            // round's first request from the turn's own. `first_round` is the
-            // part of that check that must survive across those calls: true
-            // only for the very first round below.
+            // Each goal round and auto-recovery retry calls `process_conversation_turn_with_recovery` fresh.
             let mut first_round = true;
             let mut salvage =
                 super::length_salvage::LengthSalvage::new(self.length_salvage_budget());
@@ -1411,17 +1399,12 @@ impl SessionActor {
                     .await
                 {
                     StopGateDecision::AllowStop => {
-                        // The built-in todo-stop gate is just another stop
-                        // hook: it fires after the user hooks allowed the
-                        // stop, consumes the SAME continuation budget (a
-                        // model that never engages its todos still stops
-                        // after MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
-                        // continuations), and its feedback rides the same
-                        // stop_hook_feedback user message.
-                        // The CI gate is the second built-in participant, and
-                        // it runs before the todo gate so a red branch is
-                        // reported even on a turn whose todos are all closed.
-                        // Both consume the same continuation budget.
+                        // The built-in todo-stop gate is another stop hook:
+                        // it fires after the user hooks allowed the stop,
+                        // consumes the SAME continuation budget (a model that
+                        // never engages its todos still stops after
+                        // MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
+                        // continuations).
                         if let Some(feedback) = self
                             .ci_stop_gate_feedback(prompt_id, stop_continuations_this_turn)
                             .await
@@ -2875,17 +2858,8 @@ impl SessionActor {
                 .await;
                 return Ok(TurnOutcome::StationarityEnded);
             }
-            // Ahead of the drain, and so ahead of a model request: a follow-up
-            // queued mid-turn reaches the model on the next request rather
-            // than after the turn it was aimed at. Skipped on the opening pass
-            // of the WHOLE turn (`loop_index == 1` and `first_round`) — the
-            // turn has produced nothing to steer yet, and a row queued in that
-            // window is picked up on the pass after it. `loop_index` alone
-            // cannot tell the opening pass of the turn from the opening pass
-            // of a later round: a goal continuation and an auto-recovery retry
-            // both call this function fresh, resetting `loop_index` to 0, so
-            // `first_round` carries the turn-scoped half of the check across
-            // those calls.
+            // Ahead of the drain, and so ahead of a model request: a
+            // follow-up queued mid-turn reaches the model.
             if should_harvest_before_request(loop_index, first_round) {
                 self.harvest_queued_prompts_into_interjections(false).await;
             }
@@ -2969,10 +2943,7 @@ impl SessionActor {
             if self.tool_context.task_output_token_budget.is_none() && !turn_parked.is_parked() {
                 self.refresh_token_if_expired().await;
             }
-            // A `/compact` the user sent while this turn was running. Here is
-            // the turn's own safe point: no model call is in flight, so
-            // replacing the conversation loses nothing. Ungated by the
-            // subagent budget check below — the user asked for this one.
+            // A `/compact` the user sent while this turn was running.
             self.run_pending_manual_compact().await;
             if self.tool_context.task_output_token_budget.is_none()
                 && !turn_parked.is_parked()
@@ -3284,29 +3255,17 @@ impl SessionActor {
                     continue;
                 }
                 Ok(SamplerTurnOutcome::CancelledForInterjection { partial }) => {
-                    // ASAP injection: the in-flight stream was cancelled so the
-                    // turn loop can drain the pending interjection NOW and
-                    // resubmit, instead of waiting for the (potentially long)
-                    // stream to finish. Commit any partial assistant text the
-                    // model had already produced so the resubmitted request
-                    // sees `partial assistant turn + user interjection` and the
-                    // conversation stays consistent.
+                    // ASAP injection: the in-flight stream was cancelled so
+                    // the turn loop can drain the pending interjection NOW.
                     if let Some(partial) = partial {
                         self.record_assistant_response(partial, false).await;
                     }
-                    // Drain the interjection that triggered the cancel so it
-                    // lands before the next model request; the loop then
-                    // `continue`s and rebuilds the request from the updated
-                    // chat state (partial assistant + interjection + prior
-                    // history).
+                    // Drain the interjection that triggered the cancel so it lands before the next model request.
                     self.drain_pending_interjections().await;
                     continue;
                 }
                 Ok(SamplerTurnOutcome::MaxTokensTruncated { partial }) => {
-                    // The provider cut the response off at its output-token
-                    // cap. Bounded by the same max-turns counter a tool round
-                    // uses: an unbroken run of truncated responses is a
-                    // runaway generation, not a legitimate long answer.
+                    // The provider cut the response off at its output-token cap.
                     let next_turn = tool_turn_count + 1;
                     if let Some(limit) = self.max_turns
                         && next_turn > limit
@@ -3519,9 +3478,7 @@ impl SessionActor {
                 "tokens_per_sec": tokens_per_sec,
             });
             // p50 hides the shape of an uneven stream, which is the whole
-            // question when a receive rate stutters. The per-chunk arrival
-            // curve answers it, and is opt-in because it is one number per
-            // chunk on a log that is otherwise one line per model call.
+            // question when a receive rate stutters.
             if crate::session::inference_metrics::log_stream_timing()
                 && let Some(obj) = inference_ctx.as_object_mut()
             {
@@ -3579,8 +3536,7 @@ impl SessionActor {
             let response_cost_ticks =
                 self.record_response_token_usage(&response, Some(model_duration_ms));
             // Read the session ledger AFTER the fold above so the client's
-            // running total moves on every call, not once per turn. Both ride
-            // the same actor channel, so this query is ordered after the fold.
+            // running total moves on every call, not once per turn.
             let session_cost_ticks = self
                 .chat_state_handle
                 .try_get_session_usage()
@@ -3962,10 +3918,7 @@ impl SessionActor {
                     },
                 )
                 .await;
-            // Re-resolve the live per-tool-call output cap from the current
-            // remaining context-window budget before these tools run, so a
-            // single tool result can't by itself hand back more than what's
-            // actually left of the window — see `reseed_context_budget_output_cap`.
+            // Re-resolve the live per-tool-call output cap from the current remaining context-window budget before these tools run.
             self.reseed_context_budget_output_cap().await;
             let execute_tool_calls_result = {
                 let _tool_phase = turn_phases.begin_tool_blocking();

@@ -73,10 +73,7 @@ pub enum ProfileName {
     Devbox,
     ReadOnly,
     Strict,
-    /// The reserved re-exec **jail** (path mounts via `--ro`/`--rw`/`--rn`), not
-    /// a nono/Landlock/Seatbelt profile. Magic and un-overridable: a project or
-    /// custom `sandbox.toml` profile cannot redefine it, and it never builds a
-    /// `SandboxProfile`/`SandboxManager`.
+    /// The reserved re-exec **jail** (path mounts via `--ro`/`--rw`/`--rn`), not a nono/Landlock/Seatbelt profile.
     Pathbox,
     Off,
     Custom(String),
@@ -416,9 +413,8 @@ impl ProfileName {
             ),
 
             // The pathbox jail is not a nono/Landlock/Seatbelt profile: it is
-            // applied by the re-exec jail (jail.rs) and `apply_sandbox` returns
-            // before reaching resolve. Reaching here means a call site skipped
-            // that interception — fail closed rather than build a hollow profile.
+            // applied by the re-exec jail (jail.rs) and `apply_sandbox`
+            // returns before reaching resolve.
             Self::Pathbox => anyhow::bail!(
                 "sandbox profile 'pathbox' is the path-mount jail, not a resolvable \
                  deny profile; it is applied by the re-exec jail, not SandboxManager"

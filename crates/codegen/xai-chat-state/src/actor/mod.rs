@@ -48,7 +48,7 @@ pub struct ChatStateActor {
 
 /// Text describing what a panic carried, for a log line.
 ///
-/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
+/// Both payloads `panic!` itself produces are a `&'static str` (a literal)
 /// and a `String` (a formatted one). Anything else is named as a non-message
 /// rather than reported as nothing.
 fn panic_payload(panic: &(dyn Any + Send)) -> String {
@@ -133,11 +133,9 @@ impl ChatStateActor {
     }
 
     /// Process one command, so a round that unwinds does not end the actor.
-    ///
-    /// The actor is the only writer of the session's conversation and the only
-    /// answerer of a handle's ack, so an actor lost to one command closes every
-    /// ack after it for the rest of the session. The panicked round's own ack
-    /// still closes: the sender unwinds with the command.
+    /// The actor is the only writer of the session's conversation and the
+    /// only answerer of a handle's ack, so an actor lost to one command
+    /// closes every ack after it for the rest of the session.
     async fn run_command(&mut self, cmd: ChatStateCommand) {
         match AssertUnwindSafe(self.handle_command(cmd))
             .catch_unwind()

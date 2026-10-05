@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)] // 2 hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
 
 //! Default model IDs loaded from `default_models.json` at runtime.
 //! Edit that JSON file to change them.

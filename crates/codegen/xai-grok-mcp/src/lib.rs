@@ -1,7 +1,7 @@
-#![allow(clippy::cast_possible_truncation)] // 7 hits predate the gate
-#![allow(clippy::expect_used)] // 1 hit predates the gate
-#![allow(clippy::string_slice)] // 3 hits predate the gate
-#![allow(clippy::unwrap_used)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::expect_used)]
+#![allow(clippy::string_slice)] // Hits predate the gate
+#![allow(clippy::unwrap_used)] // Hits predate the gate
 //! Two responsibilities:
 //!
 //! 1. **Quarantines `rmcp` 2.1 and `reqwest` 0.13.** `rmcp` 2.1 requires

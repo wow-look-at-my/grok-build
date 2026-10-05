@@ -37,16 +37,16 @@ fn combine_queued_prompts_enabled() -> bool {
 /// **Server-busy (`is_turn_running() || !shared_queue.is_empty()`):** the immediate-send path is for prompts that must queue server-side rather than start a turn locally.
 /// **FIFO guard (`pending_prompts.is_empty()`):** a prompt may only jump onto the server queue when the local drip-feed queue is empty.
 ///
-/// **No leader gate:** the shell's queue is what makes a mid-turn prompt
-/// arrive at the next gap between tool calls / model requests — the turn loop
+/// **No leader gate:** the shell's queue is what makes a mid-turn prompt arrive
+/// at the next gap between tool calls / model requests — the turn loop
 /// harvests it into the running turn there
 /// (`harvest_queued_prompts_into_interjections`). A prompt held in the local
 /// drip-feed queue instead reaches the model only once the whole turn ends, so
 /// gating this on leader mode meant single-client sessions never got ASAP
 /// delivery at all. Multi-client ordering is a separate concern the shared
-/// queue also solves; with one client the two queues still merge as *server
-/// rows first, then local rows*, so a local row (slash command, scheduled
-/// prompt) can never move above them.
+/// queue also solves; with one client both queues still merge as *server rows
+/// first, then local rows*, so a local row (slash command, scheduled prompt)
+/// can never move above them.
 pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
     let wake_running = agent.running_wake_turn.is_some();
     let server_busy =
@@ -60,12 +60,8 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
 }
 
 /// Whether a local row carries only text and images, and so survives the trip
-/// through [`server_queue_send_effect`] without losing anything the model sees.
-///
-/// A skill's wire payload and combined display segments have no place in that
-/// effect, so a row holding either stays local. Chip elements do not block:
-/// they only style a rewind restore, and the immediate-send path drops them
-/// the same way.
+/// through [`server_queue_send_effect`] without losing anything the model
+/// sees.
 fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
     prompt.kind == crate::app::agent::QueueEntryKind::Prompt
         && prompt.wire_blocks.is_none()
@@ -93,8 +89,7 @@ pub(super) fn server_queue_send_effect(
             skill_token_ranges,
         };
     }
-    // The builder rewrites the text (placeholder removal), so token ranges
-    // are not stamped here. The local image drain does the same.
+    // The builder rewrites the text (placeholder removal), so token ranges are not stamped here.
     let blocks = crate::prompt_images::build_content_blocks_with_workspace(text, images, Some(cwd));
     Effect::SendPromptBlocks {
         agent_id,
@@ -105,38 +100,11 @@ pub(super) fn server_queue_send_effect(
 }
 
 /// Whether a local row may be handed to the shell as a plain prompt row.
-///
-/// [`row_is_plain_text`] says the row's payload survives the trip, but a slash
-/// invocation must not take it: the shell may not know the command (pager-owned
-/// `/plan`, `/model`, …) and would hand the model the literal `/cmd args`, and
-/// even a command it does know resolves only when its OWN turn starts. Such a
-/// row — and one that owns its turn outright — stays local and runs as its own
-/// turn, the same as a `/compact` or bash row does.
 fn row_may_be_migrated(prompt: &crate::app::agent::QueuedPrompt) -> bool {
     row_is_plain_text(prompt) && !prompt.owns_its_turn()
 }
 
-/// Hand the local queue's leading plain-text rows to the shell while a turn is
-/// running, so ASAP delivery cannot latch off.
-///
-/// [`maybe_drain_queue`] only drains local rows once the session is idle, and
-/// [`immediate_server_send_eligible`] only lets a prompt onto the shell's queue
-/// while the local queue is empty. Together those two rules trap each other: a
-/// single row parked locally during a turn, such as a prompt typed during the
-/// startup race, keeps every later prompt local as well, and a
-/// local row is never harvested into the running turn
-/// (`harvest_queued_prompts_into_interjections` reads the shell's queue). A
-/// session that never idles — one driving a goal — never reaches the recovery
-/// in [`maybe_drain_queue`], so this function is the only rescue: it also runs
-/// on every inbound `session/update` (see `acp_handler::handle`), not only when
-/// the user submits a new prompt.
-///
-/// Only a leading run of plain rows moves, and it stops at the first row that
-/// cannot: the merged view renders server rows ahead of local ones, so
-/// migrating a prefix keeps the user's order, while migrating past a stuck row
-/// would hoist a newer prompt above an older one. A slash-invocation row is one
-/// that cannot move (see [`row_may_be_migrated`]): the shell resolves a command
-/// only when its own turn starts.
+/// Hand the local queue's leading plain-text rows to the shell while a turn is running, so ASAP delivery cannot latch off. [`maybe_drain_queue`] only drains local rows once the session is idle, and [`immediate_server_send_eligible`] only lets a prompt onto the shell's queue while the local queue is empty. Together those rules trap each other: a single row parked locally during a turn, such as a prompt typed during the startup race, keeps every later prompt local as well, and a local row is never harvested into the running turn (`harvest_queued_prompts_into_interjections` reads the shell's queue). A session that never idles — one driving a goal — never reaches the recovery in [`maybe_drain_queue`], so this function is the only rescue: it also runs on every inbound `session/update` (see `acp_handler::handle`), not only when the user submits a new prompt. Only a leading run of plain rows moves, and it stops at the first row that cannot: the merged view renders server rows ahead of local ones, so migrating a prefix keeps the user's order, while migrating past a stuck row would hoist a newer prompt above an older one. A slash-invocation row is one that cannot move (see [`row_may_be_migrated`]): the shell resolves a command only when its own turn starts.
 pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effect> {
     let mut effects = Vec::new();
     let crate::app::app_view::ActiveView::Agent(agent_id) = app.active_view else {
@@ -176,8 +144,7 @@ pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effec
         };
         let prompt_id = uuid::Uuid::new_v4().to_string();
         if let Some(agent) = app.agents.get_mut(&agent_id) {
-            // Same contract as the immediate-send path: this client owns the
-            // turn these deltas belong to.
+            // Same contract as the immediate-send path: this client owns the turn these deltas belong to.
             agent.note_self_originated_prompt(&prompt_id);
         }
         push_server_queue_echo(
@@ -309,9 +276,8 @@ fn attach_images_to_last_queued(
     images
 }
 
-/// The `<instructions>` half of a `/compact <instructions>` row, or `None` for
-/// a bare `/compact`. The row carries the command word because it is re-emitted
-/// verbatim (`CompactCommand::run`), and the shell wants the argument alone.
+/// The `<instructions>` half of a `/compact <instructions>` row, or `None`
+/// for a bare `/compact`.
 pub(super) fn compact_instructions(text: &str) -> Option<String> {
     let rest = text
         .trim_start()

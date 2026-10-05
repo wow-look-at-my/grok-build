@@ -416,14 +416,7 @@ pub struct ToolChoiceFunction {
     pub name: String,
 }
 
-/// Keys a tool call carries through an OpenAI-shaped API that this client only
-/// relays. Gemini 3 rejects a replayed function call whose thought signature is
-/// missing ("Function call is missing a thought_signature in functionCall
-/// parts"), and that signature reaches an OpenAI-shaped client only inside one
-/// of these: `extra_content` is Google's own spelling, `provider_specific_fields`
-/// the one a translating gateway uses. Nothing in here is read — what arrives on
-/// a tool call goes back out unchanged, which is the only form the provider
-/// accepts it in.
+/// Keys a tool call carries through an OpenAI-shaped API that this client only relays.
 pub const TOOL_CALL_VENDOR_KEYS: [&str; 2] = ["extra_content", "provider_specific_fields"];
 
 /// The [`TOOL_CALL_VENDOR_KEYS`] out of everything a tool call arrived with.
@@ -445,8 +438,7 @@ pub struct ToolCallRequest {
     #[serde(rename = "type")]
     pub kind: ToolType,
     pub function: ToolCallFunction,
-    /// Relayed verbatim; see [`TOOL_CALL_VENDOR_KEYS`]. Empty flattens to
-    /// nothing, so a provider that never sent one sees the same request as before.
+    /// Relayed verbatim; see [`TOOL_CALL_VENDOR_KEYS`].
     #[serde(flatten, default)]
     pub vendor: std::collections::BTreeMap<String, serde_json::Value>,
 }
@@ -483,9 +475,7 @@ pub struct ChatCompletionResponse {
     pub object: String,
     pub created: u64,
     pub model: String,
-    /// `null` reads as no choices: a gateway written in Go marshals an unset
-    /// slice as `null`, and rejecting the response loses the usage that rides
-    /// with it.
+    /// `null` reads as no choices: a gateway written in Go marshals an unset slice as `null`.
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub choices: Vec<ChatChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -510,10 +500,7 @@ pub enum FinishReason {
     ToolCalls,
     ContentFilter,
     FunctionCall,
-    /// Provider-reported error finish (OpenRouter sends this when the
-    /// upstream provider fails mid-generation). Maps to `StopReason::Stop`
-    /// so the turn completes normally rather than surfacing a deserialization
-    /// error to the user.
+    /// Provider-reported error finish (OpenRouter sends this when the upstream provider fails mid-generation).
     Error,
 }
 
@@ -543,8 +530,7 @@ pub struct ToolCallResponse {
     #[serde(rename = "type")]
     pub kind: String,
     pub function: ToolCallFunction,
-    /// Everything else the provider put on the call, kept so
-    /// [`tool_call_vendor_fields`] can pick the part a replay has to carry back.
+    /// Everything else the provider put on the call.
     #[serde(flatten, default)]
     pub vendor: std::collections::BTreeMap<String, serde_json::Value>,
 }
@@ -584,20 +570,12 @@ pub struct Usage {
     /// The REST mapper backfills `0` for unbilled requests; capture sites normalize `0` to "unreported" (see `stream/chat_completions.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_in_usd_ticks: Option<i64>,
-    /// Provider-reported request price in USD. OpenRouter and other
-    /// OpenAI-compatible aggregators report this instead of `cost_in_usd_ticks`.
-    /// Accepts both a bare float (e.g. `0.0000416`) and the Bifrost cost object
-    /// (e.g. `{"total_cost": 0.0000416, "input_tokens_cost": ...}`); capture
-    /// sites convert to ticks (×1e10) and prefer `cost_in_usd_ticks` when both
-    /// are present.
+    /// Provider-reported request price in USD.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<UsageCost>,
 }
 
-/// A provider-reported USD cost that may arrive as either a bare float or a
-/// Bifrost-style cost object. The float form is used by OpenRouter directly;
-/// the object form (`{"total_cost": ...}`) is what Bifrost emits when it
-/// re-serializes a passthrough `BifrostCost` struct.
+/// A provider-reported USD cost that may arrive as either a bare float or a Bifrost-style cost object.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageCost(f64);
 
@@ -673,8 +651,6 @@ impl<'de> Deserialize<'de> for UsageCost {
 /// Ticks per USD: one tick is 1e-10 USD.
 const TICKS_PER_USD: f64 = 1e10;
 
-/// One above `i64::MAX` as an exactly-representable `f64` (2^63). A whole
-/// `f64` strictly between -2^63 and 2^63 is an integer `i64` can hold exactly.
 const I64_TICKS_BOUND: f64 = 9_223_372_036_854_775_808.0;
 
 /// A USD amount whose tick form has no `i64`.
@@ -701,8 +677,6 @@ impl std::fmt::Display for CostTicksOverflow {
 
 impl std::error::Error for CostTicksOverflow {}
 
-/// Convert a USD amount to integer ticks (1 USD = 1e10 ticks), rounding to the
-/// nearest tick.
 ///
 /// `field` names where the amount came from and rides the error. An amount
 /// whose tick count leaves `i64` is `Err`: no tick count that the source did
@@ -712,19 +686,14 @@ pub fn ticks_from_usd(field: &'static str, usd: f64) -> Result<i64, CostTicksOve
     if !scaled.is_finite() || scaled.abs() >= I64_TICKS_BOUND {
         return Err(CostTicksOverflow { field, usd });
     }
-    // `scaled` is whole and inside -2^63..2^63, so this conversion is exact.
     #[allow(clippy::cast_possible_truncation)]
     let ticks = scaled as i64;
     Ok(ticks)
 }
 
-/// Convert a provider-reported USD float to integer ticks.
-///
-/// `Ok(None)` is the honest-absence answer for a missing, non-positive or
-/// non-finite amount ("unreported", never "free"). An amount too large to hold
-/// as ticks is `Err` naming the field and the amount, so a capture site never
-/// stores a price the provider did not report. Used by the sites that read
-/// `usage.cost`.
+/// Convert a provider-reported USD float to integer ticks. `Ok(None)` is the
+/// honest-absence answer for a missing, non-positive or non-finite amount
+/// ("unreported", never "free").
 pub fn usd_float_to_ticks(usd: Option<f64>) -> Result<Option<i64>, CostTicksOverflow> {
     let Some(v) = usd else {
         return Ok(None);
@@ -763,10 +732,7 @@ pub struct ChatCompletionChunk {
     pub object: String,
     pub created: u64,
     pub model: String,
-    /// `null` reads as no choices. Bifrost's `BifrostChatResponse.Choices` has
-    /// no `omitempty`, so every chunk it builds without choices -- the trailing
-    /// usage chunk among them -- arrives as `"choices": null`, and failing the
-    /// parse kills the whole turn with a serialization error.
+    /// `null` reads as no choices.
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub choices: Vec<ChatChunkChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -804,9 +770,7 @@ pub struct ToolCallDelta {
     /// The function name and/or argument fragment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<ToolCallFunctionDelta>,
-    /// Everything else the provider put on the call. Gemini's thought signature
-    /// rides the chunk that opens the call, which is why this is captured on the
-    /// delta and not only on the whole response.
+    /// Everything else the provider put on the call.
     #[serde(flatten, default)]
     pub vendor: std::collections::BTreeMap<String, serde_json::Value>,
 }
@@ -829,13 +793,7 @@ pub struct ChatChunkDelta {
     pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    /// Thinking/chain-of-thought text streamed by the model. Reads from either
-    /// `reasoning_content` (OpenAI/xAI naming) or `reasoning` (synthetic.new's
-    /// OpenAI-compatible naming) so both wire shapes feed the same accumulator;
-    /// serializes as `reasoning_content` (the shape the resend path / providers
-    /// accept). A gateway that sends the same text under BOTH keys says one
-    /// thing twice, so [`ChatChunkDelta::REASONING_KEYS`] folds them rather than
-    /// failing the chunk; text that disagrees between them is an error.
+    /// Thinking/chain-of-thought text streamed by the model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     /// A JSON `null` deserializes as an empty vec.
@@ -851,7 +809,6 @@ pub struct ChatChunkDelta {
 
 impl ChatChunkDelta {
     /// The keys [`reasoning_content`](Self::reasoning_content) is read under.
-    /// The first is what this type writes; the rest are accepted on input only.
     pub const REASONING_KEYS: Aliases = Aliases::new("reasoning_content", &["reasoning"]);
 }
 
@@ -1131,8 +1088,7 @@ impl ReasoningSummary {
 
 pub const REASONING_EFFORT_META_KEY: &str = "reasoningEffort";
 pub const SUPPORTS_REASONING_EFFORT_META_KEY: &str = "supportsReasoningEffort";
-/// Set from the `favorite_models` globs. The picker reads it to decide what its
-/// opening list holds.
+/// Set from the `favorite_models` globs. The picker reads it to decide what its opening list holds.
 pub const FAVORITE_META_KEY: &str = "favorite";
 
 /// Whether this model's ACP meta marks it a favorite.
@@ -1142,16 +1098,10 @@ pub fn favorite_meta(meta: Option<&serde_json::Map<String, serde_json::Value>>) 
         .unwrap_or(false)
 }
 
-/// Set only by a provider whose listing reports residency (Ollama's
-/// `/api/ps`, LM Studio's `loaded_instances`). The picker draws a dot from it.
+/// Set only by a provider whose listing reports residency (Ollama's `/api/ps`, LM Studio's `loaded_instances`).
 pub const LOADED_IN_VRAM_META_KEY: &str = "loadedInVram";
 
 /// Whether this model is resident in VRAM, or `None` where nobody can say.
-///
-/// The three answers are distinct and the picker renders each differently: a
-/// remote model has no dot at all, a local model that is loaded has a lit one,
-/// and a local model that is not has a dim one. Collapsing the absent case
-/// into `false` puts a cold dot beside every cloud model in the list.
 pub fn loaded_in_vram_meta(
     meta: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> Option<bool> {
@@ -1159,8 +1109,7 @@ pub fn loaded_in_vram_meta(
         .and_then(|v| v.as_bool())
 }
 
-/// The `[model_providers.<id>]` a model routes through. The picker shows it
-/// where two rows would otherwise read the same.
+/// The `[model_providers.<id>]` a model routes through.
 pub const PROVIDER_META_KEY: &str = "provider";
 /// The host and port a model's requests go to.
 pub const ENDPOINT_META_KEY: &str = "endpoint";
@@ -1198,23 +1147,16 @@ pub fn supports_reasoning_effort_meta(
     reasoning_effort_meta_state(meta) == ReasoningEffortMetaState::Supported
 }
 
-/// What the effort gate actually found when it read a model's ACP `meta`.
-///
-/// The gate is one key read, so every refusal below reaches the user as the same
-/// "not supported". They have different causes and different fixes, and only
-/// this distinction tells the two apart.
+/// What the effort gate found when it read a model's ACP `meta`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReasoningEffortMetaState {
     /// `supportsReasoningEffort: true`.
     Supported,
     /// The model carries no `meta` object at all.
     NoMeta,
-    /// `meta` is present and carries no `supportsReasoningEffort` key. This is
-    /// what a model the shell never flagged looks like: the writer omits the key
-    /// rather than writing `false`.
+    /// `meta` is present and carries no `supportsReasoningEffort` key.
     KeyAbsent,
-    /// `supportsReasoningEffort: false` — written by something that decided
-    /// against support, not by an omission.
+    /// `supportsReasoningEffort: false` — written by something that decided against support, not by an omission.
     ExplicitlyFalse,
     /// The key holds something that is not a bool, so the gate reads it as no.
     NotABool { found: String },
@@ -1429,12 +1371,6 @@ pub enum ApiBackend {
     /// Use the Anthropic Messages API (/v1/messages)
     Messages,
     /// Use Ollama's native chat API (/api/chat).
-    ///
-    /// Ollama also serves an OpenAI-compatible endpoint, and that one is the
-    /// default for it. This backend exists for the three fields the compat
-    /// endpoint cannot carry: `options.num_ctx` (the window the runner loads
-    /// at), `keep_alive` (residency) and `truncate` (whether the server may
-    /// silently drop the head of the conversation).
     Ollama,
 }
 
@@ -1442,8 +1378,7 @@ impl ApiBackend {
     /// Whether the backend enforces a response JSON schema natively alongside tool calls.
     /// The Messages API does not (a schema there blocks tool use), so structured output there goes through the StructuredOutput tool.
     pub fn supports_native_schema(&self) -> bool {
-        // Ollama's `format` takes a bare JSON schema and enforces it
-        // alongside tool calls, so it belongs with the two that do.
+        // Ollama's `format` takes a bare JSON schema and enforces it alongside tool calls.
         matches!(self, Self::ChatCompletions | Self::Responses | Self::Ollama)
     }
 
@@ -1497,16 +1432,6 @@ impl From<&str> for ConversationGroupId {
 
 /// Which optional message-level properties a Chat Completions target's schema
 /// accepts on replayed messages.
-///
-/// Most OpenAI-compatible providers ignore unknown message properties, so the
-/// defaults here are permissive — [`Self::PERMISSIVE`], exactly the body this
-/// crate sent before this type existed. A provider that validates its message
-/// schema strictly (Cerebras answers an unrecognized property with
-/// `wrong_api_format ... is unsupported`) needs [`Self::STRICT`], which omits
-/// the properties entirely rather than sending them as null/empty.
-///
-/// Pure data: no I/O, no provider knowledge. The per-model config surface
-/// selects it; the wire conversion consults it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessageProfile {
     /// Whether the target accepts `model_id` on replayed messages.
@@ -1534,11 +1459,8 @@ impl ChatMessageProfile {
         self.accepts_model_id && self.accepts_reasoning_content
     }
 
-    /// Narrow `self` by `other`: a property rejected by either side is dropped.
-    ///
-    /// Used to combine a request's profile with the per-model config's, so a
-    /// model configured as strict cannot be re-widened by a caller that left
-    /// the request at the permissive default.
+    /// Narrow `self` by `other`: a property rejected by either side is
+    /// dropped.
     pub fn narrowed_by(self, other: Self) -> Self {
         Self {
             accepts_model_id: self.accepts_model_id && other.accepts_model_id,
@@ -1564,8 +1486,7 @@ impl ChatMessageProfile {
 
 impl Default for ChatMessageProfile {
     /// Permissive, deliberately: `ConversationRequest` and `SamplingConfig`
-    /// both derive/lean on `Default`, so a strict default would silently
-    /// reshape every existing provider's request body.
+    /// both derive/lean on `Default`.
     fn default() -> Self {
         Self::PERMISSIVE
     }
@@ -1603,10 +1524,7 @@ pub struct SamplingConfig {
     /// Header name to environment variable; only the mapping persists, not the resolved secret.
     #[serde(default, skip_serializing_if = "indexmap::IndexMap::is_empty")]
     pub env_http_headers: indexmap::IndexMap<String, String>,
-    /// Extra top-level fields merged into every request body for this model
-    /// (`[model.<id>].extra_body`). Carries the per-deployment settings a
-    /// closed request struct has no field for, such as a local runtime's
-    /// residency and context-length knobs.
+    /// Extra top-level fields merged into every request body for this model (`[model.<id>].extra_body`).
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
     /// Total context window size in tokens; auto-compact thresholds derive from it.
@@ -1618,7 +1536,6 @@ pub struct SamplingConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
     /// Which optional message properties this target's schema accepts.
-    /// Defaults to [`ChatMessageProfile::PERMISSIVE`] (today's behavior).
     #[serde(default)]
     pub chat_message_profile: ChatMessageProfile,
     /// Responses API `reasoning.summary`; `None` keeps the request builder's default.
@@ -2154,12 +2071,10 @@ mod tests {
     }
 
     // ========================================================================
-    // usd_float_to_ticks — convert provider USD float to integer ticks
-    // ========================================================================
+    // usd_float_to_ticks — convert provider USD float.
 
     #[test]
     fn usd_float_to_ticks_converts_correctly() {
-        // $0.0000416 -> round(0.0000416 * 1e10) = 416_000
         assert_eq!(usd_float_to_ticks(Some(0.0000416)).unwrap(), Some(416_000));
         // $1.00 -> 1e10 ticks
         assert_eq!(usd_float_to_ticks(Some(1.0)).unwrap(), Some(10_000_000_000));
@@ -2190,7 +2105,6 @@ mod tests {
             message.contains("usage.cost") && message.contains("i64"),
             "the error names the field and the target type: {message}"
         );
-        // The largest USD amount that still converts: just under 2^63 ticks.
         assert!(usd_float_to_ticks(Some(9.0e8)).is_ok());
     }
 
@@ -2259,9 +2173,6 @@ mod tests {
         );
     }
 
-    /// The largest amount with a tick form is converted exactly: 9.2e18 ticks
-    /// is far above the 2^53 where an `f64` stops holding units, and the count
-    /// the caller stores is the integer the amount works out to.
     #[test]
     fn ticks_from_usd_converts_the_largest_amount_it_accepts() {
         assert_eq!(
@@ -2353,7 +2264,7 @@ mod tests {
     }
 
     /// A translating gateway puts the same reasoning text on both spellings in
-    /// every delta. Two copies of one string must not cost the reply.
+    /// every delta. Copies of one string must not cost the reply.
     #[test]
     fn delta_carrying_both_reasoning_spellings_parses_to_one_value() {
         let delta: ChatChunkDelta =

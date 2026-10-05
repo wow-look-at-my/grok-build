@@ -240,11 +240,8 @@ fn default_recurring() -> bool {
     true
 }
 
-/// The cadence as the duration a fire time is computed with.
-///
-/// `None` when the seconds have no `i64` second count, or no `chrono` duration.
-/// A cadence above `i64::MAX` seconds has no answer here, where a narrowing
-/// cast would hand back a negative duration and a schedule in the past.
+/// The cadence as the duration a fire time is computed with. `None` when the
+/// seconds have no `i64` second count, or no `chrono` duration.
 pub(crate) fn interval_duration(interval_secs: u64) -> Option<chrono::Duration> {
     chrono::Duration::try_seconds(i64::try_from(interval_secs).ok()?)
 }
@@ -281,8 +278,7 @@ impl ScheduledTask {
     ) -> Self {
         let now = Utc::now();
         // An interval is validated where a task is created, where the create
-        // tool parses one, and where state loads, each of which refuses a value
-        // with no duration.
+        // tool parses one, and where state loads.
         let cadence = interval_duration(interval_secs)
             .unwrap_or_else(|| panic!("scheduled interval {interval_secs} s has no duration"));
         // When fire_immediately is true, anchor created_at in the past so that

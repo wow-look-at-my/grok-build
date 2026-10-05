@@ -63,12 +63,7 @@ impl DedicatedRuntime {
             };
             rt.block_on(async move {
                 while let Some(future) = rx.recv().await {
-                    // This is `opentelemetry_sdk::runtime::Runtime::spawn`: the
-                    // trait hands over a future whose Output is `()` and gives
-                    // back no handle to anybody, so there is no caller to receive
-                    // a join result. The batch processor that queued the export is
-                    // the "nobody" here -- it learns of a lost export through its
-                    // own next failure, not through this pump.
+                    // This is `opentelemetry_sdk::runtime::Runtime::spawn`: the trait hands over a future whose Output is `()` and gives back no handle.
                     #[allow(clippy::disallowed_methods)]
                     tokio::spawn(future);
                 }

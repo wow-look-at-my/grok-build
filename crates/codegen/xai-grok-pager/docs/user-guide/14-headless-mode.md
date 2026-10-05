@@ -631,7 +631,7 @@ export XAI_API_KEY="xai-..."
 grok -p "..."
 ```
 
-Grok never checks for or installs updates, so a headless run makes no update request.
+Grok never checks for or installs updates. As a result, a headless run makes no update request.
 
 ---
 

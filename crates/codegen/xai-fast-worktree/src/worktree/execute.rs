@@ -191,20 +191,15 @@ pub(crate) fn execute_create_worktree(plan: WorktreePlan) -> Result<CreateWorktr
     Ok(result)
 }
 
-/// Keeps the repository's own `git status` blind to its managed worktrees dir.
-///
-/// The destination is a descendant of the working tree it was created in, so
-/// without this the main checkout reports `.grok/` as untracked for as long as
-/// any worktree exists. The entry belongs in the repository's exclude data:
-/// where one clone happens to park its checkouts is not a property of the
-/// project, so the tracked `.gitignore` stays untouched.
-///
-/// Two questions are asked, of two different sources. The destination's shape
-/// names the directory whose status is at stake; git names the repository that
-/// directory actually belongs to. `<grok home>/worktrees` matches the same shape
-/// with the home directory as its "main checkout", and a checkout parked there
-/// is nothing the home directory should be told to ignore -- so it is written to
-/// only when it is the source's own repository.
+/// Keeps the repository's own `git status` blind to its managed worktrees
+/// dir. The destination is a descendant of the working tree it was created
+/// in, so without this the main checkout reports `.grok/` as untracked for as
+/// long as any worktree exists. The entry belongs in the repository's exclude
+/// data: where one clone happens to park its checkouts is not a property of
+/// the project, so the tracked `.gitignore` stays untouched. Questions are
+/// asked, of different sources. The destination's shape names the directory
+/// whose status is at stake; git names the repository that directory belongs
+/// to.
 fn keep_managed_worktrees_out_of_status(source: &Path, worktree_path: &Path) {
     let Some(owner) = crate::managed_root::main_root_for_managed_path(worktree_path) else {
         return;
@@ -215,10 +210,7 @@ fn keep_managed_worktrees_out_of_status(source: &Path, worktree_path: &Path) {
     let Some(main_root) = repo.common_dir().parent() else {
         return;
     };
-    // The two can reach one directory by different routes: git resolves a macOS
-    // temporary directory to `/private/var/...` where the caller still holds
-    // `/var/...`. Compared unresolved, the two look like different repositories
-    // and no exclusion is ever registered.
+    // Both can reach one directory by different routes.
     let (Ok(owner), Ok(main_root)) = (dunce::canonicalize(owner), dunce::canonicalize(main_root))
     else {
         return;

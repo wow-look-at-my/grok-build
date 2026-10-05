@@ -1627,8 +1627,6 @@ mod output_rate {
                 async move {
                     let attempt = counter.fetch_add(1, Ordering::SeqCst);
                     if attempt == 0 {
-                        // 60 chunks at 200 ms outlasts the breach by far; the
-                        // client drops the stream partway through.
                         let events: Vec<Event> =
                             (0..60).map(|_| text_chunk_event("x", false)).collect();
                         let slow = stream::iter(events).then(|event| async move {
@@ -1940,14 +1938,10 @@ mod output_rate {
                 let counter = Arc::clone(&counter_handler);
                 async move {
                     counter.fetch_add(1, Ordering::SeqCst);
-                    // One 39-byte word plus its space is 40 bytes, and 40 bytes
-                    // every 100 ms is 100 tok/s: five times the floor below, for
-                    // two seconds before the search.
                     let word = "0".repeat(39);
                     let fast = vec![word; 20].join(" ");
                     let mut script = sse::responses_api_script_exact(&fast, "test-model");
-                    // `response.created` first, then the healthy burst, then the
-                    // search, then `response.completed` last.
+                    // `response.created` first, then the healthy burst, then the search.
                     let created = script.remove(0);
                     let completed = script.pop().expect("the terminal event");
                     let mut events = vec![Delayed::now(created)];
@@ -1963,7 +1957,7 @@ mod output_rate {
                         })
                         .to_string(),
                     )));
-                    // The search runs for three seconds: longer than the window
+                    // The search runs for a few seconds: longer than the window
                     // and the sustained duration together.
                     events.push(Delayed::after(
                         3000,
@@ -2061,7 +2055,7 @@ mod output_rate {
                         })
                         .to_string(),
                     )));
-                    // Three seconds of writing the call upstream, which outlasts
+                    // A few seconds of writing the call upstream, which outlasts
                     // the window and the sustained duration together.
                     events.push(Delayed::after(
                         3000,
@@ -2169,11 +2163,11 @@ mod output_rate {
     }
 
     /// The same failure on the wire that most providers serve. It reaches the gate
-    /// three ways: an opener with no `arguments` field, an opener whose
-    /// `arguments` is the empty string, and a continuation that repeats neither an
-    /// id nor a name — and each one holds the call open for longer than the
-    /// sustained duration, so a span the gate reads as silence breaches over a
-    /// response that was busy writing.
+    /// ways: an opener with no `arguments` field, an opener whose `arguments` is
+    /// the empty string, and a continuation that repeats neither an id nor a name
+    /// — and each one holds the call open for longer than the sustained
+    /// duration, so a span the gate reads as silence breaches over a response that
+    /// was busy writing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_unstreamed_chat_completions_tool_call_is_not_a_collapsed_stream() {
         let arguments = json!({ "path": "a.rs" }).to_string();
@@ -2209,8 +2203,6 @@ mod output_rate {
                     let arguments = arguments.clone();
                     async move {
                         counter.fetch_add(1, Ordering::SeqCst);
-                        // 39 bytes every 100 ms is 97 tok/s, near five times the
-                        // floor below, for the two seconds before the call opens.
                         let word = "0".repeat(39);
                         let mut events: Vec<(u64, Event)> = (0..20)
                             .map(|_| (100, text_chunk_event(&word, false)))
@@ -2218,9 +2210,7 @@ mod output_rate {
                         for fragment in opening {
                             events.push((0, fragment));
                         }
-                        // Three seconds writing the call, which outlasts the
-                        // window and the sustained duration together, then the
-                        // whole body in one fragment.
+                        // A few seconds writing the call, which outlasts the window and the sustained duration together.
                         events.push((3000, tool_call_chunk(None, None, Some(&arguments))));
                         events.push((0, tool_call_stop_event()));
                         let paced = stream::iter(events).then(|(delay, event)| async move {
@@ -2319,8 +2309,7 @@ mod output_rate {
                         .collect();
                     events.push((0, tool_call_chunk(Some("call_1"), Some("read_file"), None)));
                     events.push((500, tool_call_chunk(None, None, Some(r#"{"path":"a.rs"}"#))));
-                    // The call landed and the engine did not come back: one byte a
-                    // chunk, chunks still arriving so the idle timeout stays quiet.
+                    // The call landed and the engine did not come back: one byte a chunk.
                     events.extend((0..200).map(|_| (200, text_chunk_event("x", false))));
                     let paced = stream::iter(events).then(|(delay, event)| async move {
                         tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -2371,8 +2360,7 @@ mod output_rate {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Time-to-first-token limit
+// --------------------------------------------------------------------------- Time-to-first-token limit
 // ---------------------------------------------------------------------------
 
 /// A policy with only the time-to-first-token limit armed.
@@ -2399,7 +2387,7 @@ fn saw_ttft_retry(event_rx: &mut mpsc::UnboundedReceiver<SamplingEvent>) -> bool
     seen
 }
 
-/// The first attempt sends its headers and then nothing for three seconds,
+/// The first attempt sends its headers and then nothing for a few seconds,
 /// against a one-second limit. It is abandoned and the reissue answers.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_silent_stream_is_reissued_after_the_ttft_limit() {
@@ -2558,13 +2546,9 @@ fn delayed_stream(
 //
 // The provider's schema rejects any message property it does not define, and
 // the offending properties (`model_id`, `reasoning_content`) live in stored
-// conversation history. Without the strip-and-retry arm this 400 is Fatal and
-// the conversation is bricked from turn 2 onward. These tests drive the real
-// `SamplerActor` retry loop and assert on the bodies the server actually
-// received.
+// conversation history. These tests drive the real `SamplerActor` retry loop
+// and assert on the bodies the server received.
 
-/// History whose assistant item carries a recorded `model_id` plus a replayed
-/// reasoning sibling — the shape that produced the live Cerebras 400.
 fn poisoned_request(text: &str) -> ConversationRequest {
     ConversationRequest {
         items: vec![
@@ -2610,9 +2594,6 @@ fn cerebras_400_body() -> serde_json::Value {
     })
 }
 
-/// History predating the fix must recover, not dead-end: the first attempt is
-/// answered with the Cerebras 400, and the retried body must omit exactly the
-/// properties the provider named.
 ///
 /// Asserts on the recorded request bodies — what the provider actually
 /// received — using the shared mock server's `request_bodies()`.
@@ -2655,7 +2636,7 @@ async fn unsupported_message_property_400_strips_and_recovers() {
         "the recovery is a retry and must be observable as one"
     );
 
-    // Exactly two requests: the rejected attempt, then the recovered retry.
+    // Requests: the rejected attempt, then the recovered retry.
     let bodies = server.request_bodies();
     assert_eq!(
         bodies.len(),
@@ -2663,7 +2644,6 @@ async fn unsupported_message_property_400_strips_and_recovers() {
         "expected the rejected attempt plus one recovered retry, got {bodies:#?}"
     );
 
-    // The rejected attempt carried the properties (that is what caused the 400).
     let first = bodies[0]["messages"].as_array().expect("messages array");
     let first_assistant = first
         .iter()
@@ -2700,9 +2680,8 @@ async fn unsupported_message_property_400_strips_and_recovers() {
     );
 }
 
-/// A model configured `strict_message_schema` sends a body the provider
-/// accepts on the first attempt — no 400 and no retry. This is the primary
-/// fix for new sessions; the recovery above covers pre-existing history.
+/// This is the primary fix for new sessions; the recovery above covers
+/// pre-existing history.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn strict_model_config_sends_no_unsupported_property_at_all() {
     let server = xai_grok_test_support::MockInferenceServer::start()
@@ -2713,8 +2692,7 @@ async fn strict_model_config_sends_no_unsupported_property_at_all() {
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut cfg = test_config(server.url(), "qwen-3.8-27b");
-    // Exactly what `sampling_config_for_model` produces for a model entry with
-    // `strict_message_schema = true`.
+    // Exactly what `sampling_config_for_model` produces for a model entry with `strict_message_schema = true`.
     cfg.chat_message_profile = xai_grok_sampling_types::ChatMessageProfile::STRICT;
     let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
 
@@ -2791,8 +2769,6 @@ async fn permissive_model_still_sends_replayed_properties() {
     );
 }
 
-/// A 400 that is not the strict-schema class must stay fatal — the recovery
-/// must not silently rewrite bodies for unrelated request bugs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unrelated_400_stays_fatal_without_a_strip_retry() {
     let server = xai_grok_test_support::MockInferenceServer::start()
@@ -2916,10 +2892,9 @@ fn user_request_with_image(text: &str) -> ConversationRequest {
     }
 }
 
-/// The reported trap, end to end: a vision-less model answers an image with a
-/// 404, which is otherwise fatal. The images live in conversation history, so
-/// a fatal there bricks every following turn — including `/goal resume` — with
-/// no way out but a new session.
+/// The images live in conversation history, so a fatal there bricks every
+/// following turn — including `/goal resume` — with no way out but a new
+/// session.
 ///
 /// Proves both halves of the recovery: this request completes after a strip,
 /// and the *next* request never ships the image at all, so a session that

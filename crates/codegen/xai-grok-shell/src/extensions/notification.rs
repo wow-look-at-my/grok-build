@@ -164,13 +164,7 @@ impl PromptUsage {
     }
 
     /// Drop cost ticks when the bill is incomplete (genuine data loss: drain
-    /// timeout, apply-miss, or nested-subagent incomplete). A **partial** cost
-    /// (`cost_is_partial` — some calls lacked cost) is NOT scrubbed: the
-    /// reported ticks are valid for the calls that did report, and hiding them
-    /// entirely is worse than showing a partial sum (especially for
-    /// OpenAI-compatible endpoints where per-call cost reporting is
-    /// inconsistent). The `cost_is_partial` flag still rides the wire for
-    /// billing reconciliation.
+    /// timeout, apply-miss, or nested-subagent incomplete).
     pub(crate) fn scrub_untrustworthy_costs(&mut self) {
         if !self.usage_is_incomplete {
             return;
@@ -325,7 +319,7 @@ pub(crate) fn uncached_input_tokens(full_input: u64, cached_read: u64) -> u64 {
 }
 
 /// Project usage onto a headless result object. `usage.input_tokens` is uncached (`full − cache_read − cache_creation`), so the three prompt buckets are disjoint.
-/// The identity is `input_tokens + cache_read + cache_creation + output = total_tokens`. Omits cost floats only when incomplete; a partial cost is shown beside `cost_is_partial`.
+/// `input_tokens + cache_read + cache_creation + output = total_tokens`. Omits cost floats only when incomplete; a partial cost is shown beside `cost_is_partial`. Incomplete with
 /// Incomplete with no tokens emits only `usage_is_incomplete` (no zero usage object). `modelUsage` rows are a reduced external-compat schema (camelCase; no reasoning/duration).
 pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage) {
     let Some(result) = result.as_object_mut() else {
@@ -367,9 +361,7 @@ pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &Promp
     if usage.usage_is_incomplete {
         result.insert("usage_is_incomplete".into(), true.into());
     }
-    // Hide costs only on genuine data loss (incomplete). A partial bill
-    // (some calls lacked cost) still shows the reported sum — the
-    // `cost_is_partial` flag rides the wire for reconciliation.
+    // Hide costs only on genuine data loss (incomplete).
     let hide_costs = usage.usage_is_incomplete;
     if hide_costs {
         if cost_is_partial {
@@ -713,12 +705,7 @@ pub enum SessionUpdate {
     /// Never emitted for an automatic recap (those show no spinner).
     SessionRecapUnavailable,
     /// Transcript lines from a running `/todo` capture, for the task row the
-    /// client opened for it. The capture agent runs its own conversation,
-    /// which no other update carries, so without this the task window has
-    /// nothing to show.
-    ///
-    /// Display only — never added to the model conversation, and never
-    /// persisted: the durable copy is the run's `todo-captures/*.jsonl`.
+    /// client opened for it.
     TodoCaptureProgress {
         /// The client-minted id of this capture, which names its task row.
         capture_id: String,
@@ -803,8 +790,7 @@ pub enum SessionUpdate {
         resumed_from: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workflow_run_id: Option<String>,
-        /// Live-only opaque child address. Wire key is `agentAddress`;
-        /// omitted from `updates.jsonl`.
+        /// Live-only opaque child address. Wire key is `agentAddress`; omitted from `updates.jsonl`.
         #[serde(
             default,
             rename = "agentAddress",
@@ -973,12 +959,6 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         arguments_delta: Option<String>,
         /// What to call this row, read from the arguments received so far.
-        ///
-        /// The client has neither the tool registry nor the typed inputs a
-        /// title is derived from, so the shell resolves it and sends it here.
-        /// Present only on a chunk that CHANGED it: `None` means keep the title
-        /// the row already has, which for a call that has named nothing yet is
-        /// the wire `name`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
@@ -1075,8 +1055,7 @@ pub enum SessionUpdate {
         current_deliverable_id: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         current_deliverable_title: Option<String>,
-        /// The goal-harness role that runs now: one of the `GOAL_ROLE_*`
-        /// names. The client labels the turn by it.
+        /// The goal-harness role that runs now: one of the `GOAL_ROLE_*` names. The client labels the turn by it.
         #[serde(skip_serializing_if = "Option::is_none")]
         current_subagent_role: Option<String>,
         total_worker_rounds: u32,
@@ -1188,11 +1167,7 @@ pub enum SessionUpdate {
         error_kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<PromptUsage>,
-        /// Session-cumulative reported cost in USD ticks after this turn, read
-        /// from the session ledger. Prompt-scoped `usage` covers this turn
-        /// only; a client's running session total must not be a sum of turns
-        /// it happened to observe. Absent when no call in the session reported
-        /// a cost.
+        /// Session-cumulative reported cost in USD ticks after this turn, read from the session ledger.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_cost_usd_ticks: Option<i64>,
         /// Wall-clock turn duration in milliseconds. `None` on old files.
@@ -1240,29 +1215,17 @@ pub enum SessionUpdate {
         /// Headless `streaming-messages-json` stamps it onto the assistant frame.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stop_sequence: Option<String>,
-        /// THIS response's cost in USD ticks (1e10 = $1) — server-reported when
-        /// the gateway priced the call, else computed from its token usage and
-        /// the model's pricing. One response is one rendered agent message, so
-        /// this is the per-message cost; the turn-level `TurnCompleted.usage`
-        /// sum cannot be split back apart across a tool loop's responses.
-        /// Absent when the call reported no usage at all.
+        /// THIS response's cost in USD ticks (1e10 = $1) — server-reported when the gateway priced the call.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cost_usd_ticks: Option<i64>,
-        /// Session-cumulative reported cost in USD ticks after folding this
-        /// call, from the session ledger (every main-loop call plus subagent
-        /// folds) — not a sum of what any one client rendered.
+        /// Session-cumulative reported cost in USD ticks after folding this call.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_cost_usd_ticks: Option<i64>,
     },
-    /// The model's live output rate while a response streams. Fire-and-forget,
-    /// **never persisted**: it describes a stream that is happening now, and a
-    /// replayed one would put a stale number under an idle session.
-    ///
-    /// It is measured by the sampler's own meter — the one the rate floor
-    /// judges — so the indicator a client renders and the gate that reissues a
-    /// request can never disagree about the rate. `floor_tokens_per_sec` is
-    /// the configured floor, absent when the session gates nothing, and
-    /// `slow_for_ms` is how long the rate has been under it.
+    /// The model's live output rate while a response streams.
+    /// Fire-and-forget, **never persisted**: it describes a stream that is
+    /// happening now, and a replayed one would put a stale number under an
+    /// idle session.
     OutputRate {
         tokens_per_sec: f64,
         window_secs: u64,
@@ -1461,10 +1424,7 @@ pub enum RetryState {
         max_retries: u32,
         /// Human-readable reason for the retry
         reason: String,
-        /// How long the wait before this retry goes out lasts. `None` when
-        /// the retry is immediate, or when the peer predates this field. A
-        /// client counts it down, so a wait the server asked for reads as a
-        /// wait rather than as a hang.
+        /// How long the wait before this retry goes out lasts.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retry_in_ms: Option<u64>,
         /// Sampler error kind when known; absent on old shells and non-sampler paces.
@@ -3007,11 +2967,7 @@ mod tests {
 
     #[test]
     fn project_result_hides_costs_when_incomplete_but_not_partial() {
-        // A partial bill (some calls lacked cost) still shows the reported
-        // cost — hiding it entirely is worse than a partial sum, especially
-        // for OpenAI-compatible endpoints with inconsistent per-call cost
-        // reporting. Only a genuinely incomplete bill (drain timeout /
-        // apply-miss) hides cost.
+        // A partial bill (some calls lacked cost) still shows the reported cost — hiding it entirely is worse than a partial sum.
         let mut model_usage = indexmap::IndexMap::new();
         model_usage.insert(
             "m".into(),
@@ -3186,7 +3142,6 @@ mod tests {
         use xai_chat_state::{UsageLedger, UsageTotals};
         use xai_grok_sampling_types::TokenUsage;
 
-        // Simulate a turn with 3 model calls: 2 reported cost, 1 did not.
         let mut ledger = UsageLedger::default();
         let tu = TokenUsage {
             prompt_tokens: 100,

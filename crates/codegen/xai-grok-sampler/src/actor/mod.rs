@@ -63,7 +63,7 @@ fn spawn_tracked_round(
 
 /// Text describing what a panic carried, for a log line.
 ///
-/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
+/// Both payloads `panic!` itself produces are a `&'static str` (a literal)
 /// and a `String` (a formatted one). Anything else is named as a non-message
 /// rather than reported as nothing.
 fn panic_payload(panic: &(dyn Any + Send)) -> String {
@@ -139,10 +139,7 @@ impl SamplerActor {
             state: ActorState::new(config, retry_policy),
             tasks: JoinSet::new(),
         };
-        // The actor owns the command half every `SamplerHandle` sends to and
-        // every in-flight request reports through. Its death is reported here,
-        // by name, rather than surfacing later as a closed channel in
-        // whichever caller happens to send next.
+        // The actor owns the command half every `SamplerHandle` sends to and every in-flight request reports through.
         let run = tokio::spawn(actor.run());
         tokio::spawn(async move {
             if let Err(error) = run.await {
@@ -224,9 +221,7 @@ impl SamplerActor {
                 rejections
                     .tool_schemas
                     .apply(&effective_config.model, &mut request_inner);
-                // The id is what the actor needs back to clear
-                // `active_requests`, so the round is spawned through
-                // `spawn_tracked_round` rather than bare.
+                // The id is what the actor needs back to clear `active_requests`.
                 let tracked_id = request_id.clone();
                 // The round runs on its own task, so the submitter's queue
                 // clock is carried over by hand.

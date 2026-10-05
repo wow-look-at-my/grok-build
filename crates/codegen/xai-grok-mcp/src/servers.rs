@@ -917,7 +917,6 @@ impl McpState {
     }
 
     /// Minimum wait between spawn attempts for an unreachable server.
-    /// Retry triggers (the session's reconnect timer, tool batches, `x.ai/mcp/list` refreshes) cannot dogpile the OAuth-discovery and probe timeout budget while a server is down.
     pub const UNREACHABLE_RETRY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(60);
 
     /// Upper bound on an attempt's exclusivity (see [`UnreachableRetry`]).
@@ -1028,7 +1027,7 @@ impl McpState {
         );
     }
 
-    /// Settle an attempt without keeping it retryable (handoff to the auth-required flow).
+    /// Settle an attempt without keeping it retryable (handoff to the Returns
     /// Returns whether the attempt still owned the server so the caller knows its follow-up records are legitimate.
     /// The `init_failed` entry is left to the caller.
     pub fn settle_unreachable_attempt_unretryable(&mut self, name: &str, token: u64) -> bool {
@@ -4550,7 +4549,7 @@ fn drain_mcp_stderr_to_log(server_name: &str, mut stderr: tokio::process::ChildS
     };
     let mut file = tokio::fs::File::from_std(file);
     let server_name = server_name.to_string();
-    // Guarded so the drain dying is attributed to this server: the log file simply
+    // Guarded so the drain dying is attributed to this server: the log file
     // stops growing otherwise, which reads as a server that printed nothing.
     #[allow(clippy::disallowed_methods)]
     tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
@@ -4604,18 +4603,9 @@ fn plan_stdio_spawn(
     (OsString::from(command), args.to_vec())
 }
 
-/// Point a package-runner MCP child at caches the sandbox can write.
-///
-/// `uvx`, `npx`, `bunx` and friends resolve the server they run from a package
-/// index, into caches that default under `$HOME`. No write-confining sandbox
-/// profile grants `$HOME` (see `xai_grok_sandbox::confines_home_writes`), so the
-/// runner dies creating its cache and the client sees only a broken pipe — the
-/// "server shows but doesn't work" failure. Map those caches onto the session's
-/// writable temp storage (tmpfs), which every confining profile already grants.
-///
-/// Thin wrapper over [`apply_runner_cache_env`] that reads the two pieces of
-/// process state (confinement, scratch root); the logic and its tests live in
-/// the pure function so a test never touches process-global sandbox state.
+/// Point a package-runner MCP child at caches the sandbox can write. `uvx`,
+/// `npx`, `bunx` and friends resolve the server they run from a package
+/// index, into caches that default under `$HOME`.
 fn apply_sandbox_runner_cache_env(cmd: &mut Command, program: &str) {
     let Some(scratch) = xai_grok_sandbox::package_cache::scratch_root() else {
         return;
@@ -4646,9 +4636,6 @@ fn apply_runner_cache_env(
     let root = xai_grok_sandbox::package_cache::cache_root(scratch);
     for (name, value) in xai_grok_sandbox::package_cache::cache_env(&root) {
         // A variable counts as configured only when it carries a VALUE.
-        // `get_envs` also yields explicitly *removed* variables with `None`, and
-        // treating one of those as "already set" would skip the redirect and
-        // leave the runner failing exactly as before.
         let already_set = cmd
             .as_std()
             .get_envs()
