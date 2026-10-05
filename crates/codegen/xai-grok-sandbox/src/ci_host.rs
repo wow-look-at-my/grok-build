@@ -720,11 +720,10 @@ mod tests {
         );
     }
 
-    /// The hand-off starts a worker only where one is this process's to start.
-    /// Each of these is a process that must NOT fork another. The first is the
-    /// worker itself re-entering `main`. The second is a session a jail
-    /// already handed a worker. The third is a process already inside the
-    /// pathbox jail.
+    /// The hand-off starts a worker only where one is this process's to
+    /// start. Each of these is a process that must NOT fork another. The
+    /// first is the worker itself re-entering `main`. The second is a session
+    /// a jail already handed a worker.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn the_hand_off_starts_no_worker_where_one_is_not_this_processes_to_start() {

@@ -499,8 +499,8 @@ useless_format = "allow"
 # `--lib --bins`. This leaves every `#[cfg(test)]` module out of the build, so
 # a test asserting on a value it just built is not what these deny.
 #
-# A crate that still carries hits names the lint in an inner attribute at the top
-# of its crate root, with the count it is carrying. The crate roots are
+# A crate that still carries hits names the lint in an inner attribute. That
+# attribute sits at the top of its crate root, with the count of hits. The crate roots are
 # `src/lib.rs`, `src/main.rs`, each `src/bin/*.rs` and `build.rs`. They are
 # separate roots and inherit nothing. An example is
 # `#![allow(clippy::string_slice)] // 4 hits predate the gate`. That set of lines

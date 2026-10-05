@@ -508,21 +508,13 @@ fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
     Ok(path)
 }
 
-/// Build the `bwrap` command that runs the plan. Order is the whole contract:
-/// the read-only system base first, then the user mounts as given, then
-/// `$GROK_HOME`. bwrap applies binds in order and a later one covers an
-/// earlier one, so this is what makes a later `--ro` beat an earlier `--rw`.
-/// The access each synthesized bind carries comes from [`JailPlan::defaults`]
-/// where a user mount does not name it. This covers the system base from
-/// `system`, `/tmp` from `tmp`, and `$GROK_HOME` from `grok_home`. All of
-/// them default to the release behavior (ro base, tmpfs `/tmp`, rw
-/// `$GROK_HOME`), so a plan built with [`JailDefaults::default`] produces
-/// byte-identical argv to the jail before config existed. This is compiled
-/// under `cfg(test)` off Linux as well, because the emitted argv IS the
-/// contract. The option order is what makes a later bind win. It is also what
-/// keeps the CI host-worker fd an option rather than a program argument. An
-/// ordering only one host can assert is one that regresses quietly everywhere
-/// else.
+/// Build the `bwrap` command that runs the plan. The order is the contract:
+/// the system base, then the user mounts, then `$GROK_HOME`. A later bind
+/// covers an earlier one, so a later `--ro` beats an earlier `--rw`.
+///
+/// Where a user mount names no access, [`JailPlan::defaults`] supplies it.
+/// It compiles under `cfg(test)` on every host, because the argv is the
+/// contract.
 #[cfg(any(target_os = "linux", test))]
 pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     // No --die-with-parent: it kills the jail when bwrap's parent dies.
@@ -602,16 +594,20 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     cmd
 }
 
-/// Build the Seatbelt profile for the plan. Seatbelt confines READS and WRITES here, mirroring bwrap. `(allow default)` keeps the process's non-file capabilities (network, process, sysctl) open. Then `(deny file-read*)` and `(deny file-write*)` take every file access away. The rules that follow give each kind of access back. They do so only for the paths the jail is supposed to expose: - `/dev` (a terminal, a PTY, `/dev/null`) — read and write. - a `--rw` mount — read and write. - a `--ro` mount — read only. - the read-only system base (including the macOS `/System`.
-///   `/private` additions) — read only, or read and write when the config sets
-///   `system = "rw"` (the user's explicit choice to weaken the jail).
-/// - `$GROK_HOME` and the sandbox temp dir — read and write, unless
-///   `grok_home = "ro"` leaves `$GROK_HOME` readable only.
-/// - the binary itself (`self_exe`), which sandbox-exec execs by path. - metadata-only rules for the ANCESTORS of those paths, plus a read rule
-///   for `/`: path resolution walks the chain, so without them the grants
-///   above are unreachable and the jail does not start at all (see the
-///   comments at each rule).
-/// Anything not in that set is denied for both reads and writes. An example is a sibling repo under `$HOME`. This is exactly how bwrap confines it on Linux. SBPL gives the last matching rule, so emitting the allows after the deny is what makes them win. Emitting the mounts in order is what makes a later flag beat an earlier one. Where a default from [`JailPlan::defaults`] is at play (system base, `$GROK_HOME`), the emitted rule still derives from the real shipped profile. A config override thus changes exactly the rule the builder materializes. The `/tmp` [`TmpHandling`] is a bwrap mount concept; Seatbelt mounts nothing, so it has no rule here (the writable sandbox temp is the separate `temp_dir` allowed below).
+/// Build the Seatbelt profile for the plan. It confines reads and writes the
+/// way bwrap does. `(allow default)` keeps network and process access open.
+/// Both deny rules then take every file access away.
+///
+/// The rules after them give access back only to the paths the jail exposes.
+/// `/dev` and each `--rw` mount get read and write. Each `--ro` mount gets
+/// read only. The system base is read only unless the config sets
+/// `system = "rw"`. `$GROK_HOME` and the sandbox temp dir get read and write,
+/// unless `grok_home = "ro"`. The binary itself is readable. The ancestors of
+/// those paths get metadata rules, because path resolution walks the chain.
+///
+/// SBPL applies the last matching rule. The allows thus follow the denies, and
+/// a later mount flag beats an earlier one. Seatbelt mounts nothing, so
+/// [`TmpHandling`] has no rule here.
 #[cfg(target_os = "macos")]
 pub fn seatbelt_profile(plan: &JailPlan) -> String {
     let mut profile = String::from("(version 1)\n(allow default)\n");
@@ -621,12 +617,9 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     profile.push_str("(allow file-write* (subpath \"/dev\"))\n");
     // The root itself.
     profile.push_str("(allow file-read* (literal \"/\"))\n");
-    // Path resolution stats each ANCESTOR of every path it is handed, so a
-    // grant whose ancestors are denied is unreachable in practice: `getcwd`
-    // fails. A tool cannot resolve a path it was given, even inside a mounted
-    // directory. Grant metadata on the ancestors as literal rules, one per
-    // directory, never a subtree. The granted trees then resolve, while a path
-    // nobody granted stays as invisible as bwrap leaves it.
+    // Path resolution stats each ancestor of a path. A grant under a denied
+    // ancestor is unreachable, and `getcwd` fails. Grant metadata on each
+    // ancestor as a literal rule, not a subtree.
     for path in std::iter::once(&plan.self_exe)
         .chain(
             plan.mounts

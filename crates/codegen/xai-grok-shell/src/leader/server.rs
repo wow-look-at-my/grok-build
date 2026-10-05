@@ -1416,42 +1416,20 @@ fn make_version_mismatch_notification(
         .to_string(),
     )
 }
-/// Run the leader IPC server. The socket_path is where the Unix socket will be created.
+/// Run the leader IPC server on the Unix socket at `socket_path`.
 ///
-/// The leader lock is acquired AFTER this function creates the socket. This ordering ensures that:
-/// - Clients that wait for the socket can connect as soon as the server is ready.
-/// - The lock acquisition happens after the server listens.
+/// The leader lock is taken after this function creates the socket. A client
+/// that waits for the socket can then connect as soon as the server listens.
 ///
-/// # Readiness gating
+/// Until `ready_rx` reads `true`, the server accepts connections and IPC
+/// registrations. An ACP request gets a `leader_starting` JSON-RPC error, so the
+/// client retries. An ACP notification is dropped. After that, all ACP traffic
+/// goes to the agent.
 ///
-/// The `ready_rx` watch channel controls whether ACP messages are forwarded to the agent.
-/// While `*ready_rx.borrow() == false` (leader still initializing):
-/// - Client connections and IPC registrations are accepted normally.
-/// - ACP requests (messages with an `id`) receive a structured `leader_starting`
-///   JSON-RPC error so the client can retry rather than hang.
-/// - ACP notifications (no `id`) are dropped with a trace log.
-///
-/// Once `ready_rx` is signaled `true` (socket bound + bounded auth complete. The model catalog and remote settings stream in afterward). All subsequent ACP traffic is forwarded to the agent as normal.
-///
-/// # Arguments
-///
-/// * `socket_path` - Path for the Unix domain socket
-/// * `acp_tx` - Channel to send ACP messages from clients to the agent
-/// * `response_rx` - Channel to receive responses from the agent to route to clients
-/// * `cancel` - Cancellation token for graceful shutdown
-/// * `no_exit_on_disconnect` - If true, do not exit when all clients disconnect
-/// * `client_count` - Atomic counter tracking the number of connected clients
-/// * `agent_busy` - Atomic flag set while the agent has in-flight **IPC**
-///   requests; relay-driven traffic never sets it
-/// * `agent_activity` - Agent-derived activity view (running turns, parked
-///   interactions, live subagents), used for the pre-shutdown session flush
-/// * `ready_rx` - Watch receiver; ACP forwarding is gated until this is `true` * `relay_demand_tx` - Watch sender flipped to `true` when the first
-///   [`ClientMode::Headless`] client registers. `run_leader` defers starting the
-///   grok.com WebSocket relay until this fires, so a leader serving only
-///   interactive clients (TUI dashboard, IDE) never duplicates its ACP stream
-///   onto the relay. Headless registration is the devbox-flow marker: those
-///   clients are driven remotely *through* the relay.
-/// * `shutdown_tx` - Watch sender for the shutdown reason.
+/// `relay_demand_tx` becomes `true` when the first [`ClientMode::Headless`]
+/// client registers. `run_leader` starts the grok.com relay only then. A leader
+/// that serves only interactive clients thus never copies its ACP stream onto
+/// the relay.
 pub async fn run_leader_server(
     socket_path: std::path::PathBuf,
     acp_tx: mpsc::UnboundedSender<String>,
