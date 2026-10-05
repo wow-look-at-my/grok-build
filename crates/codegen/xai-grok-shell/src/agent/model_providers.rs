@@ -12,8 +12,8 @@ use crate::sampling::ApiBackend;
 
 /// A `[model_providers.<id>]` block: the settings every model behind one
 /// endpoint shares. A `[model.<id>]` that names the provider with
-/// `model_provider = "<id>"` inherits each field it leaves unset, so an
-/// endpoint, a credential, a wire format or a header set is written once.
+/// `model_provider = "<id>"` inherits each field it leaves unset. As a result,
+/// an endpoint, a credential, a wire format or a header set is written once.
 ///
 /// Every field here is also a `[model.<id>]` field, and the model's own value
 /// always wins. What is NOT here is what identifies one model: `model`,

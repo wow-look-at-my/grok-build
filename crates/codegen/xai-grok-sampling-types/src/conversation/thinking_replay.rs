@@ -248,8 +248,8 @@ pub fn names_replayed_thinking(message: &str) -> bool {
 
 impl ConversationRequest {
     /// Step the replay level down one fallback. Answers `false` when the
-    /// request carries no reasoning, or is already at the last level, so the
-    /// caller reports the rejection instead of resending the same body.
+    /// request carries no reasoning, or is already at the last level. The
+    /// caller then reports the rejection instead of resending the same body.
     pub fn degrade_thinking_replay(&mut self) -> bool {
         if !self
             .items

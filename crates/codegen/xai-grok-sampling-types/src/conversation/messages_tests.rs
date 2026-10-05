@@ -645,8 +645,8 @@ fn thinking_without_a_recorded_origin_is_replayed() {
 }
 
 /// The recovery the sampler applies when the server rejects a signature the
-/// table let through: the level steps to `TextOnly`, and the block that was
-/// the model's own stops being thinking. Its words stay as assistant text. One
+/// table let through. The level steps to `TextOnly`. The block that was the
+/// model's own stops being thinking. Its words stay as assistant text. One
 /// more step and nothing of it reaches the wire.
 #[test]
 fn a_rejected_signature_steps_the_replay_level_down() {

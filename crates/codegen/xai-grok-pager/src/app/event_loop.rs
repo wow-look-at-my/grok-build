@@ -2827,9 +2827,9 @@ fn after_task_complete_dispatch(
 /// when no dot is drawn. Another view is up, or the cwd has no branch (not a
 /// repo, or detached HEAD, which renders as `detached` with no dot).
 ///
-/// Resolved exactly as the renderer resolves it — the agent's own branch
-/// first, then the cwd's cached git info — so the timer can never poll a
-/// branch the dot isn't reporting.
+/// Resolved exactly as the renderer resolves it: the agent's own branch
+/// first, then the cwd's cached git info. Thus the timer can never poll a
+/// branch the dot is not reporting.
 fn ci_dot_target(app: &AppView) -> Option<(std::path::PathBuf, String)> {
     let ActiveView::Agent(id) = app.active_view else {
         return None;

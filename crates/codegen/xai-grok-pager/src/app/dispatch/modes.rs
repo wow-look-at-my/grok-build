@@ -13,8 +13,8 @@ use xai_grok_tools::types::SessionMode;
 /// order, against the agent that owns their session.
 ///
 /// A mode change is applied optimistically when the user asks for it, but the
-/// shell's confirmation names only a mode. This ordered log is what attributes
-/// a confirmation to the request that caused it, so a confirmation belonging
+/// shell's confirmation names only a mode. This ordered log attributes a
+/// confirmation to the request that caused it. Thus a confirmation that belongs
 /// to an earlier press cannot rewind the state a later press set. See
 /// `AgentView::mode_confirmation_is_stale`.
 pub(super) fn record_mode_change_requests(app: &mut AppView, effects: &[Effect]) {

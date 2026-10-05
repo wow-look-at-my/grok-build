@@ -637,7 +637,7 @@ mod tests {
         assert_eq!(json.get("data"), Some(&serde_json::json!("abc")));
     }
 
-    /// Every wire shape a gateway prices a call with has to parse, and an
+    /// Every wire shape a gateway prices a call with has to parse. An
     /// Anthropic response that prices nothing has to stay priceless rather
     /// than read as free.
     #[test]

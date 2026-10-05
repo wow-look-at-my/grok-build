@@ -212,9 +212,9 @@ impl OutputRateMeter {
         }
     }
 
-    /// The span the current window covers at `now`: the whole window once the
-    /// response has run that long, and the time since its first chunk before
-    /// then.
+    /// The span the current window covers at `now`. It is the whole window
+    /// once the response has run that long. Before then, it is the time since
+    /// its first chunk.
     pub fn observed_span(&self, now: Instant) -> Duration {
         let Some(first) = self.first_chunk_at else {
             return Duration::ZERO;
@@ -777,8 +777,8 @@ mod tests {
     /// A tool call whose arguments the provider does not stream is the model
     /// generating, just invisibly. Every fragment shape that says "this call is
     /// open and no argument bytes have arrived" holds the measurement. This
-    /// holds for as long as the call takes to write, and the arguments arriving
-    /// in one burst afterwards are credited rather than averaged in as silence.
+    /// holds for as long as the call takes to write. The arguments arriving in
+    /// one burst afterwards are credited rather than averaged in as silence.
     #[test]
     fn an_unstreamed_tool_call_holds_the_measurement() {
         let policy = collapsed_policy();

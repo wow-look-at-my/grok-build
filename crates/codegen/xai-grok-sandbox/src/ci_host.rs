@@ -52,8 +52,8 @@ const ALLOWED_COMMANDS: &[(&str, &str)] = &[
 /// `gh api` takes no subcommand, so it is admitted on its own.
 const ALLOWED_BARE_COMMANDS: &[&str] = &["api"];
 
-/// Every flag a request may carry. An allowlist rather than a deny-list
-/// because the flags that matter are the ones that turn a read into a write:
+/// Every flag a request may carry. It is an allowlist rather than a deny-list.
+/// The flags that matter are the ones that turn a read into a write:
 /// `-X POST`, `--method`, `--field`, `--input`.
 const ALLOWED_FLAGS: &[&str] = &[
     "--json",
@@ -721,9 +721,10 @@ mod tests {
     }
 
     /// The hand-off starts a worker only where one is this process's to start.
-    /// Each of these is a process that must NOT fork another: the worker
-    /// itself re-entering `main`, a session a jail already handed a worker, and
-    /// a process already inside the pathbox jail.
+    /// Each of these is a process that must NOT fork another. The first is the
+    /// worker itself re-entering `main`. The second is a session a jail
+    /// already handed a worker. The third is a process already inside the
+    /// pathbox jail.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn the_hand_off_starts_no_worker_where_one_is_not_this_processes_to_start() {
@@ -758,9 +759,9 @@ mod tests {
     }
 
     /// An exec that was prepared for and then did not happen must leave nothing
-    /// behind. The session is confined in place in that case, and an
-    /// inheritable fd whose number is in the environment is a live socket to an
-    /// unconfined `gh` for every child the session spawns.
+    /// behind. The session is confined in place in that case. An inheritable
+    /// fd whose number is in the environment is a live socket to an unconfined
+    /// `gh` for every child the session spawns.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn a_failed_exec_puts_the_worker_back_out_of_reach_of_children() {

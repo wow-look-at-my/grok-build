@@ -694,9 +694,10 @@ fn prune_old_logs(dir: &Path, max_age: std::time::Duration) {
 mod tests {
     use super::*;
 
-    /// The sink map is taken on every subscriber callback, so what the lock does
-    /// after somebody else panicked while holding it is the difference between a
-    /// dropped line and a process that can no longer log at all.
+    /// The sink map is taken on every subscriber callback. Another holder can
+    /// panic while it holds the lock. What the lock does after that is the
+    /// difference between a dropped line and a process that can no longer log
+    /// at all.
     #[test]
     fn a_panic_while_the_sink_map_is_held_leaves_it_acquirable() {
         let layer = std::sync::Arc::new(RoutingLayer::new(

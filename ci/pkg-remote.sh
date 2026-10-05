@@ -64,8 +64,8 @@ BINPAZER="${BINPAZER:-binpazer}"
 TYPE_ARTIFACT=1
 TYPE_NAMES=2
 
-# The names block. binpazer stores payloads. Binpazer does not model a file name or a permission,
-# so both travel as their own critical block, in the order the artifact blocks were written.
+# The names block. binpazer stores payloads. Binpazer does not model a file name or a permission.
+# So both travel as their own critical block. They travel in the order the artifact blocks were written.
 #
 # The mode rides with the name because a package's artifact set includes the build script's own
 # binary. Restored without its execute bit, cargo answers "could not execute process ... (never

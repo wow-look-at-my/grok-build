@@ -76,8 +76,8 @@ impl ConversationRequest {
     /// `prompt_tokens`, and report the cut.
     ///
     /// Returns `None` when the request already fits, when the window is
-    /// unknown (`0`), or when the request names no output budget — the
-    /// sampler's own default is applied before this runs, so `None` there
+    /// unknown (`0`), or when the request names no output budget. The
+    /// sampler's own default is applied before this runs. So `None` there
     /// means nothing bounds the output at all. A fitted budget outside the
     /// `u32` the request field carries is logged and left unapplied. The
     /// request keeps what it asked for rather than a count this arithmetic did

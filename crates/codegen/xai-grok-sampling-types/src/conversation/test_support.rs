@@ -236,10 +236,10 @@ pub(super) fn assert_prefix_stable(base: &ConversationRequest, extended: &Conver
     );
 }
 
-/// The item list a `/todo` capture sends on its SECOND model call: the same
-/// prepared snapshot `/btw` sends, its instruction, then the first response
-/// echoed back verbatim (reasoning included) with the tool result that
-/// answered it.
+/// The item list a `/todo` capture sends on its SECOND model call. It holds
+/// the same prepared snapshot `/btw` sends, and its instruction. Then comes
+/// the first response, echoed back verbatim (reasoning included), with the
+/// tool result that answered it.
 ///
 /// The loop hand-builds this list instead of taking it from chat state, so
 /// each backend's mapping is asserted against the fixture directly

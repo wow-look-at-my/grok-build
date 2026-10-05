@@ -1846,9 +1846,9 @@ mod tests {
         assert!(desc.contains("Default to delegating"));
     }
     /// Consider the bridge's full-discovery snapshot. That snapshot must
-    /// record every discovered skill name — including `paths:`-gated and
+    /// record every discovered skill name. This includes `paths:`-gated and
     /// preloaded skills that the listing baseline (`slash_skills`) holds
-    /// back — so session-start telemetry can reuse it instead of
+    /// back. Session-start telemetry can then reuse it instead of
     /// re-walking the disk.
     #[tokio::test]
     async fn discovery_snapshot_records_gated_and_preloaded_skills() {

@@ -1227,12 +1227,12 @@ fn send_prompt_with_images_while_running_and_steer_queues_on_server() {
 }
 
 /// Regression (queue reorder race). A plain prompt typed while a turn is running
-/// must never overtake an older prompt still waiting in the local drip-feed queue
-/// — e.g. prompts queued during "Starting session…" before the turn began,
-/// where the first drains to start the turn and the rest are stranded locally.
+/// must never overtake an older prompt still waiting in the local drip-feed queue.
+/// An example is prompts queued during "Starting session…" before the turn began.
+/// There the first drains to start the turn and the rest are stranded locally.
 /// Immediate-sending the new prompt onto the server queue while the old one stayed
-/// local ran them AHEAD of it (the merge is server-rows-first), so `[2, 3]` showed
-/// up as `[3, 2]`.
+/// local ran them AHEAD of it (the merge is server-rows-first). Thus `[2, 3]`
+/// showed up as `[3, 2]`.
 ///
 /// The order is now held by moving the older row to the server queue FIRST
 /// rather than by holding the newer one back
@@ -6579,8 +6579,8 @@ fn idle_enter_sends_immediately() {
     assert!(app.agents[&id].shared_queue.is_empty());
 }
 
-/// Enter while a turn is running hands the prompt to the shell right away, so
-/// the running turn harvests it at its next gap between tool calls / model
+/// Enter while a turn is running hands the prompt to the shell right away. The
+/// running turn then harvests it at its next gap between tool calls / model
 /// requests. Holding it in the local drip-feed queue instead would delay it to
 /// the end of the whole turn — the ASAP-send bug.
 #[test]

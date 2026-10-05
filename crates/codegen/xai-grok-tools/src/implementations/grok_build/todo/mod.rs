@@ -967,7 +967,7 @@ mod tests {
     }
 
     /// `/TODO` puts what the user just asked for where they will see it
-    /// first, in the order they asked for it, without disturbing the work the
+    /// first, in the order they asked for it. It does not disturb the work the
     /// agent is already tracking.
     #[test]
     fn prepend_puts_new_items_first_in_order_and_leaves_existing_ones_alone() {

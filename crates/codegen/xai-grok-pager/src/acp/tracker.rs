@@ -1302,10 +1302,11 @@ impl AcpUpdateTracker {
         true
     }
     /// Attach one model call's prompt cache-read hit rate to the message
-    /// block that call produced, from the same `ResponseCompleted` that
-    /// closes it — see [`Self::set_response_cost`]'s doc comment for why
-    /// per-response attribution (not a turn total) is what puts a rate
-    /// beside every message instead of only the turn's last one.
+    /// block that call produced. The rate comes from the same
+    /// `ResponseCompleted` that closes the block. Per-response attribution
+    /// (not a turn total) puts a rate beside every message instead of only
+    /// the turn's last one. See [`Self::set_response_cost`]'s doc comment
+    /// for why.
     ///
     /// The rate is `cache_read_input_tokens / (input_tokens +
     /// cache_read_input_tokens + cache_creation_input_tokens)`, rounded to

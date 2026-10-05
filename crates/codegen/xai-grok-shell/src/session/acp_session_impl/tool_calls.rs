@@ -3112,10 +3112,10 @@ impl SessionActor {
     /// typed inputs a title is read from. A repeat of the current title is
     /// bytes on the wire that redraw the same row.
     ///
-    /// Every step is allowed to fail and say nothing. A half-written argument
-    /// that names no tool yet, a name the registry does not know, and a body
-    /// past the size cap all leave the row showing the wire name, which is what
-    /// it showed before any of this existed.
+    /// Every step is allowed to fail and say nothing. Cases leave the row
+    /// showing the wire name: a half-written argument that names no tool yet, a
+    /// name the registry does not know, and a body past the size cap. That is
+    /// what the row showed before any of this existed.
     pub(super) async fn streaming_tool_title(
         self: &Arc<Self>,
         tool_index: u32,

@@ -193,7 +193,7 @@ pub(crate) fn execute_create_worktree(plan: WorktreePlan) -> Result<CreateWorktr
 
 /// Keeps the repository's own `git status` blind to its managed worktrees
 /// dir. The destination is a descendant of the working tree it was created
-/// in, so without this the main checkout reports `.grok/` as untracked for as
+/// in. Without this, the main checkout reports `.grok/` as untracked for as
 /// long as any worktree exists. The entry belongs in the repository's exclude
 /// data: where one clone happens to park its checkouts is not a property of
 /// the project. The tracked `.gitignore` stays untouched. Questions are

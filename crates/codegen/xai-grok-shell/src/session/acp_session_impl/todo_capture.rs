@@ -51,9 +51,9 @@ pub enum TodoCaptureError {
 }
 
 /// Tool kinds the capture agent may run. Narrower than the main turn's
-/// read-only set (`prepare_tool_call`): `EnterPlan`/`ExitPlan` change session
-/// mode and `AskUser` blocks on a human, neither of which a side agent nobody
-/// is watching may do.
+/// read-only set (`prepare_tool_call`). `EnterPlan`/`ExitPlan` change session
+/// mode, and `AskUser` blocks on a human. A side agent that nobody watches
+/// must do neither.
 fn is_capture_readable(kind: ToolKind) -> bool {
     matches!(
         kind,
@@ -133,9 +133,9 @@ const CAPTURE_ID_PREFIX: &str = "capture";
 /// Item id prefix the goal harness mints for the items it copies off the planner's own list.
 pub(super) const PLAN_SEED_ID_PREFIX: &str = "plan";
 
-/// [`add_only_todo_args`] with an explicit id prefix, so callers that append
-/// their own kind of item (a `/todo` capture, the goal planner's seed) keep
-/// their provenance while sharing one append-only argument shape.
+/// [`add_only_todo_args`] with an explicit id prefix. Callers that append
+/// their own kind of item (a `/todo` capture, the goal planner's seed) thus
+/// keep their provenance. They still share one append-only argument shape.
 pub(super) fn add_only_todo_args_with_prefix(
     contents: &[String],
     urgent: bool,
@@ -259,8 +259,8 @@ impl CaptureToolOutcome {
 /// written to steer the next turn toward the write, because a refusal the model
 /// cannot act on just burns the turn budget.
 ///
-/// `todo_tool` is the name the todo tool is advertised under in THIS session,
-/// which is the name the model calls it by — not the canonical `todo_write`,
+/// `todo_tool` is the name the todo tool is advertised under in THIS session.
+/// The model calls it by that name. It is not the canonical `todo_write`,
 /// which a `name_override` can rename out from under both.
 fn capture_action(
     name: &str,
@@ -417,7 +417,7 @@ impl SessionActor {
         let tag = self.reminder_wrapper_tag();
         let conversation = self.chat_state_handle.get_conversation().await;
         // Fit the snapshot to THIS model's window rather than sending the
-        // conversation whole: a small-window model would otherwise fail the
+        // conversation whole. Otherwise a small-window model fails the
         // capture with a context-length error. This is deterministic and
         // never retried.
         let mut items = crate::session::helpers::session_recap::budget_instruction_items(
@@ -702,9 +702,9 @@ impl SessionActor {
     /// The item contents in a todo-tool call, whatever the model spelled them.
     ///
     /// Parses through the bridge first, which reverse-maps client-facing
-    /// parameter names to canonical ones — a harness may rename `todos` the
-    /// same way it renames the tool — and yields the typed input the tool
-    /// itself would see. Falls back to reading the JSON directly, so a call
+    /// parameter names to canonical ones. A harness can rename `todos` the
+    /// same way it renames the tool. The bridge yields the typed input that
+    /// the tool itself sees. Falls back to reading the JSON directly, so a call
     /// the strict parser rejects (an extra field, a status the schema does not
     /// know) still contributes its content instead of being dropped.
     async fn capture_todo_contents(
@@ -735,9 +735,9 @@ impl SessionActor {
         contents_from_todo_write_args(args)
     }
 
-    /// Run the sanitized append through the session's own todo tool. Do this
-    /// so the list, its persisted state, and the client's plan view all move
-    /// the way they do when the main agent writes a todo. Dispatch is by the
+    /// Run the sanitized append through the session's own todo tool. Then the
+    /// list, its persisted state, and the client's plan view all move as they
+    /// do when the main agent writes a todo. Dispatch is by the
     /// session's advertised name with canonical parameter names. The registry
     /// reverse-maps client names onto canonical ones and leaves everything
     /// else alone, so canonical keys arrive as themselves under any rename.
@@ -780,9 +780,9 @@ mod tests {
         assert_ne!(id, other["todos"][0]["id"].as_str().unwrap());
     }
 
-    /// `/TODO` differs from `/todo` in exactly one argument. Everything that
-    /// holds the one-mutation rule — minted ids, forced pending, merge on —
-    /// is the same at the front of the list as at the back.
+    /// `/TODO` differs from `/todo` in exactly one argument. Minted ids, forced
+    /// pending and merge on hold the one-mutation rule. Each of them is the
+    /// same at the front of the list as at the back.
     #[test]
     fn urgent_args_prepend_and_change_nothing_else() {
         let args = add_only_todo_args(&["ship the fix".to_owned()], true);

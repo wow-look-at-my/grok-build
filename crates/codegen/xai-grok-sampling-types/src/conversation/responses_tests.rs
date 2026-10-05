@@ -1752,8 +1752,8 @@ fn encrypted_turn(origin: &str, summary: &str) -> Vec<ConversationItem> {
 }
 
 /// A Responses model reads its own `encrypted_content` and nobody else's. On a
-/// switch the blob stays home and the summary rides as assistant text, so the
-/// next model still knows what the last one was thinking.
+/// switch the blob stays home and the summary rides as assistant text. The
+/// next model thus still knows what the last one was thinking.
 #[test]
 fn encrypted_reasoning_from_another_model_rides_as_its_summary() {
     let req = ConversationRequest::from_items(encrypted_turn("grok-4", "carry the one"))

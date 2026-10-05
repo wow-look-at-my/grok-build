@@ -4896,12 +4896,12 @@ async fn prefix_stable_across_user_assistant_turns() {
     assert_prefix_stable_pair(&req2, &req3, "turn 2 -> turn 3");
 }
 
-/// End-to-end reasoning round-trip through the REAL chat-state actor. A turn-N
-/// `[Reasoning, Assistant]` pair (as the shell turn-loop commits it — the
-/// Reasoning sibling rides the `push_tool_result` arm, the Assistant rides
-/// `push_assistant_response`) must survive the integrity-repair + prune pass in
-/// `build_request` and reach the next turn's Messages wire as a `Thinking`
-/// block. The reasoning carries real thinking text with NO encrypted signature
+/// End-to-end reasoning round-trip through the REAL chat-state actor. The shell
+/// turn-loop commits a turn-N `[Reasoning, Assistant]` pair. The Reasoning
+/// sibling rides the `push_tool_result` arm. The Assistant rides
+/// `push_assistant_response`. The pair must survive the integrity-repair +
+/// prune pass in `build_request`. It must reach the next turn's Messages wire
+/// as a `Thinking` block. The reasoning carries real thinking text with NO encrypted signature
 /// (the Anthropic-compatible third-party case, e.g. Kimi) — the exact scenario
 /// the goal suspects is being dropped.
 #[tokio::test]

@@ -241,7 +241,7 @@ impl xai_tool_runtime::Tool for MonitorTool {
 /// Every spawned site drops the handle: the monitor tool has already answered
 /// by the time the pipeline starts. No caller is left to await it. Consider
 /// the reader of a monitor. That reader is waiting on the `MonitorEvent`
-/// notifications this pipeline alone produces, and a task that died mid-round
+/// notifications this pipeline alone produces. A task that died mid-round
 /// stops producing them without otherwise saying so. The panic therefore
 /// arrives as one more event naming what the pipeline could not survive.
 ///
