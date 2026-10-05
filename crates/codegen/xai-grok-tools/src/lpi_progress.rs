@@ -60,36 +60,26 @@ pub fn available() -> bool {
     std::env::split_paths(&path).any(|dir| dir.join("lpi").is_file())
 }
 
-/// A key `lpi` accepts, so it can be passed to a shell without quoting.
-fn usable_key(key: &str) -> bool {
-    !key.is_empty()
-        && key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-}
-
-/// Wrap `script` so it runs under `lpi`, whose snapshots arrive on stderr.
-/// The command's own output reaches stdout unchanged, both streams of it. A
-/// key that a shell would read as syntax yields nothing, because the wrapper
-/// is built as shell text.
+/// The argument vector that reports progress for a command's own log.
 ///
-/// The status is restored in a subshell rather than with `exit`, because the
-/// shell running the wrapper has to survive to run what follows it.
-pub fn wrap_script(script: &str, key: &str, db: Option<&Path>) -> Option<String> {
-    if !usable_key(key) {
-        return None;
-    }
-    let mut lpi = String::from("lpi pipe --learn-key ");
-    lpi.push_str(key);
-    lpi.push_str(" --json-stream");
+/// The command is not wrapped. A shell pipeline runs its elements in subshells,
+/// and the shell that carries a caller's directory and environment between
+/// calls is the one the command. Has to run in. The log the caller already
+/// writes is read instead.
+pub fn read_argv(key: &str, log: &Path, db: Option<&Path>) -> Vec<String> {
+    let mut argv = vec![
+        "lpi".to_string(),
+        "watch".to_string(),
+        "--key".to_string(),
+        key.to_string(),
+        "--json-stream".to_string(),
+    ];
     if let Some(dir) = db {
-        let dir = dir.to_str()?;
-        lpi.push_str(" --db ");
-        lpi.push_str(dir);
+        argv.push("--db".to_string());
+        argv.push(dir.to_string_lossy().into_owned());
     }
-    Some(format!(
-        "{script} 2>&1 | {lpi}\n( exit \"${{PIPESTATUS[0]}}\" )\n"
-    ))
+    argv.push(log.to_string_lossy().into_owned());
+    argv
 }
 
 #[cfg(test)]
@@ -135,29 +125,53 @@ mod tests {
     }
 
     #[test]
-    fn the_wrapper_keeps_the_command_status() {
-        let wrapped =
-            wrap_script("cargo build", "grok-build", None).expect("a plain key is usable");
-        assert!(wrapped.starts_with("cargo build 2>&1 | lpi pipe --learn-key grok-build"));
-        assert!(wrapped.contains("--json-stream"));
-        // A pipeline reports its last element.
-        assert!(wrapped.contains("( exit \"${PIPESTATUS[0]}\" )"));
-        assert!(!wrapped.contains("\nexit "));
+    fn the_reader_follows_the_log_without_touching_the_command() {
+        let argv = read_argv("grok-build", Path::new("/logs/1.log"), None);
+        assert_eq!(
+            argv,
+            vec![
+                "lpi",
+                "watch",
+                "--key",
+                "grok-build",
+                "--json-stream",
+                "/logs/1.log"
+            ]
+        );
+        // Nothing here reaches a shell, so a key is data rather than syntax.
+        assert!(
+            !argv
+                .iter()
+                .any(|arg| arg.contains("|") || arg.contains("2>&1"))
+        );
     }
 
     #[test]
-    fn the_wrapper_names_the_model_directory_when_given_one() {
-        let wrapped =
-            wrap_script("make", "b", Some(Path::new("/tmp/lpidb"))).expect("a plain key is usable");
-        assert!(wrapped.contains("--db /tmp/lpidb"));
+    fn the_reader_names_the_model_directory_when_given_one() {
+        let argv = read_argv("b", Path::new("/logs/1.log"), Some(Path::new("/tmp/lpidb")));
+        assert_eq!(
+            argv,
+            vec![
+                "lpi",
+                "watch",
+                "--key",
+                "b",
+                "--json-stream",
+                "--db",
+                "/tmp/lpidb",
+                "/logs/1.log"
+            ]
+        );
     }
 
     #[test]
-    fn a_key_a_shell_would_read_as_syntax_is_refused() {
+    fn a_key_that_is_shell_syntax_stays_a_single_argument() {
         for key in ["", "a b", "a;rm -rf", "$(x)", "a|b", "a\nb"] {
-            assert!(
-                wrap_script("make", key, None).is_none(),
-                "{key:?} must not reach a shell"
+            let argv = read_argv(key, Path::new("/logs/1.log"), None);
+            assert_eq!(
+                argv,
+                vec!["lpi", "watch", "--key", key, "--json-stream", "/logs/1.log"],
+                "{key:?} must stay one argument"
             );
         }
     }
