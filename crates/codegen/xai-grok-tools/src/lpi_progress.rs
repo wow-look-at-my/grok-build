@@ -72,6 +72,9 @@ fn usable_key(key: &str) -> bool {
 /// The command's own output reaches stdout unchanged, both streams of it. A
 /// key that a shell would read as syntax yields nothing, because the wrapper
 /// is built as shell text.
+///
+/// The status is restored in a subshell rather than with `exit`, because the
+/// shell running the wrapper has to survive to run what follows it.
 pub fn wrap_script(script: &str, key: &str, db: Option<&Path>) -> Option<String> {
     if !usable_key(key) {
         return None;
@@ -85,7 +88,7 @@ pub fn wrap_script(script: &str, key: &str, db: Option<&Path>) -> Option<String>
         lpi.push_str(dir);
     }
     Some(format!(
-        "{script} 2>&1 | {lpi}\nexit \"${{PIPESTATUS[0]}}\"\n"
+        "{script} 2>&1 | {lpi}\n( exit \"${{PIPESTATUS[0]}}\" )\n"
     ))
 }
 
@@ -137,8 +140,9 @@ mod tests {
             wrap_script("cargo build", "grok-build", None).expect("a plain key is usable");
         assert!(wrapped.starts_with("cargo build 2>&1 | lpi pipe --learn-key grok-build"));
         assert!(wrapped.contains("--json-stream"));
-        // A pipeline reports its last element, so the command's own status is restored rather than left to lpi's.
-        assert!(wrapped.contains("exit \"${PIPESTATUS[0]}\""));
+        // A pipeline reports its last element.
+        assert!(wrapped.contains("( exit \"${PIPESTATUS[0]}\" )"));
+        assert!(!wrapped.contains("\nexit "));
     }
 
     #[test]
