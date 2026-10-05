@@ -12,15 +12,15 @@ permissions:
 
 # Every run gets its own group, so a later push never cancels or drops a run in progress.
 concurrency:
-  group: ci-${{ github.run_id }}
-  cancel-in-progress: false
+  group: gha_${{ github.repository }}_${{ github.workflow }}_${{ github.ref != 'refs/heads/master' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 env:
   CARGO_TERM_COLOR: always
   # xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84 under a non-UTF-8 locale.
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
-  # Cargo reuses its own per-package artifacts in target/, which a compilation cache in front of it cannot do: a hit there still runs a process and writes the object out.
+  # Cargo reuses its own per-package artifacts in target/, which a compilation cache in front of it cannot do. A hit there still runs a process and writes the object out.
   CARGO_INCREMENTAL: "0"
   # Debuginfo on every test binary needs >37 GB of target/ against a runner's ~14 GB, and ld then dies on a bus error.
   CARGO_PROFILE_DEV_DEBUG: "0"
@@ -36,7 +36,7 @@ jobs:
   fmt:
     name: Rustfmt
     runs-on: ubuntu-22.04
-    # Its own job, not a step of build-test: rustfmt parses and never compiles, so it answers in seconds rather than waiting on the cold build it would otherwise sit behind.
+    # Its own job, not a step of build-test: rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build it would otherwise sit behind.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -65,7 +65,7 @@ jobs:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-22.04
-    # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s, so a job past this is broken, not slow.
+    # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
     timeout-minutes: 75
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
@@ -96,11 +96,11 @@ jobs:
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
         run: |
-          mkdir -p "$RUNNER_TEMP/nextest-bin"
-          curl -fsSL -o "$RUNNER_TEMP/nextest.tar.gz" \
+          mkdir -p "${{ runner.temp }}/nextest-bin"
+          curl -fsSL -o "${{ runner.temp }}/nextest.tar.gz" \
             https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
-          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin"
-          echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
+          tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
+          echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
 
       # The registry dependencies, cached by cached-run's cargo mode. See AGENTS.md, "The dependency tar". The script runs on a hit too, so the workspace compiles here once and the next step finds it fresh.
       - name: Build the dependencies
@@ -136,12 +136,7 @@ jobs:
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
-      # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here, so the lint names the file that reintroduced it; `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it, so the tree is green the moment the entry is added. Warnings that are not denied stay warnings: `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated on clippy style before.
-      #
-      # `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process, and a test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build, so the deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here.
-      #
-      # `!cancelled()` keeps a test failure from hiding a lint failure, and the other way round.
-      # `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions, so one crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
+      # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here. The lint names the file that reintroduced it. `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it. The tree is green the moment the entry is added. Warnings that are not denied stay warnings: `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated. On clippy style before. `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process. A test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build. The deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here. `!cancelled()` keeps a test failure from hiding a lint failure, and the other way round. `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions. One crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
       - name: Lint (workspace)
         if: ${{ !cancelled() }}
         run: cargo clippy --locked --workspace --lib --bins --keep-going
@@ -193,22 +188,22 @@ jobs:
       - name: Install zig (pinned 0.14.1)
         if: matrix.darwin
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
-          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/zig"
-          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
-          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/zig/zig" version
+          curl -fsSL -o "${{ runner.temp }}/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  ${{ runner.temp }}/zig.tar.xz" | sha256sum -c -
+          mkdir -p "${{ runner.temp }}/zig"
+          tar -xJf "${{ runner.temp }}/zig.tar.xz" -C "${{ runner.temp }}/zig" --strip-components=1
+          echo "${{ runner.temp }}/zig" >> "$GITHUB_PATH"
+          "${{ runner.temp }}/zig/zig" version
 
       # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
       - name: Install the macOS SDK (pinned 14.5)
         if: matrix.darwin
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/sdk.tar.xz" \
+          curl -fsSL -o "${{ runner.temp }}/sdk.tar.xz" \
             https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
-          echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  $RUNNER_TEMP/sdk.tar.xz" | sha256sum -c -
+          echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  ${{ runner.temp }}/sdk.tar.xz" | sha256sum -c -
           mkdir -p "$SDKROOT"
-          tar -xJf "$RUNNER_TEMP/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
+          tar -xJf "${{ runner.temp }}/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
 
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
       - name: Install mold
@@ -220,14 +215,14 @@ jobs:
       - name: Point the C toolchain at zig
         if: matrix.darwin
         run: |
-          printf '#!/bin/sh\nexec zig ar "$@"\n' > "$RUNNER_TEMP/zig-ar"
-          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "$RUNNER_TEMP/zig-ranlib"
-          chmod +x "$RUNNER_TEMP/zig-ar" "$RUNNER_TEMP/zig-ranlib"
+          printf '#!/bin/sh\nexec zig ar "$@"\n' > "${{ runner.temp }}/zig-ar"
+          printf '#!/bin/sh\nexec zig ranlib "$@"\n' > "${{ runner.temp }}/zig-ranlib"
+          chmod +x "${{ runner.temp }}/zig-ar" "${{ runner.temp }}/zig-ranlib"
           {
             echo "CC_aarch64_apple_darwin=$PWD/ci/zig-cc"
             echo "CXX_aarch64_apple_darwin=$PWD/ci/zig-cxx"
-            echo "AR_aarch64_apple_darwin=$RUNNER_TEMP/zig-ar"
-            echo "RANLIB_aarch64_apple_darwin=$RUNNER_TEMP/zig-ranlib"
+            echo "AR_aarch64_apple_darwin=${{ runner.temp }}/zig-ar"
+            echo "RANLIB_aarch64_apple_darwin=${{ runner.temp }}/zig-ranlib"
           } >> "$GITHUB_ENV"
 
       # The recorder is a host binary, so it takes no --target.
@@ -353,9 +348,9 @@ jobs:
 
       - name: Link the darwin binary
         run: |
-          mkdir -p "$RUNNER_TEMP/darwin-link"
-          tar -xf dist/darwin-link.tar -C "$RUNNER_TEMP/darwin-link"
-          ci/darwin-relink.sh "$RUNNER_TEMP/darwin-link" "$PWD/dist/grok-darwin-arm64"
+          mkdir -p "${{ runner.temp }}/darwin-link"
+          tar -xf dist/darwin-link.tar -C "${{ runner.temp }}/darwin-link"
+          ci/darwin-relink.sh "${{ runner.temp }}/darwin-link" "$PWD/dist/grok-darwin-arm64"
 
       - uses: wow-look-at-my/actions@cache-upload#latest
         with:
@@ -434,7 +429,7 @@ jobs:
             *) echo "FAIL: the binary does not report the buildhost release" ; exit 1 ;;
           esac
 
-      # Each upload is the org action, not the CLI. buildhost publishes its CLI as one APE, so `?os=linux` serves the same MZ file a Mac gets, and this runner's binfmt handler claims that magic: `run-detectors: unable to find an interpreter`. The action is TypeScript, mints its own OIDC bearer, and chunks a body past the edge's cap by itself.
+      # Each upload is the org action, not the CLI. buildhost publishes its CLI as one APE, so `?os=linux` serves the same MZ file a Mac gets. This runner's binfmt handler claims that magic: `run-detectors: unable to find an interpreter`. The action is TypeScript, mints its own OIDC bearer, and chunks a body past the edge's cap by itself.
       - name: Upload the linux binary
         uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
         with:
