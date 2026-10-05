@@ -347,6 +347,16 @@ pub(super) fn dispatch_show_queue(app: &mut AppView) -> Vec<Effect> {
     vec![]
 }
 
+/// `/todo` with no arguments: toggle the todo pane on the active agent, the same pane `Ctrl-T` shows.
+pub(super) fn dispatch_toggle_todos(app: &mut AppView) -> Vec<Effect> {
+    if let ActiveView::Agent(id) = app.active_view
+        && let Some(agent) = app.agents.get_mut(&id)
+    {
+        agent.toggle_todo_pane();
+    }
+    vec![]
+}
+
 /// `/tasks`: commit a read-only list of background tasks, subagents, and scheduled (`/loop`) tasks as a system block.
 /// The text is built by [`crate::app::status_blocks::tasks_block_text`]; this just resolves the active agent and pushes it.
 pub(super) fn dispatch_show_tasks(app: &mut AppView) -> Vec<Effect> {

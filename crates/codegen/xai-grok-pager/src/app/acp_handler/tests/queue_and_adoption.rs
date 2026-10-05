@@ -1143,6 +1143,7 @@
             "scheduler-fired-019e51a3-abcd-1234"
         ));
         assert!(!should_adopt_running_prompt("task-completed-abc-123"));
+        assert!(!should_adopt_running_prompt("todo-added-abc-123"));
         assert!(!should_adopt_running_prompt("subagent-completed-xyz-789"));
         assert!(!should_adopt_running_prompt(
             "notifications-019e0000-0000-7000-8000-0000000000aa"

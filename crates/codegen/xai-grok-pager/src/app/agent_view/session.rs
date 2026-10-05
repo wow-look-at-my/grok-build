@@ -303,6 +303,7 @@ impl AgentView {
             last_bg_click: None,
             hit_queue_close: Default::default(),
             hit_plan_button: Default::default(),
+            hit_badge: Default::default(),
             hit_plan_approval_status: Default::default(),
             hit_follow_indicator: Default::default(),
             hit_response_top_indicator: Default::default(),
