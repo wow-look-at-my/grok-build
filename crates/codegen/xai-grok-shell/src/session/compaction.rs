@@ -466,9 +466,7 @@ pub(crate) enum SuppressReason {
     Other,
 }
 impl SuppressReason {
-    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change. / `schema` and `other` get [`SUPPRESS_TURN`]. The next turn sends a different request, so it retries then.
-    /// `credit_block` gets [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
-    /// `auth` gets [`SUPPRESS_AUTH`]: cleared on login/token refresh, not on a `200` (an over-window session never gets one).
+    /// `auth` clears on a login, because an over-window session never gets a `200`.
     fn suppress_state(self) -> u8 {
         match self {
             SuppressReason::Size => SUPPRESS_STICKY,
