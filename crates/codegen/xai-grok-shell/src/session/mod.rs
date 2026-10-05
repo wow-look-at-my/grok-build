@@ -124,7 +124,9 @@ pub enum PromptOrigin {
     SchedulerFired,
     /// A `/todo` capture that added items while no turn was running. The shell wakes a turn with the
     /// reminder text so the work begins; the item is already on the list.
-    TodoAdded { capture_id: String },
+    TodoAdded {
+        capture_id: String,
+    },
     /// The shell re-parked `exit_plan_mode` on resume, the user approved/revised, and the shell injects the follow-up turn.
     /// Synthetic: the user never typed it, so it stays out of prompt history, but it still runs a real turn.
     PlanResume,

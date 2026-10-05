@@ -65,7 +65,9 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                     .cmd_tx
                     .send(SessionCommand::Prompt {
                         prompt_id: format!("todo-added-{capture_id}"),
-                        prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(reminder))],
+                        prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(
+                            reminder,
+                        ))],
                         prompt_mode: crate::session::plan_mode::PromptMode::Agent,
                         artifact_upload_ctx: None,
                         client_identifier: None,
