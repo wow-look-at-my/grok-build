@@ -230,9 +230,9 @@ impl EndpointsConfig {
         xai_tool_types::Aliases::new("models_list_url", &["models_endpoint"]);
 }
 
-/// `EndpointsConfig` with each list-URL key spelling as its own field, so a
-/// table naming both folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
-/// rather than failing the whole `[endpoints]` table as a duplicate field.
+/// `EndpointsConfig` with each list-URL key spelling as its own field. A
+/// table naming both thus folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`].
+/// It does not fail the whole `[endpoints]` table as a duplicate field.
 ///
 /// Every field carries `#[serde(default)]` from the container, which is the
 /// same rule [`EndpointsConfig`] applies on its own: an absent key is unset,

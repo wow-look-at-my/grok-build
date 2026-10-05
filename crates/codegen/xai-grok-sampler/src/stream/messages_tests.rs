@@ -229,12 +229,13 @@ async fn thinking_block_emits_reasoning_channel_and_preserved_in_response() {
 }
 
 /// End-to-end reasoning round-trip on the REAL Messages path. Thinking deltas
-/// (with NO encrypted signature — the Anthropic-compatible third-party case,
-/// e.g. Kimi) streamed by a provider must survive (a) the stream's synthesis
-/// into a `ConversationItem::Reasoning` sibling, (b) the shell turn-loop commit
+/// streamed by a provider have NO encrypted signature here. This is the
+/// Anthropic-compatible third-party case, for example Kimi. The deltas must
+/// survive steps. (a) is the stream's synthesis into a
+/// `ConversationItem::Reasoning` sibling. (b) is the shell turn-loop commit
 /// order (the sibling rides the `push_tool_result` arm and lands in history as
-/// `[Reasoning, Assistant]`), and (c) the real `build_messages_request` wire
-/// conversion for the NEXT turn, where it must appear as a `Thinking` content
+/// `[Reasoning, Assistant]`). (c) is the real `build_messages_request` wire
+/// conversion for the NEXT turn. There it must appear as a `Thinking` content
 /// block on the following assistant message. This is the regression the goal
 /// guards: real thinking text must be resent, not dropped.
 #[tokio::test]

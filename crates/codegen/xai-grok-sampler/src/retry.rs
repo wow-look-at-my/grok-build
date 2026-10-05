@@ -1134,9 +1134,9 @@ mod tests {
         }
     }
 
-    /// The guarantee the budget exists for: a stream that dies mid-body is
-    /// retried several times, on backoff that grows, whatever the model's
-    /// own `max_retries` says.
+    /// This is the guarantee the budget exists for. A stream that dies mid-body
+    /// is retried several times, on backoff that grows. This holds whatever the
+    /// model's own `max_retries` says.
     #[test]
     fn a_stream_interruption_is_retried_ten_times_with_growing_backoff() {
         let err = SamplingError::EventStreamError("error decoding response body".into());
