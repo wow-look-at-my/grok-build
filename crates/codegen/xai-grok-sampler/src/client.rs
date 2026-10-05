@@ -2736,8 +2736,8 @@ async fn read_body(
     })
 }
 
-/// Rebuild `Api` from stream-collected info, preserving status,
-/// `Retry-After`, and `x-should-retry` (kind is lost on this path).
+/// Rebuild `Api` from stream-collected info, preserving status, `Retry-After`, and
+/// `x-should-retry` (kind is lost on this path). Applies the request's
 /// Applies the request's [`xai_grok_sampling_types::LengthPolicy`] to a collected response.
 /// Fails a `Length` stop the policy rejects, logs the salvage breadcrumb otherwise.
 /// The single gate shared by `drive_l2` and the direct-collect path so the two cannot drift.

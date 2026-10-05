@@ -362,7 +362,7 @@ fn append_skeptic_reports(scratch_root: &std::path::Path, dest: &std::path::Path
 }
 
 /// The goal model's private scratch dir (`<scratch_root>/implementer`).
-/// The implementer writes throwaway files here. Nothing in it is evidence.
+/// implementer writes throwaway files here.
 pub(crate) fn implementer_scratch_dir(verifier_id: &str) -> PathBuf {
     goal_scratch_root(verifier_id).join("implementer")
 }

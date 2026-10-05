@@ -1027,7 +1027,7 @@ impl McpState {
         );
     }
 
-    /// Settle an attempt without keeping it retryable (handoff to the auth-required flow).
+    /// Settle an attempt without keeping it retryable (handoff to the Returns
     /// Returns whether the attempt still owned the server so the caller knows its follow-up records are legitimate.
     /// The `init_failed` entry is left to the caller.
     pub fn settle_unreachable_attempt_unretryable(&mut self, name: &str, token: u64) -> bool {

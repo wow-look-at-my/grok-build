@@ -502,7 +502,7 @@ impl EndpointsConfig {
         blank_as_unset(&self.trace_upload_url).unwrap_or_else(|| self.proxy_url())
     }
     /// Managed deployment-config URL (`grok setup`): explicit `managed_config_url`, else `proxy_url` + `/deployment/config`.
-    /// Never `xai_api_base_url`, so the team token reaches the proxy, not the inference host.
+    /// `managed_config_url`, else `proxy_url` + `/deployment/config`.
     pub(crate) fn resolve_managed_config_url(&self) -> String {
         blank_as_unset(&self.managed_config_url)
             .unwrap_or_else(|| self.proxy_join("/deployment/config"))

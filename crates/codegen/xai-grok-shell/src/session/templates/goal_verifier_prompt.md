@@ -85,7 +85,7 @@ Write this object (fixed schema) with your file-write tool:
 
 - `findings` (array — the PRIMARY output the implementer acts on): one item per gap, terse, no prose. `kind` = `bug` (defect in shipped behavior) | `gap` (unmet criterion / missing test / a plan step never run) | `todo` (TODO/`#[ignore]`/stub left in). `location` = `path:line` when code-related, else where (e.g. "no test for criterion 3", "verification plan step 4"). `detail` = one concrete line naming a code or test change, or a command to run — never a file to save. When the refute is that a test cannot honestly drive the unit (it pre-positions state, starts past the unit, or re-implements it), `detail` must tell the IMPLEMENTER to REFACTOR the shipped code. This is into a directly-callable pure unit — NOT to patch the test around an untestable unit (that whack-a-mole never converges). Empty/omitted only when you cannot refute.
 - `refuted` (bool): `true` if you found grounds; `false` only after thorough investigation.
-- `evidence` (string): a one-line summary citation (a RUN_LOG entry, a `path:line`); for `code-change`, FINAL_RESPONSE prose is NOT evidence.
+- `evidence` (string): a one-line summary citation (a RUN_LOG entry, a `path:line`). For `code-change`, FINAL_RESPONSE prose is NOT evidence.
 - `confidence` (string): `"high"` | `"medium"` | `"low"`.
 - `blocking` (string, default `"none"`): `"none"` | `"contradiction"` | `"unverifiable"` (rule 8).
 - `details_md` (string, optional): Markdown writeup; if omitted, the aggregator falls back to the details file below.
