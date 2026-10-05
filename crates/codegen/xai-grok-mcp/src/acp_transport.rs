@@ -59,8 +59,9 @@ pub fn acp_bridge_transport(
 ) -> AcpBridgeTransport {
     let (agent_read, pump_write) = tokio::io::duplex(BRIDGE_BUF); // server -> client
     let (pump_read, agent_write) = tokio::io::duplex(BRIDGE_BUF); // client -> server
-    // Nothing joins with the pump: it owns both duplex halves, so its death is the bridge's death, and a round-trip that never completes is
-    // the only thing rmcp would notice.
+    // Nothing joins with the pump: it owns both duplex halves, so its death is
+    // the bridge's death, and a round-trip that never completes is the only
+    // thing rmcp would notice. Guarded so the log names the bridge that died.
     #[allow(clippy::disallowed_methods)]
     tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
         "acp mcp bridge pump",
@@ -138,7 +139,10 @@ async fn read_requests(
         let server_id = server_id.clone();
         let responses_tx = responses_tx.clone();
         invokes.spawn(async move {
-            // This task is the only thing that will ever answer `id`.
+            // This task is the only thing that will ever answer `id`. A round
+            // that unwound without being caught leaves rmcp waiting for a
+            // response whose task is already gone, so the panic is turned into
+            // the same JSON-RPC error an `Err` from the invoker produces.
             let round = xai_grok_tools::util::detached::guarded(
                 "acp mcp bridge reverse invoke",
                 invoker.invoke(&server_id, message, invoke_timeout),

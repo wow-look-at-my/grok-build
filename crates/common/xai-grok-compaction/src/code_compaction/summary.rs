@@ -7,6 +7,12 @@
 //! - the canonical `<user_query>` wrapping ([`wrap_user_query`]).
 
 /// `text[from..to]` for the tag surgery below.
+///
+/// Every index handed here is the offset at which one of the ASCII literals
+/// `<analysis>`, `</analysis>`, `<summary>` or `</summary>` was found, or that
+/// offset plus the literal's byte length. In UTF-8 an ASCII byte is always a
+/// char boundary and never appears inside a multi-byte character, so both ends
+/// of the range align.
 #[allow(clippy::string_slice)] // both ends are ASCII tag offsets
 fn span(text: &str, from: usize, to: usize) -> &str {
     &text[from..to]

@@ -360,7 +360,9 @@ pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     if xai_grok_models::slot_by_id(slot_id).is_none() {
         anyhow::bail!("unknown harness model slot '{slot_id}'");
     }
-    // Clearing a slot has to REMOVE its key.
+    // Clearing a slot has to REMOVE its key. Setting the field to `None`
+    // only stops it serializing, and the merge then keeps the model already
+    // on disk — the modal would report "cleared" over an unchanged pin.
     let removals: Vec<(&str, &str)> = if value.is_empty() {
         vec![("models", slot_id)]
     } else {

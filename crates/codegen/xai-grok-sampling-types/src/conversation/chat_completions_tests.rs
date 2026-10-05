@@ -819,7 +819,9 @@ fn todo_capture_loop_maps_to_assistant_call_and_tool_message() {
     );
 }
 
-/// Whatever spelling it arrived in has to go back out unchanged.
+/// Gemini 3 rejects a replayed function call whose thought signature is
+/// missing, and the signature only ever reaches an OpenAI-shaped client on the
+/// call itself. Whatever spelling it arrived in has to go back out unchanged.
 #[test]
 fn a_tool_calls_provider_fields_survive_the_round_trip() {
     for key in ["extra_content", "provider_specific_fields"] {
@@ -875,7 +877,21 @@ fn a_tool_call_without_provider_fields_replays_unchanged() {
     );
 }
 
+// ============================================================================
+// Strict-schema message profiles (Cerebras `wrong_api_format`)
+// ============================================================================
+//
+// Cerebras validates its Chat Completions message schema strictly: an
+// unrecognized property on any message is a hard 400, so a replayed
+// assistant message carrying `model_id` (which this crate writes into stored
+// history) bricks the conversation from turn 2 onward. These tests drive the
+// real serialized body — the observable the provider actually sees — and
+// assert that a strict target receives no unsupported property while a
+// tolerant target's body is byte-for-byte unchanged.
 
+/// A two-turn conversation whose assistant items carry both a recorded
+/// `model_id` and a replayed reasoning sibling — exactly the history shape
+/// that produced the Cerebras 400 on `messages.6.assistant`.
 fn history_with_model_id_and_reasoning() -> Vec<ConversationItem> {
     vec![
         ConversationItem::system("You are helpful."),
@@ -941,7 +957,10 @@ fn strict_profile_omits_model_id_and_reasoning_content_from_wire_body() {
         );
     }
 
-    // The conversation itself must survive: dropping both properties must not drop content or structure.
+    // The conversation itself must survive: dropping the two properties must
+    // not drop content or structure. The `Reasoning` sibling folds into the
+    // assistant, so it contributes no message of its own: system, user,
+    // assistant, user.
     assert_eq!(assistant["content"], serde_json::json!("a1"));
     assert_eq!(messages.len(), 4, "structure preserved: {messages:#?}");
     assert_eq!(messages[0]["role"], "system");
@@ -1069,7 +1088,8 @@ fn strict_profile_leaves_stored_history_untouched() {
     req.chat_message_profile = ChatMessageProfile::STRICT;
     let _wire: crate::types::ChatCompletionRequest = req.into();
 
-    // `req.items` is moved by the conversion; assert on a freshly built request instead, so the check is on stored state.
+    // `req.items` is moved by the conversion; assert on a freshly built
+    // request instead, so the check is on stored state, not the wire.
     let mut stored = ConversationRequest::from_items(before);
     stored.chat_message_profile = ChatMessageProfile::STRICT;
 
@@ -1096,7 +1116,7 @@ fn strict_profile_leaves_stored_history_untouched() {
 }
 
 /// `narrowed_by` can only narrow: a caller cannot re-widen a strict model,
-/// and permissive sides stay permissive.
+/// and two permissive sides stay permissive.
 #[test]
 fn profile_narrowing_is_monotonic() {
     let p = ChatMessageProfile::PERMISSIVE;
@@ -1199,7 +1219,7 @@ fn strip_then_serialize_omits_unsupported_properties() {
     let before = serde_json::to_value(&before).unwrap();
     assert!(before["messages"][2].get("model_id").is_some());
 
-    // The provider's names both; strip, then serialize again.
+    // The provider's 400 names both; strip, then serialize again.
     assert!(req.strip_unsupported_message_properties(true, true));
     let after: crate::types::ChatCompletionRequest = req.into();
     let after = serde_json::to_value(&after).unwrap();

@@ -109,7 +109,12 @@ pub struct PullDiagnostics {
     notify: DiagnosticsNotify,
     support: Arc<SupportFlag>,
     in_flight: Arc<parking_lot::Mutex<InFlight>>,
-    /// Whether this server has ever answered a pull. Until it has, we do not know what kind of server it is.
+    /// Whether this server has ever answered a pull.
+    ///
+    /// Until it has, we do not know what kind of server it is. It may be
+    /// pull-only, like Roslyn, or it may be one that publishes and has simply
+    /// not had anything to publish yet — and those want opposite treatment.
+    /// One way, and never cleared.
     answered_a_pull: Arc<AtomicBool>,
     /// Bumped when the server says its answers no longer describe the code. A document version cannot express this: the text did not change, the
     /// server's knowledge of it did. Without it, a pull already in flight when the refresh arrives comes back with the very answer the server has
@@ -170,9 +175,11 @@ impl PullDiagnostics {
         #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
             loop {
-                // Guarded so the slot cannot outlive its task: `begin`
-                // reports a pull running until `finish` says otherwise, so a
-                // round that died.
+                // Guarded so the slot cannot outlive its task: `begin` reports
+                // a pull running until `finish` says otherwise, so a round that
+                // died mid-flight would keep every later question about this
+                // document answered as "already running" by work that no longer
+                // exists. `finish` releases the slot either way.
                 let round = crate::util::detached::guarded(
                     "lsp pull diagnostics",
                     pull.resolve(&uri, &key),

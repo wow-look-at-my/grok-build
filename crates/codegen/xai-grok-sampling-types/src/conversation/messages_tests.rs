@@ -575,9 +575,11 @@ fn request_text(req: &ConversationRequest) -> String {
         .join("\n")
 }
 
-/// The signature cannot be re-minted, so the BLOCK gives. Its words do not:
-/// they ride as ordinary assistant text, and the rest of the turn is
-/// untouched.
+/// Replaying another model's thinking block is a 400 the Messages API answers
+/// with "Invalid `signature` in `thinking` block", on every later turn, since
+/// the block stays in history. The signature cannot be re-minted, so the BLOCK
+/// gives. Its words do not: they ride as ordinary assistant text, and the rest
+/// of the turn is untouched.
 #[test]
 fn thinking_minted_by_another_model_rides_as_text() {
     let req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
@@ -635,8 +637,10 @@ fn thinking_from_a_sibling_model_is_left_off_the_wire() {
     );
 }
 
-/// History that never recorded which model produced a turn (`model_id`
-/// absent) is replayed as before.
+/// History that never recorded which model produced a turn (`model_id` absent)
+/// is replayed as before. Dropping it would strip thinking from every
+/// same-model session whose items were synthesized rather than streamed; the
+/// sampler's strip-and-retry is what covers a server that rejects it.
 #[test]
 fn thinking_without_a_recorded_origin_is_replayed() {
     let req = ConversationRequest::from_items(switched_model_conversation(None))
@@ -677,8 +681,10 @@ fn a_rejected_signature_steps_the_replay_level_down() {
 }
 
 /// Switching models mid-tool-loop: the turn the provider is being asked to
-/// continue made tool calls, and its thinking went with the switch. The tool loop
-/// itself survives.
+/// continue made tool calls, and its thinking went with the switch. A provider
+/// validates that turn's thinking — thinking-on requires it to lead with one —
+/// and it cannot be re-minted, so the request goes out with thinking off
+/// rather than trading one 400 for another. The tool loop itself survives.
 #[test]
 fn a_tool_loop_that_lost_its_thinking_turns_thinking_off() {
     let mut req = ConversationRequest::from_items(vec![
@@ -862,8 +868,8 @@ fn todo_capture_loop_strips_reasoning_and_keeps_the_tool_pair() {
     );
 }
 
-/// A switch between models that reason in plain text keeps the thinking. Only
-/// a signature is model-bound, and there is none on either side here, so
+/// A switch between two models that reason in plain text keeps the thinking.
+/// Only a signature is model-bound, and there is none on either side here, so
 /// dropping the block would throw away context nothing was going to reject.
 #[test]
 fn unsigned_thinking_rides_a_switch_between_two_models_that_do_not_sign() {
@@ -929,7 +935,8 @@ fn unsigned_thinking_is_dropped_at_a_model_that_signs_its_own() {
 
 /// Mid-tool-loop, the same way round: the turn being continued kept its
 /// thinking across the switch, so there is a block to lead with and thinking
-/// stays on.
+/// stays on. Turning it off here would cost the loop its reasoning for no 400
+/// that was ever going to happen.
 #[test]
 fn a_tool_loop_that_kept_its_unsigned_thinking_keeps_thinking_on() {
     let mut req = ConversationRequest::from_items(vec![
@@ -971,8 +978,9 @@ fn legacy_dialect_request(model: &str) -> ConversationRequest {
     req
 }
 
-/// A pre-4.6 Claude sizes its thinking in tokens, and rejects the effort word
-/// alongside it.
+/// The 400 this rule exists for: "Input tag 'adaptive' found using 'type' does
+/// not match any of the expected tags: 'disabled', 'enabled'". A pre-4.6 Claude
+/// sizes its thinking in tokens, and rejects the effort word alongside it.
 #[test]
 fn a_pre_4_6_claude_gets_a_token_budget_instead_of_adaptive_thinking() {
     let msgs = build_messages_request(&legacy_dialect_request("claude-haiku-4-5"));
@@ -1015,6 +1023,8 @@ fn a_4_6_model_keeps_adaptive_thinking_and_the_effort_word() {
     }
 }
 
+/// Structured outputs are not what 4.6 changed, so the legacy dialect keeps
+/// `output_config.format` while losing only the effort beside it.
 #[test]
 fn structured_output_survives_the_legacy_thinking_dialect() {
     let schema = serde_json::json!({ "type": "object" });
@@ -1027,6 +1037,7 @@ fn structured_output_survives_the_legacy_thinking_dialect() {
     assert_eq!(oc.effort, None);
 }
 
+/// The budget has to clear the API's 1024 floor and stay under `max_tokens`.
 /// A ceiling that cannot house both leaves thinking off rather than sending a
 /// budget the API rejects.
 #[test]
@@ -1062,7 +1073,8 @@ fn the_thinking_dialect_is_read_off_every_spelling_of_a_model_id() {
         "anthropic/claude-sonnet-5",
         "claude-fable-5",
         "claude-opus-4-8",
-        // Not a Claude at all: a gateway's own model keeps the request it has always been sent.
+        // Not a Claude at all: a gateway's own model keeps the request it has
+        // always been sent.
         "grok-4-fast",
         "gemini-3-pro",
     ] {
@@ -1089,7 +1101,7 @@ fn the_thinking_dialect_is_read_off_every_spelling_of_a_model_id() {
 /// path. The Chat Completions suppression is scoped to the serialized body and
 /// must not have removed the stored value.
 ///
-/// Conversations differ only in the assistant's recorded `model_id`; the
+/// Two conversations differ only in the assistant's recorded `model_id`; the
 /// signed-thinking decision must differ accordingly. If the suppression had
 /// been applied globally (or the field dropped from history), both would take
 /// the same branch and this test would fail.

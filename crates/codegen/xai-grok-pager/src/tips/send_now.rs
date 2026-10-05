@@ -1,4 +1,6 @@
-//! Tip after queuing a follow-up while a turn is running.
+//! Tip after queuing a follow-up while a turn is running: advertise that bare
+//! Enter on an empty prompt interrupts the turn and hands the model everything
+//! queued.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};

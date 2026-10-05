@@ -181,7 +181,12 @@ impl Drop for McpBridge {
         crate::metrics::mcp_tools_bridged_set(0);
         let transport = Arc::clone(&self.transport);
         if tokio::runtime::Handle::try_current().is_ok() {
-            // `Drop` cannot await, so the close has to run detached.
+            // `Drop` cannot await, so the close has to run detached. Its own `Err`
+            // arm logs the failure it can report; the "nobody" a panic would tell
+            // is the transport, which is being torn down by this very drop, and the
+            // adapter's `shutdown` path is where a caller that still cares learns
+            // the outcome. `xai_grok_tools::util::detached` is unreachable here
+            // without a dependency cycle.
             #[allow(clippy::disallowed_methods)]
             tokio::spawn(async move {
                 if let Err(err) = transport.close().await {

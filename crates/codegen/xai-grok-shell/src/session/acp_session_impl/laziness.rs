@@ -421,6 +421,10 @@ impl SessionActor {
             hosted_tools: vec![],
             tool_choice: None,
             // Set below, once the client that carries it is resolved.
+            // `model_id` stays the SESSION model everywhere else in this
+            // function: the per-model enable, the nudge budget and the
+            // telemetry all describe the model being judged, not the one
+            // doing the judging.
             model: None,
             temperature: Some(0.0),
             max_output_tokens: Some(LAZINESS_MAX_OUTPUT_TOKENS),
@@ -434,10 +438,21 @@ impl SessionActor {
             ..ConversationRequest::default()
         };
 
-        // Invisibility-critical: build a fresh `SamplingClient` via `prepare_chat_completion`.
+        // Invisibility-critical: build a fresh `SamplingClient` via
+        // `prepare_chat_completion` and call `conversation_collect`
+        // directly. This is the same side-channel pattern
+        // `run_memory_flush`, `run_dream_model_call`, and
+        // `image_describe` use. The per-session `sampler_handle`
+        // would forward streaming events on the shared sampler
+        // channel — every `ChannelToken { Text }` becomes an ACP
+        // `AgentMessageChunk` → the pager UI renders mid-classifier
+        // reasoning + text deltas. `conversation_collect` does NOT
+        // publish on that channel, so the client sees nothing.
         let slot_sampler = self.resolve_slot_sampler("laziness_classifier").await;
         // The model has to come from whichever client ends up carrying the
-        // request.
+        // request. A slot that resolved to nothing leaves the session's
+        // client, and the pinned id on that client reaches the session
+        // model's endpoint under a name it does not serve.
         request.model = Some(match &slot_sampler {
             Some((_, cfg)) => cfg.model.clone(),
             None => model_id.clone(),

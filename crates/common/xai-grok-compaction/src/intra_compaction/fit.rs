@@ -430,7 +430,8 @@ pub fn truncate_text_to_token_budget(text: &str, max_tokens: u32) -> String {
     // Reserve room for the marker so the result stays near max_bytes.
     const MARKER_RESERVE: usize = 64;
     let keep = max_bytes.saturating_sub(MARKER_RESERVE);
-    // `floor_char_boundary` is the longest prefix cut that does not land inside a multi-byte character.
+    // `floor_char_boundary` is the longest prefix cut that does not land inside
+    // a multi-byte character; a budget past the end clamps to the end.
     let end = text.floor_char_boundary(keep.min(text.len()));
     let dropped = text.len() - end;
     #[allow(clippy::string_slice)] // the index is `floor_char_boundary`'s output

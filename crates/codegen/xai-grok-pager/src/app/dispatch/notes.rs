@@ -853,10 +853,14 @@ pub(super) fn dispatch_send_btw(
     }]
 }
 
-/// Prefix for the synthetic tasks-pane row that tracks an in-flight `/todo` capture.
+/// Prefix for the synthetic tasks-pane row that tracks an in-flight `/todo`
+/// capture. Kill requests for these ids are local-only (there is no shell
+/// bg-task to cancel); completion marks the row finished and keeps it.
 pub(crate) const TODO_CAPTURE_TASK_PREFIX: &str = "todo-capture:";
 
-/// The tasks-pane row id for a capture.
+/// The tasks-pane row id for a capture. The client mints `capture_id` and
+/// sends it to the shell, which stamps its progress updates with it — that
+/// round trip is what lets a transcript line find the row it belongs to.
 pub(crate) fn todo_capture_task_id(capture_id: &str) -> String {
     format!("{TODO_CAPTURE_TASK_PREFIX}{capture_id}")
 }
@@ -865,8 +869,9 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
     if let Some(old_id) = agent.pending_todo_task_id.take() {
         agent.session.bg_tasks.remove(&old_id);
     }
-    // Same chrome as a running tool: name `/todo`, summary is the request. A system one-liner is easy to miss at the bottom of the transcript; a running tool stays in the
-    // live turn the way other in-flight work does.
+    // Same chrome as a running tool: name `/todo`, summary is the request.
+    // A system one-liner is easy to miss at the bottom of the transcript;
+    // a running tool stays in the live turn the way other in-flight work does.
     let entry_id = agent
         .scrollback
         .push(crate::scrollback::entry::ScrollbackEntry::running(
@@ -875,7 +880,8 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
             ))),
         ));
     agent.pending_todo_entry = Some(entry_id);
-    // Tasks pane sits at the top of the agent view and auto-opens on a new live running task —.
+    // Tasks pane sits at the top of the agent view and auto-opens on a new
+    // live running task — that is the "in-flight at the top" surface.
     let task_id = todo_capture_task_id(capture_id);
     agent.session.bg_tasks.insert(
         task_id.clone(),
@@ -920,7 +926,8 @@ fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
             BgTaskStatus::Failed
         };
         task.end_time = Some(std::time::SystemTime::now());
-        // The running scrollback entry is gone above.
+        // The running scrollback entry is gone above, so a row pointing at it
+        // would open a viewer on an entry that no longer exists.
         task.scrollback_entry_id = None;
     }
 }
@@ -943,7 +950,9 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: boo
             return vec![];
         };
         agent.prompt.set_text("");
-        // Repeated `/todo`s are independent captures, so each gets its own block; only the newest id is tracked.
+        // Repeated `/todo`s are independent captures, so each gets its own
+        // block; only the newest id is tracked, and an older spinner is stopped
+        // by whichever response lands.
         begin_todo_capture_ui(agent, &request, &capture_id);
         session_id
     };

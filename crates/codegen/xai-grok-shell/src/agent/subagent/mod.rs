@@ -62,7 +62,9 @@ pub(crate) use child_runtime::{
     await_session_thread_exit,
 };
 pub(crate) use handle_request::run_shell_child;
-/// Re-exported for the goal e2e suite, which drives it against a real bound session.
+/// Re-exported for the goal e2e suite, which drives it against a real bound
+/// session: it is the hop that carries a planner child's own todo items back to
+/// the session that spawned it.
 pub(crate) use handle_request::session_todo_contents;
 pub(crate) use prompt_turn_receipt::PromptTurnReceipt;
 /// Clamp for a resolved sampling-limit override; `Semaphore::new` panics past `Semaphore::MAX_PERMITS`.
@@ -220,7 +222,9 @@ pub(crate) struct SubagentSpawnContext {
     pub subagent_event_tx: mpsc::UnboundedSender<SubagentEvent>,
     pub parent_depth: u32,
     pub subagents_max_depth: u32,
-    /// How strongly system-prompt/tool wording nudges the child toward spawning its own subagents.
+    /// How strongly system-prompt/tool wording nudges the child toward
+    /// spawning its own subagents. Inherited from the parent's resolved
+    /// config, same as `subagents_max_depth`.
     pub subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     pub workflow_max_concurrent_agents: usize,
     pub media_gen_batch_limits: xai_grok_tools::media_gen_limits::MediaGenBatchLimits,
@@ -297,7 +301,9 @@ pub(crate) struct SubagentSpawnContext {
     pub available_models: indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
     /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
     pub subagent_model_overrides: std::collections::HashMap<String, String>,
-    /// `[models] subagent_default`: the model a subagent runs.
+    /// `[models] subagent_default`: the model a subagent runs on when
+    /// neither `[subagents.models]` nor its definition pins one. `None`
+    /// inherits the parent session's model.
     pub subagent_default_model: Option<String>,
     /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
     /// Omitted agents default to enabled (`true`).
@@ -856,7 +862,9 @@ async fn read_parent_sampling_config(
                     .models_manager
                     .model_compaction_at_tokens(catalog_model_id.0.as_ref()),
                 doom_loop_recovery: ctx.sampling_config.doom_loop_recovery,
-                // A subagent inherits the parent's floor: it runs the same model against the same endpoint.
+                // A subagent inherits the parent's floor: it runs the same
+                // model against the same endpoint, so a collapse there is the
+                // same collapse.
                 output_rate_floor: ctx.sampling_config.output_rate_floor,
                 header_injector: ctx.sampling_config.header_injector.clone(),
             };

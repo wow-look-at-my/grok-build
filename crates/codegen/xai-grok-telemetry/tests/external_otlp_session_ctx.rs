@@ -1,4 +1,9 @@
-//! Wire test pinning the **build-baseline disabled contract** under ambient session context.
+//! Wire test pinning the **build-baseline disabled contract** under ambient
+//! session context. Events emitted inside a `with_session_ctx` scope would,
+//! on a live stream, carry `session.id` / `turn_number` / `prompt.id` /
+//! `event.sequence`. Because `external::build_handle` returns `None` in this
+//! build, the stream never activates: emissions inside the ctx are no-ops and
+//! the in-process OTLP collector receives nothing.
 
 use std::sync::Arc;
 use std::time::Duration;

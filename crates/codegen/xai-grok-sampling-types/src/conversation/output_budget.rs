@@ -1,4 +1,16 @@
 //! Fitting a request's output budget into the model's context window.
+//!
+//! A provider counts the requested output against the same window as the
+//! prompt. So the output budget is not a free parameter of the request: it is
+//! whatever the window has left. This module answers that question for the
+//! request shape every backend converter reads, so no path can serialize a
+//! body that is arithmetically impossible.
+//!
+//! The per-item estimate lives here too, because this is where the
+//! `ConversationItem` type lives. `xai-chat-state` re-exports it, and its
+//! exact tracked count (server usage plus the delta since) is the better
+//! number where a caller has one — pass that to [`ConversationRequest::fit_output_budget`]
+//! instead of the estimate.
 
 use xai_token_estimation::BYTES_PER_TOKEN;
 
@@ -64,8 +76,11 @@ pub fn estimate_tool_spec_tokens(spec: &ToolSpec) -> u64 {
 
 impl ConversationRequest {
     /// Bytes/4 estimate of everything this request puts in the prompt: the
-    /// conversation items and the tool definitions that ride with them. This
-    /// is an estimate, not a count.
+    /// conversation items and the tool definitions that ride with them.
+    ///
+    /// This is an estimate, not a count. A caller that tracks the provider's
+    /// own reported usage should pass that number to
+    /// [`Self::fit_output_budget`] instead.
     pub fn estimate_prompt_tokens(&self) -> u64 {
         let items: u64 = self.items.iter().map(estimate_item_tokens).sum();
         let tools: u64 = self.tools.iter().map(estimate_tool_spec_tokens).sum();
@@ -127,6 +142,7 @@ mod tests {
         }
     }
 
+    /// The reported failure: 737_857 + 262_144 is one token over a 1M window.
     /// The request that goes out has to be the one that fits.
     #[test]
     fn an_output_budget_the_window_cannot_hold_is_cut_to_fit() {

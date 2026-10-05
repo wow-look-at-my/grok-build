@@ -86,7 +86,8 @@ fn external_stream_grpc_over_tls_end_to_end() {
 
     xai_grok_telemetry::external::flush();
 
-    // Give any (erroneous) TLS exporter ample time to complete a handshake and phone home.
+    // Give any (erroneous) TLS exporter ample time to complete a handshake and
+    // phone home; the metric interval above is 200ms.
     std::thread::sleep(std::time::Duration::from_millis(600));
     assert_eq!(
         recorder.log_records().len(),

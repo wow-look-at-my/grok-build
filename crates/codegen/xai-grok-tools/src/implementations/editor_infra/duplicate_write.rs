@@ -1,11 +1,16 @@
 //! Reject writes whose content is substantially identical to another repo file.
+//!
+//! The failure mode this catches: a model retypes an entire existing file
+//! through `write` / empty-`old_string` `search_replace` instead of
+//! `git mv` / `cp` plus a minimal edit.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Files smaller than this are skipped: boilerplate one-liners collide.
 pub const MIN_BYTES: usize = 64;
 
-/// Cap on how many candidate files we open.
+/// Cap on how many candidate files we open. Fail open (allow the write)
+/// rather than stalling a huge repo; the description ban still applies.
 const MAX_CANDIDATES: usize = 4_000;
 
 /// Skip files larger than this when scanning (the write itself can be any size).

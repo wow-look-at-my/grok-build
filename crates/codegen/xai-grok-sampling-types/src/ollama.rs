@@ -1,4 +1,16 @@
 //! Ollama native `/api/chat` wire format.
+//!
+//! The OpenAI-compatible endpoint Ollama also serves drops the three fields an
+//! agent needs most: `options.num_ctx` (the window the runner is loaded at),
+//! `keep_alive` (residency between turns) and `truncate` (whether the server
+//! may silently drop the head of the conversation). Its request struct has no
+//! `options` member at all, and unknown body fields are discarded by Go's JSON
+//! decoder, so there is no way to smuggle them through. This module is that
+//! endpoint's replacement.
+//!
+//! The response is NDJSON, not SSE: one complete JSON object per line, and the
+//! last one carries `done: true` plus the run's metrics. See
+//! [`crate::ollama::OllamaChatChunk`].
 
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +32,10 @@ pub struct OllamaChatRequest {
     /// How long the model stays resident after this request (`"30m"`, `0`, …).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_alive: Option<serde_json::Value>,
-    /// When `false` the server refuses a prompt that overflows the context instead of dropping the oldest messages.
+    /// When `false` the server refuses a prompt that overflows the context
+    /// instead of dropping the oldest messages. An agent needs the error: a
+    /// silently truncated head loses the system prompt and orphans tool calls,
+    /// and nothing on the wire says it happened.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncate: Option<bool>,
     /// Runner and sampling options. `num_ctx` is the load-bearing one.
@@ -34,7 +49,8 @@ pub struct OllamaMessage {
     pub role: String,
     #[serde(default)]
     pub content: String,
-    /// The model's reasoning text.
+    /// The model's reasoning text. Unsigned plain text, unlike the Messages
+    /// API's blob, so replaying it to another model is always safe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking: Option<String>,
     /// Base64 image payloads for a multimodal model.
@@ -59,7 +75,9 @@ pub struct OllamaToolCall {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OllamaToolCallFunction {
     pub name: String,
-    /// An OBJECT on this wire, not the JSON-encoded string every OpenAI-shaped API uses.
+    /// An OBJECT on this wire, not the JSON-encoded string every
+    /// OpenAI-shaped API uses. Conversion happens at the boundary in both
+    /// directions.
     #[serde(default)]
     pub arguments: serde_json::Value,
 }
@@ -154,7 +172,8 @@ pub struct OllamaShowResponse {
     /// `completion`, `tools`, `vision`, `thinking`, `insert`, `embedding`, …
     #[serde(default)]
     pub capabilities: Vec<String>,
-    /// GGUF metadata.
+    /// GGUF metadata. The window lives at `<architecture>.context_length`,
+    /// where the architecture is itself a value under `general.architecture`.
     #[serde(default)]
     pub model_info: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
@@ -166,8 +185,12 @@ impl OllamaShowResponse {
         self.capabilities.iter().any(|c| c == capability)
     }
 
-    /// The model's maximum context length, read through `general.architecture`. The key is architecture-qualified (`llama.context_length`, `qwen2.context_length`), so the architecture has
-    /// to be read first.
+    /// The model's maximum context length, read through `general.architecture`.
+    ///
+    /// The key is architecture-qualified (`llama.context_length`,
+    /// `qwen2.context_length`), so the architecture has to be read first. A
+    /// scan for any `*.context_length` would also match a projector's or an
+    /// adapter's, which describe a different tensor entirely.
     pub fn max_context_length(&self) -> Option<u64> {
         let arch = self.model_info.get("general.architecture")?.as_str()?;
         self.model_info
@@ -187,7 +210,10 @@ pub struct OllamaRunningModel {
     /// Bytes resident in VRAM. Zero means the runner is on the CPU.
     #[serde(default)]
     pub size_vram: Option<u64>,
-    /// The window the runner was LOADED at, which is the number compaction has to respect.
+    /// The window the runner was actually LOADED at, which is the number
+    /// compaction has to respect. It is chosen at load time from VRAM
+    /// (`OLLAMA_CONTEXT_LENGTH` defaults to "4k/32k/256k based on VRAM") and is
+    /// unknowable from the model's own metadata.
     #[serde(default)]
     pub context_length: Option<u64>,
     #[serde(default)]
@@ -211,7 +237,8 @@ mod tests {
             "model_info": {
                 "general.architecture": "qwen2",
                 "qwen2.context_length": 131072,
-                // A projector's own length must never be mistaken for the model's.
+                // A projector's own length must never be mistaken for the
+                // model's.
                 "clip.context_length": 77,
             },
         }))

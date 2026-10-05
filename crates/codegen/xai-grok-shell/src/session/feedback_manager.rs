@@ -1942,7 +1942,10 @@ mod author_identity_tests {
     use super::*;
     use crate::util::user_identity::ResolvedUserIdentity;
 
-    // No mock backend here: nothing this build produces reaches one.
+    // No mock backend here: nothing this build produces reaches one. The
+    // workflow's observable output is the local `feedback.jsonl` entry, which
+    // it writes before it ever consults a client, so identity resolution and
+    // metadata merging are asserted there.
 
     fn text_submission() -> FeedbackSubmission {
         let mut s = new_submission(

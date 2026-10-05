@@ -267,7 +267,7 @@ Actions that affect the agent session, available from the agent screen.
 
 **Note:** `Ctrl+M` is context-dependent. When the prompt is focused, it toggles multiline input mode. Otherwise, it opens the model picker.
 
-**Note:** While a draft is stashed, the prompt's top border reads `Stashed` (next to the `/rename` title, if you set one). The stash lives in memory only: it is gone when you quit. It does not travel to a resumed session. A new stash replaces the old one. The replaced draft is discarded.
+**Note:** While a draft is stashed, the prompt's top border reads `Stashed` (next to the `/rename` title, if you set one). The stash lives in memory only: it is gone when you quit, and it does not travel to a resumed session. A new stash replaces the old one; the replaced draft is discarded.
 
 **Note:** `Ctrl+'` is a Windows alt for `Ctrl+;` — some Windows consoles drop the `Ctrl` modifier on punctuation keys.
 
@@ -317,9 +317,9 @@ While the agent is generating:
 | Apple Terminal | `Ctrl+O` | `Ctrl+Enter`, `Ctrl+I` | Send now |
 | VS Code family (VS Code, Cursor, Windsurf, Zed) | **`Ctrl+L`** | *(none)* | Send now (`Ctrl+I` not used — Tab / host chat; plugins via `/plugins`) |
 
-In `/multiline` mode, `Shift+Enter` (or `Alt+Enter`) sends while plain `Enter` inserts a newline — except on an **empty** composer mid-turn with a queued follow-up. This is where plain `Enter` still interrupts with the queue (same as normal mode). (`Ctrl+Enter` is send-now mid-turn when bound on non–VS Code family. It does not submit a new idle turn.)
+In `/multiline` mode, `Shift+Enter` (or `Alt+Enter`) sends while plain `Enter` inserts a newline — except on an **empty** composer mid-turn with a queued follow-up, where plain `Enter` still interrupts with the queue (same as normal mode). (`Ctrl+Enter` is send-now mid-turn when bound on non–VS Code family; it does not submit a new idle turn.)
 
-Send-now is intentionally interruptive — it reads as "stop what you are doing and take this". To hand the agent a note **without** stopping it, queue with plain `Enter`. It reaches the model on the running turn's next request.
+Send-now is intentionally interruptive — it reads as "stop what you're doing and take this". To hand the agent a note **without** stopping it, queue with plain `Enter`; it reaches the model on the running turn's next request.
 
 > **WezTerm**: These modified Enter keys need `enable_kitty_keyboard = true` in your WezTerm config. Full steps and a one-line workaround are in the [terminal support guide](21-terminal-support.md#problem-ctrlenter-doesnt-interject-in-wezterm).
 

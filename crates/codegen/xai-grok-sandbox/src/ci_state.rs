@@ -1,11 +1,17 @@
 //! Pure `gh run list` → CI-state reduction, free of processes and terminals.
+//!
+//! Both readers of CI state fold the same run list the same way: the pager's
+//! status dot and the agent's `ci` tool. The reduction lives here, beside the
+//! [`crate::ci_host`] transport that fetches the runs, so the dot and the tool
+//! can never disagree about what red means.
 
 use serde::Deserialize;
 
 /// The tri-state CI colour for a branch, plus the "no CI" absent state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CiStatus {
-    /// No CI signal: `gh` unavailable, unauthenticated, no runs, or the branch has no workflow runs at all.
+    /// No CI signal: `gh` unavailable, unauthenticated, no runs, or the
+    /// branch has no workflow runs at all.
     Off,
     /// A run has failed or errored (failing/errored/cancelled/timed-out).
     Red,
@@ -40,19 +46,28 @@ impl CiStatus {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GhRun {
-    /// GitHub `status` of the run: `queued`, `in_progress`, `completed`, `requested`, `waiting`, `pending` … — `""`.
+    /// GitHub `status` of the run: `queued`, `in_progress`, `completed`,
+    /// `requested`, `waiting`, `pending` … — `""` when unknown.
     #[serde(default)]
     pub status: String,
-    /// GitHub `conclusion` of a completed run: `success`, `failure`, `cancelled`, `neutral`, `skipped`, `timed_out`, `action_required`.
+    /// GitHub `conclusion` of a completed run: `success`, `failure`,
+    /// `cancelled`, `neutral`, `skipped`, `timed_out`, `action_required`,
+    /// `stale`, `startup_failure` … — empty (`""`) or null while the run is
+    /// still in progress.
     #[serde(default)]
     pub conclusion: String,
-    /// Branch this run was triggered against.
+    /// Branch this run was triggered against. `--branch` already filters
+    /// server-side; callers re-check it so a run for another branch can never
+    /// colour this branch's state.
     #[serde(default)]
     pub head_branch: Option<String>,
-    /// Workflow this run belongs to (`""` when unknown).
+    /// Workflow this run belongs to (`""` when unknown). A branch normally
+    /// has several — CI, release, previews — and they must be folded
+    /// separately: see [`newest_run_per_workflow`].
     #[serde(default)]
     pub workflow_name: String,
-    /// The run's numeric id, when the caller asked `gh` for it.
+    /// The run's numeric id, when the caller asked `gh` for it. This is what
+    /// addresses a run's logs (`gh run view <id> --log-failed`).
     #[serde(default)]
     pub database_id: Option<u64>,
 }
@@ -66,9 +81,11 @@ impl GhRun {
         )
     }
 
-    /// A run that is still running / queued (non-terminal). Anything not yet
-    /// `completed` (queued/in_progress/pending/requested/ waiting) is a live,
-    /// moving CI signal → yellow.
+    /// A run that is still running / queued (non-terminal).
+    ///
+    /// Anything not yet `completed` (queued/in_progress/pending/requested/
+    /// waiting) is a live, moving CI signal → yellow. A `completed` run that
+    /// is still missing a final conclusion is also treated as in-flight.
     pub fn is_in_progress(&self) -> bool {
         let status_pending =
             !self.status.is_empty() && !self.status.eq_ignore_ascii_case("completed");
@@ -102,9 +119,15 @@ pub fn map_ci_status(status: Option<&str>, conclusion: Option<&str>) -> CiStatus
     ci_from_runs(std::iter::once(run))
 }
 
-/// Fold a set of runs (as returned by `gh run list`) into one tri-state. Only
-/// the newest run of each workflow counts — see
-/// [`newest_run_per_workflow`].
+/// Fold a set of runs (as returned by `gh run list`) into one tri-state.
+///
+/// Only the newest run of each workflow counts — see
+/// [`newest_run_per_workflow`]. Across those, precedence (two passes, so a
+/// failing workflow reports red even while another is still in progress):
+///   1. any failing/errored run → [`CiStatus::Red`]
+///   2. else any in-progress/pending run → [`CiStatus::Yellow`]
+///   3. else any successful run → [`CiStatus::Green`]
+///   4. else → [`CiStatus::Off`]
 pub fn ci_from_runs<I>(runs: I) -> CiStatus
 where
     I: IntoIterator<Item = GhRun>,
@@ -113,12 +136,15 @@ where
     if runs.is_empty() {
         return CiStatus::Off;
     }
+    // Pass 1 — a branch's CI is red while any run has failed/errored.
     if runs.iter().any(GhRun::is_terminal_failure) {
         return CiStatus::Red;
     }
+    // Pass 2 — otherwise the branch is yellow while any run is still moving.
     if runs.iter().any(GhRun::is_in_progress) {
         return CiStatus::Yellow;
     }
+    // Pass 3 — otherwise green when a run concluded successfully.
     if runs.iter().any(GhRun::is_success) {
         return CiStatus::Green;
     }
@@ -126,9 +152,17 @@ where
     CiStatus::Off
 }
 
-/// Keep the newest run of each workflow, dropping the ones it superseded. `gh
-/// run list` returns newest first and reaches back runs, so a branch that has
-/// been pushed twice reports both.
+/// Keep the newest run of each workflow, dropping the ones it superseded.
+///
+/// `gh run list` returns newest first and reaches back ten runs, so a branch
+/// that has been pushed twice reports both. Pushing cancels the run in flight
+/// (`concurrency.cancel-in-progress`), and a cancelled run is a failure — so
+/// folding over the raw list paints the state red off a run the newer push
+/// already replaced, and it stays red however green the branch gets.
+///
+/// Runs are grouped by workflow rather than collapsed to one, because a
+/// branch's workflows are independent: a failing test workflow must still
+/// report red while a release workflow is mid-upload.
 pub fn newest_run_per_workflow<I>(runs: I) -> Vec<GhRun>
 where
     I: IntoIterator<Item = GhRun>,
@@ -145,7 +179,8 @@ where
 /// (or the output decodes to empty), so callers degrade to "no CI status"
 /// instead of panicking.
 pub fn parse_gh_runs(stdout: &[u8]) -> Option<Vec<GhRun>> {
-    // `gh` can colourise piped JSON (e.g. `GH_FORCE_TTY`, `--color always`), which would break serde parsing.
+    // `gh` can colourise piped JSON (e.g. `GH_FORCE_TTY`, `--color always`),
+    // which would break serde parsing; strip ANSI CSI first.
     let runs = strip_ansi_csi(stdout);
     let parsed = match serde_json::from_slice::<Vec<GhRun>>(&runs) {
         Ok(runs) => runs,

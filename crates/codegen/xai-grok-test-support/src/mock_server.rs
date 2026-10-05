@@ -525,7 +525,8 @@ impl MockInferenceServer {
     }
 
     /// Price the `/v1/messages` call, as a gateway speaking that protocol
-    /// does.
+    /// does. `None` (the default) is Anthropic's own behavior: no price on
+    /// the wire at all.
     pub fn set_messages_cost_usd_ticks(&self, ticks: Option<i64>) {
         self.state.inference.set_messages_cost_usd_ticks(ticks);
     }

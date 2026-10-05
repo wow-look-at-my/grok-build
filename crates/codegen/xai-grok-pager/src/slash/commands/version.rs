@@ -1,4 +1,5 @@
-//! `/version` -- which build this session is running.
+//! `/version` -- which build this session is actually running.
+
 use super::debug_context::{BinaryFreshness, BinaryIdentity, binary_identity};
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 
@@ -42,7 +43,8 @@ fn version_report(
 ) -> String {
     let mut out = format!("grok {version}");
     if commit_short == "unknown" {
-        // A build from outside a git worktree; say so rather than printing a word that reads like a commit.
+        // A build from outside a git worktree; say so rather than printing a
+        // word that reads like a commit.
         out.push_str(" (built outside a git worktree — no commit stamped)");
     } else {
         out.push_str(&format!(" (commit {commit_short})"));

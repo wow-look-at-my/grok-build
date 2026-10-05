@@ -139,7 +139,9 @@ pub struct PromptContext {
     /// Not the UI picker name. Defaults to [`DEFAULT_SYSTEM_PROMPT_LABEL`].
     #[serde(default = "default_system_prompt_label")]
     pub system_prompt_label: String,
-    /// How strongly the system prompt nudges the model toward spawning subagents via the `task` tool.
+    /// How strongly the system prompt nudges the model toward spawning
+    /// subagents via the `task` tool. Rendered as the `<agent_usage>` block
+    /// (see `prompt.md`); `AgentUsageFrequency::Default` renders nothing.
     #[serde(default)]
     pub agent_usage_frequency: xai_tool_types::AgentUsageFrequency,
 }

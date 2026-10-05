@@ -1,5 +1,5 @@
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
 
 use std::collections::VecDeque;
 use std::io::{self, stdout};

@@ -1,4 +1,16 @@
 //! Where grok puts the worktrees it manages, and how to recognise them.
+//!
+//! Every checkout grok creates for a repository lives in that repository, under
+//! `<main checkout root>/.grok/worktrees/<label>`. Resolving the destination
+//! off the main checkout rather than the current worktree is what makes
+//! creation from inside an existing worktree land as a sibling instead of
+//! nesting inside it.
+//!
+//! Checkouts grok created before that layout existed live under the user grok
+//! home, at `<grok home>/worktrees/<label>` or, one level down inside a
+//! per-repository bucket, `<grok home>/worktrees/<repo bucket>/<label>`. Both
+//! shapes are recognised, so a worktree at either location stays grok-managed;
+//! only new destinations changed.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -9,7 +21,8 @@ pub const WORKTREES_DIR: &str = "worktrees";
 /// Per-repository parent of [`WORKTREES_DIR`].
 pub const REPO_DOT_DIR: &str = ".grok";
 
-/// Line registered in the main checkout's exclude data so its managed checkouts stay out of `git status`.
+/// Line registered in the main checkout's exclude data so its managed
+/// checkouts stay out of `git status`.
 pub const WORKTREES_EXCLUDE_LINE: &str = ".grok/worktrees/";
 
 /// The directory one repository keeps its managed checkouts in.
@@ -31,6 +44,11 @@ pub fn is_repo_worktrees_root(path: &Path) -> bool {
 }
 
 /// The outermost `<X>/.grok/worktrees` directory that contains `path`.
+///
+/// Walking outward (rather than stopping at the innermost match) keeps a
+/// checkout of a repository nested inside another checkout's managed tree
+/// grouped with the outer repository, so its siblings are placed beside it
+/// instead of inside it.
 pub fn enclosing_repo_worktrees_root(path: &Path) -> Option<PathBuf> {
     let mut outermost = None;
     for ancestor in path.ancestors().skip(1) {
@@ -66,13 +84,36 @@ pub fn is_worktree_entry_name(path: &Path) -> bool {
 }
 
 /// True when `path` is itself a checkout.
+///
+/// The test is git's own: a checkout carries a `.git` entry -- a file when it is
+/// linked to another repository, a directory when it stands alone. Nothing about
+/// the path's depth decides it, because the checkouts under a managed root arrive
+/// in two shapes: the fork's per-repository bucket (`<root>/<repo>/<label>`) and
+/// the one an unforked build writes, with the checkout directly under the root
+/// (`<root>/<label>`). A directory *inside* a checkout has no `.git` of its own,
+/// so it is never mistaken for a second one.
+///
+/// A `.git` entry that merely dangles still counts: the linked repository may be
+/// gone while the checkout directory is very much present, and that is the case
+/// a reader has to see in order to report or reclaim it.
 pub fn is_worktree_dir(path: &Path) -> bool {
     is_worktree_entry_name(path) && path.join(".git").symlink_metadata().is_ok()
 }
 
-/// The boundary of the managed layout that `path` sits in, if any. The
-/// returned directory is never itself a checkout: a path is grok-managed
-/// exactly when it is strictly below the boundary.
+/// The boundary of the managed layout that `path` sits in, if any.
+///
+/// The returned directory is never itself a checkout: a path is grok-managed
+/// exactly when it is strictly below the boundary. Two layouts produce a
+/// boundary:
+///
+/// - A repository's own `<X>/.grok/worktrees`.
+/// - The legacy `legacy_root` (the `<grok home>/worktrees` this tool wrote
+///   before checkouts moved into their repository).
+///
+/// `legacy_root` is checked first because it is the configured answer: a
+/// managed checkout of a repository that happens to live under the grok home
+/// belongs to that repository, so preferring the legacy boundary would move it
+/// out from under its own repo.
 pub fn managed_worktrees_boundary(path: &Path, legacy_root: &Path) -> Option<PathBuf> {
     if path.starts_with(legacy_root) {
         return Some(legacy_root.to_path_buf());
@@ -85,7 +126,7 @@ pub fn managed_worktrees_boundary(path: &Path, legacy_root: &Path) -> Option<Pat
 /// The entry goes in the repository's own exclude data (`.git/info/exclude`),
 /// never in the tracked `.gitignore`: which directories a clone happens to have
 /// checked out is not a property of the project. The write is idempotent, so a
-/// repository with multiple worktrees carries one line.
+/// repository with fifty worktrees carries one line.
 pub fn exclude_managed_worktrees_dir(main_root: &Path) -> std::io::Result<()> {
     // A repository whose `.git` is a pointer file keeps `info/exclude` in the
     // common dir it names, not beside the working tree.
@@ -254,13 +295,16 @@ mod tests {
         // A pool entry, which is the bucket shape under the other root.
         let pool = home.join("worktree_pool/inst-1/pool-a");
         checkout_at(&pool, None);
-        // A leftover directory in a bucket that was never a checkout -- a go build cache, on the real machine.
+        // A leftover directory in a bucket that was never a checkout -- a go
+        // build cache, on the real machine, at 208 MB.
         let cache = bucket.join("2026-09-14-gocache");
         std::fs::create_dir_all(cache.join("00")).unwrap();
-        // Names that sit beside checkouts without being ones.
+        // Names that sit beside checkouts without being ones, each with the
+        // `.git` entry a shape-only reading would have accepted.
         checkout_at(&bucket.join(".hidden-wt"), None);
         checkout_at(&bucket.join("claim.ready"), None);
-        // Inside an accepted checkout: a subdirectory, and a nested repository (a submodule's checkout) with a `.git`.
+        // Inside an accepted checkout: a subdirectory, and a nested repository
+        // (a submodule's checkout) with a `.git` of its own.
         std::fs::create_dir_all(depth_one.join("src")).unwrap();
         let nested = depth_one.join("vendor/lib");
         checkout_at(&nested, Some("/elsewhere/.git/worktrees/lib"));

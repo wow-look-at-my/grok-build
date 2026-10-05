@@ -1,11 +1,11 @@
-#![allow(clippy::cast_lossless)] // Hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
-#![allow(clippy::cast_precision_loss)] // Hits predate the gate
-#![allow(clippy::cast_sign_loss)] // Hits predate the gate
-#![allow(clippy::expect_used)] // Hits predate the gate
-#![allow(clippy::string_slice)] // Hits predate the gate
-#![allow(clippy::unwrap_used)] // Hits predate the gate
+#![allow(clippy::cast_lossless)] // 105 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 257 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 107 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 17 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 56 hits predate the gate
+#![allow(clippy::expect_used)] // 95 hits predate the gate
+#![allow(clippy::string_slice)] // 90 hits predate the gate
+#![allow(clippy::unwrap_used)] // 37 hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,

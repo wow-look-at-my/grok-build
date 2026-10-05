@@ -1,5 +1,5 @@
-#![allow(clippy::expect_used)]
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
 
 //! Canonical, extensible tool types.
 pub mod definition;

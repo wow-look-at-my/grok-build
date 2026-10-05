@@ -116,7 +116,8 @@ impl SlashCommand for DebugCommand {
         description: "Debug grok itself: inject this session's execution context and a question",
         usage: "/debug [<what is wrong> | scroll | fps | log]",
         takes_args: true,
-        // The injection needs a session id to resolve the log path.
+        // The injection needs a session id to resolve the log path, so the
+        // session-less dashboard input does not offer it.
         session_scoped: true,
         arg_placeholder: "what is wrong? (or: scroll | fps | log)",
     }
@@ -141,7 +142,8 @@ impl SlashCommand for DebugCommand {
             "scroll" => CommandResult::Action(Action::ToggleScrollDebugHud),
             "fps" => CommandResult::Action(Action::ToggleFpsHud),
             "log" => CommandResult::Action(Action::ToggleScrollLog),
-            // Everything else is the user's question — `on` and a bare `/debug` are the same invocation.
+            // Everything else is the user's question — `on` and a bare `/debug`
+            // are the same invocation with no question attached.
             request => inject(ctx, if request == "on" { "" } else { request }),
         }
     }
@@ -166,6 +168,7 @@ fn inject(ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
     );
     // Ensure the log file exists so the advertised path is real and readable
     // by the model's tools, even before the firehose writes to it.
+    // Best-effort: if the dir can't be created the injection still proceeds.
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

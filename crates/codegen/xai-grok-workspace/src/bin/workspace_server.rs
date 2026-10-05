@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used)] // 1 hit predates the gate
 
 //! Standalone workspace ToolServer for remote sandboxes.
 //!

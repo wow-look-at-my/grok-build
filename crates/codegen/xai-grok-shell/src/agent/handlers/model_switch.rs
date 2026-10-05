@@ -94,7 +94,9 @@ pub(crate) async fn apply(
             "set_session_model: agent type compatibility check"
         );
         if is_mismatch && turn_count > 0 {
-            // The turns already here were produced by another harness.
+            // The turns already here were produced by another harness, so their
+            // reasoning and tool calls are not something the new model can
+            // ingest. Convert the history to plain text and switch anyway.
             let (flatten_tx, flatten_rx) = oneshot::channel();
             let _ = handle.cmd_tx.send(SessionCommand::FlattenHistory {
                 responds_to: flatten_tx,

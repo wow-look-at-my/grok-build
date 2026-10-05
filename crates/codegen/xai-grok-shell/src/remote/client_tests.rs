@@ -1041,7 +1041,8 @@ async fn auth_headers_do_not_collide_with_json() {
 fn parse_anthropic_style_listing_max_input_tokens_resolves_context_window() {
     // Anthropic's official `/v1/models` ModelInfo shape (`id`, `created_at`,
     // `display_name`, `type`) carries the input-context-window as
-    // `max_input_tokens`.
+    // `max_input_tokens`, not `contextWindow`/`context_window`. This drives
+    // the real shipped parse path and asserts the value lands in `context_window`.
     let value = serde_json::json!({
         "id": "claude-sonnet-4-5",
         "type": "model",
@@ -1135,7 +1136,9 @@ fn parse_openrouter_context_length_only_under_top_provider_resolves() {
 }
 #[test]
 fn parse_openrouter_context_length_zero_falls_back_to_default() {
-    // A `context_length: 0` placeholder must not drop the entry.
+    // A `context_length: 0` placeholder must not drop the entry; it falls
+    // back to the documented default, mirroring the existing `0` handling
+    // for `max_input_tokens`.
     let value = serde_json::json!({
         "id": "deepseek/deepseek-v4-flash-0731",
         "context_length": 0
@@ -1148,7 +1151,9 @@ fn parse_openrouter_context_length_zero_falls_back_to_default() {
 }
 #[test]
 fn parse_openai_style_field_wins_over_openrouter_context_length() {
-    // Consistency with the existing precedence rules.
+    // Consistency with the existing precedence rules: an explicit
+    // OpenAI-style `context_window` wins when present alongside
+    // `context_length`.
     let value = serde_json::json!({
         "id": "deepseek/deepseek-v4-pro-0813",
         "context_window": 350_000,

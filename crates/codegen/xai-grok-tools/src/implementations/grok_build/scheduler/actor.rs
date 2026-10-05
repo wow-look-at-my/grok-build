@@ -822,7 +822,7 @@ impl SchedulerActor {
         let guard_task_id = task_id.to_string();
         let spawned_id = subagent_id.clone();
         // Guarded: clearing the chain anchor is what stops a loop from
-        // resuming the child that failed, and this is the only place that
+        // resuming the child that just failed, and this is the only place that
         // clears it. The handle itself has no waiter: the round it watches is
         // reported to the session by other means.
         #[allow(clippy::disallowed_methods)]

@@ -9,6 +9,10 @@ use semver::Version;
 pub const TEST_VERSION_ENV: &str = "GROK_TEST_VERSION";
 
 /// Byte pattern `xai-grok-stamp` searches the linked binary for.
+///
+/// The release number is written into the binary AFTER it links, so a build
+/// needs no release number and never waits on one. Compiling the number in is
+/// what forced the whole release path to run before the build.
 pub const STAMP_MAGIC: &[u8; 16] = b"\0GROK-VER-STAMP\0";
 
 /// Payload bytes reserved after the magic: one length byte, then the version.
@@ -17,7 +21,12 @@ pub const STAMP_PAYLOAD_LEN: usize = 64;
 /// Total slot width. [`STAMP_SLOT`] is this long and the stamper writes within it.
 pub const STAMP_SLOT_LEN: usize = STAMP_MAGIC.len() + 1 + STAMP_PAYLOAD_LEN;
 
-/// The slot itself.
+/// The slot itself. A zero length byte is the unstamped state, which is what a
+/// local build and every CI test build carry.
+///
+/// `#[used]` keeps it in the binary: a plain `static` the optimizer sees no
+/// load of is free to disappear. The stamper searches for the magic bytes, so
+/// the symbol needs no stable name.
 #[used]
 pub static STAMP_SLOT: [u8; STAMP_SLOT_LEN] = build_stamp_slot();
 
@@ -63,7 +72,8 @@ pub fn version() -> &'static str {
     stamped().unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
-/// Whether this binary carries a release stamp.
+/// Whether this binary carries a release stamp. False for a local build and for
+/// every binary CI tests, which is what makes those builds local-looking.
 pub fn is_release_stamped() -> bool {
     stamped().is_some()
 }
@@ -86,15 +96,17 @@ pub fn installed_semver() -> Result<Version, semver::Error> {
     Version::parse(&installed())
 }
 
-/// The full 40-char commit hash the binary was built from, stamped by
-/// `build.rs` via `cargo:rustc-env=BUILD_COMMIT`.
+/// The full 40-char commit hash the binary was built from, stamped by `build.rs`
+/// via `cargo:rustc-env=BUILD_COMMIT`. Falls back to `"unknown"` when the build
+/// ran outside a git worktree (e.g. a tarball).
 pub const BUILD_COMMIT: &str = match option_env!("BUILD_COMMIT") {
     Some(c) => c,
     None => "unknown",
 };
 
 /// The short commit hash the binary was built from (same source as
-/// [`BUILD_COMMIT`] but truncated by `git rev-parse --short`).
+/// [`BUILD_COMMIT`] but truncated by `git rev-parse --short`). Falls back to
+/// `"unknown"` outside a git worktree.
 pub const BUILD_COMMIT_SHORT: &str = match option_env!("BUILD_COMMIT_SHORT") {
     Some(c) => c,
     None => "unknown",
@@ -103,8 +115,12 @@ pub const BUILD_COMMIT_SHORT: &str = match option_env!("BUILD_COMMIT_SHORT") {
 /// The fixed GitHub owner/repo for the `wow-look-at-my/grok-build` remote.
 const GITHUB_REPO: &str = "wow-look-at-my/grok-build";
 
-/// Build the GitHub commit URL for a given commit hash. Returns
-/// `https://github.com/wow-look-at-my/grok-build/commit/<hash>`.
+/// Build the GitHub commit URL for a given commit hash.
+///
+/// Returns `https://github.com/wow-look-at-my/grok-build/commit/<hash>`.
+/// When `hash` is `"unknown"` (build ran outside a git worktree) this returns
+/// `None`, signalling that the caller should render plain text without a link
+/// rather than emitting a malformed `…/commit/unknown` hyperlink.
 pub fn commit_github_url(hash: &str) -> Option<String> {
     if hash.is_empty() || hash == "unknown" {
         return None;

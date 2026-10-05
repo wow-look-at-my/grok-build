@@ -730,10 +730,14 @@ impl Reminder for TaskCompletionReminder {
                 .into_iter()
                 .filter(|t| task_owned_by_session(t, my_owner.as_deref()))
                 .collect();
-            // Background bash/monitor completions surface at the NEXT
-            // TOOL-CALL BOUNDARY even while a goal loop drives the turn: the
-            // reminder rides a tool result the loop already receives, so it
-            // interrupts nothing.
+            // Background bash/monitor completions surface at the NEXT TOOL-CALL
+            // BOUNDARY even while a goal loop drives the turn: the reminder
+            // rides a tool result the loop already receives, so it interrupts
+            // nothing. The goal-loop gate that used to sit here is what
+            // deferred completions to the session going idle (the auto-wake
+            // path is goal-gated too, and that one DOES interrupt — it stays
+            // gated in the notification bridge). Subagent completions keep the
+            // suppression: the goal loop consumes those results itself.
             let surface_reminders = res
                 .get::<crate::types::resources::Params<
                     crate::implementations::grok_build::bash::BashParams,
@@ -1978,7 +1982,10 @@ mod tests {
         let shared = res.into_shared();
         let reminder = TaskCompletionReminder;
         let output = ToolOutput::Dynamic(serde_json::Value::Null.into());
-        // First post-completion tool round, goal loop STILL ACTIVE: the bash completion surfaces (it rides a tool result — it interrupts nothing).
+        // First post-completion tool round, goal loop STILL ACTIVE: the bash
+        // completion surfaces (it rides a tool result — it interrupts nothing),
+        // while the subagent completion stays suppressed (the goal loop
+        // consumes its own subagent results).
         let first = reminder.collect_reminders(shared.clone(), &output).await;
         assert_eq!(
             first.len(),
@@ -2056,7 +2063,8 @@ mod tests {
             "expected a completed task: {snapshot:?}"
         );
 
-        // Resources as a live goal-loop session would hold them: the loop is active while the task completes.
+        // Resources as a live goal-loop session would hold them: the loop is
+        // active while the task completes, and the next tool call arrives.
         let mut res = Resources::new();
         res.insert(Terminal(backend));
         res.register_state::<ReportedTaskCompletions>();
@@ -2066,7 +2074,8 @@ mod tests {
 
         let reminder = TaskCompletionReminder;
         let output = ToolOutput::Dynamic(serde_json::Value::Null.into());
-        // FIRST post-completion tool round, work still active: the reminder must be here — not deferred to idle.
+        // FIRST post-completion tool round, work still active: the reminder
+        // must be here — not deferred to idle.
         let first = reminder.collect_reminders(shared.clone(), &output).await;
         assert_eq!(
             first.len(),

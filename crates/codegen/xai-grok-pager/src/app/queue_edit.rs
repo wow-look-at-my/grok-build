@@ -481,7 +481,12 @@ impl AgentView {
         }
         // The EDITED text is what goes out, so it is what must be classified:
         // `queue_row_prompt_like` below reads the STORED row, which can be
-        // steering text while the composer holds a command.
+        // steering text while the composer holds a command. An interjection (or
+        // a `newText` override) reaches the running turn as ordinary user text —
+        // only a prompt's LEADING token is ever resolved as a command — so the
+        // model would read the literal `/cmd args` and the command would never
+        // run. Save the edit instead: the row keeps its own turn, and the shell
+        // resolves the command when that turn starts.
         if xai_prompt_queue::is_slash_invocation(&text) {
             self.show_toast("Can't send this mid-turn — it runs when the current turn ends");
             return self.save_edited_queued_row(id, server_id, true);

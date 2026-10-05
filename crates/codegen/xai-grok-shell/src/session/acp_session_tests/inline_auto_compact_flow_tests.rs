@@ -1336,6 +1336,7 @@ async fn reseed_context_budget_output_cap_derives_from_remaining_window() {
         .run_until(async {
             let (gateway_tx, _g) = mpsc::unbounded_channel();
             let (persistence_tx, _p) = mpsc::unbounded_channel();
+            // 90_000 of a 100_000 window used -> 10_000 tokens remaining.
             let actor = create_test_actor(90_000, 100_000, 85, gateway_tx, persistence_tx).await;
             actor.reseed_context_budget_output_cap().await;
 
@@ -1347,6 +1348,7 @@ async fn reseed_context_budget_output_cap_derives_from_remaining_window() {
                 .expect("cap should have been seeded")
                 .0
                 .clone();
+            // 10_000 remaining * 0.8 headroom = 8_000 tokens * 4 bytes/token = 32_000 bytes.
             assert_eq!(cfg.context_budget_max_output_bytes, Some(32_000));
         })
         .await;
@@ -1360,6 +1362,7 @@ async fn reseed_context_budget_output_cap_floors_near_a_full_window() {
         .run_until(async {
             let (gateway_tx, _g) = mpsc::unbounded_channel();
             let (persistence_tx, _p) = mpsc::unbounded_channel();
+            // Only 100 tokens left of a 100_000 window.
             let actor = create_test_actor(99_900, 100_000, 85, gateway_tx, persistence_tx).await;
             actor.reseed_context_budget_output_cap().await;
 
@@ -1406,7 +1409,8 @@ async fn a_mid_turn_compact_is_armed_rather_than_run() {
                 rx.try_recv().is_err(),
                 "answering the caller now reports a compaction that has not run"
             );
-            // A second request neither displaces the armed one nor reports a success it will not get.
+            // A second request neither displaces the armed one nor reports a
+            // success it will not get: its instructions would be dropped.
             let (tx2, mut rx2) = tokio::sync::oneshot::channel();
             actor.compact_on_request(None, tx2).await;
             assert!(

@@ -275,6 +275,7 @@ pub(super) struct HeroBoxRects {
     pub(super) announcement_rect: Option<Rect>,
     /// Promo upgrade CTA `[label]` button rect (a click opens it), if drawn.
     pub(super) upgrade_cta_rect: Option<Rect>,
+    /// Screen rect of the build-commit hash text, for OSC 8 link overlay.
     pub(super) commit_hash_link_rect: Option<Rect>,
     #[cfg(feature = "local-workspace")]
     pub(super) workspace_mode_rects: super::WorkspaceModeHitRects,

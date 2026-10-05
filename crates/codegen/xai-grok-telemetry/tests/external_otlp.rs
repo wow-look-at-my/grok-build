@@ -1,4 +1,9 @@
-//! Integration test pinning the **build-baseline disabled contract** for the external OTEL stream.
+//! Integration test pinning the **build-baseline disabled contract** for the
+//! external OTEL stream. In this build `external::build_handle` returns `None`
+//! unconditionally, so a full double opt-in (standard `OTEL_*` env vars + the
+//! `GROK_EXTERNAL_OTEL` master switch) still *resolves* but never *activates*:
+//! `is_active()` stays false and the `MockOtelServer` must receive nothing —
+//! no logs, no metrics — even after an explicit flush.
 
 use std::time::Duration;
 

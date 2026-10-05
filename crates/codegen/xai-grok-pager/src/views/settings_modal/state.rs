@@ -75,7 +75,9 @@ pub enum SettingsModalMode {
         supports_preview: bool,
     },
     /// Group sub-sheet: a list of the group's children. `child_idx` is the
-    /// focused child.
+    /// focused child. Space/Enter toggles a Bool child in place, and opens
+    /// the editor or picker of any other child, which returns to this sheet.
+    /// Esc returns to Browse.
     PickingGroup {
         key: SettingKey,
         child_idx: usize,
@@ -245,7 +247,8 @@ pub struct SettingsModalState {
     /// When true, Esc/Enter from `PickingEnum` close the modal instead of returning to Browse.
     /// Set by deep-link open (`OpenSettingsFocus` / `/privacy`); cleared on leave from the picker.
     pub close_on_picker_exit: bool,
-    /// The group sheet and child index that opened the current editor or picker.
+    /// The group sheet and child index that opened the current editor or
+    /// picker. Leaving that editor goes back to the sheet, not to Browse.
     pub(super) group_return: Option<(SettingKey, usize)>,
     /// Last left-click on a picker radio: `(choice index, when)`.
     pub(super) picker_last_click: Option<(usize, std::time::Instant)>,

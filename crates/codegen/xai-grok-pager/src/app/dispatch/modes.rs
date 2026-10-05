@@ -106,7 +106,11 @@ pub(super) fn dispatch_enter_plan_mode(
             .slash_controller
             .recognized_token_ranges(&desc, &agent.session.models);
         // Own-turn: when a turn is already running the drain below is blocked
-        // and this row waits for the NEXT turn.
+        // and this row waits for the NEXT turn — which is exactly what was
+        // asked for, since the plan mode this submit switched on applies to
+        // that turn. Marking it keeps every mid-turn delivery path (queue
+        // migration, interrupt-with-queue) from folding the description into
+        // the running turn as steering text.
         agent
             .session
             .enqueue_own_turn_prompt(desc, skill_token_ranges);
@@ -741,7 +745,8 @@ fn shift_tab_agent_label(variant: xai_grok_agent::config::BuiltinAgentName) -> &
     match variant {
         BuiltinAgentName::GrokBuildOrchestrator => "Orchestrator",
         BuiltinAgentName::Explore => "Explore",
-        // Every current `shift_tab_variants()` entry is matched above.
+        // Every current `shift_tab_variants()` entry is matched above; this
+        // covers any future addition without a second edit site.
         other => other.into(),
     }
 }
@@ -927,14 +932,20 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
             }];
         }
         // Past the last agent-identity stop: restore the base agent and
-        // re-enter Plan, closing the ring.
+        // re-enter Plan, closing the ring. Two ACP mode-set calls that MUST
+        // land in order, so this is `SetModeThenMode`, not two
+        // `SetSessionMode` effects (those race — each is its own spawned
+        // task on the pager side).
         let base_agent = agent
             .shift_tab_base_agent
             .take()
             .unwrap_or_else(|| "grok-build".to_string());
         agent.shift_tab_ring_agent_index = None;
         agent.stage_session_mode(SessionMode::Plan);
-        // The agent-identity stops carried the permission mode through untouched.
+        // The agent-identity stops carried the permission mode through
+        // untouched, so always-approve can still be on here. Leaving it set
+        // would make the next press keep Always-Approve instead of moving to
+        // Auto. Clearing it also keeps "a full ring lands on plain Plan".
         let leaving_yolo = agent.session.is_yolo();
         agent.show_mode_switch_banner("Plan");
         if leaving_yolo {

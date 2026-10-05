@@ -2149,7 +2149,9 @@ impl SessionActor {
                         | ToolKind::MemoryGet
                         | ToolKind::WebSearch
                         | ToolKind::WebFetch
-                        // The `ci` tool is a read of GitHub state: it declares itself read-only.
+                        // The `ci` tool is a read of GitHub state: it declares
+                        // itself read-only, and a missing kind here would make
+                        // the shell prompt for approval on every CI query.
                         | ToolKind::Ci
                         | ToolKind::EnterPlan
                         | ToolKind::ExitPlan
@@ -2366,7 +2368,8 @@ impl SessionActor {
             _ => serde_json::to_value(&tool_call_input)?,
         };
         let mut canonical_meta = self.stamp_tool_meta(None, wire_name, Some(&tool_call_input));
-        // One function names every tool call, finished or still streaming.
+        // One function names every tool call, finished or still streaming, so a
+        // row cannot rename itself when the last argument byte lands.
         let kind = self.agent.borrow().tool_bridge().tool_kind(wire_name);
         let title = tool_title::tool_input_title(
             &tool_call_input,
@@ -3128,7 +3131,9 @@ impl SessionActor {
                 live.entry(tool_index)
                     .or_insert_with(|| tool_title::StreamingToolArgs::new(name.to_string()));
             }
-            // Only the opening fragment carries the name.
+            // Only the opening fragment carries the name. One that arrives for
+            // an index that never opened belongs to a call this session cannot
+            // name.
             let entry = live.get_mut(&tool_index)?;
             if let Some(delta) = arguments_delta {
                 entry.push(delta);
@@ -3140,7 +3145,11 @@ impl SessionActor {
         };
         let completed = crate::session::helpers::partial_json::complete_partial_json(&args)?;
         let value = serde_json::from_str::<serde_json::Value>(&completed).ok()?;
-        // An empty object names nothing worth showing.
+        // An empty object names nothing worth showing. A tool that takes no
+        // arguments does parse from one and would be named correctly, but so
+        // would a half-written `{"path":`, and that one reads as "Read" with an
+        // empty path. Waiting for the first whole field costs the argument-less
+        // tools a few milliseconds and keeps the blank titles out.
         if !value.as_object().is_some_and(|obj| !obj.is_empty()) {
             return None;
         }
@@ -3299,7 +3308,8 @@ mod ci_tool_title_tests {
 
     #[test]
     fn a_ci_call_about_another_repository_says_which() {
-        // A query that goes to a different repository must not read in the transcript.
+        // A query that goes to a different repository must not read in the
+        // transcript as a query about the session's own branch.
         let mut ask = input(CiAction::Status, Some("fix/darwin-version-stamp"));
         ask.repo = Some("wow-look-at-my/go-toolchain".to_string());
         assert_eq!(

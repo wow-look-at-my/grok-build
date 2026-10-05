@@ -200,7 +200,9 @@ pub enum ContentBlock {
 }
 
 impl ContentBlock {
-    /// The keys `mime_type` is read under, on both the `Image` and `Resource` blocks.
+    /// The keys `mime_type` is read under, on both the `Image` and `Resource`
+    /// blocks. `mimeType` is the MCP/A spelling an upstream server writes; a
+    /// block that names both under one value is one statement, not a duplicate.
     pub const MIME_TYPE_KEYS: Aliases = Aliases::new("mime_type", &["mimeType"]);
 }
 
@@ -244,7 +246,9 @@ enum ContentBlockWire {
 #[derive(Debug)]
 enum ContentBlockWireError {
     Alias(xai_tool_types::AliasConflict),
-    /// `mime_type` stays required on the `Image` block: an image with no MIME type cannot be rendered, so its absence is still a rejection.
+    /// `mime_type` stays required on the `Image` block: an image with no MIME
+    /// type cannot be rendered, so its absence is still a rejection rather than
+    /// an empty string the renderer would have to guess at.
     MissingImageMimeType,
 }
 

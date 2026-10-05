@@ -613,6 +613,14 @@ struct ModelsResponse {
     data: Vec<serde_json::Value>,
 }
 /// The model-listing endpoint for an OpenAI-compatible **or** Anthropic base.
+///
+/// Both providers serve their model list at the same `/v1/models` shape: an
+/// OpenAI-style base `https://api.openai.com/v1` lists at
+/// `https://api.openai.com/v1/models`, and an Anthropic base
+/// `https://api.anthropic.com/v1` lists at `https://api.anthropic.com/v1/models`.
+/// Sharing one resolver (rather than a fixed OpenAI-only assumption) lets a
+/// provider base of either kind compute the correct listing URL. A base that
+/// already ends in `/models` is returned unchanged.
 pub(crate) fn models_list_url_for_base(base: &str) -> String {
     if base.ends_with("/models") {
         base.to_owned()
@@ -629,6 +637,14 @@ pub struct FetchModelsResult {
 /// Fetch and parse a `/v1/models` listing from an arbitrary OpenAI-compatible
 /// base (BYOK / custom provider, e.g. `https://gateway.pazer.ai/v1`), using a
 /// Bearer API key when supplied.
+///
+/// This is the per-model counterpart to the `model_source` listing: that fetch
+/// is driven by `EndpointsConfig` (so it only ever queries the configured
+/// xAI proxy or the single `[endpoints].models_base_url`), whereas a BYOK
+/// model carries its own `api_base_url` and API key that the generic prefetch
+/// never targets. Without this primitive the fork can never auto-detect a
+/// BYOK model's real context window (e.g. 1M) when the model's own provider
+/// lists it.
 pub(crate) fn fetch_models_for_api_base_blocking(
     base_url: &str,
     api_key: Option<&str>,
@@ -648,7 +664,8 @@ pub(crate) fn fetch_models_for_list_url_blocking(
     api_key: Option<&str>,
 ) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
     let client = crate::http::shared_startup_blocking_client();
-    // The listing carries no base of its own, so an entry that names none falls back to this.
+    // The listing carries no base of its own, so an entry that names none falls
+    // back to this. A caller that knows the inference base overwrites it.
     let base_url = url.trim_end_matches("/models").trim_end_matches('/');
     allow_endpoint(url)?;
     tracing::debug!(models_url = %url, "Fetching models for BYOK/custom API base");
@@ -703,7 +720,20 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_string(obj, "base_url"))
         .unwrap_or_else(|| default_base_url.to_owned());
     let name = get_string(obj, "name").or_else(|| Some(model.clone()));
-    // Anthropic exposes its per-model input-context-window in the `/v1/models` listing as `max_input_tokens`.
+    // Anthropic exposes its per-model input-context-window in the `/v1/models`
+    // listing as `max_input_tokens` ("Maximum input context window size in
+    // tokens for this model"), NOT `contextWindow`/`context_window`. Read it as
+    // a last-resort fallback so an Anthropic-style listing still resolves a
+    // window. A `0` (e.g. docs placeholder) is ignored so the non-zero entry
+    // isn't dropped; a positive value wins only when no OpenAI-style field is
+    // present.
+    // OpenRouter exposes the per-model context window in `/models` as
+    // `context_length` (top-level, and mirrored under `top_provider`), e.g.
+    // `{"id":"deepseek/deepseek-v4-pro-0813","context_length":1000000,
+    //   "top_provider":{"context_length":1000000}}`. Read it after the
+    // OpenAI-style fields but before the Anthropic `max_input_tokens` fallback,
+    // so a listing that emits only `context_length` still resolves a real
+    // window instead of `DEFAULT_CONTEXT_WINDOW`.
     let top_provider = obj.get("top_provider").and_then(|v| v.as_object());
     let capabilities = obj.get("capabilities").and_then(|v| v.as_object());
     let context_window = get_u64(obj, "contextWindow")

@@ -1,7 +1,7 @@
-#![allow(clippy::cast_lossless)] // Hits predate the gate
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
-#![allow(clippy::unwrap_used)] // Hits predate the gate
+#![allow(clippy::cast_lossless)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_wrap)] // 6 hits predate the gate
+#![allow(clippy::unwrap_used)] // 2 hits predate the gate
 //! Track file hunks with agent vs external attribution.
 //!
 //! `HunkTrackerActor` owns tracker state on a dedicated tokio task. Callers

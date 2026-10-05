@@ -1,4 +1,4 @@
-#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
 
 //! Cross-platform system **sleep/wake** (suspend/resume) notifications.
 //!
