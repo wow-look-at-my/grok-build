@@ -39,7 +39,7 @@ fn is_orchestration_projection_update(update: &SessionUpdate) -> bool {
     )
 }
 
-/// The `subagent_id` a persisted update belongs to. Only the three subagent
+/// The `subagent_id` a persisted update belongs to. Only those subagent
 /// records carry one; every other update answers `None`.
 fn subagent_id_of(update: &SessionUpdate) -> Option<&str> {
     let SessionUpdate::Xai(notification) = update else {

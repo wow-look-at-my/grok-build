@@ -21,8 +21,7 @@ struct AdmissionGate {
 #[derive(Clone)]
 struct TestControl {
     cancellation: CancellationToken,
-    /// Every mid-turn message the coordinator delivered to this child, in
-    /// order (`SubagentEvent::Interject`).
+    /// Every mid-turn message the coordinator delivered to this child, in order (`SubagentEvent::Interject`).
     interjections: mpsc::UnboundedSender<String>,
     admission_gate: Option<AdmissionGate>,
     admitted_messages: Option<mpsc::UnboundedSender<(ActiveAgentMessageOperation, String)>>,
@@ -746,8 +745,7 @@ async fn interject_reaches_the_active_child_named_by_id() {
             text: CONTEXT.to_owned(),
         })
         .expect("actor command channel open");
-    // Commands are handled in channel order, so a round trip on the same
-    // channel is the barrier that proves the interjection was handled.
+    // Commands are handled in channel order.
     let _ = loop_unit_active(&harness.backend, "unrelated").await;
     assert_eq!(
         harness

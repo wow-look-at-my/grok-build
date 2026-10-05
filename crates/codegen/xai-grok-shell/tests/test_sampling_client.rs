@@ -1,11 +1,4 @@
 //! Integration tests for the sampling client with mock HTTP servers.
-//!
-//! These tests verify the full streaming flow for both:
-//! - Chat Completions API (`/v1/chat/completions`)
-//! - Responses API (`/v1/responses`)
-//!
-//! Each test spawns a temporary mock server that returns SSE streams,
-//! allowing us to test the client without real API credentials.
 
 use futures_util::stream::StreamExt;
 use reqwest::StatusCode;
@@ -397,8 +390,6 @@ async fn chat_completions_collect_synthesizes_reasoning_sibling() {
 /// (conversation_to_chat_messages) → wire.
 #[tokio::test]
 async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
-    // 1. Seed a legacy chat-completions chat_history.jsonl (inline reasoning
-    //    on the assistant — the shape an older binary wrote).
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("chat_history.jsonl"),
@@ -424,8 +415,6 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
         items
     );
 
-    // 3. Continue the conversation and send it over chat-completions,
-    //    capturing the outgoing request body.
     items.push(ConversationItem::user("q2"));
 
     let server = MockInferenceServer::start().await.unwrap();
@@ -437,8 +426,6 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
         .await
         .unwrap();
 
-    // 4. The reconstructed reasoning must land on the assistant's
-    //    reasoning_content in the wire request — not be dropped.
     let body = server.request_bodies().pop().unwrap();
     let messages = body.get("messages").unwrap().as_array().unwrap();
     let assistant = messages
@@ -463,8 +450,6 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
 /// client sends to: a blob replays verbatim only to the model that minted it.
 #[tokio::test]
 async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
-    // 1. Seed a legacy grok-build chat_history.jsonl (inline reasoning
-    //    with encrypted_content + id — the older shape).
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("chat_history.jsonl"),
@@ -501,9 +486,6 @@ async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
         .await
         .unwrap();
 
-    // 4. The reconstructed reasoning must appear as a typed `reasoning`
-    //    input item with its fields preserved verbatim — the byte-stable
-    //    typed round-trip, not a flattened string.
     let body = server.request_bodies().pop().unwrap();
     let input = body.get("input").unwrap().as_array().unwrap();
     let reasoning = input
@@ -545,9 +527,7 @@ async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
 /// other half.
 #[tokio::test]
 async fn messages_upgrade_emits_reconstructed_reasoning_as_thinking_block() {
-    // 1. Seed a legacy Anthropic Messages-origin chat_history.jsonl. Anthropic Messages
-    //    thinking blocks never carried an id (stream/messages.rs sets
-    //    id=""), and the signature lives in `encrypted`.
+    // 1. Seed a legacy Anthropic Messages-origin chat_history.jsonl.
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("chat_history.jsonl"),
@@ -584,8 +564,6 @@ async fn messages_upgrade_emits_reconstructed_reasoning_as_thinking_block() {
         .await
         .unwrap();
 
-    // 4. The reconstructed reasoning must emit a Anthropic Messages `thinking`
-    //    content block carrying the thinking text + signature.
     let body = server.request_bodies().pop().unwrap();
     let messages = body.get("messages").unwrap().as_array().unwrap();
     let thinking_block = messages
@@ -1002,7 +980,6 @@ async fn test_chat_completions_401_unauthorized() {
     assert!(result.is_err());
 
     if let Err(SamplingError::Auth { .. }) = result {
-        // Expected
     } else {
         panic!("Expected Auth error");
     }
@@ -1045,7 +1022,6 @@ async fn test_responses_api_401_unauthorized() {
     assert!(result.is_err());
 
     if let Err(SamplingError::Auth { .. }) = result {
-        // Expected
     } else {
         panic!("Expected Auth error");
     }
@@ -1393,7 +1369,6 @@ async fn test_multi_turn_conversation_with_tool_calls() {
             vendor: Default::default(),
         }]),
         ConversationItem::tool_result("call_1", "# My Project\n\nThis is a test project."),
-        // The model should now respond based on the file content
     ]);
 
     let (mut stream, _metadata) = client.conversation_stream(request).await.unwrap();
@@ -1477,10 +1452,7 @@ async fn test_api_backend_getter_returns_configured_value() {
 
 #[tokio::test]
 async fn test_responses_backend_hits_responses_endpoint_not_chat_completions() {
-    // This test verifies that when ApiBackend::Responses is configured,
-    // the client hits /v1/responses and NOT /v1/chat/completions.
-    // The session-level dispatch in `xai-grok-sampler` selects the
-    // backend stream based on `SamplingClient::api_backend()`.
+    // This test verifies that when ApiBackend::Responses is configured.
 
     let server = MockInferenceServer::start().await.unwrap();
     // A request to the wrong endpoint fails loudly instead of streaming.
@@ -1565,12 +1537,7 @@ async fn test_chat_completions_backend_hits_chat_endpoint_not_responses() {
 // Cerebras strict-schema recovery (model_id / reasoning_content unsupported)
 // ============================================================================
 //
-// The provider rejects any message property its schema does not define. The
-// offending properties live in stored conversation history, so without a
-// recovery the conversation is permanently bricked from turn 2 onward. These
-// tests drive the real `SamplingClient` against the mock server: the first
-// request is answered with the documented Cerebras 400, and the recovered
-// retry is asserted on the *recorded wire body*.
+// The provider rejects any message property its schema does not define.
 
 /// History whose assistant item carries a recorded `model_id` plus a replayed
 /// reasoning sibling — the poisoned-history shape.
@@ -1592,17 +1559,15 @@ fn poisoned_history() -> Vec<ConversationItem> {
     ]
 }
 
-/// A model configured `strict_message_schema` never sends the properties in
-/// the first place — no 400 and no retry needed. This is the primary fix for
-/// new sessions; the actor-level tests in `xai-grok-sampler` cover the
-/// strip-and-retry recovery for history written before it.
+/// This is the primary fix for new sessions; the actor-level tests in
+/// `xai-grok-sampler` cover the strip-and-retry recovery for history written
+/// before it.
 #[tokio::test]
 async fn strict_model_profile_omits_properties_on_the_first_request() {
     let server = MockInferenceServer::start().await.unwrap();
     server.set_response("ok");
 
-    // Configure the client the way `sampling_config_for_model` does for a
-    // model with `strict_message_schema = true`.
+    // Configure the client the way `sampling_config_for_model` does for a model with `strict_message_schema = true`.
     let mut config = test_sampler_config(&server.url(), ApiBackend::ChatCompletions, &[]);
     config.chat_message_profile = xai_grok_sampling_types::ChatMessageProfile::STRICT;
     let client = Client::new(config).unwrap();
@@ -1661,8 +1626,6 @@ async fn permissive_model_still_sends_replayed_properties() {
     );
 }
 
-/// A 400 that is *not* the strict-schema class must stay fatal — the recovery
-/// must not silently rewrite bodies for unrelated request bugs.
 #[tokio::test]
 async fn unrelated_400_does_not_trigger_the_property_strip() {
     let server = MockInferenceServer::start().await.unwrap();

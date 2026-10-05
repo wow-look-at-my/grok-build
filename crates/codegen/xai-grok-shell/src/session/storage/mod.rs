@@ -916,17 +916,8 @@ pub struct CopySessionOptions {
     /// When true, strip `reasoning` (thinking/reasoning_content) from all assistant messages in the copied chat history.
     /// Set for forks so that the new session does not inherit the prior model's chain-of-thought.
     pub strip_reasoning: bool,
-    /// The workspace directory a worktree session was spawned from.
     /// Propagated to the forked session's `Summary::source_workspace_dir`.
     pub source_workspace_dir: Option<String>,
-    /// Whether to carry the records of subagents that were still RUNNING at
-    /// the copy point. Defaults to `false`: a fork takes the main thread's
-    /// conversation, and an agent the parent is still running keeps
-    /// reporting to the parent, so its spawn record in the child is a row
-    /// that can never resolve. `/fork --agents` sets it.
-    ///
-    /// A subagent that already finished is history the conversation refers
-    /// to; its records are copied either way.
     pub carry_running_subagents: bool,
 }
 

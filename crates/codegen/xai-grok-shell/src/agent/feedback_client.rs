@@ -223,11 +223,7 @@ impl FeedbackClient {
         request: RequestBuilder,
         context: &'static str,
     ) -> Result<T> {
-        // Every endpoint on this client reports upstream -- session signals,
-        // session events, feedback bodies, terminal details. This build sends
-        // none of it, so refuse here rather than at each call site, and refuse
-        // loudly: a caller that believes it delivered something is worse than
-        // one told it did not.
+        // Every endpoint on this client reports upstream -- session signals, session events, feedback bodies.
         let _ = &request;
         anyhow::bail!("{context} disabled: this build does not report to xAI");
         #[allow(unreachable_code)]
@@ -800,7 +796,6 @@ mod tests {
     }
 }
 
-/// Auth resolve + 401 recovery tests.
 ///
 /// Nothing here may drive a request through `send_json` / `send_empty`: those
 /// bail before the wire in this build (see `egress_disabled_pins`), so a test

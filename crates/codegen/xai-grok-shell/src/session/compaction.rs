@@ -480,8 +480,6 @@ impl SuppressReason {
     }
 }
 /// Longest provider error text carried into the user-facing compaction failure.
-/// A provider echoes the rejected request in some errors, and the whole body is
-/// not a status line.
 const COMPACT_FAILURE_DETAIL_LIMIT: usize = 400;
 /// Where a finished compaction's report went, and its one-line breakdown.
 #[derive(Debug, Default)]
@@ -700,8 +698,6 @@ impl SessionActor {
         }
         if let Some(already_armed) = self.compaction.pending_manual_compact.take() {
             // First request wins: it is the one the user has been waiting on.
-            // Answering the new caller `Ok` would report a compaction that ran
-            // with instructions this one never carried.
             self.compaction
                 .pending_manual_compact
                 .set(Some(already_armed));
@@ -757,9 +753,7 @@ impl SessionActor {
         .await;
         let result = self.run_compact(pending.instructions).await;
         if let Err(e) = &result {
-            // The client is mid-turn, so it is not in the command state that
-            // renders this request's own reply. The notification is the only
-            // report that reaches the transcript.
+            // The client is mid-turn, so it is not in the command state that renders this request's own reply.
             tracing::error!(error = %e, "mid-turn /compact failed");
             self.send_xai_notification(XaiSessionUpdate::AutoCompactFailed {
                 error: compose_compact_failure(
@@ -1098,11 +1092,8 @@ impl SessionActor {
                 self.reconstruct_full_config().await,
             ),
         };
-        // The summary needs none of the thinking. It stays only where it
-        // buys a prompt-cache hit: the same model, on a backend that takes a
-        // block it did not mint as text. A Messages target rejects a block
-        // whose text the tool-message step mutated. Another model reads
-        // none of the blobs, and its own summary is the whole point.
+        // The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model, on a backend that takes a block it
+        // did not mint as text.
         let summary_strips_reasoning = sampling_config.api_backend == ApiBackend::Messages
             || !xai_grok_sampling_types::same_model(&model_id, &sampling_config.model);
         let compaction = xai_grok_telemetry::events::CompactionScope::begin(
@@ -1297,9 +1288,7 @@ impl SessionActor {
         };
         let mut request_turns = simplified_messages.clone();
         let mut input_overflow_rejections: u32 = 0;
-        // The wire builders leave another model's thinking behind on their
-        // own. This ladder is for the blob they let through: a same-model
-        // check the server disagrees with, or an origin nobody recorded.
+        // The wire builders leave another model's thinking behind on their own.
         let mut thinking_stage = xai_grok_sampling_types::ThinkingReplay::Native;
         let two_pass_output = self
             .try_two_pass_pass2_apply(user_context.as_deref(), summary_strips_reasoning)
@@ -2351,13 +2340,9 @@ impl SessionActor {
             None
         }
     }
-    /// Returns true if the error response indicates tokens exceed the
-    /// model's context window: the session's tracked token estimate against
-    /// the `context_window` the [`SamplingErrorInfo`] metadata carries, or
-    /// the server's own message saying as much.
-    ///
-    /// Called from `handle_sampling_failure` with the
-    /// `SamplingErrorInfo` the sampler hands back.
+    /// Returns true if the error response indicates tokens exceed the model's
+    /// context window: the session's tracked token estimate against the
+    /// `context_window`.
     pub(crate) async fn should_compact_on_error(
         &self,
         err: &xai_grok_sampler::SamplingErrorInfo,
@@ -2384,13 +2369,7 @@ impl SessionActor {
             return false;
         }
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
-        // Two ways to know the window is the problem. Our own count is one, and
-        // it does not need the prompt to exceed the window on its own: a prompt
-        // that leaves no room for an answer is over it in practice, because the
-        // provider charges the requested output against the same window.
-        // The server saying so is the other, and it settles it — its tokenizer
-        // is the one that counts, and a 400 that names the context length is
-        // not a turn to hand back to the user.
+        // Ways to know the window is the problem.
         estimated_total > context_window.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS)
             || xai_grok_sampling_types::is_context_length_error(&err.message)
     }
@@ -2463,11 +2442,7 @@ impl SessionActor {
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
         let cfg = self.chat_state_handle.get_sampling_config().await?;
         let cw = cfg.context_window.get();
-        // The response shares the window with the prompt. A prompt that leaves
-        // less room than the smallest usable answer is over the window in
-        // practice, even when it is under it on its own: the request then goes
-        // out with its output budget cut to the floor, and the model answers in
-        // 1024 tokens. Compact instead.
+        // The response shares the window with the prompt.
         let usable = cw.saturating_sub(xai_token_estimation::MIN_OUTPUT_TOKENS);
         if estimated_total <= usable {
             return None;

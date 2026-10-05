@@ -2566,9 +2566,6 @@ fn the_ring_keeps_its_stop_order_across_a_full_cycle() {
     );
 }
 
-/// Rapid Shift+Tab presses land on the Nth ring stop and keep it: two presses
-/// with no confirmation in between leave the effective mode on Auto (the 2nd
-/// stop), with the plan and auto signals agreeing.
 #[test]
 fn rapid_cycle_presses_land_on_and_keep_the_last_stop() {
     use crate::app::agent_view::ModeRequest;

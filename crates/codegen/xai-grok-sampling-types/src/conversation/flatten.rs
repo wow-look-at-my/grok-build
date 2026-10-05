@@ -1,12 +1,4 @@
 //! Flatten a conversation to plain text so any model can ingest it.
-//!
-//! A history carries state that belongs to the provider that produced it: a
-//! reasoning item's `encrypted_content`, a thinking block's signature, a tool
-//! call's id and its vendor fields. Replay that to another model and the
-//! request is rejected. The conversation is then unusable on that model.
-//!
-//! This turns every one of those into ordinary text. The record of what
-//! happened survives. Nothing opaque to the target model is left in it.
 
 use std::sync::Arc;
 
@@ -23,8 +15,7 @@ pub struct FlattenReport {
     pub items_after: usize,
     /// Reasoning items rendered as assistant text.
     pub reasoning_to_text: usize,
-    /// Reasoning items dropped: they carried an encrypted blob and no text,
-    /// so there was nothing to render.
+    /// Reasoning items dropped: they carried an encrypted blob and no text, so there was nothing to render.
     pub reasoning_dropped: usize,
     /// Tool calls rendered into their assistant message's text.
     pub tool_calls_to_text: usize,
@@ -86,8 +77,7 @@ pub fn flatten_conversation(
             ConversationItem::Reasoning(r) => {
                 let text = reasoning_item_text(&r);
                 if text.trim().is_empty() {
-                    // Encrypted-only: the text was never in the history, so
-                    // nothing carries across. This is the whole loss, counted.
+                    // Encrypted-only: the text was never in the history, so nothing carries across.
                     report.reasoning_dropped += 1;
                     continue;
                 }

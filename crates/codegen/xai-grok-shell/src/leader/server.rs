@@ -3,13 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-/// The binary version of the currently running leader process.
-///
-/// Compared against each registering client's `ClientCapabilities::client_version`
-/// to detect mismatches early and surface a structured ACP notification.
-/// The same string a client sends as its own `client_version`, so the two are
-/// compared like-for-like. Two binaries built from one tree report one version
-/// and never notify; two differently-stamped ones differ and do.
+/// The binary version of the running leader process.
 fn leader_version() -> &'static str {
     xai_grok_version::version()
 }
@@ -1422,58 +1416,19 @@ fn make_version_mismatch_notification(
         .to_string(),
     )
 }
-/// Run the leader IPC server.
-///
-/// The socket_path is where the Unix socket will be created.
-/// Caller is responsible for:
-/// 1. Cleaning up any stale socket file before calling this
-/// 2. Acquiring the leader lock AFTER this function creates the socket
-///
-/// This ordering ensures that:
-/// - Clients waiting for socket can connect as soon as we're ready
-/// - The lock acquisition happens after we're actually listening
-///
-/// # Readiness gating
-///
-/// The `ready_rx` watch channel controls whether ACP messages are forwarded to the
-/// agent. While `*ready_rx.borrow() == false` (leader still initializing):
-/// - Client connections and IPC registrations are accepted normally.
-/// - ACP requests (messages with an `id`) receive a structured `leader_starting`
+/// Run the leader IPC server. The socket_path is where the Unix socket will be created. Acquiring the leader lock AFTER this function creates the socket This ordering ensures that: - Clients waiting for socket can connect as soon as we're ready - The lock acquisition happens after we're listening # Readiness gating The `ready_rx` watch channel controls whether ACP messages are forwarded to the agent. While `*ready_rx.borrow() == false` (leader still initializing): - Client connections and IPC registrations are accepted normally. - ACP requests (messages with an `id`) receive a structured `leader_starting`
 ///   JSON-RPC error so the client can retry rather than hang.
-/// - ACP notifications (no `id`) are dropped with a trace log.
-///
-/// Once `ready_rx` is signaled `true` (socket bound + bounded auth complete; the
-/// model catalog and remote settings stream in afterward), all subsequent
-/// ACP traffic is forwarded to the agent as normal.
-///
-/// # Arguments
-///
-/// * `socket_path` - Path for the Unix domain socket
-/// * `acp_tx` - Channel to send ACP messages from clients to the agent
-/// * `response_rx` - Channel to receive responses from the agent to route to clients
-/// * `cancel` - Cancellation token for graceful shutdown
-/// * `no_exit_on_disconnect` - If true, don't exit when all clients disconnect
-/// * `client_count` - Atomic counter tracking the number of connected clients
-/// * `agent_busy` - Atomic flag set while the agent has in-flight **IPC**
+/// - ACP notifications (no `id`) are dropped with a trace log. Once `ready_rx` is signaled `true` (socket bound + bounded auth complete; the model catalog and remote settings stream in afterward), all subsequent ACP traffic is forwarded to the agent as normal. # Arguments * `socket_path` - Path for the Unix domain socket * `acp_tx` - Channel to send ACP messages from clients to the agent * `response_rx` - Channel to receive responses from the agent to route to clients * `cancel` - Cancellation token for graceful shutdown * `no_exit_on_disconnect` - If true, don't exit when all clients disconnect * `client_count` - Atomic counter tracking the number of connected clients * `agent_busy` - Atomic flag set while the agent has in-flight **IPC**
 ///   requests; relay-driven traffic never sets it
 /// * `agent_activity` - Agent-derived activity view (running turns, parked
 ///   interactions, live subagents), used for the pre-shutdown session flush
-/// * `ready_rx` - Watch receiver; ACP forwarding is gated until this is `true`
-/// * `relay_demand_tx` - Watch sender flipped to `true` when the first
+/// * `ready_rx` - Watch receiver; ACP forwarding is gated until this is `true` * `relay_demand_tx` - Watch sender flipped to `true` when the first
 ///   [`ClientMode::Headless`] client registers. `run_leader` defers starting the
 ///   grok.com WebSocket relay until this fires, so a leader serving only
 ///   interactive clients (TUI dashboard, IDE) never duplicates its ACP stream
 ///   onto the relay. Headless registration is the devbox-flow marker: those
 ///   clients are driven remotely *through* the relay.
-/// * `shutdown_tx` - Watch sender for the shutdown reason. The server subscribes
-///   its own receiver and reads it once when `cancel` fires (defaults to
-///   [`ShutdownReason::Manual`]). A sender that wants clients to see another
-///   reason must write it before it cancels.
-/// * `leader_version_override` - If `Some`, overrides [`leader_version`] for version
-///   mismatch detection. Pass `None` in production; pass a test version string in
-///   integration tests, where both sides otherwise report the same version and the
-///   mismatch path never runs.
-/// * `control_state` - Leader-local control metadata and CPU profiling state
+/// * `shutdown_tx` - Watch sender for the shutdown reason.
 pub async fn run_leader_server(
     socket_path: std::path::PathBuf,
     acp_tx: mpsc::UnboundedSender<String>,
@@ -2535,7 +2490,6 @@ pub struct ServerHandle {
     /// Callers that do not need staged startup (e.g. tests, in-process use) get a fully-ready server out of the box. Production leader startup (`run_leader`) holds this back until bounded auth completes. (Catalog/settings are no longer prefetched; they refresh in the background.)
     pub ready_tx: watch::Sender<bool>,
     /// Set the shutdown reason before cancelling so clients receive the correct `ShuttingDown` reason.
-    /// The default value is [`ShutdownReason::Manual`].
     pub shutdown_tx: watch::Sender<super::protocol::ShutdownReason>,
     /// Observe relay demand: flips to `true` when the first headless client registers (see `relay_demand_tx` on [`run_leader_server`]).
     pub relay_demand_rx: watch::Receiver<bool>,

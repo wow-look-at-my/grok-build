@@ -10,8 +10,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, Header
 enum SearchBackend {
     /// A model synthesizes an answer over the Responses API (`/responses`).
     Responses,
-    /// Kagi's own ranked results (`/search`). No model is involved: Kagi
-    /// returns them already filtered, ranked, and snippet-ed.
+    /// Kagi's own ranked results (`/search`).
     Kagi,
 }
 
@@ -474,10 +473,6 @@ const KAGI_RESULT: i64 = 0;
 const KAGI_RELATED: i64 = 1;
 
 /// One Kagi Search API response body.
-///
-/// Kagi types each `data` entry with an integer `t`, so the fields are modelled
-/// flat and matched on `t` rather than as a serde-tagged enum (serde's internal
-/// tagging wants a string tag).
 #[derive(Debug, serde::Deserialize)]
 struct KagiSearchBody {
     #[serde(default)]

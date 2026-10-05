@@ -227,9 +227,7 @@ pub struct McpClientStatus {
     pub name: String,
     pub status: McpSessionStatus,
     pub tools: Vec<McpToolEntry>,
-    /// Why an `Unavailable` server is unavailable, as recorded in
-    /// [`McpState::init_failed`]. Without it the UI can only say a server is
-    /// not working, which is indistinguishable from one still starting.
+    /// Why an `Unavailable` server is unavailable, as recorded in [`McpState::init_failed`].
     pub error: Option<String>,
     pub icons: Vec<xai_grok_mcp::servers::McpIcon>,
 }
@@ -765,10 +763,8 @@ pub(crate) async fn build_mcp_status(
         if auth_required.contains(cname) {
             continue;
         }
-        // A recorded reason is proof the server failed, whatever phase init is
-        // in — a config change cancels init back to "not started", and that
-        // window is exactly when an operator is looking at the row they just
-        // added. Without a reason, only a finished pass can conclude anything.
+        // A recorded reason is proof the server failed, whatever phase init
+        // is in.
         let reason = init_failed
             .get(cname)
             .filter(|reason| !reason.is_empty())

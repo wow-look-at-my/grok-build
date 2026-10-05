@@ -392,7 +392,7 @@ zstd = "0.13"
 incremental = true
 panic = "abort"
 # A wrapped counter in a shipped binary and a panicking one in a debug build are
-# two different programs. Check the arithmetic in both, so a token count, a byte
+# different programs. Check the arithmetic in both, so a token count, a byte
 # length or a duration read from a provider fails on the developer's machine the
 # same way it would on a user's. `release-dist`, `release-dist-jemalloc` and
 # `x-prod` inherit this.

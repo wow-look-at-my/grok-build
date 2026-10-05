@@ -1,11 +1,4 @@
 //! Filesystem scanner for discovering worktrees not yet tracked in the DB.
-//!
-//! Each managed root under the grok home is read on the same rule the rest of
-//! the crate uses ([`crate::managed_root::is_worktree_dir`]): a directory is a
-//! checkout when it carries a `.git` entry. Two shapes have written that root
-//! over the versions, and both are read: the fork's, which buckets checkouts
-//! per repository at `<root>/<repo>/<label>`, and the unforked one, which puts
-//! the checkout directly under the root at `<root>/<label>`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -879,8 +872,6 @@ mod tests {
         paths
     }
 
-    /// Criterion 1: the shape an unforked grok build leaves -- the checkout is a
-    /// direct child of the root -- is one worktree, described by its own `.git`.
     #[test]
     fn discovers_a_checkout_sitting_directly_under_the_managed_root() {
         xai_test_utils::require_git!();
@@ -910,7 +901,6 @@ mod tests {
         );
     }
 
-    /// Criterion 2: the bucketed depth and the pool root are still read.
     #[test]
     fn discovers_every_shape_the_old_location_has_been_written_in() {
         xai_test_utils::require_git!();
@@ -943,9 +933,6 @@ mod tests {
         );
     }
 
-    /// Criteria 3 and 6's negative: a plain directory under a managed root is
-    /// not a checkout -- here the go build cache a bucket actually holds on the
-    /// developer's machine -- and neither is anything below a checkout.
     #[test]
     fn reports_no_record_for_a_directory_that_is_not_a_checkout() {
         xai_test_utils::require_git!();
@@ -976,7 +963,6 @@ mod tests {
         );
     }
 
-    /// Criterion 5: the rebuild registers both depths and adds nothing twice.
     #[test]
     fn rebuild_registers_both_depths_once_and_adds_nothing_on_a_second_pass() {
         xai_test_utils::require_git!();
@@ -1012,7 +998,6 @@ mod tests {
         assert_eq!(second.already_tracked, 2, "a second pass adds nothing");
     }
 
-    /// Criterion 7: discovery and the rebuild it feeds are read-only.
     #[test]
     fn a_scan_and_a_rebuild_leave_the_checkout_on_disk_as_they_found_it() {
         xai_test_utils::require_git!();

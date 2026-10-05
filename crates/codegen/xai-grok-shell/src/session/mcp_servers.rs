@@ -67,8 +67,7 @@ pub(crate) fn build_config_resolved_event(
 pub(crate) enum McpInitWait {
     /// Every server finished; tools are registered.
     Initialized,
-    /// Nothing is in flight, and it never completed — the caller owns starting
-    /// (or restarting) initialization.
+    /// Nothing is in flight, and it never completed — the caller owns starting (or restarting) initialization.
     NotInitializing,
     /// The budget elapsed with initialization still in flight.
     TimedOut,

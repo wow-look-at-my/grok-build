@@ -180,9 +180,7 @@ async fn gh_pr_view_by_branch(cwd: &str, branch: &str) -> Option<PrData> {
     })
 }
 
-/// `gh pr checks --json` for `branch`. The exit code is the verdict (1: a
-/// check failed, 8: a check is pending) and the list is printed either way,
-/// so only an unparseable stdout reads as no checks.
+/// `gh pr checks --json` for `branch`.
 async fn gh_pr_checks(cwd: &str, branch: &str) -> Vec<PrCheck> {
     let mut cmd = tokio::process::Command::new("gh");
     cmd.args(["pr", "checks", branch, "--json", "name,state,conclusion"])

@@ -1,14 +1,4 @@
 //! Layer-2 transform for Ollama's native `/api/chat` stream.
-//!
-//! The wire is NDJSON, not SSE: one whole JSON object per line, and the last
-//! one carries `done: true` with the run's metrics. There is no `[DONE]`
-//! sentinel and no event framing, so the line IS the event.
-//!
-//! One shape differs from every other backend here and drives most of this
-//! file: a tool call arrives WHOLE, in one line, with its arguments as a JSON
-//! object rather than as a string of fragments. There is nothing to
-//! accumulate, so the call is emitted as a single delta carrying its complete
-//! arguments — which is what the pager's streaming preview renders.
 
 use std::time::{Duration, Instant};
 
@@ -87,9 +77,7 @@ pub fn stream_ollama<'a>(
                 }
             };
 
-            // Ollama reports a mid-stream failure as a line carrying only
-            // `error`. Ending the stream quietly there would hand the turn a
-            // truncated answer as if the model had finished.
+            // Ollama reports a mid-stream failure as a line carrying only `error`.
             if let Some(message) = chunk.error {
                 let err = SamplingError::Api {
                     status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
@@ -110,8 +98,7 @@ pub fn stream_ollama<'a>(
                 if !response_started {
                     response_started = true;
                     final_model = Some(model.clone());
-                    // Ollama mints no message id; the request id is the only
-                    // stable name this response has.
+                    // Ollama mints no message id; the request id is the only stable name this response has.
                     yield SamplingEvent::ResponseStarted {
                         request_id: request_id.clone(),
                         message_id: request_id.to_string(),
@@ -166,14 +153,10 @@ pub fn stream_ollama<'a>(
                 for call in message.tool_calls {
                     let tool_index = next_tool_index;
                     next_tool_index += 1;
-                    // The arguments arrive as an object and every consumer
-                    // downstream carries them as a JSON string, so this is the
-                    // one place the two representations meet.
+                    // The arguments arrive as an object and every consumer downstream carries them as a JSON string.
                     let arguments = serde_json::to_string(&call.function.arguments)
                         .unwrap_or_else(|_| "{}".to_owned());
-                    // A call with no id of its own still has to pair with its
-                    // result, and the index is the only thing that
-                    // distinguishes two calls to the same tool in one message.
+                    // A call with no id of its own still has to pair with its result.
                     let id = call
                         .id
                         .filter(|id| !id.is_empty())
@@ -185,9 +168,7 @@ pub fn stream_ollama<'a>(
                         tool_index,
                         id: Some(id.clone()),
                         name: Some(call.function.name.clone()),
-                        // Whole, not a fragment: there is no second line to
-                        // append, so a consumer that waits for one waits
-                        // forever.
+                        // Whole, not a fragment: there is no second line to append.
                         arguments_delta: Some(arguments.clone()),
                     };
 
@@ -207,10 +188,7 @@ pub fn stream_ollama<'a>(
                     .prompt_eval_cached_count
                     .unwrap_or(cached_prompt_tokens);
                 completion_tokens = chunk.eval_count.unwrap_or(completion_tokens);
-                // The model load is not generation, and it is the one number
-                // the OpenAI-compatible endpoint's `usage` cannot express.
-                // Logging it is what separates a cold 40-second load from an
-                // engine that stalled.
+                // The model load is not generation.
                 if let Some(load_ns) = chunk.load_duration.filter(|&ns| ns > 0) {
                     tracing::debug!(
                         load_ms = load_ns / 1_000_000,
@@ -229,8 +207,7 @@ pub fn stream_ollama<'a>(
         } else {
             match final_done_reason.as_deref() {
                 Some("stop") => Some(StopReason::Stop),
-                // The runner hit `num_predict`; the same truncation class the
-                // other backends report as Length.
+                // The runner hit `num_predict`; the same truncation class the other backends report as Length.
                 Some("length") => Some(StopReason::Length),
                 Some("load") => Some(StopReason::Stop),
                 Some(other) => {
@@ -250,8 +227,7 @@ pub fn stream_ollama<'a>(
             completion_tokens,
             total_tokens: prompt_tokens.saturating_add(completion_tokens),
             reasoning_tokens: 0,
-            // Ollama counts the prefix its runner reused, which is the same
-            // quantity a cache-read is elsewhere.
+            // Ollama counts the prefix its runner reused, which is the same quantity a cache-read is elsewhere.
             cached_prompt_tokens,
             cache_creation_prompt_tokens: 0,
         });
@@ -264,9 +240,7 @@ pub fn stream_ollama<'a>(
                     text: assistant_thinking,
                 })],
                 content: None,
-                // Deliberately unsigned: Ollama's thinking is plain text, so
-                // there is no blob binding it to the model that wrote it, and
-                // a replay to another model is always safe.
+                // Deliberately unsigned: Ollama's thinking is plain text, so there is no blob binding it to the model that wrote it.
                 encrypted_content: None,
                 status: None,
             }));
@@ -287,8 +261,7 @@ pub fn stream_ollama<'a>(
             items,
             stop_reason,
             usage,
-            // A local runtime bills nothing, so there is no price to report and
-            // the shell's own pricing fallback answers for it.
+            // A local runtime bills nothing, so there is no price to report and the shell's own pricing fallback answers.
             cost_usd_ticks: None,
             message_chunks_emitted: message_chunk_count,
             doom_loop_signals: Vec::new(),

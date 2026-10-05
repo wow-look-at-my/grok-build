@@ -349,7 +349,7 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             //
             // Position is NOT identity here. Keying on it lets a reordered or
             // shorter list write one row's text over another's, which loses
-            // the user's work just as thoroughly as deleting it.
+            // the user's work as thoroughly as deleting it.
             for item in &input.todos {
                 let status = parse_status(&item.status);
                 let priority = parse_priority(&item.priority);
@@ -777,8 +777,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Call 3 adds three more. Every call accumulates: none of the six
-        // items has been completed or cancelled, so none of them may vanish.
+        // Every call accumulates: none of the items has been completed or
+        // cancelled, so none of them may vanish.
         let input3 = TodoWriteInput {
             todos: vec![
                 make_item("Final X", "completed", "high"),

@@ -79,7 +79,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "contextual_hints.word_select",
     "contextual_hints.export_copy",
     "contextual_hints.ssh_wrap",
-    // The "Slow output" group; its four Int children are listed above.
+    // The "Slow output" group; its Int children are listed above.
     "output_rate_floor",
 ];
 
@@ -88,12 +88,7 @@ fn every_registered_setting_is_exercised() {
     let reg = SettingsRegistry::defaults();
     let mut missing: Vec<&str> = Vec::new();
     for meta in reg.all() {
-        // Harness model slots are built from one table, so the keyboard and
-        // mouse tests below WALK that table and cover every slot rather than
-        // naming each key here. See
-        // `harness_model_slot_picker_commits_the_catalog_model_for_every_slot`,
-        // `harness_model_slot_picker_row_zero_clears_the_slot` and
-        // `mouse_click_on_a_harness_model_slot_row_opens_the_picker`.
+        // Harness model slots are built from one table, so the keyboard.
         if xai_grok_models::slot_for_setting_key(meta.key).is_some() {
             continue;
         }
@@ -2074,8 +2069,7 @@ fn registry_kind_membership_through_pr_14() {
         "String kind membership drift: {string_keys:?}",
     );
 
-    // Every harness model slot is a DynamicEnum too. They come from their own
-    // table rather than a literal list, so adding a slot cannot drift here.
+    // Every harness model slot is a DynamicEnum too.
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
     let mut expected_dynamic: Vec<&str> = vec!["default_model"];
     expected_dynamic.extend(
@@ -4505,9 +4499,8 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         .to_owned();
     assert_eq!(initial_buffer, "120", "buffer seeds from default");
 
-    // Digits append to the in-place buffer (Changed); Backspace drops the last
-    // digit. These were previously rejected but are now accepted so a user can
-    // type a number directly.
+    // Digits append to the in-place buffer (Changed); Backspace drops the
+    // last digit.
     let accept_keys: &[(KeyCode, &str)] = &[
         (KeyCode::Char('5'), "1205"),
         // Backspace undoes the appended digit, restoring the seed.
@@ -6130,7 +6123,6 @@ fn pr13_mouse_click_on_show_tips_indicator_toggles_in_one_click() {
     assert_set_bool_action(outcome, "show_tips", false);
 }
 
-/// Two-stage select-then-toggle on `show_tips`.
 #[test]
 fn pr13_mouse_click_on_show_tips_two_stage_select_then_toggle() {
     let mut s = make_state();
@@ -6361,7 +6353,6 @@ fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
             s.mode()
         );
 
-        // Row 0 is "(no override)"; row 1 is the one catalog model.
         let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
         assert!(
             matches!(outcome, SettingsKeyOutcome::Changed),
@@ -6385,7 +6376,6 @@ fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
     }
 }
 
-/// Row 0 of the picker clears the slot back to inheriting the session model.
 #[test]
 fn harness_model_slot_picker_row_zero_clears_the_slot() {
     for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
@@ -6445,8 +6435,7 @@ fn mouse_click_on_a_harness_model_slot_row_opens_the_picker() {
 }
 
 // ---------------------------------------------------------------------------
-// vim_mode (scrollback navigation) — PAGER-owned, paired with simple_mode
-// ---------------------------------------------------------------------------
+// vim_mode (scrollback navigation) — PAGER-owned, paired.
 
 /// Keyboard Space on the vim_mode row dispatches the typed setter
 /// with the inverted snapshot value (default false → true). Same
@@ -7226,8 +7215,7 @@ fn show_thinking_blocks_cache_on_dispatches_off() {
 
 #[test]
 fn thinking_summaries_space_dispatches_typed_setter() {
-    // The shipped modal key handler, driven on the row by key. `thinking_summaries`
-    // has no process cache, so the value the row reads is the `[ui]` mirror.
+    // The shipped modal key handler, driven on the row by key.
     let mut s = make_state();
     navigate_to(&mut s, "thinking_summaries");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
@@ -7259,10 +7247,7 @@ fn thinking_summaries_renders_under_appearance_category_shared_owned_restart_req
         SettingKind::Bool { default } => assert!(*default, "default must be true"),
         other => panic!("expected Bool kind for thinking_summaries, got {other:?}"),
     }
-    // Sits directly below collapsed_edit_blocks. The four rows above it are
-    // pinned into one adjacency chain by their own order asserts
-    // (show_thinking_blocks / respect_manual_folds / group_tool_verbs /
-    // collapsed_edit_blocks), so a new Appearance row cannot go between them.
+    // Sits directly below collapsed_edit_blocks.
     let keys: Vec<&str> = reg
         .all()
         .iter()

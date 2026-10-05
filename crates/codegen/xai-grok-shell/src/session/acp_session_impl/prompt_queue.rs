@@ -286,8 +286,7 @@ impl SessionActor {
             .unwrap_or_else(|| "synthetic".to_string());
         let log_owner = client_identifier.clone().unwrap_or_default();
         // A command line means something only as the LEADING token of its own
-        // turn (`resolve`), so it must never be steered into another turn as
-        // text — see the goal merge below.
+        // turn (`resolve`).
         let text_is_command =
             Self::row_text_is_command(&Self::queue_text_from_blocks(&prompt_blocks));
         let mut item = InputItem {
@@ -1203,13 +1202,6 @@ impl SessionActor {
     }
 
     /// Whether a queued row's display text is a command line.
-    ///
-    /// Thin wrapper over [`xai_prompt_queue::is_slash_invocation`] — the one
-    /// definition the pager reads too — so every shell-side gate asks the same
-    /// question. Such a row must run as its own turn: `resolve` reads a prompt's
-    /// leading token, and the interjection drain expands skills but resolves no
-    /// builtin, so steering or merging it would hand the model the literal
-    /// `/cmd args` and the command would never run.
     pub(super) fn row_text_is_command(text: &str) -> bool {
         xai_prompt_queue::is_slash_invocation(text)
     }

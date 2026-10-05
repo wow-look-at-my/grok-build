@@ -541,10 +541,8 @@ pub(crate) async fn wait_any_event_driven(
         #[allow(clippy::disallowed_methods)]
         let wait = tokio::spawn(async move {
             // Guarded, because `done` is the only thing this caller can be
-            // woken by: a round that died mid-flight would leave the tool
-            // parked until its deadline on a wait that no longer exists.
-            // The panic is logged against the task and the caller is woken
-            // to re-read the real task state.
+            // woken by: a round that died mid-flight will leave the tool
+            // parked.
             let round = crate::util::detached::guarded(
                 "task output bash wait",
                 terminal.wait_for_completion(&id, Some(timeout)),
@@ -645,11 +643,7 @@ pub(crate) async fn wait_all_event_driven(
     );
     let outcome = tokio::select! {
         rounds = all_fut => {
-            // `CompletedEarly` is the claim that every task finished. A round
-            // that came back with a `JoinError` proved nothing about its task,
-            // so the claim is withheld: the caller re-reads every task anyway,
-            // and the deadline hint is the honest one for a task nobody could
-            // confirm.
+            // `CompletedEarly` is the claim that every task finished.
             let unconfirmed: Vec<(&str, String)> = rounds
                 .iter()
                 .filter(|(_, round)| round.is_err())
