@@ -751,18 +751,24 @@ mod tests {
                 priority: TodoPriority::Medium,
                 status: TodoStatus::Completed,
                 meta: None,
+                verification: None,
+                verification_passed: false,
             },
             TodoItem {
                 content: "Dropped".to_string(),
                 priority: TodoPriority::Low,
                 status: TodoStatus::Cancelled,
                 meta: None,
+                verification: None,
+                verification_passed: false,
             },
             TodoItem {
                 content: "Stale spinner".to_string(),
                 priority: TodoPriority::High,
                 status: TodoStatus::InProgress,
                 meta: None,
+                verification: None,
+                verification_passed: false,
             },
         ];
 
@@ -823,6 +829,8 @@ mod tests {
                     status:
                         xai_grok_tools::implementations::grok_build::todo::TodoStatus::Completed,
                     meta: None,
+                    verification: None,
+                    verification_passed: false,
                 },
             ],
             state: xai_grok_tools::implementations::grok_build::todo::TodoState::default(),
