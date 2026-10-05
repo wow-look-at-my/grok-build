@@ -548,7 +548,7 @@ mod tests {
     /// `[Reasoning, Assistant]` sibling pair. (b) is the shell turn-loop commit
     /// (the sibling rides `push_tool_result`, the assistant rides
     /// `push_assistant_response`). (c) is the real
-    /// `conversation_to_chat_messages` wire conversion for turn N+. There it
+    /// `conversation_to_chat_messages` wire conversion for turn `N+1`. There it
     /// MUST appear as `reasoning_content` on the following assistant message.
     #[tokio::test]
     async fn reasoning_roundtrip_reaches_next_request_reasoning_content() {

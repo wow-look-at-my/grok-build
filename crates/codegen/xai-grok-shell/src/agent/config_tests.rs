@@ -3219,10 +3219,10 @@ fn resolve_sampling(model: &ModelEntry, session_key: Option<&str>) -> SamplerCon
     sampling_config_for_model(model, credentials, None, None, None)
 }
 
-/// A Cerebras-slugged entry must resolve — through the real `config.toml`
-/// parse, model resolution, and `sampling_config_for_model` — to a client
-/// config whose message profile is STRICT and whose endpoint/backend are
-/// what the entry specifies.
+/// A Cerebras-slugged entry must resolve through the real `config.toml`
+/// parse, model resolution, and `sampling_config_for_model`. The result must
+/// be a client config whose message profile is STRICT. Its endpoint/backend
+/// must be what the entry specifies.
 ///
 /// This is the config half of the fix: the wire suppression only takes
 /// effect if a `strict_message_schema = true` entry actually reaches
@@ -4363,8 +4363,8 @@ fn resolve_long_reasoning_reminder_precedence() {
         "env JSON enables over a TOML false and its tokens win; delay falls through"
     );
 }
-/// The output-rate floor is off by default, takes the session-wide `[ui]`
-/// value when one is set, and lets a model override it — including with a
+/// The output-rate floor is off by default. It takes the session-wide `[ui]`
+/// value when one is set. It lets a model override it, including with a
 /// zero. This turns the gate off for that model alone.
 #[test]
 fn resolve_output_rate_floor_prefers_the_model_over_the_session() {

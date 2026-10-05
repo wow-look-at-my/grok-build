@@ -3954,9 +3954,8 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries that carry a real (non-default) context window, treated as
-        // a per-slug `/v1/models` listing for backfilling entries that were
-        // left at the silent hardcoded default.
+        // Entries with a real (non-default) context window. They act as a per-slug `/v1/models`
+        // listing that backfills entries left at the silent hardcoded default.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)

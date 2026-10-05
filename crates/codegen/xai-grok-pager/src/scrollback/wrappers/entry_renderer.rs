@@ -579,7 +579,7 @@ impl<'a> EntryRenderer<'a> {
 ///
 /// - A missing (`None`) or non-positive cost returns `None`. Thus a caller never
 ///   renders a fabricated `$0.00` when the API reported no cost.
-/// - Arithmetic is exact **integer** math (no floats).
+/// - Arithmetic is exact **integer** math (no floats). A tiny cost is thus
 ///   never mis-rounded into `$0` the way a `f64` at 4 decimals could.
 pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<String> {
     let ticks = cost_usd_ticks?;

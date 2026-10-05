@@ -308,7 +308,7 @@ impl SessionActor {
         attempted(PrefireOutcome::Cached, Some(note1_chars))
     }
     /// Runs only when a valid cached NOTE₁ exists for the current conversation.
-    /// if pass-1 is still in flight we do add that await into `ttft_ms` (first token of the final summary), because the user is blocked on it;.
+    /// if pass-1 is still in flight we do add that await into `ttft_ms` (first token of the final summary), because the user is blocked on it.
     /// `stream_ms` / `delta_count` / `itl_max_ms` are always pass-2 only (the only sample that streams the successor-visible summary).
     async fn try_two_pass_pass2_apply(
         &self,
@@ -466,7 +466,8 @@ pub(crate) enum SuppressReason {
     Other,
 }
 impl SuppressReason {
-    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change. / `schema` and `other` get [`SUPPRESS_TURN`]. The next turn sends a different request, so it retries then.
+    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change.
+    /// `schema` and `other` get [`SUPPRESS_TURN`]. The next turn sends a different request, so it retries then.
     /// `credit_block` gets [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
     /// `auth` gets [`SUPPRESS_AUTH`]: cleared on login/token refresh, not on a `200` (an over-window session never gets one).
     fn suppress_state(self) -> u8 {
