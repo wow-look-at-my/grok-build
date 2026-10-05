@@ -181,7 +181,7 @@ impl TelemetryConfig {
 /// `TelemetryConfig` with each transport-key spelling as its own field, so a
 /// table naming both folds under [`TelemetryConfig::OTEL_PROTOCOL_KEYS`]
 /// instead of tripping serde's duplicate-field check. This table can arrive
-/// from a remote campaign patch, which is merged into the same value the config
+/// from a remote campaign patch. This is merged into the same value the config
 /// is read from and is not limited to any field set.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -463,7 +463,7 @@ mod wire_alias_tests {
         serde_json::from_str(&format!("{{{table}}}"))
     }
 
-    /// A `[telemetry]` table naming the transport under both spellings is one setting stated twice. This table can arrive from a remote campaign patch, which merges into the same value the whole `Config` is read from, so a duplicate-field
+    /// A `[telemetry]` table naming the transport under both spellings is one setting stated twice. This table can arrive from a remote campaign patch, which merges into the same value the whole `Config` is read from. A duplicate-field
     /// rejection here would fail the entire config parse.
     #[test]
     fn a_table_naming_the_transport_under_both_keys_under_one_value_parses_once() {
@@ -492,8 +492,8 @@ mod wire_alias_tests {
         assert!(text.contains("otel_transport"), "{err}");
     }
 
-    /// The outgoing shape keeps the canonical key, so a config written back to
-    /// disk does not grow the legacy spelling.
+    /// The outgoing shape keeps the canonical key, so a config written back
+    /// to disk does not grow the spelling.
     #[test]
     fn the_transport_serializes_under_the_canonical_key_only() {
         let mut cfg = TelemetryConfig::default();

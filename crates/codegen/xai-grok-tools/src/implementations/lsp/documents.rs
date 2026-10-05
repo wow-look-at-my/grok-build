@@ -80,9 +80,8 @@ impl Documents {
     /// A notification's revision is written down here, before the
     /// notification reaches the wire. The replaced value comes back, so
     /// [`Self::restore`] can undo a send that failed. A push that names no
-    /// version is credited with the newest version we have sent, and the
-    /// server can answer on another thread before the sending thread gets
-    /// this far.
+    /// version is credited with the newest version we have sent. The server
+    /// can answer on another thread before the sending thread gets this far.
     pub fn commit(
         &self,
         uri: &str,
@@ -207,9 +206,8 @@ mod tests {
     }
 
     /// A writer that dies holding the lock holds it for nobody afterwards.
-    ///
     /// The guard type is spelled out here rather than inferred: it is
-    /// `parking_lot`'s, which is the one that cannot report a poisoned lock at
+    /// `parking_lot`'s. This is the one that cannot report a poisoned lock at
     /// all. A fallible acquisition would let a panic in one code path make
     /// every later reader of the document versions fail.
     #[test]
@@ -282,8 +280,8 @@ mod tests {
 
     /// The revision is written down before the notification goes out, so a
     /// versionless push that arrives while the send is still running is
-    /// credited with the text the server was just given. A send that fails
-    /// takes it back: what is recorded describes the text the server has.
+    /// credited with the text the server was given. A send that fails takes
+    /// it back: what is recorded describes the text the server has.
     #[test]
     fn a_failed_send_leaves_the_document_where_it_was() {
         let documents = Documents::new();

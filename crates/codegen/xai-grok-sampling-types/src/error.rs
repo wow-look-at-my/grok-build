@@ -392,8 +392,8 @@ impl SamplingError {
         )
     }
 
-    /// The server rejected a replayed `thinking` block's signature, e.g. "messages.1.content.0: Invalid `signature` in `thinking` block". The signature is verified against the model that minted it, so a conversation carried onto another model fails this way
-    /// on every turn until the blocks are dropped.
+    /// The server rejected a replayed `thinking` block's signature, e.g. "messages.1.content.0: Invalid `signature` in `thinking` block". The signature is verified against the model that minted it. A conversation carried onto another model fails this way on
+    /// every turn until the blocks are dropped.
     pub fn is_thinking_signature_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -476,14 +476,12 @@ impl SamplingError {
 
     /// The API rejected the request because the routed model or endpoint
     /// accepts no image input at all. Distinct from
-    /// [`Self::is_image_processing_error`], which is one unreadable image on a
-    /// model that does support them; here every image in the conversation is
-    /// unroutable, so the recovery is the same strip but the cause is the
-    /// model choice.
-    ///
-    /// image_url is only supported by certain models" — so this matches a
-    /// phrase set case-insensitively across the statuses providers actually use
-    /// for it.
+    /// [`Self::is_image_processing_error`], which is one unreadable image on
+    /// a model that does support them. Here every image in the conversation
+    /// is unroutable. The recovery is the same strip but the cause is the
+    /// model choice. image_url is only supported by certain models" — so
+    /// this matches a phrase set case-insensitively across the statuses
+    /// providers use for it.
     pub fn is_image_input_unsupported_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -547,13 +545,11 @@ impl SamplingError {
     }
 
     /// The distinct property names an unsupported-property error names.
-    /// `None` when this is not such an error.
-    ///
-    /// The provider packs several failures into one newline-separated string,
-    /// e.g.
+    /// `None` when this is not such an error. The provider packs several
+    /// failures into one newline-separated string, e.g.
     /// `messages.6.assistant.model_id: property '...' is unsupported\n
     ///  messages.6.assistant.reasoning_content: property '...' is unsupported`,
-    /// so this reads every line, not just the first.
+    /// so this reads every line, not the first.
     fn unsupported_property_names(&self) -> Option<Vec<String>> {
         if !self.is_unsupported_message_property_error() {
             return None;
@@ -933,10 +929,9 @@ fn plain_text_error_message(bytes: &[u8]) -> Option<String> {
     Some(truncate_user_error(text))
 }
 
-/// User-facing message for a failed API call.
-///
-/// A structured JSON error envelope keeps its message. A plain-text body is
-/// shown after the status. Markup and an empty body map to a status phrase.
+/// User-facing message for a failed API call. A structured JSON error
+/// envelope keeps its message. A plain-text body is shown after the status.
+/// Markup and an empty body map to a status phrase.
 pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String {
     if let Some(message) = structured_error_message(bytes) {
         return message;
@@ -947,7 +942,6 @@ pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String
     }
 }
 
-///
 /// Servers answer it with an empty or contentless body, which leaves the bare
 /// message ("Request failed (HTTP 404).") describing nothing a user can act
 /// on. Other statuses are about the request, not the address, and keep their
@@ -1628,7 +1622,7 @@ mod tests {
 
     /// Without it the message is "Request failed (HTTP 404)." -- true, and
     /// no help at all in telling a wrong base URL from a wrong path from a
-    /// model that is not served there.
+    /// model. That model is not served there.
     #[test]
     fn a_404_names_the_endpoint_and_other_statuses_do_not() {
         let url = "https://api.example.com/v1/responses";
@@ -2451,8 +2445,8 @@ mod tests {
     /// The exact error Cerebras returned for a replayed assistant message in
     /// this repo's own session log. It must classify as an
     /// unsupported-message-property error, name both offending properties, and
-    /// produce a property-strip retry — otherwise it is Fatal and the session
-    /// is bricked, since the properties live in stored history.
+    /// produce a property-strip retry — otherwise it is Fatal. The session is
+    /// bricked, since the properties live in stored history.
     #[test]
     fn cerebras_unsupported_message_property_400_is_detected() {
         let err = SamplingError::Api {
@@ -2482,8 +2476,8 @@ mod tests {
     }
 
     /// Both properties named on separate lines must both be read: the
-    /// provider packs multiple failures into one newline-separated string, so
-    /// a first-line-only parse would miss `reasoning_content` and leave the
+    /// provider packs multiple failures into one newline-separated string. A
+    /// first-line-only parse would miss `reasoning_content` and leave the
     /// retry failing on the property it did not strip.
     #[test]
     fn unsupported_property_names_reads_every_line() {

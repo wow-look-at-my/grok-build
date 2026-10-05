@@ -16,14 +16,12 @@ enum Tail {
     /// Inside a bare word (`true`, `false`, `null`) that opened here.
     Literal(usize),
 }
-/// The most complete valid JSON the fragment can stand for.
-///
-/// Returns `None` when nothing complete has arrived yet — an empty fragment, or
-/// one that is only whitespace. A caller reads that as "no fields yet", which is
-/// what `{}` would say anyway but without claiming a document exists.
-///
-/// The input is never required to be a prefix of valid JSON. Garbage in the tail
-/// is dropped along with the rest of the half-written token.
+/// The most complete valid JSON the fragment can stand for. Returns `None`
+/// when nothing complete has arrived yet — an empty fragment, or one that
+/// is only whitespace. A caller reads that as "no fields yet", which is what
+/// `{}` would say anyway but without claiming a document exists. The input is
+/// never required to be a prefix of valid JSON. Garbage in the tail is
+/// dropped along with the rest of the half-written token.
 pub fn complete_partial_json(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut stack: Vec<Frame> = Vec::new();
@@ -171,7 +169,7 @@ fn mark_safe(len: usize, stack: &[Frame], safe_len: &mut usize, safe_stack: &mut
     safe_stack.clear();
     safe_stack.extend_from_slice(stack);
 }
-/// A value just ended: an object is back to wanting a key.
+/// A value ended: an object is back to wanting a key.
 fn close_value(stack: &[Frame], expect_key: &mut bool) {
     *expect_key = matches!(stack.last(), Some(Frame::Object));
 }

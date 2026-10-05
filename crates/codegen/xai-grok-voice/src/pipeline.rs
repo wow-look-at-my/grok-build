@@ -231,7 +231,7 @@ async fn start_capture_session(
     let mut capture = Some(capture);
     let out = event_tx.clone();
     // The handle is kept in `ActivePtt.reader`: the pipeline aborts it on the next
-    // press and at shutdown, so the task's lifetime is owned rather than dropped.
+    // press and at shutdown. The task's lifetime is owned rather than dropped.
     #[allow(clippy::disallowed_methods)]
     let reader = tokio::spawn(async move {
         // Stop the mic before signalling end-of-utterance so no stray PCM is queued after `audio.done`

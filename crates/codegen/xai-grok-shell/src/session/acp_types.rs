@@ -48,9 +48,9 @@ impl CompactConversationRequest {
         xai_tool_types::Aliases::new("user_context", &["userContext"]);
 }
 
-/// `CompactConversationRequest` as it arrives over ACP, with each key spelling
-/// its own field, so a request naming both folds them instead of tripping
-/// serde's duplicate-field check.
+/// `CompactConversationRequest` as it arrives over ACP. This happens with each
+/// key spelling its own field, so a request naming both folds them instead of
+/// tripping serde's duplicate-field check.
 #[derive(Debug, Default, serde::Deserialize)]
 struct CompactConversationRequestWire {
     #[serde(default)]

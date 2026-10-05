@@ -17,11 +17,9 @@ pub fn repo_worktrees_root(main_root: &Path) -> PathBuf {
     main_root.join(REPO_DOT_DIR).join(WORKTREES_DIR)
 }
 
-/// True when `path` is a `<X>/.grok/worktrees` directory.
-///
-/// Shape-only, so it answers for a path that no longer exists on disk. A plain
-/// `worktrees/` directory that is not inside a `.grok/` directory is not a
-/// managed root.
+/// True when `path` is a `<X>/.grok/worktrees` directory. Shape-only, so it
+/// answers for a path that no longer exists on disk. A plain `worktrees/`
+/// directory that is not inside a `.grok/` directory is not a managed root.
 pub fn is_repo_worktrees_root(path: &Path) -> bool {
     let here_is_worktrees = path.file_name() == Some(OsStr::new(WORKTREES_DIR));
     let parent_is_dot_grok = path
@@ -51,10 +49,9 @@ pub fn main_root_for_managed_path(path: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// True when a directory's own name can name a checkout.
-///
-/// Hidden entries and the pool's claim markers sit beside checkouts without
-/// being ones, at either level of a managed root.
+/// True when a directory's own name can name a checkout. Hidden entries and
+/// the pool's claim markers sit beside checkouts without being ones, at
+/// either level of a managed root.
 pub fn is_worktree_entry_name(path: &Path) -> bool {
     path.file_name().is_some_and(|name| {
         let name = name.to_string_lossy();
@@ -81,11 +78,10 @@ pub fn managed_worktrees_boundary(path: &Path, legacy_root: &Path) -> Option<Pat
 }
 
 /// Keeps the managed worktrees directory out of `main_root`'s `git status`.
-///
 /// The entry goes in the repository's own exclude data (`.git/info/exclude`),
-/// never in the tracked `.gitignore`: which directories a clone happens to have
-/// checked out is not a property of the project. The write is idempotent, so a
-/// repository with multiple worktrees carries one line.
+/// never in the tracked `.gitignore`. Which directories a clone happens to
+/// have checked out is not a property of the project. The write is
+/// idempotent, so a repository with multiple worktrees carries one line.
 pub fn exclude_managed_worktrees_dir(main_root: &Path) -> std::io::Result<()> {
     // A repository whose `.git` is a pointer file keeps `info/exclude` in the
     // common dir it names, not beside the working tree.
@@ -227,7 +223,7 @@ mod tests {
         }
     }
 
-    /// The one test every reader of the old location asks, over both shapes that
+    /// The test every reader of the location asks, over both shapes that
     /// location has ever had.
     #[test]
     fn a_directory_is_a_checkout_by_its_git_entry() {

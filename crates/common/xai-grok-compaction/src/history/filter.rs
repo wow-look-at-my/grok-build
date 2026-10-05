@@ -85,12 +85,11 @@ pub fn filter_turns_for_inter_compaction<T: CompactionItemBuilder>(turns: &[T]) 
 /// Returns `(all_user_messages_sections, rest)`.
 /// Extracts **all** `<grok_user_queries>...</grok_user_queries>` blocks
 /// (there may be multiple after chained compactions) and concatenates them.
-/// `text[from..to]` for the block scan below.
-///
-/// Every index is an offset at which `<grok_user_queries>` or
-/// `</grok_user_queries>` was matched, or the running cursor set to such an
-/// offset plus the literal's byte length. Both tags are pure ASCII, and an
-/// ASCII byte is always a char boundary, so both ends align.
+/// `text[from..to]` for the block scan below. Every index is an offset. This
+/// holds at which `<grok_user_queries>` or `</grok_user_queries>` was
+/// matched, or the running cursor set to such an offset plus the literal's
+/// byte length. Both tags are pure ASCII, and an ASCII byte is always a char
+/// boundary, so both ends align.
 #[allow(clippy::string_slice)] // both ends are ASCII tag offsets
 fn span(text: &str, from: usize, to: usize) -> &str {
     &text[from..to]

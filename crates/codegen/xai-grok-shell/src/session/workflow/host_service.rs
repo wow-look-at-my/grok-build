@@ -312,7 +312,7 @@ impl HostService {
             WorkflowHostRequest::SpawnAgent { opts, reply } => {
                 let svc = self.clone();
                 tokio::spawn(async move {
-                    // The script parks on `reply` for this whole round, so a
+                    // The script parks on `reply` for this whole round. A
                     // panic has to be sent as the failure it is rather than
                     // close the channel.
                     let outcome = xai_grok_tools::util::detached::guarded(
@@ -1349,9 +1349,9 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
     }
 
-    /// Runs launched from the same `WorkflowManager` share its
-    /// `agent_slots` semaphore. This proves the cap is enforced OVERALL,
-    /// across both runs at once, not just within each run separately.
+    /// Runs launched from the same `WorkflowManager` share its `agent_slots`
+    /// semaphore. This proves the cap is enforced OVERALL, across both runs
+    /// at once, not within each run separately.
     #[tokio::test]
     async fn two_runs_share_the_session_wide_agent_slots() {
         const CAP: usize = 1;
@@ -1476,9 +1476,9 @@ mod tests {
 
     /// A spawn round that unwinds returns no value, so nothing runs the
     /// `finish` call or the live-agent decrement that a returning round does.
-    /// Both are the run's only record that the agent existed: a roster row left
-    /// on "running" is the one the capped roster refuses to evict, and a live
-    /// count that never came back reads as an agent still working.
+    /// Both are the run's only record that the agent existed. A roster row left
+    /// on "running" is the one the capped roster refuses to evict. A live count
+    /// that never came back reads as an agent still working.
     #[tokio::test]
     async fn a_panicking_agent_round_frees_its_live_count_and_fails_its_row() {
         let run_id = "wf_panicking_round".to_string();

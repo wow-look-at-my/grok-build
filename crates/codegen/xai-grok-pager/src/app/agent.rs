@@ -983,12 +983,11 @@ impl AgentSession {
     ) -> u64 {
         self.enqueue_entry_at(text, QueueEntryKind::Prompt, false, skill_token_ranges)
     }
-    /// Push a plain prompt that must run as its own turn — never folded into
-    /// another turn as mid-turn steering text.
-    ///
-    /// Used for the `/plan <description>` description: the mode switch the same
-    /// submit requested applies to the FOLLOWING turn, so the description must
-    /// survive the running one intact instead of being absorbed by it.
+    /// Push a plain prompt that must run as its own turn — never folded
+    /// into another turn as mid-turn steering text. Used for the `/plan
+    /// <description>` description: the mode switch the same submit requested
+    /// applies to the FOLLOWING turn. The description must survive the
+    /// running one intact instead of being absorbed by it.
     pub fn enqueue_own_turn_prompt(
         &mut self,
         text: String,
@@ -1581,7 +1580,7 @@ mod tests {
         assert!(!multi_block.wire_matches_display(), "multi-block payload");
     }
     /// A slash-invocation row never merges into a neighbour's turn, whether it
-    /// is the front or a follower: only a turn's LEADING token is resolved as a
+    /// is the front or a follower. Only a turn's LEADING token is resolved as a
     /// command, so a command line folded into a merged body reaches the model as
     /// prose. Setting-independent — `dequeue_combined_prompt` is the same
     /// function `maybe_drain_queue` calls.

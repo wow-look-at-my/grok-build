@@ -558,11 +558,10 @@ mod egress_disabled_pins {
     use super::*;
 
     /// Every reporting call must refuse, and none may open a connection.
-    ///
-    /// Pointed at a listener on loopback that accepts nothing: if any endpoint
-    /// starts sending again, the accept below completes and this fails. An
-    /// error-only assertion would not catch a request that goes out and then
-    /// errors on the reply.
+    /// Pointed at a listener on loopback that accepts nothing: if any
+    /// endpoint starts sending again, the accept below completes and this
+    /// fails. An error-only assertion would not catch a request that goes out
+    /// and then errors on the reply.
     #[tokio::test]
     async fn no_reporting_endpoint_touches_the_network() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -796,8 +795,7 @@ mod tests {
     }
 }
 
-///
-/// Nothing here may drive a request through `send_json` / `send_empty`: those
+/// Nothing here may drive a request through `send_json` / `send_empty`. Those
 /// bail before the wire in this build (see `egress_disabled_pins`), so a test
 /// that stands up a server and waits to be called can only hang or fail. What
 /// remains testable is credential recovery, which never leaves the process.

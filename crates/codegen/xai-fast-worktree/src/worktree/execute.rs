@@ -196,7 +196,7 @@ pub(crate) fn execute_create_worktree(plan: WorktreePlan) -> Result<CreateWorktr
 /// in, so without this the main checkout reports `.grok/` as untracked for as
 /// long as any worktree exists. The entry belongs in the repository's exclude
 /// data: where one clone happens to park its checkouts is not a property of
-/// the project, so the tracked `.gitignore` stays untouched. Questions are
+/// the project. The tracked `.gitignore` stays untouched. Questions are
 /// asked, of different sources. The destination's shape names the directory
 /// whose status is at stake; git names the repository that directory belongs
 /// to.
@@ -1334,7 +1334,7 @@ mod tests {
     }
 
     /// ...and the legacy `<grok home>/worktrees` layout must not be treated as
-    /// one. Its shape is `<home>/.grok/worktrees/<repo>/<label>`, so reading the
+    /// one. Its shape is `<home>/.grok/worktrees/<repo>/<label>`. Reading the
     /// owner off the path alone would register the exclusion in the user's home
     /// directory -- a repo of its own when dotfiles are versioned.
     #[test]

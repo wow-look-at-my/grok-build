@@ -156,12 +156,11 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
 }
 
 /// Talk to the unsandboxed CI-status host worker for a sandboxed session,
-/// returning an [`Output`] shaped like a `gh` run's stdout.
-///
-/// It is authoritative: when the worker replies with the nothing-usable
-/// sentinel, we hand the caller an `Output` whose body attenuates to "no
-/// runs", so the dot degrades to the "off" state rather than falling through
-/// to an in-jail `gh` spawn. Only a genuinely absent/unusable worker
+/// returning an [`Output`] shaped like a `gh` run's stdout. It is
+/// authoritative. We hand the caller an `Output` whose body attenuates to
+/// "no runs", so the dot degrades to the "off" state rather than falling
+/// through to an in-jail `gh` spawn. This happens when the worker replies
+/// with the nothing-usable sentinel. Only a genuinely absent/unusable worker
 /// connection returns `None`.
 fn run_gh_via_ci_host(repo_root: &Path, args: &[&str], fd: i32) -> Option<std::process::Output> {
     #[cfg(unix)]
@@ -595,13 +594,12 @@ mod tests {
     }
 
     /// Publish an in-process peer speaking the worker's protocol over
-    /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to the
-    /// jailed pager, and answer one `gh-status <branch>` request with `json`.
-    ///
-    /// The peer asserts the request shape, so a caller that reached `gh` some
-    /// other way, or asked for the wrong thing, fails here rather than silently
-    /// reading whatever the peer felt like sending. Callers hold
-    /// [`ci_env_lock`] for as long as the variable must stay set.
+    /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to
+    /// the jailed pager. Answer one `gh-status <branch>` request with
+    /// `json`. The peer asserts the request shape, so a caller that reached
+    /// `gh` some other way, or asked for the wrong thing, fails here rather
+    /// than silently reading whatever the peer felt like sending. Callers
+    /// hold [`ci_env_lock`] for as long as the variable must stay set.
     #[cfg(unix)]
     fn publish_ci_host_peer(json: &'static [u8]) -> i32 {
         use std::os::unix::net::UnixStream;
@@ -630,13 +628,11 @@ mod tests {
         raw
     }
 
-    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session does:
-    /// `gh_ci_status` → `run_gh` → the `GROK_CI_HOST_FD` env read → the host
-    /// worker, with no fd passed by hand.
-    ///
-    /// `repo_root` does not exist, so a real in-jail `gh` spawn could only fail:
-    /// reading a color back at all proves the answer came over the inherited
-    /// worker connection.
+    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session
+    /// does. `gh_ci_status` → `run_gh` → the `GROK_CI_HOST_FD` env read
+    /// → the host worker, with no fd passed by hand. `repo_root` does not
+    /// exist. A real in-jail `gh` spawn could only fail: reading a color back
+    /// at all proves the answer came over the inherited worker connection.
     #[test]
     #[cfg(unix)]
     fn the_shipped_ci_status_reads_the_host_worker_the_jail_hands_it() {
@@ -860,8 +856,8 @@ mod tests {
     }
 
     /// Walk one render cadence over `span` of wall-clock time, sampling the
-    /// SHIPPED pulse once per frame the way the render loop does, and report
-    /// the wall-clock duration of one full breath: the elapsed time between the
+    /// SHIPPED pulse once per frame the way the render loop does. Report the
+    /// wall-clock duration of one full breath. The elapsed time between the
     /// first peak samples.
     fn measured_period(step: Duration, span: Duration) -> Duration {
         let mut samples: Vec<(Duration, f32)> = Vec::new();
@@ -970,13 +966,12 @@ mod tests {
         assert!(lum(bright) > lum(dim), "brighter frame must be lighter");
     }
 
-    /// The shipped status-bar call site must feed the pulse ELAPSED WALL TIME.
-    /// The pulse math above is only half the fix: a render path that still
-    /// passes `scrollback.animation_tick()` would keep the old frame-counted
-    /// behavior with a `Duration`-shaped cast.
-    ///
-    /// Structural, because the call site lives inside a ratatui render pass that
-    /// no unit test can run. It reads the real file and asserts the CI dot's
+    /// The shipped status-bar call site must feed the pulse ELAPSED WALL
+    /// TIME. The pulse math above is only half the fix. A render path that
+    /// still passes `scrollback.animation_tick()` would keep the
+    /// frame-counted behavior with a `Duration`-shaped cast. Structural,
+    /// because the call site lives inside a ratatui render pass that no unit
+    /// test can run. It reads the real file and asserts the CI dot's
     /// in-progress arm goes through `in_progress_dot_color` (the wall-clock
     /// entry point) and never through the tick counter.
     #[test]

@@ -677,7 +677,6 @@ impl std::fmt::Display for CostTicksOverflow {
 
 impl std::error::Error for CostTicksOverflow {}
 
-///
 /// `field` names where the amount came from and rides the error. An amount
 /// whose tick count leaves `i64` is `Err`: no tick count that the source did
 /// not report is ever produced.
@@ -815,7 +814,7 @@ impl ChatChunkDelta {
 /// `ChatChunkDelta` as it arrives on the wire, with each key spelling its own
 /// field. It exists so a chunk naming both reasoning keys folds them under
 /// [`ChatChunkDelta::REASONING_KEYS`] instead of tripping serde's
-/// duplicate-field check, which rejects a second key whatever its value.
+/// duplicate-field check. This rejects a second key whatever its value.
 #[derive(Debug, Default, Deserialize)]
 struct ChatChunkDeltaWire {
     #[serde(default)]

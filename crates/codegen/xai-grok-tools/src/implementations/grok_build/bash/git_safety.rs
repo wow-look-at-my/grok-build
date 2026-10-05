@@ -219,15 +219,11 @@ fn git_stdout(git_root: &Path, args: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// Split on `&&` `||` `;` `|` and newlines that are not inside quotes.
-///
-/// The walk is by CHARACTER, never by raw byte index: quotes are ASCII (`'` /
-/// `"`), and a multi-byte UTF-8 character is neither a separator nor a quote,
-/// so it is skipped whole. That keeps `i` on a char boundary whenever the
-/// statement slices below run. (The previous byte-index walk stepped onto a
-/// UTF-8 continuation byte and panicked — "byte index N is not a char
-/// boundary" — on any command carrying non-ASCII text, which aborted the
-/// whole session.)
+/// Split on `&&` `||` `;` `|` and newlines that are not inside quotes. The
+/// walk is by CHARACTER, never by raw byte index: quotes are ASCII (`'` /
+/// `"`). A multi-byte UTF-8 character is neither a separator nor a quote. It
+/// is skipped whole. That keeps `i` on a char boundary whenever the statement
+/// slices below run.
 fn split_statements(command: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -462,12 +458,12 @@ mod tests {
         assert_eq!(parts, vec!["echo 'a && b'", "rm foo"]);
     }
 
-    /// Regression: the statement scanner walked the command by RAW BYTE index
-    /// and sliced `&command[i..]` every iteration, so any multi-byte UTF-8
-    /// character panicked with "byte index N is not a char boundary" and the
-    /// panic aborted the whole session (observed as an instant quit-to-shell
-    /// on `SCRATCH=…; cat >> ci.log <<'EOF' …em-dash… EOF`). The em-dash in
-    /// CI-log prose is enough to trigger it.
+    /// Regression: the statement scanner walked the command by RAW BYTE index.
+    /// The statement scanner sliced `&command[i..]` every iteration, so any
+    /// multi-byte UTF-8 character panicked with "byte index N is not a char
+    /// boundary". The panic aborted the whole session (observed as an instant
+    /// quit-to-shell on `SCRATCH=…; cat >> ci.log <<'EOF' …em-dash… EOF`).
+    /// The em-dash in CI-log prose is enough to trigger it.
     #[test]
     fn split_survives_multibyte_utf8_in_a_heredoc() {
         let with_dash = "SCRATCH=/tmp/grok-ci; cat >> \"$SCRATCH/ci.log\" <<'EOF'\n\

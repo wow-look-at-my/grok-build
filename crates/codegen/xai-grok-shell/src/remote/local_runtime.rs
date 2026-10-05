@@ -55,7 +55,6 @@ pub(crate) fn host_root(base_url: &str) -> String {
 }
 
 /// Fetch one local runtime's listing and turn it into catalog entries.
-///
 /// `inference_base_url` is what the discovered models are reached at; the
 /// listing itself comes from the host root.
 pub(crate) fn fetch_local_listing_blocking(
@@ -80,10 +79,9 @@ pub(crate) fn fetch_local_listing_blocking(
 }
 
 /// Which of a local runtime's models are resident RIGHT NOW, by routing slug.
-///
 /// Residency changes without anything else changing: a model loads on its
 /// first request, and LM Studio's idle TTL unloads it again. A dot painted
-/// once at startup is therefore wrong within minutes, so this is the cheap
+/// once at startup is therefore wrong within minutes. This is the cheap
 /// re-read behind it — one request for Ollama, one for LM Studio, and no
 /// `/api/show` per model.
 pub(crate) fn fetch_residency_blocking(
@@ -148,12 +146,11 @@ fn to_entry(
     }
 }
 
-/// The picker's description line: what the runtime said about the model,
-/// plus a warning when it says the model was never trained to call tools.
-///
-/// That warning is the one piece of capability here with no home on
-/// `ModelInfo`, and it decides whether this agent can use the model at all —
-/// a model that cannot call tools answers a coding request with prose.
+/// The picker's description line: what the runtime said about the model, plus
+/// a warning when it says the model was never trained to call tools. That
+/// warning is the piece of capability here with no home on `ModelInfo`. It
+/// decides whether this agent can use the model at all — a model that
+/// cannot call tools answers a coding request with prose.
 fn describe(model: &LocalModel) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(description) = model.description.clone() {
@@ -169,11 +166,10 @@ fn describe(model: &LocalModel) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-/// The runtime's own reasoning levels, as catalog options.
-///
-/// LM Studio names them (`off`/`on`/`low`/`medium`/`high`); Ollama reports
-/// only that a model thinks, and the levels its API documents are the same
-/// low/medium/high plus `max`. A level this client has no
+/// The runtime's own reasoning levels, as catalog options. LM Studio names
+/// them (`off`/`on`/`low`/`medium`/`high`). Ollama reports only that a model
+/// thinks, and the levels its API documents are the same low/medium/high plus
+/// `max`. A level this client has no
 /// [`ReasoningEffort`](xai_grok_sampling_types::ReasoningEffort) for is
 /// skipped rather than guessed at.
 fn reasoning_efforts_from_levels(
@@ -206,12 +202,11 @@ fn reasoning_efforts_from_levels(
 // ── Ollama ──────────────────────────────────────────────────────────────
 
 /// `/api/tags` for what is on disk, `/api/ps` for what is resident, and one
-/// `/api/show` per model for its window and capabilities.
-///
-/// The per-model call is what `/api/tags` cannot avoid: the tag listing
-/// carries a size and a quantization and says nothing about the context
-/// length or whether the model was trained for tools. These are localhost
-/// metadata reads.
+/// `/api/show` per model for its window and capabilities. The per-model call
+/// is what `/api/tags` cannot avoid: the tag listing carries a size and a
+/// quantization. The tag listing says nothing about the context length or
+/// whether the model was trained for tools. These are localhost metadata
+/// reads.
 fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalModel>, BackendError> {
     let client = crate::http::shared_startup_blocking_client();
     let tags: OllamaTagsResponse = get_json(&client, &format!("{host}/api/tags"), api_key)?;
@@ -290,7 +285,6 @@ fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalMod
 
 // ── LM Studio ───────────────────────────────────────────────────────────
 
-///
 /// Both carry the window, the quantization and the load state in one answer,
 /// so neither needs a per-model call. Only v1 reports capabilities and the
 /// reasoning menu.

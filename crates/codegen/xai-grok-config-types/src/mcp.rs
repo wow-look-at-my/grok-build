@@ -71,8 +71,8 @@ impl McpServerTransportConfig {
 
 /// `McpServerTransportConfig` with each URL spelling as its own field. It stays
 /// `untagged`, and the fold happens in the outer `TryFrom` rather than inside a
-/// variant, because an untagged variant that fails contributes only "data did
-/// not match any variant" — the conflict text would be lost.
+/// variant. This is because an untagged variant that fails contributes only
+/// "data did not match any variant". The conflict text would be lost.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum McpServerTransportConfigWire {

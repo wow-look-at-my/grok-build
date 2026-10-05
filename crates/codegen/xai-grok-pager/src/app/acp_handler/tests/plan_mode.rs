@@ -776,7 +776,7 @@
         assert!(!test_agent(&app, AgentId(0)).kept_plan.is_kept());
     }
 
-    /// Rapid Shift+Tab presses must keep the mode the LAST press selected: the
+    /// Rapid Shift+Tab presses must keep the mode the LAST press selected. The
     /// shell's confirmation of an earlier press arrives after the ring already
     /// moved on, and must not step the displayed mode back.
     #[test]

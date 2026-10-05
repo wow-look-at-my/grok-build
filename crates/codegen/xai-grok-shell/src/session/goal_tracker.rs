@@ -692,8 +692,8 @@ impl GoalTracker {
     }
 
     /// Coordinator id of the planner child spawned for the registered run, or
-    /// `None` when no run is registered or its spawn has not published an id
-    /// yet.
+    /// `None` when no run is registered. Otherwise, its spawn has not
+    /// published an id yet.
     pub(crate) fn planner_subagent_id(&self) -> Option<String> {
         self.planner_run
             .as_ref()

@@ -16,7 +16,7 @@ pub struct ReminderPolicy {
     pub todo_gate: TodoGateConfig,
     /// Master switch for the built-in todo-stop gate: at the turn-end stop gate the model is sent back to its unfinished todos.
     pub stop_gate_unfinished_todos: bool,
-    /// Master switch for the built-in CI-stop gate: at the turn-end stop gate a model whose branch has a failing run is sent back to read the logs.
+    /// Master switch for the built-in CI-stop gate. At the turn-end stop gate a model whose branch has a failing run is sent back to read the logs.
     pub stop_gate_ci_failing: bool,
 }
 

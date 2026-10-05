@@ -250,13 +250,12 @@ mod tests {
         assert_eq!(collector.take().len(), 2, "recording survives the disarm");
     }
 
-    /// A panic inside one collector step silences nothing afterwards.
-    ///
-    /// Every step goes through [`DoomLoopSignalCollector::state`], which takes
-    /// the lock back whatever a prior holder was doing when it died. A poisoned
-    /// `std` lock instead leaves `disarm_abort` and `take` reporting the empty
-    /// answer, and an empty report is read as a response with nothing wrong
-    /// with it.
+    /// A panic inside one collector step silences nothing afterwards. Every
+    /// step goes through [`DoomLoopSignalCollector::state`], which takes the
+    /// lock back whatever a prior holder was doing when it died. A poisoned
+    /// `std` lock instead leaves `disarm_abort` and `take` reporting the
+    /// empty answer. An empty report is read as a response with nothing
+    /// wrong with it.
     #[test]
     fn a_panicking_holder_leaves_the_collector_working() {
         let confident = r#"{"type":"response.doom_loop_check","doom_loop_check":{"triggers":["tail_repetition:8@thinking"]}}"#;

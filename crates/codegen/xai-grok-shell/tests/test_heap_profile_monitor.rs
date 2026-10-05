@@ -379,10 +379,8 @@ async fn multi_threshold_latches_one_at_a_time() {
     assert_no_storage_egress(&h);
 }
 
-/// The object paths the dumps would have been stored under, checked directly
-/// rather than through uploads that no longer happen. They stay live because
-/// they name the local dump files, and crossings in the same session must not
-/// collide.
+/// They stay live because they name the local dump files, and crossings in
+/// the same session must not collide.
 #[tokio::test]
 #[serial_test::serial(heap_profile_integration)]
 async fn object_paths_are_well_formed_and_unique_per_crossing() {

@@ -11,12 +11,11 @@ pub(crate) const SEND_NOW_TIP_SEEN_KEY: &str = "send_now_tip_shown_count";
 const SEND_NOW_TIP_SEEN_CAP: u32 = 3;
 
 /// Build "Queued · Enter to interrupt & send", seen-gated to
-/// [`SEND_NOW_TIP_SEEN_CAP`] shows per session (in-memory).
-///
-/// The queued follow-up already reaches the model at the running turn's next
-/// gap. This advertises the harder gesture: after a mid-turn queue the composer
-/// is empty, so a second Enter cuts the model off mid-response and hands it the
-/// queue immediately — no special chord to learn.
+/// [`SEND_NOW_TIP_SEEN_CAP`] shows per session (in-memory). The queued
+/// follow-up already reaches the model at the running turn's next gap. This
+/// advertises the harder gesture: after a mid-turn queue the composer is
+/// empty, so a second Enter cuts the model off mid-response. The second
+/// Enter hands it the queue immediately — no special chord to learn.
 pub fn send_now_tip() -> EphemeralTip {
     let theme = Theme::current();
     let dim = Style::default().fg(theme.gray);

@@ -236,17 +236,15 @@ impl xai_tool_runtime::Tool for MonitorTool {
     }
 }
 
-/// Run [`run_monitor_pipeline`] where its death is an event rather than a silence.
-///
-/// Every spawned site drops the handle: the monitor tool has already answered
-/// by the time the pipeline starts, so no caller is left to await it. The
-/// reader of a monitor is waiting on the `MonitorEvent` notifications this
-/// pipeline alone produces, and a task that died mid-round stops producing
-/// them without otherwise saying so. The panic therefore arrives as one more
-/// event naming what the pipeline could not survive.
-///
-/// `owner_session_id` is the session the events route to, the same one the
-/// live rounds read off the task snapshot.
+/// Run [`run_monitor_pipeline`] where its death is an event rather than a
+/// silence. Every spawned site drops the handle: the monitor tool has already
+/// answered by the time the pipeline starts. No caller is left to await it.
+/// Consider the reader of a monitor. That reader is waiting on the
+/// `MonitorEvent` notifications this pipeline alone produces, and a task that
+/// died mid-round stops producing them without otherwise saying so. The panic
+/// therefore arrives as one more event naming what the pipeline could not
+/// survive. `owner_session_id` is the session the events route to, the same
+/// one the live rounds read off the task snapshot.
 pub(crate) async fn supervise_monitor_pipeline(
     task_id: &str,
     description: &str,
@@ -288,17 +286,15 @@ pub(crate) async fn supervise_monitor_pipeline(
     });
 }
 
-/// Background pipeline: polls the task output and feeds lines through
-/// the processing pipeline (line processor -> rate limiter -> XML wrap -> notification).
-///
-/// [`supervise_monitor_pipeline`] is what every spawned site calls.
-///
-/// Holds the backend as a [`Weak`](std::sync::Weak), never a strong `Arc`: a
-/// persistent monitor loops for the session's whole lifetime, so a strong ref
-/// would pin the terminal actor (and its process) and leak it across sessions
-/// on shared-runtime hosts (hosts that build one backend per session on a
-/// shared runtime). With a `Weak` the pipeline stops once the session drops
-/// its backend, letting `shutdown_all()` reap the process.
+/// Background pipeline: polls the task output and feeds lines through the
+/// processing pipeline (line processor -> rate limiter -> XML wrap ->
+/// notification). [`supervise_monitor_pipeline`] is what every spawned site
+/// calls. Holds the backend as a [`Weak`](std::sync::Weak), never a strong
+/// `Arc`: a persistent monitor loops for the session's whole lifetime. A
+/// strong ref would pin the terminal actor (and its process) and leak it
+/// across sessions on shared-runtime hosts (hosts that build one backend per
+/// session on a shared runtime). With a `Weak` the pipeline stops once the
+/// session drops its backend, letting `shutdown_all()` reap the process.
 async fn run_monitor_pipeline(
     task_id: &str,
     description: &str,
@@ -692,10 +688,10 @@ mod tests {
     }
 
     /// A monitor's reader hears about the watch through this pipeline and
-    /// nothing else: the tool answered with a task id before the pipeline ever
-    /// ran, so a pipeline that dies has no caller left to report to and the
-    /// reader is left waiting on events that will not come. The death therefore
-    /// has to arrive as an event of its own.
+    /// nothing else. The tool answered with a task id before the pipeline ever
+    /// ran. A pipeline that dies has no caller left to report to and the reader
+    /// is left waiting on events that will not come. The death therefore has to
+    /// arrive as an event of its own.
     #[tokio::test]
     async fn a_panicking_pipeline_reports_its_death_as_an_event() {
         struct DyingTerminal;

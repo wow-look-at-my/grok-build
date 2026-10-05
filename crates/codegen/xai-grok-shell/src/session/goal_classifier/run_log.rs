@@ -35,13 +35,12 @@ pub(crate) struct RunLog {
     pub withheld: usize,
 }
 
-/// Build the run log from `items`.
-///
-/// `start_prompt_index` is the session prompt index at which the goal was
-/// created. Calls on a turn before it are outside the goal and are skipped.
-/// `None` keeps every call. A compaction summary inside the goal's span is
-/// reported through [`RunLog::compacted`]; everything after it is kept,
-/// because the summary sits at or after the goal start.
+/// Build the run log from `items`. `start_prompt_index` is the session prompt
+/// index at which the goal was created. Calls on a turn before it are outside
+/// the goal and are skipped. `None` keeps every call. A compaction summary
+/// inside the goal's span is reported through [`RunLog::compacted`].
+/// Everything after it is kept, because the summary sits at or after the goal
+/// start.
 pub(crate) fn build_run_log(
     items: &[ConversationItem],
     start_prompt_index: Option<usize>,

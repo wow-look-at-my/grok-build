@@ -23,13 +23,12 @@ impl Aliases {
         std::iter::once(self.canonical).chain(self.aliases.iter().copied())
     }
 
-    /// Reduce the values read under each key to the one value the field holds.
-    ///
-    /// `values` holds one entry per key of [`keys`](Self::keys), in that order;
-    /// a key absent from the input contributes `None`. The first value present
-    /// is the result. A later key carrying a value equal to it is the same
-    /// statement twice and is accepted. A later key carrying a different value
-    /// contradicts the first, which no reader may resolve silently.
+    /// Reduce the values read under each key to the value the field holds.
+    /// `values` holds one entry per key of [`keys`](Self::keys), in that
+    /// order; a key absent from the input contributes `None`. The first value
+    /// present is the result. A later key carrying a value equal to it is the
+    /// same statement twice and is accepted. A later key carrying a different
+    /// value contradicts the first, which no reader may resolve silently.
     pub fn fold<T>(&self, values: Vec<Option<T>>) -> Result<Option<T>, AliasConflict>
     where
         T: PartialEq + std::fmt::Debug,
@@ -127,11 +126,9 @@ pub struct WireAlias {
 }
 
 /// Every field on an untrusted path that reads more than one key spelling,
-/// folded through [`Aliases`].
-///
-/// The drift test in this module reads this table against the source: a field
-/// that goes back to a bare `#[serde(alias)]` shows up as an unclassified alias,
-/// and so does one newly added.
+/// folded through [`Aliases`]. The drift test in this module reads this table
+/// against the source. A field that goes back to a bare `#[serde(alias)]`
+/// shows up as an unclassified alias, and so does one newly added.
 pub const WIRED: &[WireAlias] = &[
     WireAlias {
         file: "crates/codegen/xai-grok-sampling-types/src/types.rs",
@@ -760,7 +757,7 @@ mod tests {
         }
     }
 
-    /// A new wire-facing field is the case this exists to catch; a `LOCAL` or
+    /// A new wire-facing field is the case this exists to catch. A `LOCAL` or
     /// `ENUM_VARIANTS` entry whose file dropped the alias is the same failure
     /// wearing the opposite sign.
     #[test]
@@ -902,7 +899,7 @@ mod tests {
     }
 
     /// A table entry whose file is gone is a claim about code that does not
-    /// exist, which is how a rename silently un-classifies a field.
+    /// exist. This is how a rename silently un-classifies a field.
     #[test]
     fn every_table_entry_names_a_file_that_still_exists() {
         let root = workspace_root();
@@ -920,8 +917,8 @@ mod tests {
         }
     }
 
-    /// The scanner is the drift test's only eye, so it gets its own: it reads an
-    /// attribute rustfmt spread over lines, and ignores the same text appearing
+    /// The scanner is the drift test's only eye. It gets its own: it reads an
+    /// attribute rustfmt spread over lines. It ignores the same text appearing
     /// in a doc comment or a string literal.
     #[test]
     fn the_scanner_reads_attributes_and_not_prose() {
@@ -971,7 +968,7 @@ fn quotes_the_attribute_itself() {
         );
     }
 
-    /// A test module's fixtures are not aliases a peer will send, and a
+    /// A test module's fixtures are not aliases a peer will send. A
     /// `#[cfg(test)]` that marks ONE item must not blind the scan to the rest of
     /// the file. Both halves are what `shipped_source` has to get right, so both
     /// are asserted here and not only through the workspace walk.
@@ -1008,8 +1005,8 @@ pub struct Late {
         );
     }
 
-    /// A `#[cfg(test)]` and its `mod` on one line introduces a module just as
-    /// surely as those-line spelling, and skipping it depends on finding the
+    /// A `#[cfg(test)]` and its `mod` on one line introduces a module as
+    /// surely as those-line spelling. Skipping it depends on finding the
     /// braces from the attribute's own line.
     #[test]
     fn the_scan_skips_a_test_module_opened_on_the_attribute_line() {
@@ -1047,8 +1044,8 @@ pub struct Late {
     }
 
     /// A wire-facing field that goes back to a bare `#[serde(alias)]` is the
-    /// regression the tables exist to catch: the file still folds nothing, and
-    /// the alias is still there to be read.
+    /// regression the tables exist to catch: the file still folds nothing. The
+    /// alias is still there to be read.
     #[test]
     fn a_wire_alias_that_reverts_to_bare_serde_is_reported() {
         let reverted = r#"
@@ -1105,14 +1102,13 @@ pub struct Late {
     }
 
     /// The file minus its test modules. A test module is full of
-    /// `#[serde(alias = ...)]` written to exercise this very scanner, and those
-    /// are not aliases any peer will ever send.
-    ///
-    /// A `#[cfg(test)]` that carries one attribute of an otherwise-shipped item
-    /// must not cut the rest of the file, so the skip is brace-matched over the
-    /// module the attribute introduces rather than everything after it. That
-    /// module's `mod` keyword sits either on the attribute's own line or on the
-    /// next non-blank one, and both spellings are skipped.
+    /// `#[serde(alias = ...)]` written to exercise this scanner, and those
+    /// are not aliases any peer will ever send. A `#[cfg(test)]` that carries
+    /// one attribute of an otherwise-shipped item must not cut the rest of
+    /// the file. The skip is brace-matched over the module the attribute
+    /// introduces rather than everything after it. That module's `mod`
+    /// keyword sits either on the attribute's own line or on the next
+    /// non-blank one, and both spellings are skipped.
     fn shipped_source(source: &str) -> String {
         let lines: Vec<&str> = source.lines().collect();
         let mut kept = String::new();
@@ -1196,10 +1192,9 @@ pub struct Late {
         text
     }
 
-    /// Every string an `alias` key names in one attribute's text.
-    ///
-    /// Whitespace is collapsed first, so a key rustfmt split across lines is
-    /// still read. Requiring a separator before `alias` is what keeps clap's
+    /// Every string an `alias` key names in one attribute's text. Whitespace
+    /// is collapsed first, so a key rustfmt split across lines is still read.
+    /// Requiring a separator before `alias` is what keeps clap's
     /// `visible_alias` and `alias` args out of the read even if one ever sat
     /// inside a `#[serde(` line.
     fn alias_sites_in(attribute: &str) -> Vec<String> {
@@ -1258,10 +1253,10 @@ pub struct Late {
     }
 
     /// The `[model.<id>]` table resolves a both-keys config in
-    /// `config_model_override_parse::dedupe_aliases` before serde sees it, so
-    /// that function's `ALIASES` list and this module's tables describe one set
-    /// of keys twice. Lists that can be edited apart is the failure that file's
-    /// own comment warns about, so this asserts they name the same pairs: every
+    /// `config_model_override_parse::dedupe_aliases` before serde sees it. That
+    /// function's `ALIASES` list and this module's tables describe one set of
+    /// keys twice. Lists that can be edited apart is the failure that file's
+    /// own comment warns about, so this asserts they name the same pairs. Every
     /// pair in `ALIASES` appears here against `ConfigModelOverride`, and every
     /// pair this module claims for that type appears there.
     #[test]

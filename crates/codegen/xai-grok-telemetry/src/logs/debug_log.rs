@@ -294,8 +294,8 @@ impl RoutingLayer {
         self.sinks.lock()
     }
 
-    // Write `line` to `sink`, enforcing `max_bytes`: once the cap is reached,
-    // write a one-time notice instead and mark the sink capped so every later
+    // Write `line` to `sink`, enforcing `max_bytes`. Once the cap is reached,
+    // write a one-time notice instead. Mark the sink capped so every later
     // line is silently dropped rather than growing the file further.
     fn write_capped(&self, sink: &mut Sink, line: &[u8]) {
         if sink.capped {

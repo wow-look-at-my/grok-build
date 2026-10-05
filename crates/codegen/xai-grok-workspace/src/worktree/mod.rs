@@ -884,7 +884,8 @@ pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::Pat
     worktree_base_dir_for_source_in(&grok_home(), source_path)
 }
 
-/// [`worktree_base_dir_for_source`] with the legacy root under an explicit grok home.
+/// [`worktree_base_dir_for_source`] with the root under an explicit grok
+/// home.
 pub fn worktree_base_dir_for_source_in(
     grok_home: &Path,
     source_path: &Path,
@@ -937,7 +938,7 @@ fn resolve_worktree_path(grok_home: &Path, req: &CreateWorktreeRequest, git_root
         return path.clone();
     }
 
-    // Resolve off the source path, not the git root: a session already in a
+    // Resolve off the source path, not the git root. A session already in a
     // managed checkout must get a sibling, never a tree nested inside it.
     let base = managed_base_dir_for_source_in(grok_home, Path::new(&req.source_path))
         .unwrap_or_else(|| worktree_base_dir(git_root));
@@ -1773,7 +1774,8 @@ impl From<CreateWorktreeFromWorktreeRequestWire> for CreateWorktreeFromWorktreeR
     }
 }
 
-/// Resolve the target worktree path for a fork operation. When the source path is already a managed checkout, the destination is a sibling in the same managed root rather than a tree nested inside it; see [`worktree_base_dir_for_source`].
+/// Resolve the target worktree path for a fork operation. When the source path is already a managed checkout, the destination is a sibling in the same managed root rather than a tree. That tree is nested inside it. See
+/// [`worktree_base_dir_for_source`].
 fn resolve_fork_worktree_path(
     source_worktree_path: &Path,
     git_root: &Path,
@@ -3511,8 +3513,8 @@ mod tests {
     }
 
     /// [`worktree_db_fixture`] with the checkout's location under
-    /// `<home>/worktrees` chosen by the caller.
-    /// either depth the old managed location has been written at.
+    /// `<home>/worktrees` chosen by the caller. either depth the managed
+    /// location has been written at.
     fn worktree_db_fixture_under(
         temp: &tempfile::TempDir,
         under_worktrees: &[&str],
@@ -3705,8 +3707,8 @@ mod tests {
 
     /// Every resolver that asks "is this cwd grok-managed?" walks up to the
     /// managed boundary and consults the registry, so a checkout sitting
-    /// directly under the legacy root (the shape an unforked grok build left
-    /// behind) must resolve exactly like one inside a per-repository bucket.
+    /// directly under the root (the shape an unforked grok build left behind)
+    /// must resolve exactly like one inside a per-repository bucket.
     #[test]
     fn resolvers_answer_for_a_checkout_at_either_depth_of_the_old_location() {
         for under in [
@@ -3742,9 +3744,9 @@ mod tests {
                     "the gc liveness touch must resolve over {under:?}"
                 );
 
-                // A fork of a managed checkout lands in the root holding it, so
-                // it is a sibling of the checkout rather than a tree nested
-                // inside it.
+                // A fork of a managed checkout lands in the root holding it. It
+                // is a sibling of the checkout rather than a tree nested inside
+                // it.
                 assert_eq!(
                     worktree_base_dir_for_source(&wt).unwrap(),
                     wt.parent().unwrap(),

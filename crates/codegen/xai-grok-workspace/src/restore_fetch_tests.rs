@@ -611,7 +611,7 @@ fn pid_alive(pid: u32) -> bool {
     kill(Pid::from_raw(pid as i32), None::<Signal>).is_ok()
 }
 
-/// The pid a spawned shell writes to `path`, waiting for the write to land. `>file` creates the file when the shell parses the redirect, before `echo` puts anything in it, so a one-shot read can catch it empty — and a read that caught only the first digits would parse to some unrelated live process, which is a far worse way to fail. The trailing
+/// The pid a spawned shell writes to `path`, waiting for the write to land. `>file` creates the file when the shell parses the redirect, before `echo` puts anything in it. A one-shot read can catch it empty — and a read that caught only the first digits would parse to some unrelated live process. This is a far worse way to fail. The trailing
 /// newline is `echo`'s own, so its presence is the proof that the write finished.
 #[cfg(unix)]
 fn read_pid_when_written(path: &Path) -> u32 {
@@ -635,7 +635,7 @@ fn read_pid_when_written(path: &Path) -> u32 {
 }
 
 /// Whether `pid` is gone, waiting up to [`REAP_DEADLINE`] for it. The kill is
-/// asynchronous. `killpg` marks SIGKILL pending on every member; each dies
+/// asynchronous. `killpg` marks SIGKILL pending on every member. Each dies
 /// when it is next scheduled, and only then becomes the zombie (or absence)
 /// that `pid_alive` reads as dead.
 #[cfg(unix)]

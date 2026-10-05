@@ -323,12 +323,12 @@ async fn test_chat_completions_with_reasoning() {
 // ============================================================================
 
 /// All-new path: a chat-completions stream carrying `reasoning_content`
-/// deltas must be collected into a sibling `ConversationItem::Reasoning`
-/// that *precedes* the assistant — the exact shape currently persisted to
-/// chat_history.jsonl. Unlike `test_chat_completions_with_reasoning`
-/// (which only inspects raw SSE deltas), this drives the high-level
-/// `conversation_collect` path so it exercises
-/// stream_chat_completions → collect_response → `ConversationResponse.items`.
+/// deltas must be collected into a sibling `ConversationItem::Reasoning` that
+/// *precedes* the assistant. The exact shape persisted to chat_history.jsonl.
+/// Unlike `test_chat_completions_with_reasoning` (which only inspects raw SSE
+/// deltas), this drives the high-level `conversation_collect` path so it
+/// exercises stream_chat_completions → collect_response →
+/// `ConversationResponse.items`.
 #[tokio::test]
 async fn chat_completions_collect_synthesizes_reasoning_sibling() {
     let server = MockInferenceServer::start().await.unwrap();
@@ -440,14 +440,14 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
     );
 }
 
-/// Upgrade path, grok-build / Responses API: a legacy session whose
-/// assistant carries inline `reasoning: {text, encrypted, id}` must, on
-/// load, reconstruct a sibling Reasoning item that round-trips back to
-/// the Responses API as a **typed** `reasoning` input item — `summary`,
-/// `encrypted_content`, and `id` all preserved — NOT flattened to a
-/// string. This is the byte-stable SGLang-prefix path; it must not go
-/// through `reasoning_item_text`. The recorded `model_id` is the model the
-/// client sends to: a blob replays verbatim only to the model that minted it.
+/// Upgrade path, grok-build / Responses API. Consider a legacy session whose
+/// assistant. That session carries inline `reasoning: {text, encrypted, id}`
+/// must, on load, reconstruct a sibling Reasoning item that round-trips back
+/// to the Responses API as a **typed** `reasoning` input item — `summary`,
+/// `encrypted_content`, and `id` all preserved — NOT flattened to a string.
+/// This is the byte-stable SGLang-prefix path; it must not go through
+/// `reasoning_item_text`. The recorded `model_id` is the model the client
+/// sends to: a blob replays verbatim only to the model that minted it.
 #[tokio::test]
 async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
     let dir = tempfile::tempdir().unwrap();
@@ -515,13 +515,12 @@ async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
     );
 }
 
-/// Upgrade path, Anthropic Messages API: a legacy session whose assistant
+/// Upgrade path, Anthropic Messages API. A legacy session whose assistant
 /// carries inline `reasoning: {text, encrypted, id}` (text = thinking,
 /// encrypted = signature) must, on load, reconstruct a sibling Reasoning
-/// item that emits a Anthropic Messages `thinking` content block (with `thinking`
-/// + `signature`) on the outgoing `/v1/messages` request.
-///
-/// The legacy assistant records the model the client here calls, because a
+/// item. That item emits a Anthropic Messages `thinking` content block (with
+/// `thinking` + `signature`) on the outgoing `/v1/messages` request. The
+/// assistant records the model the client here calls. This is because a
 /// signature only replays to the model that minted it — see
 /// `messages_upgrade_drops_a_thinking_block_minted_by_another_model` for the
 /// other half.
@@ -592,11 +591,10 @@ async fn messages_upgrade_emits_reconstructed_reasoning_as_thinking_block() {
 }
 
 /// The same upgrade, carried onto another model: the reconstructed sibling is
-/// still there, but its signature was minted by `grok-4.5` and this client
-/// calls `test-model`, which the Messages API answers with
-/// "Invalid `signature` in `thinking` block" — on this turn and every later one,
-/// since the block stays in history. The block must not reach the wire; the
-/// turn it belongs to must.
+/// still there, but its signature was minted by `grok-4.5`. This client calls
+/// `test-model`, which the Messages API answers with "Invalid `signature` in
+/// `thinking` block" — on this turn and every later one, since the block stays
+/// in history. The block must not reach the wire; the turn it belongs to must.
 #[tokio::test]
 async fn messages_upgrade_drops_a_thinking_block_minted_by_another_model() {
     let dir = tempfile::tempdir().unwrap();
@@ -659,11 +657,11 @@ async fn messages_upgrade_drops_a_thinking_block_minted_by_another_model() {
     );
 }
 
-/// End to end on the Messages backend: a gateway that prices the call must
+/// End to end on the Messages backend. A gateway that prices the call must
 /// have that price land on the response, so the shell bills the turn at what
-/// was actually charged instead of an estimate off the model's configured
-/// pricing. Anthropic itself sends no price, and the same path must leave the
-/// cost honestly absent rather than reading silence as free.
+/// was charged instead of an estimate off the model's configured pricing.
+/// Anthropic itself sends no price, and the same path must leave the cost
+/// honestly absent rather than reading silence as free.
 #[tokio::test]
 async fn messages_backend_receives_a_gateway_reported_cost() {
     for (ticks, expected) in [(Some(4_160_000_i64), Some(4_160_000_i64)), (None, None)] {
@@ -1259,10 +1257,10 @@ async fn test_responses_api_request_format() {
     assert!(input.len() >= 2);
 }
 
-/// The sampler owns the doom-loop opt-in: setting
+/// The sampler owns the doom-loop opt-in. Setting
 /// `SamplerConfig::doom_loop_recovery` puts `x-grok-doom-loop-check` on the
-/// wire AND arms the collector, and the server's named check event is
-/// absorbed mid-stream without disturbing the typed event flow.
+/// wire. Setting `Samp arms the collector, and the server's named check
+/// event is absorbed mid-stream without disturbing the typed event flow.
 #[tokio::test]
 async fn test_doom_loop_check_enabled_sends_header_and_absorbs_check_event() {
     use xai_grok_sampling_types::doom_loop::{DOOM_LOOP_CHECK_EVENT_TYPE, SAMPLE_CHECK_EVENT_DATA};

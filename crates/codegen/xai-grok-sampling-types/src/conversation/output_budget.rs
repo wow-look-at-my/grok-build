@@ -17,9 +17,8 @@ pub struct OutputBudgetClamp {
     pub context_window: u64,
 }
 
-/// Bytes/4 estimate for one [`ConversationItem`].
-///
-/// Images count at [`xai_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
+/// Bytes/4 estimate for one [`ConversationItem`]. Images count at
+/// [`xai_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
 pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
     match item {
         ConversationItem::System(s) => xai_token_estimation::estimate_tokens(&s.content),
@@ -73,15 +72,13 @@ impl ConversationRequest {
     }
 
     /// Cut `max_output_tokens` down to what `context_window` has left after
-    /// `prompt_tokens`, and report the cut.
-    ///
-    /// Returns `None` when the request already fits, when the window is
-    /// unknown (`0`), or when the request names no output budget — the
-    /// sampler's own default is applied before this runs, so `None` there
-    /// means nothing bounds the output at all. A fitted budget outside the
-    /// `u32` the request field carries is logged and left unapplied: the
-    /// request keeps what it asked for rather than a count this arithmetic did
-    /// not produce.
+    /// `prompt_tokens`, and report the cut. Returns `None` when the request
+    /// already fits, when the window is unknown (`0`), or when the request
+    /// names no output budget — the sampler's own default is applied before
+    /// this runs, so `None` there means nothing bounds the output at all. A
+    /// fitted budget outside the `u32` the request field carries is logged
+    /// and left unapplied. The request keeps what it asked for rather than a
+    /// count this arithmetic did not produce.
     pub fn fit_output_budget(
         &mut self,
         prompt_tokens: u64,

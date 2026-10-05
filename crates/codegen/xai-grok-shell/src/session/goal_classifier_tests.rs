@@ -1778,8 +1778,8 @@ fn empty_pool_inherits_all() {
     assert!(assign_skeptic_models(&[], 3).is_empty());
 }
 
-/// A model changed mid-goal is used at the next verification. The
-/// previous assignment plays no part.
+/// A model changed mid-goal is used at the next verification. The assignment
+/// plays no part.
 #[test]
 fn a_changed_pool_takes_effect_at_once() {
     let before = assign_skeptic_models(&[pair("grok-4.7")], 3);

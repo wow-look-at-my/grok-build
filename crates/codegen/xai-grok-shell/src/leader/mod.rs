@@ -2075,13 +2075,12 @@ mod tests {
     }
     /// Version-floor decision against a live registration: only a strictly
     /// older parseable leader version trips eviction; dev/`unknown` and
-    /// missing versions are kept (anti-thrash, both directions).
-    ///
-    /// Fake versions are derived RELATIVE to the runtime
-    /// `client_leader_version()` (cargo builds see the crate version, bazel
-    /// fastbuild sees the unstamped `0.0.0`), with each expectation following
-    /// structurally from how the case was constructed — never from re-running
-    /// the comparison under test.
+    /// missing versions are kept (anti-thrash, both directions). Fake
+    /// versions are derived RELATIVE to the runtime `client_leader_version()`
+    /// (cargo builds see the crate version, bazel fastbuild sees the
+    /// unstamped `0.0.0`), with each expectation following structurally from
+    /// how the case was constructed — never from re-running the comparison
+    /// under test.
     #[tokio::test]
     async fn should_evict_conn_decides_from_live_fake_registrations() {
         let client: semver::Version = client_leader_version()

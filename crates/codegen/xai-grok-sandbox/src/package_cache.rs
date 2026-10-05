@@ -54,7 +54,7 @@ const RUNNER_STEMS: &[&str] = &[
     "uvx", "uv", "npx", "npm", "pnpm", "pnpx", "yarn", "yarnpkg", "bunx", "bun", "pipx",
 ];
 
-/// The scratch root a package runner's caches are mapped onto. This is the session's writable temp storage — the same directory family [`crate::paths::temp_writable_paths`] hands a confining profile, so it is writable by
+/// The scratch root a package runner's caches are mapped onto. This is the session's writable temp storage — the same directory family [`crate::paths::temp_writable_paths`] hands a confining profile. It is writable by
 /// construction and needs no new grant.
 pub fn scratch_root() -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = std::env::var_os("TMPDIR")
@@ -132,7 +132,7 @@ mod tests {
     }
 
     /// The redirect must never land in `$HOME` or `$GROK_HOME`: caches are
-    /// disposable, and mapping them into either would either widen the profile's
+    /// disposable. Mapping them into either would either widen the profile's
     /// write set or fill the session's own state directory with garbage. This is
     /// the regression guard for "map the caches onto tmpfs".
     #[test]
@@ -173,9 +173,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&scratch);
     }
 
-    /// `scratch_root` must return a directory that actually exists, and must
-    /// prefer `TMPDIR` (which the macOS jail sets to its dedicated writable
-    /// scratch dir) over the `/tmp` fallback.
+    /// `scratch_root` must return a directory that exists, and must prefer
+    /// `TMPDIR` (which the macOS jail sets to its dedicated writable scratch
+    /// dir) over the `/tmp` fallback.
     #[test]
     fn scratch_root_prefers_tmpdir_and_exists() {
         let scratch = std::env::temp_dir().join(format!(

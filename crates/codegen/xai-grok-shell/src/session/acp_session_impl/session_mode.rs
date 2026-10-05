@@ -33,13 +33,12 @@ fn is_shift_tab_ring_agent(name: &str) -> bool {
         .iter()
         .any(|v| AsRef::<str>::as_ref(v) == name)
 }
-/// The agent that a mode change must run, or `None` to keep the current agent.
-///
-/// `active` is the agent the session will run once any pending swap lands.
-/// A permission mode that arrives while a ring identity is active means the
-/// client left the ring. The base agent comes back then, whatever the client
-/// remembers about the ring. A ring identity that the session started with
-/// has no base, so it stays.
+/// The agent that a mode change must run, or `None` to keep the current
+/// agent. `active` is the agent the session will run once any pending swap
+/// lands. A permission mode that arrives while a ring identity is active
+/// means the client left the ring. The base agent comes back then, whatever
+/// the client remembers about the ring. A ring identity that the session
+/// started with has no base, so it stays.
 pub(super) fn mode_agent_target(
     state: &mut ModeAgentState,
     mode_id: &str,
@@ -182,11 +181,10 @@ impl SessionActor {
             self.switch_mode_agent(&name).await;
         }
     }
-    /// Run the named agent for the session mode.
-    ///
-    /// A full rebuild: the system prompt and the tool registry change
-    /// together. A prompt swap alone shows one agent's prompt beside another
-    /// agent's tools. While a turn runs, the swap waits for the turn to end.
+    /// Run the named agent for the session mode. A full rebuild: the system
+    /// prompt and the tool registry change together. A prompt swap alone
+    /// shows one agent's prompt beside another agent's tools. While a turn
+    /// runs, the swap waits for the turn to end.
     async fn switch_mode_agent(&self, name: &str) {
         let def = match name {
             "browser_use" => Some(AgentDefinition::browser_use()),

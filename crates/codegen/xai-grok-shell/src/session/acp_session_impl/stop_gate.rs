@@ -51,8 +51,8 @@ pub(crate) fn ci_gate_decision(
 }
 
 /// The message the model is sent back with. It names the tool that answers the
-/// next question, because a nudge that only says "CI is red" leaves the model
-/// to rediscover how to read a log from inside a sandbox.
+/// next question. This is because a nudge that only says "CI is red" leaves
+/// the model to rediscover how to read a log from inside a sandbox.
 pub(crate) fn build_ci_gate_reminder(branch: &str) -> String {
     format!(
         "<system-reminder>CI is failing on `{branch}`. Do not stop yet. Call the `ci` tool with \
@@ -171,11 +171,10 @@ impl SessionActor {
             && self.agent.borrow().reminder_policy().stop_gate_ci_failing
     }
 
-    /// Read the branch and its CI state off the host worker.
-    ///
-    /// No git and no runs both come back as `None`, which the gate reads as
-    /// "nothing to hold the model for". A `gh` that fails is `None` too, but it
-    /// is logged: the gate cannot hold a turn over an answer it never got.
+    /// Read the branch and its CI state off the host worker. No git and no
+    /// runs both come back as `None`, which the gate reads as "nothing to
+    /// hold the model for". A `gh` that fails is `None` too, but it is
+    /// logged: the gate cannot hold a turn over an answer it never got.
     pub(crate) async fn collect_ci_gate_state(
         &self,
     ) -> Option<(String, xai_grok_sandbox::ci_state::CiStatus)> {
@@ -200,10 +199,9 @@ impl SessionActor {
     }
 
     /// The CI gate's whole turn-end decision: the feedback to send the model
-    /// back with, or `None` to let the stop proceed.
-    ///
-    /// The toggle is checked before anything else so a session that turned the
-    /// gate off spends no `gh` call on every turn end.
+    /// back with, or `None` to let the stop proceed. The toggle is checked
+    /// before anything else so a session that turned the gate off spends no
+    /// `gh` call on every turn end.
     pub(crate) async fn ci_stop_gate_feedback(
         &self,
         prompt_id: &str,

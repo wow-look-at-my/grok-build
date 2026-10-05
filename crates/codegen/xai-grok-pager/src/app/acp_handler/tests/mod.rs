@@ -826,7 +826,7 @@ pub(super) fn make_agent_chunk_meta(
 }
 /// Chunk stamped with `streamStartMs`, which the shell resets on every model
 /// call. A change in it is what splits a turn's tool loop into one
-/// agent-message block per response, so a cost-per-message test must drive it.
+/// agent-message block per response. A cost-per-message test must drive it.
 pub(super) fn make_agent_chunk_for_response(
     session_id: &str,
     text: &str,
@@ -1089,10 +1089,10 @@ pub(super) fn make_viewer_chunk_with_turn_start(
         response_tx: tx,
     })
 }
-/// A durable `TurnCompleted` carrying a reported per-turn `PromptUsage` cost,
-/// built through the typed `SessionNotification` so the wire shape (and the
-/// `cost_usd_ticks` field the handler reads to attach per-turn cost) can't
-/// drift from what the dispatch parses.
+/// A durable `TurnCompleted` carrying a reported per-turn `PromptUsage` cost.
+/// The durable `Turn is built through the typed `SessionNotification` so the
+/// wire shape (and the `cost_usd_ticks` field the handler reads to attach
+/// per-turn cost) can't drift from what the dispatch parses.
 pub(super) fn xai_turn_completed_notif_with_cost(
     session_id: &str,
     prompt_id: &str,

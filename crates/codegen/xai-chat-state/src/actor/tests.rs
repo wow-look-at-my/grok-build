@@ -4896,9 +4896,9 @@ async fn prefix_stable_across_user_assistant_turns() {
     assert_prefix_stable_pair(&req2, &req3, "turn 2 -> turn 3");
 }
 
-/// End-to-end reasoning round-trip through the REAL chat-state actor:
-/// a turn-N `[Reasoning, Assistant]` pair (as the shell turn-loop commits it —
-/// the Reasoning sibling rides the `push_tool_result` arm, the Assistant rides
+/// End-to-end reasoning round-trip through the REAL chat-state actor. A turn-N
+/// `[Reasoning, Assistant]` pair (as the shell turn-loop commits it — the
+/// Reasoning sibling rides the `push_tool_result` arm, the Assistant rides
 /// `push_assistant_response`) must survive the integrity-repair + prune pass in
 /// `build_request` and reach the next turn's Messages wire as a `Thinking`
 /// block. The reasoning carries real thinking text with NO encrypted signature
@@ -5750,11 +5750,10 @@ impl crate::persistence::ChatPersistence for PanickingPersistence {
     fn flush(&mut self) {}
 }
 
-/// A command whose round panics is reported and the actor keeps serving.
-///
-/// The actor is the sole writer of the session's conversation and the sole
-/// answerer of every handle's ack, so losing it takes the rest of the
-/// session's chat state with it.
+/// A command whose round panics is reported and the actor keeps serving. The
+/// actor is the sole writer of the session's conversation and the sole
+/// answerer of every handle's ack. Losing it takes the rest of the session's
+/// chat state with it.
 #[tokio::test]
 async fn a_panicking_command_leaves_the_actor_serving_later_commands() {
     let (event_tx, _events) = mpsc::unbounded_channel::<ChatStateEvent>();

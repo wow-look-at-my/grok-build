@@ -566,10 +566,9 @@ impl SettingsModalState {
         self.breadcrumb_hovered = false;
     }
 
-    /// Transition to Browse, clearing sub-pane hover/breadcrumb state
-    /// to prevent stale hit-rects across mode changes.
-    /// A child editor or picker opened from a group sheet returns to that
-    /// sheet instead.
+    /// Transition to Browse, clearing sub-pane hover/breadcrumb state to
+    /// prevent stale hit-rects across mode changes. A child editor or picker
+    /// opened from a group sheet returns to that sheet instead.
     pub(crate) fn transition_to_browse(&mut self) {
         self.state.mode = match self.group_return.take() {
             Some((key, child_idx)) => SettingsMode::PickingGroup { key, child_idx },

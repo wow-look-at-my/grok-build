@@ -748,14 +748,14 @@ impl ProcessGroup {
     /// Whether any member of this group is still *running*, as opposed to a
     /// zombie that has already died and is only waiting to be reaped.
     /// [`Self::has_live_members`] counts zombies, which is what you want when
-    /// deciding whether to send another signal — signalling a zombie is
+    /// deciding whether to send another signal. Signalling a zombie is
     /// harmless, and skipping a kill because one looked dead is not. It is
     /// the wrong question when *reporting* that a teardown left something
-    /// behind: an orphaned zombie means the kill worked and the reaper has
-    /// not run yet, so reporting it as a leak is a false alarm, and a check
-    /// that cries wolf gets ignored on the run where the number is real.
-    /// Linux reads the state straight out of `/proc`. Elsewhere there is no
-    /// cheap way to enumerate a group, so this falls back to
+    /// behind. An orphaned zombie means the kill worked and the reaper has
+    /// not run yet. Reporting it as a leak is a false alarm, and a check that
+    /// cries wolf gets ignored on the run where the number is real. Linux
+    /// reads the state straight out of `/proc`. Elsewhere there is no cheap
+    /// way to enumerate a group. This falls back to
     /// [`Self::has_live_members`] and keeps its over-reporting rather than
     /// claiming a certainty it does not have.
     pub fn has_running_members(&self) -> Option<bool> {
@@ -804,9 +804,9 @@ impl ProcessGroup {
     }
 
     /// Ask an interactive shell to hang up. Its job-control children each live
-    /// in their own process group, which no `killpg` here reaches; a shell is
-    /// supposed to forward the hangup to them on its way out, but it is not
-    /// reliable enough to be the only path — pair this with
+    /// in their own process group, which no `killpg` here reaches. A shell is
+    /// supposed to forward the hangup to them on its way out. However, it is
+    /// not reliable enough to be the only path — pair this with
     /// [`Self::hangup_session_jobs`].
     pub fn hangup(&self) -> io::Result<()> {
         #[cfg(unix)]
@@ -825,8 +825,8 @@ impl ProcessGroup {
     /// every process group of the shell's session but its own. A shell that
     /// answers [`Self::hangup`] forwards it to its jobs itself and this is
     /// unnecessary. It exists for the escalation path: a shell still running
-    /// at the end of [`HANGUP_GRACE`] gets killed, and killing it destroys
-    /// the only process that can reach jobs sitting in groups of their own.
+    /// at the end of [`HANGUP_GRACE`] gets killed. Killing it destroys the
+    /// only process that can reach jobs sitting in groups of their own.
     /// Delivering the hangup here first keeps the policy identical to the
     /// shell's — a job that ignores SIGHUP still survives, which is the
     /// point of `nohup` — where the alternative is leaking every job
@@ -1569,10 +1569,9 @@ mod tests {
     /// Both questions a killed group gets asked, and why they differ: a
     /// zombie is a process for `has_live_members` (so another kill is still
     /// worth sending) and NOT a leak for `has_running_members` (so a teardown
-    /// that worked does not report that it failed).
-    ///
-    /// Deterministic, with no waiting on a kill to land: the zombie here is
-    /// this test's own child, and it stays a zombie until this test reaps it.
+    /// that worked does not report that it failed). Deterministic, with no
+    /// waiting on a kill to land: the zombie here is this test's own child.
+    /// It stays a zombie until this test reaps it.
     #[cfg(target_os = "linux")]
     #[test]
     fn has_running_members_ignores_a_zombie_that_has_already_died() {
@@ -1634,8 +1633,8 @@ mod tests {
     /// own, where the shell's `killpg` cannot reach it, still gets the hangup
     /// when the shell is killed before it can forward one. A sleeper outside
     /// the session holds the scan to the session rather than the machine, and
-    /// the shell itself is left running because its group is the caller's to
-    /// kill.
+    /// the shell itself is left running. This is because its group is the
+    /// caller's to kill.
     #[cfg(target_os = "linux")]
     #[test]
     fn hangup_session_jobs_reaches_a_job_in_its_own_group_but_nothing_outside_the_session() {
@@ -1720,8 +1719,8 @@ mod tests {
 
     /// Debug builds enforce the top-of-doc caveat that arming and spawning
     /// happen on the same (long-lived) thread — pdeathsig binds to the
-    /// spawning thread's lifetime, so a cross-thread arm+spawn must fail
-    /// the spawn with `InvalidInput` (`EINVAL` from the pre_exec guard)
+    /// spawning thread's lifetime. A cross-thread arm+spawn must fail the
+    /// spawn with `InvalidInput` (`EINVAL` from the pre_exec guard)
     /// instead of silently binding to the wrong thread. The same-thread
     /// happy path is covered by `armed_child_survives_while_parent_lives`.
     #[cfg(all(target_os = "linux", debug_assertions))]

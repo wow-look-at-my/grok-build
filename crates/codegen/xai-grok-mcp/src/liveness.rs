@@ -105,9 +105,9 @@ pub fn spawn_transport_liveness(
     let slot_for_task = Arc::clone(&liveness_slot);
     // The handle parked in `liveness_slot` stands for "a watcher is alive for
     // this client". A task that unwound is not alive, so it clears the slot the
-    // way every other exit does: `McpClient::arm_liveness_watcher` will not
-    // install a fresh handle over the one already there, so a slot left held by
-    // a dead watcher means that client's transport is never again detected as
+    // way every other exit does. `McpClient::arm_liveness_watcher` will not
+    // install a fresh handle over the one already there. A slot left held by a
+    // dead watcher means that client's transport is never again detected as
     // closed.
     #[allow(clippy::disallowed_methods)]
     tokio::spawn(async move {

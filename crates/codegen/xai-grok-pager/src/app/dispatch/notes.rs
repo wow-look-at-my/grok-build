@@ -865,7 +865,7 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
     if let Some(old_id) = agent.pending_todo_task_id.take() {
         agent.session.bg_tasks.remove(&old_id);
     }
-    // Same chrome as a running tool: name `/todo`, summary is the request. A system one-liner is easy to miss at the bottom of the transcript; a running tool stays in the
+    // Same chrome as a running tool: name `/todo`, summary is the request. A system one-liner is easy to miss at the bottom of the transcript. A running tool stays in the
     // live turn the way other in-flight work does.
     let entry_id = agent
         .scrollback
@@ -905,8 +905,8 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
 }
 
 /// Stop the capture's spinner. The tasks-pane row stays, finished, the way a
-/// finished bash task does: it holds the capture agent's transcript, and that
-/// is the only place the user can read what this run actually did.
+/// finished bash task does: it holds the capture agent's transcript. That is
+/// the only place the user can read what this run did.
 fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
     if let Some(entry_id) = agent.pending_todo_entry.take() {
         agent.scrollback.remove_entry(entry_id);
@@ -957,9 +957,8 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: boo
     }]
 }
 
-/// Replace the `/todo` running block with the items that were appended, or with
-/// why none were. Both outcomes are transcript blocks: a capture the user asked
-/// for and never sees the result of is the failure mode worth avoiding here.
+/// Replace the `/todo` running block with the items that were appended, or
+/// with why none were. Both outcomes are transcript blocks: a capture.
 pub(super) fn handle_todo_captured(
     app: &mut AppView,
     agent_id: AgentId,

@@ -112,7 +112,7 @@ pub fn reasoning_origin_model(items: &[ConversationItem], reasoning_idx: usize) 
 
 /// Whether `target` signs its thinking, judged by what it already put in this
 /// conversation. Nothing in the request declares which models sign, so a
-/// block this model signed earlier is the one piece of evidence there is.
+/// block this model signed earlier is the piece of evidence there is.
 pub fn target_signs_thinking(items: &[ConversationItem], target: &str) -> bool {
     items.iter().enumerate().any(|(idx, item)| {
         matches!(item, ConversationItem::Reasoning(r) if is_signed(r))

@@ -119,7 +119,7 @@ pub fn peek_access_token_principal(access_token: &str) -> Option<(String, String
 
     /// `MinimalClaims` as the token spells each principal key, so a token
     /// naming both folds them instead of tripping serde's duplicate-field
-    /// check, which would read as "not a JWT" to `peek_access_token_principal`.
+    /// check. This would read as "not a JWT" to `peek_access_token_principal`.
     #[derive(serde::Deserialize)]
     struct MinimalClaimsWire {
         #[serde(default)]
@@ -1409,7 +1409,7 @@ mod wire_alias_tests {
     use super::{IdTokenClaims, peek_access_token_principal, peek_access_token_principal_id};
 
     /// A token carrying exactly the claims given, signed with a throwaway secret. `insecure_decode` reads the body and checks nothing about the signature, so the claim names in `claims` are what the reader sees. The header names a real algorithm because a `Header` whose `alg` is not one of `jsonwebtoken::Algorithm`'s variants fails to
-    /// parse, and the reader gives up before it looks at any claim.
+    /// parse. The reader gives up before it looks at any claim.
     fn token_with(claims: &str) -> String {
         ensure_crypto_provider();
         let value: serde_json::Value =
@@ -1490,7 +1490,7 @@ mod wire_alias_tests {
     }
 
     /// `IdTokenClaims` is read out of a token and never written back, so there
-    /// is no outgoing key to assert; the canonical spelling is the one the
+    /// is no outgoing key to assert. The canonical spelling is the one the
     /// struct's own fields name, and `given_name` / `family_name` are accepted
     /// on input only.
     #[test]

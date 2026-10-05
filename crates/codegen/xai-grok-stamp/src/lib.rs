@@ -10,7 +10,7 @@ pub enum StampError {
     SlotMissing,
     /// More than one slot.
     SlotAmbiguous(usize),
-    /// The slot is at the very end of the file and is cut short.
+    /// The slot is at the end of the file and is cut short.
     SlotTruncated,
     /// The version does not fit the reserved payload.
     VersionTooLong { len: usize, max: usize },
@@ -38,10 +38,9 @@ impl std::fmt::Display for StampError {
 
 impl std::error::Error for StampError {}
 
-/// Writes `version` into the slot in `binary`, in place.
-///
-/// The length byte goes in first in source order but the whole slot is written
-/// together, so a reader never sees a length without its payload.
+/// Writes `version` into the slot in `binary`, in place. The length byte goes
+/// in first in source order but the whole slot is written together. A reader
+/// never sees a length without its payload.
 pub fn stamp(binary: &mut [u8], version: &str) -> Result<usize, StampError> {
     if version.is_empty() {
         return Err(StampError::VersionEmpty);
@@ -74,7 +73,7 @@ pub fn read_stamp(binary: &[u8]) -> Result<Option<String>, StampError> {
     Ok(stamped)
 }
 
-/// Offset of the one slot in `binary`.
+/// Offset of the slot in `binary`.
 fn find_slot(binary: &[u8]) -> Result<usize, StampError> {
     let hits: Vec<usize> = binary
         .windows(STAMP_MAGIC.len())

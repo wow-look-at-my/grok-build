@@ -207,10 +207,9 @@ impl TodoState {
         true
     }
 
-    /// The id of the first item whose text is exactly `content`.
-    ///
-    /// For a caller whose items carry no id of their own, the text is the only
-    /// identity they have.
+    /// The id of the first item whose text is exactly `content`. For a caller
+    /// whose items carry no id of their own, the text is the only identity
+    /// they have.
     pub fn id_with_content(&self, content: &str) -> Option<TodoId> {
         self.todos
             .iter()
@@ -464,7 +463,7 @@ mod tests {
 
     /// `merge: false` was a wholesale replace: it cleared the list and kept
     /// only what the call resent. Through the tool, with the flag still set
-    /// the destructive way, the earlier item has to survive — it is the
+    /// the destructive way, the earlier item has to survive. It is the
     /// user's, and only a status can retire it.
     #[tokio::test]
     async fn a_write_cannot_discard_what_it_omits() {
@@ -827,9 +826,8 @@ mod tests {
         assert_eq!(get_item(&state, "2").status, TodoStatus::InProgress);
     }
 
-    /// The write that used to be a replace. Sending one brand-new item is not
-    /// a statement that everything else is finished, so the item the call does
-    /// not mention has to survive it.
+    /// Sending one brand-new item is not a statement that everything else is
+    /// finished. The item the call does not mention has to survive it.
     #[test]
     fn a_write_that_omits_an_item_keeps_it() {
         let mut state = seed_state(&[("old", "Old task", TodoStatus::InProgress)]);
@@ -966,9 +964,7 @@ mod tests {
         assert_eq!(get_item(&state, "1").content, "Fresh task");
     }
 
-    /// `/TODO` puts what the user just asked for where they will see it
-    /// first, in the order they asked for it, without disturbing the work the
-    /// agent is already tracking.
+    /// `/TODO` puts what.
     #[test]
     fn prepend_puts_new_items_first_in_order_and_leaves_existing_ones_alone() {
         let mut state = seed_state(&[

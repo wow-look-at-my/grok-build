@@ -42,10 +42,9 @@ struct Recorded {
     output: PathBuf,
 }
 
-/// Read `@file` arguments into the list they stand for.
-///
-/// rustc falls back to a response file when a command line grows past what the
-/// system takes, and this link names hundreds of rlibs.
+/// Read `@file` arguments into the list they stand for. rustc falls back to a
+/// response file when a command line grows past what the system takes, and
+/// this link names hundreds of rlibs.
 fn expand_response_files(args: Vec<OsString>) -> Result<Vec<String>, String> {
     let mut out = Vec::with_capacity(args.len());
     for arg in args {
@@ -138,10 +137,9 @@ fn search_dir(arg: &str, next: Option<&String>) -> Option<PathBuf> {
     arg.strip_prefix("-L").map(PathBuf::from)
 }
 
-/// Copy the static and dynamic libraries out of one search directory.
-///
-/// A name already copied is kept: the first `-L` wins, which is the order the
-/// linker itself searches.
+/// Copy the static and dynamic libraries out of one search directory. A name
+/// already copied is kept: the first `-L` wins, which is the order the linker
+/// itself searches.
 fn copy_libraries(dir: &Path, libs: &Path, copied: &mut HashSet<String>) -> Result<(), String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         // A search path that does not exist is one the real link also skips.
@@ -213,7 +211,7 @@ mod tests {
     }
 
     /// The whole contract in one link: inputs are copied, `-L` directories
-    /// collapse into the bundle's own, the output is a token, and every flag
+    /// collapse into the bundle's own. The output is a token, and every flag
     /// the linker needs survives untouched.
     #[test]
     fn a_recorded_link_is_replayable_from_the_bundle_alone() {

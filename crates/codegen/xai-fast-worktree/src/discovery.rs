@@ -60,15 +60,12 @@ fn detect_source_repo(worktree_path: &Path) -> Option<PathBuf> {
 }
 
 /// One record per checkout under a managed root, and none for anything inside
-/// one.
-///
-/// Both shapes that root has ever been written in are read.
-/// consequence of the `.git` test rather than its definition: an unforked
-/// build's checkout is a direct child of the root, this fork's sits one level
-/// lower inside a per-repository bucket. Nothing below the bucket level is ever
-/// asked.
-/// already reported -- so the walk still costs one listing of the root and one
-/// of each bucket, which is all the depth reading it costs.
+/// one. Both shapes that root has ever been written in are read. consequence
+/// of the `.git` test rather than its definition. An unforked build's
+/// checkout is a direct child of the root, this fork's sits one level lower
+/// inside a per-repository bucket. Nothing below the bucket level is ever
+/// asked. already reported -- so the walk still costs one listing of the root
+/// and one of each bucket, which is all the depth reading it costs.
 fn scan_managed_root(
     base_dir: &Path,
     kind: WorktreeKind,

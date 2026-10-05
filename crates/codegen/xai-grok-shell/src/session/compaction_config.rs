@@ -31,7 +31,7 @@ pub(crate) struct PendingManualCompact {
     pub respond_to: tokio::sync::oneshot::Sender<Result<(), agent_client_protocol::Error>>,
 }
 
-/// Model slug and context window from the previous turn.
+/// Model slug and context window from the turn.
 #[derive(Clone, Debug)]
 pub(crate) struct PreviousModelInfo {
     pub model_slug: String,

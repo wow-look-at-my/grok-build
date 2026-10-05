@@ -622,7 +622,7 @@ pub enum Action {
     SwitchAccount,
     /// User pressed login on the welcome screen.
     Login,
-    /// Abandon a mid-session login and return to the previous view, without quitting.
+    /// Abandon a mid-session login and return to the view, without quitting.
     CancelLogin,
     /// User submitted a manually-pasted auth token (loopback mode).
     SubmitAuthCode(String),

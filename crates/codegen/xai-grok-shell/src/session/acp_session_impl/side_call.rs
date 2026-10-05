@@ -201,15 +201,14 @@ impl SessionActor {
     /// Recap-style side-calls preserve reasoning so their conversation prefix stays byte-identical to the parent turn.
     /// Messages strips reasoning only when the matching effort cannot emit a top-level thinking configuration.
     /// `slot` is the harness model slot this call belongs to. A slot the user
-    /// set brings its OWN sampler, not just its model id: the backend, the
-    /// context window and the credentials belong to the model the slot names,
-    /// and writing that id onto the session's client sends one model's id to
+    /// set brings its OWN sampler, not its model id. The backend, the context
+    /// window. The credentials belong to the model the slot names, and
+    /// writing that id onto the session's client sends one model's id to
     /// another model's endpoint. That costs the shared prompt-cache prefix,
-    /// which is the point of the alignment here — a user who pins the slot has
-    /// asked for the other model and pays for the cache miss.
-    ///
-    /// An unset slot, or one the session cannot reach, keeps the session's own
-    /// client, so nothing changes until a slot is pinned.
+    /// which is the point of the alignment here. A user who pins the slot has
+    /// asked for the other model and pays for the cache miss. An unset slot,
+    /// or one the session cannot reach, keeps the session's own client, so
+    /// nothing changes until a slot is pinned.
     pub(crate) async fn prepare_side_call(&self, slot: &str) -> Result<SideCallSetup, acp::Error> {
         // One config read serves the window, model, and reasoning effort.
         let sampling_config = self.chat_state_handle.get_sampling_config().await;

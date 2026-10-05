@@ -64,8 +64,8 @@ BINPAZER="${BINPAZER:-binpazer}"
 TYPE_ARTIFACT=1
 TYPE_NAMES=2
 
-# The names block. binpazer stores payloads and does not model a file name or a permission, so both
-# travel as their own critical block, in the order the artifact blocks were written.
+# The names block. binpazer stores payloads. Binpazer does not model a file name or a permission,
+# so both travel as their own critical block, in the order the artifact blocks were written.
 #
 # The mode rides with the name because a package's artifact set includes the build script's own
 # binary. Restored without its execute bit, cargo answers "could not execute process ... (never
@@ -128,8 +128,8 @@ manifest)
 	;;
 get)
 	# Same reason as the put below: a throttled fetch is a compile the warm leg
-	# was not supposed to do, and a leg that recompiles is measuring different
-	# work from the one it is compared against.
+	# was not supposed to do. A leg that recompiles is measuring different work
+	# from the one it is compared against.
 	while :; do
 		"$0" get_once "$key" "$dir"
 		rc=$?

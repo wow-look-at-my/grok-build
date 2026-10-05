@@ -233,7 +233,6 @@ impl EndpointsConfig {
 /// `EndpointsConfig` with each list-URL key spelling as its own field, so a
 /// table naming both folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
 /// rather than failing the whole `[endpoints]` table as a duplicate field.
-///
 /// Every field carries `#[serde(default)]` from the container, which is the
 /// same rule [`EndpointsConfig`] applies on its own: an absent key is unset,
 /// never an error. `external_otel_master_switch` is absent here because it is
@@ -2773,17 +2772,15 @@ impl Config {
         })
     }
     /// The output-rate floor and time-to-first-token limit for `model_id`, or
-    /// `None` when both are off.
-    ///
-    /// The floor resolves per-model first: `[model.<id>].min_output_tokens_per
-    /// _sec` is the endpoint's own number, and it is the only one that can differ
-    /// between models in one session. `[ui].min_output_tokens_per_sec` is the
-    /// session-wide fallback the settings modal writes. Zero at either layer is
-    /// off, so a per-model `0` turns the gate off for that model without touching
-    /// the session value.
-    ///
-    /// The timing is shared: `[ui].output_rate_sustained_secs` plus the
-    /// `[output_rate_floor]` window and budget, each raised to its minimum.
+    /// `None` when both are off. The floor resolves per-model first:
+    /// `[model.<id>].min_output_tokens_per _sec` is the endpoint's own
+    /// number. It is the only one that can differ between models in one
+    /// session. `[ui].min_output_tokens_per_sec` is the session-wide fallback
+    /// the settings modal writes. Zero at either layer is off, so a per-model
+    /// `0` turns the gate off for that model without touching the session
+    /// value. The timing is shared: `[ui].output_rate_sustained_secs` plus
+    /// the `[output_rate_floor]` window and budget, each raised to its
+    /// minimum.
     pub(crate) fn resolve_output_rate_floor(
         &self,
         model_id: &str,
@@ -3164,12 +3161,12 @@ impl Config {
             },
         }
     }
-    /// Planner role model: `[goal]` config, then remote when the user opted in.
-    /// The pair itself has no env layer. Both switches around it do.
-    ///
-    /// An `Explicit` pair is applied as `runtime_overrides.model`, resolved before
-    /// `resolve_subagent_sampling_config`, so it wins over a user
-    /// `[subagents.models]` pin; `InheritCurrent` hands precedence back to that pin.
+    /// Planner role model: `[goal]` config, then remote when the user opted
+    /// in. The pair itself has no env layer. Both switches around it do. An
+    /// `Explicit` pair is applied as `runtime_overrides.model`, resolved
+    /// before `resolve_subagent_sampling_config`, so it wins over a user
+    /// `[subagents.models]` pin; `InheritCurrent` hands precedence back to
+    /// that pin.
     pub(crate) fn resolve_goal_planner_model(
         &self,
         use_current_only: bool,
@@ -3234,16 +3231,13 @@ impl Config {
             },
         }
     }
-    /// The model for one harness model slot, or `None` when the slot
-    /// inherits the session model.
-    ///
-    /// Precedence is the slot's environment variable, then `[models]
-    /// <slot>` in `config.toml`, then the slot's compiled default. A slot
-    /// whose `fallback` is `SessionModel` and which nothing sets answers
-    /// `None`, and the caller keeps the session model.
-    ///
-    /// The slot id must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`]
-    /// lists. An unknown id is a programming error and answers `None`.
+    /// The model for one harness model slot, or `None` when the slot inherits
+    /// the session model. Precedence is the slot's environment variable, then
+    /// `[models] <slot>` in `config.toml`, then the slot's compiled default.
+    /// A slot whose `fallback` is `SessionModel` and which nothing sets
+    /// answers `None`, and the caller keeps the session model. The slot id
+    /// must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists. An unknown
+    /// id is a programming error and answers `None`.
     pub(crate) fn resolve_harness_model(&self, slot_id: &str) -> Option<Resolved<String>> {
         let slot = xai_grok_models::slot_by_id(slot_id)?;
         if let Ok(v) = std::env::var(slot.env)
@@ -3767,7 +3761,6 @@ fn attach_trusted_auth_config(cfg: &Config, key: &str, entry: &mut ModelEntry) {
 }
 
 /// Build one catalog entry that inherits `[model_providers.<provider_id>]`.
-///
 /// This is the same merge a `[model.<id>] model_provider = "..."` block gets,
 /// reachable for an entry that has no config block at all — an autodetected
 /// model.
@@ -3801,7 +3794,7 @@ pub(crate) fn entry_for_unrouted_block(
 }
 
 /// The entry a `[model_providers.<id>]` block resolves to on its own, with no
-/// `[model.<id>]` behind it. The provider id stands in for the model id: it
+/// `[model.<id>]` behind it. The provider id stands in for the model id. It
 /// names no model, so nothing here asks the provider for a listing and nothing
 /// reaches the network.
 pub(crate) fn provider_probe_entry(
@@ -4312,9 +4305,8 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
         .collect()
 }
 impl ModelEntryConfig {
-    /// A listing entry with nothing set but the endpoint it is reached at.
-    ///
-    /// A parser that knows only a model's name and window fills those in over
+    /// A listing entry with nothing set but the endpoint it is reached at. A
+    /// parser that knows only a model's name and window fills those in over
     /// this, rather than restating fields it has no answer for.
     pub(crate) fn minimal(base_url: &str) -> Self {
         Self {
@@ -4471,7 +4463,6 @@ pub struct ModelEntryConfig {
 }
 
 /// Convert a `[.*.extra_body]` TOML table into the JSON body fields it names.
-///
 /// A TOML value has no null, and every other scalar maps straight across, so
 /// nothing is lost. A value that cannot be represented is dropped with a
 /// warning rather than being sent as a guess.

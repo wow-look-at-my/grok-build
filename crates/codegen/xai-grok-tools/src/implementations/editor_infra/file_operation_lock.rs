@@ -282,12 +282,11 @@ mod tests {
     }
 
     /// Writers on one path: the second is parked on what the first's `drop`
-    /// promises, so the handoff has to be part of `drop` itself.
-    ///
-    /// The state is read with `try_lock` and no await in between, because a
+    /// promises, so the handoff has to be part of `drop` itself. The state is
+    /// read with `try_lock` and no await in between. This is because a
     /// release that runs in a spawned task is only visible once the scheduler
-    /// has found time for it; whoever is waiting has nothing to do but wait for
-    /// that, and nothing keeps it from being lost.
+    /// has found time for it. Whoever is waiting has nothing to do but wait
+    /// for that, and nothing keeps it from being lost.
     #[tokio::test(flavor = "current_thread")]
     async fn a_release_needs_no_scheduled_task_to_be_visible() {
         let mgr = FileOperationLockManager::new();
