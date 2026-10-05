@@ -60,19 +60,18 @@ pub fn available() -> bool {
     std::env::split_paths(&path).any(|dir| dir.join("lpi").is_file())
 }
 
-/// The argument vector that reports progress for a command's own log.
+/// The argument vector that reads one progress snapshot of a command's log.
 ///
-/// The command is not wrapped. A shell pipeline runs its elements in subshells,
-/// and the shell that carries a caller's directory and environment between
-/// calls is the one the command. Has to run in. The log the caller already
-/// writes is read instead.
+/// The command is not wrapped: a shell pipeline runs its elements in
+/// subshells. A wrapped command would leave the shell whose state the
+/// executor replays. `analyze` reports on the log as it stands.
 pub fn read_argv(key: &str, log: &Path, db: Option<&Path>) -> Vec<String> {
     let mut argv = vec![
         "lpi".to_string(),
-        "watch".to_string(),
+        "analyze".to_string(),
         "--key".to_string(),
         key.to_string(),
-        "--json-stream".to_string(),
+        "--json".to_string(),
     ];
     if let Some(dir) = db {
         argv.push("--db".to_string());
@@ -80,6 +79,24 @@ pub fn read_argv(key: &str, log: &Path, db: Option<&Path>) -> Vec<String> {
     }
     argv.push(log.to_string_lossy().into_owned());
     argv
+}
+
+/// The one-line reading for a snapshot, for a caller to surface.
+pub fn progress_line(snapshot: &Snapshot) -> String {
+    let mut line = format!("progress {:.0}%", snapshot.progress * 100.0);
+    if snapshot.units_total > 0 {
+        line.push_str(&format!(
+            " ({}/{} units)",
+            snapshot.units_done, snapshot.units_total
+        ));
+    }
+    if let Some(eta) = snapshot.eta_seconds {
+        line.push_str(&format!(", eta ~{}s", eta.round() as u64));
+    }
+    if snapshot.confidence != "none" {
+        line.push_str(&format!(", confidence {}", snapshot.confidence));
+    }
+    line
 }
 
 #[cfg(test)]
@@ -125,16 +142,29 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_reads_as_a_progress_line() {
+        let snapshot = parse_snapshot(MATCHED).expect("a snapshot line parses");
+        assert_eq!(
+            progress_line(&snapshot),
+            "progress 60% (2/3 units), confidence high"
+        );
+
+        // A baseline run carries no units and no confidence yet, so the line says only what is known.
+        let baseline = parse_snapshot(BASELINE).expect("a snapshot line parses");
+        assert_eq!(progress_line(&baseline), "progress 0%");
+    }
+
+    #[test]
     fn the_reader_follows_the_log_without_touching_the_command() {
         let argv = read_argv("grok-build", Path::new("/logs/1.log"), None);
         assert_eq!(
             argv,
             vec![
                 "lpi",
-                "watch",
+                "analyze",
                 "--key",
                 "grok-build",
-                "--json-stream",
+                "--json",
                 "/logs/1.log"
             ]
         );
@@ -153,10 +183,10 @@ mod tests {
             argv,
             vec![
                 "lpi",
-                "watch",
+                "analyze",
                 "--key",
                 "b",
-                "--json-stream",
+                "--json",
                 "--db",
                 "/tmp/lpidb",
                 "/logs/1.log"
