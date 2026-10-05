@@ -72,7 +72,20 @@ impl TodoListEntry {
             TodoStatus::Completed => style.completed,
             TodoStatus::Cancelled => style.cancelled,
         };
-        let styled = Line::from(Span::styled(item.content.clone(), status_style.text_style));
+        let mut spans = vec![Span::styled(item.content.clone(), status_style.text_style)];
+        // An item with a verifier shows whether that verification has run.
+        if item.verification.is_some() {
+            let marker = if item.verification_passed {
+                " (verified)"
+            } else {
+                " (verify pending)"
+            };
+            spans.push(Span::styled(
+                marker,
+                Style::default().fg(crate::theme::Theme::current().gray_dim),
+            ));
+        }
+        let styled = Line::from(spans);
         Self {
             id,
             item,

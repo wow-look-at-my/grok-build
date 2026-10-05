@@ -3692,7 +3692,7 @@ mod tests {
         [
           {
             "name": "todo_write",
-            "description": "Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.\n\nAdd as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.\n\nWrites merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content.\n\nEvery call returns the whole list with each item's id. Items can appear that you did not write (the user and the goal planner add them), so call with an empty `todos` array to read the current list and its ids before you update them.",
+            "description": "Create and manage a structured task list. The user sees this list live — it is your primary way to show progress.\n\nAdd as many items as the work needs — a small task may be one or two, a large one many more. Do not pad a small job into a fake checklist, and do not crush a large job into a handful of vague items. Skip for trivial single-step work. Check items off as you go; keep roughly one in_progress.\n\nWrites merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content.\n\nAn item may carry a `verification` prompt. Marking such an item `completed` runs an independent verifier subagent against that condition first, passing the `verificationContext` the completion call supplies. The item is marked done only if the verifier reports the condition satisfied; otherwise it stays open and the failure is returned to you.\n\nEvery call returns the whole list with each item's id. Items can appear that you did not write (the user and the goal planner add them), so call with an empty `todos` array to read the current list and its ids before you update them.",
             "parameters": {
               "$schema": "http://json-schema.org/draft-07/schema#",
               "required": [
@@ -3729,6 +3729,20 @@ mod tests {
                           "completed",
                           "cancelled",
                           null
+                        ]
+                      },
+                      "verification": {
+                        "description": "Optional verification prompt for this item. When set, marking the item `completed` runs an independent verifier subagent against this condition first; the item cannot be completed until that verifier reports it satisfied. Omit to leave the existing condition unchanged, or send a new prompt to replace it (which re-arms verification).",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "verificationContext": {
+                        "description": "Context handed to the verifier when completing this item: what to check, where the evidence is, anything the verifier cannot infer. Only read when this call marks the item `completed`.",
+                        "type": [
+                          "string",
+                          "null"
                         ]
                       }
                     },

@@ -30,6 +30,8 @@ fn item(content: &str, status: TodoStatus) -> TodoItem {
         priority: TodoPriority::default(),
         status,
         meta: None,
+        verification: None,
+        verification_passed: false,
     }
 }
 

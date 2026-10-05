@@ -7,6 +7,12 @@
 
 use std::fmt::Write;
 
+use crate::implementations::grok_build::task::backend::SubagentBackendResource;
+use crate::implementations::grok_build::task::effective_max_subagent_depth;
+use crate::implementations::grok_build::task::types::{
+    CurrentPromptIdResource, SessionIdResource, SpawnRootSpan, SubagentDepthCounter, SubagentOwner,
+    SubagentRequest, SubagentRuntimeOverrides, SubagentValidateTypeOutcome,
+};
 use crate::types::output::{TodoWriteOutput, TodoWriteSuccess};
 use crate::types::requirements::{Expr, ToolRequirement};
 #[allow(unused_imports)]
@@ -34,6 +40,45 @@ pub(crate) fn validate_no_duplicate_ids(updates: &[TodoUpdate]) -> Result<(), To
     Ok(())
 }
 
+/// How many items may be `in_progress` at once.
+const DEFAULT_MAX_IN_PROGRESS: usize = 5;
+
+/// The env var that overrides [`DEFAULT_MAX_IN_PROGRESS`].
+const MAX_IN_PROGRESS_VAR: &str = "GROK_TODO_MAX_IN_PROGRESS";
+
+/// Resolve the cap from the raw env value. A value that is not a positive
+/// number keeps the default and says so.
+fn max_in_progress_cap(raw: Option<&str>) -> usize {
+    let Some(raw) = raw else {
+        return DEFAULT_MAX_IN_PROGRESS;
+    };
+    match raw.trim().parse::<usize>() {
+        Ok(n) if n > 0 => n,
+        _ => {
+            tracing::warn!(
+                value = %raw,
+                "{MAX_IN_PROGRESS_VAR} is not a positive number; using the default"
+            );
+            DEFAULT_MAX_IN_PROGRESS
+        }
+    }
+}
+
+/// The message a write is refused with when it would leave more than `cap`
+/// items `in_progress`, or `None` when the write is within the cap.
+fn in_progress_cap_violation(state: &TodoState, cap: usize) -> Option<String> {
+    let running = state
+        .todo_items()
+        .filter(|item| item.status == TodoStatus::InProgress)
+        .count();
+    (running > cap).then(|| {
+        format!(
+            "{running} items would be in progress at once, over the cap of {cap}. \
+             Keep what you are working on now in progress and leave the rest pending."
+        )
+    })
+}
+
 /// Every write is a merge: updates are folded into the existing state.
 /// - **Existing items**: `content` is optional — if omitted the previous
 ///   value is kept. This lets the model mark an item from `in_progress` →
@@ -56,7 +101,12 @@ pub(crate) fn apply_merge(
 ) -> Result<(), TodoError> {
     let mut front = 0usize;
     for u in updates {
-        if state.update(&u.id, u.content.as_deref(), u.status) {
+        if state.update_with_verification(
+            &u.id,
+            u.content.as_deref(),
+            u.status,
+            u.verification.as_deref(),
+        ) {
             // Existing item – partial update succeeded, content was optional.
             continue;
         }
@@ -71,6 +121,8 @@ pub(crate) fn apply_merge(
             priority: TodoPriority::default(),
             status,
             meta: None,
+            verification: u.verification.clone().filter(|v| !v.trim().is_empty()),
+            verification_passed: false,
         };
         if prepend {
             state.insert_at(front, u.id.clone(), item);
@@ -106,6 +158,211 @@ pub(crate) fn summarize_todo_state(state: &TodoState) -> String {
             }
         }
         out
+    }
+}
+
+/// Subagent type a todo verifier runs as.
+pub const VERIFIER_SUBAGENT_TYPE: &str = "general-purpose";
+
+/// The line a verifier subagent ends its reply with to report its verdict.
+pub const VERIFIER_PASS_MARKER: &str = "VERIFIER_RESULT: PASS";
+/// The line a verifier subagent ends its reply with when the condition is not met.
+pub const VERIFIER_FAIL_MARKER: &str = "VERIFIER_RESULT: FAIL";
+
+/// A verifier subagent's verdict, read from its output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerificationVerdict {
+    Passed,
+    Failed(String),
+    /// The verifier returned no verdict line.
+    Unreported,
+}
+
+/// Read the LAST verdict line from a verifier's output. A PASS after a FAIL is
+/// the verifier correcting itself, which is why the last one wins.
+pub fn parse_verification_verdict(output: &str) -> VerificationVerdict {
+    for line in output.lines().rev() {
+        let line = line.trim();
+        if line.starts_with(VERIFIER_PASS_MARKER) {
+            return VerificationVerdict::Passed;
+        }
+        if let Some(rest) = line.strip_prefix(VERIFIER_FAIL_MARKER) {
+            let reason = rest.trim_start_matches([':', '-', ' ']).trim();
+            return VerificationVerdict::Failed(if reason.is_empty() {
+                "verifier reported failure".to_string()
+            } else {
+                reason.to_string()
+            });
+        }
+    }
+    VerificationVerdict::Unreported
+}
+
+/// Build the prompt handed to a fresh verifier subagent. It carries the item,
+/// the condition and whatever context the triggering call supplied.
+pub fn verifier_prompt(content: &str, condition: &str, context: Option<&str>) -> String {
+    let mut prompt = String::new();
+    writeln!(
+        &mut prompt,
+        "You are an independent verifier. Decide whether the verification condition below is \
+         satisfied by the current state of the workspace. Gather your own evidence; assume nothing \
+         about whether the work was done, and do not change the workspace to make the condition \
+         pass."
+    )
+    .ok();
+    writeln!(&mut prompt).ok();
+    writeln!(&mut prompt, "Todo item: {content}").ok();
+    writeln!(&mut prompt, "Verification condition: {condition}").ok();
+    if let Some(context) = context.map(str::trim).filter(|c| !c.is_empty()) {
+        writeln!(&mut prompt).ok();
+        writeln!(&mut prompt, "Context supplied by the caller:").ok();
+        writeln!(&mut prompt, "{context}").ok();
+    }
+    writeln!(&mut prompt).ok();
+    writeln!(
+        &mut prompt,
+        "End your reply with a single final line: `{VERIFIER_PASS_MARKER}` if the condition is \
+         satisfied, or `{VERIFIER_FAIL_MARKER}: <reason>` if it is not."
+    )
+    .ok();
+    prompt
+}
+
+/// A completion this call requested whose verifier has not passed yet.
+struct PendingVerification {
+    id: TodoId,
+    content: String,
+    condition: String,
+    context: Option<String>,
+}
+
+/// Outcome of one verifier run.
+struct VerificationOutcome {
+    id: TodoId,
+    passed: bool,
+    detail: String,
+}
+
+impl VerificationOutcome {
+    fn blocked(id: &TodoId, detail: String) -> Self {
+        Self {
+            id: id.clone(),
+            passed: false,
+            detail,
+        }
+    }
+}
+
+/// Run one verifier prompt in its own fresh subagent and translate the result
+/// into a verdict. Every failure mode is a block, so an item can never be
+/// completed on a verifier that did not run.
+async fn run_verifier(
+    ctx: &xai_tool_runtime::ToolCallContext,
+    backend: Option<&SubagentBackendResource>,
+    parent_session_id: &str,
+    parent_prompt_id: Option<String>,
+    depth: u32,
+    max_depth: u32,
+    pending: &PendingVerification,
+) -> VerificationOutcome {
+    let Some(backend) = backend else {
+        return VerificationOutcome::blocked(
+            &pending.id,
+            "no subagent support is available in this session".to_string(),
+        );
+    };
+    if depth >= max_depth {
+        return VerificationOutcome::blocked(
+            &pending.id,
+            format!("subagent depth limit reached ({depth}/{max_depth})"),
+        );
+    }
+    match backend
+        .backend()
+        .validate_type(VERIFIER_SUBAGENT_TYPE, parent_session_id)
+        .await
+    {
+        SubagentValidateTypeOutcome::Ok => {}
+        _ => {
+            return VerificationOutcome::blocked(
+                &pending.id,
+                format!("subagent type '{VERIFIER_SUBAGENT_TYPE}' is unavailable"),
+            );
+        }
+    }
+
+    let child_id = uuid::Uuid::now_v7().to_string();
+    let span = tracing::info_span!(parent: None, "todo.verify", todo_id = %pending.id);
+    span.follows_from(tracing::Span::current().id());
+    let request = SubagentRequest {
+        id: child_id,
+        prompt: verifier_prompt(
+            &pending.content,
+            &pending.condition,
+            pending.context.as_deref(),
+        ),
+        description: format!(
+            "verify todo: {}",
+            pending.content.lines().next().unwrap_or("").trim()
+        ),
+        subagent_type: VERIFIER_SUBAGENT_TYPE.to_string(),
+        parent_session_id: parent_session_id.to_string(),
+        parent_prompt_id,
+        // Fresh subagent: no resumed transcript and no forked conversation.
+        resume_from: None,
+        cwd: None,
+        runtime_overrides: SubagentRuntimeOverrides::default(),
+        run_in_background: false,
+        // Harness-internal: the verdict returns through this tool call.
+        surface_completion: false,
+        await_to_completion: false,
+        fork_context: false,
+        owner: SubagentOwner::Task,
+        cancel_token: tokio_util::sync::CancellationToken::new(),
+        spawn_root: SpawnRootSpan::new(span),
+        tool_call_id: Some(ctx.call_id.as_str().to_owned()),
+    };
+
+    let result = match backend.backend().spawn(request, None).await {
+        Ok(result) => result,
+        Err(error) => {
+            return VerificationOutcome::blocked(
+                &pending.id,
+                format!("verifier could not be spawned: {error}"),
+            );
+        }
+    };
+    if result.cancelled {
+        return VerificationOutcome::blocked(&pending.id, "verifier was cancelled".to_string());
+    }
+    if result.backgrounded {
+        return VerificationOutcome::blocked(
+            &pending.id,
+            "verifier did not finish within the foreground budget".to_string(),
+        );
+    }
+    if !result.success {
+        return VerificationOutcome::blocked(
+            &pending.id,
+            format!(
+                "verifier failed: {}",
+                result.error.unwrap_or_else(|| "unknown error".to_string())
+            ),
+        );
+    }
+    match parse_verification_verdict(&result.output) {
+        VerificationVerdict::Passed => VerificationOutcome {
+            id: pending.id.clone(),
+            passed: true,
+            detail: "verification passed".to_string(),
+        },
+        VerificationVerdict::Failed(reason) => {
+            VerificationOutcome::blocked(&pending.id, format!("verification failed: {reason}"))
+        }
+        VerificationVerdict::Unreported => VerificationOutcome::blocked(
+            &pending.id,
+            "verifier did not report a verdict".to_string(),
+        ),
     }
 }
 
@@ -154,6 +411,12 @@ pub struct TodoItem {
     pub status: TodoStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
+    /// Optional verification prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
+    /// Whether the current `verification` prompt has passed a verifier run.
+    #[serde(default)]
+    pub verification_passed: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -191,6 +454,18 @@ impl TodoState {
         content: Option<&str>,
         status: Option<TodoStatus>,
     ) -> bool {
+        self.update_with_verification(id, content, status, None)
+    }
+
+    /// `update` plus an optional new verification prompt. A changed condition
+    /// clears `verification_passed`: the new condition has not been verified.
+    pub fn update_with_verification(
+        &mut self,
+        id: &TodoId,
+        content: Option<&str>,
+        status: Option<TodoStatus>,
+        verification: Option<&str>,
+    ) -> bool {
         let Some(todo) = self.todos.get_mut(id) else {
             return false;
         };
@@ -199,9 +474,30 @@ impl TodoState {
         {
             todo.content = content.into();
         }
+        if let Some(verification) = verification {
+            let verification = verification.trim();
+            if !verification.is_empty() && todo.verification.as_deref() != Some(verification) {
+                todo.verification = Some(verification.to_string());
+                todo.verification_passed = false;
+            }
+        }
         if let Some(status) = status {
             todo.status = status;
         }
+        true
+    }
+
+    /// Borrow an item by id.
+    pub fn item(&self, id: &TodoId) -> Option<&TodoItem> {
+        self.todos.get(id)
+    }
+
+    /// Record the outcome of a verifier run for an item.
+    pub fn set_verification_passed(&mut self, id: &TodoId, passed: bool) -> bool {
+        let Some(todo) = self.todos.get_mut(id) else {
+            return false;
+        };
+        todo.verification_passed = passed;
         true
     }
 
@@ -267,6 +563,18 @@ pub struct TodoUpdate {
         description = "The status of the todo item: pending, in_progress, completed, or cancelled"
     )]
     pub status: Option<TodoStatus>,
+
+    #[schemars(
+        description = "Optional verification prompt for this item. When set, marking the item `completed` runs an independent verifier subagent against this condition first; the item cannot be completed until that verifier reports it satisfied. Omit to leave the existing condition unchanged, or send a new prompt to replace it (which re-arms verification)."
+    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
+
+    #[schemars(
+        description = "Context handed to the verifier when completing this item: what to check, where the evidence is, anything the verifier cannot infer. Only read when this call marks the item `completed`."
+    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_context: Option<String>,
 }
 
 impl TodoUpdate {
@@ -338,6 +646,8 @@ Add as many items as the work needs — a small task may be one or two, a large 
 
 Writes merge by id, so send only the items you are changing. An item you leave out is kept exactly as it was: there is no way to remove one. Work leaves the list by status only — completed when it is done, cancelled when it will not be done. Reword an item by sending its id with new content.
 
+An item may carry a `verification` prompt. Marking such an item `completed` runs an independent verifier subagent against that condition first, passing the `verificationContext` the completion call supplies. The item is marked done only if the verifier reports the condition satisfied; otherwise it stays open and the failure is returned to you.
+
 Every call returns the whole list with each item's id. Items can appear that you did not write (the user and the goal planner add them), so call with an empty `todos` array to read the current list and its ids before you update them."#
     }
 
@@ -393,16 +703,143 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             )));
         }
 
-        let (summary_for_prompt, todos, state_snapshot);
-        {
+        // Items this call marks `completed` whose verifier has not passed run
+        // an independent verifier subagent BEFORE the completion stands. The
+        // merge is applied first so a condition sent on the same call is the
+        // one verified; a failed verifier then reverts that item's status.
+        let (
+            pending_verifications,
+            previous_statuses,
+            backend,
+            parent_session_id,
+            parent_prompt_id,
+            depth,
+            max_depth,
+        ) = {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
+
+            let mut previous_statuses: std::collections::HashMap<TodoId, Option<TodoStatus>> =
+                std::collections::HashMap::new();
+            for update in &input.todos {
+                if update.status == Some(TodoStatus::Completed) {
+                    previous_statuses
+                        .entry(update.id.clone())
+                        .or_insert_with(|| todo_state.0.item(&update.id).map(|item| item.status));
+                }
+            }
+
+            // Refuse a write that would put more items in progress than the cap allows, before any of it lands.
+            let cap = max_in_progress_cap(std::env::var(MAX_IN_PROGRESS_VAR).ok().as_deref());
+            let mut projected = todo_state.0.clone();
+            apply_merge(&mut projected, &input.todos, input.prepend)?;
+            if let Some(message) = in_progress_cap_violation(&projected, cap) {
+                return Ok(TodoWriteOutput::TooManyInProgress(message));
+            }
 
             // Always a merge. The list belongs to the user, so a write adds
             // and updates by id and never drops what it leaves out.
             apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
 
-            summary_for_prompt = summarize_todo_state(&todo_state.0);
+            let mut pending = Vec::new();
+            for update in &input.todos {
+                if update.status != Some(TodoStatus::Completed) {
+                    continue;
+                }
+                let Some(item) = todo_state.0.item(&update.id) else {
+                    continue;
+                };
+                if item.verification_passed {
+                    continue;
+                }
+                let Some(condition) = item
+                    .verification
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|c| !c.is_empty())
+                else {
+                    continue;
+                };
+                pending.push(PendingVerification {
+                    id: update.id.clone(),
+                    content: item.content.clone(),
+                    condition: condition.to_string(),
+                    context: update.verification_context.clone(),
+                });
+            }
+
+            let backend = res.get::<SubagentBackendResource>().cloned();
+            let parent_session_id = res
+                .get::<SessionIdResource>()
+                .map(|s| s.0.clone())
+                .unwrap_or_default();
+            let parent_prompt_id = res
+                .get::<CurrentPromptIdResource>()
+                .map(|p| p.0.clone())
+                .filter(|p| !p.is_empty());
+            let depth = res.get::<SubagentDepthCounter>().map(|d| d.0).unwrap_or(0);
+            let max_depth = effective_max_subagent_depth(&res);
+
+            (
+                pending,
+                previous_statuses,
+                backend,
+                parent_session_id,
+                parent_prompt_id,
+                depth,
+                max_depth,
+            )
+        };
+
+        // Run each verifier in its own fresh subagent, outside the state lock.
+        let mut results = Vec::new();
+        for pending in &pending_verifications {
+            results.push(
+                run_verifier(
+                    &ctx,
+                    backend.as_ref(),
+                    &parent_session_id,
+                    parent_prompt_id.clone(),
+                    depth,
+                    max_depth,
+                    pending,
+                )
+                .await,
+            );
+        }
+
+        let (summary_for_prompt, todos, state_snapshot);
+        {
+            let mut res = resources.lock().await;
+            let todo_state = res.get_or_default::<State<TodoState>>();
+
+            for outcome in &results {
+                if outcome.passed {
+                    todo_state.0.set_verification_passed(&outcome.id, true);
+                } else {
+                    // A blocked verifier takes the completion back: the item
+                    // returns to the status it held before this call.
+                    let previous = previous_statuses
+                        .get(&outcome.id)
+                        .copied()
+                        .flatten()
+                        .unwrap_or(TodoStatus::Pending);
+                    todo_state.0.update(&outcome.id, None, Some(previous));
+                }
+            }
+
+            let mut summary = summarize_todo_state(&todo_state.0);
+            for outcome in results.iter().filter(|outcome| !outcome.passed) {
+                writeln!(
+                    &mut summary,
+                    "\nVERIFICATION BLOCKED todo `{}`: {}. The item was not marked completed; \
+                     address the failure and mark it completed again to re-run the verifier.",
+                    outcome.id, outcome.detail
+                )
+                .ok();
+            }
+
+            summary_for_prompt = summary;
             todos = todo_state.0.todo_items().cloned().collect::<Vec<_>>();
             state_snapshot = todo_state.0.clone();
         }
@@ -429,6 +866,8 @@ mod tests {
             id: id.to_owned(),
             content: content.map(str::to_owned),
             status,
+            verification: None,
+            verification_context: None,
         }
     }
 
@@ -441,6 +880,101 @@ mod tests {
     }
 
     // -- Tests --
+
+    #[test]
+    fn the_in_progress_cap_defaults_to_five_and_parses_an_override() {
+        assert_eq!(max_in_progress_cap(None), 5);
+        assert_eq!(max_in_progress_cap(Some("2")), 2);
+        assert_eq!(max_in_progress_cap(Some(" 7 ")), 7);
+        // A value that is not a positive number keeps the default.
+        assert_eq!(max_in_progress_cap(Some("nope")), 5);
+        assert_eq!(max_in_progress_cap(Some("0")), 5);
+    }
+
+    #[test]
+    fn a_state_over_the_cap_is_refused_with_the_count_and_the_cap() {
+        let mut state = TodoState::default();
+        let running = || TodoItem {
+            content: "work".to_string(),
+            priority: TodoPriority::Medium,
+            status: TodoStatus::InProgress,
+            meta: None,
+            verification: None,
+            verification_passed: false,
+        };
+        for i in 0..5 {
+            state.push(format!("a{i}").into(), running());
+        }
+        assert!(in_progress_cap_violation(&state, 5).is_none());
+
+        state.push("a5".into(), running());
+        let message = in_progress_cap_violation(&state, 5).expect("six in progress is over five");
+        assert!(
+            message.contains("6 items would be in progress"),
+            "{message}"
+        );
+        assert!(message.contains("over the cap of 5"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn the_tool_refuses_a_sixth_in_progress_item_and_leaves_the_list_alone() {
+        let tool = TodoWriteTool;
+        let shared = Resources::new().into_shared();
+
+        let at_cap: Vec<TodoUpdate> = (0..5)
+            .map(|i| make_update(&format!("a{i}"), Some("work"), Some(TodoStatus::InProgress)))
+            .collect();
+        let output = expect_success(
+            xai_tool_runtime::Tool::run(
+                &tool,
+                test_ctx(shared.clone()),
+                TodoWriteInput {
+                    merge: true,
+                    prepend: false,
+                    todos: at_cap,
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(output.todos.len(), 5);
+
+        let refused = xai_tool_runtime::Tool::run(
+            &tool,
+            test_ctx(shared.clone()),
+            TodoWriteInput {
+                merge: true,
+                prepend: false,
+                todos: vec![make_update(
+                    "a5",
+                    Some("one more"),
+                    Some(TodoStatus::InProgress),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+        let TodoWriteOutput::TooManyInProgress(message) = refused else {
+            panic!("expected the cap to refuse the write, got {refused:?}");
+        };
+        assert!(message.contains("over the cap of 5"), "{message}");
+
+        // Nothing the refused write carried landed.
+        let after = expect_success(
+            xai_tool_runtime::Tool::run(
+                &tool,
+                test_ctx(shared.clone()),
+                TodoWriteInput {
+                    merge: true,
+                    prepend: false,
+                    todos: vec![make_update("a0", None, None)],
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(after.todos.len(), 5, "the refused write added an item");
+    }
 
     #[test]
     fn name_and_description() {
@@ -761,6 +1295,8 @@ mod tests {
                     priority: TodoPriority::default(),
                     status: *status,
                     meta: None,
+                    verification: None,
+                    verification_passed: false,
                 },
             );
         }
@@ -1254,6 +1790,287 @@ mod tests {
         assert_eq!(
             get_item(&state, "analyze_and_propose").status,
             TodoStatus::InProgress
+        );
+    }
+
+    // ── verifier enforcement ─────────────────────────────────────────
+
+    use crate::implementations::grok_build::task::backend::ChannelBackend;
+    use crate::implementations::grok_build::task::types::{
+        CurrentPromptIdResource, SessionIdResource, SubagentDepthCounter, SubagentEvent,
+        SubagentRequest, SubagentResult, SubagentValidateTypeOutcome,
+    };
+    use crate::types::resources::SharedResources;
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::mpsc;
+
+    struct VerifierHarness {
+        backend: crate::implementations::grok_build::task::backend::SubagentBackendResource,
+        requests: Arc<Mutex<Vec<SubagentRequest>>>,
+    }
+
+    /// A coordinator backend that answers `ValidateType` with `Ok` and every
+    /// spawn with `reply`. Each spawn request is recorded so a test can
+    /// inspect the subagent the tool asked for.
+    fn verifier_backend(
+        reply: impl Fn(&SubagentRequest) -> SubagentResult + Send + Sync + 'static,
+    ) -> VerifierHarness {
+        let (raw_tx, mut raw_rx) = mpsc::unbounded_channel::<SubagentEvent>();
+        let backend = crate::implementations::grok_build::task::backend::SubagentBackendResource(
+            Arc::new(ChannelBackend::new(raw_tx)),
+        );
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&requests);
+        let reply: Arc<dyn Fn(&SubagentRequest) -> SubagentResult + Send + Sync> = Arc::new(reply);
+        tokio::spawn(async move {
+            while let Some(event) = raw_rx.recv().await {
+                match event {
+                    SubagentEvent::ValidateType(req) => {
+                        let _ = req.respond_to.send(SubagentValidateTypeOutcome::Ok);
+                    }
+                    SubagentEvent::Spawn(req) => {
+                        let result = reply(&req.request);
+                        recorded.lock().unwrap().push((*req.request).clone());
+                        let _ = req.respond_with(move |_| result);
+                    }
+                    _ => {}
+                }
+            }
+        });
+        VerifierHarness { backend, requests }
+    }
+
+    fn verifier_resources(harness: &VerifierHarness) -> SharedResources {
+        let mut resources = Resources::new();
+        resources.insert(harness.backend.clone());
+        resources.insert(SubagentDepthCounter(0));
+        resources.insert(SessionIdResource("parent".to_string()));
+        resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
+        resources.into_shared()
+    }
+
+    fn passed_result() -> SubagentResult {
+        SubagentResult {
+            success: true,
+            output: format!("checked it\n{VERIFIER_PASS_MARKER}\n").into(),
+            subagent_id: "verifier".into(),
+            child_session_id: "verifier".into(),
+            ..Default::default()
+        }
+    }
+
+    fn failed_result(reason: &str) -> SubagentResult {
+        SubagentResult {
+            success: true,
+            output: format!("looked, not satisfied\n{VERIFIER_FAIL_MARKER}: {reason}\n").into(),
+            subagent_id: "verifier".into(),
+            child_session_id: "verifier".into(),
+            ..Default::default()
+        }
+    }
+
+    /// Seed an item carrying a verifier through the shipped tool path.
+    async fn seed_verifying_item(shared: &SharedResources, id: &str, condition: &str) {
+        let input = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![TodoUpdate {
+                id: id.to_string(),
+                content: Some("Ship the parser".to_string()),
+                status: Some(TodoStatus::Pending),
+                verification: Some(condition.to_string()),
+                verification_context: None,
+            }],
+        };
+        xai_tool_runtime::Tool::run(&TodoWriteTool, test_ctx(shared.clone()), input)
+            .await
+            .unwrap();
+    }
+
+    /// Mark an item completed through the shipped tool path, supplying context.
+    async fn complete_item(
+        shared: &SharedResources,
+        id: &str,
+        context: Option<&str>,
+    ) -> TodoWriteSuccess {
+        let input = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![TodoUpdate {
+                id: id.to_string(),
+                content: None,
+                status: Some(TodoStatus::Completed),
+                verification: None,
+                verification_context: context.map(str::to_owned),
+            }],
+        };
+        expect_success(
+            xai_tool_runtime::Tool::run(&TodoWriteTool, test_ctx(shared.clone()), input)
+                .await
+                .unwrap(),
+        )
+    }
+
+    fn item_named<'a>(success: &'a TodoWriteSuccess, content: &str) -> &'a TodoItem {
+        success
+            .todos
+            .iter()
+            .find(|todo| todo.content == content)
+            .unwrap_or_else(|| panic!("item {content:?} not in {success:?}"))
+    }
+
+    /// The completion is refused and the item stays open.
+    #[tokio::test]
+    async fn a_verifier_item_cannot_be_completed_when_no_verifier_can_run() {
+        let shared = Resources::new().into_shared();
+        seed_verifying_item(&shared, "1", "cargo test -p parser passes").await;
+
+        let success = complete_item(&shared, "1", Some("the test output is in out/test.log")).await;
+
+        let item = item_named(&success, "Ship the parser");
+        assert_ne!(
+            item.status,
+            TodoStatus::Completed,
+            "an item with an unrun verifier must not be completed"
+        );
+        assert!(!item.verification_passed);
+        assert!(
+            success.summary_for_prompt.contains("VERIFICATION BLOCKED"),
+            "the refusal must be reported: {}",
+            success.summary_for_prompt
+        );
+    }
+
+    #[tokio::test]
+    async fn a_passing_verifier_allows_completion() {
+        let harness = verifier_backend(|_| passed_result());
+        let shared = verifier_resources(&harness);
+        seed_verifying_item(&shared, "1", "cargo test -p parser passes").await;
+
+        let success = complete_item(&shared, "1", None).await;
+
+        let item = item_named(&success, "Ship the parser");
+        assert_eq!(item.status, TodoStatus::Completed);
+        assert!(item.verification_passed);
+    }
+
+    #[tokio::test]
+    async fn a_failing_verifier_blocks_completion() {
+        let harness = verifier_backend(|_| failed_result("build is broken"));
+        let shared = verifier_resources(&harness);
+        seed_verifying_item(&shared, "1", "the build succeeds").await;
+
+        let success = complete_item(&shared, "1", None).await;
+
+        let item = item_named(&success, "Ship the parser");
+        assert_ne!(item.status, TodoStatus::Completed);
+        assert!(!item.verification_passed);
+        assert!(
+            success.summary_for_prompt.contains("build is broken"),
+            "the verifier's reason must reach the model: {}",
+            success.summary_for_prompt
+        );
+    }
+
+    #[tokio::test]
+    async fn the_verifier_runs_in_a_fresh_subagent_with_the_supplied_context() {
+        let harness = verifier_backend(|_| passed_result());
+        let shared = verifier_resources(&harness);
+        seed_verifying_item(&shared, "1", "cargo test -p parser passes").await;
+
+        complete_item(&shared, "1", Some("the evidence is in out/report.json")).await;
+
+        let requests = harness.requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "exactly one verifier runs per completion"
+        );
+        let request = &requests[0];
+        assert!(
+            !request.fork_context,
+            "the verifier must not be a fork of the conversation"
+        );
+        assert!(request.resume_from.is_none(), "no inherited transcript");
+        assert_eq!(request.subagent_type, VERIFIER_SUBAGENT_TYPE);
+        assert!(
+            request.prompt.contains("cargo test -p parser passes"),
+            "the condition must reach the verifier: {}",
+            request.prompt
+        );
+        assert!(
+            request.prompt.contains("out/report.json"),
+            "the supplied context must reach the verifier: {}",
+            request.prompt
+        );
+        assert!(!request.run_in_background);
+        assert!(
+            !request.surface_completion,
+            "the verdict returns through the tool call, not an idle reminder"
+        );
+    }
+
+    /// An item with no verifier is completed without spawning anything.
+    #[tokio::test]
+    async fn an_item_without_a_verifier_completes_without_spawning() {
+        let harness = verifier_backend(|_| passed_result());
+        let shared = verifier_resources(&harness);
+
+        let seed = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![make_update(
+                "1",
+                Some("Plain task"),
+                Some(TodoStatus::Pending),
+            )],
+        };
+        xai_tool_runtime::Tool::run(&TodoWriteTool, test_ctx(shared.clone()), seed)
+            .await
+            .unwrap();
+
+        let success = complete_item(&shared, "1", None).await;
+
+        assert_eq!(
+            item_named(&success, "Plain task").status,
+            TodoStatus::Completed
+        );
+        assert!(harness.requests.lock().unwrap().is_empty());
+    }
+
+    /// A rewording of the condition re-arms verification: a passed condition
+    /// does not carry over to a new one.
+    #[tokio::test]
+    async fn rewording_the_condition_re_arms_verification() {
+        let harness = verifier_backend(|_| passed_result());
+        let shared = verifier_resources(&harness);
+        seed_verifying_item(&shared, "1", "first condition").await;
+        complete_item(&shared, "1", None).await;
+
+        let reword = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![TodoUpdate {
+                id: "1".to_string(),
+                content: None,
+                status: Some(TodoStatus::InProgress),
+                verification: Some("a stricter condition".to_string()),
+                verification_context: None,
+            }],
+        };
+        xai_tool_runtime::Tool::run(&TodoWriteTool, test_ctx(shared.clone()), reword)
+            .await
+            .unwrap();
+
+        let success = complete_item(&shared, "1", None).await;
+        assert_eq!(
+            item_named(&success, "Ship the parser").status,
+            TodoStatus::Completed
+        );
+        assert_eq!(
+            harness.requests.lock().unwrap().len(),
+            2,
+            "the reworded condition must be verified again"
         );
     }
 }
