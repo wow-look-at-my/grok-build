@@ -16,7 +16,7 @@ use xai_grok_tools::implementations::use_tool;
 use xai_grok_tools::registry::types::{ToolConfig, ToolServerConfig};
 /// Process-global registry of externally-provided toolset presets.
 /// Public presets are enumerated; internal presets resolve only via [`toolset_for_preset`] and never appear in the manifest.
-/// Register before the first preset resolution — earlier-resolved configs will not see later registrations.
+/// Register before the first preset resolution - earlier-resolved configs will not see later registrations.
 pub type ToolsetPresetBuilder = fn() -> ToolServerConfig;
 /// Whether a registered preset is enumerated publicly or resolved by name only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -76,39 +76,43 @@ fn registered_public_toolset_preset_names() -> Vec<String> {
         .collect()
 }
 /// Orchestrator-specific prompt body appended to the standard GrokBuild system prompt (`prompt.md`).
-/// Instructs the GBL model to delegate coding and exploration work to subagents.
+/// The orchestrator has no file-reading, listing, searching, or execution tools, so it must delegate.
 const ORCHESTRATOR_PROMPT_BODY: &str = "\
 ## Orchestrator Mode
 
 You are a technical lead orchestrating a team of senior-engineer subagents. Your subagents \
-are highly capable \u{2014} treat them as expert peers, not junior helpers. Give them the same \
+are highly capable - treat them as expert peers, not junior helpers. Give them the same \
 quality of context and direction you would give a senior engineer joining the project.
 
-Your job is to think, plan, coordinate, and review. Their job is to explore, implement, \
-and execute. Use them aggressively and liberally \u{2014} spawn subagents early and often.
+Your job is to think, plan, coordinate, and review. Their job is to read, explore, implement, \
+and execute. Use them aggressively and liberally - spawn subagents early and often.
 
 ### Your direct responsibilities:
 - High-level planning and architecture decisions
-- Reading files for quick context (${{ tools.by_kind.read }}, ${{ tools.by_kind.search }}, ${{ tools.by_kind.list }})
-- Running quick terminal commands for orientation (${{ tools.by_kind.execute }})
-- Invoking skills and MCP tools (${{ tools.by_kind.skill }}, ${{ tools.by_kind.search_tool }}, ${{ tools.by_kind.use_tool }})
+- Invoking skills and MCP tools (${{ tools.by_kind.search_tool }}, ${{ tools.by_kind.use_tool }})
 - Web research (${{ tools.by_kind.web_search }}, ${{ tools.by_kind.web_fetch }})
 - Asking the user questions (${{ tools.by_kind.ask_user }})
 - Managing task lists and tracking progress (${{ tools.by_kind.plan }})
 - Reviewing subagent results and synthesizing responses for the user
 
+You have no tools to read files, list directories, search file contents, or run terminal \
+commands. Every task that needs one of those goes to a subagent. This includes looking up \
+TUI feature documentation - spawn an `explore` subagent to read it.
+
 ### ALWAYS delegate to subagents:
-- **ALL file modifications** \u{2014} creating, editing, deleting files (`general-purpose`)
-- **ALL builds, tests, and verification** \u{2014} running test suites, linters, compilers (`general-purpose`)
-- **Deep codebase exploration** \u{2014} searching across many files, understanding patterns (`explore`)
-- **Multi-step implementation** \u{2014} any task involving more than reading (`general-purpose`)
-- **Any research requiring thoroughness** \u{2014} don\u{2019}t do shallow searches yourself, spawn an `explore` subagent
+- **ALL reading and exploration** - reading files, listing directories, searching file contents, looking up docs (`explore`)
+- **ALL file modifications** - creating, editing, deleting files (`general-purpose`)
+- **ALL builds, tests, and verification** - running test suites, linters, compilers (`general-purpose`)
+- **ALL command execution** - any terminal command, including quick orientation commands (`general-purpose`)
+- **Deep codebase exploration** - searching across many files, understanding patterns (`explore`)
+- **Multi-step implementation** - any task involving more than reading (`general-purpose`)
+- **Any research requiring thoroughness** - don't do shallow searches yourself, spawn an `explore` subagent
 
 ### How to talk to subagents:
 Write prompts the way you would brief a senior engineer:
 - Explain WHAT you need done and WHY (the context behind the task)
-- Share what you already know \u{2014} file paths, function names, architectural decisions
-- Describe the end state, not step-by-step commands \u{2014} trust their judgment on HOW
+- Share what you already know - file paths, function names, architectural decisions
+- Describe the end state, not step-by-step commands - trust their judgment on HOW
 - If you have opinions on approach, share them as guidance, not rigid instructions
 - Include acceptance criteria: what does \"done\" look like?
 
@@ -116,13 +120,13 @@ Write prompts the way you would brief a senior engineer:
 - Break independent tasks into separate subagents and run them in parallel
 - Use `explore` subagents to investigate multiple areas simultaneously
 - Launch implementation subagents for independent files/modules at the same time
-- Do NOT wait for one subagent before spawning others that don\u{2019}t depend on it
+- Do NOT wait for one subagent before spawning others that don't depend on it
 
 ### Anti-patterns to avoid:
-- Do NOT do shallow 1-2 file reads yourself when an `explore` agent would be more thorough
-- Do NOT implement code changes yourself \u{2014} you have no file editing tools
-- Do NOT give subagents overly prescriptive step-by-step instructions \u{2014} trust their expertise
-- Do NOT summarize or re-explain what the user said \u{2014} get to work immediately";
+- Do NOT read files, list directories, search contents, or run commands yourself - you have no such tools
+- Do NOT implement code changes yourself - you have no file editing tools
+- Do NOT give subagents overly prescriptive step-by-step instructions - trust their expertise
+- Do NOT summarize or re-explain what the user said - get to work immediately";
 /// Bash tool with clearer model-facing names: `run_terminal_cmd` becomes `run_terminal_command` and `is_background` becomes `background`.
 fn bash_tool_config() -> ToolConfig {
     ToolConfig::from(&grok_build::BashTool)
@@ -364,7 +368,7 @@ pub fn grok_build_hashline_toolset(
 /// Genuinely read-only over the workspace: `read_file` (Read), `list_dir`
 /// (Glob), `grep` (Grep).
 /// `run_terminal_command` (Bash) is intentionally omitted so exploration cannot
-/// mutate the workspace — the read-only guarantee is enforced by the toolset,
+/// mutate the workspace - the read-only guarantee is enforced by the toolset,
 /// not merely by the prompt.
 /// `send_message` mutates nothing here, and without it an explorer cannot
 /// answer the session that spawned it until its whole run ends.
@@ -439,16 +443,12 @@ fn grok_build_plan_toolset() -> ToolServerConfig {
         behavior_preset: None,
     }
 }
-/// Orchestrator toolset: read/search/orchestration tools only. No terminal execution, no file editing.
-/// The orchestrator delegates all execution and file modification to subagents.
+/// Orchestrator toolset: orchestration, delegation, and research tools only.
+/// No file reading, listing, or searching, no terminal execution, and no file editing.
+/// The orchestrator delegates all reading, exploration, execution, and file modification to subagents.
 fn orchestrator_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
-            // Research tools
-            bash_tool_config(),
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
             // Subagent orchestration
             task_tool_config(),
             task_output_tool_config(),
@@ -482,9 +482,11 @@ fn orchestrator_toolset() -> ToolServerConfig {
             (&memory::MemorySearchImpl).into(),
             (&memory::MemoryGetImpl).into(),
             // Intentionally excluded:
-            // - SearchReplaceTool (no file editing — delegate to subagents)
-            // - CopyFileTool / MoveFileTool (no relocating — delegate to subagents)
-            // - OpenCodeWriteTool (no file writing — delegate to subagents)
+            // - ReadFileTool / ListDirTool / GrepTool (no reading, listing, or searching - delegate to subagents)
+            // - BashTool (no terminal execution - delegate to subagents)
+            // - SearchReplaceTool (no file editing - delegate to subagents)
+            // - CopyFileTool / MoveFileTool (no relocating - delegate to subagents)
+            // - OpenCodeWriteTool (no file writing - delegate to subagents)
         ],
         behavior_preset: None,
     }
@@ -573,7 +575,7 @@ fn opencode_toolset() -> ToolServerConfig {
     }
 }
 /// Model override for an agent definition. An `Override` ID is resolved against available models at subagent spawn.
-/// `model: inherit` or omitted → `Inherit`; a concrete id → `Override`.
+/// `model: inherit` or omitted -> `Inherit`; a concrete id -> `Override`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ModelOverride {
     /// Use the parent session's model.
@@ -731,7 +733,7 @@ impl BuiltinAgentName {
     }
     /// Built-in agent identities the pager's Shift+Tab ring can cycle
     /// through live, in ring order. Selecting one triggers a full agent
-    /// rebuild (tool registry + prompt), not just a prompt swap — see
+    /// rebuild (tool registry + prompt), not just a prompt swap - see
     /// `SessionActor::handle_session_mode`.
     pub fn shift_tab_variants() -> &'static [Self] {
         &[Self::GrokBuildOrchestrator, Self::Explore]
@@ -1547,7 +1549,7 @@ impl AgentDefinition {
             tool_config: opencode_toolset(),
             ..Self::base(
                 BuiltinAgentName::Opencode,
-                "OpenCode toolset — opencode-style tools and parameter conventions",
+                "OpenCode toolset - opencode-style tools and parameter conventions",
             )
         }
     }
@@ -1737,6 +1739,68 @@ mod tests {
             AgentDefinition::explore().allowed_subagent_types,
             Some(vec!["explore".to_string(), "plan".to_string()])
         );
+    }
+    /// The orchestrator reaches the codebase only through subagents: no read, list, search,
+    /// or execute tool is reachable, and the delegation tools are all present.
+    #[test]
+    fn orchestrator_toolset_delegates_all_reading_and_execution() {
+        use xai_grok_tools::types::tool::ToolKind;
+        let config = orchestrator_toolset();
+        for kind in [
+            ToolKind::Read,
+            ToolKind::List,
+            ToolKind::Search,
+            ToolKind::Execute,
+        ] {
+            assert!(
+                !config.tools.iter().any(|tool| tool.kind == Some(kind)),
+                "orchestrator exposes a {kind:?} tool; it must delegate instead"
+            );
+        }
+        for excluded in [
+            bash_tool_config().id,
+            ToolConfig::from(&grok_build::ReadFileTool).id,
+            ToolConfig::from(&grok_build::ListDirTool).id,
+            ToolConfig::from(&grok_build::GrepTool).id,
+        ] {
+            assert!(
+                !config.tools.iter().any(|tool| tool.id == excluded),
+                "orchestrator must not expose {excluded}"
+            );
+        }
+        let ids: Vec<String> = config.tools.into_iter().map(|tool| tool.id).collect();
+        for delegating in [
+            task_tool_config(),
+            task_output_tool_config(),
+            wait_tasks_tool_config(),
+            kill_task_tool_config(),
+        ] {
+            assert!(
+                ids.contains(&delegating.id),
+                "orchestrator lacks delegation tool {}",
+                delegating.id
+            );
+        }
+    }
+    /// The orchestrator prompt points reading, exploration, and execution at subagents and
+    /// offers no `tools.by_kind` placeholder for a tool the orchestrator no longer has.
+    #[test]
+    fn orchestrator_prompt_delegates_reading_and_execution() {
+        let body = ORCHESTRATOR_PROMPT_BODY;
+        for placeholder in [
+            "${{ tools.by_kind.read }}",
+            "${{ tools.by_kind.list }}",
+            "${{ tools.by_kind.search }}",
+            "${{ tools.by_kind.execute }}",
+        ] {
+            assert!(
+                !body.contains(placeholder),
+                "orchestrator prompt still offers {placeholder}"
+            );
+        }
+        assert!(body.contains("no tools to read files"));
+        assert!(body.contains("ALL reading and exploration"));
+        assert!(body.contains("ALL command execution"));
     }
     fn feedback_tool_id() -> String {
         ToolConfig::from(&grok_build::SendFeedbackTool).id
