@@ -317,10 +317,7 @@ A slot naming a model your account cannot reach logs a warning and falls back to
 
 ### Custom models
 
-Add custom model endpoints to use alternative providers or self-hosted models.
-Each endpoint is a `[model.<id>]` entry. The base URL must include any
-provider-specific prefix such as `/v1`; Grok appends `/chat/completions` or
-`/responses`.
+Add custom model endpoints to use alternative providers or self-hosted models. Each endpoint is a `[model.<id>]` entry. The base URL must include any provider-specific prefix such as `/v1`. Grok appends `/chat/completions` or `/responses`.
 
 ```toml
 [model.my-model]
