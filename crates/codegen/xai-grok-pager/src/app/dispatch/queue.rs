@@ -37,16 +37,16 @@ fn combine_queued_prompts_enabled() -> bool {
 /// **Server-busy (`is_turn_running() || !shared_queue.is_empty()`):** the immediate-send path is for prompts that must queue server-side rather than start a turn locally.
 /// **FIFO guard (`pending_prompts.is_empty()`):** a prompt may only jump onto the server queue when the local drip-feed queue is empty.
 ///
-/// **No leader gate:** the shell's queue is what makes a mid-turn prompt
-/// arrive at the next gap between tool calls / model requests — the turn loop
+/// **No leader gate:** the shell's queue is what makes a mid-turn prompt arrive
+/// at the next gap between tool calls / model requests — the turn loop
 /// harvests it into the running turn there
 /// (`harvest_queued_prompts_into_interjections`). A prompt held in the local
 /// drip-feed queue instead reaches the model only once the whole turn ends, so
 /// gating this on leader mode meant single-client sessions never got ASAP
 /// delivery at all. Multi-client ordering is a separate concern the shared
-/// queue also solves; with one client the two queues still merge as *server
-/// rows first, then local rows*, so a local row (slash command, scheduled
-/// prompt) can never move above them.
+/// queue also solves; with one client both queues still merge as *server rows
+/// first, then local rows*, so a local row (slash command, scheduled prompt)
+/// can never move above them.
 pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
     let wake_running = agent.running_wake_turn.is_some();
     let server_busy =

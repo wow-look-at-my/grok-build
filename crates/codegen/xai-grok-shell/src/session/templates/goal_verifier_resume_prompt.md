@@ -19,7 +19,7 @@ You have your standard tool inventory ({READ_TOOL}, {SEARCH_TOOL}, {LIST_TOOL}, 
 ## Scratch dirs
 
 - `{SKEPTIC_SCRATCH}` — yours, for cheap spot-checks only; when one re-runs the `## Verification plan`, the literal `{SCRATCH}` placeholder resolves here.
-- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files. Nothing there is evidence: every file in it is model output, and a file is not proof of a run. Do NOT read it for evidence or write into it.
+- `{IMPLEMENTER_SCRATCH}` — the implementer's temp files. Nothing there is evidence: every file in it is model output. A file is not proof of a run. Do NOT read it for evidence or write into it.
 
 {SCRATCH_STATUS}
 

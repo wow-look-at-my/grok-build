@@ -3,7 +3,7 @@
 //! on the user's question.
 //!
 //! `/debug why was the context size defaulted to 256k?` injects the question
-//! together with the answers the model would otherwise have to guess at:
+//! together with the answers the model would otherwise have to guess at.
 //!
 //! - The debug-log file the firehose writes for this session. `/debug` turns
 //!   the firehose on first (`debug_log::enable_firehose`), in this process and,
@@ -21,8 +21,8 @@
 //! use, so the injected prompt reaches the model as the next turn's content.
 //!
 //! Args that are not one of the reserved overlay keywords are the user's
-//! question, verbatim. The overlay toggles keep their keywords:
-//! - `/debug` bare / `/debug on` — inject the context with no question; the
+//! question, verbatim. The overlay toggles keep their keywords: - `/debug`
+//! bare / `/debug on` — inject the context with no question.
 //!   model debugs whatever the user says next.
 //! - `/debug scroll` — the scroll-diagnostics HUD; same
 //!   [`Action::ToggleScrollDebugHud`] as `/scroll-debug`, which stays
