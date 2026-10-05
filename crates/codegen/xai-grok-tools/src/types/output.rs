@@ -1988,6 +1988,8 @@ mod tests {
                     priority: TodoPriority::Medium,
                     status: TodoStatus::Pending,
                     meta: None,
+                    verification: None,
+                    verification_passed: false,
                 }],
                 state: TodoState::default(),
             })
@@ -2047,6 +2049,8 @@ mod tests {
                 priority: TodoPriority::High,
                 status: TodoStatus::InProgress,
                 meta: None,
+                verification: None,
+                verification_passed: false,
             }],
             state: TodoState::default(),
         });
