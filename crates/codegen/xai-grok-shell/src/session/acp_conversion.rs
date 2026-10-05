@@ -307,7 +307,9 @@ pub(crate) fn acp_tool_update(
             use xai_grok_tools::types::output::TodoWriteOutput;
             let (status, content) = match todo_output {
                 TodoWriteOutput::TodosUpdated(_) => (acp::ToolCallStatus::Completed, None),
-                TodoWriteOutput::DuplicateId(msg) | TodoWriteOutput::InvalidArgument(msg) => (
+                TodoWriteOutput::DuplicateId(msg)
+                | TodoWriteOutput::InvalidArgument(msg)
+                | TodoWriteOutput::TooManyInProgress(msg) => (
                     acp::ToolCallStatus::Failed,
                     Some(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
                         acp::TextContent::new(msg.clone()),

@@ -40,6 +40,45 @@ pub(crate) fn validate_no_duplicate_ids(updates: &[TodoUpdate]) -> Result<(), To
     Ok(())
 }
 
+/// How many items may be `in_progress` at once.
+const DEFAULT_MAX_IN_PROGRESS: usize = 5;
+
+/// The env var that overrides [`DEFAULT_MAX_IN_PROGRESS`].
+const MAX_IN_PROGRESS_VAR: &str = "GROK_TODO_MAX_IN_PROGRESS";
+
+/// Resolve the cap from the raw env value. A value that is not a positive
+/// number keeps the default and says so.
+fn max_in_progress_cap(raw: Option<&str>) -> usize {
+    let Some(raw) = raw else {
+        return DEFAULT_MAX_IN_PROGRESS;
+    };
+    match raw.trim().parse::<usize>() {
+        Ok(n) if n > 0 => n,
+        _ => {
+            tracing::warn!(
+                value = %raw,
+                "{MAX_IN_PROGRESS_VAR} is not a positive number; using the default"
+            );
+            DEFAULT_MAX_IN_PROGRESS
+        }
+    }
+}
+
+/// The message a write is refused with when it would leave more than `cap`
+/// items `in_progress`, or `None` when the write is within the cap.
+fn in_progress_cap_violation(state: &TodoState, cap: usize) -> Option<String> {
+    let running = state
+        .todo_items()
+        .filter(|item| item.status == TodoStatus::InProgress)
+        .count();
+    (running > cap).then(|| {
+        format!(
+            "{running} items would be in progress at once, over the cap of {cap}. \
+             Keep what you are working on now in progress and leave the rest pending."
+        )
+    })
+}
+
 /// Every write is a merge: updates are folded into the existing state.
 /// - **Existing items**: `content` is optional — if omitted the previous
 ///   value is kept. This lets the model mark an item from `in_progress` →
@@ -690,6 +729,14 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
                 }
             }
 
+            // Refuse a write that would put more items in progress than the cap allows, before any of it lands.
+            let cap = max_in_progress_cap(std::env::var(MAX_IN_PROGRESS_VAR).ok().as_deref());
+            let mut projected = todo_state.0.clone();
+            apply_merge(&mut projected, &input.todos, input.prepend)?;
+            if let Some(message) = in_progress_cap_violation(&projected, cap) {
+                return Ok(TodoWriteOutput::TooManyInProgress(message));
+            }
+
             // Always a merge. The list belongs to the user, so a write adds
             // and updates by id and never drops what it leaves out.
             apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
@@ -833,6 +880,101 @@ mod tests {
     }
 
     // -- Tests --
+
+    #[test]
+    fn the_in_progress_cap_defaults_to_five_and_parses_an_override() {
+        assert_eq!(max_in_progress_cap(None), 5);
+        assert_eq!(max_in_progress_cap(Some("2")), 2);
+        assert_eq!(max_in_progress_cap(Some(" 7 ")), 7);
+        // A value that is not a positive number keeps the default.
+        assert_eq!(max_in_progress_cap(Some("nope")), 5);
+        assert_eq!(max_in_progress_cap(Some("0")), 5);
+    }
+
+    #[test]
+    fn a_state_over_the_cap_is_refused_with_the_count_and_the_cap() {
+        let mut state = TodoState::default();
+        let running = || TodoItem {
+            content: "work".to_string(),
+            priority: TodoPriority::Medium,
+            status: TodoStatus::InProgress,
+            meta: None,
+            verification: None,
+            verification_passed: false,
+        };
+        for i in 0..5 {
+            state.push(format!("a{i}").into(), running());
+        }
+        assert!(in_progress_cap_violation(&state, 5).is_none());
+
+        state.push("a5".into(), running());
+        let message = in_progress_cap_violation(&state, 5).expect("six in progress is over five");
+        assert!(
+            message.contains("6 items would be in progress"),
+            "{message}"
+        );
+        assert!(message.contains("over the cap of 5"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn the_tool_refuses_a_sixth_in_progress_item_and_leaves_the_list_alone() {
+        let tool = TodoWriteTool;
+        let shared = Resources::new().into_shared();
+
+        let at_cap: Vec<TodoUpdate> = (0..5)
+            .map(|i| make_update(&format!("a{i}"), Some("work"), Some(TodoStatus::InProgress)))
+            .collect();
+        let output = expect_success(
+            xai_tool_runtime::Tool::run(
+                &tool,
+                test_ctx(shared.clone()),
+                TodoWriteInput {
+                    merge: true,
+                    prepend: false,
+                    todos: at_cap,
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(output.todos.len(), 5);
+
+        let refused = xai_tool_runtime::Tool::run(
+            &tool,
+            test_ctx(shared.clone()),
+            TodoWriteInput {
+                merge: true,
+                prepend: false,
+                todos: vec![make_update(
+                    "a5",
+                    Some("one more"),
+                    Some(TodoStatus::InProgress),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+        let TodoWriteOutput::TooManyInProgress(message) = refused else {
+            panic!("expected the cap to refuse the write, got {refused:?}");
+        };
+        assert!(message.contains("over the cap of 5"), "{message}");
+
+        // Nothing the refused write carried landed.
+        let after = expect_success(
+            xai_tool_runtime::Tool::run(
+                &tool,
+                test_ctx(shared.clone()),
+                TodoWriteInput {
+                    merge: true,
+                    prepend: false,
+                    todos: vec![make_update("a0", None, None)],
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(after.todos.len(), 5, "the refused write added an item");
+    }
 
     #[test]
     fn name_and_description() {
