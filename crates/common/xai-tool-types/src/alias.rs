@@ -766,7 +766,7 @@ mod tests {
         let found = scan_alias_sites(&root);
 
         // The scan is worth nothing if it found nothing. Every `LOCAL` and
-        // `ENUM_VARIANTS` alias stays a bare `#[serde(alias)]`, so all of them
+        // `ENUM_VARIANTS` alias stays a bare `#[serde(alias)]`. All of them
         // must appear in the scan - which is also what proves the scanner is
         // reading the tree rather than silently skipping it.
         let declared_elsewhere: usize = LOCAL

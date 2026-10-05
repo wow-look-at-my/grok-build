@@ -755,9 +755,9 @@ mod tests {
     }
 
     /// An exec that was prepared for and then did not happen must leave nothing
-    /// behind. The session is confined in place in that case, and an
-    /// inheritable fd whose number is in the environment is a live socket to an
-    /// unconfined `gh` for every child the session spawns.
+    /// behind. The session is confined in place in that case. An inheritable fd
+    /// whose number is in the environment is a live socket to an unconfined
+    /// `gh` for every child the session spawns.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn a_failed_exec_puts_the_worker_back_out_of_reach_of_children() {

@@ -227,7 +227,7 @@ pub const PATHBOX_PROFILE: &str = "pathbox";
 /// groups the flags into separate lists and loses it. The path-mount jail is
 /// enabled only when `--sandbox=pathbox` is given, OR any of
 /// `--ro`/`--rw`/`--rn` appears (the jail is then implied). A bare
-/// `--sandbox` with no value is always invalid, and a `--sandbox <profile>`
+/// `--sandbox` with no value is always invalid. A `--sandbox <profile>`
 /// naming anything other than `pathbox` is the built-in profile sandbox (not
 /// a jail) and cannot be combined with path flags. Scanning stops at a bare
 /// `--`, so a prompt is never read as a flag.
@@ -1054,9 +1054,9 @@ mod tests {
         );
     }
 
-    /// The defect this fixes, on the record. Prints the fixed argv, and beside it
-    /// the argv the pre-fix caller produced: the SAME builder for a plan with no
-    /// fd, with the identical override appended to the finished command. There it
+    /// The defect this fixes, on the record. Prints the fixed argv. Beside it the
+    /// argv the pre-fix caller produced: the SAME builder for a plan with no fd,
+    /// with the identical override appended to the finished command. There it
     /// sits after `--`, so bwrap hands it to the jailed binary as arguments and
     /// never sets the variable. Output only — the assertions live in the tests
     /// above.

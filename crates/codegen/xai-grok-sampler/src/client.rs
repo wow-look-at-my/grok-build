@@ -249,7 +249,7 @@ fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
 
 /// Strict parse, then one retry with the payload's null lists read as empty.
 /// The retry only runs when the strict parse failed. There was something to
-/// rewrite, and a retry that also fails reports the STRICT error — so a
+/// rewrite. A retry that also fails reports the STRICT error — so a
 /// malformed payload is never described in terms of the rewrite.
 fn parse_sse_event<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
     let strict = match from_sse_payload::<T>(data) {

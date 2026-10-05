@@ -515,9 +515,9 @@ fn plan_updates(
 }
 
 /// A seeded item is a todo like any other. The seed dispatches through the
-/// session's own `todo_write`, so the same `Plan` session update a
-/// model-written list produces is enqueued for the client, carrying the items
-/// the planner listed.
+/// session's own `todo_write`. The same `Plan` session update a model-written
+/// list produces is enqueued for the client, carrying the items the planner
+/// listed.
 #[tokio::test(flavor = "current_thread")]
 async fn the_seed_reaches_the_client_as_a_plan_update() {
     let local = tokio::task::LocalSet::new();
@@ -630,10 +630,11 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
         .await;
 }
 
-/// The shipped reader that carries a planner child's items back
-/// ([`crate::agent::subagent::session_todo_contents`]), driven against a real
-/// bound session whose list was written through the real tool — and against an
-/// id that was never bound, which is the proxy-mode / no-child case.
+/// This is the shipped reader that carries a planner child's items back
+/// ([`crate::agent::subagent::session_todo_contents`]). The shipped reader is
+/// driven against a real bound session whose list was written through the real
+/// tool — and against an id that was never bound. This is the proxy-mode /
+/// no-child case.
 #[tokio::test(flavor = "current_thread")]
 async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
     let local = tokio::task::LocalSet::new();
@@ -1472,7 +1473,7 @@ async fn planner_runtime_failure_pauses_goal_with_canonical_message() {
 }
 
 /// Regression. After a user Stop (ESC / Ctrl-C) the real coordinator latches
-/// the session in `spawn_blocked_sessions`, and every Task spawn — the goal
+/// the session in `spawn_blocked_sessions`. Every Task spawn — the goal
 /// planner included — is rejected as cancelled until an `OpenSpawnAdmission`
 /// arrives. The only reopen site runs after the goal-slash dispatch, and the
 /// resume path early-returns before it, which wedged goals until restart.
