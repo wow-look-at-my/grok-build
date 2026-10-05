@@ -38,7 +38,7 @@ pub struct SamplerActor {
 /// the round unwinds. The actor clears `active_requests` from the id a
 /// finished round returns, and a `JoinError` carries none. Spawned bare, a
 /// round that panicked would leave `IsActive` answering true and
-/// `ActiveCount` counting a request that stopped existing, for the rest of
+/// `ActiveCount` counting a request that stopped existing. For the rest of
 /// the sampler's life.
 fn spawn_tracked_round(
     tasks: &mut JoinSet<RequestId>,

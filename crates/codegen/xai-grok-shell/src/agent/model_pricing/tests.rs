@@ -83,8 +83,8 @@ fn a_null_cache_tier_reads_as_zero_and_leaves_the_rest_priced() {
     assert_eq!(pricing.output_per_token_usd, 0.000015);
 }
 
-/// A document that prices nothing must not be recorded as an all-zero price: `compute_cost_ticks` reads that as unusable anyway, and storing it as an answer claims a
-/// price the catalog never gave.
+/// A document that prices nothing must not be recorded as an all-zero price:
+/// `compute_cost_ticks` reads that as unusable anyway, and storing it.
 #[test]
 fn a_document_that_prices_nothing_is_not_an_answer() {
     let document: ModelinfoDocument = serde_json::from_str("{}").expect("parse");

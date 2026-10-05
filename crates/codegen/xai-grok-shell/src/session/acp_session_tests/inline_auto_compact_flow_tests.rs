@@ -1119,7 +1119,7 @@ async fn third_consecutive_overflow_gives_up_instead_of_looping() {
         .await;
 }
 /// A successful sample must clear `context_overflow_recovery` back to
-/// `None` so a later, unrelated overflow gets its own fresh compaction
+/// `None` so a later. Unrelated overflow gets its own fresh compaction
 /// attempt rather than skipping straight to the reduce fallback.
 #[tokio::test(flavor = "current_thread")]
 async fn successful_sample_resets_context_overflow_recovery() {

@@ -1422,9 +1422,9 @@ mod wire_alias_tests {
         .expect("a claims object encodes")
     }
 
-    /// An idp that writes both the snake_case and the camelCase principal key —
-    /// which is what a token relayed through a translating gateway looks like —
-    /// must still be readable, not rejected as a duplicate field.
+    /// An idp that writes both the snake_case. And the camelCase principal key
+    /// — which is what a token relayed through a translating gateway looks like
+    /// — must still be readable. Not rejected as a duplicate field.
     #[test]
     fn a_token_naming_the_principal_under_both_spellings_is_readable() {
         let token = token_with(

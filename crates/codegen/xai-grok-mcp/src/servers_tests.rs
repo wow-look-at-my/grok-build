@@ -105,8 +105,8 @@ fn plan_stdio_spawn_non_windows_never_resolves() {
 /// The spawn path must map a package runner's caches onto the session's
 /// writable temp storage. This happens whenever the session is
 /// write-confined, because the runner's default caches (`~/.cache/uv`,
-/// `~/.npm`) sit under a `$HOME` no confining profile grants — which is
-/// the EPERM that made `uvx kagimcp` and `npx tampermonkey-mcp` fail their
+/// `~/.npm`) sit under a `$HOME` no confining profile grants. Which is the
+/// EPERM that made `uvx kagimcp` and `npx tampermonkey-mcp` fail their
 /// MCP handshake with "Broken pipe". Drives the shipped
 /// `apply_runner_cache_env` (the core the spawn site calls) against a real
 /// `tokio::process::Command`, and asserts on what the child would receive.

@@ -4900,7 +4900,7 @@ async fn prefix_stable_across_user_assistant_turns() {
 /// `[Reasoning, Assistant]` pair (as the shell turn-loop commits it — the
 /// Reasoning sibling rides the `push_tool_result` arm, the Assistant rides
 /// `push_assistant_response`) must survive the integrity-repair + prune pass in
-/// `build_request` and reach the next turn's Messages wire as a `Thinking`
+/// `build_request` and reach the next turn's Messages wire. As a `Thinking`
 /// block. The reasoning carries real thinking text with NO encrypted signature
 /// (the Anthropic-compatible third-party case, e.g. Kimi) — the exact scenario
 /// the goal suspects is being dropped.

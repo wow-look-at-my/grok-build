@@ -905,8 +905,8 @@ async fn forced_harvest_delivers_rows_queued_before_the_turn_started() {
 }
 
 /// The first-Enter contract, shell side: a row that arrives while a turn is
-/// running is picked up by the turn loop's OWN harvest — the one it runs
-/// before each model request, with no user gesture behind it — and lands in
+/// running is picked up. By the turn loop's OWN harvest — the one it runs
+/// before each model request, with no user gesture behind it. And lands in
 /// the interjection buffer the next request drains. No second Enter, and no
 /// `DeliverQueuedPromptsNow`, is involved anywhere in this path.
 #[tokio::test]

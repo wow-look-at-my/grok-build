@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     /// Like [`test_host_params`], but the caller supplies the agent-slot
-    /// semaphore, so calls can share one pool the way multiple runs
+    /// semaphore. So calls can share one pool the way multiple runs
     /// launched from the same `WorkflowManager` do.
     fn test_host_params_with_slots(
         run_id: &str,

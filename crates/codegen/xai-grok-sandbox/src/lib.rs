@@ -684,8 +684,8 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
-    /// The predicate and the builder must never disagree about whether an exec follows. `apply_sandbox` asks the predicate BEFORE it starts the CI host worker, and the answer decides whether the worker's fd is made exec-surviving. A predicate that says yes where the builder then produces no command leaves an inheritable fd, and its number in the environment, in a session that went on to confine
-    /// itself in place. Every child of that session can then reach an unconfined `gh`.
+    /// The predicate and the builder must never disagree about whether an exec follows. `apply_sandbox` asks the predicate BEFORE it starts the CI host worker, and the answer decides whether the worker's fd is made exec-surviving. A predicate that says yes where the builder then produces no command leaves an inheritable fd, and its number in the environment, in a session. That went on to
+    /// confine itself in place. Every child of that session can then reach an unconfined `gh`.
     #[test]
     #[cfg(target_os = "linux")]
     fn the_reexec_predicate_agrees_with_the_builder() {

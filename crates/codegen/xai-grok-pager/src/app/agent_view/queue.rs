@@ -131,7 +131,7 @@ impl AgentView {
         } else {
             InputOutcome::Action(Action::InterruptWithQueuedPrompts)
         };
-        // Acting on the prompt-path send-now while its tip is up is the user
+        // Acting on the prompt-path send-now. While its tip is up is the user
         // accepting the hint — mirrors the undo / image-input funnels so the
         // send_now `shown → accepted` conversion is measurable.
         if matches!(outcome, InputOutcome::Action(_))
@@ -816,9 +816,9 @@ impl AgentView {
     }
 
     /// Whether the one-step move this row was asked to make would have to cross
-    /// the shell/client boundary in the merged pane — up for a client row, down
-    /// for a shell row. The pane draws every shell row first because the drain
-    /// runs them first (`maybe_drain_queue` holds every local row while any
+    /// the shell/client boundary in the merged pane — up. For a client row,
+    /// down for a shell row. The pane draws every shell row first because the
+    /// drain runs them first (`maybe_drain_queue` holds every local row while any
     /// non-running shell row exists). That move cannot be honored: rendering it
     /// would promise a run order the queue will not follow.
     fn at_queue_origin_boundary(&self, selection_id: u64) -> bool {
@@ -1002,10 +1002,10 @@ mod queue_edit_routing_tests {
         }
     }
 
-    /// Parked on a sendable wait with a bash row stuck ahead of a real
-    /// prompt: bare Enter must reach past the bash row to the sendable one
-    /// instead of always bouncing off the oldest entry's "Can't send this
-    /// now" toast while the later prompt sits right behind it.
+    /// Parked on a sendable wait. With a bash row stuck ahead of a real
+    /// prompt: bare Enter must reach past the bash row to the sendable
+    /// one. Instead of always bouncing off the oldest entry's "Can't send
+    /// this now" toast while the later prompt sits right behind it.
     #[test]
     fn prompt_path_skips_a_stuck_bash_row_to_send_a_later_prompt_while_parked() {
         let mut agent = running_agent_local_only();

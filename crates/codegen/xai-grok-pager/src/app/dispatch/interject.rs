@@ -236,7 +236,7 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
 /// shell cancels the running turn and runs it next. The user block paints at
 /// dispatch (the arm hides the queue echo; the adoption reuses the block). A
 /// slash invocation this client OWNS (a pager builtin: `/plan`, `/model`,
-/// …) is not a message at all and is routed back through the submit path
+/// …) is not a message at all and is routed back. Through the submit path
 /// instead: the shell has no such command. Sending the text would hand the
 /// model the literal `/cmd args`. Shell-owned commands (ACP-advertised skills
 /// and builtins) keep the send-now route. The shell resolves those when the

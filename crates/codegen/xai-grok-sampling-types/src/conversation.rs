@@ -579,7 +579,7 @@ impl From<ToolDefinition> for ToolSpec {
 /// dotted key addresses a nested object (`"options.num_ctx"` reaches
 /// `options: { num_ctx }`). This is because TOML cannot spell a nested table
 /// inline beside scalar siblings and an `[extra_body.options]` sub-table is a
-/// different shape from the flat map the rest of the config uses.
+/// different shape. From the flat map the rest of the config uses.
 pub fn merge_extra_body(
     body: &mut serde_json::Value,
     extras: &serde_json::Map<String, serde_json::Value>,
@@ -1036,8 +1036,8 @@ pub fn reported_cost_ticks(raw: Option<i64>) -> Option<i64> {
 }
 
 /// Per-token USD pricing for a model, used to **derive** cost from token
-/// counts when a backend reports usage but no `cost_in_usd_ticks` on the wire
-/// (e.g. OpenAI-compatible / third-party endpoints).
+/// counts when a backend reports usage but no `cost_in_usd_ticks`. On the
+/// wire (e.g. OpenAI-compatible / third-party endpoints).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ModelPricing {
     /// USD per uncached input token (the portion of `prompt_tokens` that is neither a cache read nor a cache write).
@@ -5252,7 +5252,7 @@ mod tests {
     }
 
     /// Cache tiers. Cached reads billed at a discount and cache writes at a
-    /// premium must each contribute their own tier, with the uncached portion
+    /// premium must each contribute their own tier. With the uncached portion
     /// correctly subtracted from `prompt_tokens`.
     #[test]
     fn compute_cost_ticks_covers_cache_tiers() {

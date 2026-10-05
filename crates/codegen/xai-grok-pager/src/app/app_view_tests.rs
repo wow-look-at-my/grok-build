@@ -3494,7 +3494,7 @@ fn ctrl_c_running_prompt_with_text_clears_text_and_preserves_turn() {
     );
 }
 /// Mid-turn Esc is swallowed at the app level too: no `CancelTurn`, no armed double-press, no trigger stamp, draft intact, and a toast naming Ctrl+C.
-/// naming Ctrl+C. naming Ctrl+C. Covers both panes, vim on and off.
+/// naming Ctrl+C. naming Ctrl+C. naming Ctrl+C. Covers both panes, vim on and off.
 #[test]
 fn esc_mid_turn_hints_ctrl_c_instead_of_cancelling() {
     for (vim_mode, pane) in [

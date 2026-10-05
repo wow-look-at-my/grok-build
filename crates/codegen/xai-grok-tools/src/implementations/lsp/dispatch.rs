@@ -65,7 +65,7 @@ impl LspBackendAdapter {
         tokio::spawn(async move {
             // Guarded, because the state below is what a waiter is waiting on:
             // `ensure_ready` parks on `notify` for as long as the state reads
-            // `Starting`, so a bootstrap that dies mid-flight has to move the
+            // `Starting`. So a bootstrap that dies mid-flight has to move the
             // state anyway and say why.
             let result = match crate::util::detached::guarded(
                 "lsp bootstrap",
@@ -639,10 +639,10 @@ mod tests {
 
     /// A bootstrap that ends in failure still answers whoever is waiting.
     /// `ensure_ready` parks on the coordinator's `notify` for as long as the
-    /// state reads `Starting`, so a bootstrap that stopped without moving the
-    /// state leaves every later LSP tool call waiting on a task that already
-    /// ended. A manager with no servers configured is that ending, with
-    /// nothing injected.
+    /// state reads `Starting`, so a bootstrap. That stopped without moving
+    /// the state leaves every later LSP tool call waiting on a task that
+    /// already ended. A manager with no servers configured is that ending,
+    /// with nothing injected.
     #[tokio::test]
     async fn a_failed_bootstrap_answers_the_waiter_instead_of_stranding_it() {
         let manager = Arc::new(TokioMutex::new(LspManager::default()));
@@ -663,7 +663,7 @@ mod tests {
     /// run it on loses the warm-up and nothing else. Spawning unconditionally
     /// made every synchronous `WorkspaceHandle` construction panic the moment
     /// the caller had any LSP server in `~/.grok/lsp.json`, which is a plain
-    /// test with no Tokio runtime and a machine-dependent one besides.
+    /// test. With no Tokio runtime and a machine-dependent one besides.
     #[test]
     fn ensure_started_background_without_a_runtime_skips_the_warmup() {
         assert!(

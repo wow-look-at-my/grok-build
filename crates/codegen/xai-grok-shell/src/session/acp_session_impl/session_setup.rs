@@ -344,7 +344,7 @@ impl SessionActor {
     /// running turn's next safe point otherwise. Never interrupts the turn.
     /// Rides the buffer `flush_pending_skill_reminders` drains, which is what
     /// makes a mid-turn notice land without a second flush site to keep in
-    /// sync with the turn loop's safe points.
+    /// sync. With the turn loop's safe points.
     pub(crate) fn deliver_reminder_to_main_agent(&self, text: String) {
         let tag = self.reminder_wrapper_tag();
         let text = text.replace(&format!("</{tag}>"), &format!("<\\/{tag}>"));

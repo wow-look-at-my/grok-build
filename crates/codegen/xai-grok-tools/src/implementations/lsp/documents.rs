@@ -279,7 +279,7 @@ mod tests {
     }
 
     /// The revision is written down before the notification goes out, so a
-    /// versionless push that arrives while the send is still running is
+    /// versionless push. That arrives while the send is still running is
     /// credited with the text the server was given. A send that fails takes
     /// it back: what is recorded describes the text the server has.
     #[test]

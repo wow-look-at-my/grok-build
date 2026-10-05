@@ -1090,8 +1090,8 @@ impl SessionActor {
                 self.reconstruct_full_config().await,
             ),
         };
-        // The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model, on a backend that takes a block it
-        // did not mint as text.
+        // The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model, on a backend. That takes a block
+        // it did not mint as text.
         let summary_strips_reasoning = sampling_config.api_backend == ApiBackend::Messages
             || !xai_grok_sampling_types::same_model(&model_id, &sampling_config.model);
         let compaction = xai_grok_telemetry::events::CompactionScope::begin(
@@ -2431,7 +2431,7 @@ impl SessionActor {
         None
     }
     /// Returns `Some` when tool call outputs have pushed the estimated token
-    /// count past what the context window holds alongside an answer,
+    /// count. Past what the context window holds alongside an answer,
     /// indicating pre-emptive compaction is needed.
     pub(crate) async fn check_preflight_overflow(&self) -> Option<AutoCompactTriggerInfo> {
         if self.compaction.is_suppressed() {

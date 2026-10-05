@@ -725,10 +725,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             }
         })
         .collect();
-    // The harness model slots are spliced in from their own table below.
-    // What this pins is WHERE they sit — under Models, after
-    // `subagent_model_inheritance` — and a literal list of them would go stale the
-    // moment a slot is added.
+    // The harness model slots are spliced in from their own table below. What this
+    // pins is WHERE they sit — under Models, after `subagent_model_inheritance`.
+    // And a literal list of them would go stale the moment a slot is added.
     let mut expected: Vec<SettingKey> = vec![
         // Booleans.
         "compact_mode",

@@ -696,7 +696,7 @@ mod tests {
 
     /// The sink map is taken on every subscriber callback. What the lock does
     /// after somebody else panicked while holding it is the difference between a
-    /// dropped line and a process that can no longer log at all.
+    /// dropped line and a process. That can no longer log at all.
     #[test]
     fn a_panic_while_the_sink_map_is_held_leaves_it_acquirable() {
         let layer = std::sync::Arc::new(RoutingLayer::new(

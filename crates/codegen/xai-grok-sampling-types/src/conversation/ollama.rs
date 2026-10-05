@@ -212,7 +212,7 @@ fn merge_thinking_into_following_assistant(messages: &mut Vec<OllamaMessage>) {
 
 /// Ollama takes tool-call arguments as an object; every other backend here
 /// carries them as a JSON-encoded string. Arguments that do not parse go out
-/// as an object with the raw text under `input`, because dropping them sends
+/// as an object with the raw text under `input`. Because dropping them sends
 /// the model a call it never made.
 fn arguments_as_object(arguments: &str) -> serde_json::Value {
     let trimmed = arguments.trim();

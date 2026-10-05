@@ -1056,7 +1056,7 @@ fn strict_profile_preserves_tool_calls_and_results() {
 
 /// Only the *serialized body* is narrowed. The stored conversation keeps both
 /// values, which is what lets the Messages backend resolve thinking
-/// signatures and lets a later turn on a tolerant provider still send
+/// signatures and lets a later turn. On a tolerant provider still send
 /// reasoning.
 #[test]
 fn strict_profile_leaves_stored_history_untouched() {
@@ -1150,7 +1150,7 @@ fn partial_profiles_suppress_independently() {
 
 /// `strip_unsupported_message_properties` drops exactly what the provider
 /// named, and reports whether it changed anything so the retry loop can tell a
-/// productive strip from a no-op.
+/// productive strip. From a no-op.
 #[test]
 fn strip_unsupported_message_properties_narrows_named_fields_only() {
     let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());

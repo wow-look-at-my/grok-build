@@ -665,8 +665,8 @@ pub(crate) fn user_item(id: &str, owner: &str) -> InputItem {
 
 /// Consider a user-originated row whose text. That row is a slash command,
 /// carried in both its wire blocks and its queue metadata — the shape a
-/// pager row that was never resolved client-side sends (an ACP/shell command
-/// passed through).
+/// pager row. That was never resolved client-side sends (an ACP/shell
+/// command passed through).
 #[cfg(test)]
 pub(crate) fn slash_command_item(id: &str, command: &str) -> InputItem {
     let mut item = user_item(id, "A");

@@ -638,8 +638,8 @@ mod tests {
     }
 
     /// Every wire shape a gateway prices a call with has to parse, and an
-    /// Anthropic response that prices nothing has to stay priceless rather
-    /// than read as free.
+    /// Anthropic response. That prices nothing has to stay priceless
+    /// rather than read as free.
     #[test]
     fn usage_parses_every_cost_shape_a_gateway_sends() {
         let cases = [

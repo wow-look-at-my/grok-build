@@ -1228,11 +1228,11 @@ fn send_prompt_with_images_while_running_and_steer_queues_on_server() {
 
 /// Regression (queue reorder race). A plain prompt typed while a turn is
 /// running must never overtake an older prompt still waiting in the local
-/// drip-feed queue — e.g. prompts queued during "Starting session…"
-/// before the turn began, where the first drains to start the turn and the
-/// rest are stranded locally. Immediate-sending the new prompt onto the
-/// server queue while the one stayed local ran them AHEAD of it (the merge is
-/// server-rows-first), so `[2, 3]` showed up as `[3, 2]`. The order is now
+/// drip-feed queue. E.g. prompts queued during "Starting session…" before
+/// the turn began, where the first drains to start the turn and the rest are
+/// stranded locally. Immediate-sending the new prompt onto the server queue
+/// while the one stayed local ran them AHEAD of it (the merge is
+/// server-rows-first). So `[2, 3]` showed up as `[3, 2]`. The order is now
 /// held by moving the older row to the server queue FIRST rather than by
 /// holding the newer one back (`migrate_local_rows_to_server_queue`). Leaving
 /// it stranded is what latched mid-turn delivery off for the rest of a
@@ -6578,7 +6578,7 @@ fn idle_enter_sends_immediately() {
 }
 
 /// Enter while a turn is running hands the prompt to the shell right away, so
-/// the running turn harvests it at its next gap between tool calls / model
+/// the running turn harvests it at its next gap. Between tool calls / model
 /// requests. Holding it in the local drip-feed queue instead would delay it to
 /// the end of the whole turn — the ASAP-send bug.
 #[test]

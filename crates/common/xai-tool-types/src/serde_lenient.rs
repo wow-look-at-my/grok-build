@@ -113,7 +113,7 @@ where
     })
 }
 
-/// The same leniency over `Option<Vec<String>>`, for a shadow struct that must
+/// The same leniency over `Option<Vec<String>>`, for a shadow struct. That must
 /// tell a key the sender omitted from a key it sent as `null` or `[]` before
 /// folding one field's spellings together. An omitted key yields `None`.
 /// present `null` yields `Some(Vec::new())`, which is what the list form of the

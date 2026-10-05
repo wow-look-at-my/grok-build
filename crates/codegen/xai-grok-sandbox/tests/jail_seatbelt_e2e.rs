@@ -129,12 +129,12 @@ fn the_seatbelt_jail_hands_the_host_worker_fd_and_its_env_to_the_jailed_process(
     );
 }
 
-/// The whole point of the fd contract, end to end on macOS: a process inside
+/// The whole point of the fd contract, end to end on macOS: a process. Inside
 /// the real Seatbelt jail, holding only the fd number the jail handed it,
 /// reaches the real host worker — the shipped worker loop running as a real
 /// unsandboxed child — and gets a framed answer back. The answer is checked
 /// for SHAPE, not content: a runner with no `gh` (and no credentials) is
-/// answered by the worker's nothing-usable sentinel, and that still proves
+/// answered by the worker's nothing-usable sentinel. And that still proves
 /// the jail carried the connection. This is the claim here.
 #[test]
 fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {

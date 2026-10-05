@@ -231,7 +231,7 @@ impl EndpointsConfig {
 }
 
 /// `EndpointsConfig` with each list-URL key spelling as its own field, so a
-/// table naming both folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
+/// table naming both folds. Under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
 /// rather than failing the whole `[endpoints]` table as a duplicate field.
 /// Every field carries `#[serde(default)]` from the container, which is the
 /// same rule [`EndpointsConfig`] applies on its own: an absent key is unset,
@@ -324,7 +324,7 @@ mod endpoints_wire_alias_tests {
 
     /// A `[endpoints]` table naming the list URL under both keys is one URL
     /// stated twice. The table can arrive from a managed-config or campaign
-    /// layer, not only from the user's own file, and a duplicate-field
+    /// layer, not only from the user's own file. And a duplicate-field
     /// rejection here would take the whole config down with it.
     #[test]
     fn a_table_naming_the_list_url_under_both_keys_under_one_value_parses_once() {
@@ -3948,7 +3948,7 @@ pub(crate) fn resolve_model_list(
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
         // Entries that carry a real (non-default) context window, treated as
-        // a per-slug `/v1/models` listing for backfilling entries that were
+        // a per-slug `/v1/models` listing for backfilling entries. That were
         // left at the silent hardcoded default.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()

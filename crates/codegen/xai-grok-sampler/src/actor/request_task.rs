@@ -1584,9 +1584,9 @@ impl Backup<'_> {
 }
 
 /// Publish the gate's current rate. The event's whole job is to change what a
-/// client renders. An unchanged reading is not sent — with a single exception:
-/// while the rate is under the floor the event also carries how long that has
-/// lasted, and that number moves even when the rate does not.
+/// client renders. An unchanged reading is not sent — with a single exception.
+/// While the rate is under the floor the event also carries how long that has
+/// lasted, and that number moves even. When the rate does not.
 fn publish_rate(
     gate: &OutputRateGate,
     now: std::time::Instant,

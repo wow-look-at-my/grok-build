@@ -2640,7 +2640,7 @@ async fn a_per_agent_pin_wins_over_the_subagent_default_slot() {
 }
 
 /// A slot naming a model the catalog does not carry falls through to the
-/// parent model rather than sending a request to a model that is not there.
+/// parent model rather than sending a request to a model. That is not there.
 #[tokio::test]
 async fn an_unknown_subagent_default_slot_model_falls_through_to_inherit() {
     use xai_grok_agent::config::ModelOverride;
