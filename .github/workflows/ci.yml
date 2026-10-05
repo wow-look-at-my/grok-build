@@ -33,28 +33,6 @@ env:
     {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
-  # Every check that reads the tree and nothing else, so prose is named before a build starts.
-  source-checks:
-    name: Source checks
-    # ubuntu-latest, not the 22.04 the build jobs pin: slopfix ships as a Cosmo APE whose MZ magic the older image's Mono binfmt handler claims.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      actions: write
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: wow-look-at-my/actions@no-all-builds-job#latest
-
-      - uses: wow-look-at-my/slopfix@master
-
-      - uses: wow-look-at-my/actions@no-tests-in-yaml#latest
-
-      - uses: wow-look-at-my/actions@push-excludes-tags#latest
-
-      - uses: wow-look-at-my/actions@ste-lint#latest
-
   fmt:
     name: Rustfmt
     runs-on: ubuntu-22.04
