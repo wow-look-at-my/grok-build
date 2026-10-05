@@ -551,6 +551,40 @@ pub fn render_entry_hover(
         }
     }
 }
+/// The status line's todo badge: `done/total`, where the total leaves out cancelled items. `None`
+/// when nothing counts, so the badge is absent rather than `0/0`.
+pub fn render_todo_badge_spans(
+    counts: &super::todo_pane::TodoCounts,
+    hovered: bool,
+    theme: &Theme,
+) -> Option<Vec<Span<'static>>> {
+    use ratatui::style::Modifier;
+    if counts.total() == 0 {
+        return None;
+    }
+    let total = counts.total_excluding_cancelled();
+    if total == 0 {
+        return None;
+    }
+    let count_style = if hovered {
+        Style::default()
+            .fg(theme.text_primary)
+            .bg(theme.bg_base)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.text_secondary).bg(theme.bg_base)
+    };
+    let dim_style = if hovered {
+        Style::default().fg(theme.text_secondary).bg(theme.bg_base)
+    } else {
+        Style::default().fg(theme.gray_dim).bg(theme.bg_base)
+    };
+    Some(vec![
+        Span::styled(counts.completed.to_string(), count_style),
+        Span::styled("/", dim_style),
+        Span::styled(total.to_string(), count_style),
+    ])
+}
 /// Selection/hover chrome for a side pane (todo, queue, tasks). Focused panes get a dismiss control.
 pub fn render_todo_chrome(
     buf: &mut Buffer,
@@ -1000,6 +1034,32 @@ pub(crate) fn build_hints(
 mod tests {
     use super::*;
     use crate::actions::ActionRegistry;
+
+    #[test]
+    fn the_todo_badge_counts_done_over_the_total() {
+        let counts = super::super::todo_pane::TodoCounts {
+            in_progress: 1,
+            pending: 1,
+            completed: 2,
+            cancelled: 3,
+        };
+        let spans = render_todo_badge_spans(&counts, false, &Theme::current())
+            .expect("a badge for a live list");
+        let text = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert_eq!(text, "2/4", "cancelled items stay out of the denominator");
+    }
+
+    #[test]
+    fn the_todo_badge_is_absent_when_only_cancelled_items_remain() {
+        let counts = super::super::todo_pane::TodoCounts {
+            cancelled: 2,
+            ..Default::default()
+        };
+        assert!(render_todo_badge_spans(&counts, false, &Theme::current()).is_none());
+    }
     /// Convenience: build hints for the Scrollback pane with sensible defaults.
     /// Override only what each test cares about.
     #[allow(clippy::too_many_arguments)]

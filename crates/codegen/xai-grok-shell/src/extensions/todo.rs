@@ -40,13 +40,14 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         );
     };
 
+    let capture_id = req
+        .capture_id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let (tx, rx) = oneshot::channel();
     let _ = session.cmd_tx.send(SessionCommand::TodoCapture {
         request: req.request,
         urgent: req.urgent,
-        capture_id: req
-            .capture_id
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        capture_id: capture_id.clone(),
         respond_to: tx,
     });
     let result = rx
@@ -54,10 +55,44 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         .map_err(|_| acp::Error::internal_error().data("session failed to respond"))?;
 
     match result {
-        Ok(outcome) => super::to_ext_response(Ok(serde_json::json!({
-            "added": outcome.added,
-            "toolsUsed": outcome.tools_used,
-        }))),
+        Ok(outcome) => {
+            // A user-added item is work to start, not only a note on the list: with no turn running,
+            // nothing else notices it. The capture hands back the reminder text for exactly that case,
+            // and it is sent as its own prompt so a turn begins.
+            if let Some(reminder) = outcome.wake_reminder.clone() {
+                let (wake_tx, wake_rx) = oneshot::channel();
+                let enqueued = session
+                    .cmd_tx
+                    .send(SessionCommand::Prompt {
+                        prompt_id: format!("todo-added-{capture_id}"),
+                        prompt_blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(reminder))],
+                        prompt_mode: crate::session::plan_mode::PromptMode::Agent,
+                        artifact_upload_ctx: None,
+                        client_identifier: None,
+                        screen_mode: None,
+                        verbatim: true,
+                        traceparent: xai_grok_otel::current_traceparent(),
+                        json_schema: None,
+                        send_now: false,
+                        admission: None,
+                        tool_overrides_update: None,
+                        respond_to: wake_tx,
+                        prompt_admitted: None,
+                        persist_ack: None,
+                        parsed_prompt_tx: None,
+                    })
+                    .is_ok();
+                if enqueued {
+                    tokio::spawn(async move {
+                        let _ = wake_rx.await;
+                    });
+                }
+            }
+            super::to_ext_response(Ok(serde_json::json!({
+                "added": outcome.added,
+                "toolsUsed": outcome.tools_used,
+            })))
+        }
         // Model errors take the canonical mapping so a rate limit keeps its
         // typed code and copy, same as `/btw`.
         Err(TodoCaptureError::Sampling(e)) => {

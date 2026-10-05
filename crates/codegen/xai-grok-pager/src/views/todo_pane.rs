@@ -138,6 +138,13 @@ impl TodoCounts {
     pub fn total(&self) -> usize {
         self.in_progress + self.pending + self.completed + self.cancelled
     }
+
+    /// Tasks that count toward completion progress: every status except cancelled. The status line's
+    /// `done/total` badge uses it as the denominator, so a cancelled item cannot keep the count off
+    /// `N/N`.
+    pub fn total_excluding_cancelled(&self) -> usize {
+        self.in_progress + self.pending + self.completed
+    }
 }
 
 fn empty_placeholder_message(todos_empty: bool, counts: TodoCounts) -> String {

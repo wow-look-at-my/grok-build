@@ -44,6 +44,9 @@ pub struct TodoCaptureOutcome {
     pub added: Vec<String>,
     /// Read-only tool calls the capture agent spent getting there.
     pub tools_used: usize,
+    /// The "the user assigned this" text to start a turn with, when no turn was running and nothing
+    /// was put in front of the agent. `None` when the text already went to a running turn.
+    pub wake_reminder: Option<String>,
 }
 
 /// Failure surface of a `/todo` capture run. Typed to the ACP boundary so
@@ -643,9 +646,22 @@ impl SessionActor {
         );
         // The list alone does not say who wrote an item, and the main agent
         // reads one it did not write as somebody else's suggestion. This is
-        // the message that says the user assigned it.
-        self.deliver_reminder_to_main_agent(captured_todos_reminder(urgent, &todo_tool, &added));
-        Ok(TodoCaptureOutcome { added, tools_used })
+        // the message that says the user assigned it. With a turn running it
+        // rides that turn's next safe point. With none, the caller starts a
+        // turn with it, so the work begins instead of waiting for the next
+        // prompt to notice the list.
+        let reminder = captured_todos_reminder(urgent, &todo_tool, &added);
+        let wake_reminder = if self.turn_is_running() {
+            self.deliver_reminder_to_main_agent(reminder);
+            None
+        } else {
+            Some(reminder)
+        };
+        Ok(TodoCaptureOutcome {
+            added,
+            tools_used,
+            wake_reminder,
+        })
     }
 
     /// Push the capture run's new transcript lines to the client's task row

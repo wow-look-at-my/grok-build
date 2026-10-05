@@ -155,6 +155,9 @@ pub enum SyntheticReason {
     /// Auto-wake synthetic prompt injected when a background subagent completed.
     /// Wakes the agent for a new turn.
     SubagentCompleted,
+    /// Auto-wake synthetic prompt injected when a `/todo` capture added items while the session was idle.
+    /// Wakes the agent so the work the user assigned begins, instead of waiting for the next prompt.
+    TodoAdded,
     /// Idle-gated notification drain: batched monitor events and/or bash task completions drained when the session is idle.
     /// Wakes the agent.
     NotificationDrain,
@@ -221,6 +224,7 @@ impl SyntheticReason {
             | Self::Unknown
             | Self::TaskCompleted
             | Self::SubagentCompleted
+            | Self::TodoAdded
             | Self::NotificationDrain
             | Self::GoalClassifierNudge
             | Self::SchedulerFired => true,
@@ -1454,6 +1458,19 @@ impl ConversationItem {
                 text: Arc::<str>::from(content.into()),
             }],
             synthetic_reason: SyntheticReason::TaskCompleted,
+            cwd_generation: None,
+            prior_turn_interrupt: None,
+            prompt_index: None,
+        })
+    }
+
+    /// Auto-wake synthetic prompt for a `/todo` capture that added items while the session was idle.
+    pub fn todo_added(content: impl Into<String>) -> Self {
+        Self::User(UserItem {
+            content: vec![ContentPart::Text {
+                text: Arc::<str>::from(content.into()),
+            }],
+            synthetic_reason: SyntheticReason::TodoAdded,
             cwd_generation: None,
             prior_turn_interrupt: None,
             prompt_index: None,

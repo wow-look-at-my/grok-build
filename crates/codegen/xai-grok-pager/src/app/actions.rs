@@ -692,6 +692,8 @@ pub enum Action {
     ShowQueue,
     /// Commit a read-only list of background tasks, subagents, and scheduled tasks as a system block (`/tasks`).
     ShowTasks,
+    /// Toggle the todo pane: show and focus it, focus it, or hide it (`/todo` with no arguments).
+    ToggleTodos,
     /// Show the current plan: preview popover if exists, toast if not.
     ShowPlan,
     /// Enter plan mode. If a description is provided, also start a turn with that text as the prompt.

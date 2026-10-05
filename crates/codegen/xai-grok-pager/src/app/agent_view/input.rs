@@ -695,6 +695,7 @@ impl AgentView {
                                 .update_hover(mouse.column, mouse.row);
                             changed |= self.hit_context.update_hover(mouse.column, mouse.row);
                             changed |= self.hit_credits.update_hover(mouse.column, mouse.row);
+                            changed |= self.hit_badge.update_hover(mouse.column, mouse.row);
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
                             if self.hit_voice_stop_button.contains(mouse.column, mouse.row) {
@@ -702,6 +703,10 @@ impl AgentView {
                             }
                             if self.hit_plan_button.contains(mouse.column, mouse.row) {
                                 self.reopen_plan_approval();
+                                return InputOutcome::Changed;
+                            }
+                            if self.hit_badge.contains(mouse.column, mouse.row) {
+                                self.toggle_todo_pane();
                                 return InputOutcome::Changed;
                             }
                             if self
@@ -882,13 +887,7 @@ impl AgentView {
             && key.kind != KeyEventKind::Release
             && key!('t', CONTROL).matches(key)
         {
-            self.todo.overlay.toggle();
-            self.todo.on_state_change();
-            if self.todo.overlay.focused {
-                self.set_active_pane(AgentPane::Todo, false);
-            } else if self.active_pane == AgentPane::Todo {
-                self.set_active_pane(AgentPane::Scrollback, false);
-            }
+            self.toggle_todo_pane();
             return InputOutcome::Changed;
         }
         if let Event::Key(key) = ev
@@ -1176,6 +1175,17 @@ impl AgentView {
     fn open_session_picker(&mut self) -> InputOutcome {
         self.active_modal = Some(crate::views::modal::session_picker_modal(None));
         InputOutcome::Action(Action::FetchSessionList)
+    }
+    /// Toggle the todo pane: show and focus it, focus it, or hide it. `Ctrl-T` and `/todo` with no
+    /// arguments both land here.
+    pub(crate) fn toggle_todo_pane(&mut self) {
+        self.todo.overlay.toggle();
+        self.todo.on_state_change();
+        if self.todo.overlay.focused {
+            self.set_active_pane(AgentPane::Todo, false);
+        } else if self.active_pane == AgentPane::Todo {
+            self.set_active_pane(AgentPane::Scrollback, false);
+        }
     }
     /// Returns `true` if the switch happened immediately, `false` if blocked.
     /// The one chokepoint for focusing the composer: with no route for its text (a child view) the prompt
