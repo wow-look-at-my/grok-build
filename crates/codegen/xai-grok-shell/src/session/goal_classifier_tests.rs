@@ -2244,8 +2244,8 @@ async fn verification_stage_clamps_skeptic_count_below_min() {
 
 #[tokio::test]
 async fn verification_stage_skeptic_transport_failure_counts_as_refute() {
-    // Skeptics: one transport-fails twice (its run and its
-    // retry), so it refutes fail-closed. Return Not Refuted.
+    // Three skeptics: one transport-fails twice (its run and its
+    // retry), so it refutes fail-closed. Two return Not Refuted.
     // Aggregate is 1-of-3 refute → Achieved.
     let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
         MockResponse::transport_error(),
@@ -2276,7 +2276,7 @@ async fn verification_stage_skeptic_transport_failure_counts_as_refute() {
 
 #[tokio::test]
 async fn verification_stage_retries_a_skeptic_that_gave_no_verdict() {
-    // Skeptic fails, and its retry clears. Only the retry's vote may
+    // Skeptic 0 fails, and its retry clears. Only the retry's vote may
     // count; the failure must never reach the implementer as a gap.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::transport_error(),
@@ -2336,8 +2336,8 @@ async fn verification_stage_skeptic_cancelled_counts_as_refute() {
 
 #[tokio::test]
 async fn verification_stage_skeptic_malformed_falls_back_to_refute() {
-    // Skeptics; one returns malformed-token + no JSON on its run and its
-    // retry; other returns Refuted. Both refute ⇒ NotAchieved.
+    // Two skeptics; one returns malformed-token + no JSON on its run and
+    // its retry; other returns Refuted. Both refute ⇒ NotAchieved.
     let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
         MockResponse::malformed_token(),
         MockResponse::malformed_token(),
@@ -2391,8 +2391,14 @@ async fn verification_stage_skeptic_runtime_error_counts_as_refute() {
 
 #[tokio::test]
 async fn verification_stage_skeptic_terminal_only_fallback_counts() {
-    // Dual-channel fallback — skeptic returns a clean terminal token but
-    // never writes a JSON verdict file.
+    // Dual-channel fallback — skeptic returns a clean terminal
+    // token but never writes a JSON verdict file. The harness must
+    // pick up the vote from the terminal token with
+    // `confidence: Unknown`, `evidence: ""`, and the fallback note.
+    // Variant-C outcome: skeptic 0 not-refuted, cold skeptic 1
+    // refuted → the cold quorum (skeptic 1 only) fails → NotAchieved.
+    // A terminal-only "Refuted" carries no reason, so skeptic 1 is
+    // retried once, and the retry answers the same way.
     let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
         MockResponse::terminal_only("Not Refuted"),
         MockResponse::terminal_only("Refuted"),
@@ -2718,8 +2724,8 @@ async fn verification_stage_multi_refuter_all_blocking_returns_blocked() {
 #[tokio::test]
 async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
     // A synthetic refute (transport failure, confidence Unknown) is NOT a
-    // high-confidence refute, so it must fan out the full panel rather than
-    // short-circuit. Its retry fails too.
+    // high-confidence refute, so it must fan out the full panel rather
+    // than short-circuit. Its retry fails too. 1-of-3 refute → Achieved.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::transport_error(),
         MockResponse::transport_error(),

@@ -412,7 +412,8 @@ impl SessionActor {
         // Safe when no compact is running
         self.compaction.cancel.request_cancel();
         // A turn cancel drops the in-flight `run_turn_via_sampler` future
-        // before its error path can read+clear the asap-injection flag.
+        // before its error path can read+clear the asap-injection flag, so
+        // clear both here to keep them from bleeding into a later turn.
         self.interjection_cancel_requested
             .store(false, std::sync::atomic::Ordering::SeqCst);
         *self.in_flight_sampler_request_id.lock() = None;

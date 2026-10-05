@@ -100,7 +100,10 @@ impl Shell {
                 group: Some(group), ..
             } if group.wants_hangup() => {
                 let _ = group.hangup();
-                // Hand it to the job-control children directly rather than trusting the shell to forward it.
+                // Hand it to the job-control children directly rather than
+                // trusting the shell to forward it on the way out. A shell that
+                // exits first leaves them nothing else to hear it from, and
+                // then the group kill cannot reach them either.
                 let _ = group.hangup_session_jobs();
                 true
             }
@@ -408,7 +411,8 @@ async fn run_pty_output_loop(
     // A dedicated thread, not the runtime's blocking pool: this `read` only
     // returns once every slave fd is closed, which a job that outlives the
     // shell keeps open indefinitely, and the pool is joined at runtime
-    // shutdown.
+    // shutdown. On the pool one such job wedges the whole process instead of
+    // leaking one thread the exit will reclaim.
     std::thread::spawn(move || {
         let mut reader = reader;
         let mut buf = [0u8; 4096];
@@ -1015,9 +1019,11 @@ mod tests {
                 let (gateway, _) = recording_gateway();
                 let pty_id = create_test_pty(gateway).await;
 
-                // It has to outlive the runtime drop below, which is what
-                // this covers, and killing it here would close the slave and
-                // hide that.
+                // It has to outlive the runtime drop below, which is what this
+                // covers, and killing it here would close the slave and hide
+                // that. Nothing reaps a job that ignores the hangup, so it ends
+                // itself instead of leaking one sleeper per run: 60s is far
+                // longer than the drop needs and short enough not to litter.
                 write_pty_input(&pty_id, b"(trap '' HUP; sleep 60) & echo pid=$!\n")
                     .await
                     .expect("write command");
