@@ -1438,10 +1438,10 @@ mod tests {
         assert_eq!(fg, Some(theme.accent_error), "under the floor is red");
     }
 
-    /// A row whose activity is "Waiting for response" has no stream to measure,
-    /// so a reading left over from the call that just ended does not belong on
-    /// it. Least of all one that had gone yellow or red, which reads as the
-    /// wait itself being slow.
+    /// A row whose activity is "Waiting for response" has no stream to measure.
+    /// A reading left over from the call that just ended does not belong on it.
+    /// Least of all one that had gone yellow or red, which reads as the wait
+    /// itself being slow.
     #[test]
     fn a_waiting_row_shows_no_output_rate_segment() {
         let slow = crate::acp::tracker::OutputRate {

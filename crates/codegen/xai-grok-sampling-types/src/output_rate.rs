@@ -413,8 +413,8 @@ impl OutputRateGate {
     }
 
     /// Advance the state machine. Call this on a timer, not only on arriving
-    /// chunks: a stream that stops dead delivers nothing to record, and it is
-    /// the tick that turns that silence into a falling rate.
+    /// chunks: a stream that stops dead delivers nothing to record. It is the
+    /// tick that turns that silence into a falling rate.
     pub fn tick(&mut self, now: Instant) -> RateTick {
         let Some(policy) = self.policy else {
             return RateTick::Quiet;
@@ -475,7 +475,7 @@ mod tests {
         assert!((rate - 100.0).abs() < 1.0, "rate was {rate}");
     }
 
-    /// Per-chunk estimation is what this avoids: 3-byte chunks each estimate
+    /// Per-chunk estimation is what this avoids. 3-byte chunks each estimate
     /// to zero tokens, so a summed-estimate meter reports a healthy stream as
     /// completely stalled.
     #[test]
@@ -532,8 +532,8 @@ mod tests {
     }
 
     /// Recording a whole timeline up front and ticking afterwards would let
-    /// the meter count bytes that have not arrived yet, and every reading
-    /// would come out healthy.
+    /// the meter count bytes that have not arrived yet. Every reading would
+    /// come out healthy.
     fn drive(
         gate: &mut OutputRateGate,
         start: Instant,
@@ -776,16 +776,16 @@ mod tests {
 
     /// A tool call whose arguments the provider does not stream is the model
     /// generating, just invisibly. Every fragment shape that says "this call is
-    /// open and no argument bytes have arrived" holds the measurement for as
-    /// long as the call takes to write, and the arguments arriving in one burst
-    /// afterwards are credited rather than averaged in as silence.
+    /// open and no argument bytes have arrived" holds the measurement. This
+    /// holds for as long as the call takes to write, and the arguments arriving
+    /// in one burst afterwards are credited rather than averaged in as silence.
     #[test]
     fn an_unstreamed_tool_call_holds_the_measurement() {
         let policy = collapsed_policy();
         let start = Instant::now();
 
         // Those fragment shapes a provider uses to say this differ in the id
-        // and name they repeat, which is not what the rule reads, so they
+        // and name they repeat. This is not what the rule reads, so they
         // reduce to these arguments fields.
         let spellings: &[(&str, ToolCallFragment)] = &[
             (

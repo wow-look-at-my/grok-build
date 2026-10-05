@@ -937,7 +937,7 @@ fn resolve_worktree_path(grok_home: &Path, req: &CreateWorktreeRequest, git_root
         return path.clone();
     }
 
-    // Resolve off the source path, not the git root: a session already in a
+    // Resolve off the source path, not the git root. A session already in a
     // managed checkout must get a sibling, never a tree nested inside it.
     let base = managed_base_dir_for_source_in(grok_home, Path::new(&req.source_path))
         .unwrap_or_else(|| worktree_base_dir(git_root));
@@ -1773,7 +1773,8 @@ impl From<CreateWorktreeFromWorktreeRequestWire> for CreateWorktreeFromWorktreeR
     }
 }
 
-/// Resolve the target worktree path for a fork operation. When the source path is already a managed checkout, the destination is a sibling in the same managed root rather than a tree nested inside it; see [`worktree_base_dir_for_source`].
+/// Resolve the target worktree path for a fork operation. When the source path is already a managed checkout, the destination is a sibling in the same managed root rather than a tree. That tree is nested inside it. See
+/// [`worktree_base_dir_for_source`].
 fn resolve_fork_worktree_path(
     source_worktree_path: &Path,
     git_root: &Path,
@@ -3742,9 +3743,9 @@ mod tests {
                     "the gc liveness touch must resolve over {under:?}"
                 );
 
-                // A fork of a managed checkout lands in the root holding it, so
-                // it is a sibling of the checkout rather than a tree nested
-                // inside it.
+                // A fork of a managed checkout lands in the root holding it. It
+                // is a sibling of the checkout rather than a tree nested inside
+                // it.
                 assert_eq!(
                     worktree_base_dir_for_source(&wt).unwrap(),
                     wt.parent().unwrap(),

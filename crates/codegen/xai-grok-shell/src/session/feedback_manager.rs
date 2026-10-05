@@ -1563,7 +1563,7 @@ mod tests {
     ///
     /// `shutdown` caps the final force-sync at `SHUTDOWN_SIGNAL_SYNC_TIMEOUT`
     /// (2s), but that cap is now unreachable: the client refuses every report
-    /// before the wire, so the sync fails instantly against an endpoint that
+    /// before the wire. The sync fails instantly against an endpoint that
     /// never answers. The session below has a turn on it precisely so the
     /// force-sync is attempted rather than skipped.
     #[tokio::test]
@@ -1954,7 +1954,7 @@ mod author_identity_tests {
         s
     }
 
-    /// End-to-end: an env var (as a device-management launcher would inject)
+    /// End-to-end. An env var (as a device-management launcher would inject)
     /// referenced by `[feedback.user]` with `$VAR` is expanded at config load,
     /// resolved, carried onto the submission, and retained on the local entry.
     #[tokio::test]

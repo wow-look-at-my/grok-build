@@ -901,8 +901,8 @@ fn merge_section_cli_only_updates_set_fields_preserves_unmodeled() {
     );
 }
 /// Every harness model slot survives the whole write path: the settings
-/// modal's writer sets the field, `merge_section` serializes `[models]`,
-/// the file is re-read, and the session's own resolver answers with the
+/// modal's writer sets the field, `merge_section` serializes `[models]`.
+/// The file is re-read, and the session's own resolver answers with the
 /// model that was picked.
 ///
 /// Both halves are written independently — one match on the slot id in
@@ -968,9 +968,9 @@ fn clearing_a_harness_model_slot_removes_its_key_from_the_file() {
     }
 }
 
-/// The removal pass is what makes "(no override)" reach disk. Without
-/// it a cleared slot keeps its old model, because `merge_section` never
-/// removes a key the serialized struct does not name — the assertion on
+/// The removal pass is what makes "(no override)" reach disk. Without it
+/// a cleared slot keeps its old model, because `merge_section` never
+/// removes a key the serialized struct does not name. The assertion on
 /// `web_search` below is the same behavior seen from the other side.
 #[test]
 fn removal_pass_clears_a_models_key_that_the_merge_would_keep() {

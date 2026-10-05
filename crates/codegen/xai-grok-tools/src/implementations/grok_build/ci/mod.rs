@@ -725,7 +725,7 @@ mod tests {
     }
 
     /// A `repo` the model passes is either a repository name or a rejected
-    /// request; a half-name must never turn into a query of some other repo.
+    /// request. A half-name must never turn into a query of some other repo.
     #[test]
     fn a_repository_token_is_checked_before_it_reaches_gh() {
         for good in ["o/r", "Wow-Look.at/my_repo", "a/b"] {
@@ -805,8 +805,8 @@ mod tests {
 
     /// An empty answer has to say which repository it came out of. A branch
     /// that lives elsewhere is empty here for exactly the same reason an
-    /// unpushed branch is, and the reader cannot tell both apart without
-    /// being told where was asked.
+    /// unpushed branch is. The reader cannot tell both apart without being
+    /// told where was asked.
     #[test]
     fn an_empty_answer_names_the_repository_it_asked() {
         let asked = state_summary(CiStatus::Off, "feat/x", Some("o/r"));

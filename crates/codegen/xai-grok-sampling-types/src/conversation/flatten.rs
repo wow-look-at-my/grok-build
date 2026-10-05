@@ -132,7 +132,7 @@ pub fn flatten_conversation(
 
 /// An assistant message carrying text and nothing else. No tool calls, and no
 /// origin model: a flattened record is not attributable to the model that
-/// produced it, and claiming otherwise re-arms the signature rules.
+/// produced it. Claiming otherwise re-arms the signature rules.
 fn assistant_text(content: String) -> ConversationItem {
     ConversationItem::Assistant(AssistantItem {
         content: Arc::<str>::from(content),

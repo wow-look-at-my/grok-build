@@ -83,7 +83,7 @@ pub fn managed_worktrees_boundary(path: &Path, legacy_root: &Path) -> Option<Pat
 /// Keeps the managed worktrees directory out of `main_root`'s `git status`.
 ///
 /// The entry goes in the repository's own exclude data (`.git/info/exclude`),
-/// never in the tracked `.gitignore`: which directories a clone happens to have
+/// never in the tracked `.gitignore`. Which directories a clone happens to have
 /// checked out is not a property of the project. The write is idempotent, so a
 /// repository with multiple worktrees carries one line.
 pub fn exclude_managed_worktrees_dir(main_root: &Path) -> std::io::Result<()> {

@@ -52,7 +52,7 @@ fn plan(script: &str, mounts: Vec<Mount>, grok_home: &Path, cwd: &Path) -> JailP
 }
 
 /// One jail, every guarantee the flag promises: the working directory
-/// survives, a `--ro` path refuses a write, `$GROK_HOME` takes one, `/tmp` is
+/// survives. A `--ro` path refuses a write, `$GROK_HOME` takes one, `/tmp` is
 /// a fresh tmpfs, and an unbound path is absent.
 #[test]
 fn the_jail_binds_what_it_promises_and_nothing_else() {
@@ -161,19 +161,19 @@ const WORKER_FD_ENV: &str = "GROK_CI_HOST_TEST_FD";
 /// The branch the jailed child asks about.
 const JAILED_CHILD_ENV: &str = "GROK_JAILED_CHILD_BRANCH";
 
-/// A `--sandbox` session reaches `gh` only through the host worker, and the
-/// jail is entered by exec, so the ONE thing that carries the connection is an
+/// A `--sandbox` session reaches `gh` only through the host worker. The jail is
+/// entered by exec. The ONE thing that carries the connection is an
 /// exec-surviving fd whose number the jail sets in the new image's environment.
 ///
-/// bwrap makes that a placement question the macOS side does not have:
+/// bwrap makes that a placement question the macOS side does not have.
 /// `--setenv` is an option for bwrap and everything after `--` is argv for the
 /// jailed program. Emitting it on the wrong side of that separator sets no
-/// variable at all, and the jailed pager then reports no CI while the run
-/// gains stray arguments. Only running real bubblewrap catches it.
+/// variable at all. The jailed pager then reports no CI while the run gains
+/// stray arguments. Only running real bubblewrap catches it.
 ///
 /// The answer is checked for SHAPE, not content: a runner with no `gh` (and no
 /// credentials) is answered by the worker's nothing-usable sentinel, and that
-/// still proves the jail carried the connection, which is the claim here.
+/// still proves the jail carried the connection. This is the claim here.
 #[test]
 fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
     if !bwrap_is_usable() {
@@ -184,7 +184,7 @@ fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
     let grok_home = fixture_dir("worker-home");
     std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
 
-    // The host side: the shipped worker loop in a real child of this binary, its socket end dup2'd onto a known fd - what `spawn_ci_host` does.
+    // The host side. The shipped worker loop in a real child of this binary, its socket end dup2'd onto a known fd - what `spawn_ci_host` does.
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     let theirs_fd = theirs.into_raw_fd();
     const WORKER_FD: i32 = 3;
@@ -298,8 +298,8 @@ fn bwrap_worker_self_entry() {
 }
 
 /// Delegate the parent jails: find the worker the way the shipped pager does,
-/// ask it one fixed-shape question, and write what came back where the parent
-/// can read it (the jailed cwd is a granted mount).
+/// ask it one fixed-shape question. Write what came back where the parent can
+/// read it (the jailed cwd is a granted mount).
 #[test]
 fn bwrap_jailed_child_self_entry() {
     let Ok(branch) = std::env::var(JAILED_CHILD_ENV) else {
@@ -330,9 +330,9 @@ fn bwrap_jailed_child_self_entry() {
     std::fs::write(work.join("jail-answer.txt"), report).unwrap();
 }
 
-/// With no worker there is nothing to hand over, and the jailed process must
-/// see no fd rather than an inherited one it did not ask for. That is the
-/// dot's "off" state: no CI, not a query against a stale descriptor.
+/// With no worker there is nothing to hand over. The jailed process must see
+/// no fd rather than an inherited one it did not ask for. That is the dot's
+/// "off" state: no CI, not a query against a stale descriptor.
 #[test]
 fn the_bwrap_jail_advertises_no_host_worker_when_none_was_started() {
     if !bwrap_is_usable() {

@@ -5368,7 +5368,7 @@ fn a_named_write_shows_its_body_arriving() {
         "the preview moved with the body"
     );
 }
-/// A body past the tail's line budget keeps the row at a fixed height and
+/// A body past the tail's line budget keeps the row at a fixed height. It
 /// keeps showing the NEWEST lines, which is where the model is writing.
 #[test]
 fn a_long_body_shows_its_newest_lines_at_a_fixed_height() {

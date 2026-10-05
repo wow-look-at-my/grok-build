@@ -87,7 +87,7 @@ pub fn filter_turns_for_inter_compaction<T: CompactionItemBuilder>(turns: &[T]) 
 /// (there may be multiple after chained compactions) and concatenates them.
 /// `text[from..to]` for the block scan below.
 ///
-/// Every index is an offset at which `<grok_user_queries>` or
+/// Every index is an offset. This holds at which `<grok_user_queries>` or
 /// `</grok_user_queries>` was matched, or the running cursor set to such an
 /// offset plus the literal's byte length. Both tags are pure ASCII, and an
 /// ASCII byte is always a char boundary, so both ends align.

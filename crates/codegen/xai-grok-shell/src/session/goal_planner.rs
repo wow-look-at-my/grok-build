@@ -197,10 +197,10 @@ impl RetryableSpawnError for SpawnError {
 
 /// Inherit override ⇒ exactly one attempt on the current model + session
 /// harness (the `prompt` is moved, never cloned). Explicit override ⇒ one
-/// attempt with the configured `{model, harness}` pair; if it returns a
+/// attempt with the configured `{model, harness}` pair. If it returns a
 /// retryable `Err` ([`RetryableSpawnError`]), emits `GoalRoleModelFailOpen {
 /// reason: spawn_failed }` and retries ONCE with `model = None` + harness
-/// `None` (the current-model + session-harness fallback); only a SECOND
+/// `None` (the current-model + session-harness fallback). Only a SECOND
 /// failure propagates. A cancellation propagates as-is (no retry), so a bad
 /// configured pair can never change today's failure semantics (e.g. it can
 /// never regress the fail-CLOSED planner into a goal-pause).
@@ -369,7 +369,7 @@ impl GoalPlannerSpawner for ChannelSpawner {
         id: &str,
         prompt: RoleRenderedPrompt,
     ) -> Result<PlannerSpawnOutput, SpawnError> {
-        // Publish the coordinator id BEFORE awaiting the child: a Send Now that
+        // Publish the coordinator id BEFORE awaiting the child. A Send Now that
         // lands at any point during the run has to be able to address it.
         if let Some(slot) = &self.subagent_id_slot
             && let Ok(mut published) = slot.lock()
@@ -739,8 +739,8 @@ mod tests {
     }
 
     /// The planner's harness must actually expose the todo tool: the prompt's
-    /// instruction to list the plan's work is inert, and the session's list
-    /// stays empty, if the toolset the planner runs on has no such tool.
+    /// instruction to list the plan's work is inert. The session's list stays
+    /// empty, if the toolset the planner runs on has no such tool.
     #[test]
     fn planner_harness_toolset_exposes_the_todo_tool() {
         let definition = xai_grok_agent::config::AgentDefinition::general_purpose();

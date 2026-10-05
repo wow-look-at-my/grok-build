@@ -464,7 +464,7 @@ mod tests {
 
     /// `merge: false` was a wholesale replace: it cleared the list and kept
     /// only what the call resent. Through the tool, with the flag still set
-    /// the destructive way, the earlier item has to survive — it is the
+    /// the destructive way, the earlier item has to survive. It is the
     /// user's, and only a status can retire it.
     #[tokio::test]
     async fn a_write_cannot_discard_what_it_omits() {
@@ -828,7 +828,7 @@ mod tests {
     }
 
     /// The write that used to be a replace. Sending one brand-new item is not
-    /// a statement that everything else is finished, so the item the call does
+    /// a statement that everything else is finished. The item the call does
     /// not mention has to survive it.
     #[test]
     fn a_write_that_omits_an_item_keeps_it() {

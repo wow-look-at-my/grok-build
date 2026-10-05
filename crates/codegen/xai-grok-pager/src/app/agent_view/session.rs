@@ -115,7 +115,7 @@ impl AgentView {
     }
     /// Record a user-driven session-mode change this pager is about to request.
     ///
-    /// The shell's confirmation carries only a mode id, so this ordered log is
+    /// The shell's confirmation carries only a mode id. This ordered log is
     /// what lets [`Self::superseded_mode_request`] tell a press's own
     /// confirmation from an earlier press's arriving late.
     pub(crate) fn note_mode_request(&mut self, mode_id: &str) {

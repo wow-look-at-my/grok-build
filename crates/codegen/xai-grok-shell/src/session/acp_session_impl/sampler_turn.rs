@@ -1003,7 +1003,7 @@ impl SessionActor {
     }
     /// [`Self::resolve_slot_sampler`] for a model named by something other
     /// than a slot — `[memory] flush_model` is the narrower key that still
-    /// wins over its slot, and it needs the same catalog resolution.
+    /// wins over its slot. It needs the same catalog resolution.
     ///
     /// `label` names the caller in the warnings.
     pub(crate) async fn resolve_sampler_for_model(
@@ -1346,15 +1346,15 @@ impl SessionActor {
                 cfg.context_window = new_cw;
                 self.chat_state_handle.update_sampling_config(cfg);
             }
-            // A context-window-exceeded error can recur immediately after a
-            // compaction (the next resubmit overflows again) when whatever
-            // made the conversation too big survives compaction — e.g. a
-            // single recent item that alone is near the window size.
-            // Compacting a SECOND time in a row cannot fix that (there is
-            // nothing further for the summarizer to reduce), so the ladder
-            // below only ever compacts once per overflow: the next attempt
-            // deterministically shrinks the sent conversation instead, and a
-            // third gives up rather than retrying forever.
+            // A context-window-exceeded error can recur immediately. This
+            // happens after a compaction (the next resubmit overflows again)
+            // when whatever made the conversation too big survives
+            // compaction — e.g. a single recent item that alone is near
+            // the window size. Compacting a SECOND time in a row cannot fix
+            // that (there is nothing further for the summarizer to reduce),
+            // so the ladder below only ever compacts once per overflow. The
+            // next attempt deterministically shrinks the sent conversation
+            // instead, and a third gives up rather than retrying forever.
             match self.compaction.context_overflow_recovery.get() {
                 ContextOverflowRecovery::None => {
                     let trigger_info = compaction::AutoCompactTriggerInfo {
@@ -1768,7 +1768,7 @@ impl SessionActor {
             )),
         )
     }
-    /// Deterministically shrink the session's conversation to fit `context_window` tokens, without an LLM call: drop oldest whole turns, then truncate the newest unit in place if it alone still exceeds the budget (`xai_chat_state::compaction_utils::fit_conversation_to_budget`). Only reached from [`Self::handle_sampling_failure`] as the fallback after a compaction already ran once for the current overflow and the next sample overflowed again — see `ContextOverflowRecovery`. Rewrite the conversation to plain text so the current model can read it. Returns false when the history holds nothing to convert — the caller then has a rejection this cannot explain, and says so rather than resubmitting the same bytes forever. That is also the loop bound: one flattening leaves nothing for a second to find.
+    /// Deterministically shrink the session's conversation to fit `context_window` tokens, without an LLM call. Drop oldest whole turns, then truncate the newest unit in place if it alone still exceeds the budget (`xai_chat_state::compaction_utils::fit_conversation_to_budget`). Only reached from [`Self::handle_sampling_failure`] as the fallback after a compaction already ran once for the current overflow and the next sample overflowed again — see `ContextOverflowRecovery`. Rewrite the conversation to plain text so the current model can read it. Returns false when the history holds nothing to convert — the caller then has a rejection this cannot explain, and says so rather than resubmitting the same bytes forever. That is also the loop bound: one flattening leaves nothing for a second to find.
     async fn flatten_history_for_this_model(self: &Arc<Self>) -> bool {
         let conversation = self.chat_state_handle.get_conversation().await;
         if !xai_grok_sampling_types::conversation::needs_flattening(&conversation) {
@@ -2394,7 +2394,7 @@ impl SessionActor {
     /// Resetting `estimated_tokens_since_model = 0` here also keeps the preflight-overflow guard accurate against the next turn's tool-result deltas.
     ///
     /// Returns the cost (USD ticks) this one call was folded into the ledgers
-    /// with, so the caller can put it on the wire per response — the per-turn
+    /// with, so the caller can put it on the wire per response. The per-turn
     /// bill is a sum and cannot be split back apart across a tool loop.
     pub(crate) fn record_response_token_usage(
         &self,
@@ -2407,7 +2407,7 @@ impl SessionActor {
             self.chat_state_handle
                 .record_token_usage(u64::from(u.total_tokens));
             self.chat_state_handle.record_last_turn_usage(u.clone());
-            // Cost priority: server-reported ticks → server-reported USD float
+            // Cost priority. Server-reported ticks → server-reported USD float
             // (both already resolved by the sampler into `cost_usd_ticks`) →
             // computed cost from token usage × the model's per-token pricing,
             // which `model_pricing::resolve` takes from config or the catalog.
@@ -2485,8 +2485,8 @@ impl SessionActor {
         }
     }
 
-    /// Build a partial assistant `ConversationItem` from the text the model had already streamed, so a resubmit after an asap-injection cancel or a max-tokens truncation sees the streamed text instead of silently losing it. Returns `None` when the model streamed nothing yet (clean resubmit, nothing to preserve). Only the text channel is preserved: a tool call the model was still emitting arguments for never completed (the sampler
-    /// returns no `Completed` on cancel), so there is nothing well-formed to commit.
+    /// Build a partial assistant `ConversationItem` from the text the model had already streamed. Do this so a resubmit after an asap-injection cancel or a max-tokens truncation sees the streamed text instead of silently losing it. Returns `None` when the model streamed nothing yet (clean resubmit, nothing to preserve). Only the text channel is preserved. A tool call the model was still emitting arguments for never completed (the
+    /// sampler returns no `Completed` on cancel), so there is nothing well-formed to commit.
     async fn partial_assistant_from_capture(&self) -> Option<ConversationItem> {
         let capture = self.streaming_turn_capture.lock();
         let text = capture.response_text.clone();

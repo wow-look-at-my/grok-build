@@ -541,7 +541,7 @@ impl ModelsManager {
     ///
     /// Writes through `provider_models` so a later catalog rebuild keeps the
     /// answer, and pushes to the client ONLY when a dot actually changed: the
-    /// poll runs every few seconds, and a models-updated push per tick would
+    /// poll runs every few seconds. A models-updated push per tick would
     /// redraw the picker of every connected client for nothing.
     pub(crate) fn apply_local_residency(&self, residency: &IndexMap<String, bool>) {
         if residency.is_empty() {

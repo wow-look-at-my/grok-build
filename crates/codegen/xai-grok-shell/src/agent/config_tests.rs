@@ -4363,9 +4363,9 @@ fn resolve_long_reasoning_reminder_precedence() {
         "env JSON enables over a TOML false and its tokens win; delay falls through"
     );
 }
-/// The output-rate floor is off by default, takes the session-wide
-/// `[ui]` value when one is set, and lets a model override it — including
-/// with a zero, which turns the gate off for that model alone.
+/// The output-rate floor is off by default, takes the session-wide `[ui]`
+/// value when one is set, and lets a model override it — including with a
+/// zero. This turns the gate off for that model alone.
 #[test]
 fn resolve_output_rate_floor_prefers_the_model_over_the_session() {
     let shipped = Config::default()
@@ -5908,7 +5908,7 @@ fn an_unknown_harness_model_slot_id_resolves_to_nothing() {
 }
 
 /// A `[models] goal_skeptic` slot reaches the panel as a model-only
-/// choice, so the skeptics move off the session model without the pool
+/// choice. The skeptics move off the session model without the pool
 /// form and its agent type.
 #[test]
 fn goal_skeptic_slot_fills_the_pool_when_no_pair_is_set() {

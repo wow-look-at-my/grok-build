@@ -1260,7 +1260,7 @@ mod tests {
         );
     }
     /// A bare `--sandbox` (no value) still *parses* at the clap layer (clap turns
-    /// it into an empty string) but is now an invalid request: it must be
+    /// it into an empty string) but is now an invalid request. It must be
     /// rejected by `validate_sandbox`, never silently treated as a jail.
     #[test]
     fn bare_sandbox_parses_but_is_rejected_by_validation() {

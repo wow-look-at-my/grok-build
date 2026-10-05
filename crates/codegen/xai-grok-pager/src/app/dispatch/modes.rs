@@ -910,7 +910,7 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
     };
 
     // Shift+Tab ring: the agent-identity stops (Orchestrator, Explore) sit
-    // after Always-Approve and are checked first, ahead of `mode_choices`
+    // after Always-Approve. Are checked first, ahead of `mode_choices`
     // below — ring position here is state the choice list cannot express.
     if let Some(idx) = agent.shift_tab_ring_agent_index {
         let variants = xai_grok_agent::config::BuiltinAgentName::shift_tab_variants();

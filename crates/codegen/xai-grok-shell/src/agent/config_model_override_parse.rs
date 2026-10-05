@@ -1063,8 +1063,8 @@ mod tests {
         }
     }
 
-    /// Drift guard across both user-facing model structs. A `[model.<id>]` table in `config.toml` is parsed into [`ConfigModelOverride`], not into `ModelEntryConfig`. When a field exists on `ModelEntryConfig` but not on `ConfigModelOverride`, the key parses as an **unknown field** and is silently discarded: the setting appears to work but has no effect. That is exactly how `strict_message_schema` shipped broken — a Cerebras entry could set it and the resolved profile still came out permissive, so the provider rejected every replayed message. The field list is read from the `ModelEntryConfig` declaration in the source itself, so it cannot drift from the struct the way a hand-kept list would. Each name is then fed through the real parser — the same `parse_model_overrides` the config loader calls — and must not come back as an unknown field. It deliberately does NOT compare serialized JSON: most of these fields carry `skip_serializing_if`, so a `false`/`None` value vanishes from a serialized comparison and hides the gap being checked. (An earlier draft of
-    /// this test did exactly that and passed against a struct with the field removed.) Driving the parser cannot be fooled that way.
+    /// Drift guard across both user-facing model structs. A `[model.<id>]` table in `config.toml` is parsed into [`ConfigModelOverride`], not into `ModelEntryConfig`. The key parses as an **unknown field** and is silently discarded: the setting appears to work. This happens when a field exists on `ModelEntryConfig` but not on `ConfigModelOverride`. However, the setting has no effect. That is exactly how `strict_message_schema` shipped broken — a Cerebras entry could set it. The resolved profile still came out permissive, so the provider rejected every replayed message. The field list is read from the `ModelEntryConfig` declaration in the source itself. It cannot drift from the struct the way a hand-kept list would. Each name is then fed through the real parser — the same `parse_model_overrides` the config loader calls — and must not come back as an unknown field. It deliberately does NOT compare serialized JSON: most of these fields carry `skip_serializing_if`. A `false`/`None` value vanishes from a serialized comparison and hides the gap being
+    /// checked. (An earlier draft of this test did exactly that and passed against a struct with the field removed.) Driving the parser cannot be fooled that way.
     #[test]
     fn every_user_settable_model_entry_field_is_accepted_by_the_override() {
         // `loaded_in_vram` is runtime state, not config: the local-runtime
@@ -1116,7 +1116,7 @@ mod tests {
 
     /// Field names declared by `pub struct ModelEntryConfig`, read from the
     /// source at compile time so the list is the struct's own contract rather
-    /// than a copy that can drift.
+    /// than a copy. That copy can drift.
     fn model_entry_config_field_names() -> Vec<String> {
         const SOURCE: &str = include_str!("config.rs");
         let decl = "pub struct ModelEntryConfig {";

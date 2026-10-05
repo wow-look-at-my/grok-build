@@ -228,7 +228,7 @@ async fn thinking_block_emits_reasoning_channel_and_preserved_in_response() {
     }
 }
 
-/// End-to-end reasoning round-trip on the REAL Messages path: thinking deltas
+/// End-to-end reasoning round-trip on the REAL Messages path. Thinking deltas
 /// (with NO encrypted signature — the Anthropic-compatible third-party case,
 /// e.g. Kimi) streamed by a provider must survive (a) the stream's synthesis
 /// into a `ConversationItem::Reasoning` sibling, (b) the shell turn-loop commit
@@ -941,8 +941,8 @@ async fn priced_response(events: Vec<MessageStreamEvent>) -> Option<i64> {
 }
 
 /// The whole point: a gateway that prices the call gets that price onto the
-/// response, instead of the shell falling back to an estimate off the model's
-/// configured pricing.
+/// response, instead of the shell falling back to an estimate off. The
+/// model's configured pricing.
 #[tokio::test]
 async fn a_gateway_reported_price_reaches_the_completed_response() {
     for (ticks, cost, expected, what) in [
@@ -971,8 +971,8 @@ async fn a_gateway_reported_price_reaches_the_completed_response() {
 }
 
 /// `message_start` can carry the price too. A later event that omits it is
-/// silent about the price, not a correction to zero — losing it here would
-/// bill the turn at an estimate while the real number was already on the wire.
+/// silent about the price, not a correction to zero. Losing it here would bill
+/// the turn at an estimate while the real number was already on the wire.
 #[tokio::test]
 async fn a_price_from_message_start_survives_a_silent_delta() {
     let mut start = message_start();

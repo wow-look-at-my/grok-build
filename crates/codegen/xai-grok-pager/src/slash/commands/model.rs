@@ -327,7 +327,7 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
 /// space, which opens the route phase: one row per provider serving it.
 ///
 /// `favorites_only` narrows the list to the models the config marked, plus the
-/// current one — a picker that hides what the session is running reads as a
+/// current one. A picker that hides what the session is running reads as a
 /// model that went missing. A catalog with no favorite in it lists everything,
 /// so an unconfigured session sees the whole catalog as before.
 fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> {

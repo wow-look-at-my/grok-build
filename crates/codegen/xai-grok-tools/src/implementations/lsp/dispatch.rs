@@ -628,7 +628,7 @@ mod tests {
     }
 
     /// A configured server keeps the adapter out of the "nothing to do" shape
-    /// without any process being spawned: the fix under test decides whether the
+    /// without any process being spawned. The fix under test decides whether the
     /// bootstrap task is created at all.
     fn adapter_with_one_configured_server() -> LspBackendAdapter {
         adapter(std::collections::BTreeMap::from([(

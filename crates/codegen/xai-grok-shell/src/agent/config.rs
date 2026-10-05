@@ -2776,7 +2776,7 @@ impl Config {
     /// `None` when both are off.
     ///
     /// The floor resolves per-model first: `[model.<id>].min_output_tokens_per
-    /// _sec` is the endpoint's own number, and it is the only one that can differ
+    /// _sec` is the endpoint's own number. It is the only one that can differ
     /// between models in one session. `[ui].min_output_tokens_per_sec` is the
     /// session-wide fallback the settings modal writes. Zero at either layer is
     /// off, so a per-model `0` turns the gate off for that model without touching
@@ -3801,7 +3801,7 @@ pub(crate) fn entry_for_unrouted_block(
 }
 
 /// The entry a `[model_providers.<id>]` block resolves to on its own, with no
-/// `[model.<id>]` behind it. The provider id stands in for the model id: it
+/// `[model.<id>]` behind it. The provider id stands in for the model id. It
 /// names no model, so nothing here asks the provider for a listing and nothing
 /// reaches the network.
 pub(crate) fn provider_probe_entry(

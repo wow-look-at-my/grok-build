@@ -82,8 +82,7 @@ pub struct OllamaToolFunction {
 ///
 /// Every line carries `done`. The final one carries the metrics, which is the
 /// only place `load_duration` appears — the compat endpoint's `usage` cannot
-/// express it, and it is what separates a cold model load from a stalled
-/// engine.
+/// express it. It is what separates a cold model load from a stalled engine.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 pub struct OllamaChatChunk {
     #[serde(default)]

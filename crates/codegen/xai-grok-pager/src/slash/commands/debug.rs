@@ -1,6 +1,4 @@
-//! `/debug <what is wrong>` — a self-debugging skill: hand the model this
-//! process's execution context (binary, config, log, model) and turn it loose
-//! on the user's question.
+//! `/debug <what is wrong>` — a self-debugging skill: hand the model this ! process's execution context (binary, config, log, model) and turn it loose ! on the user's question.
 //!
 //! `/debug why was the context size defaulted to 256k?` injects the question
 //! together with the answers the model would otherwise have to guess at.

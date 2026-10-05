@@ -1002,10 +1002,10 @@ async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
         })
         .await;
 }
-/// The server's tokenizer is the one that counts. When it says the context
-/// length is the problem, our own estimate saying the prompt fits is not a
-/// reason to hand the turn back to the user: the overflow ladder takes it,
-/// and that ladder is what bounds the retries.
+/// The server's tokenizer is the one that counts. Our own estimate saying
+/// the prompt fits is not a reason to hand the turn back to the user. The
+/// overflow ladder takes it, and that ladder is what bounds the retries.
+/// This applies when it says the context length is the problem.
 #[tokio::test(flavor = "current_thread")]
 async fn a_context_length_rejection_compacts_even_when_our_own_count_fits() {
     let local = tokio::task::LocalSet::new();
@@ -1039,8 +1039,8 @@ async fn a_prompt_that_leaves_no_room_for_an_answer_compacts() {
         .await;
 }
 /// A context-overflow error hitting immediately after a compaction (the very
-/// next resubmit overflows again) must NOT compact a second time in a row —
-/// it must deterministically shrink the sent conversation instead. Setting
+/// next resubmit overflows again) must NOT compact a second time in a row. It
+/// must deterministically shrink the sent conversation instead. Setting
 /// `context_overflow_recovery` to `Compacted` up front skips straight to the
 /// second-attempt branch, so this never needs a real compaction/LLM call.
 #[tokio::test(flavor = "current_thread")]
@@ -1083,9 +1083,9 @@ async fn second_consecutive_overflow_reduces_instead_of_compacting_again() {
 }
 /// A THIRD consecutive overflow (compaction, then a deterministic reduction,
 /// and the resubmit overflows yet again) must give up rather than retry
-/// forever — this is the loop-safety guarantee itself: reducing a second
-/// time could not converge any better than the first, so the turn must fail
-/// loudly instead of looping.
+/// forever. This is the loop-safety guarantee itself: reducing a second time
+/// could not converge any better than the first. The turn must fail loudly
+/// instead of looping.
 #[tokio::test(flavor = "current_thread")]
 async fn third_consecutive_overflow_gives_up_instead_of_looping() {
     use crate::session::compaction_config::ContextOverflowRecovery;
@@ -1326,8 +1326,8 @@ async fn compaction_at_tokens_fixed_and_disabled() {
         .await;
 }
 /// `reseed_context_budget_output_cap` must derive the tool-output cap from
-/// what's actually left of the context window, not a static config value:
-/// regression for the reported failure where a single ~372K-token tool result
+/// what's actually left of the context window, not a static config value.
+/// Regression for the reported failure where a single ~372K-token tool result
 /// overflowed a 524K window that had 365K tokens already in use.
 #[tokio::test(flavor = "current_thread")]
 async fn reseed_context_budget_output_cap_derives_from_remaining_window() {

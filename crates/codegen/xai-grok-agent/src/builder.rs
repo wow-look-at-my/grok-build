@@ -1845,10 +1845,11 @@ mod tests {
         assert!(desc.contains("## Usage frequency"));
         assert!(desc.contains("Default to delegating"));
     }
-    /// The bridge's full-discovery snapshot must record every discovered
-    /// skill name — including `paths:`-gated and preloaded skills that the
-    /// listing baseline (`slash_skills`) holds back — so session-start
-    /// telemetry can reuse it instead of re-walking the disk.
+    /// Consider the bridge's full-discovery snapshot. That snapshot must
+    /// record every discovered skill name — including `paths:`-gated and
+    /// preloaded skills that the listing baseline (`slash_skills`) holds
+    /// back — so session-start telemetry can reuse it instead of
+    /// re-walking the disk.
     #[tokio::test]
     async fn discovery_snapshot_records_gated_and_preloaded_skills() {
         use xai_grok_tools::computer::local::LocalTerminalBackend;

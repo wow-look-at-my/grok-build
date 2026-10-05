@@ -377,7 +377,7 @@ pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
 /// Write one slot's model into `[models]`. `None` clears the field.
 ///
 /// Split out of [`set_harness_model`] so the writer is exercised without
-/// the disk: a test walks the slot table through this and reads the result
+/// the disk. A test walks the slot table through this and reads the result
 /// back with `Config::resolve_harness_model`.
 pub(crate) fn apply_harness_model(
     m: &mut crate::agent::config::ModelsConfig,

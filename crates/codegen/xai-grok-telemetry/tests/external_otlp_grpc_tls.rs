@@ -1,10 +1,5 @@
 //! HTTPS (TLS) gRPC transport coverage of the **build-baseline disabled
-//! contract** for the external OTEL stream. Mirrors `external_otlp_grpc.rs`,
-//! but points the double opt-in at a live TLS collector whose CA the client
-//! trusts through the standard `OTEL_EXPORTER_OTLP_CERTIFICATE` variable —
-//! the one configuration that would otherwise export successfully. Because
-//! `external::build_handle` returns `None` in this build the stream never
-//! activates, so the collector must receive nothing over TLS either.
+//! contract** for the external OTEL stream. Mirrors `external_otlp_grpc.rs`, ! but points the double opt-in at a live TLS collector whose CA the client ! trusts through the standard `OTEL_EXPORTER_OTLP_CERTIFICATE` variable — ! the one configuration that would otherwise export successfully. Because ! `external::build_handle` returns `None` in this build the stream never ! activates, so the collector must receive nothing over TLS either.
 //!
 //! Lives in its own integration-test binary because the external telemetry
 //! registry is a process-global `OnceLock`.
@@ -56,7 +51,7 @@ fn external_stream_grpc_over_tls_end_to_end() {
         "external OTLP stream is hard-disabled in the build baseline (gRPC over TLS)"
     );
 
-    // `SessionNew` maps to the `session.count` metric; `SessionHarness` maps
+    // `SessionNew` maps to the `session.count` metric. `SessionHarness` maps
     // to the `session_start` log record — emit both so neither signal's TLS
     // export path can be the one that leaks.
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionNew {

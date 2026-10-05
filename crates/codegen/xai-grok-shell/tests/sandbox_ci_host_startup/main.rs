@@ -257,8 +257,11 @@ fn parent() {
     println!("{REPORT}PASS");
 }
 
-/// A session confined IN PLACE keeps the worker to itself. The hand-off makes the worker's fd exec-surviving, and names it in the environment, only where an exec follows. Where none does, doing either leaves every child of the session holding a live socket to an UNCONFINED `gh`, with the number to read it on. That is the whole
-/// point of the fd riding a `OnceLock` instead of the environment.
+/// A session confined IN PLACE keeps the worker to itself. The hand-off makes
+/// the worker's fd exec-surviving, and names it in the environment, only
+/// where an exec follows. Doing either leaves every child of the session
+/// holding a live socket to an UNCONFINED `gh`, with the number to read it
+/// on. This happens where none does.
 #[cfg(unix)]
 fn assert_worker_is_the_sessions_alone(report: &SessionReport) {
     if report.reexeced == "1" {

@@ -153,7 +153,7 @@ pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
     spawn_ci_host_with(repo_root, true)
 }
 
-/// [`spawn_ci_host`] with the exec rule made explicit: `survives_exec` clears
+/// [`spawn_ci_host`] with the exec rule made explicit. `survives_exec` clears
 /// `FD_CLOEXEC` on the fd this process keeps, and passes the fd number on to the
 /// image it execs into.
 fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
@@ -632,8 +632,9 @@ pub fn query_gh_host(fd: i32, args: &[&str]) -> Option<GhHostResponse> {
 /// through the host worker when sandboxed, by spawning it directly otherwise.
 ///
 /// The host worker is authoritative once it exists. A sandboxed session never
-/// falls back to an in-jail spawn, where `gh` reaches neither the host
-/// credentials nor the network and would answer with a misleading failure.
+/// falls back to an in-jail spawn. This applies where `gh` reaches neither
+/// the host credentials nor the network and would answer with a misleading
+/// failure.
 pub fn run_gh(cwd: &Path, args: &[&str]) -> Option<GhHostResponse> {
     #[cfg(unix)]
     if let Some(fd) = ci_host_fd() {
@@ -982,8 +983,8 @@ mod tests {
 
     #[test]
     fn a_stray_blank_line_does_not_shift_later_answers() {
-        // The reader skips a blank line instead of reporting it as an answer,
-        // so one stray newline on the wire cannot put every later caller a
+        // The reader skips a blank line instead of reporting it as an answer.
+        // One stray newline on the wire cannot put every later caller a
         // request behind.
         let fd = peer(vec![
             "\n{\"code\":0,\"stdout\":\"first\",\"stderr\":\"\",\"truncated\":false}",

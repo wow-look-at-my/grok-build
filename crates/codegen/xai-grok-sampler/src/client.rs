@@ -156,9 +156,9 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
 
 /// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
 /// Reports whether anything changed, so a caller can skip a retry that cannot
-/// differ. A gateway written in Go marshals an unset slice as `null`, so
-/// `response.created` -- whose output list is empty by definition -- arrives
-/// as `"output": null` and fails the parse.
+/// differ. Consider a gateway written in Go. That gateway marshals an unset
+/// slice as `null`, so `response.created` -- whose output list is empty by
+/// definition -- arrives as `"output": null` and fails the parse.
 fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(map) => {
@@ -222,8 +222,8 @@ fn null_key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>
 /// whole error a user gets, and there is nothing in it to act on.
 /// `serde_path_to_error` supplies the field path on a derived struct
 /// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]`
-/// event, because serde buffers the content before the variant is known and
-/// the tracker never sees those keys — measured, not assumed.
+/// event, because serde buffers the content before the variant is known. The
+/// tracker never sees those keys — measured, not assumed.
 fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
     let deserializer = &mut serde_json::Deserializer::from_str(data);
     serde_path_to_error::deserialize(deserializer).map_err(|err| {
@@ -249,7 +249,7 @@ fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
 
 /// Strict parse, then one retry with the payload's null lists read as empty.
 ///
-/// The retry only runs when the strict parse failed and there was something to
+/// The retry only runs when the strict parse failed. There was something to
 /// rewrite, and a retry that also fails reports the STRICT error — so a
 /// malformed payload is never described in terms of the rewrite.
 fn parse_sse_event<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
@@ -381,8 +381,8 @@ fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 /// or with a unit (`1.5`, `1.5s`, `30s`).
 ///
 /// A value with no `u64` second count is `None`: the same unusable answer the
-/// parser already gives for a non-finite or negative one, so the caller uses
-/// its own backoff rather than a wait this header did not state.
+/// parser already gives for a non-finite or negative one. The caller uses its
+/// own backoff rather than a wait this header did not state.
 fn parse_reset_seconds(raw: &str) -> Option<u64> {
     let raw = raw.trim();
     let digits = raw.strip_suffix('s').unwrap_or(raw).trim();
@@ -2737,7 +2737,7 @@ async fn read_body(
 }
 
 /// Rebuild `Api` from stream-collected info, preserving status, `Retry-After`, and
-/// `x-should-retry` (kind is lost on this path). Applies the request's
+/// `x-should-retry` (kind is lost on this path). Applies the request's Applies the request's
 /// Applies the request's [`xai_grok_sampling_types::LengthPolicy`] to a collected response.
 /// Fails a `Length` stop the policy rejects, logs the salvage breadcrumb otherwise.
 /// The single gate shared by `drive_l2` and the direct-collect path so the two cannot drift.
@@ -2850,9 +2850,9 @@ mod tests {
     }
 
     /// The sampler's own default output budget is what a caller that sets none
-    /// sends, so the default is where an impossible request is born: the
-    /// provider adds it to the prompt and rejects the sum. Nothing downstream
-    /// can fix that, so the sum is held inside the window here.
+    /// sends. The default is where an impossible request is born: the provider
+    /// adds it to the prompt and rejects the sum. Nothing downstream can fix
+    /// that, so the sum is held inside the window here.
     #[test]
     fn the_default_output_budget_cannot_carry_a_request_past_the_window() {
         let mut cfg = minimal_config();
@@ -2913,7 +2913,7 @@ mod tests {
             "chunk error must name the field: {chunk}"
         );
 
-        // An internally tagged event gets no path from serde, so the message
+        // An internally tagged event gets no path from serde. The message
         // falls back to where the payload's nulls are — the thing that
         // makes a bare "expected a sequence" actionable.
         let event = from_sse_payload::<rs::ResponseStreamEvent>(

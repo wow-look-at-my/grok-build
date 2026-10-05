@@ -1933,7 +1933,7 @@ pub(super) fn set_harness_model_inner(app: &mut AppView, slot_id: &str, model_id
 /// Outer dispatcher for `Action::SetHarnessModel`. Mirror, persist,
 /// toast. An empty `model_id` clears the slot. Idempotent.
 ///
-/// A non-empty id must be in the active agent's catalog; the modal's
+/// A non-empty id must be in the active agent's catalog. The modal's
 /// picker only offers catalog entries, so anything else is validator
 /// skew and is refused rather than written.
 pub(in crate::app::dispatch) fn set_harness_model(

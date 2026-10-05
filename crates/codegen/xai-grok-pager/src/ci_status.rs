@@ -596,7 +596,7 @@ mod tests {
 
     /// Publish an in-process peer speaking the worker's protocol over
     /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to the
-    /// jailed pager, and answer one `gh-status <branch>` request with `json`.
+    /// jailed pager. Answer one `gh-status <branch>` request with `json`.
     ///
     /// The peer asserts the request shape, so a caller that reached `gh` some
     /// other way, or asked for the wrong thing, fails here rather than silently
@@ -630,11 +630,11 @@ mod tests {
         raw
     }
 
-    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session does:
+    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session does.
     /// `gh_ci_status` → `run_gh` → the `GROK_CI_HOST_FD` env read → the host
     /// worker, with no fd passed by hand.
     ///
-    /// `repo_root` does not exist, so a real in-jail `gh` spawn could only fail:
+    /// `repo_root` does not exist. A real in-jail `gh` spawn could only fail:
     /// reading a color back at all proves the answer came over the inherited
     /// worker connection.
     #[test]
@@ -860,8 +860,8 @@ mod tests {
     }
 
     /// Walk one render cadence over `span` of wall-clock time, sampling the
-    /// SHIPPED pulse once per frame the way the render loop does, and report
-    /// the wall-clock duration of one full breath: the elapsed time between the
+    /// SHIPPED pulse once per frame the way the render loop does. Report the
+    /// wall-clock duration of one full breath. The elapsed time between the
     /// first peak samples.
     fn measured_period(step: Duration, span: Duration) -> Duration {
         let mut samples: Vec<(Duration, f32)> = Vec::new();
@@ -971,7 +971,7 @@ mod tests {
     }
 
     /// The shipped status-bar call site must feed the pulse ELAPSED WALL TIME.
-    /// The pulse math above is only half the fix: a render path that still
+    /// The pulse math above is only half the fix. A render path that still
     /// passes `scrollback.animation_tick()` would keep the old frame-counted
     /// behavior with a `Duration`-shaped cast.
     ///

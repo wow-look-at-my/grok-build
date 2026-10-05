@@ -5,8 +5,8 @@
 //! IDs, so an item is matched by its position.
 //!
 //! The list it writes to is the user's, shared with the grok_build todo
-//! infrastructure, so a write here is a merge by position and never deletes.
-//! A call carrying fewer items than the list holds leaves the tail alone.
+//! infrastructure. A write here is a merge by position and never deletes. A
+//! call carrying fewer items than the list holds leaves the tail alone.
 
 use std::fmt::Write;
 
@@ -479,8 +479,8 @@ mod tests {
     }
 
     /// Position is not identity. A list that drops its first entry must not
-    /// slide every later task up a row, writing each one's text over the task
-    /// that used to hold that slot.
+    /// slide every later task up a row, writing each one's text over the
+    /// task. That task used to hold that slot.
     #[tokio::test]
     async fn a_reordered_list_does_not_overwrite_rows() {
         let tool = TodoWriteTool;

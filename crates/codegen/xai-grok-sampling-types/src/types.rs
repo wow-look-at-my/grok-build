@@ -815,7 +815,7 @@ impl ChatChunkDelta {
 /// `ChatChunkDelta` as it arrives on the wire, with each key spelling its own
 /// field. It exists so a chunk naming both reasoning keys folds them under
 /// [`ChatChunkDelta::REASONING_KEYS`] instead of tripping serde's
-/// duplicate-field check, which rejects a second key whatever its value.
+/// duplicate-field check. This rejects a second key whatever its value.
 #[derive(Debug, Default, Deserialize)]
 struct ChatChunkDeltaWire {
     #[serde(default)]

@@ -4621,9 +4621,10 @@ fn apply_sandbox_runner_cache_env(cmd: &mut Command, program: &str) {
 /// The injectable core of [`apply_sandbox_runner_cache_env`].
 ///
 /// Nothing is set when the session is not write-confined (no redirection is
-/// necessary, and a user's own cache layout should not move for no reason), when
-/// `program` is not a package runner (a plain binary needs no cache), or when
-/// the server's own config already set a variable (an explicit value wins).
+/// necessary, and a user's own cache layout should not move for no reason). This
+/// happens when `program` is not a package runner (a plain binary needs no
+/// cache), or when the server's own config already set a variable (an explicit
+/// value wins).
 fn apply_runner_cache_env(
     cmd: &mut Command,
     program: &str,

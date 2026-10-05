@@ -197,9 +197,9 @@ pub fn classify_error(
     }
 
     // A server `Retry-After` is clamped to [`MAX_RETRY_BACKOFF`] like every
-    // other wait — a provider that answers a per-minute bucket with
-    // `Retry-After: 60` makes one attempt sit idle for the whole minute, and
-    // the limit often clears before the header says. The budget above is what
+    // other wait. A provider that answers a per-minute bucket with
+    // `Retry-After: 60` makes one attempt sit idle for the whole minute. The
+    // limit often clears before the header says. The budget above is what
     // covers the rest of the server's wait.
     if err.is_rate_limited() {
         let next_attempt = retry_count + 1;
@@ -602,9 +602,9 @@ mod tests {
     }
 
     /// OpenRouter's "reasoning is mandatory" is a bad-request status, which every other rule
-    /// calls fatal. It has to remap instead: re-sending the same disabling
-    /// body always fails, and nothing about the target is fixed by stripping
-    /// history — the effort has to come back enabled.
+    /// calls fatal. It has to remap instead: re-sending the same disabling body always
+    /// fails, and nothing about the target is fixed by stripping history. The effort has to
+    /// come back enabled.
     #[test]
     fn classify_reasoning_mandatory_400_remaps_effort() {
         let err = api_err(
@@ -617,8 +617,8 @@ mod tests {
         ));
     }
 
-    /// The server's "don't retry" hint is about the request it saw; remapping
-    /// to a non-disabled effort makes a different request, so the remap must
+    /// The server's "don't retry" hint is about the request it saw. Remapping
+    /// to a non-disabled effort makes a different request. The remap must
     /// outrank the veto.
     #[test]
     fn classify_reasoning_mandatory_outranks_should_retry_veto() {
@@ -670,7 +670,7 @@ mod tests {
     }
 
     /// The Cerebras shape must take the strip arm rather than the generic
-    /// fatal path — this is the arm that un-bricks a session whose stored
+    /// fatal path. This is the arm that un-bricks a session whose stored
     /// history predates the fix.
     #[test]
     fn classify_unsupported_message_property_400_strips() {
@@ -952,8 +952,8 @@ mod tests {
     }
 
     /// A per-minute bucket answers `Retry-After: 60`. One attempt must not sit
-    /// idle for the whole minute, and the budget must still cover the wait the
-    /// server asked for, so the turn is never failed earlier than before.
+    /// idle for the whole minute. The budget must still cover the wait the
+    /// server asked for. The turn is never failed earlier than before.
     #[test]
     fn a_long_rate_limit_wait_is_split_across_attempts() {
         let err = api_err_with_retry_after(StatusCode::TOO_MANY_REQUESTS, 60);

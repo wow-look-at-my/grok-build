@@ -2824,7 +2824,7 @@ fn after_task_complete_dispatch(
 }
 
 /// The `(repo cwd, branch)` whose CI dot the status bar is showing, or `None`
-/// when no dot is drawn: another view is up, or the cwd has no branch (not a
+/// when no dot is drawn. Another view is up, or the cwd has no branch (not a
 /// repo, or detached HEAD, which renders as `detached` with no dot).
 ///
 /// Resolved exactly as the renderer resolves it — the agent's own branch

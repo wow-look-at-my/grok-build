@@ -1202,7 +1202,7 @@ impl AcpUpdateTracker {
         self.orphan_updates.clear();
         self.skip_next_skill_body = false;
     }
-    /// Attach the API-reported per-turn cost (USD ticks) to the agent-message block that rendered this turn. The ACP text chunk rail does not carry cost; the *durable* `TurnCompleted` notification carries it in an adjacent `PromptUsage`, so the turn-completion handler calls this once per `TurnCompleted`, keyed by the turn's prompt. Attribution is order-independent across both ways a turn ends: - **Driver** (`attached_as_viewer=false`) finishes on `PromptResponse`
+    /// Attach the API-reported per-turn cost (USD ticks) to the agent-message block that rendered this turn. The ACP text chunk rail does not carry cost. The *durable* `TurnCompleted` notification carries it in an adjacent `PromptUsage`, so the turn-completion handler calls this once per `TurnCompleted`, keyed by the turn's prompt. Attribution is order-independent across both ways a turn ends: - **Driver** (`attached_as_viewer=false`) finishes on `PromptResponse`
     ///   (`prompt.rs`), which is usually *after* `TurnCompleted` arrives. At
     ///   that moment the agent message is still streaming (`current_agent_msg`),
     ///   so the cost attaches to the running turn — but only when the
@@ -1262,8 +1262,8 @@ impl AcpUpdateTracker {
     /// Attach one model call's cost to the message block that call produced,
     /// from the `ResponseCompleted` that closes it. A turn is a tool loop of
     /// several model calls, each rendering its own agent-message block, and
-    /// each is priced here as it lands — this is what puts a cost beside
-    /// every message's timestamp instead of only the turn's last one.
+    /// each is priced here as it lands. This is what puts a cost beside every
+    /// message's timestamp instead of only the turn's last one.
     /// `TurnCompleted` cannot do this job: it reports the turn's total as one
     /// number, with no way to split it back apart. `prompt_id` is the
     /// client's own in-flight prompt (the buffered chunk rail carries no
@@ -1310,7 +1310,7 @@ impl AcpUpdateTracker {
     /// The rate is `cache_read_input_tokens / (input_tokens +
     /// cache_read_input_tokens + cache_creation_input_tokens)`, rounded to
     /// the nearest percent. `false` when the response reported no usage, or
-    /// its total prompt tokens were zero — a response with nothing to cache
+    /// its total prompt tokens were zero. A response with nothing to cache
     /// has no rate to report, not a `0%`.
     pub fn set_response_cache_hit(
         &mut self,
@@ -1459,7 +1459,7 @@ impl AcpUpdateTracker {
     ///
     /// A key naming no drawn block (the call streamed no thinking, its block
     /// was removed by a rewind, or the transcript predates the key) changes
-    /// nothing: the summary has no block to describe, and attaching it to a
+    /// nothing. The summary has no block to describe, and attaching it to a
     /// neighbouring one would put words under the wrong reasoning.
     pub fn set_thinking_summary(
         &mut self,

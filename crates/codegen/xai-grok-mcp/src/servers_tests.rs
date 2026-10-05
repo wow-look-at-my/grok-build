@@ -103,10 +103,11 @@ fn plan_stdio_spawn_non_windows_never_resolves() {
 }
 
 /// The spawn path must map a package runner's caches onto the session's
-/// writable temp storage whenever the session is write-confined, because the
-/// runner's default caches (`~/.cache/uv`, `~/.npm`) sit under a `$HOME` no
-/// confining profile grants — which is the EPERM that made `uvx kagimcp` and
-/// `npx tampermonkey-mcp` fail their MCP handshake with "Broken pipe".
+/// writable temp storage. This happens whenever the session is write-confined,
+/// because the runner's default caches (`~/.cache/uv`, `~/.npm`) sit under a
+/// `$HOME` no confining profile grants — which is the EPERM that made `uvx
+/// kagimcp` and `npx tampermonkey-mcp` fail their MCP handshake with "Broken
+/// pipe".
 ///
 /// Drives the shipped `apply_runner_cache_env` (the core the spawn site
 /// calls) against a real `tokio::process::Command`, and asserts on what the
@@ -178,8 +179,8 @@ async fn sandboxed_package_runner_gets_tmp_cache_env() {
 }
 
 /// An unconfined session gets no redirection (nothing is confined, and a
-/// user's own cache layout must not move for no reason); a plain non-runner
-/// binary gets none (it fetches nothing); and a variable the server's own
+/// user's own cache layout must not move for no reason). A plain non-runner
+/// binary gets none (it fetches nothing). And a variable the server's own
 /// config already set keeps the configured value.
 #[tokio::test]
 async fn runner_cache_env_skips_unconfined_non_runners_and_explicit_config() {
@@ -269,11 +270,11 @@ fn stdio_path_override_matches_path_case_insensitively() {
 ///
 /// The condition under test is exactly the one a sandboxed session creates:
 /// the runner's default cache root is unreachable. Here that is enforced
-/// portably by pointing `HOME` at a directory with no write permission, so
-/// the same test is meaningful on CI and on a developer machine. `uv tool
-/// list` is used because it is offline, deterministic and finishes in
+/// portably by pointing `HOME` at a directory with no write permission. The
+/// same test is meaningful on CI and on a developer machine. `uv tool list`
+/// is used because it is offline, deterministic and finishes in
 /// milliseconds, and because it refuses to start when it cannot read its
-/// cache — the same startup path `uvx kagimcp` failed on.
+/// cache. The same startup path `uvx kagimcp` failed on.
 #[cfg(unix)]
 #[tokio::test]
 async fn shipped_runner_env_lets_a_real_runner_start_without_a_writable_home() {

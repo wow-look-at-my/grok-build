@@ -835,10 +835,10 @@ mod tests {
     /// Spawn a `sleep` predecessor and wait until it has actually exec'd.
     ///
     /// Between `spawn` returning and the exec landing, `/proc/<pid>/comm` still
-    /// reads the forked test binary's name, so `PredecessorTarget::open` finds
-    /// no "sleep" to match, declines the takeover, and signals nobody. That
-    /// window is short enough to never lose locally and wide enough to lose on
-    /// a loaded runner.
+    /// reads the forked test binary's name. `PredecessorTarget::open` finds no
+    /// "sleep" to match, declines the takeover, and signals nobody. That window
+    /// is short enough to never lose locally and wide enough to lose on a
+    /// loaded runner.
     fn spawn_predecessor() -> FixtureChild {
         let mut cmd = Command::new("sleep");
         cmd.arg("300")

@@ -58,7 +58,8 @@ impl DiscoveredModel {
 /// A `[model.<id>]` block that routes to a listed model is merged with it,
 /// under the block's own key. Every field the block sets wins. The listing
 /// fills only the fields the block left unset, so a block that only renames a
-/// model still gets the window and capabilities the runtime reported.
+/// model still gets the window. The listing capabilities the runtime
+/// reported.
 pub(crate) fn resolve_discovered_models(
     cfg: &config::Config,
     discovered: &IndexMap<String, DiscoveredModel>,
@@ -420,8 +421,7 @@ pub(crate) fn has_local_runtime(cfg: &config::Config) -> bool {
 /// catalog key discovery gave them.
 ///
 /// Only residency: the window, the capabilities and the price do not change
-/// while the runtime is up, and re-reading them costs an `/api/show` per
-/// model.
+/// while the runtime is up. Re-reading them costs an `/api/show` per model.
 pub(crate) async fn refresh_local_residency(cfg: &config::Config) -> IndexMap<String, bool> {
     let mut out = IndexMap::new();
     for (id, provider) in &cfg.model_providers {

@@ -20,7 +20,7 @@ fn sandbox_exec_is_usable() -> bool {
 }
 
 /// A unique fixture directory under the target directory, canonicalized: the
-/// Seatbelt profile matches canonical paths, so the plan it is built from must
+/// Seatbelt profile matches canonical paths. The plan it is built from must
 /// name them the way the kernel does.
 fn fixture_dir(name: &str) -> PathBuf {
     let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -36,7 +36,7 @@ fn fixture_dir(name: &str) -> PathBuf {
 }
 
 /// The release-default jail around a shell script, as `jail_bwrap_e2e.rs`
-/// builds for Linux: the cwd mounted read-write, the rest of the filesystem
+/// builds for Linux. The cwd mounted read-write, the rest of the filesystem
 /// confined by the profile.
 fn plan(script: &str, grok_home: &Path, cwd: &Path) -> JailPlan {
     JailPlan {
@@ -58,8 +58,8 @@ fn plan(script: &str, grok_home: &Path, cwd: &Path) -> JailPlan {
 /// The jailed process must find the worker both ways: the fd itself (which is
 /// what the connection rides on) and the env var naming it (which is how the
 /// pager finds the connection). Neither can be merely present in the emitted
-/// command — the fd has to survive `sandbox-exec`'s exec, and the env var has
-/// to be in the child's environment.
+/// command — the fd has to survive `sandbox-exec`'s exec. The env var has to
+/// be in the child's environment.
 #[test]
 fn the_seatbelt_jail_hands_the_host_worker_fd_and_its_env_to_the_jailed_process() {
     if !sandbox_exec_is_usable() {
@@ -136,7 +136,7 @@ fn the_seatbelt_jail_hands_the_host_worker_fd_and_its_env_to_the_jailed_process(
 ///
 /// The answer is checked for SHAPE, not content: a runner with no `gh` (and no
 /// credentials) is answered by the worker's nothing-usable sentinel, and that
-/// still proves the jail carried the connection, which is the claim here.
+/// still proves the jail carried the connection. This is the claim here.
 #[test]
 fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     if !sandbox_exec_is_usable() {
@@ -147,7 +147,7 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     let grok_home = fixture_dir("worker-home");
     std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
 
-    // The host side: the shipped worker loop in a real child of this binary, its socket end dup2'd onto a known fd — what `spawn_ci_host` does.
+    // The host side: the shipped worker loop in a real child of this binary, its socket end dup2'd onto a known fd. What `spawn_ci_host` does.
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     let theirs_fd = theirs.into_raw_fd();
     const WORKER_FD: i32 = 3;
@@ -260,8 +260,8 @@ fn seatbelt_worker_self_entry() {
 }
 
 /// Delegate the parent jails: find the worker the way the shipped pager does,
-/// ask it one fixed-shape question, and write what came back where the parent
-/// can read it (the jailed cwd is a granted mount).
+/// ask it one fixed-shape question. Write what came back where the parent can
+/// read it (the jailed cwd is a granted mount).
 #[test]
 fn seatbelt_jailed_child_self_entry() {
     let Ok(branch) = std::env::var(JAILED_CHILD_ENV) else {
@@ -292,9 +292,9 @@ fn seatbelt_jailed_child_self_entry() {
     std::fs::write(work.join("jail-answer.txt"), report).unwrap();
 }
 
-/// With no worker there is nothing to hand over, and the jailed process must
-/// see no fd rather than an inherited one it did not ask for. That is the
-/// dot's "off" state: no CI, not a query against a stale descriptor.
+/// With no worker there is nothing to hand over. The jailed process must see
+/// no fd rather than an inherited one it did not ask for. That is the dot's
+/// "off" state: no CI, not a query against a stale descriptor.
 #[test]
 fn the_seatbelt_jail_advertises_no_host_worker_when_none_was_started() {
     if !sandbox_exec_is_usable() {

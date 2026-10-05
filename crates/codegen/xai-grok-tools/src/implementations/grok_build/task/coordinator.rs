@@ -668,7 +668,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
     /// (`SubagentEvent::MessageChild`) and answer with what became of it.
     ///
     /// Scoping is the difference from `handle_interject`: a child of another
-    /// session is refused rather than steered, and every path answers, so the
+    /// session is refused rather than steered, and every path answers. The
     /// calling tool reports a real outcome instead of a silent success.
     fn handle_message_child(&mut self, request: SubagentMessageChildRequest) {
         let SubagentMessageChildRequest {

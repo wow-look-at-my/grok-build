@@ -182,8 +182,8 @@ pub(super) async fn watch_for_exit(
 /// `complete_and_release` is the only path that marks the task completed and
 /// hands the client terminal back. A watcher that unwound left `get_task`
 /// reporting a task that never finishes, so `wait_for_completion` callers sat
-/// out their whole deadline for a process that had already stopped, and the
-/// terminal was never released.
+/// out their whole deadline for a process. That process had already stopped.
+/// The terminal was never released.
 pub(super) async fn watch_for_exit_releasing_task(
     gateway: GatewaySender,
     session_id: acp::SessionId,

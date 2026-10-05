@@ -213,7 +213,7 @@ mod tests {
     }
 
     /// The whole contract in one link: inputs are copied, `-L` directories
-    /// collapse into the bundle's own, the output is a token, and every flag
+    /// collapse into the bundle's own. The output is a token, and every flag
     /// the linker needs survives untouched.
     #[test]
     fn a_recorded_link_is_replayable_from_the_bundle_alone() {

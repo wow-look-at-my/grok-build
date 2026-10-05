@@ -38,9 +38,9 @@ pub fn truncate_line(line: &str, max_chars: usize) -> Cow<'_, str> {
 /// Returns `Cow::Borrowed` if the line is already within `wrap_width` (zero-copy).
 ///
 /// This is the correct strategy for bash and task_output, where the total output
-/// is already size-bounded (30KB) and the model benefits from seeing all of it.
-/// The problem with long lines isn't size — it's that the model has no structure
-/// to anchor on. Wrapping adds that structure without losing content.
+/// is already size-bounded (30KB). The model benefits from seeing all of it. The
+/// problem with long lines isn't size — it's that the model has no structure to
+/// anchor on. Wrapping adds that structure without losing content.
 pub fn soft_wrap_line(line: &str, wrap_width: usize) -> Cow<'_, str> {
     // Fast path: same byte-length optimization as truncate_line (see comment there).
     if line.len() <= wrap_width {
@@ -122,8 +122,8 @@ impl<'a> PartialOutput<'a> {
 ///
 /// The cap decides whether truncation happens. When triggered, the returned
 /// value contains the first `preview_bytes` bytes snapped to a char boundary
-/// followed by `[Output truncated - <N> bytes total...]`, where `N` is the
-/// size of the whole output, not of the part on hand.
+/// followed by `[Output truncated - <N> bytes total...]`. This holds where
+/// `N` is the size of the whole output, not of the part on hand.
 pub fn truncate_with_preview(
     output: PartialOutput<'_>,
     max_bytes: usize,

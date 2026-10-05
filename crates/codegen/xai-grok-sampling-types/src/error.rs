@@ -392,8 +392,8 @@ impl SamplingError {
         )
     }
 
-    /// The server rejected a replayed `thinking` block's signature, e.g. "messages.1.content.0: Invalid `signature` in `thinking` block". The signature is verified against the model that minted it, so a conversation carried onto another model fails this way
-    /// on every turn until the blocks are dropped.
+    /// The server rejected a replayed `thinking` block's signature, e.g. "messages.1.content.0: Invalid `signature` in `thinking` block". The signature is verified against the model that minted it. A conversation carried onto another model fails this way on
+    /// every turn until the blocks are dropped.
     pub fn is_thinking_signature_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -477,9 +477,9 @@ impl SamplingError {
     /// The API rejected the request because the routed model or endpoint
     /// accepts no image input at all. Distinct from
     /// [`Self::is_image_processing_error`], which is one unreadable image on a
-    /// model that does support them; here every image in the conversation is
-    /// unroutable, so the recovery is the same strip but the cause is the
-    /// model choice.
+    /// model that does support them. Here every image in the conversation is
+    /// unroutable. The recovery is the same strip but the cause is the model
+    /// choice.
     ///
     /// image_url is only supported by certain models" — so this matches a
     /// phrase set case-insensitively across the statuses providers actually use
@@ -1628,7 +1628,7 @@ mod tests {
 
     /// Without it the message is "Request failed (HTTP 404)." -- true, and
     /// no help at all in telling a wrong base URL from a wrong path from a
-    /// model that is not served there.
+    /// model. That model is not served there.
     #[test]
     fn a_404_names_the_endpoint_and_other_statuses_do_not() {
         let url = "https://api.example.com/v1/responses";
@@ -2451,8 +2451,8 @@ mod tests {
     /// The exact error Cerebras returned for a replayed assistant message in
     /// this repo's own session log. It must classify as an
     /// unsupported-message-property error, name both offending properties, and
-    /// produce a property-strip retry — otherwise it is Fatal and the session
-    /// is bricked, since the properties live in stored history.
+    /// produce a property-strip retry — otherwise it is Fatal. The session is
+    /// bricked, since the properties live in stored history.
     #[test]
     fn cerebras_unsupported_message_property_400_is_detected() {
         let err = SamplingError::Api {
@@ -2482,8 +2482,8 @@ mod tests {
     }
 
     /// Both properties named on separate lines must both be read: the
-    /// provider packs multiple failures into one newline-separated string, so
-    /// a first-line-only parse would miss `reasoning_content` and leave the
+    /// provider packs multiple failures into one newline-separated string. A
+    /// first-line-only parse would miss `reasoning_content` and leave the
     /// retry failing on the property it did not strip.
     #[test]
     fn unsupported_property_names_reads_every_line() {

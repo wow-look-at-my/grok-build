@@ -59,7 +59,7 @@ pub fn acp_bridge_transport(
 ) -> AcpBridgeTransport {
     let (agent_read, pump_write) = tokio::io::duplex(BRIDGE_BUF); // server -> client
     let (pump_read, agent_write) = tokio::io::duplex(BRIDGE_BUF); // client -> server
-    // Nothing joins with the pump: it owns both duplex halves, so its death is the bridge's death, and a round-trip that never completes is
+    // Nothing joins with the pump: it owns both duplex halves. Its death is the bridge's death, and a round-trip that never completes is
     // the only thing rmcp would notice.
     #[allow(clippy::disallowed_methods)]
     tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
@@ -300,7 +300,7 @@ mod tests {
     /// A request whose round panics is answered, and the bridge keeps serving.
     ///
     /// The invoke task is the only thing that can ever write the response for
-    /// its id, so an unwound round has to produce that response itself. The
+    /// its id. An unwound round has to produce that response itself. The
     /// reader above is the test's stand-in for rmcp, which waits on the
     /// response and has no way to see that the task died.
     #[tokio::test]

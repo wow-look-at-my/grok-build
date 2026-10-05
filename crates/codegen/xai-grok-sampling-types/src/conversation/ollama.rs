@@ -111,7 +111,7 @@ fn build_ollama_messages(
                             text.push_str(t);
                         }
                         // Ollama takes bare base64, never a data URI and never
-                        // a URL: it has no fetcher, so a remote image would
+                        // a URL. It has no fetcher, so a remote image would
                         // reach the model as nothing at all.
                         ContentPart::Image { url } => {
                             if let Some(base64) = base64_payload(url) {

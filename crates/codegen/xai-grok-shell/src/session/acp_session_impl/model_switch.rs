@@ -65,7 +65,7 @@ impl SessionActor {
             .set(sampling_config.compactions_remaining);
         self.compaction_at_tokens
             .set(sampling_config.compaction_at_tokens);
-        // The floor is per-model, so it is re-resolved here rather than read
+        // The floor is per-model. It is re-resolved here rather than read
         // per turn: one config load per switch instead of one per message.
         self.output_rate_floor
             .set(crate::agent::config::resolve_output_rate_floor_from_disk(
@@ -311,10 +311,10 @@ impl SessionActor {
     ///
     /// `zero_turn` gates the zero-turn-only conversation surgery
     /// (`rewrite_zero_turn_prefix`, the project-instructions/skill-reminder
-    /// insertion): those assume `conversation[1]` is the synthetic
+    /// insertion). Those assume `conversation[1]` is the synthetic
     /// zero-turn user-info prefix slot, which is only true before any real
-    /// turn has run. Pass `true` only from the zero-turn model-switch path;
-    /// every other caller (e.g. a live mid-session agent swap) must pass
+    /// turn has run. Pass `true` only from the zero-turn model-switch path.
+    /// Every other caller (e.g. a live mid-session agent swap) must pass
     /// `false`, or it will silently overwrite the session's real first user
     /// message.
     pub(super) async fn handle_rebuild_agent_for_definition(

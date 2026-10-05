@@ -8,7 +8,7 @@ use crate::app::prompt_queue::QueueEntryWire;
 use crate::views::queue_pane::wire_row_is_steering_text;
 
 /// Advertise `name` the way a session's registry sync does for a SHELL-owned
-/// command: no skill `_meta`, so the pager resolves it to `PassThrough` and the
+/// command: no skill `_meta`, so the pager resolves it to `PassThrough`. The
 /// shell executes it when the prompt's own turn starts.
 fn register_shell_command(app: &mut AppView, id: AgentId, name: &str) {
     let agent = app.agents.get_mut(&id).unwrap();
@@ -89,9 +89,9 @@ fn text_block(text: &str) -> acp::ContentBlock {
 /// The line shape itself (`xai_prompt_queue::is_slash_invocation`) is table-
 /// tested in the shared crate both ends read; what matters here is that these
 /// row predicates consult it. `wire_blocks` excluded because a client-expanded
-/// payload has already replaced the command text with what the model must see;
-/// images make no difference, because a `/gboom stats` row can carry a pasted
-/// image and is still a command; `own_turn` covers the `/plan <description>`
+/// payload has already replaced the command text with what the model must see.
+/// Images make no difference, because a `/gboom stats` row can carry a pasted
+/// image and is still a command. `own_turn` covers the `/plan <description>`
 /// description.
 #[test]
 fn only_payload_free_slash_rows_own_their_turn() {
@@ -136,7 +136,7 @@ fn only_payload_free_slash_rows_own_their_turn() {
 }
 
 /// A server row is judged the same way: the shell's own harvest leaves a slash
-/// invocation alone, so an interrupt must not count it as deliverable.
+/// invocation alone. An interrupt must not count it as deliverable.
 #[test]
 fn server_rows_carry_the_same_rule() {
     assert!(wire_row_is_steering_text(&server_row("s", "read this", 0)));
@@ -153,7 +153,7 @@ fn server_rows_carry_the_same_rule() {
 // ── the delivery routes ───────────────────────────────────────────────────
 
 /// Handing it to the shell as a plain prompt is what put the literal
-/// `/pr-cleanup fix the branch` in front of the model: the running turn harvests
+/// `/pr-cleanup fix the branch` in front of the model. The running turn harvests
 /// queued rows into itself as text, and the shell resolves a command only when
 /// the prompt's own turn starts.
 #[test]
@@ -214,7 +214,7 @@ fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
 }
 
 /// Neither the description nor `/plan <description>` may be folded into the
-/// running turn as steering text — the plan mode this submit switched on
+/// running turn as steering text. The plan mode this submit switched on
 /// belongs to the NEXT turn.
 #[test]
 fn plan_description_submitted_mid_turn_waits_for_the_next_turn() {
@@ -279,7 +279,7 @@ fn plan_description_submitted_mid_turn_waits_for_the_next_turn() {
 
 /// Gating (3a), send-now chord: `/plan <description>` typed mid-turn and
 /// force-sent must RUN the command. Handing the text to the shell as a `sendNow`
-/// prompt does not: the shell knows no `plan` command and would give the model
+/// prompt does not. The shell knows no `plan` command and would give the model
 /// the literal `/plan <description>`.
 #[test]
 fn send_now_on_a_pager_command_runs_the_command() {
@@ -314,8 +314,8 @@ fn send_now_on_a_pager_command_runs_the_command() {
 /// Gating (3a, with an attachment): the chord's producer drains the pasted
 /// image along with the text, so the command is force-sent carrying one. The
 /// command must still run — the literal `/plan <description>` never becomes a
-/// prompt — and the attachment must land somewhere real: on the row the
-/// command queued, exactly as pressing Enter with that image does.
+/// prompt. The attachment must land somewhere real: on the row the command
+/// queued, exactly as pressing Enter with that image does.
 #[test]
 fn send_now_on_a_pager_command_with_an_image_runs_the_command() {
     let mut app = test_app_with_agent();
@@ -434,8 +434,8 @@ fn bare_enter_leaves_a_queued_command_to_its_own_turn() {
 
 /// Gating (3d): a SHELL-advertised command keeps the send-now route. The shell
 /// resolves it when the prompt's own turn starts, so force-sending it must stay
-/// immediate rather than being turned into a queued command — and the payload is
-/// a prompt the shell consumes, never text the model reads.
+/// immediate rather than being turned into a queued command. The payload is a
+/// prompt the shell consumes, never text the model reads.
 #[test]
 fn send_now_on_a_shell_command_keeps_the_immediate_route() {
     let mut app = test_app_with_agent();
@@ -464,9 +464,9 @@ fn send_now_on_a_shell_command_keeps_the_immediate_route() {
     );
 }
 
-/// `/plan <desc>` on an idle session bundles the mode switch with the prompt;
-/// `/compact` queues as a command row and is never interjected; a plain prompt
-/// sends immediately; a plain prompt typed mid-turn is still delivered to the
+/// `/plan <desc>` on an idle session bundles the mode switch with the prompt.
+/// `/compact` queues as a command row and is never interjected. A plain prompt
+/// sends immediately. A plain prompt typed mid-turn is still delivered to the
 /// running turn.
 #[test]
 fn unaffected_paths_keep_their_routing() {

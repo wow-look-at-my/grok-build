@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(outcome.map(str::to_string), Ok("finished".to_string()));
     }
 
-    /// The point of [`fire_and_forget`] is that the panic stops at the task: a
+    /// The point of [`fire_and_forget`] is that the panic stops at the task. A
     /// bare `tokio::spawn` of the same work answers its spawner with a join
     /// failure, which is the loss this whole file exists to prevent.
     #[tokio::test]

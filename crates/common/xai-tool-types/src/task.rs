@@ -887,7 +887,7 @@ impl TaskOutputToolInput {
 /// `TaskOutputToolInput` as a model writes it, with each task-id key spelling
 /// its own field. It exists so a call naming both folds them under
 /// [`TaskOutputToolInput::TASK_IDS_KEYS`] rather than tripping serde's
-/// duplicate-field check, which rejects a second key whatever its value.
+/// duplicate-field check. This rejects a second key whatever its value.
 #[derive(Debug, Default, Deserialize)]
 struct TaskOutputToolInputWire {
     #[serde(

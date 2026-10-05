@@ -1918,8 +1918,8 @@ mod tests {
         assert_eq!(v("git push --force-with-lease"), ClassifierVerdict::Block);
     }
 
-    /// The canonical tree-sitter splitter fails closed (None) for constructs
-    /// that can smuggle commands: background `&`, ANSI-C quoting, command/process
+    /// The canonical tree-sitter splitter fails closed (None) for constructs that
+    /// can smuggle commands. Background `&`, ANSI-C quoting, command/process
     /// substitution, expansions, parens/subshells, and control flow. This is what
     /// the Bash arm relies on instead of the old hand-rolled string parser.
     #[test]

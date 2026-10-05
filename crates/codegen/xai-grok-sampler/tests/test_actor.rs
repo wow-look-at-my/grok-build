@@ -238,8 +238,8 @@ async fn submit_and_collect_returns_response() {
 /// A stream shaped the way Bifrost shapes one: the trailing usage chunk has no
 /// choices, and the gateway writes an unset slice as `"choices": null`. Failing
 /// that parse turned every turn on every model behind the gateway into
-/// "Couldn't read the response", so this drives the whole SSE path, not just
-/// the chunk type.
+/// "Couldn't read the response". This drives the whole SSE path, not just the
+/// chunk type.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn null_choices_usage_chunk_completes_the_turn() {
     let app = Router::new().route(
@@ -1362,8 +1362,8 @@ fn responses_config(base_url: String, doom_loop: Option<DoomLoopRecoveryPolicy>)
 
 /// The Responses-surface twin of `null_choices_usage_chunk_completes_the_turn`:
 /// `response.created` carries an empty output list, which a Go gateway writes
-/// as `"output": null`, and `tools` arrives the same way when the request sent
-/// none. Both land on the very first event of every turn.
+/// as `"output": null`, and `tools` arrives the same way. This happens when the
+/// request sent none. Both land on the very first event of every turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_null_lists_on_created_complete_the_turn() {
     let app = Router::new().route(
@@ -1925,7 +1925,7 @@ mod output_rate {
     }
 
     /// A server-side web search delivers nothing while it runs. The model is not
-    /// generating during it, so the gap is the server's time and not a collapsed
+    /// generating during it. The gap is the server's time and not a collapsed
     /// stream: a response that searches for longer than the sustained duration is
     /// answered, not reissued.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2163,7 +2163,7 @@ mod output_rate {
     }
 
     /// The same failure on the wire that most providers serve. It reaches the gate
-    /// ways: an opener with no `arguments` field, an opener whose `arguments` is
+    /// ways. An opener with no `arguments` field, an opener whose `arguments` is
     /// the empty string, and a continuation that repeats neither an id nor a name
     /// — and each one holds the call open for longer than the sustained
     /// duration, so a span the gate reads as silence breaches over a response that
@@ -2469,7 +2469,7 @@ async fn withheld_headers_are_reissued_after_the_ttft_limit() {
     assert!(saw_ttft_retry(&mut event_rx));
 }
 
-/// Output inside the limit ends the check: a stream whose first chunk lands
+/// Output inside the limit ends the check. A stream whose first chunk lands
 /// early and whose whole body runs well past the limit is never reissued.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn early_output_is_never_reissued_by_the_ttft_limit() {
@@ -2896,9 +2896,9 @@ fn user_request_with_image(text: &str) -> ConversationRequest {
 /// following turn — including `/goal resume` — with no way out but a new
 /// session.
 ///
-/// Proves both halves of the recovery: this request completes after a strip,
-/// and the *next* request never ships the image at all, so a session that
-/// pasted a screenshot does not pay a rejected upload on every turn.
+/// Proves both halves of the recovery: this request completes after a strip.
+/// The *next* request never ships the image at all, so a session that pasted
+/// a screenshot does not pay a rejected upload on every turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn image_input_rejection_strips_and_then_stops_resending() {
     let bodies = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));

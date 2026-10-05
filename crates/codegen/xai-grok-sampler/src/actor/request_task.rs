@@ -1031,16 +1031,16 @@ fn tee_errors<'a, T: Send + 'a>(
 /// `doom_check`, when set, turns a completed response carrying confident doom-loop signals into a retryable failure.
 ///
 /// The output-rate meter runs here rather than inside a backend transform:
-/// every backend's tokens and tool-call arguments pass through this loop, so
-/// one meter covers all of them and the gate and the published rate are the
-/// same measurement. `rate_check`, when set, turns a full window under its
-/// floor into a slow response. With a `backup` launcher the slow response
-/// keeps streaming and another generation starts beside it, hidden. The
-/// earliest of these to happen decides the race: - The recovers above the
-/// floor or finishes: the backup stops. - The backup overtakes or finishes, or
-/// the fails: it takes over. Dropping this future drops the L2 stream, which
-/// cancels the HTTP request. The `ttft` deadline fails an attempt with no
-/// output, on the same tick.
+/// every backend's tokens and tool-call arguments pass through this loop. One
+/// meter covers all of them and the gate and the published rate are the same
+/// measurement. `rate_check`, when set, turns a full window under its floor
+/// into a slow response. With a `backup` launcher the slow response keeps
+/// streaming and another generation starts beside it, hidden. The earliest of
+/// these to happen decides the race: - The recovers above the floor or
+/// finishes: the backup stops. The backup overtakes or finishes, or the fails.
+/// It takes over. Dropping this future drops the L2 stream, which cancels the
+/// HTTP request. The `ttft` deadline fails an attempt with no output, on the
+/// same tick.
 #[allow(clippy::too_many_arguments)]
 async fn drive_l2(
     l2: impl futures_util::Stream<Item = SamplingEvent>,
@@ -1271,7 +1271,7 @@ async fn drive_l2(
                         first_output_seen = true;
                         await_first_output_span.take();
                     }
-                    // A backend-hosted tool call is the server's time, not the stream's: the model generates nothing from the start of a web search to its result.
+                    // A backend-hosted tool call is the server's time, not the stream's. The model generates nothing from the start of a web search to its result.
                     match &other {
                         SamplingEvent::BackendToolCallStarted { .. } => {
                             gate.pause(std::time::Instant::now());
@@ -1586,7 +1586,7 @@ impl Backup<'_> {
 }
 
 /// Publish the gate's current rate. The event's whole job is to change what a
-/// client renders, so an unchanged reading is not sent — with a single exception:
+/// client renders. An unchanged reading is not sent — with a single exception:
 /// while the rate is under the floor the event also carries how long that has
 /// lasted, and that number moves even when the rate does not.
 fn publish_rate(
@@ -2412,7 +2412,7 @@ mod tests {
 
         assert!(!should_continue);
         // The event carries the wait it is about to take and the error that
-        // caused it, so a client can say both instead of showing a bare
+        // caused it. A client can say both instead of showing a bare
         // "Retrying" for however long the backoff runs.
         match event_rx.recv().await {
             Some(SamplingEvent::Retrying {

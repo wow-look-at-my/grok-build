@@ -321,7 +321,7 @@ pub(super) fn handle_session_notification_with_origin(
             ref title,
         } => {
             // A replayed transcript already carries the finished `ToolCall`
-            // for every one of these, so replaying the chunks would build a
+            // for every one of these. Replaying the chunks would build a
             // preview of a call that is already on screen. A delta carries no
             // prompt id, so while a wake turn runs it cannot be told apart
             // from the wake turn's own output and is dropped whole.

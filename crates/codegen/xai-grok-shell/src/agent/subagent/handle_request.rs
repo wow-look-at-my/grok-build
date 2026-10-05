@@ -360,11 +360,12 @@ pub(super) fn fork_runtime_model(requested: Option<String>, parent: &str) -> Str
 }
 /// Item contents of a bound session's live todo list, in order.
 ///
-/// A session's todo list is a `State<TodoState>` resource on its OWN toolset,
-/// and every session the workspace knows is bound here keyed by session id — so
-/// this is how a parent reads a child's list without the child having to hand it
-/// over. Empty when the session is unknown (proxy mode, or a session that was
-/// never bound) or has no list at all, which is exactly "nothing to merge".
+/// A session's todo list is a `State<TodoState>` resource on its OWN toolset.
+/// Every session the workspace knows is bound here keyed by session id — so
+/// this is how a parent reads a child's list without the child. That child is
+/// having to hand it over. Empty when the session is unknown (proxy mode, or a
+/// session that was never bound) or has no list at all, which is exactly "nothing
+/// to merge".
 pub(crate) async fn session_todo_contents(
     workspace_ops: &xai_grok_workspace::WorkspaceOps,
     session_id: &str,

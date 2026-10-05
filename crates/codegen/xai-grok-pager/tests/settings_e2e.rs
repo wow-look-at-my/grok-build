@@ -4519,7 +4519,7 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         );
     }
 
-    // The stepper is still NOT a free-form text input: letters, sign/decimal
+    // The stepper is still NOT a free-form text input. Letters, sign/decimal
     // punctuation, Space, and navigation/edit keys other than Backspace are
     // silently dropped, leaving the buffer untouched (back at the seed).
     let reject_keys = &[

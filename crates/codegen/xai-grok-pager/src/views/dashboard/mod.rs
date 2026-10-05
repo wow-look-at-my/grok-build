@@ -92,11 +92,7 @@ pub fn dashboard_enabled() -> bool {
     state::load_persisted_enabled().unwrap_or(true)
 }
 
-/// Command to name in the "use /X to switch between sessions" session
-/// banners (the `/new` session-created banner and the fork marker).
-///
-/// `/dashboard` when the feature is enabled; `None` when it is off — the tip
-/// would point at a refused command, so callers fall back to a plain
+/// Command to name in the "use /X to switch between sessions" session / banners (the `/new` session-created banner and the fork marker). / / `/dashboard` when the feature is enabled. `None` when it is off — the tip / would point at a refused command, so callers fall back to a plain
 /// session-id banner.
 pub(crate) fn session_switch_hint_command() -> Option<&'static str> {
     dashboard_enabled().then_some("/dashboard")
@@ -106,7 +102,7 @@ pub(crate) fn session_switch_hint_command() -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// The hint mirrors the dashboard flag: `None` when the env override
+    /// The hint mirrors the dashboard flag. `None` when the env override
     /// disables it (the tip would name a refused command), otherwise whatever
     /// `dashboard_enabled()` says — asserted as consistency, not a fixed
     /// value, so the test doesn't depend on the machine's persisted

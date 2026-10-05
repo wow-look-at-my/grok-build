@@ -431,8 +431,8 @@ async fn first_subagent_turn_allocation_does_not_walk_the_sessions_index() {
     assert_eq!(agent.session_turn_number(&sid), Some(1));
 }
 /// Agent-side upload path with trace upload HARD-DISABLED (build baseline):
-/// even with maximally-enabling config, no harness trace uploads are built,
-/// no turn numbers burn, and no counter is persisted.
+/// even with maximally-enabling config, no harness trace uploads are built.
+/// No turn numbers burn, and no counter is persisted.
 #[tokio::test(flavor = "current_thread")]
 async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
     let agent = build_minimal_agent_for_tests();
@@ -8761,7 +8761,7 @@ mod soft_default_settings_emit {
 /// Session replicas carry the session summary, first prompt and repo head to
 /// cli-chat-proxy. Upstream lets the server switch that on through
 /// `remote_settings.session_registry_enabled` whenever the operator set
-/// nothing locally; this build ignores the remote flag, so the only way the
+/// nothing locally. This build ignores the remote flag, so the only way the
 /// replica client exists is an explicit local opt-in.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]

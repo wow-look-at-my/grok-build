@@ -797,7 +797,7 @@ mod tests {
 }
 
 ///
-/// Nothing here may drive a request through `send_json` / `send_empty`: those
+/// Nothing here may drive a request through `send_json` / `send_empty`. Those
 /// bail before the wire in this build (see `egress_disabled_pins`), so a test
 /// that stands up a server and waits to be called can only hang or fail. What
 /// remains testable is credential recovery, which never leaves the process.

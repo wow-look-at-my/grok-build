@@ -83,10 +83,10 @@ fn mode_flag(harness: &PtyHarness, flag: &str) -> bool {
 
 /// 15b. **Rapid Shift+Tab presses land on the LAST stop and stay there.**
 ///
-/// Both presses go out before the shell has confirmed the first one, so the
+/// Both presses go out before the shell has confirmed the first one. The
 /// confirmation for the first stop (Plan) arrives after the ring already
 /// advanced to Auto. The burst must settle on Auto and keep it: the prompt's
-/// `auto` flag stays up and the `plan` flag the earlier press asked for never
+/// `auto` flag stays up. The `plan` flag the earlier press asked for never
 /// appears.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]

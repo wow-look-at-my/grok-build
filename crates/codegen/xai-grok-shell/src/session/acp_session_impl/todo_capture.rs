@@ -74,7 +74,7 @@ fn is_capture_readable(kind: ToolKind) -> bool {
 ///
 /// This is the gate that holds the one-mutation rule. The capture agent is
 /// handed the session's real todo tool (so the request stays byte-identical to
-/// the main turn's and keeps its prompt cache), which means a `merge: false`
+/// the main turn's and keeps its prompt cache). This means a `merge: false`
 /// replace, a status flip, or a reworded existing item are all one argument
 /// away — until they come through here.
 fn contents_from_todo_write_args(args: &serde_json::Value) -> Vec<String> {
@@ -104,7 +104,7 @@ fn contents_from_todo_write_args(args: &serde_json::Value) -> Vec<String> {
 /// Mirrors the main turn's `prepare_tool_call`: empty arguments mean `{}`, and
 /// a run of concatenated objects (`{...}{...}`, which several models produce
 /// under load) yields the first one rather than nothing. Anything still
-/// unparseable becomes `{"raw": ...}` — the same shape the main turn hands a
+/// unparseable becomes `{"raw": ...}`. The same shape the main turn hands a
 /// tool, so the failure is the tool's to report, not a silent drop here.
 fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
     use crate::session::helpers::tool_input_parsing::{
@@ -157,13 +157,13 @@ pub(super) fn add_only_todo_args_with_prefix(
 /// What the main agent is told after a capture lands.
 ///
 /// The model treats an item it did not write as somebody else's idea, and
-/// cancels it as out of scope. Nothing on the list carries who put it there,
-/// so the correction has to arrive as its own message: the user assigned this,
+/// cancels it as out of scope. Nothing on the list carries who put it there.
+/// The correction has to arrive as its own message: the user assigned this,
 /// which makes it in scope by definition.
 ///
 /// Both variants differ in what they carry, not just in tone. `/todo` is
 /// explicitly not-now, so naming the items would pull attention onto work the
-/// user deferred; it reports the count and points at the list. `/TODO` is
+/// user deferred. It reports the count and points at the list. `/TODO` is
 /// "next", so the items ride along and the agent needs no second call to know
 /// what it is about to do.
 fn captured_todos_reminder(urgent: bool, todo_tool: &str, added: &[String]) -> String {
@@ -192,7 +192,7 @@ fn captured_todos_reminder(urgent: bool, todo_tool: &str, added: &[String]) -> S
 
 /// One line of the capture agent's transcript, for the task window that shows
 /// this run. Rendered here rather than client-side: the client never sees the
-/// capture agent's conversation, and a `ConversationItem` is not something the
+/// capture agent's conversation. A `ConversationItem` is not something the
 /// tasks pane knows how to draw.
 fn transcript_lines(items: &[ConversationItem]) -> String {
     let mut out = String::new();
@@ -268,8 +268,8 @@ fn capture_action(
     todo_tool: &str,
     tools_used: usize,
 ) -> CaptureAction {
-    // The append is always available: it is the thing the run exists to do,
-    // so a spent read budget must not strand the agent with nothing to call.
+    // The append is always available: it is the thing the run exists to do.
+    // A spent read budget must not strand the agent with nothing to call.
     if name == todo_tool {
         return CaptureAction::Append;
     }
@@ -289,9 +289,7 @@ fn capture_action(
     CaptureAction::Read
 }
 
-/// The items one model response contributes to the next turn's request: the
-/// response echoed the way the main turn records it (`turn.rs` pushes every
-/// item, assistant and otherwise), not a synthesized assistant message.
+/// Consider the items one model response.
 fn echoed_response_items(
     items: Vec<ConversationItem>,
     strip_reasoning: bool,
@@ -420,7 +418,7 @@ impl SessionActor {
         let conversation = self.chat_state_handle.get_conversation().await;
         // Fit the snapshot to THIS model's window rather than sending the
         // conversation whole: a small-window model would otherwise fail the
-        // capture with a context-length error, which is deterministic and
+        // capture with a context-length error. This is deterministic and
         // never retried.
         let mut items = crate::session::helpers::session_recap::budget_instruction_items(
             conversation,
@@ -617,7 +615,7 @@ impl SessionActor {
     /// The name this session advertises the append-capable todo tool under,
     /// or why `/todo` cannot run here. Kind alone is not enough: opencode's
     /// `todowrite` is also [`ToolKind::Plan`] and replaces the whole list
-    /// instead of merging into it, so an append cannot be expressed through
+    /// instead of merging into it. An append cannot be expressed through
     /// it.
     pub(super) async fn resolve_capture_todo_tool(
         &self,
@@ -737,10 +735,10 @@ impl SessionActor {
         contents_from_todo_write_args(args)
     }
 
-    /// Run the sanitized append through the session's own todo tool, so the
-    /// list, its persisted state, and the client's plan view all move the way
-    /// they do when the main agent writes a todo. Dispatch is by the
-    /// session's advertised name with canonical parameter names: the registry
+    /// Run the sanitized append through the session's own todo tool. Do this
+    /// so the list, its persisted state, and the client's plan view all move
+    /// the way they do when the main agent writes a todo. Dispatch is by the
+    /// session's advertised name with canonical parameter names. The registry
     /// reverse-maps client names onto canonical ones and leaves everything
     /// else alone, so canonical keys arrive as themselves under any rename.
     pub(super) async fn append_capture_todos(
@@ -859,7 +857,7 @@ mod tests {
 
     /// A capture turn continues a tool call it made itself, so what the model
     /// returned has to go back verbatim. Dropping the reasoning that came with
-    /// a call is what the Responses API rejects the continuation over; dropping
+    /// a call is what the Responses API rejects the continuation over. Dropping
     /// a hosted search's items leaves the next request describing a search that
     /// never happened.
     #[test]
@@ -1050,8 +1048,8 @@ mod tests {
 
     /// The bug this message exists for: the agent read a captured item as
     /// somebody else's idea and cancelled it. Both variants have to name the
-    /// user as the one who assigned it, and neither may read as "do this now"
-    /// — the whole point of the todo system is that it is for afterwards.
+    /// user as the one who assigned it. Neither may read as "do this now" —
+    /// the whole point of the todo system is that it is for afterwards.
     #[test]
     fn both_reminders_name_the_user_and_defer_to_the_current_work() {
         let added = ["add a second remote".to_owned(), "document it".to_owned()];

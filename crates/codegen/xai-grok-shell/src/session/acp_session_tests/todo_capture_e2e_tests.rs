@@ -278,8 +278,8 @@ async fn a_capture_leaves_the_parent_conversation_alone() {
 
 /// `/TODO` is the same capture with the items put where the user will act on
 /// them next. The adversarial call is still sanitized — the front of the list
-/// is not a way around the one-mutation rule — and the main agent's own item
-/// keeps its place, its content and its status.
+/// is not a way around the one-mutation rule. The main agent's own item keeps
+/// its place, its content and its status.
 #[tokio::test(flavor = "current_thread")]
 async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
     let local = tokio::task::LocalSet::new();
@@ -393,9 +393,9 @@ async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
         .await;
 }
 
-/// A session whose task-list tool cannot address the item a capture adds is
-/// refused before any model call, rather than written through with semantics
-/// that cannot express the append.
+/// Consider a session whose task-list tool. That session cannot address the
+/// item a capture adds is refused before any model call, rather than written
+/// through with semantics. Those semantics cannot express the append.
 #[tokio::test(flavor = "current_thread")]
 async fn a_task_list_tool_without_item_ids_is_refused() {
     let local = tokio::task::LocalSet::new();

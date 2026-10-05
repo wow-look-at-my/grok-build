@@ -1207,7 +1207,7 @@
     }
 
     /// A rate describes the stream that published it. When one model call
-    /// closes, its reading closes with it: carrying it into the next call's
+    /// closes, its reading closes with it. Carrying it into the next call's
     /// pre-first-token wait puts a stale number, and after a slow call a
     /// yellow or red one, under a row that says it is waiting for a response.
     #[test]

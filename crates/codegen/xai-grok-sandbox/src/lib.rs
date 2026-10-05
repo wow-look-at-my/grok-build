@@ -963,7 +963,7 @@ mod tests {
 
     /// The write-confining classification is what decides whether a package
     /// runner's caches get redirected. `devbox` grants writes to `$HOME`, so its
-    /// runners must be left alone; `off` confines nothing; every other built-in
+    /// runners must be left alone. `off` confines nothing. Every other built-in
     /// profile (and any custom profile, which extends one) writes only to the
     /// workspace, `$GROK_HOME` and temp.
     #[test]

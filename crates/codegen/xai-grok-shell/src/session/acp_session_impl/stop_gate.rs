@@ -51,8 +51,8 @@ pub(crate) fn ci_gate_decision(
 }
 
 /// The message the model is sent back with. It names the tool that answers the
-/// next question, because a nudge that only says "CI is red" leaves the model
-/// to rediscover how to read a log from inside a sandbox.
+/// next question. This is because a nudge that only says "CI is red" leaves
+/// the model to rediscover how to read a log from inside a sandbox.
 pub(crate) fn build_ci_gate_reminder(branch: &str) -> String {
     format!(
         "<system-reminder>CI is failing on `{branch}`. Do not stop yet. Call the `ci` tool with \

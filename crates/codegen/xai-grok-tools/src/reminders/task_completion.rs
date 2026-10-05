@@ -850,8 +850,8 @@ mod tests {
     /// A reservation made by a caller that panics still reserves nothing.
     ///
     /// The guard type is spelled out rather than inferred: `parking_lot`'s
-    /// guard is the one that cannot report a poisoned lock, so the next tool
-    /// call acquires the map and sees the reservation the panicked caller had
+    /// guard is the one that cannot report a poisoned lock. The next tool call
+    /// acquires the map and sees the reservation the panicked caller had
     /// already recorded. A lock that poisoned would make every later tool call
     /// on the session fail on a map of counters.
     #[test]
@@ -2003,7 +2003,7 @@ mod tests {
     /// A completed background task's reminder must be available on the FIRST
     /// post-completion tool round — even mid-goal-loop — and exactly once.
     /// Drives the REAL `LocalTerminalBackend` end to end: a real command is
-    /// spawned in the background, the session sees it complete, and the
+    /// spawned in the background. The session sees it complete, and the
     /// shipped reminder path surfaces it at the next tool-call boundary.
     #[tokio::test]
     async fn completed_task_reminder_surfaces_on_the_first_post_completion_tool_round() {

@@ -127,7 +127,7 @@ fn persist_entry(path: &std::path::Path, model_id: &str, entry: &PricingCacheEnt
 /// Resolve `model_id`'s per-token pricing.
 ///
 /// Config first. Then the cache. A miss starts a background fetch and answers
-/// with unusable pricing, which keeps the cost honestly absent for this call
+/// with unusable pricing. This keeps the cost honestly absent for this call
 /// rather than stalling the turn on the network.
 pub(crate) fn resolve(model_id: &str) -> ModelPricing {
     let configured = crate::agent::config::resolve_configured_pricing(model_id);

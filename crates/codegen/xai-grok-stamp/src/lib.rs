@@ -41,7 +41,7 @@ impl std::error::Error for StampError {}
 /// Writes `version` into the slot in `binary`, in place.
 ///
 /// The length byte goes in first in source order but the whole slot is written
-/// together, so a reader never sees a length without its payload.
+/// together. A reader never sees a length without its payload.
 pub fn stamp(binary: &mut [u8], version: &str) -> Result<usize, StampError> {
     if version.is_empty() {
         return Err(StampError::VersionEmpty);

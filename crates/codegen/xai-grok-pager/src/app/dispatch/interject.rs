@@ -121,15 +121,15 @@ fn dispatch_interject_on_inner(
 /// Interrupt the running turn with the whole queue (bare Enter on an empty
 /// composer while busy). Server-owned rows ride one `x.ai/queue/deliver_now`:
 /// the shell harvests them into the running turn and cancels the in-flight
-/// model stream, so the model stops mid-response and reads them. Local rows
-/// the shell has never seen (image prompts, skill-expanded slash rows,
-/// anything queued before the session bound) are sent as interjections here,
-/// which cancels the same stream shell-side. Rows that own their own turn —
-/// bash commands, client-expanded slash payloads, and a slash invocation the
-/// shell must resolve (`/compact`, `/plan`; the interjection drain resolves
-/// skills only) — cannot be folded into another turn as user text, so they
-/// stay queued and run when this turn ends. That is named in the toast rather
-/// than left for the user to notice.
+/// model stream. The model stops mid-response and reads them. Local rows the
+/// shell has never seen (image prompts, skill-expanded slash rows, anything
+/// queued before the session bound) are sent as interjections here, which
+/// cancels the same stream shell-side. Rows that own their own turn — bash
+/// commands, client-expanded slash payloads, and a slash invocation the shell
+/// must resolve (`/compact`, `/plan`. The interjection drain resolves skills
+/// only) — cannot be folded into another turn as user text, so they stay
+/// queued and run when this turn ends. That is named in the toast rather than
+/// left for the user to notice.
 pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
@@ -143,10 +143,10 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
         }
         let session_id = agent.session.session_id.clone();
         let running = agent.session.current_prompt_id.clone();
-        // The shell folds only steering text into a running turn; a queued bash
-        // row is executed from its block meta, and a slash invocation is
-        // resolved by the shell only when its own turn starts, so both keep
-        // their own turn (`wire_row_is_steering_text` mirrors the shell's rule).
+        // The shell folds only steering text into a running turn. A queued bash
+        // row is executed from its block meta. A slash invocation is resolved by
+        // the shell only when its own turn starts, so both keep their own turn
+        // (`wire_row_is_steering_text` mirrors the shell's rule).
         let (server_rows, stuck_server) = agent
             .shared_queue
             .iter()
@@ -238,10 +238,10 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
 ///
 /// A slash invocation this client OWNS (a pager builtin: `/plan`, `/model`, …)
 /// is not a message at all and is routed back through the submit path instead:
-/// the shell has no such command, so sending the text would hand the model the
+/// the shell has no such command. Sending the text would hand the model the
 /// literal `/cmd args`. Shell-owned commands (ACP-advertised skills and
-/// builtins) keep the send-now route — the shell resolves those when the
-/// prompt's own turn starts, which is exactly what "now" means for them.
+/// builtins) keep the send-now route. The shell resolves those when the prompt's
+/// own turn starts, which is exactly what "now" means for them.
 pub(super) fn dispatch_send_prompt_now(
     app: &mut AppView,
     text: String,
@@ -380,7 +380,7 @@ fn is_pager_owned_slash_invocation(agent: &AgentView, text: &str) -> bool {
 }
 
 /// Give a command's force-sent attachments to the row the command queued. The
-/// composer producer drains the text and its images before dispatching, so a
+/// composer producer drains the text and its images before dispatching. A
 /// command that runs through the registry has to be told where the attachment
 /// goes: onto the prompt row it queued (the `/plan <description>`
 /// description), or nowhere. `queued_before` is the queue's back row as the
