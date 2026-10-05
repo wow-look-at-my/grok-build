@@ -95,9 +95,9 @@ and execute. Use them aggressively and liberally - spawn subagents early and oft
 - Managing task lists and tracking progress (${{ tools.by_kind.plan }})
 - Reviewing subagent results and synthesizing responses for the user
 
-You have no tools to read files, list directories, search file contents, or run terminal \
-commands. Every task that needs one of those goes to a subagent. This includes looking up \
-TUI feature documentation - spawn an `explore` subagent to read it.
+You have no tools to read files, list directories, search file contents, run terminal \
+commands, or monitor running processes. Every task that needs one of those goes to a subagent. \
+This includes looking up TUI feature documentation - spawn an `explore` subagent to read it.
 
 ### ALWAYS delegate to subagents:
 - **ALL reading and exploration** - reading files, listing directories, searching file contents, looking up docs (`explore`)
@@ -444,7 +444,7 @@ fn grok_build_plan_toolset() -> ToolServerConfig {
     }
 }
 /// Orchestrator toolset: orchestration, delegation, and research tools only.
-/// No file reading, listing, or searching, no terminal execution, and no file editing.
+/// No file reading, listing, or searching, no terminal execution of any kind, and no file editing.
 /// The orchestrator delegates all reading, exploration, execution, and file modification to subagents.
 fn orchestrator_toolset() -> ToolServerConfig {
     ToolServerConfig {
@@ -466,11 +466,10 @@ fn orchestrator_toolset() -> ToolServerConfig {
             (&grok_build::SendMessageTool).into(),
             (&grok_build::CiTool).into(),
             (&grok_build::WorkflowTool).into(),
-            // Scheduling and monitoring
+            // Scheduling
             (&grok_build::SchedulerCreateTool).into(),
             (&grok_build::SchedulerDeleteTool).into(),
             (&grok_build::SchedulerListTool).into(),
-            (&grok_build::MonitorTool).into(),
             // Web tools
             (&grok_build::WebSearchTool).into(),
             (&grok_build::WebFetchTool).into(),
@@ -484,6 +483,7 @@ fn orchestrator_toolset() -> ToolServerConfig {
             // Intentionally excluded:
             // - ReadFileTool / ListDirTool / GrepTool (no reading, listing, or searching - delegate to subagents)
             // - BashTool (no terminal execution - delegate to subagents)
+            // - MonitorTool (runs a shell command - delegate to subagents)
             // - SearchReplaceTool (no file editing - delegate to subagents)
             // - CopyFileTool / MoveFileTool (no relocating - delegate to subagents)
             // - OpenCodeWriteTool (no file writing - delegate to subagents)
@@ -1751,6 +1751,7 @@ mod tests {
             ToolKind::List,
             ToolKind::Search,
             ToolKind::Execute,
+            ToolKind::Monitor,
         ] {
             assert!(
                 !config.tools.iter().any(|tool| tool.kind == Some(kind)),
@@ -1762,6 +1763,7 @@ mod tests {
             ToolConfig::from(&grok_build::ReadFileTool).id,
             ToolConfig::from(&grok_build::ListDirTool).id,
             ToolConfig::from(&grok_build::GrepTool).id,
+            ToolConfig::from(&grok_build::MonitorTool).id,
         ] {
             assert!(
                 !config.tools.iter().any(|tool| tool.id == excluded),
