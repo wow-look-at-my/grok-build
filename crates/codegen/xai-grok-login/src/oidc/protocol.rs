@@ -170,8 +170,7 @@ pub fn peek_access_token_principal_id(access_token: &str) -> Option<String> {
 
     impl PrincipalIdClaim {
         /// The keys `principal_id` is read under; the same pair
-        /// `MinimalClaims::PRINCIPAL_ID_KEYS` folds. Written out again because
-        /// each of these types is local to its own peek function.
+        /// `MinimalClaims::PRINCIPAL_ID_KEYS` folds.
         const PRINCIPAL_ID_KEYS: xai_tool_types::Aliases =
             xai_tool_types::Aliases::new("principal_id", &["principalId"]);
     }
@@ -624,9 +623,7 @@ pub(super) struct IdTokenClaims {
 }
 
 impl IdTokenClaims {
-    /// The keys [`first_name`](Self::first_name) is read under. `given_name` is
-    /// the OIDC standard claim; an IdP that also carries this program's own
-    /// spelling says one thing twice.
+    /// The keys [`first_name`](Self::first_name) is read under.
     pub(super) const FIRST_NAME_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("first_name", &["given_name"]);
     /// The keys [`last_name`](Self::last_name) is read under; `family_name` is
@@ -1411,12 +1408,8 @@ mod wire_alias_tests {
     use super::super::test_helpers::ensure_crypto_provider;
     use super::{IdTokenClaims, peek_access_token_principal, peek_access_token_principal_id};
 
-    /// A token carrying exactly the claims given, signed with a throwaway
-    /// secret. `insecure_decode` reads the body and checks nothing about the
-    /// signature, so the claim names in `claims` are what the reader sees. The
-    /// header names a real algorithm because a `Header` whose `alg` is not one
-    /// of `jsonwebtoken::Algorithm`'s variants fails to parse, and the reader
-    /// gives up before it looks at any claim.
+    /// A token carrying exactly the claims given, signed with a throwaway secret. `insecure_decode` reads the body and checks nothing about the signature, so the claim names in `claims` are what the reader sees. The header names a real algorithm because a `Header` whose `alg` is not one of `jsonwebtoken::Algorithm`'s variants fails to
+    /// parse, and the reader gives up before it looks at any claim.
     fn token_with(claims: &str) -> String {
         ensure_crypto_provider();
         let value: serde_json::Value =
