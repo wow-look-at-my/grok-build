@@ -127,7 +127,8 @@ jobs:
       - name: Lint (workspace)
         run: cargo clippy --locked --workspace --lib --bins --keep-going
 
-      # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/.      - name: Test (PTY end-to-end)
+      # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/.
+      - name: Test (PTY end-to-end)
         run: |
           cargo nextest run --locked --workspace --profile ci \
             -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui)' \
