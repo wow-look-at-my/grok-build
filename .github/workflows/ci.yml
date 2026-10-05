@@ -33,6 +33,16 @@ env:
     {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
+  # Runs first and gates every build job, so a prose, YAML or workflow finding fails the run in a minute instead of after the cold compile.
+  slopfix:
+    name: Slopfix
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: wow-look-at-my/slopfix@master
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-22.04
@@ -50,6 +60,7 @@ jobs:
 
   build-test:
     name: Build & test
+    needs: slopfix
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-22.04
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s, so a job past this is broken, not slow.
@@ -147,6 +158,7 @@ jobs:
 
   build-release:
     name: Build release (${{ matrix.name }})
+    needs: slopfix
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
     strategy:
@@ -352,6 +364,7 @@ jobs:
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
+    needs: slopfix
     runs-on: macos-14
     timeout-minutes: 25
     steps:
