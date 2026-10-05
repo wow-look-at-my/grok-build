@@ -1,3 +1,4 @@
+
 use std::sync::Arc;
 
 use xai_grok_auth::bearer_suffix;

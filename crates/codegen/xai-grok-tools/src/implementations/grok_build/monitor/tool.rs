@@ -438,7 +438,8 @@ async fn process_event(
                 owner_session_id: owner(),
             });
         }
-        RateLimitOutcome::Suppressed => {}
+        RateLimitOutcome::Suppressed => {
+        }
         RateLimitOutcome::AutoKill { message } => {
             let wrapped = event::wrap_monitor_event(description, &message, task_id);
             notification_handle.send_monitor_event(MonitorEvent {

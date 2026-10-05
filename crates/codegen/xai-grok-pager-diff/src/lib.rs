@@ -330,7 +330,8 @@ pub fn extract_edit_hunks(tc: &agent_client_protocol::ToolCall) -> (Vec<DiffHunk
                      falling back to Diff.meta"
                 );
             }
-            _ => {}
+            _ => {
+            }
         }
     }
 
@@ -654,6 +655,7 @@ mod tests {
         let Some(hunk) = hunks.first() else {
             panic!("expected a hunk: {hunks:?}");
         };
+
 
         let ctx_before: Vec<_> = hunk
             .iter()

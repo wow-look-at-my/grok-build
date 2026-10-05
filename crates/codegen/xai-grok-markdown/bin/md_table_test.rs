@@ -242,6 +242,7 @@ fn main() -> io::Result<()> {
 fn draw(f: &mut ratatui::Frame, app: &mut App) {
     let size = f.area();
 
+
     let render_w = app.render_width as u16;
     let full_height = wrapped_line_count(&app.full_lines, render_w).max(1) + 2; // +2 for border
     let stream_height = wrapped_line_count(&app.streaming_lines, render_w).max(1) + 2;

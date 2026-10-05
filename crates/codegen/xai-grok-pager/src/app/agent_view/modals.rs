@@ -879,7 +879,8 @@ impl AgentView {
                     state.picker_state.scroll_offset = None;
                     return InputOutcome::Changed;
                 }
-                _ => {}
+                _ => {
+                }
             }
         }
 

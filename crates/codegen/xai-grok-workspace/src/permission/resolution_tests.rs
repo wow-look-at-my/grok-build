@@ -268,6 +268,7 @@ fn load_settings_with_default_mode() {
     assert_eq!(settings.default_mode, Some("acceptEdits".to_string()));
 }
 
+
 #[test]
 fn integration_claude_settings_file_to_permission_config() {
     let tmp = tempfile::tempdir().unwrap();
@@ -332,7 +333,8 @@ fn discovery_priority_order() {
     if let Some(idx) = paths.iter().position(|p| p == &project_local) {
         // Ensure global paths (if any) come after project
         for (i, p) in paths.iter().enumerate() {
-            if p.to_string_lossy().contains("/.claude/") && i < idx {}
+            if p.to_string_lossy().contains("/.claude/") && i < idx {
+            }
         }
     }
 }

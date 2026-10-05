@@ -2636,6 +2636,7 @@ async fn live_cancel_after_partial_tool_results_repairs_remaining() {
         "file contents here",
     ));
 
+
     // User types a new prompt
     h.handle.push_user_message(ConversationItem::user(
         "never mind, just help me with something else",

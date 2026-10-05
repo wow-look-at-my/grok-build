@@ -532,5 +532,6 @@ mod tests {
     // ── Notification fields ───────────────────────────────────
 
     #[test]
-    fn notification_fields() {}
+    fn notification_fields() {
+    }
 }

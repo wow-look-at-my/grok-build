@@ -1034,6 +1034,7 @@ mod tests {
         assert_eq!(percent_of_window(500_000, 1_000_000), "50%");
     }
 
+
     #[test]
     fn bar_layout_for_width_picks_wide_at_breakpoint_and_above() {
         // At the breakpoint and above, the wide layout is selected.

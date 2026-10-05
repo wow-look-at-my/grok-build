@@ -708,7 +708,10 @@ mod tests {
 
     #[test]
     fn test_selectable_cols() {
-        let line = Line::from(vec![Span::raw("prefix: "), Span::raw("content")]);
+        let line = Line::from(vec![
+            Span::raw("prefix: "),
+            Span::raw("content"),
+        ]);
 
         // All spans selectable
         let cols = selectable_cols(&line, &Selectable::All);

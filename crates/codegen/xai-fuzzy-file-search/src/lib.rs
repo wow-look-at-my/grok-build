@@ -464,7 +464,7 @@ impl FuzzyFileMatcher {
                 .collect();
         }
 
-        // Score floor from helix's completion menu (helix-term/src/ui/completion.rs).
+        // https://github.com/helix-editor/helix/blob/d79cce4e4bfc24dd204f1b294c899ed73f7e9453/helix-term/src/ui/completion.rs#L369.
         let len = self.query.chars().count() as u32;
         let min_score = 7 + len * 14;
 

@@ -1714,7 +1714,8 @@ impl PromptWidget {
                     self.file_search.clear_context();
                     return PromptEvent::Edited;
                 }
-                FileSearchKeyResult::PassThrough => {}
+                FileSearchKeyResult::PassThrough => {
+                }
             }
         }
 

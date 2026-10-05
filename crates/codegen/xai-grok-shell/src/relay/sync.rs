@@ -935,7 +935,8 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let mut initialized = false;
 
-        let update_state = |_state: ConnectionState| {};
+        let update_state = |_state: ConnectionState| {
+        };
 
         let msg = serde_json::json!({
             "jsonrpc": "2.0",

@@ -31,6 +31,7 @@ fn similar_names(hint: &xai_grok_tools::util::path_suggestions::PathNotFoundHint
         .collect()
 }
 
+
 #[tokio::test]
 async fn pattern1_parent_exists_wrong_leaf_suggests_similar() {
     // Model asks for BillingFeaturesImpl.kt but BillingFeatures.kt exists.
@@ -128,6 +129,7 @@ async fn pattern1_contributing_md_guess() {
     assert!(!hint.cwd_note.is_empty());
 }
 
+
 #[tokio::test]
 async fn pattern2_absolute_path_completely_different_tree() {
     // Model asks for /Users/other/project/src/foo.rs, cwd is /Users/me/project.
@@ -202,6 +204,7 @@ async fn pattern3_dropped_folder_relative_path_skipped() {
     );
 }
 
+
 #[tokio::test]
 async fn pattern4_lib_vs_libs() {
     // Model asks for "lib/utils.rs", repo has "libs/" directory.
@@ -235,6 +238,7 @@ async fn pattern4_src_does_not_exist_no_misleading_suggestion() {
         "should not suggest unrelated files, got: {names:?}"
     );
 }
+
 
 #[tokio::test]
 async fn pattern5_root_file_with_close_match() {

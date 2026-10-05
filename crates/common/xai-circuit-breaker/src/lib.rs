@@ -25,3 +25,4 @@ pub use observer::{NoopObserver, Observer};
 pub use registry::CircuitBreakerRegistry;
 pub use retry_policy::{Disposition, RetryPolicy};
 pub use state::{BreakerOpen, BreakerState, Outcome};
+

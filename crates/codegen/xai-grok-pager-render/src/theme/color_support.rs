@@ -1,3 +1,4 @@
+
 use std::sync::OnceLock;
 
 use ratatui::style::Color;
@@ -254,6 +255,7 @@ fn terminal_supports_truecolor_brand(terminal: TerminalName) -> bool {
     // Native Windows: assume ConHost has VT processing enabled Pre-1709 hosts are effectively extinct and would gracefully degrade.
     cfg!(target_os = "windows")
 }
+
 
 fn indexed_to_ansi16(n: u8) -> Color {
     match n {

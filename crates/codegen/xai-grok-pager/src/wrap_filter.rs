@@ -1,3 +1,4 @@
+
 use base64::Engine as _;
 use std::sync::Arc;
 
@@ -210,7 +211,8 @@ impl Osc52Filter {
                     self.buf.push(byte);
                     match byte {
                         // BEL terminates the inner OSC.
-                        0x07 => {}
+                        0x07 => {
+                        }
                         0x1b => {
                             self.state = FilterState::DcsTmuxOscEsc;
                         }

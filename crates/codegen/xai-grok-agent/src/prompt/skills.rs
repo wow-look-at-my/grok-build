@@ -774,6 +774,7 @@ mod tests {
         );
     }
 
+
     #[test]
     fn find_skill_paths_flat_layout() {
         // Traditional flat layout: skills/<name>/SKILL.md
@@ -1214,6 +1215,7 @@ mod tests {
             Err(SkillParseError::InvalidName(_))
         ));
     }
+
 
     /// Helper: initialize a bare git repo at `path` so git2::Repository::discover works.
     fn init_git_repo(path: &Path) {

@@ -2,6 +2,7 @@
 
 use super::*;
 
+
 /// Harness-wide default `idle_threshold_ms`.
 pub(crate) const LAZINESS_DEFAULT_IDLE_THRESHOLD_MS: u64 = 10_000;
 

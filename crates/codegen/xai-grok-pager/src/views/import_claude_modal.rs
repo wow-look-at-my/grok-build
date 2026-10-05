@@ -208,7 +208,8 @@ impl ImportClaudeModalState {
             ModalWindowOutcome::Handled => {
                 return ImportClaudeModalOutcome::Changed;
             }
-            _ => {}
+            _ => {
+            }
         }
 
         let Some(area) = self.content_area else {

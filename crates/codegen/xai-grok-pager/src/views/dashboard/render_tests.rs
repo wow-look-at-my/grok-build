@@ -3877,6 +3877,7 @@ fn render_footer_peek_question_focus_flips_answer_vs_open() {
         !unfocused.contains(":answer"),
         "unfocused question footer must NOT show `answer`, got: {unfocused:?}",
     );
+
 }
 
 /// When a row (NeedsInput or otherwise) is selected with an empty prompt, the footer shows `Enter:open`.

@@ -107,7 +107,8 @@ impl AgentView {
         if let Some(result) = confirm.resolve(ch) {
             let was_drain_blocked = self.drain_blocked();
             match result {
-                EditConfirmResult::Cancel => {}
+                EditConfirmResult::Cancel => {
+                }
                 EditConfirmResult::Save => {
                     // Empty edit: keep the row text; a queued prompt must
                     // never be blanked by Save

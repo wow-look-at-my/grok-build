@@ -197,51 +197,29 @@ pub enum ScenarioStep {
         timeout_ms: u64,
     },
     /// Assert text is present on the current screen.
-    AssertContains {
-        text: String,
-    },
+    AssertContains { text: String },
     /// Assert text is absent from the current screen.
-    AssertNotContains {
-        text: String,
-    },
+    AssertNotContains { text: String },
     /// Type literal text into the TUI.
-    TypeText {
-        text: String,
-    },
+    TypeText { text: String },
     /// Inject keys using ptyctl notation, for example `<Enter>`, `<Esc>`, `jj`.
-    Keys {
-        keys: String,
-    },
+    Keys { keys: String },
     /// Paste text using bracketed paste sequences.
-    Paste {
-        text: String,
-    },
+    Paste { text: String },
     /// Paste fixture image path(s), using the same path parser as terminal drag/drop.
-    PasteImagePaths {
-        images: Vec<String>,
-    },
+    PasteImagePaths { images: Vec<String> },
     /// Paste fixture image file:// URL(s), matching Finder-style file URL payloads.
-    PasteImageFileUrls {
-        images: Vec<String>,
-    },
+    PasteImageFileUrls { images: Vec<String> },
     /// Paste fixture image path(s) with shell escaping for spaces/special chars.
-    PasteEscapedImagePaths {
-        images: Vec<String>,
-    },
+    PasteEscapedImagePaths { images: Vec<String> },
     /// Focus the prompt input by locating the rendered prompt box.
     FocusPrompt,
     /// Paste into the prompt using semantic prompt focus instead of coordinates.
-    PastePrompt {
-        text: String,
-    },
+    PastePrompt { text: String },
     /// Simulate copying an image to the OS clipboard, then pressing paste.
-    PasteClipboardImage {
-        image: String,
-    },
+    PasteClipboardImage { image: String },
     /// Drop text into the prompt using semantic prompt focus instead of coordinates.
-    DropTextPrompt {
-        text: String,
-    },
+    DropTextPrompt { text: String },
     /// Simulate a mouse click. Coordinates are 0-indexed.
     MouseClick {
         row: u16,
@@ -250,15 +228,9 @@ pub enum ScenarioStep {
         button: MouseButton,
     },
     /// Simulate a double-click at one coordinate.
-    DoubleClick {
-        row: u16,
-        col: u16,
-    },
+    DoubleClick { row: u16, col: u16 },
     /// Simulate a triple-click at one coordinate.
-    TripleClick {
-        row: u16,
-        col: u16,
-    },
+    TripleClick { row: u16, col: u16 },
     /// Simulate mouse-wheel scrolling at a coordinate.
     Scroll {
         row: u16,
@@ -275,15 +247,9 @@ pub enum ScenarioStep {
         count: u16,
     },
     /// Simulate a primary-button mouse drag. Coordinates are 0-indexed.
-    Drag {
-        from: MousePoint,
-        to: MousePoint,
-    },
+    Drag { from: MousePoint, to: MousePoint },
     /// Alias for drag used by text-selection scenarios.
-    SelectText {
-        from: MousePoint,
-        to: MousePoint,
-    },
+    SelectText { from: MousePoint, to: MousePoint },
     /// Click visible text by finding it on screen.
     ClickText {
         text: String,
@@ -312,40 +278,22 @@ pub enum ScenarioStep {
         to_offset_cols: u16,
     },
     /// Simulate dropping text at a position with click + bracketed paste.
-    DropText {
-        row: u16,
-        col: u16,
-        text: String,
-    },
+    DropText { row: u16, col: u16, text: String },
     /// Simulate dropping text at a semantic target.
-    DropTextAt {
-        target: TargetLocator,
-        text: String,
-    },
+    DropTextAt { target: TargetLocator, text: String },
     /// Simulate drag/drop of image files onto the prompt as terminal paste payload.
-    DropImagesPrompt {
-        images: Vec<String>,
-    },
+    DropImagesPrompt { images: Vec<String> },
     /// Trigger a copy shortcut/key sequence from the TUI.
     Copy {
         #[serde(default = "default_copy_keys")]
         keys: String,
     },
-    AssertOsc52Contains {
-        text: String,
-    },
-    AssertOsc52NotContains {
-        text: String,
-    },
+    AssertOsc52Contains { text: String },
+    AssertOsc52NotContains { text: String },
     /// Assert the contiguous highlighted run at the first occurrence of `at_text` renders `equals`, untrimmed.
-    AssertHighlightRun {
-        at_text: String,
-        equals: String,
-    },
+    AssertHighlightRun { at_text: String, equals: String },
     /// Assert no screen cell rendering the first occurrence of `text` has a non-default background.
-    AssertTextNotHighlighted {
-        text: String,
-    },
+    AssertTextNotHighlighted { text: String },
     /// Assert the captured **raw** PTY output contains at least `min` Kitty
     /// graphics APC sequences (`\x1b_G`).
     AssertKittyGraphics {
@@ -363,9 +311,7 @@ pub enum ScenarioStep {
     /// Assert the captured **raw** PTY output contains NO Kitty graphics APC sequences.
     AssertNoKittyGraphics {},
     /// Assert that a submitted request included at least this many image payloads.
-    AssertRequestImageCount {
-        min: usize,
-    },
+    AssertRequestImageCount { min: usize },
     /// Assert every submitted image has inline bytes, the expected MIME type, and decodes.
     AssertInlineImages {
         min: usize,
@@ -386,14 +332,9 @@ pub enum ScenarioStep {
     AssertNoTempArtifacts {},
 
     /// Resize the terminal.
-    Resize {
-        rows: u16,
-        cols: u16,
-    },
+    Resize { rows: u16, cols: u16 },
     /// Drain output for a fixed period.
-    Wait {
-        millis: u64,
-    },
+    Wait { millis: u64 },
     /// Capture text, HTML, SVG, and JSON artifacts for the current screen.
     Screenshot {
         name: String,

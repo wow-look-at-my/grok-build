@@ -1,3 +1,4 @@
+
 use crate::buffers::unicode_display_width;
 
 pub(super) struct MathBox {

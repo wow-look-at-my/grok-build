@@ -7,6 +7,7 @@ pub(crate) use xai_grok_session_events::types::{
     ToolCompletedSource, ToolOutcome, TurnOutcomeLabel,
 };
 
+
 /// Stalled: the model emitted prose narration claiming progress without any real tool calls.
 pub(crate) const LAZINESS_STALLED_NARRATION: &str = "stalled_narration";
 

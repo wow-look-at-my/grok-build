@@ -871,6 +871,7 @@ fn a_tool_call_without_provider_fields_replays_unchanged() {
     );
 }
 
+
 fn history_with_model_id_and_reasoning() -> Vec<ConversationItem> {
     vec![
         ConversationItem::system("You are helpful."),

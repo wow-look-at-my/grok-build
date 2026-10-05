@@ -610,7 +610,7 @@ fn aggregate_n2_table_driven() {
     for (rs, expected) in [
         (vec![false, false], true),
         (vec![false, true], false),
-        (vec![true, false], true), // s0 refuted (excluded), cold s1 clears
+        (vec![true, false], true),  // s0 refuted (excluded), cold s1 clears
         (vec![true, true], false),
     ] {
         assert_aggregate(&rs, expected, "N=2");
@@ -633,9 +633,9 @@ fn aggregate_n3_table_driven() {
 fn aggregate_n4_table_driven() {
     for (rs, expected) in [
         (vec![false, false, false, false], true),
-        (vec![false, false, false, true], true), // cold not-refuted = 2 (s1,s2)
-        (vec![false, false, true, true], false), // cold not-refuted = 1 (s1) < 2
-        (vec![false, true, true, true], false),  // cold not-refuted = 0
+        (vec![false, false, false, true], true),  // cold not-refuted = 2 (s1,s2)
+        (vec![false, false, true, true], false),  // cold not-refuted = 1 (s1) < 2
+        (vec![false, true, true, true], false),   // cold not-refuted = 0
         (vec![true, true, true, true], false),
     ] {
         assert_aggregate(&rs, expected, "N=4");

@@ -321,7 +321,8 @@ printf '%s' '{sentinel}'
             }
             // Only include vars that are new or changed from baseline
             match baseline.get(key) {
-                Some(baseline_value) if baseline_value == value => {}
+                Some(baseline_value) if baseline_value == value => {
+                }
                 _ => {
                     result.insert(key.to_string(), value.to_string());
                 }

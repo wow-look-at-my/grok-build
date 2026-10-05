@@ -981,6 +981,7 @@ fn signals_are_reportable(s: &crate::session::signals::SessionSignals) -> bool {
     s.turn_count > 0 || s.tool_call_count > 0
 }
 
+
 /// Max consecutive failed sync ticks tolerated before stopping the loop. Several minutes at the default 60s interval.
 const MAX_CONSECUTIVE_AUTH_FAILURES: u8 = 10;
 

@@ -132,9 +132,7 @@ pub enum SessionEvent {
         elapsed: Duration,
     },
     /// `/flush` or `/dream` started; the invocation marker that pairs each run with its outcome line.
-    MemoryCommandStarted {
-        command: MemoryCommandKind,
-    },
+    MemoryCommandStarted { command: MemoryCommandKind },
     /// `/flush` or `/dream` finished. `summary` comes from the shell's typed response.
     MemoryCommandCompleted {
         summary: String,
@@ -143,13 +141,9 @@ pub enum SessionEvent {
         elapsed: Duration,
     },
     /// Hook annotation, displayed inline after a tool call.
-    HookAnnotation {
-        message: String,
-    },
+    HookAnnotation { message: String },
     /// A hook's verdict on the tool call above it (deny, failure, timeout); this block draws the tool-row bullet.
-    HookOutcome {
-        message: String,
-    },
+    HookOutcome { message: String },
     /// The session's persisted model is no longer available after re-auth.
     /// Both IDs are empty when re-shown on blocked prompt attempts.
     ModelUnavailable {
@@ -187,9 +181,7 @@ pub enum SessionEvent {
         auto: bool,
     },
     /// Not persisted: a resumed session shows only the `Plan: Enter` tool row.
-    PlanModeEnteredByAgent {
-        permission: PermissionLabel,
-    },
+    PlanModeEnteredByAgent { permission: PermissionLabel },
     PlanReviewClosed {
         outcome: PlanReviewOutcome,
         permission: PermissionLabel,

@@ -245,7 +245,11 @@ mod tests {
     use super::*;
 
     fn test_style() -> PreviewStyle {
-        PreviewStyle::new(Color::Indexed(234), Color::Indexed(189), Color::Indexed(60))
+        PreviewStyle::new(
+            Color::Indexed(234),
+            Color::Indexed(189),
+            Color::Indexed(60),
+        )
     }
 
     #[test]

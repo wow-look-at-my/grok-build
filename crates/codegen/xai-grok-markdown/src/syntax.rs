@@ -162,11 +162,7 @@ pub(crate) fn syntax_highlight_raw(
 #[allow(dead_code)]
 pub fn test_syntect() -> &'static Syntect {
     static TEST_SYNTECT: OnceLock<Syntect> = OnceLock::new();
-    TEST_SYNTECT.get_or_init(|| {
-        Syntect::new(include_bytes!(
-            "../../xai-grok-pager-render/assets/tokyo-night.tmTheme"
-        ))
-    })
+    TEST_SYNTECT.get_or_init(|| Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme")))
 }
 
 #[cfg(test)]

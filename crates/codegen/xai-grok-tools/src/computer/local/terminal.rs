@@ -1949,7 +1949,8 @@ impl LocalTerminalActor {
                     extract_exit_status(status),
                 );
             }
-            Ok(None) if process_done => {}
+            Ok(None) if process_done => {
+            }
             Ok(None) => {}
             // An erroring `try_wait` is no proof the child was collected; keep polling.
             Err(e) => {

@@ -748,6 +748,7 @@ fn delete_forward_word_handles_atomic_elements() {
     assert_eq!(t.cursor(), elem_range.start);
 }
 
+
 #[test]
 fn element_id_is_unique_and_stable() {
     let mut t = TextArea::new();
@@ -867,6 +868,7 @@ fn elements_returns_sorted_slice() {
     assert_eq!(t.text().get(first.range.clone()).unwrap_or(""), "BBB");
     assert_eq!(t.text().get(second.range.clone()).unwrap_or(""), "DDD");
 }
+
 
 #[test]
 fn render_element_with_display_shows_display_text() {
@@ -1041,6 +1043,7 @@ fn render_text_after_wider_display_element_simple() {
     let rendered = rendered.trim_end();
     assert_eq!(rendered, "[LONG]!");
 }
+
 
 #[test]
 fn display_width_of_range_plain_text() {
@@ -2867,6 +2870,7 @@ fn selection_rendering_applies_default_selection_style() {
     assert_ne!(buf.cell((4, 0)).map(|c| c.bg), Some(default_bg));
 }
 
+
 #[test]
 fn redo_after_undo_restores() {
     let mut ta = TextArea::new();
@@ -3046,6 +3050,7 @@ fn undo_redo_multiple_round_trips() {
     ta.undo();
     assert_eq!(ta.text(), "hello");
 }
+
 
 #[test]
 fn batch_consecutive_inserts_into_one_undo_step() {
@@ -3331,6 +3336,7 @@ fn element_insert_always_discrete() {
     assert_eq!(ta.text(), "");
 }
 
+
 #[test]
 fn undo_insert_element_redo_preserves_element_id() {
     let mut ta = TextArea::new();
@@ -3522,6 +3528,7 @@ fn backspace_on_element_undo_restores_element() {
         7..14
     );
 }
+
 
 #[test]
 fn undo_group_collapses_multiple_mutations() {

@@ -16,8 +16,8 @@ rustup toolchain install nightly
 | `render_all` | All 8 combos: `pretty × syntect × {full, streaming}` for every input |
 
 Each iteration runs:
-- `render_markdown_ratatui_full()` — every combination of pretty/non-pretty × syntect/no-syntect
-- `StreamingMarkdownRenderer` char-by-char — the same combinations
+- `render_markdown_ratatui_full()` — 4 combos (pretty/non-pretty × syntect/no-syntect)
+- `StreamingMarkdownRenderer` char-by-char — same 4 combos
 
 ## Running
 

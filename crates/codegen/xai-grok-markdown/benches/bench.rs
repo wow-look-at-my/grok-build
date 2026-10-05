@@ -15,9 +15,7 @@ fn default_style() -> MarkdownStyle {
 
 /// Create syntect highlighter for benchmarking.
 fn create_syntect() -> Syntect {
-    Syntect::new(include_bytes!(
-        "../../xai-grok-pager-render/assets/tokyo-night.tmTheme"
-    ))
+    Syntect::new(include_bytes!("../assets/tokyo-night.tmTheme"))
 }
 
 fn bench_render_markdown(c: &mut Criterion) {

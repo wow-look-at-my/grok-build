@@ -1965,4 +1965,5 @@ mod tests {
         let state = DashboardState::new();
         assert!(peek_number_key(&state, 1).is_none());
     }
+
 }

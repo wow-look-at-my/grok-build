@@ -204,6 +204,7 @@ impl MessagesReducer {
         }
     }
 
+
     /// Reported reason, else `default`; a `None` default forces null so a failed turn is not mislabeled.
     fn resolved_stop_reason(&self, default: Option<&str>) -> Option<String> {
         let default = default?;

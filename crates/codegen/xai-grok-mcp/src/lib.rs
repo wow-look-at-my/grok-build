@@ -2,6 +2,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::string_slice)] // Hits predate the gate
 #![allow(clippy::unwrap_used)] // Hits predate the gate
+
 #![allow(clippy::cast_possible_wrap)]
 #![deny(clippy::indexing_slicing)]
 
