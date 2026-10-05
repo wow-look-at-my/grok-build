@@ -216,9 +216,9 @@ fn null_key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>
 }
 
 /// Deserialize an SSE payload, naming the field that failed. serde_json alone
-/// renders a rejected payload as "invalid type: null, expected a sequence"
-/// — and for a buffered (internally tagged) event it carries no line/column
-/// either, so the message names neither the field nor the offset. That is the
+/// renders a rejected payload as "invalid type: null, expected a sequence".
+/// For a buffered (internally tagged) event it carries no line/column either.
+/// Thus the message names neither the field nor the offset. That is the
 /// whole error a user gets, and there is nothing in it to act on.
 /// `serde_path_to_error` supplies the field path on a derived struct
 /// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]`
@@ -250,7 +250,7 @@ fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
 /// Strict parse, then one retry with the payload's null lists read as empty.
 ///
 /// The retry only runs when the strict parse failed. There was something to
-/// rewrite, and a retry that also fails reports the STRICT error — so a
+/// rewrite. A retry that also fails reports the STRICT error. Thus a
 /// malformed payload is never described in terms of the rewrite.
 fn parse_sse_event<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
     let strict = match from_sse_payload::<T>(data) {
@@ -2804,7 +2804,7 @@ mod tests {
     use xai_grok_sampling_types::types::ChatRequestMessage;
 
     /// A reset header naming seconds that no `u64` can hold states no wait the
-    /// client can honour, so it parses as absent rather than as a saturated
+    /// client can honour. Thus it parses as absent, not as a saturated
     /// wait of `u64::MAX` seconds.
     #[test]
     fn a_reset_header_beyond_the_u64_second_range_is_not_a_wait() {

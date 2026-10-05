@@ -204,8 +204,8 @@ impl ContentBlock {
     pub const MIME_TYPE_KEYS: Aliases = Aliases::new("mime_type", &["mimeType"]);
 }
 
-/// `ContentBlock` as it arrives on the wire. This happens with each MIME key
-/// spelling its own field, so a block naming both folds them under
+/// `ContentBlock` as it arrives on the wire. Each MIME key spelling has its own
+/// field here. A block naming both thus folds them under
 /// [`ContentBlock::MIME_TYPE_KEYS`] instead of tripping serde's duplicate-field
 /// check.
 #[derive(Debug, Deserialize)]

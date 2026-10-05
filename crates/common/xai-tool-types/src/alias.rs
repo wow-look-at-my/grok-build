@@ -720,8 +720,8 @@ mod tests {
     }
 
     /// Case one of the drift this table guards: a field that went back to a bare
-    /// `#[serde(alias)]` - its `Aliases` declaration gone, or the shadow no
-    /// longer folding every key it names.
+    /// `#[serde(alias)]`. Either its `Aliases` declaration is gone, or the shadow
+    /// no longer folds every key it names.
     #[test]
     fn every_wired_alias_is_folded_in_the_file_that_declares_it() {
         let root = workspace_root();
@@ -770,7 +770,7 @@ mod tests {
 
         // The scan is worth nothing if it found nothing. Every `LOCAL` and
         // `ENUM_VARIANTS` alias stays a bare `#[serde(alias)]`, so all of them
-        // must appear in the scan - which is also what proves the scanner is
+        // must appear in the scan. That is also what proves the scanner is
         // reading the tree rather than silently skipping it.
         let declared_elsewhere: usize = LOCAL
             .iter()
@@ -1200,8 +1200,8 @@ pub struct Late {
     ///
     /// Whitespace is collapsed first, so a key rustfmt split across lines is
     /// still read. Requiring a separator before `alias` is what keeps clap's
-    /// `visible_alias` and `alias` args out of the read even if one ever sat
-    /// inside a `#[serde(` line.
+    /// `visible_alias` and `alias` args out of the read. This holds even if one
+    /// ever sat inside a `#[serde(` line.
     fn alias_sites_in(attribute: &str) -> Vec<String> {
         const KEY: &str = "alias=\"";
         let flat: String = attribute.chars().filter(|c| !c.is_whitespace()).collect();

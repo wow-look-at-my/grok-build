@@ -3112,7 +3112,7 @@ impl SessionActor {
     /// typed inputs a title is read from. A repeat of the current title is
     /// bytes on the wire that redraw the same row.
     ///
-    /// Every step is allowed to fail and say nothing. Cases leave the row
+    /// Every step is allowed to fail and say nothing. These cases leave the row
     /// showing the wire name: a half-written argument that names no tool yet, a
     /// name the registry does not know, and a body past the size cap. That is
     /// what the row showed before any of this existed.

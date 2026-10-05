@@ -280,8 +280,8 @@ mod tests {
         assert_eq!(documents.version(A), Some(0));
     }
 
-    /// The revision is written down before the notification goes out, so a
-    /// versionless push that arrives while the send is still running is
+    /// The revision is written down before the notification goes out. A
+    /// versionless push that arrives while the send is still running is thus
     /// credited with the text the server was just given. A send that fails
     /// takes it back: what is recorded describes the text the server has.
     #[test]

@@ -185,8 +185,8 @@ async fn a_capture_appends_and_cannot_touch_the_main_agent_s_items() {
 
 /// The capture's own turns never reach the conversation the main agent is
 /// working in — that is what makes it safe to run mid-turn. The one thing it
-/// does add there is the notice that the user assigned these items, without
-/// which the agent reads them as somebody else's idea and cancels them.
+/// does add there is the notice that the user assigned these items. Without
+/// that notice, the agent reads them as somebody else's idea and cancels them.
 #[tokio::test(flavor = "current_thread")]
 async fn a_capture_leaves_the_parent_conversation_alone() {
     let local = tokio::task::LocalSet::new();

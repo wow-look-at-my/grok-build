@@ -2380,8 +2380,8 @@ async fn goal_send_now_promotes_a_command_row_instead_of_steering_it() {
 
 /// DIAGNOSTIC (not a regression guard yet): the automatic ASAP path — a plain queued row with no `send_now`. Reaches `queue_input` and///
 /// `harvest_queued_prompts_into_interjections` exactly the same way whether or not a goal is active. Confirms the harvest function itself
-/// carries no goal-awareness, so if goal mode really blocks ASAP delivery the gate must live in how often turn.rs's loop *calls* the harvest
-/// during a goal round, not in the harvest or the enqueue path.
+/// carries no goal-awareness. So if goal mode really blocks ASAP delivery, the gate must live in how often turn.rs's loop *calls* the
+/// harvest during a goal round. It cannot live in the harvest or the enqueue path.
 #[tokio::test]
 async fn plain_queue_during_goal_turn_is_harvested_like_any_other_turn() {
     let local = tokio::task::LocalSet::new();

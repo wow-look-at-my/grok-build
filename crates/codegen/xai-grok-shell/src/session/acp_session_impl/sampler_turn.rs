@@ -1349,8 +1349,8 @@ impl SessionActor {
             // A context-window-exceeded error can recur immediately. This
             // happens after a compaction (the next resubmit overflows again)
             // when whatever made the conversation too big survives
-            // compaction — e.g. a single recent item that alone is near
-            // the window size. Compacting a SECOND time in a row cannot fix
+            // compaction. An example is a single recent item that alone is
+            // near the window size. Compacting a SECOND time in a row cannot fix
             // that (there is nothing further for the summarizer to reduce),
             // so the ladder below only ever compacts once per overflow. The
             // next attempt deterministically shrinks the sent conversation
@@ -1768,7 +1768,7 @@ impl SessionActor {
             )),
         )
     }
-    /// Deterministically shrink the session's conversation to fit `context_window` tokens, without an LLM call. Drop oldest whole turns, then truncate the newest unit in place if it alone still exceeds the budget (`xai_chat_state::compaction_utils::fit_conversation_to_budget`). Only reached from [`Self::handle_sampling_failure`] as the fallback after a compaction already ran once for the current overflow and the next sample overflowed again — see `ContextOverflowRecovery`. Rewrite the conversation to plain text so the current model can read it. Returns false when the history holds nothing to convert — the caller then has a rejection this cannot explain, and says so rather than resubmitting the same bytes forever. That is also the loop bound: one flattening leaves nothing for a second to find.
+    /// Deterministically shrink the session's conversation to fit `context_window` tokens, without an LLM call. Drop oldest whole turns, then truncate the newest unit in place if it alone still exceeds the budget (`xai_chat_state::compaction_utils::fit_conversation_to_budget`). Only reached from [`Self::handle_sampling_failure`] as the fallback after a compaction already ran once for the current overflow and the next sample overflowed again — see `ContextOverflowRecovery`. Rewrite the conversation to plain text so the current model can read it. Returns false when the history holds nothing to convert. The caller then has a rejection this cannot explain. It says so rather than resubmitting the same bytes forever. That is also the loop bound: one flattening leaves nothing for a second to find.
     async fn flatten_history_for_this_model(self: &Arc<Self>) -> bool {
         let conversation = self.chat_state_handle.get_conversation().await;
         if !xai_grok_sampling_types::conversation::needs_flattening(&conversation) {
@@ -2409,8 +2409,8 @@ impl SessionActor {
             self.chat_state_handle.record_last_turn_usage(u.clone());
             // Cost priority. Server-reported ticks → server-reported USD float
             // (both already resolved by the sampler into `cost_usd_ticks`) →
-            // computed cost from token usage × the model's per-token pricing,
-            // which `model_pricing::resolve` takes from config or the catalog.
+            // computed cost from token usage × the model's per-token pricing.
+            // `model_pricing::resolve` takes that pricing from config or the catalog.
             let cost_ticks = response.cost_usd_ticks.or_else(|| {
                 let model_id = response.assistant().and_then(|a| a.model_id.clone());
                 let model_id = model_id.as_deref().unwrap_or("");

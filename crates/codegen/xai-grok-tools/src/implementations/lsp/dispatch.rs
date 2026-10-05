@@ -663,8 +663,8 @@ mod tests {
     /// `ensure_started_background` is a warm-up, so a caller with no runtime to
     /// run it on loses the warm-up and nothing else. Spawning unconditionally
     /// made every synchronous `WorkspaceHandle` construction panic the moment
-    /// the caller had any LSP server in `~/.grok/lsp.json`, which is a plain
-    /// test with no Tokio runtime and a machine-dependent one besides.
+    /// the caller had any LSP server in `~/.grok/lsp.json`. Such a caller is a
+    /// plain test with no Tokio runtime, and a machine-dependent one besides.
     #[test]
     fn ensure_started_background_without_a_runtime_skips_the_warmup() {
         assert!(

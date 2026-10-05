@@ -663,8 +663,8 @@ pub(crate) fn user_item(id: &str, owner: &str) -> InputItem {
     user_item_with_rx(id, owner).0
 }
 
-/// Consider a user-originated row whose text. That row is a slash command,
-/// carried in both its wire blocks and its queue metadata — the shape a
+/// Consider a user-originated row whose text is a slash command. The command is
+/// carried in both its wire blocks and its queue metadata. That is the shape a
 /// pager row that was never resolved client-side sends (an ACP/shell command
 /// passed through).
 #[cfg(test)]

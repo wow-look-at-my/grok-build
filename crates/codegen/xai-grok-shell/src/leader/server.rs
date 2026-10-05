@@ -1416,9 +1416,32 @@ fn make_version_mismatch_notification(
         .to_string(),
     )
 }
-/// Run the leader IPC server. The socket_path is where the Unix socket will be created. Acquiring the leader lock AFTER this function creates the socket This ordering ensures that: - Clients waiting for socket can connect as soon as we're ready - The lock acquisition happens after we're listening # Readiness gating The `ready_rx` watch channel controls whether ACP messages are forwarded to the agent. While `*ready_rx.borrow() == false` (leader still initializing): - Client connections and IPC registrations are accepted normally. - ACP requests (messages with an `id`) receive a structured `leader_starting`
+/// Run the leader IPC server. The socket_path is where the Unix socket will be created.
+///
+/// The leader lock is acquired AFTER this function creates the socket. This ordering ensures that:
+/// - Clients that wait for the socket can connect as soon as the server is ready.
+/// - The lock acquisition happens after the server listens.
+///
+/// # Readiness gating
+///
+/// The `ready_rx` watch channel controls whether ACP messages are forwarded to the agent.
+/// While `*ready_rx.borrow() == false` (leader still initializing):
+/// - Client connections and IPC registrations are accepted normally.
+/// - ACP requests (messages with an `id`) receive a structured `leader_starting`
 ///   JSON-RPC error so the client can retry rather than hang.
-/// - ACP notifications (no `id`) are dropped with a trace log. Once `ready_rx` is signaled `true` (socket bound + bounded auth complete. The model catalog and remote settings stream in afterward). All subsequent ACP traffic is forwarded to the agent as normal. # Arguments * `socket_path` - Path for the Unix domain socket * `acp_tx` - Channel to send ACP messages from clients to the agent * `response_rx` - Channel to receive responses from the agent to route to clients * `cancel` - Cancellation token for graceful shutdown * `no_exit_on_disconnect` - If true, don't exit when all clients disconnect * `client_count` - Atomic counter tracking the number of connected clients * `agent_busy` - Atomic flag set while the agent has in-flight **IPC**
+/// - ACP notifications (no `id`) are dropped with a trace log.
+///
+/// Once `ready_rx` is signaled `true` (socket bound + bounded auth complete. The model catalog and remote settings stream in afterward). All subsequent ACP traffic is forwarded to the agent as normal.
+///
+/// # Arguments
+///
+/// * `socket_path` - Path for the Unix domain socket
+/// * `acp_tx` - Channel to send ACP messages from clients to the agent
+/// * `response_rx` - Channel to receive responses from the agent to route to clients
+/// * `cancel` - Cancellation token for graceful shutdown
+/// * `no_exit_on_disconnect` - If true, do not exit when all clients disconnect
+/// * `client_count` - Atomic counter tracking the number of connected clients
+/// * `agent_busy` - Atomic flag set while the agent has in-flight **IPC**
 ///   requests; relay-driven traffic never sets it
 /// * `agent_activity` - Agent-derived activity view (running turns, parked
 ///   interactions, live subagents), used for the pre-shutdown session flush

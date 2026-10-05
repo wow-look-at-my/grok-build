@@ -856,8 +856,8 @@ pub struct TaskOutputToolInput {
     /// Lenient on the wire (invisible to the advertised schema — schemars
     /// ignores serde aliases and custom deserializers): also accepts the
     /// singular `task_id` key and a bare string/number instead of an array.
-    /// Models frequently mirror `kill_task`'s singular `task_id` here (in
-    /// soak rollouts 3 of 4 organic calls did) and previously hard-failed
+    /// Models frequently mirror `kill_task`'s singular `task_id` here (most
+    /// organic calls in soak rollouts did). They previously hard-failed
     /// with "Provide a non-empty task_ids list", after which they abandoned
     /// the background-task workflow for shell polling. A call naming both
     /// keys folds them through [`TaskOutputToolInput::TASK_IDS_KEYS`], so the

@@ -3705,9 +3705,10 @@ mod tests {
     }
 
     /// Every resolver that asks "is this cwd grok-managed?" walks up to the
-    /// managed boundary and consults the registry, so a checkout sitting
+    /// managed boundary and consults the registry. A checkout sitting
     /// directly under the legacy root (the shape an unforked grok build left
-    /// behind) must resolve exactly like one inside a per-repository bucket.
+    /// behind) must therefore resolve exactly like one inside a per-repository
+    /// bucket.
     #[test]
     fn resolvers_answer_for_a_checkout_at_either_depth_of_the_old_location() {
         for under in [

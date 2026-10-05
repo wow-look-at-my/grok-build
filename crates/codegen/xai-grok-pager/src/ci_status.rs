@@ -158,9 +158,9 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
 /// Talk to the unsandboxed CI-status host worker for a sandboxed session,
 /// returning an [`Output`] shaped like a `gh` run's stdout.
 ///
-/// It is authoritative: when the worker replies with the nothing-usable
+/// It is authoritative. When the worker replies with the nothing-usable
 /// sentinel, we hand the caller an `Output` whose body attenuates to "no
-/// runs", so the dot degrades to the "off" state rather than falling through
+/// runs". The dot then degrades to the "off" state rather than falling through
 /// to an in-jail `gh` spawn. Only a genuinely absent/unusable worker
 /// connection returns `None`.
 fn run_gh_via_ci_host(repo_root: &Path, args: &[&str], fd: i32) -> Option<std::process::Output> {
@@ -598,9 +598,9 @@ mod tests {
     /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to the
     /// jailed pager. Answer one `gh-status <branch>` request with `json`.
     ///
-    /// The peer asserts the request shape, so a caller that reached `gh` some
-    /// other way, or asked for the wrong thing, fails here rather than silently
-    /// reading whatever the peer felt like sending. Callers hold
+    /// The peer asserts the request shape. A caller that reached `gh` some
+    /// other way, or asked for the wrong thing, therefore fails here. It does
+    /// not silently read whatever the peer felt like sending. Callers hold
     /// [`ci_env_lock`] for as long as the variable must stay set.
     #[cfg(unix)]
     fn publish_ci_host_peer(json: &'static [u8]) -> i32 {

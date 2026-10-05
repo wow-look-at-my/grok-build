@@ -130,10 +130,10 @@ async fn actor_with_mock_sampler(
     actor
 }
 
-/// Consider a mid-turn interjection buffered while a tool call. That
-/// interjection is in flight reaches the model on the turn's *next* request
-/// — between AI messages, after the tool result — rather than waiting
-/// for the turn to end.
+/// Consider a mid-turn interjection buffered while a tool call is in flight.
+/// That interjection reaches the model on the turn's *next* request, between
+/// AI messages and after the tool result. It does not wait for the turn to
+/// end.
 #[tokio::test]
 async fn interjection_buffered_during_tool_call_reaches_next_request() {
     let local = tokio::task::LocalSet::new();
@@ -293,10 +293,11 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
         .await;
 }
 
-/// Consider an interjection buffered while the model. That interjection is
-/// *streaming* (no tool call in flight — the turn loop is blocked on
-/// `submit_and_collect`) must still reach the model on the next request in the
-/// same turn, not wait for a separate prompt turn or get silently dropped.
+/// Consider an interjection buffered while the model is *streaming*. No tool
+/// call is in flight, and the turn loop is blocked on `submit_and_collect`.
+/// That interjection must still reach the model on the next request in the
+/// same turn. It must not wait for a separate prompt turn or get silently
+/// dropped.
 ///
 /// This is the "don't wait for stream idle" case: the stream holds open at its
 /// terminal event via `expect_response_blocked`. The interjection is buffered
@@ -571,8 +572,8 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
 }
 
 /// ASAP injection during a model stream. The in-flight stream is CANCELLED so
-/// the turn loop iterates immediately, drains the interjection, and resubmits
-/// — instead of waiting for the (potentially many-minutes-long) stream to
+/// the turn loop iterates immediately, drains the interjection, and resubmits.
+/// It does not wait for the (potentially many-minutes-long) stream to
 /// finish. This holds when an interjection arrives while the model is actively
 /// streaming (the turn loop is blocked on `submit_and_collect`). The partial
 /// text the model had already streamed is preserved as an assistant message so

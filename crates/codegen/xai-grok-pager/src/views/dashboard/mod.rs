@@ -103,9 +103,9 @@ mod tests {
     use super::*;
 
     /// The hint mirrors the dashboard flag. `None` when the env override
-    /// disables it (the tip would name a refused command), otherwise whatever
-    /// `dashboard_enabled()` says — asserted as consistency, not a fixed
-    /// value, so the test doesn't depend on the machine's persisted
+    /// disables it (the tip will name a refused command). Otherwise whatever
+    /// `dashboard_enabled()` says. This is asserted as consistency, not a fixed
+    /// value. Thus the test does not depend on the machine's persisted
     /// `[dashboard].enabled`.
     #[serial_test::serial(GROK_AGENT_DASHBOARD)]
     #[test]

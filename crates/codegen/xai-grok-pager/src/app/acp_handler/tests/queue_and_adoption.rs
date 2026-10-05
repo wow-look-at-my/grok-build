@@ -2579,9 +2579,9 @@
     }
 
     /// The local queue's rescue onto the shell's queue used to run only from
-    /// a fresh `Action::SendPrompt`, so a row stuck locally before a
-    /// never-idle turn (a goal) had no rescue until the user typed something
-    /// new. `handle` now runs the same rescue after every inbound message, so
+    /// a fresh `Action::SendPrompt`. So a row stuck locally before a
+    /// never-idle turn (a goal) had no rescue. It waited until the user typed
+    /// something new. `handle` now runs the same rescue after every inbound message, so
     /// an ordinary session/update carries the row over without a new
     /// submission.
     #[test]

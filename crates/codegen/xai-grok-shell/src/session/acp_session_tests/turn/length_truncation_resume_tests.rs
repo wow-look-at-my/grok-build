@@ -57,9 +57,9 @@ fn chat_completion_response(text: &str, finish_reason: &str) -> ScriptedResponse
     ])
 }
 
-/// `(actor, request-count fn)` wired against `server` over Chat Completions,
-/// with `max_turns` bounding the resumption loop so a regression that never
-/// stops continuing fails on the bound instead of hanging the test.
+/// `(actor, request-count fn)` wired against `server` over Chat Completions.
+/// `max_turns` bounds the resumption loop. A regression that never stops
+/// continuing thus fails on the bound instead of hanging the test.
 async fn length_truncation_actor(
     server: &MockInferenceServer,
     max_turns: Option<usize>,
