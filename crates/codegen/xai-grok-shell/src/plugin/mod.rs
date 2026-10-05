@@ -1,4 +1,10 @@
 //! Shared plugin install, uninstall, update, and marketplace operations (output-agnostic).
+//!
+//! Called by the CLI (`plugin_cmd.rs`).
+//! The in-session slash commands (`acp_session.rs`) currently inline similar logic and should migrate here.
+//!
+//! Callers own output formatting and telemetry. Sources live in [`sources`]; every code-fetching
+//! path funnels through [`acquire`], which owns the blocking-pool (LocalSet) discipline.
 
 pub(crate) mod acquire;
 mod sources;
@@ -22,7 +28,8 @@ use xai_grok_plugin_marketplace::{
 
 use acquire::resolve_source_root_for_install;
 
-/// Persist the registry under the held lock.
+/// Persist the registry under the held lock; a failed save must fail the operation (unregistered
+/// clones, ghost entries), never report success.
 fn save_registry(registry: &InstallRegistry) -> Result<(), String> {
     registry.save().map_err(|e| e.to_string())
 }
@@ -35,8 +42,8 @@ pub struct InstallOutcome {
     pub is_local: bool,
 }
 
-/// Classify an install source as local (filesystem) vs git (remote) without
-/// installing.
+/// Classify an install source as local (filesystem) vs git (remote) without installing.
+/// Used for telemetry `install_kind` on the failure path, where no [`InstallOutcome`] is available.
 pub(crate) fn install_source_is_local(source: &str, cwd: &Path) -> bool {
     matches!(
         git_install::parse_install_source(source, cwd),
@@ -383,7 +390,8 @@ pub fn update_plugins(name: Option<&str>) -> Result<Vec<RepoUpdateOutcome>, Upda
                         }
                     }
                 }
-                // The policy refusal is a complete message.
+                // The policy refusal is a complete message; routing it through InstallError would triple-nest
+                // ("update failed: install failed: Plugin update blocked: …").
                 Err(acquire::UpdateAcquireError::Blocked { reason }) => RepoUpdateOutcome::Failed {
                     repo_key: repo_key.clone(),
                     error: reason,
@@ -460,6 +468,8 @@ fn registry_update_error(e: acquire::UpdateAcquireError, plugin_subdir: String) 
 }
 
 /// Expand GitHub shorthand (user/repo) to `https://github.com/user/repo.git`.
+/// Distinct from the workspace canonicalizer (`permission::resolution::normalize_git_url`), which
+/// normalizes existing URLs instead of expanding shorthand.
 pub fn expand_github_shorthand(input: &str) -> String {
     if !input.contains("://") && !input.contains("git@") {
         format!("https://github.com/{}.git", input.trim_end_matches(".git"))
@@ -491,7 +501,7 @@ pub fn name_from_path(path: &Path) -> String {
         .unwrap_or_else(|| "marketplace".to_string())
 }
 
-/// A `marketplace add` input, split into both source kinds the config supports (`git = "..."` vs `path = "..."`).
+/// A `marketplace add` input, split into the two source kinds the config supports (`git = "..."` vs `path = "..."`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MarketplaceAddInput {
     /// Local directory. Tilde-expanded and absolutized against the caller's cwd.
@@ -500,11 +510,9 @@ pub enum MarketplaceAddInput {
     GitUrl(String),
 }
 
-/// Classify a `marketplace add` input as a local directory or a git URL. The
-/// explicit path indicators are a leading `/`, `.`, `~`, `\`, or a Windows
-/// drive prefix. They mirror `is_github_shorthand`'s path checks in
-/// `git_install::parse_install_source`. Unlike `plugin install`, unmarked
-/// inputs (`foo`, `a/b/c`) keep the git-URL normalization for back-compat.
+/// Classify a `marketplace add` input as a local directory or a git URL. The explicit path indicators are a leading `/`, `.`, `~`, `\`, or a Windows drive prefix.
+/// They mirror `is_github_shorthand`'s path checks in `git_install::parse_install_source`. Unlike `plugin install`, unmarked inputs (`foo`, `a/b/c`) keep the legacy git-URL normalization for back-compat.
+/// Without this split, a path input would be mangled into `https://github.com/<path>.git` and only fail after network clone attempts.
 pub fn classify_marketplace_add_input(input: &str, cwd: &Path) -> MarketplaceAddInput {
     if !looks_like_local_path(input) {
         return MarketplaceAddInput::GitUrl(expand_github_shorthand(input));
@@ -515,7 +523,8 @@ pub fn classify_marketplace_add_input(input: &str, cwd: &Path) -> MarketplaceAdd
         let p = PathBuf::from(input);
         if p.is_relative() { cwd.join(p) } else { p }
     };
-    // Lexical cleanup only (`.` segments, trailing slashes.
+    // Lexical cleanup only (`.` segments, trailing slashes; `..` is kept, no symlink resolution)
+    // It keeps the stored string canonical enough for the writer's raw-string idempotency check to match the loader's PathBuf one
     MarketplaceAddInput::LocalPath(path.components().collect())
 }
 
@@ -600,8 +609,8 @@ pub enum MarketplaceInstallError {
     RegistryLock {
         detail: String,
     },
-    /// The install ref names a configured source the marketplace policy
-    /// dropped — reported as the policy, never as "unknown".
+    /// The install ref names a configured source the marketplace policy dropped — reported as the
+    /// policy, never as "unknown"; `reason` is the full pre-formatted gate message.
     SourceBlocked {
         reason: String,
     },
@@ -887,8 +896,8 @@ pub fn install_marketplace_plugin(
     qualifier: Option<&str>,
 ) -> Result<MarketplaceInstallOutcome, MarketplaceInstallError> {
     let mut outcome = {
-        // Registry lock BEFORE any source-cache lease (registry ⊃ cache),
-        // held past the installer's save but released.
+        // Registry lock BEFORE any source-cache lease (registry ⊃ cache), held past the installer's
+        // save but released before the post-install config write (init ⊃ registry order).
         let _registry_lock = acquire::lock_install_registry()
             .map_err(|detail| MarketplaceInstallError::RegistryLock { detail })?;
         let sources = load_filtered_marketplace_sources();
@@ -1202,6 +1211,8 @@ pub fn add_marketplace_source(
         )
     })?;
 
+    // Skip if the normalized URL / path already exists: a caller's pre-lock
+    // dup check can let two serialized adds reach here.
     let already_present = match source {
         MarketplaceAddInput::GitUrl(git_url) => {
             use xai_grok_workspace::permission::resolution::normalize_git_url;
@@ -1255,7 +1266,8 @@ pub fn remove_toml_marketplace_block(content: &str, source_identity: &str) -> Op
         .get_mut("sources")?
         .as_array_of_tables_mut()?;
 
-    // Full git-URL normalization (.git, host case, scp-vs-https): a different spelling of the configured source must still match.
+    // Full git-URL normalization (.git, host case, scp-vs-https): a different spelling of the
+    // configured source must still match, or the remove leaves the entry behind.
     use xai_grok_workspace::permission::resolution::normalize_git_url;
     let identity_normalized = normalize_git_url(source_identity);
     let idx = sources.iter().position(|entry| {
@@ -1271,9 +1283,9 @@ pub fn remove_toml_marketplace_block(content: &str, source_identity: &str) -> Op
 
     sources.remove(idx);
 
-    // Keep other `[marketplace]` keys (the sticky
-    // official_marketplace_auto_installed flag) when `sources` empties Drop
-    // the table only.
+    // Keep other `[marketplace]` keys (the sticky official_marketplace_auto_installed flag) when `sources` empties
+    // Drop the table only when fully empty
+    // Otherwise removing an unrelated source wipes the flag and auto-register re-adds it
     let sources_now_empty = doc
         .get("marketplace")
         .and_then(|m| m.get("sources"))
@@ -1296,7 +1308,8 @@ pub fn remove_toml_marketplace_block(content: &str, source_identity: &str) -> Op
 pub enum MarketplaceSourceRemoval {
     /// Removed from `config.toml` (the official flag folded into the write).
     ConfigToml,
-    /// Removed from a settings/known_marketplaces JSON store.
+    /// Removed from a settings/known_marketplaces JSON store (the official
+    /// flag written to `config.toml` separately, best-effort).
     JsonStore,
     /// Not present in any store.
     NotFound,
@@ -1382,7 +1395,8 @@ pub(crate) fn set_official_marketplace_auto_installed(config_path: &Path) -> std
 /// Try removing a source from `settings.json` / `known_marketplaces.json` under
 /// `~/.grok/` and `~/.claude/`. Returns `true` if removed from at least one file.
 pub fn try_remove_source_from_json_files(source_url_or_path: &str) -> bool {
-    // Resolve user grok via user_grok_home() (None when no home resolves) and home separately Removal then still runs from $GROK_HOME.
+    // Resolve user grok via user_grok_home() (None when no home resolves) and home separately
+    // Removal then still runs from $GROK_HOME when no home dir exists, and never touches a cwd-relative .grok
     let home = xai_dirs::home_dir();
     let grok = xai_grok_config::user_grok_home();
 

@@ -1,4 +1,4 @@
-//! Idle-gated pending-notification buffering and drain for `SessionActor`, plus auto-start of queued prompts.
+//! Idle-gated pending-notification buffering and drain for `SessionActor`, plus auto-start of queued prompts (`maybe_start_running_task`).
 
 use super::*;
 
@@ -6,6 +6,7 @@ use super::*;
 pub(super) const MAX_PENDING_NOTIFICATIONS: usize = 50;
 
 /// Mid-turn live-orphan scan interval.
+/// InjectNotification can fire often; one disk pass per window is enough since records persist first, so finalizing the same orphan again is a no-op.
 pub(crate) const LIVE_ORPHAN_RECONCILE_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(30);
 
@@ -156,6 +157,7 @@ impl SessionActor {
             if state.pending_inputs.is_empty() {
                 return;
             }
+            // A merge needs at least two queued prompts; sample here so the common single-prompt promote skips the config disk read below
             may_combine = state.pending_inputs.len() >= 2;
             queued_wake_ids = state
                 .pending_inputs
@@ -185,9 +187,8 @@ impl SessionActor {
             .await;
         }
 
-        // A `/memory` toggle during the turn could not swap the prompt; do it
-        // before this turn samples. Takes `state` briefly on its own, so it
-        // stays outside the lock below.
+        // A `/memory` toggle during the previous turn could not swap the prompt; do it before this
+        // turn samples. Takes `state` briefly on its own, so it stays outside the lock below.
         if self
             .memory
             .prompt_sync_pending
@@ -293,7 +294,7 @@ impl SessionActor {
             super::expire_older_than(&mut state.edit_holds, super::EDIT_HOLD_TTL);
         }
 
-        // A held front must not start until edit/release.
+        // A held front must not start until edit/release; check before combine so we never absorb followers into a front that will not run yet
         if let Some(front) = state.pending_inputs.front()
             && state.edit_holds.contains_key(&front.prompt_id)
         {
@@ -417,6 +418,7 @@ impl SessionActor {
             session = self.session_info.id.0.as_ref(),
             "promoting front of pending_inputs to the running turn",
         );
+        // Promote broadcast before spawn so clients paint (and enable echo-skip) before the user-message chunk can race in
         self.broadcast_queue_changed_promoting(&state, running_display);
 
         // Under the same lock as the promotion, so a follow-up queued after
@@ -427,7 +429,8 @@ impl SessionActor {
             .map(|item| item.prompt_id.clone())
             .collect();
 
-        // Bump the epoch here rather than in `handle_prompt`: a cancel reads the slot as soon as `running_task` is set.
+        // Bump the epoch here rather than in `handle_prompt`: a cancel reads the slot as soon as
+        // `running_task` is set on the next line.
         let epoch = self.turn_report.start_next_turn();
         let (publication_release, start_gate) = if initial_child_prompt_ready.is_some() {
             let (release, released) = oneshot::channel();
@@ -525,10 +528,9 @@ impl SessionActor {
             self.reconcile_live_orphaned_subagents().await;
         }
 
-        // Auto-wake notification turns are DROPPED both while the goal loop
-        // is active AND after the goal completes. While active, a task or
-        // monitor completion turn would pull a weak model off the goal
-        // continuation.
+        // Auto-wake notification turns are DROPPED both while the goal loop is active AND after the goal completes.
+        // While active, a task or monitor completion turn would pull a weak model off the goal continuation.
+        // After the goal completes the autonomous run is over; late dev-server completions should leave the session idle, not spawn post-goal turns.
         let suppress_all = self.goal_harness_enabled()
             && matches!(
                 self.goal_tracker.lock().status(),
@@ -543,13 +545,14 @@ impl SessionActor {
         let drained = {
             let mut state = self.state.lock().await;
 
-            // Shared idle predicate: the same conditions Layer multiple
-            // uses via `is_session_idle_for_injection` Inlined here.
+            // Shared idle predicate: the same conditions Layer 3 uses via `is_session_idle_for_injection`
+            // Inlined here so the `mut state` borrow can survive into the take/push below
             if !is_session_idle_for_injection(&state) {
                 return;
             }
 
-            // Backstop sweep for events that hit the buffer after the turn-end drain (the is_turn_active flag can lag the actual turn teardown).
+            // Backstop sweep for events that hit the buffer after the turn-end drain (the is_turn_active flag can lag the actual turn teardown)
+            // Normally a no-op
             self.sweep_monitor_buffer_into_pending(&mut state, "monitor-idle-drain");
 
             if state.pending_notifications.is_empty() {
@@ -606,13 +609,13 @@ impl SessionActor {
             }
             state.notifications_suppressed
         };
-        // Reconciliation writes subagent records, so it stays behind the
-        // suppression check It also runs in a child session.
+        // Reconciliation writes subagent records, so it stays behind the suppression check
+        // It also runs in a child session, which the notification below does not
         if !suppressed {
             self.reconcile_live_orphaned_subagents().await;
         }
-        // Like the session-end `Stop`: a subagent settling is not the session
-        // settling.
+        // Like the session-end `Stop`: a subagent settling is not the session settling.
+        // `SessionEnd` itself still fires for a child, carrying `subagentType`.
         if self.startup_hints.is_subagent {
             return;
         }
@@ -623,9 +626,9 @@ impl SessionActor {
         }
     }
 
-    /// Sweep this session's buffered monitor events (`drain_owned`) into `pending_notifications`. Used where the turn loop can no longer drain
-    /// the buffer: turn end (`drain_monitor_buffer_to_pending`), turn cancel, and the idle drain. All of them race the `is_turn_active`-gated
-    /// buffer push in `InjectNotification`.
+    /// Sweep this session's buffered monitor events (`drain_owned`) into `pending_notifications`.
+    /// Used where the turn loop can no longer drain the buffer: turn end (`drain_monitor_buffer_to_pending`), turn cancel, and the idle drain.
+    /// All three race the `is_turn_active`-gated buffer push in `InjectNotification`.
     pub(super) fn sweep_monitor_buffer_into_pending(
         &self,
         state: &mut State,
@@ -759,7 +762,8 @@ impl SessionActor {
 
         let merged_prompt_id = format!("notifications-{}", uuid::Uuid::now_v7());
 
-        // Receiver intentionally dropped: notification turns have no caller awaiting the result The send() in handle_completion returns Err.
+        // Receiver intentionally dropped: notification turns have no caller awaiting the result
+        // The send() in handle_completion returns Err, which is harmless
         let (respond_to, _) = tokio::sync::oneshot::channel();
 
         state.pending_inputs.push_back(InputItem {
@@ -800,8 +804,9 @@ impl SessionActor {
         true
     }
 
-    /// Turn-end straggler sweep: monitor events buffered during the turn's
-    /// final sampling step move to `pending_notifications`.
+    /// Turn-end straggler sweep: monitor events buffered during the turn's final sampling step move to `pending_notifications`.
+    /// That step follows the loop's last `inject_pending_monitor_events` pass.
+    /// Runs in the completion handler before `maybe_drain_notifications`, so this sweep (not the idle one) is what normally catches them.
     pub(super) async fn drain_monitor_buffer_to_pending(&self) {
         let mut state = self.state.lock().await;
         self.sweep_monitor_buffer_into_pending(&mut state, "monitor-turn-end-drain");

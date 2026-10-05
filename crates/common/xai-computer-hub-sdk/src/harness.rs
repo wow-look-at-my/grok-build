@@ -1,4 +1,24 @@
 //! Harness-side dispatch surface.
+//!
+//! A [`ToolHarness`] is the SDK-side counterpart to a server-side
+//! `Harness` connection. Build it via [`ToolHarnessBuilder`], seed
+//! the in-process [`LocalRegistry`] with `Tool` implementations that
+//! should resolve without a wire round-trip, and call
+//! [`ToolHarness::call`] to dispatch a tool.
+//!
+//! Local-first dispatch: every call queries the bound
+//! [`LocalRegistry`] first; on a hit the tool's `execute` runs
+//! in-process and the returned [`ToolStream`] is forwarded verbatim.
+//! Misses fall through to a remote `tool.call` JSON-RPC request over
+//! the shared [`HubConnection`]; the demux routes the matching
+//! response and any intermediate `tool_call_progress` notifications
+//! back into the call's stream.
+//!
+//! Connection lifecycle mirrors [`crate::ToolServer`]: the harness
+//! attaches to a pooled connection under a `(url, principal)` key,
+//! refcount-binds its session, and runs cooperative shutdown
+//! through a `ConnectionBorrow` (crate-internal) that
+//! both ends share.
 
 use std::collections::HashSet;
 use std::pin::Pin;
@@ -45,13 +65,22 @@ use crate::pool::HubConnectionPool;
 /// Host-supplied source of the current W3C `traceparent`.
 pub type TraceContextProvider = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
-/// Well-known [`HookEvent::Custom`](xai_tool_protocol::HookEvent::Custom) kind.
+/// Well-known [`HookEvent::Custom`](xai_tool_protocol::HookEvent::Custom) kind
+/// for a server → harness permission request. Sibling of
+/// [`xai_tool_protocol::turn_hook::TURN_HOOK_KIND`].
 pub const PERMISSION_REQUEST_KIND: &str = "permission_request";
 
-/// Buffer size for the per-call progress channel.
+/// Buffer size for the per-call progress channel. Picked to absorb a
+/// brief consumer pause without blocking the connection actor's
+/// inbound dispatch loop. A slow stream consumer surfaces as
+/// `RouteOutcome::ProgressFull` and the dropped frame is logged.
 const PROGRESS_BUFFER: usize = 64;
 
-/// Opt-in per-call flag (a [`ToolCallContext`] extension): when set to `true`.
+/// Opt-in per-call flag (a [`ToolCallContext`] extension): when set to
+/// `true`, the remote call's [`ToolStream`] emits one best-effort
+/// call-scoped cancel hook on `Drop` so the workspace hard-cancels the
+/// in-flight call. Absent or `false` (the default) → `Drop` emits
+/// nothing. No effect on local-dispatch calls.
 #[derive(Clone, Copy, Debug)]
 pub struct CancelOnDrop(pub bool);
 
@@ -70,6 +99,21 @@ where
 }
 
 /// In-process registry of tool handles owned by a [`ToolHarness`].
+///
+/// Tools registered here resolve in-process — `ToolHarness::call`
+/// short-circuits the wire dispatch and invokes the handle directly.
+/// Mutations are concurrency-safe (`RwLock` on `entries`, `DashMap`
+/// on `extractors`), so callers MAY hot-add or hot-remove tools
+/// while the harness is in use.
+///
+/// `entries` uses `RwLock<IndexMap>` to preserve insertion order so
+/// that `list_tools` returns descriptions in the same order tools
+/// were registered (matching the config-defined order).
+///
+/// Optionally stores a per-tool [`ModelOutputExtractor`] for client-side
+/// model output extraction. Use [`register_with_model_output`](Self::register_with_model_output)
+/// to capture the extractor at registration time, or [`register_extractor`](Self::register_extractor)
+/// to add one separately.
 #[derive(Default)]
 struct LocalRegistryInner {
     entries: RwLock<IndexMap<ToolId, Arc<dyn ToolHandle>>>,
@@ -96,7 +140,9 @@ impl LocalRegistry {
         Self::default()
     }
 
-    /// Register a typed [`Tool`] implementation by value.
+    /// Register a typed [`Tool`] implementation by value. Subsequent
+    /// registrations of the same id replace the previous handle and
+    /// return the displaced handle for inspection / drop ordering.
     pub fn register<T>(&self, tool: T) -> Option<Arc<dyn ToolHandle>>
     where
         T: Tool + std::fmt::Debug + 'static,
@@ -115,6 +161,8 @@ impl LocalRegistry {
     }
 
     /// Resolve `tool_id` to its in-process handle, if registered.
+    /// Returns a clone of the `Arc<dyn ToolHandle>` so the
+    /// caller can read without holding the lock across an await point.
     pub fn find(&self, tool_id: &ToolId) -> Option<Arc<dyn ToolHandle>> {
         self.inner.entries.read().get(tool_id).cloned()
     }
@@ -141,10 +189,13 @@ impl LocalRegistry {
     }
 
     /// Register `alias_id` as an alias pointing to the same handle as
-    /// `target_id`. Returns `true` if the alias was created (i.e. the target
-    /// exists), `false` otherwise. Used for MCP prefix-fallback: the model
-    /// may emit the bare remote name (`search_channels`) instead of the full
-    /// prefixed name (`slack___search_channels`).
+    /// `target_id`. Returns `true` if the alias was created (i.e. the
+    /// target exists), `false` otherwise.
+    ///
+    /// Used for MCP prefix-fallback: the model may emit the bare remote
+    /// name (`search_channels`) instead of the full prefixed name
+    /// (`slack___search_channels`). Registering the bare name as an
+    /// alias lets `find` resolve it without prefix-scanning logic.
     pub fn register_alias(&self, alias_id: ToolId, target_id: &ToolId) -> bool {
         if let Some(handle) = self.find(target_id) {
             if let Some(extractor) = self.inner.extractors.get(target_id) {
@@ -159,15 +210,20 @@ impl LocalRegistry {
         }
     }
 
-    /// Register a type-erased [`ToolDyn`] directly. Use this for inherently
-    /// dynamic tools (e.g. MCP tools retrieved from a registry as `Arc<dyn
-    /// ToolDyn>`) where the concrete type is not available.
+    /// Register a type-erased [`ToolDyn`] directly.
+    ///
+    /// Use this for inherently dynamic tools (e.g. MCP tools retrieved
+    /// from a registry as `Arc<dyn ToolDyn>`) where the concrete type
+    /// is not available. For native tools with a concrete type, prefer
+    /// [`register`](Self::register).
     pub fn register_dyn(
         &self,
         tool: Arc<dyn xai_tool_runtime::ToolDyn>,
     ) -> Option<Arc<dyn ToolHandle>> {
         let id = tool.id();
-        // ToolDyn already implements ToolHandle via the blanket impl in xai-computer-hub-core (ErasedTool).
+        // ToolDyn already implements ToolHandle via the blanket impl
+        // in xai-computer-hub-core (ErasedTool). We wrap it in a thin
+        // adapter that delegates execute → ToolDyn::execute.
         let handle: Arc<dyn ToolHandle> = Arc::new(DynToolAdapter(tool));
         self.inner.entries.write().insert(id, handle)
     }
@@ -194,9 +250,10 @@ impl LocalRegistry {
         self.inner.extractors.insert(tool_id, extractor);
     }
 
-    /// Extract model-facing content blocks from a tool's output. Returns
-    /// `None` if no extractor is registered for `tool_id` or if the value
-    /// fails to deserialize into the expected output type.
+    /// Extract model-facing content blocks from a tool's output.
+    ///
+    /// Returns `None` if no extractor is registered for `tool_id` or if
+    /// the value fails to deserialize into the expected output type.
     pub fn model_output(
         &self,
         tool_id: &ToolId,
@@ -208,8 +265,11 @@ impl LocalRegistry {
             .and_then(|e| e.value()(output))
     }
 
-    /// Descriptions of registered tools filtered by `should_list`. Returns descriptions in **insertion order** — the order tools were registered — so the caller sees the same ordering
-    /// as the config-defined tool list.
+    /// Descriptions of registered tools filtered by `should_list`.
+    ///
+    /// Returns descriptions in **insertion order** — the order tools
+    /// were registered — so the caller sees the same ordering as the
+    /// config-defined tool list.
     pub fn list_tools(&self, ctx: &ListToolsContext) -> Vec<ToolDescription> {
         self.inner
             .entries
@@ -222,6 +282,9 @@ impl LocalRegistry {
 }
 
 /// Thin adapter from `Arc<dyn ToolDyn>` to `ToolHandle`.
+///
+/// `ToolDyn::execute` returns `ToolStream<TypedToolOutput>` which matches
+/// `ToolHandle::execute`, so the adapter is a trivial delegation.
 struct DynToolAdapter(Arc<dyn xai_tool_runtime::ToolDyn>);
 
 impl std::fmt::Debug for DynToolAdapter {
@@ -266,11 +329,13 @@ pub struct ToolHarnessBuilder {
     default_extensions: Option<xai_tool_runtime::TypedExtensions>,
     trace_context_provider: Option<TraceContextProvider>,
     on_reconnect: Option<Arc<ReconnectCallback>>,
-    /// Sampler label for `hub_harness_connect_total` metric (`"chat"` or `"shell"`). Defaults to `"unknown"`.
+    /// Sampler label for `hub_harness_connect_total` metric
+    /// (`"chat"` or `"shell"`). Defaults to `"unknown"`.
     sampler: Option<String>,
     alpha_test_key: Option<String>,
     allow_insecure_ws: bool,
-    /// Resume the build-time `session.open`; default `false`.
+    /// Resume the build-time `session.open`; default `false`. Does not affect
+    /// the transport auto-reconnect loop, which always uses `resume: false`.
     resume: bool,
     last_seq: Option<xai_tool_protocol::LastSeq>,
 }
@@ -282,7 +347,10 @@ impl ToolHarnessBuilder {
         self
     }
 
-    /// Permit plaintext `ws://` to a non-loopback host.
+    /// Permit plaintext `ws://` to a non-loopback host. Only enable
+    /// when the transport is otherwise secured (e.g. a private network
+    /// or TLS-terminating proxy) — the bearer would otherwise cross the
+    /// wire in cleartext.
     pub fn allow_insecure_ws(mut self, allow: bool) -> Self {
         self.allow_insecure_ws = allow;
         self
@@ -310,8 +378,9 @@ impl ToolHarnessBuilder {
         self
     }
 
-    /// Bind `session_id` on the underlying connection and use it as the
-    /// envelope `session_id` for outgoing `tool.call` requests.
+    /// Bind `session_id` on the underlying connection and use it as
+    /// the envelope `session_id` for outgoing `tool.call` requests.
+    /// Calling repeatedly replaces the previous binding.
     pub fn session(mut self, session_id: SessionId) -> Self {
         self.session = Some(session_id);
         self
@@ -364,8 +433,8 @@ impl ToolHarnessBuilder {
         self
     }
 
-    /// Resume the build-time `session.open` (e.g. a cloud reconnect
-    /// re-attaching to its existing server session).
+    /// Resume the build-time `session.open` (e.g. a cloud reconnect re-attaching
+    /// to its existing server session). Default `false`; auto-reconnect is unaffected.
     pub fn resume(mut self, resume: bool) -> Self {
         self.resume = resume;
         self
@@ -449,7 +518,8 @@ impl ToolHarnessBuilder {
                 },
             };
             if let Err(e) = connection.call_request(request_id, &req).await {
-                // Roll back the local track so a later successful harness.
+                // Roll back the local track so a later successful harness for
+                // this session can still reach the last-borrower untrack edge.
                 connection.untrack_session_and_detach(&session);
                 tracing::warn!(error = %e, "session_open failed during harness build");
                 return Err(e);
@@ -480,11 +550,24 @@ pub struct SessionBindReport {
     pub binary_version: Option<String>,
     /// Configured tool ids the server could not serve.
     pub unserved_tool_ids: Vec<String>,
-    /// Server-stated reason the toolset resolution failed closed.
+    /// Server-stated reason the toolset resolution failed closed (the bind
+    /// advertises no model-facing tools by design when set).
     pub resolve_error: Option<String>,
-    /// Advisory image capability tokens from the bind reply.
+    /// Advisory image capability tokens from the bind reply. Empty means
+    /// unknown, as does any set lacking
+    /// [`xai_tool_protocol::IMAGE_CAPABILITIES_V1`].
     pub image_capabilities: Vec<String>,
     /// NATIVE (un-namespaced) tool names the bind ack advertised.
+    /// In-process projection of
+    /// [`xai_tool_protocol::SessionBindServerResult::tools`], not a wire
+    /// field. Namespaced tools are deliberately excluded: those are
+    /// dynamically registered (MCP) tools that may land in the ack when
+    /// their discovery finishes inside the bind window, and they
+    /// legitimately leave on reload/teardown — the bind-ack hold in
+    /// [`merge_discovered_remote_tools`] must not pin them, or a removed
+    /// MCP tool stays advertised agent-side forever. The hold's incident
+    /// class (a snapshot race wiping tools mid-bind) concerns the stable
+    /// native set, which this projection captures exactly.
     pub advertised_tool_names: Vec<String>,
 }
 
@@ -507,21 +590,29 @@ impl From<&xai_tool_protocol::SessionBindServerResult> for SessionBindReport {
     }
 }
 
-/// Harness attached to a pooled [`HubConnection`]. `ToolHarness` is
-/// `Clone`-cheap (`Arc` bump).
+/// Harness attached to a pooled [`HubConnection`].
+///
+/// `ToolHarness` is `Clone`-cheap (`Arc` bump). Cooperative teardown via
+/// [`Self::shutdown`] is preferred. Cleanup is **synchronous** and runs at
+/// most once across all clones via a shared CAS: `shutdown()`, wrapper
+/// `Drop` (best-effort while other clones exist), and `ToolHarnessInner::Drop`
+/// (at true refcount-zero) all call the same path. No Tokio runtime is
+/// required for Drop teardown.
 pub struct ToolHarness {
     inner: Arc<ToolHarnessInner>,
 }
 
-/// An owned, type-erased server-bind future, resolving to the server-connected [`ToolHarness`].
+/// An owned, type-erased server-bind future, resolving to the server-connected
+/// [`ToolHarness`] (or a stringified bind error).
 type BindFuture = BoxFuture<'static, Result<ToolHarness, Arc<str>>>;
 
-/// Cloneable handle to the deferred server bind.
+/// Cloneable handle to the deferred server bind; every clone observes the same
+/// single bind, resolving to the server-connected [`ToolHarness`].
 type PendingBind = Shared<BindFuture>;
 
 /// Spawn `bind` on the runtime as a cloneable [`PendingBind`], projecting a
 /// task-join panic into the bind's `Err`. Shared by the eager constructor and
-/// `LazyBind::start` so both spawn paths can't drift.
+/// `LazyBind::start` so the two spawn paths can't drift.
 fn spawn_pending_bind<F>(bind: F) -> PendingBind
 where
     F: std::future::Future<Output = Result<ToolHarness, Arc<str>>> + Send + 'static,
@@ -539,7 +630,9 @@ where
     .shared()
 }
 
-/// A bind future kept unspawned until the first [`ToolHarness::await_bound`].
+/// A bind future kept unspawned until the first [`ToolHarness::await_bound`], so
+/// the server connection — and the sandbox provisioning it performs — is deferred
+/// to the first remote tool dispatch. See [`ToolHarness::local_with_lazy_bind`].
 struct LazyBind {
     fut: parking_lot::Mutex<Option<BindFuture>>,
     started: std::sync::OnceLock<PendingBind>,
@@ -561,7 +654,8 @@ impl LazyBind {
     }
 }
 
-/// Deferred server bind: `Eager` is spawned at construction (races sampling).
+/// Deferred server bind: `Eager` is spawned at construction (races sampling);
+/// `Lazy` spawns on the first `await_bound` (provisioning deferred to first call).
 enum DeferredBind {
     Eager(PendingBind),
     Lazy(LazyBind),
@@ -580,11 +674,18 @@ struct ToolHarnessInner {
     last_bind_report: arc_swap::ArcSwapOption<SessionBindReport>,
     discovery_handle: parking_lot::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Weak handle to the demux session-inbox sender this harness registered.
+    /// Identity-guarded unregister uses this without keeping the channel open.
     session_inbox_tx:
         parking_lot::Mutex<Option<tokio::sync::mpsc::WeakSender<crate::demux::InboundFrame>>>,
-    /// Deferred server bind (prompt-before-bind): set when this local-only harness resolves.
+    /// Deferred server bind (prompt-before-bind): set when this local-only harness
+    /// resolves to a server-connected one once the bind completes. Eager variant
+    /// races sampling; lazy variant defers provisioning to the first remote
+    /// tool dispatch.
     pending_bind: Option<DeferredBind>,
-    /// Optional sink for inbound reverse-direction hook requests.
+    /// Optional sink for inbound reverse-direction hook requests. Held in
+    /// its own `Arc` so the inbox loop can clone this slot — not the whole
+    /// `inner` — a long-lived `inner` clone would pin the harness forever and
+    /// prevent both the wrapper Drop gate and `ToolHarnessInner::Drop`.
     hook_request_handler: HookHandlerSlot,
 }
 
@@ -870,9 +971,12 @@ impl ToolHarness {
         self.inner.pending_bind.is_some()
     }
 
-    /// Await the deferred server bind and return the server-connected
-    /// harness, or a clone of `self` when there is no pending bind (so
-    /// callers dispatch through the result uniformly).
+    /// Await the deferred server bind and return the server-connected harness, or a
+    /// clone of `self` when there is no pending bind (so callers dispatch
+    /// through the result uniformly).
+    ///
+    /// For a lazy bind (see [`Self::local_with_lazy_bind`]), this is what
+    /// actually starts the bind — the first call spawns it.
     pub async fn await_bound(&self) -> Result<ToolHarness, Arc<str>> {
         match &self.inner.pending_bind {
             Some(DeferredBind::Eager(pending)) => pending.clone().await,
@@ -882,9 +986,12 @@ impl ToolHarness {
     }
 
     /// Non-blocking probe of the deferred bind: `None` while in flight (or no
-    /// pending bind), `Some(Ok)`/`Some(Err)` once resolved. Uses
-    /// `now_or_never` (not `peek`): the bind runs in a spawned task, so
-    /// `Shared` only observes completion once polled.
+    /// pending bind), `Some(Ok)`/`Some(Err)` once resolved. Uses `now_or_never`
+    /// (not `peek`): the bind runs in a spawned task, so `Shared` only observes
+    /// completion once polled.
+    ///
+    /// For a lazy bind, this never *starts* the bind — it returns `None` until
+    /// a prior [`Self::await_bound`] call has spawned it, then probes that.
     pub fn try_bound(&self) -> Option<Result<ToolHarness, Arc<str>>> {
         match self.inner.pending_bind.as_ref()? {
             DeferredBind::Eager(pending) => pending.clone().now_or_never(),
@@ -955,8 +1062,11 @@ impl ToolHarness {
         }
     }
 
-    /// Open a session on the server. Does not bind any server. Registers the
-    /// session on the server connection and claims ownership.
+    /// Open a session on the server. Does not bind any server.
+    ///
+    /// Registers the session on the server connection and claims
+    /// ownership. Server binding is a separate step via
+    /// [`Self::session_bind`].
     pub async fn session_open(&self) -> Result<(), ClientError> {
         self.session_open_with(false, None).await
     }
@@ -1065,17 +1175,18 @@ impl ToolHarness {
     /// Attach to the current session as an observer
     /// (`session_attach_server`): a server-local check that a tool-server is
     /// routed for the envelope session, replying the tool snapshot and the
-    /// route it was found on. Never binds, never creates a workspace session,
-    /// never touches toolsets or handlers. Updates the in-memory remote tools
-    /// snapshot like [`Self::session_bind`]. `server_id` is an optional
-    /// diagnostics cross-check (the envelope session is the authoritative
-    /// key); `caller` is a free-form label surfaced in server metrics/logs.
-    /// An attach miss is the retryable `workspace_unavailable` family
-    /// (`reason: not_bound`). Server support is answered before calling, not
-    /// from the reply: the server advertises `session_attach_server` in
-    /// `hello_ack` (capability and method ship in the same server commit) —
-    /// gate on `HubConnection::supports`; a server that predates the method
-    /// advertises nothing and replies `-32601`.
+    /// route it was found on. Never binds, never creates a workspace
+    /// session, never touches toolsets or handlers. Updates the in-memory
+    /// remote tools snapshot like [`Self::session_bind`].
+    ///
+    /// `server_id` is an optional diagnostics cross-check (the envelope
+    /// session is the authoritative key); `caller` is a free-form label
+    /// surfaced in server metrics/logs. An attach miss is the retryable
+    /// `workspace_unavailable` family (`reason: not_bound`). Server support
+    /// is answered before calling, not from the reply: the server advertises
+    /// `session_attach_server` in `hello_ack` (capability and method ship
+    /// in the same server commit) — gate on `HubConnection::supports`; a server
+    /// that predates the method advertises nothing and replies `-32601`.
     pub async fn session_attach(
         &self,
         server_id: Option<&str>,
@@ -1144,7 +1255,8 @@ impl ToolHarness {
         let resp = connection.call_request(request_id, &req).await?;
         match resp.outcome {
             ResponseOutcome::Result(_) => {
-                // Clear cached remote tools — the server's tools are no longer available after unbind.
+                // Clear cached remote tools — the server's tools are no
+                // longer available after unbind.
                 self.inner.remote_tools.store(Arc::new(Vec::new()));
                 connection.forget_session_bind(&self.inner.session, Some(&req.params.server_id));
                 Ok(())
@@ -1187,8 +1299,10 @@ impl ToolHarness {
         tools
     }
 
-    /// Whether `name` is a known remote tool, per the cached `session_bind` /
-    /// `tools.list` result.
+    /// Whether `name` is a known remote tool, per the cached
+    /// `session_bind` / `tools.list` result. Empty before the first
+    /// bind/discovery and after unbind; always `false` for local-only
+    /// harnesses. Remote tools are not mirrored into the local registry.
     pub fn has_remote_tool(&self, name: &str) -> bool {
         self.inner
             .remote_tools
@@ -1242,8 +1356,31 @@ impl ToolHarness {
         self.inner.apply_discovered_remote_tools(tools);
     }
 
-    /// Dispatch a tool call. Local-first: if `tool_id` is registered in the [`LocalRegistry`] the tool's `execute` runs in-process and the returned [`ToolStream`] is forwarded verbatim — no wire round-trip. The hot path on a hit is a single `DashMap` lookup plus an `Arc` clone of the handle. Otherwise the harness sends a `tool.call` JSON-RPC request over the shared connection. The returned stream interleaves any intermediate `tool_call_progress` notifications (matched by `tool_call_id`) with the eventual JSON-RPC response, which becomes the terminal item. Each call MUST use a fresh `ToolCallId`. The default [`ToolCallContext::default`] mints a UUIDv7 via [`ToolCallId::new_v7`]; callers that build a context manually MUST do the same. Reusing a `ToolCallId` already in flight on this connection is detected synchronously: the second call's stream resolves with a single `Terminal(Err(_))` carrying `ToolError::Custom { code: "call_id_in_use", . }` and the FIRST call's progress and response correlation are left intact (no stomp). The `tool_call_id` keys the per-call progress channel; concurrent ids would otherwise observe each other's progress
-    /// frames.
+    /// Dispatch a tool call.
+    ///
+    /// Local-first: if `tool_id` is registered in the
+    /// [`LocalRegistry`] the tool's `execute` runs in-process and the
+    /// returned [`ToolStream`] is forwarded verbatim — no wire
+    /// round-trip. The hot path on a hit is a single `DashMap` lookup
+    /// plus an `Arc` clone of the handle.
+    ///
+    /// Otherwise the harness sends a `tool.call` JSON-RPC request
+    /// over the shared connection. The returned stream interleaves
+    /// any intermediate `tool_call_progress` notifications (matched
+    /// by `tool_call_id`) with the eventual JSON-RPC response, which
+    /// becomes the terminal item.
+    ///
+    /// Each call MUST use a fresh `ToolCallId`. The default
+    /// [`ToolCallContext::default`] mints a UUIDv7 via
+    /// [`ToolCallId::new_v7`]; callers that build a context manually
+    /// MUST do the same. Reusing a `ToolCallId` already in flight on
+    /// this connection is detected synchronously: the second call's
+    /// stream resolves with a single `Terminal(Err(_))` carrying
+    /// `ToolError::Custom { code: "call_id_in_use", .. }` and the
+    /// FIRST call's progress and response correlation are left intact
+    /// (no stomp). The `tool_call_id` keys the per-call progress
+    /// channel; concurrent ids would otherwise observe each other's
+    /// progress frames.
     pub async fn call(
         &self,
         tool_id: ToolId,
@@ -1263,7 +1400,9 @@ impl ToolHarness {
             .as_ref()
             .and_then(|provider| provider());
 
-        // Capture identifiers before `ctx` moves into the dispatch path — they feed both the local-only / remote branches.
+        // Capture identifiers before `ctx` moves into the dispatch path —
+        // they feed both the local-only / remote branches AND the
+        // `ObservedToolStream` wrapper.
         let observed_call_id = ctx.call_id.clone();
 
         let raw_stream: ToolStream<xai_tool_runtime::TypedToolOutput> =
@@ -1288,7 +1427,10 @@ impl ToolHarness {
             };
 
         // Server observability: only wrap when the harness has a server
-        // connection — otherwise emission is a no-op.
+        // connection — otherwise emission is a no-op and the extra
+        // Started/Completed bookkeeping is pure waste. Local-only
+        // harnesses (and the no-`borrow` not-found branch above) skip
+        // wrapping entirely.
         if self.inner.borrow.is_none() {
             return raw_stream;
         }
@@ -1306,8 +1448,18 @@ impl ToolHarness {
         ))
     }
 
-    /// Emit a session-level event to the server as a `session_event` custom
-    /// notification.
+    /// Emit a session-level event to the server as a `session_event`
+    /// custom notification.
+    ///
+    /// No-op on a local-only harness — without a server connection there is
+    /// nothing to deliver to and the wire frame would be discarded. Server
+    /// errors are silently ignored: emission is fire-and-forget and must
+    /// never affect dispatch.
+    ///
+    /// `ToolHarness::call` invokes this automatically for
+    /// `ToolCallStarted` / `ToolCallCompleted`; higher-level events
+    /// (turn lifecycle, phase changes) are emitted by callers that
+    /// already hold the harness.
     pub async fn emit_session_event(&self, event: SessionEvent) {
         if self.inner.borrow.is_none() {
             return;
@@ -1317,9 +1469,14 @@ impl ToolHarness {
             .await;
     }
 
-    /// Send a `tool.notify` frame to the server. The server fans the
-    /// notification out to every connection that has an active
-    /// `subscribe_notifications` subscription for this session.
+    /// Send a `tool.notify` frame to the server.
+    ///
+    /// The server fans the notification out to every connection that has an
+    /// active `subscribe_notifications` subscription for this session.
+    /// The frame is fire-and-forget: this method returns `Ok` once the
+    /// outbound message is queued, without waiting for a server ack.
+    /// Server-side errors (e.g. unknown tool, invalid session) are not
+    /// surfaced to the caller.
     pub async fn send_notification(
         &self,
         notification: xai_tool_protocol::ToolNotificationFrame,
@@ -1357,9 +1514,14 @@ impl ToolHarness {
         self.send_fire_and_forget(Method::Hook, hook).await
     }
 
-    /// Cancel an in-flight remote call. Sends the call-scoped `Cancel`
-    /// [`HookFrame`](xai_tool_protocol::HookFrame) over the fire-and-forget
-    /// [`Self::send_hook`] path.
+    /// Cancel an in-flight remote call.
+    ///
+    /// Sends the call-scoped `Cancel` [`HookFrame`](xai_tool_protocol::HookFrame)
+    /// over the fire-and-forget [`Self::send_hook`] path. Idempotent: the
+    /// server routes it to the owning tool server, which hard-cancels a live
+    /// call or tombstones an unknown / already-completed `call_id`. `Ok`
+    /// means the frame was queued; a late or repeated id is never an error
+    /// here.
     pub async fn cancel_call(
         &self,
         tool_id: &ToolId,
@@ -1489,10 +1651,14 @@ impl ToolHarness {
     }
 
     /// Best-effort, non-blocking twin of [`Self::send_hook_reply`] for
-    /// synchronous `Drop`/teardown paths that cannot `.await`. Enqueues via
-    /// [`HubConnection::try_send_outbound`]; a full or closed outbound
-    /// channel returns `Err` and the frame is abandoned — the server's
-    /// parked-request backstop then releases the await.
+    /// synchronous `Drop`/teardown paths that cannot `.await`.
+    ///
+    /// Enqueues via [`HubConnection::try_send_outbound`]; a full or closed
+    /// outbound channel returns `Err` and the frame is abandoned — the server's
+    /// parked-request backstop then releases the await. Mirrors
+    /// `RemoteCallStream`'s cancel-on-drop discipline. The async variant's only
+    /// edge over this is a brief bounded wait when the channel is momentarily
+    /// full, which best-effort teardown does not need.
     pub fn try_send_hook_reply(
         &self,
         reply: xai_tool_protocol::HookReplyFrame,
@@ -1503,8 +1669,17 @@ impl ToolHarness {
         connection.try_send_outbound(text)
     }
 
-    /// Register the sink for inbound reverse-direction hook requests (server
-    /// → harness).
+    /// Register the sink for inbound reverse-direction hook requests
+    /// (server → harness). Replaces any prior handler; the inbox loop loads
+    /// it per frame, so registering before or after
+    /// [`Self::subscribe_notifications`] both work.
+    ///
+    /// `handler` runs **inline** on the shared inbox loop that also delivers
+    /// [`HubNotification`](crate::notification::HubNotification)s, so it MUST
+    /// NOT block: only enqueue / hand the frame off (e.g. a non-blocking
+    /// channel `try_send`) and return promptly. Blocking here stalls
+    /// notification delivery for the whole session. A panic is caught (the
+    /// frame is dropped and the loop continues), but should still be avoided.
     pub fn set_hook_request_handler<F>(&self, handler: F)
     where
         F: Fn(xai_tool_protocol::HookFrame) + Send + Sync + 'static,
@@ -1512,9 +1687,12 @@ impl ToolHarness {
         *self.inner.hook_request_handler.lock() = Some(Arc::new(handler));
     }
 
-    /// Shared implementation for fire-and-forget JSON-RPC requests. Allocates
-    /// a request id, constructs a [`JsonRpcRequest`] with the given method
-    /// and params, serializes it, and queues it on the outbound channel.
+    /// Shared implementation for fire-and-forget JSON-RPC requests.
+    ///
+    /// Allocates a request id, constructs a [`JsonRpcRequest`] with the
+    /// given method and params, serializes it, and queues it on the
+    /// outbound channel. Used by [`Self::send_notification`] and
+    /// [`Self::send_hook`] to avoid duplicating the boilerplate.
     async fn send_fire_and_forget<P: serde::Serialize>(
         &self,
         method: Method,
@@ -1544,7 +1722,9 @@ impl ToolHarness {
         }
 
         let (inbox_tx, mut inbox_rx) = mpsc::channel::<crate::demux::InboundFrame>(64);
-        // Weak only: the demux entry holds the sole strong sender.
+        // Weak only: the demux entry holds the sole strong sender, so
+        // identity-guarded unregister on teardown closes the channel and the
+        // inbox loop sees EOF. The stack-local copy backs the undo below.
         let inbox_weak = inbox_tx.downgrade();
         // A repeat subscribe replaces this harness's own inbox; peers on the
         // same session keep theirs.
@@ -1576,7 +1756,9 @@ impl ToolHarness {
         }
 
         let (event_tx, event_rx) = mpsc::channel::<crate::notification::HubNotification>(64);
-        // Clone only the handler slot (a standalone `Arc`), never `inner`.
+        // Clone only the handler slot (a standalone `Arc`), never `inner`:
+        // an `inner` clone here would keep the strong count above 1 and
+        // suppress the `Drop` teardown gate.
         let hook_request_handler = self.inner.hook_request_handler.clone();
         tokio::spawn(async move {
             while let Some(frame) = inbox_rx.recv().await {
@@ -1633,8 +1815,10 @@ impl ToolHarness {
         }
     }
 
-    /// Query the server for remote tool descriptions via `tools.list` RPC and
-    /// merge them into the in-memory cache.
+    /// Query the server for remote tool descriptions via `tools.list` RPC
+    /// and merge them into the in-memory cache. After a successful bind,
+    /// a strictly smaller list does not drop tools the bind ack advertised.
+    /// Returns the full list payload, including workspace-boundness.
     pub async fn query_remote_tools(
         &self,
     ) -> Result<xai_tool_protocol::ToolsListResult, ClientError> {
@@ -1662,7 +1846,9 @@ impl ToolHarness {
             tracing::warn!(error = %e, "tool discovery: initial query failed");
         }
 
-        // Capture a Weak so the discovery task never pins ToolHarnessInner.
+        // Capture a Weak so the discovery task never pins ToolHarnessInner
+        // (a strong Arc would form a cycle via demux inbox → task → Arc →
+        // ConnectionBorrow → HubConnection → demux and defeat Drop teardown).
         let weak = Arc::downgrade(&self.inner);
         let handle = tokio::spawn(async move {
             while let Some(notification) = rx.recv().await {
@@ -1706,7 +1892,7 @@ impl ToolHarness {
         *self.inner.discovery_handle.lock() = Some(handle);
 
         // Teardown may have won between subscribe and handle install: abort
-        // the handle we published (finish_teardown would have missed it).
+        // the handle we just published (finish_teardown would have missed it).
         if self.inner.borrow.as_ref().is_some_and(|b| b.is_torn_down()) {
             if let Some(h) = self.inner.discovery_handle.lock().take() {
                 h.abort();
@@ -1722,15 +1908,33 @@ impl ToolHarness {
     }
 
     /// Cooperatively tear down this harness's connection borrow.
+    ///
+    /// Shared with both Drop paths via an at-most-once CAS inside
+    /// `finish_teardown`. Aborts tool discovery, cancels the borrow token,
+    /// identity-unregisters this harness's demux inbox, and untracks the
+    /// session. Idempotent across clones.
+    ///
+    /// **In-flight `call(...)` futures are NOT cancelled** by
+    /// `shutdown`. The harness owns no run-loop — the underlying
+    /// connection actor keeps reading inbound frames and each
+    /// per-call [`ToolStream`] resolves naturally on its terminal
+    /// frame. To force-drain in-flight calls, call
+    /// `connection().request_shutdown()` (which closes the connection
+    /// and surfaces every parked waiter as `NetworkError`) or drop
+    /// the per-call stream.
     pub async fn shutdown(&self) -> Result<(), ClientError> {
         self.inner.finish_teardown();
         Ok(())
     }
 }
 
-/// Build the `ToolNotificationFrame` carrying a session-level event. Both
-/// `tool_id` and `tool_call_id` are intentionally `None`: session events are
-/// not associated with any single tool dispatch.
+/// Build the `ToolNotificationFrame` carrying a session-level event.
+///
+/// Both `tool_id` and `tool_call_id` are intentionally `None`: session
+/// events are not associated with any single tool dispatch. If
+/// `serde_json::to_value` were to fail (it cannot — every `SessionEvent`
+/// field is a primitive), an empty `null` payload is sent rather than
+/// panicking.
 fn build_session_event_frame(event: &SessionEvent) -> ToolNotificationFrame {
     ToolNotificationFrame {
         tool_call_id: None,
@@ -1747,11 +1951,14 @@ fn build_session_event_frame(event: &SessionEvent) -> ToolNotificationFrame {
 enum HookRequestSkip {
     /// Not a `hook` request.
     NotHook { method: String },
-    /// A `hook` request whose params do not decode as a [`HookFrame`](xai_tool_protocol::HookFrame).
+    /// A `hook` request whose params do not decode as a
+    /// [`HookFrame`](xai_tool_protocol::HookFrame); the sender may be awaiting
+    /// a reply the harness cannot correlate.
     Malformed,
     /// A fire-and-forget hook (no `hook_id`); nothing awaits an answer.
     NoReplyLeg { event: String },
-    /// A request/response hook of a kind this harness never answers; the sender waits on its own backstop.
+    /// A request/response hook of a kind this harness never answers; the
+    /// sender waits on its own backstop.
     UnansweredKind { event: String },
 }
 
@@ -1874,7 +2081,8 @@ fn build_hook_reply_notification(
     session_id: &SessionId,
     mut reply: xai_tool_protocol::HookReplyFrame,
 ) -> JsonRpcNotification<xai_tool_protocol::HookReplyFrame> {
-    // Pin the frame's session id to the harness's bound session so params can never disagree with the envelope.
+    // Pin the frame's session id to the harness's bound session so params can
+    // never disagree with the envelope; callers supply only hook_id + result.
     reply.session_id = session_id.clone();
     JsonRpcNotification {
         jsonrpc: JsonRpcVersion,
@@ -1886,7 +2094,10 @@ fn build_hook_reply_notification(
 }
 
 /// Owned per-call state needed to build and dispatch the matching
-/// `ToolCallCompleted` event.
+/// `ToolCallCompleted` event. Lives inside an `Option` on
+/// [`ObservedToolStream`] so the IDs can be moved into the event by
+/// value (no string clones) on emission, and so a present `Some` is the
+/// only "still owes a Completed" signal we need.
 struct EmissionState {
     harness: ToolHarness,
     tool_call_id: ToolCallId,
@@ -1896,9 +2107,22 @@ struct EmissionState {
 
 /// Observability wrapper around a [`ToolStream`] returned by
 /// [`ToolHarness::call`].
+///
+/// Emits exactly one [`SessionEvent::ToolCallCompleted`] for the call:
+///
+/// - `Success` — terminal `Ok` flowed through.
+/// - `Error`   — terminal `Err` flowed through.
+/// - `Cancelled` — stream was dropped before any terminal item, i.e.
+///   the consumer (typically a `tokio::select!` on a cancel token) gave
+///   up mid-dispatch.
+///
+/// Emission is fire-and-forget via `tokio::spawn` because both
+/// `poll_next` and `Drop` are synchronous. The matching
+/// `ToolCallStarted` was emitted by `call` before the stream was built.
 struct ObservedToolStream {
     inner: ToolStream<xai_tool_runtime::TypedToolOutput>,
-    /// `Some` until the `ToolCallCompleted` event is scheduled.
+    /// `Some` until the `ToolCallCompleted` event is scheduled, then
+    /// `None` so neither a subsequent `poll_next` nor `Drop` double-emits.
     emission: Option<EmissionState>,
 }
 
@@ -1976,6 +2200,8 @@ impl Drop for ToolHarness {
     fn drop(&mut self) {
         // Best-effort fast path: skip while other ToolHarness clones still
         // exist (e.g. ObservedToolStream's internal clone during `call`).
+        // Correctness does not depend on this gate — `ToolHarnessInner::Drop`
+        // runs the same cleanup at true refcount-zero if this path skips.
         if Arc::strong_count(&self.inner) > 1 {
             return;
         }
@@ -2005,8 +2231,9 @@ async fn dispatch_remote(
         .get::<Cwd>()
         .map(|c| c.0.to_string_lossy().into_owned());
     let behavior_version = ctx.extensions.get::<BehaviorVersion>().map(|v| v.0.clone());
-    // Clone the cancel-on-drop identifiers ONLY when opted in — the default
-    // path pays no extra clone.
+    // Clone the cancel-on-drop identifiers ONLY when opted in — the
+    // default path pays no extra clone. `tool_id` itself moves into the
+    // request params below.
     let cancel_on_drop = ctx
         .extensions
         .get::<CancelOnDrop>()
@@ -2038,7 +2265,9 @@ async fn dispatch_remote(
         trace_context,
     };
     // Serialize params to a Value first so the wire shape and THIS step's
-    // `request_encoding` subcode stay unchanged.
+    // `request_encoding` subcode stay unchanged. The envelope `to_string`
+    // in `build_request_frame` can't fail for a valid `Value`, so its
+    // differing error subcode is unreachable.
     let params_value = match serde_json::to_value(&params) {
         Ok(v) => v,
         Err(err) => {
@@ -2056,11 +2285,14 @@ async fn dispatch_remote(
         };
 
     let (response_tx, response_rx) = oneshot::channel();
-    // Register with the session index so the in-flight short-circuit can fail this call on a workspace Disconnected notification.
+    // Register with the session index so the in-flight short-circuit can fail
+    // this call on a workspace Disconnected notification for the session.
     demux.register_call_response_waiter(request_id.clone(), session_id.clone(), response_tx);
 
     if let Err(err) = connection.send_outbound(request_text).await {
-        // The demux still holds the parked waiters.
+        // The demux still holds the parked waiters; pull them out so
+        // the response oneshot doesn't sit forever on a request that
+        // never reached the wire.
         demux.unregister_progress_waiter(&call_id);
         let _ = demux.take_response_waiter(&request_id);
         return terminal_only(Err(client_error_to_tool_error(err)));
@@ -2077,11 +2309,21 @@ async fn dispatch_remote(
     ))
 }
 
-/// Unified stream that interleaves per-call progress with the eventual
-/// JSON-RPC response and ends after exactly one terminal. The progress
-/// receiver is polled while the response is pending; once the response
-/// resolves the stream emits the matching terminal item and returns `None`
-/// thereafter.
+/// Unified stream that interleaves per-call progress with the
+/// eventual JSON-RPC response and ends after exactly one terminal.
+///
+/// The progress receiver is polled while the response is pending;
+/// once the response resolves the stream emits the matching
+/// terminal item and returns `None` thereafter. The `Drop` impl
+/// unregisters BOTH the per-call progress waiter (keyed by
+/// `tool_call_id`) AND the response waiter (keyed by
+/// `request_id`) from the demux — a stream that is dropped
+/// before the response lands MUST NOT leak either map entry.
+///
+/// `cancel_on_drop` is `Some((session_id, tool_id))` only when the caller
+/// opted in (the default path stores no extra clone); on `Drop` before a
+/// terminal is polled it emits one best-effort call-scoped `Cancel` hook
+/// so the workspace hard-cancels the in-flight call.
 struct RemoteCallStream {
     connection: Arc<HubConnection>,
     /// Consumed exactly once when the terminal is built.
@@ -2129,7 +2371,8 @@ impl RemoteCallStream {
             tool_id.clone(),
             self.call_id.clone(),
         );
-        // Counts the attempt (including a frame later dropped on a full / closed channel).
+        // Counts the attempt (including a frame later dropped on a full /
+        // closed channel), matching `send_hook`'s count-before-send.
         crate::metrics::hook_send("cancel");
         try_send_request_on_drop(
             &self.connection,
@@ -2144,11 +2387,18 @@ impl RemoteCallStream {
 impl Drop for RemoteCallStream {
     fn drop(&mut self) {
         let demux = self.connection.demux();
-        // Pull both waiters out of the demux.
+        // Pull both waiters out of the demux. Either may already be
+        // gone (the response waiter is consumed by `route_response`
+        // when the terminal frame lands; the progress waiter is
+        // already removed by `unregister_progress_waiter` if that
+        // ran). The `Option`-returning APIs make this idempotent.
         demux.unregister_progress_waiter(&self.call_id);
         let _ = demux.take_response_waiter(&self.request_id);
 
-        // `cancel_on_drop` is `Some` only when opted in.
+        // `cancel_on_drop` is `Some` only when opted in. `done` flips when
+        // the consumer POLLS a terminal, so a drop after an unpolled
+        // terminal still emits one cancel — benign, the server tombstones
+        // the finished call (mirrors `ObservedToolStream`'s window).
         if !self.done
             && let Some((session_id, tool_id)) = self.cancel_on_drop.as_ref()
         {
@@ -2169,8 +2419,12 @@ impl Stream for RemoteCallStream {
             return Poll::Ready(None);
         }
 
-        // Poll progress first so any frames that have already been routed by
-        // the demux drain in arrival order.
+        // Poll progress first so any frames that have already been
+        // routed by the demux drain in arrival order. The runtime's
+        // stream invariant is `Progress* Terminal`; checking the
+        // progress channel before the response future is what makes
+        // that invariant hold even when the server has already shipped
+        // the terminal frame by the time the consumer first polls.
         if let Some(rx) = self.progress_rx.as_mut() {
             match rx.poll_recv(cx) {
                 Poll::Ready(Some(frame)) => {
@@ -2677,6 +2931,9 @@ mod tests {
         let tool = Arc::new(EchoTool { id: id.clone() });
         let prev = registry.register_arc(tool.clone());
         assert!(prev.is_none());
+        // The original Arc is still held by the test (refcount ≥ 2):
+        // the registry stores its own clone via `ErasedTool::from_arc`,
+        // so dropping the test's clone does not invalidate the registry.
         drop(tool);
         let handle = registry.find(&id).expect("handle still present");
         assert_eq!(handle.id(), id);
@@ -2808,7 +3065,7 @@ mod tests {
         assert_eq!(b.len(), 1);
         assert!(b.find(&id).is_some());
 
-        // Register through b.
+        // Register through b, visible through a
         let id2 = ToolId::new("shared2").expect("valid");
         b.register(EchoTool { id: id2.clone() });
         assert_eq!(a.len(), 2);
@@ -2872,7 +3129,9 @@ mod tests {
 
     #[tokio::test]
     async fn local_only_call_returns_raw_stream_no_observability_wrap() {
-        // Sanity: a local-only harness has `borrow == None`.
+        // Sanity: a local-only harness has `borrow == None`, so `call()`
+        // must skip the `ObservedToolStream` wrap and emit nothing — the
+        // existing local-tool test surface stays byte-for-byte identical.
         let tool_id = ToolId::new("echo").expect("valid");
         let harness = build_local_only_harness_with(EchoTool {
             id: tool_id.clone(),
@@ -3462,7 +3721,8 @@ mod tests {
         let (harness, pool, conn) = build_connected_harness("transient-upgrade").await;
         harness.start_tool_discovery().await;
 
-        // Hold a transient strong Arc of the inner (simulates discovery upgrade mid-notification).
+        // Hold a transient strong Arc of the inner (simulates discovery
+        // upgrade mid-notification) while dropping every ToolHarness.
         let transient = harness.inner.clone();
         drop(harness);
 
@@ -3602,8 +3862,8 @@ mod tests {
         );
     }
 
-    /// Harnesses share one pooled connection and one session. The harness
-    /// that installed the hook handler must still receive a reverse
+    /// Two harnesses share one pooled connection and one session. The
+    /// harness that installed the hook handler must still receive a reverse
     /// permission hook when the other harness subscribed later.
     #[tokio::test]
     async fn permission_hook_reaches_owner_handler_after_peer_subscribes_same_session() {
@@ -3754,7 +4014,11 @@ mod tests {
         let mut live = builder().build().await.expect("first harness");
         let conn = live.connection().expect("connected").clone();
         for round in 0..ROUNDS {
-            // Spin barrier: the window is microseconds wide.
+            // Spin barrier: the window is microseconds wide, so both sides
+            // must leave the gate within nanoseconds of each other. The drop
+            // side then staggers by a cycling spin count to sweep its
+            // decrement across the build side's refcount increment. Without
+            // the lifecycle lock this fails well inside the 200 rounds.
             let gate = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let arrive_and_spin = |gate: &std::sync::atomic::AtomicUsize, extra: usize| {
                 gate.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

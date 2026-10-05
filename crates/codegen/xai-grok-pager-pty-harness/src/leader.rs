@@ -1,4 +1,9 @@
 //! Multi-client leader cluster: one shared leader plus N pager clients.
+//!
+//! Every other leader test is single-client/single-leader; [`LeaderCluster`] covers "one leader, several pager clients sharing its session".
+//! One [`ContentController`] gives one shared `$HOME` (hence one elected leader) plus a fixed leader socket beneath its `GROK_HOME`.
+//! Clients spawn with the `--leader`/`--leader-socket` flags so they all attach to the SAME leader.
+//! It also exposes the leader's durable `updates.jsonl` log so a reattach test can assert on the persisted, replayable turn-completion records.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -37,14 +42,12 @@ impl LeaderCluster {
         })
     }
 
-    /// Spawn the leader-electing client (`--leader --leader-socket <S>` plus
-    /// `extra_args`).
+    /// Spawn the leader-electing client (`--leader --leader-socket <S>` plus `extra_args`); it starts a fresh session and brings up the leader.
     pub fn spawn_leader(&self, extra_args: &[&str]) -> Result<PtyHarness> {
         self.spawn_client(&[], extra_args)
     }
 
-    /// Attach another client that resumes the shared session through the SAME
-    /// leader.
+    /// Attach another client that resumes the shared session through the SAME leader (`--leader --leader-socket <S> --resume` plus `extra_args`).
     pub fn attach(&self, extra_args: &[&str]) -> Result<PtyHarness> {
         self.spawn_client(&["--resume"], extra_args)
     }
@@ -176,7 +179,7 @@ mod tests {
             ),
         );
         let updates = parse_update_payloads(&body);
-        // Both complete lines parse; the torn final line is dropped.
+        // The two complete lines parse; the torn final line is dropped.
         assert_eq!(updates.len(), 2);
         let completed = updates
             .iter()
@@ -195,7 +198,7 @@ mod tests {
             ),
         );
         let updates = parse_update_payloads(&body);
-        // Only the envelope carrying params.update survives.
+        // Only the one envelope carrying params.update survives.
         assert_eq!(updates.len(), 1);
         assert!(is_turn_completed(&updates[0]));
         assert_eq!(updates[0]["stop_reason"], "cancelled");

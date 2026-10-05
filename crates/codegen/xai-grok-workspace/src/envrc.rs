@@ -1,4 +1,8 @@
 //! Load environment variables from a directory's `.envrc`: `direnv export json` when available, else bash with direnv stubs.
+//!
+//! Every wait `Command::output()` would hide is bounded here (exit wait, pipe drain, buffer cap, reap) because one blocked read froze session load.
+//! The output sentinel proves a capture is complete, not that a concurrent descendant kept quiet.
+//! So timing can only cost the environment, never install a truncated one.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -8,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const ENVRC_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
-const ENVRC_TIMEOUT_ENV: &str = "GROK_ENVRC_TIMEOUT_SECS"; // seconds; disables
+const ENVRC_TIMEOUT_ENV: &str = "GROK_ENVRC_TIMEOUT_SECS"; // seconds; 0 disables
 const MAX_TIMEOUT: Duration = Duration::from_secs(3600);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(250); // of silence
@@ -322,6 +326,7 @@ printf '%s' '{sentinel}'
             // Only include vars that are new or changed from baseline
             match baseline.get(key) {
                 Some(baseline_value) if baseline_value == value => {
+                    // Unchanged, skip
                 }
                 _ => {
                     result.insert(key.to_string(), value.to_string());
@@ -432,8 +437,8 @@ fn run_with_deadline(mut cmd: Command, deadline: Instant, label: &str) -> RunOut
     }
 }
 
-/// Captures a pipe on a helper thread; output survives a pipe a descendant
-/// holds open past EOF.
+/// Captures a pipe on a helper thread; output survives a pipe a descendant holds open past EOF.
+/// Unix reads are non-blocking (`done` cancels the thread); elsewhere a blocked reader detaches and the Job Object closes the pipe on drop.
 struct PipeDrain {
     buf: Arc<Mutex<Vec<u8>>>,
     done: Arc<AtomicBool>,

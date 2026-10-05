@@ -1,4 +1,12 @@
-//! Session-close timing: a closed table of `session_end.*` spans plus a per-session [`SessionEndTimer`].
+//! Session-close timing: a closed table of `session_end.*` spans plus a per-session [`SessionEndTimer`] that feeds the `SessionEndTimings` event.
+//!
+//! Leaf phases carry a duration field.
+//! Wrapper phases (`Memory`, `Hooks`, `Workflows`, `Feedback`, `SessionFlush`) are span-only aggregates of their leaves.
+//! Summing every `*_ms` therefore double-counts.
+//! Adding a leaf [`Phase`] wires it to a field in [`phase_event_slot`] (exhaustive) or it stays span-only.
+//!
+//! The timer also records `total_ms`, the wall-clock from its creation (session end starts) to emit.
+//! So `total_ms - sum(leaves)` is time spent between the measured steps.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

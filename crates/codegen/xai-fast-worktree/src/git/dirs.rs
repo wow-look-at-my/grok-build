@@ -1,7 +1,9 @@
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-/// Cap one `find_missing_file` scan.
+/// Cap one `find_missing_file` scan. A fully-covered store walks everything;
+/// exhausting the cap returns an error, which callers treat as "couldn't tell"
+/// and keep — never a delete.
 const MAX_ENTRIES_SCANNED: usize = 100_000;
 
 /// The first file under `ours` (recursively) that `theirs` does not also hold at

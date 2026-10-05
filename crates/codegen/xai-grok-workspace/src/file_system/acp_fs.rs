@@ -8,6 +8,7 @@ pub struct AcpSessionFs {
     gateway: GatewaySender,
     session_id: acp::SessionId,
     /// When set, any path under `display_cwd` is rewritten to `root` before the extension sees it.
+    /// Defense in depth for AB overlay isolation: a tool that passes the display path still reads and writes the overlay.
     display_cwd: Option<PathBuf>,
 }
 
@@ -21,7 +22,8 @@ impl AcpSessionFs {
         }
     }
 
-    /// When AB FS isolation is active.
+    /// When AB FS isolation is active, the model sees `display_cwd` (e.g., `/testbed/project`) but writes should go to `root` (the overlay path).
+    /// Any path under `display_cwd` is rewritten to the equivalent path under `root`.
     pub fn with_display_cwd(mut self, display_cwd: PathBuf) -> Self {
         self.display_cwd = Some(display_cwd);
         self
@@ -96,6 +98,7 @@ impl AsyncFileSystem for AcpSessionFs {
     }
 
     async fn delete_file(&self, path: &Path) -> Result<(), FsError> {
+        // ACP protocol doesn't support file deletion yet
         tracing::warn!(?path, "ACP filesystem does not support file deletion");
         Err(FsError::Other(
             "File deletion not supported via ACP".to_string(),

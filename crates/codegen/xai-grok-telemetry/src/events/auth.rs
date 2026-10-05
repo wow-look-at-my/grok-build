@@ -24,8 +24,9 @@ pub struct LoginMethodChosen {
     pub mode: String,
 }
 
-/// A login flow completed successfully. `method` is "xai" or "api_key";
-/// `mode` is the resolved auth mode.
+/// A login flow completed successfully.
+/// `method` is "xai" or "api_key"; `mode` is the resolved auth mode.
+/// `mid_session` is true for `/login`/401 re-auth (as opposed to the startup/logout flow).
 #[derive(Serialize)]
 pub struct LoginCompleted {
     pub method: String,
@@ -38,7 +39,8 @@ pub struct LoginCompleted {
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LoginFailureKind {
-    /// `is_connect`: a dead TCP connect *or* a TLS handshake killed mid-flight. `os_error` tells them apart.
+    /// `is_connect`: a dead TCP connect *or* a TLS handshake killed mid-flight.
+    /// `os_error` tells them apart.
     TransportConnect,
     /// TLS certificate rejected for an untrusted issuer (e.g. an uninstalled proxy root).
     CertificateUntrusted,
@@ -51,16 +53,18 @@ pub enum LoginFailureKind {
     Decode,
 }
 
-/// One per failed login attempt, emitted by the login funnel so a retried
-/// request can't inflate the count.
+/// One per failed login attempt, emitted by the login funnel so a retried request can't inflate the count.
+/// Failures that never reached HTTP (user backed out, loopback bind, id_token validation) are not reported.
 #[derive(Serialize)]
 pub struct LoginFailed {
     pub error_kind: LoginFailureKind,
+    /// OS code from the failure's cause chain (54/104 ECONNRESET, 10054 on Windows).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub os_error: Option<i32>,
 }
 
 /// The user backed out of the login funnel.
+/// `stage` is "picker", "api_key_entry", "loopback_paste", "device_wait", "api_key_wait", or "command_wait"; `via` is "esc" or "quit".
 #[derive(Serialize)]
 pub struct LoginAbandoned {
     pub stage: String,
@@ -101,8 +105,8 @@ pub struct AuthLockReplacedOutFromUnder {
     pub holder_age_secs: Option<u64>,
 }
 
-/// Why auth recovery could not refresh the credential, forcing the user to
-/// manually re-authenticate.
+/// Why auth recovery could not refresh the credential, forcing the user to manually re-authenticate.
+/// Mapped from shell's `AuthError`; only terminal failures map, transient ones don't emit (recovery retries).
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ManualAuthReason {
@@ -119,6 +123,7 @@ pub enum ManualAuthReason {
 }
 
 /// User-facing surface where the manual re-auth was triggered.
+/// Background recoveries (storage/telemetry uploads) do not emit this event.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ManualAuthSurface {
@@ -140,9 +145,9 @@ pub enum AuthTokenKind {
     None,
 }
 
-/// Product-events only (no external export). Count `distinct(principal)`,
-/// never raw events. `trigger` is whichever surface fired first, not a
-/// reliable per-surface split.
+/// Product-events only (no external export). Count `distinct(principal)`, never raw events. `trigger` is whichever
+/// surface fired first, not a reliable per-surface split. API-key sessions are excluded (a 401 there means rotate the
+/// key, not `/login`). A downstream crate's `cfg(test)` can't turn on `cfg_attr(test,...)` here
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct ManualAuth {
     pub reason: ManualAuthReason,

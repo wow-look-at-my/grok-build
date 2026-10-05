@@ -1,15 +1,25 @@
-#![allow(clippy::string_slice)]
+#![allow(clippy::string_slice)] // 1 hit predates the gate
 
 //! Shared DTO types for hooks/plugins ACP extensions.
+//!
+//! This crate defines the wire format for `x.ai/hooks/*` and `x.ai/plugins/*`
+//! ACP extension methods. It is dependency-free (only `serde`) so both
+//! `xai-grok-shell` and `xai-grok-pager` can depend on it without pulling
+//! in domain logic.
+//!
+//! Conversion from domain types (`HookSpec`, `LoadedPlugin`) to these DTOs
+//! lives in the shell's extension handlers, not here.
 
 #![deny(clippy::indexing_slicing)]
 
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
-// Enums.
+// Enums
+// ---------------------------------------------------------------------------
 
-/// Maps from `PluginScope` in `xai-grok-agent`.
+/// Maps from `PluginScope` in `xai-grok-agent`. Variant renames: source `CliOverride` -> DTO `Cli` (matches Display
+/// output "cli"); source `ConfigPath` -> DTO `Config` (matches Display output "config").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginScope {
@@ -56,7 +66,9 @@ pub enum PluginOrigin {
     },
     /// `[plugins].paths` in config.
     ConfigPath,
-    /// Catch-all for variants added after this client was built.
+    /// Catch-all for variants added after this client was built, so a newer
+    /// shell never breaks an older pager's whole plugins list. Consumers
+    /// must treat it like a missing origin.
     #[serde(other)]
     Unknown,
 }
@@ -86,7 +98,8 @@ pub enum HookEvent {
     // Compaction
     PreCompact,
     PostCompact,
-    /// An event added after this client was built: it keeps one unrecognized name from blanking the whole list.
+    /// An event added after this client was built: it keeps one unrecognized name from blanking
+    /// the whole list. Lossy on re-serialize, so only deserialize through this type.
     #[serde(other)]
     Unknown,
 }
@@ -214,6 +227,7 @@ pub struct HookInfo {
     /// Handler type.
     pub handler_type: HookHandlerType,
     /// Raw matcher pattern from config (for display). None = matches all tools.
+    /// Maps from `HookSpec.configured_matcher` (not the compiled regex).
     pub matcher: Option<String>,
     /// Command path (for command handlers).
     pub command: Option<String>,
@@ -226,10 +240,14 @@ pub struct HookInfo {
     /// Whether dispatch skips this hook: `enabled = false`, listed in ~/.grok/disabled-hooks, or kept off by `allow_managed_hooks_only`.
     #[serde(default)]
     pub disabled: bool,
-    /// Enforced by root-owned managed policy: disable actions are refused.
+    /// Enforced by root-owned managed policy: disable actions are refused
+    /// and disable state is ignored, so surfaces should show the pinned
+    /// state up front rather than let a refusal be the first signal.
     #[serde(default)]
     pub pinned: bool,
-    /// Whether `HooksAction::Remove` can succeed for this hook's source.
+    /// Whether `HooksAction::Remove` can succeed for this hook's source: true only for user-registered hook directories
+    /// without a managed-policy member (removal targets the whole `source_dir`, and a pinned member makes it refused), so
+    /// surfaces don't offer removal elsewhere.
     #[serde(default)]
     pub removable: bool,
 }
@@ -262,7 +280,8 @@ pub struct PluginInfo {
     pub root: String,
     /// Plugin scope.
     pub scope: PluginScope,
-    /// Deprecated: always `true`. Trust/untrust. Kept for serialization compatibility; will be removed.
+    /// Deprecated: always `true`. Trust/untrust has been replaced by
+    /// enable/disable. Kept for serialization compatibility; will be removed.
     pub trusted: bool,
     /// Whether the plugin is enabled (not in [plugins].disabled list).
     pub enabled: bool,
@@ -308,7 +327,8 @@ pub struct PluginsListResponse {
 }
 
 // ---------------------------------------------------------------------------
-// MCP server types.
+// MCP server types
+// ---------------------------------------------------------------------------
 
 /// Source of an MCP server configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -364,7 +384,9 @@ pub struct McpServersListResponse {
     pub servers: Vec<McpServerInfo>,
 }
 
-// --------------------------------------------------------------------------- Plugin component inventory.
+// ---------------------------------------------------------------------------
+// Plugin component inventory (from marketplace catalogs)
+// ---------------------------------------------------------------------------
 
 const MAX_COMPONENT_NAME_CHARS: usize = 120;
 const MAX_COMPONENT_DESC_CHARS: usize = 120;
@@ -383,7 +405,8 @@ pub struct ComponentItem {
 
 impl ComponentItem {
     /// Build an item with control characters stripped and the description
-    /// truncated.
+    /// truncated, defending against terminal-escape injection from
+    /// catalog-supplied strings.
     pub fn new(name: impl Into<String>, description: Option<String>) -> Self {
         let mut item = Self {
             name: name.into(),
@@ -446,7 +469,9 @@ pub struct PluginComponents {
     pub lsp_servers: Vec<ComponentItem>,
 }
 
-/// Stable identifier for one of those component categories.
+/// Stable identifier for one of the six component categories. Consumers
+/// map this to their own display labels via exhaustive `match` so adding a
+/// category is a compile error until every consumer handles it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComponentCategory {
     Skills,
@@ -513,8 +538,9 @@ impl PluginComponents {
         }
     }
 
-    /// Strip control characters, truncate descriptions, and cap each category
-    /// at [`MAX_COMPONENTS_PER_CATEGORY`] items.
+    /// Strip control characters, truncate descriptions, and cap each
+    /// category at [`MAX_COMPONENTS_PER_CATEGORY`] items. Applied when
+    /// loading untrusted catalog data.
     pub fn sanitize(&mut self) {
         for items in self.categories_mut() {
             items.truncate(MAX_COMPONENTS_PER_CATEGORY);
@@ -526,7 +552,8 @@ impl PluginComponents {
 }
 
 // ---------------------------------------------------------------------------
-// Action types.
+// Action types
+// ---------------------------------------------------------------------------
 
 /// Request wrapper for `x.ai/hooks/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1059,7 +1086,8 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// Marketplace types.
+// Marketplace types (wire format for x.ai/marketplace/* ACP endpoints)
+// ---------------------------------------------------------------------------
 
 /// Response for `x.ai/marketplace/list`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1069,7 +1097,9 @@ pub struct MarketplaceListResponse {
 }
 
 impl MarketplaceListResponse {
-    /// Sanitize all catalog-derived components in the response.
+    /// Sanitize all catalog-derived components in the response. Every
+    /// consumer that renders this data to a terminal must call this at its
+    /// ingestion point (deserialization bypasses [`ComponentItem::new`]).
     pub fn sanitize(&mut self) {
         for source in &mut self.sources {
             for plugin in &mut source.plugins {
@@ -1116,7 +1146,8 @@ pub struct MarketplacePluginEntry {
     pub has_mcp: bool,
     pub install_status: String,
     pub installed_version: Option<String>,
-    /// Structured inventory from the marketplace catalog.
+    /// Structured inventory from the marketplace catalog. None = no catalog
+    /// data for this plugin (or the sender predates this field).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub components: Option<PluginComponents>,
     /// Remote git URL for URL-sourced plugins (not present for local plugins).

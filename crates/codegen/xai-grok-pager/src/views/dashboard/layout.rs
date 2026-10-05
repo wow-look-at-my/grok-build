@@ -1,8 +1,12 @@
 //! Pure layout computation for the dashboard view.
+//!
+//! How the peek and the roster split the vertical space is specified in
+//! [`docs/internal/33-dashboard-peek-responsive-layout.md`](../../../../docs/internal/33-dashboard-peek-responsive-layout.md).
 
 use ratatui::layout::Rect;
 
 /// Minimum width at which the dashboard can render meaningful rows.
+/// Below this, the renderer falls back to a stripped, single-column view; row labels are middle-truncated.
 pub const MIN_DASHBOARD_WIDTH: u16 = 40;
 
 /// Minimum list-band height (terminal rows) while evaluating or opening a peek.
@@ -33,13 +37,15 @@ pub struct PeekLiveTailBudget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PeekAllocation {
     pub show_peek: bool,
+    /// Whole peek box height including borders; 0 if `!show_peek`.
     pub peek_box_h: u16,
     /// Max inner content rows for a peek at full allowed size (`peek_box_h - 2`).
     pub max_content_rows: u16,
 }
 
-/// The desired inner rows for a live-tail peek, shrunk to its content. The result never exceeds
-/// `max_content`; the body is also capped by [`MAX_LIVE_TAIL_ROWS`].
+/// The desired inner rows for a live-tail peek, shrunk to its content. (The paint blanks only when
+/// the middle still has 2 or more rows after the blank, so the pin and body share.). The result
+/// never exceeds `max_content`; the body is also capped by [`MAX_LIVE_TAIL_ROWS`].
 pub fn peek_live_tail_desired_content(
     max_content: u16,
     reply_rows: u16,
@@ -92,6 +98,7 @@ pub fn peek_live_tail_desired_content(
     }
 }
 
+/// The whole-box peek cap: ⌊H × 3/8⌋ rows.
 pub fn peek_max_box_rows(h: u16) -> u16 {
     ((u32::from(h) * u32::from(PEEK_MAX_FRAC_NUM)) / u32::from(PEEK_MAX_FRAC_DEN)) as u16
 }
@@ -143,26 +150,33 @@ pub fn allocate_peek(
 }
 
 /// Outer horizontal padding for the dispatch box (cols on each side).
+///
+/// Matches `LayoutConfig::outer_hpad_left/right = 2` from the agent view's default appearance config.
 pub const DISPATCH_OUTER_HPAD: u16 = 2;
 
 /// Outer horizontal padding for the top page header (cols on each side).
+/// Matches list/dispatch so the title aligns with content below.
 pub const HEADER_OUTER_HPAD: u16 = 2;
 
-/// Outer horizontal padding for the row list (cols on each side).
+/// Outer horizontal padding for the row list (cols on each side). Gives the list (rows, group
+/// headers, scrollbar) breathing room. Selection markers, group header rules (` `), and row text
+/// don't sit flush against the terminal edges.
 pub const LIST_OUTER_HPAD: u16 = 2;
 
 /// Output of [`compute_layout`].
 #[derive(Debug, Clone, Copy)]
 pub struct DashboardLayout {
-    /// Top margin row (blank space above the header).
+    /// Top margin row (blank space above the header). Height: 0 or 1.
+    /// Matches the welcome view's `v_margin` so the dashboard's title row doesn't sit flush against the alt-screen top edge.
     pub top_margin: Rect,
-    /// Header row (location label + state chips).
+    /// Header row (location label + state chips). Height: 0 or 1.
     pub header: Rect,
-    /// Vertical breathing room between the header and the row list.
+    /// Vertical breathing room between the header and the row list. Height: 0 or 1. It is a named rect
+    /// rather than an anonymous y-cursor bump only so tests can pin its position and threshold.
     pub header_gap: Rect,
-    /// Primary actions row (`+ New Agent` on the left, `Open Previous | Worktree` on the right).
+    /// Primary actions row (`+ New Agent` on the left, `Open Previous | Worktree` on the right). Height: 0 or 1, same threshold as `header`.
     pub actions: Rect,
-    /// Vertical breathing room between the actions row and the row list.
+    /// Vertical breathing room between the actions row and the row list. Height: 0 or 1; drops to 0 at `area.height <= 13`.
     pub actions_gap: Rect,
     /// Scrollable list area (rows + group headers).
     pub list: Rect,
@@ -170,17 +184,21 @@ pub struct DashboardLayout {
     pub dispatch: Rect,
     /// Footer / shortcut hint row.
     pub footer: Rect,
-    /// Bottom margin row (blank space below the shortcuts bar).
+    /// Bottom margin row (blank space below the shortcuts bar). Height: 0 or 1.
+    /// Matches the agent view's `bottom_vpad` so the shortcuts bar doesn't sit flush against the alt-screen's bottom edge.
+    /// Drops to 0 on short terminals (`area.height <= 16`, the same threshold as `views::agent::AgentViewLayout::compute`).
     pub bottom_margin: Rect,
 }
 
 /// `peek_visible` requests the peek panel; the layout shows it only when the area has enough
 /// vertical room.
 pub fn compute_layout(area: Rect, peek_visible: bool) -> DashboardLayout {
-    // A single text row is the default Callers that support a growing multiline dispatch box (Shift+Enter newlines).
+    // A single text row is the default
+    // Callers that support a growing multiline dispatch box (Shift+Enter newlines) use [`compute_layout_with_dispatch`] to request more
     compute_layout_with_dispatch(area, peek_visible, 1)
 }
 
+/// Heights (0 or 1) of the fixed chrome rows; the list and the dispatch box are sized from what remains.
 struct ChromeHeights {
     top_margin: u16,
     header: u16,
@@ -214,12 +232,15 @@ fn dashboard_chrome_heights(area: Rect) -> ChromeHeights {
     let header = u16::from(area.height > 4);
     // The actions row carries the `+ New Agent` cursor target, so it survives as long as the header does
     let actions = header;
-    // Those blank gaps switch on one height apart, bottom to top.
+    // The four blank gaps switch on one height apart, bottom to top, so each extra terminal row goes to the list or to exactly one
+    // gap: from height 9 up (past the short-terminal dispatch boundary) the list never shrinks as the terminal grows
+    // (see `layout_tests::layout_list_height_never_shrinks_as_terminal_grows`)
     let dispatch_gap = u16::from(area.height > 10);
     let shortcuts_gap = u16::from(area.height > 11);
     let header_gap = u16::from(area.height > 12);
     let actions_gap = u16::from(area.height > 13);
     let footer = u16::from(area.height >= 2);
+    // Match agent bottom_vpad; drop when height <= 16.
     let bottom_margin = u16::from(area.height > 16);
     ChromeHeights {
         top_margin,
@@ -236,6 +257,7 @@ fn dashboard_chrome_heights(area: Rect) -> ChromeHeights {
 }
 
 /// Max inner content rows available for a peek under list-first allocation (list floor and peek max fraction).
+/// Returns 0 when a peek cannot open.
 pub fn max_peek_content_rows(area: Rect) -> u16 {
     if area.height <= 8 {
         return 0;
@@ -257,7 +279,9 @@ pub fn compute_layout_with_peek_box(area: Rect, peek_box_h: u16) -> DashboardLay
     compute_layout_with_dispatch_inner(area, true, 0, Some(peek_box_h.max(3)))
 }
 
-/// Like [`compute_layout`] but lets the caller request a taller dispatch box.
+/// Like [`compute_layout`] but lets the caller request a taller dispatch box. `dispatch_text_rows`
+/// is the number of text rows the dispatch input wants (at least 1); the box adds 2 more for its
+/// top and bottom borders.
 pub fn compute_layout_with_dispatch(
     area: Rect,
     peek_visible: bool,
@@ -272,6 +296,8 @@ fn compute_layout_with_dispatch_inner(
     dispatch_text_rows: u16,
     forced_peek_box_h: Option<u16>,
 ) -> DashboardLayout {
+    // When `area.height == 0`, every subrect collapses to zero
+    // A default `footer_h` of 1 would otherwise produce a non-zero footer rect even on a 0-height area
     if area.height == 0 {
         let z = Rect {
             x: area.x,
@@ -321,7 +347,8 @@ fn compute_layout_with_dispatch_inner(
     } else {
         1
     };
-    // A multiline draft may ask for more rows than the chrome leaves.
+    // A multiline draft may ask for more rows than the chrome leaves; the list gives way first, but the box must still end inside `area` or
+    // the footer would be painted past the buffer
     let dispatch_h = dispatch_h.min(area.height.saturating_sub(fixed_overhead));
     // The peek renders inside the dispatch rect (which grows when `peek_visible`, computed above); there is no standalone peek rect
     let remaining = area.height.saturating_sub(fixed_overhead + dispatch_h);
@@ -355,8 +382,8 @@ fn compute_layout_with_dispatch_inner(
     };
     y += chrome.header;
 
-    // 1-row gap between the header and the actions row (collapsed on short
-    // terminals) Painted by `render_dashboard`'s full-area fill.
+    // 1-row gap between the header and the actions row (collapsed on short terminals)
+    // Painted by `render_dashboard`'s full-area fill; no sub-renderer touches it
     let header_gap = Rect {
         x: area.x,
         y,
@@ -381,7 +408,9 @@ fn compute_layout_with_dispatch_inner(
     };
     y += chrome.actions_gap;
 
-    // Inset the list by LIST_OUTER_HPAD on each side so the row content.
+    // Inset the list by LIST_OUTER_HPAD on each side so the row content and group header rules have side breathing room
+    // The outer columns stay painted bg_base by the area-wide fill in render_dashboard
+    // Mirrors the dispatch inset pattern but with a smaller pad (1 vs 2) because row text is long and dense
     let list_inner_pad = LIST_OUTER_HPAD.saturating_mul(2);
     let list_width = area.width.saturating_sub(list_inner_pad);
     let list_x = if list_width > 0 {
@@ -404,7 +433,8 @@ fn compute_layout_with_dispatch_inner(
     // 1-row gap between the list (or peek) and the dispatch box (mirrors `prompt_gap` in `views::agent::AgentViewLayout`)
     y += chrome.dispatch_gap;
 
-    // The single-line dispatch input keeps its 2-col outer padding so the `❯` prefix lines up.
+    // The single-line dispatch input keeps its 2-col outer padding so the `❯` prefix lines up with the row content
+    // Rows are indented past the marker column too
     let dispatch_inner_pad = DISPATCH_OUTER_HPAD.saturating_mul(2);
     let dispatch_width = area.width.saturating_sub(dispatch_inner_pad);
     let dispatch_x = if dispatch_width > 0 {
@@ -435,8 +465,8 @@ fn compute_layout_with_dispatch_inner(
     };
     y += chrome.footer;
 
-    // Bottom margin row below the shortcuts bar (matches the agent view's
-    // `bottom_vpad`) Painted with `bg_base`.
+    // Bottom margin row below the shortcuts bar (matches the agent view's `bottom_vpad`)
+    // Painted with `bg_base` by `render_dashboard`'s full-area fill; no sub-renderer ever touches this rect
     let bottom_margin = Rect {
         x: area.x,
         y,

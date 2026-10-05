@@ -1,4 +1,8 @@
 //! Sandbox API request and response types.
+//!
+//! These types are shared between the server and clients that use the sandbox API.
+//! All types use `camelCase` serialization to match the proto3 canonical JSON encoding
+//! used on the wire.
 
 use std::collections::HashMap;
 
@@ -9,10 +13,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxForkRequest {
+    /// The source sandbox ID to fork from
     pub source_sandbox_id: String,
+    /// Number of copies to create (defaults to 1)
     #[serde(default)]
     pub copies: Option<u32>,
     /// Snapshot bucket to use.
+    ///
+    /// SECURITY (CWE-284): This field is accepted for backwards compatibility
+    /// but MUST NOT be forwarded to backend services. The server always uses the
+    /// configured default bucket and enforces this server-side.
     #[serde(default)]
     pub snapshot_bucket: Option<String>,
 }
@@ -248,7 +258,8 @@ pub struct SandboxTerminateRequest {
 }
 
 // ============================================================================
-// Session Lifecycle Types.
+// Session Lifecycle Types
+// ============================================================================
 
 /// Sandbox operating mode.
 ///
@@ -347,6 +358,7 @@ pub struct SandboxStatusResponse {
     /// Additional metadata (e.g. repository size).
     #[serde(default)]
     pub metadata: HashMap<String, String>,
+    /// ISO 8601 timestamp.
     #[serde(default)]
     pub timestamp: Option<String>,
 }
@@ -396,6 +408,9 @@ pub struct SandboxHibernateResponse {
 }
 
 /// Request body for restoring a hibernated sandbox session.
+/// POST /v1/sandbox/sessions/{id}/restore
+///
+/// The `session_id` is provided as a path parameter, not in the body.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxRestoreRequest {
@@ -460,8 +475,10 @@ pub struct SandboxEnvironment {
     pub allowed_http_methods: Option<String>,
     #[serde(default)]
     pub preinstalled_packages: HashMap<String, String>,
+    /// ISO 8601 timestamp.
     #[serde(default)]
     pub create_time: Option<String>,
+    /// ISO 8601 timestamp.
     #[serde(default)]
     pub modify_time: Option<String>,
     #[serde(default)]
@@ -596,6 +613,9 @@ pub struct SandboxCreateEnvironmentRequest {
 }
 
 /// Response wrapping a single environment with metadata.
+///
+/// Shared by the create, get, and update environment endpoints since they all
+/// return the same shape: `{ "environment": SandboxEnvironmentWithMetadata }`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxEnvironmentResponse {

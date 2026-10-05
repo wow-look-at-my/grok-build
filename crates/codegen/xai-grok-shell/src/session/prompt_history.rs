@@ -1,4 +1,6 @@
 //! Per-working-directory prompt history for fast reverse search.
+//!
+//! Stores prompts in a separate JSONL file per CWD for instant loading, independent of session storage.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -14,6 +16,8 @@ pub struct PromptEntry {
     pub session_id: String,
     pub prompt: String,
     /// Whether this prompt was a direct bash command (vs. an AI prompt).
+    /// Defaults to `false` for backward compatibility: entries written before this field existed are treated as non-bash.
+    /// Shell history files (`~/.bash_history` etc.) compensate for this gap.
     #[serde(default)]
     pub is_bash: bool,
 }
@@ -45,8 +49,8 @@ pub(crate) fn load_prompts(cwd: &str) -> io::Result<Vec<String>> {
     load_prompts_filtered(cwd, |_| true)
 }
 
-/// Returns prompts in reverse chronological order (most recent first),
-/// matching `load_prompts` ordering.
+/// Returns prompts in reverse chronological order (most recent first), matching `load_prompts` ordering.
+/// The pager's up-arrow / Ctrl+R history overlay uses this when it wants only the current session's prompts.
 pub(crate) fn load_prompts_for_session(cwd: &str, session_id: &str) -> io::Result<Vec<String>> {
     load_prompts_filtered(cwd, |e| e.session_id == session_id)
 }
@@ -298,12 +302,12 @@ mod tests {
             r#"{"timestamp":"2024-01-01T00:00:00Z","session_id":"s1","prompt":"old command"}"#;
         std::fs::write(&path, format!("{old_json}\n")).unwrap();
 
-        // The entry deserializes with is_bash defaulting to false
+        // The old entry deserializes with is_bash defaulting to false
         let all = load_prompts(&cwd).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all.first().map(String::as_str), Some("old command"));
 
-        // The entry does not appear in bash-filtered results
+        // The old entry does not appear in bash-filtered results
         let bash = load_bash_prompts(&cwd).unwrap();
         assert!(bash.is_empty());
     }
@@ -345,7 +349,7 @@ mod tests {
             is_bash: false,
         };
 
-        // Interleave prompts from sessions in the shared per-CWD file.
+        // Interleave prompts from two sessions in the shared per-CWD file.
         append_prompt(&cwd, &mk("s1", "s1 first")).unwrap();
         append_prompt(&cwd, &mk("s2", "s2 first")).unwrap();
         append_prompt(&cwd, &mk("s1", "s1 second")).unwrap();

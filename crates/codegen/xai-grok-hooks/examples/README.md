@@ -8,7 +8,7 @@ Sample hooks for Grok. Copy to `~/.grok/hooks/` to enable globally, or to `<proj
 
 **Type:** blocking (`PreToolUse`)
 
-Denies destructive shell commands before they execute:
+Denies obviously destructive shell commands before they execute:
 - `rm -rf /`, `sudo rm -rf`, `mkfs`, `dd` to devices, fork bombs
 
 **Install:**
@@ -24,11 +24,17 @@ chmod +x ~/.grok/hooks/bin/safe-shell-guard.sh
 **Type:** blocking (`PreToolUse`)
 
 Denies recursive `grep` invocations in the shell before they execute:
-- `grep -r`, `grep -R`, `grep --recursive`, `grep --dereference-recursive`, `grep -d recurse`, clustered flags (`grep -rn`, `grep -nri`), and `rgrep`
+- `grep -r`, `grep -R`, `grep --recursive`, `grep --dereference-recursive`,
+  `grep -d recurse`, clustered flags (`grep -rn`, `grep -nri`), and `rgrep`
 
-Recursive grep walks an entire directory tree into memory and can OOM-kill the agent process on large repos. The system prompt already steers the model away from this. However, a prompt is advisory — this hook makes it a hard, deterministic block. Point the model at the dedicated search tool (ripgrep-backed) instead.
+Recursive grep walks an entire directory tree into memory and can OOM-kill the
+agent process on large repos. The system prompt already steers the model away from
+this, but a prompt is advisory — this hook makes it a hard, deterministic block.
+Point the model at the dedicated search tool (ripgrep-backed) instead.
 
-It is careful to avoid false positives: `ls -R | grep foo` (the `-R` belongs to `ls`), `grep -e -r file` (`-r` is the pattern), and `grep -- -r file` are all allowed.
+It is careful to avoid false positives: `ls -R | grep foo` (the `-R` belongs to
+`ls`), `grep -e -r file` (`-r` is the pattern), and `grep -- -r file` are all
+allowed.
 
 **Install:**
 ```sh
@@ -55,7 +61,7 @@ chmod +x ~/.grok/hooks/bin/session-log.sh
 
 ### 4. Tool Activity Logger (`tool-logger.json`)
 
-**Type:** observe-only in this example (`PreToolUse` + `PostToolUse`) — logging only. It exits 0 and writes nothing to stdout, so it changes nothing the model sees
+**Type:** observe-only in this example (`PreToolUse` + `PostToolUse`) — logging only; it exits 0 and writes nothing to stdout, so it changes nothing the model sees
 
 Logs all tool calls to `~/.grok/tool-activity.log` — tool name, event type, effective tool name, backgrounded status.
 
@@ -71,7 +77,7 @@ chmod +x ~/.grok/hooks/bin/tool-logger.sh
 
 **Type:** blocking (`Stop`)
 
-Keeps the agent working until `cargo build` passes. A `Stop` hook runs when the agent is about to finish its turn. Returning `{"decision":"block","reason":"…"}` feeds the reason back to the model and runs another round. The built-in cap ends the turn after multiple continuations. The hook sets a 300-second timeout because a timed-out Stop hook fails open and lets the agent stop.
+Keeps the agent working until `cargo build` passes. A `Stop` hook runs when the agent is about to finish its turn; returning `{"decision":"block","reason":"…"}` feeds the reason back to the model and runs another round. The built-in cap ends the turn after 8 continuations. The hook sets a 300-second timeout because a timed-out Stop hook fails open and lets the agent stop.
 
 **Install:**
 ```sh
@@ -107,7 +113,7 @@ Hook files use the Claude-compatible JSON format:
 
 ## Script Contract
 
-Scripts receive the hook event envelope as JSON on **stdin** and must write a response to **stdout**:
+Scripts receive the hook event envelope as JSON on **stdin** and should write a response to **stdout**:
 
 **For tool gates (`PreToolUse`):**
 ```json
@@ -128,9 +134,9 @@ or
 ```json
 {"continue":false,"stopReason":"Shown to the user; overrides any block"}
 ```
-The turn ends after multiple consecutive continuations. The input carries `stopHookActive` (true once a block has already continued this turn) so a hook can give up.
+The turn ends after 8 consecutive continuations. The input carries `stopHookActive` (true once a block has already continued this turn) so a hook can give up.
 
-**For `PostToolUse`:** the tool has already run. As a result, nothing is blocked, but stdout decides what the model sees next:
+**For `PostToolUse`:** the tool has already run, so nothing is blocked, but stdout decides what the model sees next:
 ```json
 {"decision":"block","reason":"Feedback delivered to the model with the tool result"}
 ```
@@ -140,9 +146,9 @@ The turn ends after multiple consecutive continuations. The input carries `stopH
 ```json
 {"hookSpecificOutput":{"hookEventName":"PostToolUse","updatedMCPToolOutput":"[redacted]"}}
 ```
-`updatedToolOutput` replaces a built-in tool's output and must match that tool's own output shape (the `toolResult` in the same event). `updatedMCPToolOutput` replaces an MCP tool's output and is not shape-checked. The scrollback and telemetry keep the original either way. Every hook's block reason and `additionalContext` are delivered in call order, each naming its hook. Only the replacements are last-writer-wins.
+`updatedToolOutput` replaces a built-in tool's output and must match that tool's own output shape (the `toolResult` in the same event); `updatedMCPToolOutput` replaces an MCP tool's output and is not shape-checked. The scrollback and telemetry keep the original either way. Every hook's block reason and `additionalContext` are delivered in call order, each naming its hook; only the replacements are last-writer-wins.
 
-**Exit codes:** `0` = allow / no decision, `2` = deny (`PreToolUse`), block-stop with stderr as the feedback (`Stop`/`SubagentStop`), or stderr fed to the model. This is as feedback (`PostToolUse`), other = fail-open. Valid decision JSON on stdout wins over the exit code. Except that a `PostToolUse` hook that exits non-zero keeps only its block reason — its context. Its replacement are dropped.
+**Exit codes:** `0` = allow / no decision, `2` = deny (`PreToolUse`), block-stop with stderr as the feedback (`Stop`/`SubagentStop`), or stderr fed to the model as feedback (`PostToolUse`), other = fail-open. Valid decision JSON on stdout wins over the exit code, except that a `PostToolUse` hook that exits non-zero keeps only its block reason — its context and its replacement are dropped.
 
 **For passive hooks (`SessionStart`, `Notification`, …):** stdout is informational only. Exit `0` for success.
 

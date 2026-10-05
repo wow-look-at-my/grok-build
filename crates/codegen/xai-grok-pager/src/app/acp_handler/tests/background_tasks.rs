@@ -289,7 +289,8 @@
 
     #[test]
     fn task_backgrounded_monitor_prefix_marks_is_monitor() {
-        // Reparented monitor / older backend: the command carries the "[monitor] <desc>" prefix.
+        // Reparented monitor / older backend: the command carries the "[monitor] <desc>" prefix but the notification has no monitor_description
+        // The pager must still mark it a monitor and use the stripped text as the description so it renders as a Monitor row
         let mut app = make_app_with_parent_and_child("parent-sess", "child-sess");
         let notif = make_task_backgrounded_notif(
             "parent-sess",

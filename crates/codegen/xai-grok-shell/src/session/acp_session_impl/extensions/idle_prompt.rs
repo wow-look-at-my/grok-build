@@ -12,8 +12,8 @@ use super::{NotificationEvent, NotificationEventSink};
 
 const DEFAULT_IDLE_NOTIFICATION_DELAY: Duration = Duration::from_secs(60);
 
-/// Debounce between the session settling idle and the `idle_prompt`
-/// notification, so it fires only on sustained inactivity.
+/// Debounce between the session settling idle and the `idle_prompt` notification, so it fires only on sustained inactivity.
+/// `GROK_IDLE_NOTIFICATION_DELAY_MS` overrides it (used by E2E tests).
 fn idle_notification_delay() -> Duration {
     resolve_idle_notification_delay(std::env::var("GROK_IDLE_NOTIFICATION_DELAY_MS").ok())
 }
@@ -25,12 +25,14 @@ fn resolve_idle_notification_delay(raw: Option<String>) -> Duration {
         .unwrap_or(DEFAULT_IDLE_NOTIFICATION_DELAY)
 }
 
-/// Fires the `idle_prompt` notification hook once the session stays idle for
-/// the delay.
+/// Fires the `idle_prompt` notification hook once the session stays idle for the delay.
+/// Synthetic turns (auto-wake, drain, cron) only defer an earned ping: they cancel the timer like any turn start, and settling idle re-arms it.
+/// The headless E2E covers this via `GROK_IDLE_NOTIFICATION_DELAY_MS`.
 struct IdlePromptExtension {
     notification_event_sink: Rc<dyn NotificationEventSink>,
     timer: TaskSlot<()>,
     /// Never cleared. A turn start cancels the armed timer.
+    /// Clearing the flag there too would let a bash-mode turn, which starts but never ends, swallow the ping the previous turn earned.
     has_ever_ended_a_turn: std::cell::Cell<bool>,
 }
 
@@ -105,7 +107,7 @@ mod idle_notification_delay_tests {
         );
     }
 
-    /// Pins the public `GROK_IDLE_NOTIFICATION_DELAY_MS` contract.
+    /// Pins the public `GROK_IDLE_NOTIFICATION_DELAY_MS` contract: a valid override is interpreted as milliseconds (the E2E tests depend on this).
     #[test]
     fn env_override_parses_millis() {
         assert_eq!(
@@ -154,8 +156,8 @@ mod idle_after_interrupt_tests {
         tokio::task::yield_now().await;
     }
 
-    /// Regression: an interrupt used to leave a host stuck on "working". Every way a turn can end
-    /// arms the ping, so dropping any one of the callbacks fails this.
+    /// Regression: an interrupt used to leave a host stuck on "working".
+    /// Every way a turn can end arms the ping, so dropping any one of the three callbacks fails this.
     #[tokio::test(start_paused = true)]
     async fn any_turn_ending_earns_a_ping() {
         let local = tokio::task::LocalSet::new();

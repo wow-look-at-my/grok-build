@@ -1,7 +1,7 @@
 use super::*;
 use toml::Value as TomlValue;
 
-/// A single slot would drop one of live notices and re-prompt forever.
+/// A single slot would drop one of two live notices and re-prompt forever.
 #[test]
 fn consent_answers_are_kept_per_notice() {
     let root: TomlValue = toml::from_str(
@@ -46,7 +46,8 @@ async fn set_consent_answer_is_monotonic_per_account() {
     let _guard = xai_grok_test_support::env::EnvGuard::set("GROK_HOME", home.path());
 
     let answers = || {
-        // Persist writes live `$GROK_HOME`.
+        // Persist writes live `$GROK_HOME`. Read that dest; `load_from_disk` must
+        // match it (a OnceLock miss used to look like a stale replay lowered the record).
         let path = super::super::user_config_path();
         let (dest, _) = super::super::read_follow_bound(&path).expect("bind persist dest");
         let persist_root =

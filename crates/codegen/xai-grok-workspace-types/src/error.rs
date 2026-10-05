@@ -1,4 +1,20 @@
-//! # Implementation notes - **`Io`**: `std::io::Error` is not `Serialize`.
+//! # Implementation notes
+//!
+//! - **`Io`**: `std::io::Error` is not `Serialize`, so `Io(#[from] std::io::Error)` cannot cross a gRPC stream.
+//!   The payload is a serializable `Io { message: String, kind: IoKind }`; [`IoKind`] mirrors every stable variant of [`std::io::ErrorKind`].
+//!   Conversion from `std::io::Error` happens at the workspace-crate boundary via [`WorkspaceError::from_io`].
+//!
+//! - **`Tool`**: `Tool(#[from] xai_grok_tools::ToolError)` would make this crate depend on `xai-grok-tools`, defeating the wire-types-only goal.
+//!   Tool errors travel as a generic `Tool { code, message }`; the runtime crate translates its native `ToolError` into and out of this shape.
+//!
+//! - **`Vcs`**: a plain `Vcs(String)` payload; the runtime workspace crate translates native git/jj errors into the string.
+//!   It can later become a structured `VcsErrorKind` enum without breaking the wire format (the JSON shape stays a string).
+//!
+//! - **`Internal`**: `Box<dyn Error>` is not `Serialize`, so the payload is `Internal(String)`.
+//!   Callers with richer error types format with `format!("{err:#}")` before constructing; the error chain is lost at the wire boundary.
+//!
+//! - **`ProtocolMismatch.expected`**: an owned `String`, because `&'static str` cannot deserialize into a `'static` borrow.
+//!   Construction sites typically pass a `&'static str` literal that is `.into()`'d at the boundary.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -86,6 +102,7 @@ pub enum WorkspaceError {
 
 impl WorkspaceError {
     /// Convert from a `std::io::Error`.
+    /// Used at the workspace-crate boundary; this crate does not implement `From<io::Error>` because `io::Error` is not serializable.
     pub fn from_io(err: std::io::Error) -> Self {
         Self::Io {
             message: err.to_string(),
@@ -108,6 +125,7 @@ impl WorkspaceError {
     }
 }
 
+/// Serializable mirror of [`std::io::ErrorKind`] (stable variants as of Rust 1.83+).
 /// Enumerated variants convert losslessly; future-stabilized ones collapse to [`IoKind::Other`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

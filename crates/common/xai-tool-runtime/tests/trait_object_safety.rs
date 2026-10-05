@@ -1,4 +1,8 @@
-//! `ToolDispatch` is intentionally object-safe so an impl can be stored as `Box<dyn ToolDispatch>` (or `Arc<dyn ToolDispatch>`).
+//! `ToolDispatch` is intentionally object-safe so an impl can be
+//! stored as `Box<dyn ToolDispatch>` (or `Arc<dyn ToolDispatch>`) for
+//! shared dynamic dispatch. `Tool` is NOT object-safe — its associated
+//! types make sense only via a typed-erasure adapter that lives downstream
+//! of this crate.
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -60,7 +64,8 @@ impl ToolDispatch for ProgressDispatch {
     }
 }
 
-/// Constructs a stream that ends without a `Terminal` item — drives the `call_terminal` default-impl recovery path.
+/// Constructs a stream that ends without a `Terminal` item — drives the
+/// `call_terminal` default-impl recovery path.
 struct EmptyStreamDispatch;
 
 #[async_trait]

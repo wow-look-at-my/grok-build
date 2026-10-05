@@ -1,11 +1,31 @@
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::cast_sign_loss)] // Hits predate the gate
-#![allow(clippy::expect_used)] // Hits predate the gate
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::cast_possible_truncation)] // 13 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 3 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
+#![allow(clippy::expect_used)] // 45 hits predate the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
 
 //! Tool-server and harness SDK.
+//!
+//! Single crate hosting both the tool-server runtime and the
+//! harness-side dispatch surface. The shared substrate —
+//! [`HubConnectionPool`], [`HubConnection`], the inbound demux, the
+//! refcount-managed bound-session set, and the transparent reconnect /
+//! replay state machine — lives here so both ends speak through one
+//! frame multiplex on top of one WebSocket per `(url, principal)`.
+//!
+//! The server entry point is [`ToolServer`]: build it via
+//! [`ToolServerBuilder`], wire one or more [`ToolServerHandler`]
+//! implementations, and call [`ToolServer::run`] to drive the inbound
+//! loop. The harness entry point is [`ToolHarness`]: build it via
+//! [`ToolHarnessBuilder`], optionally seed it with in-process
+//! [`xai_tool_runtime::Tool`] implementations, and call
+//! [`ToolHarness::call`] to dispatch a tool call. Authorisation
+//! credentials (`AuthCredential`) plus the target URL determine
+//! which pool entry the consumer attaches to; multiple
+//! [`ToolServer`] / [`ToolHarness`] instances against the same
+//! `(url, principal)` share a single connection and refcount their
+//! session bindings.
 
 #![forbid(unsafe_code)]
 
@@ -61,5 +81,6 @@ pub use xai_computer_hub_core::{
     grok_bot_tool_arguments_schema, grok_bot_tool_description, is_grok_bot_default_tool,
     is_grok_bot_tool,
 };
-// Re-exported so consumers that depend only on the SDK can recognize the server's `workspace_unavailable` error without also pulling.
+// Re-exported so consumers that depend only on the SDK can recognize the
+// server's `workspace_unavailable` error without also pulling in the core crate.
 pub use xai_computer_hub_core::is_workspace_unavailable;

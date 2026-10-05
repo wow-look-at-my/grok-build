@@ -1,4 +1,5 @@
-//! The marketplace SOURCE model: loading configured sources (config.toml + settings JSON + managed pins).
+//! The marketplace SOURCE model: loading configured sources (config.toml + settings JSON +
+//! managed pins) and filtering them through the managed `marketplace_allowlist`.
 
 use std::path::Path;
 
@@ -87,7 +88,8 @@ fn managed_extra_marketplace_sources(
             (SourceKind::Git { url: a, .. }, SourceKind::Git { url: b, .. }) => {
                 normalize_git_url(a) == normalize_git_url(b)
             }
-            // Local pins dedupe by exact path (same comparison as the strict-list exemption), so a pin.
+            // Local pins dedupe by exact path (same comparison as the strict-list exemption), so a pin of
+            // an already-configured directory doesn't register a duplicate row.
             (SourceKind::Local { path: a }, SourceKind::Local { path: b }) => a == b,
             _ => false,
         };
@@ -198,7 +200,8 @@ mod tests {
                 },
                 ownership: PolicyLayerOwnership::Admin,
             },
-            // A pin from a user-writable layer must not carve an exception out of the lockdown.
+            // A pin from a user-writable layer must not carve an exception
+            // out of the lockdown.
             ManagedMarketplace {
                 name: "User Pin".into(),
                 kind: ManagedMarketplaceKind::Local {

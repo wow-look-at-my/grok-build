@@ -1,10 +1,14 @@
 //! Configuration shapes referenced from session lifecycle requests and `OpsChunk::ProjectConfig` / `OpsChunk::Permissions`.
+//!
+//! TODO: align with the canonical project / permission /
+//! agent-session config types in `xai-grok-config` and friends.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 /// Filesystem isolation strategy for a forked session.
+/// `Default` is [`IsolationMode::None`] for the root session; a subagent that relies on it gets shared-tree access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IsolationMode {
@@ -18,6 +22,7 @@ pub enum IsolationMode {
 }
 
 /// Capability mode applied to a forked session.
+/// `Default` is [`CapabilityMode::ReadWrite`] for the root session; a subagent that relies on it gets read and write access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityMode {
@@ -62,6 +67,7 @@ pub struct AgentSessionConfig {
     /// Optional per-tool-server overrides.
     #[serde(default)]
     pub tool_config: Vec<ToolServerConfig>,
+    /// Maximum recursion depth for subagent nesting; 0 means no further nesting.
     #[serde(default)]
     pub max_depth: u32,
     /// Working directory override (relative to workspace root).

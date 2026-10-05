@@ -1,4 +1,5 @@
-//! Tests for session-related modals (extensions, /new worktree question) and session close helpers shared.
+//! Tests for session-related modals (extensions, /new worktree question)
+//! and session close helpers shared with the dashboard.
 use super::*;
 #[test]
 fn open_extensions_modal_no_session_sets_flag_no_fetches() {

@@ -1,4 +1,11 @@
-//! Records a real rustc link, replays it with the shipped script, and runs the binary that comes out.
+//! Records a real rustc link, replays it with the shipped script, and runs the
+//! binary that comes out.
+//!
+//! The unit tests read the argument list the recorder writes. They cannot say
+//! whether that list still links, which is the only property the macOS job
+//! depends on. This drives the same two programs CI drives — the recorder as
+//! rustc's linker, then `ci/darwin-relink.sh` — for the host target, because a
+//! Linux runner cannot execute a Mach-O binary to check it.
 
 #![cfg(unix)]
 

@@ -1,4 +1,14 @@
-//! Forward the process's Prometheus metrics to the connected server over the WebSocket transport (`metrics.donate`).
+//! Forward the process's Prometheus metrics to the connected server over
+//! the WebSocket transport (`metrics.donate`).
+//!
+//! A [`MetricDonationReporter`] periodically snapshots the default
+//! Prometheus registry via [`prometheus::gather`], converts the
+//! `MetricFamily` set to native OTLP metrics (Counter→Sum, Gauge→Gauge,
+//! Histogram→Histogram, labels preserved, cumulative temporality), and
+//! pumps the batch over the shared [`crate::donate_pump`]. Because it
+//! gathers the whole registry, every current and future metric is
+//! exported with zero per-metric wiring. Metrics are **process-aggregate**
+//! — [`ToolServer::donate_metrics`] requires no bound session.
 
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -23,7 +33,9 @@ use crate::donate_pump::{
 };
 use crate::server::ToolServer;
 
-/// How often the reporter snapshots the registry.
+/// How often the reporter snapshots the registry. The server re-stamps
+/// attribution; cumulative temporality means missed ticks only delay
+/// freshness, never lose monotonic state.
 const DEFAULT_GATHER_INTERVAL: Duration = Duration::from_secs(60);
 
 fn labels_to_kv(labels: &[prometheus::proto::LabelPair]) -> Vec<KeyValue> {
@@ -227,6 +239,7 @@ pub struct DonatedMetricsSink {
 }
 
 impl DonatedMetricsSink {
+    /// Returns the number of OTLP metrics queued (malformed input → 0).
     pub fn export_text_exposition(&self, text: &str, prefix: &str) -> usize {
         let metrics = convert_text_exposition(text, prefix);
         let exported = metrics.len();
@@ -244,7 +257,9 @@ pub fn active_metrics_sink() -> Option<DonatedMetricsSink> {
         .map(|exporter| DonatedMetricsSink { exporter })
 }
 
-/// Encodes batches of OTLP metrics onto the pump channel.
+/// Encodes batches of OTLP metrics onto the pump channel. Chunks at
+/// [`MAX_METRICS_PER_DONATION`], drops payloads over
+/// [`MAX_DONATION_BYTES`], and never blocks.
 #[derive(Clone)]
 struct MetricExporter {
     tx: mpsc::Sender<PumpMsg>,
@@ -299,21 +314,26 @@ impl MetricExporter {
 static ACTIVE_METRIC_EXPORTER: LazyLock<ArcSwapOption<MetricExporter>> =
     LazyLock::new(ArcSwapOption::empty);
 
-/// Final registry gather onto the active metric pump.
+/// Final registry gather onto the active metric pump. Called from
+/// `ToolServer` teardown before the pump drain so a crash-y shutdown
+/// captures the latest values.
 pub(crate) fn gather_and_send() {
     if let Some(exporter) = ACTIVE_METRIC_EXPORTER.load_full() {
         exporter.gather_and_send();
     }
 }
 
-/// Drop the process-global exporter on teardown so its pump `Sender` is
-/// released and the metric pump can wind down.
+/// Drop the process-global exporter on teardown so its pump `Sender` is released
+/// and the metric pump can wind down. Called from `flush_donations_inner` after
+/// the final [`gather_and_send`] (and alongside clearing the stored pump
+/// senders), so a dropped `ToolServer` doesn't leak the pump task.
 pub(crate) fn clear_active_exporter() {
     ACTIVE_METRIC_EXPORTER.store(None);
 }
 
 /// Periodic registry gatherer spawned by
-/// [`ToolServer::metric_donation_reporter`].
+/// [`ToolServer::metric_donation_reporter`]. Internal: constructed and run
+/// only by `metric_donation_reporter`; not part of the crate's public API.
 pub(crate) struct MetricDonationReporter {
     exporter: MetricExporter,
     interval: Duration,
@@ -326,7 +346,9 @@ impl MetricDonationReporter {
         loop {
             tokio::select! {
                 _ = ticker.tick() => self.exporter.gather_and_send(),
-                // Stop on teardown so this task (and the pump `tx` clone it holds) doesn't outlive `ToolServer::shutdown`.
+                // Stop on teardown so this task (and the pump `tx` clone it
+                // holds) doesn't outlive `ToolServer::shutdown` and keep
+                // gathering/sending forever.
                 _ = self.shutdown.cancelled() => break,
             }
         }
@@ -559,6 +581,7 @@ other_family_total 9\n";
         assert_eq!(hdp.count, 3);
         assert_eq!(hdp.sum, Some(6.0));
         assert_eq!(hdp.explicit_bounds, vec![0.5, 1.0]);
+        // (<=0.5): 0.25 -> 1 ; (0.5,1.0]: 0.75 -> 1 ; (+Inf): 5.0 -> 1
         assert_eq!(hdp.bucket_counts, vec![1, 1, 1]);
     }
 

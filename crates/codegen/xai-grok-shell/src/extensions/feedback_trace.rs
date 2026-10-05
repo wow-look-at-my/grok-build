@@ -3,6 +3,7 @@ use super::{ExtResult, parse_params};
 use crate::agent::MvpAgent;
 use crate::session::FeedbackTraceUploadIntent;
 use agent_client_protocol as acp;
+/// Bounds the one-shot GCS upload so a stalled connection can't hang the ACP handler; sized for the 50 MiB archive cap on a slow uplink.
 const FEEDBACK_TRACE_UPLOAD_TIMEOUT_SECS: u64 = 120;
 pub(super) async fn handle_upload_trace(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     handle_upload_trace_with_session_dir(agent, args, None).await

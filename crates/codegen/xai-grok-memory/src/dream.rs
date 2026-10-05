@@ -1,4 +1,6 @@
 //! autoDream gating and execution logic.
+//!
+//! Decides whether a dream consolidation should fire based on config gates, time elapsed, and session count.
 
 use std::path::Path;
 use std::time::SystemTime;
@@ -66,7 +68,9 @@ pub fn check_dream_gates(
     DreamGate::Open { sessions }
 }
 
-// --------------------------------------------------------------------------- Dream prompt, response processing.
+// ---------------------------------------------------------------------------
+// Dream prompt, response processing, and execution
+// ---------------------------------------------------------------------------
 
 use super::text_utils::{has_markdown_headers, is_no_reply};
 
@@ -127,13 +131,14 @@ const MAX_DREAM_INPUT_CHARS: usize = 32_000;
 pub struct DreamMessage {
     /// The concatenated session content for the model prompt.
     pub content: String,
-    /// File stems that were successfully read and included.
+    /// File stems that were successfully read and included; only these sessions are cleaned up after a successful consolidation.
+    /// Stems beyond the [`MAX_DREAM_INPUT_CHARS`] cap are excluded so their content survives for a future dream pass.
     pub processed_stems: Vec<String>,
 }
 
 /// Returns `true` if the content is scaffold boilerplate that should not be fed to the dream model as existing memory context.
-/// A file is scaffold only if it is short (under many bytes trimmed) and contains a scaffold marker. Files with substantial
-/// content are never scaffold, even if they contain leftover marker strings from the initial template.
+/// A file is scaffold only if it is short (under 500 bytes trimmed) and contains a scaffold marker.
+/// Files with substantial content are never scaffold, even if they contain leftover marker strings from the initial template.
 pub(crate) fn is_scaffold_template(content: &str) -> bool {
     const SCAFFOLD_MAX_LEN: usize = 500;
     const MARKERS: &[&str] = &[
@@ -276,7 +281,8 @@ pub fn process_dream_response(response: &str) -> Option<String> {
 }
 
 /// Minimum age in seconds a session file must have before cleanup will delete it.
-const CLEANUP_RECENCY_GUARD_SECS: u64 = 300; // A few
+/// Protects files that a concurrent session may still be appending to.
+const CLEANUP_RECENCY_GUARD_SECS: u64 = 300; // 5 minutes
 
 /// Delete session log files whose stems were processed during dream.
 /// Logs warnings for deletion failures but never propagates errors, because the consolidation already succeeded.
@@ -302,6 +308,7 @@ pub fn clean_processed_sessions(sessions_dir: &Path, stems: &[String]) -> Vec<St
         match std::fs::remove_file(&path) {
             Ok(()) => cleaned.push(stem.clone()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // Already gone; not an error, but don't count it as removed
             }
             Err(e) => {
                 tracing::warn!(
@@ -602,7 +609,8 @@ mod tests {
     }
 
     // -------------------------------------------------------------------
-    // build_dream_user_message tests.
+    // build_dream_user_message tests
+    // -------------------------------------------------------------------
 
     fn write_session_content(dir: &Path, name: &str, content: &str) {
         fs::create_dir_all(dir).unwrap();
@@ -733,7 +741,9 @@ mod tests {
         assert_eq!(result, input);
     }
 
-    // ------------------------------------------------------------------- execute_dream tests.
+    // -------------------------------------------------------------------
+    // execute_dream tests
+    // -------------------------------------------------------------------
 
     use super::super::storage::MemoryStorage;
     use std::path::PathBuf;
@@ -777,7 +787,8 @@ mod tests {
     fn execute_dream_write_failure_returns_failed() {
         let dir = TempDir::new().unwrap();
 
-        // Point the workspace dir at a path under a regular file so create_dir_all inside append_to_memory fails This works even when running as root.
+        // Point the workspace dir at a path under a regular file so create_dir_all inside append_to_memory fails
+        // This works even when running as root, unlike chmod-based approaches
         let blocker = dir.path().join("memory").join("blocker");
         fs::create_dir_all(blocker.parent().unwrap()).unwrap();
         fs::write(&blocker, "I am a file").unwrap();
@@ -887,7 +898,8 @@ mod tests {
         let sessions = dir.path().join("sessions");
         fs::create_dir_all(&sessions).unwrap();
 
-        // Create a directory where a .md file is expected.
+        // Create a directory where a .md file is expected; remove_file on a directory fails even as root, so cleanup fails without relying on chmod
+        // Back-date the dir's mtime so it passes the recency guard
         let bad_path = sessions.join("bad-stem.md");
         fs::create_dir_all(&bad_path).unwrap();
         let old = SystemTime::now() - Duration::from_secs(CLEANUP_RECENCY_GUARD_SECS + 60);
@@ -963,7 +975,8 @@ mod tests {
 
         let sessions = dir.path().join("sessions");
 
-        let half_cap = MAX_DREAM_INPUT_CHARS / 2 + 500; // Sessions of this size exceed the cap.
+        // Create 5 session files: the first 2 fill past the cap, sessions 3-5 should survive cleanup
+        let half_cap = MAX_DREAM_INPUT_CHARS / 2 + 500; // Two sessions of this size exceed the cap.
         write_old_session_content(&sessions, "aaa-first", &"a".repeat(half_cap));
         write_old_session_content(&sessions, "bbb-second", &"b".repeat(half_cap));
         write_old_session_content(&sessions, "ccc-third", "small content 3");
@@ -981,6 +994,7 @@ mod tests {
         .map(String::from)
         .collect();
 
+        // Phase 1: build_dream_user_message should cap after the first 2 sessions
         let dream_msg = build_dream_user_message(&sessions, &all_stems, None).unwrap();
         assert_eq!(
             dream_msg.processed_stems.len(),
@@ -1019,7 +1033,7 @@ mod tests {
         let sessions = dir.path().join("sessions");
         fs::create_dir_all(&sessions).unwrap();
 
-        // Only create one of both stems (old mtime to pass the recency guard)
+        // Only create one of the two stems (old mtime to pass the recency guard)
         write_old_session_content(&sessions, "exists", "Content");
 
         // Pass both; "missing" doesn't exist and should not error or count
@@ -1036,7 +1050,8 @@ mod tests {
     }
 
     // -------------------------------------------------------------------
-    // is_scaffold_template tests.
+    // is_scaffold_template tests
+    // -------------------------------------------------------------------
 
     #[test]
     fn scaffold_detects_old_workspace_template() {

@@ -1,4 +1,9 @@
 //! Path-derived identity of a grok-managed worktree.
+//!
+//! Every creation path resolves its destination to `<grok home>/worktrees/<repo slug>/<label>`, with the label as the last path component.
+//! A session cwd anywhere inside a worktree is therefore enough to recover the label.
+//! The worktree DB only enriches the result with the recorded source repo.
+//! It is a cache, never a dependency, so identity can be stamped on summaries even when the DB is missing or empty.
 
 use std::path::{Path, PathBuf};
 
@@ -18,7 +23,9 @@ pub fn worktree_identity_for_cwd(cwd: &str) -> Option<WorktreeIdentity> {
 /// `cwd` may be any directory inside one.
 /// Returns `None` when `cwd` is not inside a worktree.
 pub fn worktree_identity_in(worktrees_dir: &Path, cwd: &str) -> Option<WorktreeIdentity> {
-    // Session cwd is usually `current_dir()` (symlink-resolved) GROK_HOME (and so `worktrees_dir`).
+    // Session cwd is usually `current_dir()` (symlink-resolved)
+    // GROK_HOME (and so `worktrees_dir`) is often the unresolved env spelling
+    // A raw strip_prefix then misses a real worktree and summaries never get a kind or label
     let cwd_path = Path::new(cwd);
     let cwd_canon = canonical(cwd_path);
     let worktrees_canon = canonical(worktrees_dir);
@@ -36,8 +43,8 @@ pub fn worktree_identity_in(worktrees_dir: &Path, cwd: &str) -> Option<WorktreeI
     let source_workspace_dir = super::source_repo_for_cwd(cwd)
         .or_else(|| standalone_source_marker(&worktree_root))
         .or_else(|| {
-            // NO_SEARCH, not `discover`: every grok-created worktree has
-            // `.git`.
+            // NO_SEARCH, not `discover`: every grok-created worktree has `.git` at its root
+            // An upward walk would let a stray non-repo directory here inherit a repository enclosing grok home, like a git-managed home directory
             let repo = git2::Repository::open_ext(
                 &worktree_root,
                 git2::RepositoryOpenFlags::NO_SEARCH,
@@ -45,7 +52,8 @@ pub fn worktree_identity_in(worktrees_dir: &Path, cwd: &str) -> Option<WorktreeI
             )
             .ok()?;
             let root = repo.commondir().parent()?.to_path_buf();
-            // git2 returns symlink-resolved paths, so the containment check must compare canonicalized paths Otherwise a symlinked grok home lets.
+            // git2 returns symlink-resolved paths, so the containment check must compare canonicalized paths
+            // Otherwise a symlinked grok home lets a standalone clone report itself as the source
             (!canonical(&root).starts_with(canonical(worktrees_dir))).then_some(root)
         })
         .map(|root| root.to_string_lossy().into_owned());

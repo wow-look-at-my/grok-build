@@ -1,4 +1,10 @@
 //! E2E: stash and restore a draft with the real chord bytes, which the unit tests cannot cover because they inject pre-parsed key events.
+//!
+//! Legacy terminals send Alt+S as `ESC s`, next to the double-Esc clear: a split decode would turn on "press again to clear" and type a literal `s`.
+//!
+//! ```bash
+//! cargo test -p xai-grok-pager-pty-harness --test prompt_stash -- --ignored --nocapture
+//! ```
 
 use std::time::Duration;
 
@@ -57,7 +63,7 @@ async fn run() -> Result<()> {
         .wait_for_text(CANARY, Duration::from_secs(10))
         .context("draft rendered in composer")?;
 
-    // Stash: both Alt+S bytes must decode as one Alt+S key.
+    // Stash: the two Alt+S bytes must decode as one Alt+S key.
     pager.inject_keys(ALT_S).context("alt+s stash")?;
     pager
         .wait_for_text(STASH_CAPTION, Duration::from_secs(10))

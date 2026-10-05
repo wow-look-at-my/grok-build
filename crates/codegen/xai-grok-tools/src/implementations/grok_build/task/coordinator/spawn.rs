@@ -19,8 +19,9 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             result_tx,
             mut registered_tx,
         } = command;
-        // Registration is a side channel: a background caller still gets its
-        // terminal result on `result_tx`.
+        // Registration is a side channel: a background caller still gets its terminal result on
+        // `result_tx`. The scheduler actor needs the signal to tell "admitted" from a pre-start
+        // reject before it deletes a one-shot.
         let start_ack = if request.run_in_background {
             BackgroundStartAck::OnRegister
         } else {

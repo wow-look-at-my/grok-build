@@ -1,4 +1,16 @@
-//! The watcher's front door: config and strategy in, a running [`FsNotifyHandle`] out.
+//! The watcher's front door: config and strategy in, a running
+//! [`FsNotifyHandle`] out. The thread it starts lives in [`crate::watcher`].
+//!
+//! Two OS-watch layouts (see [`WatchStrategy`]): fan-out watches each
+//! non-ignored top-level child recursively, which is cheap where recursion is
+//! kernel-side; per-dir watches one directory each, because inotify would
+//! otherwise cost a descriptor per directory including ignored trees.
+//!
+//! Both skip the nested checkouts described in [`crate::checkout`], but only
+//! per-dir skips them at any depth. Fan-out decides once per top-level child
+//! and then hands the subtree to the OS, so a checkout below one it kept, or
+//! any checkout at all once the root itself is watched recursively, stays
+//! covered. Linux, where a watch costs a descriptor, uses per-dir.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -31,7 +43,8 @@ impl Default for FsNotifyConfig {
 /// How OS watches are laid out over the workspace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WatchStrategy {
-    /// Recursive watches on top-level children, or on the root itself past [`crate::selection::MAX_TOP_LEVEL_FANOUT`].
+    /// Recursive watches on top-level children, or on the root itself past
+    /// [`crate::selection::MAX_TOP_LEVEL_FANOUT`].
     Fanout,
     /// One non-recursive watch per non-ignored directory, full depth.
     PerDir,
@@ -61,7 +74,9 @@ pub(crate) fn max_watch_budget() -> usize {
 /// Work forwarded from notify's callback thread to the thread owning the debouncer.
 pub(crate) enum WatchCommand {
     Reconcile,
-    /// A structural delta.
+    /// A structural delta. `pruned` is applied before `added` so a rename never
+    /// unwatches the descriptor its new path just re-bound: inotify descriptors
+    /// follow inodes.
     Update {
         pruned: Vec<std::path::PathBuf>,
         added: Vec<std::path::PathBuf>,

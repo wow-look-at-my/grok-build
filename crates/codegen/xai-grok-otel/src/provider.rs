@@ -21,7 +21,8 @@ pub enum OtelProviderMode {
 
 pub type SessionMetricsGate = Arc<dyn Fn() -> bool + Send + Sync>;
 
-/// Redacts each span batch in place before export.
+/// Redacts each span batch in place before export. The domain layer injects the allowlist,
+/// so this foundation crate holds no product-specific field policy.
 pub type SpanRedactor = Arc<dyn Fn(&mut [opentelemetry_sdk::trace::SpanData]) + Send + Sync>;
 
 const ENV_OTEL_FILTER: &str = "GROK_OTEL_FILTER";

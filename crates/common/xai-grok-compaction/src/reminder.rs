@@ -1,8 +1,32 @@
 //! Shared post-compaction reminder helpers (host-agnostic).
 //!
+//! Lives at the crate root rather than under a compaction-style submodule
+//! because it is consumed by *both* compaction styles and both harnesses:
+//!
+//! - Grok chat intra FullReplace ([`crate::intra_compaction`]) and inter
+//!   (appends after sampling via [`append_reminder_block`])
+//! - grok-build full-replace ([`crate::code_compaction`] assemble's
+//!   `system_reminder`)
+//!
+//! **What lives here:** pure formatting of the **common** active-agent
+//! sections — Running Background Tasks (bash/monitor, scheduled loops,
+//! live workflows), TODO List, and Running Subagents — plus
+//! `<system-reminder>` wrapping and summary append.
+//!
+//! **What stays in the product host:** snapshotting, tool-name resolution, and harness-only
+//! sections (files, AGENTS.md, skills, MCP, memory). Callers pass **borrowed
+//! views** (`&str` over live state) so long fields (commands, todo content,
+//! descriptions, ids) are not cloned just to format.
+//!
+//! KEEP IN SYNC: the exact wording of these sections is a compatibility
+//! surface — downstream mirrors reproduce it verbatim (grep for
+//! `format_section_running_subagents` / `format_section_background_tasks`
+//! and `section_todo_list` mirrors). Update them when changing any wording
+//! here.
 
 // ---------------------------------------------------------------------------
-// Borrowed views over harness live state.
+// Borrowed views over harness live state (no long-string clones)
+// ---------------------------------------------------------------------------
 
 /// Model-facing poll/cancel tool names from the current toolset.
 /// Never hard-code: a client manifest can rename them.
@@ -54,6 +78,9 @@ pub struct BackgroundTask<'a> {
 }
 
 /// Still-running sub-agent. `subagent_id` is rendered verbatim.
+///
+/// `subagent_type` / `description` are optional so chat (no type, optional
+/// desc) and build (both present) share one line format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunningSubagent<'a> {
     pub subagent_id: &'a str,
@@ -118,7 +145,7 @@ impl ActiveAgentReminderState<'_> {
 
 /// `## Running Background Tasks` for bash/monitor commands only, or `None`
 /// when empty. Prefer [`section_running_background`] when loops / workflows
-/// should share this heading.
+/// should share this heading. Subagents stay on [`section_running_subagents`].
 pub fn section_background_tasks(tasks: &[BackgroundTask<'_>]) -> Option<String> {
     section_running_background(
         &ActiveAgentReminderState {

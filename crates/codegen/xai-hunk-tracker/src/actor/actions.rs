@@ -1,4 +1,17 @@
 //! Action commands for the HunkTrackerActor.
+//!
+//! These methods handle accept/reject actions on hunks.
+//!
+//! # Invariants
+//!
+//! Hunks only exist for files where both baseline and current content are
+//! patchable (i.e., `FileContentState::Full` or `FileContentState::Missing`
+//! for creation/deletion). Files with `Binary` or `TooLarge` content states
+//! have their hunks cleared by `recompute_hunks()`.
+//!
+//! This means action handlers should never encounter a non-patchable state
+//! when processing a hunk. The guards in these methods are defensive fallbacks
+//! that silently skip non-patchable states rather than panic.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -97,7 +110,8 @@ impl HunkTrackerActor {
 
             // Handle file creation case (no baseline)
             if matches!(state.baseline, FileContentState::Missing) {
-                // File was created - accepting makes current the baseline for this hunk's lines For a newly created file.
+                // File was created - accepting makes current the baseline for this hunk's lines
+                // For a newly created file, accept just sets baseline = current
                 state.baseline = state.current_content.clone();
                 state.baseline_accepted = true;
                 state.hunks.retain(|h| h.id != hunk.id);
@@ -171,7 +185,7 @@ impl HunkTrackerActor {
             if matches!(state.current_content, FileContentState::Missing)
                 && matches!(state.baseline, FileContentState::Full(_))
             {
-                // File
+                // File was deleted, rejecting restores it
                 if let FileContentState::Full(baseline) = &state.baseline {
                     RejectAction::RestoreDeleted {
                         baseline: baseline.clone(),
@@ -407,7 +421,7 @@ impl HunkTrackerActor {
 
             // Special case: file creation (no baseline)
             if matches!(state.baseline, FileContentState::Missing) {
-                // Accepting all hunks for a new file sets baseline = current
+                // Accepting all hunks for a new file just sets baseline = current
                 state.baseline = state.current_content.clone();
                 state.baseline_accepted = true;
                 let hunk_ids: Vec<HunkId> = hunks.iter().map(|h| h.id.clone()).collect();
@@ -499,7 +513,7 @@ impl HunkTrackerActor {
         if matches!(state.current_content, FileContentState::Missing)
             && matches!(state.baseline, FileContentState::Full(_))
         {
-            // File
+            // File was deleted - restore it
             if let FileContentState::Full(baseline) = &state.baseline {
                 tokio::fs::write(path, baseline).await.map_err(|e| {
                     HunkActionError::WriteError {
@@ -554,8 +568,9 @@ impl HunkTrackerActor {
             return Ok(());
         }
 
-        // Normal case: patch current content to revert all hunks. The early
-        // returns above handle (None, Some) and (Some, None).
+        // Normal case: patch current content to revert all hunks.
+        // The early returns above handle (None, Some) and (Some, None).
+        // If both are non-Full, there's nothing to patch — bail out.
         let Some(state) = self.file_states.get_mut(path) else {
             return Ok(());
         };
@@ -566,7 +581,8 @@ impl HunkTrackerActor {
         };
         let mut current = current_content;
 
-        // Apply patches in reverse order (from end of file to beginning) to avoid line number shifts
+        // Apply patches in reverse order (from end of file to beginning)
+        // to avoid line number shifts
         let mut sorted_hunks = hunks.to_vec();
         sorted_hunks.sort_by_key(|h| std::cmp::Reverse(h.line_info.new_start));
 

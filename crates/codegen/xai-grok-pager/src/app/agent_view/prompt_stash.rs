@@ -1,4 +1,8 @@
 //! One composer draft set aside for later, stashed by Ctrl+S / Alt+S or by a double-Esc clear.
+//! The chord on an empty composer brings it back, and a chord stash also returns on its own after the next prompt is sent.
+//! Ctrl+Z pressed right after the stash pops it.
+//!
+//! `prompt.rs` routes the chord here; `dispatch::prompt` calls the post-send restore.
 
 use super::{AgentView, PromptInputMode, PromptMode};
 use crate::app::app_view::InputOutcome;
@@ -109,8 +113,8 @@ impl AgentView {
         self.restore_stash_entry(entry);
     }
 
-    /// A browse that commits the stashed draft is a pop: live copies means the next send restores what the user just sent. The
-    /// browse carries text only, so this also hands back the images and chips it dropped.
+    /// A browse that commits the stashed draft is a pop: two live copies means the next send restores what the user just sent.
+    /// The browse carries text only, so this also hands back the images and chips it dropped.
     pub(super) fn reclaim_stash_recalled_into_composer(&mut self) {
         let composer = prompt_history_text(self.prompt.text(), self.prompt_input_mode);
         let Some(entry) = self.prompt_stash.take_if(|e| e.history_text() == composer) else {
@@ -135,8 +139,9 @@ impl AgentView {
             return InputOutcome::Unchanged;
         }
 
-        // A pasted image is still landing off-thread, so neither direction
-        // can run yet Stashing would drop the chip into the emptied composer.
+        // A pasted image is still landing off-thread, so neither direction can run yet
+        // Stashing would drop the chip into the emptied composer, and popping would merge it into the draft coming back
+        // Wait, then let the chord read the settled composer
         if self.paste_probe_in_flight > 0 {
             self.deferred_send = Some(super::AgentDeferredSend::Stash);
             return InputOutcome::Changed;
@@ -489,6 +494,7 @@ mod tests {
         ));
 
         // The probe found no image, so the composer is still empty and the chord still means pop.
+        // A resume that always stashes would strand the parked draft in the slot.
         agent.paste_probe_in_flight = 0;
         let kind = agent
             .take_deferred_send_after_paste()

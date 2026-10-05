@@ -1,4 +1,8 @@
 //! Runtime coordination and structured-output parsing for memory-v2 capture.
+//!
+//! Extraction deliberately has no tools. The model receives a fixed durable
+//! transcript snapshot and a strict JSON schema; the only write is the
+//! validated `V2CaptureStore::commit` performed by the host.
 
 use serde::Deserialize;
 use xai_grok_memory::{

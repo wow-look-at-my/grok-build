@@ -1,4 +1,7 @@
 //! Unit tests for the `grok wrap` spawn planning in [`super`] (`wrap_cmd`), split out via `#[path]` to keep the module itself small.
+//!
+//! Everything is pure: `derive_spawn` takes the PATH lookup result and the shell as inputs.
+//! The exception is the final test, which round-trips the rejoined line through a real `/bin/sh -c` to prove the quoting contract end to end.
 
 use super::*;
 use pretty_assertions::assert_eq;
@@ -28,8 +31,7 @@ fn single_arg_with_whitespace_always_routes_via_shell() {
     );
     assert_eq!(plan.args, cmd(&["-i", "-c", "/path/with space/prog"]));
 
-    // Any whitespace counts, not spaces: tabs/newlines also mark the arg as a
-    // command line to hand to the shell verbatim
+    // Any whitespace counts, not just spaces: tabs/newlines also mark the arg as a command line to hand to the shell verbatim
     let plan = derive_spawn(
         &cmd(&["x\tssh\nhost"]),
         "/bin/sh",
@@ -107,7 +109,8 @@ fn direct_route_passes_args_verbatim_without_quoting() {
 
 #[test]
 fn alias_route_keeps_first_word_bare_and_quotes_the_tail() {
-    // The first word stays unquoted (aliases only expand on bare words).
+    // The first word stays unquoted (aliases only expand on bare words); every tail word is quoted
+    // Zsh expands a bare `=word`, so no character set is safe to leave unquoted
     let plan = derive_spawn(
         &cmd(&["x", "ssh", "=host", "don't"]),
         "/bin/zsh",
@@ -152,7 +155,7 @@ fn quote_word_neutralizes_shell_metacharacters() {
 
 #[test]
 fn join_command_line_shapes() {
-    // Zero tail words: the bare first word, no trailing space.
+    // Zero tail words: just the bare first word, no trailing space.
     assert_eq!(join_command_line(&cmd(&["x"])), "x");
     // An empty tail word survives as an explicit empty argument.
     assert_eq!(join_command_line(&cmd(&["x", ""])), "x ''");

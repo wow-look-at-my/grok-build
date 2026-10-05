@@ -1,4 +1,9 @@
 //! A requested quit exits within the exit timeout even when teardown hangs.
+//! `GROK_TEST_HOLD_TEARDOWN_SECS` supplies the hang; a real `SessionEnd` hook cannot hold teardown past `SESSION_FLUSH_GRACE`.
+//!
+//! ```bash
+//! cargo test -p xai-grok-pager-pty-harness --test exit_timeout -- --ignored
+//! ```
 
 use std::time::Duration;
 

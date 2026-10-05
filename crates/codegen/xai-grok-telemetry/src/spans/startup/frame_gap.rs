@@ -3,7 +3,8 @@ use super::*;
 // The [process start, first phase] gap, recorded once per launch even across a fallback begin().
 pub(crate) static PROCESS_INIT_RECORDED: AtomicBool = AtomicBool::new(false);
 
-/// The untimed [last completed phase, first confirmed frame] gap.
+/// The untimed [last completed phase, first confirmed frame] gap. The states make the ordering explicit: the
+/// settle span can open only after a phase has ended, and the gap records once per launch.
 pub(crate) enum FrameGap {
     /// No phase has ended yet.
     Idle,
@@ -48,8 +49,8 @@ pub(crate) fn close_first_frame_span() {
     drop(span);
 }
 
-/// Resets the first-frame gap for a new or abandoned attempt, dropping any
-/// open settle span off-lock.
+/// Resets the first-frame gap for a new or abandoned attempt, dropping any open settle span off-lock, so a
+/// superseded or cancelled attempt's phase end cannot leak into the next attempt or a later paint.
 pub(crate) fn reset_frame_gap() {
     let stale = std::mem::replace(&mut *frame_gap(), FrameGap::Idle);
     drop(stale);
@@ -90,6 +91,7 @@ pub(crate) fn open_first_frame_span() {
         return;
     }
     // Built off-lock; if the state changed since the check, the span drops after the guard releases.
+    // Parent under the startup root when one is open, so the settle wait nests like the phase spans.
     let root = current().and_then(|timer| timer.root_span());
     let span = match &root {
         Some(root) => tracing::info_span!(parent: root, "startup.frame_settle"),

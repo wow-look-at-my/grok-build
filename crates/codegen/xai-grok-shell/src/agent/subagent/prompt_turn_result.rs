@@ -47,7 +47,8 @@ pub(super) fn reduce_prompt_turn_result(
     match turn_result {
         Ok(Ok(turn)) => match turn.completion_kind {
             PromptCompletionKind::Completed | PromptCompletionKind::StationarityEnded => {
-                // MaxTokens means the report is real but the output token limit cut it off The validated-Ok arm stays raw JSON.
+                // MaxTokens means the report is real but the output token limit cut it off
+                // The validated-Ok arm stays raw JSON because a note would corrupt the payload
                 let truncated = turn.stop_reason == agent_client_protocol::StopReason::MaxTokens;
                 match (mode, turn.structured_output) {
                     (

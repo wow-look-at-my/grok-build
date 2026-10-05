@@ -1,11 +1,15 @@
 //! VisibleLinkMap: per-frame map of clickable link regions on screen.
+//!
+//! Populated during the scrollback render pass from the `LinkOverlay` (markdown hyperlinks) and from web_search / web_fetch citation URLs.
+//! Used by the mouse handler for click-to-open.
 
 use ratatui::layout::Rect;
 
 use crate::render::osc8::{LinkOverlay, LinkTarget};
 
-/// A clickable link region on screen. A single logical link may span multiple
-/// screen rows when word-wrap splits it.
+/// A clickable link region on screen.
+/// A single logical link may span multiple screen rows when word-wrap splits it.
+/// Each row segment is a separate `Rect` in `rects`.
 #[derive(Debug, Clone)]
 pub struct VisibleLink {
     pub rects: Vec<Rect>,
@@ -50,7 +54,7 @@ impl VisibleLinkMap {
     }
 
     /// Rebuild the link map from a `LinkOverlay` and citation URLs. Same `id` alone is not enough: markdown ids restart
-    /// per document, so visible messages can both carry `id=0` for different URLs.
+    /// per document, so two visible messages can both carry `id=0` for different URLs.
     pub fn rebuild(
         &mut self,
         generation: u64,
@@ -89,13 +93,15 @@ impl VisibleLinkMap {
             }));
     }
 
-    /// Append overlay links without changing generation. The same-id,
-    /// same-target merge applies only *within this append*.
+    /// Append overlay links without changing generation. The same-id, same-target merge applies only *within this
+    /// append*. Callers that re-append the same source every frame must [`Self::truncate`] back to the desired prefix
+    /// length first. Otherwise each frame's links will accumulate.
     pub fn append_from_overlay(&mut self, overlay: &LinkOverlay) {
         let start_len = self.links.len();
         self.push_overlay_links(overlay, start_len, crate::terminal::terminal_context());
     }
 
+    /// Push overlay segments, merging same-id, same-target links only with entries at indices `>= merge_from` (0 for rebuild; map length for append).
     fn push_overlay_links(
         &mut self,
         overlay: &LinkOverlay,
@@ -452,13 +458,14 @@ mod tests {
     #[test]
     fn multiple_links_first_match_wins() {
         let mut map = VisibleLinkMap::default();
-        // Links that overlap on screen (shouldn't happen in practice, but tests precedence)
+        // Two links that overlap on screen (shouldn't happen in practice, but tests precedence)
         let overlay = make_overlay(vec![
             (5, 0, 10, "https://first.com", None),
             (5, 5, 15, "https://second.com", None),
         ]);
         map.rebuild(1, &overlay, vec![]);
 
+        // Position 5 is in both links; first match wins (iter order)
         let hit = map.link_at(5, 5);
         assert!(hit.is_some());
         assert_eq!(
@@ -482,14 +489,14 @@ mod tests {
     #[test]
     fn wrapped_link_merges_into_single_entry() {
         let mut map = VisibleLinkMap::default();
-        // Same id=42 on consecutive rows (word-wrap)
+        // Same id=42 on two consecutive rows (word-wrap)
         let overlay = make_overlay(vec![
             (3, 10, 30, "https://wrapped.com", Some(42)),
             (4, 0, 15, "https://wrapped.com", Some(42)),
         ]);
         map.rebuild(1, &overlay, vec![]);
 
-        // One logical link with multiple rects
+        // One logical link with 2 rects
         assert_eq!(map.links().len(), 1);
         assert_eq!(nth_link(&map, 0).rects.len(), 2);
         assert_eq!(
@@ -504,6 +511,7 @@ mod tests {
         assert!(map.link_at(15, 3).is_some());
         // Hit on second row segment
         assert!(map.link_at(5, 4).is_some());
+        // Miss between segments (wrong col on row 4)
         assert!(map.link_at(20, 4).is_none());
     }
 

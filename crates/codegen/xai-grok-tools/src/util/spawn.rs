@@ -1,4 +1,8 @@
 //! Cross-platform child-process lifecycle helpers for `tokio::process::Command`.
+//!
+//! The spawn-lifecycle primitives are re-exported from the lightweight
+//! [`xai_tty_utils`] crate; this module adds the logging reap wrapper
+//! (tracing is unavailable there).
 
 pub use xai_tty_utils::{
     ProcessGroup, ProcessScope, detach_command, detach_search_command, global_process_scope,

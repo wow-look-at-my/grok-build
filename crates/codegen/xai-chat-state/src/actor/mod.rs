@@ -1,4 +1,9 @@
 //! ChatStateActor — runs in a dedicated tokio task and owns all chat state.
+//!
+//! This module is organized into submodules by responsibility:
+//! - `state`: Internal state types (ChatState)
+//! - `mutations`: State mutation handlers (push_user_message, replace_conversation, etc.)
+//! - `queries`: Read-only query handlers (get_conversation, snapshot, etc.)
 
 mod mutations;
 mod queries;
@@ -43,7 +48,7 @@ pub struct ChatStateActor {
 
 /// Text describing what a panic carried, for a log line.
 ///
-/// Both payloads `panic!` itself produces are a `&'static str` (a literal)
+/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
 /// and a `String` (a formatted one). Anything else is named as a non-message
 /// rather than reported as nothing.
 fn panic_payload(panic: &(dyn Any + Send)) -> String {
@@ -128,9 +133,11 @@ impl ChatStateActor {
     }
 
     /// Process one command, so a round that unwinds does not end the actor.
-    /// The actor is the only writer of the session's conversation and the
-    /// only answerer of a handle's ack, so an actor lost to one command
-    /// closes every ack after it for the rest of the session.
+    ///
+    /// The actor is the only writer of the session's conversation and the only
+    /// answerer of a handle's ack, so an actor lost to one command closes every
+    /// ack after it for the rest of the session. The panicked round's own ack
+    /// still closes: the sender unwinds with the command.
     async fn run_command(&mut self, cmd: ChatStateCommand) {
         match AssertUnwindSafe(self.handle_command(cmd))
             .catch_unwind()
@@ -176,7 +183,9 @@ impl ChatStateActor {
             } => {
                 let generation = cwd_generation.get();
                 let candidate = ConversationItem::working_directory_switch(content, generation);
-                // Pop a crash-stranded reminder BEFORE the strict append.
+                // Pop a crash-stranded reminder BEFORE the strict append: the
+                // pop rewrites history from the in-memory image, which must
+                // not yet contain the acked append, or the rewrite erases it.
                 self.pop_stranded_continue_reminder();
                 let persist_rx = self
                     .persistence
@@ -354,6 +363,7 @@ impl ChatStateActor {
 
             // Queries are pure reads — repair only at write boundaries
             // (`ChatState::new`, `push_user_message`).
+            // `BuildConversationRequest` keeps the guard: it runs between turns, never from background tasks.
             ChatStateCommand::BuildConversationRequest {
                 tool_definitions,
                 memory_reminder,
@@ -429,7 +439,9 @@ impl ChatStateActor {
                 self.truncate_to_prompt_index(target_prompt_index);
                 self.state.turn_capture = None;
                 self.state.prompt_usage = None;
-                // `harness_trace_buffer` / `harness_trace_turns` survive a rewind: the subagents genuinely ran.
+                // `harness_trace_buffer` / `harness_trace_turns` survive a rewind: the
+                // subagents genuinely ran, so their sealed traces stay uploadable even
+                // when the live turn that triggered them is undone.
                 let _ = reply.send(());
             }
             ChatStateCommand::CheckAutoCompactNeeded {
@@ -460,7 +472,8 @@ impl ChatStateActor {
                 let _ = reply.send(result);
             }
             ChatStateCommand::TakeHarnessTraceTurns { reply } => {
-                // Defensive seal: a phase that recorded items but never flushed still rides its own turn.
+                // Defensive seal: a phase that recorded items but never flushed
+                // still rides its own turn rather than stranding.
                 self.state.seal_harness_trace_turn();
                 let _ = reply.send(std::mem::take(&mut self.state.harness_trace_turns));
             }

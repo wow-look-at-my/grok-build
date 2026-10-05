@@ -8,6 +8,8 @@ use crate::session::persistence::Summary;
 pub const SESSION_KIND_HEADLESS: &str = "headless";
 
 /// Listing/search policy for `session_kind=headless` rows.
+/// Applied before truncation; headless remains distinct from `Summary::is_hidden()`.
+/// The Rust default is the first-party picker policy; omitted wire values are handled separately by [`Self::from_wire`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum HeadlessPolicy {
     #[default]

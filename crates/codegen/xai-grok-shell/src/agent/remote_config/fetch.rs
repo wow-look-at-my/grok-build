@@ -87,8 +87,8 @@ impl ModelsCacheWrite {
         self.models
     }
 
-    /// The fetched catalog without persisting it: serve a live session not
-    /// yet on disk without writing.
+    /// The fetched catalog without persisting it: serve a live session not yet
+    /// on disk without writing into the auth-method/origin-scoped cache.
     pub(in crate::agent::remote_config) fn into_models(self) -> IndexMap<String, ModelEntry> {
         self.models
     }

@@ -1,6 +1,16 @@
 //! Backend-agnostic trait for memory search and retrieval.
+//!
+//! `MemoryBackend` is defined in `xai-grok-tools` to keep the tool crate
+//! backend-agnostic. The concrete implementation (`MemoryIndex`) lives in
+//! `xai-grok-shell`.
+//!
+//! All methods are `&self` (read-only). Write operations (record_access,
+//! memory flush writes) go through the session actor directly.
 
-/// Tracing target for memory system events. Use `tracing::info!(target: MEMORY_LOG_TARGET, ...)` in `xai-grok-tools`.
+/// Tracing target for memory system events.
+///
+/// Use `tracing::info!(target: MEMORY_LOG_TARGET, ...)` in `xai-grok-tools`.
+/// Mirrors `xai_grok_shell::session::memory_log::TARGET`.
 pub const MEMORY_LOG_TARGET: &str = "xai_memory";
 
 /// Staleness threshold (days): show a note suggesting verification.
@@ -77,7 +87,8 @@ pub struct MemorySearchResult {
     pub snippet: String,
     /// Source scope: `"global"`, `"workspace"`, or `"session"`.
     pub source: String,
-    /// Unix timestamp (seconds) when the chunk was created. `None` for backends that don't track creation time.
+    /// Unix timestamp (seconds) when the chunk was created.
+    /// `None` for backends that don't track creation time.
     pub created_at: Option<i64>,
 }
 
@@ -86,8 +97,9 @@ pub struct MemorySearchResult {
 /// because hybrid search may need to call an embedding API to vectorize the query for KNN lookup.
 #[async_trait::async_trait]
 pub trait MemoryBackend: Send + Sync {
-    /// Search memory for chunks matching a query string. Returns up to
-    /// `max_results` results with score >= `min_score`.
+    /// Search memory for chunks matching a query string. Returns up to `max_results` results with
+    /// score >= `min_score`. Uses hybrid search (FTS5 + vector KNN) when embeddings are available,
+    /// falling back to FTS-only otherwise.
     async fn search(
         &self,
         query: &str,
@@ -106,12 +118,16 @@ pub trait MemoryBackend: Send + Sync {
     /// Return the total number of indexed chunks.
     fn total_chunks(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>>;
 
-    /// Return the configured default for `max_results` in search queries.
+    /// Return the configured default for `max_results` in search queries. When the `memory_search` tool caller does not supply an explicit value,
+    /// using this instead of a hardcoded fallback ensures that `[memory.search].max_results` config is honoured at the tool boundary. The default
+    /// implementation returns `6`, matching the previous hardcoded value, so existing backends without a custom config behave identically.
     fn default_search_max_results(&self) -> usize {
         6
     }
 
-    /// Return the configured default for `min_score` in search queries.
+    /// Return the configured default for `min_score` in search queries. When the caller does not supply an explicit
+    /// threshold, using this instead of a hardcoded `0.0` ensures `[memory.search].min_score` config is honoured at the
+    /// tool boundary. The default implementation returns `0.0` (accept all results), matching the previous hardcoded value.
     fn default_search_min_score(&self) -> f64 {
         0.0
     }
@@ -147,13 +163,13 @@ mod tests {
 
     #[test]
     fn staleness_fresh_is_empty() {
-        let ts = Some(now_secs() - 3600);
+        let ts = Some(now_secs() - 3600); // 1 hour ago
         assert!(format_staleness_note("session", ts).is_empty());
     }
 
     #[test]
     fn staleness_note_for_moderately_old() {
-        let ts = Some(now_secs() - 86400 * 2); // A couple
+        let ts = Some(now_secs() - 86400 * 2); // 2 days ago
         let note = format_staleness_note("session", ts);
         assert!(note.starts_with("**Note ("), "expected Note, got: {note}");
         assert!(
@@ -164,7 +180,7 @@ mod tests {
 
     #[test]
     fn staleness_warning_for_very_old() {
-        let ts = Some(now_secs() - 86400 * 10); // Several
+        let ts = Some(now_secs() - 86400 * 10); // 10 days ago
         let note = format_staleness_note("session", ts);
         assert!(note.starts_with("**Stale ("), "expected Stale, got: {note}");
         assert!(note.contains("week"), "expected weeks unit, got: {note}");
@@ -207,6 +223,7 @@ mod tests {
 
     #[test]
     fn staleness_fresh_just_under_one_day() {
+        // 0.99 days = 85536 seconds
         let ts = Some(now_secs() - 85536);
         assert!(
             format_staleness_note("session", ts).is_empty(),
@@ -226,6 +243,7 @@ mod tests {
 
     #[test]
     fn staleness_note_just_under_seven_days() {
+        // 6.99 days = 603936 seconds
         let ts = Some(now_secs() - 603936);
         let note = format_staleness_note("session", ts);
         assert!(

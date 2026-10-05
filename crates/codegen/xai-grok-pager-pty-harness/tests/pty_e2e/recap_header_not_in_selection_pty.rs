@@ -2,23 +2,26 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Unique body token so we can locate the recap summary without matching the "Recap" chrome label.
+/// Unique body token so we can locate the recap summary without matching the
+/// "Recap" chrome label (or unrelated scrollback text).
 const RECAP_BODY_TOKEN: &str = "RECAP_BODY_SEL_TOKEN";
 
 /// PTY: drag-select on an expanded recap copies only the summary body, never the "Recap" header
-/// label.
+/// label. On macOS the clipboard route only emits OSC 52 when it believes the session is remote
+/// (see `resolve_clipboard_route`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn recap_header_not_in_selection_pty() {
     let content = ContentController::start().await.expect("start content");
 
     // First agent turn: any non-empty reply so recap_gate has a main turn
-    // Recap is a separate inference call.
+    // Recap is a separate inference call; the fixed mock body is swapped after this turn settles so only the recap carries RECAP_BODY_TOKEN
     content.set_response(format!(
         "{MOCK_RESPONSE_SENTINEL} first turn for recap context."
     ));
 
     let binary = pager_binary().expect("resolve pager binary");
+    // Force OSC 52 so clipboard contents can be asserted via the PTY raw stream (macOS otherwise uses the native pasteboard only)
     let overrides: Vec<(String, String)> = vec![(
         "SSH_CONNECTION".into(),
         "scripted-test 1 127.0.0.1 2".into(),
@@ -76,8 +79,8 @@ async fn recap_header_not_in_selection_pty() {
     });
     let end_col = col + RECAP_BODY_TOKEN.chars().count() as u16 - 1;
 
-    // Drag across the body token The header is Selectable::None with no
-    // selection_range, so even a multi-line select that will have included.
+    // Drag across the body token
+    // The header is Selectable::None with no selection_range, so even a multi-line select that would have included "Recap" only copies the body
     harness
         .inject_keys(mouse_drag_line(row, col, end_col).as_bytes())
         .expect("drag select recap body");

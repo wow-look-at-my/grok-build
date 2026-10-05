@@ -74,6 +74,7 @@ async fn verify_bashq_claim3_edit_keeps_bash() {
         .wait_for_text("Run shell command", Duration::from_secs(10))
         .expect("bash edit mode entered");
 
+    // The cursor sits at 0, so the edit prepends and comments out the original.
     harness
         .inject_keys(b"printf 'CLAIMTHREE_%s_OK\\n' EDITED # ")
         .expect("type the edit");

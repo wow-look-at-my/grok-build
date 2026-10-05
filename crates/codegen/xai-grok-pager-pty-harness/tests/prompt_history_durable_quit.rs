@@ -1,4 +1,19 @@
 //! E2E: a submitted prompt is durably recorded in the per-CWD `prompt_history.jsonl` and survives quitting the TUI.
+//! One path quits via a fast double Ctrl+C (the reported repro, recalled after a `--continue` resume).
+//! The other delivers a real OS SIGINT routed through the same graceful quit.
+//!
+//! Drives the real pager binary through a PTY against the shared mock inference server (isolated `$HOME`).
+//! Exercises the full path from the pager through the shell and `queue_input` to the append, plus the graceful-quit teardown.
+//!
+//! Coverage note: both paths wait for the turn to land before quitting, so `queue_input` (and its awaited append) has already run.
+//! This is an end-to-end durability and recall check, not a probe of the old detached-append race.
+//! That race is closed structurally by awaiting the append in `queue_input` and is covered by the `prompt_history` unit test.
+//! The deterministic regression catch here is the SIGINT path exiting 0 (pre-fix it was `process::exit(130)`).
+//!
+//! ```bash
+//! cargo test -p xai-grok-pager-pty-harness --test prompt_history_durable_quit \
+//!   -- --ignored --nocapture
+//! ```
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -19,7 +34,8 @@ async fn prompt_history_durable_after_double_ctrl_c_and_recallable_on_resume() {
     run().await.expect("prompt-history durable-quit e2e");
 }
 
-/// A real OS SIGINT (not an injected Ctrl+C key byte) must route through the same graceful quit.
+/// A real OS SIGINT (not an injected Ctrl+C key byte) must route through the
+/// same graceful quit: the prompt stays durable and the process exits 0.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore] // opt-in: spawns the real pager binary in a PTY (CI runs with --ignored)
@@ -48,7 +64,10 @@ async fn run() -> Result<()> {
         .wait_for_turn_idle(Duration::from_secs(15))
         .context("turn idle before double Ctrl+C")?;
 
-    // Double Ctrl+C: the first opens the quit confirmation on the empty prompt.
+    // Double Ctrl+C: the first opens the quit confirmation on the empty prompt, the second confirms
+    // That is the same graceful Action::Quit as `/exit`
+    // Two 0x03 bytes in one read collapse to a single Ctrl+C (same as Esc Esc), which arms quit and never confirms it.
+    // Wait for the hint so the confirm byte is a separate event.
     let pre = first.raw_output().len();
     first.inject_keys(keys::CTRL_C).context("ctrl-c arm")?;
     first
@@ -56,7 +75,8 @@ async fn run() -> Result<()> {
         .context("quit confirmation after the first Ctrl+C")?;
     first.inject_keys(keys::CTRL_C).context("ctrl-c confirm")?;
 
-    // Drain output until the child exits so the post-`pre` suffix holds the full graceful teardown.
+    // Drain output until the child exits so the post-`pre` suffix holds the full graceful teardown for the assertions below
+    // The teardown includes the show-cursor restore
     first.update(Duration::from_secs(10));
 
     let exit = first
@@ -135,10 +155,11 @@ async fn run_sigint() -> Result<()> {
     let pre = first.raw_output().len();
     first.send_signal(libc::SIGINT).context("send SIGINT")?;
 
-    // Drain output until the child exits so the post-`pre` suffix holds the full graceful teardown.
+    // Drain output until the child exits so the post-`pre` suffix holds the full graceful teardown for the assertions below
+    // The teardown includes the show-cursor restore
     first.update(Duration::from_secs(10));
 
-    // Pre-fix the SIGINT handler called std::process::exit(130).
+    // Pre-fix the SIGINT handler called std::process::exit(130); routing it through the graceful quit exits 0, the deterministic regression catch
     let exit = first
         .wait_exit_code(Duration::from_secs(10))
         .context("wait for SIGINT exit")?;

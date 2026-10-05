@@ -1,6 +1,7 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 #![allow(unused_imports)]
 //! Inherent [`MvpAgent`] helpers (MCP/clients/gateway, settings/models, session ops, spawn).
+//! Co-located child of `mvp_agent` (`use super::*`).
 use super::*;
 use crate::sampling::EffortTarget;
 use xai_grok_login::PreferredAuthMethod;
@@ -43,18 +44,21 @@ fn should_warn_missing_session(ctx: MissingSessionCtx) -> bool {
 }
 /// Resolve a BYOK / custom-provider model's context window from its OWN
 /// `/v1/models` endpoint on the request path, returning a model whose window
-/// has been backfilled when resolution succeeds. This is the per-request
-/// counterpart to the catalog-build resolution in `resolve_model_list`: a
-/// model carrying its own credential and a non-xAI, non-cli-chat-proxy
-/// base_url is never in the xAI proxy listing, so its window stays at the
-/// hardcoded sentinel (`CONFIG_DEFAULT_CONTEXT_WINDOW` = 200k from config, or
-/// `DEFAULT_CONTEXT_WINDOW` = 256k). Ask the provider the request is going to
-/// — not a sibling, not config — for the exact slug's window. Returns
-/// `Cow::Owned(model_with_resolved_window)` on success, or
+/// has been backfilled when resolution succeeds.
+///
+/// This is the per-request counterpart to the catalog-build resolution in
+/// `resolve_model_list`: a model carrying its own credential and a non-xAI,
+/// non-cli-chat-proxy base_url is never in the xAI proxy listing, so its
+/// window stays at the hardcoded sentinel (`CONFIG_DEFAULT_CONTEXT_WINDOW` =
+/// 200k from config, or `DEFAULT_CONTEXT_WINDOW` = 256k). Ask the provider the
+/// request is actually going to — not a sibling, not config — for the exact
+/// slug's window.
+///
+/// Returns `Cow::Owned(model_with_resolved_window)` on success, or
 /// `Cow::Borrowed(model)` when the window is already real, the model is not
 /// BYOK, the base is xAI/proxy (already resolved elsewhere), or the provider
-/// listing yields nothing (cold/unreachable provider: best-effort, sentinel
-/// is kept).
+/// listing yields nothing (cold/unreachable provider: best-effort, sentinel is
+/// kept).
 fn resolve_byok_context_window_on_request_path<'a>(
     model: &'a ModelEntry,
     credentials: &crate::agent::config::ResolvedCredentials,
@@ -68,7 +72,14 @@ fn resolve_byok_context_window_on_request_path<'a>(
         return std::borrow::Cow::Borrowed(model);
     }
     // The resolution is driven by the model's OWN credential, mirroring the
-    // catalog-build gate in `resolve_model_list`.
+    // catalog-build gate in `resolve_model_list`: a model with its own
+    // api_key/env_key is BYOK by definition, and bundled/xAI models never carry
+    // one, so only BYOK models are re-queried. `credentials.api_key` may be a
+    // session JWT (session-based auth), which must not be used to query the
+    // model's own provider; gate on `own_credential()` (static api_key/env_key)
+    // instead. Deliberately no xAI-host check here — `is_xai_api_url` treats
+    // loopback as cli-chat-proxy/xAI, which would wrongly skip a local BYOK
+    // test/mock base (see the same note in `resolve_model_list`).
     let Some(own_key) = model.own_credential() else {
         return std::borrow::Cow::Borrowed(model);
     };
@@ -146,7 +157,8 @@ impl MvpAgent {
         primary: &SamplingConfig,
     ) -> Result<(Option<OaiCompatClient>, String), acp::Error> {
         let slug = self.resolve_session_summary_model();
-        // Config resolution fills the compiled default in, so only another model counts as a choice.
+        // Config resolution fills the compiled default in, so only another
+        // model counts as a choice.
         let pinned = slug != crate::models::default_session_summary_model();
         let session_key = self.auth_manager.current_or_expired().map(|a| a.key.clone());
         let models = self.models_manager.models();
@@ -344,9 +356,9 @@ impl MvpAgent {
             }
         });
     }
-    /// Rebuild `search_tool` in every live session after a fresh gateway tool
-    /// catalog committed. Gateway tools live in the agent-level catalog, not
-    /// per-session `McpServers`.
+    /// Rebuild `search_tool` in every live session after a fresh gateway tool catalog committed.
+    /// Gateway tools live in the agent-level catalog, not per-session `McpServers`.
+    /// Callers skip on a failed refetch so the last-good index stays.
     pub(crate) fn refresh_mcp_search_index_in_sessions(&self) {
         let session_txs = self.resident_cmd_txs();
         for tx in session_txs {
@@ -372,10 +384,8 @@ impl MvpAgent {
         }
         catalog
     }
-    /// Resolve the launch dir's project-scope trust verdict ONCE and return
-    /// it with its path. Memoizes the single
-    /// [`folder_trust::resolve_launch_dir_trust`] gather (see it for the
-    /// dedup and TOCTOU contract). Backs `ensure_local_workspace_ops`.
+    /// Resolve the launch dir's project-scope trust verdict ONCE and return it with its path. Memoizes the single [`folder_trust::resolve_launch_dir_trust`] gather (see it for the dedup and TOCTOU contract).
+    /// Backs `ensure_local_workspace_ops`. The plugin registry builds deliberately do not reuse it: they read disk config through the trust gate, so they resolve (and record) afresh right before the read — see `registry_build_inputs`.
     pub(super) fn prime_launch_dir_trust(&self) -> (&std::path::Path, bool) {
         let trust = *self
             .launch_dir_trust
@@ -431,8 +441,9 @@ impl MvpAgent {
     ) -> std::sync::Arc<tokio::sync::Mutex<crate::session::mcp_servers::McpState>> {
         self.agent_mcp_state.clone()
     }
-    /// Build the launch-dir plugin registry snapshot on first use. Boot-time discovery was deferred past ACP `initialize`, leaving `plugin_registry_handle` empty. The cwd-to-git-root and user/marketplace walks stalled grok-desktop's first `initialize`. That shared snapshot still backs the launch-dir plugin MCP/LSP merges read in `resolve_mcp_servers` and the session LSP build. So populate it lazily, off the `initialize`
-    /// critical path, on the first session-creating call.
+    /// Build the launch-dir plugin registry snapshot on first use. Boot-time discovery was deferred past ACP `initialize`, leaving `plugin_registry_handle` empty.
+    /// The cwd-to-git-root and user/marketplace walks stalled grok-desktop's first `initialize`. That shared snapshot still backs the launch-dir plugin MCP/LSP merges read in `resolve_mcp_servers` and the session LSP build.
+    /// So populate it lazily, off the `initialize` critical path, on the first session-creating call. Runs the discovery walk once; per-session `build_for_cwd` still re-resolves project-scoped plugins for each session's own cwd.
     pub(crate) fn ensure_plugin_registry(&self) {
         if self.plugin_registry_initialized.replace(true) {
             return;
@@ -450,12 +461,17 @@ impl MvpAgent {
             "lazily populated plugin registry snapshot"
         );
     }
-    /// Inputs for a registry build scoped to `cwd`: a fresh real-remote trust
-    /// verdict, then `[plugins]` from disk. Self-free so callers can run it
-    /// on a blocking thread. `cfg.plugins` is boot-time state that
-    /// `config.toml` edits never refresh, so a snapshot built from it reports
-    /// stale `enabled` flags to session-less `x.ai/plugins/list` /
-    /// `x.ai/skills/list`.
+    /// Inputs for a registry build scoped to `cwd`: a fresh real-remote trust verdict, then
+    /// `[plugins]` from disk. Self-free so callers can run it on a blocking thread.
+    /// `cfg.plugins` is boot-time state that `config.toml` edits never refresh, so a snapshot built
+    /// from it reports stale `enabled` flags to session-less `x.ai/plugins/list` / `x.ai/skills/list`.
+    /// Order is load-bearing: the disk read consults the folder-trust gate, whose cold-key backstop
+    /// resolves remote-less and records a durable verdict that would make an org kill-switch
+    /// unliftable for the process; resolving first (recording, with the real `RemoteSettings`) makes
+    /// the read a cache hit.
+    /// The verdict is never the startup primer's: that memoizes a point-in-time answer, including
+    /// the non-durable no-configs allow, which also leaves the launch dir cold for the gate
+    /// (`plugins_reload_rechecks_launch_dir_trust`).
     pub(crate) fn registry_build_inputs(
         cwd: &std::path::Path,
         remote_settings: Option<&crate::util::config::RemoteSettings>,
@@ -470,7 +486,8 @@ impl MvpAgent {
     pub(crate) fn launch_cwd(&self) -> &std::path::Path {
         &self.launch_cwd
     }
-    /// An explicit rebuild populated the shared snapshot.
+    /// An explicit rebuild populated the shared snapshot; the lazy boot build must not run after it
+    /// (it would rebuild with the startup primer's memoized trust, undoing a fresh reload verdict).
     pub(crate) fn mark_plugin_registry_initialized(&self) {
         self.plugin_registry_initialized.set(true);
     }
@@ -604,29 +621,32 @@ impl MvpAgent {
         }
     }
     /// Adopt the leader's [`AgentActivity`].
+    /// The leader then sees the agent's live view of running turns/subagents and can flush sessions at shutdown.
+    /// Must be called right after construction: entries registered on the constructor-created default instance are NOT migrated.
     pub(crate) fn set_activity(
         &mut self,
         activity: crate::agent::activity::AgentActivity,
     ) {
         self.activity = activity;
     }
-    /// Send [`SessionCommand::Shutdown`] to every live session actor and wait
-    /// up to `grace` for them to exit.
+    /// Send [`SessionCommand::Shutdown`] to every live session actor and wait up to `grace` for them to exit (SessionEnd hooks, memory save, etc.).
+    /// Call on non-leader process quit **after** the cancel token fires but **before** dropping the agent / exiting the process. Otherwise session actors are killed mid-hook.
+    /// See [`crate::agent::activity::AgentActivity::flush_all_sessions`].
     pub async fn flush_all_sessions(&self, grace: std::time::Duration) {
         self.activity.flush_all_sessions(grace).await;
     }
-    /// Install the channel that fans new session cwds into the leader's
-    /// `ConfigFileWatcher::watch_path`.
+    /// Install the channel that fans new session cwds into the leader's `ConfigFileWatcher::watch_path`.
+    /// Called once after the watcher is constructed in `agent/app.rs`.
+    /// In simple / non-leader mode the channel is never wired and `notify_session_cwd_for_watch` is a no-op.
     pub(crate) fn set_config_watcher_path_tx(
         &mut self,
         tx: tokio::sync::mpsc::UnboundedSender<std::path::PathBuf>,
     ) {
         self.config_watcher_path_tx = Some(tx);
     }
-    /// Best-effort fan-out of a new session's `cwd` to the leader's
-    /// `ConfigFileWatcher` for dynamic non-recursive registration. No-op if
-    /// `set_config_watcher_path_tx` was never called (simple mode, tests) or
-    /// if the receiver has been dropped.
+    /// Best-effort fan-out of a new session's `cwd` to the leader's `ConfigFileWatcher` for dynamic non-recursive registration.
+    /// No-op if `set_config_watcher_path_tx` was never called (simple mode, tests) or if the receiver has been dropped.
+    /// Watcher errors are logged inside the spawned task and do NOT propagate here.
     pub(crate) fn notify_session_cwd_for_watch(&self, cwd: &std::path::Path) {
         if let Some(tx) = self.config_watcher_path_tx.as_ref()
             && tx.send(cwd.to_path_buf()).is_err()
@@ -702,7 +722,12 @@ impl MvpAgent {
     pub(super) fn build_registry_config(
         &self,
     ) -> Option<crate::session::RegistryConfig> {
-        // Local opt-in only.
+        // Local opt-in only. Session replicas push the session summary, first
+        // prompt and repo head to cli-chat-proxy, and upstream lets
+        // `remote_settings.session_registry_enabled` turn that on from the
+        // server when no local setting is present — the operator would never
+        // see the switch flip. The env var and `[cli] session_registry` still
+        // work for anyone who wants it.
         if !self.session_registry_local.unwrap_or(false) {
             return None;
         }
@@ -743,11 +768,9 @@ impl MvpAgent {
     pub(crate) fn workspaces_client(&self) -> crate::remote::WorkspacesClient {
         crate::remote::WorkspacesClient::new(self.auth_manager.clone())
     }
-    /// Pre-session command availability snapshot. Used by the
-    /// `x.ai/commands/list` ext method and the `InitializeResponse._meta`
-    /// path (`builtin_commands()`). Both fire before any session exists. The
-    /// eventual agent's toolset is unknown (it depends on the model the user
-    /// picks).
+    /// Pre-session command availability snapshot. Used by the `x.ai/commands/list` ext method and the `InitializeResponse._meta` path (`builtin_commands()`). Both fire before any session exists.
+    /// The eventual agent's toolset is unknown (it depends on the model the user picks). So runtime/tool-dependent gates (`/flush`, `/loop`, `/memory`, …) fail closed.
+    /// The session-scoped `available_commands_update` in `acp_session.rs` fills in the real per-model gating as soon as a session starts.
     pub(crate) fn command_availability(
         &self,
     ) -> crate::session::slash_commands::CommandAvailability {
@@ -757,8 +780,8 @@ impl MvpAgent {
             ..crate::session::slash_commands::CommandAvailability::default()
         }
     }
-    /// `true` when data collection should be suppressed (team ZDR or
-    /// coding-data-retention opt-out).
+    /// `true` when data collection should be suppressed (team ZDR or coding-data-retention opt-out).
+    /// Delegates to [`AuthManager::is_data_collection_disabled`].
     pub(crate) fn is_data_collection_disabled(&self) -> bool {
         self.auth_manager.is_data_collection_disabled()
     }
@@ -768,9 +791,9 @@ impl MvpAgent {
             .borrow()
             .product_analytics_enabled(self.auth_manager.current_or_expired().as_ref())
     }
-    /// Re-sync the `Send` mirror of `cfg.is_trace_upload_enabled()` that the
-    /// per-session collection gates read. `cfg` is `!Send`; the gates run on
-    /// the tokio pool.
+    /// Re-sync the `Send` mirror of `cfg.is_trace_upload_enabled()` that the per-session collection gates read.
+    /// `cfg` is `!Send`; the gates run on the tokio pool.
+    /// Must be called after any mid-session config change that can flip the switch, i.e. every `remote_settings` rewrite.
     pub(super) fn sync_collection_config_gate(&self) {
         self.trace_upload_live
             .store(
@@ -1466,9 +1489,9 @@ impl MvpAgent {
         }
         Ok(ops)
     }
-    /// Derive the current `AuthType` from auth method and auth manager state.
-    /// Conceptually, `AuthType` describes *which authentication mechanism
-    /// this session uses*, not *whether we have a live bearer*.
+    /// Derive the current `AuthType` from auth method and auth manager state. Conceptually, `AuthType` describes *which authentication mechanism this session uses*, not *whether we currently have a live bearer*.
+    /// Bearer liveness is tracked by the auth manager; the mechanism is fixed by `auth_method_id`.
+    /// Returns `ApiKey` only when the auth method is BYOK (`xai.api_key`) or no auth method has been selected yet AND no live credential exists. The session-based clause is load-bearing. Without it, chat_state can get locked into `auth_type = ApiKey` and skip token refresh on later prompts.
     pub(crate) fn auth_type(&self) -> xai_chat_state::AuthType {
         if self.auth_manager.current().is_some() || self.is_session_based_auth() {
             xai_chat_state::AuthType::SessionToken
@@ -1625,7 +1648,7 @@ impl MvpAgent {
         }
     }
     /// Live `/v1/settings` read. Does not join the startup load and does not
-    /// accept a warm disk cache.
+    /// accept a warm disk cache. `Rejected` is preserved for 401 self-heal.
     async fn fetch_settings(
         &self,
         auth: &xai_grok_login::GrokAuth,
@@ -1668,8 +1691,9 @@ impl MvpAgent {
             None => None,
         }
     }
-    /// Fetch settings; on a `401` try one self-healing [`AuthManager::auth`] refresh and re-fetch if it yields a *different* token. The caller waits at most `STARTUP_AUTH_REFRESH_TIMEOUT`, but the refresh is spawned and
-    /// runs to completion past the deadline. Dropping it mid-exchange could abandon an IdP response carrying the rotated refresh token. On timeout or error the original `Rejected` stands.
+    /// Fetch settings; on a `401` try one self-healing [`AuthManager::auth`] refresh and re-fetch if it yields a *different* token. This recovers a 401 from a token that expired mid-fetch.
+    /// The caller waits at most `STARTUP_AUTH_REFRESH_TIMEOUT`, but the refresh is spawned and runs to completion past the deadline. Dropping it mid-exchange could abandon an IdP response carrying the rotated refresh token.
+    /// On timeout or error the original `Rejected` stands.
     async fn fetch_settings_self_healing_401(
         &self,
         auth: &xai_grok_login::GrokAuth,
@@ -1705,8 +1729,8 @@ impl MvpAgent {
             cfg.path_not_found_hints = v;
         }
     }
-    /// Stores settings and fans out side effects via
-    /// [`Self::on_remote_settings_changed`].
+    /// Stores settings and fans out side effects via [`Self::on_remote_settings_changed`].
+    /// Shared tail for callers that do not also re-init the telemetry client (those use [`Self::refresh_remote_settings`]).
     pub(super) fn install_remote_settings(
         &self,
         settings: crate::util::config::RemoteSettings,
@@ -1909,10 +1933,8 @@ impl MvpAgent {
             }
         });
     }
-    /// One poll cycle. With no settings baseline, first population is
-    /// delegated to the fill-if-missing path (which emits on success).
-    /// Otherwise refresh the stored announcements best-effort, then run the
-    /// emit gate.
+    /// One poll cycle. With no settings baseline, first population is delegated to the fill-if-missing path (which emits on success). Otherwise refresh the stored announcements best-effort, then run the emit gate.
+    /// The gate runs even when the fetch was skipped or failed, so a pure expiry crossing still clears client banners on time.
     async fn poll_announcements_refresh_once(&self) {
         if self.cfg.borrow().remote_settings.is_none() {
             self.maybe_fetch_post_auth_settings().await;
@@ -1995,8 +2017,9 @@ impl MvpAgent {
             "pushing announcements update to clients"
         );
     }
-    /// Next generation for an `x.ai/announcements/update` push. Strictly increasing within the process, and seeded from unix-epoch seconds. So a restarted leader's pushes still clear pager watermarks that survived re-election
-    /// (`AppView.announcements_last_gen` outlives the agent).
+    /// Next generation for an `x.ai/announcements/update` push.
+    /// Strictly increasing within the process, and seeded from unix-epoch seconds.
+    /// So a restarted leader's pushes still clear pager watermarks that survived re-election (`AppView.announcements_last_gen` outlives the agent).
     pub(super) fn next_announcements_gen(&self) -> u64 {
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2166,7 +2189,14 @@ impl MvpAgent {
             .current_or_expired()
             .filter(|a| a.is_xai_auth())
             .map(|a| a.user_id);
-        // Per-request own-provider context-window resolution.
+        // Per-request own-provider context-window resolution. A BYOK / custom
+        // provider model (its own api_key/env_key + a non-xAI, non-proxy
+        // base_url) may still carry the hardcoded sentinel window because it is
+        // never present in the xAI proxy listing. Resolve the real window from
+        // the model's OWN `/v1/models` endpoint right here, on the request
+        // path, so the very provider we are about to call answers for the
+        // exact slug being requested. Resolution is best-effort: an
+        // unreachable/unlisted provider leaves the sentinel untouched.
         let effective_model: std::borrow::Cow<'_, ModelEntry> =
             resolve_byok_context_window_on_request_path(model, &credentials);
         let mut config = crate::agent::config::sampling_config_for_model(
@@ -2214,13 +2244,9 @@ impl MvpAgent {
         );
         (id.clone(), new_config)
     }
-    /// Whether the current session is a personal grok.com account on a gated
-    /// tier (free / X Basic). The Imagine tools stay advertised to the model
-    /// but are flagged tier-restricted. They then short-circuit at call time
-    /// with the SuperGrok upsell prose (see
-    /// `ImageGenConfig`/`VideoGenConfig`'s `tier_restricted`). Fails **open**
-    /// (returns `false`) whenever we can't positively confirm a restricted
-    /// personal tier.
+    /// Whether the current session is a personal grok.com account on a gated tier (free / X Basic). The Imagine tools stay advertised to the model but are flagged tier-restricted.
+    /// They then short-circuit at call time with the SuperGrok upsell prose (see `ImageGenConfig`/`VideoGenConfig`'s `tier_restricted`).
+    /// Fails **open** (returns `false`) whenever we can't positively confirm a restricted personal tier. So this client gate is a UX optimization (a clean in-chat upsell instead of a doomed request), never the security boundary. The only difference is the absent-tier policy (the pager hides on `None`, we fail open on `None`).
     fn is_tier_restricted_capability(&self) -> bool {
         let Some(auth) = self.auth_manager.current() else {
             return false;
@@ -2653,9 +2679,9 @@ impl MvpAgent {
         tracing::info!(kept_resident, unloaded, "client-disconnect detach complete");
         self.sweep_dead_sessions();
     }
-    /// Wait for an old session thread to finish before reloading the same
-    /// session. When a client disconnects and a session is *idle*,
-    /// `handle_evict_sessions` unloads it.
+    /// Wait for an old session thread to finish before reloading the same session. When a client disconnects and a session is *idle*, `handle_evict_sessions` unloads it.
+    /// That sends `Shutdown`, drops the `SessionHandle`, and keeps the `SessionThread`. (Sessions with live work stay fully resident and skip this path.)
+    /// If the client reconnects and loads the same session, wait for the old actor to finish flushing to disk before replaying `updates.jsonl`. Uses async polling (never blocks the `LocalSet` runtime) with a 5s deadline to handle slow shutdowns (e.g., embedding API timeouts).
     pub(super) async fn drain_old_session_thread(&self, session_id: &acp::SessionId) {
         self.drain_old_session_thread_within(session_id, DRAIN_OLD_THREAD_WAIT).await;
     }
@@ -2703,9 +2729,9 @@ impl MvpAgent {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
-    /// Mark a `session/load` as in flight for `session_id`. While it is
-    /// alive, [`Self::wait_for_in_flight_session_load`] blocks racing
-    /// session-scoped requests for the same session.
+    /// Mark a `session/load` as in flight for `session_id`.
+    /// While it is alive, [`Self::wait_for_in_flight_session_load`] blocks racing session-scoped requests for the same session.
+    /// Dropping the guard (every exit path of `load_session`, success or error) removes the marker and wakes all waiters via watch-channel closure.
     pub(super) fn begin_session_load(
         &self,
         session_id: &acp::SessionId,
@@ -2718,10 +2744,9 @@ impl MvpAgent {
             _tx: tx,
         }
     }
-    /// Session lookup that tolerates an in-flight `session/load`. THE
-    /// chokepoint for the post-leader-crash error class. Every user-facing
-    /// session-scoped handler (`prompt`, `set_session_model`, `interject`,
-    /// ...) resolves its handle through this.
+    /// Session lookup that tolerates an in-flight `session/load`. THE chokepoint for the post-leader-crash error class.
+    /// Every user-facing session-scoped handler (`prompt`, `set_session_model`, `interject`, ...) resolves its handle through this.
+    /// A bare `sessions` lookup would make a request racing the reconnect-replayed `session/load` fail with "unknown session id". This waits for the session to land instead. Returns `None` only when the session is genuinely absent: no load in flight (or the load failed / timed out). Those are exactly the cases where the legacy error is correct.
     pub(crate) async fn session_handle_waiting_for_load(
         &self,
         session_id: &acp::SessionId,
@@ -3606,9 +3631,9 @@ impl MvpAgent {
         }
         self.auth_manager.current_or_expired().is_some_and(|a| a.is_xai_auth())
     }
-    /// Trace upload being off as *policy* (an MDM/requirements pin or a
-    /// telemetry-disabled posture) must suppress the card. It must not invite
-    /// the user to override the policy.
+    /// Trace upload being off as *policy* (an MDM/requirements pin or a telemetry-disabled posture) must suppress the card. It must not invite the user to override the policy.
+    /// The accepted consent persists at the config tier, which those postures cannot outrank. Trace upload being off via the remote `trace_upload_enabled` default is different: that is the card's audience.
+    /// Individual consent overriding a fleet default is the feature (its own kill switch is `feedback_trace_card_enabled`).
     fn trace_upload_posture_allows_offer(cfg: &crate::agent::config::Config) -> bool {
         cfg.requirements.trace_upload.pinned() != Some(false)
             && cfg.is_telemetry_enabled()
@@ -3666,9 +3691,9 @@ impl MvpAgent {
             upload_method,
         })
     }
-    /// Allocate the next monotonic telemetry turn number for a session. The
-    /// counter is intentionally monotonic even across rewinds to avoid
-    /// overwriting older telemetry docs in cloud storage.
+    /// Allocate the next monotonic telemetry turn number for a session. The counter is intentionally monotonic even across rewinds to avoid overwriting older telemetry docs in cloud storage.
+    /// For sessions sharing a parent's trace counter, call this once with the **root session ID** and reuse the result. That way the root's counter does not advance more than once per logical turn.
+    /// The cloud storage layout writes to `{session_id}/turn_{N}/`.
     pub(crate) fn allocate_turn_number(&self, session_id: &acp::SessionId) -> u64 {
         let turn = self.peek_turn_number(session_id);
         self.set_turn_number(session_id, turn.saturating_add(1));
@@ -5180,7 +5205,8 @@ impl MvpAgent {
         self.session_registry.drain_permission_events(session_id)
     }
 }
-/// Withdraws an installed actor whose stamp the installer never resolved.
+/// Withdraws an installed actor whose stamp the installer never resolved; a load cancelled mid
+/// round-trip would otherwise leave a `Pending` slot every later adopter waits out.
 struct PendingStampGuard<'a> {
     agent: &'a MvpAgent,
     session_id: acp::SessionId,

@@ -1,4 +1,5 @@
 //! Shared transport types kept for backward compatibility with code that still references them.
+//! Sessions use `WorkspaceHandle` directly (local mode) or `ToolHarness` RPC calls (proxy mode).
 
 use serde_json::Value;
 

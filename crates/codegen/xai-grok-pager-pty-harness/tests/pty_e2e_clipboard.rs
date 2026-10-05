@@ -1,4 +1,6 @@
 //! Clipboard, paste, primary-selection, and inline-media PTY coverage.
+//!
+//! This family is isolated from ordinary PTY scheduling and serialized by Bazel because its platform cases touch host-global clipboard state.
 
 // Shared support intentionally serves all PTY family crates.
 #[allow(dead_code, unused_imports)]
@@ -46,6 +48,7 @@ async fn unknown_ssh_clipboard_delivery_is_unverified() {
         &[],
         &[
             EnvOp::set("SSH_CONNECTION", "scripted-test 1 127.0.0.1 2"),
+            // Drop the sink vars a parent `grok wrap` would have set, so the test takes the path with no OSC 52 sink
             EnvOp::remove("GROK_OSC52_SINK"),
             EnvOp::remove("LC_GROK_OSC52_SINK"),
         ],
@@ -96,6 +99,7 @@ async fn unknown_ssh_clipboard_delivery_is_unverified() {
     harness
         .wait_for_text("clipboard.delivery-unverified", Duration::from_secs(10))
         .expect("named clipboard finding");
+    // The one-off SSH command wraps at 80 columns; this remediation stays contiguous.
     harness
         .wait_for_text("grok doctor fix ssh-wrap", Duration::from_secs(10))
         .expect("doctor-owned SSH-wrap remediation");

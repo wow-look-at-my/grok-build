@@ -1,10 +1,44 @@
 //! Channel-based IndexManager for incremental reindexing.
+//!
+//! This module provides a clean, channel-based architecture for managing
+//! the code graph index with support for incremental updates from file system events.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────┐     FileEvent     ┌─────────────────┐
+//! │   FSNotify      │ ──────────────────▶│  IndexManager   │
+//! │   (debounced)   │                   │   (owns index)  │
+//! └─────────────────┘                   └────────┬────────┘
+//!                                                │
+//!                                                ▼
+//!                                       ┌─────────────────┐
+//!                                       │ ScopeGraphIndex │
+//!                                       │   (mutations)   │
+//!                                       └─────────────────┘
+//! ```
+//!
+//! The IndexManager runs in its own task and processes events sequentially,
+//! eliminating the need for Arc<Mutex> around the index.
+//!
+//! **Note**: Debouncing is handled externally by notify-debouncer-full (FSEvents).
+//! Events arriving here are already debounced, so we process them immediately.
+//!
+//! ## Deduplication
+//!
+//! The module ensures that:
+//! - At most one `IndexManager` exists per workspace per process (via `ACTIVE_MANAGERS`)
+//! - Concurrent index operations are coordinated via locks (see `manager::lock`)
+//! - Background refresh operations are deduplicated across processes
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Instant;
 
+/// Maximum file size we'll attempt to index (5 MB).
+/// Files larger than this are skipped to avoid pathological memory usage
+/// from tree-sitter AST construction on huge or binary files.
 pub const MAX_INDEXABLE_FILE_SIZE: u64 = 5 * 1024 * 1024;
 
 use crossbeam::channel::{self, Receiver, Sender};
@@ -17,7 +51,8 @@ use crate::manager::IndexBuilder;
 use crate::scope_graph::ScopeGraphIndex;
 use crate::types::{FileMeta, IndexStats};
 
-/// Global registry of active IndexManager handles per workspace. At most one IndexManager per workspace per process.
+/// Global registry of active IndexManager handles per workspace.
+/// At most one IndexManager per workspace per process. `Weak` refs so dropped handles are cleaned up.
 static ACTIVE_MANAGERS: Lazy<DashMap<PathBuf, Weak<IndexManagerHandle>>> = Lazy::new(DashMap::new);
 
 /// File system event kind - maps from notify::EventKind.
@@ -29,6 +64,7 @@ pub enum FileEventKind {
     Modified,
     /// File was deleted
     Removed,
+    /// File was renamed (old path in the event, new path in paths[1] if available)
     Renamed,
 }
 
@@ -77,6 +113,8 @@ pub enum IndexCommand {
     /// Rebuild the entire index
     Rebuild,
     /// Get a shared snapshot of the current index (response sent via oneshot).
+    /// Returns an `Arc` — cloning the sender is zero-cost when no mutations
+    /// are in flight.
     GetSnapshot(tokio::sync::oneshot::Sender<Arc<ScopeGraphIndex>>),
     /// Go to definition query
     GotoDefinition {
@@ -475,7 +513,8 @@ impl IndexManagerConfig {
     }
 }
 
-/// Test-only RAII guard: sets a shared `AtomicBool` on drop so tests can confirm the actor thread exited.
+/// Test-only RAII guard: sets a shared `AtomicBool` on drop so tests can
+/// confirm the actor thread actually exited (not just that the Weak stopped upgrading).
 #[cfg(test)]
 struct ExitBeacon(Arc<std::sync::atomic::AtomicBool>);
 
@@ -490,6 +529,7 @@ impl Drop for ExitBeacon {
 /// Single owner processes file events through a channel, avoiding `Arc<Mutex>`.
 pub struct IndexManager {
     /// The index being managed. `Arc` so `GetSnapshot` can hand out a shared reference.
+    /// Mutations use `Arc::make_mut` (zero-cost if no snapshot is alive; one COW clone otherwise).
     index: Arc<ScopeGraphIndex>,
     /// Language registry for parsing
     registry: LanguageRegistry,
@@ -548,6 +588,8 @@ impl IndexManager {
         };
 
         // Weak ref so the bg thread can't keep the channel alive past teardown.
+        // If every handle drops, the channel disconnects and the actor exits --
+        // the bg result is discarded.
         let bg_handle_weak = Arc::downgrade(&handle);
 
         // Capture the current tracing dispatcher so the background thread can use it
@@ -767,6 +809,7 @@ impl IndexManager {
                         }
                         other => {
                             // Non-file command: flush coalesced events, then handle.
+                            // Depth-1 recursion: `other` is never a file event.
                             self.apply_coalesced(coalesced, last_cache_save);
                             return self.process_command_coalesced(other, last_cache_save);
                         }
@@ -1104,7 +1147,7 @@ impl IndexManager {
         }
 
         // Check binary using a small prefix read to avoid loading large files
-        // into memory to discover they contain null bytes.
+        // into memory just to discover they contain null bytes.
         if is_binary_file(path) {
             return;
         }
@@ -1137,7 +1180,8 @@ impl IndexManager {
             return;
         };
 
-        // Intern path once, then extract and intern symbols directly from &content[byte_range].
+        // Intern path once, then extract and intern symbols directly from
+        // &content[byte_range] — no Arc<str> intermediaries.
         let idx = Arc::make_mut(&mut self.index);
         let path_id = idx.intern(&rel_str);
         intern_symbols_directly(query, tree.root_node(), &content, path_id, idx);
@@ -1237,6 +1281,7 @@ fn background_index_refresh(
         "Starting background index validation"
     );
 
+    // Phase 1: Parallel stat check on cached files to find stale/deleted
     let (stale_from_cache, deleted): (Vec<_>, Vec<_>) = cached_data
         .par_iter()
         .filter_map(|(path, cached_meta)| {
@@ -1281,6 +1326,7 @@ fn background_index_refresh(
         "Stat check complete"
     );
 
+    // Phase 2: Walk filesystem to find new files (not in cache)
     let cached_set: HashSet<&str> = cached_data.iter().map(|(p, _)| p.as_str()).collect();
     let registry = crate::languages::LanguageRegistry::new();
 
@@ -1404,6 +1450,8 @@ fn intern_symbols_directly(
 }
 
 /// Event coalescing state: deduplicates file events by path.
+/// Create/modify then remove cancels both; remove then create is a replace (`Created`).
+/// Multiple modifies collapse to one.
 struct CoalescedEvents {
     events: HashMap<PathBuf, FileEventKind>,
 }
@@ -1416,8 +1464,8 @@ impl CoalescedEvents {
     }
 
     fn add(&mut self, event: FileEvent) {
-        // Renames are special: they carry paths. Process the "to" path as
-        // Created (it needs indexing) and the "from" as Removed.
+        // Renames are special: they carry two paths. Process the "to" path
+        // as Created (it needs indexing) and the "from" as Removed.
         if event.kind == FileEventKind::Renamed
             && let Some(from) = event.paths.first()
             && let Some(to) = event.paths.get(1)
@@ -1460,7 +1508,7 @@ impl CoalescedEvents {
 }
 
 /// Check if content appears to be binary by scanning for null bytes.
-/// Uses the same heuristic as git (check first many bytes).
+/// Uses the same heuristic as git (check first 8000 bytes).
 pub fn is_binary_content(content: &[u8]) -> bool {
     content.iter().take(8000).any(|&b| b == 0)
 }
@@ -1480,6 +1528,7 @@ fn is_binary_file(path: &Path) -> bool {
 }
 
 /// Check if a path is under a hidden directory (component starting with `.`).
+/// Those paths are typically tool-managed worktrees or caches and should not be indexed.
 fn is_under_hidden_dir(path: &Path) -> bool {
     path.components().any(|c| {
         c.as_os_str()
@@ -1957,9 +2006,8 @@ mod tests {
         handle.shutdown().unwrap();
     }
 
-    // COW isolation: a snapshot taken before a mutation must keep the
-    // contents. A snapshot taken after must see the update, and both must
-    // not share backing once `make_mut` detaches.
+    // COW isolation: a snapshot taken before a mutation must keep the original contents.
+    // A snapshot taken after must see the update, and the two must not share backing once `make_mut` detaches.
     #[test]
     fn test_snapshot_isolation_across_mutation() {
         let dir = tempdir().unwrap();
@@ -1972,12 +2020,14 @@ mod tests {
 
         let handle = IndexManager::spawn(config);
 
-        // Snapshot A: sees the index.
+        // Snapshot A: sees the original index.
         let snapshot_before = handle.get_snapshot().unwrap();
         assert!(snapshot_before.has_definition("before"));
         assert!(!snapshot_before.has_definition("after"));
 
-        // Mutate: replace the file's symbol.
+        // Mutate: replace the file's symbol. While snapshot_before is alive
+        // the manager's Arc refcount is >1, so Arc::make_mut clones before
+        // mutating — that is the COW path we are testing.
         fs::write(&file_path, "fn after() {}").unwrap();
         handle
             .send_event(FileEvent::modified(file_path.clone()))
@@ -1992,7 +2042,7 @@ mod tests {
         assert!(snapshot_before.has_definition("before"));
         assert!(!snapshot_before.has_definition("after"));
 
-        // Both snapshots must not share the same backing allocation:
+        // The two snapshots must not share the same backing allocation:
         // Arc::make_mut on the manager's index detached it from snapshot_before.
         assert!(
             !std::sync::Arc::ptr_eq(&snapshot_before, &snapshot_after),
@@ -2048,6 +2098,7 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("a.rs"), "fn alpha() {}").unwrap();
 
+        // Build + cache, then fully reap so pass 2 hits the cache-load path.
         {
             let h1 = IndexManager::spawn(IndexManagerConfig::new(dir.path().to_path_buf()));
             assert!(h1.has_definition_blocking("alpha").unwrap());
@@ -2060,9 +2111,11 @@ mod tests {
             }
         }
 
-        // Make this root's background refresh sleep 3s so it is provably still running when we drop the handle below.
+        // Make this root's background refresh sleep 3s so it is provably still
+        // running when we drop the handle below.
         fs::write(dir.path().join(".bg_refresh_test_delay_ms"), "3000").unwrap();
 
+        // Pass 2: cache-load triggers a bg refresh (sleeping 3s via the marker).
         let h2 = IndexManager::spawn(IndexManagerConfig::new(dir.path().to_path_buf()));
         assert!(
             h2.has_definition_blocking("alpha").unwrap(),

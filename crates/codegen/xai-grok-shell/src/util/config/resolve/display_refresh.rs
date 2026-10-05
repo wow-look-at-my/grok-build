@@ -8,9 +8,12 @@ use xai_grok_config_types::DisplayRefreshSettings;
 pub const ENV_DISPLAY_REFRESH_PROBE_ENABLED: &str = "GROK_DISPLAY_REFRESH_PROBE_ENABLED";
 pub const ENV_DISPLAY_REFRESH_AUTO_CADENCE: &str = "GROK_DISPLAY_REFRESH_AUTO_CADENCE";
 
+/// Default motion paint cadence (~60 Hz) when env and auto-cadence do not apply.
 pub const DISPLAY_REFRESH_DEFAULT_CADENCE_MS: u64 = 16;
 
 /// Client defaults for [`DisplayRefreshPolicy`].
+/// Auto on and max_hz 240: `display_refresh_probe` telemetry showed ~0.4% error.
+/// The common 120/144/165/180/240 Hz rates clamp cleanly to 8-16 ms.
 pub const DISPLAY_REFRESH_DEFAULT_PROBE_ENABLED: bool = true;
 pub const DISPLAY_REFRESH_DEFAULT_AUTO_CADENCE_ENABLED: bool = true;
 pub const DISPLAY_REFRESH_DEFAULT_FLOOR_MS: u32 = 8;
@@ -49,8 +52,9 @@ impl Default for DisplayRefreshPolicy {
     }
 }
 
-/// Pure auto-cadence decision from policy and probe Hz (ignores env cadence
-/// knobs).
+/// Pure auto-cadence decision from policy and probe Hz (ignores env cadence knobs).
+///
+/// `ms = clamp(round(1000/hz), floor_ms, ceiling_ms)` when `auto_cadence_enabled` and `hz` is in `[min_hz, max_hz]`; otherwise no auto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AutoCadenceDecision {
     /// Derived cadence when auto applies; `None` when gated off / fail-closed.
@@ -90,6 +94,7 @@ impl DisplayRefreshLayer {
     }
 }
 
+/// Priority: 0 requirements (highest) … 4 default (lowest).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Picked {
     value: u32,
@@ -447,11 +452,13 @@ mod tests {
         assert_eq!(p.floor_ms, DISPLAY_REFRESH_DEFAULT_FLOOR_MS);
         assert_eq!(p.ceiling_ms, DISPLAY_REFRESH_DEFAULT_CEILING_MS);
 
+        // Zero clamps to 1
         let zero = toml_nested("floor_ms = 0\nceiling_ms = 0\n");
         let p = resolve_display_refresh(None, Some(&zero), None, None);
         assert_eq!(p.floor_ms, 1);
         assert_eq!(p.ceiling_ms, 1);
 
+        // Values above the env band clamp to 100
         let hi = toml_nested("floor_ms = 200\nceiling_ms = 500\n");
         let p = resolve_display_refresh(None, Some(&hi), None, None);
         assert_eq!(p.floor_ms, 100);
@@ -461,6 +468,7 @@ mod tests {
     #[test]
     fn higher_priority_bound_wins_when_inverted() {
         let _g = guard();
+        // Requirements min_hz=100 beats remote max_hz=90, so the range collapses to 100..=100
         let req = toml_nested("min_hz = 100\n");
         let remote = remote_object(DisplayRefreshSettings {
             max_hz: Some(90),

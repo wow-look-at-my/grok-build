@@ -175,8 +175,7 @@ fn row_that_cannot_resolve_paints_the_problem_verbatim() {
 
     app.update_status_line_at(now);
 
-    // A warning segment, not dim text: the row is chrome, and this is the
-    // thing in it the user has to notice
+    // A warning segment, not dim text: the row is chrome, and this is the one thing in it the user has to notice
     let problem = StatusLineDisplay::Segments(vec![StatusSegment::warn(
         "[ui.status_line] type = \"command\" needs command = \"…\"",
     )]);
@@ -266,7 +265,7 @@ fn row_that_settled_on_nothing_gives_its_line_back() {
 #[test]
 fn run_past_its_deadline_asks_for_the_tick_that_abandons_it() {
     let mut now = Instant::now();
-    // A settled row raises no other demand.
+    // A settled row raises no other demand, so the deadline is the only thing left that can ask for the tick the watchdog runs on
     let mut app = app_with_a_second_run(&mut now);
     assert_eq!(
         app.status_line_tick_demand_at(now),
@@ -441,7 +440,7 @@ fn row_belonging_to_another_agent_is_not_painted_under_this_one() {
 fn cycling_agents_cannot_re_run_a_script_faster_than_the_floor() {
     let mut now = Instant::now();
     let mut app = status_line_app(StatusLineType::Command);
-    // A second agent the row can legitimately describe.
+    // A second agent the row can legitimately describe, so the switch reaches the throttle rather than stopping at "no session to report on"
     let second = AgentId(1);
     let session = make_test_agent_session(&app, second, "second-session");
     let mut agent = AgentView::new(session, ScrollbackState::new());
@@ -489,8 +488,7 @@ fn only_a_row_that_can_change_mid_turn_holds_the_loop_awake_for_one() {
             .with_items(vec![StatusLineItem::Cwd])
             .into_config();
         app.update_status_line_at(now);
-        // Settle the run a `command` row started, so the only thing left that
-        // could ask for a tick is the turn
+        // Settle the run a `command` row just started, so the only thing left that could ask for a tick is the turn
         app.on_status_line_command_finished_at(
             now,
             RunId(0),

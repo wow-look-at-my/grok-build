@@ -1,4 +1,8 @@
 //! Merged session listing: combines local and remote session data.
+//!
+//! Used by both the ACP `x.ai/session/list` handler and the `grok sessions` CLI command.
+//! Deduplicates by session ID (remote wins) and filters local results by query.
+//! Sorts by the same key the picker UI displays (`last_active_at` falling back to `updated_at`) descending.
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -54,6 +58,7 @@ pub struct MergedSession {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_turn_summary: Option<String>,
     /// Latest session recap from `summary.json` (local sessions only).
+    /// Distinct from `last_turn_summary`; shown on `/resume` / `/session-info`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_recap: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,7 +142,7 @@ pub(crate) fn filter_summaries_by_repo(
         .collect()
 }
 
-/// Fetch those [`merge`] lanes concurrently for `cwd`.
+/// Fetch the three [`merge`] lanes concurrently for `cwd`.
 pub(crate) async fn fetch_lanes(
     client: Option<&SessionRegistryClient>,
     cwd: Option<&str>,
@@ -368,7 +373,9 @@ pub fn merge(
     }
 
     let mut merged: Vec<MergedSession> = by_id.into_values().collect();
-    // Sort newest-first by the same key the picker UI shows.
+    // Sort newest-first by the same key the picker UI shows, so the visible "time ago" column is monotonic with the list order
+    // `sort_by_cached_key` parses each timestamp once instead of on every comparison
+    // Sessions with an unparseable timestamp sort to the bottom; equal times tie-break on `session_id` ascending
     merged.sort_by_cached_key(|s| (Reverse(effective_sort_time(s)), s.session_id.clone()));
     // Dedup empty sessions BEFORE truncating so the final list has `limit` entries.
     dedup_empty_sessions(&mut merged);
@@ -376,10 +383,9 @@ pub fn merge(
     merged
 }
 
-/// Mirrors the key the session picker UI displays (`last_active_at`, falling
-/// back to `updated_at`) so the "time ago" column matches the sort order.
-/// Like the UI (`session_picker.rs`), an unparseable `last_active_at` counts
-/// as absent.
+/// Mirrors the key the session picker UI displays (`last_active_at`, falling back to `updated_at`) so the "time ago" column matches the sort order.
+/// Like the UI (`session_picker.rs`), an unparseable `last_active_at` counts as absent.
+/// `None` means neither timestamp parses; that entry sorts to the bottom.
 fn effective_sort_time(s: &MergedSession) -> Option<chrono::DateTime<chrono::FixedOffset>> {
     s.last_active_at
         .as_deref()
@@ -387,7 +393,8 @@ fn effective_sort_time(s: &MergedSession) -> Option<chrono::DateTime<chrono::Fix
         .or_else(|| chrono::DateTime::parse_from_rfc3339(&s.updated_at).ok())
 }
 
-/// Drop unused optimistic-home husks (TUI open, never sent).
+/// Drop unused optimistic-home husks (TUI open, never sent). Named empties
+/// (`/rename` before send) and explicit worktree/fork sessions stay visible.
 fn dedup_empty_sessions(sessions: &mut Vec<MergedSession>) {
     sessions.retain(|s| !is_unnamed_empty_session(s));
 }
@@ -635,7 +642,9 @@ mod tests {
 
     #[test]
     fn stale_remote_turn_counter_does_not_demote_local_sessions_to_empty() {
-        // The registry's last_turn_number is updated fire-and-forget.
+        // The registry's last_turn_number is updated fire-and-forget and can stay at 0 for sessions with real local turns
+        // Otherwise dedup_empty_sessions collapses every such same-cwd session into a single "empty draft" row
+        // That hides real sessions (and their unread indicators) from every list
         let local = vec![
             make_summary("s1", "first real session", "2026-03-01T00:00:00Z"),
             make_summary("s2", "second real session", "2026-03-01T01:00:00Z"),
@@ -802,6 +811,7 @@ mod tests {
             make_summary_with_last_active("c", "c", "2026-03-01T00:00:00Z", None),
         ];
         let merged = merge(Vec::new(), local, None, &[], 20);
+        // b: last_active 2026-06 (newest), c: updated 2026-03, a: updated 2026-01.
         assert_eq!(first(&merged).session_id, "b");
         assert_eq!(at(&merged, 1).session_id, "c");
         assert_eq!(at(&merged, 2).session_id, "a");
@@ -809,11 +819,13 @@ mod tests {
 
     #[test]
     fn unparseable_last_active_falls_back_to_updated_at() {
-        // The UI ignores a bad value and shows `updated_at`.
+        // The UI ignores a bad value and shows `updated_at`, so the sort must too
+        // Remote records carry `last_active_at`/`updated_at` as raw strings, so this path is reachable
         let mut bad_active = make_remote("bad_active", "b", "2026-07-01T00:00:00Z");
         bad_active.last_active_at = Some("garbage".into());
         let good = make_remote("good", "g", "2026-06-01T00:00:00Z");
         let merged = merge(vec![bad_active, good], Vec::new(), None, &[], 20);
+        // bad_active falls back to updated_at 2026-07 (newest), so it sorts first
         assert_eq!(first(&merged).session_id, "bad_active");
         assert_eq!(at(&merged, 1).session_id, "good");
     }
@@ -1459,6 +1471,7 @@ mod tests {
 
     #[test]
     fn limit_applied_after_merge_not_per_source() {
+        // 5 local and 5 remote sessions, limit 4
         let local: Vec<Summary> = (0..5)
             .map(|i| {
                 make_summary(
@@ -1479,6 +1492,7 @@ mod tests {
             .collect();
         let merged = merge(remote, local, None, &[], 4);
         assert_eq!(merged.len(), 4);
+        // The remote timestamps (2026-02-xx) are newer than the local ones (2026-01-xx), so all four survivors are remote
         assert!(merged.iter().all(|s| s.session_id.starts_with("remote-")));
     }
 
@@ -1497,6 +1511,7 @@ mod tests {
                 local.push(s);
             }
         }
+        // 9 local sessions across 3 cwds, limit 5
         let merged = merge(Vec::new(), local, None, &[], 5);
         assert_eq!(merged.len(), 5);
     }

@@ -29,6 +29,7 @@ struct SuggestRequest {
     #[serde(default)]
     session_id: Option<String>,
     /// Deterministic Tab mode: run only the token providers (path/file).
+    /// A history/AI row would make the set mixed (killing the pager's insta-accept/LCP behavior) and reparse history per keystroke.
     #[serde(default)]
     token_only: bool,
 }
@@ -49,10 +50,9 @@ struct GhostSuggestion {
     source: String,
 }
 
-/// One completion row. Wire-compat contract (leader mode and the cloud bridge
-/// mix shell/pager versions): `insert_text` is ALWAYS a safe whole-line
-/// replacement: range-unaware pagers `set_text` it, so it must never be a
-/// bare token.
+/// One completion row. Wire-compat contract (leader mode and the cloud bridge mix shell/pager versions): `insert_text` is ALWAYS a safe whole-line replacement: range-unaware pagers `set_text` it, so it must never be a bare token.
+/// `replace_range` and `token_text` are the additive token-in-place upgrade: byte offsets `[start, end)` into the request `text` and the text that replaces that span. Range-aware pagers use them as an ATOMIC pair.
+/// A range without `token_text` (history/AI whole-line rows, `insert_text` doubles as the span replacement) degrades to the whole-line accept.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CompletionItem {
@@ -65,7 +65,8 @@ struct CompletionItem {
     replace_range: Option<(usize, usize)>,
     #[serde(skip_serializing_if = "Option::is_none")]
     token_text: Option<String>,
-    /// The provider capped its scan/result set: the row set may be incomplete.
+    /// The provider capped its scan/result set: the row set may be incomplete, so range-aware pagers keep dropdown-only behavior.
+    /// Absent means `false` for older shells.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     truncated: bool,
 }
@@ -99,7 +100,7 @@ pub(crate) struct RankedSuggestion {
     pub(crate) source: SuggestionSource,
     pub(crate) priority: i32,
     pub(crate) is_ghost_candidate: bool,
-    /// Request-text byte range the completion targets (token for path/file, whole line for history/AI).
+    /// Request-text byte range the completion targets (token for path/file, whole line for history/AI); `None` keeps whole-line-only behavior.
     pub(crate) replace_range: Option<(usize, usize)>,
     /// Replacement for `replace_range` when it differs from `insert_text`.
     pub(crate) token_text: Option<String>,
@@ -170,6 +171,7 @@ struct SuggestPromptRequest {
     #[serde(default)]
     session_id: Option<String>,
     /// Optional model hint from the client.
+    /// One tier of the shell-side resolution in `prompt_suggest::effective_suggest_model`.
     #[serde(default)]
     model: Option<String>,
 }
@@ -181,7 +183,9 @@ struct SuggestPromptResponse {
     generation: u64,
 }
 
-/// Upper bound on the suggestion round-trip.
+/// Upper bound on the suggestion round-trip. Turn-end prediction is not latency-critical: the user is reading the agent's reply, and the idle window after a turn is typically long.
+/// But a hung call must not pin the oneshot forever. Reasoning models (e.g. `grok-4.6`) can take ~30s on a cold cache.
+/// A late suggestion is still useful; the pager's generation guard and empty-prompt gating discard it if the user moved on.
 const SUGGEST_PROMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 async fn handle_suggest_prompt(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
@@ -311,7 +315,9 @@ fn aggregate(
         .chain(file)
         .chain(ai)
         .collect();
-    // The STABLE sort is load-bearing: providers pre-rank their items and ship them at one shared priority.
+    // The STABLE sort is load-bearing: providers pre-rank their items and ship them at one shared priority per response
+    // The file provider's fuzzy tier/score/dirs-first order (see its `FILE_CMD_BOOST` doc) relies on equal-priority order surviving to the wire
+    // Do not "optimize" into `sort_unstable_by`
     all.sort_by(|a, b| b.priority.cmp(&a.priority));
 
     let ghost = all.iter().find(|s| s.is_ghost_candidate).map(|s| {
@@ -498,7 +504,7 @@ mod tests {
             ranked(4, SuggestionSource::History, false, "b"),
             ranked(3, SuggestionSource::History, false, "c"),
         ];
-        // An empty prefix never skips AI, even with multiple matches
+        // An empty prefix never skips AI, even with 3 matches
         assert!(!should_skip_ai(&m, ""));
     }
 
@@ -522,7 +528,7 @@ mod tests {
 
     #[test]
     fn context_adjusts_to_char_boundary() {
-        let text = "caf\u{00e9}"; // "cafe" with e-acute (a couple of bytes
+        let text = "caf\u{00e9}"; // "cafe" with e-acute (2 bytes for e-acute)
         assert_eq!(text.len(), 5);
         let ctx = SuggestContext::new(text.into(), 4, "/tmp".into()); // middle of 2-byte e-acute
         assert_eq!(ctx.prefix(), "caf");

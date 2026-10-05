@@ -99,7 +99,7 @@ pub(super) fn btw_mid_turn_conversation() -> Vec<ConversationItem> {
             model_fingerprint: None,
             reasoning_effort: None,
         }),
-        // Mid-turn.
+        // Mid-turn: orphaned tool_use (no result yet)
         ConversationItem::Assistant(AssistantItem {
             content: String::new().into(),
             tool_calls: vec![ToolCall {

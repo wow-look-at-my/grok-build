@@ -92,8 +92,9 @@ fn default_output_path(mode: InstrumentationMode) -> PathBuf {
     }
 }
 
-/// A wrapper layer that filters events by target name in `enabled()` directly
-/// rather than via `.with_filter()`.
+/// A wrapper layer that filters events by target name in `enabled()` directly rather than via `.with_filter()`.
+/// A `Filtered<L, F, S>` layer needs `FilterId` registration with the subscriber; boxing as `Box<dyn Layer<S>>` loses that.
+/// The result is a panic: "a Filtered layer was used, but it had no FilterId".
 pub struct TargetFilterLayer<L, S> {
     inner: L,
     target: &'static str,
@@ -331,7 +332,8 @@ pub fn install_panic_hook() {
         let location = info
             .location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()));
-        // `location` is the panic's source `file:line:col` (no user content).
+        // `location` is the panic's source `file:line:col` (no user content); the redact layer scrubs the paths
+        // It gives the panic counter a place to point without exporting the message or stack
         let err_span = tracing::info_span!(
             "internal_error",
             error_type = "panic",
@@ -341,8 +343,9 @@ pub fn install_panic_hook() {
             err_span.record("location", loc);
         }
         err_span.in_scope(|| {});
-        // The external OTEL stream gets the error class only, never the
-        // message or location `emit` is a synchronous queue push and a no-op.
+        // The external OTEL stream gets the error class only, never the message or location
+        // `emit` is a synchronous queue push and a no-op unless the stream is active
+        // The internal pipelines keep the richer span and event above
         crate::external::emit(&crate::events::InternalError {
             error_type: "panic".to_owned(),
         });
@@ -724,7 +727,7 @@ macro_rules! startup_step_timer {
 }
 
 /// A [`startup_step_timer!`] whose active/neutral names share the `<prefix>.<group>.<step>` shape,
-/// so a call site names the group and step once and both names cannot drift.
+/// so a call site names the group and step once and the two names cannot drift.
 #[macro_export]
 macro_rules! startup_step_timer_grouped {
     ($group:literal, $step:literal $(,)?) => {
@@ -736,7 +739,7 @@ macro_rules! startup_step_timer_grouped {
 }
 
 /// Returns `(InstrumentationTimer, tracing::Span)` for the group/step from one `is_active()` read, so an
-/// awaiting step names the group and step once and its names cannot pick opposite prefixes across a
+/// awaiting step names the group and step once and its two names cannot pick opposite prefixes across a
 /// startup→done transition. `.instrument` the future with the span, then drop the timer once it resolves.
 #[macro_export]
 macro_rules! startup_step_grouped {

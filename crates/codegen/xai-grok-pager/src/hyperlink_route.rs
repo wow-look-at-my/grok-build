@@ -1,4 +1,6 @@
 //! Per-environment hyperlink route policy, mirroring [`crate::clipboard::resolve_clipboard_route`].
+//!
+//! Combines the brand's [`HyperlinkCapabilities`] with multiplexer/SSH/Byobu state into a single decision struct cached once per process.
 
 use std::sync::OnceLock;
 
@@ -6,10 +8,11 @@ use crate::terminal::{Osc8Support, TerminalContext};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HyperlinkRoute {
-    /// Whether to emit OSC multiple sequences around link text.
+    /// Whether to emit OSC 8 sequences around link text.
     pub emit_osc8: bool,
-    /// Whether to include the `id=` parameter in OSC multiple sequences, so hovering highlights a link wrapped across lines as one unit.
+    /// Whether to include the `id=` parameter in OSC 8 sequences, so hovering highlights a link wrapped across lines as one unit.
     pub emit_id: bool,
+    /// Human-readable reason why OSC 8 is disabled, or `None` if enabled.
     pub skip_reason: Option<&'static str>,
 }
 
@@ -178,6 +181,7 @@ mod tests {
 
     #[test]
     fn vte_old_inside_old_tmux_blames_vte() {
+        // VTE 0.48 inside tmux 3.2: VTE is the deeper cause, so a tmux upgrade alone wouldn't fix OSC 8
         let ctx = TerminalContext {
             brand: TerminalName::Vte,
             multiplexer: MultiplexerKind::Tmux,

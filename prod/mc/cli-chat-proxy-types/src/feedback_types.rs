@@ -1,10 +1,15 @@
 //! Feedback API request and response types.
+//!
+//! These types support the feedback collection system for Grok sessions.
+//! The agent (xai-grok-shell) uses heuristics to determine when to request feedback,
+//! and clients submit feedback through these types to the feedback backend.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
-// Enums.
+// Enums
+// ============================================================================
 
 /// Type of client submitting feedback.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,8 +79,11 @@ impl std::fmt::Display for FeedbackType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RatingType {
+    /// Thumbs up/down (-1, 0, 1)
     Thumbs,
+    /// Star rating (1-5)
     Stars,
+    /// Net Promoter Score (0-10)
     Nps,
 }
 
@@ -179,6 +187,7 @@ impl std::fmt::Display for ContextType {
 pub enum FeedbackMode {
     /// Thumbs up/down
     Thumbs,
+    /// Star rating (1-5)
     Stars,
     /// Free-form text
     Text,
@@ -190,6 +199,7 @@ pub enum FeedbackMode {
     Comparison,
     /// Multi-question survey
     Survey,
+    /// Net Promoter Score (0-10)
     Nps,
     /// NPS with optional text comment
     NpsText,
@@ -212,7 +222,8 @@ impl std::fmt::Display for FeedbackMode {
 }
 
 // ============================================================================
-// Request Types.
+// Request Types
+// ============================================================================
 
 /// Allowed `feedback_type` + value-field combinations. Construct submissions
 /// via [`FeedbackSubmission::with_content`].
@@ -368,6 +379,7 @@ pub fn validate_feedback_images(images: &[FeedbackImage]) -> Result<(), Feedback
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedbackSubmission {
+    /// Session ID this feedback is for
     pub session_id: String,
 
     /// User ID (optional, extracted from auth if not provided)
@@ -388,6 +400,10 @@ pub struct FeedbackSubmission {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rating_type: Option<RatingType>,
 
+    /// Rating value (interpretation depends on rating_type)
+    /// - thumbs: -1 (down), 0 (neutral), 1 (up)
+    /// - stars: 1-5
+    /// - nps: 0-10
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rating_value: Option<i32>,
 
@@ -442,7 +458,8 @@ pub struct FeedbackSubmission {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
 
-    // === Experiment / Comparison Fields === Experiment ID (e.g. for routing experiments)
+    // === Experiment / Comparison Fields ===
+    /// Experiment ID (e.g. for routing experiments)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub experiment_id: Option<String>,
 
@@ -462,11 +479,13 @@ pub struct FeedbackSubmission {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preference_reasons: Vec<String>,
 
-    // === Request Link === Feedback request ID (links to feedback_requests table if responding to a request)
+    // === Request Link ===
+    /// Feedback request ID (links to feedback_requests table if responding to a request)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
 
-    // === Client Metadata === Client version
+    // === Client Metadata ===
+    /// Client version
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_version: Option<String>,
 
@@ -482,7 +501,9 @@ pub struct FeedbackSubmission {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
 
-    // === Feedback Context === Persisted server-side alongside the feedback record. Last user message at feedback time.
+    // === Feedback Context ===
+    // Persisted server-side alongside the feedback record.
+    /// Last user message at feedback time.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -510,6 +531,7 @@ pub struct FeedbackSubmission {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_count: Option<i64>,
 
+    /// Context window usage percentage (0–100).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_usage: Option<u8>,
 
@@ -521,7 +543,8 @@ pub struct FeedbackSubmission {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_tokens: Option<u64>,
 
-    // === Terminal Context === Terminal environment snapshot at feedback time (brand, multiplexer, SSH, etc.).
+    // === Terminal Context ===
+    /// Terminal environment snapshot at feedback time (brand, multiplexer, SSH, etc.).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_info: Option<FeedbackTerminalInfo>,
 
@@ -603,12 +626,16 @@ pub struct FeedbackTerminalInfo {
     pub is_byobu: bool,
     /// Raw `TERM` environment variable value.
     pub term_var: String,
-    /// Terminal version exactly as the emulator reports it, when known — not always the release number.
+    /// Terminal version exactly as the emulator reports it, when known — not
+    /// always the release number, since Alacritty answers with its
+    /// `alacritty_terminal` library version (release 0.15.1 arrives as
+    /// "0.25.0"). The source that reported it is deliberately not carried.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub term_version: Option<String>,
     /// tmux server version if inside tmux, otherwise "n/a".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_version: Option<String>,
+    /// Hyperlink (OSC 8) support level (e.g. "native", "hostile_parser").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hyperlink_osc8_support: Option<String>,
     /// Active clipboard legs, e.g. "native+osc52" or "native+tmux+osc52".
@@ -679,6 +706,7 @@ pub struct CreateFeedbackRequestInput {
     /// Unique request ID (UUID v7 generated by client)
     pub request_id: String,
 
+    /// Session ID this request is for
     pub session_id: String,
 
     /// Type of client making the request
@@ -691,6 +719,7 @@ pub struct CreateFeedbackRequestInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback_prompt: Option<String>,
 
+    /// Priority (1-10, higher = more important)
     #[serde(default = "default_priority")]
     pub priority: i32,
 
@@ -709,7 +738,7 @@ pub struct CreateFeedbackRequestInput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_message_ids: Vec<String>,
 
-    /// When the request expires (optional, defaults to many hours)
+    /// When the request expires (optional, defaults to 24 hours)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<DateTime<Utc>>,
 
@@ -722,6 +751,7 @@ pub struct CreateFeedbackRequestInput {
     pub trigger_condition: Option<serde_json::Value>,
 
     /// Per-turn prompt/request ID from the agent session (req_id).
+    /// Distinct from request_id which is the feedback request's own UUID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_id: Option<String>,
 }
@@ -876,7 +906,8 @@ pub struct SessionSignalsUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_model_id: Option<String>,
 
-    // === Latency Metrics === Average time to first token in milliseconds
+    // === Latency Metrics ===
+    /// Average time to first token in milliseconds
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avg_time_to_first_token_ms: Option<i64>,
 
@@ -896,7 +927,8 @@ pub struct SessionSignalsUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_sample_count: Option<i64>,
 
-    // === Inter-Token Latency (ITL) Metrics === Most recent response's ITL p50 in milliseconds
+    // === Inter-Token Latency (ITL) Metrics ===
+    /// Most recent response's ITL p50 in milliseconds
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_itl_p50_ms: Option<i64>,
     /// Most recent response's ITL p99 in milliseconds
@@ -939,14 +971,16 @@ pub struct SessionSignalsUpdate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_files_touched: Option<i64>,
 
-    // === Inference Idle Timeout Tracing === Number of inference idle timeout events in this session.
+    // === Inference Idle Timeout Tracing ===
+    /// Number of inference idle timeout events in this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inference_idle_timeouts: Option<i64>,
     /// Configured idle timeout threshold (seconds) — set once at session start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inference_idle_timeout_configured_secs: Option<i64>,
 
-    // === Doom Loop Detection Tracing === Number of doom loop warnings (model warned but continued).
+    // === Doom Loop Detection Tracing ===
+    /// Number of doom loop warnings (model warned but continued).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doom_loop_warnings: Option<i64>,
     /// Number of doom loop terminations (turn force-stopped).
@@ -964,17 +998,21 @@ pub struct SessionSignalsUpdate {
     /// Number of doom-loop recovery resamples in this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doom_loop_recovery_attempts: Option<i64>,
-    /// Completed responses accepted with confident doom-loop signals after the resample budget was spent.
+    /// Completed responses accepted with confident doom-loop signals after
+    /// the resample budget was spent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doom_loop_recovery_accepted_after_budget: Option<i64>,
-    /// Tightest (lowest-threshold) raw trigger label observed, e.g. `tail_repetition:4@thinking`.
+    /// Tightest (lowest-threshold) raw trigger label observed, e.g.
+    /// `tail_repetition:4@thinking`. Labels only — never content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doom_loop_recovery_top_trigger: Option<String>,
-    /// Stream chunks consumed by doomed attempts at their abort points, summed across resamples.
+    /// Stream chunks consumed by doomed attempts at their abort points,
+    /// summed across resamples.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doom_loop_recovery_aborted_chunks: Option<i64>,
 
-    // === GCS Upload Queue Tracing === Total items enqueued for background upload.
+    // === GCS Upload Queue Tracing ===
+    /// Total items enqueued for background upload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gcs_queue_enqueued: Option<i64>,
     /// Successful background uploads.
@@ -1065,7 +1103,8 @@ pub struct SessionSignals {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_model_id: Option<String>,
 
-    // === Latency Metrics === Average time to first token in milliseconds
+    // === Latency Metrics ===
+    /// Average time to first token in milliseconds
     #[serde(default)]
     pub avg_time_to_first_token_ms: i64,
 
@@ -1085,7 +1124,8 @@ pub struct SessionSignals {
     #[serde(default)]
     pub latency_sample_count: i64,
 
-    // === Inter-Token Latency (ITL) Metrics === Most recent response's ITL p50 in milliseconds.
+    // === Inter-Token Latency (ITL) Metrics ===
+    /// Most recent response's ITL p50 in milliseconds (nullable: None = not yet reported)
     #[serde(default)]
     pub last_itl_p50_ms: Option<i64>,
     /// Most recent response's ITL p99 in milliseconds (nullable: None = not yet reported)
@@ -1114,8 +1154,10 @@ pub struct SessionSignals {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_feedback_request_at: Option<DateTime<Utc>>,
 
+    /// Record created at
     pub created_at: DateTime<Utc>,
 
+    /// Record updated at
     pub updated_at: DateTime<Utc>,
 
     /// Additional metadata
@@ -1150,6 +1192,7 @@ pub struct FeedbackRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback_prompt: Option<String>,
 
+    /// Priority (1-10, higher = more important)
     pub priority: i32,
 
     /// Which heuristic triggered this request
@@ -1191,6 +1234,7 @@ pub struct FeedbackRequest {
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct FeedbackRequestsQuery {
+    /// Session ID to filter by
     pub session_id: String,
     /// Status filter (defaults to "pending")
     #[serde(default = "default_pending_status")]
@@ -1215,21 +1259,29 @@ fn default_pending_status() -> FeedbackRequestStatus {
 pub struct TierConfig {
     /// Whether this tier is enabled
     pub enabled: bool,
+    /// Sample rate (0.0 to 1.0, e.g., 0.0005 = 0.05%)
     pub sample_rate: f64,
     /// Minimum turns required to trigger
     pub min_turns: i64,
+    /// Minimum tool calls required (Tier 1 & 2)
     #[serde(default)]
     pub min_tool_calls: i64,
+    /// Minimum compactions required (Tier 1 & 2)
     #[serde(default)]
     pub min_compactions: i64,
+    /// Minimum errors required (Tier 2 only)
     #[serde(default)]
     pub min_errors: i64,
+    /// Whether cancellations disqualify this tier (Tier 1)
     #[serde(default)]
     pub no_cancellations: bool,
+    /// Whether cancellation is required (Tier 3)
     #[serde(default)]
     pub requires_cancellation: bool,
+    /// Whether revert is required (Tier 3)
     #[serde(default)]
     pub requires_revert: bool,
+    /// Whether at least one of cancellation/revert is required (Tier 3)
     #[serde(default)]
     pub requires_recovery: bool,
     /// Feedback mode to use when this tier triggers
@@ -1240,6 +1292,7 @@ pub struct TierConfig {
     /// Prompt text shown to users when this tier's feedback is requested
     #[serde(default)]
     pub prompt: String,
+    /// Max times this tier can trigger per session (0 = unlimited)
     #[serde(default = "default_one")]
     pub max_triggers: i32,
 }
@@ -1277,7 +1330,8 @@ pub struct FeedbackHeuristicsConfig {
     /// Configuration version (monotonically increasing)
     pub config_version: i64,
 
-    // === Global Settings === Master enable/disable switch for all feedback collection
+    // === Global Settings ===
+    /// Master enable/disable switch for all feedback collection
     pub enabled: bool,
     /// Minimum seconds between feedback requests (cooldown period)
     #[serde(default = "default_cooldown_seconds")]
@@ -1286,70 +1340,104 @@ pub struct FeedbackHeuristicsConfig {
     #[serde(default = "default_max_requests")]
     pub max_requests_per_session: i64,
 
+    // === Tier 1: Standard Engagement ===
+    /// Whether Tier 1 is enabled
     #[serde(default = "default_true")]
     pub tier1_enabled: bool,
+    /// Sample rate for Tier 1 (0.0-1.0)
     #[serde(default = "default_tier1_sample_rate")]
     pub tier1_sample_rate: f64,
+    /// Minimum turns for Tier 1
     #[serde(default = "default_tier1_min_turns")]
     pub tier1_min_turns: i64,
+    /// Minimum tool calls for Tier 1
     #[serde(default = "default_tier1_min_tool_calls")]
     pub tier1_min_tool_calls: i64,
+    /// Minimum compactions for Tier 1
     #[serde(default = "default_tier1_min_compactions")]
     pub tier1_min_compactions: i64,
+    /// Whether Tier 1 requires no cancellations
     #[serde(default = "default_true")]
     pub tier1_no_cancellations: bool,
+    /// Feedback mode for Tier 1
     #[serde(default = "default_feedback_mode_thumbs")]
     pub tier1_feedback_mode: String,
+    /// Whether Tier 1 feedback requests are dismissible
     #[serde(default = "default_true")]
     pub tier1_dismissible: bool,
+    /// Prompt text shown to users when Tier 1 feedback is requested
     #[serde(default = "default_tier1_prompt")]
     pub tier1_prompt: String,
+    /// Max times Tier 1 can trigger per session (0 = unlimited)
     #[serde(default = "default_one")]
     pub tier1_max_triggers: i32,
 
+    // === Tier 2: Complex Session with Recovery ===
+    /// Whether Tier 2 is enabled
     #[serde(default = "default_true")]
     pub tier2_enabled: bool,
+    /// Sample rate for Tier 2 (0.0-1.0)
     #[serde(default = "default_tier2_sample_rate")]
     pub tier2_sample_rate: f64,
+    /// Minimum turns for Tier 2
     #[serde(default = "default_tier2_min_turns")]
     pub tier2_min_turns: i64,
+    /// Minimum tool calls for Tier 2
     #[serde(default = "default_tier2_min_tool_calls")]
     pub tier2_min_tool_calls: i64,
+    /// Minimum compactions for Tier 2
     #[serde(default = "default_tier2_min_compactions")]
     pub tier2_min_compactions: i64,
+    /// Minimum errors for Tier 2
     #[serde(default = "default_tier2_min_errors")]
     pub tier2_min_errors: i64,
+    /// Feedback mode for Tier 2
     #[serde(default = "default_feedback_mode_thumbs_text")]
     pub tier2_feedback_mode: String,
+    /// Whether Tier 2 feedback requests are dismissible
     #[serde(default = "default_true")]
     pub tier2_dismissible: bool,
+    /// Prompt text shown to users when Tier 2 feedback is requested
     #[serde(default = "default_tier2_prompt")]
     pub tier2_prompt: String,
+    /// Max times Tier 2 can trigger per session (0 = unlimited)
     #[serde(default = "default_one")]
     pub tier2_max_triggers: i32,
 
+    // === Tier 3: Recovery from Friction ===
+    /// Whether Tier 3 is enabled
     #[serde(default = "default_true")]
     pub tier3_enabled: bool,
+    /// Sample rate for Tier 3 (0.0-1.0)
     #[serde(default = "default_tier3_sample_rate")]
     pub tier3_sample_rate: f64,
+    /// Minimum turns for Tier 3
     #[serde(default = "default_tier3_min_turns")]
     pub tier3_min_turns: i64,
+    /// Whether Tier 3 requires at least one cancellation
     #[serde(default)]
     pub tier3_requires_cancellation: bool,
+    /// Whether Tier 3 requires at least one revert
     #[serde(default)]
     pub tier3_requires_revert: bool,
+    /// Whether Tier 3 requires recovery (cancellation OR revert)
     #[serde(default = "default_true")]
     pub tier3_requires_recovery: bool,
+    /// Feedback mode for Tier 3
     #[serde(default = "default_feedback_mode_stars_text")]
     pub tier3_feedback_mode: String,
+    /// Whether Tier 3 feedback requests are dismissible
     #[serde(default = "default_true")]
     pub tier3_dismissible: bool,
+    /// Prompt text shown to users when Tier 3 feedback is requested
     #[serde(default = "default_tier3_prompt")]
     pub tier3_prompt: String,
+    /// Max times Tier 3 can trigger per session (0 = unlimited)
     #[serde(default = "default_one")]
     pub tier3_max_triggers: i32,
 
-    // === Metadata === When this config was created
+    // === Metadata ===
+    /// When this config was created
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
     /// When this config was last updated
@@ -1362,7 +1450,8 @@ pub struct FeedbackHeuristicsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    // === Lifecycle === When this config becomes effective
+    // === Lifecycle ===
+    /// When this config becomes effective
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_from: Option<DateTime<Utc>>,
     /// When this config expires
@@ -1387,6 +1476,7 @@ impl Default for FeedbackHeuristicsConfig {
             enabled: true,
             cooldown_seconds: 300,
             max_requests_per_session: 3,
+            // Tier 1
             tier1_enabled: true,
             tier1_sample_rate: 0.0005,
             tier1_min_turns: 10,
@@ -1397,6 +1487,7 @@ impl Default for FeedbackHeuristicsConfig {
             tier1_dismissible: true,
             tier1_prompt: default_tier1_prompt(),
             tier1_max_triggers: 1,
+            // Tier 2
             tier2_enabled: true,
             tier2_sample_rate: 0.0002,
             tier2_min_turns: 15,
@@ -1407,6 +1498,7 @@ impl Default for FeedbackHeuristicsConfig {
             tier2_dismissible: true,
             tier2_prompt: default_tier2_prompt(),
             tier2_max_triggers: 1,
+            // Tier 3
             tier3_enabled: true,
             tier3_sample_rate: 0.0001,
             tier3_min_turns: 20,
@@ -1433,6 +1525,7 @@ impl Default for FeedbackHeuristicsConfig {
 }
 
 impl FeedbackHeuristicsConfig {
+    /// Get the Tier 1 configuration as a TierConfig.
     pub fn tier1_config(&self) -> TierConfig {
         TierConfig {
             enabled: self.tier1_enabled,
@@ -1452,6 +1545,7 @@ impl FeedbackHeuristicsConfig {
         }
     }
 
+    /// Get the Tier 2 configuration as a TierConfig.
     pub fn tier2_config(&self) -> TierConfig {
         TierConfig {
             enabled: self.tier2_enabled,
@@ -1471,6 +1565,7 @@ impl FeedbackHeuristicsConfig {
         }
     }
 
+    /// Get the Tier 3 configuration as a TierConfig.
     pub fn tier3_config(&self) -> TierConfig {
         TierConfig {
             enabled: self.tier3_enabled,
@@ -1575,7 +1670,9 @@ pub fn parse_feedback_mode_str(s: &str) -> FeedbackMode {
     }
 }
 
-// ============================================================================ Session Turn Deltas — per-turn time-series data.
+// ============================================================================
+// Session Turn Deltas — per-turn time-series data for regression tracking
+// ============================================================================
 
 /// How a turn ended, as reported on [`SessionTurnDelta::turn_outcome`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1584,7 +1681,8 @@ pub enum TurnOutcome {
     Completed,
     Cancelled,
     Error,
-    /// Any other label a client sent.
+    /// Any other label a client sent. Kept so an unrecognized label lands in the `other` metric
+    /// bucket instead of rejecting the whole delta.
     #[serde(other)]
     Other,
 }
@@ -1604,7 +1702,7 @@ impl TurnOutcome {
 /// Per-turn delta sent once per turn via `POST /v1/sessions/{session_id}/turn-deltas`: one
 /// time-series row per turn for regression detection and session-level analytics.
 ///
-/// Each field falls into one of categories:
+/// Each field falls into one of four categories:
 ///
 /// - **Delta**: the change since the previous turn end, computed as `current_cumulative - previous_turn_snapshot`.
 ///   For the first turn, the previous snapshot is zero.
@@ -1615,13 +1713,17 @@ impl TurnOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTurnDelta {
-    // ── Context fields ────────────────────────────────────────────────── **[context]** Which client produced this record.
+    // ── Context fields ──────────────────────────────────────────────────
+    /// **[context]** Which client produced this record (e.g. CLI, TUI).
     pub client_type: ClientType,
 
     /// **[context]** 1-based turn number at the time of this snapshot.
+    /// Equals the cumulative `turn_count` from `SessionSignals`.
     pub turn_number: i64,
 
-    // ── Delta counters ────────────────────────────────────────────────── Each.
+    // ── Delta counters ──────────────────────────────────────────────────
+    // Each is `current_cumulative - previous_turn_snapshot`.
+    /// **[delta]** Number of tool calls made during this turn.
     pub delta_tool_calls: i64,
 
     /// **[delta]** Number of tool calls that failed during this turn.
@@ -1648,19 +1750,25 @@ pub struct SessionTurnDelta {
     /// **[delta]** Number of negative ratings (thumbs-down) during this turn.
     pub delta_negative_ratings: i64,
 
-    /// **[delta]** Number of assistant messages produced during this turn.
+    /// **[delta]** Number of assistant messages produced during this turn (more than one when tool-call rounds generate intermediate messages).
     pub delta_assistant_messages: i64,
 
-    /// **[delta]** Number of long idle pauses (over multiple s) that occurred during this turn.
+    /// **[delta]** Number of long idle pauses (over 60 s) that occurred during this turn.
     pub delta_long_pauses: i64,
 
     /// **[delta]** Number of successful tool uses during this turn.
+    /// Derived as `delta_tool_calls − delta_tool_failures`.
     pub delta_successful_tool_uses: i64,
 
-    // ── Turn-level snapshot values ────────────────────────────────────── **[turn-level]** Consecutive cancellation streak.
+    // ── Turn-level snapshot values ──────────────────────────────────────
+    /// **[turn-level]** Consecutive cancellation streak at turn end.
+    /// A point-in-time snapshot, not a diff; it resets to 0 when a turn completes normally.
     pub consecutive_cancellations: i64,
 
-    // ── Turn-level latency ────────────────────────────────────────────── Absolute measurements.
+    // ── Turn-level latency ──────────────────────────────────────────────
+    // Absolute measurements for this turn's inference request only.
+    // `None` when no inference occurred during the turn.
+    /// **[turn-level]** Time-to-first-token for this turn's model response (milliseconds). `None` when no inference occurred.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_to_first_token_ms: Option<i64>,
 
@@ -1669,6 +1777,7 @@ pub struct SessionTurnDelta {
     pub total_response_time_ms: Option<i64>,
 
     /// **[turn-level]** Inter-token latency p50 for this turn (ms).
+    /// Computed from the token intervals collected during this turn only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub itl_p50_ms: Option<i64>,
 
@@ -1684,14 +1793,19 @@ pub struct SessionTurnDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub itl_mean_ms: Option<i64>,
 
-    // ── Accumulated / snapshot session-level values ───────────────────── **[accumulated]** Current context window usage as a percentage.
+    // ── Accumulated / snapshot session-level values ─────────────────────
+    /// **[accumulated]** Current context window usage as a percentage (0 to 100) at turn end.
+    /// Read from cumulative `SessionSignals.context_window_usage`.
     pub context_window_usage: i64,
 
     /// **[accumulated]** Primary model ID (most recently used model).
+    /// Read from cumulative `SessionSignals.primary_model_id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
 
-    // ── Turn-level outcome / served checkpoint ────────────────────────── **[turn-level]** Whole-turn wall-clock ms.
+    // ── Turn-level outcome / served checkpoint ──────────────────────────
+    /// **[turn-level]** Whole-turn wall-clock ms, from the turn task's install to its terminal, on
+    /// the same clock for every outcome. One row per turn, so a multi-round turn spans all rounds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_duration_ms: Option<i64>,
 
@@ -1703,28 +1817,35 @@ pub struct SessionTurnDelta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_fingerprint: Option<String>,
 
-    // ── Turn-level tool / error detail ────────────────────────────────── **[turn-level]** Distinct tool names invoked during this turn.
+    // ── Turn-level tool / error detail ──────────────────────────────────
+    /// **[turn-level]** Distinct tool names invoked during this turn (deduplicated, sorted, capped at 100 entries). Reset each turn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools_used_this_turn: Vec<String>,
 
-    /// **[turn-level]** Error type strings that occurred during this turn.
+    /// **[turn-level]** Error type strings that occurred during this turn (e.g. `"timeout"`, `"rate_limit"`, `"tool_error"`). Reset each turn.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub error_types_this_turn: Vec<String>,
 
-    /// **[turn-level]** Per-tool success/failure breakdown for this turn, a JSON-serialized array.
+    /// **[turn-level]** Per-tool success/failure breakdown for this turn, a JSON-serialized array of `{ tool_name, successes, failures }`.
+    /// Empty string when no tool calls occurred. Reset each turn.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tool_outcomes: String,
 
-    // ── Accumulated totals ────────────────────────────────────────────── **[accumulated]** Total tool calls.
+    // ── Accumulated totals ──────────────────────────────────────────────
+    /// **[accumulated]** Total tool calls since session start.
+    /// Read from cumulative `SessionSignals.tool_call_count`.
     pub cumulative_tool_calls: i64,
 
-    /// **[accumulated]** Total errors since session start. Read from cumulative `SessionSignals.error_count`.
+    /// **[accumulated]** Total errors since session start.
+    /// Read from cumulative `SessionSignals.error_count`.
     pub cumulative_errors: i64,
 
     /// **[accumulated]** Wall-clock seconds elapsed since session start.
+    /// Read from cumulative `SessionSignals.session_duration_seconds`.
     pub session_duration_seconds: i64,
 
     /// **[accumulated]** Sum of token counts across all compactions since session start.
+    /// Read from `SessionSignals.total_tokens_before_compaction`.
     #[serde(default)]
     pub total_tokens_before_compaction: i64,
 
@@ -1736,19 +1857,24 @@ pub struct SessionTurnDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
 
-    /// **[context]** Wall-clock time when the session was created.
+    /// **[context]** Wall-clock time when the session was created. Used for
+    /// table partitioning in the analytics backend.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_start_at: Option<DateTime<Utc>>,
 
-    // ── Feedback state ────────────────────────────────────────────────── **[accumulated]** Total number.
+    // ── Feedback state ──────────────────────────────────────────────────
+    /// **[accumulated]** Total number of feedback requests sent this session.
+    /// Supplied by `FeedbackHeuristics`, not the signals actor.
     #[serde(default)]
     pub feedback_requests_sent: i64,
 
     /// **[accumulated]** Wall-clock timestamp of the most recent feedback request sent this session.
+    /// Supplied by `FeedbackHeuristics`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_feedback_request_at: Option<DateTime<Utc>>,
 
-    // ── Turn-level token counts ───────────────────────────────────────── **[turn-level]** Number of response.
+    // ── Turn-level token counts ─────────────────────────────────────────
+    /// **[turn-level]** Number of response (completion minus reasoning) tokens generated during this turn. `None` when no inference occurred.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_tokens: Option<i64>,
 
@@ -1756,7 +1882,10 @@ pub struct SessionTurnDelta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_tokens: Option<i64>,
 
-    // ── LOC Attribution Deltas ────────────────────────────────────────── Each is `current_cumulative - previous_turn_snapshot`.
+    // ── LOC Attribution Deltas ──────────────────────────────────────────
+    // Each is `current_cumulative - previous_turn_snapshot`, same as the counter deltas above
+    // Tracks lines-of-code changes attributed to the agent or the human during this turn
+    /// **[delta]** Lines added by the agent during this turn.
     #[serde(default)]
     pub delta_agent_lines_added: i64,
 
@@ -1801,6 +1930,9 @@ pub struct SessionTurnDelta {
     pub delta_total_files_touched: i64,
 
     /// **[context]** Whether LOC (lines-of-code) attribution tracking was enabled for this session.
+    /// When `false`, all `delta_*` LOC fields above are meaningless zeros; the hunk tracker was never spawned.
+    /// When `true`, zeros mean "tracking was active but no code changed."
+    /// Defaults to `false` for backwards-compat with old clients that don't send this field.
     #[serde(default)]
     pub loc_tracking_enabled: bool,
 }
@@ -2089,6 +2221,7 @@ mod tests {
             !delta.loc_tracking_enabled,
             "old clients should default to false"
         );
+        // LOC fields should be 0 (serde default)
         assert_eq!(delta.delta_agent_lines_added, 0);
 
         // New agent with LOC tracking enabled
@@ -2125,6 +2258,7 @@ mod tests {
     /// and that new agents' cohort fields are parsed correctly.
     #[test]
     fn feedback_heuristics_config_cohort_backward_compat() {
+        // Old config: no cohort fields → defaults to ["all"] and priority 0
         let json_no_cohorts = r#"{"config_id":"v1","config_version":1,"enabled":true}"#;
         let config: FeedbackHeuristicsConfig = serde_json::from_str(json_no_cohorts).unwrap();
         assert_eq!(config.target_user_cohorts, vec!["all"]);

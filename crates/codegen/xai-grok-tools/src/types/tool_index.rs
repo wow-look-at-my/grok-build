@@ -1,4 +1,10 @@
 //! Backend-agnostic trait for tool search/discovery.
+//!
+//! `ToolSearchIndex` is defined in `xai-grok-tools` to keep the tool crate
+//! backend-agnostic. The concrete implementation lives in `xai-grok-shell`
+//! (which has access to `McpState` and `FinalizedToolset`).
+//!
+//! Same pattern as `MemoryBackend` for `memory_search`.
 
 use std::sync::Arc;
 
@@ -15,7 +21,8 @@ pub struct ToolSearchResult {
     pub score: f32,
     /// Parameter names from the tool's input schema.
     pub parameters: Vec<String>,
-    /// Full JSON Schema for the tool's input — included so the model can construct `use_tool` calls.
+    /// Full JSON Schema for the tool's input — included so the model can
+    /// construct `use_tool` calls with the correct argument structure.
     pub input_schema: serde_json::Value,
 }
 
@@ -25,7 +32,8 @@ pub struct ToolSearchResult {
 pub struct SearchSnapshot {
     pub results: Vec<ToolSearchResult>,
     pub total_hidden_tools: usize,
-    /// `true` when the index reflects all available tools.
+    /// `true` when the index reflects all available tools. `false` when the
+    /// index source is still warming up (results may be incomplete).
     pub is_ready: bool,
 }
 
@@ -42,18 +50,22 @@ pub struct ServerSummary {
     pub tool_names: Vec<String>,
 }
 
-/// Backend-agnostic interface for searching tools by keyword. Implementations
-/// must be `Send + Sync` to be stored as `Arc<dyn ToolSearchIndex>` in
-/// `Resources`.
+/// Backend-agnostic interface for searching tools by keyword. Implementations must be `Send + Sync`
+/// to be stored as `Arc<dyn ToolSearchIndex>` in `Resources`. No MCP-specific concepts — the
+/// concrete implementation in `xai-grok-shell` maps `mcp_initialized` to `is_ready`.
 pub trait ToolSearchIndex: Send + Sync {
     /// Search and return results + metadata from a single consistent snapshot.
     fn search_snapshot(&self, query: &str, limit: usize) -> SearchSnapshot;
 
-    /// List the unique MCP servers in the index with their tool counts.
+    /// List the unique MCP servers in the index with their tool counts. Used to build the
+    /// system-reminder listing connected servers, so the model knows which integrations are
+    /// available.
     fn list_server_summaries(&self) -> Vec<ServerSummary>;
 }
 
-/// Resource wrapper for injecting a `ToolSearchIndex` into `Resources`.
+/// Resource wrapper for injecting a `ToolSearchIndex` into `Resources`. Same pattern as
+/// `MemoryBackend` — stored as an ephemeral resource (not serialized), injected by `xai-grok-shell`
+/// after MCP initialization.
 #[derive(Clone)]
 pub struct ToolIndex(pub Arc<dyn ToolSearchIndex>);
 

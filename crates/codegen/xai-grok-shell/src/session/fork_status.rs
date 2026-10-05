@@ -1,4 +1,5 @@
-//! One-shot status written when a session is forked.
+//! One-shot status written when a session is forked, consumed on the first
+//! prompt so the model learns this is a new session and what was not carried.
 
 use std::path::Path;
 

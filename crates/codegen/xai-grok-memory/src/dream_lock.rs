@@ -1,4 +1,9 @@
 //! Coordination for background memory consolidation ("dream").
+//! [`DreamLock`] is a mutex file acquired with an atomic exclusive create and tagged with an
+//! owner token (`<pid> <nonce>`): at most one acquirer can create it, and a guard removes only
+//! the file it still owns, so a stale reclaim can never make a guard delete another holder's lock.
+//! A separate marker records the last consolidation, stamped only when a dream commits so a crash
+//! reopens the gate. [`sessions_since`] counts session files modified after a given timestamp.
 
 use std::fs;
 use std::io::{self, Write};
@@ -7,7 +12,7 @@ use std::time::SystemTime;
 
 const MUTEX_FILE_NAME: &str = ".dream-mutex";
 const CONSOLIDATED_FILE_NAME: &str = ".dream-consolidated";
-/// Pre-upgrade workspaces recorded the last consolidation as this file's mtime; new code never writes it.
+/// Pre-upgrade workspaces recorded the last consolidation as this file's mtime; new code never writes it, so it serves as a read-only fallback.
 const LEGACY_MARKER_FILE_NAME: &str = ".dream-lock";
 
 fn consolidated_path(mutex_path: &Path) -> PathBuf {
@@ -59,12 +64,13 @@ fn is_process_alive(pid: u32) -> bool {
         OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
     };
 
-    // SAFETY: OpenProcess returns Err on absence/permission failure.
+    // SAFETY: OpenProcess returns Err on absence/permission failure;
+    // PROCESS_SYNCHRONIZE is the minimum right needed for WaitForSingleObject.
     let Ok(handle) = (unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }) else {
         return false;
     };
 
-    // SAFETY: handle is valid; timeout means "poll, don't block."
+    // SAFETY: handle is valid; timeout 0 means "poll, don't block."
     let wait_result = unsafe { WaitForSingleObject(handle, 0) };
     // SAFETY: handle is owned by us; close regardless of wait result.
     let _ = unsafe { CloseHandle(handle) };
@@ -188,8 +194,9 @@ pub struct DreamLockGuard {
 }
 
 impl DreamLockGuard {
-    /// Writes the consolidation marker and returns whether it durably landed;
-    /// `self` drops at the end, so the mutex is released either way.
+    /// Writes the consolidation marker and returns whether it durably landed; `self` drops at the
+    /// end, so the mutex is released either way. A `false` return means the caller should treat the
+    /// dream as not consolidated (the gate stays open for a retry).
     #[must_use]
     pub fn commit(self) -> bool {
         write_consolidated_marker(&self.path).is_ok()
@@ -197,7 +204,7 @@ impl DreamLockGuard {
 }
 
 impl Drop for DreamLockGuard {
-    /// Release the mutex, but only if we still own it.
+    /// Release the mutex, but only if we still own it. After a stale reclaim (for example a wall-clock jump) the path may hold another session's token; removing it would let a third session join, so we leave it. A crash skips this, but the token names a now-dead PID that `holder_is_reclaimable` reclaims immediately.
     fn drop(&mut self) {
         if fs::read_to_string(&self.path).is_ok_and(|c| c.trim() == self.token) {
             let _ = fs::remove_file(&self.path);
@@ -352,7 +359,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let lock = DreamLock::new(dir.path());
 
-        // Same-process acquirers share a PID, so exclusion must come from the atomic create.
+        // Two same-process acquirers share a PID, so exclusion must come from the atomic create.
         let first = lock.acquire(300).unwrap().expect("first acquire wins");
         assert!(
             lock.acquire(300).unwrap().is_none(),
@@ -408,7 +415,8 @@ mod tests {
         let original = fs::metadata(dir.path()).unwrap().permissions();
         fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).unwrap();
 
-        // A root/CAP_DAC_OVERRIDE environment ignores the mode.
+        // A root/CAP_DAC_OVERRIDE environment ignores the mode and would let the write succeed,
+        // so skip rather than assert a failure this platform cannot produce.
         let writable_anyway = fs::write(dir.path().join(".perm-probe"), b"x").is_ok();
         let _ = fs::remove_file(dir.path().join(".perm-probe"));
         if writable_anyway {
@@ -461,6 +469,7 @@ mod tests {
         let old = SystemTime::now() - Duration::from_secs(600);
         filetime::set_file_mtime(&lock.path, FileTime::from_system_time(old)).unwrap();
 
+        // Age 600 exceeds stale_secs 300, so the live PID does not block
         assert!(
             lock.try_acquire(300).unwrap().is_some(),
             "stale lock should be reclaimable"
@@ -517,7 +526,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let lock = DreamLock::new(dir.path());
 
-        // A holder that created the file but has not yet written its token must not be reclaimed.
+        // A holder that created the file but has not yet written its token must not be reclaimed,
+        // or two acquirers would run at once. Only the stale-age check may take it.
         fs::write(&lock.path, "").unwrap();
         assert!(
             lock.try_acquire(300).unwrap().is_none(),

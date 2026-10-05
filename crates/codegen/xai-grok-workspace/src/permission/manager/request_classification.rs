@@ -12,14 +12,15 @@ pub(super) const AUTO_DENY_GUIDANCE: &str = "Take a safer approach that stays wi
      alternative exists, ask the user how to proceed.";
 
 /// Auto-denial counters snapshotted for one decision.
+/// They live in their own `Cell` so the finalizer reads the value meant for the event even after the running counters are reset later in the arm.
 #[derive(Clone, Copy)]
 pub(super) struct DenialCounters {
     pub(super) consecutive: u32,
     pub(super) total: u32,
 }
 
-/// Classifier provenance for one request, plus the manager-only `NotWired`
-/// that auto_mode's [`ClassifierSource`] cannot express.
+/// Classifier provenance for one request, plus the manager-only `NotWired` that auto_mode's [`ClassifierSource`] cannot express.
+/// It never reports `heuristic` for a request no classifier actually judged.
 #[derive(Clone, Copy)]
 pub(super) enum ClassificationSource {
     /// A classifier ran and produced this provenance (llm/heuristic/timeout/…).
@@ -46,17 +47,19 @@ pub(super) struct ClassificationOutcome {
     pub(super) latency_ms: Option<u64>,
 }
 
-/// The per-request classification state: route, frozen assessment, and typed
-/// outcome in one value, so impossible combinations are unrepresentable.
+/// The per-request classification state: route, frozen assessment, and typed outcome in one value, so impossible combinations are unrepresentable.
+/// The permission event is projected from it once.
 #[derive(Default)]
 pub(super) enum RequestClassification {
     /// The request never entered the Auto classifier route (fast path skipped, non-Bash, or Auto disabled).
+    /// Event `security_findings`/verdict/source stay `None`.
     #[default]
     NotClassified,
     /// Auto fast-path allow: no side query and no assessment.
+    /// Event reports `classifier_source = fast_path` with no findings/verdict.
     FastPath,
-    /// Entered the classifier route with this frozen assessment (the exact
-    /// set handed to the classifier).
+    /// Entered the classifier route with this frozen assessment (the exact set handed to the classifier).
+    /// `outcome` is `None` only when the side query was abandoned (requester gone mid-classify), so findings survive without verdict/source/latency.
     Classified {
         assessment: BashSecurityAssessment,
         outcome: Option<ClassificationOutcome>,

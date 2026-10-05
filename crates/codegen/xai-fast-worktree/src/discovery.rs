@@ -1,4 +1,11 @@
 //! Filesystem scanner for discovering worktrees not yet tracked in the DB.
+//!
+//! Each managed root under the grok home is read on the same rule the rest of
+//! the crate uses ([`crate::managed_root::is_worktree_dir`]): a directory is a
+//! checkout when it carries a `.git` entry. Two shapes have written that root
+//! over the versions, and both are read: the fork's, which buckets checkouts
+//! per repository at `<root>/<repo>/<label>`, and the unforked one, which puts
+//! the checkout directly under the root at `<root>/<label>`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -227,7 +234,7 @@ pub fn rebuild_worktree_db(
     db: &crate::db::WorktreeDb,
     grok_home: &Path,
 ) -> anyhow::Result<RebuildReport> {
-    // Same XDG/HOME candidates as pin-GC / marker lookup: not env-only.
+    // Same XDG/HOME candidates as pin-GC / marker lookup : not env-only.
     rebuild_worktree_db_from_grove_dirs(db, grok_home, &crate::nfs::candidate_data_dirs())
 }
 
@@ -252,7 +259,9 @@ fn rebuild_worktree_db_from_grove_dirs(
     let now = now_epoch_secs();
     let roots = managed_worktree_roots(grok_home);
 
-    // Union grove identities first so later walks skip those dests and never touch a wedged NFS mount.
+    // Union grove identities first so later walks skip those dests and never
+    // touch a wedged NFS mount. Registering NFS first also keeps a grove dest
+    // from being labeled linked/standalone (sweep_dead would exists() it).
     let mut seen = HashSet::new();
     let mut counted_nfs = HashSet::new();
     let recs = db.list(&crate::db::ListFilter {
@@ -261,7 +270,9 @@ fn rebuild_worktree_db_from_grove_dirs(
     })?;
     let existing: Vec<crate::nfs::NfsIdentity> =
         crate::nfs::identities_from_worktree_records(&recs);
-    // Union every grove data dir before writing metadata.
+    // Union every grove data dir before writing metadata. A leftover
+    // ~/.grok/grove marker must not rewrite backing/source_pin alone and
+    // outrank the live XDG identity (pin-GC already unions first).
     let mut by_id: HashMap<String, crate::nfs::NfsIdentity> = HashMap::new();
     for data_dir in grove_data_dirs {
         if data_dir.as_os_str().is_empty() || !seen.insert(data_dir.clone()) {
@@ -316,10 +327,13 @@ fn register_nfs_from_union(
         }
     }
     let mut ordered: Vec<_> = by_id.into_iter().collect();
-    // HashMap order would let a stale lower-rank marker claim dest first and permanently skip the live identity.
+    // HashMap order would let a stale lower-rank marker claim dest first and
+    // permanently skip the live identity. Highest rank first; id tie-break.
     ordered.sort_by(|a, b| b.1.rank.cmp(&a.1.rank).then_with(|| a.0.cmp(&b.0)));
     let mut skip_dests: Vec<PathBuf> = Vec::new();
-    // Hang-avoidance skips stay in skip_dests (do not poke a wedged mount).
+    // Hang-avoidance skips stay in skip_dests (don't poke a wedged mount) but
+    // are not claims: dest_taken must ignore them or a rank-3 aborted journal
+    // blocks a live identity at the same dest.
     let mut claimed_dests: Vec<PathBuf> = Vec::new();
     for (id, idn) in ordered {
         if let Some(dest) = idn
@@ -392,12 +406,14 @@ fn register_nfs_from_union(
             continue;
         };
         let dest = physical_nfs_dest(dest);
-        // Lexical match only: db.get canonicalize() hangs on wedged NFS.
+        // Lexical match only : db.get canonicalize() hangs on wedged NFS.
         if recs
             .iter()
             .any(|r| crate::nfs::dest_paths_equivalent(&r.path, &dest))
         {
-            // Dest already registered: never overlay backing/source_pin (stale marker would make dead-NFS GC drop the live pin).
+            // Dest already registered: never overlay backing/source_pin (stale
+            // marker would make dead-NFS GC drop the live pin) or flip a
+            // linked/copy row to nfs. Always skip so GC cannot touch a live tree.
             claim_nfs_dest(dest, &mut skip_dests, &mut claimed_dests);
             report.already_tracked += 1;
             continue;
@@ -412,7 +428,7 @@ fn register_nfs_from_union(
             .is_none_or(|b| b.as_os_str().is_empty())
         {
             tracing::warn!(id, "rebuild skipped NFS identity with empty backing");
-            // In-flight mkdir dest must be skipped even if unmounted.
+            // In-flight mkdir dest must be skipped even if currently unmounted.
             claim_nfs_dest(dest, &mut skip_dests, &mut claimed_dests);
             continue;
         }
@@ -626,7 +642,9 @@ mod tests {
 
     #[test]
     fn rebuild_keeps_same_basename_worktrees_in_different_repos() {
-        // The cross-repo eviction bug: repos each have a `wt-abc` worktree.
+        // The cross-repo eviction bug: two repos each have a `wt-abc`
+        // worktree. Discovery + rebuild must register BOTH (distinct ids), not
+        // collapse them into one and then permanently skip the other.
         let tmp = tempfile::TempDir::new().unwrap();
         let grok_home = tmp.path();
 
@@ -861,6 +879,8 @@ mod tests {
         paths
     }
 
+    /// Criterion 1: the shape an unforked grok build leaves -- the checkout is a
+    /// direct child of the root -- is one worktree, described by its own `.git`.
     #[test]
     fn discovers_a_checkout_sitting_directly_under_the_managed_root() {
         xai_test_utils::require_git!();
@@ -890,6 +910,7 @@ mod tests {
         );
     }
 
+    /// Criterion 2: the bucketed depth and the pool root are still read.
     #[test]
     fn discovers_every_shape_the_old_location_has_been_written_in() {
         xai_test_utils::require_git!();
@@ -922,6 +943,9 @@ mod tests {
         );
     }
 
+    /// Criteria 3 and 6's negative: a plain directory under a managed root is
+    /// not a checkout -- here the go build cache a bucket actually holds on the
+    /// developer's machine -- and neither is anything below a checkout.
     #[test]
     fn reports_no_record_for_a_directory_that_is_not_a_checkout() {
         xai_test_utils::require_git!();
@@ -952,6 +976,7 @@ mod tests {
         );
     }
 
+    /// Criterion 5: the rebuild registers both depths and adds nothing twice.
     #[test]
     fn rebuild_registers_both_depths_once_and_adds_nothing_on_a_second_pass() {
         xai_test_utils::require_git!();
@@ -987,6 +1012,7 @@ mod tests {
         assert_eq!(second.already_tracked, 2, "a second pass adds nothing");
     }
 
+    /// Criterion 7: discovery and the rebuild it feeds are read-only.
     #[test]
     fn a_scan_and_a_rebuild_leave_the_checkout_on_disk_as_they_found_it() {
         xai_test_utils::require_git!();

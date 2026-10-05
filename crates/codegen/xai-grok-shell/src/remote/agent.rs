@@ -20,9 +20,11 @@ pub use prod_mc_cli_chat_proxy_types::{
 };
 
 // ============================================================================
-// Sandbox Client.
+// Sandbox Client
+// ============================================================================
 
-/// HTTP client for interacting with the sandbox API via cli-chat-proxy.
+/// HTTP client for interacting with the sandbox API via cli-chat-proxy. Path parameters (`session_id`, `environment_id`) are interpolated directly into URLs without percent-encoding.
+/// This is safe because these IDs are UUIDs in practice. If ID formats ever change to include URL-unsafe characters, the `format!()` calls should be updated to use percent-encoding.
 pub struct SandboxClient {
     client: reqwest::Client,
     base_url: String,

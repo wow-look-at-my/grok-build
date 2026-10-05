@@ -1,4 +1,6 @@
 //! Image-strip persistence policy (`acp_session_impl/image_strip.rs`).
+//! Covers which `ImagesStripped` events may rewrite stored history, the deferred persist that
+//! waits for the stripped retry to terminal (`Completed` or `Failed`), and the user notifications.
 
 use std::sync::Arc;
 
@@ -854,8 +856,8 @@ async fn server_rejected_strip_persists_when_retry_fails() {
         .await;
 }
 
-/// Blame is judged on unique URLs: DISTINCT stripped images are ambiguous and stay request-local. The
-/// same image stored twice is one suspect and persists (both occurrences).
+/// Blame is judged on unique URLs: two DISTINCT stripped images are ambiguous and stay request-local.
+/// The same image stored twice is one suspect and persists (both occurrences).
 #[tokio::test(flavor = "current_thread")]
 async fn multi_image_blame_is_judged_on_unique_urls() {
     let local = tokio::task::LocalSet::new();
@@ -870,7 +872,7 @@ async fn multi_image_blame_is_judged_on_unique_urls() {
             seed_image(&actor, PERSIST_GATE_IMAGE_URI).await;
             seed_image(&actor, second_uri).await;
 
-            // Distinct URLs: ambiguous, never persists.
+            // Two distinct URLs: ambiguous, never persists.
             let rid = RequestId::from("req-ambiguous");
             own_request(&actor, &rid);
             actor
@@ -889,7 +891,7 @@ async fn multi_image_blame_is_judged_on_unique_urls() {
                 "ambiguous blame must not delete stored images: {conv:?}"
             );
 
-            // The same URL twice (attached in turns): one suspect, persists, removing both stored occurrences
+            // The same URL twice (attached in two turns): one suspect, persists, removing both stored occurrences
             seed_image(&actor, PERSIST_GATE_IMAGE_URI).await;
             let rid = RequestId::from("req-duplicate");
             own_request(&actor, &rid);

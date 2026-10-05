@@ -1,4 +1,7 @@
 //! Location-based navigation APIs for go-to-definition and go-to-references.
+//!
+//! This module provides APIs that take a file path and position (row, column)
+//! and return definition or reference locations.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -104,6 +107,7 @@ pub struct Navigator {
 
 impl Navigator {
     /// Create a new Navigator backed by a shared index.
+    /// Accepts anything that converts into `Arc<ScopeGraphIndex>`, so owned and already-shared indexes work.
     pub fn new(index: impl Into<Arc<ScopeGraphIndex>>) -> Self {
         Self {
             index: index.into(),
@@ -372,6 +376,7 @@ mod tests {
         let index = IndexBuilder::new().build(dir.path()).unwrap();
         let navigator = Navigator::new(index);
 
+        // Get symbol at "hello_world" (row 1, col 4)
         let symbol = navigator.get_symbol_at_position(&file_path, 1, 4).unwrap();
         assert_eq!(symbol, "hello_world");
     }
@@ -399,6 +404,7 @@ function test(sessionId: string) {{
         let index = IndexBuilder::new().build(dir.path()).unwrap();
         let navigator = Navigator::new(index);
 
+        // Test that 'request' is found as a definition at line 4
         let def_result = navigator.goto_definition_by_name("request", Some(&file_path));
         assert!(
             !def_result.locations.is_empty(),
@@ -410,6 +416,7 @@ function test(sessionId: string) {{
             "request should be defined on line 4"
         );
 
+        // Test that 'toolCallId' is also found as a definition at line 4
         let def_result2 = navigator.goto_definition_by_name("toolCallId", Some(&file_path));
         assert!(
             !def_result2.locations.is_empty(),
@@ -427,6 +434,7 @@ function test(sessionId: string) {{
             !ref_result.locations.is_empty(),
             "request should have references"
         );
+        // Check that line 5 reference is found (request.sessionId)
         let line5_ref = ref_result.locations.iter().any(|loc| loc.line == 5);
         assert!(line5_ref, "request should be referenced on line 5");
     }
@@ -451,6 +459,7 @@ for (const {{ name, value }} of items) {{
         let index = IndexBuilder::new().build(dir.path()).unwrap();
         let navigator = Navigator::new(index);
 
+        // Test that 'name' is found as a definition at line 3
         let def_result = navigator.goto_definition_by_name("name", Some(&file_path));
         assert!(
             !def_result.locations.is_empty(),
@@ -462,6 +471,7 @@ for (const {{ name, value }} of items) {{
             "name should be defined on line 3"
         );
 
+        // Test that 'value' is found as a definition at line 3
         let def_result2 = navigator.goto_definition_by_name("value", Some(&file_path));
         assert!(
             !def_result2.locations.is_empty(),
@@ -492,6 +502,7 @@ console.log(first, second);"#
         let index = IndexBuilder::new().build(dir.path()).unwrap();
         let navigator = Navigator::new(index);
 
+        // Test that 'first' is found as a definition at line 2
         let def_result = navigator.goto_definition_by_name("first", Some(&file_path));
         assert!(
             !def_result.locations.is_empty(),
@@ -503,6 +514,7 @@ console.log(first, second);"#
             "first should be defined on line 2"
         );
 
+        // Test that 'second' is found as a definition at line 2
         let def_result2 = navigator.goto_definition_by_name("second", Some(&file_path));
         assert!(
             !def_result2.locations.is_empty(),
@@ -533,6 +545,7 @@ console.log(foo, bar);"#
         let index = IndexBuilder::new().build(dir.path()).unwrap();
         let navigator = Navigator::new(index);
 
+        // Test that 'foo' is found as a definition at line 2
         let def_result = navigator.goto_definition_by_name("foo", Some(&file_path));
         assert!(
             !def_result.locations.is_empty(),
@@ -544,6 +557,7 @@ console.log(foo, bar);"#
             "foo should be defined on line 2"
         );
 
+        // Test that 'bar' is found as a definition at line 2
         let def_result2 = navigator.goto_definition_by_name("bar", Some(&file_path));
         assert!(
             !def_result2.locations.is_empty(),
@@ -573,6 +587,7 @@ const result = myObject.value;"#
         let index = IndexBuilder::new().build(dir.path()).unwrap();
         let navigator = Navigator::new(index);
 
+        // Test that 'myObject' is referenced on line 2 (myObject.value)
         let ref_result = navigator.goto_references_by_name("myObject", Some(&file_path), false);
         assert!(
             !ref_result.locations.is_empty(),
@@ -600,6 +615,7 @@ const result = myObject.value;"#
         let index = IndexBuilder::new().build(dir.path()).unwrap();
         let navigator = Navigator::new(index);
 
+        // Test that 'first' is found as a definition at line 1
         let def_result = navigator.goto_definition_by_name("first", Some(&file_path));
         assert!(
             !def_result.locations.is_empty(),
@@ -611,6 +627,7 @@ const result = myObject.value;"#
             "first should be defined on line 1"
         );
 
+        // Test that 'name' is found as a definition at line 1
         let def_result2 = navigator.goto_definition_by_name("name", Some(&file_path));
         assert!(
             !def_result2.locations.is_empty(),
@@ -641,6 +658,7 @@ const result = myObject.value;"#
         let index = IndexBuilder::new().build(dir.path()).unwrap();
         let navigator = Navigator::new(index);
 
+        // Test that 'name' is found as a definition at line 1
         let def_result = navigator.goto_definition_by_name("name", Some(&file_path));
         assert!(
             !def_result.locations.is_empty(),
@@ -652,6 +670,7 @@ const result = myObject.value;"#
             "name should be defined on line 1"
         );
 
+        // Test that 'age' is found as a definition at line 1
         let def_result2 = navigator.goto_definition_by_name("age", Some(&file_path));
         assert!(
             !def_result2.locations.is_empty(),
@@ -666,7 +685,8 @@ const result = myObject.value;"#
 
     #[test]
     fn test_typescript_react_dependency_array_references() {
-        // Test that identifiers in React hook dependency arrays are captured as references Regression test.
+        // Test that identifiers in React hook dependency arrays are captured as references
+        // Regression test for dependency-array reference capture.
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("component.tsx");
 
@@ -720,6 +740,7 @@ function FileTreeTab({{ basePath, onFileSelect }}) {{
             "fileTree should have references"
         );
 
+        // Check references in dependency arrays on lines 10, 17, and 25.
         let dep_array_lines: Vec<usize> = ref_result
             .locations
             .iter()
@@ -748,6 +769,8 @@ function FileTreeTab({{ basePath, onFileSelect }}) {{
             "loadDirectory should have references"
         );
 
+        // Line 17: [loadDirectory, fileTree]
+        // Line 30: [basePath, loadDirectory]
         let load_dir_refs: Vec<usize> = ref_result2
             .locations
             .iter()

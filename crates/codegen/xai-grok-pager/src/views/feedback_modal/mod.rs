@@ -1,4 +1,6 @@
 //! Isolated feedback editor rendered with the shared modal chrome.
+//!
+//! Feedback taxonomy declaration order is the fixed cycle/picker order.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -52,7 +54,7 @@ pub(crate) struct FeedbackDraftSendFields {
     pub failure_mode: Option<FeedbackFailureMode>,
 }
 
-/// Allocated per POST attempt (separate from the modal's open generation), so a stale completion cannot act.
+/// Allocated per POST attempt (separate from the modal's open generation), so a stale completion cannot act on a later attempt's parked consent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FeedbackSubmissionId(u64);
 
@@ -63,7 +65,8 @@ impl FeedbackSubmissionId {
     }
 }
 
-/// One-shot consent committed with a modal POST.
+/// One-shot consent committed with a modal POST. The modal closes at submit, so this parks on the
+/// agent until the matching successful completion takes it; failure drops it, and nothing else reads it.
 #[derive(Debug)]
 pub(crate) struct ParkedFeedbackTraceConsent {
     pub(crate) intent: FeedbackTraceUploadIntent,
@@ -214,13 +217,15 @@ impl FeedbackModalMetadata {
     }
 }
 
-/// The modal's flow position.
+/// The modal's flow position. Write -> (Trace when the dispatcher offers it);
+/// a committed submit closes the modal instead of holding a Sending state.
 enum FeedbackModalStep {
     Write,
     Trace {
         /// The highlighted option.
         selected: FeedbackTraceChoice,
-        /// Set only by Enter: the submit dispatcher sends nothing from an undecided Trace step.
+        /// Set only by Enter: the submit dispatcher sends nothing from an undecided Trace step,
+        /// so a stray replayed submit cannot commit whatever happens to be highlighted.
         decided: Option<FeedbackTraceChoice>,
     },
 }
@@ -255,7 +260,9 @@ pub struct FeedbackModalState {
     metadata: FeedbackModalMetadata,
     /// Which supplied enum's label row is focused; `None` keeps the composer as the key owner.
     metadata_focus: Option<MetadataField>,
-    /// Stable display order of the supplied enums' rows, seeded once at open.
+    /// Stable display order of the supplied enums' rows, seeded once at open; membership and
+    /// order never change after (Left/Right cycle a row's value, never its position). Render,
+    /// key navigation, and hit-testing all read this, never `present_fields`.
     field_order: Vec<MetadataField>,
     /// Label-row rects from the last render, for click-to-focus; empty whenever no rows drew.
     metadata_row_areas: Vec<(MetadataField, Rect)>,
@@ -271,6 +278,7 @@ pub struct FeedbackModalState {
     error: Option<String>,
     drafts: DraftsState,
     /// Bare `/feedback` with an empty Write form starts on Drafts when a list comes back nonempty.
+    /// Any user tab change clears it so a late list never moves them.
     open_on_drafts_if_any: bool,
     draft_generation: u64,
     draft_load: Option<FeedbackDraftLoad>,
@@ -312,8 +320,8 @@ pub enum FeedbackModalOutcome {
     Submit,
 }
 
-/// A successful render's hand-back to `AgentView`: the composer's terminal
-/// caret and any post-flush escapes.
+/// A successful render's hand-back to `AgentView`: the composer's terminal caret and any post-flush escapes.
+/// `cursor` is the hardware cursor position; the textarea draws no caret cell of its own, so dropping it leaves the Write step caret-less.
 pub struct FeedbackModalRender {
     pub cursor: Option<(u16, u16)>,
     pub post_flush: Option<crate::terminal::overlay::PostFlush>,
@@ -521,7 +529,8 @@ impl FeedbackModalState {
     pub(crate) fn begin_trace_step(&mut self) {
         self.invalidate_draft_load();
         self.step = FeedbackModalStep::Trace {
-            // FeedbackOnly is the non-permissive default so a second Enter (double-tap or key-repeat from Write submit).
+            // FeedbackOnly is the non-permissive default so a second Enter (double-tap
+            // or key-repeat from Write submit) cannot grant a one-shot trace upload.
             selected: FeedbackTraceChoice::FeedbackOnly,
             decided: None,
         };
@@ -649,8 +658,8 @@ impl FeedbackModalState {
         }
     }
 
-    /// The (possibly edited) enums a committed send carries in the POST's
-    /// metadata bag.
+    /// The (possibly edited) enums a committed send carries in the POST's metadata bag, as the
+    /// versioned `structured_feedback` envelope (always present, with or without enums).
     pub(crate) fn structured_feedback_metadata(&self) -> serde_json::Value {
         self.metadata.structured_feedback()
     }
@@ -759,7 +768,8 @@ impl FeedbackModalState {
                 return outcome;
             }
         } else if key.code == KeyCode::Tab
-            // Focus only rows the last render drew (`metadata_row_areas` is emptied when the rows drop).
+            // Focus only rows the last render actually drew (`metadata_row_areas` is emptied
+            // when the rows drop): focusing an invisible row would just hide the caret.
             && let Some((first, _)) = self.metadata_row_areas.first().copied()
         {
             self.metadata_focus = Some(first);
@@ -768,7 +778,8 @@ impl FeedbackModalState {
             && key.modifiers.is_empty()
             // An open prompt-anchored dropdown owns Up (result navigation).
             && !self.composer.any_dropdown_open()
-            // Wrap-aware top: a long wrapped draft keeps Up for caret movement.
+            // Wrap-aware top: a long wrapped draft keeps Up for caret movement until the
+            // caret reaches the first visual row.
             && self.composer.caret_on_top_visual_row()
             && let Some((last, _)) = self.metadata_row_areas.last().copied()
         {
@@ -823,7 +834,8 @@ impl FeedbackModalState {
             KeyCode::Tab | KeyCode::BackTab | KeyCode::Esc => {
                 self.metadata_focus = None;
             }
-            // Left/Right edit the focused field's value in place, never move focus (Up/Down): Left steps to the variant, Right to the next.
+            // Left/Right edit the focused field's value in place, never move focus (Up/Down):
+            // Left steps to the previous variant, Right to the next, both wrapping.
             KeyCode::Left => self.cycle_metadata_field(field, false),
             KeyCode::Right => self.cycle_metadata_field(field, true),
             // The rows sit stacked above the composer, so Up/Down never wrap: Up stops at the
@@ -1016,7 +1028,8 @@ impl FeedbackModalState {
                             self.metadata_focus = Some(field);
                             return FeedbackModalOutcome::Changed;
                         }
-                        // Like paste, any other click targets the composer: it takes focus back from the label rows so the next Enter submits instead.
+                        // Like paste, any other click targets the composer: it takes focus back
+                        // from the label rows so the next Enter submits instead of editing a label.
                         self.metadata_focus = None;
                     }
                     self.composer.handle_mouse(mouse);

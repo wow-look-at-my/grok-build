@@ -30,8 +30,8 @@ async fn reasoning_efforts_fallback_menu_matches_builtin() {
         .expect("turn rendered");
 
     inject_keys_paced(&mut harness, b"/effort ");
-    // Assert the full built-in row set (all of them levels, keyed by
-    // their unique descriptions) renders Asserting all of them, not a couple.
+    // Assert the full built-in row set (all four levels, keyed by their unique descriptions) renders
+    // Asserting all four, not just a couple, proves the fallback matches today's built-in menu
     harness
         .wait_for_text("Extended reasoning", Duration::from_secs(10))
         .expect("built-in xhigh row");

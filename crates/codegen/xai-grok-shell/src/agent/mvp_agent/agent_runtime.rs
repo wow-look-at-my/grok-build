@@ -1,4 +1,7 @@
 //! `AgentRuntime` implementation for the run-loop agent.
+//!
+//! Each method delegates to `MvpAgent`'s inherent method of the same name;
+//! inherent methods win name resolution, so these are delegations, not recursion.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

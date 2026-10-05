@@ -1,8 +1,17 @@
 //! Skill discovery reminder — discovers new skills near accessed paths.
+//!
+//! Contains `SkillDiscoveryReminder`, a cross-cutting `Reminder` that fires
+//! after every tool call to check for SKILL.md files in `.grok/skills/`,
+//! `.agents/skills/`, or `.claude/skills/` directories near the accessed path.
+//!
+//! The actual tracking logic lives in
+//! `types::skill_discovery_tracker::SkillDiscoveryTracker`.
 
 use std::path::Path;
 
-/// Directories that contain skill definitions.
+/// Directories that contain skill definitions (`.grok/skills/`, `.agents/skills/`,
+/// `.claude/skills/`, `.cursor/skills/`). Shared between startup skill discovery
+/// and runtime `SkillDiscoveryReminder`.
 pub const SKILL_CONFIG_DIRS: &[&str] = &[".grok", ".agents", ".claude", ".cursor"];
 
 use crate::implementations::skills::discovery;
@@ -13,7 +22,9 @@ use crate::types::resources::SharedResources;
 use crate::types::skill_discovery_tracker::SkillManager;
 use crate::types::tool::{Reminder, ToolKind};
 
-/// Cross-cutting reminder that discovers skills in subdirectories near filesystem paths accessed by tools.
+/// Cross-cutting reminder that discovers skills in subdirectories near filesystem paths accessed by tools. **Concise
+/// mode limitation (V1):** This reminder is globally disabled when `SystemRemindersEnabled(false)` is set (concise
+/// mode). This means dynamic skill discovery will NOT fire in concise mode.
 pub struct SkillDiscoveryReminder;
 
 impl SkillDiscoveryReminder {
@@ -135,7 +146,8 @@ impl Reminder for SkillDiscoveryReminder {
         );
 
         if discovered.is_empty() {
-            // Even if no skills found.
+            // Even if no skills found, merge checked_dirs back so we don't
+            // re-stat the same directories on future calls.
             let mut res = resources.lock().await;
             if let Some(tracker) = res.get_mut::<SkillManager>() {
                 tracker.checked_dirs.extend(checked_dirs_snapshot);
@@ -143,8 +155,9 @@ impl Reminder for SkillDiscoveryReminder {
             return vec![];
         }
 
-        // Re-acquire lock and merge results into tracker. The reminder does
-        // NOT produce announcement text. It updates the tracker state.
+        // Re-acquire lock and merge results into tracker. The reminder does NOT produce
+        // announcement text. It just updates the tracker state. The session drains announcements
+        // from the tracker via take_pending_reconciliation() after each tool call.
         {
             let mut res = resources.lock().await;
             let tracker = match res.get_mut::<SkillManager>() {
@@ -159,7 +172,8 @@ impl Reminder for SkillDiscoveryReminder {
             tracker.add_discovered(discovered);
         }
 
-        // Return empty -- announcement delivery is handled by the session via take_pending_reconciliation().
+        // Return empty -- announcement delivery is handled by the session
+        // via take_pending_reconciliation(), NOT by this reminder.
         vec![]
     }
 }

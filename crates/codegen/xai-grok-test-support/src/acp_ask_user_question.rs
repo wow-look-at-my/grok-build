@@ -1,4 +1,6 @@
-//! The shell's `x.ai/ask_user_question` extension request as the client reads and answers it.
+//! The shell's `x.ai/ask_user_question` extension request as the client reads and answers it. The typed request
+//! (`AskUserQuestionExtRequest`) lives in `xai-grok-tools`, which this crate does not depend on, so its wire
+//! shape is mirrored here; a shell wire change touches only this module.
 
 use agent_client_protocol as acp;
 use serde::Deserialize;

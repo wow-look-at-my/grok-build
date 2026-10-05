@@ -1,4 +1,13 @@
 //! Stall-triggered goal strategist subagent runner.
+//!
+//! Mirrors [`crate::session::goal_planner`] in shape but with the OPPOSITE failure behavior.
+//! The planner is fail-CLOSED (any failure pauses the goal); the strategist is fail-OPEN / best-effort.
+//! It is an advisory enhancement that fires after N consecutive `NotAchieved` verifications to recommend a STRUCTURAL remediation.
+//!
+//! plan.md safety: the strategist writes ONLY to the strategy note, never to `plan.md` (which holds the verifier-judged contract).
+//! The strategy note lives at [`GoalTracker::strategy_path`](crate::session::goal_tracker::GoalTracker::strategy_path).
+//! As best-effort defense-in-depth, an RAII [`PlanGuard`] snapshots `plan.md` before spawning and restores those bytes after the run.
+//! A restore I/O failure or a symlink planted at the path is refused and surfaced via `GoalStrategistContractRestoreFailed` telemetry.
 
 use crate::session::events::{Event, GoalStrategistFailReason, GoalStrategistRestoreFailReason};
 use crate::session::goal_planner::{
@@ -16,6 +25,8 @@ use xai_grok_tools::implementations::grok_build::task::types::{
 // Constants
 
 /// Same general-purpose tool inventory each verifier skeptic / the planner uses.
+/// The strategist reads and greps the workspace to diagnose why the goal is stuck.
+/// The configured `agent_type` selects the HARNESS, not this subagent type.
 const GOAL_STRATEGIST_SUBAGENT_TYPE: &str = GOAL_ROLE_SUBAGENT_TYPE;
 
 /// Description shown in the pager subagent strip and matched by the e2e coordinator stub to distinguish strategist spawns from skeptics.
@@ -23,13 +34,15 @@ pub(crate) const GOAL_STRATEGIST_SUBAGENT_DESCRIPTION: &str = "goal strategist";
 
 const GOAL_STRATEGIST_PROMPT_TEMPLATE: &str = include_str!("templates/goal_strategist_prompt.md");
 
-/// Cap (in `char`s, not bytes) on the recommendation snippet read back from the strategy note and inlined.
+/// Cap (in `char`s, not bytes) on the recommendation snippet read back from the strategy note and inlined into the continuation directive.
+/// Truncation is on a `char` boundary, so the cap is UTF-8-safe but a multibyte note can exceed this many bytes.
+/// The full note lives on disk; the model is pointed at it to read the rest.
 const GOAL_STRATEGIST_RECOMMENDATION_MAX_CHARS: usize = 4096;
 
 // Outcome and spawner abstraction
 
-/// `Advised` carries the strategy note path and the short recommendation read
-/// back from it.
+/// `Advised` carries the strategy note path and the short recommendation read back from it.
+/// `FailOpen` carries the reason; every variant is logged and ignored at the call site (the goal keeps running).
 #[derive(Debug, Clone)]
 #[expect(
     dead_code,
@@ -47,12 +60,12 @@ pub(crate) enum GoalStrategistOutcome {
     },
 }
 
-/// Subagent spawn abstraction. Production uses [`ChannelSpawner`]; tests use
-/// `MockSpawner` (defined in the tests module).
+/// Subagent spawn abstraction. Production uses [`ChannelSpawner`]; tests use `MockSpawner` (defined in the tests module).
+/// The trait shape mirrors `GoalPlannerSpawner`; `SpawnError` is reused from the planner module.
 #[async_trait::async_trait]
 pub(crate) trait GoalStrategistSpawner: Send + Sync {
-    /// Spawn under `id` and return the terminal response when the subagent
-    /// finishes.
+    /// Spawn under `id` and return the terminal response when the subagent finishes.
+    /// `prompt` carries both the configured-pair render (`primary`) and the default-toolset fail-open retry render (`fallback`).
     async fn spawn_strategist(
         &self,
         id: &str,
@@ -62,8 +75,9 @@ pub(crate) trait GoalStrategistSpawner: Send + Sync {
 
 // Trigger predicate
 
-/// Using `>= last_fired + N` rather than a strict `consecutive % N == 0`
-/// makes the trigger SKIP-ROBUST.
+/// Using `>= last_fired + N` rather than a strict `consecutive % N == 0` makes the trigger SKIP-ROBUST.
+/// An exact-equality check would miss the `== N` fire entirely.
+/// `every` must be at least 1 (the resolver clamps it).
 pub(crate) fn strategist_should_fire(consecutive: u32, last_fired: u32, every: u32) -> bool {
     every > 0 && consecutive >= last_fired.saturating_add(every)
 }
@@ -80,8 +94,10 @@ pub(crate) struct ChannelSpawner {
     pub(crate) parent_prompt_id: Option<String>,
     pub(crate) cwd: Option<String>,
     /// Trace-artifact sink and resolved `task` tool name; `None` disables recording.
+    /// See [`crate::session::goal_classifier::record_subagent_trace`].
     pub(crate) trace_sink: Option<(xai_chat_state::ChatStateHandle, String)>,
-    /// Resolved per-role model and toolset override. Default (inherit) keeps the historic `::default()` spawn behavior.
+    /// Resolved per-role model and toolset override.
+    /// Default (inherit) keeps the historic `::default()` spawn behavior.
     pub(crate) role_override: RoleSpawnOverride,
     /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
     pub(crate) fallback: crate::session::goal_planner::RoleFallbackReporter,
@@ -194,21 +210,27 @@ impl ChannelSpawner {
 pub(crate) struct GoalStrategistInputs<'a> {
     pub objective: &'a str,
     /// The verifier-judged plan; passed for context and protected by the snapshot/restore guard.
+    /// May not exist on disk (planner disabled).
     pub plan_file: &'a Path,
     /// Where the strategist writes its advisory note.
     pub strategy_file: &'a Path,
     /// Absolute path to the session traces directory.
+    /// The strategist itself reads the trace files (`chat_history.jsonl`, `events.jsonl`, …) to diagnose the stuck run, not a pre-assembled packet.
     pub session_traces_dir: &'a Path,
     /// Per-goal scratch root with the implementer's and each skeptic's captured test output / artifacts.
     pub scratch_root: &'a Path,
     pub attempt: u32,
     pub consecutive_failures: u32,
     /// Resolved strategist cadence N (fires every N consecutive `NotAchieved` verifications).
+    /// Telemetry-only on `GoalStrategistFired`; the firing decision uses `goal_strategist_every` at the actor.
     pub every: u32,
     pub model_id: &'a str,
-    /// Resolved tool names for the strategist role's prompt placeholders.
+    /// Resolved tool names for the strategist role's prompt placeholders (`{READ_TOOL}`/`{SEARCH_TOOL}`/`{LIST_TOOL}`/`{EXECUTE_TOOL}`).
+    /// Built parent-side from the strategist's resolved toolset.
     pub tool_names: &'a RoleToolNames,
     /// Default/parent-toolset tool names used to render the fail-open RETRY prompt.
+    /// A retry that falls back to the default toolset then names THAT toolset's tools.
+    /// On the inherit path this equals `tool_names`.
     pub inherit_tool_names: &'a RoleToolNames,
 }
 
@@ -227,7 +249,8 @@ pub(crate) async fn run_goal_strategist(
         model_id: inputs.model_id.to_string(),
     });
 
-    // A failure here is not fatal (fail-open).
+    // A failure here is not fatal (fail-open): the spawn may still succeed if the dir already exists
+    // If it doesn't, the missing-strategy guard catches it
     if let Some(parent) = inputs.strategy_file.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
@@ -244,7 +267,7 @@ pub(crate) async fn run_goal_strategist(
         .replace("{PLAN_FILE}", &plan_file_str)
         .replace("{SESSION_TRACES_DIR}", &traces_dir_str)
         .replace("{SCRATCH_ROOT}", &scratch_root_str);
-    // Render once per toolset: `primary` for the resolved toolset.
+    // Render once per toolset: `primary` for the resolved toolset, `fallback` for the default/parent toolset the explicit-pair retry falls back to
     let render = |tool_names: &RoleToolNames| -> String {
         let rendered = tool_names.apply(&with_paths);
         let mut full = String::with_capacity(rendered.len() + inputs.objective.len() + 256);
@@ -264,9 +287,8 @@ pub(crate) async fn run_goal_strategist(
     let spawn_id = uuid::Uuid::now_v7().to_string();
     let spawn_result = spawner.spawn_strategist(&spawn_id, prompt).await;
 
-    // Restore plan.md byte-for-byte ONCE, regardless of spawn outcome On a
-    // restore failure, emit telemetry (not a log) so a corrupted contract is
-    // observable
+    // Restore plan.md byte-for-byte ONCE, regardless of spawn outcome
+    // On a restore failure, emit telemetry (not just a log) so a corrupted contract is observable
     if let Some(reason) = plan_guard.restore() {
         emit_event(Event::GoalStrategistContractRestoreFailed {
             reason: reason.as_const_str(),
@@ -375,11 +397,13 @@ enum PlanSnapshot {
     /// plan.md existed as a regular file; these are its bytes to restore.
     Present(Vec<u8>),
     /// plan.md couldn't be safely snapshotted (a symlink, or metadata/read failed for a reason other than `NotFound`).
+    /// Restore refuses to write or delete it, so a transiently-unreadable contract is never deleted as if the strategist had created it.
     Unsafe,
 }
 
-/// Restores once via [`Self::restore`] on the normal path, and again on
-/// `Drop` as a cancellation safety net.
+/// Restores once via [`Self::restore`] on the normal path, and again on `Drop` as a cancellation safety net.
+/// The runner future may be dropped mid-`.await`.
+/// Uses sync `std::fs` (so `Drop` can call it; plan.md is small, this is rare) and `symlink_metadata` everywhere (never follows a planted symlink).
 struct PlanGuard<'a> {
     plan_file: &'a Path,
     snapshot: PlanSnapshot,
@@ -407,8 +431,9 @@ impl<'a> PlanGuard<'a> {
         }
     }
 
-    /// Restore plan.md to its captured bytes (whole file, not the contract
-    /// sections) and disarm.
+    /// Restore plan.md to its captured bytes (whole file, not just the contract sections) and disarm.
+    /// Idempotent (a second call, incl. the `Drop` follow-up, is a no-op).
+    /// Returns `Some(reason)` for telemetry when the contract could NOT be guaranteed (write/remove failed, or a symlink was found).
     fn restore(&mut self) -> Option<GoalStrategistRestoreFailReason> {
         if !self.armed {
             return None;
@@ -473,8 +498,8 @@ impl<'a> PlanGuard<'a> {
 
 impl Drop for PlanGuard<'_> {
     fn drop(&mut self) {
-        // Cancellation safety net: if `restore` was never called (the runner
-        // future
+        // Cancellation safety net: if `restore` was never called (the runner future was dropped mid-await), restore now
+        // Telemetry can't be emitted from here (no event sink), so a failure is logged at ERROR
         if let Some(reason) = self.restore() {
             tracing::error!(
                 reason = reason.as_const_str(),
@@ -612,12 +637,15 @@ mod tests {
 
     #[test]
     fn strategist_fires_at_n_and_multiples_not_in_between() {
+        // N = 5, last_fired = 0: fires at 5, not before.
         assert!(!strategist_should_fire(4, 0, 5));
         assert!(strategist_should_fire(5, 0, 5));
         assert!(!strategist_should_fire(0, 0, 5), "0 failures never fires");
+        // After firing at 5 (last_fired = 5): not at 6..9, fires at 10.
         assert!(!strategist_should_fire(6, 5, 5), "must NOT fire at N+1");
         assert!(!strategist_should_fire(9, 5, 5));
         assert!(strategist_should_fire(10, 5, 5));
+        // N = 1: fires every round.
         assert!(strategist_should_fire(1, 0, 1));
         assert!(strategist_should_fire(2, 1, 1));
         // every == 0 is a degenerate guard: never fires
@@ -633,12 +661,13 @@ mod tests {
             strategist_should_fire(3, 0, 2),
             "must fire after the streak skips past the == N landing",
         );
+        // Having fired at 3 (last_fired = 3): not at 4, fires at 5.
         assert!(!strategist_should_fire(4, 3, 2));
         assert!(strategist_should_fire(5, 3, 2));
     }
 
     /// Deterministic spawner with knobs for the response text, whether to write the strategy note, and its body.
-    /// More knobs (mis)write plan.md to exercise the contract guard.
+    /// Two more knobs (mis)write plan.md to exercise the contract guard.
     struct MockSpawner {
         response: Result<String, SpawnError>,
         write_strategy: bool,

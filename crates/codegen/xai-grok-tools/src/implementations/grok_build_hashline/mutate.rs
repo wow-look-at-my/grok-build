@@ -3,6 +3,9 @@
 //! Mutations simulate the kinds of edits that happen during real agent
 //! workflows: line insertions/deletions, formatter-style whitespace changes,
 //! local token edits, boilerplate insertion, and range rewrites.
+//!
+//! Each [`Mutation`] variant describes *what* to do; [`apply_mutation`]
+//! applies it to a `Vec<String>` of file lines (owned, mutable).
 
 /// A synthetic mutation to apply to a file's lines.
 ///
@@ -45,6 +48,7 @@ pub enum LineOutcome {
     /// Line's content was directly modified (edit, range rewrite).
     Modified,
     /// Line's indentation changed but non-whitespace content is preserved.
+    /// Whitespace-normalized anchors should survive this change.
     Reindented,
     /// Line was deleted.
     Deleted,
@@ -54,6 +58,7 @@ pub enum LineOutcome {
 #[derive(Debug, Clone)]
 pub struct MutationResult {
     /// Per-original-line outcome, indexed by original 0-based line index.
+    /// Length equals the original line count before the mutation.
     pub outcomes: Vec<LineOutcome>,
 
     /// Net line-count change (positive = lines added, negative = lines removed).
@@ -291,6 +296,7 @@ mod tests {
         assert!(nth_ref(&lines, 2).contains("inserted line 1"));
         assert_eq!(nth_ref(&lines, 3), "    let x = 1;");
         assert_eq!(result.line_delta, 2);
+        // Line 0 unchanged, lines 1-4 shifted by +2.
         assert_eq!(*nth_ref(&result.outcomes, 0), LineOutcome::Unchanged);
         assert_eq!(
             *nth_ref(&result.outcomes, 1),
@@ -335,9 +341,9 @@ mod tests {
     #[test]
     fn delete_past_end_clamped() {
         let mut lines = sample_lines();
-        let m = gen_delete(3, 100);
+        let m = gen_delete(3, 100); // tries to delete 100 from idx 3
         let result = apply_mutation(&mut lines, &m);
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 3); // only deleted 2 (indices 3,4)
         assert_eq!(result.line_delta, -2);
         assert_eq!(*nth_ref(&result.outcomes, 3), LineOutcome::Deleted);
         assert_eq!(*nth_ref(&result.outcomes, 4), LineOutcome::Deleted);
@@ -369,7 +375,7 @@ mod tests {
         let mut lines = sample_lines();
         let m = gen_range_rewrite(1, 3, &["    let z = 42;"]);
         let result = apply_mutation(&mut lines, &m);
-        assert_eq!(lines.len(), 4);
+        assert_eq!(lines.len(), 4); // 5 - 2 removed + 1 added
         assert_eq!(nth_ref(&lines, 1), "    let z = 42;");
         assert_eq!(nth_ref(&lines, 2), "    println!(\"{x} {y}\");");
         assert_eq!(result.line_delta, -1);
@@ -392,6 +398,7 @@ mod tests {
         assert_eq!(nth_ref(&lines, 2), "// boilerplate");
         assert_eq!(nth_ref(&lines, 3), "fn main() {");
         assert_eq!(result.line_delta, 3);
+        // All original lines shifted by +3.
         assert_eq!(
             *nth_ref(&result.outcomes, 0),
             LineOutcome::Shifted { new_idx: 3 }
@@ -411,7 +418,7 @@ mod tests {
             &["    let a = 1;", "    let b = 2;", "    let c = 3;"],
         );
         let result = apply_mutation(&mut lines, &m);
-        assert_eq!(lines.len(), 7);
+        assert_eq!(lines.len(), 7); // 5 - 1 removed + 3 added
         assert_eq!(result.line_delta, 2);
         assert_eq!(*nth_ref(&result.outcomes, 1), LineOutcome::Deleted);
         assert_eq!(

@@ -5,6 +5,7 @@ use super::common::*;
 const DONE_SENTINEL: &str = "VERB_GROUP_THINKING_DONE";
 
 /// Word unique to the reasoning body: never in the answer, the fixture files, or any chrome.
+/// Its presence pins exactly "the thinking body is on screen".
 const REASONING_SENTINEL: &str = "THOUGHTFOLDSENTINEL";
 
 /// Collapsed thought member/header text ("Thought for Xs").
@@ -17,8 +18,9 @@ const THOUGHT_HEADER: &str = "Thought for";
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn verb_group_thinking_fold_pty() {
     let content = ContentController::start().await.expect("start content");
-    // Both opt-ins are explicit so the test does not depend on rollout
-    // defaults Folding is the feature under test.
+    // Both opt-ins are explicit so the test doesn't depend on rollout defaults
+    // Folding is the feature under test, and thinking must be shown for thought entries to exist at all (ingestion gate)
+    // A summarized thought keeps its row, so this test turns summaries off to cover the fold of a thought with no summary
     seed_ui_config(
         &content,
         "group_tool_verbs = true\nshow_thinking_blocks = true\nthinking_summaries = false",
@@ -33,7 +35,7 @@ async fn verb_group_thinking_fold_pty() {
     }
     let reasoning = format!("{REASONING_SENTINEL} weighing which fixture file to read first");
 
-    // Turn thinks and calls the first read: the tool call finishes the thought, which auto-collapses and folds into the forming run
+    // Turn 1 thinks and calls the first read: the tool call finishes the thought, which auto-collapses and folds into the forming run
     let args0 = json!({ "target_file": paths[0].to_string_lossy() }).to_string();
     let _thinking_turn = content.expect_agent_turn_with_responses(
         "thinking then first read",
@@ -52,6 +54,7 @@ async fn verb_group_thinking_fold_pty() {
             "test-model",
         )),
     );
+    // Turn 2: a plain second read grows the already-folded run to two tools.
     let args1 = json!({ "target_file": paths[1].to_string_lossy() }).to_string();
     let _second_read_turn = expect_tool_turn(&content, "call_t1", "read_file", args1);
     content.set_response(DONE_SENTINEL);
@@ -70,7 +73,8 @@ async fn verb_group_thinking_fold_pty() {
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit prompt");
 
-    // While the reasoning streams, its live panel shows the body The DONE break pins "still in flight".
+    // While the reasoning streams, its live panel shows the body
+    // The DONE break pins "still in flight": a poll that only ever saw the settled screen (where the body is folded away) fails the assert below
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut saw_streaming = false;
     while Instant::now() < deadline {
@@ -144,8 +148,7 @@ async fn verb_group_thinking_fold_pty() {
         .inject_keys(click.as_bytes())
         .expect("double-click header");
 
-    // Expanded: the thought reveals as its own collapsed 1-row member
-    // ("Thought for Xs"), still the header line, not the body
+    // Expanded: the thought reveals as its own collapsed 1-row member ("Thought for Xs"), still just the header line, not the body
     harness
         .wait_for_text(THOUGHT_HEADER, Duration::from_secs(10))
         .unwrap_or_else(|_| {

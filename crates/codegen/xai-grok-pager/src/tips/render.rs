@@ -40,8 +40,8 @@ fn tip_line(tip: &str) -> Line<'_> {
     ])
 }
 
-/// Rows above the composer line up one column inside its border, not out at
-/// its edge.
+/// Rows above the composer line up one column inside its border, not out at its edge.
+/// Callers paint the full slot and place text here, so the background still covers column zero.
 pub fn hint_text_area(area: Rect) -> Rect {
     Rect {
         x: area.x + HINT_INSET,

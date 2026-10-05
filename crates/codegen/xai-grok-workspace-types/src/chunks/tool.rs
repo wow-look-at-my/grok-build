@@ -1,4 +1,8 @@
 //! Tool-stream chunks ([`ToolChunk`]) and the paired sampler-to-workspace response messages ([`ToolResponse`]).
+//!
+//! The two enums together form the bidirectional stream that carries a tool invocation.
+//! The workspace yields `ToolChunk` values to the sampler.
+//! The sampler yields `ToolResponse` values back to the workspace whenever it sees a `Need*` chunk.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,8 +26,8 @@ pub enum ToolChunk {
     Final(ToolCallResult),
     /// Tool definitions response. Single chunk.
     Definitions(Vec<ToolDef>),
-    /// Tool needs the sampler to make a permission decision before
-    /// continuing.
+    /// Tool needs the sampler to make a permission decision before continuing.
+    /// The sampler must reply with [`ToolResponse::Permission { req_id, decision }`](ToolResponse::Permission) on the bidi response sender.
     NeedPermission {
         /// Correlation id; the sampler must echo this back in the matching [`ToolResponse::Permission`].
         req_id: String,
@@ -31,13 +35,16 @@ pub enum ToolChunk {
         request: PermissionRequest,
     },
     /// Tool needs the sampler to collect answers from the user.
+    /// The sampler must reply with [`ToolResponse::UserAnswer { req_id, answers }`](ToolResponse::UserAnswer) on the bidi response sender.
     NeedUserAnswer {
         /// Correlation id; the sampler must echo this back in the matching [`ToolResponse::UserAnswer`].
         req_id: String,
         /// Questions to ask the user.
+        /// The reply (`ToolResponse::UserAnswer { answers, .. }`) supplies one [`UserAnswer`] per [`UserQuestion`].
         questions: Vec<UserQuestion>,
     },
-    /// Tool needs the sampler to approve a plan-mode transition.
+    /// Tool needs the sampler to approve a plan-mode transition; reply with [`ToolResponse::PlanModeChange`](ToolResponse::PlanModeChange) on the bidi sender.
+    /// Not broadcast on the EventBus: sampler-caused state returns on this stream and the `Final` payload.
     NeedPlanModeChange {
         /// Correlation id; the sampler must echo this back in the matching [`ToolResponse::PlanModeChange`].
         req_id: String,

@@ -1,4 +1,9 @@
 //! Wire test for the **no-double-send invariant** (the credential-leak guard).
+//!
+//! The internal trace firehose can resolve its endpoint and headers from the deprecated `OTEL_EXPORTER_OTLP_*` fallback.
+//! When it does, the shell sets `internal_pipeline_consumed_otel_vars = true` and `external::init` MUST refuse to activate.
+//! Otherwise the standard vars could point both the internally-authed firehose and the customer server at one endpoint, leaking xAI credentials.
+//! Here we prove the refusal end-to-end: even with a fully valid double opt-in pointed at a live server, nothing is exported.
 
 use std::time::Duration;
 

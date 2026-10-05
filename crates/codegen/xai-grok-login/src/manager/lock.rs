@@ -1,4 +1,6 @@
 //! Advisory `auth.json.lock` handling.
+//! The lock file is never deleted and a held flock is never broken: an unlinked lock lets two processes spend the same refresh token.
+//! Staleness resolves in place on the live lock, via [`flock_wait`].
 
 #[path = "lock/flock_wait.rs"]
 mod flock_wait;
@@ -34,8 +36,9 @@ const _: () = assert!(
     "a heartbeating holder must never age past the stale threshold"
 );
 
-// TODO: delete once the token endpoint tolerates racing refreshes AND
-// unlink-recovery binaries have aged out.
+// TODO: delete once the token endpoint tolerates racing refreshes AND unlink-recovery binaries have aged out of the fleet
+// The heartbeat only placates their staleness check
+/// Re-dates the lock file's holder info while the lock is held.
 pub struct LockHeartbeat {
     stop: std::sync::mpsc::Sender<()>,
     handle: Option<std::thread::JoinHandle<()>>,

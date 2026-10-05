@@ -1,4 +1,7 @@
 //! Overlay worktree creation and removal.
+//!
+//! Orchestrates btrfs snapshot of the overlay upper dir, metadata persistence,
+//! overlayfs mount, and cleanup.
 
 use std::path::{Path, PathBuf};
 
@@ -27,7 +30,8 @@ struct OverlayMetadata {
     /// Always "overlay".
     #[serde(rename = "type")]
     kind: String,
-    /// Subvolume for `btrfs subvolume delete`. New layout: `<wt_base>/root` (`root/upper/` is the overlay upper).
+    /// Subvolume for `btrfs subvolume delete`. New layout: `<wt_base>/root`
+    /// (`root/upper/` is the overlay upper). Old layout: `<wt_base>/upper`.
     #[serde(alias = "snapshot_upper")]
     snapshot_root: PathBuf,
     /// Path to the overlay work dir.
@@ -36,6 +40,7 @@ struct OverlayMetadata {
     lower_dir: PathBuf,
     /// Path where the overlay was mounted.
     mount_target: PathBuf,
+    /// ISO 8601 timestamp.
     created_at: String,
 }
 
@@ -54,9 +59,13 @@ pub fn create_overlay_worktree(
         .unwrap_or("overlay-wt");
 
     // Work dir must live inside the snapshot (same subvolume/device as upper).
+    // A work dir on another device makes overlayfs return EXDEV on unlink,
+    // breaking git and other file-replacing workflows.
     let wt_base = info.overlay_root.join("worktrees").join(wt_name);
     let snapshot_root = wt_base.join("root");
-    // Fresh work dir, not the source's `work/`.
+    // Fresh work dir, not the source's `work/`: that copy has root-owned
+    // mode-000 internals a rootless creator cannot delete. Still inside the
+    // snapshot; the stale copy is reclaimed with the subvolume.
     let work_dir = snapshot_root.join("overlay-work");
 
     // Clean up if a previous attempt left debris.
@@ -90,11 +99,17 @@ pub fn create_overlay_worktree(
     // The snapshot's upper dir is at the same relative position inside the snapshot.
     let snapshot_upper = snapshot_root.join("upper");
 
+    // Step 2: Create the worktree's overlay work dir (fresh + empty). The
+    // snapshot was just (re)created from overlay_root, which has no
+    // `overlay-work` entry, so this name never pre-exists.
     std::fs::create_dir(&work_dir)
         .with_context(|| format!("create overlay work dir {}", work_dir.display()))?;
 
+    // Step 3: Write metadata for crash recovery.
+    // Written to wt_base (not inside the snapshot) so it survives overlay unmount.
     write_metadata(&wt_base, &snapshot_root, &work_dir, &info.lower_dir, dest)?;
 
+    // Step 4: Mount overlay at dest.
     std::fs::create_dir_all(dest)
         .with_context(|| format!("create overlay mount target {}", dest.display()))?;
 
@@ -148,7 +163,9 @@ pub fn remove_overlay_worktree(
         );
     }
 
-    // In-process unmount cannot detach another namespace's overlay.
+    // In-process unmount cannot detach another namespace's overlay. Confirm
+    // unmounted in every namespace before deleting the snapshot, or a live
+    // worktree loses its lower/upper.
     let overlay_upper = if snapshot_root.file_name().is_some_and(|n| n == "root") {
         snapshot_root.join("upper")
     } else {
@@ -166,7 +183,9 @@ pub fn remove_overlay_worktree(
     // Remove the (now empty) mount point directory.
     let _ = std::fs::remove_dir(target);
 
-    // Delete the btrfs snapshot (subvolume).
+    // Delete the btrfs snapshot (subvolume). Best-effort so we don't skip
+    // cleaning up work dirs, metadata, and parent dirs on failure — orphan
+    // cleanup reclaims leftover snapshots on a later run.
     let mut snapshot_delete_err = None;
     if snapshot_root.exists()
         && let Err(e) = delete_btrfs_snapshot(snapshot_root)
@@ -179,7 +198,8 @@ pub fn remove_overlay_worktree(
         snapshot_delete_err = Some(e);
     }
 
-    // Remove work dir.
+    // Remove work dir (only relevant for old layout where work dir is outside
+    // the snapshot; for new layout it's inside and already gone with the snapshot).
     let _ = std::fs::remove_dir_all(work_dir);
 
     // Clean up the metadata file — it lives outside the snapshot (at wt_base
@@ -208,7 +228,8 @@ pub fn remove_overlay_worktree(
     }
 
     Ok(RemoveReport {
-        // Overlay teardown also btrfs-deletes its backing snapshot.
+        // Overlay teardown also btrfs-deletes its backing snapshot, but the
+        // authoritative label is overlay so it isn't mislabeled btrfs.
         method: crate::metrics::DisposeMethod::Overlay,
         used_btrfs_delete: true,
         unmounted_bind: false,
@@ -216,6 +237,7 @@ pub fn remove_overlay_worktree(
     })
 }
 
+/// Try to remove via live mountinfo (Method 1).
 pub fn try_remove_from_mountinfo(
     target: &Path,
     delegate: Option<&std::sync::Arc<dyn crate::BtrfsDelegate>>,
@@ -246,8 +268,8 @@ pub fn try_remove_from_mountinfo(
     };
 
     // The overlayfs upperdir path always ends with `/upper` in both layouts:
-    // - New: `.../worktrees/<name>/root/upper` → snapshot subvol = parent
-    // (`.../root`) - Old.
+    // - New: `.../worktrees/<name>/root/upper` → snapshot subvol = parent (`.../root`)
+    // - Old: `.../worktrees/<name>/upper` → snapshot subvol = upper_dir itself
     let snapshot_root = if let Some(parent) = upper_dir.parent() {
         if parent.ends_with("root") {
             parent.to_path_buf()
@@ -347,7 +369,9 @@ pub fn cleanup_orphaned_overlay_snapshots() -> crate::api::CleanupReport {
         return report;
     };
 
-    // Active overlay upperdirs across ALL namespaces (overlays may live in another process's namespace).
+    // Active overlay upperdirs across ALL namespaces (overlays may live in
+    // another process's namespace) — never delete a snapshot still backing a
+    // mounted overlay.
     let active_uppers = crate::mount_info::overlay_upperdirs_all_namespaces();
 
     for dir_entry in entries.flatten() {
@@ -420,6 +444,7 @@ pub fn cleanup_orphaned_overlay_snapshots() -> crate::api::CleanupReport {
                         "failed to delete orphaned btrfs snapshot"
                     );
                     report.errors += 1;
+                    // Still clean up metadata + work dir below
                 } else {
                     report.btrfs_deleted += 1;
                 }

@@ -35,6 +35,8 @@ steps:
     millis: 4500
   - action: assert_not_contains
     text: "Tight on space"
+  # Dip into the auto-compact zone (19 <= 20) and back into the band: the
+  # one-shot must not re-trigger.
   - action: resize
     rows: 19
     cols: 100

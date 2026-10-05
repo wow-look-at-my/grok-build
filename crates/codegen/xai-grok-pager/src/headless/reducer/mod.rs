@@ -1,4 +1,6 @@
 //! Streaming reducers that fold the agent ACP event stream into NDJSON lines.
+//! Each wire format has one `Reducer` impl, selected by [`reducer_for`].
+//! This module owns the shared [`StreamEvent`]/[`Reducer`] types; each format is a submodule.
 
 use agent_client_protocol as proto;
 use serde::Serialize;
@@ -149,7 +151,8 @@ impl Lifecycle {
                 "Auto-compact failed.".to_string()
             }
             Lifecycle::CompactFailed { error } => {
-                // Plain output is line-oriented, so those-line error message collapses to one.
+                // Plain output is line-oriented, so the two-line error message collapses to one; JSON carries the raw string
+                // The hyphen matches the TUI
                 let single_line = error.split_whitespace().collect::<Vec<_>>().join(" ");
                 format!("Auto-compact failed - {single_line}")
             }
@@ -157,7 +160,9 @@ impl Lifecycle {
             Lifecycle::AutoContinue { .. } => "Resumed after compaction.".to_string(),
             Lifecycle::ImageCompressed { message } => message.clone(),
             Lifecycle::MemoryFlushStarted => "Memory flush started.".to_string(),
-            // `result`, `path`, and capture `detail` remain available in the structured lifecycle event.
+            // `result`, `path`, and capture `detail` remain available in the
+            // structured lifecycle event. Plain lines are trusted UI copy and
+            // must not promote model/parser errors or local paths into it.
             Lifecycle::MemoryFlushCompleted { .. } => "Memory flush completed.".to_string(),
             Lifecycle::MemoryCaptureActivity {
                 activity,

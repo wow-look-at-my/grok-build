@@ -1,4 +1,7 @@
 //! Server-authoritative prompt queue wire types.
+//!
+//! Canonical definitions live in `xai_prompt_queue`.
+//! This re-export keeps every existing `crate::session::prompt_queue::*` and `xai_grok_shell::session::prompt_queue::*` path resolving without edits.
 
 pub use xai_prompt_queue::{
     COMBINED_DISPLAY_TEXTS_META, CombineGate, QueueChanged, QueueEntryMeta, QueueEntryWire,

@@ -147,7 +147,7 @@ pub fn render_menu(
 
         // Terminal theme (Reset band slots): the selection/hover cue is
         // reverse video; the row is all default-fg text so it inverts
-        // uniformly.
+        // uniformly. RGB themes keep their bg_highlight band.
         if is_selected && theme.is_bandless() {
             buf.set_style(row_rect, Style::default().add_modifier(Modifier::REVERSED));
         }

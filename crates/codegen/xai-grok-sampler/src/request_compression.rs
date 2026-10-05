@@ -1,12 +1,18 @@
-//! zstd compression of JSON request bodies.
+//! zstd compression of JSON request bodies. The shell decides whether an
+//! endpoint may receive compressed bodies (`SamplerConfig::request_compression`);
+//! this module decides whether a given body is worth compressing and does it.
 
 use crate::config::RequestCompression;
 
 /// Below this the CPU spent compressing is not worth the bytes saved.
 pub(crate) const MIN_COMPRESS_BYTES: usize = 64 * 1024;
 
+/// Level 3: fast, good ratio on JSON, and a 2 MiB window that stays well
+/// inside the proxy's decoder bound.
 const ZSTD_LEVEL: i32 = 3;
 
+/// From here up, compression leaves the async worker: level-3 zstd runs at a
+/// few hundred MB/s, so a multi-megabyte body would stall it for tens of ms.
 const OFFLOAD_COMPRESS_BYTES: usize = 1024 * 1024;
 
 pub(crate) fn should_compress(config: RequestCompression, body_len: usize) -> bool {

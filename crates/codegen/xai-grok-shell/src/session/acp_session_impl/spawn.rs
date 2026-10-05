@@ -1,4 +1,7 @@
-//! Session bring-up for `acp_session`: `spawn_session_actor` and the per-session OS thread.
+//! Session bring-up for `acp_session`: `spawn_session_actor` and the per-session OS thread (`SessionThread` / `spawn_session_on_thread`).
+//! Also holds the MCP auto-restart wiring (`SessionRestartActions`).
+//!
+//! The chat+local `own` supervisor lives on `MvpAgent` (started in `session/new`), not `SessionActor`; crash-restart reaches it through the bridge slot seeded here.
 #![allow(clippy::items_after_test_module)]
 use super::*;
 use crate::agent::remote_config::task_model_policy::{
@@ -18,8 +21,9 @@ impl SpawnStep {
         self.span.record(field, value);
     }
 }
-/// Sync-only: the returned guard enters its span for the whole scope, so
-/// never hold a `SpawnStep` across an `.await`.
+/// Sync-only: the returned guard enters its span for the whole scope, so never hold a `SpawnStep` across an `.await`.
+/// Reads `is_active()` once (via [`spawn_await_step!`]) so the timer and span cannot pick opposite prefixes.
+/// An awaiting step uses [`spawn_await_step!`] instead.
 macro_rules! spawn_step {
     ($step:literal $(, $field:ident = $value:expr)* $(,)?) => {{
         let (timer, span) = spawn_await_step!($step $(, $field = $value)*);
@@ -29,7 +33,7 @@ macro_rules! spawn_step {
         }
     }};
 }
-/// Awaiting counterpart of [`spawn_step!`]: the step's timer and span from one literal, so both names
+/// Awaiting counterpart of [`spawn_step!`]: the step's timer and span from one literal, so the two names
 /// cannot drift. `.instrument(span)` the future, then drop the timer once it resolves.
 macro_rules! spawn_await_step {
     ($step:literal $(, $field:ident = $value:expr)* $(,)?) => {
@@ -86,7 +90,8 @@ fn configured_memory_retrieval_mode(
         Some(_) => FtsOnly,
     }
 }
-/// A per-model sampler threshold overrides this policy elsewhere.
+/// One 429 layer per role, never stacked, never zero: an active subagent pacer disables the sampler retry, and a
+/// disabled pacer falls back to it (a true rollback). A per-model sampler threshold overrides this policy elsewhere.
 fn subagent_sampler_rate_limit_threshold(is_subagent: bool, pacer_max_attempts: u32) -> u32 {
     if is_subagent && pacer_max_attempts > 0 {
         xai_grok_sampler::RATE_LIMIT_RETRY_DISABLED
@@ -849,7 +854,11 @@ pub(crate) async fn spawn_session_actor(
         ),
         two_pass_enabled,
     };
-    // The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON, written by the pager's settings modal) is the master switch.
+    // The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON,
+    // written by the pager's settings modal) is the master switch for the
+    // built-in todo-stop gate: it participates in the turn-end stop gate and
+    // consumes the same continuation budget the stop hooks use. The CLI
+    // `--todo-gate` flag stays a session-scoped opt-in on top.
     let mut reminder_policy = resolve_reminder_policy(remote_settings.as_ref(), todo_gate);
     reminder_policy.stop_gate_unfinished_todos = effective_cfg
         .as_ref()
@@ -1749,7 +1758,9 @@ pub(crate) async fn spawn_session_actor(
             .into_iter()
             .filter_map(|c| match c {
                 crate::agent::config::GoalRoleModelChoice::Explicit(p) => Some(p),
-                // A `[models] goal_skeptic` slot names a model only.
+                // A `[models] goal_skeptic` slot names a model only. An
+                // empty agent type is what carries "keep the parent's
+                // harness" through the pool and its persisted assignment.
                 crate::agent::config::GoalRoleModelChoice::ModelOnly(model) => {
                     Some(crate::util::config::GoalRoleModel {
                         model,
@@ -2527,9 +2538,9 @@ pub(crate) struct SessionInitResult {
     pub(crate) toolset: Arc<xai_grok_tools::registry::types::FinalizedToolset>,
 }
 /// Bind an installed actor's toolset to its workspace session so local `call_tool` dispatches through
-/// it. The installer calls this once it owns the id, so installs racing for one id never both bind.
-/// `cwd` and `hunk_tracker` are the actor's own (`ToolContext`). `Some` only when a local binding was
-/// taken; proxy mode binds nothing.
+/// it. The installer calls this once it owns the id, so two installs racing for one id never both
+/// bind. `cwd` and `hunk_tracker` are the actor's own (`ToolContext`). `Some` only when a local
+/// binding was taken; proxy mode binds nothing.
 pub(crate) fn bind_installed_toolset(
     workspace_ops: &xai_grok_workspace::WorkspaceOps,
     session_id: &acp::SessionId,

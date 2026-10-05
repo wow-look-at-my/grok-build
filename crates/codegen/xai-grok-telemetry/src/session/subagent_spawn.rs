@@ -1,4 +1,7 @@
 //! A closed phase schema in the spirit of [`crate::startup::StartupPhase`].
+//! Time anything else with a `tracing` span, or extend the enum deliberately.
+//! Phases are recorded once per spawned child and reported on the `subagent_completed` event.
+//! Names follow the `grok_code_subagent_spawn_*` metric taxonomy.
 #![deny(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 
 use std::sync::{Arc, Mutex};
@@ -44,8 +47,9 @@ crate::startup::span_table!(fn phase_span, fn phase_span_under(SubagentSpawnPhas
     ReadyToFirstTurn => "subagent_spawn.ready_to_first_turn",
 });
 
-/// The per-spawn profiling context a subagent spawn threads onto the session
-/// thread.
+/// The per-spawn profiling context a subagent spawn threads onto the session thread.
+/// It carries the phase recorder and the span the thread-side phases parent under.
+/// It is absent for top-level sessions, which record no phases.
 pub struct SpawnPhaseContext {
     pub timer: SharedSubagentSpawnTimer,
     pub parent: tracing::Span,

@@ -294,8 +294,9 @@ fn rewind_domain_and_result_labels_are_stable() {
     assert_eq!(rewind_result_label(true), "success");
     assert_eq!(rewind_result_label(false), "failure");
 }
-/// It adds no extra handlers and no RPC handler (the resolver and `connect_hub` append that, not this builder). The resolver-level "no
-/// intersection, no silent drop" guarantee is covered by [`resolver_advertises_tool_absent_from_connect_catalog`].
+/// The per-bind handler builder maps the session's finalized toolset 1:1: one handler per `tool_definitions()` entry, keyed by client name.
+/// It adds no extra handlers and no RPC handler (the resolver and `connect_hub` append that, not this builder).
+/// The resolver-level "no intersection, no silent drop" guarantee is covered by [`resolver_advertises_tool_absent_from_connect_catalog`].
 #[tokio::test]
 async fn build_session_routed_handlers_covers_finalized_toolset() {
     let handle = make_handle();
@@ -1225,8 +1226,9 @@ async fn background_task_survives_toolset_swap() {
     );
     new_terminal.kill_task(&bg.task_id).await;
 }
-/// Test factory whose sessions own a PERSISTENT-shell backend (the production
-/// factory shape).
+/// Test factory whose sessions own a PERSISTENT-shell backend (the production factory shape).
+/// The plain [`TestSessionContextFactory`] builds a non-persistent backend, which tracks no shell cwd.
+/// The shell-state-survival test uses this wrapper instead.
 struct PersistentShellFactory {
     inner: TestSessionContextFactory,
 }
@@ -1292,6 +1294,7 @@ fn make_persistent_shell_handle() -> WorkspaceHandle {
     .expect("handle construction should succeed")
 }
 /// The persistent shell's state (a model-issued `cd`) survives a `Reresolved` swap because the shell lives inside the session-owned backend.
+/// This is the isolation-matrix #3 "persistent-shell cwd preserved" sub-assert, on the production backend shape (`with_persistent_shell`).
 /// Unix-only, like the persistent shell.
 #[cfg(unix)]
 #[tokio::test]
@@ -1503,6 +1506,7 @@ async fn drop_session_leaves_externally_owned_hunk_tracker_alive() {
     owner_cancel.cancel();
     assert_hunk_tracker_stops(&tracker).await;
 }
+/// Isolation matrix #5: a workspace process restart loses tasks (they are process state), and what's pinned here is the recovery UX.
 /// The same session id recreates cleanly on the fresh process and the task table starts empty (loss is visible, not silent).
 /// `get_task_output` for the lost id returns the informative not-found message.
 #[tokio::test]
@@ -2378,8 +2382,9 @@ async fn tool_state_upload_is_noop_when_data_collection_disabled() {
         "opt-out ⇒ spawn_tool_state_upload must enqueue nothing"
     );
 }
-/// Queue-backed handle with an explicit `identity` and a `{sandbox_id, mode}`
-/// server-metadata blob; the returned `TempDir` must outlive the handle.
+/// Queue-backed handle with an explicit `identity` and a `{sandbox_id, mode}` server-metadata blob; the returned `TempDir` must outlive the handle.
+/// The proxy points at a dead local port.
+/// Collection is enabled (not opted out).
 fn make_queue_backed_handle(
     identity: crate::WorkspaceIdentity,
 ) -> (WorkspaceHandle, tempfile::TempDir) {
@@ -4063,9 +4068,11 @@ struct BindMcpTestState {
     hang_tools_list: bool,
     zero_tools: bool,
     tool_name: Option<String>,
-    /// When set, `tools/list` signals the first notify and waits on the second before answering.
+    /// When set, `tools/list` signals the first notify and waits on the
+    /// second before answering, so a test can interleave work mid-discovery.
     tools_list_gate: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
-    /// When set, `tools/list` returns this many tools (`tool_000`, ...) instead of the default.
+    /// When set, `tools/list` returns this many tools (`tool_000`, ...)
+    /// instead of the single default.
     tool_count: Option<usize>,
 }
 async fn bind_mcp_post(
@@ -4802,8 +4809,8 @@ async fn stop_mcp_server_ends_the_client_without_a_hub() {
     );
     server_task.abort();
 }
-/// [`crate::mcp::HubToolRegistry`] whose unregisters are never acknowledged,
-/// like the hub once Grok Desktop's session is gone.
+/// [`crate::mcp::HubToolRegistry`] whose unregisters are never acknowledged, like the hub once
+/// Grok Desktop's session is gone: the daemon's config push then waits out its whole budget.
 struct HubThatNeverAcksUnregisters {
     inner: FakeHubRegistry,
 }
@@ -5388,8 +5395,9 @@ async fn a_teardown_mid_connect_drops_the_finished_client() {
     );
     server_task.abort();
 }
-/// [`crate::mcp::HubToolRegistry`] wrapper that runs a session teardown
-/// before the first dynamic registration goes through.
+/// [`crate::mcp::HubToolRegistry`] wrapper that runs a session teardown just
+/// before the first dynamic registration goes through — the exact
+/// interleaving where teardown's own unregister pass cannot see the id yet.
 struct TeardownOnFirstRegister {
     inner: FakeHubRegistry,
     handle: WorkspaceHandle,
@@ -5622,7 +5630,8 @@ struct FakeHubRegistry {
             Vec<Arc<dyn xai_computer_hub_sdk::ToolServerHandler>>,
         >,
     >,
-    /// Dynamic registrations tracked separately, exactly like the real `ToolServer`'s `dynamic_handlers`.
+    /// Dynamic registrations tracked separately, exactly like the real `ToolServer`'s `dynamic_handlers`: a resolver install must preserve them (resolver wins tool-id collisions), which is the property single-channel publication rests on.
+    /// Entries carry the life that made them, mirroring the SDK's life-tagged ledger.
     dynamic: parking_lot::Mutex<DynamicRegistrations>,
 }
 /// Per-session life-tagged dynamic registrations, as the fake hub tracks
@@ -5632,8 +5641,7 @@ type DynamicRegistrations = std::collections::HashMap<
     Vec<(u64, Arc<dyn xai_computer_hub_sdk::ToolServerHandler>)>,
 >;
 impl FakeHubRegistry {
-    /// What the fake hub advertises for a session — the assertion surface
-    /// reload/converge tests read.
+    /// What the fake hub currently advertises for a session — the assertion surface reload/converge tests read. Inherent (not on [`crate::mcp::HubToolRegistry`]): production never reads back through the registry seam, so the trait carries only the register/unregister channel.
     fn handlers_for_session(
         &self,
         session_id: &xai_tool_protocol::SessionId,
@@ -6260,6 +6268,7 @@ async fn a_soft_rebind_keeps_registration_tags_matching_the_life() {
     assert!(!fake_hub_tool_ids(&hub, &sid).contains(&"echo".to_owned()));
     server_task.abort();
 }
+/// A bind accepted AFTER a hub unbind arrived supersedes the unbind's deferred teardown: a soft rebind continues the life (same epoch — wave 13), so the epoch alone cannot distinguish before-unbind from after-reconnect; the bind generation can.
 /// Without it, the deferred teardown closes MCP under the already-accepted bind, stranding a live session on `Closed`.
 #[tokio::test]
 async fn a_bind_accepted_after_an_unbind_invalidates_its_deferred_teardown() {
@@ -6290,8 +6299,9 @@ async fn a_bind_accepted_after_an_unbind_invalidates_its_deferred_teardown() {
     );
     server_task.abort();
 }
-/// Unfenced, the end flips the accepted bind's binding back to `Closed`, and reloads and `configure_mcp` both refuse `Closed`, so the hub-visible session stays permanently MCP-less until another bind. (Failing-first verified: with the
-/// pre-fix unfenced `teardown_session_mcp` in place of the fenced call, the "must stay open" assertion below panics.)
+/// A stale `SessionEnded` hook must not close a life revived (or continued) by a bind accepted after the end arrived — the third member of the unbind-fence family (wave 15 fenced `session.unbind`; the hook's teardown was still unfenced).
+/// Unfenced, the end flips the accepted bind's binding back to `Closed`, and reloads and `configure_mcp` both refuse `Closed`, so the hub-visible session stays permanently MCP-less until another bind.
+/// (Failing-first verified: with the pre-fix unfenced `teardown_session_mcp` in place of the fenced call, the "must stay open" assertion below panics.)
 #[tokio::test]
 async fn a_bind_accepted_after_a_session_end_invalidates_its_teardown() {
     let (url, server_task) = spawn_bind_mcp_server(BindMcpTestState::default()).await;
@@ -6321,8 +6331,8 @@ async fn a_bind_accepted_after_a_session_end_invalidates_its_teardown() {
     );
     server_task.abort();
 }
-/// The event fence's pair must be untearable: the old unbind callback loaded `mcp_epoch` and `mcp_bind_generation` as separate atomics outside `mcp_binding`, so a soft rebind BETWEEN the loads produced the torn pair (old epoch, post-bind generation) — and a soft rebind keeps its epoch, so a pairwise (epoch, generation) gate fed that torn pair matches and closes MCP under the accepted bind. The
-/// event path now anchors ONE load at arrival and re-snapshots the pair under `mcp_binding`; with the true arrival anchor the teardown refuses.
+/// The event fence's pair must be untearable: the old unbind callback loaded `mcp_epoch` and `mcp_bind_generation` as two separate atomics outside `mcp_binding`, so a soft rebind BETWEEN the loads produced the torn pair (old epoch, post-bind generation) — and a soft rebind keeps its epoch, so a pairwise (epoch, generation) gate fed that torn pair matches and closes MCP under the accepted bind.
+/// The event path now anchors ONE load at arrival and re-snapshots the pair under `mcp_binding`; with the true arrival anchor the teardown refuses.
 #[tokio::test]
 async fn a_torn_unbind_snapshot_cannot_close_an_accepted_binds_mcp() {
     let (url, server_task) = spawn_bind_mcp_server(BindMcpTestState::default()).await;
@@ -6513,6 +6523,7 @@ async fn a_reclaim_after_a_losing_binds_union_drops_new_collisions() {
     );
     server_task.abort();
 }
+/// The init-progress straggler of the uniform rule: a drive whose scope was opened under life 1 must not stamp the revived life's shared init progress with its servers — the init marks compare the life like every other state write.
 /// (Same FIFO choreography: teardown and revive queued on the binding lock ahead of the stale drive's init block.)
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stale_drive_cannot_stamp_a_revived_lifes_init_progress() {
@@ -6630,6 +6641,7 @@ async fn a_mid_bind_teardown_cannot_fail_a_bind_without_mcp_config() {
 }
 /// An EMPTY configured set must never fail a bind: the desktop always passes `bind_mcp: Some(...)` (an empty registry must still be a configured set so a later `mcp.json` edit has somewhere to land), so a user with no MCP servers — the common case — sits on the configured arm.
 /// The loud raced-teardown refusal keys on the set being NON-empty; an empty set proceeds with the binding left `Closed`, and the next bind re-opens.
+/// (Accepted trade-off: an `mcp.json` edit landing inside that raced window attaches at the session's next bind, not immediately — the same deal the no-config arm made in wave 18.)
 #[tokio::test(flavor = "multi_thread")]
 async fn an_empty_configured_set_never_fails_a_bind() {
     let factory = Arc::new(TestSessionContextFactory::new());
@@ -6723,6 +6735,7 @@ async fn a_mid_bind_teardown_cannot_fail_a_bind_with_configured_mcp() {
     server_task.abort();
 }
 /// THE bind invariant, latency edition: a hung MCP server cannot push a bind past the hub's ack budget even when setup was slow — the converge grace is a deadline from BIND START, so setup time shrinks the wait.
+/// Here setup (the mount hook) burns ~6s of the 10s window, discovery hangs forever, and the bind must return in ~6s + min(8s, 10−1−6=3s) ≈ 9s — where the pre-deadline behavior (6s + full 8s grace = 14s) would blow the ack.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_hung_mcp_server_cannot_push_a_bind_past_the_ack_budget() {
     let state = BindMcpTestState {
@@ -6858,6 +6871,7 @@ async fn a_rebind_reopens_for_the_client_driven_configure_path() {
     );
     server_task.abort();
 }
+/// Carrier #6, HIGH shape: hub registrations are life-tagged, so a stale in-flight teardown's unregister batch (tagged with the life it closed) can never remove the registration a revived life has since made under the same id.
 /// The revive's register SUPERSEDES the stale ledger entry (same id, older life) instead of being refused as a duplicate.
 #[tokio::test]
 async fn a_stale_teardown_unregister_cannot_remove_a_revived_lifes_tool() {
@@ -6899,6 +6913,9 @@ async fn a_stale_teardown_unregister_cannot_remove_a_revived_lifes_tool() {
     );
     server_task.abort();
 }
+/// Carrier #6, MEDIUM shape: an `Always` reclaim that takes an id away from the MCP side
+/// must not strip a resolver-installed NATIVE handler that has since taken the id —
+/// unregisters remove only matching-life DYNAMIC registrations, by Arc identity, never by bare id.
 #[tokio::test]
 async fn a_reclaim_unregister_cannot_strip_a_native_tool() {
     let (url, server_task) = spawn_bind_mcp_server(BindMcpTestState::default()).await;
@@ -7576,8 +7593,8 @@ async fn restored_server_first_bind_ordering_decides_capability_and_toolset() {
         "owner-first ordering yields the full capability the agent declared"
     );
 }
-/// Both a soft rebind and an SDK dead-loop FULL rebind re-run that exact path. With a live background task, the test drives an identical rebind (`Reused`) and then a
-/// changed-explicit-toolset rebind (`Reresolved`).
+/// Isolation matrix #1 to #3 through the REAL `session.bind` resolver, the closure `connect_hub` installs. Both a soft rebind and an SDK dead-loop FULL rebind re-run that exact path.
+/// With a live background task, the test drives an identical rebind (`Reused`) and then a changed-explicit-toolset rebind (`Reresolved`).
 #[tokio::test]
 async fn bind_flow_rebinds_keep_backend_and_task_alive_end_to_end() {
     let orphaned_before = orphaned_swap_count();
@@ -7795,7 +7812,7 @@ async fn resolve_ack_skipped_when_no_handles() {
     assert_eq!(count, 0);
     assert_eq!(msg.as_deref(), Some("data_collection_disabled"));
 }
-/// Real enqueue tasks that both report `Enqueued` resolve to a clean `Enqueued` ack with `artifact_count == 2`.
+/// Two real enqueue tasks that both report `Enqueued` resolve to a clean `Enqueued` ack with `artifact_count == 2`.
 #[tokio::test]
 async fn resolve_ack_awaits_real_handles() {
     let before = tokio::spawn(async { EnqueueOutcome::Enqueued });
@@ -8650,7 +8667,9 @@ async fn tool_definitions_emit_registers_producer() {
         "tool-definitions emission must register in the producer tracker"
     );
 }
+/// The drain must wait for a slow producer (phase 1.5) so its artifact reaches the queue before the queue drain runs.
 /// The producer enqueues an item the unreachable test queue can never upload.
+/// `unfinished == 1` is therefore only observable if the enqueue landed before phase 2 concluded.
 #[tokio::test]
 async fn two_phase_drain_waits_for_producer_then_drains_queue() {
     use std::sync::atomic::Ordering;
@@ -8690,6 +8709,7 @@ async fn two_phase_drain_waits_for_producer_then_drains_queue() {
         "the producer's artifact must be in the queue when the queue drain times out"
     );
 }
+/// Phase 1.5 is capped at half the post-phase-1 remainder.
 /// A producer that would finish within the total budget (at 400ms of 600ms) but past the cap (300ms) is cut off there.
 /// That preserves the phase-2 floor.
 #[tokio::test(start_paused = true)]

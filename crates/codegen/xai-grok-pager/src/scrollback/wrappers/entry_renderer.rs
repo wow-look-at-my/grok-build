@@ -17,17 +17,22 @@ use crate::scrollback::types::{AccentStyle, BlockBackground, DisplayMode, Select
 use crate::theme::{self, Theme};
 
 /// Animation speed for running blocks (radians per tick).
+/// ~0.15 gives a smooth wave that travels the block in ~40 ticks.
 const WAVE_SPEED: f32 = 0.15;
 
 pub struct EntryRenderer<'a> {
     entry: &'a ScrollbackEntry,
     theme: &'a Theme,
-    /// Deliberately NOT an eager `AppearanceConfig::default()`: that conversion reads `Theme::current()`.
+    /// Deliberately NOT an eager `AppearanceConfig::default()`: that conversion reads `Theme::current()` and quantizes every color.
+    /// Profiling a resize showed it running once per entry only to be overwritten.
     appearance: OnceCell<Cow<'a, AppearanceConfig>>,
     tick: u64,
     /// Number of rows to skip from the top of the entry.
+    /// When non-zero, the renderer acts as if the entry starts `skip_rows` rows lower, omitting that many top rows (vpad, then content lines).
+    /// The remainder renders into `area`; this eliminates scratch-buffer rendering of partially-visible entries.
     skip_rows: u16,
     /// Whether this entry's block is groupable (participates in dense groups).
+    /// When true AND display_mode == Collapsed, the bullet is dimmed.
     groupable: bool,
     /// Whether this entry is currently selected in the scrollback.
     is_selected: bool,
@@ -37,13 +42,17 @@ pub struct EntryRenderer<'a> {
     group_header_count: u16,
     /// When true, this is a collapse header for an expanded group ("▾ N tool calls" instead of "╶╶ N more").
     group_collapse_header: bool,
-    /// Aggregated group-header label; when set, group-header rows render it instead.
+    /// Aggregated group-header label; when set, group-header rows render it instead of the plain "N more" / "N tool calls" text.
+    /// The variant picks the chrome: verb-run headers wear running/error accents from the run state, truncation headers keep the dimmed fold chrome.
     group_header_label: Option<&'a crate::scrollback::state::verb_group::GroupHeaderLabel>,
-    /// When true, suppress the block's background band (force `BlockBackground::None`) so the entry blends.
+    /// When true, suppress the block's background band (force `BlockBackground::None`) so the entry blends with the
+    /// terminal's own background.
     flat_background: bool,
     /// When true, reclaim the accent column for content (chrome width drops by [`HorizontalLayout::ACCENT`]).
+    /// Minimal mode pairs this with zeroed `block_pad_{left,right}`, so content starts at column 0, aligned with the welcome card.
     hide_accent: bool,
     /// Paint the accent bar with [`Modifier::DIM`] on top of its color.
+    /// A rail that resolved to `Color::Reset` then reads as chrome rather than full-brightness content.
     dim_accent: bool,
     /// Session/worktree cwd (`AgentSession.cwd`) for Expanded tool paths.
     cwd: Option<&'a Path>,
@@ -75,8 +84,8 @@ impl<'a> EntryRenderer<'a> {
         self
     }
 
-    /// Suppress the block background band so the entry blends with the
-    /// terminal's own background (minimal mode).
+    /// Suppress the block background band so the entry blends with the terminal's own background (minimal mode).
+    /// See [`Self::flat_background`].
     pub fn with_flat_background(mut self, flat: bool) -> Self {
         self.flat_background = flat;
         self
@@ -95,8 +104,9 @@ impl<'a> EntryRenderer<'a> {
         self
     }
 
-    /// Background to paint where the block itself has none (accent column,
-    /// gutter, bullets).
+    /// Background to paint where the block itself has none (accent column, gutter, bullets).
+    /// In flat mode this is `Color::Reset`, the terminal's default background, so the entry stays transparent instead of an opaque `bg_base` strip.
+    /// Otherwise it is `bg_base`.
     fn fallback_bg(&self) -> ratatui::style::Color {
         if self.flat_background {
             ratatui::style::Color::Reset
@@ -145,8 +155,9 @@ impl<'a> EntryRenderer<'a> {
         self
     }
 
-    /// Skip the first `n` rows of the entry when rendering. The skipped rows
-    /// consume vpad first, then content lines.
+    /// Skip the first `n` rows of the entry when rendering.
+    /// The skipped rows consume vpad first, then content lines.
+    /// This allows partially-visible entries to be rendered directly into the output buffer without a scratch buffer intermediate.
     pub fn with_skip_rows(mut self, n: u16) -> Self {
         self.skip_rows = n;
         self
@@ -211,7 +222,8 @@ impl<'a> EntryRenderer<'a> {
 
         let bg = self.theme.bg_base;
 
-        // The column is reserved but never painted here.
+        // The column is reserved but never painted here, and an unowned cell survives the frame diff
+        // Whatever glyph the previous frame left at this position would stay
         fill_bg_spaces(buf, accent_area, bg);
 
         // Verb-group header: an aggregated "Verb N noun" label whose diamond takes the run-state color
@@ -233,6 +245,8 @@ impl<'a> EntryRenderer<'a> {
             };
 
             // Diamond chrome in BOTH states, same family as the "N more" headers.
+            // The selection caret (the expandable indicator in scrollback_pane.rs) overdraws the diamond on the selected row
+            // It flips `›`/`⌄` with the group's fold state
             let prefix = group_header_chrome_prefix();
             let mut spans = vec![ratatui::text::Span::styled(
                 prefix,
@@ -240,12 +254,15 @@ impl<'a> EntryRenderer<'a> {
             )];
             spans.extend(vg.line.spans.iter().cloned());
             let line = ratatui::text::Line::from(spans);
-            // Group-header content is registered selectable (GROUP_HEADER_RANGE_ID) Its selection maps visual columns.
+            // Group-header content is registered selectable (GROUP_HEADER_RANGE_ID)
+            // Its selection maps visual columns, so it must paint visual too
             buf.set_line_safe_bidi(content_area.x, content_area.y, &line, content_area.width);
             return;
         }
 
-        // Render header: a dimmed ◈, then brighter text.
+        // Render header: a dimmed ◈, then brighter text that stands out
+        // The aggregated label describes the hidden rows through the shared bucket vocabulary ("Ran 6 commands")
+        // When the caller supplied none (the render loop owns the reasons), the plain count remains
         let n = self.group_header_count;
         let diamond_style = Style::default().fg(self.theme.gray);
         let text_style = Style::default()
@@ -267,7 +284,8 @@ impl<'a> EntryRenderer<'a> {
             spans.push(ratatui::text::Span::styled(label, text_style));
         }
         let line = ratatui::text::Line::from(spans);
-        // Group-header content is registered selectable (GROUP_HEADER_RANGE_ID) Its selection maps visual columns.
+        // Group-header content is registered selectable (GROUP_HEADER_RANGE_ID)
+        // Its selection maps visual columns, so it must paint visual too
         buf.set_line_safe_bidi(content_area.x, content_area.y, &line, content_area.width);
     }
 
@@ -284,11 +302,12 @@ impl<'a> EntryRenderer<'a> {
         }
     }
 
-    /// Legacy fixed chrome-width estimate for callers with no appearance to borrow (off-screen mermaid sizing).
+    /// Legacy fixed chrome-width estimate for callers with no appearance to borrow (off-screen mermaid sizing); the live value is `chrome_width()`.
     pub const CHROME_WIDTH: u16 = 1 + 2 + 1; // accent + left_pad + right_pad (legacy)
 
-    /// Whether this entry should display a timestamp on the first content
-    /// line.
+    /// Whether this entry should display a timestamp on the first content line.
+    /// Timestamps are shown for user and agent messages (including /btw responses and mid-turn interjections).
+    /// Thinking traces, tool calls, and system messages get none.
     fn should_show_timestamp(&self) -> bool {
         matches!(
             self.entry.block,
@@ -297,7 +316,10 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// The per-message cost indicator shares the timestamp's message-block
-    /// gating — it decorates the same message blocks.
+    /// gating — it decorates the same message blocks, never thinking/tool/
+    /// system rows. Unlike the timestamp it is deliberately NOT coupled to the
+    /// `show_timestamps` appearance toggle: a reported cost must render even
+    /// when timestamps are hidden, so the indicator never silently vanishes.
     fn should_show_cost(&self) -> bool {
         self.should_show_timestamp() && self.entry.cost_usd_ticks.is_some_and(|t| t > 0)
     }
@@ -311,7 +333,8 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// Width reserved on the right for the per-message cost indicator, when
-    /// this message block reports a cost.
+    /// this message block reports a cost. Independent of the `show_timestamps`
+    /// toggle so a reported cost always has a gutter to render into.
     fn cost_reserved(&self) -> u16 {
         if self.should_show_cost() {
             cost_ticks_display_width(self.entry.cost_usd_ticks)
@@ -321,13 +344,15 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// The per-message cache-hit-percent indicator shares the cost/timestamp
-    /// gating (message blocks only).
+    /// gating (message blocks only): it decorates the same blocks and never
+    /// thinking/tool/system rows.
     fn should_show_cache_hit(&self) -> bool {
         self.should_show_timestamp() && self.entry.cache_hit_percent.is_some()
     }
 
     /// The cache-hit string (if one is present), painted on its own row below
-    /// the content rather than sharing the first line's gutter.
+    /// the content rather than sharing the first line's gutter — see
+    /// `cache_hit_reserved_rows`.
     fn cache_hit_display(&self) -> Option<String> {
         if !self.should_show_cache_hit() {
             return None;
@@ -336,7 +361,12 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// Extra row reserved below the content for the cache-hit-percent line,
-    /// when this message block reports one.
+    /// when this message block reports one. Unlike the cost indicator this
+    /// does NOT widen `timestamp_reserved()` (the content-wrap gutter): the
+    /// gutter already narrows every content line for the cost/timestamp
+    /// overlay, and a second label there would narrow it further. Reserving
+    /// a row instead — mirroring `inline_media_rows`'s additive reservation
+    /// in `assemble_height` — keeps content width untouched.
     fn cache_hit_reserved_rows(&self) -> u16 {
         if self.should_show_cache_hit() { 1 } else { 0 }
     }
@@ -350,15 +380,17 @@ impl<'a> EntryRenderer<'a> {
         let cost = self.cost_reserved();
         if self.appearance().show_timestamps && self.should_show_timestamp() {
             let ts: u16 = 10; // max short format: "  12:30 PM"
-            // The cost token (when present) sits left of the timestamp with
-            // one space between.
+            // The cost token (when present) sits left of the timestamp with one
+            // space between. When no cost is reported there is no extra
+            // reservation — keep the historical 10-col timestamp gutter intact.
             if cost > 0 {
                 ts.saturating_add(cost.saturating_add(1))
             } else {
                 ts
             }
         } else {
-            // When the timestamp is hidden, a reported cost still reserves its own right-aligned gutter so it does not collide.
+            // When the timestamp is hidden, a reported cost still reserves its
+            // own right-aligned gutter so it does not collide with content.
             cost
         }
     }
@@ -383,6 +415,7 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// Extra rows to reserve for inline media preview (images/video poster).
+    /// Returns 0 on non-graphics terminals or when the block has no media.
     fn inline_media_rows(&self, content_width: u16) -> u16 {
         use crate::terminal::image::scrollback_inline_overlay_active;
 
@@ -409,8 +442,9 @@ impl<'a> EntryRenderer<'a> {
             .saturating_sub(self.chrome_width())
             .saturating_sub(self.timestamp_reserved());
         let content_lines = self.estimate_content_lines(content_width);
-        // `inline_media_rows` (in `assemble_height`) covers trailing tool
-        // media.
+        // `inline_media_rows` (in `assemble_height`) covers trailing tool media.
+        // `estimate_extra_rows` adds the Mermaid treatment rows (one affordance row or fallback caption per diagram)
+        // Those live inside `output()` and are invisible to this source-based estimate, so it never under-reserves
         self.assemble_height(content_width, content_lines)
             .saturating_add(self.entry.block.estimate_extra_rows())
     }
@@ -422,9 +456,8 @@ impl<'a> EntryRenderer<'a> {
         if let Some(lines) = self.entry.cached_estimate_lines(content_width) {
             return lines;
         }
-        // Collapsed / Truncated foldable entries render a compact ~1-line
-        // header, NOT their (often huge) hidden body Use the ENTRY-level
-        // foldability.
+        // Collapsed / Truncated foldable entries render a compact ~1-line header, NOT their (often huge) hidden body
+        // Use the ENTRY-level foldability, matching the fold path
         let lines = if self.entry.display_mode != DisplayMode::Expanded && self.entry.is_foldable()
         {
             1
@@ -456,8 +489,8 @@ impl<'a> EntryRenderer<'a> {
         let content_width = width
             .saturating_sub(self.chrome_width())
             .saturating_sub(self.timestamp_reserved());
-        // Compute vpad and populate the cache before borrowing the cached
-        // output `ensure_cached` takes the RefCell mutably on a miss.
+        // Compute vpad and populate the cache before borrowing the cached output
+        // `ensure_cached` takes the RefCell mutably on a miss, so the `Ref` from `cached_output_ref` must come after it
         let ctx = self
             .entry
             .context(content_width, self.appearance(), self.cwd);
@@ -541,10 +574,11 @@ impl<'a> EntryRenderer<'a> {
             .unwrap_or(last_content_row)
     }
 
-    /// Inverse of [`rendered_row_of_logical_line`]. Shares `logical_line_start_rows` with that method so both
+    /// Inverse of [`rendered_row_of_logical_line`]. Shares `logical_line_start_rows` with that method so the two
     /// provably round-trip.
     pub fn logical_line_of_rendered_row(&self, width: u16, row: u16) -> usize {
         let (starts, _) = self.logical_line_start_rows(width);
+        // `starts` is ascending: the count of starts at or before `row`, minus 1, is the 0-based index of the logical line containing `row`
         starts
             .partition_point(|&start| start <= row)
             .saturating_sub(1)
@@ -552,20 +586,28 @@ impl<'a> EntryRenderer<'a> {
 }
 
 /// Convert an API-reported server cost (in USD ticks, 1e10 per USD) to a
-/// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees -
-/// A missing (`None`) or non-positive cost returns `None`, so a caller never
+/// readable display string such as `$0.12` or `$3.42`.
+///
+/// # Honesty guarantees
+///
+/// - A missing (`None`) or non-positive cost returns `None`, so a caller never
 ///   renders a fabricated `$0.00` when the API reported no cost.
-/// - Arithmetic is exact **integer** math (no floats).
+/// - Arithmetic is exact **integer** math (no floats), so a reported cost is
 ///   never mis-rounded into `$0` the way a `f64` at 4 decimals could.
+/// - Up to 6 significant fractional digits are shown (trailing zeros trimmed),
+///   so even a tiny-but-real reported cost renders as non-zero.
+///
+/// Pure — no terminal/theme/IO deps — so it is exactly assertable in unit
+/// tests.
 pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<String> {
     let ticks = cost_usd_ticks?;
     if ticks <= 0 {
         return None;
     }
-    const PER_USD: i64 = 10_000_000_000;
-    const FRAC_SCALE: i64 = 10_000;
+    const PER_USD: i64 = 10_000_000_000; // 1 USD = 1e10 ticks
+    const FRAC_SCALE: i64 = 10_000; // PER_USD / 10^6 → 6 fractional digits
     let whole = ticks / PER_USD;
-    let frac = (ticks % PER_USD) / FRAC_SCALE;
+    let frac = (ticks % PER_USD) / FRAC_SCALE; // 0..=999_999 (6 digits)
     let frac_text = format!("{frac:06}");
     let trimmed = frac_text.trim_end_matches('0');
     if trimmed.is_empty() {
@@ -575,6 +617,8 @@ pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<Strin
     }
 }
 
+/// Display width of a cost string (0 when the cost is not present / renders to
+/// nothing), so the gutter reservation and the overlay share one source of truth.
 pub(crate) fn cost_ticks_display_width(cost_usd_ticks: Option<i64>) -> u16 {
     cost_ticks_to_display(cost_usd_ticks)
         .map(|s| unicode_width::UnicodeWidthStr::width(s.as_str()) as u16)
@@ -587,8 +631,10 @@ pub(crate) fn cache_hit_to_display(cache_hit_percent: Option<u8>) -> Option<Stri
     cache_hit_percent.map(|p| format!("cache {p}%"))
 }
 
-/// Diamond chrome prefix every group header draws before its text —
-/// verb-run labels, truncation labels, and plain counts alike.
+/// Diamond chrome prefix every group header draws before its text — verb-run
+/// labels, truncation labels, and plain counts alike, in both fold states.
+/// Selection geometry for labeled headers derives from this same string (see
+/// [`group_header_chrome_prefix_width`]) so render and hitbox can't drift.
 pub(crate) fn group_header_chrome_prefix() -> String {
     format!("{} ", crate::glyphs::diamond_dotted())
 }
@@ -620,8 +666,9 @@ impl Renderable for EntryRenderer<'_> {
         let content_width = width
             .saturating_sub(self.chrome_width())
             .saturating_sub(self.timestamp_reserved());
-        // Use cached output for height calculation The is_selected flag only
-        // affects styling (e.g., UserPrompt prefix color).
+        // Use cached output for height calculation
+        // The is_selected flag only affects styling (e.g., UserPrompt prefix color), not line count
+        // The non-selected cached output therefore gives the correct height
         self.entry
             .ensure_cached(content_width, self.appearance(), false, self.cwd);
         // Clamp the line count: a pathologically large block could exceed u16.
@@ -656,6 +703,7 @@ impl Renderable for EntryRenderer<'_> {
                 let remaining = Rect::new(area.x, area.y + 1, area.width, remaining_height);
                 (remaining, 0u16)
             } else {
+                // Header is scrolled off: reduce skip_rows by 1 for content
                 (area, self.skip_rows - 1)
             }
         } else {
@@ -663,8 +711,8 @@ impl Renderable for EntryRenderer<'_> {
         };
 
         let layout_cfg = &self.appearance().scrollback.layout;
-        // Minimal (`hide_accent`): reclaim the accent column so content is
-        // flush-left Fullscreen keeps the 1-col gutter even.
+        // Minimal (`hide_accent`): reclaim the accent column so content is flush-left
+        // Fullscreen keeps the 1-col gutter even when a block has no painted accent (so columns stay aligned across entry types)
         let accent_w = if self.hide_accent {
             0
         } else {
@@ -678,14 +726,14 @@ impl Renderable for EntryRenderer<'_> {
         ])
         .areas(area);
 
-        // Build context directly: we only need it for background/accent
-        // decisions, not the output This avoids a full block.output().
+        // Build context directly: we only need it for background/accent decisions, not the output
+        // This avoids a full block.output() call (including syntax highlighting for edit blocks) that was previously thrown away
         let mut ctx = self
             .entry
             .context(content_area.width, self.appearance(), self.cwd);
         ctx.is_selected = self.is_selected;
-        // Minimal mode blends committed/tail blocks with the real terminal
-        // background Suppress the block's own band.
+        // Minimal mode blends committed/tail blocks with the real terminal background
+        // Suppress the block's own band; accents and per-line code shading stay
         let bg = if self.flat_background {
             BlockBackground::None
         } else {
@@ -808,7 +856,8 @@ impl Renderable for EntryRenderer<'_> {
             }
         }
 
-        // Render content using cache (keyed on is_selected for blocks like UserPrompt that adjust styling based on selection state).
+        // Render content using cache (keyed on is_selected for blocks like UserPrompt that adjust styling based on selection state)
+        // When timestamps are enabled, wrap content at a narrower width so text never collides with the right-aligned timestamp
         let ts_reserved = self.timestamp_reserved();
         let text_width = content_area.width.saturating_sub(ts_reserved);
         self.entry
@@ -816,11 +865,15 @@ impl Renderable for EntryRenderer<'_> {
         let cached_ref = self.entry.cached_output_ref();
         let output: &BlockOutput = &cached_ref;
         let has_vpad = self.entry.block.has_vpad(&ctx);
-        // Determine how many rows of vpad/content to skip. Layout is: [vpad_top?] [content lines...] [vpad_bottom?]
+        // Determine how many rows of vpad/content to skip.
+        // Layout is: [vpad_top?] [content lines...] [vpad_bottom?]
         let vpad_top = if has_vpad { 1u16 } else { 0 };
         let skip_remaining = skip_rows;
 
+        // Skip vpad_top (0 or 1 row)
         let vpad_top_visible = if skip_remaining < vpad_top {
+            // Partial skip into vpad: vpad is still visible
+            // (vpad is 0 or 1 row, so this means skip_rows == 0)
             true
         } else {
             false
@@ -835,7 +888,8 @@ impl Renderable for EntryRenderer<'_> {
             row += 1;
         }
 
-        // Own the timestamp gutter per row (no-bg blocks skip the full-area fill).
+        // Own the timestamp gutter per row (no-bg blocks skip the full-area fill) so a wide glyph can't strand a ghost
+        // Per-row bg keeps code blocks whole
         let own_gutter = ts_reserved > 0 && bg_color.is_none() && content_area.width > ts_reserved;
 
         // Content lines: skip the first `content_skip` lines
@@ -844,8 +898,9 @@ impl Renderable for EntryRenderer<'_> {
                 break;
             }
 
-            // Apply line-specific background if set Decorative panel bands
-            // (tool result previews) are dropped in flat mode.
+            // Apply line-specific background if set
+            // Decorative panel bands (tool result previews) are dropped in flat mode so they blend with the terminal's own background
+            // Semantic shading (diff rows, code-block fill) always paints
             let line_bg = if self.flat_background && line.background_is_panel {
                 None
             } else {
@@ -887,7 +942,7 @@ impl Renderable for EntryRenderer<'_> {
             if self.appearance().show_timestamps
                 && let Some(ts) = self.entry.created_at
             {
-                // Check if mouse is hovering the timestamp zone (rightmost
+                // Check if mouse is hovering the timestamp zone (rightmost 10
                 // cols of the first content row).
                 let ts_hovered = self.mouse_pos.is_some_and(|(mx, my)| {
                     my == first_content_y
@@ -911,7 +966,8 @@ impl Renderable for EntryRenderer<'_> {
                     let ts_style = Style::default().fg(self.theme.gray);
                     buf.set_string_safe(ts_x, first_content_y, &ts_str, ts_style);
                     if let Some(cost) = cost {
-                        // Cost sits immediately left of the timestamp, separated by one space.
+                        // Cost sits immediately left of the timestamp, separated
+                        // by one space. Subtle, honest chrome: dim but legible.
                         let cost_x = ts_x.saturating_sub(cost_width.saturating_add(1));
                         let cost_style = Style::default().fg(self.theme.gray_dim);
                         buf.set_string_safe(cost_x, first_content_y, &cost, cost_style);
@@ -954,9 +1010,11 @@ impl Renderable for EntryRenderer<'_> {
             let bullet_y = content_area.y + if has_vpad { 1 } else { 0 };
 
             if bullet_y >= max_row {
+                // bullet not visible; skip post-pass
             } else if self.entry.is_pending_user_input {
-                // Pending user input: leave the bullet glyph alone, freeze
-                // its color at the block's bullet color.
+                // Pending user input: leave the bullet glyph alone, just freeze its color at the block's bullet color. They would
+                // otherwise render in default gray and lose the cue entirely. The fallback intentionally matches the turn-status
+                // diamond and the drain-blocked diamond.
                 let color = bullet_style
                     .map(|s| s.color)
                     .unwrap_or(self.theme.accent_user);
@@ -979,6 +1037,7 @@ impl Renderable for EntryRenderer<'_> {
                     && !self.is_selected
                 {
                     // Collapsed groupable with colored bullet: dim it.
+                    // When selected, keep the bullet at its original full color so the selection reads as undimmed
                     let bg = bg_color.unwrap_or(self.fallback_bg());
                     let dim = self.appearance().scrollback.display.dim_accent;
                     let dimmed = blend_color(bg, style.color, dim).unwrap_or(style.color);
@@ -986,6 +1045,7 @@ impl Renderable for EntryRenderer<'_> {
                         cell.fg = dimmed;
                     }
                 }
+                // Static and not collapsed-groupable: the bullet already has its correct color from prepend_bullet(); no post-pass needed
             }
         }
     }
@@ -1005,6 +1065,8 @@ mod tests {
         let entry = ScrollbackEntry::new(RenderBlock::stub("Hello", Color::Blue));
         let renderer = EntryRenderer::new(&entry, &theme);
 
+        // One content line plus two vpad rows
+        // Width 80 minus chrome 4 leaves 76 for content
         assert_eq!(renderer.desired_height(80), 3);
     }
 
@@ -1057,6 +1119,7 @@ mod tests {
     fn rendered_row_of_logical_line_follows_word_wrap() {
         let _theme = pin_theme();
         let theme = Theme::current();
+        // First logical line is long enough to wrap into several rows at a narrow width; the second logical line then starts well past row 1
         let text = format!("{}\nsecond", "word ".repeat(40));
         let entry = ScrollbackEntry::new(RenderBlock::user_prompt(text));
         let renderer = EntryRenderer::new(&entry, &theme);
@@ -1069,6 +1132,7 @@ mod tests {
             row0 <= 1,
             "first logical line starts at the top content row"
         );
+        // Line 1 begins after every wrapped row of line 0, so it lands more than one row below it: proof the mapping follows the word wrap
         assert!(
             row1 > row0 + 1,
             "wrapped first line must push the second logical line past row {}",
@@ -1101,7 +1165,8 @@ mod tests {
         let entry = ScrollbackEntry::new(RenderBlock::stub("Test", Color::Blue));
         let renderer = EntryRenderer::new(&entry, &theme);
 
-        // Area: chars wide, a few rows Layout: accent(1) + left_pad(2) + content(16) + right_pad(1) = 20
+        // Area: 20 chars wide, 3 rows
+        // Layout: accent(1) + left_pad(2) + content(16) + right_pad(1) = 20
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
@@ -1111,9 +1176,12 @@ mod tests {
         assert_eq!(buf.cell((0, 1)).unwrap().symbol(), "┃");
         assert_eq!(buf.cell((0, 2)).unwrap().symbol(), "┃");
 
+        // Left padding at columns 1-2 (empty space)
         assert_eq!(buf.cell((1, 1)).unwrap().symbol(), " ");
         assert_eq!(buf.cell((2, 1)).unwrap().symbol(), " ");
 
+        // Content starts at column 3
+        // Row 0 = vpad (empty), row 1 = content "Test", row 2 = vpad
         assert_eq!(buf.cell((3, 1)).unwrap().symbol(), "T");
         assert_eq!(buf.cell((4, 1)).unwrap().symbol(), "e");
         assert_eq!(buf.cell((5, 1)).unwrap().symbol(), "s");
@@ -1122,7 +1190,9 @@ mod tests {
 
     #[test]
     fn pending_user_input_keeps_diamond_bullet_with_static_color() {
-        // While a tool is blocked on a permission / question we keep the default Diamond bullet but freeze its color There is no character swap.
+        // While a tool is blocked on a permission / question we keep the default Diamond bullet but freeze its color
+        // There is no character swap and no wave brightness animation
+        // The bullet must read the same glyph at every tick so the eye sees "paused on you", not the running-wave loading cue
         use crate::scrollback::blocks::tool::{OtherToolCallBlock, ToolCallBlock};
 
         let theme = Theme::current();
@@ -1137,6 +1207,8 @@ mod tests {
             let mut buf = Buffer::empty(area);
             let renderer = EntryRenderer::new(&entry, &theme).with_tick(tick);
             renderer.render(area, &mut buf);
+            // Default layout: accent(1) + left_pad(2), so content starts at 3
+            // Tool call header has no vpad, so bullet sits on row 0.
             let cell = buf.cell((3, 0)).unwrap();
             assert_eq!(
                 cell.symbol(),
@@ -1155,7 +1227,8 @@ mod tests {
 
     #[test]
     fn non_pending_running_tool_keeps_default_bullet() {
-        // Sanity check: when is_pending_user_input is false we leave the normal Diamond bullet alone The running wave animation runs on top of it.
+        // Sanity check: when is_pending_user_input is false we leave the normal Diamond bullet alone
+        // The running wave animation runs on top of it as before
         use crate::scrollback::blocks::tool::{OtherToolCallBlock, ToolCallBlock};
 
         let theme = Theme::current();
@@ -1187,6 +1260,7 @@ mod tests {
     }
 
     /// Check that a right-aligned timestamp ending with "AM" or "PM" exists on a row.
+    /// Only scans the rightmost 16 columns to avoid false positives from content text.
     fn has_ampm_timestamp(buf: &Buffer, y: u16, x_end: u16) -> bool {
         let x_start = x_end.saturating_sub(16);
         let text = collect_row_symbols(buf, y, x_start, x_end);
@@ -1206,6 +1280,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
 
+        // UserPrompt has vpad=true, first content row is y=1.
         let expected = entry.created_at.unwrap().format("%-I:%M %p").to_string();
         let ts_width = expected.len() as u16;
         let ts_x = width - 2 - ts_width;
@@ -1230,6 +1305,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
 
+        // AgentMessage has vpad=false, first content row is y=0.
         let expected = entry.created_at.unwrap().format("%-I:%M %p").to_string();
         let ts_width = expected.len() as u16;
         let ts_x = width - 2 - ts_width;
@@ -1247,7 +1323,8 @@ mod tests {
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"));
         let width: u16 = 80;
 
-        // AgentMessage has no vpad, so the first content row is y=0 Hover the rightmost multiple cols of that row.
+        // AgentMessage has no vpad, so the first content row is y=0
+        // Hover the rightmost 10 cols of that row to trigger expansion.
         let hover_x = width - 2 - 5; // inside the timestamp zone
         let renderer = EntryRenderer::new(&entry, &theme).with_mouse_pos(Some((hover_x, 0)));
 
@@ -1256,8 +1333,8 @@ mod tests {
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
 
-        // Compare against the entry's captured timestamp, not a fresh
-        // Local::now() Re-sampling the clock here races the second boundary.
+        // Compare against the entry's captured timestamp, not a fresh Local::now()
+        // Re-sampling the clock here races the second boundary (%H:%M:%S) and made this test flaky
         let expected = entry
             .created_at
             .unwrap()
@@ -1413,6 +1490,8 @@ mod tests {
         let entry = ScrollbackEntry::new(RenderBlock::user_prompt("hi"));
         let renderer = EntryRenderer::new(&entry, &theme);
 
+        // Short timestamp "h:mm AM" is 7-8 chars; code requires content_width > ts_width + 1.
+        // Width 12: chrome (5 actual) leaves content_width 7, just barely not enough for the 8-char timestamp plus 1
         let width: u16 = 12;
         let height = renderer.desired_height(width);
         let area = Rect::new(0, 0, width, height);
@@ -1431,8 +1510,10 @@ mod tests {
 
     #[test]
     fn gutter_cleared_on_non_first_content_row_without_background() {
-        // Regression: nothing wrote the timestamp gutter on rows past the first A glyph stranded there (e.g. a wide table cell past `text_width`).
+        // Regression: nothing wrote the timestamp gutter on rows past the first
+        // A glyph stranded there (e.g. a wide table cell past `text_width`) used to persist; every content row must now clear it.
         let theme = Theme::current();
+        // Long enough to wrap into several content rows at width 80.
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("word ".repeat(80)));
         let renderer = EntryRenderer::new(&entry, &theme);
 
@@ -1495,11 +1576,12 @@ mod tests {
     // no terminal deps, so the strings are asserted exactly.
     #[test]
     fn cost_ticks_to_display_formats_representative_inputs() {
-        // Small fractional USD: 1e10 ticks = $1.
+        // Small fractional USD: 1e10 ticks = $1. 1_234_500_000 → $0.12345.
         assert_eq!(
             cost_ticks_to_display(Some(1_234_500_000)).as_deref(),
             Some("$0.12345")
         );
+        // Cents exactly: 100_000_000 ticks → $0.01.
         assert_eq!(
             cost_ticks_to_display(Some(100_000_000)).as_deref(),
             Some("$0.01")
@@ -1509,6 +1591,7 @@ mod tests {
             cost_ticks_to_display(Some(5_000_000_000_000)).as_deref(),
             Some("$500")
         );
+        // Mixed whole + fraction: 342_000_000_000 ticks → $34.2 → "34.2".
         assert_eq!(
             cost_ticks_to_display(Some(342_000_000_000)).as_deref(),
             Some("$34.2")
@@ -1524,13 +1607,15 @@ mod tests {
     fn cost_ticks_to_display_missing_and_non_positive_are_none() {
         // Unreported → None (never a fabricated `$0.00`).
         assert_eq!(cost_ticks_to_display(None), None);
+        // Wire backfilled 0 / negative → unreported, not "free".
         assert_eq!(cost_ticks_to_display(Some(0)), None);
         assert_eq!(cost_ticks_to_display(Some(-5)), None);
     }
 
     #[test]
     fn cost_indicator_renders_next_to_timestamp_for_reported_cost() {
-        // A message with a reported cost draws the cost token immediately to the LEFT of the timestamp.
+        // A message with a reported cost draws the cost token immediately to
+        // the LEFT of the timestamp on the first content line.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
             .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12345
@@ -1542,6 +1627,9 @@ mod tests {
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
 
+        // AgentMessage has no vpad → first content row is y=0. Scan the whole
+        // row: the cost token must sit immediately (one space) left of the
+        // visible timestamp, and both must be in the reserved right gutter.
         let row = collect_row_symbols(&buf, 0, 0, width);
         let cost_str = "$0.12345";
         let cost_pos = row.find(cost_str).expect("cost token must render");
@@ -1561,7 +1649,11 @@ mod tests {
 
     #[test]
     fn cost_indicator_renders_when_timestamps_off() {
-        // A reported per-message cost must NOT silently vanish when the timestamp display is toggled off.
+        // A reported per-message cost must NOT silently vanish when the
+        // timestamp display is toggled off: criterion 1 requires the indicator
+        // whenever the API reports a cost, independent of unrelated appearance
+        // gates. With `show_timestamps=false` the cost token still renders,
+        // right-aligned in the reserved gutter, with no timestamp beside it.
         let theme = Theme::current();
         let appearance = AppearanceConfig {
             show_timestamps: false,
@@ -1604,7 +1696,8 @@ mod tests {
 
     #[test]
     fn cost_indicator_absent_when_cost_not_reported() {
-        // A message with no reported cost must render the timestamp but NO cost token — and never a fabricated `$0`.
+        // A message with no reported cost must render the timestamp but NO cost
+        // token — and never a fabricated `$0`.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"));
         let renderer = EntryRenderer::new(&entry, &theme);
@@ -1625,7 +1718,8 @@ mod tests {
 
     #[test]
     fn cost_indicator_not_shown_on_non_message_blocks() {
-        // Thinking/tool rows do not carry timestamps.
+        // Thinking/tool rows don't carry timestamps, so they must not carry a
+        // cost marker either, even if a cost value were attached.
         crate::appearance::cache::set_show_thinking_blocks(true);
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::thinking("think"))
@@ -1647,7 +1741,10 @@ mod tests {
 
     #[test]
     fn cache_hit_indicator_renders_on_the_row_below_cost_and_timestamp() {
-        // A one-line agent message has no vpad.
+        // A one-line agent message has no vpad, so the cost/timestamp overlay
+        // sits on row 0 and the cache-hit line must land on the reserved row
+        // directly below it (row 1), right-aligned in the same gutter — not
+        // sharing row 0's already-narrowed width.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
             .with_cost_usd_ticks(Some(1_234_500_000)) // $0.12345
@@ -1707,7 +1804,8 @@ mod tests {
 
     #[test]
     fn cache_hit_indicator_not_shown_on_non_message_blocks() {
-        // Thinking/tool rows do not carry timestamps.
+        // Thinking/tool rows don't carry timestamps, so they must not carry a
+        // cache-hit marker either, even if a value were attached.
         crate::appearance::cache::set_show_thinking_blocks(true);
         let theme = Theme::current();
         let entry =
@@ -1731,7 +1829,9 @@ mod tests {
 
     #[test]
     fn background_block_gutter_uses_block_background_fill() {
-        // Background blocks own the gutter via the existing full-area fill.
+        // Background blocks own the gutter via the existing full-area fill, so the no-bg clear must not run for them
+        // Pinned so the band color (read from the process-global theme in user.rs build_lines) is GrokNight, not the developer's config
+        // Asserted relationally (gutter == content cell from the same render) so the test doesn't encode the pinned palette's exact quantized value
         let _guard = pin_theme();
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::user_prompt("hello"));
@@ -1743,6 +1843,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
 
+        // The band bg as this render actually painted it: a content cell on the text row (row 1: UserPrompt has vpad), left of the rightmost timestamp gutter
         let band = gutter_band(&renderer, width);
         let content_cell = buf.cell((band.start.saturating_sub(8), 1)).unwrap();
         assert_ne!(
@@ -1761,14 +1862,17 @@ mod tests {
 
     #[test]
     fn gutter_keeps_code_block_background_on_no_background_block() {
-        // The per-row clear must reuse that bg, not bg_base, or the code
-        // rectangle gets a notch. Concrete theme so both bgs differ.
+        // The per-row clear must reuse that bg, not bg_base, or the code rectangle gets a notch. Concrete theme so the two
+        // bgs differ. (Historically this passed under NO_COLOR only because the md_style Reset-to-silver fallback bug
+        // painted a concrete bg despite the opt-out.).
         if !crate::theme::color_support::detect().has_color() {
             return;
         }
         let theme = Theme::groknight();
         let mut entry = ScrollbackEntry::new(RenderBlock::agent_message("```\nZZZZ\n```\n"));
         // The code block's only content row is the first content row, which is also where the timestamp overlay lands.
+        // Drop `created_at` so the overlay is skipped. It would otherwise paint the right-aligned clock into the gutter
+        // band and clobber the ghost-clear assertion at the current wall-clock time.
         entry.created_at = None;
         let renderer = EntryRenderer::new(&entry, &theme);
 
@@ -1791,8 +1895,7 @@ mod tests {
             "test premise: code-block bg must differ from bg_base"
         );
 
-        // (b) Gutter keeps the code-block background (full width): on the
-        // unfixed `bg_base` fill this cell would read `theme.bg_base`.
+        // (b) Gutter keeps the code-block background (full width): on the unfixed `bg_base` fill this cell would read `theme.bg_base`, not `code_bg`
         assert_eq!(
             buf.cell((ghost_x, code_row)).unwrap().bg,
             code_bg,
@@ -1815,7 +1918,8 @@ mod tests {
     #[test]
     fn estimate_matches_exact_for_plain_single_line() {
         let _theme = pin_theme();
-        // For plain single-line content the cheap estimate must equal the exact rendered height This is why total_height stays correct.
+        // For plain single-line content the cheap estimate must equal the exact rendered height
+        // This is why total_height stays correct for the many simple entries that don't wrap or use markdown structure
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello world"));
         let r = EntryRenderer::new(&entry, &theme);
@@ -1834,7 +1938,8 @@ mod tests {
     #[test]
     fn estimate_collapsed_tool_call_matches_exact() {
         let _theme = pin_theme();
-        // A collapsed tool call renders a one-line header.
+        // A collapsed tool call renders a one-line header; the estimate must NOT count the (large) hidden body
+        // It must equal the exact height so the scroll math is correct for sessions full of collapsed calls
         let theme = Theme::current();
         let mut entry = ScrollbackEntry::new(RenderBlock::tool_call_with_details(
             "Bash",
@@ -1871,7 +1976,8 @@ mod tests {
     #[test]
     fn estimate_trailing_newline_does_not_add_a_row() {
         let _theme = pin_theme();
-        // `str::lines()` (and the renderers) drop a single trailing newline.
+        // `str::lines()` (and the renderers) drop a single trailing newline, so the estimate must strip it too
+        // Trailing-`\n` source would otherwise estimate one row too many and break estimate == exact
         let theme = Theme::current();
         let with_nl = ScrollbackEntry::new(RenderBlock::stub("a\nb\nc\n", Color::Blue));
         let without_nl = ScrollbackEntry::new(RenderBlock::stub("a\nb\nc", Color::Blue));
@@ -1888,7 +1994,9 @@ mod tests {
     #[test]
     fn estimate_differs_from_exact_for_wrapping_text() {
         let _theme = pin_theme();
-        // The estimate is a cheap char-ceil that ignores word boundaries For word-heavy content.
+        // The estimate is a cheap char-ceil that ignores word boundaries
+        // For word-heavy content at a narrow width the exact word-wrapped height is therefore larger
+        // This proves the estimate is genuinely an approximation (so the viewport-exact measurement path is actually doing work)
         let theme = Theme::current();
         let appearance = AppearanceConfig {
             show_timestamps: false,
@@ -1916,7 +2024,9 @@ mod tests {
     #[test]
     fn estimate_height_saturates_instead_of_overflowing() {
         let _theme = pin_theme();
-        // A pathologically tall block (multi-MB source) hits the line-count cap; adding vpad on top must SATURATE.
+        // A pathologically tall block (multi-MB source) hits the line-count cap; adding vpad on top must SATURATE, not overflow
+        // Overflow means a debug panic or a release wrap that corrupts virtual_y
+        // Stub has vpad, so this exercises the saturating_add in `assemble_height`
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::stub("\n".repeat(70_000), Color::Blue));
         let r = EntryRenderer::new(&entry, &theme);
@@ -1926,14 +2036,18 @@ mod tests {
     #[test]
     fn estimate_uses_display_width_not_byte_length() {
         let _theme = pin_theme();
+        // Wide (CJK) glyphs are 2 display columns but 3 UTF-8 bytes each
+        // The estimate must wrap on DISPLAY width, not byte length
+        // A 10-glyph wide string (display 20, bytes 30) must size like 20 ascii cols (bytes 20), NOT like 30 ascii cols (bytes 30)
         let theme = Theme::current();
+        // Narrow width so 20 vs 30 display columns wrap to different counts.
         let height = |text: &str| {
             let entry = ScrollbackEntry::new(RenderBlock::stub(text, Color::Blue));
             EntryRenderer::new(&entry, &theme).estimate_height(14)
         };
-        let wide = height("一二三四五六七八九十");
-        let ascii_same_display = height("xxxxxxxxxxxxxxxxxxxx");
-        let ascii_same_bytes = height("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+        let wide = height("一二三四五六七八九十"); // display 20, bytes 30
+        let ascii_same_display = height("xxxxxxxxxxxxxxxxxxxx"); // display 20, bytes 20
+        let ascii_same_bytes = height("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"); // display 30, bytes 30
         assert_eq!(
             wide, ascii_same_display,
             "wraps by display width: wide(20 cols) == ascii(20 cols)"
@@ -1955,7 +2069,8 @@ mod tests {
         let theme = Theme::current();
         let md = "intro line\n\n```mermaid\nA-->B\n```\n\nafterword line\n";
 
-        // Baselines with the setting OFF (no treatment row) Both heights are captured in this window.
+        // Baselines with the setting OFF (no treatment row)
+        // Both heights are captured in this window because `estimate_extra_rows`/`output()` read the *current* global setting
         crate::appearance::cache::set_render_mermaid(crate::appearance::RenderMermaid::Off);
         let off_entry = ScrollbackEntry::new(RenderBlock::agent_message(md));
         let h_off = EntryRenderer::new(&off_entry, &theme).desired_height(80);
@@ -1968,7 +2083,8 @@ mod tests {
         let h_on = r.desired_height(80);
         assert_eq!(h_on, h_off + 1, "the affordance row adds exactly one row");
 
-        // The off-screen estimate accounts for the affordance row (one per diagram) and so never under-reserves vs the realized height.
+        // The off-screen estimate accounts for the affordance row (one per diagram) and so never under-reserves vs the realized height
+        // That is the invariant a bulk load (`grok -r`) relies on to avoid clipping
         let est_on = r.estimate_height(80);
         assert_eq!(
             est_on,
@@ -2022,11 +2138,15 @@ mod tests {
     }
 
     /// Fixed injected line-bg color for the flat-background tests.
+    /// A raw RGB (not a theme color): the stub injects it directly into its output, so the tests are independent of `Theme::current()`.
+    /// Other tests mutate that theme's process-global kind / color-level state in a parallel run.
     const LINE_BG: Color = Color::Rgb(12, 34, 56);
 
     #[test]
     fn flat_background_suppresses_panel_line_bg() {
-        // In minimal mode (flat_background) that fixed-color band clashes with the terminal's own background.
+        // In minimal mode (flat_background) that fixed-color band clashes with the terminal's own background, so it must
+        // be dropped. The block-level suppression alone doesn't cover it because those blocks declare
+        // `BlockBackground::None` and shade per line.
         use crate::scrollback::block::StubBlock;
 
         let theme = Theme::groknight();
@@ -2051,7 +2171,8 @@ mod tests {
 
     #[test]
     fn flat_background_keeps_semantic_line_bg() {
-        // Semantic per-line backgrounds (diff insert/delete rows, code-block fill; NOT marked `background_is_panel`).
+        // Semantic per-line backgrounds (diff insert/delete rows, code-block fill; NOT marked `background_is_panel`) must survive flat mode
+        // They carry meaning, unlike the decorative tool-preview panels
         use crate::scrollback::block::StubBlock;
 
         let theme = Theme::groknight();

@@ -1,4 +1,9 @@
-//! Runs the built binary against one `[model_providers.<id>]` setup: the provider lists its models.
+//! Runs the built binary against one `[model_providers.<id>]` setup: the
+//! provider lists its models, and `[model.<id>]` blocks tune some of them.
+//! Every prompt must reach the provider's URL and nothing else.
+//!
+//! Not `#[ignore]`d: CI builds the binary before the workspace run, so this
+//! runs on every push.
 
 use xai_grok_test_support::mock_server::LogEntry;
 use xai_grok_test_support::*;

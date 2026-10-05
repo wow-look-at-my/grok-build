@@ -1,11 +1,19 @@
 //! REST client for uploading files to GCS via cli-chat-proxy.
+//!
+//! Routes requests through cli-chat-proxy using user's grok.com auth token.
+//! The proxy handles GCS authentication server-side.
+//!
+//! For large files that exceed Cloudflare's body size limit, use the multipart
+//! upload API which splits files into chunks and composes them server-side.
 
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::File as StdFile;
-// Positional read traits live in different modules per platform.
+// Positional read traits live in different modules per platform; the
+// methods we use (read_at on Unix, seek_read on Windows) have the same
+// signature, so the call site cfg-branches on the method name only.
 #[cfg(unix)]
 use std::os::unix::fs::FileExt;
 #[cfg(windows)]
@@ -23,6 +31,8 @@ use xai_grok_auth::AuthCredentialProvider;
 
 use crate::circuit_breaker_observer::TracingObserver;
 
+// StorageClient's session-wide breaker uses `BreakerConfig::client()` (401 failure code).
+// Observer name "storage_breaker" is a structured field so existing analytics queries keep matching.
 
 const STORAGE_BREAKER_NAME: &str = "storage_breaker";
 
@@ -30,12 +40,16 @@ fn storage_breaker_config() -> BreakerConfig {
     BreakerConfig::client()
 }
 
+/// Hook invoked at every 401 so the embedding app can record auth-attribution telemetry.
+/// `sent_bearer_prefix` is a prefix only — the full bearer never escapes `StorageClient`.
+/// `None` means no bearer was configured.
 pub trait Auth401AttributionCallback: Send + Sync + std::fmt::Debug {
     fn record_401(&self, operation: &str, sent_bearer_prefix: Option<&str>);
 }
 
 // ============================================================================
-// Retry Configuration.
+// Retry Configuration
+// ============================================================================
 
 /// Configuration for exponential backoff retry logic.
 /// Particularly important for 429s from GCS during autoscaling.
@@ -45,10 +59,13 @@ pub struct RetryConfig {
     initial_delay: Duration,
     /// Maximum delay between retries (default: 30s)
     max_delay: Duration,
+    /// Maximum number of retry attempts (default: 5)
     max_retries: u32,
+    /// Multiplier for exponential backoff (default: 2.0)
     multiplier: f64,
+    /// Jitter factor (0.0 to 1.0) - randomizes delay to prevent thundering herd (default: 0.5)
     jitter_factor: f64,
-    /// Whether to respect Retry-After headers from multiple responses (default: true)
+    /// Whether to respect Retry-After headers from 429 responses (default: true)
     respect_retry_after: bool,
     /// Maximum delay to honor from Retry-After header (default: 60s)
     max_retry_after: Duration,
@@ -112,6 +129,7 @@ impl RetryConfig {
         self
     }
 
+    /// Set the jitter factor (0.0 to 1.0).
     pub fn with_jitter_factor(mut self, factor: f64) -> Self {
         self.jitter_factor = factor.clamp(0.0, 1.0);
         self
@@ -124,7 +142,8 @@ impl RetryConfig {
             self.initial_delay.as_millis() as f64 * self.multiplier.powi(attempt as i32);
         let capped_delay_ms = base_delay_ms.min(self.max_delay.as_millis() as f64);
 
-        // Apply jitter using a simple hash of the current time This provides enough randomness.
+        // Apply jitter using a simple hash of the current time
+        // This provides enough randomness to prevent thundering herd without needing rand
         let jitter_value = generate_jitter(self.jitter_factor);
         let jittered_delay_ms = capped_delay_ms * (1.0 + jitter_value);
 
@@ -142,7 +161,8 @@ impl RetryConfig {
         if self.respect_retry_after
             && let Some(server_delay) = retry_after
         {
-            // Use the larger of our calculated delay or server's Retry-After.
+            // Use the larger of our calculated delay or server's Retry-After,
+            // but cap at max_retry_after to prevent abuse
             let capped_server_delay = server_delay.min(self.max_retry_after);
             return base_delay.max(capped_server_delay);
         }
@@ -242,13 +262,16 @@ fn generate_jitter(jitter_factor: f64) -> f64 {
     // Mix the bits a bit using a simple hash
     let mixed = ((nanos as u64).wrapping_mul(0x517cc1b727220a95) >> 32) as u32;
 
+    // Convert to a value in [0, 1)
     let random_01 = (mixed as f64) / (u32::MAX as f64);
 
     // Map to [-jitter_factor/2, +jitter_factor/2]
     (random_01 * jitter_factor) - (jitter_factor / 2.0)
 }
 
-/// Outcome of a storage existence check.
+/// Outcome of a storage existence check. `ProbeFailed` (transient: network /
+/// parse / 5xx) is distinct from `NotFound` so callers don't synthesise a
+/// phantom-missing answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExistsResult<T> {
     Found(T),
@@ -268,6 +291,7 @@ pub struct UploadResponse {
 }
 
 /// Response from GET /v1/storage/limits endpoint (storage-related config).
+/// 0 = unlimited (backward compatible default).
 #[derive(Debug, Clone, Deserialize)]
 pub struct UploadLimits {
     /// Max bytes for inlining file content in SerializeRepoChangesRequest (e.g. untracked files, binaries).
@@ -289,12 +313,15 @@ fn parse_retry_after(response: &reqwest::Response) -> Option<Duration> {
         return Some(Duration::from_secs(seconds));
     }
 
-    // Note: HTTP-date format (e.g., "Wed, 21 Oct 2015 07:28:00 GMT") is not supported as it's rarely used by GCS.
+    // Note: HTTP-date format (e.g., "Wed, 21 Oct 2015 07:28:00 GMT") is not supported
+    // as it's rarely used by GCS and would require additional parsing complexity
 
     None
 }
 
-/// Whether an HTTP status is retryable.
+/// Whether an HTTP status is retryable. Proxy-mode uploads cross the same
+/// Cloudflare edge as sampling, so they share its rule (429 + 5xx, minus
+/// origin-TLS 525/526).
 #[inline]
 fn is_retryable_status(status: u16) -> bool {
     RetryPolicy::edge_client().should_retry(status)
@@ -314,8 +341,9 @@ mod retry_status_tests {
     }
 }
 
-/// Static credentials for proxy-mode uploads when no `AuthManager` is
-/// available.
+/// Static credentials for proxy-mode uploads when no `AuthManager` is available.
+/// Only bins/tests/no-AuthManager paths; production uses the obfuscated shell provider.
+/// Do not make the static provider the production default.
 pub struct StaticGrokAuth {
     pub user_token: Option<String>,
 }
@@ -354,7 +382,9 @@ mod static_grok_auth_tests {
     }
 }
 
-/// Default reqwest client used by `StorageClient::new`.
+/// Default reqwest client used by `StorageClient::new`. Plain defaults --
+/// production callers should instead pass a tuned client (e.g. shell's
+/// `crate::http::shared_upload_client()`) to `with_provider`.
 fn default_upload_client() -> Client {
     #[expect(clippy::expect_used)]
     xai_grok_extra_ca::build_reqwest_client(|builder| builder)
@@ -365,17 +395,24 @@ fn default_upload_client() -> Client {
 #[derive(Clone)]
 pub struct StorageClient {
     http_client: reqwest_middleware::ClientWithMiddleware,
-    /// Plain `reqwest::Client` for requests that must NOT go through the auth middleware.
+    /// Plain `reqwest::Client` for requests that must NOT go through the
+    /// auth middleware (direct GCS uploads via signed URLs, signed-URL
+    /// downloads, etc.).
     raw_http_client: Client,
     /// Base URL for the proxy (e.g., "https://cli-chat-proxy.grok.com/v1")
     base_url: String,
-    /// Retry configuration for handling transient failures (especially errors)
+    /// Retry configuration for handling transient failures (especially 429 errors)
     retry_config: RetryConfig,
+    /// Optional callback invoked on every 401 so the embedding application
+    /// can record auth-attribution telemetry. Shell installs a bridge here;
+    /// bins/tests typically leave it `None`.
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
-    /// Credential provider used to snapshot the bearer prefix at multiple sites for attribution telemetry.
+    /// Credential provider used to snapshot the bearer prefix at 401 sites
+    /// for attribution telemetry.
     credentials: Arc<dyn AuthCredentialProvider>,
 
     /// Client identity forwarded to cli-chat-proxy (for logging + metrics).
+    /// Set via `with_client_identity` / `with_client_mode`.
     client_version: Option<String>,
     client_identifier: Option<String>,
     client_mode: Option<String>,
@@ -461,9 +498,9 @@ impl StorageClient {
         self
     }
 
-    /// Configures the client identity reported to the storage backend on all
-    /// storage requests. Becomes `x-grok-client-version` and
-    /// `x-grok-client-identifier` so 400/403s can be attributed.
+    /// Configures the client identity reported to the storage backend on all storage requests.
+    /// Becomes `x-grok-client-version` and `x-grok-client-identifier` so 400/403s can be attributed.
+    /// Prefer `build_storage_client_for_proxy` from the shell; direct callers use `with_client_identity`.
     pub fn with_client_identity(
         mut self,
         version: impl Into<String>,
@@ -475,14 +512,14 @@ impl StorageClient {
     }
 
     /// Sets the `x-grok-client-mode` value forwarded to cli-chat-proxy
-    /// (`headless` / `interactive`).
+    /// (`headless` / `interactive`), for the `client_mode` metric label.
     pub fn with_client_mode(mut self, mode: impl Into<String>) -> Self {
         self.client_mode = Some(mode.into());
         self
     }
 
     /// Sets the retry configuration for handling transient failures.
-    /// Useful for tuning retries during GCS autoscaling.
+    /// Useful for tuning 429 retries during GCS autoscaling.
     pub fn with_retry_config(mut self, config: RetryConfig) -> Self {
         self.retry_config = config;
         self
@@ -514,9 +551,9 @@ impl StorageClient {
             .context("Failed to parse upload limits response")
     }
 
-    /// Fire the attribution callback if installed. `operation` is the
-    /// consumer-side op suffix. The shell bridge prepends `"StorageClient."`
-    /// for the analytics consumer string.
+    /// Fire the attribution callback if installed. `operation` is the consumer-side op suffix.
+    /// The shell bridge prepends `"StorageClient."` for the analytics consumer string.
+    /// Bearer is read from the current snapshot, not necessarily the exact wire bearer.
     fn fire_401_attribution(&self, operation: &str) {
         if let Some(ref cb) = self.attribution {
             let bearer_prefix = self.credentials.snapshot().token;
@@ -524,7 +561,8 @@ impl StorageClient {
         }
     }
 
-    /// GET /v1/storage/exists.
+    /// GET /v1/storage/exists. 2xx → `Found`; 401/403 → `Unauthorized`;
+    /// 404 → `NotFound`; everything else → `ProbeFailed`.
     pub async fn check_exists(&self, path: &str) -> ExistsResult<UploadResponse> {
         if self.breaker.check().is_err() {
             return ExistsResult::Unauthorized;
@@ -555,6 +593,8 @@ impl StorageClient {
                 ExistsResult::Unauthorized
             }
             Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => ExistsResult::NotFound,
+            // 403 fires attribution but, per the breaker contract, does
+            // NOT count toward the 401 counter.
             Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
                 self.fire_401_attribution("check_exists");
                 ExistsResult::Unauthorized
@@ -586,7 +626,8 @@ impl StorageClient {
             exists: Vec<String>,
         }
 
-        // Collect into &str up front so the JSON body holds borrows tied to `paths` rather than the generic `S`.
+        // Collect into &str up front so the JSON body holds borrows tied to
+        // `paths` rather than the generic `S`, avoiding HRTB issues at callers.
         let paths_ref: Vec<&str> = paths.iter().map(<S as AsRef<str>>::as_ref).collect();
         if self.breaker.check().is_err() {
             return ExistsResult::Unauthorized;
@@ -603,7 +644,7 @@ impl StorageClient {
                 ExistsResult::Unauthorized
             }
             Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => ExistsResult::NotFound,
-            // Fires attribution; does NOT count toward the breaker.
+            // 403 fires attribution; does NOT count toward the breaker.
             Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
                 self.fire_401_attribution("batch_check_exists");
                 ExistsResult::Unauthorized
@@ -634,6 +675,7 @@ impl StorageClient {
     }
 
     /// Upload multiple small files in one batch request (`POST /v1/storage/batch_upload`).
+    /// `None` if the endpoint is unavailable (404 from an old proxy) or on error.
     /// Callers should fall back to per-file `upload` when `None` is returned.
     pub async fn batch_upload(
         &self,
@@ -681,7 +723,8 @@ impl StorageClient {
                     tracing::debug!("batch_upload rejected (403), skipping");
                     return None;
                 }
-                // Retry with exponential backoff.
+                // 422: server detected the body was stripped in transit
+                // (Content-Length: 0). Retry with exponential backoff.
                 Ok(resp) if resp.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
                     if attempt < self.retry_config.max_retries {
                         wait_for_network_retry(
@@ -742,6 +785,8 @@ impl StorageClient {
         &self,
         files: Vec<(String, Vec<u8>, String)>,
     ) -> Option<Vec<prod_mc_cli_chat_proxy_types::BatchUploadResult>> {
+        // Short-circuit on empty input: the server rejects empty payloads with
+        // a 400, and there are no per-file results to return anyway.
         if files.is_empty() {
             tracing::debug!("batch_upload_json: skipping empty file list");
             return Some(Vec::new());
@@ -799,7 +844,8 @@ impl StorageClient {
                 .add_common_headers(self.http_client.post(&url))
                 .header("Content-Type", "application/json")
                 .header("Content-Encoding", "zstd")
-                // Clone needed: reqwest consumes the body on send, but we need it intact for retries.
+                // Clone needed: reqwest consumes the body on send, but we
+                // need it intact for retries.
                 .body(compressed.clone());
 
             match request.send().await {
@@ -850,8 +896,9 @@ impl StorageClient {
     }
 
     /// Download a dedup blob from GCS to a local path. The proxy mints a short-lived signed GET.
-    /// Call only when download is permitted for this session.
+    /// `Err` on 403 or any other non-success. Call only when download is permitted for this session.
     pub async fn download_blob(&self, storage_path: &str, dest: &Path) -> Result<()> {
+        // Step 1: get a signed GET URL from the proxy.
         let url = format!("{}/storage/download", self.base_url);
         let resp = self
             .add_common_headers(self.http_client.get(&url))
@@ -887,6 +934,9 @@ impl StorageClient {
             .await
             .context("Failed to parse storage download response")?;
 
+        // Step 2: fetch the object via the signed URL, streaming to dest.
+        // Use the raw client — signed URLs carry their own auth and must
+        // NOT go through the AuthRetryMiddleware.
         let object_resp = self
             .raw_http_client
             .get(&download_resp.signed_url)
@@ -1223,6 +1273,8 @@ impl StorageClient {
         }
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_default();
+            // Structured so the queue worker can classify terminal 400/404 by
+            // status code rather than scraping the message string.
             return Err(HttpUploadError {
                 status_code: status.as_u16(),
                 message: format!("Failed to upload to '{path}': HTTP {status} - {error_body}"),
@@ -1262,6 +1314,7 @@ impl StorageClient {
             anyhow::bail!("Cannot upload empty file via multipart");
         }
 
+        // Step 1: Initialize multipart upload session (now with file_size for signed URLs)
         let init_start = std::time::Instant::now();
         let init_response = self.multipart_init(file_size).await?;
         if init_response.upload_id.is_empty() {
@@ -1292,6 +1345,7 @@ impl StorageClient {
             .with_context(|| format!("Failed to open file: {}", file_path.display()))?;
         let shared_file = Arc::new(file);
 
+        // Step 2: Upload parts - either direct to GCS or through proxy
         let uploaded_parts = if use_direct_upload {
             // Direct upload mode: use pre-signed URLs
             tracing::info!(
@@ -1319,6 +1373,7 @@ impl StorageClient {
             .await?
         };
 
+        // Step 3: Complete the multipart upload by sending all parts to server
         tracing::debug!(
             "Starting multipart complete with {} parts",
             uploaded_parts.len()
@@ -1615,8 +1670,9 @@ impl StorageClient {
     // Signed upload URL
     // ====================================================================
 
-    /// Request a pre-signed GCS PUT URL from the proxy. The caller then PUTs
-    /// directly to GCS, bypassing proxy body-size limits.
+    /// Request a pre-signed GCS PUT URL from the proxy.
+    /// The caller then PUTs directly to GCS, bypassing proxy body-size limits.
+    /// Recommended for payloads that may exceed 4 MB.
     pub async fn get_signed_upload_url(
         &self,
         path: &str,
@@ -1658,6 +1714,7 @@ impl StorageClient {
     }
 
     /// Upload bytes directly to GCS using a pre-signed PUT URL.
+    /// `content_type` must match the one baked into the signed URL, or GCS rejects with 403.
     pub async fn upload_via_signed_url(
         &self,
         signed_url: &str,
@@ -1918,7 +1975,7 @@ fn create_read_at_stream(
                     current_offset += n as u64;
                     bytes_sent += n as u64;
 
-                    // Log progress every few seconds or if send took > 100ms
+                    // Log progress every 5 seconds or if send took > 100ms
                     if last_log.elapsed().as_secs() >= 5 || send_time.as_millis() > 100 {
                         let elapsed = stream_start.elapsed().as_secs_f64();
                         let speed_mbps = if elapsed > 0.0 {
@@ -1967,14 +2024,15 @@ fn create_read_at_stream(
 }
 
 // ============================================================================
-// Multipart Upload Types.
+// Multipart Upload Types
+// ============================================================================
 
 /// Options for multipart upload.
 #[derive(Debug, Clone)]
 pub struct MultipartUploadOptions {
     /// Size of each part in bytes. Defaults to server's max_part_size_bytes (typically 50MB).
     pub part_size_bytes: Option<usize>,
-    /// Maximum number of concurrent part uploads.
+    /// Maximum number of concurrent part uploads. Defaults to 4.
     pub max_concurrent_uploads: usize,
 }
 
@@ -2014,6 +2072,7 @@ pub struct MultipartInitResponse {
     /// Pre-signed PUT URLs for direct upload to GCS (if supported by server)
     #[serde(default)]
     pub part_urls: Vec<SignedPartUrl>,
+    /// ISO 8601 timestamp when the signed URLs expire
     #[serde(default)]
     pub expires_at: Option<String>,
 }
@@ -2133,6 +2192,7 @@ mod download_blob_tests {
         assert_eq!(std::fs::read(&dest).unwrap(), CONTENT);
     }
 
+    /// 403 from the proxy must surface as a clear error; dest file must not be created.
     #[tokio::test]
     async fn download_blob_errors_on_403() {
         let proxy_router = Router::new().route(
@@ -2155,6 +2215,7 @@ mod download_blob_tests {
         assert!(!dest.exists(), "dest must not be created on error");
     }
 
+    /// 400 from the proxy (rejected path) must also surface as an error.
     #[tokio::test]
     async fn download_blob_errors_on_400() {
         let proxy_router = Router::new().route(
@@ -2330,7 +2391,8 @@ mod batch_check_exists_tests {
 
     #[tokio::test]
     async fn batch_returns_probe_failed_on_network_error() {
-        // Privileged port 1 on loopback isn't listening -> deterministic ECONNREFUSED.
+        // Privileged port 1 on loopback isn't listening -> deterministic ECONNREFUSED
+        // (no port-reuse race like bind-then-drop would have).
         let client = StorageClient::new("http://127.0.0.1:1/v1", "test-token");
         let paths = vec!["blobs/a".to_string()];
         let result = client.batch_check_exists(&paths).await;
@@ -2397,7 +2459,9 @@ mod batch_check_exists_tests {
 
 #[cfg(test)]
 mod check_exists_tests {
-    //! Mirrors `batch_check_exists_tests` so the singular `check_exists` has the same coverage.
+    //! Mirrors `batch_check_exists_tests` so the singular `check_exists` has
+    //! the same coverage of Found / NotFound / Unauthorized / ProbeFailed
+    //! discriminants after canonicalisation.
     use super::{ExistsResult, StorageClient};
     use axum::{Router, response::IntoResponse, routing::get};
     use std::net::SocketAddr;
@@ -2812,6 +2876,7 @@ mod batch_upload_tests {
         );
         let result = client.batch_upload(test_files()).await;
         assert!(result.is_none(), "should give up after max retries");
+        // 1 initial + 2 retries = 3 total attempts
         assert_eq!(attempt.load(Ordering::Relaxed), 3);
     }
 

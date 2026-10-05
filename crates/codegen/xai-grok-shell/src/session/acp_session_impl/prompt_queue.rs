@@ -1,8 +1,8 @@
 use super::*;
 use xai_agent_lifecycle::ShutdownPolicy;
 
-/// Outcome of a queue send-now request
-/// ([`SessionActor::handle_interject_queued_prompt`]).
+/// Outcome of a queue send-now request ([`SessionActor::handle_interject_queued_prompt`]).
+/// `mutated` reports whether the request changed anything (promoted, steered, or saved an edit).
 #[must_use = "cancel_running_turn means the caller must cancel the running turn"]
 pub(super) struct SendNowOutcome {
     pub(super) cancel_running_turn: bool,
@@ -142,9 +142,8 @@ impl SessionActor {
             })),
         );
 
-        // Log the prompt to the per-CWD fast history file when queued, not in
-        // handle_prompt, because the prompt can be cancelled before
-        // processing Extract.
+        // Log the prompt to the per-CWD fast history file when queued, not in handle_prompt, because the prompt might be cancelled before processing
+        // Extract raw text from prompt_blocks (without <user_query> tags)
         let raw_prompt_text: String = prompt_blocks
             .iter()
             .filter_map(|block| {
@@ -256,9 +255,9 @@ impl SessionActor {
         let queue_meta = if !queue_mutation_policy.is_visible() {
             None
         } else {
-            // Derive the wire `kind` from the prompt content so the shared
-            // queue / `running_prompt_id` adoption picks the right display
-            // shim Bash commands carry a bash `PromptBlockMeta`.
+            // Derive the wire `kind` from the prompt content so the shared queue / `running_prompt_id` adoption picks the right display shim
+            // Bash commands carry a bash `PromptBlockMeta`; everything user-submitted here is otherwise a plain prompt
+            // (Cron prompts are server-injected via their own path and render client-side.)
             let kind = if matches!(
                 input_origin.as_prompt_origin(),
                 crate::session::PromptOrigin::ParentAgentMessage { .. }
@@ -287,7 +286,8 @@ impl SessionActor {
             .unwrap_or_else(|| "synthetic".to_string());
         let log_owner = client_identifier.clone().unwrap_or_default();
         // A command line means something only as the LEADING token of its own
-        // turn (`resolve`).
+        // turn (`resolve`), so it must never be steered into another turn as
+        // text — see the goal merge below.
         let text_is_command =
             Self::row_text_is_command(&Self::queue_text_from_blocks(&prompt_blocks));
         let mut item = InputItem {
@@ -313,7 +313,8 @@ impl SessionActor {
             traceparent,
         };
 
-        // Use `running_prompt_id()`, not `current_prompt_id`, which is cleared while the front is still unpopped Auto send-now fires only.
+        // Use `running_prompt_id()`, not `current_prompt_id`, which is cleared while the front is still unpopped
+        // Auto send-now fires only when the turn is blocked in a wait and the held queue is empty
         let running_front_id = state.running_prompt_id().map(str::to_string);
         let turn_running = running_front_id.is_some();
         let goal_active = self.goal_tracker.lock().status()
@@ -432,7 +433,8 @@ impl SessionActor {
         &self,
         state: &State,
     ) -> Vec<crate::session::prompt_queue::QueueEntryWire> {
-        // The running identity is race-free.
+        // The running identity is race-free: `running_task` lives under the same lock as `pending_inputs`
+        // `handle_completion` clears the `current_prompt_id` pin early, so keying on it would briefly re-list the finished, unpopped front as queued
         let running_id = state.running_prompt_id();
         let mut out = Vec::new();
         for item in &state.pending_inputs {
@@ -548,8 +550,9 @@ impl SessionActor {
         }
     }
 
-    /// True when `prompt_id` is the in-flight turn, which a queue edit must
-    /// never remove or reorder.
+    /// True when `prompt_id` is the in-flight turn, which a queue edit must never remove or reorder.
+    /// Keys on `state.running_task` (race-free under the caller's state lock), not the `current_prompt_id` pin.
+    /// `handle_completion` clears the pin while the finished front is still unpopped; a queue edit in that window must still refuse the front.
     pub(super) fn is_running_prompt(state: &State, prompt_id: &str) -> bool {
         state.running_prompt_id() == Some(prompt_id)
     }
@@ -564,8 +567,8 @@ impl SessionActor {
                 .is_some_and(|front| state.running_prompt_id() == Some(front.prompt_id.as_str()))
     }
 
-    /// The send-now guard's commit point: cleared at promote, set at each
-    /// intake path's commit.
+    /// The send-now guard's commit point: cleared at promote, set at each intake path's commit.
+    /// The guard spares the cancel until it is set; a missed intake path fails soft (its turns are spared, never cancelled).
     pub(super) async fn mark_front_message_committed(&self) {
         self.state.lock().await.front_message_committed = true;
     }
@@ -725,7 +728,7 @@ impl SessionActor {
             .map(str::to_string);
         let mut promoted = Vec::new();
         loop {
-            // Hidden runtime wakes may be skipped.
+            // Hidden runtime wakes may be skipped, but a visible protected row stops the prefix rather than being skipped over
             let Some(pos) = state.pending_inputs.iter().position(|item| {
                 Some(item.prompt_id.as_str()) != running_front_id.as_deref()
                     && (item.is_queue_visible() || !item.input_origin.is_synthetic())
@@ -913,7 +916,8 @@ impl SessionActor {
                 .iter_mut()
                 .find(|item| row_matches(item))
         {
-            // The send-now no-opped but the row is still queued: keep the edit as an LWW write so it isn't silently lost Stale versions get no fallback (LWW).
+            // The send-now no-opped but the row is still queued: keep the edit as an LWW write so it isn't silently lost
+            // Stale versions get no fallback (LWW); the running turn is never edited
             Self::apply_queued_prompt_edit(item, new_text.to_string(), owner);
             mutated = true;
             tracing::info!(
@@ -950,7 +954,8 @@ impl SessionActor {
             .filter_map(|item| item.queue_meta.as_ref().map(|m| m.id.clone()))
             .collect();
 
-        // Protected/hidden/running rows pin their absolute slots Reorder only editable rows across the remaining slots
+        // Protected/hidden/running rows pin their absolute slots
+        // Reorder only editable rows across the remaining slots
         let running_id = state.running_prompt_id().map(str::to_string);
         let mut queued = Vec::new();
         let slots: Vec<Option<InputItem>> = std::mem::take(&mut state.pending_inputs)
@@ -995,7 +1000,9 @@ impl SessionActor {
     /// Returns whether any row was actually cleared.
     pub(super) async fn handle_clear_queue(&self, owner: Option<&str>) -> bool {
         let mut state = self.state.lock().await;
-        // Partition rather than `retain`: each cleared user prompt still has a client awaiting its `respond_to` It must be resolved.
+        // Partition rather than `retain`: each cleared user prompt still has a client awaiting its `respond_to`
+        // It must be resolved with `Cancelled` (see [`respond_removed_prompt`]) instead of being dropped
+        // A bare drop shows up as "session failed to respond" and a spurious "Turn failed" on the running turn
         let running_id = state.running_prompt_id().map(str::to_string);
         let mut kept = VecDeque::with_capacity(state.pending_inputs.len());
         let mut cleared_any = false;
@@ -1022,9 +1029,9 @@ impl SessionActor {
         cleared_any
     }
 
-    /// (Any non-text blocks such as pasted images on the original prompt are not preserved: the user has explicitly typed replacement text.)
-    /// `new_text` is blank (a queued prompt is never blanked). Every path clears the id's hold under the queue lock so a stale edit request
-    /// cannot leave promote parked.
+    /// (Any non-text blocks such as pasted images on the original prompt are not preserved: the user has explicitly typed replacement text.) 2.
+    /// `new_text` is blank (a queued prompt is never blanked).
+    /// Every path clears the id's hold under the queue lock so a stale edit request cannot leave promote parked.
     pub(super) async fn handle_edit_queued_prompt(
         &self,
         id: &str,
@@ -1128,7 +1135,9 @@ impl SessionActor {
             let Some(next) = pending.remove(1) else {
                 break;
             };
-            // The follower's text is folded into the front's turn below.
+            // The follower's text is folded into the front's turn below, so it still runs
+            // But its own queue row is gone, so it resolves as RemovedFromQueue (the same completion a client sees for an explicit dequeue)
+            // The multi-client UI repaints its bubble from the promote broadcast's `running_combined_texts`
             Self::respond_removed_prompt(next.respond_to);
             let extra = Self::joined_text_blocks(&next.prompt_blocks);
             if let Some(front) = pending.front_mut() {
@@ -1194,6 +1203,13 @@ impl SessionActor {
     }
 
     /// Whether a queued row's display text is a command line.
+    ///
+    /// Thin wrapper over [`xai_prompt_queue::is_slash_invocation`] — the one
+    /// definition the pager reads too — so every shell-side gate asks the same
+    /// question. Such a row must run as its own turn: `resolve` reads a prompt's
+    /// leading token, and the interjection drain expands skills but resolves no
+    /// builtin, so steering or merging it would hand the model the literal
+    /// `/cmd args` and the command would never run.
     pub(super) fn row_text_is_command(text: &str) -> bool {
         xai_prompt_queue::is_slash_invocation(text)
     }
@@ -1228,7 +1244,7 @@ impl SessionActor {
                 }
             }
         }
-        // Append to the LAST text block so a multi-text front stays ordered (front text first, then the follower).
+        // Append to the LAST text block so a multi-text front stays ordered (front text first, then the follower); `combined_texts` mirrors that
         if let Some(acp::ContentBlock::Text(t)) = item
             .prompt_blocks
             .iter_mut()
@@ -1257,8 +1273,8 @@ impl SessionActor {
         else {
             return;
         };
-        // Stamp the first text block (matches append_text_to_prompt) An
-        // image-first front would otherwise lose the meta that replay uses.
+        // Stamp the first text block (matches append_text_to_prompt)
+        // An image-first front would otherwise lose the meta that replay uses to render multiple bubbles
         let Some(acp::ContentBlock::Text(t)) = item
             .prompt_blocks
             .iter_mut()

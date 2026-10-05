@@ -1,3 +1,17 @@
+//! OSC 11 terminal background detection.
+//!
+//! Queries the terminal's background color via the OSC 11 escape sequence:
+//!   Query:  `\x1b]11;?\x07`
+//!   Reply:  `\x1b]11;rgb:RRRR/GGGG/BBBB\x07`  (or ST terminator `\x1b\\`)
+//!
+//! tmux 3.2 and later intercepts a *bare* OSC 11 query from a pane and answers it (3.4 also snapshots the outer terminal colour on attach).
+//! Always send the bare query first.
+//! DCS wrapping is a short fallback only.
+//! `allow-passthrough` is off by default, and even when on the outer reply lands on tmux's tty rather than the pane.
+//! Do not wrap inside an editor `:terminal`: libvterm would paint the envelope as garbage.
+//!
+//! This is a **startup-only** fallback: it must NOT be called once crossterm's `EventStream` is active, as both compete for stdin in raw mode.
+//! The live `SystemAppearanceWatcher` uses only desktop and env detection.
 
 use super::system_appearance::SystemAppearance;
 use std::time::Duration;
@@ -5,6 +19,7 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 
+/// Luminance threshold: backgrounds with Y < 0.5 are considered dark.
 const LUMINANCE_THRESHOLD: f64 = 0.5;
 
 const OSC11_TIMEOUT: Duration = Duration::from_millis(500);
@@ -23,6 +38,8 @@ pub fn detect_via_osc11() -> Option<SystemAppearance> {
         return None;
     }
 
+    // Bare first: tmux answers OSC 11 from the pane
+    // Wrapping first is a regression when passthrough is off (default) or the reply never re-enters the pane
     if let Some(appearance) = query_osc11(OSC11_QUERY, OSC11_TIMEOUT) {
         return Some(appearance);
     }
@@ -70,6 +87,8 @@ pub(crate) fn parse_osc11_rgb(response: &str) -> Option<(u8, u8, u8)> {
     Some((parse_channel(r)?, parse_channel(g)?, parse_channel(b)?))
 }
 
+/// For 3- or 4-digit values, extracts the high byte (`>> 8`) to map to 0-255.
+/// For 1- or 2-digit values, uses the value directly as 0-255.
 fn parse_channel(s: &str) -> Option<u8> {
     let trimmed = s.trim();
     let val = u16::from_str_radix(trimmed, 16).ok()?;
@@ -80,6 +99,7 @@ fn parse_channel(s: &str) -> Option<u8> {
     })
 }
 
+/// Applies the sRGB transfer function inverse (IEC 61966-2-1).
 fn srgb_to_linear(c: u8) -> f64 {
     let s = c as f64 / 255.0;
     if s <= 0.04045 {
@@ -89,8 +109,8 @@ fn srgb_to_linear(c: u8) -> f64 {
     }
 }
 
-/// Restores the termios on drop without touching crossterm's process-wide
-/// `TERMINAL_MODE_PRIOR_RAW_MODE`.
+/// Restores the original termios on drop without touching crossterm's process-wide `TERMINAL_MODE_PRIOR_RAW_MODE`.
+/// Calling `crossterm::disable_raw_mode` here would restore the shell's pre-pager cooked termios, breaking the pager's own raw mode.
 #[cfg(unix)]
 struct TermiosGuard {
     fd: RawFd,
@@ -109,6 +129,7 @@ impl Drop for TermiosGuard {
 }
 
 /// POSIX-portable subset of `cfmakeraw(3)`.
+/// Clears the lflags that would block a single-byte read (canonical mode, echo, signal interpretation, extended processing).
 #[cfg(unix)]
 fn make_raw_termios(snapshot: &libc::termios) -> libc::termios {
     let mut raw = *snapshot;
@@ -147,6 +168,7 @@ fn read_osc_response_with_fd(fd: RawFd, timeout: Duration) -> Option<String> {
 }
 
 /// Read bytes from stdin until a terminator is found or timeout expires.
+// Only invoked from `read_osc_response_with_fd`, which is Unix-only.
 #[cfg(unix)]
 fn read_with_timeout(timeout: Duration) -> Option<String> {
     unix_read_with_timeout(timeout)
@@ -162,6 +184,10 @@ fn unix_read_with_timeout(timeout: Duration) -> Option<String> {
     if !ends_with_osc_terminator(&buf) {
         return None;
     }
+    // A reply that is not UTF-8 is not the terminal's OSC 11 answer at all (it is
+    // some other byte on the wire), and `None` is the caller's "no idea what the
+    // background is" state. Lossy would turn that stray bytes-into-a-color-name
+    // claim, which is the one thing this function must not do.
     #[allow(clippy::disallowed_methods)]
     let decoded = String::from_utf8(buf).ok();
     decoded
@@ -263,7 +289,7 @@ mod tests {
 
     #[test]
     fn parse_3digit_channel() {
-        // 3-digit hex is uncommon but possible; with a few digits the high byte is extracted
+        // 3-digit hex is uncommon but possible; with more than 2 digits the high byte is extracted
         let response = "\x1b]11;rgb:fff/fff/fff\x07";
         assert_eq!(parse_osc11_rgb(response), Some((15, 15, 15)));
     }
@@ -324,6 +350,8 @@ mod tests {
 
     #[test]
     fn classify_mid_gray_boundary() {
+        // sRGB (186, 186, 186) has luminance about 0.497, just below the 0.5 threshold
+        // sRGB (188, 188, 188) has luminance about 0.508, just above it
         assert_eq!(classify_luminance(186, 186, 186), SystemAppearance::Dark);
         assert_eq!(classify_luminance(188, 188, 188), SystemAppearance::Light);
     }
@@ -357,6 +385,7 @@ mod tests {
 
     #[test]
     fn srgb_to_linear_low_value() {
+        // 10/255 is about 0.0392, below the 0.04045 cutoff, so it takes the linear branch
         let result = srgb_to_linear(10);
         let expected = (10.0 / 255.0) / 12.92;
         assert!((result - expected).abs() < 1e-10);
@@ -364,6 +393,7 @@ mod tests {
 
     #[test]
     fn srgb_to_linear_high_value() {
+        // 128/255 is about 0.502, above the 0.04045 cutoff, so it takes the gamma branch
         let result = srgb_to_linear(128);
         let s: f64 = 128.0 / 255.0;
         let expected = ((s + 0.055) / 1.055).powf(2.4);
@@ -395,7 +425,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn make_raw_termios_clears_only_canonical_echo_signal_extended() {
-        // Pre-populate with cleared bits AND preserved bits.
+        // Pre-populate with cleared bits AND preserved bits, then assert the result is exactly the preserved set
+        // Catches regressions that widen the mask
         let mut snapshot: libc::termios = unsafe { std::mem::zeroed() };
         snapshot.c_lflag =
             libc::ICANON | libc::ECHO | libc::ISIG | libc::IEXTEN | libc::TOSTOP | libc::NOFLSH;

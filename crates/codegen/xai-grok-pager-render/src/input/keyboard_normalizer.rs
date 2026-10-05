@@ -5,6 +5,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crate::terminal::ModifierDelivery;
 
 /// Snapshot of physically-held modifier keys at a single point in time.
+/// Future probes can populate more bits; consumers should only read what they need.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct ModifierState {
     pub command: bool,
@@ -34,8 +35,9 @@ impl ModifierProbe for OsModifierProbe {
     }
 }
 
-/// Reusable normalizer that upgrades incoming key events with modifiers the
-/// terminal failed to encode.
+/// Reusable normalizer that upgrades incoming key events with modifiers the terminal failed to encode.
+/// One instance lives on the pager's `AppView` and is invoked at the top of `handle_input`, so every downstream surface sees the rescued event.
+/// Construct with [`KeyboardNormalizer::from_terminal_context`].
 #[derive(Debug, Clone, Copy)]
 pub struct KeyboardNormalizer<P: ModifierProbe = OsModifierProbe> {
     probe: P,
@@ -267,7 +269,8 @@ mod tests {
 
     #[test]
     fn rescue_only_adds_modifier_for_dropped_axis() {
-        // Cmd is Native and only Opt is Dropped.
+        // Cmd is Native and only Opt is Dropped, so a bare Backspace with Cmd held must NOT be rescued
+        // Rescuing it would claim a modifier the terminal would have delivered
         let opt_only = ModifierDelivery::new_for_test(ModifierFate::Native, ModifierFate::Dropped);
         let n = make(
             ModifierState {

@@ -84,6 +84,7 @@ fn effective_image_budget_limits(
 ) -> (usize, usize) {
     let (trigger_bytes, reclaim_target_bytes) = image_budget_limits(max_request_bytes);
     // The existing tool estimate is bytes/4; invert that same heuristic here.
+    // Saturation is conservative: an unrepresentable reserve leaves no image budget.
     let reserved_bytes =
         usize::try_from(xai_token_estimation::estimate_chars(compaction_tool_tokens))
             .unwrap_or(usize::MAX);

@@ -14,7 +14,7 @@ pub struct LineSegment<'a> {
 
 impl fmt::Display for LineSegment<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // To write without crlf, can write segment.content
+        // To write without crlf, can simply write segment.content
         write!(f, "{}", self.content)?;
         if self.ends_with_crlf {
             write!(f, "\r\n")?;
@@ -23,7 +23,9 @@ impl fmt::Display for LineSegment<'_> {
     }
 }
 
-/// The parse events `split_into_line_segments` distinguishes.
+/// The parse events `split_into_line_segments` distinguishes. Everything the splitter cares about: printable characters
+/// (visual width), CR, LF; every other action (SGR colors, cursor moves, OSC, …) merely extends the current segment byte
+/// range.
 enum SegmentEvent {
     Print(char),
     CarriageReturn,
@@ -32,8 +34,9 @@ enum SegmentEvent {
     Other,
 }
 
-/// `anstyle_parse::Perform` implementor that records the event (if any)
-/// produced by the byte fed to the parser.
+/// `anstyle_parse::Perform` implementor that records the single event (if any) produced by the byte just fed to the
+/// parser. The VTE state machine dispatches at most one action per input byte, so a one-slot buffer is sufficient. Print
+/// events are dispatched on the *final* byte of a UTF-8 sequence; the char itself tells us how many bytes it spans.
 #[derive(Default)]
 struct EventCollector {
     event: Option<SegmentEvent>,
@@ -91,7 +94,10 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
 
     macro_rules! push_segment {
         ($end:expr, $crlf:expr) => {
-            // `segment_start` and `$end` are only ever set to the first byte of a printed char (`index + 1 - ch.len_utf8()`), one past a `\n` or `\r`.
+            // `segment_start` and `$end` are only ever set to the first byte of
+            // a printed char (`index + 1 - ch.len_utf8()`), one past a `\n` or
+            // `\r`, or one past the final byte of an escape sequence. Each is a
+            // char boundary, so the slice cannot split a character.
             #[allow(unused_assignments, clippy::string_slice)]
             {
                 if let Some(content) = input.get(segment_start..$end) {
@@ -109,7 +115,9 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
     for (index, byte) in input.bytes().enumerate() {
         parser.advance(&mut performer, byte);
         let Some(event) = performer.event.take() else {
-            // Mid-sequence byte (escape params, UTF-8 continuation, …): the action it belongs to is dispatched on the sequence's final byte.
+            // Mid-sequence byte (escape params, UTF-8 continuation, …): the
+            // action it belongs to is dispatched on the sequence's final byte
+            // and its bytes are claimed then.
             continue;
         };
 
@@ -117,9 +125,11 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
 
         match event {
             SegmentEvent::LineFeed => {
-                // Emit current segment but strip \r if the segment ended with it.
+                // Emit current segment but strip \r if the segment ended with it. Note: `segment_end` (not `index`) is deliberate — a LF
+                // can fire mid-escape-sequence ("\x1b[3\n1m"), and the pending escape bytes must not leak into the emitted segment.
                 push_segment!(segment_end - usize::from(prev_is_cr), true);
-                // We skip \n itself (and possibly the preceding \r, and any pending escape bytes) so they don't end up.
+                // We skip \n itself (and possibly the preceding \r, and any
+                // pending escape bytes) so they don't end up in segments
                 segment_end = index + 1;
                 segment_start = segment_end;
             }
@@ -130,11 +140,13 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
                 is_cr = true;
             }
             SegmentEvent::Print(ch) => {
-                // Input is a valid &str, so print fires on the last byte of the char's UTF-8 encoding.
+                // Input is a valid &str, so print fires on the last byte of the char's UTF-8 encoding; anything unclaimed before the
+                // char (e.g. an aborted escape) folds into the current segment so the wrap point lands on the char boundary.
                 let char_bytes = ch.len_utf8();
                 segment_end = index + 1 - char_bytes;
 
-                // The only case where visual width grows.
+                // The only case where visual width actually grows
+                // (assuming we don't have cursor move etc, only CSI::Sgr/Control/Print)
                 let char_width = ch.width().unwrap_or(0);
                 let new_width = visual_width + char_width;
                 if new_width > term_width && has_visual {
@@ -144,8 +156,7 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
                     segment_end += char_bytes;
                     visual_width = char_width; // Reset to just this character's width
                     has_visual = true;
-                    // Unlikely edge case: char_width > term size and we have
-                    // to flush it again
+                    // Very unlikely edge case: char_width > term size and we have to flush it again
                     if char_width > term_width {
                         push_segment!(segment_end, false);
                         segment_start = segment_end;
@@ -167,7 +178,7 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
     }
 
     // Trailing bytes that never completed an action (e.g. a dangling "\x1b[")
-    // are left out of `segment_end`, matching the termwiz-based
+    // are left out of `segment_end`, matching the previous termwiz-based
     // implementation which never consumed incomplete sequences.
 
     // We have pending segment that hasn't been pushed, without crlf
@@ -185,7 +196,8 @@ pub fn split_into_line_segments<'a>(input: &'a str, term_width: usize) -> Vec<Li
                     last.content = content;
                 }
             } else {
-                // There's last segment but either it ends with lf or pending segment has visual width note.
+                // There's last segment but either it ends with lf or pending segment has visual width
+                // note: pending segment can't have lf because otherwise we would have matched on it
                 push_segment!(segment_end, false);
             }
         } else {
@@ -270,6 +282,7 @@ mod tests {
 
     #[test]
     fn test_bare_cr_resets_width() {
+        // CR resets visual position, so "12345\r67" fits in width 10
         let input = "12345\r67";
         let segments = split_into_line_segments(input, 10);
         assert_eq!(segments.len(), 1);
@@ -279,6 +292,7 @@ mod tests {
 
     #[test]
     fn test_edge_case_char_wider_than_terminal() {
+        // Emoji is 2 wide, terminal is 1 wide
         let input = "😊";
         let segments = split_into_line_segments(input, 1);
         // Should still create one segment even though it exceeds width
@@ -316,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_wrap_at_exact_width() {
-        let input = "12345678"; // chars
+        let input = "12345678"; // exactly 8 chars
         let segments = split_into_line_segments(input, 8);
         assert_eq!(segments.len(), 1);
         assert_eq!(only_seg(&segments).content, "12345678");
@@ -361,9 +375,10 @@ mod tests {
 
     #[test]
     fn test_visual_width_calculation_with_unicode() {
+        // "你好" is 4 visual width (2 per character)
         let input = "hello 你好";
         let segments = split_into_line_segments(input, 10);
-        assert_eq!(segments.len(), 1);
+        assert_eq!(segments.len(), 1); // "hello 你好" = 6 + 4 = 10, exactly fits
 
         let segments2 = split_into_line_segments(input, 9);
         assert_eq!(segments2.len(), 2); // Doesn't fit, must wrap

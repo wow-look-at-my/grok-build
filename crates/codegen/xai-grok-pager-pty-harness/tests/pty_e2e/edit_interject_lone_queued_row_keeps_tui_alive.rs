@@ -4,12 +4,14 @@ use super::common::*;
 
 /// Regression e2e for the orphaned invisible `EditConfirm`. The pane auto-hide used to switch panes
 /// while still in `EditingQueued`, leaving a confirm modal that never renders but consumes every
-/// later key. On a broken binary the probe text never echoes and step several times out.
+/// later key. On a broken binary the probe text never echoes and step 7 times out.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn edit_interject_lone_queued_row_keeps_tui_alive() {
     let content = ContentController::start().await.expect("start content");
     content.set_chunk_delay(Some(Duration::from_millis(150)));
+    // Turn 1 must stay open long enough for the ENTIRE mid-turn setup to land WHILE it is still
+    // streaming. Only then does the edit-interject drain into turn 1 (STEPTWO).
     let step_one = {
         let mut s = String::from("STEPONE");
         for i in 0..150 {
@@ -27,7 +29,8 @@ async fn edit_interject_lone_queued_row_keeps_tui_alive() {
         "STEPTHREE liveness prompt handled.",
     );
 
-    // Write the image fixture under the isolated HOME The pasted absolute path becomes an `[Image #1]` composer chip.
+    // Write the image fixture under the isolated HOME
+    // The pasted absolute path becomes an `[Image #1]` composer chip (path-paste detection reads and decodes it)
     let png_path = content.home().join("queue-edit-fixture.png");
     std::fs::write(&png_path, PNG_32X32_GRAY).expect("write png fixture");
 
@@ -46,8 +49,9 @@ async fn edit_interject_lone_queued_row_keeps_tui_alive() {
         .wait_for_text("STEPONE", Duration::from_secs(30))
         .expect("step 1: turn streaming");
 
-    // Queue ONE image-bearing message, the lone LOCAL queue row. The prose
-    // and the path must reach the pager as SEPARATE events.
+    // Queue ONE image-bearing message, the lone LOCAL queue row. The prose and the path must reach the
+    // pager as SEPARATE events. A payload mixing prose and a path therefore falls back to plain text
+    // instead of a chip.
     harness
         .inject_keys(b"brick repro payload ")
         .expect("type queued text");
@@ -62,7 +66,8 @@ async fn edit_interject_lone_queued_row_keeps_tui_alive() {
         .wait_for_text("[Image #", Duration::from_secs(10))
         .expect("step 2b: image chip attached");
     harness.inject_keys(b"\r").expect("queue the message");
-    // Only the queue pane renders the `#1 ` row prefix.
+    // Only the queue pane renders the `#1 ` row prefix, so the composer echo (on screen since step 2a) can never match it
+    // Matching it proves the Enter actually queued the row
     harness
         .wait_for_text("#1 brick repro payload", Duration::from_secs(10))
         .expect("step 3: message queued as row #1 in the queue pane");
@@ -106,8 +111,8 @@ async fn edit_interject_lone_queued_row_keeps_tui_alive() {
     // Wire checks: the final request's user_query sequence is exactly [prompt, edited interjection (with wire prefix), liveness probe]
     let bodies = content.request_bodies();
     let last = bodies.last().expect("final request recorded");
-    // User-role context preambles (user_info, skill reminders) do not carry
-    // <user_query>.
+    // User-role context preambles (user_info, skill reminders) don't carry <user_query>; real prompts and interjections do
+    // Content is a plain string OR a parts array (the image-bearing interjection), so `message_text` handles parts instead of a bare `as_str`
     let finals: Vec<String> = last["messages"]
         .as_array()
         .expect("messages array")
@@ -180,8 +185,9 @@ fn contains_image_part(value: &serde_json::Value) -> bool {
     }
 }
 
-/// Hardcoded rather than encoded via the `image` dep so the fixture is byte-stable and
-/// encoder-independent.
+/// Valid 32×32 8-bit grayscale PNG (signature, IHDR, IDAT, IEND; CRCs correct; the IDAT zlib
+/// round-trips). Hardcoded rather than encoded via the `image` dep so the fixture is byte-stable
+/// and encoder-independent.
 const PNG_32X32_GRAY: &[u8] = &[
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x20, 0x08, 0x00, 0x00, 0x00, 0x00, 0x56, 0x11, 0x25,

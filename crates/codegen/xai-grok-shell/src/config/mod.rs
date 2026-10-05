@@ -14,6 +14,9 @@ pub use xai_grok_config_types::{
     TemporalDecaySettings,
 };
 /// Read the memory mode selected by the current effective config.
+///
+/// Session actors use their already-resolved [`MemoryConfig`] instead. This
+/// helper is for standalone commands that do not own a session.
 static STANDALONE_MEMORY_MODE: AtomicU8 = AtomicU8::new(0);
 pub fn cache_standalone_memory_mode(mode: MemoryMode) {
     let encoded = match mode {
@@ -47,8 +50,9 @@ fn resolve_standalone_memory_mode(
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct SubagentsConfig {
-    /// Whether subagent support is enabled.
+    /// Whether subagent support is enabled. Defaults to `true`, so a `[subagents]` table that only tunes limits, models, or toggles keeps subagents on.
     pub enabled: bool,
+    /// Raw `[subagents] max_depth` (i64 so out-of-range parses; clamped to at least 1 at resolve).
     #[serde(default)]
     pub max_depth: Option<i64>,
     #[serde(default)]
@@ -61,13 +65,25 @@ pub struct SubagentsConfig {
     pub limit_behavior: Option<String>,
     #[serde(default)]
     pub workflow_max_concurrent: Option<i64>,
-    /// How strongly system-prompt/tool wording nudges the model toward spawning subagents.
+    /// How strongly system-prompt/tool wording nudges the model toward
+    /// spawning subagents. One of: `"explicit-only"`, `"very-rare"`,
+    /// `"rare"`, `"default"`, `"often"`, `"very-often"`. Purely a wording
+    /// knob — never gates the tool itself (see `enabled`).
+    ///
+    /// ```toml
+    /// [subagents]
+    /// usage_frequency = "often"
+    /// ```
     #[serde(default)]
     pub usage_frequency: Option<String>,
     /// Per-subagent model ID overrides.
+    /// Keys are agent names, values are model IDs that must exist in the available models registry.
+    /// Parsed from `[subagents.models]` in config.toml.
     #[serde(default)]
     pub models: std::collections::HashMap<String, String>,
-    /// Per-subagent enable/disable toggles. Keys are agent names, values are booleans.
+    /// Per-subagent enable/disable toggles.
+    /// Keys are agent names, values are booleans.
+    /// Omitted agents default to enabled (`true`).
     #[serde(default)]
     pub toggle: std::collections::HashMap<String, bool>,
     /// Declarative subagent role definitions.
@@ -198,8 +214,8 @@ impl SubagentsConfig {
     pub fn get_persona(&self, name: &str) -> Option<&SubagentPersona> {
         self.personas.get(name)
     }
-    /// Discover personas from `.grok/personas/` directory. File-based
-    /// personas are loaded from `{cwd}/.grok/personas/*.toml`.
+    /// Discover personas from `.grok/personas/` directory. File-based personas are loaded from `{cwd}/.grok/personas/*.toml`. Each file defines a single `SubagentPersona`. The file stem becomes the persona name.
+    /// Inline config takes precedence.
     pub(crate) fn discover_personas(&mut self, cwd: &std::path::Path) {
         let dir = cwd.join(".grok").join("personas");
         self.discover_personas_in_dir(&dir);
@@ -235,15 +251,15 @@ impl SubagentsConfig {
         }
         errors
     }
-    /// Discover roles from `.grok/roles/` directory and merge with inline
-    /// config. File-based roles are loaded from `{cwd}/.grok/roles/*.toml`.
+    /// Discover roles from `.grok/roles/` directory and merge with inline config. File-based roles are loaded from `{cwd}/.grok/roles/*.toml`.
+    /// Each file defines a single `SubagentRole` (same schema as inline `[subagents.roles.*]`). The file stem becomes the role name. Precedence: inline config roles override file-based roles with the same name.
     pub(crate) fn discover_roles(&mut self, cwd: &std::path::Path) {
         let roles_dir = cwd.join(".grok").join("roles");
         self.discover_roles_in_dir(&roles_dir);
     }
     pub const ENV_MAX_DEPTH: &'static str = "GROK_SUBAGENTS_MAX_DEPTH";
     pub const DEFAULT_MAX_DEPTH: u32 = 1;
-    /// Clamp to `1..=u32::MAX`.
+    /// Clamp to `1..=u32::MAX`. Values below 1 (including 0 and negatives) warn and become 1 so nesting is never accidentally disabled.
     pub(crate) fn clamp_max_depth(raw: i64, source: &str) -> u32 {
         if raw < i64::from(Self::DEFAULT_MAX_DEPTH) {
             tracing::warn!(
@@ -263,7 +279,8 @@ impl SubagentsConfig {
             raw as u32
         }
     }
-    /// Precedence: env > TOML > remote > [`Self::DEFAULT_MAX_DEPTH`]. Spawn is rejected when `depth >= max`.
+    /// Precedence: env > TOML > remote > [`Self::DEFAULT_MAX_DEPTH`].
+    /// Depth 0 is the top-level session; a child is parent+1. Spawn is rejected when `depth >= max`.
     /// So `max = 1` allows only top-level spawns; nested spawns from a first-level subagent need `max >= 2`.
     pub(crate) fn resolve_max_depth(
         env: Option<&str>,
@@ -391,8 +408,11 @@ impl SubagentsConfig {
         }
         xai_tool_types::AgentUsageFrequency::default()
     }
-    /// Resolve the final subagents config from all sources (in priority order): CLI tri-state (`Some(false)` from `--no-subagents` force-disables, `Some(true)` force-enables, `None` defers) `GROK_SUBAGENTS` env
-    /// var: `1`/`true` enables.
+    /// Resolve the final subagents config from all sources (in priority order): CLI tri-state (`Some(false)` from `--no-subagents` force-disables, `Some(true)` force-enables, `None` defers)
+    /// `GROK_SUBAGENTS` env var: `1`/`true` enables, `0`/`false` force-disables; config file `[subagents] enabled`; Default (enabled).
+    /// `enabled` is deliberately not remotely gated. Only explicit local intent (CLI flag, `GROK_SUBAGENTS`, `[subagents] enabled`) changes the default.
+    /// A `[subagents]` table without an `enabled` key is not intent: it keeps the default so tuning `max_depth` or `[subagents.models]` cannot turn subagents off.
+    /// Project files are excluded from this trust-independent base; Task boundaries overlay them using the parent cwd's authoritative trust verdict.
     pub fn resolve(cli_flag: Option<bool>, config: &toml::Value) -> Self {
         let user_grok_root = xai_grok_config::user_grok_home();
         Self::resolve_base_with_sources(
@@ -526,6 +546,7 @@ pub(crate) struct ModelOverrideConfig {
     /// Compiled default (`grok-4.6`) when unset locally, remotely, and via env.
     pub image_description: Option<String>,
     /// Next-prompt suggestion model pin.
+    /// Unlike the other overrides this does NOT fill a compiled default; see [`PromptSuggestModelPin`].
     #[serde(skip)]
     pub prompt_suggestion: PromptSuggestModelPin,
 }
@@ -539,8 +560,9 @@ impl Default for ModelOverrideConfig {
         }
     }
 }
-/// Resolved model pin for the next-prompt suggestion call (tab-autocomplete
-/// ghost text).
+/// Resolved model pin for the next-prompt suggestion call (tab-autocomplete ghost text). Precedence is `env > config.toml > remote`; see [`ModelOverrideConfig::resolve`].
+/// Unlike the other auxiliary overrides this does not collapse to a plain model string. The consumer (`handle_suggest_prompt`) must distinguish an explicit pin from "unpinned".
+/// When unpinned, the client hint wins; otherwise reasoning-disabled sampling uses the alias and reasoning-enabled sampling uses the session model. Every effective model is catalog-guarded. A model missing from the shell's catalog skips the per-turn suggestion request instead of firing one that must fail.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PromptSuggestModelPin {
     /// `GROK_PROMPT_SUGGESTIONS_MODEL`: catalog-guarded explicit pin.
@@ -659,11 +681,14 @@ pub struct MediaGenToolsConfig {
 #[serde(default)]
 pub struct ToolsConfig {
     /// When `true`, all tools (including `read_file`) filter gitignored files.
+    /// When `false` (default), each tool picks its own default.
     pub respect_gitignore: bool,
-    /// Restrict tools whose xAI API requires server-side artifact storage (the video tools).
+    /// Restrict tools whose xAI API requires server-side artifact storage (currently just the video tools).
+    /// Without a valid `[tools.zdr_video_output_s3]` bucket they stay advertised but return setup guidance at call time.
+    /// Intended for ZDR-bound teams via `~/.grok/managed_config.toml`. Defaults to `false`.
     pub disable_zdr_incompatible_tools: bool,
-    /// Optional S3 bucket config for ZDR video output. When present (and
-    /// valid), video tools presign an upload URL and pass it to the API.
+    /// Optional S3 bucket config for ZDR video output. When present (and valid), video tools presign an upload URL and pass it to the API.
+    /// The generated video then lands in a team-owned bucket instead of being downloaded locally. Only effective when `disable_zdr_incompatible_tools` is `true`. Populated from `[tools.zdr_video_output_s3]` in config.
     pub zdr_video_output_s3:
         Option<xai_grok_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config>,
     pub media_gen: MediaGenToolsConfig,
@@ -795,6 +820,7 @@ fn resolve_clamped_count(
     default
 }
 /// Positive whole-number ladder: env > TOML > remote > default.
+/// Invalid/non-positive env warns and falls through; TOML/remote `< 1` clamp to 1.
 pub(crate) fn resolve_positive_count(
     env_name: &str,
     env: Option<&str>,
@@ -859,13 +885,17 @@ impl StorageMode {
             Ok("local") => return Self::Local,
             _ => {}
         }
-        // `remote.writeback_enabled` is deliberately not consulted: Writeback flushes every turn of the conversation to grok-code-backend.
+        // `remote.writeback_enabled` is deliberately not consulted: Writeback
+        // flushes every turn of the conversation to grok-code-backend, and
+        // upstream lets the server turn that on for a client that asked for
+        // nothing. Writeback stays reachable through --storage-mode and
+        // GROK_STORAGE_MODE, which are the operator's own choices.
         let _ = remote;
         Self::Local
     }
-    /// Resolve from remote settings, enforcing the rule that `Writeback`
-    /// requires grok.com auth (it syncs session history to the user's
-    /// account). This is the home for that gate.
+    /// Resolve from remote settings, enforcing the rule that `Writeback` requires grok.com auth (it syncs session history to the user's account).
+    /// This is the single home for that gate.
+    /// It is used at boot ([`crate::agent::init`]) and by the post-readiness self-heal (`MvpAgent::reapply_storage_mode`).
     pub(crate) fn from_remote_gated(
         remote: Option<&crate::util::config::RemoteSettings>,
         has_xai_auth: bool,
@@ -942,6 +972,7 @@ fn walk_toml(
 /// The `[skills]` table from an effective config, shared by the reload dispatch and `grok inspect`.
 pub(crate) use crate::config::reloader::parse_skills_config;
 /// Effective config with disk campaigns only, for one-shot entrypoints that never fetch remote settings.
+/// This avoids resolving against a never-seeded cache.
 pub use crate::util::config::load_effective_config_disk_only;
 /// Effective config: the layers plus the campaign overlay (remote cache and `GROK_CAMPAIGNS_OVERRIDE`).
 pub use crate::util::config::{
@@ -1071,9 +1102,9 @@ pub(crate) fn apply_requirements(config: &mut crate::agent::config::Config) -> V
         .collect();
     keep_the_deciding_layer(enforced)
 }
-/// Layers arrive user first, system last, and the last write is the pin that
-/// holds. Report that one, so an operator reading the log sees the file that
-/// decided rather than the first that asked.
+/// Layers arrive user first, system last, and the last write is the pin that holds.
+/// Report that one, so an operator reading the log sees the file that decided rather than the first that asked.
+/// Keyed by value as well as path, because one layer can enforce the same path twice for different reasons.
 fn keep_the_deciding_layer(mut enforced: Vec<EnforcedField>) -> Vec<EnforcedField> {
     let mut seen = std::collections::HashSet::new();
     enforced.reverse();
@@ -1148,7 +1179,8 @@ fn apply_requirements_inner(
             if let Some(val) = req_bool(req, "features", stringify!($name)) {
                 config.requirements.$name.pin(val, source.clone());
                 config.features.$name = Some(val);
-                // Unconditional, like the registry loop A later layer repeating the pin must report.
+                // Unconditional, like the registry loop
+                // A later layer repeating the pin must report, or the dedupe keeps the first layer that asked instead of the one that decided
                 push(concat!("features.", stringify!($name)), format!("{val}"));
             }
         };
@@ -1486,7 +1518,8 @@ pub fn apply_sandbox(
         });
     xai_grok_sandbox::set_configured_profile(&resolved.value);
     // The pathbox jail is the re-exec jail (jail.rs), applied before this
-    // function runs.
+    // function runs. It is reported as a confining profile (so leader/workspace
+    // gates treat it as confined) but never drives a nono `SandboxManager`.
     if sandbox_profile == xai_grok_sandbox::ProfileName::Pathbox {
         return;
     }
@@ -1494,13 +1527,24 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    // Whether a bwrap re-exec follows decides how the worker's fd is handed over, so it is settled.
+    // Whether a bwrap re-exec follows decides how the worker's fd is handed
+    // over, so it is settled before the worker starts. Only an exec-surviving
+    // fd reaches the new image, and only an exec takes the fd out of reach of
+    // this process's other children: clearing close-on-exec without an exec
+    // hands every child of the session a live socket to an UNCONFINED `gh`.
+    // The re-exec command cannot be built first to answer this. It snapshots
+    // this process's environment when it sets its own marker, and the fd's
+    // name has to be in that snapshot.
     #[cfg(target_os = "linux")]
     let reexec_follows = xai_grok_sandbox::bwrap_reexec_planned(&sandbox_profile, &workspace);
     #[cfg(not(target_os = "linux"))]
     let reexec_follows = false;
     // Start the unsandboxed `gh` worker before the confinement below is
-    // installed.
+    // installed. `gh` keeps its OAuth token in the login keychain, and the
+    // profile's macOS rules deny the keychain mach services, so a `gh` spawned
+    // under this sandbox sends no Authorization header and every CI query
+    // answers 401. The worker forked here stays unconfined, and answers those
+    // queries from the host instead.
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
         let _ = xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
     }
@@ -1588,7 +1632,10 @@ pub fn apply_sandbox(
             BwrapStartup::Continue => {}
         }
         // Still running, so the exec the worker's fd was prepared for never
-        // happened.
+        // happened: the command would not build, or `exec` itself failed and
+        // this process fell back to Landlock. Either way the session is
+        // confined in place, and an inheritable fd with its number in the
+        // environment would hand every child a socket to an unconfined `gh`.
         if reexec_follows && let Some(fd) = xai_grok_sandbox::ci_host::ci_host_fd() {
             xai_grok_sandbox::ci_host::reclaim_from_failed_exec(fd);
         }
@@ -1634,7 +1681,8 @@ pub fn apply_sandbox(
 }
 pub use xai_grok_workspace::project_config::find_project_configs;
 /// Resolve the effective `[plugins]` config for a working directory the same way a session does at reload time: global/user config ([`load_effective_config`]), plus every ancestor project `.grok/config.toml` ([`find_project_configs`], extending `paths` and `disabled`), plus the imported `enabledPlugins` merge.
-/// All of them must discover the same plugins for a given cwd. Centralizing it prevents the paths/disabled/discovered-command drift those callers would otherwise accumulate.
+/// All three must discover the same plugins for a given cwd.
+/// Centralizing it prevents the paths/disabled/discovered-command drift those callers would otherwise accumulate.
 pub(crate) fn resolve_effective_plugins_config(
     cwd: &std::path::Path,
 ) -> crate::agent::config::PluginsConfig {
@@ -1797,9 +1845,8 @@ pub fn remove_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error:
         Ok(plugins_list_remove(table, "disabled", plugin_id))
     })
 }
-/// Async [`add_dismissed_plugin_cta`] for UI callers (see
-/// [`config_write_blocking`]): the locked write sleep-polls the config-init
-/// flock.
+/// Async [`add_dismissed_plugin_cta`] for UI callers (see [`config_write_blocking`]): the locked
+/// write sleep-polls the config-init flock, so it must stay off the render path.
 pub async fn run_add_dismissed_plugin_cta(plugin_id: String) -> Result<(), String> {
     config_write_blocking(move || add_dismissed_plugin_cta(&plugin_id)).await
 }
@@ -1841,8 +1888,9 @@ pub fn add_dismissed_plugin_cta_to_file(
         Ok(true)
     })
 }
-/// All plugin ids listed in `[plugin_cta].dismissed` in
-/// `~/.grok/config.toml`.
+/// All plugin ids listed in `[plugin_cta].dismissed` in `~/.grok/config.toml`.
+///
+/// Read once (e.g. on catalog load) and cached so the matched-debounce recompute doesn't parse the config from disk on the UI thread.
 pub fn dismissed_plugin_ctas() -> std::collections::HashSet<String> {
     let config_path = crate::util::grok_home::grok_home().join("config.toml");
     dismissed_plugin_ctas_in_file(&config_path)
@@ -1994,8 +2042,9 @@ pub(crate) fn registered_hook_paths() -> std::collections::HashSet<String> {
         Err(_) => std::collections::HashSet::new(),
     }
 }
-/// Remove a hook path from `~/.grok/hooks-paths`. Returns whether the path
-/// was present (exact string match, like `add_hooks_path`).
+/// Remove a hook path from `~/.grok/hooks-paths`.
+/// Returns whether the path was present (exact string match, like `add_hooks_path`).
+/// On `false` nothing was removed and callers must not claim success.
 pub(crate) fn remove_hooks_path(path: &str) -> Result<bool, Box<dyn std::error::Error>> {
     remove_hooks_path_from_file(
         path,

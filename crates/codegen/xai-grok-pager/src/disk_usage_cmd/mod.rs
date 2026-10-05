@@ -1,4 +1,6 @@
-//! `grok du`: what the user's grok home uses on disk. It creates no grok home, registry file, or schema.
+//! `grok du`: what the user's grok home uses on disk.
+//! It creates no grok home, registry file, or schema.
+//! A read-only open of a WAL database still leaves `-shm` and `-wal` sidecars, so sizes are collected before the registry opens.
 mod display;
 use crate::fs_size::{
     BucketSize, Measure, Volume, WalkIssues, modified_at, physical_buckets, physical_dir_size,
@@ -124,6 +126,7 @@ pub(crate) struct DiskUsageReport {
     grok_home: String,
     total_bytes: u64,
     /// Capacity less available is at least the used bytes (`f_bavail` withholds the root reserve).
+    /// A larger `total_bytes` therefore proves blocks were counted more than once.
     volume_capacity_bytes: Option<u64>,
     volume_available_bytes: Option<u64>,
     /// Largest first.
@@ -228,7 +231,7 @@ pub(crate) struct WorktreeUsage {
     last_modified_at: Option<i64>,
     path: String,
 }
-/// Hand-written so the enum stays flat on the wire: keys, fixed order.
+/// Hand-written so the enum stays flat on the wire: twelve keys, fixed order.
 impl Serialize for WorktreeUsage {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;

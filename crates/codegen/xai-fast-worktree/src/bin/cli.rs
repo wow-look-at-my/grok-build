@@ -1,4 +1,10 @@
 //! CLI for fast git worktree creation.
+//!
+//! Usage:
+//!   fast-worktree create <source> <dest> [options]
+//!
+//! Example:
+//!   fast-worktree create /path/to/repo /path/to/worktree --dirty --parallelism 8
 
 #![deny(clippy::indexing_slicing)]
 
@@ -68,6 +74,7 @@ enum Commands {
         #[arg(long, short = 'i')]
         ignored: bool,
 
+        /// Number of parallel workers (0 = auto)
         #[arg(long, short = 'j', default_value = "0")]
         parallelism: usize,
 
@@ -84,6 +91,7 @@ enum Commands {
         btrfs: CliBtrfsMode,
 
         /// Create a standalone repo copy instead of a linked worktree.
+        /// The copy has its own .git/ (CoW'd) and can be promoted via rename.
         #[arg(long, short = 's')]
         standalone: bool,
     },
@@ -164,6 +172,7 @@ fn main() -> Result<()> {
                 result.commit.get(..12).unwrap_or(result.commit.as_str())
             );
 
+            // For snapshot methods (btrfs/overlay), files_copied will be 0
             if result.unignored_copy.files_copied > 0 {
                 println!(
                     "  Files:  {} copied, {} dirs",

@@ -35,6 +35,7 @@ pub(super) fn ensure_login_method(app: &mut AppView) {
             crate::acp::AuthStartMode::Command => AuthMode::Command,
         };
     }
+    // No interactive method: leave login_method_id unset (fail-closed).
 }
 
 /// Error when no interactive login method is available (empty auth_methods, e.g. `preferred_method=api_key` with no credentials).
@@ -106,8 +107,9 @@ pub(super) fn dispatch_switch_account(app: &mut AppView) -> Vec<Effect> {
     ]
 }
 
-/// Scan the trailing run of session-event / system blocks for a
-/// [`SessionEvent::ReAuthRequired`] prompt.
+/// Scan the trailing run of session-event / system blocks for a [`SessionEvent::ReAuthRequired`] prompt.
+/// Used by the `PromptResponse` handler to suppress the redundant "Turn failed" block after a 401.
+/// The re-auth prompt is pushed by the `RetryState` handler, which runs first.
 pub(super) fn scrollback_has_recent_reauth_prompt(
     scrollback: &crate::scrollback::state::ScrollbackState,
 ) -> bool {
@@ -203,9 +205,9 @@ pub(super) fn strip_trailing_auth_error_blocks(agent: &mut AgentView) {
     }
 }
 
-/// Start an interactive login flow. Triggered by pressing 'l' on the welcome
-/// screen or by the `/login` slash command. Only the welcome view renders the
-/// auth UI (the external auth provider's sign-in URL and status).
+/// Start an interactive login flow. Triggered by pressing 'l' on the welcome screen or by the `/login` slash command.
+/// Only the welcome view renders the auth UI (the external auth provider's sign-in URL and status).
+/// A mid-session invocation therefore stashes the caller's view in `auth_return_view` and switches to `Welcome` so the flow is visible.
 pub(super) fn dispatch_login(app: &mut AppView) -> Vec<Effect> {
     ensure_login_method(app);
     let Some(method_id) = app.login_method_id.clone() else {
@@ -219,8 +221,8 @@ pub(super) fn dispatch_login(app: &mut AppView) -> Vec<Effect> {
 }
 
 fn start_login(app: &mut AppView, method_id: acp::AuthMethodId, mode: AuthMode) -> Vec<Effect> {
-    // Show the auth UI when triggered from inside a session `show_welcome`
-    // resets ephemeral state here.
+    // Show the auth UI when triggered from inside a session
+    // `show_welcome` resets ephemeral state here, covering the AuthComplete / cancel-login fallbacks too (`auth_return_view` is only ever set here)
     if !matches!(app.active_view, ActiveView::Welcome) {
         app.auth_return_view = Some(app.active_view);
         show_welcome(app);
@@ -249,13 +251,15 @@ fn start_login(app: &mut AppView, method_id: acp::AuthMethodId, mode: AuthMode) 
     ]
 }
 
+/// Only meaningful when `auth_return_view` is set (a mid-session `/login` or 401 re-auth prompt).
 /// Aborts the in-flight auth task and tells the shell to cancel its device/loopback flow so a retry does not race a still-polling prior mint.
 /// Bump the seq so a fresh login does not collide with a late `AuthComplete`/`AuthFailed`.
 pub(super) fn dispatch_cancel_login(app: &mut AppView) -> Vec<Effect> {
     let Some(return_view) = app.auth_return_view.take() else {
         return vec![];
     };
-    // Capture the attempt's request_seq before abort clears Authenticating.
+    // Capture the attempt's request_seq before abort clears Authenticating, so the shell cancel is scoped to this attempt only
+    // A delayed RPC must not cancel a fast re-login
     let cancel_seq = match &app.auth_state {
         AuthState::Authenticating { request_seq, .. } => Some(*request_seq),
         _ => None,
@@ -266,7 +270,9 @@ pub(super) fn dispatch_cancel_login(app: &mut AppView) -> Vec<Effect> {
     app.auth_show_raw_url = false;
     app.auth_code_input.reset();
     restore_auth_return_view(app, return_view);
-    // This runs on all agents.
+    // This runs on all agents because the login may have been started from the dashboard
+    // Clearing the stash alone is not enough
+    // A leftover `ReAuthRequired` block would let a later `PromptResponse` re-detect it via `scrollback_has_recent_reauth_prompt`
     for agent in app.agents.values_mut() {
         agent.reauth_stashed_prompt = None;
         strip_trailing_auth_error_blocks(agent);
@@ -314,11 +320,17 @@ pub(super) fn handle_auth_complete(
         app.welcome_prompt_focused = !app.is_access_blocked();
         app.auth_code_input.reset();
 
+        // Mid-session re-auth (`/login` or a 401 prompt): restore the view the user was on instead of running the startup load-session flow
+        // The session state lives in `app.agents`, independent of `active_view`, so it is preserved across the auth detour
         if let Some(return_view) = app.auth_return_view.take() {
             restore_auth_return_view(app, return_view);
-            // Mid-session re-auth returns to the existing session, not the startup flow Discard any deferred startup stash rather than leaving it.
+            // Mid-session re-auth returns to the existing session, not the startup flow
+            // Discard any deferred startup stash rather than leaving it to fire later
+            // One example: an incidental `Ctrl+N` pressed during /login that the chokepoint deferred
             clear_startup_actions(app);
-            // Re-auth succeeded: hide the now-stale re-auth prompt (and any trailing error blocks) so the user returns.
+            // Re-auth succeeded: hide the now-stale re-auth prompt (and any trailing error blocks) so the user returns to a clean session
+            // Mirrors how the credit-limit upsell strips its stale blocks
+            // Auth is global, so handle every agent (the login may have been started from the dashboard, not the agent that 401'd)
             let mut retry_effects = Vec::new();
             let mut page_flips = Vec::new();
             for agent in app.agents.values_mut() {
@@ -369,8 +381,9 @@ pub(super) fn handle_auth_complete(
             return effects;
         }
 
-        // Replay deferred session startup once both gates are open If trust
-        // is still Pending its question renders next.
+        // Replay deferred session startup once both gates are open
+        // If trust is still Pending its question renders next and its answer drains instead
+        // The trust handlers use the same predicate, so the deferred startup runs exactly once after whichever gate resolves last
         if app.session_startup_allowed() {
             effects.extend(drain_startup_actions(app));
         }

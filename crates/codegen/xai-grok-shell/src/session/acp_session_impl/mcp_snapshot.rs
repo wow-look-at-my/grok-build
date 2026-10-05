@@ -19,7 +19,7 @@ pub(super) const DELIVERY_TOOLS_TEMPLATED_PREFIX_WAIT: std::time::Duration =
     std::time::Duration::from_secs(60);
 pub(super) const MCP_INIT_WAIT_BOUND: std::time::Duration = std::time::Duration::from_secs(120);
 
-/// Outcome of [`SessionActor::wait_for_mcp_handshakes_until`].
+/// Outcome of [`SessionActor::wait_for_mcp_handshakes_until`]; `GenerationChanged` tells the caller to restart against the current generation's deadline.
 #[derive(Debug, Clone, Copy)]
 enum McpHandshakeWait {
     Complete,
@@ -113,7 +113,8 @@ impl SessionActor {
 }
 
 pub(super) struct SnapshotRefresher {
-    /// A pass-owned refresh never publishes for a replaced server set.
+    /// A pass-owned refresh never publishes for a replaced server set. It is not interrupted mid-way: its descriptor
+    /// writers run on blocking threads.
     pub(super) generation: Option<crate::session::mcp_servers::Generation>,
     pub(super) tool_bridge: Arc<crate::tools::bridge::ToolBridge>,
     pub(super) mcp_state: Arc<TokioMutex<McpState>>,
@@ -234,7 +235,8 @@ impl SnapshotRefresher {
                 disabled_gateway_tools,
             )
             .await;
-            // `search_tool` and `use_tool` read under the bridge's resource lock, so both publications land.
+            // `search_tool` and `use_tool` read under the bridge's resource lock, so both publications land in one
+            // critical section.
             let mut published = Err(Superseded);
             tool_bridge
                 .update_resources_with(|resources| {
@@ -446,8 +448,8 @@ impl SessionActor {
         }
     }
 
-    /// One deadline armed at first use, so a session pays the grace at most
-    /// once; `deliveryTools` sessions keep full waits.
+    /// One deadline armed at first use, so a session pays the grace at most once; `deliveryTools` sessions keep full waits.
+    /// A config change mid-grace restarts the wait against the new generation's freshly armed deadline.
     pub(super) async fn wait_for_mcp_startup_grace(&self) {
         self.wait_for_mcp_handshakes(|generation| {
             self.mcp_startup_waits

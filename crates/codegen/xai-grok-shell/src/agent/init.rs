@@ -1,4 +1,8 @@
 //! Agent bootstrap and lifecycle hooks.
+//!
+//! [`bootstrap`] runs the full init sequence (config resolution, process
+//! singletons, model catalog) and returns a resolved config + `ModelsManager`.
+//! [`update_telemetry_config`] re-initializes telemetry after auth changes.
 use crate::agent::config::{self, Config as AgentConfig, ModelEntry};
 use crate::agent::remote_config::settings_get::SettingsWait;
 use crate::agent::remote_config::{ModelsManager, ResolvedModels, settings_get};
@@ -30,13 +34,18 @@ impl From<String> for BootstrapError {
     }
 }
 /// The owned handoff from the async boot pre-resolve to sync bootstrap: the
-/// settled settings wait and the pre-resolved catalog.
+/// settled settings wait and the pre-resolved catalog, moved by value so a
+/// concurrent boot in the same process cannot observe another boot's. Fields are
+/// private; only [`resolve_boot_startup_settings`] builds one and
+/// [`bootstrap_with_cancel`] consumes it.
 #[must_use]
 pub struct BootstrapPrefetch {
     settings_wait: Option<SettingsWait>,
     models: ResolvedModels,
 }
-/// One bootstrap at a time.
+/// One bootstrap at a time. A connect-timeout drop does not abort
+/// `spawn_blocking`, so the fallback connect would otherwise overlap
+/// `start_refresh_supervisor` / `init_process`.
 static BOOTSTRAP_GATE: Mutex<()> = Mutex::new(());
 struct BootstrapPermit<'a>(#[expect(dead_code)] std::sync::MutexGuard<'a, ()>);
 fn ensure_bootstrap_not_cancelled(cancel: &CancellationToken) -> Result<(), BootstrapError> {
@@ -293,6 +302,7 @@ fn install_settings_wait(
     }
 }
 /// Fill `remote_settings` if absent and apply process-global remote side effects.
+/// The boot spends at most one settings retry budget (#278686).
 fn ensure_remote_settings_side_effects(
     cfg: &mut AgentConfig,
     profile: LaunchProfile,
@@ -426,7 +436,9 @@ fn init_process(cfg: &AgentConfig, auth_manager: &AuthManager) {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        // Every agent mode (stdio/headless/leader and the in-process TUI agent) passes through here.
+        // Every agent mode (stdio/headless/leader and the in-process TUI
+        // agent) passes through here, so diagnostic uploads always carry
+        // the version stamp and the resource ceilings in effect.
         xai_grok_telemetry::unified_log::set_version(xai_grok_version::version());
         let limits = crate::util::limits::ProcessLimits::read();
         limits.log();

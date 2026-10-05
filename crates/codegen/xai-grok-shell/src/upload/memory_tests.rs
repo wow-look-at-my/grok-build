@@ -1,4 +1,6 @@
-//! Production-entry tests for the per-turn memory archive: blocking-pool build, per-cwd in-flight sharing, flush-deadline detach.
+//! Production-entry tests for the per-turn memory archive: blocking-pool
+//! build, per-cwd in-flight sharing, flush-deadline detach, and manifest
+//! terminal records.
 use super::*;
 use crate::upload::trace::tests::read_tar_gz_entries;
 #[tokio::test(flavor = "current_thread")]

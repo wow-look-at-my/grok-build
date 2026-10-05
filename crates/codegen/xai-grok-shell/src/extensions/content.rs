@@ -1,4 +1,7 @@
 //! Shared split of optional client `content` blocks.
+//!
+//! Interject and `/btw` both accept a text override plus image blocks. The
+//! rule lives here so a side question does not inherit interjection-only behavior.
 
 use agent_client_protocol as acp;
 

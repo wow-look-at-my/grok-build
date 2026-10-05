@@ -1,4 +1,5 @@
-//! Provides persistent caching of git marketplace repos. Cache root: `~/.grok/marketplace-cache/<url-hash>/`
+//! Provides persistent caching of git marketplace repos.
+//! Cache root: `~/.grok/marketplace-cache/<url-hash>/`
 
 use std::collections::VecDeque;
 use std::fs::File;
@@ -116,7 +117,8 @@ fn sync_cache_locked(
     }
 }
 
-/// The flock helper shared by every plugin lock site (source cache here, the install registry in the shell and agent); lives in the agent crate.
+/// The one flock helper shared by every plugin lock site (source cache here, the install registry
+/// in the shell and agent); lives in the agent crate at the bottom of the dependency graph.
 pub use xai_grok_agent::plugins::install_registry::acquire_file_lock;
 
 /// Check if the cache was fetched recently enough to skip fetching.
@@ -145,6 +147,7 @@ fn cache_hash(url: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// Clone a git repo with depth 1.
 /// Uses the git CLI (not libgit2): a libgit2 clone cannot be killed on timeout, so a hung remote would pin a thread forever.
 fn clone_repo(url: &str, branch: Option<&str>, dest: &Path) -> Result<(), String> {
     let url = xai_grok_agent::plugins::git_install::validate_git_url(url)?;

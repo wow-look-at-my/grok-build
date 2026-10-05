@@ -1,4 +1,19 @@
 //! `task` tool — launches a subagent to handle a task autonomously.
+//!
+//! The TaskTool delegates subagent operations to a [`SubagentBackend`]
+//! (injected as [`SubagentBackendResource`]). The backend abstracts over the
+//! coordinator mailbox. All hosts use the same backend and coordinator actor;
+//! only their child runners differ.
+//!
+//! ## Resources
+//!
+//! - `SubagentBackendResource` — backend for spawn/query/cancel (required)
+//! - `SubagentDepthCounter` — current nesting depth (optional, defaults to 0)
+//! - `MaxSubagentDepth` — max nesting (optional, defaults to [`MAX_SUBAGENT_DEPTH`])
+//! - `SessionIdResource` — current session ID for parent scoping (optional)
+//! - `SubagentForegroundWait` — host wait-window guard factory (optional)
+//! - `TaskModelValidator` — validates explicit model slugs before spawn
+//! - `Params<TaskParams>` — whether the model may pick a child model (optional)
 
 mod active_message;
 pub mod admission;
@@ -101,7 +116,8 @@ async fn recent_user_asks(resources: &SharedResources) -> Vec<String> {
             continue;
         }
         // Auto-continue / stop-hook / recovery injections are typed `user`
-        // but are not parent asks.
+        // but are not parent asks. Counting them burns lookback and can
+        // drop leftover exec outside the window (common after compaction).
         if v.get("synthetic_reason").is_some_and(|x| !x.is_null()) {
             continue;
         }
@@ -173,7 +189,9 @@ pub(crate) async fn notified_on_completion(resources: &SharedResources) -> bool 
 #[derive(Debug, Default)]
 pub struct TaskTool;
 
-/// True when `name` is a wire name of the subagent-spawn ("task") tool.
+/// True when `name` is a wire name of the subagent-spawn ("task") tool. Accepts every spelling regardless of enabled
+/// features: names arrive over the wire from arbitrary toolsets. Spellings other than [`TASK_TOOL_NAME`] are defined
+/// downstream and pinned to this predicate by tests at their definition sites.
 pub fn is_task_tool_id(name: &str) -> bool {
     matches!(name, TASK_TOOL_NAME | "Task" | "spawn_subagent")
 }
@@ -227,7 +245,8 @@ fn log_background_spawn_after_start(
     joined: Result<Result<SubagentResult, xai_tool_runtime::ToolError>, tokio::task::JoinError>,
 ) {
     match flatten_spawn_join(joined) {
-        // Child-result failures are logged once by the coordinator.
+        // Child-result failures are logged once by the coordinator. This
+        // waiter only owns join/transport errors the coordinator never sees.
         Ok(_) => {}
         Err(e) => {
             tracing::error!(
@@ -284,7 +303,8 @@ impl crate::types::tool_metadata::ToolMetadata for TaskTool {
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
         // The task tool can only be used when both get_task_output
-        // (BackgroundTaskAction) and kill_task (KillTaskAction) are present.
+        // (BackgroundTaskAction) and kill_task (KillTaskAction) are present,
+        // so the agent can manage background subagents it spawns.
         Expr::And(vec![
             Expr::Value(ToolRequirement::tool_kind(ToolKind::BackgroundTaskAction)),
             Expr::Value(ToolRequirement::tool_kind(ToolKind::KillTaskAction)),
@@ -463,13 +483,12 @@ impl xai_tool_runtime::Tool for TaskTool {
         }
 
         // Treat blank/empty/"null" cwd as absent (models sometimes emit these).
+        // Also strip stray surrounding quote characters and expand `~`.
         let cwd = input.cwd.as_deref().and_then(sanitize_cwd_value);
 
-        // Validate mutual exclusion: cwd and isolation=worktree cannot both
-        // be set. Both set the effective cwd — setting both is ambiguous.
-        // However, if the cwd path doesn't exist as a real directory on disk,
-        // the model likely passed a nonsense path — clear it so worktree
-        // wins.
+        // Validate mutual exclusion: cwd and isolation=worktree cannot both be set. Both set the effective cwd — setting both
+        // is ambiguous. However, if the cwd path doesn't exist as a real directory on disk, the model likely passed a nonsense
+        // path — just clear it so worktree wins.
         let cwd = if cwd.is_some() && input.isolation == Some(SubagentIsolationMode::Worktree) {
             if cwd
                 .as_deref()
@@ -507,9 +526,13 @@ impl xai_tool_runtime::Tool for TaskTool {
             }
         }
 
-        // The wait window must cover eager validation too: a user prompt should interject if the coordinator stalls.
+        // The wait window must cover eager validation too: a user prompt
+        // should interject if the coordinator stalls.
         let foreground_wait = foreground_wait.map(|wait| wait.enter());
 
+        // 2. Eager validation — catch unknown / disabled / not-allowed
+        //    types before the fire-and-forget background spawn.
+        // Resume inherits the source type; the host validates that.
         let mut subagent_type = input.subagent_type.clone();
         let type_was_omitted = !input.subagent_type_specified;
         if resume_from.is_none() {
@@ -571,9 +594,12 @@ impl xai_tool_runtime::Tool for TaskTool {
             .then(|| {
                 tool_cancellation.map(|tool_cancellation| {
                     let child_cancellation = child_cancellation.clone();
-                    // The handle is kept to abort the forwarder once the
-                    // child is no longer foreground, so the only thing that
-                    // can come back from it is a panic.
+                    // The handle is kept to abort the forwarder once the child
+                    // is no longer foreground, so the only thing that can come
+                    // back from it is a panic. Guarded so that panic names the
+                    // forwarder rather than leaving a child running that nobody
+                    // can cancel any more. The returned handle is kept by the
+                    // caller and aborted, so nothing joins it.
                     #[allow(clippy::disallowed_methods)]
                     tokio::spawn(crate::util::detached::fire_and_forget(
                         "subagent cancellation forwarder",
@@ -602,10 +628,13 @@ impl xai_tool_runtime::Tool for TaskTool {
                 },
                 reasoning_effort: None,
                 persona: None,
-                // JSON cannot set this field.
+                // JSON cannot set this field. Compat-harness adapters still
+                // populate it in-process; model-facing spawns stay `None`.
                 capability_mode: input.capability_mode,
                 isolation: input.isolation,
-                // Model-issued `task` spawns never override the harness.
+                // Model-issued `task` spawns never override the harness; the
+                // parent agent decides the flavor (the `/goal` harness override
+                // is set only by the harness-internal role spawners).
                 harness_agent_type: None,
                 completion_output_cap: None,
                 spawn_depth: None,
@@ -736,7 +765,9 @@ impl xai_tool_runtime::Tool for TaskTool {
                 result.subagent_type
             };
             Ok(ToolOutput::SubagentCompleted(SubagentCompletedOutput {
-                // SubagentCompletedOutput.output is `String` (serde-visible boundary).
+                // SubagentCompletedOutput.output is `String` (serde-visible
+                // boundary). One allocation per completion; cheaper paths
+                // (pending_completions / snapshot) keep the Arc<str>.
                 output: result.output.to_string(),
                 subagent_id: result.subagent_id,
                 subagent_type: resolved_type,
@@ -1866,7 +1897,8 @@ mod tests {
         let (backend, mut rx) = make_backend();
         let resources = resources_for_task(backend);
 
-        // done_tx signals after the spawn has been replied to so the test can wait for Fix A's match arm to execute.
+        // done_tx signals after the spawn has been replied to so the
+        // test can wait for Fix A's match arm to execute.
         let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
         let drain = tokio::spawn(async move {
             if let Some(SubagentEvent::Spawn(boxed)) = rx.recv().await {
@@ -1916,7 +1948,9 @@ mod tests {
 
     #[tokio::test]
     async fn background_spawn_survives_transport_error_after_validation() {
-        // Smoke test of the fire-and-forget contract when the spawn channel is closed.
+        // Smoke test of the fire-and-forget contract when the spawn
+        // channel is closed; companion test covers the Ok(success:false)
+        // arm with tracing assertions.
         let (backend, rx) = make_backend();
         drop(rx);
         let resources = resources_for_task(backend);

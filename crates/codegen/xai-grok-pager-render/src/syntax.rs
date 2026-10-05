@@ -1,4 +1,14 @@
 //! Provides lazily-initialized `Syntect` instances for code highlighting.
+//! Dark themes (GrokNight, TokyoNight) share `grok-night.tmTheme`; GrokDay uses `grok-day.tmTheme` with deepened colors for light backgrounds.
+//!
+//! ## Terminal-native palette (minimal lock + `terminal` theme)
+//!
+//! While [`crate::theme::cache::terminal_native_active`] holds (minimal mode's lock, or the `Terminal` kind), syntect still loads a night `.tmTheme`.
+//! Its pastel RGB tokens collapse to **White** after naive ANSI-16 quantization, which is invisible on light terminal profiles.
+//!
+//! On that palette we do **not** detect light/dark. Instead:
+//! 1. Near-gray tokens become `Color::Reset` (terminal default fg; always readable).
+//! 2. Chromatic tokens map to base ANSI-16 accents (Red/Green/Yellow/Blue/Magenta/Cyan), never White/Black/bright variants.
 
 use std::sync::OnceLock;
 
@@ -51,6 +61,7 @@ pub fn polarity_safe_syntax_fg(r: u8, g: u8, b: u8) -> Color {
     if chroma < 40 {
         return Color::Reset;
     }
+    // Integer HSV hue in degrees [0, 360).
     let (ri, gi, bi) = (r as i32, g as i32, b as i32);
     let h = if max == ri {
         let mut h = (gi - bi) * 60 / chroma;
@@ -63,6 +74,7 @@ pub fn polarity_safe_syntax_fg(r: u8, g: u8, b: u8) -> Color {
     } else {
         (ri - gi) * 60 / chroma + 240
     };
+    // Magenta starts at 255° so Tokyo Night purple (#bb9af7, ~261°) lands Magenta rather than Blue; pure blues (~221°) stay Blue
     match h {
         0..30 | 330..=360 => Color::Red,
         30..90 => Color::Yellow,
@@ -109,7 +121,8 @@ pub fn get_syntect() -> &'static Syntect {
         ThemeKind::GrokNight
         | ThemeKind::RosePineMoon
         | ThemeKind::OscuraMidnight
-        // Terminal remaps every token in `syntect_rgb_to_fg`.
+        // Terminal remaps every token in `syntect_rgb_to_fg`, so the
+        // source palette only has to be a full one — polarity is irrelevant.
         | ThemeKind::Terminal
         | ThemeKind::Auto => SYNTECT_GROKNIGHT
             .get_or_init(|| Syntect::new(include_bytes!("../assets/grok-night.tmTheme"))),

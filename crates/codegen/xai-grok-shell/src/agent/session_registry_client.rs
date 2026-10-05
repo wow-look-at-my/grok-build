@@ -1,4 +1,8 @@
 //! REST client for the session replicas registry (cli-chat-proxy).
+//!
+//! Registers, updates, finalizes, searches, and downloads session replicas for cross-host session replication.
+//! The write methods (`register`, `update`, `finalize`) are safe to call without checking the result.
+//! The read methods (`search`, `get_session`, `download_file`) return typed results.
 
 use anyhow::{Context, Result};
 use reqwest::RequestBuilder;
@@ -54,6 +58,7 @@ pub struct UpdateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_head_at_end: Option<String>,
     /// The latest turn whose restore artifacts are confirmed durable.
+    /// Omitted from the wire when `None`; old servers ignore unknown fields.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restorable_turn_number: Option<i32>,
 }
@@ -73,6 +78,7 @@ pub struct SessionRecord {
     pub updated_at: String,
     pub last_turn_number: i32,
     /// Present on servers that have applied the restorable-turn migration.
+    /// `None` when talking to an older server; callers should fall back to `last_turn_number` then.
     #[serde(default)]
     pub restorable_turn_number: Option<i32>,
     pub cwd: String,
@@ -158,6 +164,7 @@ impl SessionRegistryClient {
         self
     }
 
+    /// Attach an `AuthManager` so request signing and 401 recovery go through the shared auth path.
     pub fn with_auth(mut self, auth_manager: std::sync::Arc<xai_grok_login::AuthManager>) -> Self {
         let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> =
             std::sync::Arc::new(
@@ -172,6 +179,7 @@ impl SessionRegistryClient {
     }
 
     /// Execute with auth middleware, returning the response and the bearer suffix the middleware stamped.
+    /// [`Self::check_response`] uses that suffix to attribute a 401 to the token actually sent.
     async fn send_authed(
         &self,
         builder: RequestBuilder,
@@ -373,8 +381,9 @@ impl SessionRegistryClient {
 mod tests {
     use super::*;
 
-    // ── UpdateRequest wire shapes ──────────────────────────────────────────── The registry writer sends distinct update payloads at different times: Immediately after a turn: `last_turn_number` and `repo_head_at_end`
-    // Once restore artifacts are durable: `restorable_turn_number` only These tests verify `skip_serializing_if = "Option::is_none"` for each shape Old servers then silently ignore the new field and clients never overwrite unrelated fields with nulls
+    // ── UpdateRequest wire shapes ──────────────────────────────────────────── The registry writer sends two distinct update payloads at different times: Immediately after a turn: `last_turn_number` and `repo_head_at_end`
+    // Once restore artifacts are durable: `restorable_turn_number` only These tests verify `skip_serializing_if = "Option::is_none"` for each shape
+    // Old servers then silently ignore the new field and clients never overwrite unrelated fields with nulls
 
     #[test]
     fn immediate_turn_update_omits_restorable_field() {

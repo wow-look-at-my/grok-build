@@ -1,4 +1,8 @@
 //! Filesystem access policy for model-visible memory v2 roots.
+//!
+//! Reads may inspect safe in-scope files. Writes are limited to Markdown topic
+//! and observation-inbox files, use atomic replacement, and require an
+//! unchanged snapshot from an earlier ordinary read when replacing a file.
 
 use std::collections::HashMap;
 use std::io::{Read as _, Write as _};
@@ -12,9 +16,12 @@ use crate::v2::{
 };
 
 const MAX_PREVIOUS_CONTENT_BYTES: u64 = 8 * 1024 * 1024;
-/// Largest topic a write may produce.
+/// Largest topic a write may produce. Dream's `read_topics` and forget both
+/// refuse larger files, so accepting one here would make every later Dream fail.
 pub(crate) const MAX_TOPIC_FILE_BYTES: u64 = 256 * 1024;
-/// Largest inbox observation a write may produce.
+/// Largest inbox observation a write may produce. Mirrors the private
+/// `MAX_OBSERVATION_FILE_BYTES` in `v2_capture.rs`, which is the source of
+/// truth for what capture recovery and Dream are willing to read back.
 const MAX_WRITE_OBSERVATION_BYTES: u64 = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +31,9 @@ pub enum V2PathClass {
     Topic(V2MemoryScope),
     Observation(V2MemoryScope),
     ArchivedObservation(V2MemoryScope),
-    /// A path nested below `topics/` or `observations/_inbox/`.
+    /// A path nested below `topics/` or `observations/_inbox/`. Manifest
+    /// generation, browse, Dream input, and capture recovery only list
+    /// immediate children, so such files would be invisible.
     Nested(V2MemoryScope),
     Protected(V2MemoryScope),
 }
@@ -196,7 +205,14 @@ impl V2MemoryAccessPolicy {
         Ok(configured_class.unwrap_or(V2PathClass::Outside))
     }
 
-    /// Remove a read topic file with the same containment.
+    /// Remove a previously read topic file with the same containment and stale
+    /// snapshot checks used by ordinary v2 writes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`V2AccessError::Protected`] unless `path` is a topic Markdown
+    /// file, or [`V2AccessError::ReadRequired`] / [`V2AccessError::Stale`] when
+    /// the caller has not observed the current bytes.
     pub fn remove_topic_file(&self, path: &Path) -> V2AccessResult<()> {
         self.remove_topic_file_inner(path, None)
     }
@@ -504,7 +520,8 @@ impl V2MemoryAccessPolicy {
             path: path.to_path_buf(),
             source,
         })?;
-        // Creating missing parents changes which prefix is canonicalized.
+        // Creating missing parents changes which prefix is canonicalized. Check
+        // containment and symlink components again before opening the tempfile.
         canonical = self.validate_containment(path, class)?;
         persist_atomically(&canonical, contents, previous_content.is_none())?;
 

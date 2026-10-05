@@ -1,4 +1,19 @@
-//! A dedicated tracing target for hooks and plugins subsystems with an optional file logger that writes.
+//! A dedicated tracing target for hooks and plugins subsystems with an optional
+//! file logger that writes to `~/.grok/logs/hooks.log`.
+//!
+//! ## When to use
+//!
+//! Use regular `tracing::info!` / `tracing::debug!` / `tracing::warn!` with targets `xai_grok_hooks` or `xai_grok_agent::plugins`.
+//! Log at discovery, dispatch, execution, and error points.
+//!
+//! ## Enabling
+//!
+//! ```bash
+//! GROK_HOOKS_LOG=1 grok              # enable, write to ~/.grok/logs/hooks.log
+//! GROK_HOOKS_LOG=/tmp/h.log grok     # write to custom path
+//! GROK_HOOKS_LOG=0 grok              # explicitly disable
+//! tail -f ~/.grok/logs/hooks.log     # watch in another terminal
+//! ```
 
 use std::fmt;
 use std::path::PathBuf;

@@ -36,6 +36,10 @@ fn push_respects_max_entries_cap() {
 
 #[test]
 fn failure_count_stays_consistent_under_cap_eviction() {
+    // Push enough failures to overflow the cap and confirm
+    // error_rate() (which is O(1) via the cached failures
+    // counter) still reads 1.0 after entries are dropped from
+    // the front.
     let mut w = SlidingWindow::new();
     let base = Instant::now();
     for i in 0..(MAX_WINDOW_ENTRIES + 100) {
@@ -54,7 +58,8 @@ fn failure_count_decrements_on_time_eviction() {
     w.push(true, base + Duration::from_millis(20));
     assert!((w.error_rate() - (2.0 / 3.0)).abs() < 1e-9);
 
-    // Evict the first entries (the leading true and false).
+    // Evict the first two entries (the leading true and false).
+    // Remaining is one true → error_rate = 1.0.
     w.evict(Duration::from_millis(5), base + Duration::from_millis(20));
     assert_eq!(w.sample_count(), 1);
     assert!((w.error_rate() - 1.0).abs() < f64::EPSILON);
@@ -67,6 +72,8 @@ fn clear_resets_failure_count() {
     w.push(true, base);
     w.push(true, base + Duration::from_millis(1));
     w.clear();
+    // After clear, pushing one success must read error_rate 0.0;
+    // a stale failures counter would read 2/1 instead.
     w.push(false, base + Duration::from_millis(2));
     assert!(w.error_rate().abs() < f64::EPSILON);
 }
@@ -86,13 +93,15 @@ fn cap_then_time_eviction_keeps_failure_count_consistent() {
     assert_eq!(w.sample_count(), MAX_WINDOW_ENTRIES);
     assert!((w.error_rate() - 1.0).abs() < f64::EPSILON);
 
-    // Move past the window and evict — every existing sample falls out, cached failures counter must reach zero.
+    // Move past the window and evict — every existing sample falls
+    // out, cached failures counter must reach zero.
     let way_later = base + Duration::from_secs(3600);
     w.evict(Duration::from_secs(1), way_later);
     assert_eq!(w.sample_count(), 0);
     assert!(w.error_rate().abs() < f64::EPSILON);
 
-    // New samples after a full eviction must continue to read consistently (regression on a stale `failures` field).
+    // New samples after a full eviction must continue to read
+    // consistently (regression on a stale `failures` field).
     w.push(false, way_later);
     w.push(true, way_later + Duration::from_micros(1));
     assert_eq!(w.sample_count(), 2);

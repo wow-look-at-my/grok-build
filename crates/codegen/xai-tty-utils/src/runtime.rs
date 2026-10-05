@@ -1,4 +1,19 @@
 //! Worker-thread and blocking-pool policy for tokio runtimes.
+//!
+//! Tokio defaults to one worker per core and 512 blocking threads *per
+//! runtime*. On many-core shared hosts that pins too many thread slots
+//! against per-user ceilings (`pids.max` / `RLIMIT_NPROC`). Grok runtimes
+//! are I/O-bound, so throughput does not scale past a small worker count.
+//!
+//! Blocking pool: `spawn_blocking` panics on `pthread_create` EAGAIN only
+//! when the pool is empty. Once one thread exists, further EAGAIN queues.
+//! Cap the pool so it cannot stampede to 512. Keep idle threads forever so
+//! the pool never returns to 0. Pre-warm process-lifetime runtimes so the
+//! first mid-turn `spawn_blocking` does not take the empty-pool panic arm.
+//!
+//! This is the single home for the policy. Every production multi-thread
+//! runtime (the `grok` binary, `workspace_server`) derives its worker count
+//! from here.
 
 use std::io;
 use std::num::NonZeroUsize;
@@ -13,9 +28,10 @@ use std::time::{Duration, Instant};
 )]
 pub const MAX_WORKER_THREADS: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
-/// Maximum Tokio blocking threads per runtime.
+/// Maximum Tokio blocking threads per runtime. Tokio's default is 512.
 pub const MAX_BLOCKING_THREADS: usize = 16;
 
+/// Tokio 1.52's condvar uses `Instant::now().checked_add(timeout)`; overflow is `None` (wait forever).
 pub const BLOCKING_THREAD_KEEP_ALIVE: Duration = Duration::MAX;
 
 const PREWARM_THREAD_WAIT: Duration = Duration::from_secs(5);
@@ -37,8 +53,9 @@ pub fn apply_blocking_pool(builder: &mut tokio::runtime::Builder) -> &mut tokio:
         .thread_keep_alive(BLOCKING_THREAD_KEEP_ALIVE)
 }
 
-/// Apply the blocking-pool policy, build, and pre-warm the full pool.
-/// Process-lifetime runtimes only.
+/// Apply the blocking-pool policy, build, and pre-warm the full pool. Process-lifetime runtimes only. Per-session
+/// runtimes should [`apply_blocking_pool`] — a 16-wide pre-warm races `pthread_create` across a subagent wave.
+/// `Builder::build` failed, or pre-warm timed out waiting for workers.
 pub fn build_with_blocking_pool(
     builder: &mut tokio::runtime::Builder,
 ) -> io::Result<tokio::runtime::Runtime> {

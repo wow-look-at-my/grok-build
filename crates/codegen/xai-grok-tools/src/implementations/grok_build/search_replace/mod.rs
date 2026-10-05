@@ -1,4 +1,16 @@
 //! SearchReplace (Edit) tool — new architecture (`Tool` trait).
+//!
+//! Replaces an exact string in a file, with support for:
+//! - New file creation (when `old_string` is empty)
+//! - Replace-all mode (`replace_all: true`)
+//!
+//! ## Resources
+//!
+//! - `Cwd` — working directory for path resolution (required)
+//! - `FileSystem` — read/write file content (required)
+//! - `NotificationHandle` — emit `FileWritten` notifications (optional, noop fallback)
+//! - `ToolCallId` — notification correlation (optional, defaults empty)
+//! - `TemplateRenderer` — resolve client-facing tool/param names in error messages (optional)
 pub(crate) mod helpers;
 mod versions;
 use crate::notification::types::FileWritten;
@@ -49,7 +61,9 @@ ${% endif -%}
 - `${{ params.edit.old_string }}` must match exactly one place in the file. If it appears more than once, add surrounding lines to make it unique, or set `${{ params.edit.replace_all }}` to change every occurrence (handy for renaming an identifier).
 - To create a new file, set `${{ params.edit.old_string }}` to an empty string. An empty `${{ params.edit.old_string }}` cannot overwrite an existing non-empty file.
 - Do not use this tool to duplicate or relocate an existing file. Relocating code is `cp`/`git mv` (or the copy_file/move_file tools) plus a minimal edit — never rewriting the destination from the source."#;
-/// The overwrite-guard sentence in [`DESCRIPTION_FULL`].
+/// The overwrite-guard sentence in [`DESCRIPTION_FULL`]. Only accurate while
+/// `empty_old_string_does_not_override` is enabled (opt-in; the default is the legacy overwrite
+/// behavior); `versioned_definition` strips it unless a config enables the guard.
 pub(crate) const EMPTY_OLD_STRING_GUARD_SENTENCE: &str =
     " An empty `${{ params.edit.old_string }}` cannot overwrite an existing non-empty file.";
 /// Input for the search_replace tool.
@@ -83,16 +97,23 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SearchReplaceParams {
-    /// Deprecated runtime no-op, kept so configs still sending it deserialize under `deny_unknown_fields`.
+    /// Deprecated runtime no-op, kept so configs still sending it deserialize under
+    /// `deny_unknown_fields`. Still gates the config-time Read-tool requirement (`requires_expr`).
     #[serde(default)]
     pub skip_read_before_edit: bool,
-    /// When true (opt-in), an empty `old_string` may only create a new file or fill an empty one.
+    /// When true (opt-in), an empty `old_string` may only create a new file or fill an empty one — it never silently overwrites an existing
+    /// non-empty file. Defaults to false (the legacy behavior): an empty `old_string` replaces the file's entire contents. The served description
+    /// includes the guard sentence only when this is enabled (see `versioned_definition`).
     #[serde(default)]
     pub empty_old_string_does_not_override: bool,
-    /// When true, enable normalized-fallback matching for Unicode confusable characters.
+    /// When true, enable normalized-fallback matching for Unicode confusable characters (smart quotes, em-dashes, etc.).
+    /// When exact byte matching fails, the tool will retry with confusable-normalized comparison and perform the
+    /// replacement if an unambiguous match is found. Default: `false` — disabled until Stage 1 diagnostics are stable.
     #[serde(default)]
     pub unicode_normalized_fallback: bool,
-    /// When true, append a hint that the user may have changed the file to `NoMatchesFound` error messages.
+    /// When true, append a hint that the user may have changed the file to `NoMatchesFound` error
+    /// messages. This nudges the model to re-read instead of blindly retrying with the same stale
+    /// content. Default: `true`.
     #[serde(default = "default_true")]
     pub include_user_edit_hint: bool,
 }
@@ -107,7 +128,9 @@ impl Default for SearchReplaceParams {
     }
 }
 register_resource!("grok_build", "SearchReplace", SearchReplaceParams);
-/// SearchReplace tool — new architecture. Replaces an exact string in a file.
+/// SearchReplace tool — new architecture.
+///
+/// Replaces an exact string in a file.
 #[derive(Debug, Default)]
 pub struct SearchReplaceTool;
 /// Core search-replace logic shared by `SearchReplaceTool` and `SearchReplaceConciseTool`.
@@ -239,6 +262,7 @@ pub(crate) async fn run_search_replace(
     Ok(result)
 }
 /// Maximum length for a single path component (file or directory name).
+/// POSIX `NAME_MAX` is 255 on both macOS and Linux.
 const NAME_MAX: usize = 255;
 /// Validate that no path component exceeds `NAME_MAX`. Returns
 /// `Some(SearchReplaceOutput::FilenameTooLong(..))` if any component is too long, `None` if the
@@ -392,7 +416,7 @@ async fn handle_new_file_creation(
 }
 /// Return a short nearest-match hint for a `NoMatchesFound` error message. Finds the first file
 /// line containing the longest token from `old_string`'s first line. Returns `"\n\nNearest match:
-/// line N: <content>"` (≤chars), or an empty string if no match is found.
+/// line N: <content>"` (≤200 chars), or an empty string if no match is found.
 fn build_nearest_match_hint(file: &str, old_string: &str) -> String {
     let keyword = old_string
         .lines()
@@ -815,7 +839,8 @@ impl crate::types::tool_metadata::ToolMetadata for SearchReplaceTool {
     }
     fn requires_expr(&self) -> Expr<ToolRequirement> {
         Expr::And(vec![
-            // Unless `skip_read_before_edit` is set.
+            // Unless `skip_read_before_edit` is set, require a Read tool in the toolset
+            // (read-before-edit is encouraged via description and RL grading, not runtime-enforced).
             Expr::Value(ToolRequirement::if_params(
                 Expr::Not(Box::new(Expr::Value(ToolParamsRequirement::new(
                     "skip_read_before_edit",
@@ -823,7 +848,9 @@ impl crate::types::tool_metadata::ToolMetadata for SearchReplaceTool {
                 )))),
                 ToolRequirement::tool_kind(ToolKind::Read),
             )),
-            // Description template references these input params via ${{ params.edit.old_string }}, ${{ params.edit.new_string }}.
+            // Description template references these input params via ${{ params.edit.old_string }}, ${{ params.edit.new_string }},
+            // ${{ params.edit.replace_all }}. They must remain visible. TODO: We can generate the schemas and requirement by
+            // enforcing it during the registry phase, since these are parts of the params which are tied to the tool
             Expr::Value(ToolRequirement::input_param(ToolKind::Edit, "old_string")),
             Expr::Value(ToolRequirement::input_param(ToolKind::Edit, "new_string")),
             Expr::Value(ToolRequirement::input_param(ToolKind::Edit, "replace_all")),

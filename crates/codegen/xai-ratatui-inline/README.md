@@ -1,6 +1,6 @@
 # ratatui-inline
 
-A Rust library for building terminal applications with inline viewports - dynamic UI elements that stay at the bottom of the terminal while preserving. Scrollback history above them. Perfect for building chat-like interfaces, command prompts, and interactive terminal tools.
+A Rust library for building terminal applications with inline viewports - dynamic UI elements that stay at the bottom of the terminal while preserving scrollback history above them. Perfect for building chat-like interfaces, command prompts, and interactive terminal tools.
 
 ## What is this?
 
@@ -50,7 +50,7 @@ The library uses a "natural flow" approach for scrollback:
 3. Add viewport-height newlines to reserve space
 4. Clear and render the viewport
 
-This implementation works universally across all terminals and multiplexers without special modes or workarounds.
+This single implementation works universally across all terminals and multiplexers without special modes or workarounds.
 
 ### Line Ending Handling
 
@@ -62,7 +62,7 @@ This implementation works universally across all terminals and multiplexers with
 
 ### Why Fork ratatui's Terminal?
 
-The standard ratatui Terminal API does not expose internals needed for inline viewport manipulation:
+The standard ratatui Terminal API doesn't expose internals needed for inline viewport manipulation:
 - **Viewport area access** - Need to know current position and dimensions
 - **Direct viewport positioning** - Must be able to set viewport location
 - **Buffer management** - Need back buffer reset and previous buffer access
@@ -80,7 +80,7 @@ Flicker-free rendering using the DCS synchronized output protocol:
 ## Performance
 
 - **Colored JSON**: ~186μs per operation
-- **Plain text**: ~75μs per operation
+- **Plain text**: ~75μs per operation  
 - **Zero allocations** in hot path
 - **Single-pass parsing** for all text processing
 
@@ -125,7 +125,8 @@ This approach:
 - `crossterm` - Cross-platform terminal manipulation
 - `anstyle-parse` - ANSI/SGR-aware line segmentation (production)
 - `unicode-width` - Unicode character width calculation
-- `termwiz` - **dev-dependency only**. Reference splitter for `tests/segment_differential.rs` (not linked into shipped binaries)
+- `termwiz` - **dev-dependency only**; reference splitter for
+  `tests/segment_differential.rs` (not linked into shipped binaries)
 
 ## References
 
@@ -135,4 +136,5 @@ This approach:
 
 ## License / attribution
 
-This crate includes a forked `Terminal` implementation derived from [ratatui](https://github.com/ratatui/ratatui) (MIT / Apache-2.0). See `NOTICE` in this directory and the repository root `THIRD-PARTY-NOTICES`.
+This crate includes a forked `Terminal` implementation derived from [ratatui](https://github.com/ratatui/ratatui)
+(MIT / Apache-2.0). See `NOTICE` in this directory and the repository root `THIRD-PARTY-NOTICES`.

@@ -1,4 +1,6 @@
 //! Fork-context normalization: summarizes parent conversation for child sessions.
+//!
+//! Extracted from `xai-grok-shell/src/agent/subagent/` `normalize_forked_context()`.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -7,10 +9,12 @@ use std::fmt::Write;
 use xai_grok_sampling_types::conversation::ConversationItem;
 
 /// Maximum number of complete turns to render verbatim in the background context.
+/// Turns beyond this threshold (counting from the end) are summarized as metadata (message counts and tools used).
 const MAX_VERBATIM_TURNS: usize = 3;
 
-/// XML tags whose content is stripped from user messages during fork context
-/// normalization.
+/// XML tags whose content is stripped from user messages during fork context normalization. The child session's system
+/// prompt builder re-injects these blocks, so keeping them in the background context duplicates them. See also:
+/// `xai-chat-state::compaction_utils::strip_system_tags`, which strips a related (but different) tag set for compaction.
 const FORK_NOISE_TAGS: &[&str] = &[
     "system-reminder",
     "system_reminder", // Cursor wire format uses underscore
@@ -20,8 +24,11 @@ const FORK_NOISE_TAGS: &[&str] = &[
     "attached_files", // File context attached by an alternate agent; the child reads files itself
 ];
 
-/// The System item is kept as-is (replaced later by `spawn_session_actor`).
+/// The System item is kept as-is (replaced later by `spawn_session_actor`). The task prompt is NOT included here: it
+/// arrives via the normal Prompt command and becomes the last user message (position [2]). `inherited_prefix_len` is the
+/// number of items the child should treat as pre-existing context (typically 2 for `[System, BackgroundContext]`).
 pub fn normalize_forked_context(items: Vec<ConversationItem>) -> (Vec<ConversationItem>, usize) {
+    // Extract the system prompt (position 0), kept as a placeholder for spawn_session_actor
     let system = items
         .first()
         .filter(|i| matches!(i, ConversationItem::System(_)))
@@ -85,8 +92,8 @@ pub fn normalize_forked_context(items: Vec<ConversationItem>) -> (Vec<Conversati
 }
 
 /// The scan skips those, both before the Assistant and inside the ToolResult run that follows it. Otherwise long forked
-/// histories would register zero turns and never summarize, blowing up token usage. NOTE: scanners walk turn boundaries
-/// while skipping `Reasoning` items, and they must move together.
+/// histories would register zero turns and never summarize, blowing up token usage. NOTE: two scanners walk turn
+/// boundaries while skipping `Reasoning` items, and they must move together.
 fn count_complete_turns(items: &[&ConversationItem]) -> Vec<usize> {
     let mut turn_ends = Vec::new();
     let mut i = 0;
@@ -348,7 +355,9 @@ fn render_summary(out: &mut String, items: &[&ConversationItem]) {
     }
 }
 
-/// Truncate a string to at most `max_chars` Unicode characters.
+/// Truncate a string to at most `max_chars` Unicode characters. `char_indices` finds the byte offset of the Nth
+/// character, so multi-byte UTF-8 content (emoji, CJK) never splits mid-character. Returns the full string if it has
+/// `max_chars` or fewer characters.
 fn truncate_str(s: &str, max_chars: usize) -> &str {
     match s.char_indices().nth(max_chars) {
         Some((byte_offset, _)) => s.get(..byte_offset).unwrap_or(s),
@@ -487,7 +496,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
                 .join("");
-            // All turns should be verbatim
+            // All three turns should be verbatim
             assert!(text.contains("[User]: Turn 1"));
             assert!(text.contains("[User]: Turn 2"));
             assert!(text.contains("[User]: Turn 3"));
@@ -527,15 +536,21 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
                 .join("");
+            // With 4 turns, the last 3 are verbatim and the first 1 is summarized.
+            // early_end = turns[turns.len()-3] = turns[1] = end of turn 2.
+            // So turns 1-2 are summarized, turns 3-4 are verbatim.
             assert!(text.contains("=== Earlier context (summarized) ==="));
+            // Turns 1 and 2 are summarized: 2 user msgs, 2 assistant msgs
             assert!(
                 text.contains("Messages: 2 user, 2 assistant"),
                 "Expected summary of turns 1-2. Full text:\n{text}"
             );
             assert!(text.contains("Tools used: grep, read_file"));
+            // Last 2 turns (3, 4) should be verbatim
             assert!(text.contains("=== Recent turns (verbatim) ==="));
             assert!(text.contains("[User]: Turn 3"));
             assert!(text.contains("[User]: Turn 4"));
+            // Turns 1 and 2 should NOT appear verbatim
             assert!(!text.contains("[User]: Turn 1"));
             assert!(!text.contains("[User]: Turn 2"));
         } else {
@@ -705,7 +720,7 @@ mod tests {
         ];
         let refs: Vec<&ConversationItem> = items.iter().collect();
         let turns = count_complete_turns(&refs);
-        assert_eq!(turns.as_slice(), [4, 6]);
+        assert_eq!(turns.as_slice(), [4, 6]); // after 2 tool results, then A2
     }
 
     #[test]
@@ -754,15 +769,15 @@ mod tests {
 
     #[test]
     fn truncate_str_multibyte_emoji() {
-        // Each emoji is a few bytes.
-        let s = "\u{1F600}\u{1F601}\u{1F602}\u{1F603}";
+        // Each emoji is 4 bytes. Truncating at 2 chars should yield 2 emojis (8 bytes).
+        let s = "\u{1F600}\u{1F601}\u{1F602}\u{1F603}"; // 4 emojis
         assert_eq!(truncate_str(s, 2), "\u{1F600}\u{1F601}");
     }
 
     #[test]
     fn truncate_str_multibyte_cjk() {
-        // CJK chars are a few bytes each. Truncating at multiple chars should yield chars (several bytes).
-        let s = "\u{4F60}\u{597D}\u{4E16}\u{754C}";
+        // CJK chars are 3 bytes each. Truncating at 3 chars should yield 3 chars (9 bytes).
+        let s = "\u{4F60}\u{597D}\u{4E16}\u{754C}"; // 4 CJK chars
         assert_eq!(truncate_str(s, 3), "\u{4F60}\u{597D}\u{4E16}");
     }
 

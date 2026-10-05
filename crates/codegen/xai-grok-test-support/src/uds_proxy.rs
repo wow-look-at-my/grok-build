@@ -1,4 +1,12 @@
 //! Frame-aware fault-injection proxy for unix-domain-socket IPC.
+//!
+//! The proxy sits between a client and a real listener, `proxy.sock` in front of `real.sock`, parsing the leader IPC framing.
+//! A frame is a 4-byte big-endian length prefix, then the body, so faults land on exact frame boundaries.
+//! The plan can drop exactly the Nth frame, sever after a half-written length prefix, or delay or duplicate one frame.
+//! Everything is path-addressed, so no production changes are needed: point `LeaderClient::connect` or `GROK_LEADER_SOCKET` at the proxy path.
+//!
+//! Frame numbering is 1-based and **per proxied connection, per direction**; reconnects restart the count.
+//! Unix-only (the leader transport on Windows is a named pipe, which cannot be interposed this way); gated in `lib.rs`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -27,7 +35,7 @@ pub struct FaultPlan {
     pub direction: FaultDirection,
     /// Silently drop the Nth frame (never forwarded).
     pub drop_frame: Option<u64>,
-    /// On the Nth frame, forward a couple of bytes of its 4-byte length prefix, then hard-close both sides of the connection.
+    /// On the Nth frame, forward only 2 bytes of its 4-byte length prefix, then hard-close both sides of the connection.
     pub sever_mid_frame: Option<u64>,
     /// Hold the Nth frame for the given duration before forwarding it.
     pub delay: Option<(u64, Duration)>,
@@ -37,7 +45,7 @@ pub struct FaultPlan {
 
 #[derive(Default)]
 struct FaultState {
-    /// The sever scope: cancelled and swapped for a fresh token on every [`FaultHandle::sever_now`].
+    /// The sever scope: cancelled and swapped for a fresh token on every [`FaultHandle::sever_now`], so only connections active at sever time die.
     sever_now: std::sync::Mutex<CancellationToken>,
     /// Frames fully forwarded client-to-leader across all connections.
     forwarded_c2l: AtomicU64,
@@ -52,8 +60,8 @@ pub struct FaultHandle {
 }
 
 impl FaultHandle {
-    /// Hard-close every active proxied connection immediately (mid-stream
-    /// sever, independent of the frame-indexed plan).
+    /// Hard-close every active proxied connection immediately (mid-stream sever, independent of the frame-indexed plan).
+    /// Later connections through the same proxy are unaffected.
     pub fn sever_now(&self) {
         let mut guard = self.state.sever_now.lock().unwrap();
         guard.cancel();
@@ -74,8 +82,8 @@ impl FaultHandle {
     }
 }
 
-/// A running proxy: listener on [`Self::proxy_path`], forwarding to the
-/// upstream path it was spawned with.
+/// A running proxy: listener on [`Self::proxy_path`], forwarding to the upstream path it was spawned with.
+/// Dropping the struct stops the listener and severs active connections.
 pub struct UdsProxy {
     pub proxy_path: PathBuf,
     handle: FaultHandle,
@@ -106,6 +114,7 @@ impl UdsProxy {
                     accepted = listener.accept() => {
                         let Ok((client, _)) = accepted else { break };
                         let Ok(upstream) = UnixStream::connect(&upstream_path).await else {
+                            // Upstream gone: dropping `client` models a refused connection; the caller's retry logic takes over
                             continue;
                         };
                         spawn_connection(client, upstream, plan.clone(), accept_handle.clone());
@@ -148,7 +157,7 @@ fn spawn_connection(
     let (client_read, client_write) = tokio::io::split(client);
     let (upstream_read, upstream_write) = tokio::io::split(upstream);
 
-    // One sever scope per connection: a mid-frame sever (or `sever_now`) cancels BOTH pumps so both half-connections drop together
+    // One sever scope per connection: a mid-frame sever (or `sever_now`) cancels BOTH pumps so the two half-connections drop together
     let conn_cancel = handle.connection_scope();
 
     let c2l_plan = (plan.direction == FaultDirection::ClientToLeader).then(|| plan.clone());
@@ -257,6 +266,8 @@ fn bump_forwarded(handle: &FaultHandle, direction: FaultDirection) {
     }
 }
 
+/// Max frame body the proxy will buffer, mirroring the leader transport's own 64 MiB `MAX_MESSAGE_SIZE`.
+/// A corrupt or mis-framed length fails with a readable pump error instead of a multi-GiB allocation.
 const MAX_FRAME_SIZE: usize = 64 * 1024 * 1024;
 
 async fn read_frame(reader: &mut ReadHalf<UnixStream>) -> io::Result<([u8; 4], Vec<u8>)> {
@@ -422,7 +433,7 @@ mod tests {
         let mut client = UnixStream::connect(&proxy.proxy_path).await.unwrap();
         client_write_frame(&mut client, b"never-delivered").await;
 
-        // The upstream got a couple of bytes of a length prefix and then a close, so it echoes nothing; the client's next read observes the sever
+        // The upstream got 2 bytes of a length prefix and then a close, so it echoes nothing; the client's next read observes the sever
         let read = client_read_frame(&mut client).await;
         assert!(
             read.is_err(),

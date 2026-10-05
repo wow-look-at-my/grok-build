@@ -1,4 +1,6 @@
 //! Tracks which repos have been cloned/symlinked into the managed install directory, along with the plugins discovered within each repo.
+//!
+//! The registry is persisted as `registry.json` in the install directory.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +37,7 @@ pub enum InstallKind {
     Local {
         source_path: PathBuf,
         /// Optional plugin subdirectory selector used at install time (e.g. multi-package `path#plugins/foo`).
+        /// Preserved so refresh rediscovers the same scope.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subdir: Option<String>,
     },
@@ -138,7 +141,8 @@ impl InstallRegistry {
         }
     }
 
-    /// Save the registry to disk.
+    /// Save the registry to disk. Every writer holds the registry flock across load→mutate→save
+    /// (shell `lock_install_registry`, agent [`lock_registry`] — same lock file).
     pub fn save(&self) -> Result<(), InstallError> {
         self.save_atomic()
     }
@@ -233,7 +237,9 @@ impl InstallRegistry {
         &self.install_dir
     }
 
-    /// Default: `~/.grok/installed-plugins/`
+    /// Resolution order:
+    /// 1. `[plugins].install_dir` from effective config (requirements > config > managed)
+    /// 2. Default: `~/.grok/installed-plugins/`
     pub fn resolve_install_dir() -> PathBuf {
         if let Some(dir) = Self::read_install_dir_from_config() {
             return dir;
@@ -254,6 +260,7 @@ impl InstallRegistry {
         Some(expanded)
     }
 
+    /// Format: `<basename>-<hash8>` where hash8 is the first 8 hex chars of SHA-256(normalized source).
     pub fn repo_key(source: &str) -> String {
         let basename = source
             .trim_end_matches('/')
@@ -287,8 +294,8 @@ impl InstallRegistry {
     }
 }
 
-/// Exclusive advisory flock over `<install_dir>/registry.lock` (drop releases
-/// it) — the same lock file and [`acquire_file_lock`].
+/// Exclusive advisory flock over `<install_dir>/registry.lock` (drop releases it) — the same lock
+/// file and [`acquire_file_lock`] as the shell's `plugin::acquire::lock_install_registry`.
 #[derive(Debug)]
 pub struct RegistryLockGuard {
     _file: std::fs::File,

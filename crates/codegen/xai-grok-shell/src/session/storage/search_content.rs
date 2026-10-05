@@ -1,4 +1,7 @@
 //! Extracting searchable text from session update files.
+//!
+//! The peek structs are shared with the resume/replay collectors in [`super`], so the indexed text cannot drift from what a resumed session replays.
+//! Everything downstream of the extracted string (hashing, dedup, the SQLite index itself) lives in `xai-grok-session-search`.
 
 use std::io::{self, BufRead};
 use std::path::Path;
@@ -11,7 +14,9 @@ use crate::session::wire_tags::{REWIND_MARKER, USER_MESSAGE_CHUNK};
 
 const SEARCH_CONTENT_CHAR_LIMIT: usize = 200_000;
 
-// Zero-copy peek structs Text-bearing fields are `Cow`, not `&str`.
+// Zero-copy peek structs
+// Text-bearing fields are `Cow`, not `&str`: serde cannot borrow `&str` from JSON strings containing escapes
+// Borrowing would error and silently drop the message from the index
 
 /// Peek for assistant text (agent_message_chunk content.text).
 #[derive(serde::Deserialize)]
@@ -35,6 +40,7 @@ struct AgentTextPeek<'a> {
 }
 
 /// Peek for user message content (user_message_chunk content.text).
+/// Reuses [`ContentPeek`] so the peeked fields are defined in one place.
 #[derive(serde::Deserialize)]
 struct UserContentPeek<'a> {
     #[serde(borrow)]

@@ -1,4 +1,5 @@
 //! Drives a real in-process `MvpAgent` over ACP on duplex pipes.
+//! This lives outside `tests/common/` because that compiles into every integration binary and would pull the transport stack into all of them.
 
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
@@ -346,7 +347,8 @@ fn set_test_env(grok_home: &std::path::Path, server_url: &str) {
         std::env::set_var("GROK_TELEMETRY_ENABLED", "false");
         std::env::set_var("GROK_FEEDBACK_ENABLED", "false");
         std::env::set_var("GROK_TRACE_UPLOAD", "false");
-        // Turn summaries fire one more request to the same mock endpoint after the turn.
+        // Turn summaries fire one more request to the same mock endpoint after the turn, on a spawned task
+        // The race makes request-count assertions flaky
         std::env::set_var("GROK_TURN_SUMMARY", "false");
     }
 }

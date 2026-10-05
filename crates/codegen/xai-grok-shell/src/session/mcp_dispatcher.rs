@@ -1,4 +1,25 @@
 //! Session-actor side `StatusDispatcher` for MCP client events.
+//!
+//! Receives [`xai_grok_mcp::servers::McpClientEvent`]s emitted by:
+//! - per-client transport-liveness watchers ([`xai_grok_mcp::liveness`]),
+//! - the [`xai_grok_mcp::servers::GrokClientHandler`] (server-pushed `tools/list_changed` and `resources/list_changed`),
+//! - the `ensure_initialized` success/failure path,
+//! - the session MCP config diff path (`UpdateMcpServers` / toggle).
+//!
+//! Coalesces events in a **50 ms tumbling window** keyed by `(server_name, McpClientEventKind)`.
+//! Two events with the same key collapse into the latest one.
+//! An MCP server bursting 100 `tools/list_changed` notifications inside 10 ms produces exactly one ACP push.
+//!
+//! Each surviving entry is emitted as an ACP [`agent_client_protocol::ExtNotification`] with method `x.ai/mcp/server_status`.
+//! The payload schema is defined by [`McpServerStatusPayload`].
+//!
+//! ## Contract
+//!
+//! - `ConfigDiff` is fanned out per-server, **not** stored as a single event in the buffer.
+//! - After a flush, the dispatcher hands each `TransportClosed` / `HandshakeFailed` key to [`crate::session::mcp_restart::maybe_schedule_restart`].
+//!   That gate applies the stdio-only, shutting-down, and configured-and-enabled guard rails.
+//!   When they pass it spawns the bounded [`crate::session::mcp_restart::auto_restart_stdio`] task.
+//!   The dispatcher itself only coalesces and pushes.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -33,9 +54,11 @@ pub struct McpServerStatusPayload {
     pub status: McpServerStatus,
     pub reason: McpServerStatusReason,
     /// Optional human-readable detail.
+    /// Passes the full handshake / transport error reason to the UI verbatim (no sanitization or truncation) so failures are easy to debug.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     /// Reserved for future use; always `null` today.
+    /// It may later carry the post-restart tool list so the client can re-render without a follow-up `mcp/list` round-trip.
     pub tools: Option<serde_json::Value>,
 }
 
@@ -65,6 +88,7 @@ pub enum McpServerStatusReason {
     Disabled,
     AuthExpired,
     /// First-time successful handshake (a new server transitioned from `Initializing` to `Ready`).
+    /// Every `McpClientEvent::Ready` maps to this reason.
     Initialized,
     /// A watcher fired `TransportClosed`, the auto-restart path re-handshook, and the new handshake succeeded.
     RestartSucceeded,
@@ -84,10 +108,14 @@ pub(crate) fn classify_source(name: &str) -> McpServerSource {
 }
 
 /// The auto-restart task consults this set before respawning.
+/// A `TransportClosed` that arrives *because* the dispatcher's `kill_on_drop` killed the child must NOT resurrect a server the user just deleted.
+/// `flush_window` is the only writer: `ConfigRemoved` marks, `Ready` clears, and nothing expires entries, so a removed server stays marked for good.
 #[derive(Default)]
 pub(crate) struct ShutdownState {
     shutting_down: HashSet<McpServerName>,
-    /// Servers with an `auto_restart_stdio` task in flight.
+    /// Servers with an `auto_restart_stdio` task currently in flight.
+    /// A second `TransportClosed` / `HandshakeFailed` arriving while the first respawn is mid-backoff or mid-handshake is short-circuited.
+    /// A duplicate task would race on `start_mcp_server` and `owned_clients.insert`, orphaning an stdio child.
     in_flight_restart: HashSet<McpServerName>,
 }
 
@@ -95,8 +123,7 @@ impl ShutdownState {
     pub(crate) fn mark(&mut self, name: McpServerName) {
         self.shutting_down.insert(name);
     }
-    /// Used by the auto-restart task: when `true`, skip respawn because the
-    /// session is tearing the client down on purpose.
+    /// Used by the auto-restart task: when `true`, skip respawn because the session is tearing the client down on purpose (config diff / toggle-off).
     pub(crate) fn is_shutting_down(&self, name: &str) -> bool {
         self.shutting_down.contains(name)
     }
@@ -115,6 +142,8 @@ impl ShutdownState {
 }
 
 /// The dispatcher loop writes: `mark` / `forget` from `flush_window`.
+/// The auto-restart actions read: `is_shutting_down` from `mcp_restart::auto_restart_stdio`.
+/// `std::sync::Mutex` is sufficient because every caller acquires the lock synchronously and holds it only for a `HashSet` insert / lookup.
 pub(crate) type SharedShutdownState = Arc<std::sync::Mutex<ShutdownState>>;
 
 pub(crate) fn new_shutdown_state() -> SharedShutdownState {
@@ -188,7 +217,8 @@ fn insert_event(win: &mut CoalescedWindow, ev: McpClientEvent) {
                     .insert(*client_id);
             }
             let kind = kind_of(&ev);
-            // server_name() returns None only for ConfigDiff, which is handled above The unwrap_or is defensive.
+            // server_name() returns None only for ConfigDiff, which is handled above
+            // The unwrap_or is defensive: a future payload-less variant gets a deterministic key string rather than a panic
             let server = ev.server_name().unwrap_or("").to_string();
             win.buf.insert((server, kind), ev);
         }
@@ -254,8 +284,8 @@ pub(crate) fn build_payload(
             McpServerStatusReason::ConfigChanged,
             None,
         ),
-        // `Ready` is only emitted from the first-time `ensure_initialized`
-        // path Map it to `Initialized`.
+        // `Ready` is only emitted from the first-time `ensure_initialized` path
+        // Map it to `Initialized`, NOT `RestartSucceeded` (which is reserved for the auto-restart code path)
         (McpClientEventKind::Ready, _) => (
             McpServerStatus::Ready,
             McpServerStatusReason::Initialized,
@@ -293,12 +323,15 @@ pub(crate) fn flush_window(
     shutdown: &SharedShutdownState,
     gateway: &xai_acp_lib::AcpAgentGatewaySender,
 ) {
-    // Recover from poisoning rather than cascade-panicking: `flush_window` does non-trivial work under this lock A single panic.
+    // Recover from poisoning rather than cascade-panicking: `flush_window` does non-trivial work under this lock
+    // A single panic while holding it would otherwise turn every future restart-task check and dispatcher window into a panic
+    // The `HashSet` state remains coherent across a panic (no half-updated invariant), so `into_inner()` is safe
     let mut shutdown_guard = shutdown.lock().unwrap_or_else(|e| e.into_inner());
     for (key, event) in buf {
         let (server, kind) = &key;
-        // ONLY `ConfigRemoved` marks `shutting_down`: the mark signals user
-        // intent (config removed / toggled off).
+        // ONLY `ConfigRemoved` marks `shutting_down`: the mark signals user intent (config removed / toggled off), not transport death `run_dispatcher` feeds every `TransportClosed` key into `maybe_schedule_restart`.
+        // Marking on `TransportClosed` would therefore classify every stdio crash as an intentional shutdown, and auto-restart would never fire.
+        // `Ready` clears the mark: a server that just (re-)handshook is back, so future events on it are processed normally.
         match kind {
             McpClientEventKind::ConfigRemoved => {
                 shutdown_guard.mark(server.clone());
@@ -352,10 +385,12 @@ fn flush_elicitation_completes(
 }
 
 /// A server with one or more `TransportClosed` ids in the window.
+/// Produced by [`collect_close_candidates`] and consumed by [`drop_dead_clients`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DeadClient {
     pub server: McpServerName,
     /// Every `TransportClosed` client id observed for this server in the window.
+    /// Eviction fires when the registered client's id is in this set.
     pub closed: HashSet<u64>,
 }
 
@@ -376,9 +411,9 @@ pub(crate) fn collect_close_candidates(
         .collect()
 }
 
-/// Names eligible for in-place HTTP recovery: enabled HTTP/SSE config entries. MUST match the recovery gate
-/// (`SessionActor::is_http_server_configured`). If both predicates diverge, a disabled HTTP server still in `configs` is kept here (not evicted)
-/// yet rejected by the gate (not recovered).
+/// Names eligible for in-place HTTP recovery: enabled HTTP/SSE config entries.
+/// MUST match the recovery gate (`SessionActor::is_http_server_configured`).
+/// If the two predicates diverge, a disabled HTTP server still in `configs` is kept here (not evicted) yet rejected by the gate (not recovered).
 pub(crate) fn recoverable_http_servers(
     configs: &[acp::McpServer],
     disabled: &HashSet<String>,
@@ -461,6 +496,8 @@ pub(crate) async fn run_dispatcher(
     cwd: std::path::PathBuf,
 ) {
     // Cancellation source for spawned `auto_restart_stdio` tasks.
+    // The dispatcher exiting (channel closed) means the session is shutting down, so we cancel.
+    // An in-flight backoff sleep then aborts promptly instead of running for up to 21s and pushing status through a gateway that is tearing down.
     let restart_cancel = tokio_util::sync::CancellationToken::new();
     loop {
         let Some(mut win) = collect_window(&mut rx, COALESCE_WINDOW).await else {
@@ -505,11 +542,13 @@ pub(crate) async fn run_dispatcher(
             (HashSet::new(), HashMap::new())
         };
 
-        // Evict dead stdio clients, gated on client identity (see [`collect_close_candidates`]) HTTP `TransportClosed` clients are KEPT.
+        // Evict dead stdio clients, gated on client identity (see [`collect_close_candidates`])
+        // HTTP `TransportClosed` clients are KEPT for in-place recovery
+        // `ConfigRemoved` is not evicted here (the config diff already dropped the old client)
         let dead = collect_close_candidates(&win, &http_servers);
         let stale = drop_dead_clients(&mcp_state, &dead).await;
-        // Strip stale closes BEFORE the restart-key capture, the disconnect
-        // telemetry.
+        // Strip stale closes BEFORE the restart-key capture, the disconnect telemetry, and the status flush below
+        // The healthy replacement is then neither reported unavailable nor respawned
         for server in &stale {
             win.buf
                 .remove(&(server.clone(), McpClientEventKind::TransportClosed));
@@ -591,6 +630,7 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc::unbounded_channel;
 
+    /// Contract: 100 ToolsChanged events for the same server within 10 ms coalesce into exactly one buffer entry.
     #[tokio::test(start_paused = true)]
     async fn coalesce_within_50ms_window() {
         let (tx, mut rx) = unbounded_channel::<McpClientEvent>();
@@ -600,7 +640,8 @@ mod tests {
             })
             .unwrap();
         }
-        // Drop the sender so collect_window terminates promptly once the buffered events are drained.
+        // Drop the sender so collect_window terminates promptly once the buffered events are drained; the window deadline is the backstop
+        // Under `start_paused = true` time only advances on `tokio::time::advance` or when a task awaits a timer
         drop(tx);
 
         let win = collect_window(&mut rx, COALESCE_WINDOW)
@@ -1052,8 +1093,8 @@ mod tests {
         assert_ne!(old_id, replacement.client_id(), "ids must be unique");
 
         let mcp_state = StdArc::new(TokioMutex::new(McpState::new(vec![])));
-        // The config diff already removed `old_client` and the background
-        // handshake inserted the replacement under the same name.
+        // The config diff already removed `old_client` and the background handshake inserted the replacement under the same name
+        // That is the state the dispatcher observes at flush time
         mcp_state
             .lock()
             .await
@@ -1198,16 +1239,17 @@ mod tests {
 
     // ── Integration test: end-to-end run_dispatcher with restart_actions wired
 
-    /// Construct an `AcpAgentGatewaySender` whose receiver half is dropped
-    /// immediately. All `forward_fire_and_forget` calls silently no-op.
+    /// Construct an `AcpAgentGatewaySender` whose receiver half is dropped immediately.
+    /// All `forward_fire_and_forget` calls silently no-op.
+    /// Suitable only for tests that don't assert on wire payloads.
     fn discard_gateway() -> xai_acp_lib::AcpAgentGatewaySender {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         xai_acp_lib::AcpAgentGatewaySender::new(tx)
     }
 
-    /// `RestartActions` test double for the integration test. Uses `RefCell`
-    /// for internal state, matching the `MockActions` convention in
-    /// `mcp_restart.rs`.
+    /// `RestartActions` test double for the integration test.
+    /// Uses `RefCell` for internal state, matching the `MockActions` convention in `mcp_restart.rs`.
+    /// `is_in_shutting_down` consults a shared `SharedShutdownState`.
     struct CountingActions {
         configured: std::cell::RefCell<HashSet<String>>,
         respawn_calls: std::cell::RefCell<Vec<String>>,
@@ -1288,11 +1330,15 @@ mod tests {
                 })
                 .unwrap();
 
+                // Let dispatcher poll: collect_window receives the first event and starts the 50 ms timeout_at
                 tokio::task::yield_now().await;
+                // Advance past the 50 ms collect_window deadline so the timeout fires
+                // flush_window then runs and maybe_schedule_restart spawns auto_restart_stdio
                 tokio::time::advance(Duration::from_millis(60)).await;
                 for _ in 0..5 {
                     tokio::task::yield_now().await;
                 }
+                // Advance past BACKOFF[0] = 1 s so the spawned auto_restart_stdio's first sleep elapses and respawn_stdio is invoked
                 tokio::time::advance(Duration::from_secs(1)).await;
                 for _ in 0..5 {
                     tokio::task::yield_now().await;
@@ -1364,6 +1410,7 @@ mod tests {
                 for _ in 0..5 {
                     tokio::task::yield_now().await;
                 }
+                // Past BACKOFF[0]: a (wrongly) scheduled restart would have respawned by now
                 tokio::time::advance(Duration::from_secs(1)).await;
                 for _ in 0..5 {
                     tokio::task::yield_now().await;

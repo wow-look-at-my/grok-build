@@ -1,4 +1,15 @@
 //! SSRF (Server-Side Request Forgery) protection for `web_fetch`.
+//!
+//! Policy:
+//! - Non-public addresses (loopback, RFC 1918, link-local, CGNAT, TEST-NET,
+//!   multicast, etc.) are blocked by default.
+//! - Local access is opt-in via tool params (`WebFetchParams::allow_local`,
+//!   set from `[toolset.web_fetch] allow_local` or `GROK_WEB_FETCH_ALLOW_LOCAL=1`).
+//!   Even when enabled, only **explicit** loopback hosts are allowed
+//!   (`localhost`, `127.0.0.0/8` literals, `::1`). A public hostname that
+//!   resolves to loopback/private stays blocked.
+//!
+//! Reference: [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/)
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -43,8 +54,11 @@ fn is_non_public_ipv4(ip: Ipv4Addr) -> bool {
         || ip.is_unspecified()
         || ip.is_multicast()
         || ip.is_broadcast()
+        // "This network" (RFC 1122) 0.0.0.0/8
         || ipv4_in_cidr(ip, [0, 0, 0, 0], 8)
+        // CGNAT (RFC 6598) 100.64.0.0/10 — cloud metadata-ish
         || ipv4_in_cidr(ip, [100, 64, 0, 0], 10)
+        // IETF Protocol Assignments (RFC 6890) 192.0.0.0/24
         || ipv4_in_cidr(ip, [192, 0, 0, 0], 24)
         // TEST-NET-1 (RFC 5737)
         || ipv4_in_cidr(ip, [192, 0, 2, 0], 24)
@@ -53,6 +67,7 @@ fn is_non_public_ipv4(ip: Ipv4Addr) -> bool {
         // TEST-NET-2 / TEST-NET-3
         || ipv4_in_cidr(ip, [198, 51, 100, 0], 24)
         || ipv4_in_cidr(ip, [203, 0, 113, 0], 24)
+        // Reserved (RFC 6890) 240.0.0.0/4
         || ipv4_in_cidr(ip, [240, 0, 0, 0], 4)
 }
 
@@ -79,7 +94,8 @@ fn is_non_public_ipv6(ip: Ipv6Addr) -> bool {
         || ip.is_unicast_link_local()
 }
 
-/// Loopback including IPv4-mapped forms (`::ffff:127.0.0.1`).
+/// Loopback including IPv4-mapped forms (`::ffff:127.0.0.1`). `IpAddr::is_loopback` is false for
+/// mapped addresses even when the embedded v4 is loopback, so local opt-in must use this helper.
 fn is_loopback_addr(ip: IpAddr) -> bool {
     if ip.is_loopback() {
         return true;
@@ -139,7 +155,9 @@ pub(crate) async fn check_ssrf(url: &Url, allow_local: bool) -> Result<(), WebFe
         return Err(WebFetchError::DnsEmpty(host.to_string()));
     }
 
-    // Any non-public address blocks the request.
+    // Any non-public address blocks the request. When allow_local is on,
+    // only *explicit* loopback hosts may use loopback IPs — a rebinding name
+    // that resolves to 127.0.0.1 stays blocked.
     addrs
         .iter()
         .find(|addr| is_blocked_for_host(addr.ip(), host, allow_local))

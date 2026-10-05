@@ -6,7 +6,7 @@ Headless mode runs Grok non-interactively from the command line. It accepts a si
 
 ## Basic Usage
 
-Passing a prompt non-interactively triggers headless mode. The most common way is the `-p` flag (short for `--single`). `--prompt-json` and `--prompt-file` also trigger it:
+Passing a prompt non-interactively triggers headless mode. The most common way is the `-p` flag (short for `--single`); `--prompt-json` and `--prompt-file` also trigger it:
 
 ```bash
 grok -p "Your prompt here"
@@ -115,7 +115,7 @@ grok -p "Build the project" --allow "Bash"
 
 ## Output Formats
 
-Headless mode supports output formats, selected with `--output-format`.
+Headless mode supports four output formats, selected with `--output-format`.
 
 ### plain (default)
 
@@ -127,7 +127,11 @@ Here's a summary of the codebase...
 
 ### json
 
-A single JSON object emitted after the response completes: response text, stop reason, session ID, request ID (plus `thought` when reasoning is present). When the prompt reached the model, the same object also carries spend fields (`usage`, `num_turns`, `modelUsage`, cost). `stopReason` is the snake_case ACP/Messages token (`end_turn`, `max_tokens`, …).
+A single JSON object emitted after the response completes: response text,
+stop reason, session ID, request ID (plus `thought` when reasoning is present).
+When the prompt reached the model, the same object also carries spend fields
+(`usage`, `num_turns`, `modelUsage`, cost). `stopReason` is the snake_case
+ACP/Messages token (`end_turn`, `max_tokens`, …).
 
 ```json
 {
@@ -160,21 +164,45 @@ A single JSON object emitted after the response completes: response text, stop r
 
 Usage notes:
 
-- `usage` sums tokens for the prompt, including subagents that finished before turn end (also under their own `modelUsage` keys). Compaction and other side-model calls are excluded.
+- `usage` sums tokens for the prompt, including subagents that finished
+  before turn end (also under their own `modelUsage` keys). Compaction and
+  other side-model calls are excluded.
 - **Token field policy (headless result / `end` / error spend):**
   - `usage.input_tokens` and `modelUsage.*.inputTokens` are **uncached only**.
   - `cache_read_input_tokens` / `cacheReadInputTokens` are cache hits.
-  - `total_tokens` is full input + output (includes both cache buckets): `total_tokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens + output_tokens`.
-  - ACP `_meta.usage.inputTokens` (PromptUsage) is still the **full** prompt sum. Only the headless projector subtracts cache. Prefer headless fields for spend automation.
-- `num_turns` counts main-agent model rounds recorded on the prompt ledger (tool-loop rounds that reported usage). Subagent sampler calls do not increase it. Per-model call counts (including subagents) stay on `modelUsage.*.modelCalls`. This is the same counter family as `--max-turns`, not a guarantee of exact equality when rounds lack usage or hit gates.
-- `total_cost_usd` appears only when the server reported a **complete** cost. Absence means unreported or incomplete, not free. Cost is stamped for API-key traffic today. Pool/OAuth paths often omit it until the server stamps cost. When some calls lacked cost, `cost_is_partial` is true and **all** cost floats are omitted (`total_cost_usd` and every `modelUsage.*.costUSD`) so consumers cannot sum model rows. This is into a fake complete bill.
-- `total_cost_usd_ticks` is the same value in exact integer ticks (1 USD = 10^10 ticks) and appears under the same conditions. Use it for billing reconciliation: summing per-invocation ticks matches the server's usage export exactly, which float dollars cannot guarantee.
-- When subagent usage can not be applied, nested subagent usage was incomplete, or the success-path drain timed out (up to 120s on the turn task), `usage_is_incomplete` is true. Cost floats are omitted the same way (token totals may under-count subagents). Cancel snapshots without that long drain and marks incomplete while subagents are still live. Incomplete with no recorded tokens emits only `usage_is_incomplete` (no zero `usage` object).
+  - `total_tokens` is full input + output (includes both cache buckets):
+    `total_tokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens + output_tokens`.
+  - ACP `_meta.usage.inputTokens` (PromptUsage) is still the **full** prompt
+    sum; only the headless projector subtracts cache. Prefer headless fields
+    for spend automation.
+- `num_turns` counts main-agent model rounds recorded on the prompt ledger
+  (tool-loop rounds that reported usage). Subagent sampler calls do not
+  increase it. Per-model call counts (including subagents) stay on
+  `modelUsage.*.modelCalls`. This is the same counter family as `--max-turns`,
+  not a guarantee of exact equality when rounds lack usage or hit gates.
+- `total_cost_usd` appears only when the server reported a **complete** cost.
+  Absence means unreported or incomplete, never free. Cost is stamped for
+  API-key traffic today; pool/OAuth paths often omit it until the server
+  stamps cost. When some calls lacked cost, `cost_is_partial` is true and
+  **all** cost floats are omitted (`total_cost_usd` and every
+  `modelUsage.*.costUSD`) so consumers cannot sum model rows into a fake
+  complete bill.
+- `total_cost_usd_ticks` is the same value in exact integer ticks
+  (1 USD = 10^10 ticks) and appears under the same conditions. Use it for
+  billing reconciliation: summing per-invocation ticks matches the server's
+  usage export exactly, which float dollars cannot guarantee.
+- When subagent usage could not be applied, nested subagent usage was incomplete,
+  or the success-path drain timed out (up to 120s on the turn task),
+  `usage_is_incomplete` is true and cost floats are omitted the same way
+  (token totals may under-count subagents). Cancel snapshots without that long
+  drain and marks incomplete while subagents are still live. Incomplete with
+  no recorded tokens emits only `usage_is_incomplete` (no zero `usage` object).
 - A prompt that never reached the model omits the spend fields.
 
 The `sessionId` field is useful for resuming the conversation later.
 
-On failure, Grok emits an error object (process exit non-zero). Prompt-level failures may also include frozen spend fields when usage was recorded:
+On failure, Grok emits an error object (process exit non-zero). Prompt-level
+failures may also include frozen spend fields when usage was recorded:
 
 ```json
 {"type":"error","message":"Couldn't start session: ..."}
@@ -182,7 +210,7 @@ On failure, Grok emits an error object (process exit non-zero). Prompt-level fai
 
 ### streaming-json
 
-Newline-delimited JSON, one `type`-tagged object per line, derived from the agent's ACP session updates. Leaf field names (`toolCallId`, `kind`, `rawInput`, `rawOutput`) follow ACP. `toolName` and the `usage` line are xAI additions. Consume it by switching on `type`.
+Newline-delimited JSON, one `type`-tagged object per line, derived from the agent's ACP session updates. Leaf field names (`toolCallId`, `kind`, `rawInput`, `rawOutput`) follow ACP; `toolName` and the `usage` line are xAI additions. Consume it by switching on `type`.
 
 ```json
 {"type":"thought","data":"Analyzing the directory structure..."}
@@ -207,17 +235,23 @@ Event types:
 | `end`              | Final event with metadata and spend fields when available                                    |
 | `error`            | An error occurred (carries `message`, and spend fields if any)                               |
 
-`end` is always the last event. Spend fields on `end` match the json object shape (snake_case uncached `input_tokens`, safe cost floats). `end.stopReason` is the turn stop reason in snake_case (`end_turn`, `max_tokens`, `max_turn_requests`, `refusal`, `cancelled`). The verbatim per-response provider reason (e.g. `tool_use`, `pause_turn`) is on the `usage` line's `stopReason`. Per-response `message_id`/`stopReason`/`signature` are populated on the Messages API backend. Other backends report what they carry.
+`end` is always the last event. Spend fields on `end` match the json object
+shape (snake_case uncached `input_tokens`, safe cost floats). `end.stopReason`
+is the turn stop reason in snake_case (`end_turn`, `max_tokens`,
+`max_turn_requests`, `refusal`, `cancelled`); the verbatim per-response provider
+reason (e.g. `tool_use`, `pause_turn`) is on the `usage` line's `stopReason`.
+Per-response `message_id`/`stopReason`/`signature` are populated on the Messages
+API backend; other backends report what they carry.
 
-Grok may also emit `max_turns_reached` and `auto_compact_*` events. Treat the list as non-exhaustive and switch on `type`.
+Grok may also emit `max_turns_reached` and `auto_compact_*` events; treat the list as non-exhaustive and switch on `type`.
 
 ### streaming-messages-json
 
 Newline-delimited JSON in the Messages API `stream-json` wire format. The data-bearing surface matches the Messages shape exactly. This includes the `assistant`/`user` message bodies, `usage`, `tool_use`/`tool_result`, inline web search, `stop_reason`, and the `--include-partial-messages` event framing. A consumer that reconstructs messages, reads spend, or detects errors works without changes.
 
-The `system`/`init` and terminal `result` lines carry metadata. Grok emits the fields it has real data for and omits pure-placeholder fields it cannot fill, rather than zero-filling them. As a result, those lines may not pass strict `init`/`result` schema validation. The individual fields are listed below. Read the fidelity notes before treating any one field as authoritative. For a clean xAI-native stream with no placeholder shape, use `streaming-json`.
+The `system`/`init` and terminal `result` lines carry metadata. Grok emits the fields it has real data for and omits pure-placeholder fields it cannot fill, rather than zero-filling them. As a result, those two lines may not pass strict `init`/`result` schema validation. The individual fields are listed below. Read the fidelity notes before treating any one field as authoritative. For a clean xAI-native stream with no placeholder shape, use `streaming-json`.
 
-The stream opens with a `system`/`init` line, then `assistant` messages whose `message.content[]` holds `text`, `thinking`, and `tool_use` blocks. `user` messages carrying `tool_result` blocks, and a terminal `result`:
+The stream opens with a `system`/`init` line, then `assistant` messages whose `message.content[]` holds `text`, `thinking`, and `tool_use` blocks, `user` messages carrying `tool_result` blocks, and a terminal `result`:
 
 ```json
 {"type":"system","subtype":"init","session_id":"abc123","apiKeySource":"user","model":"grok-4.6","cwd":"/repo","permissionMode":"default","tools":["read_file","bash"],"slash_commands":["review"],"mcp_servers":[{"name":"linear","status":"connected"}],"skills":[],"uuid":"..."}
@@ -237,17 +271,17 @@ Message types:
 
 The `assistant` and `user` messages carry `session_id`, `uuid`, and `parent_tool_use_id` (`null` for the main conversation). The `system`/`init` and terminal `result` lines carry `session_id` and `uuid` but no `parent_tool_use_id`.
 
-The `uuid` on each line is freshly generated per emitted line. It is not a provider, message, or event id, and not a correlation key. It does not match the provider `message.id` (that value rides `assistant.message.id`). It is unique per line, even for lines that describe the same message. It carries no cross-line or cross-run identity. Do not use it to correlate or deduplicate.
+The `uuid` on each line is freshly generated per emitted line. It is not a provider, message, or event id, and not a correlation key. It does not match the provider `message.id` (that value rides `assistant.message.id`). It is unique per line, even for lines that describe the same message, and it carries no cross-line or cross-run identity. Do not use it to correlate or deduplicate.
 
 Text and reasoning chunks are grouped into one assistant message per model response. A response's parallel `tool_result` blocks are grouped into a single `user` message. `result.result` is the final assistant message text. A model response that produces no content blocks emits no `assistant` line in the default mode. Only `--include-partial-messages` surfaces such a response, as its empty `message_start` … `message_stop` envelope.
 
-On `init`, `skills` is live. It lists the session's user-invocable skill names, a subset of `slash_commands` sourced from the session's advertised commands, or `[]`. This is when the session surfaces no skills. The `init` line is emitted once, deferred to the first output line so it captures the session's advertised `tools`, `slash_commands`, and `skills`. The Messages schema defines no second `init`, so a command list that changes after streaming begins is not re-advertised.
+On `init`, `skills` is live. It lists the session's user-invocable skill names, a subset of `slash_commands` sourced from the session's advertised commands, or `[]` when the session surfaces no skills. The `init` line is emitted once, deferred to the first output line so it captures the session's advertised `tools`, `slash_commands`, and `skills`. The Messages schema defines no second `init`, so a command list that changes after streaming begins is not re-advertised.
 
 The other `init` fields carry real data:
 
 - `apiKeySource` is `user` for API-key auth and `oauth` otherwise. Grok does not distinguish the schema's `project`, `org`, and `temporary` sources.
 - `permissionMode` is the effective headless mode mapped to the Messages enum: the `--permission-mode` value, or `bypassPermissions` under `--yolo`, else `default`. Grok-only modes such as `auto` collapse to `default`.
-- `mcp_servers[].status` is one `x.ai/mcp/list` snapshot, emitted only for `streaming-messages-json`: `connected`, `failed`, `needs-auth`, `pending`, or `disabled`. Servers still handshaking are `pending`. `disabled` is only stamped after the session reports `sessionMcpResolved`. An unresolved list row is `pending` even when `enabled` is still false. The snapshot does not wait for the Blocking startup grace. That grace still applies to the prompt's toolset. Other output formats omit the array and do not call `x.ai/mcp/list`.
+- `mcp_servers[].status` is one `x.ai/mcp/list` snapshot, emitted only for `streaming-messages-json`: `connected`, `failed`, `needs-auth`, `pending`, or `disabled`. Servers still handshaking are `pending`. `disabled` is only stamped after the session reports `sessionMcpResolved`; an unresolved list row is `pending` even when `enabled` is still false. The snapshot does not wait for the Blocking startup grace; that grace still applies to the prompt's toolset. Other output formats omit the array and do not call `x.ai/mcp/list`.
 
 Grok omits the schema's pure-placeholder `init` fields it has no data for, rather than emitting dummy values: `claude_code_version`, `output_style`, and `plugins`.
 
@@ -255,15 +289,15 @@ Grok omits the schema's pure-placeholder `init` fields it has no data for, rathe
 
 `model` appears on `init` and every `assistant` frame. It is the real model id when known, and the literal `"unknown"` only when no model is known at emit time.
 
-The assistant frame's `stop_sequence` is wired end-to-end. It carries the provider's matched stop sequence when the model stopped on a configured one (`stop_reason: "stop_sequence"`). It is `null` on every other stop reason and backend. In `--include-partial-messages` framing, the matched sequence rides both the flushed `assistant` frame and the partial `message_delta.stop_sequence`, so a partial rebuild matches the frame. Only the partial `message_start.stop_sequence` stays `null`, because the matched sequence is not known at message open.
+The assistant frame's `stop_sequence` is wired end-to-end. It carries the provider's matched stop sequence when the model stopped on a configured one (`stop_reason: "stop_sequence"`), and is `null` on every other stop reason and backend. In `--include-partial-messages` framing, the matched sequence rides both the flushed `assistant` frame and the partial `message_delta.stop_sequence`, so a partial rebuild matches the frame. Only the partial `message_start.stop_sequence` stays `null`, because the matched sequence is not known at message open.
 
 The emitted error subtypes are `error_max_turns`, `error_during_execution`, and `error_max_structured_output_retries`. The schema's `error_max_budget_usd` subtype is never emitted, because grok has no budget feature.
 
-`result.usage` reports the Messages `message.usage` shape with the token buckets disjoint: `input_tokens` (uncached), `cache_read_input_tokens`, and `cache_creation_input_tokens`. Grok derives these from the turn's aggregate ledger, reshaped into those buckets. Subagent cache creation is included in `cache_creation_input_tokens`. The aggregate ledger tracks it as its own bucket. As a result, it is no longer folded into `input_tokens`.
+`result.usage` reports the Messages `message.usage` shape with the three token buckets disjoint: `input_tokens` (uncached), `cache_read_input_tokens`, and `cache_creation_input_tokens`. Grok derives these from the turn's aggregate ledger, reshaped into those buckets. Subagent cache creation is included in `cache_creation_input_tokens`. The aggregate ledger tracks it as its own bucket, so it is no longer folded into `input_tokens`.
 
 `result.usage` always emits numeric buckets, even when data is missing. This happens when the turn's usage ledger is incomplete (the same condition that surfaces `usage_is_incomplete` in the `json` format), or when no aggregate ledger reached the reducer at all. Any bucket grok cannot account for falls back to `0`, because the Messages API schema has no marker for incomplete or absent usage. The reducer logs a warning to stderr in both cases. Read an all-zero `usage` here as "unknown", not "free".
 
-The nested `server_tool_use` counter is populated. `web_search_requests` is the number of *successful* backend web searches emitted this run. Failed searches and non-search `WebSearch` actions such as open_page are excluded, matching the Messages API, which does not bill errored searches. A failed backend search still emits a `web_search_tool_result` in the error shape (`content.type: "web_search_tool_result_error"`), but is not counted. Its `error_code` is a fixed `"unavailable"` placeholder, not a code forwarded from the backend. There is no `web_fetch_requests` key, because grok has no server-side `web_fetch`. As a result, the placeholder is omitted.
+The nested `server_tool_use` counter is populated. `web_search_requests` is the number of *successful* backend web searches emitted this run. Failed searches and non-search `WebSearch` actions such as open_page are excluded, matching the Messages API, which does not bill errored searches. A failed backend search still emits a `web_search_tool_result` in the error shape (`content.type: "web_search_tool_result_error"`), but is not counted. Its `error_code` is a fixed `"unavailable"` placeholder, not a code forwarded from the backend. There is no `web_fetch_requests` key, because grok has no server-side `web_fetch`, so the placeholder is omitted.
 
 Backend web search is inline. It folds into the same `assistant` frame as the surrounding text. The frame carries a `server_tool_use` block (`name: "web_search"`, `input.query`) immediately followed by a `web_search_tool_result` block. That result block's `tool_use_id` matches the `server_tool_use.id`, and its `content` is a `web_search_result` hit array of `{type, url, title}`. This matches the Messages API's inline server-tool shape rather than splitting the response across frames.
 
@@ -271,11 +305,11 @@ X search and code interpreter are a documented divergence. They stay generic, su
 
 `--include-partial-messages` emits the raw event framing so a consumer can rebuild each message with the Messages streaming accumulator. The framing is `message_start`, `content_block_start`/`content_block_delta`/`content_block_stop`, `message_delta`, and `message_stop`. It carries the structural events an accumulator needs. The deltas are coarser than the Messages API's token-level streaming: tool input arrives as a single `input_json_delta`, and `citations_delta` is never produced (see below). The result is a faithful reconstruction of each message rather than a token-by-token replay.
 
-On the Messages API backend, the framing is faithful. `message_start` carries the real provider `message.id` and the input-side `usage`. A thinking block emits its `signature_delta` in order, before the block's `content_block_stop`. The `message_start.usage` input side reports all prompt-side buckets known at message open: `input_tokens` (the uncached portion), `cache_read_input_tokens`, and `cache_creation_input_tokens`. A cache hit is therefore visible on `message_start`, rather than only appearing later on `message_delta`/`result`. `output_tokens` seeds `0` there and is finalized on `message_delta`. A response that starts but produces no content still emits the `message_start` … `message_stop` envelope with no content blocks.
+On the Messages API backend, the framing is faithful. `message_start` carries the real provider `message.id` and the input-side `usage`. A thinking block emits its `signature_delta` in order, before the block's `content_block_stop`. The `message_start.usage` input side reports all three prompt-side buckets known at message open: `input_tokens` (the uncached portion), `cache_read_input_tokens`, and `cache_creation_input_tokens`. A cache hit is therefore visible on `message_start`, rather than only appearing later on `message_delta`/`result`. `output_tokens` seeds `0` there and is finalized on `message_delta`. A response that starts but produces no content still emits the `message_start` … `message_stop` envelope with no content blocks.
 
 Some backends surface per-response metadata only at end of turn. Those backends fall back to a synthesized `message_start.id` and zero-seeded input `usage`. They defer the reasoning `signature` to the final `assistant` line, which is authoritative in that case.
 
-Tool-call input is emitted as a single `input_json_delta` carrying the complete arguments JSON, followed by `content_block_stop`. It is not a sequence of token-level fragments. This is a deliberate divergence from the Messages API's incremental `partial_json` streaming. Grok's ACP tool-call path delivers each tool call as one validated JSON object once the arguments are fully parsed. As a result, a single delta is the accurate representation. A consumer that concatenates `partial_json` reassembles the identical object either way. The backend web-search `server_tool_use` block's `input.query` is emitted the same way, as one `input_json_delta`.
+Tool-call input is emitted as a single `input_json_delta` carrying the complete arguments JSON, followed by `content_block_stop`. It is not a sequence of token-level fragments. This is a deliberate divergence from the Messages API's incremental `partial_json` streaming. Grok's ACP tool-call path delivers each tool call as one validated JSON object once the arguments are fully parsed, so a single delta is the accurate representation. A consumer that concatenates `partial_json` reassembles the identical object either way. The backend web-search `server_tool_use` block's `input.query` is emitted the same way, as one `input_json_delta`.
 
 The Messages API `citations_delta` carries inline citations for cited text spans, such as those from web search. This stream does not produce it. Grok's Messages content deltas are limited to text, thinking, signature, and tool-input JSON, so there is no citation data to surface as a `citations_delta`. Backend web-search source URLs are reported inline on the completed `web_search_tool_result` block instead (see above), not as per-span text citations.
 
@@ -285,7 +319,7 @@ Fidelity caveats apply to a few fields.
 
 `num_turns` and `total_cost_usd` are authoritative when known. When they are not, `num_turns` falls back to the count of completed model responses this turn, and `total_cost_usd` falls back to `0`. A completed but contentless response emits no `assistant` line, yet still counts as a turn. Spend is never overreported.
 
-`modelUsage` carries the per-model token and cost fields grok tracks, plus `webSearchRequests` attributed to the active model. The reducer tracks a single global web-search count rather than per-model. As a result, the whole count lands on the current or last model and other rows stay `0`. A per-model `modelUsage.*.costUSD` is `0` when that model's cost is unknown or withheld. This is the same fail-closed-to-zero behavior as the top-level `total_cost_usd`. The `json` format omits cost floats entirely when partial. However, this stream keeps the field present and `0`. `contextWindow` is the current model's real total context window (the same value grok uses for auto-compaction), and it appears only on the current model's row. Other rows omit it, and so does the current row when the window is unknown. `maxOutputTokens` has no grok catalog. As a result, that key is omitted entirely. `modelUsage` is `{}` when no per-model breakdown is available.
+`modelUsage` carries the per-model token and cost fields grok tracks, plus `webSearchRequests` attributed to the active model. The reducer tracks a single global web-search count rather than per-model, so the whole count lands on the current or last model and other rows stay `0`. A per-model `modelUsage.*.costUSD` is `0` when that model's cost is unknown or withheld. This is the same fail-closed-to-zero behavior as the top-level `total_cost_usd`. The `json` format omits cost floats entirely when partial, but this stream keeps the field present and `0`. `contextWindow` is the current model's real total context window (the same value grok uses for auto-compaction), and it appears only on the current model's row. Other rows omit it, and so does the current row when the window is unknown. `maxOutputTokens` has no grok catalog, so that key is omitted entirely. `modelUsage` is `{}` when no per-model breakdown is available.
 
 Like `streaming-json`, this stream is read only. Tool approvals and other bidirectional flows use the ACP interface (`grok agent`).
 
@@ -314,7 +348,7 @@ grok -p "hello" --session-id "$(uuidgen | tr '[:upper:]' '[:lower:]')" --output-
 
 ### Resume (`-r`)
 
-The `-r/--resume` flag resumes a specific session by ID, or by title for the current directory when the value is not an ID. This is ignoring letter case (a sole manually renamed match wins among duplicates. Remaining duplicates error with their IDs. UUID-shaped values always take the ID path, so scripts must prefer IDs). It errors if the session does not exist:
+The `-r/--resume` flag resumes a specific session by ID, or by title for the current directory when the value is not an ID, ignoring letter case (a sole manually renamed match wins among duplicates; remaining duplicates error with their IDs; UUID-shaped values always take the ID path, so scripts should prefer IDs). It errors if the session does not exist:
 
 ```bash
 # Get the session ID from a previous JSON response
@@ -537,10 +571,11 @@ grok -p "Run the test suite" --yolo
 For headless use, authenticate with one of:
 
 - **`XAI_API_KEY`**: simplest for CI. See [Environment Variables](#environment-variables-for-headless) above.
-- **`grok login --device-auth`** (or `--device-code`): no browser needed on the target machine. See [Authentication > Device Code Flow](02-authentication.md#device-code-flow).
+- **`grok login --device-auth`** (or `--device-code`): no browser needed on the target machine.
+  See [Authentication > Device Code Flow](02-authentication.md#device-code-flow).
 - **`grok login`**: browser-based OAuth2 on machines with a GUI.
 
-If you have logged in, cached credentials are used automatically.
+If you've previously logged in, cached credentials are used automatically.
 
 ---
 
@@ -555,15 +590,19 @@ If you have logged in, cached credentials are used automatically.
 
 ## Project Root Discovery
 
-When Grok starts, it discovers the project root by walking upward from `--cwd` (or the current directory) until it finds a `.git` directory.
+When Grok starts, it discovers the project root by walking upward from `--cwd`
+(or the current directory) until it finds a `.git` directory.
 
-Note: If `--cwd` is nested inside a large repository (such as a monorepo), Grok discovers that repository as the project root and scopes its discovery (AGENTS.md, skills, git history) to it. This can make startup slow. Point `--cwd` at the specific subproject you want to work in to keep the scope small.
+Note: If `--cwd` is nested inside a large repository (such as a monorepo),
+Grok discovers that repository as the project root and scopes its discovery (AGENTS.md, skills, git history) to it, which can make
+startup slow. Point `--cwd` at the specific subproject you want to work in to keep
+the scope small.
 
 ---
 
 ## File Locations
 
-Grok stores data in `~/.grok` (override with `GROK_HOME`. See [Environment Variables for Headless](#environment-variables-for-headless)):
+Grok stores data in `~/.grok` (override with `GROK_HOME`; see [Environment Variables for Headless](#environment-variables-for-headless)):
 
 | Path                     | Contents                              |
 | ------------------------ | ------------------------------------- |
@@ -592,7 +631,7 @@ export XAI_API_KEY="xai-..."
 grok -p "..."
 ```
 
-Grok never checks for or installs updates. As a result, a headless run makes no update request.
+Grok never checks for or installs updates, so a headless run makes no update request.
 
 ---
 
@@ -621,7 +660,7 @@ On SIGINT/SIGTERM:
 
 - Session state saved up to the last completed tool call
 - File modifications by tools are **not rolled back**
-- Exit code is **130** for SIGINT (`128 + 2`) and **143** for SIGTERM (`128 + 15`). CI pipelines can distinguish these from a normal error (exit code `1`)
+- Exit code is **130** for SIGINT (`128 + 2`) and **143** for SIGTERM (`128 + 15`); CI pipelines can distinguish these from a normal error (exit code `1`)
 - Resume: `grok -p "continue" --resume "<id>"` or `grok -p "continue" --continue`
 
 See [Session Management in Headless Mode](#session-management-in-headless-mode) for details on named sessions and the `-s`/`-r`/`-c` flags.

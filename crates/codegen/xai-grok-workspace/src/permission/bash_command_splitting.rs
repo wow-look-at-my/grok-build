@@ -9,8 +9,9 @@ pub struct BashCommandHighlights {
     pub suffix: Vec<String>,
 }
 
-/// A parsed "plain" command: - `words`: the command and args (env assignments
-/// stripped) - `span_start` / `span_end`.
+/// A parsed "plain" command:
+/// - `words`: the command and args (env assignments stripped)
+/// - `span_start` / `span_end`: byte range in the original script covering the highlighted command part (command name and args).
 #[derive(Debug, Clone)]
 pub struct PlainCommand {
     words: Vec<String>,
@@ -24,8 +25,9 @@ impl PlainCommand {
         &self.words
     }
 
-    /// Whether this command's highlighted span covers the entire script (ignoring surrounding whitespace). Only then can the dequoted word join stand in for the raw script; a dropped assignment or sibling would
-    /// let a wider script match a narrower grant.
+    /// Whether this command's highlighted span covers the entire script (ignoring surrounding whitespace).
+    /// Only then can the dequoted word join stand in for the raw script; a dropped assignment or sibling would let a wider script match a narrower grant.
+    /// A mismatched or shorter `script` is panic-safe and answers `false`.
     pub(crate) fn spans_whole_script(&self, script: &str) -> bool {
         let (Some(before), Some(after)) =
             (script.get(..self.span_start), script.get(self.span_end..))
@@ -70,12 +72,14 @@ pub fn try_parse_word_only_commands_sequence(tree: &Tree, src: &str) -> Option<V
         // allow simple env var assignments before commands
         "variable_assignment",
         "variable_name",
+        // allow redirections (e.g., 2>&1, > file, etc.)
         "redirected_statement",
         "file_redirect",
         "file_descriptor",
         // Comments never execute.
         "comment",
-        // Heredoc bodies are stdin to the head command, not executed text.
+        // Heredoc bodies are stdin to the head command, not executed text; unquoted `$(...)` still fails this allowlist, and a same-statement `> file` stays a file_redirect
+        // `declaration_command` (`export K=V`) is deliberately absent: it is not a `command` node, so ask-mode segment evaluation (no env guard) would miss a PATH/LD_PRELOAD hijack
         "heredoc_redirect",
         "heredoc_start",
         "heredoc_body",
@@ -211,8 +215,8 @@ fn decode_env_option_token(raw: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// Safe subset for recursing a packed `env -S` operand as a Bash script: no
-/// env-S quotes/escapes/comments/expansions that could diverge on reparse.
+/// Safe subset for recursing a packed `env -S` operand as a Bash script: no env-S quotes/escapes/comments/expansions that could diverge on reparse.
+/// Includes bare `\` so `\t`/`\n`/… stay non-extractable (Ask floor only).
 fn is_high_confidence_env_s_payload(s: &str) -> bool {
     !s.is_empty()
         && !s.contains('\0')
@@ -221,8 +225,8 @@ fn is_high_confidence_env_s_payload(s: &str) -> bool {
             .any(|c| matches!(c, '\'' | '"' | '\\' | '#' | '`' | '$' | '\n' | '\r'))
 }
 
-/// Callers must pass already-literal text: a separate argv word, or payload
-/// carved after option-token quote removal.
+/// Callers must pass already-literal text: a separate argv word, or payload carved after option-token quote removal.
+/// Never pass raw shell-escape sequences meant for env-S.
 fn take_high_confidence_payload(raw: &str) -> Option<String> {
     is_high_confidence_env_s_payload(raw).then(|| raw.to_owned())
 }
@@ -547,8 +551,9 @@ pub(crate) fn strip_wrapper_command(cmd: &[String]) -> Option<&[String]> {
     Some(inner)
 }
 
-/// True if `words`' head is a command [`strip_wrapper_command`] would peel,
-/// i.e. its basename is in the canonical wrapper set.
+/// True if `words`' head is a command [`strip_wrapper_command`] would peel, i.e. its basename is in the canonical wrapper set.
+/// Reports membership only (so bare `env`, which `strip_wrapper_command` returns `None` for, still counts).
+/// Keep the set in sync with `strip_wrapper_command`'s match arms.
 pub(crate) fn is_wrapper_command(words: &[String]) -> bool {
     matches!(
         words.first().and_then(|w| w.rsplit(['/', '\\']).next()),
@@ -605,20 +610,21 @@ pub(crate) fn unwrap_wrappers_checked(words: &[String]) -> CheckedWrapperPeel<'_
     }
 }
 
-/// Repeatedly strip wrapper commands (e.g. `timeout 30 nice -n 10 rm -rf /`),
-/// bounded to avoid pathological loops.
+/// Repeatedly strip wrapper commands (e.g. `timeout 30 nice -n 10 rm -rf /`), bounded to avoid pathological loops.
+/// Returns the original slice if no wrapper is present.
 pub(crate) fn unwrap_wrappers(words: &[String]) -> &[String] {
     unwrap_wrappers_checked(words).words
 }
 
-/// Peel wrapper commands (`timeout`, `nice`, `env`, …) from a command's
-/// words.
+/// Peel wrapper commands (`timeout`, `nice`, `env`, …) from a command's words.
+/// This is the same normalization the permission enforcer applies before matching session grants.
+/// The pager's "Always allow" pattern editor uses this so its pre-fill and match preview agree with enforcement on wrapped commands.
 pub fn unwrap_command_wrappers(words: &[String]) -> &[String] {
     unwrap_wrappers(words)
 }
 
-/// Result of peeling shell-transparent prefixes (`exec` / `command` /
-/// `builtin`).
+/// Result of peeling shell-transparent prefixes (`exec` / `command` / `builtin`).
+/// Not part of the canonical wrapper set; used only by security gates.
 pub(crate) enum TransparentPrefixPeel<'a> {
     Ready(&'a [String]),
     Ambiguous,
@@ -903,8 +909,8 @@ pub fn primary_command_from_script(script: &str) -> Option<BashCommandHighlights
     })
 }
 
-/// Returns `Some(Vec<PlainCommand>)` with every command in source order
-/// (including "setup" commands like `cd`, `sleep`, etc.).
+/// Returns `Some(Vec<PlainCommand>)` with every command in source order (including "setup" commands like `cd`, `sleep`, etc.).
+/// Returns `None` if the script contains constructs that tree-sitter-bash cannot cleanly decompose into plain word-only commands.
 pub fn all_commands_from_script(script: &str) -> Option<Vec<PlainCommand>> {
     let tree = try_parse_shell(script)?;
     try_parse_word_only_commands_sequence(&tree, script)
@@ -926,6 +932,7 @@ fn parse_plain_command_from_node(cmd: Node, src: &str) -> Option<PlainCommand> {
         match child.kind() {
             // Env assignments in front of the command are skipped; the outer whitelist already vetted their contents
             "variable_assignment" => {
+                // no-op, just skip for words & span
             }
             "command_name" => {
                 let word_node = child.named_child(0)?;
@@ -962,7 +969,7 @@ fn parse_plain_command_from_node(cmd: Node, src: &str) -> Option<PlainCommand> {
                     let text = content_node.utf8_text(src.as_bytes()).ok()?.to_owned();
 
                     if span_start.is_none() {
-                        // Highlight whole quoted string in the script, so span uses the outer node
+                        // Highlight whole quoted string in the original script, so span uses the outer node
                         span_start = Some(child.start_byte());
                     }
                     span_end = Some(child.end_byte());
@@ -1049,8 +1056,9 @@ pub fn soft_break_offsets_after_operators(script: &str) -> Vec<usize> {
     };
 
     let root = tree.root_node();
-    // On a broken parse, tree-sitter can still expose `|` / `&&` / `;` nodes
-    // that are *not* real shell control flow.
+    // On a broken parse, tree-sitter can still expose `|` / `&&` / `;` nodes that are *not* real shell control flow
+    // They can be fragments of unclosed strings or half-parsed heredocs
+    // Prefer no soft-breaks over wrong ones
     if root.has_error() {
         return Vec::new();
     }
@@ -1061,7 +1069,8 @@ pub fn soft_break_offsets_after_operators(script: &str) -> Vec<usize> {
     while let Some(node) = stack.pop() {
         let kind = node.kind();
 
-        // Do not walk into string / heredoc / comment payload.
+        // Do not walk into string / heredoc / comment payload; operator characters there are not shell syntax nodes we care about
+        // Skipping the whole subtree is cheaper and safer
         if is_payload_node_kind(kind) {
             continue;
         }
@@ -1093,8 +1102,8 @@ pub fn heredoc_payload_byte_ranges(script: &str) -> Vec<(usize, usize)> {
     };
 
     let root = tree.root_node();
-    // Match soft-break policy: on a broken parse, tree-sitter error recovery
-    // can invent or mis-bound `heredoc_body` nodes Prefer.
+    // Match soft-break policy: on a broken parse, tree-sitter error recovery can invent or mis-bound `heredoc_body` nodes
+    // Prefer no payload ranges (normal soft-wrap / no false no-wrap) over wrong spans that overflow or skip wraps
     if root.has_error() {
         return Vec::new();
     }
@@ -1511,6 +1520,8 @@ mod tests {
             })
         );
 
+        // Note: "timeout 60 foo" is parsed as one command where timeout takes 60 and foo as args
+        // So the primary should skip sleep and get to the timeout command, but timeout is also skipped
         let sleep_timeout_command = "sleep 5 && timeout 60 && foo --bar";
         assert_eq!(
             primary_command_from_script(sleep_timeout_command),
@@ -1545,7 +1556,7 @@ mod tests {
             })
         );
 
-        // Wrapped command: the wrapper peels into the prefix and the inner program is the primary.
+        // Wrapped command: the wrapper peels into the prefix and the inner program is the primary (see `primary_command_peels_wrappers_into_prefix`)
         let timeout_wrapped = "timeout 60 cargo test";
         assert_eq!(
             primary_command_from_script(timeout_wrapped),
@@ -1688,7 +1699,7 @@ mod tests {
             vec!["&&"],
             "body operators must not create soft-breaks; got {ops:?} for {script:?}"
         );
-        // The break must sit on the first physical line (after `&&`).
+        // The single break must sit on the first physical line (after `&&`).
         let breaks = soft_break_offsets_after_operators(script);
         assert_eq!(breaks.len(), 1);
         let first_nl = script.find('\n').unwrap();
@@ -1838,6 +1849,7 @@ mod tests {
     #[test]
     fn soft_break_empty_on_parse_error() {
         // Broken scripts must not emit soft-breaks from half-parsed ops.
+        // Unclosed quote / paren typically marks the tree as has_error().
         let broken = r#"echo "unclosed && true | false"#;
         let tree = try_parse_shell(broken).expect("tree-sitter still returns a tree");
         assert!(

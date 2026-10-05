@@ -1,4 +1,4 @@
-//! Session/plan-mode concern for `SessionActor`.
+//! Session/plan-mode concern for `SessionActor` (`handle_session_mode`, plan-mode reminders and persistence, active-template detection).
 use super::*;
 pub(super) fn prompt_mode_from_session_mode_id(session_mode_id: &acp::SessionModeId) -> PromptMode {
     use xai_grok_tools::types::SessionMode;
@@ -19,13 +19,18 @@ pub(super) fn session_mode_id_from_prompt_mode(prompt_mode: PromptMode) -> acp::
     };
     acp::SessionModeId::new(mode.as_id())
 }
-/// The agent-identity half of the session mode. A session mode is either a
-/// permission mode (`default`, `plan`, `ask`) or an agent name.
+/// The agent-identity half of the session mode.
+///
+/// A session mode is either a permission mode (`default`, `plan`, `ask`) or an
+/// agent name. An agent name swaps the whole agent, and with it the system
+/// prompt and the tool registry.
 #[derive(Debug, Default)]
 pub(crate) struct ModeAgentState {
     /// The agent that ran before a Shift+Tab ring identity replaced it.
     ring_base: Option<String>,
-    /// A swap that arrived while a turn ran. The run loop applies it at turn end.
+    /// A swap that arrived while a turn ran. The run loop applies it at turn
+    /// end. It is never dropped, because a dropped swap leaves the model under
+    /// the prompt of a mode the user already left.
     pending: Option<AgentDefinition>,
 }
 fn is_shift_tab_ring_agent(name: &str) -> bool {
@@ -75,13 +80,13 @@ impl SessionActor {
         snapshot.start_prompt_mode = Some(self.turn_start_prompt_mode.lock().to_string());
         snapshot.end_prompt_mode = Some(self.turn_prompt_mode.lock().to_string());
     }
-    /// `false` twin: this agent type is not compiled into this build, so no
-    /// session runs it.
+    /// `false` twin: this agent type is not compiled into this build, so no session runs it.
+    /// Keeps ungated call sites compiling in both configurations, like [`Self::is_cursor_harness`].
     pub(super) fn is_cursor_agent(&self) -> bool {
         false
     }
-    /// `false` twin: this template integration is not compiled into this
-    /// build, so no session runs it.
+    /// `false` twin: this template integration is not compiled into this build, so no session runs it.
+    /// Keeps ungated call sites compiling in both configurations.
     pub(super) fn is_cursor_harness(&self) -> bool {
         false
     }
@@ -375,8 +380,9 @@ impl SessionActor {
             self.persist_plan_mode_state();
         }
     }
-    /// The user toggled plan mode ON (Shift+Tab) while the model was thinking, so the tracker sits in `Pending`. The running turn would otherwise proceed without any
-    /// plan-mode instruction. No-op unless the tracker is `Pending`.
+    /// Mid-turn counterpart of `inject_plan_mode_reminders` case 1. The user toggled plan mode ON (Shift+Tab) while the model was thinking, so the tracker sits in `Pending`.
+    /// The running turn would otherwise proceed without any plan-mode instruction.
+    /// No-op unless the tracker is `Pending`.
     pub(super) async fn activate_plan_mode_mid_turn(&self) {
         use crate::session::plan_mode::PlanModeState;
         let activation = {
@@ -420,6 +426,7 @@ impl SessionActor {
         );
     }
     /// The activation reminder template for the active template (no first-entry/reentry distinction), or grok's reentry/full variant.
+    /// Shared by turn-start injection (`inject_plan_mode_reminders` case 1) and the mid-turn toggle (`activate_plan_mode_mid_turn`).
     fn plan_activation_template(&self, is_reentry: bool) -> &'static str {
         use crate::session::plan_mode::{
             plan_mode_reentry_reminder_template, plan_mode_reminder_full_template,

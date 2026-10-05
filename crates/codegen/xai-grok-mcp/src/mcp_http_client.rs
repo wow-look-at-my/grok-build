@@ -1,4 +1,9 @@
-//! MCP HTTP client wrapper that throttles SSE reconnects with exponential backoff.
+//! MCP HTTP client wrapper that throttles SSE reconnects with exponential backoff, working around rmcp's zero-backoff reconnect loop.
+//! When an established SSE stream errors, rmcp re-issues the `GET` immediately with its retry counter reset to 0.
+//! It never consults its `SseRetryPolicy`; only connect failures and graceful EOF consult it.
+//! We ship rmcp 3.2; still unfixed upstream as of rmcp 3.2.0 (an errored stream
+//! re-enters `Retrying { retry_times: 0 }` immediately, bypassing the retry policy):
+//! <https://github.com/modelcontextprotocol/rust-sdk/blob/rmcp-v3.2.0/crates/rmcp/src/transport/common/client_side_sse.rs>
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,10 +18,11 @@ use rmcp::transport::streamable_http_client::{
 use sse_stream::{Error as SseError, Sse};
 
 /// A stream that survived this long is healthy and resets the backoff.
+/// Flood lifetimes are sub-millisecond; healthy proxies/LBs recycle idle streams no faster than ~25s.
 const STABLE_STREAM_THRESHOLD: Duration = Duration::from_secs(2);
 /// Delay for the n-th consecutive rapid death: `BASE_DELAY * 2^(n-2)` (the first reconnects immediately), capped at [`MAX_DELAY`].
 const BASE_DELAY: Duration = Duration::from_millis(500);
-/// Caps a broken server's cost at multiple attempts/min; a healed server gets its stream back within 30s.
+/// Caps a broken server's cost at ~2 attempts/min; a healed server gets its stream back within 30s.
 const MAX_DELAY: Duration = Duration::from_secs(30);
 const WARN_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
@@ -64,6 +70,7 @@ struct ThrottleState {
     consecutive_rapid: u32,
     warn_budget: WarnBudget,
     /// Limits each episode to one warn; cleared when the episode resets.
+    /// The warn may fire late if the cooldown held it back at episode entry.
     episode_warned: bool,
 }
 
@@ -76,6 +83,7 @@ impl ThrottleState {
     }
 
     fn delay_for_attempt(attempt: u32) -> Duration {
+        // 2^6 * BASE_DELAY already saturates MAX_DELAY; clamp guards pow overflow.
         let exp = attempt.saturating_sub(2).min(6);
         (BASE_DELAY * 2u32.pow(exp)).min(MAX_DELAY)
     }
@@ -114,7 +122,9 @@ impl ThrottleState {
     }
 }
 
-/// Wraps any [`StreamableHttpClient`] and backs off `get_stream` reconnects.
+/// Wraps any [`StreamableHttpClient`] and backs off `get_stream` reconnects; `post_message` / `delete_session` delegate untouched.
+/// Clones share the throttle state (rmcp clones the client per stream task / reconnect).
+/// Backoff and episode state are per instance; the [`WarnBudget`] is the caller's, so a rebuilt client does not warn again within the cooldown.
 #[derive(Clone)]
 pub struct McpHttpClient<C> {
     inner: C,
@@ -135,8 +145,8 @@ impl<C> McpHttpClient<C> {
     }
 }
 
-/// The system clock in production; the paused clock under `start_paused`
-/// tests.
+/// The system clock in production; the paused clock under `start_paused` tests.
+/// Use this for all throttle timing so timing tests stay deterministic.
 fn now() -> Instant {
     tokio::time::Instant::now().into_std()
 }
@@ -226,6 +236,7 @@ impl<C: StreamableHttpClient + Sync> StreamableHttpClient for McpHttpClient<C> {
 mod tests {
     use super::*;
 
+    /// Simulates rapid stream deaths starting at `start` until the throttle engages (attempt 2).
     /// Returns the throttle-entry time and its plan.
     fn drive_to_first_throttle(st: &mut ThrottleState, start: Instant) -> (Instant, BackoffPlan) {
         assert!(st.plan_on_get_stream(start).is_none());
@@ -243,6 +254,7 @@ mod tests {
     fn warn_lifecycle_across_episodes_and_cooldowns() {
         let mut st = ThrottleState::default();
 
+        // Episode 1: the entry attempt warns once; later attempts stay debug.
         let (t2, p2) = drive_to_first_throttle(&mut st, Instant::now());
         assert_eq!(p2.delay, BASE_DELAY);
         assert_eq!(p2.log, ReconnectLog::Warn);
@@ -435,6 +447,7 @@ mod tests {
         let _guard = tracing::subscriber::set_default(capture.clone());
 
         let client = McpHttpClient::new(MockInner, "mock-server", WarnBudget::default());
+        // Attempts 0 and 1 are unthrottled; attempt 2 warns; attempt 3 is debug.
         for _ in 0..4 {
             drive_once(&client).await;
         }

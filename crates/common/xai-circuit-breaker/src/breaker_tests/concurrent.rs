@@ -40,13 +40,15 @@ fn concurrent_check_and_record_no_panic() {
     let _rate = cb.error_rate();
 }
 
-/// The breaker must remain readable, its sliding window must stay
-/// bounded at `MAX_WINDOW_ENTRIES` (10k), and `error_rate()` must read
-/// as a finite f64 (no NaN from divide-by-zero or counter corruption).
+/// 100 threads × 100 `record(Failure)` calls. The breaker must remain
+/// readable, its sliding window must stay bounded at
+/// `MAX_WINDOW_ENTRIES` (10k), and `error_rate()` must read as a
+/// finite f64 (no NaN from divide-by-zero or counter corruption).
 #[test]
 fn concurrent_record_does_not_panic_or_corrupt_window() {
     let cb = Arc::new(CircuitBreaker::new(BreakerConfig {
-        // Keep the breaker closed throughout so every record() goes through the `Closed` branch.
+        // Keep the breaker closed throughout so every record() goes
+        // through the `Closed` branch that mutates the window.
         enabled: true,
         min_samples: usize::MAX,
         error_rate_threshold: 2.0,
@@ -71,7 +73,10 @@ fn concurrent_record_does_not_panic_or_corrupt_window() {
         cb.state(),
         BreakerState::Closed | BreakerState::Open | BreakerState::HalfOpen
     ));
+    // min_samples = usize::MAX and threshold = 2.0 keep us Closed.
     assert_eq!(cb.state(), BreakerState::Closed);
+    // 10,000 failures into an unbounded-rate-threshold breaker must
+    // produce a finite error_rate — no NaN from a corrupted counter.
     let rate = cb.error_rate();
     assert!(rate.is_finite(), "error_rate must be finite, got {rate}");
     assert!(

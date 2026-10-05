@@ -123,21 +123,27 @@ impl Drop for V2DreamWorkers {
 }
 
 pub(crate) struct SessionMemory {
-    /// Mode resolved when the session was spawned.
+    /// Mode resolved when the session was spawned. Kept even while memory is
+    /// disabled so toggles, telemetry, and trace uploads cannot switch roots.
     pub configured_mode: Option<crate::config::MemoryMode>,
     /// Rollout and kill switches resolved once at session spawn.
     pub v2_config: crate::config::MemoryV2Config,
-    /// Storage layout resolved at spawn.
+    /// Storage layout resolved at spawn. Retained while disabled so re-enabling
+    /// restores the pinned mode and any configured root override.
     pub configured_storage: Option<crate::session::memory::MemoryStorage>,
     /// `--no-memory` / `GROK_MEMORY=0`: memory stays off for the whole process.
     pub process_disabled: bool,
     /// The effective TOML started this session with `[memory] enabled = false`.
+    /// The `/memory` toggle can still enable memory for the session.
     pub config_opt_out: bool,
     /// Whether enabling v2 carries curated legacy `MEMORY.md` files into the v2 scopes.
+    /// Resolved at spawn from the root override and the maintenance rollout gate.
     pub v2_legacy_carryover: bool,
-    /// A `/memory` toggle changed v2 state while a turn was running.
+    /// A `/memory` toggle changed v2 state while a turn was running, so the system prompt's
+    /// `<memory>` section is stale. Applied before the next turn is promoted.
     pub prompt_sync_pending: AtomicBool,
     /// Memory storage handle for writing flush output (None when memory disabled).
+    /// Wrapped in `RefCell` to allow `/memory on|off` toggle from `&Arc<SessionActor>`.
     pub storage: RefCell<Option<crate::session::memory::MemoryStorage>>,
     /// Whether to write a session summary to memory on session end.
     pub save_on_end: bool,
@@ -146,26 +152,33 @@ pub(crate) struct SessionMemory {
     /// First-turn memory injection behavior resolved from local and remote config.
     pub initial_injection_config: crate::config::MemoryInitialInjectionConfig,
     /// Per-process latch: the first-turn injection decision already ran in this session segment.
+    /// Cross-segment idempotency comes from `conversation_has_memory_context`, not this flag.
     pub context_injected: AtomicBool,
     pub flush_config: crate::config::MemoryFlushConfig,
-    /// When `true`, auto-compact checks are suppressed during the in-context memory flush.
+    /// When `true`, auto-compact checks are suppressed during the legacy
+    /// in-context memory flush. Memory-v2 extraction uses its own worker latch.
     pub is_flushing: Arc<AtomicBool>,
-    /// Cooperatively-cancelled, joinable memory-v2 worker.
+    /// Cooperatively-cancelled, joinable memory-v2 worker. The wrapper also
+    /// cancels and aborts on drop as a teardown backstop.
     pub capture_worker: RefCell<Option<CaptureWorker>>,
     /// Owns every capture-triggered Dream task until session teardown.
     pub dream_workers: V2DreamWorkers,
     /// Class of the most recent capture failure reported by this process, so
-    /// `/flush` can attribute a still-failing queue correctly.
+    /// `/flush` can attribute a still-failing queue correctly. The durable
+    /// queue only keeps the sanitized error text, so a failure inherited from
+    /// an earlier process has no class here.
     pub last_capture_failure:
         RefCell<Option<xai_grok_telemetry::memory_telemetry::MemoryV2FailureClass>>,
     /// The compaction count at which the last flush ran (once-per-cycle guard).
     pub last_flush_compaction: AtomicU64,
     pub flush_count: AtomicU64,
     /// Content from the most recent successful flush, used for delta prompts.
+    /// Wrapped in `RefCell` because `SessionActor` is single-threaded (LocalSet).
     pub last_flush_content: RefCell<Option<String>>,
     pub flush_success_count: AtomicU64,
     pub flush_error_count: AtomicU64,
     /// Counts model-initiated `memory_search` tool calls.
+    /// Wrapped in `RefCell` to allow `/memory on|off` toggle from `&Arc<SessionActor>`.
     pub search_counter: RefCell<Option<Arc<AtomicU64>>>,
     /// Counts first-turn memory context injections.
     pub injection_count: AtomicU64,
@@ -173,7 +186,8 @@ pub(crate) struct SessionMemory {
     pub compaction_recovery_count: AtomicU64,
     /// Total memory chunks added across all sources.
     pub chunks_added: Arc<AtomicU64>,
-    /// Handle to the startup reindex+embed task, taken and awaited by the launch dream.
+    /// Handle to the startup reindex+embed task, taken and awaited by the launch dream. `None`
+    /// once taken, or when memory was not indexed at launch.
     pub init_reindex_handle: RefCell<Option<tokio::task::JoinHandle<()>>>,
     /// autoDream consolidation config.
     pub dream_config: crate::config::MemoryDreamConfig,

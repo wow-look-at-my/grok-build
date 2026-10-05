@@ -62,7 +62,9 @@ impl<S: AcpSide, C> AcpGatewayReceiver<S, C> {
     }
 }
 
-/// The other side of the gateway.
+/// The other side of the gateway. Allows to send messages to a channel so that
+/// they will be forwarded automatically to a connection (as long as gateway
+/// receiver side is running in the background).
 pub struct AcpGatewaySender<S: AcpSide> {
     tx: mpsc::UnboundedSender<S::OutMessage>,
     tracing: bool,
@@ -342,7 +344,9 @@ impl<S: AcpSide> AcpGatewaySender<S> {
         self.enqueue(request, "forward_with_completion").1
     }
 
-    /// Enqueue a request without waiting for the response.
+    /// Enqueue a request without waiting for the response. Returns whether
+    /// the gateway channel accepted it (`false`: receiver gone, message
+    /// discarded) so callers keeping delivery-dependent state can retry.
     pub fn forward_fire_and_forget<T>(&self, request: T) -> bool
     where
         T: AcpRequest,
@@ -352,6 +356,8 @@ impl<S: AcpSide> AcpGatewaySender<S> {
     }
 
     /// Send a request and await the response. Returns a `Send` future.
+    /// Equivalent to the trait methods, but `Send` because this is an inherent async fn,
+    /// not wrapped by `#[async_trait(?Send)]`.
     pub async fn send<T>(&self, request: T) -> AcpResult<T::Response>
     where
         T: AcpRequest,
@@ -436,6 +442,8 @@ impl acp::Client for AcpGatewaySender<acp::AgentSide> {
 
     async fn session_notification(&self, args: acp::SessionNotification) -> AcpResult<()> {
         // Fire-and-forget: session notifications carry no meaningful response (ACK is `()`).
+        // A degraded agent→relay→client path can stall for minutes; blocking here freezes
+        // the terminal streaming loop and hangs the session.
         self.forward_fire_and_forget(args);
         Ok(())
     }
@@ -445,7 +453,8 @@ impl acp::Client for AcpGatewaySender<acp::AgentSide> {
     }
 
     async fn ext_notification(&self, args: acp::ExtNotification) -> AcpResult<()> {
-        // Fire-and-forget for the same reason as `session_notification` above: the ACK is `()` and blocking risks hanging the caller.
+        // Fire-and-forget for the same reason as `session_notification` above:
+        // the ACK is `()` and blocking risks hanging the caller when the relay path is degraded.
         self.forward_fire_and_forget(args);
         Ok(())
     }
@@ -582,6 +591,8 @@ mod tests {
             .await;
     }
 
+    /// Regression: two-phase cutover keeps replay-before-response and avoids
+    /// dropping live updates during drain.
     #[tokio::test]
     async fn two_phase_cutover_no_missing_updates() {
         let local = tokio::task::LocalSet::new();
@@ -595,6 +606,7 @@ mod tests {
                 const DELTA: usize = 50;
                 const LIVE: usize = 20;
 
+                // Phase 1: sync enqueue of replay notifications.
                 let completions: Vec<_> = (0..DELTA)
                     .map(|i| {
                         sender.forward_with_completion(text_notification(&format!("delta-{i}")))
@@ -632,6 +644,7 @@ mod tests {
                     .position(|s| s == "RESPONSE")
                     .expect("RESPONSE marker must be in the log");
 
+                // (1) Delta notifications are all present and before RESPONSE.
                 for i in 0..DELTA {
                     let tag = format!("delta-{i}");
                     let pos = log
@@ -644,6 +657,7 @@ mod tests {
                     );
                 }
 
+                // (2) Delta notifications preserve enqueue order.
                 let delta_positions: Vec<usize> = (0..DELTA)
                     .map(|i| log.iter().position(|s| s == &format!("delta-{i}")).unwrap())
                     .collect();
@@ -657,6 +671,7 @@ mod tests {
                     );
                 }
 
+                // (3) No live updates are lost.
                 for i in 0..LIVE {
                     let tag = format!("live-{i}");
                     assert!(
@@ -665,6 +680,7 @@ mod tests {
                     );
                 }
 
+                // (4) Live updates do not precede replay delta.
                 let last_delta = *delta_positions.last().unwrap();
                 for i in 0..LIVE {
                     let tag = format!("live-{i}");

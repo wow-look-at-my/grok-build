@@ -1,4 +1,7 @@
 //! Consent screen: a notice the user must accept before a session starts.
+//!
+//! Mirrors the folder-trust question, the other blocking welcome screen. The body is laid out by
+//! [`crate::app::consent::wrap`], which the validator also uses, so gate and screen agree on width.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -167,8 +170,8 @@ fn paint_body(
             let text: String = run.iter().map(|cell| cell.text.as_str()).collect();
             let cols = row_cols(run);
             let style = match link {
-                // Hover keys on the link, not the rect, so every run
-                // brightens together Bold as well as brighter.
+                // Hover keys on the link, not the rect, so every run brightens together
+                // Bold as well as brighter, because a 16-colour palette maps both colours to the same one
                 Some(index) if hovered_link == Some(index) => theme
                     .link_style()
                     .fg(theme.text_primary)

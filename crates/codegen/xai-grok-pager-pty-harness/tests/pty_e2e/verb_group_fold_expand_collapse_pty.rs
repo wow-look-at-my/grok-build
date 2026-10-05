@@ -24,6 +24,8 @@ async fn verb_group_fold_expand_collapse_pty() {
         "b2.txt",
     ] {
         let path = content.home().join(name);
+        // a1's body is unique so opening MEMBER 0's block below has an unambiguous sentinel
+        // The edit diff already shows "hello verb group" on screen
         let body = if name == "a1.txt" {
             "first member body a1\n"
         } else {
@@ -37,7 +39,7 @@ async fn verb_group_fold_expand_collapse_pty() {
     }
     let home_str = content.home().to_string_lossy().into_owned();
 
-    // Reads, greps, an edit, more reads, then a plain completion to settle
+    // Three reads, two greps, an edit, two more reads, then a plain completion to settle
     let _tool_turns = [
         expect_tool_turn(&content, "call_r1", "read_file", read_args(&paths[0])),
         expect_tool_turn(&content, "call_r2", "read_file", read_args(&paths[1])),
@@ -125,7 +127,8 @@ async fn verb_group_fold_expand_collapse_pty() {
         harness.screen_contents()
     );
 
-    // Focus scrollback with a single Tab, then wait for a scrollback-only footer hint.
+    // Focus scrollback with a single Tab, then wait for a scrollback-only footer hint to prove the
+    // scrollback owns keys.
     harness.inject_keys(b"\t").expect("focus scrollback");
     harness
         .wait_for_text("Ctrl+e:", Duration::from_secs(10))
@@ -151,9 +154,8 @@ async fn verb_group_fold_expand_collapse_pty() {
     harness
         .inject_keys(click.as_bytes())
         .expect("double-click header");
-    // Expanded shape: the header line sits ABOVE the members and every member
-    // (including the first) renders as its own row The slot stays selected
-    // and acts.
+    // Expanded shape: the header line sits ABOVE the members and every member (including the first) renders as its own row
+    // The slot stays selected and acts as MEMBER 0: the caret sits on the member row pointing right, and the header row wears no caret
     harness
         .wait_for_text("a1.txt", Duration::from_secs(10))
         .unwrap_or_else(|_| {
@@ -189,6 +191,8 @@ async fn verb_group_fold_expand_collapse_pty() {
         harness.screen_contents()
     );
 
+    // Prove the scrollback owns keys, then Right: it must open MEMBER 0's own block (not re-toggle the group)
+    // Opening drops member 0 from the run, so the group dissolves while its body is on show
     harness
         .wait_for_text("Ctrl+e:", Duration::from_secs(10))
         .unwrap_or_else(|_| {

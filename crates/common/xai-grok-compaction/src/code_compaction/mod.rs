@@ -1,4 +1,28 @@
 //! grok-build's "code agent" compaction subsystem.
+//!
+//! grok-build does not select a tail to keep; it summarizes the whole
+//! conversation and rebuilds a fresh history from scratch (the *full-replace*
+//! strategy). This module groups that subsystem — generic over the engine's
+//! [`CompactionItem`](crate::item::CompactionItem) /
+//! [`CompactionItemFactory`](crate::item::CompactionItemFactory) seams — so it
+//! can be reused as a unit by grok-build, separate from Grok chat's
+//! [`intra_compaction`](crate::intra_compaction) (tail-keep, per-step) and
+//! [`inter_compaction`](crate::inter_compaction) (chunked, between-turn).
+//!
+//! Layout (mirroring
+//! [`intra_compaction`](crate::intra_compaction) /
+//! [`inter_compaction`](crate::inter_compaction)):
+//!
+//! - **Policy & content**: [`prompt`] (summarization prompt), [`summary`]
+//!   (summary cleaning + carrier), [`failure`] (deterministic-vs-transient
+//!   classification), [`config`] (tunables + trigger/seed defaults).
+//! - **Algorithm**: [`assemble`] (full-replace history rebuild).
+//! - **Orchestration**: [`compact`]
+//!   (`build prompt → sample → clean → assemble`).
+//!
+//! Host-specific concerns (triggers, transport, persistence/replay, state
+//! commit, metrics observer) stay in the product host (for example
+//! `xai-grok-shell`).
 
 pub mod assemble;
 pub mod compact;

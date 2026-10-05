@@ -26,7 +26,8 @@ pub enum SegmentTone {
 /// A `builtin` segment, already cut to the columns it may use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusSegment {
-    // Not `pub`: a struct literal elsewhere would skip the control-character filter.
+    // Not `pub`: a struct literal elsewhere would skip the control-character filter in [`Self::new`]
+    // Read through [`Self::text`]
     pub(super) text: String,
     pub(super) tone: SegmentTone,
 }
@@ -50,9 +51,9 @@ impl StatusSegment {
         Self::new(text, SegmentTone::Warn)
     }
 
-    /// Control characters are dropped here rather than at the painter. A
-    /// segment carries the user's own text: a cwd, a model name, a config
-    /// value they typed.
+    /// Control characters are dropped here rather than at the painter.
+    /// A segment carries the user's own text: a cwd, a model name, a config value they typed.
+    /// Only [`SanitizedText`](super::SanitizedText) filters the path a script's output takes.
     fn new(text: impl Into<String>, tone: SegmentTone) -> Self {
         let text: String = text.into();
         Self {

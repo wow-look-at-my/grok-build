@@ -1,9 +1,13 @@
 //! Runtime-tunable timing/threshold config for the workspace tool server.
+//!
+//! All values are read once at startup from `GROK_WORKSPACE_*` environment variables via [`StatusConfig::from_env`].
+//! Unset or unparseable variables fall back to the documented defaults (with a `warn!` on parse failure), so construction never fails.
 
 use std::str::FromStr;
 use std::time::Duration;
 
-// ── Default timing/threshold values ────────────────────────────────────── Single source of truth.
+// ── Default timing/threshold values ──────────────────────────────────────
+// Single source of truth for the `StatusConfig::default()` values and the documented fallbacks for each `GROK_WORKSPACE_*` env var
 
 /// Default interval between status/heartbeat emissions.
 const DEFAULT_HEARTBEAT_SECS: u64 = 30;
@@ -23,7 +27,7 @@ const DEFAULT_DRAIN_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_AGENT_RPC_TIMEOUT_SECS: u64 = 30;
 /// Default timeout (s) for establishing an agent connection.
 const DEFAULT_AGENT_CONNECT_TIMEOUT_SECS: u64 = 5;
-/// Default preview-activity withhold window. Sourced from the tracker's `PREVIEW_ACTIVITY_WINDOW_MS` so both can't drift.
+/// Default preview-activity withhold window. Sourced from the tracker's `PREVIEW_ACTIVITY_WINDOW_MS` so the two can't drift.
 const DEFAULT_PREVIEW_ACTIVITY_WINDOW_MS: u64 = crate::activity::PREVIEW_ACTIVITY_WINDOW_MS;
 /// Default client-RPC withhold window; `0` disables the withhold.
 const DEFAULT_RPC_ACTIVITY_WINDOW_MS: u64 = crate::activity::RPC_ACTIVITY_WINDOW_MS;
@@ -33,33 +37,39 @@ const DEFAULT_PRESENCE_ACTIVITY_WINDOW_MS: u64 = crate::activity::PRESENCE_ACTIV
 const DEFAULT_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS: u64 = 10_000;
 /// Smallest window that still leaves room for a strictly-smaller scrape; only a broken config reaches it (the normal window is 60s).
 const MIN_PREVIEW_ACTIVITY_WINDOW_MS: u64 = 2;
+/// Scrape-interval floor; `0` would busy-loop the scraper.
 const MIN_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS: u64 = 1;
+/// Ceiling on the client-RPC withhold window, so a seconds-for-ms typo cannot pin a sandbox for a day. `0` (the kill switch) is exempt.
 const MAX_RPC_ACTIVITY_WINDOW_MS: u64 = 600_000;
+/// Ceiling on the client-presence withhold window; `0` is exempt.
 const MAX_PRESENCE_ACTIVITY_WINDOW_MS: u64 = 600_000;
+/// Default keep-awake window for scheduled tasks; `0` turns it off.
 const DEFAULT_SCHEDULED_TASK_KEEP_AWAKE_MS: u64 =
     crate::activity::SCHEDULED_TASK_KEEP_AWAKE_WINDOW_MS;
 /// Ceiling on the keep-awake window; `0` is exempt. Matches the 7-day cap on session TTL overrides.
-const MAX_SCHEDULED_TASK_KEEP_AWAKE_MS: u64 = 7 * 24 * 3_600_000; // Several
+const MAX_SCHEDULED_TASK_KEEP_AWAKE_MS: u64 = 7 * 24 * 3_600_000; // 7 days
 const DEFAULT_PREVIEW_STATE_POLL_INTERVAL_MS: u64 = 5_000;
 /// Poll-interval floor; `0` would busy-loop the watcher against loopback.
+/// Doubles as the gap floor between consecutive long-poll requests in `crate::preview_state`, so a proxy that ignores `?wait` can't be hot-looped.
 pub(crate) const MIN_PREVIEW_STATE_POLL_INTERVAL_MS: u64 = 100;
 /// Default preview-state long-poll hold; `0` disables long-polling entirely (the watcher keeps today's fixed-interval cadence).
 const DEFAULT_PREVIEW_STATE_WAIT_SECS: u64 = 0;
 /// Ceiling on the long-poll hold, mirroring the proxy's own `?wait` clamp (`xai-grok-preview-proxy` clamps held requests to 15s).
 const MAX_PREVIEW_STATE_WAIT_SECS: u64 = 15;
-/// Default preview-proxy discovery refresh passthrough.
+/// Default preview-proxy discovery refresh passthrough; `0` means the supervisor omits `--discovery-refresh-ms` and the proxy uses its default.
 const DEFAULT_PREVIEW_DISCOVERY_REFRESH_MS: u64 = 0;
 /// Discovery-refresh floor, mirroring the proxy's own flag floor; anything lower would rescan `/proc/net/tcp` in a near-busy loop.
 const MIN_PREVIEW_DISCOVERY_REFRESH_MS: u64 = 100;
-/// Discovery-refresh ceiling: past 10s the preview-state document goes stale enough to defeat the reporter.
+/// Discovery-refresh ceiling: past 10s the preview-state document goes stale enough to defeat the reporter, so a seconds-for-ms typo is repaired.
 const MAX_PREVIEW_DISCOVERY_REFRESH_MS: u64 = 10_000;
-/// Default fraction of TTL (or remaining lifetime at cold start) at which to refresh.
+/// Default fraction of TTL (or remaining lifetime at cold start) at which to refresh. Must stay in (0, 1).
 const DEFAULT_OIDC_REFRESH_FRACTION: f64 = 0.6;
-/// Default half-width of the jitter window as a fraction of the schedule scale (TTL or remaining).
+/// Default half-width of the jitter window as a fraction of the schedule scale (TTL or remaining). Must stay in [0, 0.5].
 const DEFAULT_OIDC_REFRESH_JITTER_FRACTION: f64 = 0.2;
 /// Default hard floor before expiry. Must exceed the SDK's 60s reactive margin so a reconnect never has to refresh synchronously.
 const DEFAULT_OIDC_SAFETY_MARGIN_SECS: u64 = 120;
 /// Default floor between consecutive *successful* refreshes.
+/// Must stay below `safety_margin` so a healthy short-TTL token does not hot-loop the IdP.
 const DEFAULT_OIDC_MIN_REFRESH_INTERVAL_SECS: u64 = 60;
 /// Smallest allowed spacing between successful refreshes. Zero would reschedule immediately when the TTL is at most `safety_margin`.
 const MIN_OIDC_MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -70,6 +80,7 @@ const MAX_OIDC_DURATION: Duration = Duration::from_secs(24 * 3600);
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProactiveRefreshConfig {
     /// `GROK_WORKSPACE_OIDC_PROACTIVE_REFRESH_ENABLED`. Default `true`.
+    /// `false` keeps the SDK reactive provider (kill-switch for workspace-owned proactive refresh). `true` selects the workspace-owned provider.
     pub enabled: bool,
     /// `GROK_WORKSPACE_OIDC_REFRESH_FRACTION`, open interval `(0, 1)`.
     pub fraction: f64,
@@ -78,6 +89,7 @@ pub struct ProactiveRefreshConfig {
     /// Hard floor before expiry (`GROK_WORKSPACE_OIDC_REFRESH_SAFETY_MARGIN_SECS`).
     pub safety_margin: Duration,
     /// Floor between consecutive *successful* refreshes (`GROK_WORKSPACE_OIDC_MIN_REFRESH_INTERVAL_SECS`).
+    /// Failure retries are bounded by expiry, not this floor.
     pub min_refresh_interval: Duration,
 }
 
@@ -218,6 +230,7 @@ pub struct StatusConfig {
     /// Reconnect backoff schedule for the server SDK connection. `None` leaves the SDK's built-in default exponential schedule in place.
     pub ws_reconnect_backoff: Option<Vec<Duration>>,
     /// Optional WebSocket liveness deadline (`GROK_WORKSPACE_WS_LIVENESS_DEADLINE_SECS`).
+    /// `None` leaves the SDK's `min(4× ping, 120s)` default in place.
     pub ws_liveness_deadline: Option<Duration>,
     /// Initial hub-connect hedge delay (`GROK_WORKSPACE_HUB_CONNECT_HEDGE_AFTER_SECS`).
     pub hub_connect_hedge_after: Option<Duration>,
@@ -232,35 +245,55 @@ pub struct StatusConfig {
     /// Idle duration after which an inactive session is pruned.
     pub session_idle_prune: Duration,
     /// Legacy single-phase drain timeout (`GROK_WORKSPACE_DRAIN_TIMEOUT_SECS`), retained for compatibility.
+    /// The SIGTERM and server-evict paths now use the two-phase drain bounded by `GROK_WORKSPACE_TERMINATION_GRACE_MS`.
     pub drain_timeout: Duration,
     /// Per-call timeout for agent RPCs.
     pub agent_rpc_timeout: Duration,
     /// Timeout for establishing an agent connection.
     pub agent_connect_timeout: Duration,
+    /// Opt-in foreground-only idle (`GROK_WORKSPACE_IDLE_IGNORE_BACKGROUND_TASKS`).
+    /// Requires the literal `"true"`; other spellings fall back to this default.
     pub idle_ignores_background: bool,
+    /// Recent preview-proxy traffic withholds idle for this window (`GROK_WORKSPACE_PREVIEW_ACTIVITY_WINDOW_MS`).
     pub preview_activity_window: Duration,
+    /// Cadence at which the preview-activity scraper polls the proxy (`GROK_WORKSPACE_PREVIEW_ACTIVITY_SCRAPE_INTERVAL_MS`).
     /// Kept strictly below `preview_activity_window` by [`validate`](Self::validate).
     pub preview_activity_scrape_interval: Duration,
+    /// A client mutation RPC withholds idle for this window (`GROK_WORKSPACE_RPC_ACTIVITY_WINDOW_MS`); zero disables.
     /// Clamped to `MAX_RPC_ACTIVITY_WINDOW_MS` by [`validate`](Self::validate).
     pub rpc_activity_window: Duration,
+    /// Presence-keepalive kill-switch (`GROK_WORKSPACE_PRESENCE_KEEPALIVE_ENABLED`, default OFF).
     /// When off, the `ClientPresence` tier is wired with a zero window.
     pub presence_keepalive_enabled: bool,
+    /// A visible client-presence note withholds idle for this window (`GROK_WORKSPACE_PRESENCE_ACTIVITY_WINDOW_MS`); zero disables.
     pub presence_activity_window: Duration,
+    /// A live scheduled task keeps the sandbox awake while its next run is at most this far away (`GROK_WORKSPACE_SCHEDULED_TASK_KEEP_AWAKE_MS`).
     /// Zero turns it off. Clamped to `MAX_SCHEDULED_TASK_KEEP_AWAKE_MS` by [`validate`](Self::validate).
     pub scheduled_task_keep_awake: Duration,
+    /// Preview-state reporter kill-switch (`GROK_WORKSPACE_PREVIEW_STATE_REPORTER_ENABLED`, default OFF).
     pub preview_state_reporter_enabled: bool,
+    /// Poll cadence (`GROK_WORKSPACE_PREVIEW_STATE_POLL_INTERVAL_MS`); floored by [`validate`](Self::validate).
     pub preview_state_poll_interval: Duration,
-    /// Once the proxy's document carries a `generation`.
+    /// Preview-state long-poll hold (`GROK_WORKSPACE_PREVIEW_STATE_WAIT_SECS`).
+    /// Once the proxy's document carries a `generation`, the watcher holds `GET ?wait=<secs>&if_generation=<gen>` instead of fixed-interval polling.
+    /// Zero (the default) disables long-polling; clamped to the proxy's own 15s hold ceiling by [`validate`](Self::validate).
     pub preview_state_wait: Duration,
+    /// Preview-proxy discovery-scan cadence (`GROK_WORKSPACE_PREVIEW_DISCOVERY_REFRESH_MS`).
     /// The supervisor forwards it to the proxy as `--discovery-refresh-ms`.
+    /// Zero (the default) omits the flag, leaving the proxy default; nonzero is clamped into [100ms, 10s] by [`validate`](Self::validate).
     pub preview_discovery_refresh: Duration,
+    /// Proxy loopback control port from the `--preview-control-port` CLI flag (set by `workspace_server`, not env).
     /// `None` uses the proxy default.
     pub preview_control_port: Option<u16>,
+    /// True when this container booted via the sandbox restore path, which injects `GROK_SESSION_RESTORED=true`; a first boot never does.
     pub session_restored: bool,
+    /// True when restore injects `GROK_REVIVE_SCRIPT_CONFIGURED=true` (launchable revive configured).
     /// The var is unset on first boot and non-launchable restores.
     pub revive_script_configured: bool,
+    /// True when restore injects `GROK_RESUME_NUDGE_DISABLED=true` (per-env `resume_nudge_disabled` sandbox config).
     /// When set, the session-resumed nudge is suppressed at source for this boot.
     pub resume_nudge_disabled: bool,
+    /// True when restore injects `GROK_COMPUTER_SESSION_RESUMED_EMIT=true` (sandbox `computer_session_resumed_emit` config field; default OFF).
     /// When false, the session-resumed nudge is suppressed at source.
     pub computer_session_resumed_emit: bool,
 }
@@ -396,8 +429,8 @@ impl StatusConfig {
     }
 
     /// Read only the agent gRPC `(request, connect)` timeouts from the environment, without parsing or validating the rest of the config.
-    /// Used by the btrfs delegate's env-based construction path, which has no `StatusConfig` in scope. Reading just these vars avoids
-    /// re-running [`validate`](Self::validate) (and its possible duplicate `warn!`).
+    /// Used by the btrfs delegate's env-based construction path, which has no `StatusConfig` in scope.
+    /// Reading just these two vars avoids re-running [`validate`](Self::validate) (and its possible duplicate `warn!`).
     pub fn agent_timeouts_from_env() -> (Duration, Duration) {
         let defaults = Self::default();
         const RPC_VAR: &str = "GROK_WORKSPACE_AGENT_RPC_TIMEOUT_SECS";
@@ -635,7 +668,8 @@ fn backoff_schedule_from_env(var: &str) -> Option<Vec<Duration>> {
 mod tests {
     use super::*;
 
-    // Crate-shared env lock: every test that mutates the process environment holds it for its full duration One lock for the whole crate.
+    // Crate-shared env lock: every test that mutates the process environment holds it for its full duration
+    // One lock for the whole crate: `unsafe set_var` mutates the global `environ` array, so even tests touching disjoint vars must serialize
     use crate::ENV_TEST_LOCK as ENV_LOCK;
 
     #[test]

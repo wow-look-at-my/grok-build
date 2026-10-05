@@ -1,4 +1,19 @@
-//! Normalizes chat_history.jsonl for the data processing pipeline, converting v1 (`ConversationItem`) lines to v0.
+//! Normalizes chat_history.jsonl for the data processing pipeline, converting v1 (`ConversationItem`) lines to v0 (`ChatRequestMessage`) format.
+//!
+//! Usage:
+//!   chat-history-downgrade <INPUT> <OUTPUT>
+//!
+//! ## Reasoning-shape compatibility
+//!
+//! Two on-disk v1 shapes carry reasoning, and both must be downgraded into the v0 `reasoning_content: Option<String>` field:
+//!
+//! 1. **Legacy shape**: reasoning lived as a field on the assistant item itself: `{"type":"assistant","reasoning":{"text":...},...}`.
+//!    `AssistantItem` no longer has that field, so serde silently drops it on deserialize.
+//!    The converter pre-extracts it from the raw JSON before parsing as `ConversationItem`.
+//!
+//! 2. **Current shape**: reasoning is a sibling `ConversationItem::Reasoning(rs::ReasoningItem)` item preceding the assistant in the JSONL stream.
+//!    The downgrade buffers them and folds their text into the next assistant's `reasoning_content`, matching `conversation_to_chat_messages`.
+//!    Intervening user / tool messages clear the buffer.
 
 #![deny(clippy::indexing_slicing)]
 
@@ -26,8 +41,9 @@ fn convert_line(
     trimmed: &str,
     pending_reasoning: &mut Vec<String>,
 ) -> anyhow::Result<Option<ChatRequestMessage>> {
-    // Inspect the raw JSON first so we can: (a) extract a legacy `assistant.reasoning.text` field before strongly-typed
-    // parsing drops it.
+    // Inspect the raw JSON first so we can:
+    //   (a) extract a legacy `assistant.reasoning.text` field before strongly-typed parsing drops it, and
+    //   (b) buffer sibling `Reasoning` lines.
     let raw: serde_json::Value = serde_json::from_str(trimmed)
         .map_err(|e| anyhow::anyhow!("line is not valid JSON: {e}"))?;
     let item_type = raw.get("type").and_then(|t| t.as_str());
@@ -65,8 +81,7 @@ fn convert_line(
                 .map_err(|_| anyhow::anyhow!("failed to parse as v1 or v0: {v1_err}"))?,
         };
 
-    // Attach reasoning to assistant messages, with the field taking
-    // precedence when both sources exist
+    // Attach reasoning to assistant messages, with the legacy field taking precedence when both sources exist
     if let Some(text) = legacy_reasoning {
         chat_msg.reasoning_content = Some(text);
         pending_reasoning.clear();
@@ -74,7 +89,8 @@ fn convert_line(
         chat_msg.reasoning_content = Some(pending_reasoning.join("\n"));
         pending_reasoning.clear();
     } else if !matches!(chat_msg.role, Role::Assistant) {
-        // An intervening user / tool message clears pending reasoning.
+        // An intervening user / tool message clears pending reasoning, matching `conversation_to_chat_messages`
+        // Reasoning attaches only to the immediately-following assistant
         pending_reasoning.clear();
     }
 
@@ -489,6 +505,7 @@ mod tests {
         }
         writer.flush().unwrap();
 
+        // 5 emitted lines: sys, q1, a1, q2, a2 (two reasoning lines folded in).
         assert_eq!(count, 5);
 
         let output = std::fs::read_to_string(&output_path).unwrap();

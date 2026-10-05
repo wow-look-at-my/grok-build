@@ -140,6 +140,7 @@ fn hung_open_wedges_only_one_caller() {
     use super::lock_file_with;
 
     let root = tempfile::tempdir().unwrap();
+    // `tempfile::tempdir()` inherits the umask (0755), which a `GuardedIn` dir is refused for.
     let slot_dir = root.path().join("slots");
     DirBuilder::new().mode(0o700).create(&slot_dir).unwrap();
     let target = root.path().join("leader.lock");

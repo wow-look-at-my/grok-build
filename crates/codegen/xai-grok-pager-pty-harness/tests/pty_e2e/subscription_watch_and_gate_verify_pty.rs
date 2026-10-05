@@ -1,4 +1,6 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
+//
+// End-to-end coverage for free-to-paid subscription auto-detection (`src/app/subscription.rs`)
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -21,7 +23,7 @@ fn user_check_count(content: &ContentController) -> usize {
         .count()
 }
 
-/// Count of `GET /v1/settings` fetches.
+/// Count of `GET /v1/settings` fetches (the qualifying-tier check refetches settings, so a post-upgrade increase marks detection completing).
 fn settings_count(content: &ContentController) -> usize {
     content
         .requests()
@@ -39,7 +41,7 @@ fn models_count(content: &ContentController) -> usize {
         .count()
 }
 
-/// Paid-only model id used to prove the post-unblock catalog replaced the free list in the picker.
+/// Paid-only model id used to prove the post-unblock catalog actually replaced the free list in the picker (not merely that `/v1/models` was hit).
 const PAID_ONLY_MODEL: &str = "composer-paid-only";
 
 /// Minimal unsigned JWT with a `tier` claim matching [`PAID_TIER`]. It must match
@@ -205,6 +207,7 @@ fn spawn_subscription_session(
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
     // Start free-targeted (no paid-only model); swap after upgrade.
+    // OIDC mock is started only after free-phase polling so early refresh still connection-refuses (keeps the free watch path hermetic)
     let content = ContentController::start_with_models(vec![MockModel::new("grok-3")])
         .await
         .expect("start content");
@@ -227,7 +230,8 @@ async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
     // Now enable hermetic paid JWT refresh for the post-unblock catalog path.
     let oidc = start_local_oidc_paid_refresh().await;
 
-    // Server-side upgrade: the live tier flips to a qualifying value.
+    // Server-side upgrade: the live tier flips to a qualifying value and settings now carry the paid display tier
+    // Swap the model catalog BEFORE recording models_before so an in-flight free fetch cannot falsely satisfy the post-upgrade re-fetch wait
     let settings_before = settings_count(&content);
     content.server().set_user_subscription_tier(Some(PAID_TIER));
     content.server().set_settings(json!({
@@ -256,8 +260,8 @@ async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
         "model catalog re-fetch after free→paid subscription unblock",
     );
 
-    // Stronger than a GET count: switch to the paid-only model id The status
-    // bar shows it on success.
+    // Stronger than a GET count: switch to the paid-only model id
+    // The status bar shows it on success (same pattern as same_agent_type_switch_no_modal)
     harness
         .inject_keys(format!("/model {PAID_ONLY_MODEL}\r").as_bytes())
         .expect("switch to paid-only model");
@@ -306,8 +310,8 @@ async fn startup_gate_shows_paywall_for_free_user_after_live_check() {
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
-    // The verified gate renders. Normally the check response resolves the
-    // deferral within seconds.
+    // The verified gate renders. Normally the check response resolves the deferral within seconds.
+    // The budget also covers the 30s hung-check safety net under full-suite contention
     harness
         .wait_for_text(GATE_MSG, Duration::from_secs(45))
         .expect("gate copy renders for a genuinely-free user");
@@ -361,7 +365,9 @@ async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
     );
     harness.inject_keys(b"/new\r").expect("run /new");
 
-    // Sample the screen across the deferral window.
+    // Sample the screen across the deferral window: the gate copy must never appear
+    // A gated check result is impossible (the live tier is paid and the fresh settings allow)
+    // The 30s hung-check net is the only other surface, and the resolving check disarms it
     let end = Instant::now() + Duration::from_secs(8);
     while Instant::now() < end {
         harness.update(Duration::from_millis(150));
@@ -372,8 +378,7 @@ async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
         );
     }
 
-    // Positive anchors: the deferral's live check ran, and the session is
-    // fully usable (prompt round-trips)
+    // Positive anchors: the deferral's live check actually ran, and the session is fully usable (prompt round-trips)
     assert!(
         user_check_count(&content) > checks_before,
         "expected a live subscription check for the deferred gate; requests: {:?}",

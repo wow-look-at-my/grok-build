@@ -38,7 +38,9 @@ async fn esc_idle_empty_no_messages_is_swallowed_noop() {
         harness.screen_contents()
     );
 
-    // Esc TWICE while idle with an empty prompt and no messages: a true swallow stays a no-op on the second press Pressing once.
+    // Esc TWICE while idle with an empty prompt and no messages: a true swallow stays a no-op on the second press
+    // Pressing once and typing couldn't distinguish a swallow from a silently-armed rewind (the next keystroke clears any pending)
+    // A wrongly-armed rewind would instead OPEN the picker on the second Esc
     harness.inject_keys(keys::ESC).expect("press esc (1)");
     harness.update(Duration::from_millis(250));
     harness.inject_keys(keys::ESC).expect("press esc (2)");

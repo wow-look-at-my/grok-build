@@ -1,4 +1,10 @@
-//! Provides a single `ModalWindow` that handles the visual frame: border, title, close button, optional tab bar.
+//! Provides a single `ModalWindow` that handles the visual frame: border, title, close button, optional tab bar, footer shortcuts.
+//! It also routes common input: Esc to close, tab switching, shortcut clicks.
+//! Each popup modal in the pager becomes an instance of `ModalWindow` with different features enabled via [`ModalWindowConfig`].
+//!
+//! The visual style follows the import-claude modal's design.
+//! It draws an accent-colored square border, a bold title on the top border, generous inner padding, and a `Clear` background.
+//! Footer shortcuts render inline and centered, with hover highlights.
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEventKind};
 use ratatui::buffer::Buffer;
@@ -16,7 +22,9 @@ pub use crate::modal_window_state::{ModalWindowState, ShortcutHitArea};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// When set, [`render_modal_window`] renders **borderless** ("embedded"): no centered popup box, no border.
+/// When set, [`render_modal_window`] renders **borderless** ("embedded"): no centered popup box, no border, no close button.
+/// The modal's content fills the given `area` directly.
+/// Minimal mode sets this once at startup so it never shows a floating modal frame; the full TUI leaves it off and keeps the bordered popup.
 static EMBEDDED: AtomicBool = AtomicBool::new(false);
 
 /// Enable/disable borderless ("embedded") modal rendering.
@@ -72,25 +80,28 @@ pub struct ModalWindowConfig<'a> {
     pub shortcuts: &'a [Shortcut<'a>],
     /// Sizing parameters.
     pub sizing: ModalSizing,
-    /// Fold state of the focused entry.
+    /// Fold state of the currently focused entry.
+    /// When provided, Left/Right/h/l return specific fold outcomes instead of [`ModalWindowOutcome::Unhandled`].
     pub fold_info: Option<FoldInfo>,
 }
 
 /// Sizing parameters for the modal popup.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModalSizing {
+    /// Fraction of screen width to use (0.0..=1.0). Default: 0.9.
     pub width_pct: f32,
-    /// Maximum width in columns.
+    /// Maximum width in columns. Default: 140.
     pub max_width: u16,
-    /// Minimum width in columns.
+    /// Minimum width in columns. Default: 60.
     pub min_width: u16,
-    /// Vertical margin (top and bottom) in rows.
+    /// Vertical margin (top and bottom) in rows. Default: 7.
     pub v_margin: u16,
-    /// Horizontal inner padding in columns (applied on both sides).
+    /// Horizontal inner padding in columns (applied on both sides). Default: 2.
     pub h_pad: u16,
     /// Vertical inner padding above the content area (below the tab bar, if present).
+    /// It is not applied at the bottom: the footer occupies that space. Default: 2.
     pub v_pad: u16,
-    /// Lines reserved at the bottom for footer shortcuts.
+    /// Lines reserved at the bottom for footer shortcuts. Default: 2.
     pub footer_lines: u16,
 }
 
@@ -109,7 +120,8 @@ impl Default for ModalSizing {
 }
 
 impl ModalSizing {
-    /// Good for picker lists. Used by: cloud_modal and other pickers.
+    /// Medium popup: ~60% width, standard padding. Good for picker lists.
+    /// Used by: cloud_modal and other pickers.
     pub fn medium() -> Self {
         Self {
             width_pct: 0.60,
@@ -122,17 +134,20 @@ impl ModalSizing {
         }
     }
 
-    /// Good for forms/detail views. Used by: import_claude_modal. Same as
-    /// Default.
+    /// Large popup: ~90% width, generous padding. Good for forms/detail views.
+    /// Used by: import_claude_modal. Same as Default.
     pub fn large() -> Self {
         Self::default()
     }
 
-    /// Returns adjusted sizing for compact mode with * little margins*.
+    /// Returns adjusted sizing for compact mode with *very little margins*.
+    ///
+    /// Goal: maximize usable content area inside every popup (command palette, /resume sessions, plugins/hooks/mcps, import-claude, docs, etc.).
     pub fn with_compact(mut self, compact: bool) -> Self {
         if compact {
             // Almost no outer centering margin: the popup can nearly touch the top and bottom of the terminal
             self.v_margin = 0;
+            // Keep 1 column so the left accent line and selection border have room
             self.h_pad = 1;
             // No extra vertical breathing room above the first content row (search bar, tab content, or first picker row)
             self.v_pad = 0;
@@ -161,6 +176,7 @@ pub struct Shortcut<'a> {
     /// Display label (e.g. "Enter import 3" or "Esc cancel").
     pub label: &'a str,
     /// Whether clicking this shortcut dispatches `ShortcutActivated`.
+    /// All shortcuts get the same visual style and hover highlights regardless of this flag.
     pub clickable: bool,
     /// Caller-defined identifier, returned in `ModalWindowOutcome::ShortcutActivated`.
     pub id: usize,
@@ -172,7 +188,8 @@ pub struct ModalContentArea {
     pub content: Rect,
     /// Rect for the footer shortcut row.
     pub footer: Rect,
-    /// Full inner width (border to border, no h_pad). Use this for rendering full-width dividers.
+    /// Full inner width (border to border, no h_pad).
+    /// Use this for rendering full-width dividers.
     pub inner_x: u16,
     pub inner_width: u16,
 }
@@ -297,7 +314,8 @@ pub fn render_modal_window(
         inner
     };
 
-    // Optional tab bar below the top border, with a full-width divider separating tabs from content The tab bar wraps onto multiple rows.
+    // Optional tab bar below the top border, with a full-width divider separating tabs from content
+    // The tab bar wraps onto multiple rows when tabs don't fit on a single line
     let tab_bar_height;
     let tab_divider_height;
     if let Some(tabs) = config.tabs {
@@ -321,6 +339,7 @@ pub fn render_modal_window(
     }
 
     // Compute content area (inside padding, above footer).
+    // When tabs are present, the divider replaces vertical padding between tabs and content (so content starts right after the divider)
     let effective_v_pad = if config.tabs.is_some() {
         0
     } else {
@@ -343,7 +362,8 @@ pub fn render_modal_window(
         height: content_height,
     };
 
-    // Footer: spans all footer rows at the bottom Shortcuts render bottom-aligned within this area.
+    // Footer: spans all footer rows at the bottom
+    // Shortcuts render bottom-aligned within this area (a single row stays on the last line, additional rows wrap upward)
     let footer_height = footer_lines.min(inner.height);
     let footer_y = inner.y + inner.height.saturating_sub(footer_height);
     let footer_area = Rect {
@@ -376,7 +396,8 @@ pub(crate) fn render_close_button(
     state: &mut ModalWindowState,
     theme: &Theme,
 ) {
-    // Padding spaces around a bracketed close mark (`✗`, or `x` on legacy ConHost where the Dingbats glyph renders as tofu) Each cell is one column.
+    // Padding spaces around a bracketed close mark (`✗`, or `x` on legacy ConHost where the Dingbats glyph renders as tofu)
+    // Each cell is one column, so the 5-cell width is platform-independent
     let close_cells: [&str; 5] = [" ", "[", crate::glyphs::ballot_x(), "]", " "];
     let close_width = close_cells.len() as u16;
     let close_rect = Rect {
@@ -478,6 +499,9 @@ fn render_tab_bar(
                 .get(..byte_offset_at_width(label, remaining))
                 .unwrap_or("");
             let label_w = display.width();
+            // Inactive tab labels use `theme.gray` (secondary-text tier), not `theme.gray_dim`
+            // At ANSI16 `gray_dim` collapses to the softer slot (silver on White), leaving text at ~1.2:1 contrast
+            // That is fine for the modal frame's one-cell border line but unreadable as text glyphs on grokday
             let style = if is_active {
                 if state.tabs_focused && !is_embedded {
                     Style::default()
@@ -519,6 +543,7 @@ fn render_tab_bar(
 }
 
 /// Predict footer shortcut row count at the given area and sizing.
+/// Returns 0 when the modal is too small to render.
 pub(crate) fn predict_shortcut_rows(
     area: Rect,
     sizing: &ModalSizing,
@@ -528,6 +553,7 @@ pub(crate) fn predict_shortcut_rows(
     if modal_width < 20 || modal_height < 6 {
         return 0;
     }
+    // Border on each side eats 1 column, so inner_width = modal_width - 2
     let inner_width = modal_width.saturating_sub(2);
     let footer_width = inner_width.saturating_sub(sizing.h_pad * 2);
     shortcuts_rows_needed(shortcuts, footer_width)
@@ -554,7 +580,7 @@ pub(crate) fn shortcuts_rows_needed(shortcuts: &[Shortcut<'_>], width: u16) -> u
         return 0;
     }
     let avail = width as usize;
-    let sep_w = "  |  ".width();
+    let sep_w = "  |  ".width(); // 5
     let mut rows = 1u16;
     let mut cur_row_w: usize = 0;
     for shortcut in shortcuts {
@@ -574,8 +600,8 @@ pub(crate) fn shortcuts_rows_needed(shortcuts: &[Shortcut<'_>], width: u16) -> u
     rows
 }
 
-/// Split a shortcut label into its `(key, label)` parts at the first ASCII
-/// space character.
+/// Split a shortcut label into its `(key, label)` parts at the first ASCII space character. We
+/// split on ASCII `' '` rather than `char::is_whitespace`.
 fn split_shortcut_label(label: &str) -> (&str, &str) {
     match label.find(' ') {
         Some(i) => label.split_at(i),
@@ -671,7 +697,9 @@ pub fn render_modal_shortcuts(
                 }
             }
 
-            // Split the label at the first whitespace The leading token is the "key" (bold text_secondary).
+            // Split the label at the first whitespace
+            // The leading token is the "key" (bold text_secondary); the rest is the descriptive label (gray, the tertiary shade)
+            // Single-token labels render entirely as the key
             let (key_part, label_part) = split_shortcut_label(display);
 
             let mut key_style = Style::default()
@@ -779,6 +807,7 @@ pub(crate) fn render_centered_tip_footer(buf: &mut Buffer, area: Rect, theme: &T
     );
 }
 
+/// No tip if height < 3; blank gap above tip when height >= 6.
 pub(crate) fn split_content_for_tip_footer(content: Rect) -> (Rect, Option<Rect>) {
     if content.height < 3 {
         return (content, None);
@@ -837,6 +866,8 @@ pub fn fold_indicator_span(
 }
 
 /// Render a fold indicator directly into a buffer at `(x, y)`.
+///
+/// Convenience wrapper around [`fold_indicator_span`] that writes the glyph into `buf` and returns the number of columns consumed (always 2).
 pub fn render_fold_indicator(
     buf: &mut Buffer,
     x: u16,
@@ -926,6 +957,7 @@ pub fn handle_modal_mouse(
         .map(|hit| hit.id);
 
     // Check which shortcut index is hovered (for hover state tracking).
+    // Uses `shortcuts_idx` (the index into the full shortcuts slice) so the hover index matches the render loop's `idx` in `render_modal_shortcuts`
     let shortcut_hover_idx: Option<usize> = state
         .shortcut_hits
         .iter()
@@ -971,6 +1003,8 @@ pub fn handle_modal_mouse(
             }
             if changed {
                 // Chrome hover state changed (e.g. cursor left a shortcut) but is now in the content area.
+                // Return Handled so a redraw clears the stale highlight
+                // The content hover will update on the next mouse move
                 return ModalWindowOutcome::Handled;
             }
             ModalWindowOutcome::Unhandled
@@ -980,8 +1014,8 @@ pub fn handle_modal_mouse(
 }
 
 /// Word-wrap text into lines that fit within `max_w` display columns. Measures display width (wide
-/// CJK/emoji are a couple of columns), not chars, so a fitting line never overflows the modal
-/// border; all slicing uses `char_indices`.
+/// CJK/emoji are 2 columns), not chars, so a fitting line never overflows the modal border; all
+/// slicing uses `char_indices`.
 pub(crate) fn word_wrap(text: &str, max_w: usize) -> Vec<&str> {
     if max_w == 0 {
         return vec![text];
@@ -1762,7 +1796,9 @@ mod tests {
 
     #[test]
     fn hover_shortcut_uses_shortcuts_idx_not_position_in_hits() {
-        // Regression: when non-clickable hint shortcuts precede clickable ones.
+        // Regression: when non-clickable hint shortcuts precede clickable ones, the hover index must be the full shortcuts-array index (shortcuts_idx)
+        // The position within shortcut_hits would never match the renderer's `hovered == Some(idx)` comparison
+        // Hover highlights would then never appear
         let mut state = ModalWindowState::new();
         state.popup_area = Some(Rect {
             x: 10,
@@ -1770,6 +1806,8 @@ mod tests {
             width: 80,
             height: 30,
         });
+        // Simulate 3 non-clickable hints before this clickable shortcut.
+        // The clickable shortcut is at shortcuts_idx=3 in the full array but at position 0 in shortcut_hits
         state.shortcut_hits = vec![ShortcutHitArea {
             rect: Rect {
                 x: 40,
@@ -1783,6 +1821,7 @@ mod tests {
         }];
         let outcome = handle_modal_mouse(&mut state, MouseEventKind::Moved, 44, 32);
         assert_eq!(outcome, ModalWindowOutcome::Handled);
+        // hovered_shortcut must be 3 (shortcuts_idx), not 0 (position in hits)
         assert_eq!(state.hovered_shortcut, Some(3));
     }
 
@@ -1842,7 +1881,8 @@ mod tests {
 
     #[test]
     fn split_shortcut_label_only_splits_on_ascii_space() {
-        // Tabs, NBSP, and other non-space whitespace must NOT split.
+        // Tabs, NBSP, and other non-space whitespace must NOT split; only ASCII ' ' is a separator
+        // This keeps interpolated labels safe from accidental key/label boundary surprises
         assert_eq!(split_shortcut_label("Esc\tcancel"), ("Esc\tcancel", ""));
         assert_eq!(
             split_shortcut_label("Esc\u{00A0}cancel"),

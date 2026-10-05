@@ -1,11 +1,18 @@
 //! Tool types and post-execution reminders.
+//!
+//! The tool runtime contract (`Tool` trait) lives in `xai_tool_runtime`.
+//! Tool metadata (kind, namespace, fingerprinting, etc.) lives in
+//! `crate::types::tool_metadata::ToolMetadata`.
+//!
+//! This module provides:
+//! - `ToolNamespace`, `ToolKind` — classification enums
+//! - `Reminder` — post-execution system reminders (per-tool + cross-cutting)
 use crate::types::output::ToolOutput;
 use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::resources::SharedResources;
-/// The toolset a tool belongs to. Serializes to snake_case (`grok_build`,
-/// `mcp`, …) for the canonical tool `_meta` wire contract. PascalCase
-/// aliases are accepted on deserialize so legacy persisted/manifest values
-/// still parse.
+/// The toolset a tool belongs to. Serializes to snake_case (`grok_build`, `mcp`, …) for the canonical tool `_meta` wire contract. PascalCase
+/// aliases are accepted on deserialize so legacy persisted/manifest values still parse. The `Display` impl remains PascalCase for existing
+/// qualified id strings (e.g. `"GrokBuild:read_file"`); only the serde form goes on the wire.
 #[derive(
     Debug,
     Clone,
@@ -93,16 +100,18 @@ pub enum ToolKind {
     Other,
 }
 impl ToolKind {
-    /// Total number of `ToolKind` variants (powered by `strum::EnumCount`).
+    /// Total number of `ToolKind` variants (powered by `strum::EnumCount`). Used by downstream
+    /// compile-time assertions (e.g. `ALL_TOOL_KINDS` in `capability.rs`) to catch missing variants
+    /// when the enum grows.
     pub const VARIANT_COUNT: usize = <Self as strum::EnumCount>::COUNT;
     /// Stable snake_case key for this kind (the `tools.by_kind.<key>` template key).
     pub fn as_key(self) -> &'static str {
         self.into()
     }
 }
-/// System reminders that fire after a tool call completes. **Per-tool
-/// reminders** on tool structs (e.g., `ReadFileTool`: empty file, offset past
-/// end).
+/// System reminders that fire after a tool call completes. **Per-tool reminders** on tool structs
+/// (e.g., `ReadFileTool`: empty file, offset past end). **Cross-cutting reminders** on standalone
+/// structs (e.g., `SkillDiscoveryReminder`) that react to any tool call.
 #[async_trait::async_trait]
 pub trait Reminder {
     /// Requirements for this reminder to be active.

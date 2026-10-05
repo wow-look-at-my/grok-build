@@ -1,4 +1,7 @@
 //! Decides whether teardown runs the kitty pop fence and records what happened.
+//!
+//! The fence needs the key-event source to itself and a terminal still reading output; every other case, including a
+//! fence whose query never got out, gets the legacy crossterm drain instead.
 
 use std::time::Duration;
 
@@ -54,7 +57,7 @@ impl TeardownFence {
             | FenceDecision::SkipWriterWedged
             | FenceDecision::SkipNoFlags => None,
         };
-        // A fence that never read still owes the residue the drain
+        // A fence that never read still owes the residue the legacy drain
         if fence.is_none_or(|pop| matches!(pop.outcome, Unsupported | QueryFailed)) {
             let _ = event_loop::drain_pending_events(LEGACY_DRAIN_QUIET, |_| false);
         }

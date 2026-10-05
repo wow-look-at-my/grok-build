@@ -1,6 +1,6 @@
 # Custom Hooks Guide
 
-Hooks let you run custom scripts or HTTP requests at key moments during a Grok session, for example before or after a tool runs. This is when a session starts or ends, or when the agent sends a notification.
+Hooks let you run custom scripts or HTTP requests at key moments during a Grok session, for example before or after a tool runs, when a session starts or ends, or when the agent sends a notification.
 
 Use them for automation, safety checks, logging, notifications, and integrating with your own tools.
 
@@ -54,7 +54,7 @@ Hooks are discovered from several places (all are merged):
 | Config    | `config.toml`, `managed_config.toml`, `requirements.toml` | Always | Hooks shipped in your (or your organization's) config |
 | Plugin    | Bundled inside installed plugins  | Per-plugin   | Shared team hooks |
 
-Config-file hooks use the same schema in TOML form. See the [Hooks user guide](user-guide/10-hooks.md#hooks-in-config-files) for details.
+Config-file hooks use the same schema in TOML form; see the [Hooks user guide](user-guide/10-hooks.md#hooks-in-config-files) for details.
 
 **Trusting a project**: The first time you open a project with hooks, open the hooks modal (`Ctrl+L` outside the VS Code family, or `/hooks` on any terminal) or run `/hooks-trust`. This is the same folder-trust gate as `--trust`, recorded in `~/.grok/trusted_folders.toml`. Trust prevents untrusted repos from running arbitrary code.
 
@@ -112,7 +112,7 @@ The full event is sent as JSON on **stdin**. Example for a `PreToolUse` hook:
 }
 ```
 
-The `hook_event_name` (snake_case key) carries Claude's PascalCase value. `hookEventName` (camelCase key) carries grok's snake_case value.
+The `hook_event_name` (snake_case key) carries Claude's PascalCase value; `hookEventName` (camelCase key) carries grok's snake_case value.
 
 ### Output (for blocking hooks like PreToolUse)
 Write JSON to **stdout**:
@@ -122,11 +122,11 @@ Write JSON to **stdout**:
 
 **Exit codes** (behavior differs by hook type):
 - `0`: success / allow (for blocking hooks).
-- `2`: explicit deny (`PreToolUse`), block-stop with stderr as feedback (`Stop`/`SubagentStop`. See Stop Decision Control in the user guide), or feedback to the model (`PostToolUse`, whose stderr reaches the model even though the tool has already run).
-- Any other (including timeout, crash, or a missing env var): **fail-open**. The failure is logged and gets one line in the scrollback. However, the tool call is not blocked. To block a tool call, return JSON `{"decision":"deny","reason":"..."}` on stdout.
+- `2`: explicit deny (`PreToolUse`), block-stop with stderr as feedback (`Stop`/`SubagentStop`; see Stop Decision Control in the user guide), or feedback to the model (`PostToolUse`, whose stderr reaches the model even though the tool has already run).
+- Any other (including timeout, crash, or a missing env var): **fail-open**. The failure is logged and gets one line in the scrollback, but the tool call is not blocked. To block a tool call, return JSON `{"decision":"deny","reason":"..."}` on stdout.
 
 ### PostToolUse output
-`PostToolUse` runs after the tool finished, so it blocks nothing, but its stdout decides what the model sees next. `{"decision":"block","reason":"..."}` feeds the reason to the model alongside the result. `hookSpecificOutput.additionalContext` adds a note. `hookSpecificOutput.updatedToolOutput` (built-in tools. Must match the tool's own output shape) or `hookSpecificOutput.updatedMCPToolOutput` (MCP tools. Not shape-checked) replaces the output the model reads, while the scrollback and telemetry keep the original. Every hook's block reason and context are delivered in call order, each naming its hook. Only the replacements are last-writer-wins, and a hook that exits non-zero keeps only its block reason. Output replacement is settings-file only: an SDK-registered `PostToolUse` hook can contribute a `block` reason and `additionalContext` but cannot replace the tool output. See PostToolUse Output in the user guide.
+`PostToolUse` runs after the tool finished, so it blocks nothing, but its stdout decides what the model sees next. `{"decision":"block","reason":"..."}` feeds the reason to the model alongside the result. `hookSpecificOutput.additionalContext` adds a note. `hookSpecificOutput.updatedToolOutput` (built-in tools; must match the tool's own output shape) or `hookSpecificOutput.updatedMCPToolOutput` (MCP tools; not shape-checked) replaces the output the model reads, while the scrollback and telemetry keep the original. Every hook's block reason and context are delivered in call order, each naming its hook. Only the replacements are last-writer-wins, and a hook that exits non-zero keeps only its block reason. Output replacement is settings-file only: an SDK-registered `PostToolUse` hook can contribute a `block` reason and `additionalContext` but cannot replace the tool output. See PostToolUse Output in the user guide.
 
 ### Passive hooks
 For events like `SessionStart` or `Notification`, stdout is ignored. Just exit 0 on success.
@@ -162,13 +162,17 @@ Each handler can declare additional env vars to inject into the child process:
 }
 ```
 
-Values must be **strings**. JSON numbers and bools fail to parse. Wrap them in quotes if you need them.
+Values must be **strings**. JSON numbers and bools currently fail to parse; wrap
+them in quotes if you need them.
 
-For plugin hooks, the plugin adapter additionally injects `GROK_PLUGIN_ROOT` and `GROK_PLUGIN_DATA`. These keys override any user-declared values for the same names (the plugin contract is non-negotiable).
+For plugin hooks, the plugin adapter additionally injects
+`GROK_PLUGIN_ROOT` and `GROK_PLUGIN_DATA`. These keys override any user-declared
+values for the same names (the plugin contract is non-negotiable).
 
 ### Variable Substitution
 
-`command` and `url` strings support `$VAR` and `${VAR}` substitution at config-load time:
+`command` and `url` strings support `$VAR` and `${VAR}` substitution at
+config-load time:
 
 ```json
 {
@@ -181,21 +185,45 @@ Lookup order for each reference:
 1. The handler's own `env` map.
 2. The current process environment (the env Grok itself sees).
 
-If a reference is unset in both, it is **preserved verbatim** (e.g. `${UNSET}` stays as the literal string). Runner-injected names (`CLAUDE_PROJECT_DIR`, `GROK_WORKSPACE_ROOT`, `GROK_HOOK_EVENT`, `GROK_HOOK_NAME`, `GROK_SESSION_ID`) are not taken from the Grok process environment at load. Unix `sh -c` expands them from the child env. Windows PowerShell rewrites `$VAR` to `$env:VAR`. HTTP `url` substitutes them at request time. Remaining unresolved command refs are refused with "required env var(s) not set".
+If a reference is unset in both, it's **preserved verbatim** (e.g. `${UNSET}`
+stays as the literal string). Runner-injected names (`CLAUDE_PROJECT_DIR`,
+`GROK_WORKSPACE_ROOT`, `GROK_HOOK_EVENT`, `GROK_HOOK_NAME`,
+`GROK_SESSION_ID`) are not taken from the Grok process environment at
+load. Unix `sh -c` expands them from the child env; Windows PowerShell
+rewrites `$VAR` to `$env:VAR`. HTTP `url` substitutes them at request
+time. Remaining unresolved command refs are refused with "required env
+var(s) not set".
 
-For HTTP hooks specifically, `url` is also re-expanded **at request time** (immediately before SSRF validation), so plugin-injected vars like `${GROK_PLUGIN_ROOT}/check` resolve against the plugin's actual path.
+For HTTP hooks specifically, `url` is also re-expanded **at request time**
+(immediately before SSRF validation), so plugin-injected vars like
+`${GROK_PLUGIN_ROOT}/check` resolve against the plugin's actual path.
 
 #### Parameter-expansion modifiers
 
-POSIX parameter-expansion forms are **never** expanded at load time. They are left verbatim for the runtime `sh -c` branch to handle: `${VAR:-default}`, `${VAR-default}`, `${VAR:=x}`, `${VAR:?msg}`, `${VAR:+x}`, `${VAR%pat}`, `${VAR#pat}`, `${VAR/pat/repl}`, `${VAR:N:M}`. This avoids subtle divergences between the load-time expander and POSIX shell semantics (notably, the empty-string behaviour of `:-`).
+POSIX parameter-expansion forms are **never** expanded at load time. They are
+left verbatim for the runtime `sh -c` branch to handle: `${VAR:-default}`,
+`${VAR-default}`, `${VAR:=x}`, `${VAR:?msg}`, `${VAR:+x}`, `${VAR%pat}`,
+`${VAR#pat}`, `${VAR/pat/repl}`, `${VAR:N:M}`. This avoids subtle divergences
+between the load-time expander and POSIX shell semantics (notably, the
+empty-string behaviour of `:-`).
 
-If your hook command contains shell metacharacters (spaces, pipes, `&&`, redirects, `$`, etc.), the runner routes it through `sh -c` and you get full shell-expansion semantics. If your command is a bare path with no metachars, the runner spawns it directly. Even then, `$VAR` / `${VAR}` references in the path are still resolved at load time. As a result, direct-exec paths like `${HOME}/bin/check.sh` work without being wrapped in `sh -c`.
+If your hook command contains shell metacharacters (spaces, pipes, `&&`,
+redirects, `$`, etc.), the runner routes it through `sh -c` and you get full
+shell-expansion semantics. If your command is a bare path with no metachars,
+the runner spawns it directly. Even then, `$VAR` / `${VAR}` references in the
+path are still resolved at load time, so direct-exec paths like
+`${HOME}/bin/check.sh` work without being wrapped in `sh -c`.
 
 #### What is NOT expanded
 
-- **`matcher`** is a regex (`$` is the regex anchor for end-of-line). It is never env-expanded. Substituting `$VAR` will silently change the regex's semantics and likely produce an invalid pattern. If you need a dynamic matcher, generate the JSON file at write time.
+- **`matcher`** is a regex (`$` is the regex anchor for end-of-line). It is
+  never env-expanded. Substituting `$VAR` would silently change the regex's
+  semantics and likely produce an invalid pattern. If you need a dynamic
+  matcher, generate the JSON file at write time.
 - **`timeout`** is numeric, so there is nothing to expand.
-- **The values of the `env` map itself**: these are stored verbatim. These passed to the child as-is, so `"BAR": "${HOME}/x"` injects the literal string `${HOME}/x` into the child's environment.
+- **The values of the `env` map itself**: these are stored verbatim and
+  passed to the child as-is, so `"BAR": "${HOME}/x"` injects the literal
+  string `${HOME}/x` into the child's environment.
 
 ## Managing Hooks in the TUI
 
@@ -236,7 +264,7 @@ The full event envelope is POSTed as JSON. Useful for webhooks, analytics, or se
 
 ## Troubleshooting
 
-- **Hook not running?** Press `Ctrl+L` outside the VS Code family (or run `/hooks` anywhere) to see if it is loaded and matched.
+- **Hook not running?** Press `Ctrl+L` outside the VS Code family (or run `/hooks` anywhere) to see if it's loaded and matched.
 - **Project hooks ignored?** Trust the project first.
 - **Script not found?** Check the path is relative to the `.json` file and executable (`chmod +x`).
 - **`The argument '/.claude/hooks/….ps1' to the -File parameter does not exist`?** PowerShell treated `$CLAUDE_PROJECT_DIR` as empty. Grok rewrites it to `$env:CLAUDE_PROJECT_DIR` unless `GROK_SHELL=cmd`.

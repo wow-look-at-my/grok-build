@@ -2,6 +2,7 @@ use super::*;
 
 use std::time::Instant;
 
+/// A state holding run id 0, which is where every case below starts.
 fn state_with_run(now: Instant) -> StatusLineState {
     let mut state = StatusLineState::default();
     let ctx = Box::new(super::test_context("/tmp"));
@@ -505,6 +506,7 @@ fn documented_paths(guide: &str) -> std::collections::HashSet<String> {
 }
 
 /// The backticked cells of a section's table rows.
+/// Prose does not count: the porting notes name several fields, and a field named only there would count as documented without a table row.
 fn table_cells(section: &str) -> impl Iterator<Item = &str> {
     section
         .lines()

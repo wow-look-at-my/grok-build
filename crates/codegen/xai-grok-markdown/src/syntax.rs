@@ -17,6 +17,7 @@ use syntect::{
 pub struct Syntect {
     /// The color theme for syntax highlighting.
     pub theme: SyntectTheme,
+    /// The syntax definitions (supports 250+ languages via two-face).
     pub syntax_set: SyntaxSet,
 }
 
@@ -65,8 +66,9 @@ impl Syntect {
         ))
     }
 
-    /// Highlighter for a fenced code block *info* string: a language token
-    /// (`rust`, `python`) or a `lineStart:lineEnd:path` line-range citation.
+    /// Highlighter for a fenced code block *info* string: a language token (`rust`, `python`) or a `lineStart:lineEnd:path` line-range citation.
+    /// A citation's path resolves via [`Syntect::find_syntax_by_file_path`].
+    /// When the path has no known syntax, the whole string falls back to [`Syntect::find_syntax_by_token`], so plain ` ```lang` blocks keep working.
     pub fn highlight_lines_for_fence_info(&self, fence_info: &str) -> Option<HighlightLines<'_>> {
         Some(HighlightLines::new(
             self.find_syntax_for_fence_info(fence_info)?,
@@ -74,10 +76,9 @@ impl Syntect {
         ))
     }
 
-    /// Resolve the [`SyntaxReference`] for a fenced code block *info* string,
-    /// with the same rules as [`Syntect::highlight_lines_for_fence_info`].
-    /// This is exposed so the incremental open-code highlighter can build its
-    /// resumable `ParseState`/`HighlightState` from the same syntax.
+    /// Resolve the [`SyntaxReference`] for a fenced code block *info* string, with the same rules as [`Syntect::highlight_lines_for_fence_info`].
+    /// This is exposed so the incremental open-code highlighter can build its resumable `ParseState`/`HighlightState` from the same syntax.
+    /// That keeps its output byte-identical to the batch `HighlightLines` path.
     pub(crate) fn find_syntax_for_fence_info(&self, fence_info: &str) -> Option<&SyntaxReference> {
         if let Some((_, _, path)) = parse_line_citation_fence_info(fence_info)
             && let Some(s) = self.find_syntax_by_file_path(Path::new(path))
@@ -103,6 +104,7 @@ fn is_swift_token(token: &str) -> bool {
 }
 
 fn patched_swift(set: &SyntaxSet) -> Option<&SyntaxReference> {
+    // Last `.swift` wins: we append the patched grammar after two-face's Swift.
     set.syntaxes().iter().rev().find(|syntax| {
         syntax
             .file_extensions
@@ -111,8 +113,8 @@ fn patched_swift(set: &SyntaxSet) -> Option<&SyntaxReference> {
     })
 }
 
-/// The path is the segment after the **second** colon; it is then parsed with [`Path::new`]. Paths with extra
-/// colons in the first segments are not supported; use a repo-relative or forward-slash form.
+/// The path is the segment after the **second** colon; it is then parsed with [`Path::new`].
+/// Paths with extra colons in the first two segments are not supported; use a repo-relative or forward-slash form.
 fn parse_line_citation_fence_info(info: &str) -> Option<(&str, &str, &str)> {
     let mut it = info.splitn(3, ':');
     let start = it.next()?;

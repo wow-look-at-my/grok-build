@@ -1,4 +1,5 @@
-//! Session-scoped telemetry: emission context, end timers, session metrics, subagent spawn timing, and activity gauges.
+//! Session-scoped telemetry: emission context, end timers, session metrics,
+//! subagent spawn timing, and activity gauges.
 
 pub mod activity;
 pub mod session_ctx;

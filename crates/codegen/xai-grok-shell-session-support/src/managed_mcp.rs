@@ -1,4 +1,9 @@
 //! Managed MCP gateway catalog and tool calls via the Grok API.
+//!
+//! Catalog: `GET /v1/mcp/tools/list` returns `managed_gateway:*` rows.
+//! Call: `POST /v1/mcp/tools/call`.
+//!
+//! The config-file and plugin merge reads shell's config system, so it lives in shell's `session::managed_mcp`, which re-exports everything here.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -18,6 +23,7 @@ pub struct ManagedMcpState {
     pub gateway_tool_cache: GatewayToolCatalogCache,
     pub gateway_tool_fetch_notify: Arc<tokio::sync::Notify>,
     /// Retained across gateway disable and cache invalidation.
+    /// The on-disk MCP descriptor mirror uses it to remove stale gateway connector directories when the current catalog is empty or absent.
     pub gateway_tool_connectors_seen: HashSet<String>,
 }
 
@@ -109,8 +115,9 @@ pub struct GatewayToolCatalog {
     pub reauth_connectors: Vec<GatewayReauthConnector>,
 }
 
-/// Structured reauth identity from `GET /v1/mcp/tools/list`. Every field defaults so one incomplete row cannot fail the whole catalog parse; the catalog
-/// builder drops empty ids.
+/// Structured reauth identity from `GET /v1/mcp/tools/list`. Every field defaults so one
+/// incomplete row cannot fail the whole catalog parse; the catalog builder drops empty ids.
+/// `connector_uuid` is carried from the wire contract but has no client use yet.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct GatewayReauthConnector {
     #[serde(default)]

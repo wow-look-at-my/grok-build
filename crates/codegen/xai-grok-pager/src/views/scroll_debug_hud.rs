@@ -1,4 +1,19 @@
 //! Scroll-diagnostics HUD, the in-pager "scroll playground".
+//!
+//! A compact top-right overlay paints a per-frame snapshot of the scroll state machine ([`MouseScrollState::debug_snapshot`]).
+//! It also shows the active scrollback's viewport facts, inside a REAL session with the REAL event loop.
+//! Recipe: `GROK_FPS=1 GROK_SCROLL_DEBUG=1 grok --resume <session>`.
+//! Then flip `scroll_mode`, `scroll_lines`, `invert_scroll`, or `scroll_speed` in `/settings` to compare variants live.
+//! This HUD samples once per frame; `GROK_SCROLL_LOG=1` additionally records every event as JSONL (`input::scroll_log` in xai-grok-pager-render).
+//!
+//! Invariant: the HUD must never affect scroll behavior. The snapshot is read-only (`&self`, caller-supplied `now`).
+//! It is taken in the draw path after all input/tick state updates for the frame, and rendering only paints buffer cells.
+//! When disabled, the HUD costs a single bool check per frame.
+//!
+//! Unlike the FPS overlay (`render::frame_metrics`, debug/dev builds only), this HUD compiles into release builds behind its runtime gate.
+//! Hidden commands like `/gboom` already ship this way.
+//! Dev instrumentation alters the frame pipeline (phase timings through `draw_frame`), so a dev-only HUD could not probe the production render path.
+//! The pty e2e suite also runs against production-featured binaries.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -8,8 +23,9 @@ use crate::input::mouse::ScrollDebugSnapshot;
 /// Panel width in cells; each line is padded/truncated to this.
 const PANEL_WIDTH: u16 = 46;
 
-/// Runtime on/off switch for the HUD, mirroring how `FrameMetrics` reads its
-/// env var.
+/// Runtime on/off switch for the HUD, mirroring how `FrameMetrics` reads its env var.
+/// `GROK_SCROLL_DEBUG` (nonempty and not `"0"`) enables it at startup, and the hidden `/scroll-debug` command toggles it live.
+/// Deliberately NOT a settings-registry entry: it is a diagnostic, not a preference to persist.
 pub struct ScrollDebugHud {
     enabled: bool,
 }
@@ -46,8 +62,8 @@ pub struct ViewportDebug {
     pub at_bottom: bool,
 }
 
-/// Owned per-frame render params, assembled by `AppView::draw` BEFORE the
-/// frame closure and after all scroll-state updates.
+/// Owned per-frame render params, assembled by `AppView::draw` BEFORE the frame closure and after all scroll-state updates.
+/// Building the params outside the closure keeps the closure free of `self.scroll_state`.
 pub struct ScrollDebugPanel {
     pub snapshot: ScrollDebugSnapshot,
     pub view: Option<ViewportDebug>,
@@ -164,6 +180,8 @@ mod tests {
     fn panel_paints_theme_agnostic_style_over_every_cell() {
         let area = Rect::new(0, 0, 60, 14);
         let mut buf = Buffer::empty(area);
+        // Mimic a themed frame: near-black RGB bg (Oscura Midnight base is #030304), tinted fg, and a modifier on every cell
+        // The overlay must override all of it
         let theme = Style::default()
             .fg(Color::Rgb(228, 228, 228))
             .bg(Color::Rgb(3, 3, 4))
@@ -183,7 +201,7 @@ mod tests {
         };
         panel.render(area, &mut buf);
 
-        // Several lines with a `view:` row; the panel hugs the right edge.
+        // 10 lines with a `view:` row; the panel hugs the right edge.
         let x0 = area.width - PANEL_WIDTH;
         for y in 0..10u16 {
             for x in x0..area.width {

@@ -1,4 +1,6 @@
-//! Large-prompt offload for `SessionActor`: an oversized user turn is written verbatim to the session's `prompts/prompt_{n}.txt`.
+//! Large-prompt offload for `SessionActor`: an oversized user turn is written verbatim to the session's
+//! `prompts/prompt_{n}.txt` and the model receives a bounded excerpt pointing at it. Every failure path (write error,
+//! lost task) still sends a bounded message, never the oversized original; [`OFFLOAD_NOTICE_MARKER`] stays byte-stable for external matchers.
 
 use super::*;
 use crate::session::prompt_parser::{ParsedPrompt, PromptLayout};
@@ -12,8 +14,7 @@ use xai_grok_tools::types::resources::TruncationCfg;
 use xai_grok_tools::types::template_renderer::TemplateRenderer;
 use xai_grok_tools::types::tool::ToolKind;
 
-/// Budget for the inline excerpt: read_file's per-call cap in bytes, so an
-/// offloaded prompt's excerpt is never larger.
+/// Budget for the inline excerpt: read_file's per-call cap in bytes, so an offloaded prompt's excerpt is never larger than one read would return.
 pub(crate) const LARGE_PROMPT_THRESHOLD: usize =
     READ_FILE_MAX_TOKENS * xai_token_estimation::BYTES_PER_TOKEN as usize;
 
@@ -23,12 +24,15 @@ const LARGE_QUERY_BUDGET_PERCENT: usize = 80;
 /// Bytes kept at the TAIL when bounding head+tail, so a trailing question survives.
 const BOUNDED_TAIL_BUDGET: usize = 4_000;
 
-/// Floor for the skill and for the context, so neither is erased by an oversized query.
+/// Floor for the skill and for the context, so neither is erased by an oversized query; leftover budget flows to
+/// them afterwards.
 const PART_INLINE_FLOOR: usize = 4_000;
 
 /// Fixed part of the notice reserve; the variable parts (path, tool and param names) are added per call.
 const NOTICE_BASE_RESERVE: usize = 1_200;
 
+/// Raw bytes per read window: `read_file` caps its formatted output (`N→` anchors), so keep 10 %
+/// headroom.
 const READ_WINDOW_BYTES: usize = LARGE_PROMPT_THRESHOLD * 9 / 10;
 
 /// Literal `offset`/`limit` pairs the notice lists before it falls back to a continuation clause.
@@ -41,6 +45,8 @@ const ELISION_MARKER: &str = "\n\n…[middle omitted — see the offload note fo
 const OFFLOAD_NOTICE_MARKER: &str = "[Full request offloaded to file]";
 
 /// In-band notice that REPLACES the offload notice when the full request could not be persisted (write error or task-join failure).
+/// It references no path, there is no file to read, so the model is never told to `read_file` a file that does not exist.
+/// The bounded head+tail excerpt remains.
 const OFFLOAD_FAILED_NOTICE: &str = "\n\n[Full request could not be saved to a file — the excerpt above is truncated. Answer from it, and ask the user to resend the full content if anything essential is missing.]";
 
 /// UTF-8-safe suffix: the last `<= max_bytes` bytes of `s`, on a char boundary.
@@ -62,10 +68,12 @@ fn bound_head_tail_with_cut(s: &str, budget: usize) -> (String, Option<Range<usi
     if s.len() <= budget {
         return (s.to_string(), None);
     }
+    // Not enough room for a head + marker + tail; fall back to a plain head (empty for budget 0)
     if budget <= ELISION_MARKER.len() {
         let head = truncate_bytes(s, budget);
         return (head.to_string(), Some(head.len()..s.len()));
     }
+    // budget > marker and tail_len <= content_budget / 2 (no underflow); head + tail < s.len()
     let content_budget = budget - ELISION_MARKER.len();
     let tail_len = BOUNDED_TAIL_BUDGET.min(content_budget / 2);
     let head_len = content_budget - tail_len;
@@ -99,8 +107,8 @@ struct ReadWindow {
     limit: usize,
 }
 
-/// A part of the request the excerpt does not show, as lines of the offloaded
-/// file in `read_file`'s numbering.
+/// A part of the request the excerpt does not show, as lines of the offloaded file in `read_file`'s
+/// numbering, with the windows that fetch exactly those lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ElidedRange {
     label: &'static str,
@@ -148,8 +156,9 @@ fn read_windows(
     windows
 }
 
-/// Client-facing name of the Read tool and its line-window params as the
-/// finalized toolset exposes them.
+/// Client-facing name of the Read tool and its line-window params as the finalized toolset exposes
+/// them (`None` when absent: the notice names nothing it cannot vouch for), plus the session's line
+/// cap. The path param is not carried: it differs per toolset and is unambiguous next to the tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReadToolInfo {
     tool: Option<String>,
@@ -169,8 +178,8 @@ impl Default for ReadToolInfo {
     }
 }
 
-/// Bounded in-band message, the exact notice embedded in it (so a failure
-/// path strips the same bytes).
+/// Bounded in-band message, the exact notice embedded in it (so a failure path strips the same
+/// bytes), and the file line ranges the message does not show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BoundedPrompt {
     message: String,
@@ -269,7 +278,10 @@ or you could not read a part you needed.",
     )
 }
 
-/// Upper bound on the notice length.
+/// Upper bound on the notice length. The excerpt budget is derived from this reserve rather than
+/// from the rendered notice so the notice may later describe the excerpt itself (the elided line
+/// ranges, each with its own `offset`/`limit` pair, up to six, plus a continuation clause) without
+/// the budget becoming circular; the 8× name factor and the base cover that fuller text.
 fn notice_reserve(file_path: &std::path::Path, info: &ReadToolInfo) -> usize {
     let name_len = |name: &Option<String>| name.as_deref().map_or(0, str::len);
     NOTICE_BASE_RESERVE
@@ -279,6 +291,9 @@ fn notice_reserve(file_path: &std::path::Path, info: &ReadToolInfo) -> usize {
 
 /// Build the bounded in-band message for an oversized prompt (`full_message`, laid out per
 /// `layout`) already written to `file_path`. Pure; preserves message ordering, stays within budget.
+/// The query comes first and yields 20 % only when the skill or the context would otherwise be
+/// starved; skill and context keep [`PART_INLINE_FLOOR`] each, and leftover flows to the skill,
+/// then the context.
 fn build_truncated_prompt_message(
     context: &str,
     query: &str,
@@ -291,7 +306,8 @@ fn build_truncated_prompt_message(
 ) -> BoundedPrompt {
     let reserve = notice_reserve(file_path, info);
 
-    // Joiners the layout arms emit: "\n" before the skill in the query block.
+    // Joiners the layout arms emit: "\n" before the skill in the query block; "\n\n" before the
+    // context, which the cursor arm always emits.
     let skill_joiner = if skill_information.is_empty() { 0 } else { 1 };
     let context_joiner = if is_cursor || !context.is_empty() {
         2
@@ -311,6 +327,7 @@ fn build_truncated_prompt_message(
         .saturating_sub(skill_floor)
         .saturating_sub(context_floor);
     let mut query_budget = query.len().min(query_max);
+    // Only when the other parts would be starved does the query give up 20 %.
     let overflow = skill_information.len().saturating_sub(skill_floor)
         + context.len().saturating_sub(context_floor);
     if overflow > query_max.saturating_sub(query_budget) {
@@ -379,8 +396,9 @@ fn build_truncated_prompt_message(
     }
 }
 
-/// Replace the file-referencing offload `notice` embedded in `message` with
-/// the no-file [`OFFLOAD_FAILED_NOTICE`].
+/// Replace the file-referencing offload `notice` embedded in `message` with the no-file [`OFFLOAD_FAILED_NOTICE`].
+/// A failed offload therefore never leaves the model chasing a "read this file" pointer to a file that does not exist.
+/// Returns `message` unchanged if the notice is absent (defensive).
 fn strip_offload_notice(message: &str, notice: &str) -> String {
     message.replacen(notice, OFFLOAD_FAILED_NOTICE, 1)
 }
@@ -456,7 +474,8 @@ impl SessionActor {
         let file_path = get_prompt_file_path(&self.session_info, prompt_index);
         let info = self.resolve_read_tool_info().await;
 
-        // Build the bounded preview once (pure, always within budget) so every outcome (write ok, write fail, lost task) sends a bounded message None.
+        // Build the bounded preview once (pure, always within budget) so every outcome (write ok, write fail, lost task) sends a bounded message
+        // None of them may send the oversized original that would re-overflow the model context
         let full_len = full_message.len();
         let bounded = build_truncated_prompt_message(
             &context,
@@ -473,9 +492,11 @@ impl SessionActor {
             elided_ranges = bounded.elided.len(),
             "offloading large prompt to file"
         );
-        // The join-failure fallback must also carry no dangling file reference The file may not have been written if the task never ran.
+        // The join-failure fallback must also carry no dangling file reference
+        // The file may not have been written if the task never ran to completion
         let join_fallback = strip_offload_notice(&bounded.message, &bounded.notice);
 
+        // 0600 via the secure-file helper; on a blocking thread so the large write doesn't stall the executor
         let offload_span = region!("turn.prompt_offload_write", Parent::Inherit);
         let offload = tokio::task::spawn_blocking(move || {
             write_offload_and_build(

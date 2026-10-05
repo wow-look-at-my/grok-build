@@ -2,11 +2,15 @@
 
 use super::state::{FileContentState, MAX_TRACKED_TEXT_BYTES};
 
-/// Git LFS pointer files start with this exact prefix. See https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md
+/// Git LFS pointer files start with this exact prefix.
+/// See https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md
 const LFS_POINTER_PREFIX: &[u8] = b"version https://git-lfs.github.com/spec/v1\n";
 
-/// LFS pointers are small text files (typically many bytes) with the format.
+/// LFS pointers are small text files (typically ~130 bytes) with the format: When the hunk tracker reads the raw git blob
+/// for an LFS-tracked file, it gets this pointer text. The working copy, however, holds the real (smudged) content.
+/// Detecting and marking LFS pointers prevents phantom diffs that can never be resolved.
 pub fn is_lfs_pointer(bytes: &[u8]) -> bool {
+    // Spec pointers are tiny; 1024 is a hard cap so large buffers skip the prefix scan.
     bytes.len() < 1024 && bytes.starts_with(LFS_POINTER_PREFIX)
 }
 
@@ -82,6 +86,8 @@ pub async fn read_file_bounded(path: &std::path::Path) -> FileContentState {
     use tokio::io::AsyncReadExt;
 
     // Use symlink_metadata (lstat) to detect symlinks without following them.
+    // Symlinks produce phantom diffs: git stores the target path string while
+    // read() follows the link and returns the target file's content.
     let metadata = match tokio::fs::symlink_metadata(path).await {
         Ok(m) => m,
         Err(_) => return missing_content(),
@@ -258,6 +264,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_file_bounded_binary_no_full_read() {
         // Binary file larger than limit - size check short-circuits first (TooLarge).
+        // This is correct: no content retained either way, size is primary concern.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("huge_binary.bin");
         let mut data = vec![0xFFu8; MAX_TRACKED_TEXT_BYTES * 10];

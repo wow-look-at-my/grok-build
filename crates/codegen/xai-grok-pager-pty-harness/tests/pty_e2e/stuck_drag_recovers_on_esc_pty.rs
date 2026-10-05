@@ -90,7 +90,9 @@ async fn stuck_drag_recovers_on_esc_pty() {
     harness.inject_keys(keys::ESC).expect("esc");
     harness.update(Duration::from_millis(300));
 
-    // Motions could re-extend the latched selection after Esc.
+    // Two motions could re-extend the latched selection after Esc. `<32` is left-drag motion (button 0 + motion bit).
+    // `<35` is a bare move with no button held, reported under any-event tracking (DECSET 1003)
+    // https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Any-event-tracking
     let far_motion = sgr_mouse(32, row, far_col, 'M') + sgr_mouse(35, row, far_col, 'M').as_str();
     harness
         .inject_keys(far_motion.as_bytes())

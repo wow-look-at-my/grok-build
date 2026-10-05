@@ -3,11 +3,13 @@
 use super::*;
 use crate::fts::META_KEY_SCHEMA_VERSION;
 
-/// A synthetic session store: the gate tests exercise the claim lease, not
-/// the on-disk layout, so the sessions need no transcripts.
+/// A synthetic session store: the gate tests exercise the claim lease, not the on-disk layout, so the sessions need no transcripts.
+/// `list_sessions` has to report a non-zero count for the single-flight test, which asserts that exactly one of two racing gates ran the reindex.
 struct FakeSource {
     sessions: Vec<IndexableSession>,
-    /// `list_sessions` runs only in the gate that won the claim.
+    /// `list_sessions` runs only in the gate that won the claim, so waiting on this holds the lease until the other gate
+    /// finishes its wait window. Without it the fake enumerates so fast that the loser's first claim can land after the
+    /// winner already released. A launch's first claim always reindexes, so both gates would run the reindex.
     peer_done: Option<Arc<AtomicBool>>,
 }
 
@@ -91,8 +93,9 @@ const TEST_TIMING: BootstrapTiming = BootstrapTiming {
 const _: () = assert!(TEST_TIMING.refresh.as_millis() < TEST_TIMING.lease.as_millis());
 const _: () = assert!(TEST_TIMING.poll.as_millis() < TEST_TIMING.peer_wait.as_millis());
 
-/// [`TEST_TIMING`] with a shorter peer wait, for the single-flight test. That
-/// test holds the winning gate's claim open for the losing gate's whole wait.
+/// [`TEST_TIMING`] with a shorter peer wait, for the single-flight test.
+/// That test holds the winning gate's claim open for the losing gate's whole wait.
+/// The shorter the hold, the smaller the window in which a sibling test bumps the process-global cache epoch (see the marker assertion there).
 const CONTENDED_TIMING: BootstrapTiming = BootstrapTiming {
     lease: Duration::from_secs(300),
     refresh: Duration::from_millis(50),
@@ -138,7 +141,8 @@ async fn test_claimant_reindexes_even_when_marker_exists() {
         progress.total.load(Ordering::Relaxed) > 0,
         "a launch claimant must reindex even when a completed marker already exists"
     );
-    // The cache epoch is process-global A sibling heal withholds this run's completion marker.
+    // The cache epoch is process-global
+    // A sibling heal withholds this run's completion marker ("cache healed during bootstrap")
     let healed = recovery::current_epoch() != epoch_before;
     assert!(
         healed || read_marker(&db_path).as_deref() != Some("123"),
@@ -376,7 +380,9 @@ async fn test_concurrent_gates_single_flight() {
     assert!(b.is_ok(), "gate b: {b:?}");
 
     let db_path = search_db_path(tmp.path());
-    // The cache epoch is process-global A sibling test healing its own cache.
+    // The cache epoch is process-global
+    // A sibling test healing its own cache while these gates run makes the winner withhold its completion marker ("cache healed during bootstrap")
+    // That is the behavior under test elsewhere; here it just means the marker is legitimately absent
     let healed = recovery::current_epoch() != epoch_before;
     assert!(
         healed || read_marker(&db_path).is_some(),
@@ -389,8 +395,19 @@ async fn test_concurrent_gates_single_flight() {
 
     let a_ran = progress_a.total.load(Ordering::Relaxed) > 0;
     let b_ran = progress_b.total.load(Ordering::Relaxed) > 0;
-    // At least one gate must do the work; both is legal and not a
-    // single-flight failure.
+    // At least one gate must do the work; both is legal and not a single-flight
+    // failure. A barrier starts these together but cannot keep them overlapping:
+    // on a loaded machine the first gate can claim, reindex two tiny sessions,
+    // and release before the second gate's FIRST claim attempt. That second gate
+    // has then seen no peer, and a launch's first claim deliberately ignores an
+    // existing marker (it owes pruning and skipped retries), so it reindexes
+    // too. The lease only serializes gates that actually overlap. Asserting
+    // "exactly one" here asserted the scheduler, not the product, and failed on
+    // CI roughly one run in five.
+    //
+    // The property that must hold — a gate that meets a live claim never
+    // reindexes behind it — is asserted deterministically in
+    // `test_gate_does_not_reindex_behind_a_live_peer_claim`.
     assert!(
         a_ran || b_ran,
         "some gate must reindex, a_total={}, b_total={}",
@@ -399,9 +416,9 @@ async fn test_concurrent_gates_single_flight() {
     );
 }
 
-/// The single-flight guarantee itself, with no dependence on how both gates
+/// The single-flight guarantee itself, with no dependence on how the two gates
 /// interleave: while a peer's claim is live, a launch gate must leave the index
-/// alone. If the lease stopped being honoured, processes would reindex the
+/// alone. If the lease stopped being honoured, two processes would reindex the
 /// shared database at once — this goes red, where the racing test above cannot
 /// be relied on to.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -412,7 +429,8 @@ async fn test_gate_does_not_reindex_behind_a_live_peer_claim() {
     let db_path = search_db_path(&root);
     with_search_index(&db_path, |_| Ok(())).unwrap();
 
-    // A peer holds the claim for the whole call — no release.
+    // A peer holds the claim for the whole call — no release, so nothing about
+    // this test turns on when the release lands.
     let peer = ClaimToken::new();
     assert!(
         claim_bootstrap_lease(&db_path, &peer, TEST_TIMING.lease)
@@ -442,7 +460,8 @@ async fn test_gate_does_not_reindex_behind_a_live_peer_claim() {
         "the peer's claim must survive the gate that waited on it"
     );
 
-    // The peer's claim is still the peer's: releasing with its token works.
+    // The peer's claim is still the peer's: releasing with its token works, so
+    // the gate never stole and re-stamped the lease under it.
     release_bootstrap_claim(&db_path, &peer).await;
     assert!(!has_bootstrap_claim(&db_path).unwrap());
 }

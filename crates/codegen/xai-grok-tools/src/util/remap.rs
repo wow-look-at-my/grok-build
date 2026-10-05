@@ -24,8 +24,8 @@ pub fn remap_json_keys(
 
 /// Remap wrapper keys without silently overwriting a canonical/randomized collision.
 ///
-/// # Errors Returns an error when input keys map to one output
-/// key.
+/// # Errors
+/// Returns an error when two input keys map to one output key.
 pub fn remap_json_keys_checked(
     value: serde_json::Value,
     mapping: &HashMap<String, String>,
@@ -44,8 +44,8 @@ pub fn remap_json_keys_checked(
 }
 
 /// Build a reverse map (model-facing → canonical) from a canonical → model-facing map. Panics in
-/// debug mode if canonical names map to the same model-facing name (collision would silently drop
-/// one mapping).
+/// debug mode if two canonical names map to the same model-facing name (collision would silently
+/// drop one mapping).
 pub fn reverse_map(map: &HashMap<String, String>) -> HashMap<String, String> {
     let reversed: HashMap<_, _> = map.iter().map(|(k, v)| (v.clone(), k.clone())).collect();
     debug_assert_eq!(

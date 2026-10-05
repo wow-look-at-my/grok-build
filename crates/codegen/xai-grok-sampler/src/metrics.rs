@@ -39,7 +39,10 @@ pub struct InferenceLatencyStats {
     pub chunk_count: u32,
     /// Inter-token latency intervals (raw data for session aggregation)
     pub itl_intervals_ms: Vec<u64>,
-    /// Arrival offset of each content chunk from `stream_start`, in MICROseconds.
+    /// Arrival offset of each content chunk from `stream_start`, in
+    /// MICROseconds. `itl_intervals_ms` truncates to whole milliseconds, so a
+    /// stream faster than ~1000 chunks/s reads as a run of zeros and its
+    /// jitter is unrecoverable. This keeps the raw arrival curve.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunk_offsets_us: Vec<u64>,
     pub itl_p50_ms: Option<u64>,
@@ -181,7 +184,7 @@ mod tests {
         assert_eq!(stats.time_to_first_token_ms, Some(100));
         assert_eq!(stats.time_to_last_byte_ms, 200);
         assert_eq!(stats.chunk_count, 2);
-        // One 50ms interval between both chunks
+        // One 50ms interval between the two chunks
         assert_eq!(stats.itl_p50_ms, Some(50));
         assert_eq!(stats.itl_p99_ms, Some(50));
         assert_eq!(stats.itl_max_ms, Some(50));
@@ -202,7 +205,9 @@ mod tests {
 
         let stats = InferenceLatencyStats::from_timestamps(start, &chunks, end);
 
-        // The millisecond intervals report the fast gaps as zero.
+        // The millisecond intervals report the two fast gaps as zero, so the
+        // stall is the only thing left and every statistic agrees it is
+        // typical. This is what makes an uneven stream unreadable.
         assert_eq!(stats.itl_intervals_ms, vec![0, 0, 4]);
         assert_eq!(stats.itl_p50_ms, Some(0));
 
@@ -227,6 +232,7 @@ mod tests {
     #[test]
     fn test_many_chunks() {
         let start = Instant::now();
+        // 11 chunks: intervals are [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
         let chunks: Vec<Instant> = (0..11)
             .scan(100u64, |acc, i| {
                 let t = *acc;
@@ -242,21 +248,27 @@ mod tests {
         assert_eq!(stats.time_to_last_byte_ms, 1000);
         assert_eq!(stats.chunk_count, 11);
 
+        // p50 takes intervals[len / 2] = intervals[5]
         assert_eq!(stats.itl_p50_ms, Some(60));
+        // p99_idx is ceil(10 * 0.99) - 1 = 9, so p99 reads intervals[9]
         assert_eq!(stats.itl_p99_ms, Some(100));
         assert_eq!(stats.itl_max_ms, Some(100));
+        // The ten intervals sum to 550
         assert_eq!(stats.itl_mean_ms, Some(55));
     }
 
     #[test]
     fn test_p99_does_not_overflow() {
         let start = Instant::now();
+        // 101 chunks give 100 intervals (indices 0..99)
         let chunks: Vec<Instant> = (0..101).map(|i| offset(start, 100 + i * 10)).collect();
         let end = offset(start, 2000);
 
         let stats = InferenceLatencyStats::from_timestamps(start, &chunks, end);
 
         assert_eq!(stats.chunk_count, 101);
+        // All 100 intervals are 10ms
+        // p99_idx is ceil(100 * 0.99) - 1 = 99, which stays in bounds
         assert_eq!(stats.itl_p99_ms, Some(10));
         assert_eq!(stats.itl_max_ms, Some(10));
         assert_eq!(stats.itl_p50_ms, Some(10));

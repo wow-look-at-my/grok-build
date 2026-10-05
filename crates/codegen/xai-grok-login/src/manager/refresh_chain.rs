@@ -1,4 +1,5 @@
 //! The refresh protocol that runs under the lock: the [`RefreshStep`] machine and its per-step methods.
+//! Mutation stays in `manager.rs` (`apply_refresh_outcome`).
 
 use std::sync::Arc;
 
@@ -12,6 +13,7 @@ use super::sleep_gate::InFlightGuard;
 use super::{AuthManager, LOCK_TIMEOUT_WAIT, REFRESH_LOCK_TIMEOUT, TokenType};
 
 /// `Held` is the live lock, proven before the irreversible IdP call.
+/// `Adopted` is a sibling's freshly rotated token; return it without refreshing.
 pub(super) enum LockOutcome {
     Held(AuthFileLock),
     Adopted(Box<GrokAuth>),
@@ -95,6 +97,7 @@ impl AuthManager {
                     {
                         RefreshStep::Refreshed(Box::new(auth))
                     } else if let Some(err) = self.permanent_failure() {
+                        // Re-checked under the mutex so a 401 burst costs one IdP call.
                         RefreshStep::Failed(err)
                     } else {
                         RefreshStep::AdoptBeforeLock

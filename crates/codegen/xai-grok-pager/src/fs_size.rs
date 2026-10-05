@@ -1,4 +1,6 @@
 //! Sizes are physical (block-based) on Unix and logical `len()` elsewhere.
+//! Totals differ from du(1): clones and hard links cost their full size at every path.
+//! Walks never follow symlinks and stop at [`Volume`] boundaries, since descending into an unresponsive network mount blocks past any timeout.
 use std::collections::HashMap;
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
@@ -101,10 +103,17 @@ pub(crate) struct BucketedSizes {
     pub(crate) buckets: HashMap<PathBuf, Measure>,
     pub(crate) issues: WalkIssues,
 }
-/// A grok worktree is a child of a managed root, or a child of that root's per-repository bucket.
+/// A grok worktree is a child of a managed root, or a child of that root's
+/// per-repository bucket. Deeper than that a directory is inside a checkout,
+/// which is sized as part of it and never gets a row of its own.
 const BUCKET_DEPTH_RANGE: std::ops::RangeInclusive<usize> = 1..=2;
 
 /// Which checkout a walked file's bytes belong to, over one DFS walk.
+///
+/// Depth-first pre-order visits every parent before its children, so at most one
+/// bucket is open at a time and it is the most recently opened one: anything
+/// deeper than it sits inside that checkout, and a checkout never nests inside
+/// another bucket.
 #[derive(Default)]
 struct BucketWalk {
     counted: HashMap<PathBuf, BucketSize>,

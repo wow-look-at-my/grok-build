@@ -1,5 +1,6 @@
-//! Row-mutation policy for the queue pane: how a row's origin and wire kind
-//! project to edit/send capabilities.
+//! Row-mutation policy for the queue pane: how a row's origin and wire kind project to edit/send
+//! capabilities. A `ReadOnly` pane protects every row, including unknown kinds and local rows, so a
+//! mirrored queue the view cannot address never offers a control that would route to another session.
 
 /// How a [`crate::views::queue_pane::QueuePane`] derives its rows' capabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,8 +11,8 @@ pub(crate) enum QueueMutation {
     ReadOnly,
 }
 
-/// Capabilities projected from a queue row under the pane's
-/// [`QueueMutation`].
+/// Capabilities projected from a queue row under the pane's [`QueueMutation`].
+/// Under `PerRowKind`, local rows and unknown server kinds stay editable/sendable for backward compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ServerRowCapabilities {
     can_mutate: bool,

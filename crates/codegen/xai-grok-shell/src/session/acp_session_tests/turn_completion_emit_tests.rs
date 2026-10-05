@@ -1,4 +1,8 @@
 //! Leader-side emission of the durable `TurnCompleted` terminal.
+//!
+//! These drive the SHIPPED handlers (`handle_completion` for normal and error completions, `cancel_running_task` for cancellation).
+//! They assert on the notification the real `send_xai_notification` persists.
+//! The terminal is the persisted and replayed twin of the fire-and-forget `prompt_complete`, so a re-attaching viewer can finalize from replay.
 
 use super::support::*;
 use super::turn_end_reporting_tests::RecordingLifecycle;
@@ -250,8 +254,8 @@ async fn normal_completion_persists_turn_completed_after_buffered_delta_flush() 
             let (gateway_tx, _gateway_rx) =
                 mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, mut persistence_rx) = mpsc::unbounded_channel::<PersistenceMsg>();
-            // Buffering is enabled with a long window so a streamed delta is
-            // HELD in the replay buffer.
+            // Buffering is enabled with a long window so a streamed delta is HELD in the replay buffer until an explicit flush
+            // That is the exact state the actor loop is in when a turn's completion arrives
             let (mut actor, mut event_rx) =
                 create_test_actor_ex(0, 256_000, 85, gateway_tx, persistence_tx).await;
             actor.buffering_settings = Some(BufferingSettings {
@@ -272,14 +276,14 @@ async fn normal_completion_persists_turn_completed_after_buffered_delta_flush() 
                 state.pending_inputs.push_back(item);
             }
 
-            // Stream the turn's last delta through the BUFFERED path:
-            // `send_update` enqueues it on `event_tx` The replay buffer
-            // merges and HOLDS it.
+            // Stream the turn's last delta through the BUFFERED path: `send_update` enqueues it on `event_tx`
+            // The replay buffer merges and HOLDS it; it is NOT persisted yet
             actor
                 .send_update(agent_msg_update("last delta"), Some(1))
                 .await;
 
-            // Mirror the actor-owned replay buffer: drain the queued event(s) into it The delta is then stranded exactly.
+            // Mirror the actor-owned replay buffer: drain the queued event(s) into it
+            // The delta is then stranded exactly as it is when a completion reaches `run_session`'s completion branch
             let mut replay_buffer = ReplayBuffer::new(actor.buffering_settings.clone());
             while let Ok(event) = event_rx.try_recv() {
                 if let SessionEvent::Notification(notification) = event {
@@ -291,8 +295,9 @@ async fn normal_completion_persists_turn_completed_after_buffered_delta_flush() 
                 "the buffered delta must not be persisted before the flush"
             );
 
-            // This is the exact flush `run_session`'s completion branch
-            // performs before calling `handle_completion` The.
+            // This is the exact flush `run_session`'s completion branch performs before calling `handle_completion` The.
+            // Cancel/Shutdown arms perform the same flush.
+            // Removing it leaves the held delta stranded, so the terminal would be the only persisted update.
             if let Some(notification) = replay_buffer.flush() {
                 actor.emit_buffered(notification).await;
             }
@@ -356,6 +361,9 @@ async fn normal_completion_persists_turn_completed_after_buffered_delta_flush() 
                  after the turn's flush barrier could keep the content but drop the terminal"
             );
 
+            // Limitation: this calls `handle_completion` and mirrors the completion-branch flush; it does not drive the full `run_session` loop.
+            // Injecting a real completion would need a mock-model turn.
+            // The negative case is a buffered delta NEVER reaching persistence without the flush.
         })
         .await;
 }
@@ -963,7 +971,8 @@ async fn no_output_rewind_cancel_emits_no_turn_completed() {
                 state.pending_inputs.push_back(item);
             }
 
-            // A RewindIfNoOutput cancel on a rewindable turn takes the rewind path: the turn is treated as UNSENT Matching the emit_turn_ended, NO durable terminal is emitted.
+            // A RewindIfNoOutput cancel on a rewindable turn takes the rewind path: the turn is treated as UNSENT
+            // Matching the legacy emit_turn_ended, NO durable terminal is emitted, else replay would finalize a turn that was rewound
             let _ = actor.cancel_running_task(crate::session::CancelOptions { history: crate::session::CancelHistoryDisposition::RewindIfNoOutput { prompt_id: None }, user_initiated: true, ..Default::default() }).await;
 
             let msgs = drain_persistence(&mut persistence_rx);
@@ -1034,8 +1043,9 @@ async fn unknown_prompt_completion_emits_no_turn_completed() {
             let (persistence_tx, mut persistence_rx) = mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
 
-            // Reproduce the cancel race: the Cancel path already finalized
-            // and dequeued the turn (current_prompt_id cleared, queue empty).
+            // Reproduce the cancel race: the Cancel path already finalized and dequeued the turn (current_prompt_id cleared, queue empty)
+            // A stale `(prompt, EndTurn)` completion now lands on the unknown-prompt branch of handle_completion
+            // It must NOT emit a second terminal; the Cancel path already emitted TurnCompleted{cancelled} for it
             *actor
                 .current_prompt_id
                 .lock()

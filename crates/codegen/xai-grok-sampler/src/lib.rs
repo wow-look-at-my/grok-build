@@ -1,9 +1,18 @@
-#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_lossless)] // 5 hits predate the gate
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::cast_sign_loss)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
 //! Actor-based sampling layer for xAI grok.
+//!
+//! This crate holds the HTTP streaming and retry logic extracted from `xai-grok-shell`'s session actor.
+//! It is built on the same actor pattern as `xai-hunk-tracker`.
+//!
+//! ## Layered API
+//!
+//! - **Layer 1**: [`client::SamplingClient`] returns raw chunk streams.
+//! - **Layer 2**: [`stream`] transforms raw streams into [`SamplingEvent`]s.
+//! - **Layer 3**: [`SamplerHandle`] manages concurrent requests with retry, cancellation, and event-based coordination via the actor.
 
 #![deny(clippy::indexing_slicing)]
 

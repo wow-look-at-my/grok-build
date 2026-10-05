@@ -1,3 +1,15 @@
+//! Three-tier semaphore admission + bounded-wait backpressure.
+//!
+//! Concurrent *running* calls are bounded at three scopes, acquired in a
+//! fixed **session → connection → global** order. A consistent
+//! most-local-first order is deadlock-free and never holds a scarce
+//! global permit while blocking on a local one. A single shared deadline
+//! spans all three acquisitions, so total admission latency is bounded by
+//! `wait_timeout`, not `3 × wait_timeout`.
+//!
+//! Under moderate pressure `admit` waits; under very high pressure the
+//! deadline elapses and the caller emits the shared overloaded JSON-RPC
+//! error (`-32016` "tool_busy") instead of silently dropping the request.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -10,7 +22,8 @@ use xai_tool_protocol::{
     JsonRpcError, JsonRpcId, JsonRpcResponse, JsonRpcVersion, ResponseOutcome, SessionId,
 };
 
-/// Numeric JSON-RPC code for overload rejection (`xai-tool-protocol` `error_codes.rs`: `-32016` "tool_busy").
+/// Numeric JSON-RPC code for overload rejection (`xai-tool-protocol`
+/// `error_codes.rs`: `-32016` "tool_busy").
 pub(crate) const TOOL_BUSY_CODE: i32 = -32016;
 
 const TOOL_BUSY_MESSAGE: &str = "tool server busy; tool call rejected";
@@ -27,13 +40,14 @@ pub(crate) const DEFAULT_ADMISSION_WAIT_TIMEOUT: Duration = Duration::from_secs(
 /// Ops-tunable override for the process-wide global cap (Helm `env:`).
 const GLOBAL_MAX_INFLIGHT_ENV: &str = "XAI_TOOL_SERVER_GLOBAL_MAX_INFLIGHT";
 
-/// Inflight-gauge scope labels, in acquisition order. A held [`AdmitGuard`] counts against all of them.
+/// Inflight-gauge scope labels, in acquisition order. A held [`AdmitGuard`]
+/// counts against all three.
 const SCOPES: [&str; 3] = ["session", "conn", "global"];
 
 /// Build the shared overloaded (`-32016` "tool_busy") JSON-RPC error
 /// response. This is the single source of the overload wire shape, reused
 /// by BOTH the admission-timeout path (`server::execute_call`) and the
-/// demux inbox-full path (`demux::route_session`) so both never drift.
+/// demux inbox-full path (`demux::route_session`) so the two never drift.
 pub(crate) fn overloaded_response(id: JsonRpcId, session_id: SessionId) -> JsonRpcResponse<Value> {
     JsonRpcResponse {
         jsonrpc: JsonRpcVersion,
@@ -47,8 +61,14 @@ pub(crate) fn overloaded_response(id: JsonRpcId, session_id: SessionId) -> JsonR
     }
 }
 
-/// Process-wide global admission semaphore, shared by every connection. Initialized once at first use: the value comes from `XAI_TOOL_SERVER_GLOBAL_MAX_INFLIGHT` when present and parseable as a positive integer, otherwise `default_cap` (the builder knob, default
-/// [`DEFAULT_GLOBAL_MAX_INFLIGHT`]).
+/// Process-wide global admission semaphore, shared by every connection.
+///
+/// Initialized once at first use: the value comes from
+/// `XAI_TOOL_SERVER_GLOBAL_MAX_INFLIGHT` when present and parseable as a
+/// positive integer, otherwise `default_cap` (the builder knob, default
+/// [`DEFAULT_GLOBAL_MAX_INFLIGHT`]). Because the cell initializes exactly
+/// once, the first caller's `default_cap` and the env var at that instant
+/// fix the process-wide capacity.
 pub(crate) fn global_semaphore(default_cap: usize) -> Arc<Semaphore> {
     static SEM: OnceLock<Arc<Semaphore>> = OnceLock::new();
     SEM.get_or_init(|| {
@@ -61,8 +81,10 @@ pub(crate) fn global_semaphore(default_cap: usize) -> Arc<Semaphore> {
     .clone()
 }
 
-/// Resolve the process-wide global cap from the raw env value, falling back
-/// to `default_cap`.
+/// Resolve the process-wide global cap from the raw env value, falling
+/// back to `default_cap`. Pure (no global state) so the
+/// fall-back-never-panic guarantee is unit-tested: a non-numeric,
+/// negative, empty, or zero value all yield `default_cap`.
 fn resolve_global_cap(raw: Option<&str>, default_cap: usize) -> usize {
     raw.and_then(|v| v.parse::<usize>().ok())
         .filter(|n| *n > 0)
@@ -78,7 +100,10 @@ pub(crate) enum Overloaded {
     Shutdown,
 }
 
-/// RAII guard holding all permits for the call's lifetime.
+/// RAII guard holding all three permits for the call's lifetime.
+///
+/// Fields drop in declaration order, so permits are released in reverse
+/// of acquisition: global → connection → session.
 #[derive(Debug)]
 pub(crate) struct AdmitGuard {
     _global: OwnedSemaphorePermit,
@@ -94,8 +119,8 @@ impl Drop for AdmitGuard {
     }
 }
 
-/// One per connection (`conn_sem`); the per-session map is
-/// created/destroyed alongside each session loop.
+/// Three-tier admission controller. One per connection (`conn_sem`); the
+/// per-session map is created/destroyed alongside each session loop.
 #[derive(Debug)]
 pub(crate) struct Admission {
     session_sems: DashMap<SessionId, Arc<Semaphore>>,
@@ -141,7 +166,8 @@ impl Admission {
         let start = Instant::now();
         let deadline = start + self.wait_timeout;
         // The entry is created in `bind_session_local`; a straggler call
-        // admitted after unbind cleanup falls back to a private.
+        // admitted just after unbind cleanup falls back to a private,
+        // un-tracked semaphore rather than recreating a leaked entry.
         let session_sem = self
             .session_sems
             .get(session_id)
@@ -250,7 +276,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn admit_blocks_on_connection_scope_when_conn_saturated() {
-        // conn_max = 1 is the binding constraint even though session has room.
+        // conn_max = 1 is the binding constraint even though session has
+        // room; a second admit on a *different* session still times out.
         let admission = test_admission(8, 1, 64);
         let a = sid("a");
         let b = sid("b");
@@ -295,7 +322,8 @@ mod tests {
         let session = sid("gone");
         // No ensure_session: simulate a straggler after unbind removed it.
         admission.remove_session(&session);
-        // Falls back to a private semaphore and still admits (no panic, no leaked tracked entry).
+        // Falls back to a private semaphore and still admits (no panic,
+        // no leaked tracked entry).
         let _g = admission.admit(&session).await.expect("private fallback");
         assert!(
             admission.session_sems.get(&session).is_none(),

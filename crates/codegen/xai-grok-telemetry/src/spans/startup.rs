@@ -1,4 +1,5 @@
 //! Named startup phases on a per-process timer, reported once to `unified.jsonl`, product events, and OTLP metrics.
+//! A closed schema with pinned metric keys: time anything else with a `tracing` span, or give it its own schema.
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -142,8 +143,8 @@ impl RootClose {
             RootClose::Discarded => "discarded",
         }
     }
-    /// Only a reported or served attempt reaches its ready point, so only
-    /// then does closing its open phase end the last phase.
+    /// Only a reported or served attempt reaches its ready point, so only then does closing its open phase end
+    /// the last phase and start the first-frame gap. Superseded and abandoned attempts are interruptions.
     fn ends_last_phase(self) -> bool {
         matches!(self, RootClose::Reported(_) | RootClose::Served)
     }
@@ -308,7 +309,7 @@ impl StartupTimer {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
-    /// Closes the open phase; re-entering the open phase is ignored, so layers can name the same step and it is measured once.
+    /// Closes the open phase; re-entering the open phase is ignored, so two layers can name the same step and it is measured once.
     /// Returns whether a prior phase closed, so the caller can stamp the phase boundary.
     pub fn enter(&self, phase: StartupPhase) -> bool {
         let now = Instant::now();

@@ -42,6 +42,7 @@ pub(super) struct TrackedTask {
     explicitly_killed: bool,
     kill_result_delivered: bool,
     /// In-flight `wait_for_completion` callers.
+    /// ACP has no oneshot list; this is the live-waiter count used for kill delivery.
     live_waiters: usize,
     kind: TaskKind,
     owner_session_id: Option<String>,
@@ -128,6 +129,8 @@ struct LiveWaiter<'a> {
     tasks: TaskMap,
     task_id: &'a str,
     /// Set on the normal return path so Drop does not treat this wait as cancelled.
+    /// A cancelled wait must clear `block_waited` immediately.
+    /// ClientUi kill only clears it after the kill RPC, and the exit watcher can emit `TaskCompleted` in that gap.
     finished: bool,
 }
 
@@ -225,6 +228,8 @@ impl AcpTerminalAdapter {
 }
 
 /// Per-task budget for live `terminal/output` during `list_tasks` (task/list).
+/// After this expires that id falls back to local metadata; remaining ids still
+/// get their own live attempt with a fresh budget.
 const TERMINAL_OUTPUT_RPC_BUDGET: Duration = Duration::from_secs(2);
 
 #[async_trait::async_trait]
@@ -455,9 +460,9 @@ impl TerminalBackend for AcpTerminalAdapter {
                 Some(task) if task.completed => Tracked::Completed,
                 Some(task) => {
                     task.explicitly_killed = true;
-                    // ModelTool/Teardown suppress auto-wake immediately
-                    // (`marks_result_delivered(false)` is true) ClientUi
-                    // waits until.
+                    // ModelTool/Teardown suppress auto-wake immediately (`marks_result_delivered(false)` is true)
+                    // ClientUi waits until after the kill RPC so a cancelled waiter is visible
+                    // Setting only `explicitly_killed` here would let the exit watcher emit TaskCompleted with `kill_result_delivered` still false
                     if source.marks_result_delivered(false) {
                         task.kill_result_delivered = true;
                     }
@@ -552,8 +557,8 @@ impl TerminalBackend for AcpTerminalAdapter {
         match start {
             WaitStart::Immediate => return self.get_task(task_id).await,
             WaitStart::ProbeThenMaybeBlock => {
-                // Not tracked as running: one output probe A dead or unknown
-                // terminal must not burn the wait budget.
+                // Not tracked as running: one output probe A dead or unknown terminal must not burn the wait budget on WaitForTerminalExit Match kill's untracked probe: `get_task` maps every TerminalOutput error to None
+                // So a transport/channel blip on a still-live resumed terminal must not look like not-found Only a client that answered and disowned the id is a definitive miss
                 let probe = self
                     .gateway
                     .send(acp::TerminalOutputRequest::new(
@@ -630,8 +635,9 @@ impl TerminalBackend for AcpTerminalAdapter {
     }
 
     async fn list_tasks(&self) -> Vec<TaskSnapshot> {
-        // Preserve x.ai/task/list output for running rows via get_task (live
-        // terminal/output or log tail).
+        // Preserve x.ai/task/list output for running rows via get_task (live terminal/output or log tail).
+        // Bound each RPC so a hung client cannot stall enumeration indefinitely; only the timed-out id
+        // falls back, and the remaining ids still get a live attempt with their own budget.
         let task_ids: Vec<String> = {
             let tasks = self.tasks.lock().unwrap();
             tasks.keys().cloned().collect()

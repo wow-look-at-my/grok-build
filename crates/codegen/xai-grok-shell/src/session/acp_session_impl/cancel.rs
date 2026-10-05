@@ -14,6 +14,7 @@ pub(super) enum WakeBarrier {
 pub(super) struct CancelOutcome {
     pub(super) barrier: WakeBarrier,
     /// A user cancel with a classified reason tore down a turn, a rewind included.
+    /// Whether that leaves the session idle is the loop's call.
     pub(super) turn_stopped: bool,
     pub(super) settled: bool,
 }
@@ -366,9 +367,8 @@ impl SessionActor {
                 rewind_disposition,
             );
         }
-        // A claimed rewind owns only the turn The generic teardown targets
-        // whatever is running now and must not run; a new turn may already be
-        // promoted
+        // A claimed rewind owns only the old turn
+        // The generic teardown targets whatever is running now and must not run; a new turn may already be promoted
         if let Some((input, epoch, target_prompt_index, message_completions)) = claimed_rewound {
             let _strip_guard = self.prepare_image_strips_for_rewind().await;
             self.cancel_active_sampling_requests();
@@ -408,10 +408,12 @@ impl SessionActor {
             CancelFinalization::Keep(lease) => lease.binding.epoch(),
         };
         let suppress_task_wakes = kind == Some(crate::session::CancelKind::StopGesture);
-        // Abort in-flight `/compact` or auto-compact generation (via the stream select and the pre-replace guard) Safe.
+        // Abort in-flight `/compact` or auto-compact generation (via the stream select and the pre-replace guard)
+        // Safe when no compact is running
         self.compaction.cancel.request_cancel();
         // A turn cancel drops the in-flight `run_turn_via_sampler` future
-        // before its error path can read+clear the asap-injection flag.
+        // before its error path can read+clear the asap-injection flag, so
+        // clear both here to keep them from bleeding into a later turn.
         self.interjection_cancel_requested
             .store(false, std::sync::atomic::Ordering::SeqCst);
         *self.in_flight_sampler_request_id.lock() = None;
@@ -419,8 +421,9 @@ impl SessionActor {
             self.arm_wake_barrier(trigger.as_ref());
         }
 
-        // This unified-log marker is the counterpart of
-        // `shell.cancel.received` in `MvpAgent::cancel`.
+        // This unified-log marker is the counterpart of `shell.cancel.received` in `MvpAgent::cancel`.
+        // The pin is only a snapshot: the authoritative cancel identity is `running_task.prompt_id`, captured under the state lock below `current_prompt_id` is cleared early (turn scope guard drop / `handle_completion`) while.
+        // Keying the durable `TurnCompleted` on the pin alone would lose the terminal (and its `cancelTrigger`) in that window.
         let pinned_prompt_id = self
             .current_prompt_id
             .lock()
@@ -474,8 +477,9 @@ impl SessionActor {
         // A send-now redirect is the user continuing, not stopping, so it never kills an in-flight command.
         let send_now = matches!(trigger, Some(crate::session::CancelTrigger::SendNow));
 
-        // Kill all running foreground terminal processes before aborting the
-        // task. Send-now skips this and backgrounds them after the abort.
+        // Kill all running foreground terminal processes before aborting the task.
+        // Send-now skips this and backgrounds them after the abort.
+        // A narrow race exists: the running task could spawn a new terminal between this call and the abort() below In practice this is negligible; abort() drops the future and any child handle it owns.
         if !send_now {
             self.kill_foreground_commands_for_cancel().await;
         }
@@ -533,7 +537,9 @@ impl SessionActor {
                 return CancelOutcome::noop();
             }
 
-            // Closes the race between abort() and the TurnActiveGuard drop.
+            // Closes the race between abort() and the TurnActiveGuard drop: is_turn_active may still be true
+            // InjectNotification would then route Next-priority events to the buffer instead of pending_notifications
+            // Moving them here keeps them in the queue; an interactive stop defers their drain, other cancels do not
             self.sweep_monitor_buffer_into_pending(&mut state, "monitor-cancel-drain");
 
             // When killing all background tasks, also clear their pending notifications; the monitors that produced them are now dead
@@ -590,12 +596,14 @@ impl SessionActor {
                     },
                 );
             }
-            // Binding of the task torn down here.
+            // Binding of the task actually torn down here; rewinds keep it `None`
+            // so their terminal transition targets `All` (matching the cause).
             let mut binding = None;
             let cancelled_prompt_id = if !identity_matches {
                 None
             } else if rewound_input.is_some() {
-                // The rewind aborted the live task above; name it so the tore-down-task teardown below runs for it.
+                // The legacy rewind aborted the live task above; name it so the
+                // tore-down-task teardown below runs for it.
                 rewound_task_prompt_id
             } else if let CancelFinalization::Keep(_) = &finalization {
                 state.running_task.as_ref().map(|task| {
@@ -642,11 +650,9 @@ impl SessionActor {
                     .as_deref()
                     .is_some_and(|prompt_id| Self::is_capturable_front(&state, prompt_id));
 
-            // Only an interactive stop (Ctrl+C / Esc / [stop]) also removes
-            // queued task/workflow completion wakes. Preserve real user
-            // prompts and unrelated synthetic entries so
-            // `maybe_start_running_task` can promote the next genuine user
-            // turn.
+            // Only an interactive stop (Ctrl+C / Esc / [stop]) also removes queued task/workflow completion wakes.
+            // Preserve real user prompts and unrelated synthetic entries so `maybe_start_running_task` can promote the next genuine user turn.
+            // The cancelling client does not pull any prompt back into its input; the server queue is the single source of truth for what runs next.
             let message_cause = if kill_background_tasks {
                 xai_message_delivery_core::TerminalCause::HardTeardown
             } else if rewound_input.is_some() {
@@ -700,14 +706,15 @@ impl SessionActor {
             if had_message_fallbacks {
                 self.broadcast_queue_changed(&state);
             }
-            // Whether a user prompt remains queued behind the just-cancelled
-            // turn.
+            // Whether a user prompt remains queued behind the just-cancelled turn.
+            // It distinguishes the next turn's redirect kind for telemetry `queued_after_cancel` means a queued prompt is promoted; `cancel_then_send` means the user types a fresh prompt.
+            // Synthetic inputs (auto-wake / nudges) are not user redirects.
             let had_queued_user_prompt = state
                 .pending_inputs
                 .iter()
                 .any(|i| !i.input_origin.is_synthetic());
-            // `current_prompt_id` is deliberately NOT cleared here: cancel usage attribution must snapshot the ledger against
-            // the live pin first It is cleared.
+            // `current_prompt_id` is deliberately NOT cleared here: cancel usage attribution must snapshot the ledger against the live pin first
+            // It is cleared below, right after the `finalize_usage_from_outcome` / `snapshot_prompt_usage` call
             (
                 cancelled_prompt_id,
                 pending_inputs,
@@ -718,7 +725,9 @@ impl SessionActor {
                 captures_cancelled_turn,
             )
         };
-        // True iff this cancel aborted a live task: the Keep-with-task rail and every rewind rail that tore one down.
+        // True iff this cancel aborted a live task: the Keep-with-task rail and
+        // every rewind rail that tore one down. A Keep lease that bound no task
+        // sheds all task authority, so this stays false there.
         let tore_down_task = cancelled_prompt_id.is_some();
         if tore_down_task {
             self.cancel_active_sampling_requests();
@@ -736,8 +745,9 @@ impl SessionActor {
                     } else {
                         HashMap::new()
                     };
-                // The aborted turn can strand a continue reminder awaiting
-                // its continuation.
+                // The aborted turn can strand a continue reminder awaiting its continuation, plus dangling tool calls
+                // Repair now so the on-disk tail is clean even if the session ends here (the next push would otherwise repair lazily)
+                // Rewinds skip this: they replace the turn's history wholesale
                 self.chat_state_handle
                     .repair_dangling_after_harness_halt("user_cancel", answers);
             }
@@ -762,8 +772,8 @@ impl SessionActor {
         }
         // No prompt id means no turn ran, and closing a fresh session would otherwise write a `TurnEnded` with no `turn_started`
         if rewound_input.is_none() && cancelled_prompt_id.is_some() {
-            // The trigger (esc / ctrl_c / …) goes into the events.jsonl
-            // `cancellation_context` The category stays `MidTurnAbort`.
+            // The trigger (esc / ctrl_c / …) goes into the events.jsonl `cancellation_context`
+            // The category stays `MidTurnAbort` so the existing dashboards/dataset keep working
             let cancellation_context = trigger
                 .as_ref()
                 .map(|t| serde_json::json!({ "trigger": t.as_str() }));
@@ -772,8 +782,9 @@ impl SessionActor {
                 Some(crate::session::events::CancellationCategory::MidTurnAbort),
                 cancellation_context,
             );
-            // Mark the next real user prompt as following a mid-turn abort so
-            // replay/analytics/the model can see the user stopped.
+            // Mark the next real user prompt as following a mid-turn abort so replay/analytics/the model can see the user stopped this turn
+            // Send-now is a silent cancel-and-send: the user is continuing, not aborting
+            // It must not set the interrupt category or the interrupt envelope for its own continuation turn (mirrors the cancel-rate skip above)
             if !send_now {
                 self.events.set_prior_interrupt_category(
                     crate::session::events::CancellationCategory::MidTurnAbort,
@@ -809,7 +820,8 @@ impl SessionActor {
             if let Some(is_turn_active) = &self.tool_context.is_turn_active {
                 is_turn_active.store(false, std::sync::atomic::Ordering::Relaxed);
             }
-            // The aborted turn's `BlockingWaitGuard`s drop asynchronously.
+            // The aborted turn's `BlockingWaitGuard`s drop asynchronously (they live in tool futures owned by the drainer task / subagent spawn task).
+            // Until they do, `queue_input` would read a stale depth > 0 and auto-send-now the next prompt against a turn already gone.
             self.tool_context.blocking_wait_depth.reset();
             self.flush_pending_skill_reminders().await;
         }
@@ -859,8 +871,8 @@ impl SessionActor {
         if rewound_input.is_none()
             && let Some(prompt_id) = cancelled_prompt_id.or(no_task_pinned_prompt_id)
         {
-            // Only a cancel that ends a turn counts, and before the
-            // terminal's snapshot so it lands on this turn's row.
+            // Only a cancel that ends a turn counts, and before the terminal's snapshot so it lands
+            // on this turn's row. An idle Esc has no turn; a rewind replaces the turn, not stops it.
             if user_initiated && !rewind_requested {
                 self.signals_handle().record_cancellation();
             }
@@ -917,6 +929,8 @@ impl SessionActor {
         });
         Self::settle_parent_message_completions(message_completions, &message_result);
         for (idx, input) in pending_inputs.into_iter().enumerate() {
+            // idx 0 gets running-turn attribution only when this cancel tore
+            // down a live task; a no-task cancel attests nothing about it.
             let is_running_turn = tore_down_task && idx == 0;
             if let Some(task_id) = input.input_origin.completion_id()
                 && let Some(reservations) = &self.tool_context.task_completion_reservations
@@ -930,10 +944,10 @@ impl SessionActor {
                     total_tokens,
                     turn_snapshot: None,
                     completion_kind: PromptCompletionKind::Cancelled {
-                        // Running turn only, matching events.jsonl's
-                        // category; queued prompts
+                        // Running turn only, matching events.jsonl's category; queued prompts were removed, not mid-turn aborted
                         category: is_running_turn
                             .then_some(crate::session::events::CancellationCategory::MidTurnAbort),
+                        // Attach the trigger to the running turn only (idx 0); MvpAgent stamps it on the `PromptResponse` `_meta`
                         context: if is_running_turn {
                             trigger.as_ref().map(|t| {
                                 crate::session::commands::CancellationContext {
@@ -951,6 +965,8 @@ impl SessionActor {
                     } else {
                         None
                     },
+                    // Only the running turn (idx 0) ran, so only it reports the tool overrides it ran under
+                    // A queued prompt that never promoted has nothing to report (like respond_removed_prompt)
                     tool_overrides: if is_running_turn {
                         self.effective_tool_overrides()
                     } else {
@@ -983,6 +999,7 @@ impl SessionActor {
     /// Each one's tool call gets an honest answer saying the command is still running.
     async fn background_foreground_commands_for_send_now(&self) {
         // This session and its subagents share one terminal, so move only this session's own commands.
+        // Replying to another session's command would put an answer in this session's history for a question it never asked.
         let owner = Some(self.session_info.id.0.as_ref());
         let backgrounded = {
             self.agent
@@ -992,8 +1009,8 @@ impl SessionActor {
                 .await
         };
 
-        // Empty can mean nothing was running, or that this backend cannot
-        // background at all. Kill, so the command does not outlive its turn.
+        // Empty can mean nothing was running, or that this backend cannot background at all. Kill, so the command does not outlive its turn.
+        // A kill does not report which commands it stopped, so `repair_dangling_tool_calls` answers the tool call before the next request.
         if backgrounded.is_empty() {
             self.kill_foreground_commands_for_cancel().await;
         }

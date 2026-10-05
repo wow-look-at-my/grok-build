@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Describes the relation between nodes in the ScopeGraph.
+/// Describes the relation between two nodes in the ScopeGraph.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Copy, Clone, Debug)]
 pub enum EdgeKind {
     /// The edge weight from a nested scope to its parent scope.

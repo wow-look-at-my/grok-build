@@ -168,6 +168,7 @@ mod tests {
         assert!(narrow > wide, "narrow={narrow} wide={wide}");
     }
 
+    /// Compact mode insets the drawn box by `PROMPT_GUTTER` instead of 2, so the measured wrap width must follow the draw width.
     #[test]
     fn desired_prompt_height_measures_at_the_compact_draw_width() {
         let mut prompt = PromptWidget::new();

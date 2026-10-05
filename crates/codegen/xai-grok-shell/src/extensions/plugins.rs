@@ -129,12 +129,14 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         "x.ai/plugins/list" => {
             let req: ListRequest = super::parse_params(args)?;
 
-            // A known session answers from its own registry.
+            // A known session answers from its own registry, which includes `_meta.pluginDirs` plugins
+            // Only an unknown session (a pull before any session exists) falls back to the shared snapshot
             let sid = acp::SessionId::new(req.session_id);
             let registry = match agent.session_handle_waiting_for_load(&sid).await {
                 Some(handle) => handle.plugins_list().await,
                 None => {
-                    // The snapshot is built lazily on the first session.
+                    // The snapshot is built lazily on the first session; a pull before that must build it
+                    // rather than report an empty registry
                     agent.ensure_plugin_registry_async().await;
                     agent.plugin_registry_snapshot()
                 }

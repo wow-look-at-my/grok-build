@@ -28,10 +28,12 @@ pub const MAX_IMAGE_PAYLOAD_BYTES: usize = 768 * 1024;
 /// Raw-byte budget derived from [`MAX_IMAGE_PAYLOAD_BYTES`].
 pub(crate) const MAX_IMAGE_RAW_BYTES: usize = MAX_IMAGE_PAYLOAD_BYTES * 3 / 4;
 
-/// Total pixel budget (w*h) for images sent to the model.
+/// Total pixel budget (w*h) for images sent to the model; preserves the old
+/// 1024x1024 square budget as an aspect-agnostic area.
 pub(crate) const MAX_IMAGE_PIXELS: u64 = 1_048_576;
 
 /// Max pixel dimension (width or height) for images sent to the model.
+/// Model-agnostic side clamp; the area cap above is the operative budget.
 pub(crate) const MAX_IMAGE_DIMENSION: u32 = 2000;
 
 /// Floor dimension — re-encode gives up when `max_side` falls to or below this.
@@ -40,7 +42,9 @@ const MIN_IMAGE_DIMENSION: u32 = 128;
 /// JPEG quality ladder for the read-file image compression path.
 const READFILE_QUALITY_STEPS: &[u8] = &[85, 70, 50, 40];
 
-/// Absolute upper bound on decoded pixel count before we refuse to decode.
+/// Absolute upper bound on decoded pixel count before we refuse to decode. Matches the model API's `MAX_IMAGE_PIXELS`
+/// ceiling (and the shell's `MAX_VISION_TOTAL_PX`) so any photo the API would accept can be read and downscaled — a
+/// 20-48 Mpx camera photo must not fail `read_file`. Images above this are rejected by the API regardless.
 const MAX_DECODE_PIXELS: u64 = 178_956_970;
 
 /// Resize and compress an image so its base64 form stays under
@@ -79,7 +83,8 @@ pub async fn image_read_output(
             ));
         }
         Err(e) => {
-            // Don't leak `JoinError::Display` (panic payload / paths) into model-visible text.
+            // Don't leak `JoinError::Display` (panic payload / paths)
+            // into model-visible text.
             tracing::warn!(error = %e, "image compression task panicked");
             return ReadFileOutput::ImageSizeError(
                 "Image compression failed; see logs.".to_owned(),
@@ -142,8 +147,9 @@ fn compress_image_for_conversation_with_caps(
         .and_then(|r| r.into_dimensions().ok())
         .is_none_or(|(w, h)| !params.exceeds_dimension_caps(w, h));
 
-    // Pass through untouched only if the bytes are a structurally complete
-    // JPEG/PNG/WebP — the formats the API accepts on the wire.
+    // Pass through untouched only if the bytes are a structurally complete JPEG/PNG/WebP — the formats the API accepts on the wire. Anything else
+    // (truncated container, HEIC/PSD/unsniffable bytes) falls through to the re-encode chain, which either emits valid endpoint bytes or fails
+    // this call — never embedding a payload that would 400 on this and every following turn.
     let passthrough_sendable = match image::guess_format(&raw_bytes) {
         Ok(
             format
@@ -347,6 +353,7 @@ mod tests {
     /// under the old 1024px side cap this was downscaled for no byte gain.
     #[test]
     fn compress_wide_image_under_area_budget_passes_through() {
+        // 1600x600 = 0.96 Mpx <= MAX_IMAGE_PIXELS with both sides <= 2000.
         let png = make_small_png(1600, 600);
         let (result, mime) =
             compress_image_for_conversation(png.clone(), "image/png".into()).unwrap();
@@ -378,6 +385,9 @@ mod tests {
         );
     }
 
+    /// Regression: a 25 Mpx camera-class photo (cf. a real 5184×3888 iPhone
+    /// shot rejected under the old 16 Mpx cap) must compress, not error —
+    /// the API accepts up to ~178.9 Mpx and we downscale before the wire.
     #[test]
     fn compress_camera_sized_photo_succeeds() {
         let png = make_noisy_png(5000, 5000);
@@ -388,8 +398,9 @@ mod tests {
         assert!(u64::from(w) * u64::from(h) <= MAX_IMAGE_PIXELS);
     }
 
-    /// SOF dims are patched — encoding a real >178 Mpx fixture is
-    /// infeasible.
+    /// Above the API's own ceiling the decode is refused (the API would 400
+    /// it regardless). SOF dims are patched — encoding a real >178 Mpx
+    /// fixture is infeasible.
     #[test]
     fn compress_above_api_ceiling_returns_pixel_limit_exceeded() {
         use image::codecs::jpeg::JpegEncoder;
@@ -403,6 +414,7 @@ mod tests {
             .windows(2)
             .position(|w| w == [0xFF, 0xC0])
             .expect("baseline SOF0 present");
+        // 16384 x 16384 = 268 Mpx, above the 178.9 Mpx ceiling.
         let Some(dims) = jpeg.get_mut(sof + 5..sof + 9) else {
             panic!("SOF0 dimensions missing at {sof}");
         };
@@ -486,6 +498,8 @@ mod tests {
         );
     }
 
+    /// Tiny caps (~1.4 KB base64) on a 256×256 noise PNG exhaust the
+    /// quality ladder and surface `PayloadCapExceeded`.
     #[test]
     fn payload_cap_exceeded_reached_through_production_path() {
         let png = make_noisy_png(256, 256);

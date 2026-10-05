@@ -97,7 +97,8 @@ pub(crate) fn manager_permission_analytics(
             .classifier_verdict
             .as_deref()
             .and_then(|s| try_enum("classifier_verdict", s)),
-        // None means never classified; Some([]) means the classifier route ran with an empty assessment Any unknown token omits the whole field.
+        // None means never classified; Some([]) means the classifier route ran with an empty assessment
+        // Any unknown token omits the whole field (see convert_findings)
         security_findings: ev.security_findings.as_deref().and_then(convert_findings),
         classifier_latency_ms: ev.classifier_latency_ms,
         // Clamp to the manager's own budget (defense-in-depth) using the owner's constants, so a budget change cannot silently desync this clamp
@@ -131,9 +132,9 @@ pub(crate) fn permission_decision_source(decision: &Decision, is_yolo: bool) -> 
     }
 }
 
-/// Provenance for the analytics `source` field. When the manager returned no
-/// event, a `Reject` is a channel failure (`manager_unavailable`), NOT a
-/// human choice.
+/// Provenance for the analytics `source` field.
+/// When the manager returned no event, a `Reject` is a channel failure (`manager_unavailable`), NOT a human choice.
+/// Provenance is then omitted rather than mislabeled `user_reject`; with an event present, [`permission_decision_source`] labels as usual.
 pub(crate) fn resolved_decision_source(
     manager_event_present: bool,
     decision: &Decision,
@@ -147,10 +148,12 @@ pub(crate) fn resolved_decision_source(
 }
 
 /// One manager-authoritative telemetry snapshot for a resolved decision.
+/// Both the `tool.decision` span and the product `PermissionDecisionPayload` are fed from this, so they can never disagree on mode, wait, or source.
 pub(crate) struct ResolvedDecisionTelemetry {
     pub permission_mode: PermissionMode,
     pub wait_ms: u64,
     /// Provenance for the product payload and the span.
+    /// `None` (omitted) for an event-less synthetic manager failure, so it is never mislabeled `user_reject`.
     pub source: Option<String>,
 }
 
@@ -189,8 +192,9 @@ pub(crate) fn permission_outcome(decision: &Decision) -> PermissionOutcome {
     }
 }
 
-/// The production event-to-payload projection, used by `tool_calls.rs` and
-/// the cohort tests so the tested path is exactly the shipped one.
+/// The single production event-to-payload projection, used by `tool_calls.rs` and the cohort tests so the tested path is exactly the shipped one.
+/// Mode, wait, and source are never re-derived, so the span and product rails cannot observe different shell state.
+/// Content-free analytics come from [`manager_permission_analytics`].
 pub(crate) fn canonical_permission_tool_name(
     access: &xai_grok_workspace::permission::AccessKind,
 ) -> String {
@@ -560,9 +564,9 @@ mod permission_analytics_tests {
         );
     }
 
-    /// Drift guard: every prompt-outcome wire in `PromptOutcomeKind::ALL`
-    /// normalizes to a telemetry category. That list is what the manager
-    /// itself emits via `PromptOutcome::kind().wire_str()`.
+    /// Drift guard: every prompt-outcome wire in `PromptOutcomeKind::ALL` normalizes to a telemetry category.
+    /// That list is what the manager itself emits via `PromptOutcome::kind().wire_str()`.
+    /// A new owner kind (one `wire_enum!` list entry) that lacks a `PermissionPromptOutcome` mapping fails here rather than being silently omitted.
     #[test]
     fn prompt_outcome_covers_manager_vocabulary() {
         use xai_grok_workspace::permission::PromptOutcomeKind;
@@ -706,7 +710,7 @@ mod permission_analytics_tests {
         assert!(resolved_decision_source(false, &Decision::Allow, false).is_some());
     }
 
-    /// Real manager events run through the production projection and then the KPI predicate.
+    /// Four real manager events run through the production projection and then the KPI predicate.
     #[test]
     fn four_event_cohort_smoke_denominator_and_rates() {
         let events = [

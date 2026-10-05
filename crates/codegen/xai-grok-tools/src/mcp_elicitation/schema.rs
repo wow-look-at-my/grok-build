@@ -1,4 +1,6 @@
-//! Elicitation `requestedSchema` parsing: size limits, the immutable field specification model.
+//! Elicitation `requestedSchema` parsing: size limits, the immutable field
+//! specification model, and the schema → spec conversion. Validation of
+//! submitted values lives in [`super::validate`].
 
 use serde_json::Value;
 use std::collections::HashSet;
@@ -29,8 +31,9 @@ fn schema_bytes_ok(schema: &Value) -> bool {
         .unwrap_or(false)
 }
 
-/// Immutable description of one form field, parsed from the server's
-/// `requestedSchema`.
+/// Immutable description of one form field, parsed from the server's `requestedSchema`. Carries
+/// schema constraints and defaults only — user input, selections, and display errors live with the
+/// consumer (the pager), which submits values back through [`super::validate_form`].
 #[derive(Debug, Clone)]
 pub struct ElicitFieldSpec {
     pub name: String,
@@ -62,6 +65,8 @@ pub enum ElicitFieldKind {
         maximum: Option<f64>,
         default: Option<String>,
     },
+    /// `type: "integer"` — parsed and range-checked losslessly as `i64`
+    /// (never through `f64`, which rounds above 2^53 and saturates casts).
     Integer {
         minimum: Option<i64>,
         maximum: Option<i64>,
@@ -87,7 +92,9 @@ pub enum ElicitFieldKind {
     },
 }
 
-/// Those `format` values the MCP elicitation spec allows on string fields.
+/// The four `format` values the MCP elicitation spec allows on string
+/// fields. Unknown format strings are annotations per JSON Schema and get
+/// no validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ElicitTextFormat {
     Email,

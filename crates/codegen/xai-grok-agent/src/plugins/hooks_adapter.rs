@@ -47,6 +47,9 @@ pub fn parse_plugin_hooks_from_value(
     plugin_data: &str,
 ) -> (Vec<HookSpec>, Vec<String>) {
     // Normalize the inline value into the wrapped shape the parser requires.
+    // Claude Code plugins declare hooks inline without a top-level `hooks` key;
+    // without this they parse to zero specs and the hooks silently never run.
+    // Grok's native wrapped shape is returned unchanged (idempotent).
     let normalized = super::manifest::normalize_inline_hooks(value);
     let content = serde_json::to_string(&normalized).unwrap_or_default();
     // Use a synthetic path for parse_hook_file's source_dir (resolves relative commands).
@@ -334,7 +337,8 @@ mod tests {
     #[test]
     fn parse_inline_hooks_from_claude_code_shape() {
         // Claude Code declares hooks inline WITHOUT a top-level `hooks` key.
-        // This is the shape.
+        // This is the shape that previously parsed to zero specs and silently
+        // never ran; normalization must rescue it.
         let value = serde_json::json!({
             "PreToolUse": [
                 {
@@ -510,10 +514,10 @@ mod tests {
         );
     }
 
-    /// User-declared `env` is kept, but those plugin-owned keys always win.
+    /// User-declared `env` is kept, but the four plugin-owned keys always win.
     #[test]
     fn parse_plugin_hooks_user_env_merged_with_plugin_precedence() {
-        // All keys, so a one-key regression can't pass.
+        // All four keys, so a one-key regression can't pass.
         let value = serde_json::json!({
             "hooks": {
                 "PreToolUse": [
@@ -553,7 +557,7 @@ mod tests {
             "user-declared env keys must survive plugin merge"
         );
 
-        // All of them plugin-owned keys: plugin wins over the user's attempt.
+        // All four plugin-owned keys: plugin wins over the user's attempt.
         for (key, expected) in [
             ("CLAUDE_PLUGIN_ROOT", "/actual/plugin/root"),
             ("GROK_PLUGIN_ROOT", "/actual/plugin/root"),

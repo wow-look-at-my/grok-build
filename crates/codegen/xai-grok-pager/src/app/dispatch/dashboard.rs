@@ -492,8 +492,9 @@ pub(super) fn dispatch_dashboard_overlay_exit(app: &mut AppView) -> Vec<Effect> 
     app.active_view = ActiveView::AgentDashboard;
     vec![]
 }
-/// Disarm a pending overlay stop-confirm (see
-/// [`dispatch_dashboard_overlay_stop`]).
+/// Disarm a pending overlay stop-confirm (see [`dispatch_dashboard_overlay_stop`]).
+/// Called from every overlay navigation that can happen WITHOUT a key press (mouse clicks on `[Dashboard]` / `‹` / `›`).
+/// Key presses already disarm via the pending-action fast path in `AppView::handle_input`.
 fn clear_pending_overlay_stop(app: &mut AppView) {
     if app
         .pending_action
@@ -963,6 +964,7 @@ pub(super) fn dispatch_dashboard_confirm_worktree(
     );
     effects
 }
+/// Cycle the dashboard overlay to the prev (-1) / next (+1) agent in the visible row order, wrapping at the ends.
 /// Attaches overlay chrome on the first cycle from a session not opened via the dashboard.
 pub(super) fn dispatch_dashboard_overlay_cycle(app: &mut AppView, delta: i32) -> Vec<Effect> {
     use crate::views::dashboard::DashboardRowId;
@@ -1415,7 +1417,7 @@ pub(super) fn dispatch_dashboard_peek_cycle_mode(app: &mut AppView) -> Vec<Effec
     effects
 }
 /// An idle agent sends it immediately (a turn starts); a mid-turn agent keeps it queued so it drains after the current turn finishes.
-/// This is the same queue and drain pipeline the agent view's own prompt input uses, so both surfaces behave identically.
+/// This is the same queue and drain pipeline the agent view's own prompt input uses, so the two surfaces behave identically.
 pub(super) fn dispatch_dashboard_peek_reply(
     app: &mut AppView,
     row: crate::views::dashboard::DashboardRowId,

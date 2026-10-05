@@ -1,4 +1,8 @@
 //! Agents modal popup: lists all agent definitions (built-in, user, project, bundled).
+//!
+//! Opened by `/config-agents` (alias `/agents`).
+//! Uses the shared [`ModalWindow`](super::modal_window) chrome.
+//! Blocks all input until closed with `Esc`.
 use crate::app::bundle::{BundleState, PersonaDetail};
 use crate::input::line_editor::{LineEditOutcome, LineEditor};
 use crate::theme::Theme;
@@ -98,8 +102,8 @@ pub enum AgentsModalOutcome {
     Close,
     Changed,
     Unchanged,
-    /// User pressed Enter or o: open the agent's full definition in the line
-    /// viewer.
+    /// User pressed Enter or o: open the agent's full definition in the line viewer.
+    /// Contains the source path (if file-based) or in-memory markdown content.
     ViewAgent {
         /// Display title for the viewer.
         title: String,
@@ -225,14 +229,17 @@ pub enum PersonaConfirmAction {
 /// Modal state for the agents listing.
 pub struct AgentsModalState {
     pub window: ModalWindowState,
-    /// Active tab (source of truth).
+    /// Currently active tab (source of truth). `window.active_tab` (a `usize` index) is derived from
+    /// this in the render path via `AgentsTab::ALL.position()`. Only this field should be mutated by
+    /// input handlers; the window's copy is a rendering hint synced each frame.
     pub active_tab: AgentsTab,
     pub agents: Vec<AgentListEntry>,
     pub selected: usize,
     pub scroll: usize,
     search: LineEditor,
     pub search_active: bool,
-    /// Maps screen Y position to agent index. Rebuilt every render frame so a mouse click can select an agent.
+    /// Maps screen Y position to agent index.
+    /// Rebuilt every render frame so a mouse click can select an agent.
     pub(crate) row_map: Vec<(u16, usize)>,
     /// Content area rect from the last render (for click bounds checking).
     pub(crate) content_rect: Option<Rect>,
@@ -871,8 +878,9 @@ fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
     }
     lines
 }
-/// Build viewer content for a built-in agent's prompt extension. Shows only the `prompt_body`, the custom instructions this agent adds on top of the base template. Template variables like `${{ tools.by_kind.read }}` are resolved to actual tool names
-/// using the agent's configured toolset.
+/// Build viewer content for a built-in agent's prompt extension. Shows only the `prompt_body`, the
+/// custom instructions this agent adds on top of the base template. Template variables like `${{
+/// tools.by_kind.read }}` are resolved to actual tool names using the agent's configured toolset.
 fn synthesize_agent_markdown(entry: &AgentListEntry) -> String {
     if let Some(ref body) = entry.definition.prompt_body {
         render_prompt_body(body, &entry.definition.tool_config)

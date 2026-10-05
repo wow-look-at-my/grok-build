@@ -1,3 +1,8 @@
+//! These tests verify the parallel dispatch path (GROK_PARALLEL_TOOL_DISPATCH):
+//! - Phase 1: prepare_tool_call for each tool
+//! - Phase 2: permission prompts (if any)
+//! - Phase 3: parallel dispatch via dispatch_tool
+//! - Post-tool hooks and followups
 
 use super::*;
 
@@ -305,11 +310,12 @@ async fn generic_tool_completion_chokepoint_has_exact_active_message_cardinality
 
 #[tokio::test]
 async fn test_parallel_dispatch_basic() {
-    // Ordering correctness: verify that futures::future::join_all preserves the order of results matching the order.
+    // Ordering correctness: verify that futures::future::join_all preserves the order of results matching the order of input futures.
+    // In Phase 2, dispatch_futures is built by mapping approved.iter() to dispatch_tool calls Phase 3 zips approved.into_iter() with dispatch_results, so result[i] must correspond to approved[i].
 
     use futures::future::join_all;
 
-    // Simulate multiple tools with different latencies
+    // Simulate 3 tools with different latencies
     let futures = vec![
         Box::pin(async { (0, "tool_a") })
             as std::pin::Pin<Box<dyn futures::Future<Output = (i32, &'static str)>>>,
@@ -330,7 +336,9 @@ async fn test_parallel_dispatch_basic() {
 
 #[test]
 fn test_parallel_dispatch_permission_reject() {
-    // Permission rejection abort: when prepare_tool_call returns Err(ToolLoop::PermissionReject).
+    // Permission rejection abort: when prepare_tool_call returns Err(ToolLoop::PermissionReject), subsequent tools should not be dispatched
+    //
+    // Verify the logic: once final_result is set, remaining tools are skipped.
     let mut final_result: Option<ToolLoop> = None;
     let tool_calls = ["tool_0", "tool_1", "tool_2"];
     let mut approved_count = 0;
@@ -361,10 +369,11 @@ fn test_parallel_dispatch_permission_reject() {
 }
 #[test]
 fn test_parallel_dispatch_followups() {
-    // Deferred followups placement: handle_bridge_tool_success returns Vec<ConversationItem> followups that get extended.
+    // Deferred followups placement: handle_bridge_tool_success returns Vec<ConversationItem> followups that get extended into deferred_followups.
+    // In Phase 3: let followups = handle_bridge_tool_success(...).await?; deferred_followups.extend(followups);.
     let mut deferred_followups: Vec<&str> = Vec::new();
 
-    // Simulate followups from multiple tools
+    // Simulate followups from 2 tools
     let followups_tool_0 = vec!["followup_a", "followup_b"];
     let followups_tool_1 = vec!["followup_c"];
 
@@ -380,13 +389,15 @@ fn test_parallel_dispatch_followups() {
 #[test]
 fn test_parallel_dispatch_hooks() {
     // Dispatching a single tool should behave identically to the serial path.
+    // The parallel dispatch infrastructure (prepare_tool_call, then dispatch_tool, then post-flight) should work for N=1 without special casing.
     let approved_count = 1;
-    let dispatch_futures_count = approved_count;
+    let dispatch_futures_count = approved_count; // 1:1 mapping
     let results_count = 1; // incremental stream yields same count
 
     assert_eq!(approved_count, dispatch_futures_count);
     assert_eq!(dispatch_futures_count, results_count);
 
+    // Also verify the Phase 3 indexed slot works for single element
     let approved = ["single_tool"];
     let ok_val: Result<&str, ()> = Ok("success");
     let results = [ok_val];
@@ -442,10 +453,9 @@ async fn incremental_dispatch_surfaces_fast_tool_before_slow_sibling() {
     assert!(slow_done.load(Ordering::SeqCst));
 }
 
-/// Regression for the race where toolsets edited the same file concurrently.
-/// `lock_path_for_args` is the per-call key `execute_tool_calls` Phase
-/// multiple uses to bucket concurrent calls into per-file
-/// `tokio::sync::Mutex` groups.
+/// Regression for the race where two toolsets edited the same file concurrently.
+/// `lock_path_for_args` is the per-call key `execute_tool_calls` Phase 2 uses to bucket concurrent calls into per-file `tokio::sync::Mutex` groups.
+/// The compat toolset input types use `path`, and grok_build's `read_file` uses `target_file`.
 #[test]
 fn lock_path_for_args_matches_grok_build_file_path() {
     // grok_build search_replace / opencode EditTool / WriteTool / etc.
@@ -553,8 +563,8 @@ fn lock_path_for_args_ignores_non_string_path_values() {
 
 #[test]
 fn lock_path_for_args_buckets_parallel_compat_strreplace_to_same_lock() {
-    // The exact symptom of the bug: compat StrReplace calls in one batch
-    // targeting the same file both returned None here and raced.
+    // The exact symptom of the bug: two compat StrReplace calls in one batch targeting the same file both returned None here and raced on the file
+    // Both must hash to the same bucket so the dispatcher serializes them via a per-file Mutex
     let call_a = serde_json::json!({
         "path": "/repo/src/main.rs",
         "old_string": "foo",
@@ -574,8 +584,7 @@ fn lock_path_for_args_buckets_parallel_compat_strreplace_to_same_lock() {
         Some("/repo/src/main.rs".to_owned())
     );
 
-    // Cross-file calls must bucket independently so they keep running
-    // concurrently.
+    // Cross-file calls must bucket independently so they keep running concurrently; otherwise we'd serialize unrelated edits and tank batch latency
     let call_c = serde_json::json!({
         "path": "/repo/src/lib.rs",
         "old_string": "x",
@@ -589,8 +598,9 @@ fn lock_path_for_args_buckets_parallel_compat_strreplace_to_same_lock() {
 
 #[test]
 fn lock_path_for_args_buckets_grok_build_and_compat_to_same_lock_for_same_file() {
-    // A mixed batch of grok_build search_replace and compat. StrReplace in
-    // the same turn must still serialize on the shared file path.
+    // A mixed batch of grok_build search_replace and compat.
+    // StrReplace in the same turn must still serialize on the shared file path.
+    // That mix is possible if the harness ever exposes both toolsets, or during a toolset migration file_path takes precedence over path when both are present, but neither tool emits both keys today.
     let grok = serde_json::json!({
         "file_path": "/repo/src/main.rs",
         "old_string": "a",
@@ -623,6 +633,7 @@ fn test_skill_discovery_deferred_during_parallel_batch() {
         if i == 0 {
             // Image followup from handle_bridge_tool_success
             deferred_followups.push(ConversationItem::user("[Image content]"));
+            // Skill discovery fires after tool 1; it must be deferred, not pushed immediately
             deferred_followups.push(ConversationItem::system_reminder(
                 "<system-reminder>\nNew skills discovered\n</system-reminder>",
             ));
@@ -630,6 +641,7 @@ fn test_skill_discovery_deferred_during_parallel_batch() {
     }
     conversation.extend(deferred_followups);
 
+    // 1 assistant + 3 tool_result + 2 deferred user messages
     assert_eq!(conversation.len(), 6);
     assert!(matches!(
         at(&conversation, 0),

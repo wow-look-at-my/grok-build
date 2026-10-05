@@ -1,4 +1,17 @@
 //! Microphone capture on Linux via a subprocess recorder.
+//!
+//! The release CLI ships as a fully-static `*-unknown-linux-musl` binary.
+//! Linking `cpal` pulls in `alsa-sys` (a `NEEDED libasound.so.2`), losing the static guarantee enforced by the release build.
+//! Statically linking ALSA is no help either: it reaches the user's real device (PulseAudio/PipeWire) through plugins it loads via `dlopen`.
+//! A static musl binary can't `dlopen`.
+//!
+//! Instead, capture spawns the system recorder (`pw-record`, `parec`, or `arecord`) and reads raw PCM16 mono from its stdout.
+//! No native audio library is linked into the binary.
+//! The recorders are asked for signed 16-bit little-endian mono at the STT sample rate.
+//! That is exactly the format the pipeline forwards, so there is no downmix/resample step.
+//!
+//! This module exposes the same interface as the `cpal` backend (`spawn_pcm_capture`, `capture_pcm_for_duration`, `CaptureHandle`).
+//! That keeps the pipeline and probe backend-agnostic.
 
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -14,12 +27,16 @@ use super::pipe::{self, READ_CHUNK};
 use crate::error::VoiceError;
 
 /// Grace before a start is accepted (mirrors the `cpal` backend's open handshake).
+/// A missing device, dead audio server, or rejected flag exits within a few ms.
+/// Waiting turns that into an error (and triggers fallback) instead of a silent "listening" session that never produces audio.
 const START_GRACE: Duration = Duration::from_millis(300);
 
 /// Poll interval while waiting out [`START_GRACE`].
+/// A rejected flag dies in a few ms, so a failing recorder falls through to the next without paying the full grace.
 const START_POLL: Duration = Duration::from_millis(15);
 
 /// Upper bound on the `pw-record --help` capability probe so a wedged binary can't hang `/voice` or Doctor.
+/// A misjudged probe only reorders candidates (see [`candidate_recorders`]) and never blocks, so this can be generous.
 const PW_HELP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A system audio recorder that can stream raw PCM16 mono to stdout.
@@ -48,7 +65,9 @@ impl Recorder {
         let rate = rate.to_string();
         match self {
             Recorder::PwRecord => vec![
-                // Without `--raw`, `pw-record` treats `--format`/`--rate`/`--channels`.
+                // Without `--raw`, `pw-record` treats `--format`/`--rate`/`--channels` as a libsndfile container subformat. It then
+                // wraps stdout in a container: WAV before PipeWire 1.6, AU with a header on 1.6 and later WAV cannot be written to a
+                // pipe ("this file format does not support pipe writing", exit 1); Ubuntu 24.04/Debian 12 ship 1.0/1.2.
                 "--raw".into(),
                 "--rate".into(),
                 rate,
@@ -120,8 +139,9 @@ fn binary_on_path(name: &str) -> bool {
     })
 }
 
-/// Scans stdout and stderr since usage text lands on either. A probe that can't run, or outlives [`PW_HELP_TIMEOUT`],
-/// counts as "no `--raw`". That only demotes `pw-record`, never blocks it (see [`candidate_recorders`]).
+/// Whether `pw-record` accepts `--raw` (PipeWire ~1.0 and later), via `pw-record --help` (opens no capture device). Scans
+/// stdout and stderr since usage text lands on either. A probe that can't run, or outlives [`PW_HELP_TIMEOUT`], counts as
+/// "no `--raw`". That only demotes `pw-record`, never blocks it (see [`candidate_recorders`]).
 fn pw_record_supports_raw() -> bool {
     let mut cmd = Command::new("pw-record");
     cmd.arg("--help")
@@ -134,7 +154,9 @@ fn pw_record_supports_raw() -> bool {
         return false;
     };
 
-    // Bound the probe so a wedged `pw-record --help` can't hang `/voice` or Doctor `--help` prints a few lines then exits.
+    // Bound the probe so a wedged `pw-record --help` can't hang `/voice` or Doctor
+    // `--help` prints a few lines then exits, well under the pipe buffer, so reading after it exits can't deadlock
+    // A child that outlives the window is killed and treated as "no --raw"
     let deadline = Instant::now() + PW_HELP_TIMEOUT;
     loop {
         match child.try_wait() {
@@ -217,7 +239,8 @@ fn try_spawn(recorder: Recorder, sample_rate: u32) -> Result<Child, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // setsid detach via the sanctioned helper (workspace subprocess rule) The recorder writes to a pipe.
+    // setsid detach via the sanctioned helper (workspace subprocess rule)
+    // The recorder writes to a pipe and must not share the pager's controlling TTY
     xai_tty_utils::detach_std_command(&mut cmd);
     #[allow(clippy::disallowed_methods)] // recorder owned by the capture handle, killed on stop
     let mut child = cmd
@@ -306,8 +329,9 @@ pub fn spawn_pcm_capture(
     Ok(CaptureHandle::new(child, stop, reader))
 }
 
-/// The recorder capture would try first, without recording ([`crate::probe::input_device_info`]). The
-/// capability-aware ordering reports a too-old `pw-record` behind `parec`/`arecord` when those exist.
+/// The recorder capture would try first, without recording ([`crate::probe::input_device_info`]).
+/// The capability-aware ordering reports a too-old `pw-record` behind `parec`/`arecord` when those exist.
+/// Doctor is then accurate on the common Ubuntu 22.04 setup instead of falsely green on `pw-record`.
 pub fn input_device_info() -> Result<crate::probe::InputDeviceInfo, VoiceError> {
     let recorders = require_recorders(binary_on_path, pw_record_supports_raw)?;
     // `require_recorders` returns a non-empty list on `Ok`; degrade to an error rather than panic if that ever changes
@@ -339,7 +363,9 @@ pub fn capture_pcm_for_duration(
     let duration = Duration::from_secs(seconds.max(1) as u64);
     let deadline = Instant::now() + duration;
 
-    // The read would otherwise run past the requested duration.
+    // The read would otherwise run past the requested duration. Deliberately not joined: if the recorder dies early we
+    // return without waiting out the full duration. The watchdog's late `kill` on an already-reaped `Child` is a harmless
+    // `InvalidInput` (std tracks the reap, so no PID-reuse hazard)
     let child = Arc::new(Mutex::new(child));
     let watchdog_child = Arc::clone(&child);
     thread::spawn(move || {
@@ -401,7 +427,8 @@ mod tests {
         assert!(parec.contains(&"--channels=1".to_string()));
 
         let pw = Recorder::PwRecord.args(48_000);
-        // Raw mode is required: without it pw-record wraps stdout in a libsndfile container.
+        // Raw mode is required: without it pw-record wraps stdout in a libsndfile container
+        // (WAV before PipeWire 1.6, which cannot be written to a pipe; AU with a header on 1.6 and later.)
         assert!(pw.contains(&"--raw".to_string()));
         let r = pw.iter().position(|a| a == "--rate").unwrap();
         assert_eq!(pw.get(r + 1).map(String::as_str), Some("48000"));
@@ -439,7 +466,8 @@ mod tests {
 
     #[test]
     fn old_pipewire_is_demoted_below_pulse_and_alsa() {
-        // pw-record present but `--raw` unsupported: it ranks last so parec is tried first.
+        // pw-record present but `--raw` unsupported: it ranks last so parec is tried first, but it is not dropped
+        // A misjudged probe must not block a working pw-record (the spawn is the source of truth)
         let all_present_no_raw = candidate_recorders(|_| true, || false);
         assert!(matches!(
             all_present_no_raw.as_slice(),
@@ -449,7 +477,8 @@ mod tests {
 
     #[test]
     fn sole_pipewire_stays_a_candidate_when_probe_says_no_raw() {
-        // The only recorder on PATH is a pw-record the probe rejects.
+        // The only recorder on PATH is a pw-record the probe rejects: still offer it so first_success can spawn-test it
+        // Erroring out here would act on a possible false negative
         let only_pw = require_recorders(|p| p == "pw-record", || false).unwrap();
         assert!(matches!(only_pw.as_slice(), [Recorder::PwRecord]));
     }

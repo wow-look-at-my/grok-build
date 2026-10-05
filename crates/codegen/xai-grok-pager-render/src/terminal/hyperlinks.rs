@@ -1,3 +1,6 @@
+//! Per-terminal hyperlink (OSC 8) capabilities.
+//!
+//! Input-handling code reads one [`HyperlinkCapabilities`] struct instead of branching on brand.
 
 use super::TerminalName;
 
@@ -8,12 +11,13 @@ pub enum Osc8Support {
     Native,
     /// Terminal actively garbles unknown OSC sequences (Apple Terminal).
     HostileParser,
+    /// Terminal explicitly does not support OSC 8.
     Unsupported,
     #[default]
     Unknown,
 }
 
-/// Which URL schemes the terminal supports in OSC multiple links.
+/// Which URL schemes the terminal supports in OSC 8 links.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, strum::Display)]
 #[strum(serialize_all = "snake_case")]
 #[non_exhaustive]
@@ -44,6 +48,7 @@ pub struct HyperlinkCapabilities {
     /// Whether the terminal supports the `id=` parameter for hover-grouping.
     pub id_param: bool,
     pub scheme_filter: SchemeFilter,
+    /// Whether the terminal supports OSC 22 cursor-shape changes (e.g. switching to a hand/pointer cursor on link hover).
     pub osc22_cursor: bool,
     /// Whether the terminal handles link hover styling natively (so our app should skip its own Cmd/Ctrl+hover highlight logic).
     pub native_link_hover: bool,
@@ -62,6 +67,7 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
             native_link_hover: false,
             native_plain_url_open: false,
         },
+        // iTerm2 is the OSC 8 reference implementation
         TerminalName::Iterm2 => HyperlinkCapabilities {
             osc8: Native,
             id_param: true,
@@ -78,6 +84,7 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
             native_link_hover: false,
             native_plain_url_open: false,
         },
+        // Kitty has supported OSC 8 since v0.19
         TerminalName::Kitty => HyperlinkCapabilities {
             osc8: Native,
             id_param: true,
@@ -86,7 +93,7 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
             native_link_hover: false,
             native_plain_url_open: false,
         },
-        // Rio and foot also support it.
+        // Alacritty has supported OSC 8 since v0.11. Rio and foot also support it.
         TerminalName::Alacritty | TerminalName::Rio | TerminalName::Foot => HyperlinkCapabilities {
             osc8: Native,
             id_param: true,
@@ -103,7 +110,7 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
             native_link_hover: false,
             native_plain_url_open: false,
         },
-        // Hover styling is native.
+        // VS Code-family embeds share xterm.js OSC 8 (since v1.72); Zed does too. Hover styling is native.
         TerminalName::VsCode
         | TerminalName::Cursor
         | TerminalName::Windsurf
@@ -115,6 +122,8 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
             native_link_hover: true,
             native_plain_url_open: false,
         },
+        // Warp's OSC 8 support is an open issue (warpdotdev/Warp#4194)
+        // Its UrlLocator opens bare URLs under mouse reporting; keep native_link_hover false for the file:// fallback
         TerminalName::WarpTerminal => HyperlinkCapabilities {
             osc8: Unsupported,
             id_param: false,
@@ -133,6 +142,7 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
             native_link_hover: false,
             native_plain_url_open: false,
         },
+        // Windows Terminal has supported OSC 8 since v1.4
         TerminalName::WindowsTerminal => HyperlinkCapabilities {
             osc8: Native,
             id_param: true,
@@ -141,7 +151,7 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
             native_link_hover: false,
             native_plain_url_open: false,
         },
-        // JetBrains JediTerm: OSC multiple varies across IDE versions and there is no runtime probe (no TERM_FEATURES)
+        // JetBrains JediTerm: OSC 8 varies across IDE versions and there is no runtime probe (no TERM_FEATURES)
         TerminalName::JetBrains => HyperlinkCapabilities {
             osc8: Unknown,
             id_param: false,
@@ -170,8 +180,11 @@ pub fn hyperlink_capabilities(brand: TerminalName) -> HyperlinkCapabilities {
     }
 }
 
+// ── OSC 22 cursor-shape commands ──────────────────────────────────────
+//
+// These wrap raw OSC 22 sequences as crossterm `Command`s so call sites can use `crossterm::execute!` / `queue!` instead of manual byte writes
 
-/// iTerm2, Ghostty, and Kitty honor it; others ignore it silently.
+/// OSC 22 hand cursor. iTerm2, Ghostty, and Kitty honor it; others ignore it silently.
 pub struct SetPointerCursor;
 
 impl crossterm::Command for SetPointerCursor {
@@ -185,6 +198,7 @@ impl crossterm::Command for SetPointerCursor {
     }
 }
 
+/// OSC 22: reset the mouse pointer to the default (arrow) shape.
 pub struct SetDefaultCursor;
 
 impl crossterm::Command for SetDefaultCursor {

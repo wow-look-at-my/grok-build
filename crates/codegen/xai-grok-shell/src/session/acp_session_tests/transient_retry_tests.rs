@@ -1,4 +1,5 @@
 //! Pins `handle_sampling_failure`'s transient arm: eligible kinds retry while budget remains.
+//! Exhaustion and the kill switch fall through, and kinds with their own recovery path stay untouched.
 
 use super::support::*;
 use super::*;
@@ -50,6 +51,7 @@ fn transient_retry_eligibility_truth_table() {
         );
     }
 
+    // Matches `is_retryable_api_status`: origin-TLS 52x, client errors (including 408 and 429), and status-less Api all fail closed
     for status in [
         Some(525),
         Some(526),
@@ -169,6 +171,7 @@ async fn idle_timeout_first_failure_requests_resubmit() {
         .await;
 }
 
+/// A 503 that exhausted the sampler's internal retries gets the same turn-level resubmit.
 #[tokio::test(flavor = "current_thread")]
 async fn server_error_first_failure_requests_resubmit() {
     let local = tokio::task::LocalSet::new();

@@ -7,15 +7,17 @@ use crate::implementations::skills::types::SkillInfo;
 
 use super::canonical_path;
 
-/// `paths:`-gated skills held out of the listing until a tool touches a
-/// matching file, then activated.
+/// `paths:`-gated skills held out of the listing until a tool touches a matching
+/// file, then activated. Session-scoped (one instance per `SkillManager`).
 #[derive(Debug, Clone, Default)]
 pub(super) struct ConditionalSkills {
-    /// Held skills; activated ones stay here (gated by `activated`) so a reseed can re-promote them.
+    /// Held skills; activated ones stay here (gated by `activated`) so a reseed
+    /// can re-promote them.
     held: Vec<SkillInfo>,
     /// `dedup_key`s activated this session; survives reseed.
     activated: HashSet<String>,
-    /// Held skills found via dynamic discovery, so a reseed doesn't drop a hold the baseline never knew.
+    /// Held skills found via dynamic discovery, so a reseed doesn't drop a hold
+    /// the baseline never knew.
     dynamic_paths: HashSet<PathBuf>,
 }
 

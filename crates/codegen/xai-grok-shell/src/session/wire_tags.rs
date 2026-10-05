@@ -1,4 +1,8 @@
 //! Single source of truth for the `sessionUpdate` discriminant strings.
+//! The session-resume replay matchers compare them against persisted `updates.jsonl` lines.
+//!
+//! Each value is derived from its enum's serde impl (not a hand-written literal), so renaming a variant updates the matcher automatically.
+//! The guard test pins the wire format, turning an accidental serde change into a failing test.
 
 use std::sync::LazyLock;
 

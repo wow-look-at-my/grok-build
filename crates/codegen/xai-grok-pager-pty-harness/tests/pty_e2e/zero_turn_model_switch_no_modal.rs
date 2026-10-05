@@ -22,7 +22,8 @@ async fn zero_turn_model_switch_no_modal() {
         .inject_keys(b"/model cursor-model\r")
         .expect("type model switch");
 
-    // When the switch lands before the session exists.
+    // When the switch lands before the session exists, deferred_model_switch applies it silently on SessionCreated and no "Switched to" line prints
+    // Wait for what both paths show: the prompt is consumed and the status bar names the new model
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
     loop {
         harness.update(Duration::from_millis(100));

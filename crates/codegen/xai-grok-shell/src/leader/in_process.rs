@@ -19,8 +19,13 @@ use crate::agent::mvp_agent::MvpAgent;
 
 const SIMPLEX_BUF: usize = 8 * 1024 * 1024;
 
-/// An in-process agent: the tasks that pump its I/O, and the handle that
-/// keeps it allocated.
+/// An in-process agent: the tasks that pump its I/O, and the handle that keeps it allocated.
+///
+/// `MvpAgent` spawns background tasks on the ambient `LocalSet` that hold raw `LocalRef` self-pointers, so the agent
+/// must outlive every task on that `LocalSet`. Aborting `tasks` ends the ACP connection (which owns its own clone of
+/// the agent) but leaves those background tasks queued; a caller that lets the agent die while they are still queued
+/// frees the memory they keep reading, and their teardown writes through the dangling pointer.
+/// Hold `keepalive` past the `LocalSet`: `drop(local_set)` first, then `drop(keepalive)`.
 pub struct InProcessAgent {
     /// The ACP connection, the request pump and the response pump. Abort and await them to end the agent's I/O.
     pub tasks: Vec<JoinHandle<()>>,
@@ -44,8 +49,9 @@ pub async fn spawn_agent(
     let connection = tokio::task::spawn_local(async move {
         let mut config = AgentConfig::default();
         let auth_manager = Arc::new(config.create_auth_manager());
-        // This runs on a current-thread `LocalSet`, where the sync bootstrap
-        // in `MvpAgent::new` cannot drive the settings load itself.
+        // This runs on a current-thread `LocalSet`, where the sync bootstrap in `MvpAgent::new`
+        // cannot drive the settings load itself. Resolve it on the async runtime first so
+        // bootstrap observes a finished wait rather than falling open to bundled defaults.
         let boot = crate::agent::init::resolve_boot_startup_settings(
             &mut config,
             &tokio_util::sync::CancellationToken::new(),

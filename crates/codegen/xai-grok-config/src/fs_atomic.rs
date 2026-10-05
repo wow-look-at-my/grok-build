@@ -1,4 +1,5 @@
-//! Atomic file writes, shared by the managed-cache marker, the signature sidecar.
+//! Atomic file writes, shared by the managed-cache marker, the signature sidecar, and downstream identifier caches (e.g. the telemetry agent id).
+//! The temp file is fsynced before it is published, so a crash cannot leave the final path holding a truncated file.
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -8,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static WRITE_NONCE: AtomicU64 = AtomicU64::new(0);
 
+/// Follow no more hops than the kernel: Linux 40, Darwin/BSD 32, Windows 63 relative / 31 fully-qualified.
 #[cfg(not(windows))]
 const SYMLINK_FOLLOW_LIMIT: u8 = if cfg!(target_os = "linux") { 40 } else { 32 };
 #[cfg(windows)]
@@ -24,14 +26,14 @@ enum LeafSymlink {
     Replace,
 }
 
-/// Follow parent and leaf hops up to the kernel cap, then tmp+rename the
-/// referent.
+/// Follow parent and leaf hops up to the kernel cap, then tmp+rename the referent.
+/// `..` through a non-directory is ENOTDIR; through a missing hop is ENOENT.
 pub fn resolve_atomic_destination(path: &Path) -> io::Result<PathBuf> {
     resolve_destination(path, LeafSymlink::Follow)
 }
 
-/// Like [`resolve_atomic_destination`], but a leaf symlink is left in place
-/// so `rename` replaces that inode.
+/// Like [`resolve_atomic_destination`], but a leaf symlink is left in place so
+/// `rename` replaces that inode (project `.grok/config.toml`, managed slots).
 pub fn resolve_atomic_slot(path: &Path) -> io::Result<PathBuf> {
     resolve_destination(path, LeafSymlink::Replace)
 }
@@ -60,7 +62,8 @@ fn resolve_destination(path: &Path, leaf: LeafSymlink) -> io::Result<PathBuf> {
                 pop_parent(&mut resolved, true)?;
                 continue;
             }
-            // Unix, verbatim `\\?\`, and symlink substitutes: probe.
+            // Unix, verbatim `\\?\`, and symlink substitutes: probe. Excess
+            // `..` at a volume root is an error (no clamp to `D:\victim`).
             let meta = std::fs::symlink_metadata(&resolved)?;
             if !is_walkable_directory(&meta) {
                 return Err(not_a_directory(&resolved));
@@ -128,7 +131,8 @@ fn resolve_destination(path: &Path, leaf: LeafSymlink) -> io::Result<PathBuf> {
         let target = read_followable_link_target(&resolved)?;
         hops.consume_target(&target, &resolved)?;
         // Leaf file write: a directory-marked target (`foo/`, `foo/.`) or a
-        // Windows directory reparse must not become a regular file.
+        // Windows directory reparse must not become a regular file after
+        // `components()` strips the marker.
         if rest.is_empty() && leaf_symlink_names_directory(&meta, &target) {
             return Err(not_a_directory(&resolved));
         }
@@ -231,6 +235,9 @@ fn hop_limit_for_target(target: &Path) -> u8 {
 }
 
 fn reparse_target_is_fully_qualified(target: &Path) -> bool {
+    // Root-relative `\l2` is still SYMLINK_FLAG_RELATIVE (63), not the 31-hop FQ cap.
+    // Native `\Device\HarddiskVolume…` is fully-qualified even though Rust's
+    // `is_absolute` is false (no DOS drive prefix).
     target.is_absolute() || is_windows_nt_native_path(target)
 }
 
@@ -256,7 +263,7 @@ fn windows_path_for_win32_apis(path: &Path) -> PathBuf {
     }
 }
 
-/// Remaining-reparse budget.
+/// Remaining-reparse budget. Any fully-qualified hop tightens the cap to 31.
 #[derive(Clone, Copy, Debug, Default)]
 struct HopBudget {
     hops: u8,
@@ -584,7 +591,8 @@ fn pop_windows_beyond_root(resolved: &mut PathBuf, clamp_volume_root: bool) -> i
             format!("excess '..' above volume root at {}", resolved.display()),
         ));
     }
-    // Logical per-drive cwd (`GetFullPathName`).
+    // Logical per-drive cwd (`GetFullPathName`). `canonicalize` follows a
+    // junction there and `C:..\target` would write the physical parent.
     *resolved = std::path::absolute(resolved.join("."))?;
     let _ = resolved.pop();
     Ok(())
@@ -788,8 +796,8 @@ fn windows_file_id_from_handle(handle: *mut core::ffi::c_void) -> io::Result<(u6
 
 #[cfg(windows)]
 fn windows_legacy_file_index(handle: *mut core::ffi::c_void) -> io::Result<(u64, [u8; 16])> {
-    // FILETIME is DWORDs. Modeling it as `u64` pads after attributes and
-    // shifts volume/index, so replacements can share a colliding id.
+    // FILETIME is two DWORDs. Modeling it as `u64` pads after attributes
+    // and shifts volume/index, so replacements can share a colliding id.
     #[repr(C)]
     #[derive(Clone, Copy)]
     struct FileTime {
@@ -967,9 +975,9 @@ pub fn unix_file_mode(path: &Path) -> Option<u32> {
     }
 }
 
-/// Follow (or slot) destination bound at resolve time: path plus inode
-/// identity. Publish must prove this dest is still the same file, or still
-/// absent.
+/// Follow (or slot) destination bound at resolve time: path plus inode identity.
+/// Publish must prove this dest is still the same file, or still absent.
+/// Parent identity is bound so an absent dest cannot be retargeted via an ancestor swap.
 #[derive(Clone, Debug)]
 pub struct BoundDest {
     path: PathBuf,
@@ -1186,7 +1194,7 @@ pub fn require_same_follow_destination(path: &Path, expected: &Path) -> io::Resu
     Ok(now.path)
 }
 
-/// Resolve twice and refuse a retarget between both walks.
+/// Resolve twice and refuse a retarget between the two walks.
 pub fn resolve_follow_destination_stable(path: &Path) -> io::Result<PathBuf> {
     let first = bind_follow_destination(path)?;
     require_same_bound_destination(path, &first).map(|d| d.path)
@@ -1250,9 +1258,12 @@ fn refuse_changed_destination_inode(dest: &Path, bound: Option<FileId>) -> io::R
     }
 }
 
-/// Write to a temp file then rename, so a torn write can't leave a
-/// half-written file. The temp name is unique per writer (pid and counter)
-/// and `create_new`, so concurrent writers don't collide.
+/// Write to a temp file then rename, so a torn write can't leave a half-written file.
+/// The temp name is unique per writer (pid and counter) and `create_new`, so concurrent writers don't collide.
+/// `mode` (unix only) is applied at temp-file creation, so the final file never exists with looser permissions.
+///
+/// Parent-directory symlinks are followed. A leaf file-symlink is replaced (managed slots).
+/// User `config.toml` and `pager.toml` follow via [`resolve_atomic_destination`].
 pub fn write_atomically(
     final_path: &Path,
     contents: &str,
@@ -1305,7 +1316,8 @@ fn write_via_temp(
     let mut last_exists = None;
     for _ in 0..TMP_NAME_RETRIES {
         let nonce = WRITE_NONCE.fetch_add(1, Ordering::Relaxed);
-        // Do not prefix with the dest basename: a 255-byte name plus pid/nonce exceeds NAME_MAX.
+        // Do not prefix with the dest basename: a 255-byte name plus pid/nonce
+        // exceeds NAME_MAX. The dest directory + unique suffix is enough.
         let tmp = dir.join(format!(".{}.{nonce}.tmp", std::process::id()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);

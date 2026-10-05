@@ -1,4 +1,5 @@
-//! Behavioural coverage for the `Transport` trait, `Principal` builder, and `TransportKind` re-export.
+//! Behavioural coverage for the `Transport` trait, `Principal` builder,
+//! and `TransportKind` re-export.
 
 use async_trait::async_trait;
 use serde_json::{Value, json};

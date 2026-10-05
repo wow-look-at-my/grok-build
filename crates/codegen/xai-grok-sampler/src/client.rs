@@ -1,4 +1,14 @@
 //! HTTP client for the xAI sampling APIs.
+//!
+//! Owns the `reqwest::Client`, default request headers, and per-method defaults.
+//! Talks to three backend shapes:
+//!
+//! * Chat Completions (`/chat/completions`)
+//! * Responses API (`/responses`)
+//! * Anthropic Messages API (`/messages`)
+//!
+//! All trace-upload and URL-based header injection is intentionally *not* here.
+//! The session puts per-request headers (proxy auth, OTel context, etc.) into [`SamplerConfig::extra_headers`] before constructing the client.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -97,8 +107,8 @@ pub(crate) fn deserialize_response_event(data: &str) -> Result<rs::ResponseStrea
             // Try sanitizing: parse as Value, strip unknown tools, retry.
             if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) {
                 null_lists_as_empty(&mut value);
-                // Strip tools that async_openai's rs::Tool can't deserialize (e.g., xAI-specific "x_search") Instead of maintaining a hardcoded allowlist,
-                // try deserializing each tool entry.
+                // Strip tools that async_openai's rs::Tool can't deserialize (e.g., xAI-specific "x_search")
+                // Instead of maintaining a hardcoded allowlist, try deserializing each tool entry; if it fails, drop it
                 if let Some(tools) = value
                     .pointer_mut("/response/tools")
                     .and_then(|v| v.as_array_mut())
@@ -124,6 +134,13 @@ pub(crate) fn deserialize_response_event(data: &str) -> Result<rs::ResponseStrea
 
 /// Keys the wire schemas type as a list, so `null` there is a producer bug
 /// rather than a value we would lose by rewriting it.
+///
+/// Every entry is a slice field Bifrost declares without `omitempty` (Go
+/// marshals an unset slice as `null`), across its chat-completions, Responses
+/// and Anthropic surfaces. The list must stay keys-that-are-lists only: the
+/// same payloads carry plenty of legitimately-null pointer fields (`error`,
+/// `instructions`, `reasoning`, …) that a blanket null-to-`[]` rewrite would
+/// corrupt into a parse failure of its own.
 const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
     "annotations",
     "bytes",
@@ -144,11 +161,18 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
     "vector_store_ids",
 ];
 
-/// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
-/// Reports whether anything changed, so a caller can skip a retry that cannot
-/// differ. A gateway written in Go marshals an unset slice as `null`, so
-/// `response.created` -- whose output list is empty by definition -- arrives
-/// as `"output": null` and fails the parse.
+/// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively. Reports
+/// whether anything changed, so a caller can skip a retry that cannot differ.
+///
+/// A gateway written in Go marshals an unset slice as `null`, so
+/// `response.created` -- whose output list is empty by definition -- arrives as
+/// `"output": null` and fails the parse. Because serde buffers the internally
+/// tagged event, that failure carries no line or column AND no field path: it
+/// reads as a bare "invalid type: null, expected a sequence" and takes the whole
+/// turn with it.
+///
+/// Only reached after the strict parse already failed, so a well-formed server
+/// never meets this.
 fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(map) => {
@@ -205,15 +229,19 @@ fn null_key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>
     }
 }
 
-/// Deserialize an SSE payload, naming the field that failed. serde_json alone
-/// renders a rejected payload as "invalid type: null, expected a sequence"
-/// — and for a buffered (internally tagged) event it carries no line/column
-/// either, so the message names neither the field nor the offset. That is the
-/// whole error a user gets, and there is nothing in it to act on.
+/// Deserialize an SSE payload, naming the field that failed.
+///
+/// serde_json alone renders a rejected payload as "invalid type: null, expected
+/// a sequence" — and for a buffered (internally tagged) event it carries no
+/// line/column either, so the message names neither the field nor the offset.
+/// That is the whole error a user gets, and there is nothing in it to act on.
+///
 /// `serde_path_to_error` supplies the field path on a derived struct
-/// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]`
-/// event, because serde buffers the content before the variant is known and
-/// the tracker never sees those keys — measured, not assumed.
+/// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]` event,
+/// because serde buffers the content before the variant is known and the
+/// tracker never sees those keys — measured, not assumed. That is exactly the
+/// shape gateways break, so for an empty path the message falls back to listing
+/// where the payload's nulls are.
 fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
     let deserializer = &mut serde_json::Deserializer::from_str(data);
     serde_path_to_error::deserialize(deserializer).map_err(|err| {
@@ -268,7 +296,7 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
     let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
         return;
     };
-    // Stash cost ticks in metadata for stream_responses. Wire forms are
+    // Stash cost ticks in metadata for stream_responses. Two wire forms are
     // supported: xAI `cost_in_usd_ticks` (integer, authoritative) and the
     // standard `usage.cost` USD float (OpenRouter, etc.) converted to ticks.
     // The `usage.cost` value may be a bare float or a Bifrost cost object
@@ -341,6 +369,7 @@ fn splice_extra_tool_entries(
     }
 }
 
+/// Parse `Retry-After` as integer seconds, capped at 120; HTTP-dates yield `None`.
 fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     let retry_after = headers
         .get(reqwest::header::RETRY_AFTER)
@@ -349,7 +378,12 @@ fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 
     // A token bucket answers a breach with the WHOLE window ("Retry-After:
     // 60" on a per-minute limit), while its own reset header says when this
-    // caller's tokens come back. Take whichever is sooner.
+    // caller's tokens actually come back. Take whichever is sooner. A
+    // provider runs SEVERAL token buckets (total and uncached, per minute,
+    // hour and day) and spells each reset differently, so the match is the
+    // reset prefix plus the word that names the resource. A request bucket
+    // is left out: it is not what a token breach waits on. A wait that turns
+    // out to be short earns another 429, which the budget covers.
     let bucket_reset = headers
         .iter()
         .filter(|(name, _)| {
@@ -367,7 +401,8 @@ fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 }
 
 /// Seconds from a rate-limit reset header, which is written as a bare number
-/// or with a unit (`1.5`, `1.5s`, `30s`).
+/// or with a unit (`1.5`, `1.5s`, `30s`). A fractional value rounds UP: a
+/// wait shorter than the reset earns the same 429 back.
 ///
 /// A value with no `u64` second count is `None`: the same unusable answer the
 /// parser already gives for a non-finite or negative one, so the caller uses
@@ -380,6 +415,8 @@ fn parse_reset_seconds(raw: &str) -> Option<u64> {
         return None;
     }
     let whole = secs.ceil();
+    // 2^64 is the first whole `f64` above `u64::MAX`; below it the value is a
+    // whole number the `u64` holds exactly.
     const U64_SECONDS_BOUND: f64 = 18_446_744_073_709_551_616.0;
     if whole >= U64_SECONDS_BOUND {
         tracing::error!(
@@ -436,7 +473,7 @@ fn extract_model_metadata(headers: &reqwest::header::HeaderMap) -> Option<Respon
     }
 }
 
-/// Wrapper for streaming chat completion requests that adds `stream`.
+/// Wrapper for streaming chat completion requests that adds `stream` and `stream_options` without modifying the original `ChatCompletionRequest`.
 #[derive(Serialize)]
 struct StreamingChatRequest<'a> {
     #[serde(flatten)]
@@ -510,10 +547,13 @@ pub struct SamplingClient {
     http: reqwest::Client,
     default_headers: HeaderMap,
     base_url: String,
-    /// Extra top-level body fields merged into every request this client sends; see [`SamplerConfig::extra_body`].
+    /// Extra top-level body fields merged into every request this client
+    /// sends; see [`SamplerConfig::extra_body`].
     extra_body: serde_json::Map<String, serde_json::Value>,
     defaults: ClientDefaults,
     /// Optional 401-attribution hook.
+    /// The shell wires this to emit a structured event at every UNAUTHORIZED arm so 401s can be bucketed by stale-snapshot vs. live-token-rejected.
+    /// `None` for sampler-only callers and tests.
     attribution_callback: Option<crate::attribution::SharedAttributionCallback>,
     /// Per-request bearer override. See `SamplerConfig::bearer_resolver`.
     bearer_resolver: Option<crate::config::SharedBearerResolver>,
@@ -544,7 +584,8 @@ struct ClientDefaults {
     max_completion_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
-    /// The window `max_completion_tokens` shares with the prompt. `0` means unknown, which claims nothing about either.
+    /// The window `max_completion_tokens` shares with the prompt. `0` means
+    /// unknown, which claims nothing about either.
     context_window: u64,
     api_backend: ApiBackend,
     auth_scheme: AuthScheme,
@@ -553,7 +594,8 @@ struct ClientDefaults {
     reasoning_summary: Option<xai_grok_sampling_types::ReasoningSummary>,
     extra_response_includes: Vec<String>,
     doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
-    /// Per-model message-schema profile, applied to every conversation request this client sends.
+    /// Per-model message-schema profile, applied to every conversation request
+    /// this client sends (see [`Self::apply_conversation_defaults`]).
     chat_message_profile: xai_grok_sampling_types::ChatMessageProfile,
 }
 
@@ -567,13 +609,16 @@ enum EndpointTemplate {
     /// No query params and no query on the base URL (or an unparseable base): append the path to the base verbatim.
     Plain(String),
     /// Query params configured: `{prefix}/{path}{suffix}`.
+    /// `suffix` starts with `?` and folds any base-URL params; a configured key wins over the same key in `base_url`.
+    /// Pairs are percent-encoded with no duplicates.
     WithQuery { prefix: String, suffix: String },
 }
 
 impl EndpointTemplate {
     fn new(base_url: &str, query_params: &IndexMap<String, String>) -> Self {
         let base = base_url.trim_end_matches('/').to_string();
-        // The fast path is safe only when there is nothing to fold.
+        // The fast path is safe only when there is nothing to fold: no configured params and no query already on the base
+        // A base query would otherwise land before the appended path
         if query_params.is_empty() && !base.contains('?') {
             return Self::Plain(base);
         }
@@ -624,7 +669,8 @@ impl EndpointTemplate {
 }
 
 // =============================================================================
-// User-Agent helpers.
+// User-Agent helpers
+// =============================================================================
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PlatformInfo {
@@ -688,12 +734,16 @@ pub fn user_agent_string_for(origin: &OriginClientInfo) -> String {
     }
 }
 
+/// A request builder coupled to the credential state it was built with, so a 401 arm cannot classify from anything but the build-time capture.
+/// The wire default (`SentCredential::Unknown`, which charges the retry budget) stays the fail-closed one.
+/// Only an explicit `sent_bearer: None` (a send the builder provably stamped no credential onto) reaches the uncharged lane via [`auth_rejected`].
 struct SentRequest {
     builder: reqwest::RequestBuilder,
     /// Tail fragment of the credential in the built headers (`None` means no credential header).
     sent_bearer: Option<String>,
 }
 
+/// The one way a 401 becomes a `SamplingError::Auth` with a wire-derived credential classification: from the fragment its [`SentRequest`] captured.
 fn auth_rejected(message: String, sent_bearer: Option<&str>) -> SamplingError {
     SamplingError::Auth {
         message,
@@ -707,6 +757,8 @@ fn auth_rejected(message: String, sent_bearer: Option<&str>) -> SamplingError {
 
 impl SamplingClient {
     /// The same client on the shared HTTP/1.1 transport, which never pools.
+    /// A caller uses it after a transport failure, because a bad HTTP/2
+    /// connection fails every request that the pool sends on it.
     pub fn with_http1(&self) -> Result<Self> {
         let mut client = self.clone();
         client.http = crate::shared_http::client_http1().map_err(SamplingError::Http)?;
@@ -752,9 +804,8 @@ impl SamplingClient {
             }
         }
 
-        // Apply all extra headers verbatim This is the injection point for
-        // proxy-auth headers and any other URL- or environment-specific
-        // headers the session decides to set
+        // Apply all extra headers verbatim
+        // This is the single injection point for proxy-auth headers and any other URL- or environment-specific headers the session decides to set
         for (key, value) in &config.extra_headers {
             let header_name = HeaderName::try_from(key.as_str())
                 .map_err(|_| SamplingError::InvalidConfiguration("Invalid extra header name"))?;
@@ -874,8 +925,10 @@ impl SamplingClient {
             chat_message_profile: config.chat_message_profile,
         };
 
-        // Ollama's native paths are siblings of the OpenAI-compatible
-        // endpoint at the host root, not children of it.
+        // Ollama's native paths are siblings of the OpenAI-compatible endpoint
+        // at the host root, not children of it. A provider block names one
+        // base URL for both, so `http://host:11434/v1` has to resolve
+        // `api/chat` at `http://host:11434/api/chat`.
         let endpoint_base = if defaults.api_backend == ApiBackend::Ollama {
             native_host_root(&config.base_url)
         } else {
@@ -901,8 +954,8 @@ impl SamplingClient {
         self.defaults.api_backend.clone()
     }
 
-    /// Give the bearer resolver its pre-send hook before [`Self::post`] reads
-    /// it.
+    /// Give the bearer resolver its pre-send hook before [`Self::post`] reads it.
+    /// Awaited separately because `post` is sync (its callers hand the builder straight to `send()`).
     async fn prepare_bearer(&self) {
         if let Some(resolver) = &self.bearer_resolver {
             resolver.prepare_for_send().await;
@@ -910,7 +963,7 @@ impl SamplingClient {
     }
 
     /// The credential tail is captured at build time — see [`SentRequest`] for
-    /// why a record-time re-read would race the recovery a triggers.
+    /// why a record-time re-read would race the recovery a 401 triggers.
     fn post(&self, url: impl reqwest::IntoUrl) -> SentRequest {
         if !self.first_use_noted.load(Ordering::Relaxed)
             && !self.first_use_noted.swap(true, Ordering::Relaxed)
@@ -983,6 +1036,8 @@ impl SamplingClient {
                 .get(AUTHORIZATION)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.strip_prefix("Bearer ")),
+            // No credential is attached under this scheme, so there is
+            // nothing to attribute a 401 to.
             AuthScheme::None => None,
         };
         raw.map(|s| bearer_suffix(s).to_string())
@@ -990,6 +1045,7 @@ impl SamplingClient {
 
     /// Best-effort *build-time* view of what the next request would carry (resolver-authoritative).
     /// For request-start diagnostics ([`Self::auth_info`]) only.
+    /// 401 attribution must use the fragment captured by [`Self::post`], which cannot race a recovery.
     fn current_sent_bearer_suffix(&self) -> Option<String> {
         // A resolver stays wired when the endpoint opts out of auth; its
         // bearer is not what goes on the wire.
@@ -1006,6 +1062,9 @@ impl SamplingClient {
         Self::sent_fragment_from_headers(&self.default_headers, &self.defaults.auth_scheme)
     }
 
+    /// Invoke the optional 401 attribution callback for one logical 401 response.
+    /// The emit happens at the lowest layer that saw the status, so higher layers that react to a 401 must not emit a duplicate event.
+    /// `sent_suffix` is the fragment [`Self::post`] captured for the rejected request.
     fn record_401_attribution(
         &self,
         consumer: crate::attribution::SamplingConsumer,
@@ -1085,6 +1144,7 @@ impl SamplingClient {
         Ok(request)
     }
 
+    /// `sent_bearer` is the fragment [`Self::post`] captured for the request that produced `response` (401 attribution).
     async fn handle_response(
         &self,
         response: reqwest::Response,
@@ -1393,6 +1453,7 @@ impl SamplingClient {
             });
         }
 
+        // Strip UTF-8 BOM if present: eventsource-stream 0.2.3 incorrectly slices BOM at byte 1 instead of 3.
         const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
         let mut is_first = true;
         let byte_stream = response.bytes_stream().map(move |result| {
@@ -1527,7 +1588,8 @@ impl SamplingClient {
             success = tracing::field::Empty,
         ));
 
-        // The trace field is process-local: upstream session code consumes it (and may upload a payload artifact).
+        // The trace field is process-local: upstream session code consumes it (and may upload a payload artifact); the sampler never forwards it
+        // Drop it before we send
         request.trace.take();
 
         tracing::debug!("create_response: {:?}", &request);
@@ -1551,7 +1613,8 @@ impl SamplingClient {
         })?;
         splice_extra_tool_entries(&mut request_body, extra_tool_entries);
         append_response_includes(&mut request_body, &self.defaults.extra_response_includes);
-        // async-openai's ReasoningTextContent struct omits the `type` discriminator that the Responses API requires on input Patch it.
+        // async-openai's ReasoningTextContent struct omits the `type` discriminator that the Responses API requires on input
+        // Patch it in after serializing
         xai_grok_sampling_types::patch_reasoning_text_types(&mut request_body);
         self.prepare_bearer().await;
         let SentRequest {
@@ -1820,9 +1883,9 @@ impl SamplingClient {
                             data = %data,
                         );
 
-                        // Intercept the non-standard doom-loop event before
-                        // typed deserialization async-openai's event enum
-                        // does not know it and will fail to parse it.
+                        // Intercept the non-standard doom-loop event before typed deserialization
+                        // async-openai's event enum does not know it and would fail to parse it
+                        // With the check disabled, `is_check_event` still guards against a server emitting it without opt-in (rollout skew)
                         let swallow = match &doom_loop_for_stream {
                             Some(collector) => collector.absorb(&event.event, data),
                             None => is_check_event(&event.event, data),
@@ -2228,13 +2291,23 @@ impl SamplingClient {
         }
 
         // The per-model config is authoritative for the message schema, and
-        // narrows (never widens) whatever the caller asked for.
+        // narrows (never widens) whatever the caller asked for. A request
+        // carrying an already-narrowed profile — e.g. set by the strict-schema
+        // recovery after a 400 — therefore keeps it, while a model configured
+        // strict strips the properties even when the caller left the
+        // permissive default in place.
         request.chat_message_profile = request
             .chat_message_profile
             .narrowed_by(self.defaults.chat_message_profile);
 
         // The provider counts the requested output against the same window as
-        // the prompt, so the default applied above is not free.
+        // the prompt, so the default applied just above is not free: on a large
+        // conversation it is what carries the request past the window. Every
+        // backend converter reads `max_output_tokens` from here, so this is the
+        // last point that can hold the sum inside the window. The estimate is
+        // the only prompt size this layer has; a caller that tracks the
+        // provider's reported usage fits the budget with that number first, and
+        // this only ever cuts further.
         let usable_window =
             xai_token_estimation::window_less_estimate_slack(self.defaults.context_window);
         if let Some(clamp) =
@@ -2310,7 +2383,7 @@ impl SamplingClient {
         let x_grok_transient_retry = request.x_grok_transient_retry.clone();
         let x_grok_agent_id = request.x_grok_agent_id.clone();
 
-        // The hosted tools travel as raw JSON, spliced in after serialization by `splice_extra_tool_entries`.
+        // The hosted tools travel as raw JSON, spliced in after serialization by `splice_extra_tool_entries`, whose doc explains why each one does
         let extra_tools = xai_grok_sampling_types::extra_tool_entries(&request.hosted_tools);
 
         let responses_request: rs::CreateResponse = (&request).into();
@@ -2408,7 +2481,7 @@ impl SamplingClient {
     ///
     /// The response is NDJSON: one whole JSON object per line, no SSE framing
     /// and no `[DONE]` sentinel. Lines are reassembled here because a chunk
-    /// boundary lands at an arbitrary byte, so a line can straddle some of
+    /// boundary lands at an arbitrary byte, so a line can straddle two of
     /// them.
     pub async fn conversation_stream_ollama(
         &self,
@@ -2427,7 +2500,10 @@ impl SamplingClient {
         let slot = crate::request_slots::acquire_unless_held().await;
 
         let mut body = serde_json::to_value(&chat_request).map_err(SamplingError::Serialization)?;
-        // `keep_alive`, `truncate` and `options.num_ctx` reach the wire from here and nowhere else.
+        // `keep_alive`, `truncate` and `options.num_ctx` reach the wire from
+        // here and nowhere else: they are per-deployment settings with no
+        // cross-provider meaning, so they live in config rather than in the
+        // typed request.
         xai_grok_sampling_types::merge_extra_body(&mut body, &self.extra_body);
 
         let endpoint = self.endpoint("api/chat");
@@ -2528,9 +2604,9 @@ impl SamplingClient {
         self.create_message(wrapper).await
     }
 
-    /// Backend-aware streaming call that collects the full response. Honors
-    /// the request's [`LengthPolicy`](xai_grok_sampling_types::LengthPolicy)
-    /// like the actor path.
+    /// Backend-aware streaming call that collects the full response.
+    /// Honors the request's [`LengthPolicy`](xai_grok_sampling_types::LengthPolicy) like the actor path.
+    /// The default still fails a text-only or empty `Length` stop, so side callers never persist a silently truncated result.
     pub async fn conversation_collect(
         &self,
         request: ConversationRequest,
@@ -2621,9 +2697,9 @@ fn sse_error_text(error: &eventsource_stream::EventStreamError<reqwest::Error>) 
 /// Parse an NDJSON byte stream into a single object for each line.
 ///
 /// A transport chunk boundary lands at an arbitrary byte, so a line can
-/// straddle some of them and the tail has to be carried across. The final
-/// line often arrives without a trailing newline, so what is left in the
-/// buffer at end of stream is a line too.
+/// straddle two of them and the tail has to be carried across. The final line
+/// often arrives without a trailing newline, so what is left in the buffer at
+/// end of stream is a line too.
 fn ndjson_chunk_stream<S, B, T>(byte_stream: S) -> impl Stream<Item = Result<T>> + Send
 where
     S: Stream<Item = std::result::Result<B, reqwest::Error>> + Send + 'static,
@@ -2639,7 +2715,10 @@ where
             let bytes = match next {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    // A body that stopped arriving mid-read is transient, and the sampler's stream-interrupt budget is what answers it.
+                    // A body that stopped arriving mid-read is transient, and
+                    // the sampler's stream-interrupt budget is what answers
+                    // it; reporting it as a finished response would hand the
+                    // turn a truncated answer.
                     failed = true;
                     yield Err(SamplingError::EventStreamError(error_chain(&error)));
                     break;
@@ -2708,11 +2787,11 @@ async fn read_body(
     })
 }
 
-/// Rebuild `Api` from stream-collected info, preserving status, `Retry-After`, and
-/// `x-should-retry` (kind is lost on this path). Applies the request's
-/// [`xai_grok_sampling_types::LengthPolicy`] to a collected response. Fails a `Length` stop
-/// the policy rejects, logs the salvage breadcrumb otherwise. The single gate shared by
-/// `drive_l2` and the direct-collect path so both cannot drift.
+/// Rebuild `Api` from stream-collected info, preserving status,
+/// `Retry-After`, and `x-should-retry` (kind is lost on this path).
+/// Applies the request's [`xai_grok_sampling_types::LengthPolicy`] to a collected response.
+/// Fails a `Length` stop the policy rejects, logs the salvage breadcrumb otherwise.
+/// The single gate shared by `drive_l2` and the direct-collect path so the two cannot drift.
 pub(crate) fn apply_length_policy(
     policy: xai_grok_sampling_types::LengthPolicy,
     response: xai_grok_sampling_types::ConversationResponse,
@@ -2832,6 +2911,7 @@ mod tests {
         cfg.max_completion_tokens = Some(262_144);
         let client = SamplingClient::new(cfg).expect("client should build");
 
+        // ~737_857 estimated prompt tokens, the size the server reported.
         let mut request =
             ConversationRequest::from_items(vec![xai_grok_sampling_types::ConversationItem::user(
                 "x".repeat(737_857 * 4),
@@ -2886,7 +2966,7 @@ mod tests {
         );
 
         // An internally tagged event gets no path from serde, so the message
-        // falls back to where the payload's nulls are — the thing that
+        // falls back to where the payload's nulls are — the one thing that
         // makes a bare "expected a sequence" actionable.
         let event = from_sse_payload::<rs::ResponseStreamEvent>(
             r#"{"type":"response.created","sequence_number":0,
@@ -3732,7 +3812,8 @@ mod tests {
             ..Default::default()
         };
 
-        // Second registered dispatcher: other tests' threads cannot cache callsite interest as `never` for this.
+        // Second registered dispatcher: other tests' threads cannot cache callsite interest as
+        // `never` for this one.
         let _interest_pin = tracing::Dispatch::new(tracing_subscriber::Registry::default());
         let disabled =
             tracing::subscriber::set_default(tracing::subscriber::NoSubscriber::default());
@@ -3878,8 +3959,8 @@ mod tests {
         assert!(bearer.is_none());
     }
 
-    /// The race this design closes: a triggers a recovery that rotates the resolver. A
-    /// record-time re-read would then attribute a bearer the rejected request never carried.
+    /// The race this design closes: a 401 triggers a recovery that rotates the resolver.
+    /// A record-time re-read would then attribute a bearer the rejected request never carried.
     /// The attributed fragment must be the one captured when the request was built.
     #[test]
     fn post_capture_is_immune_to_resolver_rotation_after_build() {
@@ -3906,7 +3987,7 @@ mod tests {
             sent_bearer: sent_at_build,
             ..
         } = client.post("https://example.test/v1/responses");
-        // The kicks recovery; the resolver rotates before the callback runs.
+        // The 401 kicks recovery; the resolver rotates before the callback runs.
         *resolver.0.lock().unwrap() = "fresh-token-newtail99".to_string();
 
         assert_eq!(
@@ -3942,8 +4023,9 @@ mod tests {
         assert!(request.headers().get("x-api-key").is_none());
     }
 
-    /// Regression: `api_key` seeds `default_headers` with `Authorization: Bearer ...`. With a `bearer_resolver` also set, `post()` must
-    /// produce exactly one `Authorization` header on the wire.
+    /// Regression: `api_key` seeds `default_headers` with `Authorization: Bearer ...`.
+    /// With a `bearer_resolver` also set, `post()` must produce exactly one `Authorization` header on the wire.
+    /// `RequestBuilder::header(AUTHORIZATION, ...)` appends rather than replaces, causing two identical headers and a 400 from cli-chat-proxy.
     #[test]
     fn post_emits_single_authorization_with_api_key_and_bearer_resolver() {
         let cfg = SamplerConfig {
@@ -4116,6 +4198,7 @@ mod tests {
         assert_eq!(usage.output_tokens, 711);
         assert_eq!(usage.input_tokens_details.cached_tokens, 1984);
         assert_eq!(usage.output_tokens_details.reasoning_tokens, 388);
+        // total_tokens is rewritten to ctx.input + ctx.output (5022 + 571), not the wire's cumulative total (6714)
         assert_eq!(usage.total_tokens, 5_593);
     }
 
@@ -4155,6 +4238,7 @@ mod tests {
             Some("78")
         );
 
+        // The REST mapper backfills 0 for unbilled requests: no stash.
         let event = deserialize_response_event(&make(0)).expect("parse");
         let rs::ResponseStreamEvent::ResponseCompleted(e) = event else {
             panic!("expected ResponseCompleted");
@@ -4191,6 +4275,7 @@ mod tests {
         let rs::ResponseStreamEvent::ResponseCompleted(e) = event else {
             panic!("expected ResponseCompleted");
         };
+        // round(0.0000416 * 1e10) = 416_000
         assert_eq!(
             e.response
                 .metadata
@@ -4272,6 +4357,8 @@ mod tests {
 
     #[test]
     fn deserialize_response_event_total_tokens_unchanged_when_context_details_partial() {
+        // Defensive: if the backend ever ships only one of the two context_details fields, we can't know the live context size
+        // Leave `total_tokens` on the wire's cumulative value instead of guessing; treating the missing half as 0 would silently under-report
         let sse = r#"{
             "type": "response.completed",
             "sequence_number": 0,

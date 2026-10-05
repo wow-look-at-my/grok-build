@@ -1,4 +1,11 @@
 //! Concrete `MemoryBackend` implementation using hybrid search.
+//!
+//! `MemoryBackendImpl` combines FTS5 keyword search with optional vector KNN similarity via `hybrid_search()`.
+//! When embeddings are available (embedding config and API key), the query is vectorized and both signals merge with recency and source weights.
+//! When embeddings are unavailable, search degrades to FTS-only.
+//!
+//! `rusqlite::Connection` is `!Send + !Sync`, so we open a fresh `MemoryIndex` per query.
+//! WAL mode keeps concurrent readers from blocking.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -119,6 +126,7 @@ pub struct MemoryBackendParams {
     /// Embedding provider config; `None` forces FTS-only fallback everywhere.
     pub embed_config: Option<xai_grok_config_types::MemoryEmbeddingConfig>,
     /// Base URL for embedding API calls (CLI proxy).
+    /// It must match the endpoint `embedding_credentials` was scoped to; a mismatch fails closed.
     pub embed_base_url: String,
     /// API key for embedding API calls.
     pub embed_api_key: Option<String>,
@@ -208,6 +216,7 @@ pub struct MemoryBackendImpl {
     search_source: MemorySearchSource,
     observation_sink: Arc<dyn MemoryObservationSink>,
     /// Shared search counter, read by session summary telemetry.
+    /// Only the ToolBridge backend's counter is shared back to the session actor; injection and compaction-recovery backends keep local counters.
     pub search_counter: std::sync::Arc<std::sync::atomic::AtomicU64>,
     embedding_credentials: EndpointScopedCredentials,
 }
@@ -266,7 +275,7 @@ impl MemoryBackendImpl {
 
     /// Open a read-only connection for simple queries (`total_chunks`, `get`).
     fn open_readonly(&self) -> Result<rusqlite::Connection, rusqlite::Error> {
-        // Journal-mode-aware open (busy_timeout included): never mmap a legacy WAL -shm on network mounts (SIGBUS).
+        // Journal-mode-aware open (busy_timeout included): never mmap a legacy WAL -shm on network mounts (SIGBUS); see JournalMode::open_readonly
         xai_sqlite_journal::JournalMode::for_db_path(&self.db_path).open_readonly(&self.db_path)
     }
 
@@ -352,6 +361,7 @@ impl MemoryBackend for MemoryBackendImpl {
             }
         };
 
+        // ── Sync phase 1: reindex dirty files, collect chunks needing embeddings ──
         let mut reindex_chunks: Vec<(String, String)> = Vec::new();
         let mut needs_release = false;
         // Watcher-sync telemetry data (populated inside the claim guard below).
@@ -364,7 +374,8 @@ impl MemoryBackend for MemoryBackendImpl {
             let sync_start = std::time::Instant::now();
             let dirty_files = watcher.take_dirty();
             let dirty_count = dirty_files.len();
-            // Sum of all index-chunk changes this cycle: chunks added, updated, or removed by reindex_file.
+            // Sum of all index-chunk changes this cycle: chunks added, updated, or removed by reindex_file, plus chunks removed by delete_path
+            // One counter covers delete-only syncs, where reindex_file never runs
             let mut changed_chunk_count: usize = 0;
             for file in &dirty_files {
                 if file.exists() {
@@ -374,7 +385,8 @@ impl MemoryBackend for MemoryBackendImpl {
                         changed_chunk_count += stats.added + stats.updated + stats.removed;
                     }
                 } else {
-                    // The file
+                    // The file was deleted; remove its stale chunks so they are no longer searchable
+                    // reindex_file alone would return early on the unreadable file and leave orphaned chunks behind
                     if let Ok(n) = index.delete_path(file) {
                         changed_chunk_count += n;
                     }
@@ -430,6 +442,7 @@ impl MemoryBackend for MemoryBackendImpl {
             }
         }
 
+        // ── Sync phase 2: FTS search ──
         let mut search_config = self.search_config.clone();
         search_config.max_results = max_results;
         search_config.min_score = min_score as f32;
@@ -455,6 +468,7 @@ impl MemoryBackend for MemoryBackendImpl {
         )
         .await;
 
+        // ── Sync phase 3: vector search + scoring + merge (borrows &index) ──
         let merged = super::search::hybrid_search_merge(
             &index,
             fts_results,
@@ -473,8 +487,8 @@ impl MemoryBackend for MemoryBackendImpl {
         let error_class = select_search_error_class(fts_error_class, merged.is_vector_degraded);
         let results = merged.results;
 
-        // Record accesses for the returned chunks so access_count and
-        // last_accessed stay current Non-fatal.
+        // Record accesses for the returned chunks so access_count and last_accessed stay current
+        // Non-fatal: a failed write does not affect the search response
         for result in &results {
             let _ = index.record_access(&result.chunk_id);
         }
@@ -710,8 +724,8 @@ mod factory_tests {
         );
     }
 
-    /// from_session_params propagates search_source into the backend. Every caller (tool, injection, compaction_recovery) must set a distinct
-    /// source label so dashboards can separate those search paths.
+    /// from_session_params propagates search_source into the backend.
+    /// Every caller (tool, injection, compaction_recovery) must set a distinct source label so dashboards can separate the three search paths.
     #[test]
     fn test_factory_propagates_search_source() {
         let tmp = TempDir::new().unwrap();
@@ -767,6 +781,7 @@ mod factory_tests {
             ..make_params_fts_only("test-watcher-runtime")
         };
         // watcher.is_some() reflects whether startup succeeded.
+        // (On environments without inotify/FSEvents this may be None; skip rather than fail.)
         let _ = params_with_watcher.watcher.is_some(); // This line only needs to compile.
 
         // Failure path: the directory does not exist, so the watcher must return None
@@ -786,6 +801,7 @@ mod factory_tests {
         );
     }
 
+    /// The MemoryBackend trait override in MemoryBackendImpl must expose search_config.max_results rather than the hardcoded default (6).
     #[test]
     fn test_default_search_max_results_from_config() {
         let tmp = TempDir::new().unwrap();
@@ -948,14 +964,16 @@ mod factory_tests {
             "global memory dir must not exist before initialization"
         );
 
-        // --- Wrong ordering (watcher before init) --- The watcher returns None because the directory does not exist.
+        // --- Wrong ordering (watcher before init) ---
+        // The watcher returns None because the directory does not exist.
         let watcher_before_init = crate::watcher::MemoryFileWatcher::start(&global);
         assert!(
             watcher_before_init.is_none(),
             "watcher must fail (None) when directory does not exist yet"
         );
 
-        // --- Correct ordering (init, then watcher) --- After ensure_initialized the directories.
+        // --- Correct ordering (init, then watcher) ---
+        // After ensure_initialized the directories and MEMORY.md templates exist.
         storage.ensure_initialized().unwrap();
 
         assert!(
@@ -976,6 +994,7 @@ mod factory_tests {
         );
 
         // Watcher now succeeds because the directory exists.
+        // (It may still return None in environments without inotify/kqueue, e.g. some CI containers, but must not panic.)
         let watcher_after_init = crate::watcher::MemoryFileWatcher::start(&global);
         // If a watcher was returned we can confirm it is usable (not dirty yet).
         if let Some(w) = watcher_after_init {
@@ -984,6 +1003,7 @@ mod factory_tests {
                 "freshly started watcher must report no dirty files"
             );
         }
+        // If None, the test environment does not support file-watching. That is acceptable; the directories themselves are what matter here.
     }
 
     /// End-to-end regression test for the watcher-driven delete path.
@@ -1002,6 +1022,9 @@ mod factory_tests {
         let storage = MemoryStorage::with_paths(global.clone(), workspace);
         let db_path = storage.workspace_dir().join("index.sqlite");
 
+        // Step 1: Write and canonicalize the file path BEFORE indexing
+        // On macOS, TempDir paths may live under /private/tmp (via a symlink from /tmp)
+        // FSEvents returns canonicalized paths, so the path stored in the index must match what the watcher event delivers
         let file_raw = global.join("note.md");
         std::fs::write(&file_raw, "# Unique\n\nXyzzy-watcher-delete-token.").unwrap();
         let file = dunce::canonicalize(&file_raw).unwrap_or(file_raw);
@@ -1018,6 +1041,7 @@ mod factory_tests {
             idx.reindex_file(&file, "workspace").unwrap();
         }
 
+        // Step 2: Start watcher AFTER indexing so the Remove event for the upcoming deletion is the first event the watcher ever sees
         let watch_dir = dunce::canonicalize(&global).unwrap_or(global.clone());
         let watcher = match crate::watcher::MemoryFileWatcher::start(&watch_dir) {
             Some(w) => w,
@@ -1034,6 +1058,7 @@ mod factory_tests {
         };
         let backend = MemoryBackendImpl::from_session_params(storage, &params);
 
+        // Step 3: Confirm content is found before deletion.
         let before = backend
             .search("Xyzzy-watcher-delete-token", 5, 0.0)
             .await
@@ -1043,9 +1068,11 @@ mod factory_tests {
             "content must be found before file is deleted"
         );
 
+        // Step 4: Delete the file; the OS will fire a Remove event
         std::fs::remove_file(&file).unwrap();
 
-        // Poll until the watcher detects the event (more reliable than a fixed sleep on macOS, where FSEvents delivery time varies considerably).
+        // Poll until the watcher detects the event (more reliable than a fixed sleep on macOS, where FSEvents delivery time varies considerably)
+        // Give up after 2 s and skip the timing-sensitive assertion rather than flake; delete_path unit tests cover the underlying logic
         let mut event_delivered = false;
         for _ in 0..20 {
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1055,10 +1082,12 @@ mod factory_tests {
             }
         }
         if !event_delivered {
-            // FSEvents did not deliver the event a bounded number of s.
+            // FSEvents did not deliver the event within 2 s; the environment is too slow
+            // Skip silently; the logic is covered by delete_path unit tests.
             return;
         }
 
+        // Steps 5 and 6: search triggers sync-on-search, which detects file.exists() == false and calls delete_path(), clearing all stale chunks
         let after = backend
             .search("Xyzzy-watcher-delete-token", 5, 0.0)
             .await
@@ -1359,11 +1388,13 @@ mod tests {
         let (db_path, storage) = setup_index(&tmp);
         let backend = MemoryBackendImpl::new(db_path, storage);
 
+        // Even with high min_score, hybrid search normalizes scores to [0,1] so results above the threshold should be returned
         let results = backend.search("rust programming", 10, 0.0).await.unwrap();
         assert!(
             !results.is_empty(),
             "FTS-only fallback should still return results"
         );
+        // Hybrid scoring normalizes scores into the (0,1] range
         assert!(
             results.first().is_some_and(|r| r.score > 0.0),
             "hybrid scores should be positive"
@@ -1414,8 +1445,8 @@ mod tests {
             idx.reindex_file(&f, "session").unwrap();
         }
 
-        // Verify the supplemental query mechanism With a tight limit the base
-        // FTS returns a mix.
+        // Verify the supplemental query mechanism
+        // With a tight limit the base FTS returns a mix, but `search_fts_by_sources` for "global"/"workspace" always finds the evergreen chunks
         let evergreen = idx
             .search_fts_by_sources("graphite PRs", 10, &["global", "workspace"])
             .unwrap();

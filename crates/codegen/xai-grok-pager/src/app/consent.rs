@@ -1,4 +1,9 @@
 //! Consent gate, modelled on folder trust. Which accounts see a notice is a targeting decision.
+//!
+//! The answer is recorded locally, so it does not survive a second machine or a wiped config.
+//!
+//! Every failure path fails open: a client that cannot reach settings must stay usable.
+//! Validation is the trust boundary, so a notice that survives it is safe to paint.
 
 use std::collections::BTreeMap;
 
@@ -15,6 +20,7 @@ use crate::key;
 const MAX_CONSENT_BODY_BYTES: usize = 2_000;
 
 /// No scrolling and an unreadable notice cannot be accepted, so the body must fit the smallest terminal we support.
+/// `the_largest_allowed_body_paints_at_every_height_it_promises` pins it.
 pub(crate) const MAX_CONSENT_BODY_ROWS: usize = 12;
 
 /// Body width on an 80-column terminal: the screen's own wrap width at the default margin.
@@ -43,6 +49,7 @@ pub enum ConsentArmRefusal {
     /// Too tall for the smallest supported terminal, so the gate could never be read or accepted.
     BodyTooTall(usize),
     /// Markup the parser cannot pair off.
+    /// Painting it would show a url, dropping it would cut the notice short, and a legal notice may not be shown with a sentence missing.
     UnpairedMarkup,
     /// A url outside a link. Terminals linkify one on sight, so it would open unchecked.
     UrlInPlainText,
@@ -126,8 +133,8 @@ fn text_or(raw: Option<&str>, fallback: &str, max_cols: usize) -> String {
     crate::render::line_utils::truncate_str(&sanitize_notice_text(cleaned), max_cols)
 }
 
-/// Narrower than a url's own set: a machine with no browser offers the URL
-/// for pasting into a shell.
+/// Narrower than a url's own set: a machine with no browser offers the URL for pasting into a shell.
+/// Keep it free of quoting and expansion hazards.
 fn is_safe_url_char(c: char) -> bool {
     c.is_ascii_alphanumeric()
         || matches!(
@@ -171,8 +178,8 @@ fn split_markdown_links(
     let mut rest = body;
 
     while let Some(open) = rest.find('[') {
-        // The label ends at the first `]`, so a stray bracket cannot swallow
-        // the sentence that follows it into a hyperlink A `[`.
+        // The label ends at the first `]`, so a stray bracket cannot swallow the sentence that follows it into a hyperlink
+        // A `[` with no `]` at all is prose, and carries no url
         let Some(close) = rest.get(open..).and_then(|s| s.find(']')).map(|i| open + i) else {
             break;
         };
@@ -188,9 +195,8 @@ fn split_markdown_links(
             rest = next;
             continue;
         };
-        // A closer with whitespace or a bracket before it belongs to
-        // something further along, and taking it will swallow the text in
-        // between.
+        // A closer with whitespace or a bracket before it belongs to something further along, and taking it would swallow the text in between
+        // Unsafe characters are a different matter: they make a well-formed link we will not open, which costs the hyperlink, not the copy
         let Some(url_len) = after_label.find(')').filter(|end| {
             after_label
                 .get(..*end)
@@ -275,8 +281,8 @@ impl ConsentNotice {
         }
 
         let rows = wrap(&segments, REFERENCE_BODY_COLS);
-        // The check above was on the raw body Dropping a link, or a body of
-        // nothing but zero-width characters, leaves text.
+        // The check above was on the raw body
+        // Dropping a link, or a body of nothing but zero-width characters, leaves text the screen will not paint and so cannot accept
         if !rows
             .iter()
             .flatten()
@@ -308,6 +314,7 @@ impl ConsentNotice {
 }
 
 /// One grapheme with the columns it occupies and the link it belongs to.
+/// Counting characters rather than columns would clip a wide-character notice in half while reporting it painted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BodyCell {
     pub text: String,
@@ -323,7 +330,7 @@ pub fn row_cols(row: &[BodyCell]) -> u16 {
 
 /// The key rides in the label, not a hint row, so it wraps and underlines with the link and counts against the row cap the validator measures.
 fn numbered_label(index: usize, label: &str) -> std::borrow::Cow<'_, str> {
-    // Only links have a key, so a tenth gets no number it could not act on.
+    // Only nine links have a key, so a tenth gets no number it could not act on.
     if index < MAX_KEYED_LINKS {
         std::borrow::Cow::Owned(format!("{label}[{}]", index + 1))
     } else {
@@ -347,7 +354,7 @@ fn flatten(segments: &[ConsentSegment]) -> Vec<BodyCell> {
     cells
 }
 
-/// Preserves the source's exact spacing, so no whitespace is invented where segments meet.
+/// Preserves the source's exact spacing, so no whitespace is invented where two segments meet.
 pub fn wrap(segments: &[ConsentSegment], width: u16) -> Vec<BodyRow> {
     if width == 0 {
         return Vec::new();
@@ -563,6 +570,7 @@ pub fn handle_answer(ev: &Event, ctx: &mut ConsentInputCtx<'_>) -> InputOutcome 
             return InputOutcome::Unchanged;
         }
 
+        // The accept row is painted first and only when the body is readable, so row 0 is accept.
         if let Some(row) = over_menu_row {
             return InputOutcome::Action(if can_accept && row == 0 {
                 Action::AcceptConsent

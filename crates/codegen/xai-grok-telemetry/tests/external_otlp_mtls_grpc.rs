@@ -91,7 +91,8 @@ fn external_stream_grpc_mtls_end_to_end() {
 
     xai_grok_telemetry::external::flush();
 
-    // Give any erroneous mTLS exporter time to finish a handshake and phone home; the metric interval above is 200ms.
+    // Give any erroneous mTLS exporter time to finish a handshake and phone
+    // home; the metric interval above is 200ms.
     std::thread::sleep(Duration::from_millis(600));
     assert_eq!(
         recorder.log_records().len(),

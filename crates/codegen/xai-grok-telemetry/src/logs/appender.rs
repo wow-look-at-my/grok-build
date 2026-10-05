@@ -5,7 +5,8 @@ use std::sync::OnceLock;
 
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 
-// Park every worker guard for the process lifetime Dropping a guard flushes and shuts down that file's writer thread.
+// Park every worker guard for the process lifetime
+// Dropping a guard flushes and shuts down that file's writer thread, so accumulate (never overwrite) to let multiple file-log layers coexist
 static FILE_LOG_GUARDS: OnceLock<parking_lot::Mutex<Vec<WorkerGuard>>> = OnceLock::new();
 
 /// Opens `path` in append mode and parks the worker guard for the process lifetime so buffered logs aren't lost.
@@ -28,6 +29,7 @@ pub(crate) fn non_blocking_file_writer(path: &Path) -> std::io::Result<NonBlocki
 }
 
 /// Drop all parked worker guards, flushing their non-blocking writers.
+/// Call at process exit so short-lived runs (e.g. headless `grok -p`) don't lose buffered logs.
 pub(crate) fn flush_file_log_guards() {
     if let Some(m) = FILE_LOG_GUARDS.get() {
         let mut guards = m.lock();

@@ -103,7 +103,8 @@ fn raw_handle_identity(handle: *mut std::ffi::c_void) -> Option<FileIdentity> {
     }
 
     let mut information = std::mem::MaybeUninit::uninit();
-    // SAFETY: the borrowed handle is live and the output has the exact BY_HANDLE_FILE_INFORMATION layout.
+    // SAFETY: the borrowed handle is live and the output has the exact
+    // BY_HANDLE_FILE_INFORMATION layout.
     let result = unsafe { get_file_information_by_handle(handle, information.as_mut_ptr()) };
     if result == 0 {
         return None;

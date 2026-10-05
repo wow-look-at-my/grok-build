@@ -125,7 +125,8 @@ pub fn grok_bot_tool_description(name: &str) -> Option<&'static str> {
         .map(|(_, desc)| *desc)
 }
 
-/// The model must paste a roster id, not invent a name or a shortened UUID.
+/// The model must paste a roster id, not invent a name or a shortened UUID;
+/// the full rule sits on bot_send_prompt, the reads carry the pointer.
 const AGENT_ID_PARAM_DESCRIPTION: &str = "Agent id pasted from bot_list_agents.";
 const SEND_AGENT_ID_DESCRIPTION: &str = "Opaque id copied exactly from \
      bot_list_agents or bot_search_agents; never a name, never typed from \

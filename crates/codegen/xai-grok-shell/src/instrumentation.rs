@@ -1,4 +1,11 @@
 //! Shim; see `xai_grok_telemetry::instrumentation` for the implementation.
+//!
+//! Two pieces stay here:
+//! - The [`instrumentation_timer!`] macro is `#[macro_export]`-ed from this crate.
+//!   Call sites spell it `crate::instrumentation_timer!` or `xai_grok_shell::instrumentation_timer!`.
+//!   Keeping the macro here means no downstream caller needs editing.
+//! - [`finalize_and_exit`] logs a terminal exit event and shuts down the shared OTel pipeline before the process exits.
+//!   The telemetry crate exposes the shutdown helper; this thin wrapper combines it with `process::exit`.
 
 pub use xai_grok_telemetry::instrumentation::{
     ChromeTraceOptions, InstrumentationFinalizer, InstrumentationMode, InstrumentationTimer,
@@ -31,8 +38,8 @@ pub fn finalize_and_exit(code: i32) -> ! {
     std::process::exit(code);
 }
 
-/// Time a block under the instrumentation target. Those sites spell it `crate::instrumentation_timer!(...)` or `xai_grok_shell::instrumentation_timer!(...)`. The macro body delegates to types and
-/// functions in `xai_grok_telemetry::instrumentation`.
+/// Time a block under the instrumentation target. The macro stays in shell so `$crate` continues to resolve to `xai_grok_shell` for the 12+ existing call sites.
+/// Those sites spell it `crate::instrumentation_timer!(...)` or `xai_grok_shell::instrumentation_timer!(...)`. The macro body delegates to types and functions in `xai_grok_telemetry::instrumentation`.
 #[macro_export]
 macro_rules! instrumentation_timer {
     ($name:literal) => {{

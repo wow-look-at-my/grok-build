@@ -1,4 +1,7 @@
 //! Point-in-time candidate view of local session storage.
+//!
+//! Resolves session directories under the sessions root (`<encoded-cwd>/<session-id>/` buckets).
+//! The journaled relocation transaction this module was named for never ran in production and was deleted.
 
 use std::collections::HashMap;
 use std::fs;

@@ -1,4 +1,17 @@
-//! The unified `Tool` trait, the streaming primitives it produces.
+//! The unified `Tool` trait, the streaming primitives it produces, and the
+//! helper constructors tool authors use to build well-formed streams.
+//!
+//! `Tool::execute` is the canonical streaming entry point; the runtime
+//! always calls it. The default impl wraps `Tool::run` (the simpler
+//! convenience hook) into a single-item terminal stream so blocking tools
+//! don't have to think about streaming. A tool that overrides neither gets
+//! a `NotImplemented` terminal at runtime.
+//!
+//! `ToolStream<T>` is a type alias for an opaque pinned stream; the helper
+//! free functions [`terminal_only`], [`deferred_terminal`] and
+//! [`with_progress`] are the supported ways to build one. Stream invariant:
+//! at most arbitrarily many `Progress` items, ending in exactly one
+//! `Terminal`.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -25,13 +38,25 @@ pub trait Tool: Send + Sync {
     /// Typed input. Must be deserialisable from JSON for wire dispatch.
     type Args: for<'de> Deserialize<'de> + JsonSchema + Send + 'static;
 
-    /// Typed output.
+    /// Typed output. Must implement [`ToolOutput`] which provides
+    /// model-facing content blocks and optional chat-completion
+    /// responses. All methods have defaults, so most output types
+    /// just need:
+    /// ```rust,ignore
+    /// impl ToolOutput for MyOutput {}
+    /// ```
     type Output: Serialize + ToolOutput + Send + 'static;
 
     /// Stable identity used by the runtime to route to this tool.
     fn id(&self) -> ToolId;
 
     /// Model-facing description and argument schema.
+    ///
+    /// Receives the per-turn [`ListToolsContext`] (viewer context,
+    /// attachments, etc.) — the same context [`Tool::should_list`] consumes
+    /// — so descriptions can be context-aware. Most tools ignore `_ctx` and
+    /// return a static description. Callers outside a listing turn pass
+    /// [`ListToolsContext::default`].
     fn description(&self, _ctx: &ListToolsContext) -> ToolDescription;
 
     /// Per-tool capability flags (concurrency, scope, frame caps, ...).
@@ -39,8 +64,9 @@ pub trait Tool: Send + Sync {
         ToolCapabilities::default()
     }
 
-    /// Whether [`Tool::description`] varies with the per-turn [`ListToolsContext`]. `false` for the common case of a
-    /// static description.
+    /// Whether [`Tool::description`] varies with the per-turn
+    /// [`ListToolsContext`]. `false` for the common case of a static
+    /// description.
     fn has_dynamic_description(&self) -> bool {
         false
     }
@@ -52,7 +78,13 @@ pub trait Tool: Send + Sync {
     }
 
     /// Streaming entry point. Default impl wraps `run` into a single-item
-    /// stream so blocking tools override `run`.
+    /// stream so blocking tools just override `run`.
+    ///
+    /// Uses a native `async fn` in trait (RPITIT) with an explicit `Send`
+    /// bound rather than `#[async_trait]`, so the returned future is not
+    /// boxed. The `Tool` trait is only ever consumed generically (type
+    /// erasure goes through [`ToolDyn`]), so it does not need to be
+    /// dyn-compatible.
     fn execute(
         &self,
         ctx: ToolCallContext,
@@ -80,7 +112,8 @@ pub trait Tool: Send + Sync {
     }
 }
 
-/// Stream of items a tool produces during a single call. Shape: `[Progress(_)*, Terminal(Result<T, ToolError>)]`.
+/// Stream of items a tool produces during a single call. Shape:
+/// `[Progress(_)*, Terminal(Result<T, ToolError>)]`.
 pub type ToolStream<T> = Pin<Box<dyn Stream<Item = ToolStreamItem<T>> + Send>>;
 
 /// One item in a [`ToolStream`].
@@ -110,7 +143,10 @@ pub enum ToolProgress {
     /// Rich content blocks.
     Content { blocks: Vec<ContentBlock> },
     /// Tool-defined progress payload. `subkind` is a stable snake-case
-    /// discriminator owned by the tool.
+    /// discriminator owned by the tool. The outer `"kind"` serde tag is
+    /// always `"custom"` for this variant; `subkind` is the producer's
+    /// own discriminator and lives one level deeper to avoid colliding
+    /// with the tag.
     Custom {
         subkind: String,
         payload: serde_json::Value,
@@ -129,7 +165,8 @@ pub enum ToolProgress {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case", try_from = "ContentBlockWire")]
 pub enum ContentBlock {
-    /// Plain text.
+    /// Plain text. Equivalent to `ToolProgress::Text` but allowed inside a
+    /// content list so a tool can interleave images and text.
     Text { text: String },
     /// Image. `mime_type` is e.g. `"image/png"`; `data` is base64.
     ///
@@ -163,7 +200,9 @@ pub enum ContentBlock {
 }
 
 impl ContentBlock {
-    /// The keys `mime_type` is read under, on both the `Image` and `Resource` blocks.
+    /// The keys `mime_type` is read under, on both the `Image` and `Resource`
+    /// blocks. `mimeType` is the MCP/A spelling an upstream server writes; a
+    /// block that names both under one value is one statement, not a duplicate.
     pub const MIME_TYPE_KEYS: Aliases = Aliases::new("mime_type", &["mimeType"]);
 }
 
@@ -207,7 +246,9 @@ enum ContentBlockWire {
 #[derive(Debug)]
 enum ContentBlockWireError {
     Alias(xai_tool_types::AliasConflict),
-    /// `mime_type` stays required on the `Image` block: an image with no MIME type cannot be rendered, so its absence is still a rejection.
+    /// `mime_type` stays required on the `Image` block: an image with no MIME
+    /// type cannot be rendered, so its absence is still a rejection rather than
+    /// an empty string the renderer would have to guess at.
     MissingImageMimeType,
 }
 
@@ -268,17 +309,21 @@ impl TryFrom<ContentBlockWire> for ContentBlock {
     }
 }
 
-/// Build a single-item stream containing only the terminal result. The most
-/// common shape — a blocking tool's `Tool::run` is wrapped this way by the
-/// default `execute` impl.
+/// Build a single-item stream containing only the terminal result.
+///
+/// The most common shape — a blocking tool's `Tool::run` is wrapped this
+/// way by the default `execute` impl.
 pub fn terminal_only<T: Send + 'static>(result: Result<T, ToolError>) -> ToolStream<T> {
     Box::pin(stream::iter(std::iter::once(ToolStreamItem::Terminal(
         result,
     ))))
 }
 
-/// Build a single-item stream whose terminal result is computed when the stream is first polled, not when it is built. `terminal` is not polled until the stream is; the same tail [`with_progress`]
-/// emits after an empty progress stream.
+/// Build a single-item stream whose terminal result is computed when the
+/// stream is first polled, not when it is built.
+///
+/// `terminal` is not polled until the stream is; the same tail
+/// [`with_progress`] emits after an empty progress stream.
 pub fn deferred_terminal<T, F>(terminal: F) -> ToolStream<T>
 where
     T: Send + 'static,
@@ -308,15 +353,35 @@ where
 
 /// Type-erased tool output that bundles the serialised JSON value with
 /// model-facing content blocks extracted at serialisation time.
+///
+/// When the `ToolDyn` blanket impl serialises a typed `Tool::Output` to
+/// JSON it also calls [`ToolOutput::model_output`] and
+/// [`ToolOutput::chat_completion_output`], capturing both
+/// here so downstream consumers never need to deserialise the `Value`
+/// back into the concrete type.
+///
+/// # MCP invariant
+///
+/// `model_output` is **always non-empty**. The [`ToolOutput`]
+/// default serialises the typed output as a JSON text block, so even
+/// tools that never override `model_output()` produce MCP-compliant
+/// content.  Tools that override the method are expected to return at
+/// least one block.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypedToolOutput {
     /// Identity of the tool that produced this output.
     pub tool_id: ToolId,
     /// Serialised JSON representation of the tool output.
     pub value: Value,
-    /// Model-facing content blocks. Always contains at least one block (MCP compliance — see struct-level docs).
+    /// Model-facing content blocks. Always contains at least one block
+    /// (MCP compliance — see struct-level docs).
     pub model_output: Vec<ContentBlock>,
-    /// Optional chat-completion response frame, extracted from the typed output via [`ToolOutput`].
+    /// Optional chat-completion response frame, extracted from the typed
+    /// output via [`ToolOutput`] at type-erasure time.
+    ///
+    /// `None` for the vast majority of tools. Present when a tool
+    /// produces a frontend-ready chat response (render cards, progress
+    /// reports, etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_completion_output: Option<ToolChatCompletionResponse>,
 }
@@ -324,6 +389,11 @@ pub struct TypedToolOutput {
 impl TypedToolOutput {
     /// Convenience constructor for building a `TypedToolOutput` from an
     /// already-serialised `Value` (e.g. at wire decode boundaries).
+    ///
+    /// `model_output` is derived from the value via
+    /// [`extract_content_blocks`](crate::render::extract_content_blocks);
+    /// `chat_completion_output` is always `None` since the wire format
+    /// does not carry it.
     pub fn from_value(tool_id: ToolId, value: Value) -> Self {
         let model_output = crate::render::extract_content_blocks(&value);
         Self {
@@ -379,7 +449,12 @@ pub trait ToolDyn: Send + Sync {
         true
     }
 
-    /// JSON-typed streaming entry point.
+    /// JSON-typed streaming entry point. The returned stream MUST honour
+    /// the same `[Progress*, Terminal]` invariant as [`ToolStream`].
+    ///
+    /// Terminal items carry [`TypedToolOutput`] which bundles both the
+    /// serialised JSON `Value` and the model-facing content blocks
+    /// extracted from the typed output.
     async fn execute(&self, ctx: ToolCallContext, args: Value) -> ToolStream<TypedToolOutput>;
 }
 
@@ -418,12 +493,14 @@ impl<T: Tool> ToolDyn for T {
             match item {
                 ToolStreamItem::Progress(p) => ToolStreamItem::Progress(p),
                 ToolStreamItem::Terminal(Ok(out)) => {
-                    // TypedToolOutput::value and the model_output fallback.
+                    // TypedToolOutput::value and the model_output
+                    // fallback.
                     match serde_json::to_value(&out) {
                         Ok(value) => {
                             let custom = out.model_output();
                             let model_output = if custom.is_empty() {
-                                // Default path: extract blocks from the already-serialised Value.
+                                // Default path: extract blocks from the
+                                // already-serialised Value.
                                 crate::render::extract_content_blocks(&value)
                             } else {
                                 custom
@@ -468,14 +545,17 @@ pub trait ToolFamily: Send + Sync {
     /// Identity shared by every variant in this family.
     fn id(&self) -> ToolId;
 
-    /// Resolve a `variant` to its concrete tool. Returns `None` when the family does not expose the requested variant.
+    /// Resolve a `variant` to its concrete tool. Returns `None` when the
+    /// family does not expose the requested variant.
     fn get_tool(&self, variant: &ToolVariant) -> Option<ArcTool>;
 
-    /// Every variant the family exposes.
+    /// Every variant the family exposes. Registries iterate this once at
+    /// startup and cache the results, so allocating here is fine.
     fn variants(&self) -> Vec<ToolVariant>;
 
-    /// Variant name the default falls back to when the family's `Default` arm
-    /// is itself a named variant.
+    /// Variant name the default falls back to when the family's `Default`
+    /// arm is itself a named variant. Returns `None` when the default is
+    /// the [`ToolVariant::Default`] sentinel.
     fn default_variant_name(&self) -> Option<&'static str> {
         None
     }

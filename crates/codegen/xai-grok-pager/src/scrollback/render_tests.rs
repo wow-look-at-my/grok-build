@@ -29,8 +29,8 @@ fn make_markdown_entry(text: &str) -> ScrollbackEntry {
     ScrollbackEntry::new(RenderBlock::agent_message(text))
 }
 
-/// Compute EntryLayoutInfo for a set of entries (heights and gap_after). Uses default
-/// appearance.
+/// Compute EntryLayoutInfo for a set of entries (heights and gap_after).
+/// Uses default appearance. Gap rule: all stubs are groupable and expanded, so every gap is 1.
 fn compute_layouts(
     entries: &[ScrollbackEntry],
     viewport_width: u16,
@@ -79,6 +79,7 @@ fn compute_layouts(
             };
         }
     }
+    // Last entry: trailing gap of 1
     if let Some(slot) = layouts.last_mut() {
         slot.gap_after = 1;
     }
@@ -210,6 +211,7 @@ fn count_reversed(buf: &Buffer) -> usize {
         .sum()
 }
 
+/// The plain text of buffer row `y` (viewport x starts at 0, so a byte index into this string equals the buffer column for ASCII content).
 fn buffer_row_text(buf: &Buffer, y: u16) -> String {
     (buf.area.left()..buf.area.right())
         .map(|x| buf.cell((x, y)).map(|c| c.symbol()).unwrap_or(""))
@@ -267,6 +269,7 @@ fn search_highlight_maps_to_wrapped_continuation_row() {
     let entries = vec![make_markdown_entry(
         "alpha bravo charlie delta echo foxtrot golf hotel needle",
     )];
+    // Width 40 wraps the sentence (message blocks also reserve 10 cols for the timestamp) while keeping "needle" whole on a continuation row
     let viewport = Rect::new(0, 0, 40, 12);
     let re = regex::Regex::new("needle").unwrap();
 
@@ -309,6 +312,8 @@ fn test_total_height_calculation() {
     let viewport = Rect::new(0, 0, 80, 20);
     let result = render_with_scratch(&entries, viewport, 0, None);
 
+    // Each stub entry is 3 lines (1 content + 2 vpad). All are groupable and expanded, so every gap is 1.
+    // Total: 3*3 + 2 gaps + 1 trailing = 12
     assert_eq!(result.total_height, 12);
 }
 
@@ -318,6 +323,7 @@ fn test_scroll_offset_skips_content() {
     let viewport = Rect::new(0, 0, 80, 10);
     let result = render_with_scratch(&entries, viewport, 4, None);
 
+    // 5 entries * 3 lines + 4 gaps + 1 trailing = 20
     assert_eq!(result.total_height, 5 * 3 + 5);
 }
 
@@ -472,7 +478,7 @@ fn windowed_paint_renders_full_verb_group_label_for_offscreen_members() {
 
     let virtual_y = state.get_cached_virtual_y().expect("layout cache");
     let layouts = state.get_cached_entry_layouts().expect("layout cache");
-    // Header row on the viewport's last row: all members are off-screen.
+    // Header row on the viewport's last row: all 50 members are off-screen.
     let scroll = at(virtual_y, header) + 1 - viewport.height as usize;
     let (paint_range, content_y0) =
         state.paint_window(0..state.len(), scroll, viewport.height as usize);
@@ -950,6 +956,7 @@ fn render_state(
     (buf, result)
 }
 
+/// Render the header row (row 0) of a truncation-grouped state, with or without the fold's spans.
 fn truncation_header_row(
     state: &crate::scrollback::ScrollbackState,
     viewport: Rect,
@@ -982,6 +989,7 @@ fn truncation_header_renders_bucket_label_with_spans_and_plain_count_without() {
         !at(layouts, 0).verb_group_header,
         "commands never verb-fold"
     );
+    // 6 participants with max_visible 3 leave 3 hidden; the plain count shows one less while the label describes all 3 hidden participants
     assert_eq!(at(layouts, 0).group_header_count, 2);
 
     let labeled = truncation_header_row(&state, viewport, true);
@@ -1109,7 +1117,8 @@ fn labeled_truncation_header_synthetic_line_copies_label_text() {
     assert_eq!(header.lines.len(), 1);
     assert_eq!(at(&header.lines, 0).text, "Ran 3 commands");
     assert_eq!(at(&header.lines, 0).screen_y, 0);
-    // Pin the hitbox to the DRAWN glyphs, not to the chrome helper The frame's own cells must spell the label starting at screen_x.
+    // Pin the hitbox to the DRAWN glyphs, not just to the chrome helper
+    // The frame's own cells must spell the label starting at screen_x, so a chrome edit that misaligned highlight from paint would fail here
     let screen_x = at(&header.lines, 0).screen_x;
     let drawn: String = (screen_x..screen_x + at(&header.lines, 0).selectable_cols.end)
         .map(|x| buf.cell((x, 0)).map(|c| c.symbol()).unwrap_or(""))
@@ -1333,8 +1342,8 @@ fn test_selected_entry_output_divergence_uses_selected_branch() {
 /// `effective_output` at the wrong width.
 #[test]
 fn message_block_content_width_subtracts_timestamp_reservation() {
-    // Picked so the message wraps to a different line count at `content_width
-    // - 10` than at `content_width` With a 30-wide viewport.
+    // Picked so the message wraps to a different line count at `content_width - 10` than at `content_width`
+    // With a 30-wide viewport and 4 columns of chrome, pane_content_width is 26 and per-block content_width is 16
     let entries = vec![make_markdown_entry(
         "hello world foo bar baz qux quux corge grault garply waldo",
     )];
@@ -1349,7 +1358,9 @@ fn message_block_content_width_subtracts_timestamp_reservation() {
         "AgentMessage should reserve 10 cols for the timestamp"
     );
 
-    // The lines registered in the resolved model came from the cached output computed at `block.content_width` Re-deriving them.
+    // The lines registered in the resolved model came from the cached output computed at `block.content_width`
+    // Re-deriving them at the same width must produce the same line count so block_line_idx values remain valid
+    // Deriving at the wider `pane_content_width` produces a different wrapping (the bug `finish_text_drag` previously triggered)
     let appearance = AppearanceConfig::default();
     let model_lines = at(&result.selection_model.ranges, 0).lines.len();
     let entry_lines_narrow = at(&entries, 0)
@@ -1477,7 +1488,7 @@ fn overlay_relative_link_resolves_against_cwd() {
 
 #[test]
 fn overlay_markdown_relative_link_opens_as_file_url() {
-    // End-to-end through the real render path: a markdown link to a short media path.
+    // End-to-end through the real render path: a markdown link to a short media path that matches this transcript's generated media becomes a `file://` overlay
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("images")).unwrap();
     std::fs::write(dir.path().join("images/1.png"), b"x").unwrap();
@@ -1533,15 +1544,21 @@ fn overlay_markdown_relative_link_opens_as_file_url() {
 
 #[test]
 fn overlay_word_wrap_splits_link() {
+    // Pre-wrap line "hello world" (11 chars) wrapped into two segments: wrapped line 0: "hello" (5 chars, joiner=None
+    // → new pre-wrap line) wrapped line 1: "world" (5 chars, joiner=Some(" ") → continuation). The joiner " " is the
+    // space consumed at the wrap point (col 5).
     let output = make_block_output(&[("hello", None), ("world", Some(" "))]);
+    // Link spans the full pre-wrap line: cols 0..11
     let links = [make_hyperlink(0, 0..11, "https://b.com", 2)];
     let mut overlay = LinkOverlay::new();
     map_hyperlinks_to_overlay(&links, &output, 0, 0, 10, 0, 0, &[], None, &mut overlay);
 
     assert_eq!(overlay.links().len(), 2);
+    // First segment: cols 0..5 on screen row 0
     assert_eq!(at(overlay.links(), 0).screen_row, 0);
     assert_eq!(at(overlay.links(), 0).col_start, 0);
     assert_eq!(at(overlay.links(), 0).col_end, 5);
+    // Second segment: cols 0..5 on screen row 1
     assert_eq!(at(overlay.links(), 1).screen_row, 1);
     assert_eq!(at(overlay.links(), 1).col_start, 0);
     assert_eq!(at(overlay.links(), 1).col_end, 5);
@@ -1558,11 +1575,13 @@ fn overlay_word_wrap_splits_link() {
 #[test]
 fn overlay_content_skip_hides_scrolled_lines() {
     let output = make_block_output(&[("line0", None), ("line1", None), ("line2", None)]);
+    // Link on line 0 (scrolled off), link on line 2 (visible)
     let links = [
         make_hyperlink(0, 0..5, "https://hidden.com", 1),
         make_hyperlink(2, 0..5, "https://visible.com", 2),
     ];
     let mut overlay = LinkOverlay::new();
+    // content_skip=2 means first 2 wrapped lines are above viewport
     map_hyperlinks_to_overlay(&links, &output, 2, 0, 10, 0, 0, &[], None, &mut overlay);
 
     assert_eq!(overlay.links().len(), 1);
@@ -1583,6 +1602,7 @@ fn overlay_max_screen_y_clips_links() {
         make_hyperlink(2, 0..5, "https://clipped.com", 2),
     ];
     let mut overlay = LinkOverlay::new();
+    // max_screen_y=2 means only rows 0..2 are visible (screen_y 0 and 1)
     map_hyperlinks_to_overlay(&links, &output, 0, 0, 2, 0, 0, &[], None, &mut overlay);
 
     assert_eq!(overlay.links().len(), 1);
@@ -1598,12 +1618,14 @@ fn overlay_max_screen_y_clips_links() {
 fn overlay_content_line_offset_skips_header_lines() {
     // Simulates BtwBlock: header, separator, then markdown body
     let output = make_block_output(&[
-        ("/btw question", None),
-        ("", None),
-        ("body text", None),
+        ("/btw question", None), // header (offset 0)
+        ("", None),              // separator (offset 1)
+        ("body text", None),     // markdown body line 0
     ]);
+    // Hyperlink on markdown body line_index=0, cols 0..4
     let links = [make_hyperlink(0, 0..4, "https://body.com", 1)];
     let mut overlay = LinkOverlay::new();
+    // content_line_offset=2 shifts line_index by 2
     map_hyperlinks_to_overlay(&links, &output, 0, 0, 10, 0, 2, &[], None, &mut overlay);
 
     assert_eq!(overlay.links().len(), 1);
@@ -1625,6 +1647,7 @@ fn overlay_content_line_offset_out_of_range_is_safe() {
 
 #[test]
 fn overlay_partial_column_overlap() {
+    // Link spans cols 3..8, but the line is only 6 chars wide (cols 0..6)
     let output = make_block_output(&[("abcdef", None)]);
     let links = [make_hyperlink(0, 3..8, "https://partial.com", 1)];
     let mut overlay = LinkOverlay::new();
@@ -1687,8 +1710,9 @@ fn execute_block_urls_get_overlay_links() {
 
 #[test]
 fn markdown_wrapped_project_media_path_fully_linkified() {
-    // Regression: imagine-tool prose whose long, percent-encoded media path
-    // soft-wraps across rows The whole path must be clickable.
+    // Regression: imagine-tool prose whose long, percent-encoded media path soft-wraps across rows
+    // The whole path must be clickable, not just the leading fragment on the first row
+    // Each visual row gets one overlay region, all pointing at the full file:// URL
     let path = "/Users/alice/.grok/projects/%2FUsers%2Falice%2Fcode%2Fxai/\
                 019e0000-0000-7000-8000-000000000001/images/1.jpg";
     let entries = vec![make_markdown_entry(&format!(
@@ -1739,7 +1763,8 @@ fn markdown_wrapped_project_media_path_fully_linkified() {
 
 #[test]
 fn two_autolink_documents_with_restarted_ids_stay_separate_hits() {
-    // Each agent message is its own markdown document.
+    // Each agent message is its own markdown document, so both autolinks get id=0
+    // Consecutive same-id overlay entries must not merge when the URLs differ (Apple Terminal Cmd+hover/click)
     let entries = vec![
         make_markdown_entry("<https://example.com/aaa>\n"),
         make_markdown_entry("<https://example.com/bbb>\n"),
@@ -1950,6 +1975,7 @@ fn group_header_entry_does_not_leak_hidden_line_links() {
 
 #[test]
 fn collapse_header_entry_does_not_leak_links_but_visible_group_entries_do() {
+    // Smallest shape the truncation fold can produce for an expanded group: 3 entries, header count = group_len - 1 = 2
     let mut entries = vec![
         ScrollbackEntry::new(RenderBlock::execute_with_output(
             "cd /Users/foo/hidden && ls",
@@ -2148,6 +2174,7 @@ fn group_header_entry_contributes_no_selectable_lines() {
 #[test]
 fn verb_group_header_selection_geometry_tracks_chrome() {
     crate::appearance::cache::set_show_thinking_blocks(false);
+    // Absolute path so the URL/path scanner linkifies member 0's row.
     let mut entries = vec![
         ScrollbackEntry::new(RenderBlock::read("/tmp/verbgeo/a1.rs", None)),
         ScrollbackEntry::new(RenderBlock::read("a2.rs", None)),
@@ -2163,6 +2190,7 @@ fn verb_group_header_selection_geometry_tracks_chrome() {
     let layouts_for = |expanded: bool| {
         vec![
             EntryLayoutInfo {
+                // The expanded slot is the header line plus entry 0's own row
                 height: if expanded { 2 } else { 1 },
                 gap_after: 0,
                 // Verb headers carry the run's tool-member count.
@@ -2218,6 +2246,7 @@ fn verb_group_header_selection_geometry_tracks_chrome() {
         collapsed.selectable_cols, expanded.selectable_cols,
         "hitbox always spans exactly the label glyphs"
     );
+    // The expanded slot also exposes member 0's own content line at the row below the header, selectable like any other member row
     let member_line_at = |expanded: bool| {
         let mut buf = Buffer::empty(viewport);
         let result = render_scrolled_entries_with_scratch(
@@ -2304,8 +2333,8 @@ fn verb_group_header_selection_geometry_tracks_chrome() {
         member_link_rows(false).is_empty(),
         "folded member must expose no links"
     );
-    // Both states wear the diamond chrome: the hitbox starts past it at the
-    // same x either way The label begins at the content column.
+    // Both states wear the diamond chrome: the hitbox starts past it at the same x either way
+    // The label begins at the content column (accent plus left pad, NOT `chrome_width`, which also counts the right pad) plus the diamond prefix
     let expected_x = HorizontalLayout::ACCENT
         + appearance.scrollback.layout.block_pad_left
         + group_header_chrome_prefix_width();
@@ -2319,8 +2348,9 @@ fn verb_group_header_selection_geometry_tracks_chrome() {
     );
 }
 
-/// The expanded slot's rows are independent drag targets. The synthetic header line keys its own reserved range, so a drag anchored on
-/// either row paints and copies that row alone.
+/// The expanded slot's two rows are independent drag targets.
+/// The synthetic header line keys its own reserved range, so a drag anchored on either row paints and copies that row alone.
+/// Before the reserved id, both rows shared (entry 0, range 0, block line 0), so `push_line` merged them and a drag on either selected both.
 #[test]
 fn verb_group_expanded_slot_header_and_member_select_independently() {
     use crate::scrollback::text_selection::reconstruct_selection_text;
@@ -2337,6 +2367,7 @@ fn verb_group_expanded_slot_header_and_member_select_independently() {
     let theme = Theme::current();
     let appearance = AppearanceConfig::default();
     let viewport = Rect::new(0, 0, 80, 10);
+    // Expanded slot: the header line plus member 0's own row
     let layouts = vec![
         EntryLayoutInfo {
             height: 2,
@@ -2375,7 +2406,7 @@ fn verb_group_expanded_slot_header_and_member_select_independently() {
     );
     let model = &result.selection_model;
 
-    // Both rows resolve to distinct ranges, one line each on their own screen rows
+    // The two rows resolve to two distinct ranges, one line each on their own screen rows
     let header = model.range(0, GROUP_HEADER_RANGE_ID).expect("header range");
     assert_eq!(header.lines.len(), 1);
     assert_eq!(at(&header.lines, 0).text, "Read 2 files");
@@ -2569,6 +2600,7 @@ fn group_header_media_entry_registers_no_media_placements() {
 
 #[test]
 fn truncated_execute_block_detects_urls_in_head_and_tail() {
+    // Default truncation: first_lines=2, last_lines=3, threshold=5.
     // Build output > 5 lines with URLs in both the head and tail sections.
     let output = [
         "https://head.example.com/first",
@@ -2621,6 +2653,7 @@ fn truncated_execute_block_detects_urls_in_head_and_tail() {
     );
 }
 
+/// Collapsed Edit header: after the bullet is prepended the path is span 2, and the OSC8 overlay must cover path cols only (not the verb or bullet).
 #[test]
 fn tool_header_link_target_overlay_covers_path_after_bullet() {
     use crate::appearance::ToolBullet;
@@ -3065,6 +3098,7 @@ fn url_overlay_group<'a>(result: &'a ScrollRenderResult, url: &str) -> Vec<&'a O
     group
 }
 
+/// Assert that `fragments` are on strictly-increasing CONSECUTIVE screen rows (rows must differ by exactly 1).
 /// Catches partial regressions where the middle of a wrapped URL is silently skipped.
 fn assert_consecutive_rows(fragments: &[&OverlayLink]) {
     for w in fragments.windows(2) {
@@ -3083,6 +3117,7 @@ fn assert_consecutive_rows(fragments: &[&OverlayLink]) {
     }
 }
 
+/// Regression: a `[text](url)` link in pretty mode lost the OSC 8 wrapper and the terminal's auto-styling on every wrapped URL row except the first.
 /// Every wrapped row covering URL bytes must receive its own `OverlayLink` so the entire URL is clickable and styled.
 #[test]
 fn overlay_pretty_link_url_wraps_across_rows() {
@@ -3095,7 +3130,8 @@ fn overlay_pretty_link_url_wraps_across_rows() {
     let viewport = Rect::new(0, 0, 50, 20);
     let result = render_with_scratch(&entries, viewport, 0, None);
 
-    // This is a plain paragraph (no `subsequent_indent`).
+    // This is a plain paragraph (no `subsequent_indent`), so the combined fragment widths must equal the URL's display
+    // width. That invariant would fail under any row drop or off-by-N column-tracking regression.
     let group = url_overlay_group(&result, url);
     assert_eq!(
         group.len(),
@@ -3142,7 +3178,8 @@ fn overlay_pretty_link_url_wraps_multi_row_paragraph() {
             .collect::<Vec<_>>(),
     );
     assert_consecutive_rows(&group);
-    // The combined width of all fragments must equal the URL's display width (these URLs are pure ASCII, so display width equals byte length).
+    // The combined width of all fragments must equal the URL's display width (these URLs are pure ASCII, so display width equals byte length)
+    // Any silently-dropped middle row would make this sum unequal.
     let combined_width: u32 = group.iter().map(|o| (o.col_end - o.col_start) as u32).sum();
     assert_eq!(
         combined_width as usize,
@@ -3155,8 +3192,9 @@ fn overlay_pretty_link_url_wraps_multi_row_paragraph() {
     );
 }
 
-/// CJK link text: column tracking must be display-width aware. That is the strongest cell-width invariant we can
-/// pin without re-deriving the entire wrap layout.
+/// CJK link text: column tracking must be display-width aware. If the bug had used byte length for `日` (3 bytes,
+/// but 2 display cells), the column accounting would be off by N cells per CJK character. That is the strongest
+/// cell-width invariant we can pin without re-deriving the entire wrap layout.
 #[test]
 fn overlay_pretty_link_url_with_cjk_text() {
     use unicode_width::UnicodeWidthStr;
@@ -3175,6 +3213,8 @@ fn overlay_pretty_link_url_with_cjk_text() {
     assert_consecutive_rows(&group);
 
     // Combined fragment widths must equal the URL's display width. For pure-ASCII URLs that's `url.len()`.
+    // A byte-vs-cell regression in CJK column tracking would propagate as a wrong pre-wrap column for the URL HyperlinkTarget
+    // That in turn would clip or shift one of the fragments, making the sum unequal
     let combined_width: u32 = group.iter().map(|o| (o.col_end - o.col_start) as u32).sum();
     assert_eq!(
         combined_width as usize,
@@ -3183,8 +3223,9 @@ fn overlay_pretty_link_url_with_cjk_text() {
     );
 }
 
-/// Long URL inside a blockquote. `map_hyperlinks_to_overlay` produces OverlayLinks whose combined width exactly equals the URL's
-/// display width.
+/// Long URL inside a blockquote. The OverlayLink for the URL must cover continuation rows so OSC 8 is present on every wrapped row.
+/// Blockquote URL wrap: OSC 8 must cover every wrapped row.
+/// `map_hyperlinks_to_overlay` produces OverlayLinks whose combined width exactly equals the URL's display width.
 #[test]
 fn overlay_pretty_link_url_in_blockquote_wraps_correctly() {
     use unicode_width::UnicodeWidthStr;
@@ -3207,6 +3248,7 @@ fn overlay_pretty_link_url_in_blockquote_wraps_correctly() {
     );
     assert_consecutive_rows(&group);
 
+    // The indent width for blockquote continuation is 2 ("│ ")
     let indent_width: u16 = 2;
 
     // Continuation rows (all but the first) must start after the indent
@@ -3303,8 +3345,9 @@ fn overlay_pretty_link_url_in_list_wraps_correctly() {
     );
 }
 
-/// GBT-6459 regression: parenthetical mid-path URL soft-wraps (e.g. arxiv abs link). Both wrap
-/// fragments must share the same id and point to the FULL URL, not a truncated prefix.
+/// GBT-6459 regression: parenthetical mid-path URL soft-wraps (e.g. arxiv abs link).
+/// Both wrap fragments must share the same id and point to the FULL URL, not a truncated prefix.
+/// Symptom: row 0 opens `https://arxiv.org/` alone; continuation has no OSC8 (gray, not clickable).
 #[test]
 fn overlay_parenthetical_arxiv_url_wraps_correctly() {
     use unicode_width::UnicodeWidthStr;
@@ -3312,6 +3355,7 @@ fn overlay_parenthetical_arxiv_url_wraps_correctly() {
     let markdown = format!("See ({url}) for details.\n");
     let entries = vec![make_markdown_entry(&markdown)];
 
+    // Viewport width chosen to wrap mid-URL: "See (https://arxiv.org/" on row 0, "abs/2309.14322) for details." on row 1
     let viewport = Rect::new(0, 0, 30, 10);
     let result = render_with_scratch(&entries, viewport, 0, None);
 
@@ -3513,7 +3557,7 @@ fn overlay_pretty_link_url_no_wrap_single_row() {
     );
 }
 
-/// Markdown links on the same pre-wrap line, both with URLs long enough to wrap their `(url)` suffixes.
+/// Two markdown links on the same pre-wrap line, both with URLs long enough to wrap their `(url)` suffixes.
 /// Each URL must produce its own id-group and the id-groups must be distinct (no merging).
 #[test]
 fn overlay_pretty_two_wrapping_links_distinct_ids() {
@@ -3546,6 +3590,7 @@ fn overlay_pretty_two_wrapping_links_distinct_ids() {
     assert_consecutive_rows(&group_a);
     assert_consecutive_rows(&group_b);
 
+    // The set of OverlayLink ids referencing either URL must have at least 4 distinct entries.
     let ids: std::collections::HashSet<u32> = result
         .link_overlay
         .links()
@@ -3660,7 +3705,8 @@ fn tool_media_overlay_exposes_filepath_click_rect() {
     use crate::scrollback::blocks::tool::{OtherToolCallBlock, ToolCallBlock};
     use crate::terminal::image::{GraphicsProtocol, set_protocol_for_test};
 
-    // With the Kitty overlay active the block hosts its image overlay (no text `[Open]` line).
+    // With the Kitty overlay active the block hosts its image overlay (no text `[Open]` line)
+    // The sole placement is the overlay one whose second output line is the click-to-copy filepath
     let _guard = set_protocol_for_test(GraphicsProtocol::Kitty);
 
     let dir = tempfile::tempdir().unwrap();
@@ -3680,6 +3726,7 @@ fn tool_media_overlay_exposes_filepath_click_rect() {
     };
     assert!(media.has_button_row, "overlay/image tool-media placement");
 
+    // The tool block has no vpad, so its second output line (the filepath) is screen row 1: a one-row click-to-copy target at the image's x
     let rect = media
         .filepath_screen_rect
         .expect("tool media exposes the click-to-copy filepath rect");

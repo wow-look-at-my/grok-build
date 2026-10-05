@@ -1,4 +1,5 @@
 //! Coding-data sharing upsell banner (the Figma "Data Sharing Upsell" design).
+//! Shared by the welcome tip slot and the agent-view banner slot; visibility is gated by `AppView::privacy_banner_should_show`.
 
 use crate::theme::Theme;
 use ratatui::buffer::Buffer;
@@ -83,6 +84,7 @@ fn legal_width(variant: &[LegalSegment]) -> u16 {
 }
 
 /// Buttons render whole or not at all, and never at the cost of the title.
+/// A clipped/overflowing `[Opt in]` must not leave a click target in the blank margin (a stray click there would silently opt the user in).
 fn buttons_fit(area_width: u16) -> bool {
     area_width >= PRIVACY_BANNER_TITLE.len() as u16 + 1 + button_block_width()
 }
@@ -395,7 +397,7 @@ mod tests {
         assert_eq!(rects.policy, Rect::default());
     }
 
-    /// Both links open different documents, so an off-by-one rect sends the user to the wrong page.
+    /// The two links open different documents, so an off-by-one rect sends the user to the wrong page.
     #[test]
     fn each_legal_link_hits_its_own_words() {
         for width in [200, 117, 80, 60, 40, 30, 24, 18] {

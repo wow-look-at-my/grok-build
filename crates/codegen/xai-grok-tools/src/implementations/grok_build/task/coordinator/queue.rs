@@ -9,11 +9,12 @@ use super::super::types::{SubagentRequest, SubagentResult};
 
 use super::{ChildRunner, SubagentCoordinator};
 
-/// Cancelling a queued spawn's token schedules no wake of its own.
+/// Cancelling a queued spawn's token schedules no wake of its own; sweeps
+/// run at least this often while spawns are parked.
 pub(super) const QUEUED_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The session admission queue: spawns parked at the concurrent limit, in
-/// arrival order.
+/// arrival order. Every queue convention lives behind these methods.
 #[derive(Default)]
 pub(super) struct SpawnQueue {
     entries: VecDeque<QueuedSpawn>,

@@ -22,8 +22,8 @@ fn content_hit(id: &str) -> xai_grok_shell::extensions::session_search::SearchSe
     }
 }
 
-/// Like [`test_app`] but with `cwd` set to this crate's directory, which
-/// lives inside the git repo.
+/// Like [`test_app`] but with `cwd` set to this crate's directory, which lives inside the git repo.
+/// Worktree tests require a git ancestor to pass the `has_git_ancestor` pre-check.
 fn test_app_git() -> AppView {
     let mut app = test_app();
     app.cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

@@ -1,4 +1,6 @@
-//! Dashboard chrome above the row list: the header row (location label, `[Choose …]` hint, state chips, promo CTA).
+//! Dashboard chrome above the row list: the header row (location label, `[Choose …]` hint, state chips, promo CTA)
+//! and the primary actions row (`+ New Agent`, `Open Previous /resume`, `Worktree Ctrl+w`).
+//! Both paint into rects from [`crate::views::dashboard::layout::DashboardLayout`] and register their click targets on [`DashboardState`].
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -231,7 +233,7 @@ fn underline_location_on_hover(spans: Vec<Span<'static>>) -> Vec<Span<'static>> 
         .collect()
 }
 
-/// Paint the primary actions row into `area` and write those action hit rects.
+/// Paint the primary actions row into `area` and write the three action hit rects.
 pub(super) fn render_actions_row(
     buf: &mut Buffer,
     area: Rect,
@@ -266,7 +268,8 @@ pub(super) fn render_actions_row(
     };
     let new_agent_w = (UnicodeWidthStr::width(new_agent_label) as u16).min(area.width);
 
-    // Right-hand items are laid out before `+ New Agent` so a focus fallback (below) can still colour that button.
+    // Right-hand items are laid out before `+ New Agent` so a focus fallback (below) can still colour that button in the same frame
+    // Each right-hand item keeps a 2-cell gap from the `+ New Agent` button so the two sides never touch
     let mut right_edge = area.x + area.width;
     let left_limit = area.x + new_agent_w + 2;
     let fits = |right_edge: u16, w: u16| right_edge.checked_sub(w).is_some_and(|x| x >= left_limit);
@@ -354,9 +357,8 @@ pub(super) fn render_actions_row(
     }));
 }
 
-/// A cursor parked on a right-hand item needs a painted item under it; when
-/// this frame dropped the item (row too narrow, or no actions row at all),
-/// the cursor falls back to `+ New Agent`.
+/// A cursor parked on a right-hand item needs a painted item under it; when this frame dropped the item (row too narrow, or no
+/// actions row at all), the cursor falls back to `+ New Agent`, which is painted last and so shows the focus colour this frame.
 fn fall_back_from_unpainted_item(state: &mut DashboardState) {
     if state
         .actions_focus

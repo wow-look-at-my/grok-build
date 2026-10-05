@@ -1,4 +1,5 @@
 //! Host routing for session picker fetch results: resolve the host a result was issued for to its live picker storage.
+//! The target carries the freshness values (generation and per-kind seqs) the result must match to apply.
 
 use crate::app::app_view::{AppView, SessionPickerEntry};
 use crate::app::dispatch::ctx::get_active_agent_mut;
@@ -13,6 +14,7 @@ use crate::views::session_picker_surface::SessionPickerHost;
 type SearchHit = xai_grok_shell::extensions::session_search::SearchSessionHit;
 
 /// A picker fetch carries this and its result echoes it back.
+/// It names the requesting host and snapshots the generation and per-kind seq the host's picker had when the fetch dispatched.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::app::dispatch) struct PickerRequest {
     pub host: SessionPickerHost,

@@ -15,9 +15,8 @@ pub(super) fn turn_result_to_hook_outcome(
     }
 }
 
-/// Encode a
-/// [`CancellationCategory`](crate::session::events::CancellationCategory) as
-/// its bare snake_case wire string for the `after_turn` payload.
+/// Encode a [`CancellationCategory`](crate::session::events::CancellationCategory) as its bare snake_case wire string for the `after_turn` payload.
+/// Deliberately `serde_json::to_value` then `as_str`, not `to_string`: that yields the quoted form and fails the workspace decode.
 pub(super) fn cancellation_category_to_wire_string(
     category: Option<crate::session::events::CancellationCategory>,
 ) -> Option<String> {
@@ -27,6 +26,7 @@ pub(super) fn cancellation_category_to_wire_string(
         .and_then(|v| v.as_str().map(String::from))
 }
 
+/// The shell's granular `ToolOutcome` variants collapse to the hub protocol's three.
 /// `Cancelled` means the tool never ran (permission, doom-loop, hook, followup).
 pub(super) fn map_tool_outcome(
     outcome: crate::session::events::ToolOutcome,
@@ -345,7 +345,8 @@ impl SessionActor {
                 xai_grok_hooks::dispatcher::PostToolUseResult::default(),
             )
         };
-        // Client PostToolUse runs the awaited gate though it is not yet in ADVERTISED_BLOCKING_EVENTS.
+        // Client PostToolUse runs the awaited gate though it is not yet in
+        // ADVERTISED_BLOCKING_EVENTS; SDK clients dispatch by callback id and answer.
         dispatch_result.merge(self.run_post_tool_use_client_hooks(&envelope).await);
 
         let mut results = std::mem::take(&mut dispatch_result.results);
@@ -393,7 +394,8 @@ impl SessionActor {
                 tool_input_truncated,
                 error: error_text,
                 duration_ms: Some(duration_ms),
-                // No clean abort/cancel signal at these dispatch sites.
+                // No clean abort/cancel signal at these dispatch sites; failures
+                // here are tool-reported, never interrupts.
                 is_interrupt: false,
                 subagent_type: self.subagent_type_label(),
             },
@@ -426,8 +428,8 @@ impl SessionActor {
         result.additional_context
     }
 
-    /// Enforcement scope for a prompt-gate block: only a real user prompt on
-    /// a top-level session.
+    /// Enforcement scope for a prompt-gate block: only a real user prompt on a top-level session.
+    /// The event fires for every origin, but synthetic wakes and subagent sessions run the gate observe-only.
     pub(super) fn should_enforce_prompt_block(
         &self,
         policy: &xai_agent_lifecycle::InputPolicy,

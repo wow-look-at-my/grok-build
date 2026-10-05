@@ -1,4 +1,7 @@
 //! The agent surface that extension handlers operate against.
+//!
+//! Extension modules name this trait instead of the concrete run-loop agent, so
+//! the run loop can implement it while the extensions stay independent of it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

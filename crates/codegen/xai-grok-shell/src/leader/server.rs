@@ -3,7 +3,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-/// The binary version of the running leader process.
+/// The binary version of the currently running leader process.
+///
+/// Compared against each registering client's `ClientCapabilities::client_version`
+/// to detect mismatches early and surface a structured ACP notification.
+/// The same string a client sends as its own `client_version`, so the two are
+/// compared like-for-like. Two binaries built from one tree report one version
+/// and never notify; two differently-stamped ones differ and do.
 fn leader_version() -> &'static str {
     xai_grok_version::version()
 }
@@ -32,8 +38,10 @@ use xai_grok_login::AuthManager;
 use xai_grok_workspace::WorkspaceHandle;
 const REGISTRATION_TIMEOUT: Duration = Duration::from_secs(30);
 /// Separator for namespacing request IDs.
+/// The pipe is valid in JSON strings (no escaping needed) and unlikely to appear in typical JSON-RPC IDs (usually numbers or UUIDs).
 const ID_NAMESPACE_SEP: char = '|';
-/// Cap on live notifications buffered per in-flight `session/load` (see `load_live_buffer`).
+/// Cap on live notifications buffered per in-flight `session/load` (see `load_live_buffer`). A normal load resolves in well under a second, so the buffer is tiny; this bound prevents unbounded growth if a load stalls.
+/// On overflow we stop buffering and forward live normally. Correctness of the transcript is preserved by the client's eventId dedup; only the ordering nicety is lost in this degenerate case.
 const MAX_BUFFERED_LIVE_PER_LOAD: usize = 4096;
 enum ServerEvent {
     Disconnected(ClientId),
@@ -47,13 +55,17 @@ enum LeaderServerPoll {
     Response(String),
 }
 /// A live notification buffered during an in-flight `session/load`: the shared payload plus its `event_seq`.
+/// The `event_seq` is computed at buffer time, when the message is already parsed, so the post-load flush never re-parses.
 type BufferedLive = (Arc<str>, Option<u64>);
-/// Message queued to a client handler task.
+/// Message queued to a client handler task. ACP payloads are by far the hot path (every chunk of every session fans out to every subscriber), so they travel as a shared `Arc<str>`.
+/// The routing loop pays one refcount bump per recipient instead of a full `String` clone. The live-load buffer and the interaction cache share the same allocation.
+/// The handler serializes the wire envelope via [`ServerMessageRef`] without ever building an owned `ServerMessage::Acp`.
 #[derive(Debug, Clone)]
 enum ClientOutbound {
     /// An ACP payload, shared (refcounted) across fan-out targets.
     Acp(Arc<str>),
-    /// Everything else (registration, control results, ping, shutdown, errors).
+    /// Everything else (registration, control results, ping, shutdown, errors). Boxed: a
+    /// control result carrying a full cursor worker status dwarfs the `Acp` variant.
     Message(Box<ServerMessage>),
 }
 impl From<ServerMessage> for ClientOutbound {
@@ -61,8 +73,9 @@ impl From<ServerMessage> for ClientOutbound {
         Self::Message(Box::new(msg))
     }
 }
-/// Serialize-only mirror of [`ServerMessage`]'s `Acp` variant that borrows
-/// the payload.
+/// Serialize-only mirror of [`ServerMessage`]'s `Acp` variant that borrows the payload.
+/// It lets the per-client writer frame a shared `Arc<str>` without copying it into an owned `ServerMessage`.
+/// It must stay wire-identical to `ServerMessage::Acp`; the `server_message_ref_is_wire_identical` test asserts that.
 #[derive(serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerMessageRef<'a> {
@@ -85,7 +98,7 @@ struct OutstandingModelSwitch {
     model: String,
     seq: u64,
 }
-/// Resolves a client's `default_model` across overlapping switch requests.
+/// Resolves a client's `default_model` across overlapping switch requests. Each forwarded switch gets a rising sequence number, so a response that arrives late or is rejected never restores a model older than the client's most recent choice.
 #[derive(Default)]
 struct ModelSwitchTracker {
     confirmed: Option<String>,
@@ -135,13 +148,19 @@ struct ClientState {
     mode: ClientMode,
     capabilities: ClientCapabilities,
     /// The client type string from IPC registration (e.g., "grok-tui", "grok-code-extension").
+    /// Injected into `initialize` requests as `clientIdentifier` so the agent knows the real client type when several clients share one leader.
     client_type: String,
     /// Set to `true` once the client's `initialize` request has been seen and had `clientIdentifier` injected.
+    /// Until `initialize` is observed, each ACP message is checked so we never miss a late `initialize`.
+    /// After it is seen once, we skip the per-message parse as an optimisation.
     initialize_seen: bool,
     /// Patch the next response's `modelState.currentModelId` to match `default_model`.
+    /// Set on outbound `initialize`, cleared after patching the response.
     patch_initialize_model: bool,
     model_switches: ModelSwitchTracker,
-    /// Whether this client has completed IPC registration. Only registered clients are counted in `client_count`.
+    /// Whether this client has completed IPC registration.
+    /// Only registered clients are counted in `client_count`.
+    /// Pre-registration connections (which may time out) must not inflate the count.
     registered: bool,
 }
 #[derive(Debug, Clone)]
@@ -209,6 +228,7 @@ impl LeaderServerControlState {
 pub struct WorkspaceControl {
     default_hub_url: Option<String>,
     /// Hub credential, wired to the leader's `AuthManager` once auth is ready.
+    /// A `watch` so a starting leader (socket up, auth pending) can be awaited instead of failing the command.
     auth: tokio::sync::watch::Sender<Option<Arc<dyn AuthProvider>>>,
     /// Serializes mutating commands (start/pause/resume/stop) so their long awaits (drain, reconnect) never interleave.
     lock: tokio::sync::Mutex<()>,
@@ -239,11 +259,11 @@ impl std::fmt::Debug for WorkspaceControl {
             .finish_non_exhaustive()
     }
 }
-/// Hub [`AuthProvider`] backed by the leader's `AuthManager`: returns the
-/// current token at each connect/reconnect.
+/// Hub [`AuthProvider`] backed by the leader's `AuthManager`: returns the current token at each connect/reconnect; never writes auth.json.
 struct LeaderAuthProvider {
     auth_manager: Arc<AuthManager>,
-    /// One background refresh at a time. `current()` is called by a reconnect loop that can spin fast while offline.
+    /// One background refresh at a time. `current()` is called by a reconnect loop that can spin fast while offline. A `refresh_lock` would serialize those tasks but not collapse them.
+    /// Each queued one would still issue its own IdP call once the previous released.
     refresh_in_flight: Arc<std::sync::atomic::AtomicBool>,
 }
 impl std::fmt::Debug for LeaderAuthProvider {
@@ -285,12 +305,9 @@ impl AuthProvider for LeaderAuthProvider {
             .unwrap_or_default();
         AuthCredential::bearer(token)
     }
-    /// Owner identity from the leader's `AuthManager`. The workspace derives
-    /// `WorkspaceIdentity` from this provider instead of a separate auth.json
-    /// read. Mirrors the in-process path (`mvp_agent`). Prefer
-    /// `GrokAuth.team_id` (what shell telemetry/snapshot use) mapped onto a
-    /// `"Team"` principal so team attribution is derived. Otherwise pass
-    /// principal fields through.
+    /// Owner identity from the leader's `AuthManager`. The workspace derives `WorkspaceIdentity` from this provider instead of a separate auth.json read. Mirrors the in-process path (`mvp_agent`).
+    /// Prefer `GrokAuth.team_id` (what shell telemetry/snapshot use) mapped onto a `"Team"` principal so team attribution is derived. Otherwise pass principal fields through.
+    /// `None` when no credential is available (identity resolution never blocks).
     fn identity(&self) -> Option<AuthIdentity> {
         let a = self.auth_manager.current_or_expired()?;
         Some(match a.team_id.filter(|t| !t.is_empty()) {
@@ -313,12 +330,14 @@ struct WorkspaceExposure {
     cwd: PathBuf,
     started_at: Instant,
     paused: std::sync::atomic::AtomicBool,
-    /// Drained before the hub connection closes and re-armed on resume, since the pump is bound to one hub connection.
+    /// Drained before the hub connection closes and re-armed on resume, since the pump is
+    /// bound to one hub connection. `None` when the connect left no hub handle.
     metric_donation: Mutex<Option<xai_computer_hub_sdk::MetricDonationPump>>,
 }
 /// Service name the hub allowlists for the leader's metric donation.
 const LEADER_METRIC_SERVICE: &str = "grok_leader";
-/// Bound on arming and draining the metric pump: both wait on the hub connection, and pause, stop, resume, start.
+/// Bound on arming and draining the metric pump: both wait on the hub connection, and pause,
+/// stop, resume, start, and shutdown hold the workspace lock while they do.
 const METRIC_DONATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// Start exporting the process-wide Prometheus registry (workspace and worker families)
 /// over the hub connection `handle` just opened. Only runs while that connection is up.
@@ -405,18 +424,16 @@ fn extract_session_id(json: &serde_json::Value) -> Option<String> {
                 .map(|s| s.to_string())
         })
 }
-/// Whether a payload attaches an existing session (`session/load` or
-/// `session/resume`).
+/// Whether a payload attaches an existing session (`session/load` or `session/resume`).
+/// Both need live-broadcast buffering until the response (see `load_live_buffer`) and the pending-modal replay keyed on it.
 fn is_session_attach_request(json: &serde_json::Value) -> bool {
     json.get("method")
         .and_then(|m| m.as_str())
         .is_some_and(|m| m == "session/load" || m == "session/resume")
 }
-/// Extract the leader unicast target `ClientId` from a notification's
-/// `params._meta["x.ai/leaderClientId"]`. The agent stamps this onto every
-/// `session/load` replay notification, echoing the id the leader injected
-/// into the load request. The replay then routes back to ONLY the loading
-/// client instead of broadcasting to all subscribers.
+/// Extract the leader unicast target `ClientId` from a notification's `params._meta["x.ai/leaderClientId"]`.
+/// The agent stamps this onto every `session/load` replay notification, echoing the id the leader injected into the load request.
+/// The replay then routes back to ONLY the loading client instead of broadcasting to all subscribers. Live (non-replay) turn deltas are never tagged, so they keep broadcasting.
 fn extract_target_client_id(json: &serde_json::Value) -> Option<ClientId> {
     let params = json.get("params")?;
     params
@@ -448,8 +465,9 @@ fn event_seq_of(json: &serde_json::Value) -> Option<u64> {
         .and_then(|v| v.as_str())?;
     event_id.rsplit_once('-')?.1.parse::<u64>().ok()
 }
-/// Whether a payload is a machine-wide notification (no `sessionId`) that
-/// must be **broadcast to every client**.
+/// Whether a payload is a machine-wide notification (no `sessionId`) that must be **broadcast to every client**.
+/// These never fall through to the last-active-client fallback: `x.ai/sessions/changed`: the session roster changed; every open dashboard must stay in sync.
+/// Every connected client's model picker must refresh, not just the most recently active one. `x.ai/mcp/servers_updated`: the MCP catalog resolved or changed (managed connectors fetched in the background after `initialize`). The push fires seconds after `initialize` returns. Broadcast is safe: the pager handler only debounce-refetches `mcp/list` for agents with an open extensions modal.
 fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
     matches!(
         method_of(json),
@@ -461,8 +479,9 @@ fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
         )
     )
 }
-/// The namespaced method a leader payload carries, normalizing both ext
-/// wire forms the gateway produces: direct.
+/// The namespaced method a leader payload carries, normalizing the two ext wire forms the gateway produces: direct: `{"method":"x.ai/foo", ...}` -> `x.ai/foo` wrapped: `{"method":"_x.ai/foo","params":{"method":"x.ai/foo",...}}` -> `x.ai/foo`
+/// Gateway-forwarded ext methods/notifications (`ext_method` / `ext_notification`) arrive WRAPPED. Examples: `ask_user_question`, `exit_plan_mode`, `session_notification`.
+/// A wrapped payload has a top-level `_`-prefixed method with the real method and params nested one level under `params`. Anything that classifies a payload by method name MUST use this: matching the raw top-level `method` misses the wrapped form.
 pub(super) fn method_of(json: &serde_json::Value) -> Option<&str> {
     let top = json.get("method")?.as_str()?;
     if let Some(stripped) = top.strip_prefix('_') {
@@ -488,9 +507,8 @@ fn interaction_inner_params(json: &serde_json::Value) -> Option<&serde_json::Val
         Some(params)
     }
 }
-/// Whether a payload is a blocking *interaction* reverse-request: a tool
-/// permission, `ask_user_question`, or plan-approval. Unlike other
-/// reverse-requests (driver-only), these are **shared**.
+/// Whether a payload is a blocking *interaction* reverse-request: a tool permission, `ask_user_question`, or plan-approval. Unlike other reverse-requests (driver-only), these are **shared**.
+/// They broadcast to every subscriber so any client can render and answer the modal, first-answer-wins. See `SHARED_INTERACTIVE_MODALS.md`.
 fn is_interaction_request(json: &serde_json::Value) -> bool {
     matches!(
         method_of(json),
@@ -856,8 +874,8 @@ fn make_leader_starting_error(json: &serde_json::Value) -> Option<String> {
     });
     Some(response.to_string())
 }
-/// Choose the bytes forwarded to the agent: the re-serialized `json` when an
-/// injection/rewrite mutated it, the original `payload` otherwise.
+/// Choose the bytes forwarded to the agent: the re-serialized `json` when an injection/rewrite mutated it, the original `payload` otherwise.
+/// Non-JSON payloads are never parsed or re-serialized.
 fn select_outbound_payload(
     json: Option<&serde_json::Value>,
     payload_mutated: bool,
@@ -1404,19 +1422,58 @@ fn make_version_mismatch_notification(
         .to_string(),
     )
 }
-/// Run the leader IPC server. The socket_path is where the Unix socket will be created. Acquiring the leader lock AFTER this function creates the socket This ordering ensures that: - Clients waiting for socket can connect as soon as we're ready - The lock acquisition happens after we're listening # Readiness gating The `ready_rx` watch channel controls whether ACP messages are forwarded to the agent. While `*ready_rx.borrow() == false` (leader still initializing): - Client connections and IPC registrations are accepted normally. - ACP requests (messages with an `id`) receive a structured `leader_starting`
+/// Run the leader IPC server.
+///
+/// The socket_path is where the Unix socket will be created.
+/// Caller is responsible for:
+/// 1. Cleaning up any stale socket file before calling this
+/// 2. Acquiring the leader lock AFTER this function creates the socket
+///
+/// This ordering ensures that:
+/// - Clients waiting for socket can connect as soon as we're ready
+/// - The lock acquisition happens after we're actually listening
+///
+/// # Readiness gating
+///
+/// The `ready_rx` watch channel controls whether ACP messages are forwarded to the
+/// agent. While `*ready_rx.borrow() == false` (leader still initializing):
+/// - Client connections and IPC registrations are accepted normally.
+/// - ACP requests (messages with an `id`) receive a structured `leader_starting`
 ///   JSON-RPC error so the client can retry rather than hang.
-/// - ACP notifications (no `id`) are dropped with a trace log. Once `ready_rx` is signaled `true` (socket bound + bounded auth complete; the model catalog and remote settings stream in afterward), all subsequent ACP traffic is forwarded to the agent as normal. # Arguments * `socket_path` - Path for the Unix domain socket * `acp_tx` - Channel to send ACP messages from clients to the agent * `response_rx` - Channel to receive responses from the agent to route to clients * `cancel` - Cancellation token for graceful shutdown * `no_exit_on_disconnect` - If true, don't exit when all clients disconnect * `client_count` - Atomic counter tracking the number of connected clients * `agent_busy` - Atomic flag set while the agent has in-flight **IPC**
+/// - ACP notifications (no `id`) are dropped with a trace log.
+///
+/// Once `ready_rx` is signaled `true` (socket bound + bounded auth complete; the
+/// model catalog and remote settings stream in afterward), all subsequent
+/// ACP traffic is forwarded to the agent as normal.
+///
+/// # Arguments
+///
+/// * `socket_path` - Path for the Unix domain socket
+/// * `acp_tx` - Channel to send ACP messages from clients to the agent
+/// * `response_rx` - Channel to receive responses from the agent to route to clients
+/// * `cancel` - Cancellation token for graceful shutdown
+/// * `no_exit_on_disconnect` - If true, don't exit when all clients disconnect
+/// * `client_count` - Atomic counter tracking the number of connected clients
+/// * `agent_busy` - Atomic flag set while the agent has in-flight **IPC**
 ///   requests; relay-driven traffic never sets it
 /// * `agent_activity` - Agent-derived activity view (running turns, parked
 ///   interactions, live subagents), used for the pre-shutdown session flush
-/// * `ready_rx` - Watch receiver; ACP forwarding is gated until this is `true` * `relay_demand_tx` - Watch sender flipped to `true` when the first
+/// * `ready_rx` - Watch receiver; ACP forwarding is gated until this is `true`
+/// * `relay_demand_tx` - Watch sender flipped to `true` when the first
 ///   [`ClientMode::Headless`] client registers. `run_leader` defers starting the
 ///   grok.com WebSocket relay until this fires, so a leader serving only
 ///   interactive clients (TUI dashboard, IDE) never duplicates its ACP stream
 ///   onto the relay. Headless registration is the devbox-flow marker: those
 ///   clients are driven remotely *through* the relay.
-/// * `shutdown_tx` - Watch sender for the shutdown reason.
+/// * `shutdown_tx` - Watch sender for the shutdown reason. The server subscribes
+///   its own receiver and reads it once when `cancel` fires (defaults to
+///   [`ShutdownReason::Manual`]). A sender that wants clients to see another
+///   reason must write it before it cancels.
+/// * `leader_version_override` - If `Some`, overrides [`leader_version`] for version
+///   mismatch detection. Pass `None` in production; pass a test version string in
+///   integration tests, where both sides otherwise report the same version and the
+///   mismatch path never runs.
+/// * `control_state` - Leader-local control metadata and CPU profiling state
 pub async fn run_leader_server(
     socket_path: std::path::PathBuf,
     acp_tx: mpsc::UnboundedSender<String>,
@@ -2327,9 +2384,10 @@ async fn run_client_session(
                 }
                 result = ready_rx.changed() => {
                     if result.is_err() {
-                        // Watch sender.
+                        // Watch sender was dropped (leader shutting down without ready).
                         return Ok(());
                     }
+                    // Loop re-checks *ready_rx.borrow() at top; no Ref held across await.
                 }
             }
         }
@@ -2441,10 +2499,9 @@ where
         }
     }
 }
-/// Broadcast a planned shutdown to all connected clients. Sends
-/// `ShuttingDown` (advance notice with reason and `delay_ms: 0`) followed
-/// immediately by `Shutdown`. Both messages are sent before the server exits,
-/// so clients that process the channel quickly will see both.
+/// Broadcast a planned shutdown to all connected clients. Sends `ShuttingDown` (advance notice with reason and `delay_ms: 0`) followed immediately by `Shutdown`.
+/// Both messages are sent before the server exits, so clients that process the channel quickly will see both.
+/// `delay_ms` is set to 0 because the server sends `Shutdown` immediately after `ShuttingDown`; there is no actual grace period. The cancel token propagates to client session handlers simultaneously. A sleep between the two messages would let session writers exit before `Shutdown` is delivered.
 async fn broadcast_shutdown(
     clients: &HashMap<ClientId, ClientState>,
     reason: super::protocol::ShutdownReason,
@@ -2473,9 +2530,12 @@ pub struct ServerHandle {
     pub client_count: Arc<AtomicUsize>,
     /// Atomic flag: `true` while the agent has pending (in-flight) requests
     pub agent_busy: Arc<AtomicBool>,
-    /// Signal the IPC server that the leader is fully ready.
+    /// Signal the IPC server that the leader is fully ready (socket bound and bounded auth; catalog/settings refresh runs in the background). Send `true` once the leader has finished initializing.
+    /// Until then, ACP requests receive a `leader_starting` error and ACP notifications are dropped. `spawn_leader_server` sends `true` immediately.
+    /// Callers that do not need staged startup (e.g. tests, in-process use) get a fully-ready server out of the box. Production leader startup (`run_leader`) holds this back until bounded auth completes. (Catalog/settings are no longer prefetched; they refresh in the background.)
     pub ready_tx: watch::Sender<bool>,
     /// Set the shutdown reason before cancelling so clients receive the correct `ShuttingDown` reason.
+    /// The default value is [`ShutdownReason::Manual`].
     pub shutdown_tx: watch::Sender<super::protocol::ShutdownReason>,
     /// Observe relay demand: flips to `true` when the first headless client registers (see `relay_demand_tx` on [`run_leader_server`]).
     pub relay_demand_rx: watch::Receiver<bool>,

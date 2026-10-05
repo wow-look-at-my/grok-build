@@ -7,6 +7,7 @@ use serde::Serialize;
 pub enum SuperGrokUpsell {
     WelcomeScreen,
     RateLimitError,
+    /// Free-usage-exhausted paywall modal (free-tier 429 with the `subscription:free-usage-exhausted` well-known error code).
     FreeUsagePaywall,
     /// Upsell modal shown when a tier-restricted slash command (`/usage`, `/imagine`, …) is invoked on the free / X Basic tiers.
     RestrictedCommand,
@@ -26,7 +27,9 @@ pub struct SuperGrokUpsellClicked {
     pub auth_method: Option<String>,
 }
 
-/// Modeled on [`SuperGrokUpsell`].
+/// Modeled on [`SuperGrokUpsell`]; lets the funnel attribute the click to the welcome hero vs the in-session header vs
+/// the banner vs the dashboard. Also distinguishes keyboard (`Ctrl+O`) activations from pointer/OSC 8 ones. Ord/Eq exist
+/// so the pager can track which (announcement, surface) pairs already showed the CTA.
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum AnnouncementCtaSurface {
@@ -37,8 +40,8 @@ pub enum AnnouncementCtaSurface {
     Keyboard,
 }
 
-/// A promo announcement's CTA button was painted on a surface: the impression
-/// half of the per-surface CTR funnel with [`AnnouncementCtaClicked`].
+/// A promo announcement's CTA button was painted on a surface: the impression half of the per-surface CTR funnel with [`AnnouncementCtaClicked`].
+/// Emitted once per (announcement, surface) per pager process (cleared on logout); never emitted for `Keyboard` (a click-only surface).
 #[derive(Serialize)]
 pub struct AnnouncementCtaShown {
     /// Announcement `id` from the server push (`None` for id-less items).
@@ -58,6 +61,7 @@ pub struct AnnouncementCtaClicked {
     pub source: AnnouncementCtaSurface,
 }
 
+/// 403 "run out of credits": billing exhaustion (not request throttling).
 #[derive(Serialize)]
 pub struct CreditLimitHit {
     pub model_id: String,
@@ -78,7 +82,8 @@ pub struct CreditLimitUpsellShown {
     pub surface: CreditLimitUpsellSurface,
     pub max_tier: bool,
     pub pay_as_you_go: bool,
-    /// User is on unified usage billing (buy-credits wording). When false, legacy on-demand / PAYG wording was used.
+    /// User is on unified usage billing (buy-credits wording).
+    /// When false, legacy on-demand / PAYG wording was used.
     #[serde(default)]
     pub unified_billing: bool,
 }
@@ -102,12 +107,14 @@ pub struct CreditLimitUpsellClicked {
     pub choice: CreditLimitChoice,
 }
 
-/// Emitted when a access-gated user re-authenticates and the gate is lifted,
-/// i.e. they subscribed (externally on grok.com) and came back.
+/// Emitted when a previously access-gated user re-authenticates and the gate is lifted, i.e. they subscribed (externally on grok.com) and came back.
+/// This is the actual conversion signal for SuperGrok Heavy subscriptions attributed to Grok Build.
+/// The user saw the gate in Grok Build, went and paid, then returned with access.
 #[derive(Serialize)]
 pub struct SubscriptionActivated {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_method: Option<String>,
     /// Whether the subscribe CTA was shown in this session before the gate was lifted (`access_gate_shown_logged`).
+    /// When `true`, the conversion is strongly attributable to Grok Build's upsell surface.
     pub upsell_shown_this_session: bool,
 }

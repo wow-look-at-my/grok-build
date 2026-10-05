@@ -1,4 +1,18 @@
 //! Version-aware config layering.
+//! A `[[version_overrides]]` array carries semver-gated patches deep-merged in ascending `minimum_version` order.
+//!
+//! ```toml
+//! [[version_overrides]]
+//! minimum_version = "1.7.0"
+//! [version_overrides.features]
+//! logging = true
+//!
+//! [[version_overrides]]
+//! minimum_version = "1.8.0"
+//! maximum_version = "1.9.999"
+//! [version_overrides.features.telemetry]
+//! enabled = true
+//! ```
 
 use semver::Version;
 use serde::Deserialize;
@@ -61,6 +75,7 @@ pub fn apply_version_overrides(
     let entries = take_patch_array::<VersionOverrideMeta>(config, VERSION_OVERRIDES_KEY)?;
 
     // Parse all bounds upfront so an invalid entry fails before any merge.
+    // A missing minimum_version becomes Version::new(0, 0, 0) (no lower bound)
     let mut parsed: Vec<(Version, Option<Version>, toml::Table)> =
         Vec::with_capacity(entries.len());
     for (index, entry) in entries.into_iter().enumerate() {
@@ -118,7 +133,7 @@ mod tests {
         Version::parse(s).unwrap()
     }
 
-    /// The helper asserts the section is stripped on every call, so the "stripped even on no match" contract is covered across all cases.
+    /// The helper asserts the section is stripped on every call, so the "stripped even on no match" contract is covered across all 8 cases.
     #[test]
     fn version_match_boundaries() {
         fn applies(min: Option<&str>, max: Option<&str>, cli: &str) -> bool {

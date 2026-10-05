@@ -1,8 +1,15 @@
-//! Response envelope for `workspace.*` methods.
+//! Response envelope for `workspace.*` methods. Wire shape:
+//!
+//! ```json
+//! {"ok": <value>}
+//! {"err": {"code": "<code>", "message": "<message>"}}
+//! ```
 
 use serde::{Deserialize, Serialize};
 
-/// Wire code for "the target session has an active turn" rejections of toolset mutations.
+/// Wire code for "the target session has an active turn" rejections of toolset mutations (`workspace.update_tool_config`).
+/// Retryable at the turn boundary.
+/// Shared so clients can recognise the retryable class without depending on the workspace crate's error enum.
 pub const TURN_ACTIVE: &str = "turn_active";
 
 pub const HUB_ERROR: &str = "hub_error";

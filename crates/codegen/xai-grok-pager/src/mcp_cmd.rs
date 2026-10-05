@@ -112,6 +112,7 @@ pub struct AddArgs {
     command_or_url: Option<String>,
 
     /// Arguments passed to the server command.
+    /// Place them after `--` so flags such as `-y` are passed to the server instead of grok.
     #[arg(value_name = "ARGS")]
     args: Vec<String>,
 
@@ -157,11 +158,12 @@ pub async fn run(mcp_args: McpArgs) -> Result<()> {
 }
 
 fn run_list(json: bool) -> Result<()> {
-    // Include project-scoped servers (nearest definition wins).
+    // Include project-scoped servers (nearest definition wins), matching what a session started in this directory would load from config.toml files
     let cwd = current_dir_or_exit();
     let servers = xai_grok_shell::util::config::load_mcp_server_configs_with_project(&cwd);
     let disabled = xai_grok_shell::util::config::disabled_mcp_server_names(&cwd);
-    // `mcp_doctor::policy_subjects` judges this same TOML walk (plus the doctor-only `.mcp.json` and plugin legs).
+    // `mcp_doctor::policy_subjects` judges this same TOML walk (plus the doctor-only `.mcp.json`
+    // and plugin legs), so every server listed here has a verdict; the rule itself is the merge's.
     let blocked = xai_grok_shell::mcp_doctor::policy_blocked_servers(&cwd);
 
     if json {
@@ -271,7 +273,8 @@ async fn run_add(args: AddArgs) -> Result<()> {
         expose_image_base64: None,
     };
 
-    // Policy check BEFORE persist (the same gate as the TUI Add): a denied server must not be written.
+    // Policy check BEFORE persist (the same gate as the TUI Add): a denied
+    // server must not be written under a success message.
     let cwd = current_dir_or_exit();
     let write_scope = match args.scope {
         McpScope::User => xai_grok_shell::mcp_doctor::McpWriteScope::User,
@@ -297,9 +300,8 @@ async fn run_add(args: AddArgs) -> Result<()> {
 fn resolve_add(args: &AddArgs) -> Result<ResolvedAdd> {
     validate_server_name(&args.name)?;
 
-    // Extra args or --env mean the user is describing a command, and the
-    // --command/--url flags keep their own rules Only a bare positional
-    // http(s):// URL therefore triggers inference
+    // Extra args or --env mean the user is describing a command, and the legacy --command/--url flags keep their own rules
+    // Only a bare positional http(s):// URL therefore triggers inference
     let inferred_http = args.transport.is_none()
         && args.url.is_none()
         && args.args.is_empty()
@@ -311,7 +313,7 @@ fn resolve_add(args: &AddArgs) -> Result<ResolvedAdd> {
 
     let transport = match args.transport {
         Some(t) => t,
-        // The --url form defaults to HTTP and honors the --type flag.
+        // The legacy --url form defaults to HTTP and honors the legacy --type flag.
         None if args.url.is_some() => match args.transport_type.as_deref() {
             Some(t) if t.eq_ignore_ascii_case("sse") => McpTransport::Sse,
             _ => McpTransport::Http,
@@ -353,8 +355,7 @@ fn resolve_add(args: &AddArgs) -> Result<ResolvedAdd> {
             if !args.header.is_empty() {
                 bail!("--header can only be used with HTTP or SSE servers.");
             }
-            // A KEY=value command means an env pair leaked out of -e, which
-            // takes one pair per flag (the --env was greedy)
+            // A KEY=value command means an env pair leaked out of -e, which takes one pair per flag (the old --env was greedy)
             if looks_like_env_pair(command) {
                 let pairs: Vec<String> = args
                     .env
@@ -372,8 +373,7 @@ fn resolve_add(args: &AddArgs) -> Result<ResolvedAdd> {
 
             let mut warnings = Vec::new();
             if !explicit_transport && looks_like_url(command) {
-                // Suggest a command that passes URL validation even when the
-                // lacks a scheme (e.g. localhost:3000).
+                // Suggest a command that passes URL validation even when the original lacks a scheme (e.g. localhost:3000).
                 let suggested_url =
                     if command.starts_with("http://") || command.starts_with("https://") {
                         command.to_string()
@@ -612,6 +612,8 @@ fn available_mcp_server_names(cwd: &Path) -> Vec<String> {
 }
 
 async fn run_set_enabled(name: &str, enabled: bool) -> Result<()> {
+    // Do not use validate_server_name (add-only: [A-Za-z0-9_-])
+    // Enable/disable also targets compat/plugin names that may contain dots or other keys
     if name.is_empty() {
         bail!("Server name cannot be empty.");
     }
@@ -634,8 +636,8 @@ async fn run_set_enabled(name: &str, enabled: bool) -> Result<()> {
         std::process::exit(1);
     }
 
-    // Policy check BEFORE the config write, or a blocked server is written
-    // under a success message and resurrects when the pin lifts.
+    // Policy check BEFORE the config write, or a blocked server is written under a success
+    // message and resurrects when the pin lifts; disabling only tightens, so it stays allowed.
     if enabled && let Some(refusal) = xai_grok_shell::mcp_doctor::policy_enable_refusal(&cwd, name)
     {
         eprintln!("{refusal}");
@@ -925,7 +927,7 @@ mod tests {
 
     #[test]
     fn add_http_transport_with_non_url_command_is_rejected() {
-        // This silently stored `xcrun` as an HTTP URL.
+        // Previously this silently stored `xcrun` as an HTTP URL.
         let add = parse_add(&[
             "grok",
             "mcp",
@@ -943,7 +945,7 @@ mod tests {
 
     #[test]
     fn add_explicit_stdio_keeps_url_looking_command_as_stdio() {
-        // URL sniffing overrode an explicit stdio transport.
+        // Previously URL sniffing overrode an explicit stdio transport.
         let add = parse_add(&[
             "grok",
             "mcp",
@@ -989,7 +991,7 @@ mod tests {
 
     #[test]
     fn add_infers_http_with_headers() {
-        // This bailed: stdio was assumed and --header is remote-only.
+        // Previously this bailed: stdio was assumed and --header is remote-only.
         let add = parse_add(&[
             "grok",
             "mcp",
@@ -1150,8 +1152,7 @@ mod tests {
 
     #[test]
     fn add_legacy_multi_value_env_is_rejected() {
-        // The --env was greedy (`--env A=1 B=2`); with --command the stray
-        // pair now lands in the positional and trips the source group
+        // The old --env was greedy (`--env A=1 B=2`); with --command the stray pair now lands in the positional and trips the source group
         let err = PagerArgs::try_parse_from([
             "grok",
             "mcp",
@@ -1315,7 +1316,8 @@ mod tests {
 
     #[test]
     fn grok_com_known_only_with_toml_definition() {
-        // Unique name: `grok_home()` is process-wide OnceLock, so GROK_HOME.
+        // Unique name: `grok_home()` is process-wide OnceLock, so GROK_HOME. `grok_com_*` in the real ~/.grok disabled
+        // list would fail an orphan assertion on a well-known name.
         let name = format!("grok_com_orphan_{}", uuid::Uuid::new_v4().as_simple());
 
         let orphan = tempfile::tempdir().unwrap();

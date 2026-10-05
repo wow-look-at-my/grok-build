@@ -17,6 +17,7 @@ pub struct YoloToggled {
     pub previous_state: bool,
     pub trigger: YoloTrigger,
     /// Previous permission mode (`default` / `plan` / `bypass_permissions`).
+    /// `None` falls back to yolo-only derivation from `previous_state`.
     #[serde(skip)]
     pub from_mode: Option<String>,
 }

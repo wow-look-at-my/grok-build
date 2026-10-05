@@ -1,4 +1,15 @@
 //! Shell child runtime adapter and presentation.
+//!
+//! Lifecycle state and command scheduling live in the shared `xai-grok-tools` coordinator actor.
+//! This module keeps shell-specific child-session construction, ACP presentation, persistence, and trace work.
+//! The parent-side lifecycle and presentation entry points live in `spawn.rs`.
+//!
+//! ## Design
+//!
+//! - `run_shell_child()` runs one shell child behind `ChildRunner`.
+//! - Pending/active/completed, waiters, deadlines, and cancellation are actor-owned.
+//! - Child sessions share the parent's hunk tracker, filesystem, terminal, and env
+//!   so that edits, bash commands, and file reads go through the same backends.
 #![deny(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 use crate::agent::config::{resolve_credentials, sampling_config_for_model};
 use crate::agent::remote_config::resolve_catalog_key;
@@ -51,10 +62,14 @@ pub(crate) use child_runtime::{
     await_session_thread_exit,
 };
 pub(crate) use handle_request::run_shell_child;
-/// Re-exported for the goal e2e suite, which drives it against a real bound session.
+/// Re-exported for the goal e2e suite, which drives it against a real bound
+/// session: it is the hop that carries a planner child's own todo items back to
+/// the session that spawned it.
 pub(crate) use handle_request::session_todo_contents;
 pub(crate) use prompt_turn_receipt::PromptTurnReceipt;
 /// Clamp for a resolved sampling-limit override; `Semaphore::new` panics past `Semaphore::MAX_PERMITS`.
+/// See [`SubagentsConfig::resolve_sampling_limit`].
+/// [`SubagentsConfig::resolve_sampling_limit`]: crate::config::SubagentsConfig::resolve_sampling_limit
 pub(crate) const MAX_SUBAGENT_SAMPLING_LIMIT: usize = 512;
 /// How the child session's initial context was bootstrapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,24 +78,25 @@ pub(crate) enum InitialContextSource {
     New,
     /// Parent history as `<background_context>` (harness-only chat-prefix fork).
     Forked,
-    /// Resumed from a completed peer subagent. The child inherits the source's raw transcript, tool state, and model.
+    /// Resumed from a previously completed peer subagent.
+    /// The child inherits the source's raw transcript, tool state, and model.
+    /// System prompt and prompt context are freshly rendered from the current agent definition.
     Resumed,
 }
-/// Captured parent-side tier inputs for resolving
-/// `auto_compact_threshold_percent` once the subagent's actual model id is
-/// known.
+/// Captured parent-side tier inputs for resolving `auto_compact_threshold_percent` once the subagent's actual model id is known.
+/// Stored on [`SubagentSpawnContext`] so the resolver can run at spawn time and the per-model lookup honors the SUBAGENT's model, not the parent's.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AutoCompactThresholdTiers {
     /// `cfg.session.auto_compact_threshold_percent` (user global TOML).
     pub user_session: Option<u8>,
-    /// Subset of `cfg.config_models` whose `auto_compact_threshold_percent` is set.
+    /// Subset of `cfg.config_models` whose `auto_compact_threshold_percent` is set, keyed by the model entry's id (the table key in `[model.<id>]`).
     pub user_per_model: std::collections::HashMap<String, u8>,
     /// `cfg.remote_settings.auto_compact_threshold_percent` (GB global).
     pub remote_global: Option<u8>,
 }
 impl AutoCompactThresholdTiers {
-    /// Slice the parent's `Config` into those tier inputs we'll resolve against later. Only fields relevant to the
-    /// auto-compact threshold are captured; the parent's `Config` is not held by reference.
+    /// Slice the parent's `Config` into the four tier inputs we'll resolve against later.
+    /// Only fields relevant to the auto-compact threshold are captured; the parent's `Config` is not held by reference.
     pub(crate) fn capture(cfg: &crate::agent::config::Config) -> Self {
         let user_per_model = cfg
             .config_models
@@ -98,6 +114,7 @@ impl AutoCompactThresholdTiers {
     }
 }
 /// Live-gateway target for a nested child's pre-reparent spawner session.
+/// Address only: never `XaiSessionNotification` / spawn bookkeeping on this session.
 #[derive(Clone)]
 pub(crate) struct SpawnerAddressTarget {
     pub session_id: String,
@@ -175,9 +192,11 @@ impl RunShellChildHarnessConfig {
 pub(crate) struct SubagentSpawnContext {
     /// Parent's LSP runtime, inherited via ToolContext, same as fs/terminal.
     pub lsp: Option<std::sync::Arc<dyn xai_grok_tools::implementations::lsp::LspBackend>>,
-    /// Root session's process scope, inherited so the subagent's own child processes are reaped when the parent session closes. It is the root's.
+    /// Root session's process scope, inherited so the subagent's own child processes are reaped when the parent session closes. It is the root's, not an intermediate parent's.
+    /// The Spawn arm of `handle_command` in xai-grok-tools task/coordinator.rs re-parents nested Spawn requests to the root parent. Every subagent therefore resolves back to the root session.
     pub process_scope: Option<xai_tty_utils::ProcessScope>,
-    /// Parent's client-registered hooks, inherited so the subagent's tool calls hit the same PreToolUse gate.
+    /// Parent's client-registered hooks, inherited so the subagent's tool calls hit the same PreToolUse gate. Its events fire the same observe hooks over the parent's connection. Empty when the parent has none.
+    /// Filled by the coordinator after the context is built (an async snapshot from the parent session actor).
     pub client_hooks: crate::extensions::hooks::ClientHooks,
     pub sampling_config: xai_grok_sampler::SamplerConfig,
     #[cfg(test)]
@@ -188,6 +207,7 @@ pub(crate) struct SubagentSpawnContext {
     pub fail_start_metadata_write: bool,
     pub managed_mcp_proxy_base_url: String,
     /// The staging auth header value propagated from the parent.
+    /// Used when building subagent `SamplerConfig`s for auth-flow tracking and for `inject_url_derived_headers` in the construction helpers.
     pub alpha_test_key: Option<String>,
     pub auth_method_id: acp::AuthMethodId,
     pub model_id: acp::ModelId,
@@ -202,25 +222,32 @@ pub(crate) struct SubagentSpawnContext {
     pub subagent_event_tx: mpsc::UnboundedSender<SubagentEvent>,
     pub parent_depth: u32,
     pub subagents_max_depth: u32,
-    /// How strongly system-prompt/tool wording nudges the child toward spawning its own subagents.
+    /// How strongly system-prompt/tool wording nudges the child toward
+    /// spawning its own subagents. Inherited from the parent's resolved
+    /// config, same as `subagents_max_depth`.
     pub subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     pub workflow_max_concurrent_agents: usize,
     pub media_gen_batch_limits: xai_grok_tools::media_gen_limits::MediaGenBatchLimits,
     /// Inference idle timeout (secs), resolved from the parent's model config at spawn-context creation time.
     pub inference_idle_timeout_secs: u64,
     pub parent_compaction: crate::session::CompactionPins,
-    /// Lazy because the subagent may be assigned a different model from the parent.
+    /// Lazy because the subagent may be assigned a different model from the parent (via `[subagents.models]` or `AgentDefinition.model`).
+    /// Call [`Self::resolve_auto_compact_threshold_percent`] once the subagent's `effective_sampling_config.model` is known.
     pub auto_compact_threshold_tiers: AutoCompactThresholdTiers,
     pub hunk_tracker_handle: HunkTrackerHandle,
     /// Parent's hunk-tracking gate.
+    /// Inherited so a disabled parent's subagent also skips the per-event forward instead of paying it into a noop handle.
     pub hunk_tracking_enabled: bool,
     /// Parent's filesystem implementation (LocalFs or AcpSessionFs), shared so the child reads/writes the same working tree.
     pub fs: Arc<dyn AsyncFileSystem>,
     /// Parent's terminal runner, shared so bash commands run in the same terminal environment (env vars, cwd, color settings).
     pub terminal: Arc<dyn AsyncTerminalRunner>,
     /// Parent's terminal backend, shared so background tasks, monitors, and scheduled tasks survive subagent exit.
+    /// When `Some`, the subagent session reuses this backend instead of creating a new `LocalTerminalBackend`.
     pub parent_terminal_backend: Option<Arc<dyn xai_grok_tools::computer::types::TerminalBackend>>,
     /// Parent's notification handle for reparenting on subagent exit.
+    /// When a subagent exits, its surviving tasks (monitors, bg commands) need their notification handles swapped to this.
+    /// Events then route to the parent's notification bridge.
     pub parent_notification_handle:
         Option<xai_grok_tools::notification::types::ToolNotificationHandle>,
     /// Parent's scheduler handle.
@@ -245,12 +272,17 @@ pub(crate) struct SubagentSpawnContext {
     pub goal_enabled: bool,
     pub background_workflows_enabled: bool,
     /// Child policy for exposing `ask_user_question`.
+    /// Always false; the parent session's setting must not cross the subagent boundary.
     pub ask_user_question_enabled: bool,
     /// Whether the parent session is non-interactive (headless `-p` / SDK).
+    /// Copied onto the child's `StartupHints` so its prompt omits interactive guidance.
     pub parent_non_interactive: bool,
     /// Parent session command channel.
+    /// Carries lifecycle notifications the parent persists (`SubagentSpawned` / `SubagentFinished`).
+    /// When goal mode is on, it also carries transient `SubagentProgress` ticks the parent consumes for token accounting without persisting.
     pub parent_cmd_tx: Option<mpsc::UnboundedSender<SessionCommand>>,
     /// Pre-reparent spawner session that can receive a live-only `agentAddress`.
+    /// `None` when this spawn was not reparented or that session cannot be targeted.
     pub spawner_address_target: Option<SpawnerAddressTarget>,
     /// Parent session info, used to locate the parent session directory.
     pub parent_session_info: Option<SessionInfo>,
@@ -260,7 +292,8 @@ pub(crate) struct SubagentSpawnContext {
     /// Subagent personas config for persona/SOUL layering.
     pub subagent_personas:
         std::collections::HashMap<String, xai_grok_subagent_resolution::config::SubagentPersona>,
-    /// Parent session's ChatStateHandle, used to read the actual live sampling config and credentials from the parent session actor.
+    /// Parent session's ChatStateHandle, used to read the actual live sampling config and credentials from the parent session actor (async).
+    /// Cheap Clone (mpsc sender). `None` when the parent SessionHandle is not found.
     pub parent_chat_state: Option<xai_chat_state::ChatStateHandle>,
     /// Parent session's resolved turn limit, for subagent inheritance.
     pub parent_max_turns: Option<usize>,
@@ -268,34 +301,48 @@ pub(crate) struct SubagentSpawnContext {
     pub available_models: indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
     /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
     pub subagent_model_overrides: std::collections::HashMap<String, String>,
-    /// `[models] subagent_default`: the model a subagent runs.
+    /// `[models] subagent_default`: the model a subagent runs on when
+    /// neither `[subagents.models]` nor its definition pins one. `None`
+    /// inherits the parent session's model.
     pub subagent_default_model: Option<String>,
     /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
+    /// Omitted agents default to enabled (`true`).
     pub subagent_toggle: std::collections::HashMap<String, bool>,
-    /// Whether web search is force-disabled via `--disable-web-search`. Inherited from the parent session.
+    /// Whether web search is force-disabled via `--disable-web-search`.
+    /// Inherited from the parent session.
     pub disable_web_search: bool,
-    /// Whether the runtime turn-end TodoGate is force-enabled via `--todo-gate`. Inherited from the parent session.
+    /// Whether the runtime turn-end TodoGate is force-enabled via `--todo-gate`.
+    /// Inherited from the parent session.
     pub todo_gate: bool,
-    /// Remote settings snapshot from the parent session, the remote tier for every `resolve_*` on this context.
+    /// Remote settings snapshot from the parent session, the remote tier for every
+    /// `resolve_*` on this context. `run_shell_child` reads it again after the child
+    /// spawn, so the child gets a clone, not a move.
     pub remote_settings: Option<crate::util::config::RemoteSettings>,
     /// Inherited `--laziness-debug-log <path>` from the parent session.
+    /// Subagent classifier fires append to the same log file.
+    /// `None` when the parent did not enable debug mode.
     pub laziness_debug_log: Option<std::path::PathBuf>,
     pub backend_tools_enabled: bool,
-    /// Whether tools should respect `.gitignore` patterns. Inherited from the parent session.
+    /// Whether tools should respect `.gitignore` patterns.
+    /// Inherited from the parent session.
     pub respect_gitignore: bool,
-    /// Whether to enrich path-not-found errors with hints. Inherited from the parent session.
+    /// Whether to enrich path-not-found errors with hints.
+    /// Inherited from the parent session.
     pub path_not_found_hints: bool,
     /// Per-tool params resolved from the parent's config, forwarded verbatim to the child spawn.
+    /// A default here silently drops the child's bash tool to the compiled 5-minute ceiling.
     pub tool_params_json: crate::session::agent_rebuild::ResolvedToolParamsJson,
     /// Plugin registry for plugin-aware agent lookup.
     pub plugin_registry: Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>,
     /// Shared models manager for etag-triggered refresh.
     pub models_manager: crate::agent::remote_config::ModelsManager,
     /// Pre-resolved file tool overrides (hashline vs standard) from the parent.
+    /// `None` means use the standard (default) file tools.
     pub file_tool_overrides: Option<Vec<xai_grok_tools::registry::types::ToolConfig>>,
     /// Parent session's agent config snapshot.
     pub agent_config: Option<crate::agent::config::Config>,
     /// GCS bucket URL for trace uploads.
+    /// For proxy upload mode this is a placeholder; the actual bucket is determined by the proxy from user ACLs.
     pub gcs_bucket_url: Option<String>,
     /// GCS upload method (direct or proxy).
     pub gcs_upload_method: Option<crate::session::repo_changes::UploadMethod>,
@@ -306,14 +353,19 @@ pub(crate) struct SubagentSpawnContext {
     pub image_description_model: String,
     pub workspace_ops: xai_grok_workspace::WorkspaceOps,
     pub auth_manager: std::sync::Arc<xai_grok_login::AuthManager>,
-    /// The parent SessionActor's live `Auth401AttributionCallback`, captured at spawn time.
+    /// The parent SessionActor's live `Auth401AttributionCallback`, captured at spawn time. Subagents inherit this so the child's `OaiCompatClient` 401 sites emit attribution under the parent's session id.
+    /// It is joined with the parent's live `AuthManager`. Reading from `ctx.sampling_config.attribution_callback` would not work.
+    /// The baseline `MvpAgent.sampling_config` goes through `agent/config.rs::sampling_config_for_model`, which always sets that field to `None`.
     pub attribution_callback: Option<xai_grok_sampler::SharedAttributionCallback>,
     /// Parent session's agent name (e.g. "grok-build").
     pub parent_agent_name: Option<String>,
-    /// `agent_type` of the parent's current model: the harness-flavor fallback.
+    /// `agent_type` of the parent's current model: the harness-flavor fallback when `parent_agent_name` is not a recognized harness.
+    /// For example, a custom client profile keeps its own name but runs a strict-harness model.
+    /// `None` when the model is not in the catalog.
     pub parent_model_agent_type: Option<String>,
     pub allowed_subagent_types: Option<Vec<String>>,
-    /// Parent's MCP server configs for resolving named references in agent mcpServers.
+    /// Parent's MCP server configs for resolving named references in agent mcpServers. NOTE: This is a snapshot from `SessionHandle` (populated at spawn_session_actor time).
+    /// Servers added later via `UpdateMcpServers` (managed MCPs, plugin reload) will not appear here. Named references only resolve against the initial config.
     pub parent_mcp_configs: Vec<agent_client_protocol::McpServer>,
     /// Parent's managed MCP state handle (Arc-shared, no re-fetch).
     pub managed_mcp_state: crate::session::managed_mcp::ManagedMcpStateHandle,
@@ -325,7 +377,7 @@ pub(crate) struct SubagentSpawnContext {
     pub parent_skills: Option<Vec<xai_grok_tools::implementations::skills::types::SkillInfo>>,
     /// Parent's skills config for the child's SkillManager.
     pub parent_skills_config: xai_grok_agent::prompt::skills::SkillsConfig,
-    /// Parent's resolved vendor-compat config, inherited by the child.
+    /// Parent's resolved vendor-compat config, inherited by the child so its skills / rules / AGENTS.md discovery honors the same vendor toggles.
     pub parent_compat: xai_grok_tools::types::compat::CompatConfig,
     /// Parent's `[paths]` config, inherited for the same reason as `parent_compat`.
     pub parent_paths_config: xai_grok_agent::prompt::paths::PathsConfig,
@@ -337,11 +389,15 @@ pub(crate) struct SubagentSpawnContext {
     /// Resolved name of the scheduled-task deletion tool in the parent's toolset.
     pub scheduler_delete_tool_name: Option<String>,
     pub scheduler_create_tool_name: Option<String>,
-    /// Whether auto-wake is enabled. When `false`, subagent completions are not injected as synthetic prompts.
+    /// Whether auto-wake is enabled.
+    /// When `false`, subagent completions are not injected as synthetic prompts.
     pub auto_wake_enabled: bool,
     /// Parent's live goal-loop gate (shared `Arc`).
+    /// When set, the subagent auto-wake synthetic prompt is suppressed so an async completion wake doesn't derail the parent mid-`/goal`.
+    /// Surfaces 2/3 still drain it.
     pub goal_loop_active: Arc<std::sync::atomic::AtomicBool>,
     /// The process tree's shared subagent turn-sampling semaphore.
+    /// See [`crate::config::SubagentsConfig::resolve_sampling_limit`].
     pub subagent_sampling_semaphore: Arc<tokio::sync::Semaphore>,
 }
 const _: () = {
@@ -349,13 +405,15 @@ const _: () = {
     assert_send::<SubagentSpawnContext>()
 };
 impl SubagentSpawnContext {
-    /// Would installing a live bearer resolver strip this subagent's only
-    /// credential?
+    /// Would installing a live bearer resolver strip this subagent's only credential? A wired resolver is the sampler's sole auth source, so with no session key at spawn it must not displace a fallback key (env `XAI_API_KEY`).
+    /// Keyed on the resolved config key, not the session cache alone. The cache is empty in exactly the post-wake / mid-refresh states the resolver targets, and gating on it would freeze the subagent for life.
+    /// Shared by all three resolver-wiring paths so they cannot drift.
     fn would_strip_fallback_key(&self, resolved_api_key: Option<&str>) -> bool {
         self.auth.is_none() && resolved_api_key.is_some()
     }
-    /// Resolve `auto_compact_threshold_percent` for the subagent's actual model id, picked by `resolve_subagent_sampling_config`, not the parent's. The GB per-model tier is read from `available_models` (the same catalog used to
-    /// pick the subagent's `SamplerConfig`). User TOML and GB global tiers are sourced from the parent's snapshot captured at spawn-context build time.
+    /// Resolve `auto_compact_threshold_percent` for the subagent's actual model id, picked by `resolve_subagent_sampling_config`, not the parent's.
+    /// Walks the same precedence as the main session's resolver: env > user [model.<id>] > user [session] > GB per-model > GB global > 85.
+    /// The GB per-model tier is read from `available_models` (the same catalog used to pick the subagent's `SamplerConfig`). User TOML and GB global tiers are sourced from the parent's snapshot captured at spawn-context build time.
     pub(crate) fn resolve_auto_compact_threshold_percent(&self, subagent_model_id: &str) -> u8 {
         let gb_per_model =
             crate::agent::config::find_model_by_id(&self.available_models, subagent_model_id)
@@ -370,6 +428,7 @@ impl SubagentSpawnContext {
             self.auto_compact_threshold_tiers.remote_global,
         )
     }
+    /// Resolve the 429 wait-attempt budget against the subagent's own model id.
     pub(crate) fn resolve_subagent_rate_limit_max_attempts(&self, subagent_model_id: &str) -> u32 {
         let per_model =
             crate::agent::config::find_model_by_id(&self.available_models, subagent_model_id)
@@ -633,14 +692,9 @@ async fn resolve_subagent_sampling_config(
     );
     (parent_config, parent_mid)
 }
-/// Resolve a subagent's effective sampling config and model id, honoring the
-/// model-resolution precedence. An explicit `runtime_override_model` is the
-/// goal role model or a persona override carried on
-/// `effective_runtime.model`. It is resolved HERE, BEFORE
-/// [`resolve_subagent_sampling_config`], where the user `[subagents.models]`
-/// pin and `AgentDefinition.model` apply. So a goal/persona override WINS
-/// over a user per-agent pin. An override that does not resolve to a known
-/// model warns and falls through to the pin path.
+/// Resolve a subagent's effective sampling config and model id, honoring the model-resolution precedence.
+/// An explicit `runtime_override_model` is the goal role model or a persona override carried on `effective_runtime.model`.
+/// It is resolved HERE, BEFORE [`resolve_subagent_sampling_config`], where the user `[subagents.models]` pin and `AgentDefinition.model` apply. So a goal/persona override WINS over a user per-agent pin. An override that does not resolve to a known model warns and falls through to the pin path. Extracted from `run_shell_child` so the precedence is unit-testable without spawning a child session.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn resolve_effective_model_config(
     runtime_override_model: Option<&str>,
@@ -660,6 +714,7 @@ async fn resolve_effective_model_config(
     resolve_subagent_sampling_config(subagent_type, definition_model, ctx).await
 }
 /// Truncate an API key to a safe prefix for logging.
+/// Counts characters, not bytes: a configured key with a multi-byte character would panic a byte slice, and this only ever runs to build a log line.
 fn key_prefix(key: &Option<String>) -> String {
     match key {
         Some(k) => k.chars().take(8).collect(),
@@ -693,9 +748,9 @@ fn log_subagent_model_resolution(
         })),
     );
 }
-/// Session-token bearer resolver for a subagent config, over the parent's `AuthManager` (wire-valid only). Without it the subagent runs
-/// forever on the `api_key` frozen at spawn and 401s once the parent rotates the token. Gated exactly like the parent session's resolver
-/// (`auth_method::session_token_auth_gate`); all of them subagent config paths go through this.
+/// Session-token bearer resolver for a subagent config, over the parent's `AuthManager` (wire-valid only).
+/// Without it the subagent runs forever on the `api_key` frozen at spawn and 401s once the parent rotates the token.
+/// Gated exactly like the parent session's resolver (`auth_method::session_token_auth_gate`); all three subagent config paths go through this.
 fn session_bearer_resolver(
     ctx: &SubagentSpawnContext,
     byok: crate::agent::auth_method::ModelByok,
@@ -807,7 +862,9 @@ async fn read_parent_sampling_config(
                     .models_manager
                     .model_compaction_at_tokens(catalog_model_id.0.as_ref()),
                 doom_loop_recovery: ctx.sampling_config.doom_loop_recovery,
-                // A subagent inherits the parent's floor: it runs the same model against the same endpoint.
+                // A subagent inherits the parent's floor: it runs the same
+                // model against the same endpoint, so a collapse there is the
+                // same collapse.
                 output_rate_floor: ctx.sampling_config.output_rate_floor,
                 header_injector: ctx.sampling_config.header_injector.clone(),
             };
@@ -951,6 +1008,8 @@ struct InitialContext {
     conversation: Vec<xai_grok_sampling_types::conversation::ConversationItem>,
     force_compact: bool,
     /// True only for a verbatim mirror-fork (parent items copied byte-for-byte).
+    /// Gates sending the parent tool snapshot so the child's full request prefix matches the parent.
+    /// A summarized-fork fallback leaves this false.
     verbatim_fork: bool,
 }
 /// Resume bootstrap: preserve only the System head (see `resume_inherited_prefix_len`).
@@ -1003,8 +1062,9 @@ fn forked_initial_context(
         verbatim_fork: false,
     }
 }
-/// A verbatim mirror requires a coherent tail: the conversation must end on a
-/// plain assistant text response (a clean turn boundary).
+/// A verbatim mirror requires a coherent tail: the conversation must end on a plain assistant text response (a clean turn boundary).
+/// A dangling assistant (unanswered tool calls), a trailing ToolResult (mid-turn), or a trailing user/reasoning means the prefix would be incoherent.
+/// The caller then falls back to the summarized path instead of partial-trimming.
 fn conversation_tail_is_complete(
     items: &[xai_grok_sampling_types::conversation::ConversationItem],
 ) -> bool {
@@ -1013,9 +1073,9 @@ fn conversation_tail_is_complete(
         Some(ConversationItem::Assistant(a)) if a.tool_calls.is_empty()
     )
 }
-/// Decide the live-fork context. Verbatim mirror (the cache-preserving path): keep the items BYTE-FOR-BYTE. We deliberately do NOT run `fork_filter_chat` here. At planner spawn the conversation is between turns (the
-/// `/goal` user message is not yet pushed). (This is the ONLY path that filters; the verbatim path never does.) Input that is empty or only `System` item(s), before OR after filtering, inherited nothing, so it fails
-/// open to `New` rather than a hollow fork.
+/// Decide the live-fork context. Verbatim mirror (the cache-preserving path): keep the items BYTE-FOR-BYTE. It applies when the parent fits the fork's 80% guard and ends at a clean turn boundary.
+/// We deliberately do NOT run `fork_filter_chat` here. At planner spawn the conversation is between turns (the `/goal` user message is not yet pushed). (This is the ONLY path that filters; the verbatim path never does.)
+/// Input that is empty or only `System` item(s), before OR after filtering, inherited nothing, so it fails open to `New` rather than a hollow fork.
 fn verbatim_or_normalize_fork(
     items: Vec<xai_grok_sampling_types::conversation::ConversationItem>,
     child_context_window: u64,
@@ -1073,7 +1133,8 @@ fn verbatim_or_normalize_fork(
         verbatim_fork: false,
     }
 }
-/// `true` only when the fork summarized (ran `normalize_forked_context`).
+/// `true` only when the fork actually summarized (ran `normalize_forked_context`).
+/// A verbatim mirror-fork inherits items as-is and never normalizes, so it reports `false` even though its source is `Forked`.
 fn fork_context_normalized(source: &InitialContextSource, verbatim_fork: bool) -> bool {
     matches!(source, InitialContextSource::Forked) && !verbatim_fork
 }
@@ -1121,6 +1182,7 @@ enum BootstrapInitialContext {
     /// Explicit resume_from failed: abort spawn (fail closed).
     ResumeAbort(String),
 }
+/// Phase 3: resume (fail-closed on copy error) > fork (live then disk, fail-open) > New.
 /// Unresolved non-empty resume is aborted by the caller before this runs.
 #[tracing::instrument(skip_all)]
 async fn bootstrap_initial_context(
@@ -1442,10 +1504,8 @@ fn durable_resume_source_from_meta(
         model_id: meta.effective_model_id,
     })
 }
-/// Resolve the MCP pool a child subagent should import from its parent.
-/// Inheritance applies to **every** agent source (built-in, user, project,
-/// and plugin). Plugin agents are not excluded: the parent already connected
-/// these servers for the session.
+/// Resolve the MCP pool a child subagent should import from its parent. Inheritance applies to **every** agent source (built-in, user, project, and plugin).
+/// Plugin agents are not excluded: the parent already connected these servers for the session. Agent-owned `mcpServers` (spawned by the child itself) are handled separately and remain blocked for plugins.
 fn resolve_inherited_mcp_pool(
     parent_pool: Option<crate::session::mcp_servers::SharedMcpPool>,
     inheritance: &xai_grok_agent::config::McpInheritance,
@@ -1604,14 +1664,9 @@ fn gate_subagent_type(
 pub(crate) fn subagent_harness_flavor_is_representable(agent_type: &str) -> bool {
     xai_grok_subagent_resolution::subagent_harness_flavor_is_representable(agent_type)
 }
-/// Apply the harness-dependent toolset/prompt re-selection to a resolved
-/// agent definition. The harness flavor (alternate vs grok-build) normally
-/// follows the PARENT: `GrokBuildOrchestrator` parents give children the
-/// alternate harness. The orchestrator keeps children lean, and other parents
-/// inherit the file-tool override (hashline vs standard). A `/goal` role may
-/// pass `harness_agent_type` to OVERRIDE that flavor regardless of the
-/// parent. So a grok-build session can run an alternate-harness verifier and
-/// vice-versa.
+/// Apply the harness-dependent toolset/prompt re-selection to a resolved agent definition.
+/// The harness flavor (alternate vs grok-build) normally follows the PARENT: `GrokBuildOrchestrator` parents give children the alternate harness.
+/// The orchestrator keeps children lean, and other parents inherit the file-tool override (hashline vs standard). A `/goal` role may pass `harness_agent_type` to OVERRIDE that flavor regardless of the parent. So a grok-build session can run an alternate-harness verifier and vice-versa. Extracted so both [`run_shell_child`] (real spawn) and [`describe_subagent_type`] (read-only probe) build the SAME `tool_config`.
 fn resolve_subagent_toolset(
     subagent_type: &str,
     harness_agent_type: Option<&str>,
@@ -1630,9 +1685,9 @@ fn resolve_subagent_toolset(
         definition,
     );
 }
-/// Map a resolved `ToolServerConfig` into a [`SubagentTypeSummary`]. Keys on each entry's `ToolConfig.kind` (first tool per kind wins). Entries with `kind: None` (`from_id`/MCP/custom tools) are SKIPPED. So this is NOT a byte-for-byte equivalent of the finalize-time `kind_to_name` map,
-/// which keys on the registry `entry.kind`. Both agree for the builtin goal toolsets, where every tool's kind is populated by `From<&T: Tool>`. They diverge for `kind: None` tools, which carry no capability signal anyway. The client-facing name is
-/// `ToolConfig::resolve_client_name(default_id)`, so a `name_override` is reflected.
+/// Map a resolved `ToolServerConfig` into a [`SubagentTypeSummary`]. Keys on each entry's `ToolConfig.kind` (first tool per kind wins). Entries with `kind: None` (`from_id`/MCP/custom tools) are SKIPPED.
+/// So this is NOT a byte-for-byte equivalent of the finalize-time `kind_to_name` map, which keys on the registry `entry.kind`.
+/// The two agree for the builtin goal toolsets, where every tool's kind is populated by `From<&T: Tool>`. They diverge for `kind: None` tools, which carry no capability signal anyway. The client-facing name is `ToolConfig::resolve_client_name(default_id)`, so a `name_override` is reflected.
 fn summarize_tool_config(
     config: &xai_grok_tools::registry::types::ToolServerConfig,
 ) -> SubagentTypeSummary {
@@ -1710,7 +1765,7 @@ enum ResumeWorktreeAction {
     Shared,
 }
 /// Decide how to recover a resumed subagent's worktree from its on-disk state and whether a durable snapshot is available.
-/// Pure so the outcomes are unit-testable without git/async.
+/// Pure so the three outcomes are unit-testable without git/async.
 fn resume_worktree_action(dir_exists: bool, snapshot_ref: Option<&str>) -> ResumeWorktreeAction {
     if snapshot_ref.is_some() {
         ResumeWorktreeAction::Rehydrate
@@ -1952,7 +2007,9 @@ async fn cancel_pending_shell_child(
     result
 }
 const PROGRESS_PUBLISH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
-/// Change signature for the progress-publisher dedupe.
+/// Change signature for the progress-publisher dedupe: `(turn_count, tool_call_count, context_usage_pct, error_count, tokens_used)`.
+/// `tokens_used` is part of the signature so rising child token spend always publishes a tick. Goal token accounting (subagent records, live totals, and the turn-end budget check) keys off prompt token movement.
+/// That movement can climb while turn/tool counts and the coarse context-usage *percent* bucket stay flat.
 type ProgressSignature = (u32, u32, u8, u32, u64);
 fn progress_tick_should_emit(
     prev: ProgressSignature,
@@ -2110,15 +2167,19 @@ pub(crate) struct SubagentMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumed_from: Option<String>,
     /// Effective cwd used by the child session.
+    /// Persisted for durable `resume_from` reconstruction after in-memory cache eviction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_cwd: Option<String>,
-    /// Worktree path if the child used `isolation=worktree`. Persisted for durable `resume_from` reconstruction.
+    /// Worktree path if the child used `isolation=worktree`.
+    /// Persisted for durable `resume_from` reconstruction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_path: Option<String>,
     /// Durable git ref holding a snapshot of the child's worktree working state.
+    /// Persisted so a deleted worktree can be rehydrated on resume.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_ref: Option<String>,
-    /// Effective model ID used by the child session. Persisted for durable `resume_from` identity validation.
+    /// Effective model ID used by the child session.
+    /// Persisted for durable `resume_from` identity validation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_model_id: Option<String>,
 }
@@ -2136,7 +2197,9 @@ pub(crate) struct SubagentSessionMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_prompt_id: Option<String>,
     pub subagent_type: String,
-    /// Human-readable spawn description: the task tool's `description` argument, or the fixed role label.
+    /// Human-readable spawn description: the task tool's `description` argument, or the fixed role label for harness-spawned goal subagents.
+    /// Role labels are "goal plan writer", "goal achievement skeptic", and so on.
+    /// All goal roles share `subagent_type = "general-purpose"`, so this is what identifies them in the artifact.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2502,9 +2565,9 @@ fn completed_finish_from_inspection(
         will_wake: false,
     })
 }
-/// Heal subagents stuck "Running" after a dead process: emit exactly one `SubagentFinished` per id. They are `unfinished` (replayed spawns whose finish a rewind dropped, or a forked-in subagent with no meta) and on-disk `running` metas. Ids still live under `parent_session_id` are skipped; a
-/// fork source's live children are not. A `running` meta becomes `cancelled`, unless the coordinator still holds its terminal result, which is then re-emitted. Runs after replay so the finish orders after the spawn. Pre-existing recovery entry point: args are independent handles/sources from
-/// call sites, not one groupable object
+/// Heal subagents stuck "Running" after a dead process: emit exactly one `SubagentFinished` per id. Two id-keyed sources are unioned, so a crash orphan present in both heals once.
+/// They are `unfinished` (replayed spawns whose finish a rewind dropped, or a forked-in subagent with no meta) and on-disk `running` metas. Ids still live under `parent_session_id` are skipped; a fork source's live children are not.
+/// A `running` meta becomes `cancelled`, unless the coordinator still holds its terminal result, which is then re-emitted. Runs after replay so the finish orders after the spawn. Pre-existing recovery entry point: args are independent handles/sources from two call sites, not one groupable object
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all)]
 pub(crate) async fn reconcile_orphaned_subagents_with_backend(

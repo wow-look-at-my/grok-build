@@ -30,8 +30,8 @@ pub(crate) async fn apply(
             let value_id = value.as_value_id().ok_or_else(|| {
                 acp::Error::invalid_params().data("reasoning_effort requires a string value")
             })?;
-            // The selector is resolved inside `apply_reasoning_effort` under
-            // the config lock.
+            // The selector is resolved inside `apply_reasoning_effort` under the config lock, so
+            // it is validated against the model the effort will actually run on.
             model_switch::apply_reasoning_effort(
                 agent,
                 session_id.clone(),

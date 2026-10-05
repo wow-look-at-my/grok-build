@@ -1,4 +1,6 @@
 //! `/tasks` snapshots what's running in the background as a committed system block.
+//! The dispatcher (`dispatch_show_tasks`) reads the three task sources and commits a read-only list.
+//! Killing and attaching are out of scope here (use the tasks pane in the full TUI).
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

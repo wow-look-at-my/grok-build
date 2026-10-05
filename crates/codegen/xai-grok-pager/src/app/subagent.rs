@@ -1,4 +1,24 @@
 //! Tracking state for spawned child sessions.
+//! [`SubagentInfo`] is the single source of truth, used by both the subagent pane (display) and the permission view (provenance labels).
+//!
+//! # Child-transcript replay and eviction
+//!
+//! - **replay**: read a child's persisted `updates.jsonl` and apply it to that child's view.
+//!   [`ensure_subagent_child_replayed`] runs on fullscreen open and dashboard attach.
+//!   [`replay_resumed_child_before_live_block`] runs only through its single funnel,
+//!   the [`child_view_for_live_update_mut`](crate::app::agent_view::AgentView::child_view_for_live_update_mut) accessor.
+//!   The funnel reads a resumed child's inherited history before its first live block closes the empty-view window.
+//! - **evict**: drop a finished child's retained view once disk is proven able to rebuild it ([`evict_finished_child_view`]).
+//!
+//! The ordering rule both depend on: a replay may only append to a view that *shows nothing yet*.
+//! Disk history can therefore never land after a live block.
+//! A finished foreground child is reset to that state first; a child that is still running, or a background child, waits instead.
+//!
+//! The child's session stream is the only writer of its task prompt (the shell's `UserMessageChunk` echo, live and persisted); the pager seeds no copy.
+//! A `UserPrompt` in a running child's view therefore means the live stream already reached it, and a fresh child's disk holds nothing newer.
+//!
+//! The spawn path itself never reads the child transcript (the MB-scale `updates.jsonl`), so a burst of spawns cannot block the UI thread.
+//! The small `meta.json` enrichment ([`enrich_from_meta`]) is a separate, bounded read.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -50,6 +70,7 @@ pub struct SubagentAttemptInfo {
     pub tool_call_count: Option<u32>,
     pub tokens_used: Option<u64>,
     pub context_window_tokens: Option<u64>,
+    /// 0-100.
     pub context_usage_pct: Option<u8>,
     pub tools_used: Vec<Arc<str>>,
     pub error_count: Option<u32>,
@@ -125,28 +146,35 @@ pub struct SubagentInfo {
 }
 
 /// Where a child's authoritative transcript lives.
+/// One state feeds both the replay-on-open and the eviction decision, so the two cannot drift apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ChildTranscript {
     /// No disk copy proven yet: the next fullscreen open replays `updates.jsonl`.
+    /// A failed read stays here, so a lagging persistence flush is retried.
+    /// So does an empty read of a finished child, or of a still-running resumed child whose inherited history is expected on disk.
     #[default]
     NeedsReplay,
     /// An emitting replay proved disk reproduces the transcript: the retained view may be dropped and rebuilt.
     DiskBacked,
     /// A replay of a still-running child that inherits nothing found an empty disk.
+    /// The result is cached so later opens skip the relocation scan.
+    /// A resumed child never caches here: its inherited history is expected on disk, so an empty read stays `NeedsReplay` to retry.
     DiskEmptyWhileRunning,
     /// The in-memory view is the only copy (disk resolved to nothing while the view held content), so evicting it would lose the transcript.
     MemoryOnly,
 }
 
 /// Disk is only final once the child is terminal.
+/// An empty read means "not written yet" for a running child and "nothing was ever written" for a finished one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChildLifecycle {
     Running,
     Finished,
 }
 
-/// A resumed child inherits its source's persisted history, copied into its
-/// session dir at spawn.
+/// A resumed child inherits its source's persisted history, copied into its session dir at spawn.
+/// An empty read while it runs is therefore transient ("not visible yet").
+/// A fresh or forked child starts with an empty replay transcript, so an empty read is a settled negative worth caching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChildOrigin {
     Resumed,
@@ -183,8 +211,8 @@ impl ChildTranscript {
         }
     }
 
-    /// The child is terminal, so disk is final and the cached empty read is
-    /// worth one more try.
+    /// The child is terminal, so disk is final and the cached empty read is worth one more try.
+    /// A proven `DiskBacked` or `MemoryOnly` state is untouched.
     pub(crate) fn retry_disk_after_finish(&mut self) {
         if matches!(self, Self::DiskEmptyWhileRunning) {
             *self = Self::NeedsReplay;
@@ -426,7 +454,8 @@ fn replay_inherited_updates(
                     .handle_update(update, &meta, &mut child_view.scrollback);
             }
             ReplayedUpdate::Xai(update) => {
-                // Same window as `session/load`: historical xAI events must not start live commands (family-switch compact) or defer compact outcomes.
+                // Same window as `session/load`: historical xAI events must not start live commands
+                // (family-switch compact) or defer compact outcomes to a turn that never comes.
                 let was_loading = child_view.session.loading_replay;
                 child_view.session.loading_replay = true;
                 crate::app::acp_handler::apply_child_view_session_event(child_view, &update, false);
@@ -606,8 +635,8 @@ pub(crate) fn ensure_subagent_child_replayed(
     } else {
         None
     };
-    // A finished rebuild or resumed source may be relocated A running child
-    // stays hinted-only.
+    // A finished rebuild or resumed source may be relocated
+    // A running child stays hinted-only, since a copy with the same id under a foreign cwd is not its own
     let fallback = if finished || resumed {
         ReplayLookupFallback::Relocation
     } else {
@@ -905,8 +934,9 @@ pub(crate) fn parse_tag_prefix(description: &str) -> (Option<&str>, &str) {
     (None, description)
 }
 
-/// `format_subagent_label`'s label, then the description in curly quotes when
-/// there is one, as the `Subagent` scrollback row quotes it.
+/// `format_subagent_label`'s label, then the description in curly quotes when there is one, as the `Subagent`
+/// scrollback row quotes it. Clamped by `clamp_activity_subject` (first line, 40 chars) rather than by width:
+/// the label is fixed at spawn for rows built later, which have no width to truncate against.
 pub(crate) fn subagent_display_label(info: &SubagentInfo) -> String {
     let (label, description) = format_subagent_label(info);
     if description.trim().is_empty() {

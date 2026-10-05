@@ -76,7 +76,9 @@ impl Drop for CaptureLeaseGuard {
                 );
             }
         });
-        // This is the abort/unwind backstop.
+        // This is the abort/unwind backstop. Cooperative shutdown performs and
+        // awaits its release above; a detached blocking release here keeps Drop
+        // non-blocking, while lease expiry remains the fallback at runtime exit.
         drop(release);
     }
 }
@@ -222,7 +224,9 @@ fn classify_extraction_output(
 const CONTENT_FILTER_STOP_REASON: &str = "content_filter";
 
 /// Class `/flush` reports when the queue still carries a failed job at its
-/// deadline.
+/// deadline. The durable queue keeps only sanitized error text, so a failure
+/// inherited from another process cannot be attributed more precisely than
+/// "did not converge".
 fn flush_capture_failure_class(recorded: Option<MemoryV2FailureClass>) -> MemoryV2FailureClass {
     recorded.unwrap_or(MemoryV2FailureClass::Convergence)
 }
@@ -595,7 +599,8 @@ impl SessionActor {
 
     pub(super) async fn resume_v2_capture(self: &Arc<Self>) {
         if self.memory.can_expose_v2() {
-            // Startup promotion opens and migrates the state database.
+            // Startup promotion opens and migrates the state database, so it
+            // runs as a tracked task instead of on the actor's startup path.
             let session = Arc::clone(self);
             let clock = xai_grok_memory::system_v2_clock();
             let promotion =
@@ -2088,7 +2093,8 @@ mod tests {
                 let workspace = storage.workspace_dir().to_path_buf();
                 init_v2_scopes(&root, storage.global_dir(), &workspace);
                 let session_id = actor.session_info.id.to_string();
-                // Promotion now conflicts on every attempt.
+                // Promotion now conflicts on every attempt, so the first worker
+                // parks in its retry loop after extraction finishes.
                 let _dream_lease = hold_dream_lease(storage.global_dir(), &workspace);
 
                 actor.start_v2_capture_worker().await;
@@ -2139,7 +2145,8 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 store.fail_retryable(&lease, now, "disk full").unwrap();
-                // Keep the latch held so the barrier cannot restart extraction and replace the recorded class.
+                // Keep the latch held so the barrier cannot restart extraction
+                // and replace the recorded class before its deadline.
                 let parked_cancel = tokio_util::sync::CancellationToken::new();
                 let worker_cancel = parked_cancel.clone();
                 let parked = tokio::task::spawn_local(async move {
@@ -2162,7 +2169,9 @@ mod tests {
                     let actor = Arc::clone(&actor);
                     async move { actor.flush_v2_capture().await }
                 });
-                // Auto-advance only fires while no blocking poll is in flight.
+                // Auto-advance only fires while no blocking poll is in flight,
+                // so this sleep resolves after the barrier has observed the
+                // failed job.
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 tokio::time::advance(FLUSH_TIMEOUT).await;
 
@@ -2211,7 +2220,7 @@ mod tests {
                 let session_id = actor.session_info.id.to_string();
                 let store = V2CaptureStore::open(&workspace, V2MemoryScope::Workspace).unwrap();
                 store.ensure_session(&session_id).unwrap();
-                // Index multiple belongs to the stopped turn; an uncommitted stop must not reuse it.
+                // Index 3 belongs to the stopped turn; an uncommitted stop must not reuse it.
                 *actor.tool_context.prompt_index.lock().await = 3;
                 for (prompt_id, is_committed, expected_requested) in
                     [("uncommitted", false, 0), ("committed", true, 1)]
@@ -2238,6 +2247,7 @@ mod tests {
                     );
                     actor.state.lock().await.running_task = None;
                 }
+                // Re-enqueueing turn 1 against another source prompt would be a conflict.
                 let job = store
                     .enqueue_for_prompt_with_visibility(
                         &session_id,

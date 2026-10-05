@@ -12,6 +12,14 @@
     dead_code
 )]
 //! High-performance git worktree creation using CoW cloning.
+//!
+//! This crate provides fast worktree creation by:
+//! 1. Using `git worktree add --no-checkout` (instant metadata creation)
+//! 2. Parallel CoW file cloning with hash-based sharding
+//! 3. Optional dirty file replication and ignored file copying
+//! 4. BTRFS snapshot support on Linux for O(1) cloning
+//! 5. Worktree sync API for pre-created worktree pools
+//! 6. SQLite metadata tracking (behind `metadata` feature)
 #![deny(clippy::indexing_slicing)]
 mod api;
 #[cfg(feature = "metadata")]

@@ -1,4 +1,9 @@
-//! Hello handshake helpers used by the connection actor and the reconnect-replay path.
+//! Hello handshake helpers used by the connection actor and the
+//! reconnect-replay path.
+//!
+//! Splitting these into a dedicated module keeps the connection state
+//! machine readable: send the frame, parse the ack, surface a typed
+//! [`crate::ClientError`].
 
 use futures::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
@@ -6,7 +11,9 @@ use xai_tool_protocol::{ConnectionKind, HelloAckMsg, HelloMsg};
 
 use crate::error::ClientError;
 
-/// Wire-protocol version both ends speak.
+/// Wire-protocol version both ends speak. Re-exported from the
+/// protocol crate so the SDK and the IC service share one source of
+/// truth.
 pub use xai_tool_protocol::PROTOCOL_VERSION;
 
 /// Send the [`HelloMsg`] and wait for the matching [`HelloAckMsg`].

@@ -5,7 +5,8 @@ use serde_json::Value;
 
 use super::{RpcActivityClass, WorkspaceRpc};
 
-/// `workspace.git_status`.
+/// `workspace.git_status`. Compact JSON string, capped server-side at ~1 KB.
+/// Deprecated: use [`GitStatusExtReq`] with `GitStatusFormat::Prompt` for the same output.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitStatusReq {}
 
@@ -163,12 +164,16 @@ pub struct GitCommitReq {
     #[serde(default)]
     pub sync: bool,
     /// Stage everything (`git add -A`, honoring ignore rules) before committing.
+    /// With this set, nothing to commit is `CommitOutcome::clean` and push still runs so a retry can deliver an earlier unpushed commit; without it, that is an error.
     #[serde(default)]
     pub stage_all: bool,
-    /// Seed the local-only default excludes (`.env`, `node_modules/`, build output, …) into `info/exclude`.
+    /// Seed the local-only default excludes (`.env`, `node_modules/`, build output, …) into `info/exclude` before staging.
+    /// This keeps `stage_all` from ever sweeping them in.
+    /// Idempotent: guarded by a marker line, shared with environments that pre-seed the same block.
     #[serde(default)]
     pub seed_default_excludes: bool,
     /// Refuse to commit unless the workspace is on exactly this branch (detached HEAD never matches).
+    /// This guards single-writer conversation branches.
     #[serde(default)]
     pub expected_branch: Option<String>,
 }
@@ -190,9 +195,11 @@ pub struct GitSyncBaseReq {
     #[serde(default)]
     pub base_ref: Option<String>,
     /// Roll back an in-progress merge (`git merge --abort`) instead of merging.
+    /// Idempotent: no merge in progress is still `Aborted`.
     #[serde(default)]
     pub abort: bool,
-    /// Refuse to merge unless the workspace is on exactly this branch (detached HEAD never matches).
+    /// Refuse to merge unless the workspace is on exactly this branch (detached HEAD never matches), mirroring `GitCommitReq`.
+    /// Ignored for `abort`, which must stay usable as a rollback wherever the merge happened.
     #[serde(default)]
     pub expected_branch: Option<String>,
 }
@@ -239,8 +246,9 @@ impl WorkspaceRpc for GitCheckoutReq {
 // Git ops the control plane invokes on the sandbox
 // Git mutates only through these platform ops; there is no autonomous agent commit/push/merge
 
-/// `EnsureBinding`: ensure the conversation branch (`conv/<id>`) exists and
-/// is checked out.
+/// `EnsureBinding`: ensure the conversation branch (`conv/<id>`) exists and is checked out.
+/// When the branch is absent it is forked off `base_ref`; the base itself is never written.
+/// Idempotent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitEnsureBindingReq {
     #[serde(default)]
@@ -267,16 +275,18 @@ pub struct GitEnsureBindingResult {
     pub head_sha: Option<String>,
 }
 
-/// `MergeToMain`: merge the conversation branch into its target branch (the
-/// publish path, or an explicit "Merge" button). Merge, never rebase; never
-/// force.
+/// `MergeToMain`: merge the conversation branch into its target branch (the publish path, or an explicit "Merge" button).
+/// Merge, never rebase; never force.
+/// On conflicts the implementer aborts and restores `session_branch` (no `MERGE_HEAD` left on the integration branch).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitMergeToMainReq {
     #[serde(default)]
     pub git_root: Option<std::path::PathBuf>,
     /// The conversation branch to merge (`conv/<id>`).
+    /// This is the same identity as [`super::super::binding::ResolvedRepoSource::session_branch`].
     pub session_branch: String,
     /// Integration branch from the binding resolver (`ResolvedRepoSource.merge_target`).
+    /// `None` or empty is a hard error; do not serde-default to `main` (BYO remotes use `master`/`trunk`).
     #[serde(default)]
     pub target_branch: Option<String>,
     /// Push the target branch after a successful merge.
@@ -313,10 +323,12 @@ pub enum GitMergeToMainOutcome {
     /// Clean merge (or fast-forward); `sha` is the new target HEAD.
     Merged { sha: String },
     /// The merge hit conflicts; the implementer aborted and restored `session_branch`. `files` are the unmerged paths.
+    /// The workspace must not be left with `MERGE_HEAD` on the integration branch.
     Conflicts { files: Vec<String> },
 }
 
 /// `Push`: push a branch to `origin` after a commit, classifying the outcome.
+/// The op never forces (a non-fast-forward on a single-writer conv branch is a conflict to report, not to overwrite).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GitPushReq {
     #[serde(default)]
@@ -524,6 +536,7 @@ pub struct CommitResult {
     pub data: CommitData,
     pub warning: Option<String>,
     /// Structured outcome of the commit and push, for machine callers.
+    /// `None` comes from servers predating the field and from the jj backend; `data`/`warning` are the human-readable channel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<CommitOutcome>,
 }
@@ -542,6 +555,7 @@ pub struct CommitOutcome {
 }
 
 /// Push-step classification for [`CommitOutcome`].
+/// A non-fast-forward rejection on a single-writer conversation branch means the remote diverged and needs resolution; the op never forces.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PushStatus {
@@ -615,9 +629,8 @@ pub struct GitStatusData {
     pub unstaged: Vec<GitFileChange>,
 }
 
-/// Response wrapper for `git_status_ext` with a stable shape; check `format`
-/// for which field is set. Tagged optional fields avoid untagged-enum
-/// ambiguity.
+/// Response wrapper for `git_status_ext` with a stable shape; check `format` for which field is set. Tagged optional fields avoid untagged-enum ambiguity.
+/// Manual `Deserialize` wraps a legacy flat `GitStatusData` from an older server as `format: Structured` instead of parsing it as empty.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct GitStatusExtResponse {
     /// The format of this response (echoed from request for convenience).
@@ -637,10 +650,12 @@ impl<'de> Deserialize<'de> for GitStatusExtResponse {
     where
         D: serde::Deserializer<'de>,
     {
-        // Deserialize into a generic value first to distinguish the new envelope.
+        // Deserialize into a generic value first to distinguish the new envelope from a legacy flat `GitStatusData` payload
+        // An older workspace server still returns flat status for `git_status_ext` during version skew
         let value = Value::deserialize(deserializer)?;
 
-        // The new envelope is identified by any of its own keys.
+        // The new envelope is identified by any of its own keys; `format` is always serialized, and `data`/`prompt` cover any hand-written payload
+        // A legacy flat `GitStatusData` (root/branch/staged/...) has none of them.
         let is_new_envelope = value.as_object().is_some_and(|obj| {
             obj.contains_key("format") || obj.contains_key("data") || obj.contains_key("prompt")
         });
@@ -783,6 +798,7 @@ pub struct GitBranchListData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitCollectChangesReq {
     /// Any path inside the repo/worktree. The git root is discovered from this path.
+    /// The field is named `repo_path` (not `git_root`) to match `SerializeRepoChangesRequest`.
     pub repo_path: String,
 
     /// Include commit series (typically commits ahead of upstream).
@@ -794,10 +810,12 @@ pub struct GitCollectChangesReq {
     pub include_uncommitted: bool,
 
     /// Optional public base revision override (like `origin/main` or a commit SHA).
+    /// If omitted, the server auto-detects the latest public commit on HEAD's first-parent history.
     #[serde(default)]
     pub base_ref: Option<String>,
 
-    /// Max bytes to inline for one file blob in commit/uncommitted patches.
+    /// Max bytes to inline for one file blob in commit/uncommitted patches. `0` means no limit; larger blobs are truncated with a warning.
+    /// Untracked content uses [`UNTRACKED_CONTENT_THRESHOLD`] and is excluded, not truncated.
     #[serde(default = "default_max_file_bytes")]
     pub max_file_bytes: u64,
 
@@ -1004,6 +1022,8 @@ pub struct UntrackedFileData {
     pub content_included: bool,
 }
 
+/// Threshold for including untracked file content in the RPC response (1 MB).
+/// Files larger than this have `content_base64: None` and must be fetched separately.
 pub const UNTRACKED_CONTENT_THRESHOLD: u64 = 1024 * 1024;
 
 #[cfg(test)]

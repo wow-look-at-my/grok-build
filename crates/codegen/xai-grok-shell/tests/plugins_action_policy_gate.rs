@@ -1,4 +1,5 @@
-//! E2E: managed policy must bind the pager wire paths — plugins/action install/update of unlisted sources refuse.
+//! E2E: managed policy must bind the pager wire paths — plugins/action install/update of
+//! unlisted sources refuse, and mcp/toggle of a pin-dropped server cites the org policy.
 
 mod acp_harness;
 
@@ -33,7 +34,8 @@ fn plugins_action_install_and_update_respect_marketplace_lockdown() {
         )
         .unwrap();
 
-        // Local plugin directory: not on the strict list, so installing it is a lockdown bypass if it succeeds.
+        // Local plugin directory: not on the strict list, so installing it is
+        // a lockdown bypass if it succeeds.
         let plugin_dir = cwd.join("unlisted-plugin");
         std::fs::create_dir_all(&plugin_dir).unwrap();
         std::fs::write(
@@ -42,7 +44,8 @@ fn plugins_action_install_and_update_respect_marketplace_lockdown() {
         )
         .unwrap();
 
-        // Guard: the fixture must arm the policy (in-process agent, same OnceLock).
+        // Guard: the fixture must actually arm the policy (in-process agent, same OnceLock) — a
+        // vacuous policy would make every refusal assertion below meaningless.
         let ms = xai_grok_workspace::permission::resolution::managed_settings();
         assert!(
             ms.marketplace_allowlist
@@ -146,7 +149,8 @@ fn plugins_action_install_and_update_respect_marketplace_lockdown() {
             "a refused update must not request a reload"
         );
 
-        // Pin-dropped project server: the enable refusal must cite the organization policy.
+        // Pin-dropped project server: the enable refusal must cite the
+        // organization policy, not claim the server is missing from config.
         std::fs::create_dir_all(cwd.join(".cursor")).unwrap();
         std::fs::write(
             cwd.join(".cursor").join("mcp.json"),

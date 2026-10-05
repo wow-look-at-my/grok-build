@@ -16,7 +16,7 @@
             vec!["p1", "p2"]
         );
 
-        // A later broadcast fully replaces the queue.
+        // A later broadcast fully replaces the previous queue.
         assert!(handle_ext_notification(
             &queue_changed_ext("sess-1", &["p2"]),
             &mut app
@@ -243,6 +243,7 @@
             agent.session.current_prompt_id = Some("running-turn".into());
             agent.set_active_pane(crate::app::agent_view::ActivePane::Prompt, true);
         }
+        // Enter #1: bash typed mid-turn goes server-authoritative.
         let effects =
             crate::app::dispatch::dispatch(Action::SendBashCommand("echo hi".into()), app);
         assert!(
@@ -258,6 +259,8 @@
             .cloned()
             .expect("the echo id must be tracked as optimistic");
 
+        // Enter #2 immediately (empty composer): the send-now must PARK
+        // Firing the interject now would overtake the in-flight prompt RPC shell-side and no-op, silently dropping the send-now
         let outcome = app
             .agents
             .get_mut(&AgentId(0))
@@ -412,6 +415,7 @@
 
         let notif = acp::ExtNotification::new("x.ai/queue/changed", raw.into());
 
+        // Case 1: current_prompt_id is None, so adopt it
         let mut app = make_app_with_agent("sess-1");
         assert!(
             app.agents
@@ -433,6 +437,8 @@
             "adopts running_prompt_id when current_prompt_id was None"
         );
 
+        // Case 2: current_prompt_id is already set (one client drip-feeding its own prompts), so the broadcast must NOT override it
+        // The broadcast changes nothing here
         let mut app = make_app_with_agent("sess-1");
         app.agents
             .get_mut(&AgentId(0))
@@ -599,7 +605,8 @@
         let mut app = make_app_with_agent("sess-1");
         let id = AgentId(0);
 
-        // A load's replay records the running turn's durable terminal.
+        // A load's replay records the running turn's durable terminal; the load then completes
+        // The load clears loading_replay; the terminal set persists until the next replay window
         app.agents.get_mut(&id).unwrap().session.loading_replay = true;
         let _ = handle_ext_notification(
             &xai_turn_completed_notif("sess-1", "p-run", "end_turn", true),
@@ -772,6 +779,7 @@
     }
 
     /// Regression: in the FIFO handoff the leader's user-echo (no `promptId`) arrives before the deferred turn-start shim sets `expect_user_echo`.
+    /// Without setting it at stash time, the 2nd queued prompt renders twice.
     #[test]
     fn fifo_handoff_user_echo_not_duplicated() {
         use crate::app::dispatch::dispatch;
@@ -813,6 +821,7 @@
         let mut app = make_app_with_agent("sess-1");
         let id = AgentId(0);
 
+        // p1 from idle; its echo consumes the pending skip, so the 2nd handoff starts with skip == false (the condition that triggered the dup)
         let _ = dispatch(Action::SendPrompt("first".into()), &mut app);
         user_echo(&mut app, "first");
         assert_eq!(user_block_count(&app, id, "first"), 1);
@@ -917,8 +926,9 @@
             &mut app
         ));
 
-        // `p1` finishes and the leader promotes `p2`: running=p2, p2 removed
-        // from the queue The viewer's `current_prompt_id` is still `p1`.
+        // `p1` finishes and the leader promotes `p2`: running=p2, p2 removed from the queue
+        // The viewer's `current_prompt_id` is still `p1`: its `prompt_complete` for p1 has not been processed yet
+        // That hits the FIFO-handoff STASH branch, where the old code unconditionally set the echo-skip
         assert!(handle_queue_changed(
             &queue_changed_running("sess-1", &[], Some("p2")),
             &mut app
@@ -928,6 +938,7 @@
         user_echo(&mut app, "text p2");
 
         // The viewer must render p2's user block from that echo exactly once.
+        // Before the fix the stash branch set `expect_user_echo`, swallowing the echo, so the count was 0 and the prompt vanished from scrollback
         assert_eq!(
             user_block_count(&app, id, "text p2"),
             1,
@@ -974,9 +985,8 @@
         let mut app = make_app_with_agent("sess-1");
         let id = AgentId(0);
 
-        // VIEWER of another client's turn `p1`, but it DID originate `p2`
-        // (typed via immediate-send while still viewing) The guard keyed on
-        // origination and wrongly set the echo-skip
+        // VIEWER of another client's turn `p1`, but it DID originate `p2` (typed via immediate-send while still viewing)
+        // The old guard keyed on origination and wrongly set the echo-skip
         {
             let agent = app.agents.get_mut(&id).unwrap();
             agent.attached_as_viewer = true;
@@ -1095,7 +1105,7 @@
             "adoption-on-load must not grow the scrollback"
         );
 
-        // A live (non-replay) chunk stamped with the adopted prompt id now passes the gate and renders.
+        // A live (non-replay) chunk stamped with the adopted prompt id now passes the gate and renders (previously dropped, so the viewer froze)
         let (tx, _rx) = tokio::sync::oneshot::channel();
         let request = acp::SessionNotification::new(
             acp::SessionId::new("sess-1"),
@@ -1374,9 +1384,9 @@
     fn driver_post_rewind_still_drops_stale_delta() {
         let mut app = make_app_with_agent("sess-1");
         let id = AgentId(0);
-        // A locally-created driver (NOT a viewer) that finished its turn:
-        // finish_turn cleared current_prompt_id back to None The aborted turn
-        // was driven.
+        // A locally-created driver (NOT a viewer) that just finished its turn: finish_turn cleared current_prompt_id back to None
+        // The aborted turn was driven by THIS client, so its prompt id is self-originated
+        // That is what makes the gate treat the late chunk as ours (drop) rather than as another client's turn (adopt)
         {
             let agent = app.agents.get_mut(&id).unwrap();
             assert!(
@@ -1928,7 +1938,7 @@
         let id = AgentId(0);
         {
             let agent = app.agents.get_mut(&id).unwrap();
-            // Local send before the outage: user block pushed, echo skip set
+            // Local send just before the outage: user block pushed, echo skip set
             agent
                 .scrollback
                 .push_block(RenderBlock::user_prompt("pre-outage prompt"));
@@ -2045,6 +2055,8 @@
     #[test]
     fn viewer_adopting_live_delta_enters_turn_running_and_timer_is_monotonic() {
         // A viewer (attached_as_viewer) watching the driver's turn starts Idle.
+        // Adopting the first live delta must flip it to TurnRunning and stamp `turn_started_at`
+        // A second chunk must NOT reset `turn_started_at`
         let mut app = make_app_with_agent("sess-view");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -2099,7 +2111,8 @@
 
     #[test]
     fn viewer_replay_delta_does_not_enter_turn_running() {
-        // A replayed historical-load delta (also attached_as_viewer) must NOT flash TurnRunning.
+        // A replayed historical-load delta (also attached_as_viewer) must NOT flash TurnRunning; only LIVE deltas put a viewer in the running state
+        // The promptId is still adopted so later chunks match
         let mut app = make_app_with_agent("sess-view");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -2122,6 +2135,9 @@
 
     #[test]
     fn viewer_mid_turn_reattach_shows_running_chrome_after_replay_window() {
+        // (1) the viewer subscribes on its load request, so it receives a LIVE delta DURING its replay window (loading_replay = true)
+        // Before the fix, step (3) never flipped the viewer to TurnRunning: the TurnRunning entry lived inside the mismatch-only adopt block
+        // The chrome never appeared. It must now.
         let mut app = make_app_with_agent("sess-view");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -2130,6 +2146,7 @@
             assert!(matches!(agent.session.state, AgentState::Idle));
         }
 
+        // (1) live delta during the replay window: adopts promptId, stays Idle.
         let _ = handle(
             make_agent_chunk_message_with_prompt("sess-view", "responding 1", "pid-driver", false),
             &mut app,
@@ -2147,12 +2164,15 @@
             );
         }
 
+        // (2) SessionLoaded completes (no runningPromptId conveyed).
         app.agents
             .get_mut(&AgentId(0))
             .unwrap()
             .session
             .loading_replay = false;
 
+        // (3) a post-load live delta MATCHING the already-adopted promptId
+        //     It skips the mismatch-only adopt block, so the fix must flip the viewer to TurnRunning here
         let _ = handle(
             make_agent_chunk_message_with_prompt("sess-view", "responding 2", "pid-driver", false),
             &mut app,
@@ -2177,7 +2197,9 @@
 
     #[test]
     fn viewer_does_not_enter_turn_running_for_server_initiated_turn() {
-        // If a viewer entered TurnRunning for it.
+        // If a viewer entered TurnRunning for it, nothing would ever finish the turn and the viewer would be stuck "Responding…" forever
+        // The driver also declines to show chrome for these (its server-initiated adopt path never calls start_turn)
+        // The viewer must mirror that: adopt the id (so content renders) but stay Idle (no running chrome)
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
 
@@ -2207,7 +2229,9 @@
 
     #[test]
     fn viewer_enters_turn_running_for_scheduler_fired_cron_turn() {
-        // A `/loop` (scheduled-task) turn has a synthetic `scheduler-fired-…` prompt id UNLIKE auto-wake turns it is client-driven.
+        // A `/loop` (scheduled-task) turn has a synthetic `scheduler-fired-…` prompt id
+        // UNLIKE auto-wake turns it is client-driven via `MvpAgent::prompt()` and DOES emit `x.ai/session/prompt_complete`
+        // So a viewer MUST enter TurnRunning for it; otherwise the dashboard's locally-tracked row for a running `/loop` session never shows Working
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
 
@@ -2247,7 +2271,7 @@
 
     #[test]
     fn viewer_prompt_complete_finishes_turn() {
-        // A viewer in TurnRunning receives x.ai/session/prompt_complete for its session and runs finish_turn: state Idle.
+        // A viewer in TurnRunning receives x.ai/session/prompt_complete for its session and runs finish_turn: state Idle, current_prompt_id cleared
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
         let _ = handle(
@@ -2276,7 +2300,9 @@
 
     #[test]
     fn viewer_prompt_complete_pushes_turn_completed_marker() {
-        // Regression (leader/dashboard mode): the "Worked for X" marker comes from the driver's PromptResponse RPC.
+        // Regression (leader/dashboard mode): the "Worked for X" marker comes from the driver's PromptResponse RPC, which a viewer never receives
+        // Before this fix the driver pane showed "Worked for …" while the viewer pane (same session) showed nothing
+        // The viewer must push the equivalent marker on the broadcast prompt_complete
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
         let _ = handle(
@@ -2303,7 +2329,8 @@
 
     #[test]
     fn viewer_turn_completed_elapsed_matches_authoritative_turn_start() {
-        // The viewer back-dates its turn anchor from the authoritative `turnStartMs` (not the local first-delta time) Its elapsed.
+        // The viewer back-dates its turn anchor from the authoritative `turnStartMs` (not the local first-delta time)
+        // Its elapsed, and therefore the "Worked for X" marker, matches the driver's instead of reading near-zero
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
 
@@ -2411,7 +2438,8 @@
 
     #[test]
     fn viewer_prompt_complete_rate_limit_pushes_no_marker() {
-        // Rate limits get a dedicated UX on the driver.
+        // Rate limits get a dedicated UX on the driver and aren't actionable from a viewer
+        // The viewer still finishes its turn but pushes no "Turn failed" line
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
         let _ = handle(

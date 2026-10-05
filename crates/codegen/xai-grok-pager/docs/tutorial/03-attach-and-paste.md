@@ -1,6 +1,7 @@
 # Attach Files, Images & Paste
 
-The more precisely you point Grok at the right context, the better the result. Ways to get things into the prompt:
+The more precisely you point Grok at the right context, the better the
+result. Three ways to get things into the prompt:
 
 ## Mention files with `@`
 
@@ -14,10 +15,12 @@ Type `@` for a fuzzy file picker — line ranges work too:
 
 ## Paste images
 
-Paste a screenshot straight into the prompt: `Cmd+V` on macOS, `Ctrl+V` on Linux, `Alt+V` on Windows. Great for error dialogs, designs, and diagrams.
+Paste a screenshot straight into the prompt: `Cmd+V` on macOS, `Ctrl+V` on
+Linux, `Alt+V` on Windows. Great for error dialogs, designs, and diagrams.
 
 ## Run shell commands yourself
 
-Type `!` on an empty prompt to run a shell command directly — the output lands in the scrollback where Grok can see it too.
+Type `!` on an empty prompt to run a shell command directly — the output
+lands in the scrollback where Grok can see it too.
 
 *Go deeper: `/docs Getting Started`*

@@ -274,7 +274,9 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
         }
 
         "x.ai/terminal/background" => {
-            // Mark a terminal as backgrounded: the process keeps running but waiting callers are notified.
+            // Mark a terminal as backgrounded: the process keeps running but waiting callers are notified so the agent can continue
+            // Route through the session's tool bridge so the LocalTerminalBackend actor unblocks the foreground waiter (BashTool::run)
+            // Also try the StreamingLocalTerminalRunner registry for AcpTerminalAdapter-based sessions
             let req: TerminalIdRequest = parse(args)?;
             agent
                 .background_foreground_command(&req.session_id, &req.terminal_id)

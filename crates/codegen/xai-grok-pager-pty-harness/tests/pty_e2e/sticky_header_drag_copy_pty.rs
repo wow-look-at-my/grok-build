@@ -1,8 +1,11 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
+//
+// Drag-select and copy out of a prompt pinned as a sticky header (painted outside the content renderer's selection bookkeeping).
 #[allow(unused_imports)]
 use super::common::*;
 use xai_grok_pager_pty_harness::StyledLine;
 
+/// 60 answer lines over a 50-row terminal overflow the viewport, so the prompt pins to the top.
 const LAST_LINE: &str = "ANSWERLINE060";
 
 /// Only rendered in a pinned header's gap row; seeing it proves the header is pinned.
@@ -46,6 +49,7 @@ async fn sticky_header_drag_copy_pty() {
     content.set_response(long_answer());
 
     let binary = pager_binary().expect("resolve pager binary");
+    // SSH_CONNECTION forces the OSC 52 clipboard route.
     let env_refs: Vec<(&str, &str)> = vec![("SSH_CONNECTION", "scripted-test 1 127.0.0.1 2")];
     let mut harness = PtyHarness::spawn_with_content_env_in_dir(
         &binary,

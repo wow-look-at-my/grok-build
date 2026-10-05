@@ -45,6 +45,7 @@ pub struct MockModelEntry {
     supports_reasoning_effort: bool,
     reasoning_effort: Option<String>,
     /// Each entry is a table carrying a `value` key, or a bare value string.
+    /// `parse_remote_model_value` defines the full shape.
     reasoning_efforts: Vec<Value>,
     /// Sets `You are <label>` in the primary system prompt, so a model switch is visible on the wire.
     system_prompt_label: Option<String>,
@@ -173,7 +174,8 @@ pub struct MockUserTeam {
     pub role: String,
 }
 
-/// `canAdministerTeam` on `GET /v1/user`.
+/// `canAdministerTeam` on `GET /v1/user`. `Omitted` leaves the key out; `Unresolved` is `null`,
+/// the proxy's answer when it could not resolve the caller's team-administration capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MockCanAdministerTeam {
     Omitted,
@@ -227,6 +229,7 @@ impl MockInferenceServer {
         Self::start_inner(models, None, Transport::Plain).await
     }
 
+    /// Start a mock that returns 401 on inference requests missing `Authorization: Bearer <required_token>`.
     pub async fn start_with_required_auth(
         models: Vec<MockModelEntry>,
         required_token: impl Into<String>,
@@ -234,9 +237,12 @@ impl MockInferenceServer {
         Self::start_inner(models, Some(required_token.into()), Transport::Plain).await
     }
 
-    /// Serve the same router over HTTPS with a throwaway CA; there is no
-    /// plaintext listener, so a logged request implies a completed TLS
-    /// handshake.
+    /// Serve the same router over HTTPS with a throwaway CA; there is no plaintext listener,
+    /// so a logged request implies a completed TLS handshake.
+    /// [`Self::url`] is `https://127.0.0.1:PORT/v1` and [`Self::ca_pem_path`] is the path to the
+    /// CA PEM the client must trust. Only [`crate::headless::run_headless`] and
+    /// [`crate::headless::run_headless_with_env`] inject it; any other runner must set
+    /// `GROK_EXTRA_CA_BUNDLE` to [`Self::ca_pem_path`] on its own `TestSandbox` via `set_env`.
     pub async fn start_tls() -> anyhow::Result<Self> {
         Self::start_inner(
             vec![MockModelEntry::new(DEFAULT_MODEL)],
@@ -332,6 +338,8 @@ impl MockInferenceServer {
         self.state.overrides.enqueue_response(path, response);
     }
 
+    /// Default-responder concurrency cap: over `cap` in-flight (each held for `hold`), extra requests get 429 with `Retry-After`.
+    /// Scripted responses and expectations bypass the cap.
     pub fn set_inference_concurrency_cap(&self, cap: usize, hold: Duration, retry_after_secs: u64) {
         self.state
             .overrides
@@ -428,6 +436,7 @@ impl MockInferenceServer {
         })
     }
 
+    /// Until this is called, `GET /v1/settings` returns 404.
     pub fn set_settings(&self, settings: impl serde::Serialize) {
         let value = serde_json::to_value(settings).expect("serialize settings");
         let mut guard = self.state.settings.write().unwrap();
@@ -516,13 +525,15 @@ impl MockInferenceServer {
     }
 
     /// Price the `/v1/messages` call, as a gateway speaking that protocol
-    /// does.
+    /// does. `None` (the default) is Anthropic's own behavior: no price on
+    /// the wire at all.
     pub fn set_messages_cost_usd_ticks(&self, ticks: Option<i64>) {
         self.state.inference.set_messages_cost_usd_ticks(ticks);
     }
 
-    /// Emit each SSE event after `delay`, so a test can hold a turn visibly
-    /// streaming. `None` restores instant streaming.
+    /// Emit each SSE event after `delay`, so a test can hold a turn visibly streaming.
+    /// `None` restores instant streaming.
+    /// Applies to requests started after the call.
     pub fn set_chunk_delay(&self, delay: Option<Duration>) {
         self.state.inference.set_chunk_delay(delay);
     }
@@ -607,6 +618,7 @@ impl MockInferenceServer {
         self.state.log.last_system_prompt()
     }
 
+    /// While closed, every `/v1/storage` upload is rejected with 401.
     pub fn set_storage_unauthorized(&self, unauthorized: bool) {
         self.state.storage.set_unauthorized(unauthorized);
     }
@@ -621,6 +633,7 @@ impl MockInferenceServer {
         self.state.storage.uploads()
     }
 
+    /// While set, every `POST /v1/feedback` answers 500 (the body is still recorded).
     pub fn set_feedback_failure(&self, fail: bool) {
         self.state.feedback.set_failure(fail);
     }
@@ -813,7 +826,8 @@ impl MockInferenceServer {
                     }
                 }),
             )
-            // The shell POSTs `{GROK_FEEDBACK_BASE_URL}/feedback`, and the sandbox points that base at `url()` (which ends in `/v1`).
+            // The shell POSTs `{GROK_FEEDBACK_BASE_URL}/feedback`, and the sandbox points that base at `url()` (which ends in `/v1`)
+            // `/v1/feedback/{config,requests}` are deliberately unrouted: the shell treats their 404 as an old proxy
             .route(
                 "/v1/feedback",
                 post({
@@ -835,7 +849,7 @@ impl MockInferenceServer {
                     }
                 }),
             )
-            // Reads as an old proxy, so the shell falls back to a plain `POST /v1/storage`
+            // 404 reads as an old proxy, so the shell falls back to a plain `POST /v1/storage`
             .route(
                 "/v1/storage/exists",
                 get(|| async { StatusCode::NOT_FOUND }),
@@ -856,6 +870,7 @@ impl MockInferenceServer {
                 "/v1/storage/limits",
                 get(|| async { StatusCode::NOT_FOUND }),
             )
+            // Body limit: repo-context archives can exceed axum's 2 MB default.
             .layer(axum::extract::DefaultBodyLimit::max(256 * 1024 * 1024))
     }
 }

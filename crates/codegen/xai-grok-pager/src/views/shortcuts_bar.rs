@@ -1,4 +1,6 @@
-//! The bar accepts `&[HintItem]` from any source (action registry, prompt widget, scrollback state).
+//! The bar accepts `&[HintItem]` from any source (action registry, prompt widget, scrollback state); each view builds its own hints dynamically.
+//!
+//! When a `PendingAction` is active (double-press confirmation), the bar replaces all hints with "press again to {label}".
 
 use std::borrow::Cow;
 
@@ -12,8 +14,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::input::key::KeyShortcut;
 use crate::theme::Theme;
 
-/// A single hint for the shortcuts bar. It carries the keys as structured
-/// data; the bar decides how they render.
+/// A single hint for the shortcuts bar. It carries the keys as structured data; the bar decides how
+/// they render. Views build these dynamically from the registry, widget keymaps, or local state.
 #[derive(Debug, Clone)]
 pub struct HintItem {
     /// Keys to display. Multiple keys are shown joined with "/" (e.g., j/k).
@@ -21,10 +23,13 @@ pub struct HintItem {
     /// Short label for the bottom bar (e.g., "send", "nav", "cancel").
     pub label: Cow<'static, str>,
     /// Optional custom key text, used when the bar paints a single key (and in the cheatsheet).
+    /// With more than one key (`keys.len() > 1`) the bar ignores this and builds the text from the structured keys.
     pub custom_display: Option<&'static str>,
     /// Longer description for the all-shortcuts cheatsheet (e.g., "Send prompt to agent").
+    /// When `None`, falls back to `label`.
     pub description: Option<Cow<'static, str>>,
     /// When true, the hint survives compact-mode truncation and renders regardless of `max_visible`.
+    /// Use for hints that should be discoverable in every scrollback context (e.g. nav, turn, mode).
     pub pinned: bool,
 }
 
@@ -136,7 +141,8 @@ pub struct ShortcutsBar<'a> {
     pending_confirmation: Option<PendingHint>,
     /// Right-aligned text (e.g. team name).
     right_text: Option<&'a str>,
-    /// Compact mode: render only the first `max_visible` hints from `hints`, then always append `help_hint`.
+    /// Compact mode: render only the first `max_visible` hints from `hints`, then always append `help_hint` (e.g. the "all shortcuts" modal trigger).
+    /// When None, all hints are rendered.
     compact: Option<CompactConfig>,
 }
 
@@ -144,6 +150,7 @@ pub struct CompactConfig {
     /// Maximum number of items to render from the hint list before the trailing help hint.
     pub max_visible: usize,
     /// The trailing help hint (typically the binding for the all-shortcuts modal).
+    /// It is always rendered when set, even if the hint list is empty.
     pub help_hint: Option<HintItem>,
 }
 
@@ -383,7 +390,7 @@ mod tests {
             help_hint: Some(help),
         };
         let out = compute_effective_hints(&hints, Some(&cfg));
-        assert_eq!(out.len(), 3); // visible hints plus the help hint
+        assert_eq!(out.len(), 3); // two visible hints plus the help hint
         let [a, b, help_row] = out.as_slice() else {
             panic!("expected two visible hints plus help: {out:?}");
         };
@@ -429,6 +436,8 @@ mod tests {
 
     #[test]
     fn compact_pinned_hints_always_included() {
+        // a, b, c are unpinned; d, e are pinned
+        // With max_visible 3 the two pinned hints leave one unpinned slot, which goes to a
         let hints = vec![
             h("a", key!('a')),
             h("b", key!('b')),
@@ -460,6 +469,7 @@ mod tests {
         };
         let out = compute_effective_hints(&hints, Some(&cfg));
         let labels: Vec<&str> = out.iter().map(|h| h.label.as_ref()).collect();
+        // One pinned hint leaves a budget of two unpinned ones
         assert_eq!(labels, vec!["a", "nav", "b"]);
     }
 
@@ -478,7 +488,7 @@ mod tests {
         };
         let out = compute_effective_hints(&hints, Some(&cfg));
         let labels: Vec<&str> = out.iter().map(|h| h.label.as_ref()).collect();
-        // All of them pinned hints show; the unpinned budget is zero
+        // All three pinned hints show; the unpinned budget is zero
         assert_eq!(labels, vec!["a", "b", "c"]);
     }
 
@@ -512,6 +522,7 @@ mod tests {
 
         crate::theme::cache::set(crate::theme::ThemeKind::Terminal);
         let buf = render_hints(&hints);
+        // "Ctrl+x:send" — key cell at col 0, label cell after the colon.
         let text = leading_text(&buf, 12);
         let label_x = text.find(":send").expect("label rendered") as u16 + 1;
         let key = buf.cell((0, 0)).unwrap().style();
@@ -556,6 +567,7 @@ mod tests {
             leading_text(&buf, 12)
         );
 
+        // In "Ctrl+[/]:prev/next agent" the join slash lands at col 6
         let slash = buf.cell((6, 0)).expect("slash cell");
         assert_eq!(slash.symbol(), "/");
         assert_eq!(
@@ -579,6 +591,7 @@ mod tests {
         assert_eq!(close.style().fg, Some(key_fg));
         assert!(close.style().add_modifier.contains(Modifier::BOLD));
 
+        // "Ctrl+[/]:" is 9 cols and "prev" is 4, putting the label "/" at col 13
         let label_slash = buf.cell((13, 0)).expect("label slash cell");
         assert_eq!(label_slash.symbol(), "/");
         assert_eq!(label_slash.style().fg, Some(action_fg));
@@ -626,7 +639,7 @@ mod tests {
         item.custom_display = Some("\u{2191}/\u{2193}");
         let buf = render_hints(&[item]);
 
-        // In "↑/↓:nav" all of them key cells must be key-styled, including `/`
+        // In "↑/↓:nav" all three key cells must be key-styled, including `/`
         for col in 0..3 {
             let cell = buf.cell((col, 0)).expect("key cell");
             assert_eq!(
@@ -704,7 +717,9 @@ mod tests {
         let hints = [HintItem::paired(key!(' ', CONTROL), key!(F(8)), "toggle")];
         let buf = render_hints(&hints);
 
-        // The join / lands.
+        // "Ctrl+Space/F8:toggle"
+        //  0123456789...
+        // The join / lands at col 10
         let mut text = String::new();
         for col in 0..20 {
             text.push_str(buf.cell((col, 0)).expect("cell").symbol());

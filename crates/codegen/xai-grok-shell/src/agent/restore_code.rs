@@ -1,4 +1,4 @@
-//! Wraps [`xai_grok_workspace::session::git::build_restore_decision`] into the JSON shape `LoadSession` emits.
+//! Wraps [`xai_grok_workspace::session::git::build_restore_decision`] into the JSON shape `LoadSession` emits on `_meta.codeRestore`.
 use serde_json::Value;
 use xai_grok_workspace::session::git::{
     CheckoutSessionOutcome, RestoreKind, build_restore_decision,

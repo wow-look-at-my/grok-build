@@ -1,4 +1,7 @@
 //! Tool-related shapes referenced from `ToolChunk`.
+//!
+//! TODO(workspace): align with the canonical tool types in
+//! `xai-grok-tools` (`ToolDef`, `ToolCallResult`, `ToolProgress`).
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,15 +16,18 @@ pub struct ToolOutputChunk {
     #[serde(default)]
     pub stream: String,
     /// Raw bytes from the tool, serialized as a standard (RFC 4648) base64 string in JSON via `bytes_as_base64`.
+    /// Binary serializers (postcard, bincode) send them as length-prefixed bytes.
     #[serde(default, with = "bytes_as_base64")]
     pub bytes: Vec<u8>,
     /// Wall-clock timestamp the chunk was emitted (UTC).
+    /// A missing field defaults to the Unix epoch (`DateTime::default()`), not `Utc::now()`.
+    /// The receiver's wall clock must never pose as the originator's.
     #[serde(default)]
     pub at: DateTime<Utc>,
 }
 
-/// Lifecycle / progress event emitted by a tool. No `Eq`: `Percent` carries
-/// an `f32`.
+/// Lifecycle / progress event emitted by a tool. No `Eq`: `Percent` carries an `f32`.
+/// Adjacent tagging matches every other wire enum; this nests inside `ToolChunk::Progress`, so the shape must stay uniform.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ToolProgress {
@@ -44,6 +50,7 @@ pub enum ToolProgress {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCallResult {
     pub call_id: ToolCallId,
+    /// Process / tool exit code (0 means success).
     #[serde(default)]
     pub exit_code: i32,
     /// Optional human-readable summary.

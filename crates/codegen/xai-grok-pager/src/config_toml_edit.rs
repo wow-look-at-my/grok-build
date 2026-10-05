@@ -1,4 +1,5 @@
 //! Load `config.toml` as a [`toml_edit::DocumentMut`] for in-place edits.
+//! A non-blank file that does not parse is left untouched (`None`).
 
 use std::path::Path;
 

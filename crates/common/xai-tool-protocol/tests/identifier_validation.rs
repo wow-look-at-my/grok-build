@@ -1,4 +1,5 @@
-//! Validation rules for every identifier newtype, plus the synthetic `ServerId` helper invariants.
+//! Validation rules for every identifier newtype, plus the synthetic
+//! `ServerId` helper invariants.
 
 use std::str::FromStr;
 
@@ -144,7 +145,8 @@ fn server_id_synthesis_is_deterministic() {
 
 #[test]
 fn server_id_synthesis_bypasses_reserved_prefix_check() {
-    // The synthesised id starts with `auto:`.
+    // The synthesised id starts with `auto:`; the reserved-prefix rule
+    // only applies to client-supplied values via `ServerId::new`.
     let conn = ConnectionId::new("conn-abc").unwrap();
     let tool = ToolId::new("read_file").unwrap();
     let synth = ServerId::synthesize_for_tool(&conn, &tool);

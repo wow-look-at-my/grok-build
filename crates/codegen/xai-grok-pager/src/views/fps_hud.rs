@@ -1,4 +1,18 @@
 //! Release-safe FPS readout: `/debug fps`, and `GROK_FPS` on release builds.
+//!
+//! The frame profiler (`render::frame_metrics`, `GROK_FPS`) threads per-phase timings through `draw_frame`, so it exists only in debug/dev builds.
+//! This HUD measures the one thing that needs no pipeline change: the wall-clock cost of the whole `draw_frame` call (render, flush, writer handoff).
+//! It therefore compiles into release builds behind a runtime toggle (the scroll-debug HUD precedent).
+//! It measures the production render path itself, with no debug-only approximation.
+//!
+//! `GROK_FPS` ownership: in debug/dev builds the env feeds `FrameMetrics` and this HUD stays toggle-only (no double overlay).
+//! On release binaries, where that overlay does not exist, the same env enables this HUD from startup.
+//! `GROK_FPS=1` is therefore never a silent no-op ([`HONORS_GROK_FPS_ENV`]).
+//!
+//! "fps" here is render throughput (1 / mean frame cost), not paint frequency.
+//! The pager draws on demand, so an idle UI paints nothing and a busy one is bounded by this number.
+//!
+//! Invariant (shared with the scroll HUD): pure observation. Disabled cost is one bool check per frame; rendering only paints buffer cells.
 use super::debug_style;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -11,8 +25,11 @@ const REFRESH: Duration = Duration::from_millis(250);
 /// Panel width in cells; each line is padded/truncated to this.
 const PANEL_WIDTH: u16 = 32;
 /// Whether this HUD owns the `GROK_FPS` env gate: only where the dev `FrameMetrics` overlay is compiled out.
+/// In debug/dev builds the env keeps feeding that overlay alone.
 const HONORS_GROK_FPS_ENV: bool = true;
 /// Runtime state for the FPS HUD.
+/// `GROK_FPS` enables it at startup on release binaries ([`HONORS_GROK_FPS_ENV`]); `/debug fps` toggles it live everywhere.
+/// Deliberately NOT a settings-registry entry: it is a diagnostic, not a preference to persist.
 pub struct FpsHud {
     enabled: bool,
     samples: VecDeque<Duration>,
@@ -120,7 +137,7 @@ pub struct FpsOverlay {
     pub top_offset: u16,
 }
 impl FpsOverlay {
-    /// Paint those-line panel in the top-right corner of `area`, in the shared theme-agnostic debug chrome (every cell, padding included).
+    /// Paint the two-line panel in the top-right corner of `area`, in the shared theme-agnostic debug chrome (every cell, padding included).
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         debug_style::render_panel(
             area,

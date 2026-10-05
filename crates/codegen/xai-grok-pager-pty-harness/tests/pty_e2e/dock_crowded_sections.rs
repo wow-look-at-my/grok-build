@@ -1,7 +1,9 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Screen row where the dock's first section header sits.
+/// Screen row where the dock's first section header sits. The same task
+/// descriptions appear in the scrollback above, so the dock is found from the
+/// bottom of the screen, never by a plain text search.
 #[cfg(unix)]
 fn dock_top_row(screen: &str) -> u16 {
     let lines: Vec<&str> = screen.lines().collect();

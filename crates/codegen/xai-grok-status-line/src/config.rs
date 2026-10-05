@@ -1,4 +1,7 @@
 //! This module parses `[ui.status_line]`, the half of the contract a user writes.
+//!
+//! Parsing never fails here.
+//! A parse error anywhere in `[ui]` discards the whole table, so a value this module cannot read is recorded as a problem rather than rejected.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -59,7 +62,7 @@ struct RawStatusLineConfig {
     items: Option<Lenient<Vec<Lenient<String>>>>,
     padding: Option<Lenient<u16>>,
     refresh_interval: Option<Lenient<u64>>,
-    /// `#[serde(untagged)]` replays the table through a fresh deserializer.
+    /// `#[serde(untagged)]` replays the table through a fresh deserializer, so a typo here is reported through `serde_ignored` rather than dropped.
     #[serde(flatten)]
     unknown: BTreeMap<String, serde::de::IgnoredAny>,
 }

@@ -1,8 +1,11 @@
-//! Reports `StopFailure` and `StopCancelled`, both turn-end hooks that run instead of `Stop`.
+//! Reports `StopFailure` and `StopCancelled`, the two turn-end hooks that run instead of `Stop`.
+//! A reporter claims the turn's one report and hands the payload to a background worker, so an interrupt cannot abort a hook already running.
+//! The gate owns the third report, `Stop`.
 
 use super::*;
 use xai_grok_hooks::event::{self, StopCancelledReason, StopFailureKind};
 
+/// This path's slice of the session's ten-second exit budget, spent twice per teardown: once by `flush` and once by `drain`.
 const TURN_END_DRAIN_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Debug)]
@@ -138,7 +141,7 @@ pub(super) fn cancel_reason_for_completion(
         }),
         PromptCompletionKind::MaxTurnsReached { .. } => Some(StopCancelledReason::MaxTurns),
         PromptCompletionKind::StationarityEnded => Some(StopCancelledReason::NoProgress),
-        // `Completed` fires `Stop`; the others never ran a turn.
+        // `Completed` fires `Stop`; the other two never ran a turn.
         PromptCompletionKind::Completed
         | PromptCompletionKind::Rewound
         | PromptCompletionKind::RemovedFromQueue => None,
@@ -165,6 +168,7 @@ pub(super) fn cancel_details(kind: &PromptCompletionKind) -> Option<String> {
 pub(super) struct TurnEndQueue {
     session: Arc<SessionActor>,
     /// This queue's own sender, dropped by [`Self::drain`]: the worker's `recv` ends only once every sender is gone.
+    /// Unbounded, since the claim bounds it at one clipped payload a turn.
     tx: Option<tokio::sync::mpsc::UnboundedSender<QueueItem>>,
     worker: Option<tokio::task::JoinHandle<()>>,
 }
@@ -255,7 +259,8 @@ impl Drop for TurnEndQueue {
     /// If the loop unwinds instead of draining, the worker still holds an `Arc<SessionActor>`.
     fn drop(&mut self) {
         if let Some(worker) = self.worker.take() {
-            // Disarm first: `abort` only schedules cancellation Until the runtime reaps the task a send still succeeds.
+            // Disarm first: `abort` only schedules cancellation
+            // Until the runtime reaps the task a send still succeeds and would commit a claim nothing will ever dispatch
             self.disarm();
             tracing::warn!("the session ended unexpectedly; any queued turn-end hooks did not run");
             worker.abort();
@@ -269,7 +274,7 @@ impl SessionActor {
         if !self.has_enabled_hooks_for(event::HookEventName::StopCancelled) {
             return None;
         }
-        // Joined report: a cancelled salvaged turn's hook payload carries every committed segment.
+        // Joined report: a cancelled salvaged turn's hook payload carries every committed segment, not just the last fragment
         self.chat_state_handle.get_trailing_assistant_report().await
     }
 

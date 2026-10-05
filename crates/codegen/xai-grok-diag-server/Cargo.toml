@@ -7,7 +7,7 @@ description = "In-guest diagnostics HTTP server (/ready, /statusz, /logs) for th
 
 [dependencies]
 anyhow = { workspace = true }
-# Router/handlers for the endpoints; pinned to the workspace version
+# Router/handlers for the three endpoints; pinned to the workspace version
 # already used by the sibling preview proxy.
 axum = { workspace = true }
 serde = { workspace = true }

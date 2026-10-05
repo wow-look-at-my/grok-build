@@ -1,4 +1,6 @@
 //! Unstyled location pieces for the welcome top bar and the dashboard header.
+//! The session header reuses [`worktree_badge`] and [`branch_label`] only.
+//! Pure over the per-cwd git probe; nothing here spawns `git`.
 
 use std::path::Path;
 
@@ -30,8 +32,8 @@ pub(crate) struct LocationParts {
     pub cwd_display: String,
 }
 
-/// The dashboard header passes its staged `app.cwd` so the line tracks a
-/// `/cd` immediately.
+/// The dashboard header passes its staged `app.cwd` so the line tracks a `/cd` immediately, before (or even if) `Effect::SetWorkingDir` moves the process cwd.
+/// Safe to call during render: it reads the per-cwd git cache and never blocks or spawns `git`.
 pub(crate) fn location_parts(cwd: &Path) -> LocationParts {
     location_parts_from(cwd, git_info::cwd_git_info_lazy(cwd))
 }

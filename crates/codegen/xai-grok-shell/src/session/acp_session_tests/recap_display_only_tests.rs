@@ -1,4 +1,7 @@
 //! Regression tests for the session-recap display-only invariant.
+//!
+//! A recap must NEVER mutate the model conversation: it is generated from a read-only snapshot and sent to the client as a notification only.
+//! These tests lock that contract: after `handle_recap` returns, `get_conversation()` must be byte-identical to what it was before.
 
 use super::support::*;
 use super::*;
@@ -749,9 +752,11 @@ async fn manual_recap_over_budget_trims_persisted_request_and_is_display_only() 
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, mut persistence_rx) =
                 tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            // A window of 8_000 gives prompt_budget = 8_000 * 85 / 100 - 4_000 = 2_800
             const PROMPT_BUDGET: u64 = 8_000 * 85 / 100 - 4_000;
             let actor = create_test_actor(0, 8_000, 85, gateway_tx, persistence_tx).await;
 
+            // An oversized real user turn (~40 KB, about 10k estimated tokens) forces the over-budget branch regardless of the harness `total_tokens` arg
             actor.chat_state_handle.replace_conversation(vec![
                 ConversationItem::system("you are a coding agent"),
                 ConversationItem::user("x".repeat(40_000)),
@@ -826,6 +831,8 @@ fn over_budget_recap_serializes_to_well_formed_messages_request() {
         vendor: Default::default(),
     };
 
+    // An over-budget (window 8_000) conversation that ENDS in a tool run and carries reasoning
+    // A valid interior tool pair sits behind a non-tool barrier so it survives the trim
     let conv = vec![
         ConversationItem::system("you are a coding agent"),
         ConversationItem::user("o".repeat(60_000)), // oldest, dropped by trim
@@ -1195,7 +1202,7 @@ async fn turn_summary_generate_persists_and_broadcasts() {
                 );
                 let summary = update.get("summary").and_then(|v| v.as_str()).unwrap_or("");
                 assert!(!summary.is_empty(), "broadcast summary must be non-empty");
-                // The transient path must not stamp eventId.
+                // The transient path must not stamp eventId, the cursor a reconnect resumes from
                 let meta = value.get("meta");
                 assert!(
                     meta.and_then(|m| m.get("eventId")).is_none(),

@@ -1,4 +1,5 @@
-//! The HTTP client the loopback doubles' own tests send requests with.
+//! The one HTTP client the loopback doubles' own tests send requests with.
+
 use reqwest::{Method, Response};
 
 #[allow(clippy::disallowed_methods, reason = "loopback only client")]

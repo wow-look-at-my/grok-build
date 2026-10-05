@@ -108,7 +108,8 @@ pub mod leader {
         let cleanup = close_clients(clients).await;
         let mut cleanup_error = cleanup.error;
         if !cleanup.all_closed {
-            // This error-only path requests hard kills.
+            // This error-only path requests hard kills, then intentionally leaks concrete owners so panic unwind cannot run blocking Drop
+            // The leak is bounded by the lifetime of the test process.
             for client in clients.iter_mut() {
                 client.contain_failed_cleanup_for_unwind();
             }

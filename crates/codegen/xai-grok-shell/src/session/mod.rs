@@ -34,8 +34,8 @@ pub use prod_mc_cli_chat_proxy_types::feedback_types::{
     validate_feedback_images,
 };
 pub use xai_fsnotify::{FsConfig, FsEvent, FsEventKind, FsEventSource, FsNotifyError, GitMetaKind};
-/// `false` twin: this template is not compiled into this build, so no
-/// template matches.
+/// `false` twin: this template is not compiled into this build, so no template matches.
+/// Keeps ungated call sites compiling in both configurations.
 pub(crate) fn is_cursor_user_template(
     _template: &xai_grok_agent::prompt::user_message::UserMessageTemplate,
 ) -> bool {
@@ -112,14 +112,18 @@ pub enum PromptOrigin {
         completion_id: String,
     },
     /// Server-initiated prompt from the idle-gated notification drain (`maybe_drain_notifications`).
+    /// Batches one or more monitor-event or bash-task-completed notifications into a single turn while the user is idle.
     NotificationDrain,
-    /// The goal orchestrator injects a system reminder into context and then triggers a model turn.
+    /// The goal orchestrator injects a system reminder into context and then triggers a model turn so the model can print a visible progress update.
     GoalSummary,
     /// Nudge injected when the verification stage rejects an `update_goal(completed: true)` attempt.
+    /// Carries the "not yet achieved — keep working" system-reminder body alongside the path to the persisted details file.
+    /// The variant name retains the `Classifier` prefix for wire stability.
     GoalClassifierNudge,
     /// Scheduled task (`/loop`) prompt fired by the scheduler via the pager.
     SchedulerFired,
-    /// The shell re-parked `exit_plan_mode` on resume, the user approved/revised, and the shell injects the follow-up turn. Synthetic.
+    /// The shell re-parked `exit_plan_mode` on resume, the user approved/revised, and the shell injects the follow-up turn.
+    /// Synthetic: the user never typed it, so it stays out of prompt history, but it still runs a real turn.
     PlanResume,
 }
 impl PromptOrigin {

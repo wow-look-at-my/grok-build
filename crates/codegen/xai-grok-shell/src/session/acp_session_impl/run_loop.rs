@@ -4,8 +4,9 @@ use super::*;
 use xai_grok_telemetry::instrument_task;
 use xai_grok_telemetry::region::Parent;
 use xai_grok_telemetry::session_end::{self, Phase, SharedSessionEndTimer};
-/// The `YoloToggled` event to emit after `set_yolo_mode(requested)`:
-/// `Some(actual)` only on a real change.
+/// The `YoloToggled` event to emit after `set_yolo_mode(requested)`: `Some(actual)` only on a real change.
+/// Callers MUST pass the post-call state read back via `is_yolo_mode()`, never the request.
+/// Under the always-approve pin the manager clamps a requested ON to OFF, so reporting the request would announce a turn-on that never happened.
 pub(super) fn yolo_toggle_report(was: bool, actual: bool) -> Option<bool> {
     (was != actual).then_some(actual)
 }
@@ -26,9 +27,12 @@ mod yolo_toggle_report_tests {
 /// lands in a running turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InFlightStream {
-    /// Cut the stream so the text reaches the next request (`SessionCommand::Interject`, the user's own interjection).
+    /// Cut the stream so the text reaches the very next request
+    /// (`SessionCommand::Interject`, the user's own interjection).
     Cancel,
-    /// Leave the stream alone; the text waits for the turn's next drain point.
+    /// Leave the stream alone; the text waits for the turn's next drain point
+    /// (`SessionCommand::InterjectWithoutCancel`, context handed to a live
+    /// subagent such as the goal planner).
     Keep,
 }
 /// Deliver an interjection to this session. A running turn buffers it; with
@@ -41,7 +45,10 @@ async fn deliver_interjection(
     images: Vec<acp::ImageContent>,
     in_flight: InFlightStream,
 ) {
-    // Broadcast to every attached client so all panes viewing this session render the interjection block.
+    // Broadcast to every attached client so all panes viewing this session
+    // render the interjection block, not just the originating client. The
+    // originator dedups this echo by `id` against its optimistic local block;
+    // viewers render it.
     session.broadcast_interjection(&text, id.as_deref());
     // Telemetry at enqueue (not drain) so it is recorded even when a cancel
     // clears the buffer before the next drain point.
@@ -53,7 +60,9 @@ async fn deliver_interjection(
             redirect_kind: crate::session::events::RedirectKind::Interjection,
         });
     // Buffer only into an actually-running turn: the buffer is drained
-    // exclusively by the turn loop, so an interjection arriving.
+    // exclusively by the turn loop, so an interjection arriving while idle
+    // (the pager's running-state check races turn end) would strand forever
+    // and silently drop the message. Run it as its own prompt turn instead.
     let turn_running = session
         .current_prompt_id
         .lock()
@@ -88,15 +97,17 @@ fn spawn_dream_check(session: &Arc<SessionActor>) -> tokio::task::JoinHandle<()>
         session.maybe_run_dream().await;
     })
 }
-/// Abort a still-running dream and wait for it to stop, so session-end index
-/// work never overlaps it.
+/// Abort a still-running dream and wait for it to stop, so session-end index work never overlaps it.
+/// A finished dream makes this a no-op; a live one is parked on the model call, so the abort returns
+/// at once without stamping the marker, leaving the gate open for the next launch.
 async fn stop_dream(dream_task: &mut Option<tokio::task::JoinHandle<()>>) {
     if let Some(handle) = dream_task.take() {
         handle.abort();
         let _ = handle.await;
     }
 }
-/// Best-effort removal of this session's scratch staging on teardown. A no-op in builds without a scratch producer.
+/// Best-effort removal of this session's scratch staging on teardown.
+/// A no-op in builds without a scratch producer.
 fn cleanup_session_scratch(_session: &SessionActor) {}
 const DEFERRED_START_CANCEL_JOIN: std::time::Duration = std::time::Duration::from_millis(500);
 pub(super) struct DeferredStart {
@@ -317,7 +328,8 @@ struct StartupTasks {
     _context_snapshot: Option<crate::util::AbortOnDrop>,
     mcp_startup: StartupTaskSet,
 }
-/// Startup tasks handed over by `&self` actor methods, each holding a strong `Arc` to the actor.
+/// Startup tasks handed over by `&self` actor methods, each holding a strong `Arc` to the actor. Owned by the run
+/// loop, so no task keeps the session alive past it.
 pub(super) struct StartupTaskSet(std::rc::Rc<std::cell::RefCell<tokio::task::JoinSet<()>>>);
 impl StartupTaskSet {
     pub(super) fn install(actor: &SessionActor) -> Self {
@@ -617,7 +629,8 @@ pub(super) async fn run_session(
                     && !session.startup_hints.is_subagent => {
                     tracing::debug!(target: xai_grok_telemetry::memory_log::TARGET,
                         "MEMORY_DREAM_CHECK: timer fired");
-                    // Only start a new dream when the one has finished.
+                    // Only start a new dream when the previous one has finished; a shorter check
+                    // interval must not abort an in-flight consolidation.
                     if dream_task.as_ref().is_none_or(|h| h.is_finished()) {
                         dream_task = Some(spawn_dream_check(&session));
                     }
@@ -625,13 +638,16 @@ pub(super) async fn run_session(
                         dream_check_sleep.as_mut().reset(tokio::time::Instant::now() + timeout);
                     }
                 }
-                // Layer-3 LazinessDetector: zero the per-session nudge counter whenever the user switches models The cap is per-(session, model).
+                // Layer-3 LazinessDetector: zero the per-session nudge counter whenever the user switches models
+                // The cap is per-(session, model); switching is a deliberate user action that resets expectations
+                // `.changed()` only resolves on switches AFTER subscription, so there is no stored-permit hazard
                 changed = model_switch_rx.changed() => {
                     if changed.is_ok() {
                         let new_gen = *model_switch_rx.borrow_and_update();
                         session.handle_model_switch_for_laziness(new_gen).await;
                     }
                 }
+                // Events from the ChatStateActor that the session loop must react to
                 event = chat_state_event_rx.recv() => {
                     match event {
                         Some(xai_chat_state::ChatStateEvent::ConversationReset { new_len }) => {
@@ -669,8 +685,10 @@ pub(super) async fn run_session(
                         }
                         Some(xai_chat_state::ChatStateEvent::PromptIndexChanged { .. }) |
                         Some(xai_chat_state::ChatStateEvent::TokensUpdated { .. }) => {
+                            // Prompt index and token updates are informational; consumers query the actor directly when they need them
                         }
                         None => {
+                            // Actor shut down; no more events
                         }
                     }
                 }
@@ -709,7 +727,9 @@ pub(super) async fn run_session(
                                 xai_message_delivery_core::TerminalCause::ActorDrop,
                             )
                             .await;
-                        // ── session_end (channel-closed path) ──────── Queued reports first.
+                        // ── session_end (channel-closed path) ────────
+                        // Queued reports first, so an earlier turn's report precedes the session-end `Stop`
+                        // Hooks fire BEFORE memory auto-save
                         let end_timer = session_end::SessionEndTimer::new_shared();
                         turn_end_queue.flush().await;
                         fire_session_end_hooks(&session, "channel_closed", &end_timer, &mut deferred_start).await;
@@ -754,7 +774,9 @@ pub(super) async fn run_session(
                             session.emit_status_snapshot_detached();
                         }
                         SessionCommand::RestorePlanApproval => {
-                            // Spawn the restored plan-approval round-trip so the command loop is not blocked.
+                            // Spawn the restored plan-approval round-trip so the command loop is not blocked on the open-ended user decision.
+                            // Detaching the handle is safe: the task lives on this session's `LocalSet` and is dropped when the session ends.
+                            // Dropping it cancels the `request_plan_approval` future and clears `awaiting` via the guard `resume_plan_approval` also self-guards against a concurrent or duplicate restore via `pending_interactions`.
                             let s = session.clone();
                             let completion_tx = completion_tx.clone();
                             tokio::task::spawn_local(async move {
@@ -786,7 +808,8 @@ pub(super) async fn run_session(
                                 continue;
                             }
                             session.ensure_prefix_ready().await;
-                            // Clear suppression: the user is re-engaging Synthetic auto-wake prompts skip this; the user has not re-engaged.
+                            // Clear suppression: the user is re-engaging
+                            // Synthetic auto-wake prompts skip this; the user has not actually re-engaged, so post-cancel suppression must hold
                             if !origin.is_synthetic() {
                                 if let Some(gate) = &session.tool_context.task_wake_suppressed {
                                     gate.set(false);
@@ -806,6 +829,8 @@ pub(super) async fn run_session(
                                     Some(serde_json::json!({ "reason": "user_intake" })),
                                 );
                                 // Layer-3 LazinessDetector wake: bump the monotonic counter.
+                                // Any classifier poll-loop already running snapshots a stale value and aborts.
+                                // Synthetic prompts (NotificationDrain, GoalSummary, auto-wake) are not real user input and must NOT bump it.
                                 session
                                     .user_input_generation
                                     .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -914,6 +939,7 @@ pub(super) async fn run_session(
                                     "OVERRIDE_MODEL: changing model name in sampling config"
                                 );
                                 // Update signals so primaryModelId and modelsUsed reflect the override, not the agent default (e.g. "grok-4.5").
+                                // set_primary_model also adds to models_used.
                                 session.signals_handle().set_primary_model(&model_name);
                                 cfg.model = model_name.clone();
                                 cfg.extra_headers.extend(extra_headers);
@@ -1101,7 +1127,8 @@ pub(super) async fn run_session(
                                         xai_grok_tools::implementations::grok_build::monitor::types::MonitorEventNotification {
                                             task_id: task_id.clone(),
                                             event_text,
-                                            // Tag with this session's id so the shared (leader-mode) buffer drains show it only here The bridge guard guarantees this event is owned.
+                                            // Tag with this session's id so the shared (leader-mode) buffer drains show it only here
+                                            // The bridge guard guarantees this event is owned by this session
                                             owner_session_id: Some(
                                                 session.session_info.id.0.to_string(),
                                             ),
@@ -1154,7 +1181,7 @@ pub(super) async fn run_session(
                             SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
                         }
                         SessionCommand::EditQueuedPrompt { id, new_text, editor } => {
-                            // Re-kick so a held front can start.
+                            // Re-kick so a previously held front can start.
                             if session.handle_edit_queued_prompt(&id, new_text, editor.as_deref()).await {
                                 session.release_hook_block_hold("queue_edit").await;
                             }
@@ -1165,7 +1192,8 @@ pub(super) async fn run_session(
                             session.handle_hold_edit(id).await;
                         }
                         SessionCommand::ReleaseEdit { id } => {
-                            // No hook-hold release: ReleaseEdit also fires on a cancelled editor.
+                            // No hook-hold release: ReleaseEdit also fires on a cancelled editor, and a peek is not re-engagement
+                            // The save path (EditQueuedPrompt) releases.
                             session.handle_release_edit(&id).await;
                             // Unblocks an editable front that was parked under edit hold.
                             SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
@@ -1190,38 +1218,48 @@ pub(super) async fn run_session(
                             }
                         }
                         SessionCommand::DeliverQueuedPromptsNow => {
-                            // . Harvest first: the cancel only pays off if there is something to drain after it.
+                            // The user asked for the queue NOW, so the stream
+                            // the model is mid-way through is what they are
+                            // interrupting. Harvest first: the cancel only pays
+                            // off if there is something to drain after it.
                             if session.harvest_queued_prompts_into_interjections(true).await {
                                 session.cancel_in_flight_stream_for_interjection();
                             }
                         }
                         SessionCommand::Cancel(options) => {
                             // Flush the actor-owned replay buffer before tearing down the running turn.
+                            // Chunks still pending at cancel (notably.
+                            // Ctrl+C It must reach disk before the trace upload snapshots the session directory.
                             if let Some(notification) = replay_buffer.flush() {
                                 session.emit_buffered(notification).await;
                             }
                             // Clear, don't flush: converting interjections to prompt turns would restart the model after a stop
                             session.pending_interjections.clear();
-                            // Drop a stale asap-injection cancel flag and the in-flight id.
+                            // Drop a stale asap-injection cancel flag and the
+                            // in-flight id so they cannot affect a later turn.
                             session
                                 .interjection_cancel_requested
                                 .store(false, std::sync::atomic::Ordering::SeqCst);
                             *session.in_flight_sampler_request_id.lock() = None;
                             // Do not abort turn summary here.
+                            // Summaries spawn only after a successful turn, so a summary call still running describes that prior success.
+                            // Cancel targets the current turn; the prior summary line shows until replaced, so it should still finish.
                             let is_rewind = matches!(
                                 &options.history,
                                 crate::session::CancelHistoryDisposition::RewindIfNoOutput { .. }
                             );
                             let cancel = session.cancel_running_task(options).await;
-                            // A rewind settles on its own rail (`settled` stays false).
+                            // A rewind settles on its own rail (`settled` stays false), so it still gets the post-cancel kick.
+                            // An unsettled non-rewind cancel lost the finalization claim; the owner's release re-kicks the queue.
                             if cancel.settled || is_rewind {
-                                // Auto-pause the active goal so timers stop and the pager shows "paused" instead of "active" Shared with the doom-loop and back-off paths.
+                                // Auto-pause the active goal so timers stop and the pager shows "paused" instead of "active"
+                                // Shared with the doom-loop and back-off paths via `auto_pause_goal_if_active`
                                 session
                                     .auto_pause_goal_if_active(
                                         crate::session::goal_tracker::GoalPauseReason::User,
                                     )
                                     .await;
-                                // Kick any already-queued prompt.
+                                // Kick any already-queued prompt; the aborted task can't send the completion message it would otherwise wait for
                                 SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
                                 // An armed barrier must outlive the cancel; only a clear one lets queued notifications drain
                                 if cancel.barrier == super::cancel::WakeBarrier::Clear {
@@ -1251,6 +1289,8 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::ReloadHooks => {
                             // Re-discover the session's project hooks on the now-flipped folder-trust verdict.
+                            // Run INLINE on the serialized command loop (not a spawned task) like `ReloadPlugins` `reload_hooks_impl` mutates `hook_registry`.
+                            // The file-header `await_holding_refcell_ref` allow assumes no concurrent mutation; spawning would race turn tasks.
                             if !session.startup_hints.is_subagent {
                                 let _ = session.reload_hooks_impl().await;
                             }
@@ -1315,14 +1355,17 @@ pub(super) async fn run_session(
                             let was = session.permissions.is_yolo_mode();
                             tracing::info!("Session received SetYoloMode: {}", enabled);
                             session.permissions.set_yolo_mode(enabled);
-                            // Report the ACTUAL state, not the request Under the always-approve pin the manager clamps a requested.
+                            // Report the ACTUAL state, not the request
+                            // Under the always-approve pin the manager clamps a requested ON to OFF
+                            // Emitting `enabled` would then announce a turn-on that never happened
                             let actual = session.permissions.is_yolo_mode();
                             if let Some(enabled) = yolo_toggle_report(was, actual) {
                                 session.emit_event(crate::session::events::Event::YoloToggled { enabled });
                             }
                         }
                         SessionCommand::SetAutoMode { enabled } => {
-                            // Feature gate: a runtime request to enable auto is honored only.
+                            // Feature gate: a runtime request to enable auto is honored only when the feature is enabled
+                            // A client notification can't bypass the gate
                             let enabled = enabled
                                 && crate::util::config::auto_permission_mode_enabled_from_disk();
                             tracing::info!("Session received SetAutoMode: {}", enabled);
@@ -1453,6 +1496,8 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::CopyFile { respond_to } => {
                             // Flush the actor-owned replay buffer before tearing down the running turn.
+                            // Chunks still pending at cancel (notably AgentThoughtChunk reasoning text) then get committed to updates.jsonl.
+                            // A long reasoning stream's tail can sit in the buffer when the user hits Ctrl+C.
                             if let Some(notification) = replay_buffer.flush() {
                                 session.emit_buffered(notification).await;
                             }
@@ -1464,11 +1509,14 @@ pub(super) async fn run_session(
                             let _ = respond_to.send(session.is_busy().await);
                         }
                         SessionCommand::FlushComplete { respond_to } => {
-                            // Flush the actor-owned replay buffer inline This branch already runs inside `run_session()` Sending a replay flush event.
+                            // Flush the actor-owned replay buffer inline
+                            // This branch already runs inside `run_session()`
+                            // Sending a replay flush event to `event_tx` would deadlock waiting for the same loop to process its own mailbox
                             if let Some(notification) = replay_buffer.flush() {
                                 session.emit_buffered(notification).await;
                             }
-                            // Chain through the persistence actor: signal only after flush_pending() completes on disk.
+                            // Chain through the persistence actor: signal only after flush_pending() completes on disk
+                            // That makes FlushComplete a true sync barrier
                             let _ = session
                                 .notifications.persistence_tx
                                 .send(PersistenceMsg::FlushAndAck { respond_to });
@@ -1525,10 +1573,12 @@ pub(super) async fn run_session(
                                 mcp_servers.len()
                             );
 
-                            // Re-seed the session-scoped MCP output cap (repo `[mcp] max_output_bytes`) BEFORE the unchanged-diff early-exit below.
+                            // Re-seed the session-scoped MCP output cap (repo `[mcp] max_output_bytes`) BEFORE the unchanged-diff early-exit below: this command also fires for `<cwd>/.grok/config.toml` edits, and a cap-only edit changes no server.
                             session.reseed_mcp_output_cap().await;
 
-                            // Capture the dispatcher's event sender alongside the diff `McpClientEvent::ConfigDiff` can then fan out right.
+                            // Capture the dispatcher's event sender alongside the diff
+                            // `McpClientEvent::ConfigDiff` can then fan out right after the in-memory swap
+                            // The emit happens without holding the `mcp_state` lock
                             let (change, dispatch_event_tx) = {
                                 let mut mcp_state = session.mcp_state.lock().await;
                                 let change = session.update_mcp_configs(&mut mcp_state, mcp_servers);
@@ -1792,7 +1842,9 @@ pub(super) async fn run_session(
                                         "Failed to persist disabled_tools to config"
                                     );
                                 }
-                                // Emit the typed. The toggle-tool path is not server-scoped.
+                                // Emit the typed.
+                                // The toggle-tool path is not server-scoped.
+                                // So `server_name` / `tools` stay empty, and skip-if-empty drops them from the wire.
                                 let payload = crate::extensions::mcp::McpToolsChanged {
                                     session_id: session_id.to_string(),
                                     server_name: String::new(),
@@ -2124,7 +2176,8 @@ pub(super) async fn run_session(
                             .await;
                         }
                         SessionCommand::GoalSummaryTurn { prompt_text } => {
-                            // Queue a synthetic prompt so the model gets a turn to print a visible progress summary Mirrors the pattern used.
+                            // Queue a synthetic prompt so the model gets a turn to print a visible progress summary
+                            // Mirrors the pattern used by `maybe_drain_notifications`
                             let prompt_id = format!("goal-summary-{}", uuid::Uuid::now_v7());
                             let prompt_blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(prompt_text))];
                             let (respond_to, _) = tokio::sync::oneshot::channel();
@@ -2224,12 +2277,16 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::TakeStreamingCapture { prompt_id, respond_to } => {
                             // Out-of-band: never touches `chat_state`.
+                            // The live slot is the only source of truth; there is no stash A queued prompt's `StreamStarted` racing this take resets the slot to the new prompt-id.
+                            // We then log a tripwire before returning `None`.
                             let taken = {
                                 let mut cap = session.streaming_turn_capture.lock();
                                 if cap.prompt_id.as_deref() == Some(prompt_id.as_str()) {
                                     Some(std::mem::take(&mut *cap))
                                 } else {
-                                    // Race: the live slot now belongs to a different turn Drop this take rather than misattribute the partial The warn! is a production tripwire.
+                                    // Race: the live slot now belongs to a different turn
+                                    // Drop this take rather than misattribute the partial
+                                    // The warn! is a production tripwire: if it ever fires in real traffic, add a per-prompt stash
                                     if !cap.is_empty() {
                                         tracing::warn!(
                                             requested_prompt_id = %prompt_id,
@@ -2241,7 +2298,9 @@ pub(super) async fn run_session(
                                     None
                                 }
                             };
-                            // Consolidate outside the lock: `finalize_for_upload` builds an up-to-8MB joined string It must not run while sampler events.
+                            // Consolidate outside the lock: `finalize_for_upload` builds an up-to-8MB joined string
+                            // It must not run while sampler events for a racing same-session turn contend for the mutex
+                            // Keep only uncommitted generations; if the capture is empty afterwards there is nothing to upload
                             let result = taken.and_then(|mut cap| {
                                 cap.finalize_for_upload();
                                 (!cap.is_empty()).then_some(cap)
@@ -2261,7 +2320,9 @@ pub(super) async fn run_session(
                             let end_timer = session_end::SessionEndTimer::new_shared();
                             session.persist_resume_status().await;
                             shutdown_workflows(&session, &end_timer).await;
-                            // Flush the actor-owned replay buffer so streamed chunks still pending at shutdown are committed.
+                            // Flush the actor-owned replay buffer so streamed chunks still pending at shutdown are committed to updates.jsonl.
+                            // The commit must precede the session-directory snapshot for trace upload.
+                            // Mirrors the same flush in the.
                             if let Some(notification) = replay_buffer.flush() {
                                 session.emit_buffered(notification).await;
                             }
@@ -2286,10 +2347,13 @@ pub(super) async fn run_session(
                                     xai_message_delivery_core::TerminalCause::HardTeardown,
                                 )
                                 .await;
-                            // Drop any queued synthetic auto-wake prompts and pending notifications.
+                            // Drop any queued synthetic auto-wake prompts and pending notifications before running hooks A synthetic prompt can slip through the per-tool-result sweep A later persistence path would then flush it to chat_history.jsonl.
+                            // That leaves a trailing `<system-reminder>` with no assistant reply.
+                            // Placed BEFORE hook dispatch so the cleanup runs even if hooks abort.
                             session.drop_pending_synthetic_items().await;
 
-                            // ── session_end (shutdown path) ──────────── Hooks fire.
+                            // ── session_end (shutdown path) ────────────
+                            // Hooks fire BEFORE memory auto-save
                             turn_end_queue.flush().await;
                             fire_session_end_hooks(&session, "shutdown", &end_timer, &mut deferred_start).await;
                             session.memory.stop_capture_worker().await;
@@ -2328,7 +2392,9 @@ pub(super) async fn run_session(
                                 xai_message_delivery_core::TerminalCause::ActorDrop,
                             )
                             .await;
-                        // Completion channel closed: full feedback teardown so the final signal sync and upload drain still run Cancel alone does not force-sync.
+                        // Completion channel closed: full feedback teardown so the final signal sync and upload drain still run
+                        // Cancel alone does not force-sync; shutdown owns that
+                        // No session-end hooks here, but the flush still precedes `shutdown_workflows`, which makes a queued report's entry durable
                         let end_timer = session_end::SessionEndTimer::new_shared();
                         turn_end_queue.flush().await;
                         session.memory.stop_capture_worker().await;
@@ -2342,7 +2408,9 @@ pub(super) async fn run_session(
                             .await;
                         return;
                     };
-                    // Flush any buffered turn deltas before `handle_completion` emits the durable `TurnCompleted` `TurnCompleted` then lands.
+                    // Flush any buffered turn deltas before `handle_completion` emits the durable `TurnCompleted`
+                    // `TurnCompleted` then lands in updates.jsonl strictly after the turn's last `session/update` delta
+                    // Mirrors the Cancel / Shutdown / FlushComplete arms
                     if let Some(notification) = replay_buffer.flush() {
                         session.emit_buffered(notification).await;
                     }
@@ -2386,11 +2454,17 @@ pub(super) async fn run_session(
                     if let Some(processed) = processed {
                         let _ = processed.send(());
                     }
-                    // A Shift+Tab to another agent during the turn.
+                    // A Shift+Tab to another agent during the turn. The next
+                    // turn must run under that agent's prompt and tools.
                     session.apply_pending_mode_agent().await;
-                    // Drain monitor events that were routed to the mid-turn buffer but arrived.
+                    // Drain monitor events that were routed to the mid-turn buffer but arrived after the turn ended
+                    // The is_turn_active check races the buffer push
                     session.drain_monitor_buffer_to_pending().await;
-                    // Backstop for a `/compact` armed mid-turn.
+                    // Backstop for a `/compact` armed mid-turn: a turn that
+                    // answered in one pass reaches no second pre-sampling
+                    // boundary, so nothing inside it ran the request. Spawned,
+                    // not awaited — a compaction on this loop blocks the Cancel
+                    // the user presses to stop it.
                     if session.has_pending_manual_compact() {
                         let s = session.clone();
                         tokio::task::spawn_local(async move {
@@ -2403,14 +2477,18 @@ pub(super) async fn run_session(
                             .await;
                     }
                     // Goal continuation (success) or back-off (non-success).
+                    // Owns the streak-tracking and reminder-injection path.
                     session
                         .handle_turn_end(turn_succeeded, suppress_goal_continuation)
                         .await;
                     // Convert them to front-of-queue prompt turns so the message runs instead of stranding.
+                    // INVARIANT: this flush must only ever see interjections aimed at the turn that just completed.
+                    // Both cancel paths drain the buffer before their completion arrives.
                     let flushed_interjections = session.flush_stranded_interjections().await;
                     if flushed_interjections > 0 {
                         tracing::info!("Flushed stranded interjection(s) into prompt turns");
-                        // Typed before the block verdict was visible.
+                        // Typed before the block verdict was visible, so they stay under the hook-block hold instead of auto-running
+                        // The notice keeps them from being parked silently
                         if session.state.lock().await.hook_block_held() {
                             session
                                 .send_hook_annotation(&format!(
@@ -2423,17 +2501,22 @@ pub(super) async fn run_session(
                     // If no user prompt started, check for pending notifications
                     SessionActor::maybe_drain_notifications(session.clone(), completion_tx.clone()).await;
                     session.emit_session_idle_if_idle().await;
-                    // LazinessDetector: spawn an idle-triggered classifier
-                    // dispatch.
+                    // LazinessDetector: spawn an idle-triggered classifier dispatch.
+                    // The method is a no-op when the per-model `laziness_detector.enabled = false` (the v1 default for every model).
+                    // No classification cost is incurred without explicit opt-in.
                     {
                         let s = session.clone();
                         tokio::task::spawn_local(async move {
                             s.maybe_fire_laziness_check().await;
                         });
                     }
-                    // Per-turn dashboard summary (display-only side-call).
+                    // Per-turn dashboard summary (display-only side-call); spawned so the actor loop keeps accepting commands.
+                    // `turn_succeeded` keeps cancelled/errored/refused turns from triggering a fresh model call.
+                    // A user who hit Ctrl+C wants model activity to stop.
                     if turn_ran && turn_succeeded {
                         session.restart_turn_summary(completed_prompt_id);
+                        // Early-session auto-title refresh (turns 3 and 6), then frozen
+                        // Same success gating as the turn summary
                         session.maybe_refresh_title();
                     }
                 }

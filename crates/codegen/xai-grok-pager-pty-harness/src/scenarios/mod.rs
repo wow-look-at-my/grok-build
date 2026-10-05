@@ -1,4 +1,7 @@
 //! Named scenarios that drive content into the pager and measure frame timing.
+//!
+//! Each scenario is a function `async fn run(&mut PtyHarness, &ContentController)` returning a [`BenchResults`].
+//! Scenarios are dispatched by name via the [`Scenario`] enum for the `pty-bench` CLI and for ad-hoc test usage.
 
 use std::time::Duration;
 

@@ -1,4 +1,6 @@
 //! Applies a model switch to a session, the ungated path.
+//! `set_session_model` enforces the `allowed_models` gate before delegating here.
+//! Internal callers (`new_session`, `load_session`) call `apply` directly.
 use crate::agent::config;
 use crate::agent::mvp_agent::{
     MvpAgent, agent_name_after_model_switch, harnesses_are_compatible, resolve_required_agent_type,
@@ -92,7 +94,9 @@ pub(crate) async fn apply(
             "set_session_model: agent type compatibility check"
         );
         if is_mismatch && turn_count > 0 {
-            // The turns already here were produced by another harness.
+            // The turns already here were produced by another harness, so their
+            // reasoning and tool calls are not something the new model can
+            // ingest. Convert the history to plain text and switch anyway.
             let (flatten_tx, flatten_rx) = oneshot::channel();
             let _ = handle.cmd_tx.send(SessionCommand::FlattenHistory {
                 responds_to: flatten_tx,

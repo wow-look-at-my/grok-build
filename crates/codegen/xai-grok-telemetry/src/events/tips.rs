@@ -13,7 +13,7 @@ pub enum ContextualTipKind {
     SmallScreen,
     /// A double-click on the fold/nav path shows a tip to enable Word select in settings.
     WordSelect,
-    /// Nearby drag-copies → tip naming /copy and /export.
+    /// Three nearby drag-copies → tip naming /copy and /export.
     ExportCopy,
     /// An SSH session without `grok wrap` shows a tip to wrap the ssh command locally.
     SshWrap,
@@ -27,8 +27,8 @@ pub enum ContextualTipAction {
     Accepted,
 }
 
-/// One contextual-hint impression or acceptance: per tip, how often it is
-/// shown vs. acted on.
+/// One contextual-hint impression or acceptance: per tip, how often it is shown vs. acted on.
+/// The `action` property drives the product-analytics funnel.
 #[derive(Serialize)]
 pub struct ContextualTip {
     pub tip: ContextualTipKind,

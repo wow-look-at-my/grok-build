@@ -29,6 +29,8 @@ pub enum PatternMode {
 }
 
 /// Action to take when a rule matches.
+///
+/// The default is Deny (CWE-1188): omitting the `action` field in a TOML permission rule must not silently create a catch-all allow rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RuleAction {

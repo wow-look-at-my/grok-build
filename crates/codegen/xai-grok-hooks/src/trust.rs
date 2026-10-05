@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-// Project-hook trust is no longer stored here.
+// Project-hook trust is no longer stored here: the shell's folder-trust store
+// (`~/.grok/trusted_folders.toml`) is the single authority for whether a repo's project hooks run (the same gate as repo-local MCP/LSP). The helpers below exist only to migrate prior grants out of the legacy file.
 
-/// Path to the project-hook trust file
-/// (`<user_grok_home>/trusted-hook-projects`), or `None` when no user grok
-/// home resolves.
+/// Path to the legacy project-hook trust file (`<user_grok_home>/trusted-hook-projects`), or `None` when no user grok home resolves.
+/// It is retained only for the one-time migration into folder-trust.
 pub fn legacy_trust_file_path() -> Option<PathBuf> {
     Some(xai_grok_config::user_grok_home()?.join(xai_grok_config::TRUSTED_HOOK_PROJECTS_FILENAME))
 }
@@ -37,8 +37,8 @@ pub enum HookSkipReason {
     ManagedOnly,
 }
 
-/// One-shot snapshot of the per-spec skip inputs: the disabled-hooks file and
-/// the `allow_managed_hooks_only` pin.
+/// One-shot snapshot of the per-spec skip inputs: the disabled-hooks file and the `allow_managed_hooks_only` pin.
+/// [`Self::skip_reason`] is the one rule the dispatcher, the stop-gate guard, and the modal apply, so they cannot disagree about what runs.
 #[derive(Debug, Default)]
 pub struct DisabledHooks {
     names: std::collections::HashSet<String>,

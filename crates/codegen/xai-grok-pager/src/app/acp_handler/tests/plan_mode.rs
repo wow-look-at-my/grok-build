@@ -80,7 +80,8 @@
 
     #[test]
     fn exit_plan_mode_empty_opens_placeholder_preview() {
-        // An empty plan.md must still open the approval UI Otherwise the user only sees "Waiting on plan approval" with a dead Tab:plan.
+        // An empty plan.md must still open the approval UI
+        // Otherwise the user only sees "Waiting on plan approval" with a dead Tab:plan and thinks the session is stuck
         let mut app = make_app_with_agent("sess-1");
         let (ext, _rx) = make_exit_plan_ext(None);
 
@@ -108,7 +109,8 @@
 
     #[test]
     fn exit_plan_mode_dismisses_open_modal() {
-        // Regression: if the Ctrl+P command palette is open when the agent calls exit_plan_mode.
+        // Regression: if the Ctrl+P command palette is open when the agent calls exit_plan_mode, the modal must be dismissed
+        // Otherwise the modal hides the line viewer in draw order while input routes to the invisible line viewer, leaving the user stuck
         let mut app = make_app_with_agent("sess-1");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -135,7 +137,8 @@
 
     #[test]
     fn exit_plan_mode_dismisses_open_block_viewer() {
-        // Regression: if an Edit/tool block_viewer is open when exit_plan_mode opens.
+        // Regression: if an Edit/tool block_viewer is open when exit_plan_mode opens, dismiss it so wheel scroll reaches the plan line_viewer
+        // Draw returns on line_viewer (the plan stays visible), but handle_scroll prefers block_viewer while it remains in state
         let mut app = make_app_with_agent("sess-1");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();
@@ -784,7 +787,8 @@
         app.auto_mode_gate = true;
         let id = AgentId(0);
 
-        // Rapid presses from Normal, with no confirmation in between: Normal -> Plan -> Auto.
+        // Two rapid presses from Normal, with no confirmation in between:
+        // Normal -> Plan -> Auto.
         let _ = crate::app::dispatch::dispatch(Action::CycleMode, &mut app);
         let _ = crate::app::dispatch::dispatch(Action::CycleMode, &mut app);
         {
@@ -796,7 +800,8 @@
             assert!(agent.session.is_auto(), "setup: the auto flag is set");
         }
 
-        // The confirmation of the FIRST press (plan) lands now, after the second press already moved the ring to Auto.
+        // The confirmation of the FIRST press (plan) lands now, after the
+        // second press already moved the ring to Auto.
         let (tx, _rx) = tokio::sync::oneshot::channel();
         handle(
             AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {

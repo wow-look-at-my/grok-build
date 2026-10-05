@@ -8,9 +8,10 @@ use crate::deserialize::optional_bool as de_opt_bool_tolerant;
 #[path = "display_refresh_tests.rs"]
 mod tests;
 
-/// Display-refresh probe and auto-cadence settings: one struct for local `[ui.display_refresh]`, remote `display_refresh`, and `UiConfig`. Each
-/// field deserializes tolerantly (wrong types become `None`); unknown keys land in [`Self::extra`] so a settings save cannot drop future knobs.
+/// Display-refresh probe and auto-cadence settings: one struct for local `[ui.display_refresh]`, remote `display_refresh`, and `UiConfig`.
+/// Each field deserializes tolerantly (wrong types become `None`); unknown keys land in [`Self::extra`] so a settings save cannot drop future knobs.
 /// `resolve_display_refresh` resolves it.
+/// Client defaults: probe on, auto on, floor 8 ms, ceiling 16 ms, Hz band 55 to 240.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct DisplayRefreshSettings {
@@ -28,24 +29,28 @@ pub struct DisplayRefreshSettings {
         skip_serializing_if = "Option::is_none"
     )]
     pub auto_cadence_enabled: Option<bool>,
+    /// Lower clamp for auto-derived ms (default 8).
     #[serde(
         default,
         deserialize_with = "de_opt_u32_tolerant",
         skip_serializing_if = "Option::is_none"
     )]
     pub floor_ms: Option<u32>,
+    /// Upper clamp for auto-derived ms (default 16).
     #[serde(
         default,
         deserialize_with = "de_opt_u32_tolerant",
         skip_serializing_if = "Option::is_none"
     )]
     pub ceiling_ms: Option<u32>,
+    /// Minimum accepted probe Hz for auto-cadence (default 55).
     #[serde(
         default,
         deserialize_with = "de_opt_u32_tolerant",
         skip_serializing_if = "Option::is_none"
     )]
     pub min_hz: Option<u32>,
+    /// Maximum accepted probe Hz for auto-cadence (default 165).
     #[serde(
         default,
         deserialize_with = "de_opt_u32_tolerant",

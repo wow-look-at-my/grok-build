@@ -111,8 +111,7 @@ fn every_registered_feature_reads_its_own_remote_setting() {
             Feature::ActiveAgentMessages => settings.active_agent_messages_enabled = Some(value),
             Feature::Dock => settings.dock_enabled = Some(value),
             Feature::TerminalTheme => settings.terminal_theme_enabled = Some(value),
-            // The row with no remote tier, stated as such rather than as a
-            // projection that reads nothing
+            // The one row with no remote tier, stated as such rather than as a projection that reads nothing
             Feature::BackendTools => {
                 assert!(spec.remote.is_none(), "{} grew a remote tier", spec.key);
                 continue;

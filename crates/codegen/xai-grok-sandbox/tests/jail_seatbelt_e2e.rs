@@ -1,4 +1,11 @@
 //! Drives the shipped `--sandbox` Seatbelt builder against real `sandbox-exec`.
+//!
+//! The unit tests read the command the builder produces. They cannot say
+//! whether `sandbox-exec` accepts it, nor — the part that matters for the CI
+//! dot — whether the host worker's fd and its `GROK_CI_HOST_FD` name actually
+//! arrive inside the jail. A command that merely looks right is the failure
+//! this file exists to catch, and on macOS it is the only test that launches
+//! the jail at all.
 
 #![cfg(target_os = "macos")]
 
@@ -51,6 +58,8 @@ fn plan(script: &str, grok_home: &Path, cwd: &Path) -> JailPlan {
         cwd: cwd.to_path_buf(),
         args: vec![OsString::from("-c"), OsString::from(script)],
         defaults: JailDefaults::default(),
+        // Set per test: the point of these two is what happens with, and
+        // without, a host worker to hand over.
         ci_host_fd: None,
     }
 }
@@ -70,12 +79,17 @@ fn the_seatbelt_jail_hands_the_host_worker_fd_and_its_env_to_the_jailed_process(
     let grok_home = fixture_dir("grok-home");
     std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
 
-    // The host worker's own arrangement: a socketpair whose far end stays in the unsandboxed process, its fd made exec-surviving.
+    // The host worker's own arrangement: a socketpair whose far end stays in
+    // the unsandboxed process, its fd made exec-surviving, and its NUMBER
+    // passed into the jail as `GROK_CI_HOST_FD`.
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     let fd = ours.as_raw_fd();
     xai_grok_sandbox::ci_host::inherit_across_exec(fd).expect("clear close-on-exec");
 
-    // Beyond the fd, this is the profile's path-resolution half.
+    // Beyond the fd, this is the profile's path-resolution half: a grant whose
+    // ancestors cannot be stat-ed leaves the jailed process unable to resolve
+    // its own working directory. An unbound path must stay invisible at the
+    // same time — that confinement is what the profile is for.
     let unbound = fixture_dir("unbound");
     let script = format!(
         "printf 'env=%s\\n' \"${{GROK_CI_HOST_FD:-unset}}\"\n\
@@ -117,7 +131,8 @@ fn the_seatbelt_jail_hands_the_host_worker_fd_and_its_env_to_the_jailed_process(
         "a path the jail did not grant must stay invisible: {stdout}"
     );
 
-    // The fd is the connection, not a number: a write from inside the jail has to reach the peer outside it.
+    // The fd is the connection, not just a number: a write from inside the
+    // jail has to reach the peer outside it.
     let mut alive = String::new();
     theirs
         .take(5)
@@ -147,7 +162,9 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     let grok_home = fixture_dir("worker-home");
     std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
 
-    // The host side: the shipped worker loop in a real child of this binary, its socket end dup2'd onto a known fd — what `spawn_ci_host` does.
+    // The host side: the shipped worker loop in a real child of this binary,
+    // its socket end dup2'd onto a known fd — what `spawn_ci_host` does before
+    // a jail exec.
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     let theirs_fd = theirs.into_raw_fd();
     const WORKER_FD: i32 = 3;
@@ -181,7 +198,8 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     xai_grok_sandbox::ci_host::inherit_across_exec(client_fd).expect("clear close-on-exec");
     std::mem::forget(ours); // the jailed child owns it from here.
 
-    // The jailed side: this test binary, in the jail, resolving the worker the way the shipped pager does —.
+    // The jailed side: this test binary, in the jail, resolving the worker the
+    // way the shipped pager does — from the env var the jail set.
     let answer_path = work.join("jail-answer.txt");
     let mut jailed = plan("", &grok_home, &work);
     jailed.self_exe = std::env::current_exe().expect("current test binary");
@@ -192,7 +210,8 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     jailed.ci_host_fd = Some(client_fd);
 
     let output = seatbelt_command(&jailed)
-        // The branch is also the switch that puts the child in jailed-client mode.
+        // The branch is also the switch that puts the child in jailed-client
+        // mode, exactly as the marker env names the worker.
         .env(JAILED_CHILD_ENV, "master")
         .output()
         .expect("sandbox-exec must run");
@@ -220,7 +239,10 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
          nothing-usable sentinel, not nothing at all: {answered:?}"
     );
 
-    // The jailed child is gone, but its copy of the client end was a dup.
+    // The jailed child is gone, but its copy of the client end was a dup: this
+    // process still holds the original, and until that closes the worker's read
+    // loop has no EOF to end on. (`ours` is forgotten above precisely so this
+    // is the single close of that fd.)
     unsafe {
         libc::close(client_fd);
     }
@@ -239,7 +261,8 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
 
 /// Names the fd the parent handed this child its socket on.
 const WORKER_FD_ENV: &str = "GROK_CI_HOST_TEST_FD";
-/// The branch the jailed child asks about.
+/// The branch the jailed child asks about; its presence is also the switch that
+/// makes the child run in jailed-client mode rather than as a test.
 const JAILED_CHILD_ENV: &str = "GROK_JAILED_CHILD_BRANCH";
 
 /// Delegate the parent spawns as the unsandboxed host worker.
@@ -254,7 +277,8 @@ fn seatbelt_worker_self_entry() {
     else {
         return;
     };
-    // SAFETY: the parent dup2'd its socketpair end onto this fd before exec, and nothing else in this process owns it.
+    // SAFETY: the parent dup2'd its socketpair end onto this fd before exec,
+    // and nothing else in this process owns it.
     let stream = unsafe { UnixStream::from_raw_fd(fd) };
     xai_grok_sandbox::ci_host::run_ci_host_worker_on(stream);
 }
@@ -275,7 +299,8 @@ fn seatbelt_jailed_child_self_entry() {
         return;
     };
     report.push_str(&format!("fd={fd}\n"));
-    // SAFETY: the jail handed this process the fd by number and nothing else in this process owns it.
+    // SAFETY: the jail handed this process the fd by number and nothing else
+    // in this process owns it.
     let mut stream = unsafe { UnixStream::from_raw_fd(fd) };
     let answer = match stream.write_all(format!("gh-status {branch}\n").as_bytes()) {
         Err(e) => format!("write failed: {e}"),

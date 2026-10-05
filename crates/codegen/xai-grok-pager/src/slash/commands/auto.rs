@@ -1,4 +1,11 @@
 //! `/auto` toggles auto permission mode (LLM classifier).
+//!
+//! - Off (or always-approve): returns `SetPermissionMode(Auto)`.
+//! - Already auto: returns `SetPermissionMode(Ask)` to toggle off.
+//!
+//! The dispatcher mutates the state, persists it (rolling back on failure), and shows the toast.
+//! Visibility is gated by [`crate::slash::SlashController::set_auto_mode_available`].
+//! `/auto` is hard-hidden when the auto permission-mode feature is off.
 
 use crate::app::actions::{Action, PermissionModeKind};
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

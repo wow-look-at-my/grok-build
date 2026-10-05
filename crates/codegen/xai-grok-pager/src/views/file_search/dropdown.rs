@@ -1,4 +1,6 @@
 //! Dropdown list renderer for @-completion results.
+//!
+//! Rows highlight the selection and the fuzzy-matched characters, long paths truncate with `…`, and a scrollbar appears when results overflow.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -29,6 +31,7 @@ pub fn render_dropdown(buf: &mut Buffer, area: Rect, file_search: &FileSearchSta
     let scroll = file_search.scroll_offset();
     let dir_mode = file_search.is_dir_mode();
 
+    // Reserve 2 columns on the right for the scrollbar (gap and track)
     let needs_scrollbar = topk.len() > area.height as usize;
     let content_width = if needs_scrollbar {
         area.width.saturating_sub(2)

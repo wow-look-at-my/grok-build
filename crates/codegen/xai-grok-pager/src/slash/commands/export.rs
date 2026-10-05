@@ -1,4 +1,11 @@
 //! `/export [filename]` -- export the current conversation transcript as Markdown.
+//!
+//! Omit the filename (or pass empty) to copy the full transcript to the clipboard.
+//! With a filename, writes a UTF-8 .md file (supports ~ expansion, paths with spaces,
+//! and parent directory creation).
+//!
+//! Pager-side only (local TUI execution). Follows the exact patterns from
+//! `copy.rs`, `share.rs`, and the SlashCommand trait in `command.rs`.
 
 use std::path::{Path, PathBuf};
 

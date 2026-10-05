@@ -142,7 +142,8 @@ pub struct HashlineEditError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shifted_to: Option<usize>,
 
-    /// If a shifted match was found, the fresh anchor string the model can retry with (e.g. `"25:abc:rst"`).
+    /// If a shifted match was found, the fresh anchor string the model can
+    /// retry with (e.g. `"25:abc:rst"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shifted_anchor: Option<String>,
 

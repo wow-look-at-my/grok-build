@@ -1,4 +1,7 @@
 //! `lsp` tool - code intelligence via language servers.
+//!
+//! Implementation is in `implementations::lsp`. This module provides the
+//! `LspTool` (Tool trait impl) under the `GrokBuild` namespace.
 
 use std::sync::Arc;
 

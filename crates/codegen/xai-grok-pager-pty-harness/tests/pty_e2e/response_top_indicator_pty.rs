@@ -1,8 +1,13 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
+//
+// An answer taller than the screen leaves the reader at its tail
+// The sticky header's gap row offers a clickable ▲ that snaps the answer's first line to the top
+// It is the discoverable fix for "grok doesn't show you its answer from the top, so you have to scroll a lot"
 #[allow(unused_imports)]
 use super::common::*;
 
 /// First and last line of the streamed answer.
+/// 60 bullets over a 50-row terminal guarantees the answer overflows the viewport.
 const FIRST_LINE: &str = "ANSWERLINE001";
 const LAST_LINE: &str = "ANSWERLINE060";
 
@@ -51,8 +56,8 @@ async fn response_top_indicator_jumps_to_answer_start() {
         .inject_keys(format!("{TOP_PROMPT}\r").as_bytes())
         .expect("submit prompt");
 
-    // Follow mode parks the finished turn at the answer's tail The ▲
-    // renders in the sticky header's gap row as soon.
+    // Follow mode parks the finished turn at the answer's tail
+    // The ▲ renders in the sticky header's gap row as soon as the answer's first line scrolls off the top
     harness
         .wait_for_text(LAST_LINE, Duration::from_secs(60))
         .expect("answer tail visible (follow mode at the bottom)");

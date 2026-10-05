@@ -22,10 +22,14 @@ pub struct DiagnosticsSummary {
     pub diagnostic_count: usize,
 }
 
-/// How many diagnostics one file may contribute to a summary.
+/// How many diagnostics one file may contribute to a summary. A file with forty errors is usually
+/// one mistake seen forty times, and the fortieth line teaches the reader nothing the first ten did
+/// not.
 const MAX_PER_FILE: usize = 10;
 
-/// How many a whole summary may carry.
+/// How many a whole summary may carry. A refresh re-opens every document at once, so without a
+/// ceiling the first one on a large solution could put every problem in the workspace into a single
+/// tool result.
 const MAX_PER_SUMMARY: usize = 30;
 
 /// What a drain found: the lines to show, and the counts that go with them.
@@ -33,7 +37,8 @@ const MAX_PER_SUMMARY: usize = 30;
 struct CollectedDiagnostics {
     lines: Vec<String>,
     file_count: usize,
-    /// Reportable diagnostics found, including any the caps left out — the counts describe what the servers said.
+    /// Reportable diagnostics found, including any the caps left out — the
+    /// counts describe what the servers said, not what survived the trim.
     diagnostic_count: usize,
     shown: usize,
 }
@@ -62,7 +67,9 @@ impl CollectedDiagnostics {
         reportable.sort_by_key(|(label, d)| (*label != "error", d.range.start.line));
         self.diagnostic_count += reportable.len();
 
-        // How many this file may contribute, given what the summary has room for.
+        // How many this file may contribute, given what the summary has room
+        // for. Applying it here rather than counting inside the loop means the
+        // header is only written when something follows it.
         let room = MAX_PER_FILE.min(MAX_PER_SUMMARY.saturating_sub(self.shown));
         let showing: Vec<_> = reportable.into_iter().take(room).collect();
         if showing.is_empty() {
@@ -84,8 +91,9 @@ impl CollectedDiagnostics {
         }
     }
 
-    /// The line that tells the reader something was left out, if anything
-    /// was.
+    /// The line that tells the reader something was left out, if anything was. Silently truncating
+    /// would be worse than not reporting at all: the reader would take a partial list for the whole
+    /// truth and conclude the rest of the file was fine.
     fn trimmed_note(&self) -> Option<String> {
         let hidden = self.diagnostic_count.saturating_sub(self.shown);
         (hidden > 0).then(|| format!("… and {hidden} more not shown"))
@@ -99,13 +107,17 @@ pub struct LspManager {
     pub initialized: bool,
     pub tools_enabled: bool,
     pub pending_diagnostics_by_server: HashMap<String, PendingEdits>,
-    /// How long a file is held waiting for a verdict, and how long a silent server is blocked on.
+    /// How long a file is held waiting for a verdict, and how long a silent
+    /// server is blocked on. Configurable so a test can exercise the real drain
+    /// without spending the production durations waiting.
     pub pending_policy: PendingPolicy,
     pub diagnostics_ready: DiagnosticsNotify,
     pub shutting_down: bool,
     pub next_lifecycle_id: u64,
     pub notification_handle: crate::notification::ToolNotificationHandle,
-    /// When set, each spawned server's process group is registered here so the agent can reap the language-server trees.
+    /// When set, each spawned server's process group is registered here so the
+    /// agent can reap the language-server trees on session close. `None` outside
+    /// an agent session.
     pub process_scope: Option<ProcessScope>,
 }
 
@@ -207,7 +219,9 @@ impl LspManager {
             {
                 Ok(mut client) => {
                     if !client.enroll(self.process_scope.as_ref()) {
-                        // Session teardown raced this start: the closed scope killed the child at registration.
+                        // Session teardown raced this start: the closed scope killed the child at registration. Installing the client would
+                        // advertise a dead server and feed the restart monitor respawn churn, so stop starting servers for this manager
+                        // instead.
                         tracing::info!(server = %name, "session scope closed during LSP start; discarding server");
                         self.shutting_down = true;
                         return;
@@ -315,7 +329,9 @@ impl LspManager {
             .any(|pending| !pending.is_empty())
     }
 
-    /// Whether any pending server is still expected to answer.
+    /// Whether any pending server is still expected to answer. False once every server owing us one
+    /// has been silent for longer than [`super::pending::SERVER_PATIENCE`], which lets the drain
+    /// return immediately instead of blocking for its whole timeout.
     fn worth_blocking_for_diagnostics(&self) -> bool {
         let now = Instant::now();
         self.pending_diagnostics_by_server
@@ -357,7 +373,9 @@ impl LspManager {
                 .pending_diagnostics_by_server
                 .entry(server_name)
                 .or_insert_with(|| PendingEdits::new(policy));
-            // Asking for a refresh is the server speaking.
+            // Asking for a refresh is the server speaking. A server that spent
+            // a long time loading has been written off as silent by now, and
+            // this is the moment it is least true.
             pending.note_server_spoke();
             for (uri, version) in documents {
                 pending.mark(lifecycle_id, &uri, version, now);
@@ -395,7 +413,8 @@ impl LspManager {
         let now = Instant::now();
         let mut collected = CollectedDiagnostics::default();
 
-        // In server-name order, so what the reader sees does not depend on how a hash map happened to lay itself out.
+        // In server-name order, so what the reader sees does not depend on how
+        // a hash map happened to lay itself out.
         let mut servers: Vec<&String> = self.pending_diagnostics_by_server.keys().collect();
         servers.sort_unstable();
         let servers: Vec<String> = servers.into_iter().cloned().collect();
@@ -582,7 +601,9 @@ pub async fn drain_lsp_diagnostics(
 ) -> Option<DiagnosticsSummary> {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut lsp = lsp_manager.lock().await;
-    // Set once the budget is spent.
+    // Set once the budget is spent. Checked only *after* collecting, so the store is always read
+    // one final time before we conclude there was nothing: a report can land between the wait's
+    // last poll and our re-taking the lock, and it would otherwise sit unread.
     let mut out_of_time = false;
 
     loop {
@@ -611,14 +632,17 @@ pub async fn drain_lsp_diagnostics(
             return None;
         }
 
-        // Register the waiter before dropping the lock so a notify_one() that lands in between is not lost.
+        // Register the waiter before dropping the lock so a notify_one() that
+        // lands in between is not lost.
         let notify = lsp.diagnostics_ready.clone();
         let notified = notify.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
         drop(lsp);
 
-        // Every document shares this notification, so being woken is not proof that *our* files were answered — a publish.
+        // Every document shares this notification, so being woken is not proof that *our* files
+        // were answered — a publish for some other file wakes us just the same. Go back and look,
+        // and if it was not for us, keep waiting until it is or the budget runs out.
         out_of_time = tokio::time::timeout_at(deadline, notified).await.is_err();
         lsp = lsp_manager.lock().await;
     }
@@ -647,8 +671,8 @@ mod tests {
             .collect()
     }
 
-    /// A file with multiple problems is usually one mistake seen many times,
-    /// and the reader is worse off for having all of them.
+    /// A file with forty problems is usually one mistake seen forty times, and
+    /// the reader is worse off for having all of them.
     #[test]
     fn one_file_cannot_fill_the_whole_summary() {
         let mut collected = CollectedDiagnostics::default();

@@ -1,4 +1,6 @@
-//! The `PluginRegistry` is the source of truth for which plugins are loaded in a session.
+//! The `PluginRegistry` is the single source of truth for which plugins are loaded in a session.
+//! It is built once during `MvpAgent` initialization and can be rebuilt via `/plugins reload`.
+//! Each session receives a snapshot.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,6 +23,7 @@ pub struct LoadedPlugin {
     /// The concrete discovery source this plugin came from.
     pub origin: PluginOrigin,
     /// Whether the plugin is trusted for executable operations (hooks, MCP, LSP).
+    /// Derived from discovery scope: CLI and User plugins are auto-trusted; Project plugins require explicit trust grant.
     pub trusted: bool,
     /// Whether the plugin is enabled (not in `[plugins].disabled`).
     pub enabled: bool,
@@ -59,10 +62,15 @@ pub struct LoadedPlugin {
     pub has_inline_mcp_only: bool,
     /// Number of LSP servers defined.
     pub lsp_server_count: usize,
+    /// Whether LSP servers are inline-only (no file-based config).
     pub has_inline_lsp_only: bool,
+    /// Inline hooks JSON from manifest (when hooks are defined inline, not file-based).
     pub inline_hooks: Option<serde_json::Value>,
+    /// Inline MCP servers JSON from manifest (when defined inline, not file-based).
     pub inline_mcp_servers: Option<serde_json::Value>,
+    /// Inline LSP servers JSON from manifest (when defined inline, not file-based).
     pub inline_lsp_servers: Option<serde_json::Value>,
+    /// Warning if this plugin won a name collision with another plugin.
     pub conflict: Option<String>,
 }
 
@@ -157,6 +165,8 @@ impl PluginRegistry {
             let inline_lsp_servers = dp.manifest.inline_lsp_servers().cloned();
 
             // Determine enabled status.
+            // Every plugin should be in either the `enabled` or `disabled` list (`DiscoveryConfig::populate_plugin_lists` ensures this)
+            // A plugin is enabled only if it is in the `enabled` list and NOT in the `disabled` list (disabled takes precedence on conflict)
             let explicitly_enabled = enabled
                 .iter()
                 .any(|e| e == &dp.id.0 || e == &dp.manifest.name);
@@ -280,7 +290,8 @@ impl PluginRegistry {
 /// Builds per-session registries and rebuilds the shared "latest" registry for new sessions.
 #[derive(Debug, Clone)]
 pub struct SharedPluginRegistryHandle {
-    /// The latest registry, rebuilt on `/plugins reload`. New sessions clone from here.
+    /// The latest registry, rebuilt on `/plugins reload`.
+    /// New sessions clone from here. Running sessions keep their snapshot.
     inner: std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<PluginRegistry>>>>,
     /// CLI `--plugin-dir` paths from process startup, preserved across reloads.
     cli_plugin_dirs: std::sync::Arc<Vec<std::path::PathBuf>>,
@@ -295,6 +306,11 @@ impl SharedPluginRegistryHandle {
     }
 
     /// Get the current registry snapshot (cheap Arc clone).
+    ///
+    /// A poison is recovered rather than propagated: the guarded value is one
+    /// `Option<Arc<PluginRegistry>>` swap, and this runs on the path every new
+    /// session takes to get its plugins.
+    /// `parking_lot::RwLock` is the structural fix and is not a dependency here.
     #[allow(clippy::disallowed_methods)]
     pub fn snapshot(&self) -> Option<std::sync::Arc<PluginRegistry>> {
         self.inner
@@ -340,7 +356,8 @@ impl SharedPluginRegistryHandle {
         }
     }
 
-    /// Replace the shared "latest" registry with one built elsewhere (e.g. on a blocking thread via [`Self::refresh_and_build_for_cwd`]).
+    /// Replace the shared "latest" registry with one built elsewhere (e.g. on a blocking thread via
+    /// [`Self::refresh_and_build_for_cwd`]), so the decision to publish can stay with the caller.
     pub fn publish(&self, registry: Option<std::sync::Arc<PluginRegistry>>) {
         *self.inner.write().unwrap() = registry;
     }
@@ -530,7 +547,8 @@ fn count_lsp_servers(dp: &DiscoveredPlugin) -> usize {
 /// Each entry in the inner `hooks` array is one hook handler spec.
 fn count_hook_specs(hooks_path: Option<&Path>, inline_hooks: Option<&serde_json::Value>) -> usize {
     fn count_in_value(v: &serde_json::Value) -> usize {
-        // Normalize so a Claude Code-shape inline value (no top-level `hooks` key) is counted.
+        // Normalize so a Claude Code-shape inline value (no top-level `hooks`
+        // key) is counted; Grok's native wrapped shape is unchanged.
         let normalized = super::manifest::normalize_inline_hooks(v);
         let Some(events) = normalized.get("hooks").and_then(|h| h.as_object()) else {
             return 0;
@@ -565,6 +583,9 @@ fn read_mcp_server_names(path: &Path) -> Result<Vec<String>, ()> {
     Ok(names)
 }
 
+/// Matches by:
+/// 1. Full `plugin_id` (e.g. `"user/a1b2c3d4/my-plugin"`)
+/// 2. `plugin_name` shorthand (e.g. `"my-plugin"`), only for convenience
 fn is_disabled(dp: &DiscoveredPlugin, disabled: &[String]) -> bool {
     disabled
         .iter()
@@ -620,6 +641,7 @@ mod tests {
     #[test]
     fn count_hook_specs_counts_claude_code_shape_inline_hooks() {
         // Claude Code declares hooks inline without a top-level `hooks` key.
+        // Previously this counted as 0; normalization must make it count.
         let claude_shape = serde_json::json!({
             "PreToolUse": [
                 {
@@ -671,7 +693,8 @@ mod tests {
 
     #[test]
     fn skill_counts_dedupe_same_basename_different_paths() {
-        // Skill dirs with the same basename at different paths collide on the loader's per-plugin name identity Only one loads.
+        // Two skill dirs with the same basename at different paths collide on the loader's per-plugin name identity
+        // Only one loads, so only one may be counted
         let tmp = tempfile::tempdir().unwrap();
         for group in ["a", "b"] {
             let d = tmp.path().join(group).join("dup-skill");
@@ -1119,7 +1142,7 @@ mod tests {
         assert!(config.enabled.contains(&"config".to_string()));
         assert!(config.disabled.contains(&"user".to_string()));
         assert!(config.disabled.contains(&"project".to_string()));
-        // Every plugin lands in exactly one of both lists
+        // Every plugin lands in exactly one of the two lists
         assert_eq!(config.enabled.len() + config.disabled.len(), 4);
     }
 
@@ -1151,8 +1174,8 @@ mod tests {
 
     #[test]
     fn untrusted_project_plugin_excluded_from_active_even_when_enabled() {
-        // Simulates the attack: a project plugin is enabled (e.g. via
-        // pre-populated enabledPlugins) but NOT trusted.
+        // Simulates the attack: a project plugin is enabled (e.g. via pre-populated enabledPlugins) but NOT trusted.
+        // It must NOT appear in active_plugins() so its hooks never fire
         let plugins = vec![
             make_discovered("malicious", PluginScope::Project, false), // untrusted
         ];
@@ -1191,7 +1214,8 @@ mod tests {
 
     #[test]
     fn pre_enabled_project_plugin_blocked_without_trust() {
-        // End-to-end: populate_plugin_lists won't auto-disable a plugin that's already in the enabled list active_plugins() must still block it.
+        // End-to-end: populate_plugin_lists won't auto-disable a plugin that's already in the enabled list
+        // active_plugins() must still block it when untrusted
         use super::super::discovery::DiscoveryConfig;
 
         let plugins = vec![make_discovered(

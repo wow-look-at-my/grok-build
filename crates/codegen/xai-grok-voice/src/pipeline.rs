@@ -1,4 +1,8 @@
 //! Voice pipeline: mic capture streams to STT and transcripts come back as pager events.
+//!
+//! The pager drives capture with press/release commands.
+//! They back both a toggle (`/voice`, `Ctrl+Shift+M`) and true push-to-talk (F12 hold), hence the `Ptt*` names.
+//! A press may be followed by a release after a long hold or, for a toggle, a later stop.
 
 #[cfg(feature = "audio")]
 use std::collections::VecDeque;
@@ -42,16 +46,16 @@ pub async fn run_voice_pipeline(
         match cmd {
             VoiceCommand::Shutdown => break,
             VoiceCommand::PttPress => {
-                // Aborting drops the reader's capture and STT session,
-                // releasing the mic and socket at once.
+                // Aborting drops the old reader's capture and STT session, releasing the mic and socket at once (The pager always sends
+                // a `PttRelease` between presses, so an `active` session is one that's stopping, never a live duplicate.). We don't join
+                // the old reader, so its stream may still be releasing as the new one opens; cpal handles that brief overlap
                 if let Some(prev) = active.take() {
                     prev.reader.abort();
                 }
 
-                // Otherwise a quick tap-and-release would open a hot mic and
-                // append a spurious final after the user already let go
-                // `biased` polls the start first so a just-completed session
-                // is always kept (dropping it would leak its reader).
+                // Otherwise a quick tap-and-release would open a hot mic and append a spurious final after the user already let go
+                // `biased` polls the start first so a just-completed session is always kept (dropping it would leak its reader). The
+                // concurrent mic-open still completes, but its handle is then dropped, releasing the device right away
                 tokio::select! {
                     biased;
                     session = open_session(&config, &auth, &event_tx) => {
@@ -72,7 +76,8 @@ pub async fn run_voice_pipeline(
                 let Some(session) = active.as_ref() else {
                     continue;
                 };
-                // The reader task owns the capture handle Signalling it lets the reader stop the mic and send `audio.done` in a single place.
+                // The reader task owns the capture handle
+                // Signalling it lets the reader stop the mic and send `audio.done` in a single place, matching the no-speech-watchdog teardown below
                 let _ = session.finish_tx.send(()).await;
             }
         }
@@ -116,6 +121,8 @@ async fn start_capture_session(
 }
 
 /// Hard cap on the pre-connect PCM backlog (memory safety).
+/// Sized far above any real connect: the STT connect timeout aborts long before this is reached.
+/// In practice it never drops; it only bounds a pathological hang.
 #[cfg(feature = "audio")]
 const BACKLOG_MAX_CHUNKS: usize = 1024;
 
@@ -131,7 +138,8 @@ async fn forward_pcm(
     let audio_tx = loop {
         tokio::select! {
             chunk = mic_rx.recv() => match chunk {
-                // A normal connect stays well under the cap.
+                // A normal connect stays well under the cap, so the lead-in is kept intact
+                // Only a pathologically slow connect (which the connect timeout aborts anyway) drops its oldest chunks
                 Some(c) => {
                     if backlog.len() == BACKLOG_MAX_CHUNKS {
                         backlog.pop_front();
@@ -158,12 +166,13 @@ async fn forward_pcm(
     }
 }
 
-/// How long a session may run without any transcript before it is torn down.
+/// How long a session may run without any transcript before it is torn down (instead of streaming a dead mic until the user gives up).
+/// The first transcript disarms it, so long dictation with pauses is unaffected.
 #[cfg(feature = "audio")]
 const NO_SPEECH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Message and permission guidance for a session torn down by
-/// [`NO_SPEECH_TIMEOUT`].
+/// Message and permission guidance for a session torn down by [`NO_SPEECH_TIMEOUT`].
+/// A denied grant is indistinguishable from not speaking because macOS may return silence instead of an error.
 #[cfg(feature = "audio")]
 fn no_speech_error() -> (String, Option<String>) {
     (
@@ -178,7 +187,8 @@ async fn start_capture_session(
     auth: &SharedVoiceAuth,
     event_tx: &mpsc::Sender<VoiceEvent>,
 ) -> Result<ActivePtt, VoiceError> {
-    // Open the mic concurrently with the bearer fetch and the connect handshake (TLS, WebSocket, `transcript.created`).
+    // Open the mic concurrently with the bearer fetch and the connect handshake (TLS, WebSocket, `transcript.created`)
+    // Both legs take hundreds of ms and used to run in series before any capture, clipping the first word of a hold
     let (mic_tx, mic_rx) = mpsc::channel::<Vec<u8>>(64);
     let sample_rate = config.sample_rate;
     // `spawn_pcm_capture` blocks until the device opens; keep it off the runtime.
@@ -187,7 +197,11 @@ async fn start_capture_session(
 
     // Drain mic before connect resolves so capture never backpressures while the socket comes up
     let (audio_tx_tx, audio_tx_rx) = tokio::sync::oneshot::channel::<mpsc::Sender<Vec<u8>>>();
-    // Deliberately not awaited: the connect race below must not wait on the drain.
+    // Deliberately not awaited: the connect race below must not wait on the drain,
+    // and `forward_pcm` ends on its own when the mic closes or the connect fails.
+    // A panic inside it stops audio for this hold rather than stranding a waiter --
+    // there is none -- and this crate sits below `xai-grok-tools`, so the guarded
+    // detached helper that would name the panic on the log is not reachable here.
     #[allow(clippy::disallowed_methods)]
     let _drain = tokio::spawn(forward_pcm(mic_rx, audio_tx_rx));
 
@@ -224,8 +238,8 @@ async fn start_capture_session(
     // press and at shutdown, so the task's lifetime is owned rather than dropped.
     #[allow(clippy::disallowed_methods)]
     let reader = tokio::spawn(async move {
-        // Stop the mic before signalling end-of-utterance so no stray PCM is
-        // queued after `audio.done` Stopping releases the device.
+        // Stop the mic before signalling end-of-utterance so no stray PCM is queued after `audio.done`
+        // Stopping releases the device and drops the capture thread's clone of the audio sender. `Option::take` makes it idempotent.
         let stop_capture = |capture: &mut Option<crate::audio::CaptureHandle>| {
             if let Some(handle) = capture.take() {
                 handle.stop();
@@ -234,7 +248,9 @@ async fn start_capture_session(
         // Tear down when no transcript arrives within the timeout; the first transcript disarms this
         let no_speech_deadline = tokio::time::Instant::now() + NO_SPEECH_TIMEOUT;
         let mut awaiting_speech = true;
-        // Stitch those deltas into the live preview so a long pauseless utterance keeps accumulating instead of resetting.
+        // Stitch those deltas into the live preview so a long pauseless utterance keeps accumulating instead of resetting to the
+        // latest ~3s chunk. The committed prompt text only ever comes from `speech_final`. The server produces that as a clean
+        // one-pass re-transcription of the whole turn, better than stitched deltas. The prefix resets on each `speech_final`
         let mut locked_prefix = String::new();
         loop {
             tokio::select! {
@@ -325,7 +341,8 @@ mod tests {
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(8);
         let task = tokio::spawn(forward_pcm(mic_rx, tx_rx));
 
-        // These chunks buffer before the live sender is handed over, then flush once it arrives.
+        // These chunks buffer before the live sender is handed over, then flush once it arrives
+        // (Keep `mic_tx` open across the handoff: a mic that closes before the socket is ready discards the backlog; see the separate test.)
         mic_tx.send(vec![1]).await.unwrap();
         mic_tx.send(vec![2]).await.unwrap();
         tx_tx.send(audio_tx).unwrap();

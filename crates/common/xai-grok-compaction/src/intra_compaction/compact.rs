@@ -1,4 +1,25 @@
-//! Main orchestration entry point: [`apply_intra_compaction()`] — the `select → sample → guard → commit` skeleton.
+//! Main orchestration entry point: [`apply_intra_compaction()`] — the
+//! `select → sample → guard → commit` skeleton, generic over
+//! [`CompactionItemBuilder`].
+//!
+//! Public surface (called from harness wrappers / the agent loop):
+//!
+//! - [`apply_intra_compaction`] — top-level orchestrator. Reads
+//!   [`IntraCompactionConfig::mode`] and dispatches to one of the
+//!   same-level per-target helpers below.
+//! - [`apply_steps_compaction`] — run a single pass on the agent loop's
+//!   accumulated step turns.
+//! - [`apply_history_compaction`] — run a single pass on prior
+//!   conversation-history turns.
+//!
+//! All three are public so callers can either let the orchestrator pick
+//! based on policy (`apply_intra_compaction`) or force a specific target
+//! (`apply_steps_compaction` / `apply_history_compaction`).
+//!
+//! Per-harness inputs are injected through seams: token counting via
+//! [`ItemTokenCounter`], metrics via [`IntraCompactionObserver`], the LLM
+//! call via [`CompactionSampler`], and state commit via
+//! [`CompactionStreamProc`].
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,7 +32,8 @@ use super::observer::IntraCompactionObserver;
 use super::traits::{CompactionStreamProc, CompactionTarget};
 use super::trigger::{IntraCompactionError, IntraCompactionResult, IntraCompactionTrigger};
 // The `Shared` summarizer reuses grok-build's full-replace summarization core
-// (the shared summarization core lives in `code_compaction`).
+// (the shared summarization core lives in `code_compaction`); intra_compaction intentionally
+// depends on `code_compaction` for it.
 use crate::code_compaction::{
     SampleRetryError, SampledSummary, build_summary_prompt, format_compact_summary,
     sample_summary_with_retries,
@@ -27,13 +49,34 @@ use crate::select::select_turns_to_compact;
 use crate::steps::format_compaction_prompt;
 use crate::token::ItemTokenCounter;
 
-/// Top-level intra-compaction entry point. Reads [`IntraCompactionConfig::mode`] and dispatches to the same-level per-target helpers: - [`IntraCompactionMode::FullReplace`] (default) →
+/// Top-level intra-compaction entry point.
+///
+/// Reads [`IntraCompactionConfig::mode`] and dispatches to the same-level
+/// per-target helpers:
+///
+/// - [`IntraCompactionMode::FullReplace`] (default) →
 ///   [`apply_full_replace_compaction`]
-/// - [`IntraCompactionMode::StepsOnly`] → [`apply_steps_compaction`] - [`IntraCompactionMode::HistoryOnly`] → [`apply_history_compaction`] - [`IntraCompactionMode::HistoryThenSteps`] →
+/// - [`IntraCompactionMode::StepsOnly`] → [`apply_steps_compaction`]
+/// - [`IntraCompactionMode::HistoryOnly`] → [`apply_history_compaction`]
+/// - [`IntraCompactionMode::HistoryThenSteps`] →
 ///   [`apply_history_compaction`] first, then [`apply_steps_compaction`]
 ///   only if the post-history accumulated step tokens still exceed
 ///   `policy.steps_trigger_ratio` of the history token count.
-/// `active_reminder` is an optional harness-supplied `<system-reminder>` (e.g. running sub-agents) appended verbatim to the summary on the `FullReplace` path, so in-flight state survives the dropped tail. Ignored by the partial modes (they keep a tail). `summarizer_input_budget` is the max tokens of conversation turns fed to the FullReplace summarizer (already net of response reserve + prompt overhead). When `Some`, FullReplace runs [`fit_turns_for_summarizer`] first. `None` skips fit (tests / callers that pre-fit). On any error, parser state is left unchanged (the per-target helpers guard this).
+///
+/// `active_reminder` is an optional harness-supplied `<system-reminder>`
+/// (e.g. running sub-agents) appended verbatim to the summary on the
+/// `FullReplace` path, so in-flight state survives the dropped tail. Ignored
+/// by the partial modes (they keep a tail).
+///
+/// `summarizer_input_budget` is the max tokens of conversation turns fed to
+/// the FullReplace summarizer (already net of response reserve + prompt
+/// overhead). When `Some`, FullReplace runs [`fit_turns_for_summarizer`]
+/// first. `None` skips fit (tests / callers that pre-fit).
+///
+/// On any error, parser state is left unchanged (the per-target helpers
+/// guard this). Every terminal outcome — success or any error variant —
+/// is reported to `observer` with a `status` label, so failure rates are
+/// observable in harness metrics.
 pub async fn apply_intra_compaction<T, S, P>(
     stream_proc: &S,
     sampler: &P,
@@ -161,20 +204,21 @@ where
     .await
 }
 
-/// `FullReplace` strategy (default): grok-build's full-replace — summarize
-/// the *whole* conversation (prior history + accumulated steps) in one pass
-/// and rebuild context from scratch via [`CompactionTarget::FullReplace`].
+/// `FullReplace` strategy (default): grok-build's full-replace — summarize the
+/// *whole* conversation (prior history + accumulated steps) in one pass and
+/// rebuild context from scratch via [`CompactionTarget::FullReplace`].
+///
 /// Unlike the partial modes there is no tail-keep selection and no
 /// `<grok_user_queries>` preamble: the shared `code_compaction` summarizer
-/// (always [`IntraSummarizer::Shared`] here, regardless of
-/// `policy.summarizer`) preserves user intent itself, matching grok-build.
-/// The reduction and `min_compactable_tokens` guards are kept for parity with
-/// the partial modes. When `summarizer_input_budget` is `Some`, turns are
-/// **fitted** via the ordered ladder (history drop → tool truncate → step
-/// drop → emergency; later only if earlier still insufficient) before
-/// sampling so the compact model never sees a multi-100k prompt. Reduction
-/// guard still uses the **raw** pre-fit token count so a successful recovery
-/// is not discarded.
+/// (always [`IntraSummarizer::Shared`] here, regardless of `policy.summarizer`)
+/// preserves user intent itself, matching grok-build. The reduction and
+/// `min_compactable_tokens` guards are kept for parity with the partial modes.
+///
+/// When `summarizer_input_budget` is `Some`, turns are **fitted** via the
+/// ordered ladder (history drop → tool truncate → step drop → emergency;
+/// later only if earlier still insufficient) before sampling so the compact
+/// model never sees a multi-100k prompt. Reduction guard still uses the
+/// **raw** pre-fit token count so a successful recovery is not discarded.
 pub async fn apply_full_replace_compaction<T, S, P>(
     stream_proc: &S,
     sampler: &P,
@@ -214,7 +258,9 @@ where
     let (llm_turns, fit_rung) = if let Some(budget) = summarizer_input_budget {
         let plan = fit_turns_for_summarizer(&history_turns, &step_turns, token_counter, budget);
         // Fit's Emergency keeps the newest original item when the ladder
-        // emptied mid-way.
+        // emptied mid-way. Reject empty plans and zero-token fit (e.g. a
+        // media-only tool turn clipped to empty text) so we do not feed the
+        // summarizer nothing and commit a hallucination over the conversation.
         if plan.llm_turns.is_empty() || plan.tokens_fit == 0 {
             return Err(IntraCompactionError::NothingToCompact);
         }
@@ -237,12 +283,22 @@ where
         "[IntraCompaction] starting full replace"
     );
 
+    // 2. Summarize (possibly fitted) turns through grok-build's shared core.
+    //    FullReplace always uses the shared summarizer (it *is* the
+    //    `code_compaction` path); `policy.summarizer` is ignored for this mode.
     let summary_text = sample_shared_summary_with_retries(sampler, &llm_turns, policy).await?;
 
-    // 2b.
+    // 2b. Preserve in-flight active agent state (e.g. running sub-agents) across
+    //     the compaction. FullReplace drops the working tail, so append the
+    //     harness-supplied `<system-reminder>` (verbatim ids) to the summary so
+    //     the model can keep polling/cancelling them. Empty/None → no change.
+    //     Shared with Grok chat inter-compaction via `append_reminder_block` so
+    //     both inject the reminder into the summary text identically, before the
+    //     reduction guard below counts it.
     let summary_text = crate::append_reminder_block(summary_text, active_reminder);
 
-    // 3. Build the replacement developer turn.
+    // 3. Build the replacement developer turn. Snapshot the summary as a
+    //    cheap-to-clone `Arc<str>` before moving the owned text into the item.
     let summary: Arc<str> = Arc::from(summary_text.as_str());
     let compaction_turn = T::compaction_summary_item(summary_text);
     let tokens_after = token_counter.count_item_tokens(&compaction_turn);
@@ -264,7 +320,7 @@ where
         });
     }
 
-    // 5. Commit: replace the entire conversation with the summary turn.
+    // 5. Commit: replace the entire conversation with the single summary turn.
     let turns_compacted = total_turns;
     stream_proc
         .replace_with_compaction(
@@ -332,15 +388,18 @@ where
     )
     .await;
 
-    // If history compaction reported nothing to compact, we still try steps
-    // compaction below (it may still be worthwhile).
+    // If history compaction reported nothing to compact, we still try
+    // steps compaction below (it may still be worthwhile). Any other
+    // history error is bubbled up; the caller treats it as non-fatal.
     let history_result = match history_result {
         Ok(r) => Some(r),
         Err(IntraCompactionError::NothingToCompact) => None,
         Err(e) => return Err(e),
     };
 
-    // Decide whether steps compaction is worth running.
+    // Decide whether steps compaction is worth running. The threshold is
+    // expressed as a ratio of step-turn tokens to history-turn tokens
+    // (taken after the history compaction pass).
     let accumulated = stream_proc.get_accumulated_turns_for_compaction().await;
     let history = stream_proc.get_history_turns_for_compaction().await;
     let steps_tokens: u64 = accumulated
@@ -395,7 +454,9 @@ where
         }),
         (Some(h), Err(IntraCompactionError::NothingToCompact)) => Ok(h),
         (None, Ok(s)) => Ok(s),
-        // Steps-error after a successful history pass: history is already applied — surface the steps error so the caller can log it.
+        // Steps-error after a successful history pass: history is already
+        // applied — surface the steps error so the caller can log it, but
+        // history work is not lost (mutation is durable on the parser).
         (_, Err(e)) => Err(e),
     }
 }
@@ -493,13 +554,14 @@ where
                 .await?
         }
         // New (default): grok-build's shared summarization core from
-        // `code_compaction`.
+        // `code_compaction` — `build_summary_prompt` + degenerate-reject +
+        // `format_compact_summary` cleaning — run intra-locally.
         IntraSummarizer::Shared => {
             sample_shared_summary_with_retries(sampler, &turns_for_llm, policy).await?
         }
     };
 
-    // 3c. For `History` target.
+    // 3c. For `History` target, prepend a `<grok_user_queries>` preamble so
     //     the original user messages + attachment refs survive the
     //     summarization. Carries forward both prior (from earlier
     //     compactions) and current (from this round's `User` turns) via
@@ -527,7 +589,11 @@ where
         }
     };
 
-    // 4. Build the replacement item.
+    // 4. Build the replacement item. Carries category metadata so that
+    //    subsequent compaction passes (inter or intra) treat it as
+    //    already-compacted content. Snapshot the (possibly large) summary as a
+    //    cheap-to-clone `Arc<str>` for the result before moving the owned text
+    //    into the item.
     let summary: Arc<str> = Arc::from(final_summary_text.as_str());
     let compaction_turn = T::compaction_summary_item(final_summary_text);
     let tokens_after = token_counter.count_item_tokens(&compaction_turn);
@@ -549,7 +615,9 @@ where
         });
     }
 
-    // 6. Commit the LLM-produced summary into parser state.
+    // 6. Commit the LLM-produced summary into parser state. The trait
+    //    method dispatches internally on `target` (Steps view vs History
+    //    view) and rebuilds any derived state (e.g. SglangEngine).
     stream_proc
         .replace_with_compaction(target, plan.split_idx, compaction_turn)
         .await?;
@@ -601,12 +669,26 @@ fn build_prompt_for_target(
     }
 }
 
-/// `Shared` summarizer (default): sample through the shared retry loop [`sample_summary_with_retries`](crate::code_compaction::sample_summary_with_retries) — grok-build's summarization core (`build_summary_prompt` + bounded retry + degenerate-reject + `format_compact_summary` cleaning) — then map the structured outcome onto [`IntraCompactionError`] and return the *cleaned* summary on success. The classification (degenerate/empty = transient; deterministic vs transient sampler errors, incl. context-length overflow) lives in the shared loop, so intra and grok-build stay in lock-step. Outcome mapping: - exhausted empty/degenerate run → [`IntraCompactionError::EmptyResponse`]; - context overflow → [`IntraCompactionError::ContextOverflow`] (terminal;
+/// `Shared` summarizer (default): sample through the shared retry loop
+/// [`sample_summary_with_retries`](crate::code_compaction::sample_summary_with_retries)
+/// — grok-build's summarization core (`build_summary_prompt` + bounded retry +
+/// degenerate-reject + `format_compact_summary` cleaning) — then map the
+/// structured outcome onto [`IntraCompactionError`] and return the *cleaned*
+/// summary on success.
+///
+/// The classification (degenerate/empty = transient; deterministic vs transient
+/// sampler errors, incl. context-length overflow) lives in the shared loop, so
+/// intra and grok-build stay in lock-step. Outcome mapping:
+/// - exhausted empty/degenerate run → [`IntraCompactionError::EmptyResponse`];
+/// - context overflow → [`IntraCompactionError::ContextOverflow`] (terminal;
 ///   intra has no input ladder);
 /// - other deterministic sampler error →
 ///   [`IntraCompactionError::SamplerBuild`] (terminal);
 /// - transient sampler error that exhausts retries →
 ///   [`IntraCompactionError::SamplerStream`].
+///
+/// Intra observes terminally (via [`IntraCompactionObserver`]), not per-attempt,
+/// so it passes the no-op `()` observer to the shared loop.
 async fn sample_shared_summary_with_retries<T, P>(
     sampler: &P,
     turns: &[T],
@@ -635,7 +717,8 @@ where
     )
     .await
     {
-        // grok-build returns the raw summary and cleans it in its assembler.
+        // grok-build returns the raw summary and cleans it in its assembler;
+        // intra has no assembler, so it cleans here (pre-refactor behavior).
         Ok(SampledSummary { summary, .. }) => Ok(format_compact_summary(&summary)),
         Err(SampleRetryError::Empty { .. }) => Err(IntraCompactionError::EmptyResponse),
         Err(SampleRetryError::Failure {
@@ -762,7 +845,11 @@ mod tests {
     use crate::item::{CompactionFileRef, CompactionItem, CompactionRole};
     use crate::sampler::LlmCompactionOutput;
 
-    /// A non-degenerate mock summary.
+    /// A non-degenerate mock summary. The default `Shared` summarizer rejects
+    /// summaries whose cleaned seed is shorter than
+    /// [`crate::code_compaction::MIN_SUMMARY_SEED_CHARS`] (500), so intra tests that
+    /// expect a *successful* sample under `Shared` must return at least that
+    /// much.
     fn long_summary() -> String {
         format!("Summary of the work so far. {}", "detail ".repeat(100))
     }
@@ -953,6 +1040,7 @@ mod tests {
         }
     }
 
+    /// Deterministic counter: 1 token per 4 chars (min 1).
     struct CharCounter;
     impl ItemTokenCounter<MockItem> for CharCounter {
         fn count_item_tokens(&self, item: &MockItem) -> u32 {
@@ -1067,7 +1155,8 @@ mod tests {
     fn enabled_policy() -> IntraCompactionConfig {
         IntraCompactionConfig {
             enabled: true,
-            // These tests exercise the steps (tail-keep) path.
+            // These tests exercise the steps (tail-keep) path; pin the mode so
+            // they stay independent of the crate default (now `FullReplace`).
             mode: IntraCompactionMode::StepsOnly,
             trigger_threshold_percent: 85,
             target_threshold_percent: 50,
@@ -1107,6 +1196,10 @@ mod tests {
 
     #[tokio::test]
     async fn compact_replaces_turns_on_success_and_notifies_observer() {
+        // 6 turns × 500 tokens (2000 chars / 4); ctx 1000, target 50% → 500
+        // → keep the newest 1 turn, compact the oldest 5 (2500 tokens). The
+        // summary must be non-degenerate (>= 500 cleaned chars) for the shared
+        // sampler to accept it, yet still pass the reduction guard (≤ 2000).
         let turns: Vec<_> = (0..6).map(|_| MockItem::user(&"x".repeat(2000))).collect();
         let sp = MockStreamProc::with_turns(turns);
         let sampler = MockSampler::returns(&long_summary());
@@ -1142,6 +1235,7 @@ mod tests {
     async fn compact_skips_on_insufficient_reduction() {
         let turns: Vec<_> = (0..8).map(|_| MockItem::user(&"y".repeat(400))).collect();
         let sp = MockStreamProc::with_turns(turns);
+        // Summary is bigger than the originals → ratio > 0.8 → reject.
         let sampler = MockSampler::returns(&"z".repeat(8000));
         let obs = RecordingObserver::default();
 
@@ -1257,7 +1351,8 @@ mod tests {
 
     #[tokio::test]
     async fn compact_propagates_apply_failure() {
-        // 2000-char turns so the (non-degenerate) summary still passes the reduction guard and reaches the commit step.
+        // 2000-char turns so the (non-degenerate) summary still passes the
+        // reduction guard and reaches the commit step that fails.
         let turns: Vec<_> = (0..6).map(|_| MockItem::user(&"x".repeat(2000))).collect();
 
         struct FailingApply {
@@ -1308,6 +1403,8 @@ mod tests {
 
     #[tokio::test]
     async fn full_replace_compacts_whole_conversation_and_notifies_observer() {
+        // 6 turns × 500 tokens (2000 chars / 4) = 3000 tokens. FullReplace
+        // summarizes *all* of them (no tail-keep) into one developer turn.
         let turns: Vec<_> = (0..6).map(|_| MockItem::user(&"x".repeat(2000))).collect();
         let sp = MockStreamProc::with_turns(turns);
         let sampler = MockSampler::returns(&long_summary());
@@ -1330,7 +1427,7 @@ mod tests {
         assert_eq!(r.turns_compacted, 6);
         assert!(!r.summary.is_empty());
         assert_eq!(sampler.call_count(), 1);
-        // The mock now holds only the summary turn.
+        // The mock now holds only the single summary turn.
         assert_eq!(sp.turns.lock().unwrap().len(), 1);
         // Observer recorded a `FullReplace` success (drives the
         // `target="full_replace"` metric).
@@ -1343,7 +1440,8 @@ mod tests {
 
     #[tokio::test]
     async fn full_replace_appends_active_reminder_to_summary() {
-        // The harness-supplied `<system-reminder>` (e.g. running sub-agents) is appended verbatim.
+        // The harness-supplied `<system-reminder>` (e.g. running sub-agents) is
+        // appended verbatim to the FullReplace summary developer turn.
         let turns: Vec<_> = (0..6).map(|_| MockItem::user(&"x".repeat(2000))).collect();
         let sp = MockStreamProc::with_turns(turns);
         let sampler = MockSampler::returns(&long_summary());
@@ -1399,6 +1497,7 @@ mod tests {
 
     #[tokio::test]
     async fn full_replace_skips_below_min_compactable_tokens() {
+        // 2 turns × 1 token = 2 tokens, below `min_compactable_tokens`.
         let turns: Vec<_> = (0..2).map(|_| MockItem::user("x")).collect();
         let sp = MockStreamProc::with_turns(turns);
         let sampler = MockSampler::returns(&long_summary());
@@ -1475,8 +1574,8 @@ mod tests {
 
     #[tokio::test]
     async fn shared_summarizer_cleans_successful_summary() {
-        // A non-degenerate summary wrapped in <analysis>/<summary> is
-        // cleaned: scratchpad stripped, tags neutralized.
+        // A non-degenerate summary wrapped in <analysis>/<summary> is cleaned:
+        // scratchpad stripped, tags neutralized, "Summary:" heading produced.
         let raw = format!(
             "<analysis>\nthinking\n</analysis>\n<summary>\n1. Primary Request: {}\n</summary>",
             "detail ".repeat(100)
@@ -1498,7 +1597,8 @@ mod tests {
 
     #[tokio::test]
     async fn legacy_summarizer_accepts_short_uncleaned_summary() {
-        // Legacy has no degenerate floor and does NO cleaning.
+        // Legacy has no degenerate floor and does NO cleaning: a short raw
+        // summary is accepted verbatim (would be rejected under `Shared`).
         let turns: Vec<_> = (0..6).map(|_| MockItem::user(&"x".repeat(400))).collect();
         let sp = MockStreamProc::with_turns(turns);
         let sampler = MockSampler::returns("compacted summary");

@@ -1,4 +1,6 @@
-//! Observer-invocation invariants: fires-once-per-transition, post-transition state visible to the observer.
+//! Observer-invocation invariants: fires-once-per-transition,
+//! post-transition state visible to the observer, and `is_open()`
+//! Release-ordering after `record()`.
 
 use std::sync::Arc;
 use std::sync::Barrier;
@@ -138,7 +140,10 @@ fn is_open_visible_to_reader_thread_after_trip() {
                 );
                 std::hint::spin_loop();
             }
-            // Mirror saw the trip; the authoritative `state` Acquire load must also reflect Open.
+            // Mirror saw the trip; the authoritative `state` Acquire
+            // load must also reflect Open (or HalfOpen on a racing
+            // open-elapsed CAS, which can't happen here — no clock
+            // advance).
             cb.state()
         })
     };

@@ -195,7 +195,8 @@ mod tests {
 
     const ENV_CONTEXTUAL_HINTS: &str = "GROK_CONTEXTUAL_HINTS";
 
-    // `GROK_CONTEXTUAL_HINTS` is process-global Serialize the tests reading it and force it unset.
+    // `GROK_CONTEXTUAL_HINTS` is process-global
+    // Serialize the tests reading it and force it unset so a developer's shell value can't make them flaky
     static CONTEXTUAL_HINTS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn contextual_hints_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -259,7 +260,7 @@ mod tests {
     #[test]
     fn contextual_hints_remote_tier_controls_default_per_tip() {
         let _g = contextual_hints_guard();
-        // Disabling distinct fields catches a cross-wired resolver line (reading one remote field into another's gate)
+        // Disabling two distinct fields catches a cross-wired resolver line (reading one remote field into another's gate)
         let r = ContextualHintsRemote {
             ssh_wrap: Some(false),
             export_copy: Some(false),

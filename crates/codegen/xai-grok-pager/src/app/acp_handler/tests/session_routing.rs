@@ -3,7 +3,8 @@
 
     #[test]
     fn acp_chunk_for_inactive_agent_lands_in_its_scrollback() {
-        // Regression: switching away from a streaming agent must not discard chunks bound.
+        // Regression: switching away from a streaming agent must not discard chunks bound for that agent
+        // Only `TaskResult::PromptResponse` once survived, so the user saw a bare "Worked for X.Xs" with no body text
         let mut app = make_app_with_agent("sess-A");
         insert_agent(&mut app, AgentId(1), Some("sess-B"));
         switch_active_to(&mut app, AgentId(1));
@@ -43,7 +44,7 @@
 
     #[test]
     fn acp_chunk_for_subagent_routes_through_parent() {
-        // Subagent (child) chunk must land in the parent's `subagent_views[child_sid]` even.
+        // Subagent (child) chunk must land in the parent's `subagent_views[child_sid]` even when a different agent is currently active
         let mut app = make_app_with_agent("sess-A");
         insert_agent(&mut app, AgentId(1), Some("sess-B"));
         switch_active_to(&mut app, AgentId(1));
@@ -81,7 +82,8 @@
 
     #[test]
     fn acp_chunk_with_unknown_session_id_is_dropped_and_no_redraw() {
-        // No agent owns the session_id and the active agent already has a session_id assigned (so the race-window fallback does not fire).
+        // No agent owns the session_id and the active agent already has a session_id assigned (so the race-window fallback does not fire)
+        // The notification must be dropped silently.
         let mut app = make_app_with_agent("sess-A");
         insert_agent(&mut app, AgentId(1), Some("sess-B"));
         // make_app_with_agent already activated AgentId(0); no switch needed.
@@ -104,8 +106,11 @@
 
     #[test]
     fn session_id_none_race_window_routes_to_active_agent() {
-        // Pin the existing race-window behavior.
+        // Pin the existing race-window behavior: notifications that arrive before `TaskResult::SessionCreated` must still land on the active agent
+        // In that window the active agent has no session_id yet
 
+        // Case 1: active agent A has session_id == None; everyone else has a real id
+        // A stray notification routes to A
         {
             let mut app = make_app_with_agent("sess-A");
             app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
@@ -128,6 +133,7 @@
             );
         }
 
+        // Case 2: both A and B have session_id == None; the active one wins.
         {
             let mut app = make_app_with_agent("sess-A");
             app.agents.get_mut(&AgentId(0)).unwrap().session.session_id = None;
@@ -264,7 +270,8 @@
 
     #[test]
     fn acp_chunks_for_two_agents_dont_cross_contaminate() {
-        // Send chunks to both A and B in sequence Each landing in its own scrollback proves the demux works in both directions regardless.
+        // Send chunks to both A and B in sequence
+        // Each landing in its own scrollback proves the demux works in both directions regardless of which agent is currently active
         let mut app = make_app_with_agent("sess-A");
         insert_agent(&mut app, AgentId(1), Some("sess-B"));
         switch_active_to(&mut app, AgentId(1));

@@ -108,8 +108,9 @@ fn is_auth_tool_error_classification() {
                 serde_json::json!({"code": "http_failure", HTTP_STATUS_DETAILS_KEY: 401}),
             ),
         ),
-        // Forbidden must NOT trigger a refresh. This mirrors the inference path's gate in xai-grok-sampling-types/src/error.rs means "authenticated but not permitted" (content
-        // safety, ZDR, remote settings gates).
+        // Negative: 403.
+        // Forbidden must NOT trigger a refresh.
+        // This mirrors the inference path's gate in xai-grok-sampling-types/src/error.rs 403 means "authenticated but not permitted" (content safety, ZDR, remote settings gates).
         (
             false,
             xai_tool_runtime::ToolError::new(
@@ -120,6 +121,8 @@ fn is_auth_tool_error_classification() {
                 serde_json::json!({"code": "http_failure", HTTP_STATUS_DETAILS_KEY: 403}),
             ),
         ),
+        // Regression guard: a 403 whose body happens to contain "unauthorized" must still be classified as not-auth
+        // Without the structured-variant short-circuit in is_auth_tool_error, the keyword fallback would mis-fire here
         (
             false,
             xai_tool_runtime::ToolError::new(
@@ -141,13 +144,13 @@ fn is_auth_tool_error_classification() {
                 serde_json::json!({"code": "http_failure", HTTP_STATUS_DETAILS_KEY: 500}),
             ),
         ),
-        // Fallback path: BYOK or provider key validation arrives as a
-        // ValidationError without a status code The classifier still catches
-        // it.
+        // Fallback path: BYOK or provider key validation arrives as a ValidationError without a status code
+        // The classifier still catches it via the message-string fallback
         (
             true,
             xai_tool_runtime::ToolError::invalid_arguments("response: invalid api key for project"),
         ),
+        // Fallback path: an OAuth 2.0 `invalid_token` payload (RFC 6749) surfaced as raw JSON without a structured status code
         (
             true,
             xai_tool_runtime::ToolError::invalid_arguments(r#"{"error":"invalid_token"}"#),
@@ -170,8 +173,8 @@ fn is_auth_tool_error_classification() {
                 "Tool not found: image_gen",
             ),
         ),
-        // Negative: bare digits embedded in a request id must not trigger a
-        // refresh Regression guard.
+        // Negative: bare digits embedded in a request id must not trigger a refresh
+        // Regression guard for a bare-`401` substring match accidentally re-introduced into the fallback path
         (
             false,
             xai_tool_runtime::ToolError::invalid_arguments("request id req_401abc failed"),

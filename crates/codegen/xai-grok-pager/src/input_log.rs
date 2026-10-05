@@ -1,9 +1,12 @@
 //! Input flight recorder: a rolling buffer of recent key events.
+//!
+//! Ctrl+Shift+D dumps to `~/.grok/logs/input-debug-<timestamp>.json`.
+//! Can be better utilized once input bugs are fully resolved.
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::time::Instant;
-/// Default ring buffer capacity (several seconds of fast typing).
+/// Default ring buffer capacity (~10 seconds of fast typing).
 const DEFAULT_CAPACITY: usize = 200;
 /// Snapshot of textarea state captured by `PromptWidget::handle_key`.
 /// Stored on `PromptWidget` after each key; read by `AgentView` when building `RawInputEntry`.
@@ -61,6 +64,7 @@ pub struct InputRecord {
     /// Wall-clock unix millis for log correlation.
     pub wall_ts: u64,
     /// Sanitized key category (see [`sanitize_key_code`]).
+    /// Printable chars are logged as `"Char"` without the character value to prevent reconstructing typed text from the dump.
     pub key: String,
     /// Modifier flags, e.g. `"NONE"`, `"CONTROL"`.
     pub mods: String,

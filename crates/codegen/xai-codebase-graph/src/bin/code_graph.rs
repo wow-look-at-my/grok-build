@@ -1,7 +1,34 @@
-#![allow(clippy::expect_used)] // Hits predate the gate
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)] // 2 hits predate the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
 
 //! CLI tool for code graph navigation.
+//!
+//! Provides go-to-definition and go-to-references functionality.
+//!
+//! # Usage
+//!
+//! ```bash
+//! # Build the index for a repository
+//! code-graph index /path/to/repo
+//!
+//! # Build the index with custom cache location
+//! code-graph index /path/to/repo --cache /path/to/cache.bin
+//!
+//! # Go to definition (by position)
+//! code-graph definition /path/to/repo --file src/main.rs --row 10 --col 15
+//!
+//! # Go to definition (by symbol name)
+//! code-graph definition /path/to/repo --symbol MyStruct
+//!
+//! # Go to references (by position)
+//! code-graph references /path/to/repo --file src/main.rs --row 10 --col 15
+//!
+//! # Go to references (by symbol name)
+//! code-graph references /path/to/repo --symbol MyStruct
+//!
+//! # Show index statistics
+//! code-graph stats /path/to/repo
+//! ```
 
 #![deny(clippy::indexing_slicing)]
 

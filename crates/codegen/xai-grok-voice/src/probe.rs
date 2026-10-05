@@ -1,4 +1,5 @@
 //! Voice diagnostics: input-device lookup, silent-mic fix text, and an end-to-end probe.
+//! The probe captures mic audio, streams it to STT, and reports the transcript.
 
 #[cfg(feature = "audio")]
 use std::sync::Arc;
@@ -137,8 +138,8 @@ pub async fn run_streaming_probe(_opts: VoiceProbeOptions) -> Result<VoiceProbeR
     ))
 }
 
-/// The input device capture would use (cpal default, or the Linux recorder
-/// name).
+/// The input device capture would use (cpal default, or the Linux recorder name).
+/// It stays available without `audio` so `/terminal-setup` compiles in no-audio builds.
 #[derive(Debug, Clone)]
 pub struct InputDeviceInfo {
     pub name: String,

@@ -20,7 +20,7 @@ pub struct HeadlessResult {
     pub elapsed: Duration,
 }
 
-/// Timeout for one headless grok invocation: many seconds, multiplied by [`crate::scaled`]'s `GROK_TEST_TIMEOUT_SCALE`.
+/// Timeout for one headless grok invocation: 60 seconds, multiplied by [`crate::scaled`]'s `GROK_TEST_TIMEOUT_SCALE`.
 fn headless_timeout() -> Duration {
     crate::scaled(Duration::from_secs(60))
 }

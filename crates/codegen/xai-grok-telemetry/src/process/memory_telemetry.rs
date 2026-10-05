@@ -1,4 +1,5 @@
 //! Memory subsystem telemetry routes through `log_event` (product tier, `Enabled` mode only).
+//! Events carry no PII or user content, only counts, scores, durations, and config values.
 
 use serde::Serialize;
 
@@ -191,6 +192,10 @@ pub struct MemoryV2GcCompleted {
 
 #[derive(Debug, Default, Serialize)]
 /// Content-free telemetry boundary for the deferred memory-v2 forget UX.
+///
+/// A future shell caller can map `ForgetResult::was_already_forgotten` and the
+/// post-operation tombstone count into this event without paths, hashes,
+/// reasons, or forgotten content.
 pub struct MemoryV2Forgotten {
     pub target_kind: MemoryV2TargetKind,
     pub was_already_forgotten: bool,

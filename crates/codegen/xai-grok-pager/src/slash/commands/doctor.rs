@@ -1,4 +1,6 @@
 //! `/doctor`: diagnose terminal, color/theme, clipboard, and voice input.
+//!
+//! Runs the shared TUI probe and diagnostics path, including live runtime evidence that the standalone command cannot observe.
 
 use crate::slash::command::{
     AppCtx, ArgItem, CommandExecCtx, CommandResult, DoctorRequest, SlashCommand, slash_meta,

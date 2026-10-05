@@ -1,4 +1,5 @@
-//! [`WorkspaceRpcHandler`] implements [`ToolServerHandler`] and dispatches server-proxied `workspace.*` JSON-RPC methods.
+//! [`WorkspaceRpcHandler`] implements [`ToolServerHandler`] and dispatches server-proxied `workspace.*` JSON-RPC methods to [`WorkspaceHandle`].
+//! It is registered on the `ToolServer` with tool_id `workspace_rpc`.
 use crate::error::{WorkspaceError, WorkspaceResult};
 use crate::handle::WorkspaceHandle;
 use crate::hub_ids::WORKSPACE_RPC_TOOL_ID;
@@ -160,8 +161,9 @@ struct NoOpNotifier;
 impl crate::worktree::WorktreeNotificationSender for NoOpNotifier {
     async fn send_worktree_status(&self, _progress: crate::worktree::WorktreeStatus) {}
 }
-/// Escape hatch: `WORKSPACE_CLIENT_FS_QUERIES=0` (or `false`) disables the
-/// client-facing `workspace.client_fs_*` ops.
+/// Escape hatch: `WORKSPACE_CLIENT_FS_QUERIES=0` (or `false`) disables the client-facing `workspace.client_fs_*` ops with a graceful `HubError`.
+/// The variable is read per call, so flipping it needs no process restart and tests can toggle it under a lock.
+/// Also gates the staged-upload maintenance (orphan sweep and GC ticker) started with the workspace.
 pub(crate) fn client_fs_queries_enabled() -> bool {
     !matches!(
         std::env::var("WORKSPACE_CLIENT_FS_QUERIES").as_deref(),

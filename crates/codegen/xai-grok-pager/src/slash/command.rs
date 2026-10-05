@@ -1,4 +1,6 @@
-//! Dispatch is synchronous: `run()` has no `async_trait`.
+//! Dispatch is synchronous: `run()` has no `async_trait`, and commands that need async work return `CommandResult::Action(action)` for the dispatch layer.
+//! Trait methods return `&str` (not `&'static str`) so ACP-sourced commands with runtime-determined data work.
+//! There is no `validate_args()`; validation happens inside `run()`.
 
 use crate::acp::model_state::ModelState;
 use crate::app::actions::Action;
@@ -6,6 +8,8 @@ use crate::app::bundle::BundleState;
 use agent_client_protocol as acp;
 
 /// Provisional scheduled task info for immediate display in the tasks pane.
+///
+/// Created by `/loop` when the user submits the command so the task appears instantly, rather than waiting for the LLM round-trip through `scheduler_create`.
 #[derive(Debug, Clone)]
 pub struct ScheduledTaskPreview {
     pub prompt: String,
@@ -27,6 +31,7 @@ pub enum DoctorRequest {
 #[allow(clippy::large_enum_variant)]
 pub enum CommandResult {
     /// Command handled successfully, no visible output needed.
+    /// Kept for parity with the original TUI's result enum; no command returns it directly today.
     Handled,
     /// Build or act on TUI doctor state from live app/session inputs.
     Doctor(DoctorRequest),
@@ -36,20 +41,24 @@ pub enum CommandResult {
     Message(String),
     /// Command produced a pager Action to dispatch (e.g., SwitchModel, Quit).
     Action(Action),
-    /// Command should be sent through the queued command pipeline (e.g., /compact). The String is the raw command text.
+    /// Command should be sent through the queued command pipeline (e.g., /compact).
+    /// The String is the raw command text.
     QueueCommand(String),
-    /// Skill invocation: pager read the SKILL.md, applied substitutions, and
-    /// constructed structured prompt blocks for the wire. `display_text` is
-    /// what the user sees in scrollback.
+    /// Skill invocation: pager read the SKILL.md, applied substitutions, and constructed structured prompt blocks for the wire.
+    /// `display_text` is what the user sees in scrollback.
+    /// `prompt_blocks` is the actual content sent to the model.
     InjectSkill {
         display_text: String,
         prompt_blocks: Vec<agent_client_protocol::ContentBlock>,
         /// Whether to display as a skill invocation (teal accent) in scrollback.
+        /// `true` for real skills (e.g. /commit), `false` for built-in commands like /loop that inject structured prompts but aren't skills.
         display_as_skill: bool,
         /// If set, immediately show a provisional scheduled task in the tasks pane.
+        /// The real `ScheduledTaskCreated` notification from the shell replaces it.
         scheduled_task_preview: Option<ScheduledTaskPreview>,
     },
-    /// Command text should be sent as a regular prompt. This variant deliberately covers different cases.
+    /// Command text should be sent as a regular prompt. This variant deliberately covers two different cases. Unknown
+    /// commands (pager doesn't know them, shell might).
     PassThrough(String),
 }
 
@@ -64,7 +73,9 @@ pub struct ArgItem {
     pub insert_text: String,
     /// Description shown alongside the item.
     pub description: String,
-    /// Whether the model this row names is resident in VRAM.
+    /// Whether the model this row names is resident in VRAM. `None` on every
+    /// row that is not a local model, which is what keeps the dot off the
+    /// cloud models in the same list.
     pub loaded_in_vram: Option<bool>,
 }
 
@@ -89,7 +100,8 @@ impl WorkflowRunChoice {
     }
 
     pub fn can_resume(&self) -> bool {
-        // The picker lists only runs the user stopped (`/workflow stop`) or paused (`/workflow pause`) System pauses (blocked, back-off, budget).
+        // The picker lists only runs the user stopped (`/workflow stop`) or paused (`/workflow pause`)
+        // System pauses (blocked, back-off, budget) stay off this list; those runs are still resumable if typed by name
         matches!(self.status.as_str(), "user_paused" | "cancelled")
     }
 
@@ -101,7 +113,9 @@ impl WorkflowRunChoice {
     }
 
     pub fn can_save(&self, definitions: &[WorkflowChoice]) -> bool {
-        // Shell save requires the display name to equal the script's `meta.name` First runs keep the catalog name.
+        // Shell save requires the display name to equal the script's `meta.name`
+        // First runs keep the catalog name; uniquified copies (`review-pr-2`) do not
+        // A definition literally named `sprint-2` is still savable because that name is in the catalog
         !self.builtin
             && definitions
                 .iter()
@@ -137,13 +151,17 @@ pub struct AppCtx<'a> {
     /// Whether the consumer billing surface is visible (`AppView::usage_visible`); gates `/usage` subcommands.
     pub billing_surface_visible: bool,
     /// Whether `/usage` is offered and executable.
+    /// False for external-auth deployments with no grok.com billing session.
     pub usage_command_visible: bool,
     pub workflows_available: bool,
     /// Saved or built-in workflow definitions advertised by the shell (`_meta.workflowSource`).
+    /// Backs `/workflow` argument suggestions.
     pub saved_workflows: &'a [WorkflowChoice],
     /// Live session runs.
+    /// Backs `/workflow pause|resume|stop|save` name suggestions so a manage verb never auto-picks a run.
     pub workflow_runs: &'a [WorkflowRunChoice],
     /// Current session title for `/rename` ghost-prefill (`display_name`, else `generated_session_title`).
+    /// `None` when there is no title yet.
     pub current_title: Option<&'a str>,
 }
 
@@ -157,8 +175,11 @@ pub struct CommandExecCtx<'a> {
     /// Whether the consumer billing surface is visible (`AppView::usage_visible`); gates `/usage` subcommands.
     pub billing_surface_visible: bool,
     /// Whether `/usage` is offered and executable.
+    /// False for external-auth deployments with no grok.com billing session.
     pub usage_command_visible: bool,
     /// Snapshot of the active agent's PAGER-owned settings, built by the dispatcher when it builds the command.
+    /// Slash commands like `/multiline` read this to compute `!current` and dispatch a typed `Action::SetX(new)`.
+    /// The dispatcher remains the single source of truth for the actual state mutation.
     pub(crate) pager_state: crate::settings::PagerLocalSnapshot,
 }
 
@@ -218,7 +239,8 @@ pub trait SlashCommand: Send + Sync {
         false
     }
 
-    /// Whether the command accepts arguments right now.
+    /// Whether the command accepts arguments right now. Only dropdown and completion paths consult this: the insert
+    /// text's trailing space, the snapshot taken when the args phase starts, and argument suggestions.
     #[allow(unused_variables)]
     fn takes_args_now(&self, ctx: &AppCtx) -> bool {
         self.takes_args()
@@ -236,45 +258,55 @@ pub trait SlashCommand: Send + Sync {
         None
     }
 
-    /// Every row the modal picker may search, which can be wider than the
-    /// rows it opens on.
+    /// Every row the modal picker may search, which can be wider than the rows
+    /// it opens on.
+    ///
+    /// The modal picker asks one time and filters its own copy as the user
+    /// types, so a command that opens on a subset (`/model` opens on the
+    /// favorites) has to hand over the whole set here. Otherwise the rows it
+    /// left out are unreachable from that picker. The inline dropdown asks
+    /// again on every keystroke and does not use this.
     fn search_args(&self, ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
         self.suggest_args(ctx, args_query)
     }
 
-    /// `insert_text` of the row the args menu (dropdown or modal picker)
-    /// opens on when no selection carries over.
+    /// `insert_text` of the row the args menu (dropdown or modal picker) opens on when no selection carries over.
+    /// Resolved by exact equality against the rows built from `suggest_args(ctx, args_query)`; `None` or an
+    /// unmatched value keeps the first row.
     fn preselected_arg(&self, _ctx: &AppCtx, _args_query: &str) -> Option<String> {
         None
     }
 
-    /// Whether this command is visible / executable. Default is `true` (every
-    /// command is visible).
+    /// Whether this command is currently visible / executable.
+    /// Default is `true` (every command is visible).
+    /// Override to gate a command on session state.
     #[allow(unused_variables)]
     fn visible(&self, ctx: &AppCtx) -> bool {
         true
     }
 
     /// Whether this command operates on a single agent session (its conversation, context, model, turns, plan, etc.)
-    /// rather than the pager.
+    /// rather than the pager as a whole. Surfaces that always have a session (the agent view) ignore this flag and
+    /// continue to show every command.
     fn session_scoped(&self) -> bool {
         false
     }
 
-    /// Whether a `session_scoped()` command should still be offered on
-    /// session-less surfaces (the agent dashboard's dispatch input).
+    /// Whether a `session_scoped()` command should still be offered on session-less surfaces (the agent dashboard's
+    /// dispatch input). Has no effect for non-session-scoped commands (they're always offered).
     fn offered_when_session_less(&self) -> bool {
         false
     }
 
-    /// Whether this command should ONLY be offered on the session-less
-    /// dashboard surface, the inverse of [`Self::session_scoped`].
+    /// Whether this command should ONLY be offered on the session-less dashboard surface, the inverse of
+    /// [`Self::session_scoped`]. `/cd` changes where the dashboard dispatches new agents, so it is meaningless in an
+    /// agent session and hidden there.
     fn dashboard_only(&self) -> bool {
         false
     }
 
-    /// A mid-text `/name` token runs this command with the whole message as
-    /// its args: `prose /name q` is `/name prose q`.
+    /// A mid-text `/name` token runs this command with the whole message as its args: `prose /name q` is `/name prose q`.
+    /// Opt in only when the whole message is the argument; `submission_refusal` only sees a leading `/` and is bypassed.
     fn can_hoist_from_mid_text(&self) -> bool {
         false
     }
@@ -291,19 +323,23 @@ pub trait SlashCommand: Send + Sync {
         false
     }
 
-    /// Tool names the agent must have registered for this command to work.
+    /// Tool names the agent must have registered for this command to work. Override for commands that only make sense
+    /// when specific tools are available. The registry hides commands whose requirements aren't all present in the
+    /// agent's advertised toolset.
     fn required_tools(&self) -> &[&str] {
         &[]
     }
 
-    /// Whether this command supports live preview when navigating arg
-    /// suggestions in the dropdown.
+    /// Whether this command supports live preview when navigating arg suggestions in the dropdown.
+    ///
+    /// When true, [`preview_arg`] is called on every selection change and [`cancel_preview`] on dropdown close (Esc).
     fn supports_preview(&self) -> bool {
         false
     }
 
-    /// Capture the current preview-relevant state as a string. Called once
-    /// when preview mode begins (first navigation in args dropdown).
+    /// Capture the current preview-relevant state as a string.
+    /// Called once when preview mode begins (first navigation in args dropdown).
+    /// The returned value is stored and passed back to [`cancel_preview`] if the user dismisses the dropdown.
     fn preview_state(&self) -> Option<String> {
         None
     }
@@ -312,15 +348,21 @@ pub trait SlashCommand: Send + Sync {
     #[allow(unused_variables)]
     fn preview_arg(&self, arg: &str) {}
 
-    /// Cancel a live preview, reverting to the state before the dropdown opened.
+    /// Cancel a live preview, reverting to the state before the dropdown opened. Only called when [`supports_preview`]
+    /// returns true.
     #[allow(unused_variables)]
     fn cancel_preview(&self, previous: &str) {}
 
     /// Execute the command synchronously.
+    ///
+    /// For async work, return `CommandResult::Action(action)` and let the dispatch layer handle the effect pipeline.
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult;
 
-    /// Execute, with the name the user typed. Resolution is case-insensitive,
-    /// so `token` is the only place the typed case survives.
+    /// Execute, with the name the user actually typed.
+    ///
+    /// Resolution is case-insensitive, so `token` is the only place the typed
+    /// case survives. Override this when the case is part of the request
+    /// (`/TODO` versus `/todo`); everything else wants [`Self::run`].
     fn run_with_token(&self, ctx: &mut CommandExecCtx, _token: &str, args: &str) -> CommandResult {
         self.run(ctx, args)
     }

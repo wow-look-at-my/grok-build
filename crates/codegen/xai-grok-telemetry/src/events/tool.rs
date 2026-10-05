@@ -347,6 +347,7 @@ pub struct ToolCallCompleted {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_reason: Option<ToolSourceReason>,
     /// Registered read, search-replace, and write ids. A client-facing rename still qualifies.
+    /// Absent for an unknown id or a missing path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path_scope: Option<PathScope>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -358,12 +359,17 @@ pub struct ToolCallCompleted {
     /// Raw requested model for the external stream. Not a product field.
     #[serde(skip)]
     pub external_model_id: String,
-    /// Primary file path of the call, for the external stream only.
+    /// Primary file path of the call, for the external stream only (`#[serde(skip)]`: never serialized to product events/analytics).
+    /// Always reduced to `file_extension`; the full path rides the `OTEL_LOG_TOOL_DETAILS` gate.
     #[serde(skip)]
     pub file_path: Option<String>,
+    /// Tool parameters for the external stream's `OTEL_LOG_TOOL_DETAILS`
+    /// 4 KB preview **and** `OTEL_LOG_TOOL_CONTENT` full `tool_input`
+    /// (`#[serde(skip)]`; reduced / capped at emit time).
     #[serde(skip)]
     pub parameters: Option<serde_json::Value>,
-    /// Tool-call id for the external stream (`#[serde(skip)]`; always-on join key, not content).
+    /// Tool-call id for the external stream (`#[serde(skip)]`; always-on
+    /// join key, not content).
     #[serde(skip)]
     pub tool_use_id: Option<String>,
     /// Tool result body for `OTEL_LOG_TOOL_CONTENT` (`#[serde(skip)]`).
@@ -397,12 +403,15 @@ pub struct ModelResponseReceived {
     pub cost_usd_ticks: Option<i64>,
 }
 
-/// Emitted once per turn via [`crate::external::emit`] (not
-/// [`crate::session_ctx::log_event`]).
+/// Emitted once per turn via [`crate::external::emit`] (not [`crate::session_ctx::log_event`]), so Mixpanel never
+/// receives `assistant_response`. Thinking/tool-use blocks are excluded at the source. `response_length` always exports
+/// on the external event; `response_text` is `#[serde(skip)]` and gated by `OTEL_LOG_ASSISTANT_RESPONSES`.
 #[derive(Serialize)]
 pub struct AssistantResponse {
-    /// Char/byte count of the assembled text blocks (always-on, like `prompt_length`). Zero on tool-only turns.
+    /// Char/byte count of the assembled text blocks (always-on, like
+    /// `prompt_length`). Zero on tool-only turns.
     pub response_length: usize,
+    /// Gated by `OTEL_LOG_ASSISTANT_RESPONSES`; omitted when length is 0.
     #[serde(skip)]
     pub response_text: Option<String>,
 }

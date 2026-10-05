@@ -1,10 +1,12 @@
-//! Pure-Rust engine: the vendored `mermaid-to-svg` (a dagre layout port) turns Mermaid source into SVG.
+//! Pure-Rust engine: the vendored `mermaid-to-svg` (a dagre layout port) turns Mermaid source into SVG, then [`crate::rasterize`] makes the PNG.
 
 use mermaid_to_svg::{MermaidTheme as EngineTheme, render_mermaid_to_svg};
 
 use crate::{MermaidEngine, MermaidError, MermaidTheme, RenderParams, RenderedDiagram};
 
 /// The default, offline, pure-Rust engine.
+///
+/// Uses the vendored dagre-based layout engine to produce an SVG, then rasterizes it with [`crate::rasterize`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PureRustEngine;
 
@@ -116,9 +118,10 @@ mod tests {
     }
 
     /// A cyclic flowchart whose back-edge (`Attempts -->|No| Enter`) routes back up into the cycle, the tricky case for flowchart edge routing.
-    /// Every one of the edges must keep its arrowhead, and no node may be dropped by the cycle.
+    /// Every one of the eight edges must keep its arrowhead, and no node may be dropped by the cycle.
     #[test]
     fn cyclic_login_flow_renders_with_arrowheads() {
+        // Eight directed edges; each must emit exactly one arrowhead marker.
         const EDGE_COUNT: usize = 8;
         let source = "flowchart TD\n\
             Start([User visits login page]) --> Enter[Enter username & password]\n\
@@ -130,7 +133,8 @@ mod tests {
             Attempts -->|No| Enter\n\
             Validate -->|Yes| Session[Create session]";
         let svg = build_svg(source, MermaidTheme::Light).expect("cyclic flow renders");
-        // Require exactly one `marker-end="url(#arrowhead)"` per edge, so a dropped.
+        // Require exactly one `marker-end="url(#arrowhead)"` per edge, so a dropped or detached back-edge arrowhead fails
+        // A whole-doc "contains arrow" substring check would pass even with one missing
         let arrowheads = svg.matches(r#"marker-end="url(#arrowhead)""#).count();
         assert_eq!(
             arrowheads, EDGE_COUNT,
@@ -151,7 +155,7 @@ mod tests {
 
     #[test]
     fn light_and_dark_render_to_different_pixels() {
-        // Stronger than an SVG-string diff: render both themes at identical params and assert the encoded pixels differ
+        // Stronger than an SVG-string diff: render both themes at identical params and assert the encoded pixels actually differ
         let engine = PureRustEngine::new();
         let light = engine
             .render(

@@ -1,4 +1,17 @@
 //! SQLite-backed FTS5 index for session search.
+//!
+//! Modelled after the memory system's `MemoryIndex` and `schema.rs`, but purpose-built for searching across *sessions* (titles and user prompts).
+//!
+//! ## Schema
+//!
+//! - `meta`: key-value metadata (schema version, bootstrap marker/claim)
+//! - `session_docs`: one row per session (title, content, content_hash)
+//! - `session_docs_fts`: content-synced FTS5 over title and content (not cwd)
+//!
+//! FTS is kept in sync with `session_docs` via `AFTER INSERT/UPDATE/DELETE` triggers so callers never need to touch the FTS table directly.
+//! The `cwd` column is intentionally excluded from the FTS table: it is a filter dimension only, applied via JOIN on `session_docs`.
+//!
+//! The index is a rebuildable cache: an unusable file is quarantined and recreated once (see the crate's `recovery` module and [`with_index`]).
 
 use std::path::Path;
 use std::time::Duration;
@@ -9,9 +22,11 @@ use xai_sqlite_journal::JournalMode;
 use crate::recovery;
 
 /// Bump when making breaking schema changes that require dropping and recreating tables, or to force a rebuild of stale index content.
+/// v3 to v4 forced a rebuild because messages with JSON escapes were silently dropped at indexing.
 const SCHEMA_VERSION: &str = "4";
 
 /// Lease stamp for the bootstrap claim, held while a reindex runs, stored as `"{unix_secs}:{owner_token}"`.
+/// `CAST` reads the numeric prefix, and the token fences refresh/release to the owner.
 pub(crate) const META_KEY_BOOTSTRAP_CLAIM: &str = "bootstrap_claimed_at";
 
 /// Unix seconds of the last completed full reindex; its presence is the completed-bootstrap marker.
@@ -135,14 +150,18 @@ impl SessionSearchIndex {
             .optional()
             .unwrap_or(None);
 
-        // One-way ratchet: drop only on UPGRADE (stored < current).
+        // One-way ratchet: drop only on UPGRADE (stored < current). A newer index is safe to read: bumps regenerate content only
+        // (the table schema is column-identical). The newer binary re-upserts any rows we write via content-hash mismatch `None`
+        // means a fresh DB; a non-integer stored value is legacy or corrupt and parses as 0
         let current: u64 = SCHEMA_VERSION
             .parse()
             .expect("SCHEMA_VERSION is an integer");
         let stored: Option<u64> = stored_version.as_deref().map(|v| v.parse().unwrap_or(0));
         let owned_by_newer = stored.is_some_and(|s| s > current);
         if stored.is_some_and(|s| s < current) {
-            // The marker and claim die with the tables A surviving marker reads as "bootstrap complete" over an empty index.
+            // The marker and claim die with the tables A surviving marker reads as "bootstrap complete" over an empty index, and a
+            // stale claim blocks the rebuild until the lease expires. Other `meta` keys are preserved. Immediate: a deferred begin
+            // can fail with SQLITE_BUSY_SNAPSHOT, which skips the busy handler
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             tx.execute_batch(
                 "
@@ -533,6 +552,7 @@ impl SessionSearchIndex {
             "NULL"
         };
 
+        // BM25 weights: title 10.0, content 1.0
         let sql = format!(
             "SELECT
                d.session_id,
@@ -627,9 +647,9 @@ impl SessionSearchIndex {
         Some((prefixes.join(" AND "), prefixes.join(" OR ")))
     }
 
-    /// Split a query word on every stripped character instead of gluing:
-    /// `session_picker.rs` searches as `session_picker` and `rs`. Gluing
-    /// produced the never-indexed `session_pickerrs`.
+    /// Split a query word on every stripped character instead of gluing: `session_picker.rs` searches as `session_picker` and `rs`.
+    /// Gluing produced the never-indexed `session_pickerrs`.
+    /// Fragments with no alphanumeric (`-`, `->`, `_`) are dropped: they tokenize to empty phrases; an empty phrase inside an AND matches nothing.
     fn sanitize_token(token: &str) -> impl Iterator<Item = &str> {
         token
             .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
@@ -637,8 +657,8 @@ impl SessionSearchIndex {
     }
 
     /// One quoted FTS5 prefix per token, stemmed on the query side only. Plural queries reach singular docs by searching the
-    /// shorter stem (`sessions` becomes `session*`, `caches` becomes `cach*`). Words shorter than letters, identifiers with
-    /// digits/`_`/`-`, and words ending in `ss` (`pass`, `class`) stay exact.
+    /// shorter stem (`sessions` becomes `session*`, `caches` becomes `cach*`). Words shorter than four letters, identifiers
+    /// with digits/`_`/`-`, and words ending in `ss` (`pass`, `class`) stay exact.
     fn token_prefix(token: &str) -> String {
         let stem = if token.len() < 4 || !token.chars().all(|c| c.is_ascii_alphabetic()) {
             token
@@ -806,7 +826,8 @@ mod tests {
 
     #[test]
     fn test_network_mode_uses_fresh_per_host_truncate_db() {
-        // Network mode opens a per-host sibling of the given path in rollback-journal mode.
+        // Network mode opens a per-host sibling of the given path in rollback-journal mode, and the index is fully usable there
+        // The legacy shared file is left untouched: a live old binary can flip it back to WAL at any time
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("session_search.sqlite");
 
@@ -872,8 +893,8 @@ mod tests {
             Some(SCHEMA_VERSION),
             "schema version must be rewritten to current"
         );
-        // The drop batch invalidates the completed-bootstrap marker (the
-        // dropped tables no longer reflect a completed bootstrap).
+        // The drop batch invalidates the completed-bootstrap marker (the dropped tables no longer reflect a completed bootstrap)
+        // It leaves every other `meta` key alone
         assert_eq!(
             reopened.get_meta("last_bootstrap_at").unwrap(),
             None,
@@ -1003,7 +1024,8 @@ mod tests {
         let bogus = tmp.path().join("bogus.sqlite");
         std::fs::write(&bogus, b"not-sqlite").unwrap();
 
-        // The first op attempt reports the DB unusable.
+        // The first op attempt reports the DB unusable, as a mid-op corruption would
+        // `with_index` heals (a no-op here, the DB is healthy) and retries the op exactly once, which then succeeds
         let calls = std::cell::Cell::new(0u32);
         let result = with_index(&path, |index| {
             let n = calls.get();

@@ -142,7 +142,8 @@ fn settled_tombstones_leave_the_manifest_alone_until_a_file_is_removed() {
         .unwrap();
     store.forget(&forget_request(&first, 20)).unwrap();
 
-    // Reopening reconciles the settled tombstone again; nothing.
+    // Reopening reconciles the settled tombstone again; nothing was removed, so the
+    // manifest on disk is not rewritten.
     std::fs::write(&manifest, "sentinel").unwrap();
     let reopened =
         V2MaintenanceStore::open(&workspace, V2MemoryScope::Workspace, &global, &workspace)

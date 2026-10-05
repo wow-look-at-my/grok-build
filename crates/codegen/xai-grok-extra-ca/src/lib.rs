@@ -1,4 +1,7 @@
-//! TLS policy for the grok CLI: OS roots, Mozilla roots.
+//! TLS policy for the grok CLI: OS roots, Mozilla roots, and opt-in extra roots from `GROK_EXTRA_CA_BUNDLE` (fallback: `SSL_CERT_FILE`).
+//! A bad bundle is logged and skipped, never failing client construction.
+//!
+//! Every client pins rustls: feature unification can otherwise select native-tls, whose untyped errors break the certificate classifier.
 
 #![deny(clippy::indexing_slicing)]
 
@@ -18,7 +21,7 @@ pub const ENV_GROK_EXTRA_CA_BUNDLE: &str = "GROK_EXTRA_CA_BUNDLE";
 
 pub const ENV_SSL_CERT_FILE: &str = "SSL_CERT_FILE";
 
-/// ring on Windows ARM64: aws-lc-sys's jitterentropy is miscompiled for that target and overflows the stack on the first TLS handshake.
+/// ring on Windows ARM64: aws-lc-sys's jitterentropy is miscompiled for that target and overflows the stack on the first TLS handshake (xai-org/plugin-marketplace#426).
 const IS_RING_TARGET: bool = cfg!(all(windows, target_arch = "aarch64"));
 
 /// Installs aws-lc-rs, or ring where `IS_RING_TARGET`.
@@ -48,6 +51,8 @@ pub fn ensure_default_crypto_provider() {
 }
 
 /// Builds a reqwest client with the grok TLS policy: the shared roots (OS store, Mozilla bundle, and any extra roots).
+/// The roots are read once per process instead of on each build.
+/// For HTTP/1.1 only, add `http1_only()` in `configure`.
 #[allow(clippy::disallowed_methods)] // the approved async build path
 pub fn build_reqwest_client(
     configure: impl Fn(reqwest::ClientBuilder) -> reqwest::ClientBuilder,
@@ -352,6 +357,7 @@ pub(crate) fn parse_and_validate_pem(pem: &[u8]) -> ParseOutcome {
     }
 }
 
+/// Relabel OpenSSL `TRUSTED CERTIFICATE` blocks the PEM parser skips (rustls/pemfile#52).
 fn normalize_trusted_certificate_labels(pem: &[u8]) -> Vec<u8> {
     String::from_utf8_lossy(pem)
         .replace("BEGIN TRUSTED CERTIFICATE", "BEGIN CERTIFICATE")

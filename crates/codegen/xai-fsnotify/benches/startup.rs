@@ -1,4 +1,24 @@
 //! Watcher startup-latency benchmark.
+//!
+//! All scenarios build ~12k total dirs so inotify-watch creation cost is
+//! comparable across them:
+//!
+//! - `favorable` — most dirs live in a gitignored `target/` the new code skips.
+//! - `fanout_w48_with_target` — 48 non-ignored top-level children PLUS a
+//!   gitignored `target/`: a realistic moderate-width repo that fans out and
+//!   skips the build dir (net win).
+//! - `fanout_w64_no_ignored` — 64 non-ignored children, nothing ignored: the
+//!   fan-out path's worst case (pure per-child `watch()` round-trip overhead,
+//!   nothing to skip), bounding the cost at the threshold.
+//! - `wide_w400` — 400 non-ignored children: above the threshold, so it
+//!   exercises the recursive-root fallback (recursive-vs-recursive).
+//! - `nested_ignored_js_shape` — node_modules-heavy tree where ~5/6 of the
+//!   dirs are gitignored *below* the top level: per-dir mode (Linux default)
+//!   prunes them; fan-out mode pays for them on emulated-recursion backends.
+//!
+//! Run with `cargo bench -p xai-fsnotify --bench startup`. Medians land in
+//! `target/criterion/watcher_startup/<scenario>/new/estimates.json`.
+//! `GROK_FSNOTIFY_PER_DIR=0|1` pins the strategy for A/B runs.
 
 use std::fs;
 use std::path::Path;
@@ -9,6 +29,8 @@ use xai_fsnotify::{FsConfig, FsEventSource};
 
 const TOTAL_DIRS: usize = 12_000;
 
+/// Create `count` nested directories under `base`, grouped 100 per parent so
+/// the tree has realistic fan-out and depth rather than one flat directory.
 fn make_dirs(base: &Path, count: usize) {
     for i in 0..count {
         let dir = base.join(format!("g{}", i / 100)).join(format!("d{i}"));
@@ -16,7 +38,8 @@ fn make_dirs(base: &Path, count: usize) {
     }
 }
 
-/// Kept at ~`TOTAL_DIRS` for comparability with the others.
+/// Favorable: three watched subtrees plus a large gitignored `target/` holding
+/// ~2/3 of the dirs. Kept at ~`TOTAL_DIRS` for comparability with the others.
 fn build_favorable_tree() -> TempDir {
     let temp = TempDir::new().unwrap();
     let root = temp.path();
@@ -77,7 +100,8 @@ fn build_nested_ignored_tree() -> TempDir {
 }
 
 fn bench_startup(c: &mut Criterion) {
-    // `start` blocks on a std mpsc ready signal.
+    // `start` blocks on a std mpsc ready signal; the tokio loop is only spawned,
+    // never awaited during timing, so a current-thread runtime suffices.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

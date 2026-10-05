@@ -1,4 +1,7 @@
 //! Timeline sidebar: a tick rail (one tick per turn) that replaces the scrollbar in its gutter while enabled.
+//! Tick position encodes conversation order, not scroll proportion.
+//!
+//! Geometry is computed once per frame into a [`TimelineRail`] consumed by both the renderer and mouse hit-testing, so they cannot drift.
 
 use std::ops::Range;
 
@@ -30,9 +33,12 @@ pub struct TimelineRail {
     pub ticks_y: u16,
     /// Active turn (viewport top), if any.
     pub active: Option<usize>,
-    /// The ▲ target: the nearest turn strictly above the viewport top ([`ScrollbackState::turn_above_viewport_top`]).
+    /// The ▲ target: the nearest turn strictly above the viewport top
+    /// ([`ScrollbackState::turn_above_viewport_top`]), NOT `active - 1`.
     pub up_target: Option<usize>,
-    /// The ▼ target: the nearest turn below the viewport top ([`ScrollbackState::turn_below_viewport_top`]).
+    /// The ▼ target: the nearest turn below the viewport top
+    /// ([`ScrollbackState::turn_below_viewport_top`]). Both go through `jump_to_turn`, which
+    /// over-scrolls trailing turns rather than dimming.
     pub down_target: Option<usize>,
     /// Chevron rows.
     pub up_y: u16,
@@ -69,8 +75,8 @@ pub(crate) fn rail_width(
     }
 }
 
-/// The viewport-derived turn state the rail is built from, gathered once per
-/// frame from `ScrollbackState`.
+/// The viewport-derived turn state the rail is built from, gathered once per frame from `ScrollbackState`.
+/// Bundled so [`compute_rail`] takes one argument instead of four adjacent `Option<usize>` / `bool` positionals.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RailViewport {
     /// Turn at the viewport top (the highlighted tick), if any.
@@ -94,6 +100,7 @@ pub fn compute_rail(
         return None;
     }
     let height = scrollback_area.height as usize;
+    // Chevrons take 2 rows; require at least 1 tick row.
     let max_ticks = height.checked_sub(2)?;
     if max_ticks == 0 {
         return None;
@@ -102,7 +109,9 @@ pub fn compute_rail(
     let window = if turn_count <= max_ticks {
         0..turn_count
     } else {
-        // More turns than rows: slide a window that keeps the active tick visible At the bottom.
+        // More turns than rows: slide a window that keeps the active tick visible
+        // At the bottom, prefer the tail so the newest ticks stay on screen
+        // Never exclude the viewport-top (active) turn, though, or no tick would highlight
         let tail_start = turn_count - max_ticks;
         let start = if vp.at_bottom {
             match vp.active {
@@ -249,7 +258,7 @@ pub fn render_tick_hover_popup(
     }
     let tick_y = rail.ticks_y + (turn_idx - rail.window.start) as u16;
 
-    // Wrap to a bounded number of lines by display width; ellipsize the last.
+    // Wrap to at most 2 lines by display width; ellipsize the last.
     let max_text = ((scrollback_area.width / 2).clamp(16, 32)) as usize;
     let mut lines: Vec<String> = Vec::new();
     let mut rest: &str = preview.trim();
@@ -365,6 +374,7 @@ mod tests {
     fn small_conversation_shows_all_ticks_centered() {
         let rail = rail(4, Some(1)).unwrap();
         assert_eq!(rail.window, 0..4);
+        // 4 ticks + 2 chevrons = 6 rows centered in 20: top = 2 + 7 = 9.
         assert_eq!(rail.up_y, 9);
         assert_eq!(rail.ticks_y, 10);
         assert_eq!(rail.down_y, 14);
@@ -372,6 +382,7 @@ mod tests {
 
     #[test]
     fn overflow_windows_around_active() {
+        // 50 turns, 18 tick rows (20 - 2 chevrons).
         let rail = rail(50, Some(25)).unwrap();
         assert_eq!(rail.window.len(), 18);
         assert!(rail.window.contains(&25));
@@ -426,6 +437,7 @@ mod tests {
     #[test]
     fn hit_maps_chevrons_and_ticks() {
         let rail = rail(4, Some(1)).unwrap();
+        // Outside the rail columns (width 2: cols 76-77).
         assert_eq!(rail.hit(75, rail.ticks_y), None);
         assert_eq!(rail.hit(78, rail.ticks_y), None);
         // Chevrons.

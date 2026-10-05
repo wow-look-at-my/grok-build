@@ -47,8 +47,9 @@ impl CliUpdateInstaller {
     }
 }
 
-/// [`CliUpdateTrigger`]'s strum string and `FromStr` are the only rendering;
-/// tests pin the round trip with the wire values.
+/// [`CliUpdateTrigger`]'s strum string and `FromStr` are the only rendering; tests pin the round trip with the wire
+/// values. Volume caveat: one-shot `grok update` resolves telemetry from disk and env only. So `user_command`
+/// under-reports relative to the in-process `leader_converge`; the triggers are not directly comparable.
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq, strum::AsRefStr, strum::IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]

@@ -1,4 +1,5 @@
-//! Pure validation of submitted elicitation form values against parsed [`ElicitFieldSpec`]s.
+//! Pure validation of submitted elicitation form values against parsed
+//! [`ElicitFieldSpec`]s. Schema parsing lives in [`super::schema`].
 
 use serde_json::{Map, Value};
 
@@ -8,7 +9,9 @@ use super::schema::{ElicitFieldKind, ElicitFieldSpec, ElicitTextFormat};
 /// [`ElicitFieldSpec`]. Selections are indexes into the spec's options.
 #[derive(Debug, Clone)]
 pub enum ElicitFieldValue<'a> {
-    /// String / Number / Integer fields: the raw text draft.
+    /// String / Number / Integer fields: the raw text draft. An empty draft means "not provided";
+    /// anything else is validated and submitted **verbatim** — JSON Schema string values and length
+    /// constraints do not trim whitespace.
     Draft(&'a str),
     Bool(bool),
     Choice(Option<usize>),
@@ -100,6 +103,9 @@ pub fn validate_field(
             {
                 return Err(format!("select at most {max}"));
             }
+            // JSON Schema semantics (reviewer-confirmed): `required` only demands the property be
+            // present and `minItems` defaults to 0, so an empty required multi-select submits `[]`.
+            // Only an optional field with nothing selected is omitted.
             if values.is_empty() && !spec.required {
                 return Ok(None);
             }
@@ -115,7 +121,8 @@ pub fn validate_field(
             ElicitFieldValue::Draft(draft),
         ) => {
             // The draft is validated and submitted exactly as typed: JSON
-            // Schema does not trim.
+            // Schema does not trim, so whitespace counts toward length
+            // constraints and is part of the accepted content.
             if draft.is_empty() {
                 return if spec.required {
                     Err("required".into())
@@ -146,7 +153,8 @@ pub fn validate_field(
             },
             ElicitFieldValue::Draft(draft),
         ) => {
-            // Numeric fields submit the parsed number, not the text.
+            // Numeric fields submit the parsed number, not the text, so
+            // surrounding whitespace is a tolerated input artifact here.
             let s = draft.trim();
             if s.is_empty() {
                 return if spec.required {
@@ -155,6 +163,9 @@ pub fn validate_field(
                     Ok(None)
                 };
             }
+            // Lossless: never routed through `f64`, so 1e20 is rejected
+            // instead of silently saturating and values above 2^53 keep
+            // every digit.
             let Ok(n) = s.parse::<i64>() else {
                 return Err("must be an integer".into());
             };
@@ -202,7 +213,8 @@ pub fn validate_field(
                 None => Err("invalid number".into()),
             }
         }
-        // A value of the wrong shape for the field (caller bug): surface as a validation error instead of silently accepting.
+        // A value of the wrong shape for the field (caller bug): surface as
+        // a validation error instead of silently accepting or panicking.
         _ => Err("invalid value".into()),
     }
 }
@@ -217,8 +229,8 @@ fn validate_text_format(format: ElicitTextFormat, s: &str) -> Option<String> {
             }
         }
         ElicitTextFormat::Uri => {
-            // Any absolute URI (scheme required), not http(s): `urn:`,
-            // `mailto:`, `ftp:` etc. are all valid `format: uri`.
+            // Any absolute URI (scheme required), not just http(s):
+            // `urn:`, `mailto:`, `ftp:` etc. are all valid `format: uri`.
             if url::Url::parse(s).is_ok() {
                 None
             } else {
@@ -245,7 +257,7 @@ fn validate_text_format(format: ElicitTextFormat, s: &str) -> Option<String> {
 }
 
 /// Pragmatic email shape check: one `@`, a non-empty local part without
-/// whitespace, and a hostname-shaped domain with at least labels.
+/// whitespace, and a hostname-shaped domain with at least two labels.
 fn is_plausible_email(s: &str) -> bool {
     let Some((local, domain)) = s.split_once('@') else {
         return false;

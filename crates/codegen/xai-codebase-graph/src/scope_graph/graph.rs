@@ -26,10 +26,12 @@ pub type NodeIndex = petgraph::graph::NodeIndex<u32>;
 /// A symbol with its name and range.
 pub type SymbolWithRange = (Arc<str>, Range);
 
-/// A reference with its resolved definition (if any). Format: (ref_name, ref_range, Option<(def_name, def_range)>)
+/// A reference with its resolved definition (if any).
+/// Format: (ref_name, ref_range, Option<(def_name, def_range)>)
 pub type ReferenceWithDefinition = (String, Range, Option<(String, Range)>);
 
 /// Result of symbol extraction: (definitions, references, aliases).
+/// Aliases use Arc<str> to avoid extra allocation when merging into index.
 pub type ExtractedSymbols = (
     Vec<SymbolWithRange>,
     Vec<SymbolWithRange>,
@@ -37,9 +39,12 @@ pub type ExtractedSymbols = (
 );
 
 /// Version tracking for tree-sitter queries used to build an index.
+/// Detects query changes so the index rebuilds even if file contents have not.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum QueryVersion {
-    /// Legacy format - index was built before query versioning.
+    /// Legacy format - index was built before query versioning was added.
+    /// This triggers a rebuild since we don't know what queries were used.
+    /// Default for backwards compatibility with old cached indexes.
     #[default]
     Legacy,
     /// The hash of all tree-sitter queries used to build this index.
@@ -215,7 +220,8 @@ impl ScopeGraph {
             let new_def = NodeKind::Def(new);
             let new_idx = self.graph.add_node(new_def);
 
-            // if the parent scope exists, insert this def there, if not, insert into the defining scope
+            // if the parent scope exists, insert this def there, if not,
+            // insert into the defining scope
             let target_scope = self.parent_scope(defining_scope).unwrap_or(defining_scope);
 
             self.graph
@@ -323,7 +329,8 @@ impl ScopeGraph {
         }
     }
 
-    /// Insert a ref into the scope-graph unconditionally (for cross-file reference tracking) Unlike insert_ref, this adds the reference even.
+    /// Insert a ref into the scope-graph unconditionally (for cross-file reference tracking)
+    /// Unlike insert_ref, this adds the reference even if no local definition is found.
     pub fn insert_ref_unconditional(&mut self, new: Reference) {
         let new_ref = NodeKind::Ref(new);
         self.graph.add_node(new_ref);
@@ -368,6 +375,7 @@ impl ScopeGraph {
                     let ref_name = String::from_utf8_lossy(reference.name(src)).to_string();
                     let ref_range = reference.range;
 
+                    // Find the definition this reference points to
                     let def_info = self
                         .graph
                         .edges_directed(idx, Direction::Outgoing)
@@ -561,8 +569,9 @@ pub fn scope_graph_from_definitions_query(
     (scope_graph, alias_pairs)
 }
 
-/// Lightweight symbol extraction for fast indexing. Does not build a full ScopeGraph. Returns
-/// `(definitions, references, aliases)`.
+/// Lightweight symbol extraction for fast indexing. Does not build a full ScopeGraph.
+/// Directly extracts (name, range) tuples — ~2-3x faster when the full graph is not needed.
+/// Returns `(definitions, references, aliases)`.
 pub fn extract_symbols_fast(
     query: &tree_sitter::Query,
     root_node: tree_sitter::Node<'_>,
@@ -654,8 +663,10 @@ pub struct ScopeGraphIndex {
     /// File path ID -> ScopeGraph for that file
     pub(crate) graphs: HashMap<StringId, ScopeGraph>,
     /// Symbol name ID -> list of (file_path_id, line_number) where it's defined.
+    /// Line numbers are `u32` to halve per-entry memory vs `usize` on 64-bit.
     pub(crate) definitions: HashMap<StringId, Vec<(StringId, u32)>>,
     /// Symbol name ID -> list of (file_path_id, line_number) where it's referenced.
+    /// Same compact representation as `definitions`.
     pub(crate) references: HashMap<StringId, Vec<(StringId, u32)>>,
     /// Alias ID -> Original ID mapping
     pub(crate) aliases: HashMap<StringId, StringId>,
@@ -666,6 +677,7 @@ pub struct ScopeGraphIndex {
     /// Version of tree-sitter queries used to build this index
     pub(crate) query_version: QueryVersion,
     /// Reverse index: file path ID -> set of symbol IDs that have definitions in this file.
+    /// Used for O(symbols_in_file) removal instead of O(all_symbols) full scan.
     pub(crate) file_to_defs: HashMap<StringId, AHashSet<StringId>>,
     /// Reverse index: file path ID -> set of symbol IDs that have references in this file.
     pub(crate) file_to_refs: HashMap<StringId, AHashSet<StringId>>,
@@ -694,7 +706,8 @@ impl ScopeGraphIndex {
     }
 
     // ========================================================================
-    // String interning helpers.
+    // String interning helpers
+    // ========================================================================
 
     /// Intern a string and return its ID.
     #[inline]
@@ -761,7 +774,8 @@ impl ScopeGraphIndex {
     }
 
     // ========================================================================
-    // Symbol insertion (for builder/manager use).
+    // Symbol insertion (for builder/manager use)
+    // ========================================================================
 
     /// Add a definition occurrence for a symbol.
     pub fn add_definition(&mut self, symbol: &str, path: &str, line: usize) {
@@ -1262,7 +1276,8 @@ impl ScopeGraphIndex {
     }
 
     // ========================================================================
-    // Statistics.
+    // Statistics and metadata
+    // ========================================================================
 
     /// Get statistics: (files_count, total_definitions, total_references).
     /// File count is O(1). Definition and reference counts walk unique symbols, not occurrences.
@@ -1306,8 +1321,8 @@ impl ScopeGraphIndex {
     }
 
     /// Reclaim over-allocated Vec capacity after a bulk build. Idempotent.
-    /// `IndexBuilder` calls this automatically; manual builders should call
-    /// it once after insertions.
+    /// `IndexBuilder` calls this automatically; manual builders should call it once after insertions.
+    /// Do not call it in tight incremental-update loops.
     pub fn compact(&mut self) {
         for locs in self.definitions.values_mut() {
             locs.shrink_to_fit();
@@ -1319,7 +1334,8 @@ impl ScopeGraphIndex {
     }
 
     // ========================================================================
-    // Binary serialization (custom format with magic bytes).
+    // Binary serialization (custom format with magic bytes)
+    // ========================================================================
 
     /// Save the index to a file in binary format.
     pub fn save(&self, path: &Path) -> io::Result<()> {
@@ -1636,6 +1652,8 @@ mod tests {
     fn test_line_number_overflow_saturates() {
         let mut index = ScopeGraphIndex::new();
 
+        // u32::MAX + 1 would wrap to 0 with a truncating cast — must saturate
+        // to u32::MAX instead.
         index.add_definition("sym", "file.rs", u32::MAX as usize + 1);
         let locs = index.find_definitions("sym");
         assert_eq!(locs.len(), 1);

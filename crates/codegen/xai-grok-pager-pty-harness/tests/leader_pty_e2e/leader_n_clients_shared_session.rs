@@ -8,7 +8,8 @@ use super::common::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test leader_pty_e2e -- --ignored --test-threads=1"]
 async fn leader_n_clients_shared_session() {
-    // One driver plus VIEWERS viewers; bump to scale the live fan-out Keep it small.
+    // One driver plus VIEWERS viewers; bump to scale the live fan-out
+    // Keep it small: worker_threads above and the per-viewer survival pump below are sized for it, so raise them together if you scale VIEWERS up
     const VIEWERS: usize = 2;
 
     let cluster = LeaderCluster::start(DEFAULT_ROWS, DEFAULT_COLS)
@@ -18,6 +19,7 @@ async fn leader_n_clients_shared_session() {
         .content()
         .set_response(format!("{} first turn payload.", turn_sentinel(1)));
 
+    // The driver spawns the leader and runs turn 1.
     let mut a = cluster.spawn_leader(&[]).expect("spawn driver");
     a.wait_for_text(WELCOME_SCREEN_SENTINEL, LEADER_TIMEOUT)
         .expect("driver welcome");
@@ -26,7 +28,8 @@ async fn leader_n_clients_shared_session() {
     a.wait_for_text(&turn_sentinel(1), STREAM_TIMEOUT)
         .expect("driver turn 1");
 
-    // Every viewer attaches through the shared leader and must replay the driver's transcript exactly once A duplicated replay.
+    // Every viewer attaches through the shared leader and must replay the driver's transcript exactly once
+    // A duplicated replay or an empty pane both fail
     let mut viewers: Vec<PtyHarness> = Vec::new();
     for i in 0..VIEWERS {
         let mut v = cluster
@@ -34,7 +37,8 @@ async fn leader_n_clients_shared_session() {
             .unwrap_or_else(|e| panic!("spawn viewer {i}: {e}"));
         v.wait_for_text(&turn_sentinel(1), LEADER_TIMEOUT)
             .unwrap_or_else(|e| panic!("viewer {i} replayed driver's transcript: {e}"));
-        // Settle the PTY before counting.
+        // Settle the PTY before counting: wait_for_text returns on first match, so a duplicate in a later batch slips past an immediate count
+        // A pump can only reveal a duplicate, never hide one
         v.update(Duration::from_millis(500));
         let screen = v.screen_contents();
         assert_eq!(
@@ -45,6 +49,7 @@ async fn leader_n_clients_shared_session() {
         viewers.push(v);
     }
 
+    // Turn 2 driven from the driver streams live into EVERY viewer (fan-out).
     cluster
         .content()
         .set_response(format!("{} second turn payload.", turn_sentinel(2)));

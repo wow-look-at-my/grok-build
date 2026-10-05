@@ -1,4 +1,16 @@
-//! Tool notifications — typed messages a running tool emits to subscribers (TUI, gateway, audit log, ...) for live visibility.
+//! Tool notifications — typed messages a running tool emits to subscribers
+//! (TUI, gateway, audit log, ...) for live visibility into execution.
+//!
+//! The enum and its payload structs use unconditional serde derives so wire
+//! adapters can serialise them without enabling additional features.
+//!
+//! Each `ToolNotification` variant has a parallel `send_*` convenience on
+//! [`ToolNotificationHandle`]. The two surfaces are kept in lockstep — when
+//! adding a variant here, add the `send_*` constructor too.
+//!
+//! The handle is built on `futures::channel::mpsc` so it is runtime-neutral:
+//! the trait crate doesn't pin a particular async executor on its
+//! consumers.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -6,7 +18,10 @@ use std::time::{Duration, SystemTime};
 use futures::channel::mpsc;
 use serde::{Deserialize, Serialize};
 
-/// Common fields shared by every bash notification variant.
+/// Common fields shared by every bash notification variant. Hoisted into a
+/// dedicated struct so the variants stay in lockstep on tool_call_id /
+/// command / output / cwd, and so payload-shape changes only need to be
+/// made once.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BashNotificationBase {
     /// Tool call id, used to correlate with the originating tool call.
@@ -15,7 +30,8 @@ pub struct BashNotificationBase {
     /// The command being executed.
     pub command: String,
 
-    /// Captured output bytes. May be truncated; use `output_lossy` for a `String` rendering that handles invalid UTF-8.
+    /// Captured output bytes. May be truncated; use `output_lossy` for a
+    /// `String` rendering that handles invalid UTF-8.
     pub output: Vec<u8>,
 
     /// Total bytes received before any truncation.
@@ -50,10 +66,12 @@ pub struct BashExecutionComplete {
     #[serde(flatten)]
     pub base: BashNotificationBase,
 
-    /// `Some(code)` for a normal exit; `None` when the process was killed by a signal before reaching `exit(2)`.
+    /// `Some(code)` for a normal exit; `None` when the process was killed
+    /// by a signal before reaching `exit(2)`.
     pub exit_code: Option<i32>,
 
-    /// Signal that terminated the process (e.g. `"SIGKILL"`). `None` when the process exited normally.
+    /// Signal that terminated the process (e.g. `"SIGKILL"`). `None` when
+    /// the process exited normally.
     pub signal: Option<String>,
 }
 
@@ -78,20 +96,27 @@ pub struct BashExecutionTimeout {
     pub timeout: Duration,
 }
 
-/// Sent when a foreground bash command was moved to the background.
+/// Sent when a foreground bash command was moved to the background. The
+/// process keeps running; a downstream task monitor emits the eventual
+/// [`BashExecutionComplete`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BashExecutionBackgrounded {
     #[serde(flatten)]
     pub base: BashNotificationBase,
 
-    /// File the full output stream is being written to.
+    /// File the full output stream is being written to. Background tasks
+    /// always tee to disk so consumers can fetch the rest later.
     pub output_file: PathBuf,
 
-    /// Background task registry id.
+    /// Background task registry id. Distinct from `base.tool_call_id`:
+    /// the task id is generated when backgrounding, the tool call id was
+    /// assigned when the originating tool was invoked.
     pub task_id: String,
 }
 
-/// Sent when a bash command failed to spawn.
+/// Sent when a bash command failed to spawn. Distinct from
+/// [`BashExecutionComplete`] with a non-zero `exit_code` because the
+/// process never started.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BashExecutionFailed {
     pub tool_call_id: String,
@@ -103,6 +128,13 @@ pub struct BashExecutionFailed {
 
 /// Emitted when a tool reads a file. Subscribers use this for state
 /// snapshotting (rewind, audit) of accessed files.
+///
+/// **Reserved for a future `ToolNotification::FileRead` variant.** The
+/// struct is kept in the public API so adapters can construct it ahead of
+/// time, but it is not currently dispatched by any
+/// [`ToolNotificationHandle`] helper. Adding the enum variant here is a
+/// breaking change for exhaustive `match` consumers, so the variant is
+/// deferred until a downstream crate has a real consumer wired up.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRead {
     pub tool_call_id: String,
@@ -132,11 +164,14 @@ pub struct PlanModeEntered {
     pub tool_call_id: String,
 }
 
-/// Sent when the agent transitions out of plan mode.
+/// Sent when the agent transitions out of plan mode. Carries the plan
+/// document so subscribers can present it for approval without an extra
+/// file read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanModeExited {
     pub tool_call_id: String,
-    /// Plan content as captured at exit time. `None` when the plan file did not exist or was empty.
+    /// Plan content as captured at exit time. `None` when the plan file
+    /// did not exist or was empty.
     pub plan_content: Option<String>,
     /// Path the plan file lives at.
     pub plan_file_path: String,
@@ -146,7 +181,8 @@ pub struct PlanModeExited {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserQuestionAsked {
     pub tool_call_id: String,
-    /// Serialised question payload. Subscribers render it directly; the runtime does not introspect its shape.
+    /// Serialised question payload. Subscribers render it directly; the
+    /// runtime does not introspect its shape.
     pub questions_json: serde_json::Value,
 }
 
@@ -217,7 +253,9 @@ pub struct ScheduledTaskCreated {
     pub next_fire_at: Option<String>,
 }
 
-/// Streaming event from a Monitor tool background process.
+/// Streaming event from a Monitor tool background process. Each event is
+/// already XML-wrapped for direct injection into the conversation; the
+/// raw text is preserved for plain-text consumers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitorEvent {
     pub task_id: String,
@@ -234,9 +272,12 @@ pub struct MonitorEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSnapshot {
     pub task_id: String,
-    /// Actual command that was executed (may be wrapped by an isolation harness).
+    /// Actual command that was executed (may be wrapped by an isolation
+    /// harness).
     pub command: String,
-    /// Original user-provided command before isolation wrapping.
+    /// Original user-provided command before isolation wrapping. When
+    /// present, model- and user-facing surfaces should prefer it over
+    /// `command`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_command: Option<String>,
     pub cwd: String,
@@ -332,6 +373,12 @@ impl ToolNotification {
 }
 
 /// Cloneable handle for emitting [`ToolNotification`]s.
+///
+/// Built on `futures::channel::mpsc::UnboundedSender` so the sender side
+/// is runtime-neutral — the trait crate does not pin tokio (or any other
+/// executor) on its callers. Sends are non-blocking and best-effort:
+/// errors (a closed receiver) are silently dropped, matching the
+/// established convention for fire-and-forget notification streams.
 #[derive(Clone)]
 pub struct ToolNotificationHandle {
     sender: mpsc::UnboundedSender<ToolNotification>,
@@ -355,7 +402,10 @@ impl ToolNotificationHandle {
         (Self { sender }, receiver)
     }
 
-    /// Build a handle whose sends are silently dropped.
+    /// Build a handle whose sends are silently dropped. Use for callers
+    /// that don't care about notifications (smoke tests, dry-run
+    /// utilities). NOT a sensible default for production paths — the
+    /// silent-drop behaviour makes notification bugs invisible.
     pub fn noop() -> Self {
         let (sender, _receiver) = mpsc::unbounded();
         Self { sender }
@@ -475,8 +525,8 @@ impl ToolNotificationHandle {
         self.send(ToolNotification::ScheduledTaskCreated(created));
     }
 
-    /// Send a [`ToolNotification::MonitorEvent`]: a streaming event from a
-    /// Monitor background process.
+    /// Send a [`ToolNotification::MonitorEvent`]: a streaming event from
+    /// a Monitor background process, ready for conversation injection.
     pub fn send_monitor_event(&self, event: MonitorEvent) {
         self.send(ToolNotification::MonitorEvent(event));
     }

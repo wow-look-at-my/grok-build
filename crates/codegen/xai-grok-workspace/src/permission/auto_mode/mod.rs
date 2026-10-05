@@ -1,4 +1,6 @@
 //! Auto permission mode: LLM transcript classifier with safe fast-paths.
+//!
+//! Port of common agent auto-permission classifier semantics adapted to Grok's `AccessKind` permission gate.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -25,6 +27,8 @@ use crate::permission::wire_enum;
 
 wire_enum! {
     /// Classifier outcome for a single tool authorization.
+    /// The single owner of the `classifier_verdict` wire vocabulary: the enum, its `ALL` inventory, and `wire_str` are generated together.
+    /// The cross-crate telemetry drift test cannot go stale when a verdict is added.
     pub enum ClassifierVerdict {
         Allow => "allow",
         Block => "block",
@@ -33,7 +37,9 @@ wire_enum! {
 }
 
 wire_enum! {
-    /// The full `classifier_source` wire vocabulary: the classifier-produced provenances ([`ClassifierSource`]).
+    /// The full `classifier_source` wire vocabulary: the classifier-produced provenances ([`ClassifierSource`]) plus two manager-only states.
+    /// `fast_path` means the manager decided on the fast path (allowlist, no side query); `not_wired` means no classifier is installed.
+    /// This is the single owner projection that the manager emits and the shell drift test iterates; there are no loose string constants.
     pub enum ClassifierSourceKind {
         Llm => "llm",
         Heuristic => "heuristic",
@@ -44,8 +50,9 @@ wire_enum! {
     }
 }
 
-/// Stable source categories a classifier can report. A strict subset of
-/// [`ClassifierSourceKind`].
+/// Stable source categories a classifier can report.
+/// A strict subset of [`ClassifierSourceKind`].
+/// [`ClassifierSource::kind`] is the exhaustive bridge (a new provenance here fails to compile until it is mapped).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassifierSource {
     Llm,
@@ -65,7 +72,7 @@ impl ClassifierSource {
         }
     }
 
-    /// Wire string, derived from the owner [`ClassifierSourceKind`] projection so classifier-provenance wire values have a single source.
+    /// Wire string, derived from the owner [`ClassifierSourceKind`] projection so classifier-provenance wire values have a single source of truth.
     pub const fn as_str(self) -> &'static str {
         self.kind().wire_str()
     }
@@ -172,15 +179,21 @@ impl ClassifierOutcome {
     }
 }
 
-/// Role of a single classifier request message (transport-agnostic.
+/// Role of a single classifier request message (transport-agnostic; the shell crate maps these onto sampling-types so this crate stays decoupled).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClassifierMessageRole {
     System,
     User,
 }
 
-/// How much context [`build_classifier_messages`] includes (decreasing
-/// order).
+/// How much context [`build_classifier_messages`] includes (decreasing order).
+/// Also the type of the `[auto_mode] prompt_type` config field; the shell reads it straight off the resolved config.
+/// Serde wire values are the snake_case variant names.
+/// Operator-facing meaning of each variant:
+/// - `full`: system, AGENTS.md, transcript, proposed action, and the JSON instruction.
+/// - `no_user_tool_prefix`: drops the conversation transcript (the `User:` / tool-call turns); keeps AGENTS.md.
+/// - `bare_instructions`: system, proposed action, and the JSON instruction (no AGENTS.md, no transcript).
+/// - `just_command`: system and the command to judge only (json_schema still enforces the output shape).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClassifierPromptType {
@@ -285,11 +298,13 @@ pub struct ClassifierContext {
     /// Project AGENTS.md ("what the main agent sees"); None when absent.
     pub project_instructions: Option<String>,
     /// Trusted harness security assessment for this action: an opaque, ordered, deduplicated finding set.
+    /// Nonempty findings force the model path.
     pub security_findings: BashSecurityAssessment,
 }
 
 impl ClassifierContext {
     /// Flat untrusted transcript feeding the heuristic substring pre-check.
+    /// Permission decisions are excluded and assistant tool args remain scanned.
     fn transcript_text(&self) -> String {
         self.turns
             .iter()
@@ -338,6 +353,8 @@ impl PermissionClassifier for FixedClassifier {
 }
 
 /// Production default classifier: rule-based transcript-style risk assessment without a network call.
+/// Blocks known-dangerous patterns; allows routine commands.
+/// Replace it via `set_classifier` to use full transcript context.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct HeuristicPermissionClassifier;
 
@@ -350,7 +367,8 @@ impl HeuristicPermissionClassifier {
     ) -> ClassifierVerdict {
         let detail = access_detail.unwrap_or("").to_ascii_lowercase();
         let tool = tool_name.to_ascii_lowercase();
-        // Flatten the structured turns (user text and assistant tool_use args) into one substring-checkable blob The dangerous-pattern.
+        // Flatten the structured turns (user text and assistant tool_use args) into one substring-checkable blob
+        // The dangerous-pattern and hostile-intent pre-checks scan it, so tool-call args feed the scan too
         let transcript = context.transcript_text().to_ascii_lowercase();
         let blob = format!("{tool} {detail} {transcript}");
 
@@ -439,7 +457,9 @@ impl HeuristicPermissionClassifier {
                     ClassifierVerdict::Block
                 }
             }
-            // Edits never reach here in practice.
+            // Edits never reach here in practice: the fast path Allows ALL edits before classify (the accept-all-edits product decision)
+            // If one ever does (a fast-path bypass), Block fails closed so the user is prompted instead of silently auto-approved
+            // Non-allowlisted MCP tools land here too
             AccessKind::Edit(_)
             | AccessKind::MCPTool { .. }
             | AccessKind::AgentMessage { .. }
@@ -451,14 +471,13 @@ impl HeuristicPermissionClassifier {
     }
 }
 
-/// Routine local-dev command prefixes (word-boundary matched). `env`/`find`
-/// are handled separately (wrapper unwrapping / read-only predicate). The
-/// package managers `uv`/`npm`/`pnpm`/`yarn`/`rustup` are ABSENT: a blanket
-/// prefix is denylist-shaped whack-a-mole. They go through the fail-closed
-/// SAFE-subcommand allowlist in [`package_manager_subcommand_is_routine`]
-/// instead. `cp`/`mv`/`mkdir`/`touch` are also ABSENT: they write/create
-/// arbitrary destinations the write model already Blocks. `cd`/`pushd`/`popd`
-/// only move the spawned shell's cwd.
+/// Routine local-dev command prefixes (word-boundary matched).
+/// `env`/`find` are handled separately (wrapper unwrapping / read-only predicate).
+/// The package managers `uv`/`npm`/`pnpm`/`yarn`/`rustup` are ABSENT: a blanket prefix is denylist-shaped whack-a-mole.
+/// They go through the fail-closed SAFE-subcommand allowlist in [`package_manager_subcommand_is_routine`] instead.
+/// `cp`/`mv`/`mkdir`/`touch` are also ABSENT: they write/create arbitrary destinations the write model already Blocks.
+/// `cd`/`pushd`/`popd` only move the spawned shell's cwd.
+/// `git` is ABSENT: [`routine_git`] decides every git shape.
 const ROUTINE_PREFIXES: &[&str] = &[
     "cargo ",
     "pytest",
@@ -524,7 +543,7 @@ const ROUTINE_PREFIXES: &[&str] = &[
 ];
 
 /// kubectl flags that select caller-controlled config / endpoint / auth / identity (including shorthands).
-/// Shared with `manager.rs::kubectl_has_unsafe_flag` so both classifiers cannot drift.
+/// Shared with `manager.rs::kubectl_has_unsafe_flag` so the two classifiers cannot drift.
 pub(crate) const KUBECTL_UNSAFE_FLAGS: &[&str] = &[
     "--kubeconfig",
     "--context",
@@ -558,8 +577,9 @@ pub(crate) fn rg_has_unsafe_flag(words: &[String]) -> bool {
     })
 }
 
-/// Env var KEYs safe to set for a routine command: cosmetic / logging only,
-/// with no effect on which binary runs or how it resolves code.
+/// Env var KEYs safe to set for a routine command: cosmetic / logging only, with no effect on which binary runs or how it resolves code.
+/// Anything else (LD_PRELOAD, DYLD_*, PATH, NODE_OPTIONS, PYTHONPATH, GIT_SSH_COMMAND, FOO, ...) is treated as exec-affecting and blocks.
+/// Case-sensitive exact match.
 const SAFE_ENV_KEYS: &[&str] = &[
     "CARGO_TERM_COLOR",
     "CARGO_TERM_PROGRESS_WHEN",
@@ -578,28 +598,30 @@ const SAFE_ENV_KEYS: &[&str] = &[
 /// Heuristic classification of a bash command (fail-closed).
 /// Parses ONCE with the canonical tree-sitter splitter and Blocks anything it can't prove is a chain of routine, side-effect-free dev commands.
 fn classify_bash(cmd: &str) -> ClassifierVerdict {
-    // Fail closed (Block) on anything the splitter can't decompose into plain
-    // word-only commands: `&` background, `$'...'` ANSI-C quoting.
+    // Fail closed (Block) on anything the splitter can't decompose into plain word-only commands:
+    // `&` background, `$'...'` ANSI-C quoting, `$(...)`/backtick/`<()`/`>()` substitutions, `${...}`/`$VAR` expansions, parens, control flow
     let Some(tree) = try_parse_shell(cmd) else {
         return ClassifierVerdict::Block;
     };
     let Some(cmds) = try_parse_word_only_commands_sequence(&tree, cmd) else {
         return ClassifierVerdict::Block;
     };
-    // Default-deny env: an env KEY outside the cosmetic-safe allowlist (or
-    // any `env` option) can change which binary runs.
+    // Default-deny env: an env KEY outside the cosmetic-safe allowlist (or any `env` option) can change which binary runs or how code resolves
+    // Read from the PARSED, quote-stripped tree so `env "LD_PRELOAD=..."` can't hide the key
     if script_env_risk(tree.root_node(), cmd, &cmds) != EnvRisk::Safe {
         return ClassifierVerdict::Block;
     }
-    // A routine command can still write an arbitrary destination via a
-    // redirect OR a command-internal flag/operand Examples: `sort -o`.
+    // A routine command can still write an arbitrary destination via a redirect OR a command-internal flag/operand
+    // Examples: `sort -o`, `git --output`, `go -o`, `dd of=`, `tee`, `truncate`, `uniq out`, in-place `sed`/`rustfmt`
+    // Reuse the canonical shell write model (sharing the already-parsed tree) and Block any write to a non-sink path
     for path in command_write_paths_in_tree(tree.root_node(), cmd) {
         if !is_safe_write_sink(&path) {
             return ClassifierVerdict::Block;
         }
     }
-    // Every parsed command must be routine (sudo/doas/run0 stay as a
-    // non-wrapper head and fail the check).
+    // Every parsed command must be routine (sudo/doas/run0 stay as a non-wrapper head and fail the check), else Block
+    // Project code-runners (`cargo`/`make`/`pytest`/`python`/`node`, `npm test`/`run`, `uv run <routine>`) run project-controlled code BY DESIGN
+    // This heuristic is a fail-closed FALLBACK; the real safety boundary is the LLM side-query and managed policy
     if !cmds.is_empty() && cmds.iter().all(|c| bash_command_is_routine(c.words())) {
         return ClassifierVerdict::Allow;
     }
@@ -626,7 +648,7 @@ fn bash_command_is_routine(words: &[String]) -> bool {
         .next()
         .unwrap_or(head_word.as_str())
         .to_ascii_lowercase();
-    // Package managers: fail-closed safe-subcommand allowlist.
+    // Package managers: fail-closed safe-subcommand allowlist; None means not a package manager, fall through to the generic find/prefix checks
     if let Some(routine) = package_manager_subcommand_is_routine(&head, inner) {
         return routine;
     }
@@ -761,7 +783,8 @@ fn package_manager_subcommand_is_routine(prog: &str, inner: &[String]) -> Option
         }
         LaunchTarget::NotLauncher => {}
     }
-    // A remaining non-launcher subcommand must be on the per-tool safe allowlist.
+    // A remaining non-launcher subcommand must be on the per-tool safe allowlist;
+    // anything else (incl. a missing subcommand) fails closed.
     let sub = launcher_subcommand(prog, inner);
     Some(match prog {
         "npm" | "pnpm" | "yarn" => sub.is_some_and(|s| NPM_SAFE_SUBCOMMANDS.contains(&s)),
@@ -772,11 +795,10 @@ fn package_manager_subcommand_is_routine(prog: &str, inner: &[String]) -> Option
     })
 }
 
-/// Safe non-launcher subcommands of `npm`/`pnpm`/`yarn` (dependency / build /
-/// test management). `run <script>`/`test` execute project-controlled code,
-/// the same accepted by-design boundary as `cargo`. EXACT match; launchers
-/// (`exec`/`x`) and remote/scaffold subcommands (`dlx`/`create`/`init
-/// <pkg>`/`explore`) are handled elsewhere.
+/// Safe non-launcher subcommands of `npm`/`pnpm`/`yarn` (dependency / build / test management).
+/// `run <script>`/`test` execute project-controlled code, the same accepted by-design boundary as `cargo`.
+/// EXACT match; launchers (`exec`/`x`) and remote/scaffold subcommands (`dlx`/`create`/`init <pkg>`/`explore`) are handled elsewhere.
+/// Anything not listed (e.g. `publish`) fails closed.
 const NPM_SAFE_SUBCOMMANDS: &[&str] = &[
     "install",
     "i",
@@ -839,8 +861,8 @@ const RUSTUP_SAFE_SUBCOMMANDS: &[&str] = &[
     "override",
 ];
 
-/// `true` if the launched inner of a package-manager launcher writes a
-/// non-sink path.
+/// `true` if the launched inner of a package-manager launcher writes a non-sink path.
+/// Those writes are invisible to the outer tree-level write guard, which sees the launcher program name like `uv`/`npm`.
 fn launched_writes_nonsink(words: &[String]) -> bool {
     command_words_write_paths(words)
         .iter()
@@ -876,9 +898,9 @@ fn is_remote_launcher(head: &str, inner: &[String]) -> bool {
         return false;
     };
     match head {
-        // `dlx` (pnpm/yarn) fetches and runs; `create` scaffolds from a
-        // remote starter `explore` runs an inline command in a dependency
-        // dir.
+        // `dlx` (pnpm/yarn) fetches and runs; `create` scaffolds from a remote starter
+        // `explore` runs an inline command in a dependency dir (don't parse its post-`--`)
+        // `init <pkg>` is `create <pkg>`; bare `init`/`-y` is local
         "npm" | "pnpm" | "yarn" => {
             matches!(sub, "dlx" | "create" | "explore")
                 || (sub == "init" && inner.get(2).is_some_and(|a| !a.starts_with('-')))
@@ -1041,8 +1063,8 @@ fn is_safe_env_key(key: &str) -> bool {
     SAFE_ENV_KEYS.contains(&key)
 }
 
-/// A lone wrapper (e.g. bare `env` printing the environment) does nothing
-/// dangerous, and `unwrap_wrappers` leaves it intact.
+/// A lone wrapper (e.g. bare `env` printing the environment) does nothing dangerous, and `unwrap_wrappers` leaves it intact, so treat it as routine.
+/// Delegates to the canonical wrapper set in `bash_command_splitting` (no drift).
 fn is_lone_wrapper(words: &[String]) -> bool {
     words.len() == 1 && is_wrapper_command(words)
 }
@@ -1175,6 +1197,7 @@ pub fn auto_mode_fast_path(
 }
 
 /// Default system message for the permission classifier.
+/// Output shape is carried by the user message and the strict response schema ([`classifier_output_json_schema`]).
 pub const AUTO_MODE_CLASSIFIER_SYSTEM_PROMPT: &str =
     include_str!("../../../templates/auto_mode_classifier_system_prompt.md");
 
@@ -1204,12 +1227,13 @@ pub fn classifier_output_json_schema() -> serde_json::Value {
 }
 
 /// Char cap for the compact-JSON MCP args carried in `access_detail`.
+/// MCP tool inputs are arbitrary JSON (file contents, large payloads); the cap keeps the classifier prompt and telemetry from blowing up.
 pub const MCP_ACCESS_DETAIL_MAX_LEN: usize = 1024;
 
-/// Render an MCP tool call's `access_detail`: the tool name followed by its
-/// compact (not pretty) JSON args. The args are truncated so oversized inputs
-/// never bloat the classifier prompt. `null` input (no args) renders the name
-/// only.
+/// Render an MCP tool call's `access_detail`: the tool name followed by its compact (not pretty) JSON args.
+/// The args are truncated so oversized inputs never bloat the classifier prompt.
+/// `null` input (no args) renders the name only.
+/// Reuses the shared char-safe truncator so the cut/marker behavior matches read_file/grep.
 pub fn mcp_access_detail(name: &str, input: &serde_json::Value) -> String {
     if input.is_null() {
         return name.to_string();
@@ -1324,7 +1348,7 @@ pub fn build_classifier_messages(
         ClassifierPromptType::NoUserToolPrefix | ClassifierPromptType::BareInstructions => {
             format!("## Proposed action\n{proposed_action}\n\n{CLASSIFIER_JSON_INSTRUCTION}")
         }
-        // Minimal: the action to judge (json_schema still enforces shape).
+        // Minimal: just the action to judge (json_schema still enforces shape).
         ClassifierPromptType::JustCommand => proposed_action,
     };
     messages.push(ClassifierMessage {
@@ -1394,8 +1418,9 @@ pub fn parse_classifier_model_output(text: &str) -> ClassifierOutcome {
     if lower.contains("\"shouldblock\": true") || lower.contains("shouldblock\":true") {
         return ClassifierOutcome::llm(ClassifierVerdict::Block, None);
     }
-    // Deliberately do NOT infer Allow from a loose `"shouldBlock": false` substring: narrative prose or multiple JSON fragments (from `rfind('}')`) can contain it without a reliable decision. Only a clean JSON parse (above) or an unambiguous one-word reply (below)
-    // may allow; anything else stays conservative.
+    // Deliberately do NOT infer Allow from a loose `"shouldBlock": false` substring: narrative prose or multiple JSON fragments (from `rfind('}')`) can contain it without a reliable decision.
+    // Only a clean JSON parse (above) or an unambiguous one-word reply (below) may allow; anything else stays conservative.
+    // Substring `contains("block")` / `contains("allow")` misreads prose like "do not block" or "not allowed" and flips the verdict, so anything but a terse single-word verdict is Unavailable (the conservative heuristic fallback).
     match lower.trim() {
         "block" | "blocked" | "deny" | "denied" => {
             ClassifierOutcome::llm(ClassifierVerdict::Block, None)
@@ -1409,6 +1434,9 @@ pub fn parse_classifier_model_output(text: &str) -> ClassifierOutcome {
 
 /// Async classify callback (side-query / sampling). Tests inject fixed text.
 /// Receives the structured classifier message array; returns the model reply.
+///
+/// Must be `Send + Sync` so it can live on the permission actor.
+/// Session-local `!Send` sampling is wired via [`ClassifyTextChannel`] instead of capturing `SessionActor` directly.
 pub type ClassifyTextFn = Arc<
     dyn Fn(
             Vec<ClassifierMessage>,
@@ -1417,14 +1445,20 @@ pub type ClassifyTextFn = Arc<
         + Sync,
 >;
 
-/// Request/response channel for session-local sampling (LocalSet / `!Send`
-/// `SessionActor`).
+/// Request/response channel for session-local sampling (LocalSet / `!Send` `SessionActor`).
+/// The permission actor sends the message array; the session task runs `prepare_chat_completion` then `conversation_collect` and replies.
 pub type ClassifyTextChannel = tokio::sync::mpsc::UnboundedSender<(
     Vec<ClassifierMessage>,
     tokio::sync::oneshot::Sender<Result<String, ClassifierFailure>>,
 )>;
 
-/// Production auto-mode classifier.
+/// Production auto-mode classifier. Order of decision:
+/// 1. deterministic [`HeuristicPermissionClassifier`] pre-pass: a provably routine, side-effect-free action allows immediately (no model call);
+/// 2. the injected side-query (LLM) when present;
+/// 3. an unavailable verdict when the side-query fails, or the heuristic's (non-Allow) verdict when the model responds with unparseable output.
+///
+/// Tradeoff of (1): conversational deny guidance cannot veto a provably-routine command (only the hostile-intent scan gates the pre-pass).
+/// Durable restrictions belong in permission policy, enforced before auto mode.
 pub struct LlmPermissionClassifier {
     /// Direct async callback (tests / Send sampling clients).
     pub classify_text: Option<ClassifyTextFn>,
@@ -1432,6 +1466,8 @@ pub struct LlmPermissionClassifier {
     pub classify_channel: Option<ClassifyTextChannel>,
     pub fallback: HeuristicPermissionClassifier,
     /// How much context the classifier prompt includes.
+    /// Resolved by the shell at wiring time (the live path passes the configured/built-in default).
+    /// The struct default is `Full` for the heuristic/test constructors.
     pub prompt_type: ClassifierPromptType,
 }
 
@@ -1491,15 +1527,16 @@ impl PermissionClassifier for LlmPermissionClassifier {
         context: ClassifierContext,
     ) -> Pin<Box<dyn Future<Output = ClassifierOutcome> + Send + 'a>> {
         Box::pin(async move {
-            // Deterministic pre-pass: a provable heuristic Allow skips the
-            // model (no side-query latency, no false block).
+            // Deterministic pre-pass: a provable heuristic Allow skips the model (no side-query latency, no false block)
+            // Anything unprovable still gets the model verdict
             let heuristic = HeuristicPermissionClassifier::classify_sync(
                 tool_name,
                 access,
                 access_detail,
                 &context,
             );
-            // Trusted findings force the model path.
+            // Trusted findings force the model path: a heuristic Allow cannot skip the side-query when static analysis flagged risk
+            // Otherwise the model would never see the findings it must judge against
             if heuristic == ClassifierVerdict::Allow && context.security_findings.is_empty() {
                 return ClassifierVerdict::Allow.into();
             }
@@ -1540,9 +1577,9 @@ impl PermissionClassifier for LlmPermissionClassifier {
             if outcome.verdict() != ClassifierVerdict::Unavailable {
                 return outcome;
             }
-            // Malformed/empty model output must fail closed when findings are
-            // present Falling back to the heuristic can Allow a flagged
-            // command.
+            // Malformed/empty model output must fail closed when findings are present
+            // Falling back to the heuristic could Allow a flagged command, silently converting a classifier failure into execution
+            // Keep parse provenance (Llm for non-empty unparseable text) so telemetry does not mislabel a model parse miss as heuristic
             if !context.security_findings.is_empty() {
                 return outcome;
             }
@@ -1939,7 +1976,7 @@ mod tests {
             ClassifierVerdict::Allow
         );
         assert_eq!(v("timeout 5 cargo test"), ClassifierVerdict::Allow);
-        // Bare `env` prints the environment: Allow
+        // Bare `env` just prints the environment: Allow
         assert_eq!(v("env"), ClassifierVerdict::Allow);
         // Read-only `find`: Allow
         assert_eq!(v("find . -name '*.rs'"), ClassifierVerdict::Allow);
@@ -2170,7 +2207,8 @@ mod tests {
         assert_eq!(v("dd if=/dev/zero of=~/.bashrc"), ClassifierVerdict::Block);
         assert_eq!(v("tee ~/.bashrc"), ClassifierVerdict::Block);
         assert_eq!(v("truncate -s0 ~/.bashrc"), ClassifierVerdict::Block);
-        // Read-only / no-write forms of the same programs stay Allow `grep -o` is "only-matching", NOT an output file.
+        // Read-only / no-write forms of the same programs stay Allow
+        // `grep -o` is "only-matching", NOT an output file, and `git -O` is a READ order-file, NOT a write
         assert_eq!(v("sort file.txt"), ClassifierVerdict::Allow);
         assert_eq!(v("git diff"), ClassifierVerdict::Allow);
         assert_eq!(v("git diff --stat"), ClassifierVerdict::Allow);
@@ -2253,14 +2291,13 @@ mod tests {
         assert_eq!(v("rustup show"), ClassifierVerdict::Allow);
     }
 
-    /// The heuristic stays fail-closed: the accept-all-edits fast path means
-    /// edits never reach it in production. If one ever did via a fast-path
-    /// bypass it must Block, and non-allowlisted MCP tools that DO reach here
-    /// must Block too. Neither may silently auto-approve. Uses `/etc/hosts`
-    /// (NOT `/etc/passwd`): the edit detail feeds the dangerous-substring
-    /// pre-check, and `/etc/passwd` matches `"passwd "`. It would Block
-    /// before the edit arm is reached, so it could not catch a regression to
-    /// `Edit(_) => Allow`.
+    /// The heuristic stays fail-closed: the accept-all-edits fast path means edits never reach it in production.
+    /// If one ever did via a fast-path bypass it must Block, and non-allowlisted MCP tools that DO reach here must Block too.
+    /// Neither may silently auto-approve.
+    ///
+    /// Uses `/etc/hosts` (NOT `/etc/passwd`): the edit detail feeds the dangerous-substring pre-check, and `/etc/passwd` matches `"passwd "`.
+    /// It would Block before the edit arm is reached, so it could not catch a regression to `Edit(_) => Allow`.
+    /// `/etc/hosts` trips no pre-check, so the assertion genuinely reaches and guards the `Edit(_) => Block` arm.
     #[test]
     fn heuristic_blocks_out_of_workspace_edit_and_unknown_mcp() {
         let empty = ClassifierContext::default();
@@ -2490,6 +2527,7 @@ mod tests {
         }));
         assert!(full.last().unwrap().text.contains("## Proposed action"));
 
+        // NoUserToolPrefix: keeps AGENTS.md (so 3 msgs with instructions present), drops the transcript
         let no_prefix = build(ClassifierPromptType::NoUserToolPrefix);
         assert_eq!(no_prefix.len(), 3);
         assert!(
@@ -3206,7 +3244,7 @@ mod tests {
             ClassifierVerdict::Allow
         );
         assert_eq!(v("# cleanup\nrm -rf ~/x"), ClassifierVerdict::Block);
-        // A quoted heredoc into a routine code-runner head is data: allow
+        // A quoted heredoc into a routine code-runner head is just data: allow
         assert_eq!(
             v("python3 <<'PY'\nprint('hi')\nPY"),
             ClassifierVerdict::Allow
@@ -3302,6 +3340,7 @@ mod tests {
             assert_eq!(v(cmd), ClassifierVerdict::Block, "`{cmd}` must block");
         }
         // The read-only forms stay routine, incl. `--o*` options that are NOT abbreviations of the pager flag.
+        // (`git grep -o` stays Block: the write model treats `git ... -o <path>` as an output flag, a conservative rule for `git format-patch`.)
         assert_eq!(v("git grep -n TODO src"), ClassifierVerdict::Allow);
         assert_eq!(v("git grep -o TODO src"), ClassifierVerdict::Block);
         assert_eq!(

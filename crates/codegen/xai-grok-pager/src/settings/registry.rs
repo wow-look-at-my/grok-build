@@ -1,4 +1,6 @@
 //! Settings registry: a data model of pure metadata.
+//!
+//! See the module-level docs in `mod.rs` for the architectural rationale.
 
 use agent_client_protocol as acp;
 use xai_grok_shell::agent::config::{
@@ -8,7 +10,8 @@ use xai_grok_shell::config::EffectiveConfigLayers;
 use xai_grok_shell::util::config::{DISPLAY_REFRESH_DEFAULT_AUTO_CADENCE_ENABLED, RemoteSettings};
 use xai_grok_tools::implementations::grok_build::ask_user_question;
 
-/// Stable identity for a setting.
+/// Stable identity for a setting. We deliberately do NOT use a `SettingId` enum: enum renames would ripple through
+/// call sites.
 pub type SettingKey = &'static str;
 
 /// Ownership class for a setting.
@@ -75,8 +78,8 @@ pub struct EnumChoice {
     pub description: &'static str,
 }
 
-/// Runtime-built enum choice for `SettingKind::DynamicEnum` settings whose
-/// choices come from a `PagerLocalSnapshot`.
+/// Runtime-built enum choice for `SettingKind::DynamicEnum` settings whose choices come from a `PagerLocalSnapshot` at picker-open time.
+/// The fields are owned `String`s because the values come from runtime catalogs.
 #[derive(Debug, Clone)]
 pub struct OwnedEnumChoice {
     pub canonical: String,
@@ -85,14 +88,17 @@ pub struct OwnedEnumChoice {
 }
 
 /// Source of runtime choices for a `SettingKind::DynamicEnum`.
+/// `#[non_exhaustive]` allows adding new sources without breaking matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DynamicEnumSource {
     /// Models from the active session's catalog.
+    /// Prepends a `"(no override)"` sentinel so the user can clear the setting.
     ActiveModelCatalog,
 }
 
 /// Build the owned choice list for a `DynamicEnum` at picker-open time.
+/// `ActiveModelCatalog` prepends a "(no override)" choice with an empty canonical at index 0 for clearing the setting.
 pub fn dynamic_enum_choices(
     source: DynamicEnumSource,
     snapshot: &PagerLocalSnapshot,
@@ -117,13 +123,14 @@ pub fn dynamic_enum_choices(
     }
 }
 
-/// String validator applied at write time. Unicode categories to prevent
-/// Trojan-Source visual spoofing.
+/// String validator applied at write time. Unicode categories to prevent Trojan-Source visual spoofing. New input
+/// paths must re-apply this filter.
 #[derive(Debug, Clone, Copy)]
 pub enum StringValidator {
     /// Non-empty, no whitespace. Used for model ids.
     NonEmptyToken,
     /// Validated against the live model catalog at commit time.
+    /// Empty input is accepted as a sentinel that clears the default.
     KnownModel,
     /// Empty, or an absolute HTTP(S) URL without a query or fragment.
     HttpUrlOrEmpty,
@@ -165,8 +172,8 @@ pub enum SettingKind {
         source: DynamicEnumSource,
         supports_preview: bool,
     },
-    /// A navigational row that opens a sub-sheet of `children` (other
-    /// registered settings, by key).
+    /// A navigational row that opens a sub-sheet of `children` (other registered settings, by key). Children are hidden
+    /// from the top-level list (rendered only inside the sub-sheet).
     Group {
         children: &'static [SettingKey],
     },
@@ -183,14 +190,17 @@ pub struct SettingMeta {
     pub label: &'static str,
     pub description: &'static str,
     /// Free-form keywords for the search filter.
+    /// All lowercase, no empty strings; `keywords_lowercase_and_non_empty` enforces this.
     pub keywords: &'static [&'static str],
     pub kind: SettingKind,
     /// When `true`, the value takes effect only on next session start.
+    /// Renders a "restart" pill on the row while it is expanded.
     pub restart_required: bool,
 }
 
-/// A typed value carried by `Action::Set*` payloads, modal preview state, and
-/// the rollback path on persist failure.
+/// A typed value carried by `Action::Set*` payloads, modal preview state, and the rollback path on persist failure.
+///
+/// Each variant aligns 1:1 with a `SettingKind` variant.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SettingValue {
     Bool(bool),
@@ -199,8 +209,8 @@ pub enum SettingValue {
     Int(i64),
 }
 
-/// The write of the user key on disk right now, and the newest intent waiting
-/// behind it.
+/// The one write of the user key on disk right now, and the newest intent waiting behind it.
+/// Writing one key at a time keeps the disk in toggle order whatever the runtime does with the tasks; a failed write settles the mirror back on `persisted`.
 #[derive(Debug, Clone, Copy)]
 pub struct PendingWrite {
     /// What the disk held when the write was issued, then what each completed write left there.
@@ -210,6 +220,7 @@ pub struct PendingWrite {
 }
 
 /// A registry `[features]` row as the settings modal sees it.
+/// The user `config.toml` key is the only layer the modal writes; the other tiers are seeded once so the effective value can be re-resolved after a local write without re-reading disk.
 #[derive(Debug, Clone, Copy)]
 pub struct FeatureOverrideState {
     pub feature: Feature,
@@ -322,29 +333,42 @@ pub struct PagerLocalSnapshot {
     /// Whether YOLO mode (always-approve) is active on the active agent.
     pub yolo_mode: bool,
     /// Whether Auto (LLM classifier) mode is active on the active agent.
+    /// Mutually exclusive with `yolo_mode` in practice (yolo wins); `/auto` reads it so it can toggle off when already on.
     pub auto_mode: bool,
     /// Currently-selected model's display name, or `None` if no catalog has loaded yet.
     pub current_model_name: Option<String>,
     /// `(display_name, ModelId)` pairs from the active session's catalog.
+    /// Cloned into the snapshot so the modal's validator and resolver are self-contained (the modal outlives the borrow on `app.agents`).
     pub available_models: Vec<(String, acp::ModelId)>,
-    /// Whether the user has opted OUT of coding data sharing. Lives in auth metadata (no `UiConfig` field).
+    /// Whether the user has opted OUT of coding data sharing. Lives in auth metadata (no `UiConfig` field). The mapping
+    /// is inverted: `opt_out == false` renders as the canonical "opt-in". The snapshot default is `true` (opted out) to
+    /// match the safer consumer default.
     pub coding_data_sharing_opt_out: bool,
     /// Why `coding_data_sharing` cannot be changed here (`None` means editable).
     pub coding_data_sharing_lock: Option<CodingDataSharingLock>,
     /// Whether plan mode is active.
+    /// Uses effective state (`pending.unwrap_or(active)`) so rapid toggles don't double-send.
+    /// Refreshed on all mutation paths including ACP `CurrentModeUpdate`.
     pub plan_mode_active: bool,
     /// `[cli].show_tips` mirror; `None` means no TOML override, so the default `true` applies.
     pub show_tips: Option<bool>,
-    /// Process-wide vim-mode scrollback flag. Mirrors `appearance::cache::load_vim_mode()` at snapshot time.
+    /// Process-wide vim-mode scrollback flag.
+    /// Mirrors `appearance::cache::load_vim_mode()` at snapshot time.
+    /// Process-wide mouse-wheel scroll speed (1-100).
+    /// Mirrors `appearance::cache::load_scroll_speed()` at snapshot time.
     pub scroll_speed: u8,
     /// Mirrors `AppView::appearance.scrollback.scroll.respect_manual_folds` at snapshot time.
     pub respect_manual_folds: bool,
     /// Mirrors `AppView::auto_mode_gate` at snapshot time.
+    /// When false the permission-mode picker hides the "Auto" choice (matches the Shift+Tab cycle, which skips Auto when the feature gate is off).
     pub auto_mode_gate: bool,
     /// `[toolset.ask_user_question].timeout_enabled` mirror (effective TOML merge, like `show_tips`).
+    /// `None` means unset in TOML, so the default `true` applies.
     pub ask_user_question_timeout_enabled: Option<bool>,
     /// Live `voice_config.language` at snapshot time.
+    /// Lets the modal show the language actually in effect when `[ui].voice_stt_language` is unset but an explicit `[voice].language` applies.
     pub voice_stt_language: String,
+    /// Mirrors `AppView::subagent_model_inheritance` at snapshot time.
     pub subagent_model_inheritance: FeatureOverrideState,
 }
 
@@ -360,7 +384,8 @@ impl Default for PagerLocalSnapshot {
             coding_data_sharing_lock: None,
             plan_mode_active: false,
             show_tips: None,
-            // Matches the registry default and `appearance::cache::SCROLL_SPEED_DEFAULT` Bare `u8::default()` would be `0` (out of range).
+            // Matches the registry default and `appearance::cache::SCROLL_SPEED_DEFAULT`
+            // Bare `u8::default()` would be `0` (out of range) so we override
             scroll_speed: 50,
             respect_manual_folds: crate::appearance::ScrollConfig::default().respect_manual_folds,
             auto_mode_gate: false,
@@ -384,7 +409,9 @@ pub fn canonical_voice_capture_mode(value: Option<&str>) -> &'static str {
     }
 }
 
-/// Canonicalize a raw voice STT language to a settings choice.
+/// Canonicalize a raw voice STT language to a settings choice. Delegates to
+/// [`xai_grok_voice::canonicalize_stt_language`] so the pager and the STT client share one catalog. The catalog is
+/// the official Grok STT languages plus the client-only `auto`.
 pub fn canonical_voice_stt_language(value: Option<&str>) -> &'static str {
     xai_grok_voice::canonicalize_stt_language(value)
 }
@@ -410,6 +437,7 @@ impl PagerLocalSnapshot {
 
     /// Resolve a user-supplied name to a `ModelId` via the snapshot.
     /// Case-insensitive ASCII match against display names only.
+    /// Ids aren't carried in the snapshot's primary key; callers needing id-based resolution should use `ModelState::resolve_by_name_or_id`.
     pub fn resolve_model_name(&self, query: &str) -> Option<acp::ModelId> {
         self.available_models.iter().find_map(|(name, id)| {
             if name.eq_ignore_ascii_case(query) {
@@ -436,8 +464,9 @@ impl SettingsRegistry {
         Self { entries }
     }
 
-    /// Build a registry from a caller-supplied list of `SettingMeta`. Exists
-    /// for tests; `#[doc(hidden)]` discourages production use.
+    /// Build a registry from a caller-supplied list of `SettingMeta`.
+    /// Exists for tests; `#[doc(hidden)]` discourages production use.
+    /// Panics on duplicate keys.
     #[doc(hidden)]
     pub fn from_entries(entries: Vec<SettingMeta>) -> Self {
         assert_unique_keys(&entries);
@@ -509,7 +538,7 @@ fn build_search_haystack(m: &SettingMeta) -> String {
     s
 }
 
-// Snapshot reads: the place that maps a SettingKey to its live field
+// Snapshot reads: the one place that maps a SettingKey to its live field
 
 /// Read the current value of `key` from `UiConfig` (SHELL/SHARED) or the pager snapshot (PAGER-owned).
 /// Returns `None` for unknown keys.
@@ -541,9 +570,10 @@ pub fn current_value_for(
             Some(SettingValue::Bool(ui.stop_gate_unfinished_todos_enabled()))
         }
         "stop_gate_ci_failing" => Some(SettingValue::Bool(ui.stop_gate_ci_failing_enabled())),
-        // Resolved once per session in the shell.
+        // Resolved once per session in the shell; the pager keeps the `[ui]`
+        // mirror so the row reads back what the next session will do.
         "thinking_summaries" => Some(SettingValue::Bool(ui.thinking_summaries_enabled())),
-        // Per-tip contextual hints.
+        // Per-tip contextual hints: `None` (inherit) reads as the default ON
         "contextual_hints.undo" => {
             Some(SettingValue::Bool(ui.contextual_hints.undo.unwrap_or(true)))
         }
@@ -574,6 +604,7 @@ pub fn current_value_for(
         // PAGER: read from the snapshot
         "multiline_mode" => Some(SettingValue::Bool(pager.multiline_mode)),
         "scroll_speed" => Some(SettingValue::Int(pager.scroll_speed as i64)),
+        // Live caches (like `group_tool_verbs`); scroll_lines shows the registry default 3 while unset (profile-default state)
         "scroll_mode" => Some(SettingValue::Enum(
             crate::appearance::cache::load_scroll_mode().as_canonical(),
         )),
@@ -620,14 +651,16 @@ pub fn current_value_for(
         "voice_capture_mode" => Some(SettingValue::Enum(canonical_voice_capture_mode(
             ui.voice_capture_mode.as_deref(),
         ))),
-        // SHELL: canonicalized from `[ui].voice_stt_language` When unset,
-        // fall back to the live `voice_config.language` (snapshot mirror).
+        // SHELL: canonicalized from `[ui].voice_stt_language`
+        // When unset, fall back to the live `voice_config.language` (snapshot mirror)
+        // That way an explicit `[voice].language` shows as the current choice instead of the registry default
         "voice_stt_language" => Some(SettingValue::Enum(canonical_voice_stt_language(Some(
             ui.voice_stt_language
                 .as_deref()
                 .unwrap_or(&pager.voice_stt_language),
         )))),
-        // Theme: unknown disk values fall through to the canonical default auto_dark_theme and auto_light_theme additionally filter out "auto".
+        // Theme: unknown disk values fall through to the canonical default
+        // auto_dark_theme and auto_light_theme additionally filter out "auto" (a circular reference)
         "theme" => Some(SettingValue::Enum(
             ui.theme
                 .as_deref()
@@ -649,6 +682,8 @@ pub fn current_value_for(
                 .unwrap_or("grokday"),
         )),
         // render_mermaid: SHELL-owned (persisted to `[ui].render_mermaid`).
+        // Read from the process-wide cache mirror, which reflects the live value the render path uses
+        // The `vim_mode` snapshot field plays the same role for its setting
         "render_mermaid" => Some(SettingValue::Enum(
             crate::appearance::cache::load_render_mermaid().as_canonical(),
         )),
@@ -669,8 +704,9 @@ pub fn current_value_for(
             ui.remember_tool_approvals
                 .unwrap_or(xai_grok_shell::util::config::DEFAULT_REMEMBER_TOOL_APPROVALS),
         )),
-        // ask_user_question timeout: reflects the effective TOML merge The
-        // toggle writes the user layer, and the env.
+        // ask_user_question timeout: reflects the effective TOML merge
+        // The toggle writes the user layer, and the env and remote settings tiers feed the final gate at agent build
+        // None falls back to the resolver-shared default (ON)
         "toolset.ask_user_question.timeout_enabled" => Some(SettingValue::Bool(
             pager
                 .ask_user_question_timeout_enabled
@@ -680,10 +716,9 @@ pub fn current_value_for(
         "subagent_model_inheritance" => Some(SettingValue::Bool(
             pager.subagent_model_inheritance.resolve().value,
         )),
-        // default_selected_permission: maps
-        // `[ui].default_selected_permission` onto one of those registry
-        // canonicals `None` or an unrecognised value on disk falls back to
-        // `always_allow_all_sessions`.
+        // default_selected_permission: maps `[ui].default_selected_permission` onto one of the four registry canonicals
+        // `None` or an unrecognised value on disk falls back to `always_allow_all_sessions`, the effective default
+        // The cursor lands on the "Always allow on all sessions" row, picked explicitly in `enqueue_permission`
         "default_selected_permission" => Some(SettingValue::Enum(
             crate::appearance::permission_cursor::DefaultSelectedPermission::from_config_value(
                 ui.default_selected_permission
@@ -792,7 +827,7 @@ mod tests {
                         "compact_mode default drifts from UiConfig::default()"
                     );
                 }
-                // Per-tip contextual hints.
+                // Per-tip contextual hints: `None` (inherit) reads as the default ON
                 ("contextual_hints.undo", SettingKind::Bool { default }) => {
                     assert_eq!(
                         *default,
@@ -1108,8 +1143,8 @@ mod tests {
                     );
                 }
                 ("keep_text_selection", SettingKind::Enum { default, .. }) => {
-                    // The compile-time default is flash The `word_select`
-                    // default is a remote rollout flag applied at startup.
+                    // The compile-time default is flash
+                    // The `word_select` default is a remote rollout flag applied at startup, not part of this static registry default
                     let expected = if ui.keep_text_selection_enabled() {
                         "hold"
                     } else {
@@ -1178,6 +1213,7 @@ mod tests {
                         "render_mermaid default drifts from UiConfig::default()",
                     );
                 }
+                // scroll_speed: Option<u8>; None reads as 50
                 ("scroll_speed", SettingKind::Int { default, .. }) => {
                     assert_eq!(
                         *default,
@@ -1215,6 +1251,7 @@ mod tests {
                         "display_refresh_auto_cadence default drifts from resolve default"
                     );
                 }
+                // scroll_lines: Option<u8>; None reads as the registry default 3 (the display value while the per-terminal profile is in charge)
                 ("scroll_lines", SettingKind::Int { default, .. }) => {
                     assert_eq!(
                         *default,
@@ -1239,7 +1276,10 @@ mod tests {
                          None, mapped to the `always_allow_all_sessions` canonical)",
                     );
                 }
-                // A harness model slot has no UiConfig field of its own: it lives in `[models]` and reaches the modal through the `harness_models` projection.
+                // A harness model slot has no UiConfig field of its own: it
+                // lives in `[models]` and reaches the modal through the
+                // `harness_models` projection, which starts empty. Its
+                // registry default is the empty inherit sentinel.
                 (key, SettingKind::DynamicEnum { default, .. })
                     if xai_grok_models::slot_for_setting_key(key).is_some() =>
                 {
@@ -1262,6 +1302,7 @@ mod tests {
     }
 
     /// Every PAGER-owned setting's default must match `PagerLocalSnapshot::default()`.
+    /// Three-way alignment (registry, snapshot, `AgentView::new`) is enforced across multiple tests.
     #[test]
     fn defaults_match_pager_state() {
         let reg = SettingsRegistry::defaults();

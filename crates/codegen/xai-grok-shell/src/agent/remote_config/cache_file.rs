@@ -98,7 +98,8 @@ fn sweep_stale_tmp(path: &std::path::Path, ttl: std::time::Duration) {
     }
 }
 
-/// Atomic replace via a unique temp file and rename.
+/// Atomic replace via a unique temp file and rename. `private` sets 0600 for the
+/// sensitive settings cache; the models cache uses the default mode.
 pub(in crate::agent::remote_config) fn write_atomic(
     path: &std::path::Path,
     ttl: std::time::Duration,

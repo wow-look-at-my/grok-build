@@ -1,4 +1,14 @@
 //! Interactive Mermaid diagram rendering playground.
+//!
+//! Run with:
+//!   cargo run -p xai-grok-markdown --features playground --bin md-mermaid-test
+//!
+//! Controls:
+//!   Esc / Tab    — toggle textarea focus
+//!   h / Left     — shrink render width  (when unfocused)
+//!   l / Right    — grow render width    (when unfocused)
+//!   n            — next sample          (when unfocused)
+//!   q / ^C / ^D  — quit                 (when unfocused)
 
 #![deny(clippy::indexing_slicing)]
 

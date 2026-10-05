@@ -1,4 +1,7 @@
 //! Integration tests using the public API only.
+//!
+//! OS-event delivery tests were removed (flaky by construction). Registry
+//! sharing remains: it locks watcher identity and stats, not event timing.
 
 use serial_test::serial;
 use tempfile::TempDir;
@@ -14,7 +17,7 @@ async fn shared_dedupes_by_directory() {
 
     // First call creates the watcher; subsequent calls for the same canonical
     // directory hand back clones of the *same* source rather than opening a
-    // new OS watch.
+    // new OS watch. Skip gracefully where the OS denies watches (CI limits).
     let Ok(a) = xai_fsnotify::shared(path.clone(), FsConfig::default()) else {
         eprintln!("skipping: OS watcher unavailable (resource limit?)");
         return;
@@ -51,7 +54,8 @@ async fn shared_dedupes_by_directory() {
         "a new directory must create a new watcher"
     );
 
-    // Once the last sharer drops, the registry entry is reclaimed and a later request rebuilds a fresh source.
+    // Once the last sharer drops, the registry entry is reclaimed and a later
+    // request rebuilds a fresh source (exercises the recreate-after-drop path).
     drop(a);
     drop(b);
     let d = xai_fsnotify::shared(path, FsConfig::default()).unwrap();

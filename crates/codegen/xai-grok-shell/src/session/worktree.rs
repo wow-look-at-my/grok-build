@@ -1,4 +1,6 @@
 //! Core worktree lifecycle logic lives in [`xai_grok_workspace::worktree`].
+//! This module re-exports everything from there and adds session-aware functions.
+//! Those functions depend on shell-specific infrastructure (persistence, auth, registry client, storage client, session restore).
 use crate::session::worktree_cleanup::cleanup_worktree_on_failure;
 use crate::util::config::WorktreeType as ShellWorktreeType;
 use anyhow::{Context, Result};

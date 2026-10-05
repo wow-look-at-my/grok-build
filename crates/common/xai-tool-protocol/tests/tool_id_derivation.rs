@@ -1,4 +1,6 @@
-//! `ToolDescriptionWithSchema::derive_tool_id`: namespaced descriptions render as `"{ns}:{name}"`; bare names pass through.
+//! `ToolDescriptionWithSchema::derive_tool_id`: namespaced descriptions
+//! render as `"{ns}:{name}"`; bare names pass through; descriptions whose
+//! derived id fails [`ToolId`] validation return `Err`.
 
 use xai_tool_protocol::{IdError, ToolDescriptionWithSchema, ToolId};
 use xai_tool_types::ToolDescription;

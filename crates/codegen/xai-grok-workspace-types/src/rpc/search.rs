@@ -29,7 +29,8 @@ pub struct ContentSearchRequest {
     pub max_matches: Option<usize>,
     #[serde(default = "default_respect_gitignore")]
     pub respect_gitignore: bool,
-    /// Absolute search root (the per-session cwd), resolved by the shell. Falls back to the workspace root when absent.
+    /// Absolute search root (the per-session cwd), resolved by the shell.
+    /// Falls back to the workspace root when absent.
     #[serde(default)]
     pub cwd: Option<std::path::PathBuf>,
     /// Session id used in the `x.ai/search/content/status` payload.
@@ -87,6 +88,7 @@ pub struct ContentSearchData {
 }
 
 /// Client ID structure for routing notifications across relay instances.
+/// Duplicated from the shell extensions so this crate does not depend on them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientId {
@@ -112,6 +114,7 @@ impl TargetClientId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FuzzyOpenReq {
     /// Absolute search root (the per-session cwd joined with any subpath), resolved by the shell.
+    /// Falls back to the workspace root when absent.
     pub root: Option<std::path::PathBuf>,
     pub request_id: Option<String>,
     #[serde(default)]
@@ -136,6 +139,7 @@ pub struct FuzzyChangeReq {
     pub query: String,
     #[serde(default)]
     pub dirs_only: bool,
+    /// Max matches per status notification (default 100).
     #[serde(default)]
     pub limit: Option<usize>,
 }
@@ -158,8 +162,8 @@ impl WorkspaceRpc for FuzzyCloseReq {
     type Response = bool;
 }
 
-/// `workspace.fuzzy_search` polls the current results of an open fuzzy
-/// search.
+/// `workspace.fuzzy_search` polls the current results of an open fuzzy search.
+/// The response is the serialized result set (or `null` when the search no longer exists).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FuzzyStatusReq {
     pub search_id: String,

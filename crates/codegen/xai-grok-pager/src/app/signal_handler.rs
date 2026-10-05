@@ -1,4 +1,19 @@
 //! TUI-side signal handlers that restore the terminal before exiting.
+//!
+//! Without these, signal-triggered termination (SIGINT, SIGTERM, SIGHUP from WSL/SSH disconnect) leaves the terminal in raw mode.
+//! The alternate screen stays active, mouse capture stays on, and Kitty keyboard protocol flags stay pushed.
+//! The next time the terminal becomes visible the user sees a stale snapshot of the TUI that looks alive but is backed by a dead process.
+//!
+//! SIGINT / SIGTERM / SIGHUP are handled in a tokio task.
+//! The handler runs in normal Rust context (not actual signal-handler context).
+//! It can therefore use the full [`crate::app::terminal_restore::emit_terminal_teardown_sequences`] path (locked stderr, conditional cursor-style reset, multiplexer flush).
+//! It then runs `disable_raw_mode`, flushes Sentry/OpenTelemetry, and exits.
+//!
+//! SIGPIPE is intentionally left alone.
+//! The disposition is `SIG_IGN` (Rust's stdlib default), so writes to a closed pipe return `Err(BrokenPipe)` instead of terminating the process.
+//! The writer thread already swallows those errors.
+//! Installing a custom handler would change the disposition inherited by fork+exec children (MCP servers, hooks) from `SIG_IGN` to `SIG_DFL`.
+//! That re-introduces a prior SIGPIPE regression.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -26,8 +41,8 @@ pub(crate) fn clear_current_session_id_if(session_id: &acp::SessionId) {
     }
 }
 
-/// Lets the signal handler route SIGINT/SIGTERM/SIGHUP into the same graceful
-/// quit as `/exit` instead of a hard exit.
+/// Lets the signal handler route SIGINT/SIGTERM/SIGHUP into the same graceful quit as `/exit` instead of a hard exit.
+/// The graceful quit runs teardown and history/telemetry flushes. Registered by the event loop before it starts.
 static QUIT_NOTIFY: parking_lot::Mutex<Option<std::sync::Arc<tokio::sync::Notify>>> =
     parking_lot::Mutex::new(None);
 
@@ -40,7 +55,9 @@ pub(crate) fn clear_quit_notify() {
     *QUIT_NOTIFY.lock() = None;
 }
 
-/// Whether the TUI owns the terminal.
+/// Whether the TUI currently owns the terminal.
+/// Set by [`install`], cleared by [`mark_restored`] or by [`shutdown_with_terminal_restore`] after teardown completes.
+/// The SIGPIPE path (SIG_IGN, no handler) does not interact with this flag.
 static TERMINAL_OWNED: AtomicBool = AtomicBool::new(false);
 
 /// Mode-only update for in-process switches; never re-run [`install`] (it would spawn a second signal task).
@@ -53,8 +70,9 @@ pub(crate) fn install(mode: ScreenMode) {
     set_mode(mode);
     TERMINAL_OWNED.store(true, Ordering::Release);
 
-    // Ignore SIGTTIN/SIGTTOU so the pager can't be suspended if a child (or
-    // grandchild).
+    // Ignore SIGTTIN/SIGTTOU so the pager can't be suspended if a child (or grandchild) briefly steals the terminal's foreground process group
+    // Every TUI that reads from stdin should do this
+    // Without it, a single tcsetpgrp() from a rogue child stops the entire pager, leaving the terminal in raw mode
     #[cfg(unix)]
     unsafe {
         libc::signal(libc::SIGTTIN, libc::SIG_IGN);
@@ -65,6 +83,7 @@ pub(crate) fn install(mode: ScreenMode) {
 }
 
 /// Mark the terminal as no longer owned by the TUI.
+/// Called by the clean shutdown path and the panic hook so a signal arriving after the shell has reclaimed the terminal does not re-run teardown.
 pub(crate) fn mark_restored() {
     TERMINAL_OWNED.store(false, Ordering::Release);
 }
@@ -83,7 +102,8 @@ fn spawn_async_signal_task() {
     }
     #[cfg(windows)]
     {
-        // ctrl_c gets the first-graceful / second-force treatment Console close, logoff, and shutdown stay immediate.
+        // ctrl_c gets the first-graceful / second-force treatment
+        // Console close, logoff, and shutdown stay immediate: the OS grants only a short window, so graceful teardown may not finish
         use tokio::signal::windows;
         let mut streams = SignalStreams::install();
         let mut ctrl_close = windows::ctrl_close().ok();
@@ -120,7 +140,7 @@ fn spawn_async_signal_task() {
     }
 }
 
-// Tokio exposes distinct CtrlClose / CtrlLogoff / CtrlShutdown types with no shared trait; generate those identical recv helpers from one body
+// Tokio exposes distinct CtrlClose / CtrlLogoff / CtrlShutdown types with no shared trait; generate the three identical recv helpers from one body
 #[cfg(windows)]
 macro_rules! define_recv_optional_windows_signal {
     ($name:ident, $ty:ty) => {

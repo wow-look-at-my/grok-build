@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 
-/// Unique identifier for a hunk. Uses UUID for guaranteed uniqueness across sessions.
+/// Unique identifier for a hunk.
+/// Uses UUID for guaranteed uniqueness across sessions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HunkId(pub Arc<str>);
 
@@ -34,7 +35,7 @@ impl Default for HunkId {
 
 impl std::fmt::Display for HunkId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Show first several characters for display (respects char boundaries)
+        // Show first 8 characters for display (respects char boundaries)
         let short: String = self.0.chars().take(8).collect();
         write!(f, "{}", short)
     }
@@ -64,7 +65,9 @@ impl std::fmt::Display for HunkLineInfo {
     }
 }
 
-/// The source of a hunk - who made the change.
+/// The source of a hunk - who made the change. This enum distinguishes between: Changes made directly by the agent (with
+/// prompt attribution); External changes to files the agent has touched (tracked for session context); External changes
+/// to files the agent hasn't touched.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum HunkSource {
@@ -75,10 +78,13 @@ pub enum HunkSource {
         prompt_index: usize,
     },
 
-    /// External edit (by user) to a file the agent has touched.
+    /// External edit (by user) to a file the agent has previously touched.
+    /// These are tracked separately so we know they're "part of agent session"
+    /// but weren't written by the agent itself.
     ExternalEditOnAgentFile,
 
-    /// External edit to a file the agent has NOT touched. Only tracked when TrackingMode::AllDirty is enabled.
+    /// External edit to a file the agent has NOT touched.
+    /// Only tracked when TrackingMode::AllDirty is enabled.
     External,
 }
 
@@ -230,9 +236,11 @@ impl Hunk {
 /// Action to take on a hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HunkAction {
-    /// Accept the hunk - update baseline to include. After accept: baseline = current_content for the affected lines.
+    /// Accept the hunk - update baseline to include this change.
+    /// After accept: baseline = current_content for the affected lines.
     Accept,
     /// Reject the hunk - revert file content back to baseline.
+    /// After reject: file on disk is overwritten with baseline content.
     Reject,
 }
 
@@ -281,6 +289,7 @@ pub enum HunkSourceFilter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrackingMode {
+    /// Only track files the agent has written to
     #[default]
     AgentOnly,
     /// Track all git dirty files (agent files + external dirty files)
@@ -309,6 +318,7 @@ pub struct SessionStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnSummary {
+    /// The prompt index this turn corresponds to
     pub prompt_index: usize,
     /// Files modified in this turn (unique paths)
     pub files: Vec<PathBuf>,
@@ -343,6 +353,8 @@ pub struct SessionSummary {
 }
 
 /// Status of file content - explicit discrimination for API consumers.
+/// This replaces the ambiguous `Option<String>` where `None` could mean
+/// missing, binary, or too large.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FileContentStatus {
@@ -353,7 +365,8 @@ pub enum FileContentStatus {
     Binary,
     /// File exceeds MAX_TRACKED_TEXT_BYTES (content not retained)
     TooLarge,
-    /// File is a Git LFS pointer (raw blob is a small text stub.
+    /// File is a Git LFS pointer (raw blob is a small text stub; working
+    /// copy holds the smudged content — not diffable)
     LfsPointer,
     /// Path is a symbolic link (not diffable)
     Symlink,
@@ -447,7 +460,8 @@ impl FileContentView {
     }
 }
 
-/// Per-file content entry returned by `GetAllFileContents`.
+/// Per-file content entry returned by `GetAllFileContents`. Contains baseline, current content, agent attribution, and
+/// staging state for a single tracked file — everything a client needs to render diffs without per-file round trips.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileContentEntry {
@@ -479,17 +493,21 @@ pub struct FileHunkData {
     pub current_content: Option<String>,
 }
 
-// FileContentState is crate-internal (actor::state is pub(crate)); imported here for snapshot serialization.
+// FileContentState is crate-internal (actor::state is pub(crate));
+// imported here for snapshot serialization.
 use crate::actor::state::FileContentState;
 
-/// Snapshot of a single tracked file's hunk state. Preserves the full
-/// FileContentState (including Binary/TooLarge) for correctness in fork and
-/// cross-session sync flows.
+/// Snapshot of a single tracked file's hunk state. Preserves the full FileContentState (including Binary/TooLarge) for
+/// correctness in fork and cross-session sync flows. `Serialize`/`Deserialize` let the rewind checkpoint store persist
+/// this to disk (see [`HunkTurnDelta`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileHunkStateSnapshot {
     /// Content at git HEAD or session start (baseline for diffing).
+    /// FileContentState::Missing means file didn't exist at baseline (new file).
+    /// FileContentState::TooLarge/Binary means content not retained (metadata only).
     pub baseline: FileContentState,
-    /// Last known content (from agent write or disk read). FileContentState::Missing means file doesn't exist.
+    /// Last known content (from agent write or disk read).
+    /// FileContentState::Missing means file doesn't exist currently.
     pub current_content: FileContentState,
     /// Active hunks for this file.
     pub hunks: Vec<Hunk>,
@@ -499,8 +517,9 @@ pub struct FileHunkStateSnapshot {
     pub baseline_accepted: bool,
 }
 
-/// Used to preserve pending hunks across session kill/reload cycles (e.g.,
-/// fork sync-back).
+/// Used to preserve pending hunks across session kill/reload cycles (e.g., fork sync-back). Without this, the session
+/// reload creates a fresh `HunkTrackerActor` with empty state, causing all un-reviewed hunks to silently disappear — the
+/// user sees their changes "auto-applied" because they're on disk but no longer shown as reviewable.
 #[derive(Debug, Clone)]
 pub struct HunkTrackerSnapshot {
     /// All tracked files with their baselines, current content, hunks, and agent flags.
@@ -511,8 +530,9 @@ pub struct HunkTrackerSnapshot {
     pub session_stats: SessionStats,
 }
 
-/// Incremental, single-turn slice of hunk-tracker state, captured per
-/// `prompt_index` for the rewind checkpoint store.
+/// Incremental, single-turn slice of hunk-tracker state, captured per `prompt_index` for the rewind checkpoint store:
+/// snapshots of the turn's touched files plus its hunk-id set, never a whole-tracker copy. Restore composes deltas
+/// (ascending, last write per path wins) into a [`HunkTrackerSnapshot`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HunkTurnDelta {
     /// The turn this delta belongs to.
@@ -558,10 +578,9 @@ impl HunkTrackerSnapshot {
     }
 }
 
-/// Rewrite a single absolute path from one directory prefix to another. Pure
-/// function — no filesystem I/O. Tries both raw and canonicalized prefix
-/// variants to handle macOS symlinks (e.g., `/var` → `/private/var`) and
-/// paths stored with vs. without symlink resolution.
+/// Rewrite a single absolute path from one directory prefix to another. Pure function — no filesystem I/O. Tries both raw
+/// and canonicalized prefix variants to handle macOS symlinks (e.g., `/var` → `/private/var`) and paths stored with vs.
+/// without symlink resolution. Returns `None` if the path cannot be made relative to `old_cwd` under any prefix variant.
 pub(crate) fn rewrite_single_path(
     path: &std::path::Path,
     old_cwd: &std::path::Path,

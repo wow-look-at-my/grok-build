@@ -1,4 +1,5 @@
-//! Spawns the sampling-transport prewarm at session create/resume and records its outcome.
+//! Spawns the sampling-transport prewarm at session create/resume and records
+//! its outcome on a detached `session.sampler_transport_prewarm` span.
 
 use super::*;
 

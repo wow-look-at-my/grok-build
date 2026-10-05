@@ -13,7 +13,8 @@ use crate::types::output::ReadFileOutput;
 use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::tool::{ToolKind, ToolNamespace};
 
-/// Concise variant of `ReadFileTool`.
+/// Concise variant of `ReadFileTool`. Delegates to `run_read_file()`, then swaps `content_concise`
+/// into `content` (no line-number padding).
 #[derive(Debug, Default)]
 pub struct ReadFileConciseTool;
 
@@ -79,7 +80,8 @@ impl xai_tool_runtime::Tool for ReadFileConciseTool {
             .extensions
             .get::<xai_tool_runtime::Cwd>()
             .map(|c| c.0.clone());
-        // `None`: the concise tool does not stream.
+        // `None`: the concise tool does not stream, so it needs no
+        // text-path streamability signal (see `run_read_file`).
         let invoking = crate::types::tool_metadata::invoking_param_names(&ctx);
         let result =
             run_read_file(input, cwd_override, None, resources, None, &invoking, None).await?;

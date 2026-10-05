@@ -810,7 +810,7 @@ fn the_route_back_never_names_a_card_the_plan_approval_outranks() {
 }
 
 /// With the preview closed, the plan approval's own bar is what renders, and it must name `Tab` the way the preview's bar does.
-/// The key does the same thing in both states, so it cannot answer to names.
+/// The key does the same thing in both states, so it cannot answer to two names.
 #[test]
 fn the_plan_preview_names_tab_the_way_its_viewer_does() {
     let mut agent = make_agent();
@@ -880,7 +880,9 @@ fn blanking_a_free_text_answer_unmarks_it_from_the_nav_buttons_too() {
             .unwrap_or_else(|| panic!("missing index")),
         "a blank answer is not an answer, so its mark goes with it"
     );
-    // The text itself is a draft, not an answer `swap_question_freeform` carries the composer across questions.
+    // The text itself is a draft, not an answer
+    // `swap_question_freeform` carries the composer across questions, so coming back restores what was typed
+    // Only the mark decides what is submitted, and what `Esc` reads
 
     agent.question_view.as_mut().expect("card open").active_tab = 0;
     assert_eq!(
@@ -890,12 +892,13 @@ fn blanking_a_free_text_answer_unmarks_it_from_the_nav_buttons_too() {
     );
 }
 
-// ── vim mode
-// ──────────────────────────────────────────────────────────────
-// The Tab/Esc contract is mode-independent: card intercepts run ahead of the
-// scrollback's vim letter bindings These go through `handle_input` so the
-// full router (not the card handlers) is under test
+// ── vim mode ──────────────────────────────────────────────────────────────
+// The Tab/Esc contract is mode-independent: card intercepts run ahead of the scrollback's vim letter bindings
+// These go through `handle_input` so the full router (not just the card handlers) is under test
 
+// Two options and a freeform row, so Tab from option 1 lands on the freeform row (2)
+// Leave freeform with an arrow (a letter would enter InputMode), then `l` must still switch questions under vim mode
+// Parked j is scrollback nav; it must not walk or answer the options
 fn open_elicitation(agent: &mut AgentView) {
     use crate::views::elicitation_view::ElicitationViewState;
     use xai_grok_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};

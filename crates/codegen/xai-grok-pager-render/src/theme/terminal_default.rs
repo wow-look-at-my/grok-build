@@ -1,4 +1,23 @@
 //! Terminal-native palette for minimal mode.
+//!
+//! Any RGB theme is designed for one background polarity.
+//! Composited on the terminal's own canvas it can land dark-on-dark or light-on-light (e.g. macOS in Light Mode with a dark terminal profile).
+//! Polarity detection is not reliable either.
+//! OS appearance and OSC 11 both disagree with the actual canvas in edge cases and can change mid-session.
+//! Terminal profiles, however, tune their **default** fg/bg to be legible against their own background; `git` and `ls` stay readable this way.
+//! So a palette built from `Reset` (body) and sparse named ANSI-16 accents is polarity-safe without detection.
+//!
+//! ## Grays / secondary text
+//!
+//! Do **not** paint body or status text as `DarkGray` (ANSI bright black).
+//! Many dark profiles deliberately set that slot very dark for subtle chrome, which washes out tool stdout and the prompt info bar. Instead:
+//!
+//! - **Primary content** (`text_primary`, `gray_bright`, …) uses `Color::Reset` (the terminal default foreground).
+//! - **Secondary chrome** (`gray`, `gray_dim`, `text_secondary`) also uses `Color::Reset`.
+//!   [`Theme::muted`] / [`Theme::dim`] apply `Modifier::DIM`, so de-emphasis tracks the terminal's own fg rather than hard-coded bright black.
+//! - **Syntax highlighting** is not themed day/night.
+//!   Under the terminal-native lock, [`crate::syntax::polarity_safe_syntax_fg`] remaps syntect tokens to default-fg grays and base ANSI accents.
+//!   Do not load a light tmTheme based on OS/terminal detection.
 
 use ratatui::style::{Color, Modifier};
 
@@ -100,7 +119,9 @@ impl Theme {
         theme.hover_border = Color::DarkGray;
         theme.prompt_border = Color::DarkGray;
         theme.scrollbar_fg = Color::DarkGray;
-        // Decoration only (borders, dividers, gutters) via direct `fg(gray_dim)` reads.
+        // Decoration only (borders, dividers, gutters) via direct
+        // `fg(gray_dim)` reads; readable content goes through
+        // `Theme::dim()`/`muted()`, which stay on Reset + DIM here.
         theme.gray_dim = Color::DarkGray;
         theme
     }
@@ -211,7 +232,8 @@ mod tests {
             ("bg_base", theme.bg_base),
             ("bg_dark", theme.bg_dark),
             ("bg_terminal", theme.bg_terminal),
-            // Menus float over the composer.
+            // Menus float over the composer; unlike the message band they
+            // stay on the canvas rather than taking the bright-black fill.
             ("md_code_bg", theme.md_code_bg),
             ("scrollbar_bg", theme.scrollbar_bg),
             ("text_primary", theme.text_primary),

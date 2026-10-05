@@ -1,4 +1,13 @@
 //! In-process SDK MCP servers over the ACP reverse channel (`x.ai/mcp/sdk_call`).
+//!
+//! The official `grok-agent-sdk` lets a host define in-process tools (`@tool` / `create_sdk_mcp_server`).
+//! When `transport="acp"`, the SDK registers them in `session/new` `_meta["x.ai/mcp/servers"] = [{ "name", "serverId" }]`.
+//! The agent invokes their tools by sending each MCP JSON-RPC message back to the client as a reverse `x.ai/mcp/sdk_call` request.
+//! [`GatewayAcpInvoker`] handles those requests here.
+//!
+//! The reverse route (agent to client, `x.ai/mcp/sdk_call`) invokes a tool that lives in the SDK's process, with no extra IPC.
+//! It mirrors the forward route (client to agent, `x.ai/mcp/call` in `extensions::mcp`), which invokes a tool on a server the agent is connected to.
+//! The two routes use distinct method strings and sit on opposite request handlers, so they never collide.
 
 use std::time::Duration;
 
@@ -37,8 +46,9 @@ pub(crate) fn parse_acp_mcp_servers(meta: Option<&acp::Meta>) -> Vec<AcpServerEn
     servers
 }
 
-/// Sends each SDK MCP `invoke` as one `x.ai/mcp/sdk_call` reverse request
-/// through the gateway.
+/// Sends each SDK MCP `invoke` as one `x.ai/mcp/sdk_call` reverse request through the gateway.
+/// `AcpAgentGatewaySender::send` is `Send`, unlike `acp::Client::ext_method`, so the rmcp invoker bound is met with no relay task.
+/// Calls may run concurrently; the gateway serializes them onto the session channel.
 pub(crate) struct GatewayAcpInvoker {
     gateway: AcpAgentGatewaySender,
 }
@@ -50,6 +60,7 @@ impl GatewayAcpInvoker {
 }
 
 /// Reverse `x.ai/mcp/sdk_call` params.
+/// Declares the on-wire field names once (mirroring the forward side's typed `McpCallRequest`) so `serverId` is never hand-spelled.
 #[derive(serde::Serialize)]
 struct SdkCallParams<'a> {
     #[serde(rename = "serverId")]

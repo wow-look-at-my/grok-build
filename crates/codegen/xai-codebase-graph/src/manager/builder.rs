@@ -62,6 +62,7 @@ struct FileSymbols {
 }
 
 /// Builder for creating a symbol index.
+/// Parallel parse with thread-local caches, then bounded merge-batching to cap two-phase peak memory.
 pub struct IndexBuilder {
     registry: LanguageRegistry,
     num_threads: usize,
@@ -69,11 +70,14 @@ pub struct IndexBuilder {
     respect_gitignore: bool,
     /// Whether to skip hidden files/directories (default: true)
     skip_hidden: bool,
+    /// Chunk size for parallel processing / thread-local cache locality (default: 100)
     chunk_size: usize,
-    /// Max files whose symbols are held at once during merge.
+    /// Max files whose symbols are held at once during merge. Bounds two-phase peak memory.
+    /// Default: 5 000 files per batch.
     build_batch_size: usize,
 }
 
+/// Get the default number of threads (N-1 cores, minimum 1).
 fn default_num_threads() -> usize {
     num_cpus::get().saturating_sub(1).max(1)
 }
@@ -110,14 +114,16 @@ impl IndexBuilder {
         self
     }
 
+    /// Set the chunk size for parallel processing (default: 100).
     #[must_use]
     pub fn with_chunk_size(mut self, size: usize) -> Self {
         self.chunk_size = size;
         self
     }
 
-    /// Set the merge-batch size (default: files per batch). Smaller
-    /// values reduce peak RSS at slightly more pool-scheduling cost.
+    /// Set the merge-batch size (default: 5 000 files per batch).
+    /// Smaller values reduce peak RSS at slightly more pool-scheduling cost.
+    /// Values below `chunk_size` are clamped at build time, so call order does not matter.
     #[must_use]
     pub fn with_build_batch_size(mut self, size: usize) -> Self {
         self.build_batch_size = size;
@@ -207,7 +213,7 @@ impl IndexBuilder {
             .git_ignore(self.respect_gitignore)
             .git_global(self.respect_gitignore)
             .git_exclude(self.respect_gitignore)
-            .threads(self.num_threads.min(12))
+            .threads(self.num_threads.min(12)) // Use parallel walking (capped at 12)
             .build_parallel();
 
         walker.run(|| {
@@ -230,7 +236,9 @@ impl IndexBuilder {
 
                 // Check if the file is supported
                 if registry.is_supported(path) {
-                    // A walk callback that panics ends the build regardless of what the lock does afterwards.
+                    // A walk callback that panics ends the build regardless of
+                    // what the lock does afterwards, and pushing a `PathBuf` is
+                    // the whole critical section.
                     #[allow(clippy::disallowed_methods)]
                     let mut found = files.lock().unwrap();
                     found.push(path.to_path_buf());
@@ -244,6 +252,7 @@ impl IndexBuilder {
     }
 
     /// Build index with mmap parse and lightweight symbol extraction (no full ScopeGraph).
+    /// Two-phase: parallel extract into `FileSymbols`, then sequential merge into one interner.
     /// Paths are stored relative to `root_path`.
     fn build_fast(&self, root_path: &Path, file_paths: &[PathBuf]) -> Result<ScopeGraphIndex> {
         // Configure thread pool with N-1 cores
@@ -256,14 +265,16 @@ impl IndexBuilder {
 
         let registry = Arc::new(LanguageRegistry::new());
         let chunk_size = self.chunk_size;
-        // Clamp here against the final chunk_size so that call order of with_build_batch_size / with_chunk_size.
+        // Clamp here against the final chunk_size so that call order of
+        // with_build_batch_size / with_chunk_size on the builder does not matter.
         let build_batch_size = self.build_batch_size.max(chunk_size);
         let root_arc: Arc<Path> = Arc::from(root_path);
 
         let mut index = ScopeGraphIndex::new();
 
-        // Parse a batch in parallel, merge it, drop it, then start the next. Peak is
-        // O(build_batch_size) symbols plus the growing index, not O(total_files).
+        // Process files in bounded merge-batches to cap two-phase peak memory.
+        // Parse a batch in parallel, merge it, drop it, then start the next.
+        // Peak is O(build_batch_size) symbols plus the growing index, not O(total_files).
         for batch in file_paths.chunks(build_batch_size) {
             let batch_symbols: Vec<FileSymbols> = pool.install(|| {
                 batch
@@ -289,12 +300,15 @@ impl IndexBuilder {
                 }
                 index.set_file_meta(path_str, file_syms.file_meta);
             }
+            // batch_symbols dropped here — frees the parallel-extracted symbols
+            // before the next batch is parsed
         }
 
         // Set the query version hash so we can detect query changes on cache load
         index.set_query_version(self.registry.compute_query_hash());
 
         // Reclaim over-allocated Vec capacity that accumulated during bulk push().
+        // This is a one-time cost paid here (O(symbols)) to permanently reduce RSS.
         index.compact();
 
         Ok(index)

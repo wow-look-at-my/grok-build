@@ -1,4 +1,4 @@
-#![allow(clippy::string_slice)]
+#![allow(clippy::string_slice)] // 1 hit predates the gate
 
 pub mod buffer;
 pub mod events;

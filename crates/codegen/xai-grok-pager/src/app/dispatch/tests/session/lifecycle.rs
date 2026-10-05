@@ -7,8 +7,8 @@ fn expect_agent(app: &AppView, id: AgentId) -> &AgentView {
     agent
 }
 use crate::app::dispatch::session::lifecycle::dispatch_accept_consent;
-/// Simulate a release-stamped build so folder-trust is active (a local/dev
-/// build auto-trusts and persists nothing).
+/// Simulate a release-stamped build so folder-trust is active (a local/dev build auto-trusts and persists nothing).
+/// Mirrors this module's raw env idiom.
 fn simulate_release_build() {
     unsafe { std::env::set_var(xai_grok_version::TEST_VERSION_ENV, "0.0.0-sim") };
 }
@@ -1595,6 +1595,7 @@ fn trust_gate_outcome_maps_every_case() {
 }
 /// When BOTH auth and trust are pending, `AuthComplete` must NOT replay the deferred startup.
 /// The trust question renders next, and its answer drains it.
+/// Verifies the symmetric two-gate ordering.
 #[test]
 fn auth_complete_defers_startup_until_trust_resolved() {
     let mut app = test_app();
@@ -1986,6 +1987,7 @@ fn login_mid_session_resets_welcome_announcement_expanded() {
         "mid-session login must reset the expanded announcement"
     );
 }
+/// After a successful mid-session re-auth, the stale `ReAuthRequired` prompt (pushed when the 401 surfaced) is stripped.
 /// The user returns to a clean session.
 #[test]
 fn auth_complete_strips_reauth_prompt_after_mid_session_login() {

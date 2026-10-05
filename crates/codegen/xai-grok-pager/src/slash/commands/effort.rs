@@ -1,4 +1,6 @@
 //! `/effort`: set reasoning effort on the current model without re-picking it.
+//!
+//! Thin wrapper over `Action::SwitchModel` with the session's current model id and the chosen effort (same wire path as `/model <name> <effort>`).
 
 use crate::acp::model_state::EffortTokenError;
 use crate::app::actions::Action;
@@ -192,6 +194,7 @@ mod tests {
 
     #[test]
     fn none_and_minimal_rejected_when_model_menu_omits_them() {
+        // The legacy fallback menu is low..xhigh; `none`/`minimal` used to pass through and 400 on grok-4.5, so reject at the TUI instead
         let mut state = ModelState::default();
         let (id, info) = model_with_reasoning("reasoning-x", "Reasoning X");
         state.available.insert(id.clone(), info);

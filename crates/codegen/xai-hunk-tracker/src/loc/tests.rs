@@ -93,7 +93,8 @@ impl HunkRecordWriter for VecWriter {
     }
 }
 
-/// Thread-safe wrapper around `VecWriter` for use with `run_loc_sink` (which takes ownership of the writer).
+/// Thread-safe wrapper around `VecWriter` for use with `run_loc_sink`
+/// (which takes ownership of the writer).
 struct SharedWriter(std::sync::Arc<std::sync::Mutex<VecWriter>>);
 
 impl SharedWriter {
@@ -139,7 +140,7 @@ fn from_hunk_agent_edit() {
     assert_eq!(record.hunk_id, HunkId::from_string("test-hunk-001".into()));
     assert_eq!(record.file_path, PathBuf::from("/tmp/foo.rs"));
     assert_eq!(record.hunk_start, 10);
-    assert_eq!(record.hunk_end, 14);
+    assert_eq!(record.hunk_end, 14); // 10 + 5 - 1
     assert_eq!(record.lines_added, 5);
     assert_eq!(record.lines_removed, 3);
     assert_eq!(record.author_type, Some(AuthorType::Agent));
@@ -168,7 +169,7 @@ fn from_hunk_external() {
     assert_eq!(record.prompt_index, None);
     assert_eq!(record.source_type, Some(SourceType::External));
     assert_eq!(record.hunk_start, 1);
-    assert_eq!(record.hunk_end, 4);
+    assert_eq!(record.hunk_end, 4); // 1 + 4 - 1
 }
 
 #[test]
@@ -221,7 +222,7 @@ fn from_hunk_pure_deletion() {
 
     // Pure deletion: new_count == 0, so uses old_start/old_count
     assert_eq!(record.hunk_start, 5);
-    assert_eq!(record.hunk_end, 7);
+    assert_eq!(record.hunk_end, 7); // 5 + 3 - 1
     assert_eq!(record.lines_added, 0i64);
     assert_eq!(record.lines_removed, 3i64);
 }
@@ -258,7 +259,7 @@ async fn sink_processes_added_and_content_changed() {
 
     let hunk = sample_agent_hunk();
     let mut updated_hunk = sample_agent_hunk();
-    updated_hunk.line_info.new_count = 8;
+    updated_hunk.line_info.new_count = 8; // grew from 5 to 8 lines
 
     // Send a mix of events — only HunkAdded and HunkContentChanged should produce records
     tx.send(HunkEvent::FileAdded {
@@ -275,8 +276,8 @@ async fn sink_processes_added_and_content_changed() {
         path: PathBuf::from("/tmp/foo.rs"),
         hunk: Arc::new(updated_hunk),
         trigger_source: HunkSource::AgentEdit { prompt_index: 2 },
-        prev_lines_added: 5,   // original hunk had a few lines
-        prev_lines_removed: 3, // original hunk had a few lines
+        prev_lines_added: 5,   // original hunk had 5 lines added
+        prev_lines_removed: 3, // original hunk had 3 lines removed
     })
     .unwrap();
     tx.send(HunkEvent::HunkMoved {
@@ -326,10 +327,12 @@ async fn sink_processes_added_and_content_changed() {
     assert_eq!(added.lines_added, 5);
     assert_eq!(added.lines_removed, 3);
 
+    // Second record: updated (delta: 8-5=3 added, 3-3=0 removed)
     assert_eq!(updated.event_type, EventType::Updated);
     assert_eq!(updated.lines_added, 3i64);
     assert_eq!(updated.lines_removed, 0i64);
 
+    // Third record: removed (negates accumulated: -(5+3)=-8, -(3+0)=-3)
     assert_eq!(removed.event_type, EventType::Removed);
     assert_eq!(removed.lines_added, -8i64);
     assert_eq!(removed.lines_removed, -3i64);
@@ -406,7 +409,7 @@ async fn sink_removed_hunk_after_updates_zeroes_correctly() {
     let path = hunk.path.clone();
 
     let mut updated = sample_agent_hunk();
-    updated.line_info.new_count = 8;
+    updated.line_info.new_count = 8; // grew from 5 → 8
 
     // Add → update → remove
     tx.send(HunkEvent::HunkAdded {
@@ -487,17 +490,20 @@ async fn sink_accepted_hunk_preserves_loc() {
     assert_eq!(total_added, 5, "Accepted hunk's LOC should be preserved");
 }
 
+/// When a hunk *shrinks* (e.g., human deletes 3 of 10 agent lines), the
+/// delta must be negative so SUM-based LOC totals stay accurate.
 #[tokio::test]
 async fn sink_shrinking_hunk_produces_negative_delta() {
     let (tx, rx) = mpsc::unbounded_channel();
     let ctx = make_ctx();
     let cancel = tokio_util::sync::CancellationToken::new();
 
-    // Agent adds several lines
+    // Agent adds 10 lines
     let mut hunk = sample_agent_hunk();
     hunk.line_info.new_count = 10;
     hunk.line_info.old_count = 0;
 
+    // Human deletes 3 → hunk shrinks to 7
     let mut shrunk = sample_agent_hunk();
     shrunk.line_info.new_count = 7;
     shrunk.line_info.old_count = 0;
@@ -529,12 +535,13 @@ async fn sink_shrinking_hunk_produces_negative_delta() {
     assert_eq!(agent.author_type, Some(AuthorType::Agent));
     assert_eq!(agent.lines_added, 10i64);
 
+    // Second: human shrunk the hunk by 3 → negative delta
     assert_eq!(human.author_type, Some(AuthorType::Human));
     assert_eq!(human.event_type, EventType::Updated);
     assert_eq!(human.lines_added, -3i64);
     assert_eq!(human.lines_removed, 0i64);
 
-    // SUM(lines_added) by author: agent=10, human=-net=7 ✅
+    // SUM(lines_added) by author: agent=10, human=-3, net=7 ✅
     let agent_total: i64 = w
         .records
         .iter()

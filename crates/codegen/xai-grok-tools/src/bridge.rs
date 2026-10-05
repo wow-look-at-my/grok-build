@@ -1,4 +1,10 @@
-//! ToolBridge: adapter that wraps `xai-grok-tools`'s `ToolRegistry` and exposes it through a session layer.
+//! ToolBridge: adapter that wraps `xai-grok-tools`'s `ToolRegistry` and
+//! exposes it through a session layer.
+//!
+//! The bridge:
+//! 1. Owns a `ToolRegistry` with all built-in tools registered
+//! 2. Dispatches tool calls via `call_new_tool()`
+//! 3. Manages tool definitions, enable/disable, name overrides
 
 use std::sync::Arc;
 
@@ -56,8 +62,9 @@ impl From<ToolRunResult> for ToolBridgeResult {
     }
 }
 
-/// Bridges the `ToolRegistry` into a session layer. Owns the registry and
-/// dispatches tool calls via `call_new_tool()`.
+/// Bridges the `ToolRegistry` into a session layer. Owns the registry and dispatches tool calls via `call_new_tool()`. All state lives in
+/// `Resources` on the registry — no separate `ToolState`. The `terminal` field is stored separately from the registry lock to enable
+/// cancellation during tool execution. When a bash command is running, the registry lock is held by `call()`.
 #[derive(Clone)]
 pub struct ToolBridge {
     registry: Arc<FinalizedToolset>,
@@ -100,8 +107,9 @@ impl ToolBridge {
         self.registry.tool_definitions()
     }
 
-    /// Returns the client-facing name of the tool registered with the given `ToolKind`, if any. Useful for "does this agent have a way to do X?" checks where the X is identified
-    /// by kind rather than by namespaced id.
+    /// Returns the client-facing name of the tool registered with the given `ToolKind`, if any. Useful for "does this agent
+    /// have a way to do X?" checks where the X is identified by kind rather than by namespaced id.
+    /// `Some("get_task_output")` for the grok_build agent and `None` for agents that do not register a tool of that kind.
     pub async fn tool_for_kind(&self, kind: ToolKind) -> Option<String> {
         self.registry
             .resources
@@ -139,6 +147,14 @@ impl ToolBridge {
 
     /// [`ToolNamespace`] for a registered tool by client-facing name, or
     /// `None` for unknown names.
+    ///
+    /// Kind alone does not identify an implementation: two namespaces can
+    /// register the same kind with different semantics (grok_build's
+    /// merge-capable `todo_write` versus opencode's replace-only
+    /// `todowrite`, both [`ToolKind::Plan`]). Callers that need one specific
+    /// implementation pair this with the kind, so a `name_override` cannot
+    /// hide it and a same-kind tool from another harness cannot impersonate
+    /// it.
     pub fn tool_namespace(&self, tool_name: &str) -> Option<crate::types::tool::ToolNamespace> {
         self.registry
             .get_tool_metadata(tool_name)
@@ -155,8 +171,9 @@ impl ToolBridge {
         self.registry.tool_definitions_builtins_only_inline_mcp()
     }
 
-    /// Render a prompt template through [`TemplateRenderer`] with extra
-    /// agent-specific context fields.
+    /// Render a prompt template through [`TemplateRenderer`] with extra agent-specific context fields. The template can use
+    /// both `${{ tools.by_kind.* }}` (resolved from the finalized tool registry) and caller-provided fields like `${{
+    /// os_name }}`, `${{ memory_enabled }}`, etc. Returns `None` if the renderer is not yet available.
     pub async fn render_prompt(
         &self,
         template: &str,
@@ -209,7 +226,9 @@ impl ToolBridge {
         self.registry.unregister_tool_by_name(name)
     }
 
-    /// Access the underlying `FinalizedToolset`.
+    /// Access the underlying `FinalizedToolset`. Used by `WorkspaceOps::bind_local_session` to
+    /// install the agent's toolset on the workspace session so local-mode tool calls dispatch
+    /// through the workspace.
     pub fn toolset(&self) -> Arc<FinalizedToolset> {
         Arc::clone(&self.registry)
     }
@@ -300,7 +319,8 @@ impl ToolBridge {
     ) {
         let registry = &*self.registry;
         let mut res = registry.resources.lock().await;
-        // Resolve client-facing tool names from the template renderer so listing headers and descriptions use the correct (possibly randomized).
+        // Resolve client-facing tool names from the template renderer
+        // so listing headers and descriptions use the correct (possibly randomized) names.
         let renderer = res.get::<TemplateRenderer>();
         let skill_tool_name = renderer.and_then(|r| r.render("${{ tools.by_kind.skill }}").ok());
         let read_tool_name = renderer.and_then(|r| r.render("${{ tools.by_kind.read }}").ok());
@@ -459,7 +479,9 @@ impl ToolBridge {
         result
     }
 
-    /// Set the stable display path for forked sessions.
+    /// Set the stable display path for forked sessions. Inserts [`DisplayCwd`] into the tool
+    /// registry's [`Resources`] so that tools can use [`resolve_model_path`] and
+    /// [`display_cwd_or_cwd`] to rewrite model-provided paths and format output paths correctly.
     pub async fn set_display_cwd(&self, display_cwd: std::path::PathBuf) {
         let registry = &*self.registry;
         registry
@@ -548,12 +570,14 @@ impl ToolBridge {
         }
     }
 
-    /// Read a typed resource from the registry. Returns `None` if the
-    /// resource type has never been inserted.
+    /// Read a typed resource from the registry. Returns `None` if the resource type has never been
+    /// inserted. The resource is cloned so no lock is held after this returns.
     pub async fn read_resource<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
         self.registry.resources.lock().await.get::<T>().cloned()
     }
     /// Get the shared resources handle for direct access.
+    /// Used by the skill reconciliation helper which needs to update
+    /// `AvailableSkills` in the Resources directly.
     pub async fn shared_resources(&self) -> crate::types::resources::SharedResources {
         self.registry.resources.clone()
     }
@@ -701,7 +725,9 @@ impl ToolBridge {
         use crate::reminders::task_completion::{ReportedTaskCompletions, task_owned_by_session};
 
         let mut res = self.registry.resources.lock().await;
-        // Subagents share the parent's terminal backend, so `list_tasks()` returns tasks owned by other sessions.
+        // Subagents share the parent's terminal backend, so `list_tasks()` returns tasks owned by
+        // other sessions. The owner filter runs before `mark_reported` so the owning session still
+        // reports the task on its own next turn.
         let my_owner = res.get::<OwnerSessionId>().map(|o| o.0.clone());
         let state = res.get_or_default::<State<ReportedTaskCompletions>>();
         completed
@@ -712,7 +738,9 @@ impl ToolBridge {
             .collect()
     }
 
-    /// Construct a minimal bridge for tests. Has no tools registered.
+    /// Construct a minimal bridge for tests. Has no tools registered. Bypasses `ToolRegistryBuilder::finalize()` entirely
+    /// so this can be called from sync `#[test]` functions that lack a tokio runtime. (`finalize()` spawns background tasks
+    /// via `tokio::spawn`.)
     pub fn for_test() -> Self {
         let toolset = FinalizedToolset::empty_for_test();
         Self {
@@ -784,7 +812,9 @@ mod tests {
         let bridge = ToolBridge::for_test();
         let toolset = bridge.toolset();
 
-        // PascalCase + grok_build's snake_case in one registry to exercise the lookup.
+        // PascalCase + grok_build's snake_case in one registry
+        // to exercise the lookup on the literal name strings each
+        // namespace ships.
         register_fixture(&toolset, "Write", ToolKind::Write, "fixture_write");
         register_fixture(
             &toolset,

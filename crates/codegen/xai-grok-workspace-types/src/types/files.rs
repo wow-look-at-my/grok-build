@@ -1,4 +1,7 @@
 //! `@file` provider shapes referenced from `OpsChunk::ResolvedFiles`.
+//!
+//! TODO(workspace): align with the canonical resolution result types
+//! used by the `@file` provider in `xai-grok-shell`.
 
 use serde::{Deserialize, Serialize};
 

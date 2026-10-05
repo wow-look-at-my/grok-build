@@ -642,8 +642,8 @@
             Some("legacy_auth"),
             "Unauthorized (401) ... deprecated authentication method"
         ));
-        // auth_transient means the shell says the failure self-heals (refreshable credential, no sticky verdict, e.g. a
-        // post-wake network gap).
+        // auth_transient means the shell says the failure self-heals (refreshable credential, no sticky verdict, e.g. a post-wake network gap).
+        // Even with a 401 in the message, the `/login` banner must not fire
         assert!(!is_reauthable_failure(
             Some("auth_transient"),
             "Unauthorized (401)\n\nAuthentication is temporarily unavailable"
@@ -656,6 +656,7 @@
         assert!(!is_reauthable_failure(Some("api"), "model not found"));
     }
 
+    /// A 401 with `error_type == "auth"` shows the actionable re-auth prompt instead of the raw "Retry failed: Unauthorized (401) …" dump.
     #[test]
     fn apply_retry_state_auth_failure_pushes_reauth_prompt() {
         let mut session = make_session(Some("s1"));
@@ -705,6 +706,7 @@
         assert_eq!(session.in_flight_prompt.unwrap().text, "retry after login");
     }
 
+    /// A 401 reported with a non-auth `error_type` but an "Unauthorized (401)" message (the `SamplingErrorKind::Api` path) also prompts.
     #[test]
     fn apply_retry_state_401_message_without_auth_type_prompts_reauth() {
         let mut session = make_session(Some("s1"));
@@ -743,6 +745,7 @@
         ));
     }
 
+    /// Non-auth terminal failures render the formatted RequestFailed banner (same visual treatment as 401 re-auth), not a raw RetryFailed dump.
     #[test]
     fn apply_retry_state_generic_failure_shows_request_failed_banner() {
         let mut session = make_session(Some("s1"));
@@ -1011,7 +1014,9 @@
 
     #[test]
     fn compaction_lifecycle_refreshes_context_bar_from_trigger_counts() {
-        // Started refreshes with the count the trigger fired on.
+        // Started refreshes with the count the trigger fired on; the banner percentage derives from it
+        // Completed refreshes with the post-compact count
+        // Failed/Cancelled carry no count; the next meta.totalTokens restamps
         let started = XaiSessionUpdate::AutoCompactStarted {
             tokens_used: 460_231,
             context_window: 500_000,
@@ -1070,6 +1075,7 @@
 
         let info = agent.subagent_sessions.get(child_sid).unwrap();
         assert_eq!(info.attempt.tokens_used, Some(25000));
+        // 25000 tokens of the default 131072 window rounds to 19 percent
         assert_eq!(info.attempt.context_usage_pct, Some(19));
 
         // The child view's context_state.used (context-bar numerator) must also be reset; see handle_child_session_notification
@@ -1193,7 +1199,7 @@
     }
 
     /// The active agent's status row, rendered from what its tracker holds,
-    /// the same fields `agent_view/render.rs` hands the renderer.
+    /// the same two fields `agent_view/render.rs` hands the renderer.
     fn active_row_text(app: &AppView) -> String {
         let agent = &app.agents[&AgentId(0)];
         let activity = agent.resolve_turn_activity();

@@ -1,4 +1,9 @@
 //! Each method resolves its git root from an explicit `gitRoot`, falling back to a session lookup via `sessionId`.
+//! The work itself is delegated to the pure functions in `session::git::*`.
+//!
+//! Git and JJ helpers (`git_cli`, `status`, `detect_vcs_kind`, `find_git_root_from_path`, etc.) take a `&Path` and shell out to `git` or `jj`.
+//! They do not touch workspace state, so they stay direct calls rather than routing through `WorkspaceChannel`.
+//! The channel's VCS stubs (`git_status`, `git_diff`, etc.) are reserved for stateful operations (cached VCS state, cross-session conflict detection).
 use super::{Empty, ExtResult, parse_params, to_ext_response, to_ext_response_partial};
 use crate::agent::MvpAgent;
 use crate::session::ExtMethodResult;

@@ -32,7 +32,9 @@ impl SkillManager {
 
         let mut owned_paths = HashSet::new();
         let mut suggestion: Option<SkillPathSuggestion> = None;
-        // Count every eligible same-name registration, including the failed path itself: skipping.
+        // Count every eligible same-name registration, including the failed
+        // path itself: skipping that path without counting it would let a
+        // second same-named skill look unique and get suggested.
         let mut match_count = 0usize;
         for skill in self
             .startup_skills
@@ -45,7 +47,9 @@ impl SkillManager {
                 continue;
             }
             let canonical = canonical_path(&skill.path);
-            // The highest-precedence record owns its canonical path outright.
+            // The highest-precedence record owns its canonical path outright:
+            // a shadowed record must not be suggested (nor count as ambiguity)
+            // even when the owner is disabled or otherwise ineligible.
             if !owned_paths.insert(canonical.clone()) {
                 continue;
             }
@@ -63,7 +67,8 @@ impl SkillManager {
                 return None;
             }
             if canonical == requested_path {
-                // Already the failed read target — not a suggestion.
+                // Already the failed read target — not a suggestion, but it
+                // still occupied the single unique-match slot above.
                 continue;
             }
 

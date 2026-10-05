@@ -174,8 +174,9 @@ impl ConversationsClient {
         let wire: ListConversationsResponseWire = serde_json::from_slice(&bytes)?;
 
         let searching = q.search_query.as_deref().is_some_and(|s| !s.is_empty());
-        // During an active search, results come exclusively from
-        // `text_search_matches` Never fall back to `wire.conversations` here.
+        // During an active search, results come exclusively from `text_search_matches`
+        // Never fall back to `wire.conversations` here: an empty match set means "no hits"
+        // The server may return recent/unfiltered conversations in `conversations` that are NOT search matches; showing those would be wrong
         let conversations = if searching {
             wire.text_search_matches
                 .into_iter()
@@ -232,7 +233,7 @@ impl ConversationsClient {
 
         let response = builder.send().await?;
         let status = response.status();
-        // A means already soft-deleted; keep deletion idempotent like the build path's `classify_remote_delete`
+        // A 404 means already soft-deleted; keep deletion idempotent like the build path's `classify_remote_delete`
         if !status.is_success() && status.as_u16() != 404 {
             return Err(ConvError::Http {
                 status: status.as_u16(),

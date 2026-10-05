@@ -21,6 +21,7 @@ impl SessionActor {
     }
 
     /// Model-facing catalog of launchable workflows.
+    /// Returns `None` when background workflows are disabled, this session is a subagent (launches are top-level only), or none are registered.
     pub(crate) fn workflow_listing_for_prompt(&self) -> Option<String> {
         self.workflow_listing_snapshot().map(|(text, _)| text)
     }

@@ -29,8 +29,7 @@ pub(crate) const OAUTH_DISCOVERY_TIMEOUT: std::time::Duration = std::time::Durat
 pub(crate) async fn discover_metadata_bounded(
     manager: &AuthorizationManager,
 ) -> Result<AuthorizationMetadata, AuthError> {
-    // rmcp 3.x `resolve_metadata` never fails discovery: it degrades to
-    // legacy endpoints guessed from the base URL.
+    // rmcp 3.x `resolve_metadata` never fails discovery: it degrades to legacy endpoints guessed from the base URL. The probe's auth decision needs the rmcp 2.x "no OAuth support" signal back, so the fallback maps to `NoAuthorizationSupport` instead of guessing endpoints.
     let resolve = async {
         let resolution = manager.resolve_metadata().await?;
         if resolution.source == AuthorizationMetadataSource::LegacyEndpointFallback {
@@ -425,7 +424,8 @@ fn open_consent_browser(server_name: &str, auth_url: &str) {
         return;
     }
     if let Err(e) = webbrowser::open(auth_url) {
-        // eprintln!
+        // eprintln! corrupts the TUI alternate screen (in-process, fd 2).
+        // TODO: show the auth URL via ACP notification instead
         tracing::warn!(%e, url = %auth_url, "Failed to open browser for MCP OAuth; user must visit URL manually");
     }
 }

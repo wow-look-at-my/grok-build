@@ -46,9 +46,14 @@ async fn ctrlc_with_queued_prompt_no_dup() {
 
     harness.inject_keys(keys::CTRL_C).expect("Ctrl+C cancel A");
     // The barrier is never released: the cancel is the only way A can end, so
-    // it cannot lose a race to A's own completion.
+    // it cannot lose a race to A's own completion. Releasing here would —
+    // `inject_keys` writes to the PTY without waiting for the pager to read
+    // it, so A finishes on its own, B promotes, and the Ctrl+C lands on B
+    // instead, destroying the very prompt this case exists to protect.
 
-    // Standard cancel (queued prompts skip the rewind): A is cancelled.
+    // Standard cancel (queued prompts skip the rewind): A is cancelled and B promotes as the next turn
+    // When B's turn starts it pins its block to the head, so the "Turn cancelled by user" marker and the "❯ B" promotion scroll above the viewport
+    // Gate on B's reply, which stays at the head, and prove correctness via the composer state and the recorded wire below
     harness
         .wait_for_text("BRAVORESP", Duration::from_secs(90))
         .expect("B promoted and replied");
@@ -59,7 +64,8 @@ async fn ctrlc_with_queued_prompt_no_dup() {
         "cancel with a queued prompt must not restore A to the composer\nscreen:\n{}",
         harness.screen_contents()
     );
-    // No duplication: A (cancelled) and B (promoted) each reach the wire exactly once.
+    // No duplication: A (cancelled) and B (promoted) each reach the wire exactly once in the final request
+    // Counting visible lines is unreliable here (A scrolls above the viewport when B's turn starts), so assert against the wire
     let bodies = content.request_bodies();
     let last = bodies.last().expect("final request recorded");
     let user_queries: Vec<String> = last["messages"]

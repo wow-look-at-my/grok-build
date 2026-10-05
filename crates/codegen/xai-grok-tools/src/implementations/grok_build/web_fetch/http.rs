@@ -1,4 +1,10 @@
 //! Cached HTTP client with atomic invalidation for `web_fetch`.
+//!
+//! The `reqwest::Client` is held behind an `ArcSwapOption` so it can be
+//! atomically invalidated on transport errors, forcing the next call to rebuild
+//! with a fresh connection pool. This prevents connection pool poisoning
+//! (half-read connections being returned to the pool and corrupting subsequent
+//! requests).
 
 use std::sync::Arc;
 
@@ -7,7 +13,9 @@ use arc_swap::ArcSwapOption;
 use super::config::WebFetchParams;
 use super::error::WebFetchError;
 
-/// Cached, invalidatable HTTP client for web fetching.
+/// Cached, invalidatable HTTP client for web fetching. **Normal path:** `get_or_rebuild()` returns the cached client
+/// via a lock-free atomic load. **On transport error:** call `invalidate()` to atomically set the client to `None`. The
+/// next `get_or_rebuild()` falls through and builds a fresh client with a clean connection pool.
 #[derive(Clone, Debug)]
 pub(crate) struct HttpClient {
     inner: Arc<ArcSwapOption<reqwest::Client>>,

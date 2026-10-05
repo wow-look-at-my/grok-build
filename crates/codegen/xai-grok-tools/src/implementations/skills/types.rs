@@ -39,19 +39,26 @@ const fn default_true() -> bool {
 /// Skill info returned by the list extension method.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SkillInfo {
-    /// Command identity: slash name, dedup key, listing label.
+    /// Command identity: slash name, dedup key, listing label. Plugin skills
+    /// and same-scope name-collision losers (`dedupe_skills` re-key) use the
+    /// directory basename here, not frontmatter `name`.
     pub name: String,
-    /// Frontmatter `name`, kept as the display label when `name` is overridden to the directory basename.
+    /// Frontmatter `name`, kept as the display label when `name` is overridden
+    /// to the directory basename (plugin skills; same-scope collision re-key).
+    /// None = `name` is the label. Not a plugin marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
     pub description: String,
-    /// True when `description` came from frontmatter rather than being derived from the body.
+    /// True when `description` came from frontmatter rather than being derived
+    /// from the body. Gates whether plugin skills appear in the listing.
     #[serde(default)]
     pub has_user_specified_description: bool,
-    /// Glob patterns (gitignore-style).
+    /// Glob patterns (gitignore-style). When set, the skill is held back from
+    /// the listing until a matching file is touched. None = always shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<Vec<String>>,
-    /// Frontmatter `origin`: the tool that wrote the skill (e.g. `learn`), validated to a short slug at parse time.
+    /// Frontmatter `origin`: the tool that wrote the skill (e.g. `learn`),
+    /// validated to a short slug at parse time. None = hand-written or unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
     /// Trigger phrases for model matching, separate from description.
@@ -101,13 +108,16 @@ pub struct SkillInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     /// Whether this skill can be invoked by the user via /skill-name.
+    /// Skills with user_invocable=false are not shown in the skill tool.
     #[serde(default = "default_true")]
     pub user_invocable: bool,
     /// If true, the model cannot auto-invoke this skill; only user slash commands work.
+    /// Skills with this flag are shown in the system prompt but filtered from the skill tool.
     #[serde(default)]
     pub disable_model_invocation: bool,
 
-    /// Whether this skill is enabled.
+    /// Whether this skill is enabled. Disabled skills are still listed
+    /// but excluded from the system prompt and skill tool invocation.
     #[serde(default = "default_true")]
     pub enabled: bool,
 
@@ -132,9 +142,9 @@ impl SkillInfo {
     }
 }
 
-/// Extract the skill name from a path if it points to a `SKILL.md` file.
-/// Returns the parent directory name (e.g. `"/skills/deploy/SKILL.md"` →
-/// `"deploy"`).
+/// Extract the skill name from a path if it points to a `SKILL.md` file. Returns the parent
+/// directory name (e.g. `"/skills/deploy/SKILL.md"` → `"deploy"`). Returns `None` for non-SKILL.md
+/// paths or bare `"SKILL.md"` with no parent.
 pub fn skill_name_from_path(path: &str) -> Option<&str> {
     let p = std::path::Path::new(path);
     if p.file_name()?.to_str()? == "SKILL.md" {

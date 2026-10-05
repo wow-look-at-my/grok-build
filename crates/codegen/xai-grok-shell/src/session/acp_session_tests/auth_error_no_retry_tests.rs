@@ -28,7 +28,7 @@ impl xai_grok_login::refresh::TokenRefresher for AlwaysSucceedRefresher {
 }
 
 /// Test refresher that always fails transiently — the shape of a sleep-gate
-/// deferral ("refresh deferred: system sleep imminent").
+/// deferral ("refresh deferred: system sleep imminent") or a network blip.
 struct AlwaysTransientFailRefresher {
     called: Arc<AtomicBool>,
 }
@@ -116,7 +116,7 @@ async fn make_actor_parts_with_auth_manager(
 }
 
 /// Variant that pins the credential `auth_type`; the `auth_method_id` is derived from it.
-/// Use [`make_actor_with_method_and_credentials`] to pin both independently.
+/// Use [`make_actor_with_method_and_credentials`] to pin the two independently.
 async fn make_actor_with_auth_and_credentials(
     auth_manager: Option<Arc<AuthManager>>,
     auth_type: xai_chat_state::AuthType,
@@ -185,6 +185,7 @@ fn auth_manager_with_valid_token(key: &str) -> (tempfile::TempDir, Arc<AuthManag
     (dir, am)
 }
 
+/// Sub-case 1: with no auth_manager the handler falls through and emits no attribution.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
 async fn no_emit_when_auth_manager_is_none() {
@@ -211,6 +212,7 @@ async fn no_emit_when_auth_manager_is_none() {
         .await;
 }
 
+/// Sub-case 2: with no AuthManager, auth recovery is skipped entirely and the 401 falls through to a terminal error.
 /// Covers BYOK / API-key users where no OIDC refresh is possible.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
@@ -284,6 +286,8 @@ async fn sampler_401_recovery_returns_refresh_and_retry() {
         .await;
 }
 
+/// Rule: a credential-less 401 with transiently-failed recovery parks on the
+/// uncharged path instead of failing the turn.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
 async fn credential_less_401_with_deferred_refresh_parks_on_uncharged_resubmit() {
@@ -322,7 +326,7 @@ async fn credential_less_401_with_deferred_refresh_parks_on_uncharged_resubmit()
         .await;
 }
 
-/// Rule: an already-parked credential-less re-parks without touching the
+/// Rule: an already-parked credential-less 401 re-parks without touching the
 /// refresher — parked cycles must not consume the shared escalation budget.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
@@ -364,6 +368,9 @@ async fn parked_credential_less_401_reparks_without_recovery_dispatch() {
         .await;
 }
 
+/// Rule: a credential-less 401 on a Length-salvage continuation still parks, fresh or
+/// parked — the quiet truncated-complete arm excludes `Auth` kinds, so it neither
+/// completes the turn truncated nor goes terminal.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
 async fn mid_salvage_credential_less_401_still_parks() {
@@ -378,6 +385,8 @@ async fn mid_salvage_credential_less_401_still_parks() {
                     });
                 let (_dir, am) = auth_manager_with_refresher(refresher);
                 let (actor, _rx) = make_actor_with_auth_manager(Some(am)).await;
+                // A window the seeded estimate exceeds: only the quiet arm's
+                // `Auth` exclusion keeps this 401 out of it.
                 let error = xai_grok_sampler::SamplingErrorInfo {
                     model_metadata: Some(xai_grok_sampling_types::ResponseModelMetadata {
                         context_window: Some(1),
@@ -409,7 +418,7 @@ async fn mid_salvage_credential_less_401_still_parks() {
         .await;
 }
 
-/// Rule: a credentialed (or `Unknown` — fails closed) stays terminal when recovery fails.
+/// Rule: a credentialed (or `Unknown` — fails closed) 401 stays terminal when recovery fails.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
 async fn credentialed_401_with_deferred_refresh_stays_terminal() {
@@ -476,7 +485,7 @@ async fn credential_less_401_with_park_kill_switch_stays_terminal() {
         .await;
 }
 
-/// Rule: a credential-less stays terminal under a provider refresh authority —
+/// Rule: a credential-less 401 stays terminal under a provider refresh authority —
 /// parking would loop on a token only an interactive flow can mint.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
@@ -520,7 +529,7 @@ async fn credential_less_401_with_provider_authority_stays_terminal() {
         .await;
 }
 
-/// Rule: a credential-less stays terminal when the remedy is a manual re-login —
+/// Rule: a credential-less 401 stays terminal when the remedy is a manual re-login —
 /// resubmits would loop on a credential no refresh can mint.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
@@ -555,8 +564,9 @@ async fn credential_less_401_with_permanent_failure_stays_terminal() {
         .await;
 }
 
+/// Regression: sampler 401 with API-key auth (BYOK `env_key` / `XAI_API_KEY`) must NOT attempt an OIDC session-token refresh.
 /// The bearer on the wire is the static API key, so refreshing the session token reports success but the retry re-sends the same rejected key.
-/// Recovery is skipped and the surfaces as a terminal error.
+/// Recovery is skipped and the 401 surfaces as a terminal error.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
 async fn sampler_401_with_api_key_auth_skips_refresh_and_surfaces_error() {
@@ -732,6 +742,7 @@ async fn pre_flight_hard_expired_refresh_failure_skips_jwt_fallthrough() {
 }
 
 /// Soft-expired (inside the early-invalidation buffer) and a transient refresh failure: retain the seed.
+/// The access token on the wire is still accepted, so it can continue until 401 recovery.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial(attribution_emit_count)]
 async fn pre_flight_soft_expired_transient_fail_retains_seed() {
@@ -884,6 +895,7 @@ fn model_not_found_error() -> xai_grok_sampler::SamplingErrorInfo {
         }
 }
 
+/// 404 model-not-found with a legacy WebLogin token appends a "Legacy auth detected" hint to the error message.
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_auth_hint_on_404_model_not_found() {
     let local = tokio::task::LocalSet::new();
@@ -964,6 +976,7 @@ fn unauthorized_401_error() -> xai_grok_sampler::SamplingErrorInfo {
         }
 }
 
+/// 401 Unauthorized with a legacy WebLogin token appends a "Legacy auth detected" hint to the error message.
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_auth_hint_on_401_unauthorized() {
     let local = tokio::task::LocalSet::new();
@@ -1019,6 +1032,7 @@ async fn legacy_auth_hint_on_401_unauthorized() {
         .await;
 }
 
+/// 401 with OIDC auth must NOT append the legacy hint.
 #[tokio::test(flavor = "current_thread")]
 async fn no_legacy_hint_on_401_for_oidc_auth() {
     let local = tokio::task::LocalSet::new();
@@ -1066,6 +1080,7 @@ async fn no_legacy_hint_on_401_for_oidc_auth() {
         .await;
 }
 
+/// 404 model-not-found with OIDC auth must NOT append the legacy hint.
 #[tokio::test(flavor = "current_thread")]
 async fn no_legacy_hint_for_oidc_auth() {
     let local = tokio::task::LocalSet::new();
@@ -1127,15 +1142,19 @@ fn session_token_auth_gate_truth_table() {
         assert!(!gate(false, ModelByok::NotByok, fp));
         assert!(!gate(false, ModelByok::Byok, fp));
         assert!(!gate(false, ModelByok::Unknown, fp));
-        // Session method: a definite classification ignores the endpoint NotByok always refreshes (it only ever routes to the session endpoint).
+        // Session method: a definite classification ignores the endpoint
+        // NotByok always refreshes (it only ever routes to the session endpoint); a genuine per-model Byok never does
         assert!(gate(true, ModelByok::NotByok, fp));
         assert!(!gate(true, ModelByok::Byok, fp));
     }
     // Unknown BYOK: refresh only against a first-party xAI host.
+    // That way a transiently-unclassifiable config can't demote a live session (the stale-token 401 regression).
+    // The session token still never leaks to a third-party BYOK endpoint.
     assert!(gate(true, ModelByok::Unknown, true));
     assert!(!gate(true, ModelByok::Unknown, false));
 }
 
+/// Pre-fix, the gate read `auth_type` and skipped recovery here, 401'ing every turn until restart.
 #[tokio::test(flavor = "current_thread")]
 async fn sampler_401_session_method_with_stale_api_key_auth_type_still_recovers() {
     let local = tokio::task::LocalSet::new();
@@ -1339,7 +1358,8 @@ async fn session_born_on_api_key_recovers_after_oidc_login_without_restart() {
                 .auth_method_id
                 .store(Some(std::sync::Arc::new(acp::AuthMethodId::new("oidc"))));
 
-            // The gate is recomputed each turn from the shared handle.
+            // The gate is recomputed each turn from the shared handle, so the flip alone activates the live resolver on the very next turn
+            // That happens with no re-spawn and before any token refresh runs
             assert!(
                 actor
                     .reconstruct_full_config()
@@ -1653,6 +1673,7 @@ async fn switch_to_first_party_model_drops_minted_provider_token() {
         .await;
 }
 
+/// Arm 4c: a 401 on a provider-backed model re-mints once and resubmits.
 #[tokio::test(flavor = "current_thread")]
 async fn sampler_401_on_provider_model_remints_and_resubmits() {
     let local = tokio::task::LocalSet::new();
@@ -1701,6 +1722,7 @@ async fn sampler_401_on_provider_model_remints_and_resubmits() {
         .await;
 }
 
+/// Arm 4c also fires for a bare 401 that did not classify as `Auth`-kind.
 #[tokio::test(flavor = "current_thread")]
 async fn sampler_non_auth_kind_401_on_provider_model_still_recovers() {
     let local = tokio::task::LocalSet::new();
@@ -1743,6 +1765,7 @@ async fn sampler_non_auth_kind_401_on_provider_model_still_recovers() {
         .await;
 }
 
+/// A 401 on a request that went out with no key mints instead of recovering.
 #[tokio::test(flavor = "current_thread")]
 async fn sampler_401_with_no_key_on_provider_model_mints_and_resubmits() {
     let local = tokio::task::LocalSet::new();
@@ -1784,8 +1807,9 @@ async fn sampler_401_with_no_key_on_provider_model_mints_and_resubmits() {
         .await;
 }
 
-/// The actor uses a session-based method, so the gate would be active for a non-BYOK model. The BYOK memo
-/// overrides it; that override is the invariant under test.
+/// A provider model's 401 goes through the provider, never the session refresher (4a/4b vs 4c exclusivity).
+/// The actor uses a session-based method, so the gate would be active for a non-BYOK model.
+/// The BYOK memo overrides it; that override is the invariant under test.
 #[tokio::test(flavor = "current_thread")]
 async fn sampler_401_on_provider_model_never_refreshes_session() {
     let local = tokio::task::LocalSet::new();
@@ -1885,6 +1909,7 @@ async fn pre_turn_on_provider_model_never_installs_session_token() {
         .await;
 }
 
+/// A token rejected moments after mint surfaces the 401 (fresh-mint guard).
 #[tokio::test(flavor = "current_thread")]
 async fn sampler_401_on_fresh_provider_token_surfaces_error() {
     let local = tokio::task::LocalSet::new();

@@ -1,4 +1,5 @@
 //! In-process `session/load` harness: a real `MvpAgent` wired to a client over ACP duplex pipes.
+//! A test can thus time a real load round-trip without a subprocess.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,6 +20,7 @@ const INIT_TIMEOUT: Duration = Duration::from_secs(60);
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// A completed `session/load` over the shared in-process harness.
+/// `client_conn` is returned so the caller keeps the connection alive for any post-load notifications (e.g. the re-advertise) it wants to observe.
 pub struct LoadedAgent {
     pub client_conn: acp::ClientSideConnection,
     pub load_started: Instant,

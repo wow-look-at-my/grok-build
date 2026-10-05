@@ -10,6 +10,8 @@ pub enum ProgressState {
 pub fn supports_progress_bar(ctx: &TerminalContext) -> bool {
     match ctx.brand {
         TerminalName::Ghostty | TerminalName::WezTerm => true,
+        // iTerm2 added OSC 9;4 progress support in 3.6
+        // Older versions misinterpret the sequence as an OSC 9 desktop notification, displaying the raw parameters (e.g. "4;1;-1") as alert text.
         TerminalName::Iterm2 => ctx.is_term_program_version_or_later(3, 6),
         _ => false,
     }
@@ -19,6 +21,8 @@ const OSC_INDETERMINATE: &str = "\x1b]9;4;1;-1\x07";
 pub(crate) const OSC_CLEAR: &str = "\x1b]9;4;0;0\x07";
 
 /// Build the progress bar escape sequence without writing it.
+///
+/// Returns `None` if the terminal brand does not support the OSC 9;4 progress indicator.
 pub fn build_progress_escape(state: ProgressState, ctx: &TerminalContext) -> Option<String> {
     if !supports_progress_bar(ctx) {
         return None;

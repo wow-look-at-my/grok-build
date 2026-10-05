@@ -1,4 +1,7 @@
 //! Agent spawning: creates the agent process and ACP channels.
+//!
+//! Simplified to only support GrokShell (in-process) mode.
+//! Subprocess and remote modes can be added later if needed.
 
 use std::io::{IsTerminal, Write};
 use std::rc::Rc;
@@ -21,15 +24,19 @@ use xai_grok_shell::{
     util::grok_home::grok_home,
 };
 
-/// Extra slack when joining the agent OS thread after cancel so the flush can finish and the thread can unwind.
+/// Extra slack when joining the agent OS thread after cancel so the flush
+/// can finish and the thread can unwind.
 const AGENT_JOIN_SLACK: Duration = Duration::from_secs(2);
 
 const UPLOAD_DRAIN_AT_CANCEL: Duration = Duration::from_secs(1);
 
-/// Grace for the worker runtime's teardown after the run loop exits.
+/// Grace for the worker runtime's teardown after the run loop exits: a plain
+/// drop waits out every in-flight `spawn_blocking` task (non-abortable), so a
+/// long detached archive build would otherwise hold `/quit` for its duration.
 const WORKER_RUNTIME_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
-/// Cancels `token` unless disarmed.
+/// Cancels `token` unless disarmed. Held across the bootstrap join so a
+/// connect-timeout drop (which does not abort `spawn_blocking`) stops the worker.
 struct BootstrapCancelGuard {
     token: Option<CancellationToken>,
 }
@@ -88,24 +95,31 @@ pub(super) fn shutdown_worker_runtime(rt: tokio::runtime::Runtime) {
         .record("elapsed_ms", started.elapsed().as_millis() as i64);
 }
 
-/// How long the join stays silent before telling an interactive user why exit is taking a moment.
+/// How long the join stays silent before telling an interactive user why exit
+/// is taking a moment. Short joins (the common case) print nothing.
 const JOIN_NOTICE_AFTER: Duration = Duration::from_millis(1500);
 
-/// Stderr notice after a slow join.
+/// Stderr notice after a slow join. Covers the whole SessionEnd pipeline
+/// (hooks, telemetry sync, upload drain, memory, optional dream), not
+/// hooks alone, so the copy is intentionally not "session hooks".
 const JOIN_NOTICE: &str = "Finishing session…";
 
 /// Result of spawning a child agent.
 pub struct SpawnedAgent {
-    /// Agent worker OS thread.
+    /// Agent worker OS thread. Hand to [`AgentShutdownGuard`] so the worker is
+    /// cancelled and joined, letting session actors finish SessionEnd teardown
+    /// (hooks, telemetry, uploads, memory), on every exit path.
     pub thread_handle: thread::JoinHandle<Result<()>>,
     pub channel: AcpClientChannel,
     pub cancel: CancellationToken,
-    /// The agent's `AuthManager`, shared so pager-side consumers (e.g. the voice channel) resolve the same refreshing bearer.
+    /// The agent's `AuthManager`, shared so pager-side consumers (e.g. the voice
+    /// channel) resolve the same refreshing bearer as chat traffic.
     pub auth_manager: std::sync::Arc<AuthManager>,
 }
 
-/// The teardown mechanism for an in-process agent: cancels the worker and
-/// joins it on drop, so session actors always get.
+/// The single teardown mechanism for an in-process agent: cancels the worker and joins it on drop, so session
+/// actors always get. Scope-end drop is the default; the TUI is the one caller that drops it explicitly, because
+/// the join has to happen before background processes are reaped.
 pub struct AgentShutdownGuard {
     cancel: CancellationToken,
     thread: Option<thread::JoinHandle<Result<()>>>,
@@ -205,8 +219,8 @@ fn join_agent_thread(handle: thread::JoinHandle<Result<()>>, timeout: Duration) 
     outcome
 }
 
-/// A slow session end is often *because* the pane just closed, and on macOS
-/// `is_terminal()` still says yes for a pty whose master is gone.
+/// A slow session end is often *because* the pane just closed, and on macOS `is_terminal()` still
+/// says yes for a pty whose master is gone, so the write may fail. `true` when the notice landed.
 fn write_join_notice(w: &mut impl Write) -> bool {
     crate::best_effort_stderr::write_line(w, JOIN_NOTICE)
 }
@@ -257,22 +271,28 @@ pub async fn spawn_grok_shell(
     memory_config: Option<xai_grok_shell::config::MemoryConfig>,
 ) -> Result<SpawnedAgent> {
     let auth_manager = boot_auth_manager(&grok_home(), &agent_config);
-    // Pause token refreshes across system sleep so an OIDC refresh can't straddle a suspend.
+    // Pause token refreshes across system sleep so an OIDC refresh can't
+    // straddle a suspend (which can revoke the refresh token and force
+    // re-login). No-op where the OS listener is unavailable.
     auth_manager.start_system_power_listener();
 
     let agent_cancel = cancel.child_token();
 
-    // With no leader, this process owns token refresh.
+    // With no leader, this process owns token refresh; a turn parked on the uncharged 401 path never drives refreshes
+    // itself and relies on this loop. On `agent_cancel` so the loop dies with the agent instead of surviving a failed
+    // spawn.
     auth_manager.start_proactive_refresh(agent_cancel.child_token());
     auth_manager.prewarm_auth_refresh(agent_cancel.child_token());
-    // Dropping a token does not cancel it: a `?` exit below creates no SpawnedAgent and no AgentShutdownGuard.
+    // Dropping a token does not cancel it: a `?` exit below creates no SpawnedAgent and no AgentShutdownGuard, so this
+    // guard cancels the prewarm and the refresh loop instead.
     let cancel_auth_tasks_unless_spawned = agent_cancel.clone().drop_guard();
 
     xai_grok_shell::agent::app::apply_otel_config(&auth_manager, &agent_config.grok_com_config);
 
     // Policy repair must finish before any authenticated settings load.
     xai_grok_shell::managed_config::ensure_managed_policy_present(&auth_manager).await;
-    // This worker is a current-thread runtime.
+    // This worker is a current-thread runtime. Resolve settings here so the
+    // sync bootstrap below observes a finished wait instead of falling open.
     let mut agent_config = agent_config;
     let boot = xai_grok_shell::agent::init::resolve_boot_startup_settings(
         &mut agent_config,
@@ -282,7 +302,9 @@ pub async fn spawn_grok_shell(
     )
     .await?;
 
-    // On a blocking thread so the connect `select!` can preempt `bootstrap`'s synchronous I/O.
+    // On a blocking thread so the connect `select!` can preempt `bootstrap`'s synchronous I/O. A child of the connect
+    // token so a user cancel stops the worker, but a timeout drop does not cancel the parent (the embedded fallback
+    // reuses it).
     let bootstrap_cancel = cancel.child_token();
     let worker_cancel = bootstrap_cancel.clone();
     let bootstrap_auth = auth_manager.clone();
@@ -301,7 +323,8 @@ pub async fn spawn_grok_shell(
 
     let (acp_client, acp_agent) = acp_channels();
 
-    // Clone before `auth_manager` is moved into the agent closure below.
+    // Clone before `auth_manager` is moved into the agent closure below, so the
+    // pager (voice channel) can share the same refreshing bearer.
     let auth_manager_for_pager = auth_manager.clone();
 
     let skills_paths = agent_config.skills.paths.clone();
@@ -346,7 +369,7 @@ async fn spawn_agent_thread_direct(
     skills_paths: Vec<String>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     spawn_runtime_thread("acp-agent-worker", move |rt| {
-        // Declared before the `LocalSet` so an unwind also drops it last: tokio drops tasks in spawn order.
+        // Declared before the `LocalSet` so an unwind also drops it last: tokio drops tasks in spawn order, so the gateway task would free the agent before its `LocalRef` tasks are dropped.
         let mut keepalive: Option<Rc<MvpAgent>> = None;
         let local = tokio::task::LocalSet::new();
         let result = local.block_on(&rt, async {
@@ -390,7 +413,8 @@ pub(super) async fn spawn_runtime_thread(
     // A caller dropped while it waits for the build drops `start_tx`, so the thread exits instead of running `body` detached.
     let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
     let thread_name = name.to_owned();
-    // `block_on` inlines the agent's async state machine on this stack.
+    // `block_on` inlines the agent's async state machine on this stack; a debug build of the
+    // agent worker overflows the 2 MB default at the first prompt (macOS spawns with 512 KB)
     const RUNTIME_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
     let handle = thread::Builder::new()
         .name(name.to_owned())
@@ -544,8 +568,9 @@ mod tests {
         );
     }
 
-    /// It starts in `spawn_grok_shell`'s body on `agent_cancel`, so a `?` exit before the spawn succeeds (drop-guard
-    /// fires) must cancel it instead of leaking a refresh loop until process teardown.
+    /// The embedded-shell path has no leader process to own token refresh: a parked 401 turn can only self-heal
+    /// in-process through this loop. It starts in `spawn_grok_shell`'s body on `agent_cancel`, so a `?` exit before the
+    /// spawn succeeds (drop-guard fires) must cancel it instead of leaking a refresh loop until process teardown.
     #[tokio::test]
     async fn spawn_drop_guard_cancels_proactive_refresh_loop() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -555,10 +580,12 @@ mod tests {
             "construction alone must not start the loop — only the guarded spawn body may"
         );
 
-        // Baseline includes the configured refresher's back-reference; the loop task's own Arc is the +1 on top of it.
+        // Baseline includes the configured refresher's back-reference; the
+        // loop task's own Arc is the +1 on top of it.
         let baseline = std::sync::Arc::strong_count(&am);
 
-        // Mirror spawn_grok_shell's wiring: loop on agent_cancel, guarded until ownership transfers to SpawnedAgent.
+        // Mirror spawn_grok_shell's wiring: loop on agent_cancel, guarded until
+        // ownership transfers to SpawnedAgent.
         let cancel = CancellationToken::new();
         let agent_cancel = cancel.child_token();
         am.start_proactive_refresh(agent_cancel.child_token());
@@ -573,7 +600,8 @@ mod tests {
             "the running loop task must hold its own AuthManager Arc"
         );
 
-        // A `?` exit drops the guard with no SpawnedAgent.
+        // A `?` exit drops the guard with no SpawnedAgent; the cancelled loop
+        // must release its own AuthManager Arc instead of refreshing forever.
         drop(guard);
         let deadline = Instant::now() + Duration::from_secs(5);
         while std::sync::Arc::strong_count(&am) > baseline && Instant::now() < deadline {

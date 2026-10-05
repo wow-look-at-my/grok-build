@@ -42,7 +42,7 @@ fn submit_turn(harness: &mut PtyHarness, content: &ContentController, prompt: &s
         .expect("turn idle");
 }
 
-/// Deleting the older of checkpoint files (what the 30-day sweep did) must not block a rewind based on the newer.
+/// Deleting the older of two checkpoint files (what the 30-day sweep did) must not block a rewind based on the newer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn rewind_after_compaction_with_missing_checkpoint() {
@@ -105,6 +105,7 @@ async fn rewind_after_compaction_with_missing_checkpoint() {
         .wait_for_text("Rewind to which turn?", Duration::from_secs(15))
         .expect("rewind picker");
     harness.inject_keys(b"\r").expect("pick the newest prompt");
+    // confirm_before_rewind defaults to on
     harness
         .wait_for_text("Rewind conversation to", Duration::from_secs(15))
         .expect("confirm dialog");

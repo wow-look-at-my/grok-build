@@ -1,4 +1,8 @@
-//! Measures the throughput of `StorageAdapter::copy_session_data`.
+//! Measures the throughput of `StorageAdapter::copy_session_data` over a synthesized session shaped like production data.
+//! The bound on peak RSS is checked in `tests/test_fork_copy_memory.rs`.
+//!
+//! Run: `cargo bench -p xai-grok-shell --bench fork_copy`
+//! Size override: `FORK_BENCH_MB=64 cargo bench ...` (default 16 MB).
 
 use std::hint::black_box;
 use std::time::Duration;

@@ -1,4 +1,6 @@
 //! Compile-time selection of the authority this build talks to.
+//!
+//! One implementation compiles, so the trait is a checklist: a backend that forgets a decision fails to build.
 use crate::flow::StderrCallback;
 use crate::refresh::{DiagnosticUploader, TokenRefresher};
 use crate::{AuthManager, AuthUrlInfo, GrokAuth, GrokComConfig, LoginTransportOverride};
@@ -30,10 +32,12 @@ pub trait AuthBackend {
     /// Whether this backend minted the credential, which the scope key alone cannot establish.
     fn owns(&self, auth: &GrokAuth) -> bool;
     /// Whether this backend's session token may be sent to `url`.
+    /// A model entry carries its own base URL, so without this a poisoned or hand-edited entry aims the bearer anywhere.
     fn may_receive_session(&self, url: &str) -> bool;
     /// The host to name when telling the user whose session they hold.
     fn login_host(&self, config: &GrokComConfig) -> String;
     /// Whether xAI issued this backend's credentials and may therefore receive them.
+    /// Gates every request that carries the bearer to an xAI host, and every xAI-only policy.
     fn is_xai_authority(&self) -> bool;
     /// Obtain a credential; the flag reports whether a login actually ran.
     async fn login(&self, req: LoginRequest<'_>) -> anyhow::Result<(GrokAuth, bool)>;

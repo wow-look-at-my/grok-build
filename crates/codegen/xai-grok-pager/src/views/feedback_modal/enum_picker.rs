@@ -1,4 +1,9 @@
-//! The Write step's editable enum labels: one full-width row per supplied enum above the composer.
+//! The Write step's editable enum labels: one full-width row per supplied enum above the
+//! composer, plus the shared-picker popup that edits the focused row's value.
+//!
+//! The picker is the same list widget family as the command palette and arg picker. Enter on a
+//! focused label row opens it; it owns key/paste/mouse input until Enter commits the highlighted
+//! variant or Esc backs out, both landing back on the still-focused row.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
@@ -121,7 +126,8 @@ impl FeedbackModalState {
         theme: &Theme,
         fields: &[MetadataField],
     ) {
-        // Marker column: cells left of the text when the gutter allows (normal h_pad = 2), hugging the text in compact renders (h_pad = 1).
+        // Marker column: two cells left of the text when the gutter allows (normal h_pad = 2),
+        // hugging the text in compact renders (h_pad = 1), never left of the modal's inner edge.
         let marker_x = content.x.saturating_sub(2).max(inner_x);
         for (index, field) in fields.iter().enumerate() {
             let y = content.y + index as u16;

@@ -151,7 +151,8 @@ async fn unimplemented_tool_returns_not_implemented_terminal() {
 
 #[tokio::test]
 async fn run_takes_args_by_value() {
-    // The trait `run` consumes args; this would not compile if the signature accidentally borrowed.
+    // The trait `run` consumes args; this would not compile if the
+    // signature accidentally borrowed.
     let tool = BlockingOk;
     let args = EchoArgs {
         text: "consumed".into(),

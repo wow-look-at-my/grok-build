@@ -5,7 +5,9 @@ use xai_grok_tools::implementations::grok_build;
 use xai_grok_tools::registry::types::ToolConfig;
 
 /// The tool-server binary defaults to a 5-minute foreground ceiling (`DEFAULT_MAX_TIMEOUT_MS`).
-pub const PRODUCTION_MAX_TIMEOUT_SECS: f64 = 36_000.0; // Several
+/// Production opts *up* to 10h by sending this explicitly, overridable via config.toml.
+/// This bounds only foreground commands; background tasks are always unbounded.
+pub const PRODUCTION_MAX_TIMEOUT_SECS: f64 = 36_000.0; // 10 hours
 
 /// User configurable settings for the built-in bash tool (`[toolset.bash]`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -13,14 +15,18 @@ pub const PRODUCTION_MAX_TIMEOUT_SECS: f64 = 36_000.0; // Several
 pub struct BashToolConfig {
     pub timeout_secs: Option<f64>,
     /// Foreground ceiling for model-provided command timeouts (seconds).
+    /// When `None`, `to_bash_params_json` emits the production default ([`PRODUCTION_MAX_TIMEOUT_SECS`], 10h).
     pub max_timeout_secs: Option<f64>,
     pub output_byte_limit: Option<usize>,
     pub cmd_prefix: Option<String>,
     /// Whether to auto-background a command when it times out (default: `true`).
     pub auto_background_on_timeout: Option<bool>,
-    /// How long a command may block the foreground before auto-backgrounding, in milliseconds.
+    /// How long a command may block the foreground before auto-backgrounding, in milliseconds, when `auto_background_on_timeout` is on.
+    /// `None` uses the server default of 15s.
+    /// `Some(0)` disables the short budget, so auto-backgrounding happens only at the model/default timeout.
     pub foreground_block_budget_ms: Option<u64>,
     /// Whether to allow a background `&` operator in foreground commands (default: `true`).
+    /// Resolution: config.toml (this) > remote settings > `true`.
     pub allow_background_operator: Option<bool>,
     pub login_shell_capture: Option<bool>,
 }
@@ -75,13 +81,15 @@ impl BashToolConfig {
     }
 }
 
-/// User configurable settings for the ask_user_question tool
-/// (`[toolset.ask_user_question]`).
+/// User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.
+/// That keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.toml` and round-trip through `AgentConfig`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AskUserQuestionToolConfig {
-    /// Whether the questionnaire timeout is enabled (default: `true`). `false` waits forever for answers.
+    /// Whether the questionnaire timeout is enabled (default: `true`).
+    /// `false` waits forever for answers.
     pub timeout_enabled: Option<bool>,
+    /// Wait budget in seconds when the timer is enabled (positive integer; default: 1800 / 30 minutes).
     pub timeout_secs: Option<u64>,
 }
 
@@ -90,10 +98,15 @@ pub struct AskUserQuestionToolConfig {
 #[serde(default)]
 pub struct WebFetchToolConfig {
     /// When set, all HTTP requests are routed through this URL.
+    /// Resolution: TOML > `GROK_WEB_FETCH_PROXY` env > remote settings > None.
     pub proxy_endpoint: Option<String>,
-    /// When set, it overrides the built-in default allowlist. An explicit empty list blocks all fetches.
+    /// When set, it overrides the built-in default allowlist.
+    /// An explicit empty list blocks all fetches.
+    /// Resolution: TOML > remote settings > built-in defaults.
     pub allowed_domains: Option<Vec<String>>,
     /// Allow fetches to explicit loopback hosts only (`localhost` / `127.0.0.0/8` / `::1`).
+    /// Private and metadata ranges stay blocked.
+    /// Resolution: TOML > `GROK_WEB_FETCH_ALLOW_LOCAL` env > false.
     pub allow_local: Option<bool>,
 }
 
@@ -213,7 +226,8 @@ impl ShellToolsetConfig {
             user_id: None,
             conversation_group_id: None,
             origin_client: None,
-            // Leaving the callback `None` here is fine.
+            // Leaving the callback `None` here is fine; this base is only the placeholder for the "no base provided" path
+            // Production `SamplerConfig`s in agent/config.rs and acp_session.rs set the real attribution callback
             attribution_callback: None,
             bearer_resolver: None,
             supports_backend_search: false,
@@ -255,7 +269,8 @@ impl ShellToolsetConfig {
 }
 
 // ---------------------------------------------------------------------------
-// File toolset selection.
+// File toolset selection
+// ---------------------------------------------------------------------------
 
 /// Configurable in `config.toml` under `[toolset.hashline]`:
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,6 +278,7 @@ impl ShellToolsetConfig {
 pub struct HashlineSchemeConfig {
     /// Active scheme: `"chunk"` (default) or `"content_only"`.
     pub scheme: String,
+    /// Anchor hash length in characters (1-4).
     pub hash_len: usize,
     /// Chunk size for the chunk scheme.
     pub chunk_size: usize,

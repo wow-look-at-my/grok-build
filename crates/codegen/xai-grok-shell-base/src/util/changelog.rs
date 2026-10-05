@@ -1,4 +1,11 @@
 //! Changelog fetching from CDN with local disk cache.
+//!
+//! Both markdown (`*.external.md`) and JSON (`*.external.json`) changelogs are published per-version to the CDN at `x.ai/cli/changelogs/`.
+//!
+//! `ChangelogManager::fetch()` retrieves both formats in parallel and returns a `Changelog` with optional markdown and structured entries.
+//! Consumers pick the format they need:
+//! - `/release-notes` uses `changelog.markdown` for rich scrollback display
+//! - The welcome screen uses `changelog.entries` for bullet rendering
 
 use std::path::PathBuf;
 
@@ -6,7 +13,9 @@ use std::path::PathBuf;
 const CHANGELOG_BASE: &str = "https://x.ai/cli/changelogs";
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// A single structured changelog entry from the published JSON changelog.
+/// A single structured changelog entry from the published JSON changelog. Shape must match the output of `render_external_json` in `changelog.sh`: `{category, description, breaking_change}`
+/// If you change fields here, update `changelog.sh:render_external_json` too. All fields use `#[serde(default)]` so a single malformed entry doesn't kill the entire array parse.
+/// Entries with an empty description are filtered out by `bullets_from_entries`.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ChangelogEntry {
     /// Category label (e.g. "features", "fixes", "breaking", "performance").
@@ -29,6 +38,8 @@ pub struct Changelog {
 }
 
 /// Manages changelog retrieval from CDN with local disk caching.
+/// Single entry point: `fetch()` returns both markdown and JSON in one `Changelog` struct.
+/// Each format is fetched independently with its own cache file, so a failure in one doesn't block the other.
 pub struct ChangelogManager {
     md_cache: PathBuf,
     json_cache: PathBuf,
@@ -42,7 +53,8 @@ impl Default for ChangelogManager {
 
 impl ChangelogManager {
     pub fn new() -> Self {
-        // Prefer the live `$GROK_HOME` over the `grok_home()` OnceLock A home injected.
+        // Prefer the live `$GROK_HOME` over the `grok_home()` OnceLock
+        // A home injected by the PTY e2e harness must beat a path some earlier init cached in the same process
         Self::from_env_home()
     }
 
@@ -59,7 +71,9 @@ impl ChangelogManager {
         }
     }
 
-    /// Fetch both markdown and JSON changelogs for the current version.
+    /// Fetch both markdown and JSON changelogs for the current version. Each format is fetched independently (CDN, 3 s timeout) and cached to disk, falling back to the cached copy on failure.
+    /// Either field may be `None` if offline with no cache. When `GROK_CHANGELOG_OFFLINE` is set (PTY / integration tests), the CDN is skipped and only the disk cache is read.
+    /// JSON is cached only after a successful parse; the markdown cache is write-through since it's consumed as raw text.
     pub fn fetch(&self) -> Changelog {
         // Always re-resolve from env so a caller holding an older manager (or a stale OnceLock) still reads the live harness home
         Self::from_env_home().fetch_with(changelog_offline(), CHANGELOG_BASE)
@@ -89,7 +103,8 @@ impl ChangelogManager {
             entries = json_handle.join().ok().flatten();
         });
 
-        // If the CDN is unreachable (CI sandboxes, airplane mode).
+        // If the CDN is unreachable (CI sandboxes, airplane mode), fall back to any on-disk seed under `$GROK_HOME`
+        // This applies even when offline mode was not requested, keeping PTY/integration tests deterministic
         if markdown.is_none() {
             markdown = read_cache(&self.md_cache);
         }
@@ -135,6 +150,7 @@ impl ChangelogManager {
         }
     }
 
+    /// Try remote (3 s timeout), cache on success, fall back to disk cache on failure.
     fn fetch_and_cache(&self, url: &str, cache_path: &std::path::Path) -> Option<String> {
         if let Ok(content) = fetch_blocking(url)
             && !content.trim().is_empty()
@@ -148,8 +164,8 @@ impl ChangelogManager {
     }
 }
 
-/// When set, `ChangelogManager::fetch` skips the CDN and only reads disk
-/// cache.
+/// When set, `ChangelogManager::fetch` skips the CDN and only reads disk cache.
+/// Used by PTY harness tests that seed `CHANGELOG.{md,json}` under a temp home.
 fn changelog_offline() -> bool {
     std::env::var_os("GROK_CHANGELOG_OFFLINE").is_some_and(|v| !v.is_empty() && v != "0")
 }
@@ -165,9 +181,9 @@ fn strip_markdown_inline(s: &str) -> String {
     s.replace("**", "").replace('`', "")
 }
 
-/// Convert changelog entries to plain-text bullet strings. Strips `**bold**`
-/// and backtick formatting from each description and returns at most `max`
-/// entries.
+/// Convert changelog entries to plain-text bullet strings.
+/// Strips `**bold**` and backtick formatting from each description and returns at most `max` entries.
+/// Entries with an empty description (from tolerant deserialization) are skipped.
 pub fn bullets_from_entries(entries: &[ChangelogEntry], max: usize) -> Vec<String> {
     entries
         .iter()
@@ -235,7 +251,8 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("CHANGELOG.md"), "# fallback md\n").unwrap();
 
-        // Non-offline path with an unreachable CDN base: the remote fetch fails deterministically.
+        // Non-offline path with an unreachable CDN base: the remote fetch fails deterministically, so the on-disk cache must win
+        // The failure does not depend on whether the sandbox blocks network
         let changelog = manager_for(&home).fetch_with(false, "http://127.0.0.1:1");
         assert_eq!(
             changelog.markdown.as_deref(),

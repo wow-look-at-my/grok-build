@@ -1,4 +1,7 @@
 //! Recap and `/btw` side questions on `SessionActor`.
+//!
+//! Shared cache-aligned request setup lives in [`super::side_call`].
+//! Per-turn dashboard summary lifecycle lives in [`super::turn_summary`].
 
 use super::side_call::{AuxCall, collect_aux_call, log_prompt_cache_usage};
 use super::*;
@@ -8,6 +11,8 @@ use agent_client_protocol as acp;
 use crate::session::SideQuestionError;
 
 /// Max characters of a recap persisted to `summary.json` for session-list display.
+/// The full recap can be long and rides every row of the session-list response.
+/// Listing cards only show a short preview, so bound what goes on the wire.
 const RECAP_PERSIST_MAX_CHARS: usize = 240;
 
 /// What the model is told about a `/btw` side question. Shared with other backends that answer one
@@ -131,7 +136,8 @@ impl SessionActor {
             req_id: format!("xai-btw-{}", uuid::Uuid::new_v4()),
         });
 
-        // conversation_collect is one-shot (no sampler-actor retry).
+        // conversation_collect is one-shot (no sampler-actor retry); /btw adds
+        // its own bounded transient-failure retry (policy + predicate above).
         let attempts = std::cell::Cell::new(1u32);
         let result = collect_aux_call(&sampling_client, &base_request, "btw", |e, backoff| {
             attempts.set(attempts.get() + 1);
@@ -236,7 +242,8 @@ impl SessionActor {
     pub(super) async fn handle_recap(&self, auto: bool) {
         use crate::session::helpers::session_recap;
 
-        // Snapshot before the first await A prompt accepted while we await the conversation then bumps the epoch after this capture.
+        // Snapshot before the first await
+        // A prompt accepted while we await the conversation then bumps the epoch after this capture and cancels the recap
         let recap_epoch = self.recap_epoch.get();
 
         let conversation = self.chat_state_handle.get_conversation().await;
@@ -272,9 +279,8 @@ impl SessionActor {
             return;
         }
 
-        // Serialize recap work: the watermark alone cannot exclude concurrent
-        // manual re-recaps once last == main_turns (in-flight or finished)
-        // Claim after the gate.
+        // Serialize recap work: the watermark alone cannot exclude concurrent manual re-recaps once last == main_turns (in-flight or finished)
+        // Claim after the gate with no await between check and set; LocalSet and Cell make that atomic for concurrent spawn_local Recap cmds
         if self.recap_in_flight.get() {
             tracing::debug!(auto, main_turns, "skipping recap: another recap in flight");
             if !auto {
@@ -283,7 +289,8 @@ impl SessionActor {
             return;
         }
         self.recap_in_flight.set(true);
-        // Clear in-flight on every exit Advance the watermark only on success or suppress (not on failure, empty, or cancel) so auto can retry later.
+        // Clear in-flight on every exit
+        // Advance the watermark only on success or suppress (not on failure, empty, or cancel) so auto can retry later for this turn
         let clear_in_flight = || self.recap_in_flight.set(false);
 
         let setup = match self.prepare_side_call("recap").await {
@@ -440,7 +447,9 @@ impl SessionActor {
             }
             return;
         }
-        // Persist a bounded preview of the committed recap so `/resume` and `/session-info` can show it whenever available Only a preview.
+        // Persist a bounded preview of the committed recap so `/resume` and `/session-info` can show it whenever available
+        // Only a preview: the full recap can be long and rides every row of the session-list response, while the card shows a short line
+        // Distinct from the per-turn `last_turn_summary`; last-writer-wins
         let recap_preview: String = summary.chars().take(RECAP_PERSIST_MAX_CHARS).collect();
         let _ = self.notifications.persistence_tx.send(
             crate::session::persistence::PersistenceMsg::LastRecap(Some(recap_preview)),
@@ -530,8 +539,8 @@ impl SessionActor {
         }
     }
 
-    /// Tell the live client that a manual `/recap` produced no recap, so it
-    /// can clear the loading spinner instead of animating forever.
+    /// Tell the live client that a manual `/recap` produced no recap, so it can clear the loading spinner instead of animating forever.
+    /// Only the manual path shows a spinner, so callers gate this on `!auto`.
     async fn emit_recap_unavailable(&self) {
         self.send_xai_notification(
             crate::extensions::notification::SessionUpdate::SessionRecapUnavailable,

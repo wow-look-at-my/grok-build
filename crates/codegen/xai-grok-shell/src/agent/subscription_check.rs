@@ -1,21 +1,33 @@
 //! Checks the live subscription tier so the paywall gate can lift.
+//!
+//! `single_check()` queries `GET /user?include=subscription` on the backend for the live tier, independent of the JWT.
+//! On a qualifying tier it does a best-effort JWT refresh and returns an `UnblockResult`.
+//! The agent then re-fetches settings and lifts the gate itself.
+//!
+//! The pager drives the polling via `x.ai/auth/check_subscription`.
+//! The callers are the 5s paywall chain, the free-tier watch, the refocus check, and the gate deferral that verifies before showing the paywall.
+//! See the pager's `app::subscription` module.
 use std::sync::Arc;
 use std::time::Duration;
 use xai_grok_login::AuthManager;
 use xai_grok_login::UserInfo;
 use xai_grok_login::manager::{BEST_EFFORT_REFRESH_TIMEOUT, BoundedRefresh, RefreshReason};
 use xai_grok_login::token_type::TokenType;
-/// Any active subscription qualifies: the proxy only returns a tier when an
-/// active subscription exists (`None` otherwise).
+/// Any active subscription qualifies: the proxy only returns a tier when an active subscription exists (`None` otherwise).
+/// The access gate in remote settings controls which tiers are actually allowed.
+/// The `"Free"` guard is defense-in-depth should the proxy ever start stamping free users explicitly.
 fn is_qualifying_tier(tier: &str) -> bool {
     !tier.is_empty() && tier != "Free"
 }
 /// Returned only when the check confirmed a qualifying tier.
 pub(crate) struct UnblockResult {
     pub(crate) new_tier: String,
-    /// The `userId` from the `/user` response that confirmed the tier.
+    /// The `userId` from the `/user` response that confirmed the tier, resolved with the live bearer so it names the account the check started with. The caller's identity guard accepts it alongside the started user_id.
+    /// The mint below spawns a `/user` enrichment that can rewrite a seeded or stale user_id to this canonical value mid-check. That rewrite is not an account switch.
     pub(crate) canonical_user_id: String,
-    /// True when the best-effort refresh below hit its bounded deadline with the exchange still running.
+    /// True when the best-effort refresh below hit its bounded deadline with the exchange still running (detached, not dropped).
+    /// The caller must not force a second mint then: it would only queue behind the detached exchange for up to another full budget.
+    /// That would hold the gate lift past the single budget while the subscription is already confirmed.
     pub(crate) refresh_deadline_hit: bool,
 }
 async fn fetch_user_info(

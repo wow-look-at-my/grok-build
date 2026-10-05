@@ -1,4 +1,6 @@
 //! Query commands for the HunkTrackerActor.
+//!
+//! These methods provide read-only access to hunk state.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -83,7 +85,9 @@ impl HunkTrackerActor {
             .unwrap_or_default()
     }
 
-    /// Get all tracked file paths, regardless of source or remaining hunks.
+    /// Get all tracked file paths, regardless of source or remaining hunks. Returns every key in `file_states` — agent files,
+    /// external edits, and fs_notify-detected changes alike. Entries persist after the user accepts/rejects every hunk,
+    /// making this suitable for file-discovery when replicating a worktree's changes back to the root repo.
     pub(super) fn get_all_tracked_paths(&self) -> Vec<PathBuf> {
         self.file_states.keys().cloned().collect()
     }

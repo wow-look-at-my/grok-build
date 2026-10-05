@@ -1,4 +1,11 @@
 //! ReadFile — new-architecture implementation.
+//!
+//! Reuses the core logic (`extract_file_content_lines`, `bytes_to_metadata`,
+//! constants) from the old `implementations::read_file` module.
+//! State:
+//! - Notifications emitted via `NotificationHandle` from Resources.
+//!
+//! Reminders are NOT implemented here (Phase 5).
 use crate::implementations::read_file::{
     handle_pdf, is_pdf_file, raw_text_to_file_content, run_document_extraction,
 };
@@ -27,12 +34,18 @@ use crate::types::schema::GrokIntegerSchema;
 pub struct ReadFileParams {
     #[serde(default)]
     pub cursor_rules_on_read: bool,
-    /// Byte budget for the formatted text window.
+    /// Byte budget for the formatted text window. When the window exceeds it, only the leading whole
+    /// lines that fit are returned (at least one) plus a continuation marker naming the next offset.
+    /// `None` keeps the token cap ([`READ_FILE_MAX_TOKENS`]) as the only size limit. Skill markdown
+    /// and project-instruction files returned whole (under the token cap) are exempt; windowed reads
+    /// are budgeted.
     #[serde(default)]
     pub max_output_bytes: Option<usize>,
 }
 crate::register_resource!("grok_build", "ReadFile", ReadFileParams);
-/// Internal version discriminant for read_file.
+/// Internal version discriminant for read_file. `read_file` has cross-cutting version divergence:
+/// gitignore enforcement and error mapping. If extracting into version modules, this tool is the
+/// highest-risk candidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReadFileVersion {
     Current,
@@ -62,6 +75,9 @@ pub fn exceeds_read_cap(text: &str) -> bool {
 pub use crate::implementations::read_file::{
     FileMetadata, PDF_MAX_PAGES_PER_READ, bytes_to_metadata, parse_page_range,
 };
+/// Max size of one streamed delta: strictly below `stream_chunk`'s 16 KiB
+/// cap (so a delta is never capped/gapped) and char-aligned (so concatenated
+/// deltas reproduce the terminal `content` byte-for-byte).
 const STREAM_DELTA_TARGET_BYTES: usize = 4 * 1024;
 /// ReadFile's capabilities incl. its streaming spec (single source of
 /// truth). Streams the formatted projection (not raw bytes) as inert
@@ -108,6 +124,7 @@ Usage:
 - Line numbers (1-based) appear as anchors in the format LINE_NUMBER→LINE_CONTENT on the first returned line and on every 10th line of the file; the lines in between show content only. Count from the nearest anchor when referring to a specific line
 - This tool can read PDF files (.pdf), PowerPoint files (.pptx), Jupyter notebooks (.ipynb files), and image files (e.g. PNG, JPG, etc).
 - When reading an image file the contents are presented visually as this tool uses multimodal LLMs."#;
+/// Schema-only advertised default (runtime still treats omit as line 1 via unwrap_or).
 fn schema_default_offset() -> Option<i64> {
     Some(1)
 }
@@ -156,8 +173,9 @@ async fn max_output_bytes(resources: &SharedResources) -> Option<usize> {
     res.get::<Params<ReadFileParams>>()
         .and_then(|p| p.0.max_output_bytes)
 }
-/// Number of leading whole lines of `content` (formatted output, `\n`-joined)
-/// whose cumulative length fits in `budget` bytes.
+/// Number of leading whole lines of `content` (formatted output, `\n`-joined) whose cumulative length
+/// fits in `budget` bytes. Always at least 1 so a window whose first line alone is over budget still
+/// makes progress instead of returning an empty body.
 fn lines_within_byte_budget(content: &str, budget: usize) -> usize {
     let mut used = 0usize;
     let mut kept = 0usize;
@@ -217,7 +235,9 @@ fn resolve_read_start_line(file_content: &str, offset: Option<i64>) -> usize {
     let computed = (total_fields as i64) + offset_raw + 1;
     computed.max(1) as usize
 }
-/// Only non-negative raw offsets are stored on `FileContent`.
+/// Only non-negative raw offsets are stored on `FileContent`. Negatives become
+/// `None` ("from beginning"); we mirror only the signed input wire type, not
+/// the resolved start line.
 fn stored_read_offset(offset: Option<i64>) -> Option<usize> {
     offset.filter(|&o| o >= 0).map(|o| o as usize)
 }
@@ -264,7 +284,9 @@ pub struct ExtractedContent {
     pub content_concise: String,
     /// Raw unformatted content
     pub raw_output: String,
-    /// Base64 images captured per-line before truncation.
+    /// Base64 images captured per-line before truncation. Plumbed through
+    /// `FileContent.extracted_images` and turned into multimodal
+    /// `ContentPart::Image` follow-ups by the session layer.
     pub extracted_images: Vec<crate::util::base64_images::ExtractedImage>,
 }
 pub fn extract_file_content_lines(
@@ -711,7 +733,8 @@ pub(crate) async fn run_read_file(
         extracted_images,
     }))
 }
-/// New-architecture `ReadFile` tool. Params: `()` — no per-tool configuration.
+/// New-architecture `ReadFile` tool. Params: `()` — no per-tool configuration. Notifications: Emits
+/// `FileRead` via `NotificationHandle`.
 #[derive(Default, Debug)]
 pub struct ReadFileTool;
 impl crate::types::tool_metadata::ToolMetadata for ReadFileTool {
@@ -773,14 +796,18 @@ impl xai_tool_runtime::Tool for ReadFileTool {
                         && let ReadFileOutput::FileContent(fc) = &output
                         && !fc.content.is_empty()
                     {
-                        // Replay char-aligned slices of the final `content`.
+                        // Replay char-aligned slices of the final `content`
+                        // (each below the 16 KiB cap; see
+                        // STREAM_DELTA_TARGET_BYTES).
                         let content = fc.content.as_bytes();
                         let mut last_total: u64 = 0;
                         let mut window_start = 0usize;
                         while window_start < content.len() {
                             let mut window_end =
                                 (window_start + STREAM_DELTA_TARGET_BYTES).min(content.len());
-                            // Align DOWN to a char boundary.
+                            // Align DOWN to a char boundary (a char is ≤ 4
+                            // bytes vs the 4 KiB target: never a zero-width
+                            // window).
                             while window_end > window_start
                                 && !fc.content.is_char_boundary(window_end)
                             {
@@ -900,6 +927,7 @@ mod tests {
         }));
         resources
     }
+    /// 200 lines of 10 visible chars each (~2.2 KB formatted): over the budgets used below, under the token cap.
     fn budget_fixture() -> String {
         (1..=200)
             .map(|i| format!("line{i:06}"))
@@ -2095,6 +2123,8 @@ pub fn verify(req: &HttpRequest) -> Result<Claims, Error> {
         );
         assert_eq!(extracted.raw_output, source_code);
     }
+    /// Same as above but with offset+limit to simulate a partial re-read
+    /// (e.g. the model had only read lines 4-8 before compaction).
     #[tokio::test]
     async fn reread_file_from_disk_partial_range() {
         let tmp = TempDir::new().unwrap();
@@ -2846,6 +2876,8 @@ pub fn verify(req: &HttpRequest) -> Result<Claims, Error> {
             }
         }
     }
+    /// Regression: a single formatted line above the 16 KiB cap still streams
+    /// losslessly via fixed-size char-aligned windows.
     #[tokio::test]
     async fn read_file_streams_oversized_line_without_cap_break() {
         let tmp = TempDir::new().unwrap();
@@ -3081,6 +3113,9 @@ pub fn verify(req: &HttpRequest) -> Result<Claims, Error> {
         assert_eq!(extracted.content, "2→");
         assert_eq!(extracted.content_concise, "2→");
     }
+    /// Harness parity: offset=-1 on a file with no trailing `\n` resolves to the
+    /// phantom field only (start past any `split_inclusive` line), so Grok
+    /// returns empty content/raw — same as the reference phantom-only window.
     #[test]
     fn extract_file_content_lines_negative_one_no_trailing_newline_stable() {
         let file_content = "a\nb\nc";

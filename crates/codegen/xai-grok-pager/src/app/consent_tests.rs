@@ -164,6 +164,7 @@ fn a_link_with_nothing_to_paint_is_dropped() {
     let notice = ConsentNotice::try_from_remote(&gate).expect("valid");
 
     assert_eq!(notice.links, vec!["https://x.ai/b"]);
+    // The surviving link takes index 0, so the dropped one leaves no gap for a key to fall into.
     assert_eq!(
         notice.segments,
         vec![
@@ -323,7 +324,7 @@ fn unpairable_markup_refuses() {
         "Read our [Terms](https://x.ai/legal/te",
         // A url holds no space, so this `)` closes the second link, not the first.
         "Read [Terms](https://x.ai/a [Policy](https://x.ai/b) now.",
-        // The same, with both links flush against each other and no space to give it away.
+        // The same, with the two links flush against each other and no space to give it away.
         "Read [Terms](https://x.ai/a[Policy](https://x.ai/b) now.",
         // A `]` too many desyncs the pairing and leaves the url with no `[` in front of it.
         "[a] b](https://x.ai/legal/tos) applies.",

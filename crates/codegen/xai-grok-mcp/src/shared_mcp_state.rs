@@ -1,4 +1,5 @@
-//! Writes to [`McpState`] on a premise formed before an `await`.
+//! Writes to [`McpState`] on a premise formed before an `await`: the premise is re-checked and the write made under
+//! one lock.
 
 use std::sync::Arc;
 

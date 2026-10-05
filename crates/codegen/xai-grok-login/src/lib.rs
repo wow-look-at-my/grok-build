@@ -6,6 +6,9 @@
     dead_code
 )]
 //! Authentication subsystem for the grok shell crate family.
+//!
+//! Extracted from `xai-grok-shell::auth`; the shell re-exports this crate as
+//! `xai_grok_shell::auth` so existing `crate::*` paths keep resolving.
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_sign_loss)]

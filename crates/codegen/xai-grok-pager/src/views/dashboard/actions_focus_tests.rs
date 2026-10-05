@@ -1,4 +1,5 @@
-//! Keyboard and click interaction on the actions row: the `←`/`→` walk, Enter-as-click, Esc.
+//! Keyboard and click interaction on the actions row: the `←`/`→` walk, Enter-as-click, Esc, and the focus fallback.
+//! Paint and layout coverage for the row stays in `chrome_tests.rs`; these tests only render it to learn which items exist.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

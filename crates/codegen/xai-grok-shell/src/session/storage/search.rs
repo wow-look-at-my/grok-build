@@ -1,4 +1,5 @@
 //! Binds the `xai-grok-session-search` index to this crate's JSONL session store.
+//! A process that keeps no index holds no manager, so these entry points take the handle rather than reach for a global.
 
 use std::io;
 use std::path::Path;
@@ -57,9 +58,12 @@ impl SearchIndex {
 }
 
 /// The process's one index decision, shared rather than copied.
+/// Sharing means a session created while the remote settings are in flight reads the answer that lands later.
+/// `OnceLock` not `OnceCell`: the persistence actor's clone is `Send`.
 #[derive(Clone, Default)]
 pub struct SharedSearchIndex(Arc<OnceLock<Option<Arc<SearchIndexManager>>>>);
 
+/// Three states, because collapsing the first two is a bug a reader cannot see: an empty answer from `Pending` is not final, and one from `Off` is.
 #[derive(Clone, Copy)]
 pub enum IndexDecision<'a> {
     Pending,
@@ -79,6 +83,8 @@ impl std::fmt::Debug for IndexDecision<'_> {
 
 impl<'a> IndexDecision<'a> {
     /// The manager to write through.
+    /// Treats `Pending` and `Off` alike on purpose: it skips, and the bootstrap after the decision backfills what was missed.
+    /// A read must not, which is why this is not `decision`.
     pub fn writer(self) -> Option<&'a SearchIndexManager> {
         match self {
             Self::On(index) => Some(index),
@@ -162,7 +168,8 @@ impl SessionSource for JsonlSessionSource {
         };
         match self.0.load_summary(&info).await {
             Ok(summary) => Ok(Some(self.to_indexable(&summary))),
-            // A missing session is a delete, not a failure.
+            // A missing session is a delete, not a failure: the index drops its row
+            // Every other error leaves the row alone
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
         }

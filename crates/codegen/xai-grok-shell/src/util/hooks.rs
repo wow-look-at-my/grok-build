@@ -1,11 +1,12 @@
 //! Host bindings for [`xai_grok_hooks::discovery`]. Discovery itself lives in the hooks crate.
+//! Bound here are the two inputs that crate cannot read: the Claude import cutoff and the managed-settings hooks pin.
 
 use std::path::Path;
 
 use xai_grok_hooks::error::HookError;
 
-/// The `[claude_compat] imported = true` cutoff, read once per process in
-/// [`crate::claude_import`].
+/// The `[claude_compat] imported = true` cutoff, read once per process in [`crate::claude_import`].
+/// Every entry point below passes it down so the hooks crate stays free of shell state.
 fn claude_import_marked() -> bool {
     crate::claude_import::is_claude_import_marked_with_log("discover_hook_source_paths")
 }

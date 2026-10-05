@@ -1,4 +1,8 @@
 //! Verifies that a profile's read-deny enforcement is durable in this mount namespace.
+//! The `__GROK_INSIDE_BWRAP` marker and sentinel are reproducible by a caller, so neither proves identity.
+//! Strict deny targets must instead be exact read-only mountpoints.
+//! Namespace seccomp prevents those mounts from being changed after verification.
+//! The sentinel only makes an empty dynamic deny set fail closed outside the expected mount-namespace shape.
 
 use std::path::Path;
 #[cfg(target_os = "linux")]
@@ -47,9 +51,9 @@ struct PathStatus {
     mode: u16,
 }
 
-/// Create the sentinel directory on the host before the re-exec, replacing a
-/// hostile non-directory or symlink entry. `create_dir_all` would silently
-/// accept a symlink-to-directory, and bwrap would then mount onto its target.
+/// Create the sentinel directory on the host before the re-exec, replacing a hostile non-directory or symlink entry.
+/// `create_dir_all` would silently accept a symlink-to-directory, and bwrap would then mount onto its target.
+/// The re-exec must not proceed without it: the inner verification requires the read-only sentinel mount unconditionally.
 #[cfg(target_os = "linux")]
 pub(crate) fn ensure_bwrap_sentinel_dir() -> Result<PathBuf, String> {
     let parent = crate::paths::grok_home();
@@ -95,7 +99,9 @@ fn ensure_sentinel_dir_under(parent: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// Verify the sentinel's expected read-only self-bind shape.
+/// Verify the sentinel's expected read-only self-bind shape. This is an empty-set fail-closed gate, not an identity
+/// proof: an unprivileged caller can reproduce it with a mount namespace. `statvfs` on the path would also follow a
+/// symlink, so this opens the writable parent and the child relative to it with `O_NOFOLLOW`.
 #[cfg(all(feature = "enforce", target_os = "linux"))]
 pub(crate) fn verify_bwrap_sentinel() -> Result<(), String> {
     verify_sentinel_under(&crate::paths::grok_home())
@@ -173,7 +179,8 @@ fn verify_sentinel_under(parent: &Path) -> Result<(), String> {
 
 #[cfg(all(feature = "enforce", target_os = "linux"))]
 fn fstatvfs_is_read_only(fd: std::os::fd::RawFd, path: &Path) -> Result<bool, String> {
-    // SAFETY: fd is open for the duration of the call; buf is a valid zero-initialized out-pointer.
+    // SAFETY: fd is open for the duration of the call; buf is a valid
+    // zero-initialized out-pointer.
     let mut buf: libc::statvfs = unsafe { std::mem::zeroed() };
     if unsafe { libc::fstatvfs(fd, &mut buf) } != 0 {
         return Err(format!(
@@ -284,6 +291,8 @@ fn path_status(path: &Path) -> Result<PathStatus, std::io::Error> {
         )
     })?;
     // Linux statx is a fixed 256-byte ABI structure.
+    // This private definition keeps the query available on older musl libc headers.
+    // SAFETY: all-zero bytes are a valid initial state for the kernel output struct.
     let mut statx: LinuxStatx = unsafe { std::mem::zeroed() };
     // SAFETY: c_path is a valid NUL-terminated path and statx is a valid
     // fixed-size output buffer for the kernel statx ABI.
@@ -354,8 +363,9 @@ fn verify_exact_read_only_mount_entry(
     Ok(())
 }
 
-/// Installs namespace lockdown before inspecting mounts and requires the
-/// unconditional sentinel so an empty deny set fails closed.
+/// Installs namespace lockdown before inspecting mounts and requires the unconditional sentinel so an empty deny set
+/// fails closed. Returns a message naming the missing sentinel, the first unmasked path, or the resolve/expansion failure
+/// when the deny set cannot be recomputed. All of them must refuse startup.
 #[cfg(all(feature = "enforce", target_os = "linux"))]
 pub fn verify_read_deny_enforced(
     profile: &crate::ProfileName,
@@ -474,8 +484,8 @@ fn verify_path_masked(path: &Path) -> Result<(), String> {
     verify_exact_read_only_mount_entry(path, status.mount_id, &read_mountinfo()?)
 }
 
-/// Without `enforce` on Linux nothing is kernel-read-denied (and the shell
-/// never requires read-deny).
+/// Without `enforce` on Linux nothing is kernel-read-denied (and the shell never requires read-deny).
+/// Non-Linux enforces deny paths in-process via Seatbelt, not through a spoofable re-exec marker.
 #[cfg(not(all(feature = "enforce", target_os = "linux")))]
 pub fn verify_read_deny_enforced(
     _profile: &crate::ProfileName,

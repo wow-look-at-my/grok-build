@@ -11,8 +11,9 @@ use tempfile::TempDir;
 const TEST_API_KEY: &str = "test-key-for-ci";
 const REDACTED: &str = "<redacted>";
 
-/// One test's isolated filesystem tree and canonical child environment.
-/// Construction never mutates the process environment.
+/// One test's isolated filesystem tree and canonical child environment. Construction never mutates the process
+/// environment. Child commands start from `env_clear()` and receive only platform essentials, sandbox paths, grok network
+/// kill switches, and explicit overrides.
 pub struct TestSandbox {
     root: TempDir,
     home: PathBuf,
@@ -49,6 +50,7 @@ impl TestSandbox {
     }
 
     /// Isolated working directory.
+    /// When built with [`TestSandboxBuilder::git`], this contains a repository with one committed `README.md`.
     pub fn workspace(&self) -> &Path {
         &self.workspace
     }
@@ -102,6 +104,7 @@ impl TestSandbox {
     }
 
     /// Apply the effective environment to a Tokio child command.
+    /// Explicit command-level `.env(...)` calls made afterward have final precedence.
     pub fn apply_to_tokio_command(&self, cmd: &mut tokio::process::Command) {
         cmd.env_clear().envs(self.env());
     }
@@ -115,6 +118,7 @@ impl TestSandbox {
     }
 
     /// Apply the effective environment to a standard child command.
+    /// Explicit command-level `.env(...)` calls made afterward have final precedence.
     pub fn apply_to_std_command(&self, cmd: &mut Command) {
         cmd.env_clear().envs(self.env());
     }
@@ -136,9 +140,9 @@ impl TestSandbox {
         cmd
     }
 
-    /// Values that must be removed from captured child-output diagnostics.
-    /// This intentionally returns values only, never keys. Process
-    /// diagnostics never print the child's environment.
+    /// Values that must be removed from captured child-output diagnostics. This intentionally returns values only, never
+    /// keys. Process diagnostics never print the child's environment. A failing child can still echo endpoint URLs,
+    /// credentials, and sandbox-owned private paths.
     pub(crate) fn diagnostic_redactions(&self) -> Vec<String> {
         self.env
             .iter()
@@ -181,6 +185,7 @@ impl Default for TestSandbox {
 }
 
 /// Minimal construction-time choices for [`TestSandbox`].
+/// Runtime feature variables belong on [`TestSandbox::set_env`] instead of a growing config.
 #[derive(Default)]
 pub struct TestSandboxBuilder {
     mock_url: Option<String>,
@@ -356,7 +361,9 @@ fn baseline_env_from_parent(
         ("DISABLE_TELEMETRY", "1"),
         ("DISABLE_FEEDBACK_COMMAND", "1"),
         ("GROK_PROMPT_SUGGESTIONS", "false"),
-        // Every sandbox has an empty `GROK_HOME`, so without this the agent id is recomputed per test.
+        // Every sandbox has an empty `GROK_HOME`, so without this the agent id is
+        // recomputed per test; on Windows that is a ~30s `powershell Get-WmiObject`
+        // run inside `initialize`, which blew the harness deadlines (GB-5593).
         ("GROK_AGENT_ID", "grok-e2e-sandbox"),
         // Pin so a developer-exported override cannot flake empty-home launch tests.
         ("GROK_DEFAULT_PERMISSION_MODE", "ask"),
@@ -377,8 +384,8 @@ fn baseline_env_from_parent(
         "GIT_CONFIG_GLOBAL".into(),
         grok_home.join("gitconfig").into_os_string(),
     );
-    // Leader-lock acquire slots stay inside the sandbox instead of the
-    // developer's `/tmp/grok-file-lock-<uid>`.
+    // Leader-lock acquire slots stay inside the sandbox instead of the developer's `/tmp/grok-file-lock-<uid>`.
+    // Literal on purpose: `xai_grok_file_lock::SLOT_DIR_ENV` lives in a crate this one does not depend on.
     env.insert(
         "GROK_FILE_LOCK_SLOT_DIR".into(),
         temp.join("lock-slots").into_os_string(),
@@ -434,7 +441,9 @@ fn apply_hermetic_rg_env(
     env.insert("RG_BIN_PATH".into(), rg_bin.into_os_string());
 }
 
-/// Read `key` from the parent environment.
+/// Read `key` from the parent environment. Windows variable names are case-insensitive and MSYS
+/// bash (GitHub Actions `shell: bash`) upper-cases inherited ones, so `SystemRoot` arrives as
+/// `SYSTEMROOT`; an exact lookup drops it and the child's Winsock fails (WSAEPROVIDERFAILEDINIT).
 fn parent_var<'a>(parent_env: &'a BTreeMap<OsString, OsString>, key: &str) -> Option<&'a OsString> {
     if let Some(value) = parent_env.get(OsStr::new(key)) {
         return Some(value);

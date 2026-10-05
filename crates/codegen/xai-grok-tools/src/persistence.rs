@@ -1,4 +1,7 @@
 //! Background persistence for tool state.
+//!
+//! [`ResourcesPersistence`] persists `Resources` state (the new architecture).
+//! Old `ToolStatePersistence` and `PersistenceLayer` have been deleted.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -8,7 +11,9 @@ use tokio::io::AsyncWriteExt;
 
 use crate::types::resources::Resources;
 
-/// Background persistence for `Resources` state/params.
+/// Background persistence for `Resources` state/params. Same pattern as `ToolStatePersistence` — debounced background writes with atomic
+/// rename. Takes a `serde_json::Value` from `Resources::serialize()` and writes it to disk. On load, parses the JSON and feeds it to
+/// `Resources::load_from()`. This replaces the old `ToolStatePersistence` pipeline for the new architecture.
 pub struct ResourcesPersistence {
     /// `None` means this handle reads and writes nothing.
     state_path: Option<PathBuf>,
@@ -35,6 +40,7 @@ enum ResourcesPersistenceCommand {
 
 impl ResourcesPersistence {
     /// A handle that reads and writes nothing.
+    /// For tests, and for sessions with no state directory, which keep their resources in memory for the life of the session.
     pub fn noop() -> Self {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
@@ -83,7 +89,10 @@ impl ResourcesPersistence {
         // runs through `guarded` and logs the panic under the writer's name.
         #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
-            // Guarded so the writer's own death is attributed.
+            // Guarded so the writer's own death is attributed. Unobserved, it
+            // would look like a session that persisted its tool state: `rx`
+            // goes with the task, so later sends fail and `flush` below is the
+            // only place anyone could still notice.
             let wrote = crate::util::detached::guarded(
                 "resources persistence writer",
                 Self::writer_loop(rx, writer_path),
@@ -419,7 +428,8 @@ impl ResourcesPersistence {
 mod tests {
     use super::*;
 
-    // ResourcesPersistence tests -----------------------------------------------------------------------
+    // ResourcesPersistence tests
+    // -----------------------------------------------------------------------
 
     use crate::types::resources::{Resources, State, WebCitationCounter};
 
@@ -476,7 +486,7 @@ mod tests {
     }
 
     /// Atomic-rename guarantee: a concurrent reader hammering the path while
-    /// the writer streams snapshots must never observe torn JSON.
+    /// the writer streams 200 snapshots must never observe torn JSON.
     #[tokio::test]
     async fn writer_atomic_rename_never_exposes_partial_json() {
         use std::sync::atomic::{AtomicBool, Ordering};

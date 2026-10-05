@@ -1,4 +1,16 @@
 //! Rows the leader adds to the roster without hosting them in `MvpAgent`.
+//!
+//! The worker door publishes its claims into an [`ExternalRoster`];
+//! [`RosterListMerge`] sits on the `run_leader` agent boundary, remembers the
+//! id of every `x.ai/sessions/list` request that passes inbound (IPC and relay
+//! alike), and appends the roster's rows to the matching response before the
+//! fan-out. [`run_changed_notifier`] turns each roster generation into an
+//! `x.ai/sessions/changed` broadcast on the same fan-out. Pending ids are
+//! compared as JSON values because IPC ids are namespaced strings while relay
+//! ids are whatever grok.com sent, and they expire after
+//! [`PENDING_LIST_TTL`] so an unanswered request cannot leak. Compiled in
+//! every build: without the worker door the roster is simply empty and
+//! every line passes through untouched.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -123,7 +135,8 @@ impl Drop for ExternalRosterPublisher {
     }
 }
 
-/// Appends [`ExternalRoster`] rows to `x.ai/sessions/list` responses.
+/// Appends [`ExternalRoster`] rows to `x.ai/sessions/list` responses. Pending ids are a
+/// linear scan: a dashboard polls the list a few times a second at most.
 pub(crate) struct RosterListMerge {
     roster: ExternalRoster,
     pending: Mutex<Vec<(Value, Instant)>>,
@@ -139,8 +152,9 @@ impl RosterListMerge {
 
     /// Records the `id` of an inbound `x.ai/sessions/list` request; every other line is ignored.
     pub(crate) fn observe_inbound(&self, line: &str) {
-        // Every client request passes here (prompts with attachments
-        // included).
+        // Every client request passes here (prompts with attachments included); only a list
+        // request is worth parsing, and only while there are rows to merge into its answer
+        // (the common no-door configuration then never parses a roster line).
         if self.roster.is_empty() || !line.contains("sessions/list") {
             return;
         }
@@ -164,7 +178,8 @@ impl RosterListMerge {
     /// unchanged (and unparsed where the cheap checks allow).
     pub(crate) fn filter_outbound<'a>(&self, line: &'a str) -> Cow<'a, str> {
         if self.roster.is_empty() {
-            // Ids recorded while the door was live would otherwise wait for a reused JSON-RPC id after a restart.
+            // Ids recorded while the door was live would otherwise wait for a reused JSON-RPC id
+            // after a restart; with no rows there is nothing they could merge into.
             self.pending.lock().clear();
             return Cow::Borrowed(line);
         }

@@ -1,4 +1,18 @@
 //! [`WorkspaceOps`]: dual-mode workspace operations handle.
+//!
+//! Two modes:
+//!
+//! - **`Local`**: extensions dispatch through [`WorkspaceHandle`]; tool calls dispatch through the workspace session's [`FinalizedToolset`].
+//!   The toolset is installed via [`WorkspaceOps::bind_local_session`] after the agent is built.
+//!
+//! - **`Proxy`**: everything routes through hub WebSocket to a remote workspace server.
+//!
+//! ## Type safety
+//!
+//! Each RPC method has a corresponding request struct that implements [`WorkspaceRpc`].
+//! The struct carries a `METHOD` constant and derives `Serialize + Deserialize`.
+//! Both the proxy client (`WorkspaceOps`) and the server (`WorkspaceRpcHandler::dispatch`) use the same struct.
+//! Add or rename a field and the compiler catches both sides.
 use crate::error::{WorkspaceError, WorkspaceResult};
 use crate::file_system::ContentSearchRequest;
 use crate::handle::WorkspaceHandle;
@@ -73,8 +87,8 @@ macro_rules! workspace_rpc {
         }
     };
 }
-/// Typed workspace operation: the wire contract (`METHOD`, `Response`) comes
-/// from the [`WorkspaceRpc`] supertrait; this adds local-mode `execute()`.
+/// Typed workspace operation: the wire contract (`METHOD`, `Response`) comes from the [`WorkspaceRpc`] supertrait; this adds local-mode `execute()`.
+/// In proxy mode the op is serialized through the server RPC.
 #[async_trait]
 pub trait WorkspaceOp: WorkspaceRpc + DeserializeOwned + Send + Sync {
     /// Execute the operation locally against the workspace handle.
@@ -241,6 +255,8 @@ fn session_tracker(
     Ok(session.hunk_tracker().clone())
 }
 /// Ancestor hop budget when locating `.grok/repos.json`.
+/// A single-repo sandbox rewrite is one hop (`/workspace/app` to `/workspace`); desktop workspaces can sit deeper, so this is a backstop only.
+/// Primary bounds are the sandbox root (`/workspace`) and the user-global grok home.
 const REPOS_MANIFEST_MAX_ANCESTOR_HOPS: usize = 16;
 /// Directories to probe for [`REPOS_MANIFEST_RELATIVE_PATH`], starting at `root_cwd` (the agent cwd after a single-repo rewrite) and walking up.
 /// Does not escape the sandbox workspace or load `~/.grok/repos.json` / `$GROK_HOME/repos.json` (user-global, not a provisioned workspace).
@@ -314,8 +330,8 @@ impl WorkspaceOp for ReposListReq {
         })
     }
 }
-/// Resolve the directory a git op runs in: the explicit `git_root` when the
-/// caller provides one, else the workspace root.
+/// Resolve the directory a git op runs in: the explicit `git_root` when the caller provides one, else the workspace root.
+/// The desktop sends `git_root` per window, so each session's git ops target that window's repo rather than the workspace launch directory's.
 pub(crate) async fn git_op_cwd(
     ws: &WorkspaceHandle,
     git_root: &Option<std::path::PathBuf>,
@@ -1504,8 +1520,9 @@ pub enum WorkspaceOps {
     Proxy { client: WorkspaceClient },
 }
 impl WorkspaceOps {
-    /// Extensions dispatch through the handle immediately. Tool calls require
-    /// a workspace session.
+    /// Extensions dispatch through the handle immediately.
+    /// Tool calls require a workspace session.
+    /// Call [`bind_local_session`](Self::bind_local_session) after building the agent to install the toolset.
     pub fn local(handle: WorkspaceHandle) -> Self {
         Self::Local { handle }
     }
@@ -1679,13 +1696,14 @@ impl WorkspaceOps {
             Self::Proxy { client } => client.server_binary_version(),
         }
     }
-    /// **DEPRECATED**: Use [`Self::git_status_ext`] with `format:
-    /// GitStatusFormat::Prompt` instead. This method.
+    /// **DEPRECATED**: Use [`Self::git_status_ext`] with `format: GitStatusFormat::Prompt` instead.
+    /// This method will be removed in a future release.
     pub async fn git_status(&self) -> WorkspaceResult<Value> {
         self.rpc(&GitStatusReq {}).await
     }
-    /// `GitStatusExtReq` implements `WorkspaceOp`, so this dispatches in both
-    /// modes rather than being proxy-only.
+    /// `GitStatusExtReq` implements `WorkspaceOp`, so this dispatches in both modes rather than being proxy-only.
+    /// `GitStatusFormat::Prompt` gives the compact JSON string output that replaces the deprecated `git_status()`.
+    /// `GitStatusFormat::Structured` (the default) gives structured `GitStatusData`.
     pub async fn git_status_ext(
         &self,
         req: &GitStatusExtReq,
@@ -1815,8 +1833,7 @@ impl WorkspaceOps {
 }
 #[cfg(any(test, feature = "test-support"))]
 impl WorkspaceOps {
-    /// Test variant backed by a temp dir. Supports extension dispatch
-    /// (`dispatch()`).
+    /// Test variant backed by a temp dir. Supports extension dispatch (`dispatch()`). Tool calls via `call_tool()` require a workspace session; call `bind_local_session()` with a test toolset first.
     pub fn for_test() -> Self {
         Self::Local {
             handle: WorkspaceHandle::for_test(),
@@ -2335,9 +2352,9 @@ mod tests {
             );
         }
     }
-    /// Compile-time drift guard for `HookSpecWire`, the struct analog of `hook_event_name_wire_covers_all_upstream_variants`. The lean
-    /// types crate can't depend on `xai-grok-hooks`, and `hook_registry_to_wire` only couples both via a serde round-trip. A new
-    /// serialized field on upstream `HookSpec` would otherwise be dropped on the wire silently.
+    /// Compile-time drift guard for `HookSpecWire`, the struct analog of `hook_event_name_wire_covers_all_upstream_variants`.
+    /// The lean types crate can't depend on `xai-grok-hooks`, and `hook_registry_to_wire` only couples the two via a serde round-trip.
+    /// A new serialized field on upstream `HookSpec` would otherwise be dropped on the wire silently.
     #[test]
     fn hook_spec_wire_covers_all_upstream_fields() {
         use xai_grok_hooks::config::HookSpec;

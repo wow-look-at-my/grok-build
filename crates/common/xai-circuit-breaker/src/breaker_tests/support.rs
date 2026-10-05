@@ -1,4 +1,12 @@
 //! Shared test helpers for the `breaker_tests` sub-modules.
+//!
+//! Items are `pub(super)` so sibling test modules
+//! (`breaker_tests::state_machine`, `breaker_tests::half_open`, …) can
+//! reach them. The `#[cfg(test)] #[path = "breaker_tests/support.rs"]
+//! mod support;` declaration in `breaker.rs` makes `super` resolve to
+//! the parent `breaker` module — sibling sub-modules then import via
+//! `use super::support::*`. A future flatten-the-`#[path]` refactor
+//! would silently break those imports, hence this note.
 
 use std::sync::Arc;
 use std::time::Duration;

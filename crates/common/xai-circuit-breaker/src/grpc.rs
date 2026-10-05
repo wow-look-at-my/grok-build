@@ -1,4 +1,5 @@
-//! [`GrpcRetryPolicy`] — classifies a `tonic::Code` into a [`Disposition`].
+//! [`GrpcRetryPolicy`] — classifies a `tonic::Code` into a [`Disposition`], the
+//! gRPC analogue of [`crate::RetryPolicy`]. Behind the `grpc` feature.
 
 use crate::retry_policy::Disposition;
 use std::error::Error;
@@ -10,7 +11,8 @@ pub struct GrpcRetryPolicy {
 }
 
 impl GrpcRetryPolicy {
-    /// Retry only transient connection errors (`Unavailable`, `Unknown`).
+    /// Retry only transient connection errors (`Unavailable`, `Unknown`);
+    /// excluding `Internal`/`DeadlineExceeded` avoids amplifying a sick peer.
     pub const DEFAULT: Self = Self::new(&[Code::Unavailable, Code::Unknown]);
 
     /// Permissive preset: also retry `Internal` and `DeadlineExceeded`.
@@ -40,10 +42,11 @@ impl GrpcRetryPolicy {
         self.retryable.contains(&code)
     }
 
-    /// [`Self::is_retryable`] on the code, or a `status` the client
-    /// synthesized from a connection failure (GOAWAY, connection closed,
-    /// channel timeout), which carries the error as source where a
-    /// server-sent status never does.
+    /// [`Self::is_retryable`] on the code, or a `status` the client synthesized
+    /// from a connection failure (GOAWAY, connection closed, channel timeout),
+    /// which carries the error as source where a server-sent status never does.
+    /// `ResourceExhausted` (ENHANCE_YOUR_CALM) and `PermissionDenied`
+    /// (INADEQUATE_SECURITY) are peer verdicts and stay terminal.
     pub fn is_retryable_status(&self, status: &tonic::Status) -> bool {
         self.is_retryable(status.code())
             || (status.source().is_some()

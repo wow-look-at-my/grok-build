@@ -1,4 +1,6 @@
-//! Answers the workflow tool's requests (launch, validate, resume, pause, stop) for one session.
+//! Answers the workflow tool's requests (launch, validate, resume, pause,
+//! stop) for one session. Each envelope carries a oneshot for the ack; a
+//! dropped ack means the tool stopped waiting, so send failures are ignored.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -201,7 +203,8 @@ async fn control_ack(
     let mut manager = manager.lock().await;
     match manager.control_run(key, control) {
         Ok(run) => {
-            // The model gets the outcome from this tool result.
+            // The model gets the outcome from this tool result; a `/workflow stop`
+            // relies on the completion wake to learn about it, so only the tool path opts out.
             if control == WorkflowControl::Stop {
                 manager
                     .tracker()

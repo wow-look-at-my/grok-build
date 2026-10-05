@@ -1,4 +1,8 @@
-//! Bot-relay wire types: JSON-RPC method payloads, the closed hub error enum, and the `bot.event` envelope.
+//! Bot-relay wire types: JSON-RPC method payloads, the closed hub error
+//! enum, and the `bot.event` envelope.
+//!
+//! These types are the client-facing stability boundary. Gateway command
+//! names and payloads pass through verbatim; this module does not type them.
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -33,6 +37,7 @@ pub const COMMAND_REJECTED_NOT_YET_ENABLED: &str = "not_yet_enabled";
 /// `reason` on `command_rejected` when envelope `agentId` and `args.agentId` disagree.
 pub const COMMAND_REJECTED_AGENT_ID_MISMATCH: &str = "agent_id_mismatch";
 
+/// `reason` on `command_rejected` when `uploadAttachment` args JSON exceeds 3 MiB.
 pub const COMMAND_REJECTED_ARGS_TOO_LARGE: &str = "args_too_large";
 
 /// `reason` on `command_rejected` when required command args are missing or empty.
@@ -53,6 +58,9 @@ pub const COMMAND_REJECTED_ATTACHMENT_CREDENTIAL_UNAVAILABLE: &str =
     "attachment_credential_unavailable";
 
 /// `reason` on `command_rejected` when the owning harness refused the send.
+/// Nothing was accepted and the same message may be sent again. The upstream
+/// `failureCode` is logged rather than surfaced, because this list is a closed
+/// client contract.
 pub const COMMAND_REJECTED_HARNESS_REFUSED: &str = "harness_refused";
 
 /// `reason` on `command_rejected` when attachUpload cannot see the file (missing or not the caller's).
@@ -61,24 +69,34 @@ pub const COMMAND_REJECTED_ATTACHMENT_NOT_FOUND: &str = "attachment_not_found";
 /// `reason` on `command_rejected` when the file exists but is not a BOT_CHAT upload.
 pub const COMMAND_REJECTED_ATTACHMENT_WRONG_SOURCE: &str = "attachment_wrong_source";
 
+/// `reason` on `command_rejected` when the stored BotChat object exceeds 25 MiB.
 pub const COMMAND_REJECTED_ATTACHMENT_TOO_LARGE: &str = "attachment_too_large";
 
 /// `reason` on `command_rejected` when the BotChat upload is not PostProcessDone.
 pub const COMMAND_REJECTED_ATTACHMENT_NOT_READY: &str = "attachment_not_ready";
 
 /// `reason` on `command_rejected` when the live box gateway refused a well-formed command with its own sentence.
+/// The refusal is an HTTP 4xx carrying a JSON `error` body, or a 5xx whose `error`
+/// names a missing or malformed agent id: `detail.upstream_message` carries that
+/// sentence, and a `failureCode` lands in `detail.upstream` as
+/// `code=<failureCode>`. Nothing was accepted.
 pub const COMMAND_REJECTED_BOX_REFUSED: &str = "box_refused";
 
 /// `reason` on `command_rejected` when the box refused a well-formed catalog method (capability skew, not a client catalog bug).
 pub const COMMAND_REJECTED_GATEWAY_UNKNOWN_METHOD: &str = "gateway/unknown-method";
 
 /// `reason` on `command_rejected` when the target agent's harness owns this state and exposes no RPC for the operation.
+/// The box never held the state, so a box answer would be empty or a ghost.
 pub const COMMAND_REJECTED_TEMPORAL_UNSUPPORTED: &str = "temporal_unsupported";
 
-/// `reason` on `command_rejected` when the upstream answered the voice mint with `invalid_argument` or a voice harness call.
+/// `reason` on `command_rejected` when the upstream answered the voice mint with `invalid_argument` or a voice harness call with `not_found`: voice calling is not enabled for this account, or the mint was refused.
+/// `detail.upstream` keeps the `status=... connect=...` excerpt and
+/// `detail.upstream_message` the sentence.
 pub const COMMAND_REJECTED_VOICE_CALL_UNAVAILABLE: &str = "voice_call_unavailable";
 
-/// `reason` on `command_rejected` when the upstream refused `setMainAgent` because the main bot feature is not enabled for this account.
+/// `reason` on `command_rejected` when the upstream refused `setMainAgent` because the main bot feature is not enabled for this account: `getMainAgent` still reads the pointer, but nothing can write it until the account is enrolled.
+/// `detail.upstream` keeps the `status=400 connect=invalid_argument` excerpt
+/// and `detail.upstream_message` the sentence.
 pub const COMMAND_REJECTED_MAIN_AGENT_NOT_ENABLED: &str = "main_agent_not_enabled";
 
 /// Every `command_rejected` reason above, sorted. Codegen fails if this
@@ -150,13 +168,18 @@ pub struct BotVncDescriptorParams {
     pub agent_id: String,
 }
 
-/// `bot.vncDescriptor` result. `expires_hint` is unix milliseconds.
+/// `bot.vncDescriptor` result.
+///
+/// `expires_hint` is unix milliseconds. `null` means a legacy network-token
+/// URL (valid until pod migration); a concrete value is the port-token
+/// expiry the client should refresh before.
 #[typeshare]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BotVncDescriptorResult {
     pub vnc_url: String,
     /// Unix time in milliseconds, or `null` when the URL has no expiry.
+    /// Present as `null` on the wire when unset; omitted keys also read as `None`.
     #[serde(default)]
     #[typeshare(serialized_as = "Option<NullableMillis>")]
     pub expires_hint: Option<i64>,
@@ -164,7 +187,13 @@ pub struct BotVncDescriptorResult {
 
 // ── bot.roster ───────────────────────────────────────────────────────────
 
-/// `bot.roster` params. A live read from the box that may wake a hibernated box.
+/// `bot.roster` params. A live read from the box that may wake a
+/// hibernated box. The hub bounds the wait and, while the box is coming up,
+/// answers either a retryable `box_unavailable` (`box_waking` /
+/// `box_hibernated` / `wake_failed`) or `box_migrating`, or, when it
+/// remembers one, the last live roster with `rememberedAtMs` set and every
+/// row `unknown`; an empty `agents` list is only ever a real answer from a
+/// live box, never the result of a failure.
 #[typeshare]
 pub type BotRosterParams = BotEmptyParams;
 
@@ -181,10 +210,12 @@ pub struct BotRosterEntry {
     pub name: String,
     /// One of `running`, `idle` or `unknown`.
     pub status: String,
-    /// `false` marks a row shared with the viewer; mutations on it are rejected with `audience_unsupported`.
+    /// `false` marks a row shared with the viewer; mutations on it are
+    /// rejected with `audience_unsupported`.
     #[serde(default = "default_viewer_is_owner")]
     pub viewer_is_owner: bool,
-    /// Unix time in milliseconds of the agent's last turn, when the box reports one.
+    /// Unix time in milliseconds of the agent's last turn, when the box
+    /// reports one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[typeshare(serialized_as = "Option<I54>")]
     pub last_turn_at: Option<i64>,
@@ -225,7 +256,9 @@ impl Default for BotRosterEntry {
 #[serde(rename_all = "camelCase")]
 pub struct BotRosterResult {
     pub agents: Vec<BotRosterEntry>,
-    /// Unix time in milliseconds of the live read this roster was remembered from.
+    /// Unix time in milliseconds of the live read this roster was remembered
+    /// from. Present only when the box was not ready and the hub served the
+    /// last live roster in its place; every row then reads `unknown`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[typeshare(serialized_as = "Option<I54>")]
     pub remembered_at_ms: Option<i64>,
@@ -285,8 +318,10 @@ impl<'de> Deserialize<'de> for BotRunState {
     }
 }
 
-/// `bot.status` result: off-box run state. `runState` is a string on the
-/// wire.
+/// `bot.status` result: off-box run state.
+///
+/// `runState` is a string on the wire. Generated clients see `string` and
+/// compare against [`BotRunState`]. Unknown values degrade to `unknown`.
 #[typeshare]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -319,12 +354,18 @@ pub struct BotTranscriptOffboxResult {
 
 // ── transcript entries ───────────────────────────────────────────────────
 
-/// Fields the hub merges into every transcript entry it decodes from the durable store — `getAgentTranscriptTail` / window / thread reads.
+/// Fields the hub merges into every transcript entry it decodes from the
+/// durable store — `getAgentTranscriptTail` / window / thread reads and
+/// `transcript` events alike — next to the box's own fields. Entries the box
+/// answers directly carry none of them.
 #[typeshare]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BotTranscriptEntryStamp {
-    /// Grows with every write to the entry, so of copies.
+    /// Grows with every write to the entry, so of two copies with the same id
+    /// the higher `entry_version` is the newer one. Taken from the store's
+    /// per-agent write sequence, so versions are not contiguous per entry and
+    /// only compare between copies of the same entry.
     #[typeshare(serialized_as = "I54")]
     pub entry_version: u64,
 }
@@ -340,7 +381,8 @@ pub type BotUsageParams = BotEmptyParams;
 /// meter, not a balance.
 ///
 /// `usage_percent` is absent when the account has no personal meter (a
-/// pooled team allowance, or a zero denominator with no grants).
+/// pooled team allowance, or a zero denominator with no grants). It is not
+/// clamped: on-demand overage reads above 100.
 #[typeshare]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -350,7 +392,8 @@ pub struct BotUsageResult {
     /// Unix time in milliseconds of the current period start.
     #[typeshare(serialized_as = "I54")]
     pub current_period_start_ms: i64,
-    /// Unix time in milliseconds of the next reset, or of the trial expiry when `trial` is set.
+    /// Unix time in milliseconds of the next reset, or of the trial expiry
+    /// when `trial` is set. Absent until the user's first metered turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[typeshare(serialized_as = "Option<I54>")]
     pub next_reset_at_ms: Option<i64>,
@@ -360,7 +403,8 @@ pub struct BotUsageResult {
     /// The allowance is a live trial grant rather than a weekly bucket.
     pub trial: bool,
     pub is_team_seat: bool,
-    /// `supergrok-plus` / `supergrok-heavy` when the SuperGrok tier is the population funding the meter.
+    /// `supergrok-plus` / `supergrok-heavy` when the SuperGrok tier is the
+    /// population funding the meter; absent when another plan funds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub funding_plan: Option<String>,
     /// Server-owned meter label (e.g. `SuperGrok Heavy`, `Grok Bot Plan`).
@@ -441,25 +485,38 @@ pub type BotPresenceResult = BotEmptyResult;
 #[serde(rename_all = "snake_case")]
 pub enum BotRelayErrorCode {
     IdentityUnavailable,
-    /// The xAI account has never been linked to a Cursor account.
+    /// The xAI account has never been linked to a Cursor account. The user
+    /// must run the link flow (or JIT provisions once opted in).
     LinkRequired,
-    /// The link was explicitly removed (a sticky unlink on the Cursor side).
+    /// The link was explicitly removed (a sticky unlink on the Cursor
+    /// side). Re-linking takes an explicit flow, never a silent retry.
     LinkRemoved,
-    /// Linking needs the user's recorded consent before an existing Cursor account can be attached.
+    /// Linking needs the user's recorded consent before an existing Cursor
+    /// account can be attached. Definitive until the consent UX runs.
     ConsentRequired,
-    /// Enterprise-managed on either side (enterprise-claimed email domain, active team, or server-side enterprise policy).
+    /// Enterprise-managed on either side (enterprise-claimed email domain,
+    /// active team, or server-side enterprise policy); the flow serves
+    /// self-serve accounts only. `reason` names which rule refused.
     EnterpriseUnsupported,
     /// The matched Cursor account is on legacy request-based pricing.
     LegacyPricingUnsupported,
-    /// The xAI account has no verified email, so no Cursor account can be matched or created. Fixable on the xAI side.
+    /// The xAI account has no verified email, so no Cursor account can be
+    /// matched or created. Fixable on the xAI side.
     EmailUnverified,
-    /// Linking hit a conflict that needs manual resolution: the email matches multiple accounts.
+    /// Linking hit a conflict that needs manual resolution: the email
+    /// matches multiple accounts, or a 1:1 link rule declined the pair.
+    /// `reason` distinguishes.
     LinkConflict,
     /// A link exists, but its Cursor account is gone or unusable.
     CursorAccountUnavailable,
-    /// Definitive self-serve refusal this client build does not know more precisely.
+    /// Definitive self-serve refusal this client build does not know more
+    /// precisely (a reason token newer than the mapping). `reason` carries
+    /// the token verbatim.
     LinkUnsupported,
-    /// The linked Cursor account, or a Cursor team that seats it, is in Privacy Mode (Legacy).
+    /// The linked Cursor account, or a Cursor team that seats it, is in
+    /// Privacy Mode (Legacy), which refuses cloud-agent storage. Definitive
+    /// until the user (or a team admin) switches to Privacy Mode. `reason`
+    /// is `personal` or `team`.
     LegacyPrivacyUnsupported,
     NoPlan,
     UsageExhausted,
@@ -546,7 +603,7 @@ impl BotRelayErrorCode {
     /// The `(numeric, key)` JSON-RPC class from [`crate::ERROR_CODES`] for
     /// every code — the single exhaustive mapping both
     /// [`Self::jsonrpc_numeric`] and [`Self::jsonrpc_code_key`] project
-    /// from, so both companion values cannot drift and adding a variant
+    /// from, so the two companion values cannot drift and adding a variant
     /// forces an intentional classification.
     const fn jsonrpc_class(self) -> (i32, &'static str) {
         match self {
@@ -601,8 +658,9 @@ impl BotRelayErrorCode {
     }
 }
 
-/// The link-state subset of [`BotRelayErrorCode`] as its own type, so constructors that only accept link states are infallible by shape instead of guarded by asserts. Converts
-/// losslessly into the wire enum.
+/// The link-state subset of [`BotRelayErrorCode`] as its own type, so
+/// constructors that only accept link states are infallible by shape
+/// instead of guarded by asserts. Converts losslessly into the wire enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LinkStateCode {
     LinkRequired,
@@ -675,7 +733,8 @@ impl<'de> Deserialize<'de> for BotRelayErrorCode {
 }
 
 /// How one of the caller's Grok accounts signs in. Senders emit only the
-/// named variants.
+/// named variants. Receivers treat any unknown wire string as
+/// [`Self::Other`].
 #[typeshare]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -752,13 +811,15 @@ impl<'de> Deserialize<'de> for BotRelaySignIn {
 pub struct BotRelaySiblingAccount {
     #[typeshare(serialized_as = "String")]
     pub sign_in: BotRelaySignIn,
-    /// X username without `@`, Google / password / email-code email, GitHub username. Absent for Apple / SSO / other.
+    /// X username without `@`, Google / password / email-code email, GitHub username.
+    /// Absent for Apple / SSO / other.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
     /// Unix time in milliseconds the account was created.
     #[typeshare(serialized_as = "I54")]
     pub created_at_ms: i64,
-    /// This sibling holds a live relay session in the hub, so it is the account Cursor is linked to.
+    /// This sibling holds a live relay session in the hub, so it is the
+    /// account Cursor is linked to. At most one account in a list is `true`.
     pub linked: bool,
 }
 
@@ -773,16 +834,32 @@ pub const UPSTREAM_MESSAGE_MAX_CHARS: usize = 240;
 pub struct BotRelayErrorDetail {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream: Option<String>,
-    /// The upstream's own user-facing sentence for a refusal, trimmed and capped.
+    /// The upstream's own user-facing sentence for a refusal, trimmed and
+    /// capped at [`UPSTREAM_MESSAGE_MAX_CHARS`] chars. Never the raw body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_message: Option<String>,
-    /// Set only on `link_conflict` with reason `jit_link_declined` when the sibling lookup succeeded and found.
+    /// Set only on `link_conflict` with reason `jit_link_declined` when the
+    /// sibling lookup succeeded and found at least one account. Ordered by
+    /// `createdAtMs`. Absent when the lookup failed or found nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sibling_accounts: Option<Vec<BotRelaySiblingAccount>>,
 }
 
-/// Hub-owned bot-relay error object. Wire form: `{code, retryable, detail,
-/// reason?}`. `detail` is always present (empty object when unused).
+/// Hub-owned bot-relay error object.
+///
+/// Wire form: `{code, retryable, detail, reason?}`.
+/// `detail` is always present (empty object when unused).
+/// `reason` is set for [`BotRelayErrorCode::CommandRejected`] and for the
+/// link-state codes ([`BotRelayErrorCode::is_link_state`]), where it
+/// carries the exchange's machine reason token for per-case client copy.
+///
+/// On the JSON-RPC envelope this object is `error.data`. Receivers
+/// switch on `data.code`. The envelope `error.message` is the snake_case
+/// [`BotRelayErrorCode`].
+///
+/// `code` is a string on the wire. Generated clients see `string` and
+/// compare against [`BotRelayErrorCode`]. Unknown values degrade to
+/// `upstream_error` while preserving `retryable` and `detail`.
 #[typeshare]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -856,7 +933,8 @@ impl fmt::Display for HubChannel {
     }
 }
 
-/// Future `hub:*` channel this crate does not yet name.
+/// Future `hub:*` channel this crate does not yet name. Constructed only
+/// via [`BotEventChannel::from_wire`]; the string includes the `hub:` prefix.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HubUnknownChannel(String);
 
@@ -866,7 +944,8 @@ impl HubUnknownChannel {
     }
 }
 
-/// Upstream-verbatim channel. Never starts with `hub:`. Constructed only via [`BotEventChannel::from_wire`].
+/// Upstream-verbatim channel. Never starts with `hub:`. Constructed only
+/// via [`BotEventChannel::from_wire`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UpstreamChannel(String);
 
@@ -877,7 +956,10 @@ impl UpstreamChannel {
 }
 
 /// `bot.event` channel: an upstream-verbatim string or a hub-owned `hub:*`
-/// name. Known `hub:*` values are [`Self::Hub`].
+/// name.
+///
+/// Known `hub:*` values are [`Self::Hub`]. Any other `hub:`-prefixed
+/// string is [`Self::HubUnknown`]. Non-`hub:` strings are [`Self::Upstream`].
 #[derive(Debug, Clone)]
 pub enum BotEventChannel {
     Hub(HubChannel),
@@ -948,6 +1030,11 @@ impl<'de> Deserialize<'de> for BotEventChannel {
 // ── Hub-owned event bodies ───────────────────────────────────────────────
 
 /// Body of `hub:turn_started` (`event` when [`HubChannel::TurnStarted`]).
+///
+/// The hub mints `turn_id` when it sees the agent's `isRunning` level rise
+/// and repeats it on the matching [`HubTurnFinishedEvent`], so a client can
+/// tell which running span a finish closes. A subscriber joining mid-turn
+/// receives the running turn's start first.
 #[typeshare]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -957,6 +1044,9 @@ pub struct HubTurnStartedEvent {
 }
 
 /// Body of `hub:turn_finished` (`event` when [`HubChannel::TurnFinished`]).
+///
+/// `turn_id` matches the [`HubTurnStartedEvent`] that opened the span;
+/// empty from hubs that predate turn ids.
 #[typeshare]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -978,9 +1068,25 @@ pub struct HubResyncRequiredEvent {
 
 // ── bot.event envelope ───────────────────────────────────────────────────
 
-/// `bot.event` envelope v1 (`v == `[`BOT_EVENT_ENVELOPE_V`]). It is an
-/// ordering reference, not a dedupe key (a redelivered event gets a
-/// fresh `seq`) and is never comparable across connections.
+/// `bot.event` envelope v1 (`v == `[`BOT_EVENT_ENVELOPE_V`]).
+///
+/// `seq` is a per-(connection, agent) monotonic counter starting at 1 on
+/// each `bot.subscribe`. It is an ordering reference, not a dedupe key
+/// (a redelivered event gets a fresh `seq`) and is never comparable
+/// across connections. Resync is signaled by [`HubChannel::ResyncRequired`]
+/// or a reconnect, never inferred from `seq`.
+///
+/// [`Self::event_id`] is reserved for content-identity dedupe and is
+/// omitted from the wire when `None`.
+///
+/// `event` is upstream-verbatim for [`BotEventChannel::Upstream`]. For
+/// [`HubChannel::TurnStarted`] it is [`HubTurnStartedEvent`]; for
+/// [`HubChannel::TurnFinished`] it is [`HubTurnFinishedEvent`]; for
+/// [`HubChannel::ResyncRequired`] it is [`HubResyncRequiredEvent`].
+///
+/// `channel` is a string on the wire. Typeshare cannot express the
+/// hub / hub-unknown / upstream split, so generated clients see `string`.
+/// Compare against [`HubChannel`] for the known `hub:*` values.
 #[typeshare]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

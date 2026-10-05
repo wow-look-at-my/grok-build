@@ -1,4 +1,9 @@
 //! Parse repo-level marketplace index.
+//!
+//! Catalog files are probed in order: `.grok-plugin/marketplace.json` (preferred), then `.grok-plugin/plugin.json`.
+//! The `.claude-plugin/` copies of both follow, for compatibility with the alternate layout.
+//!
+//! When present, an index is preferred over filesystem scanning: it is faster and provides curated metadata (category, tags, homepage).
 
 use std::path::Path;
 
@@ -58,7 +63,7 @@ pub struct IndexAuthor {
     pub name: String,
 }
 
-/// Object: `{ "type": "local", "path": "./plugins/foo" }`.
+/// Object: `{ "type": "local", "path": "./plugins/foo" }`; Object: `{ "source": "url", "url": "https://github.com/...", "ref": "main" }`; Object: `{ "source": "url", "url": "https://...", "sha": "61f1903b..." }` (recommended for vendor pins); String: `"./plugins/foo"` (shorthand used by some marketplaces).
 #[derive(Debug, Clone)]
 pub struct IndexSource {
     pub r#type: Option<String>,

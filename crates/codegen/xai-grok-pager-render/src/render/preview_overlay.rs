@@ -1,4 +1,9 @@
 //! Renders a bordered popup showing a preview of multiline content.
+//! Shows first N and last N lines with a `⋮` separator when content exceeds the preview limit.
+//!
+//! Used for:
+//! - Paste element previews in the prompt widget
+//! - Queue item previews in the queue pane
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -10,7 +15,8 @@ use super::line_utils::{truncate_line, truncate_str};
 use super::safe_buf::SafeBuf;
 
 // ---------------------------------------------------------------------------
-// PreviewStyle.
+// PreviewStyle — configurable colors
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy)]
 pub struct PreviewStyle {
@@ -33,16 +39,21 @@ impl PreviewStyle {
 }
 
 // ---------------------------------------------------------------------------
-// PreviewConfig.
+// PreviewConfig — layout configuration
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct PreviewConfig {
     /// Number of lines to show from the top and bottom when truncating.
+    /// If content has more than `preview_lines * 2` lines, shows first N, dots separator, and last N lines.
     pub preview_lines: usize,
 
+    /// Width of the overlay as a fraction of the available width (0.0 to 1.0).
+    /// Default: 0.75 (3/4 of available width).
     pub width_ratio: f32,
 
     /// Vertical gap between the overlay's bottom border and the anchor point.
+    /// At 0 the overlay sits flush against the anchor.
     pub bottom_gap: u16,
 
     /// Minimum width for the overlay. Below this, the overlay won't render.
@@ -52,6 +63,8 @@ pub struct PreviewConfig {
     pub min_height: u16,
 
     /// Optional one-line hint painted into the bottom border row, e.g. `╰─ enter to expand ────╯`.
+    /// It costs no content row and is skipped when the box is too narrow to fit readable text.
+    /// `None` (the default) leaves the plain border.
     pub hint: Option<Line<'static>>,
 }
 
@@ -140,7 +153,8 @@ pub fn render_preview_overlay(
         dots_style,
     );
 
-    // The hint lives in the bottom border row.
+    // The hint lives in the bottom border row, so it costs no content row
+    // The border interruption reads as a label even when a theme aliases the hint palette to the border/content colors
     if let Some(hint) = &config.hint {
         render_border_hint(buf, box_area, hint, style.bg);
     }
@@ -214,6 +228,7 @@ fn render_line(buf: &mut Buffer, x: u16, y: u16, width: u16, line: &str, style: 
 /// Hint sits in the bottom border after the corner and one dash. Corners and one dash per side are never overwritten.
 /// Skipped when the box is too narrow for readable text.
 fn render_border_hint(buf: &mut Buffer, box_area: Rect, hint: &Line<'static>, bg: Color) {
+    // Chrome around the text: corners (2) + one dash each side (2) + pads (2).
     const CHROME: u16 = 6;
     // Below this the truncated text is noise; keep the plain border
     const MIN_TEXT_WIDTH: u16 = 8;
@@ -246,9 +261,9 @@ mod tests {
 
     fn test_style() -> PreviewStyle {
         PreviewStyle::new(
-            Color::Indexed(234),
-            Color::Indexed(189),
-            Color::Indexed(60),
+            Color::Indexed(234), // grayscale 28  — dark bg
+            Color::Indexed(189), // (215,215,255) — light text
+            Color::Indexed(60),  //  (95,95,135)  — dim border
         )
     }
 
@@ -290,6 +305,7 @@ mod tests {
         );
         assert!(result.is_some());
         let rect = result.unwrap();
+        // 3 rows: border + 1 content + border
         assert_eq!(rect.height, 3);
     }
 
@@ -306,9 +322,10 @@ mod tests {
         );
         assert!(result.is_some());
         let rect = result.unwrap();
-        // A few lines + borders = 6 rows
+        // 4 lines + 2 borders = 6 rows
         assert_eq!(rect.height, 6);
 
+        // 4 lines does not exceed preview_lines * 2 = 6, so no dots separator
         let buf_str = buffer_to_string(&buf);
         assert!(!buf_str.contains("⋮"), "Should not have dots: {}", buf_str);
     }
@@ -329,6 +346,7 @@ mod tests {
         );
         assert!(result.is_some());
 
+        // 10 lines exceeds preview_lines * 2 = 6, so the dots separator renders
         let buf_str = buffer_to_string(&buf);
         assert!(buf_str.contains("⋮"), "Should have dots: {}", buf_str);
         assert!(
@@ -358,6 +376,7 @@ mod tests {
         );
         assert!(result.is_some());
         let rect = result.unwrap();
+        // 5 top + 1 dots + 5 bottom + 2 borders = 13 rows
         assert_eq!(rect.height, 13);
 
         let buf_str = buffer_to_string(&buf);
@@ -451,6 +470,7 @@ mod tests {
             config,
         )
         .unwrap();
+        // The hint costs no row: 2 content + 2 borders.
         assert_eq!(rect.height, 4);
         assert!(row_to_string(&buf, rect.y + 1).contains("hello"));
         assert!(row_to_string(&buf, rect.y + 2).contains("world"));
@@ -523,6 +543,7 @@ mod tests {
 
     #[test]
     fn test_hint_skipped_when_ultra_narrow() {
+        // A box of 12 cells leaves 6 for text, below the readability floor, so the border stays plain
         let mut buf = Buffer::empty(Rect::new(0, 0, 16, 10));
         let config = PreviewConfig {
             hint: Some(test_hint()),

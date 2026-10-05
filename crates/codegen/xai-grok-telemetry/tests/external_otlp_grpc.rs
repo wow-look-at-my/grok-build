@@ -1,4 +1,9 @@
-//! gRPC-transport coverage of the **build-baseline disabled contract** for the external OTEL stream.
+//! gRPC-transport coverage of the **build-baseline disabled contract** for the
+//! external OTEL stream. Mirrors `external_otlp.rs` but points a valid gRPC
+//! double opt-in at a live collector: because `external::build_handle` returns
+//! `None` in this build, the stream never activates and the gRPC collector must
+//! receive nothing. Lives in its own integration-test binary because the
+//! external telemetry registry is a process-global `OnceLock`.
 
 mod otlp_collector;
 

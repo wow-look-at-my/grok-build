@@ -56,6 +56,7 @@ fn cell_aspect_from_measures_and_rejects_bogus_reports() {
         width,
         height,
     };
+    // 10x20 px cells give a 0.5 ratio; 9x20 give 0.45
     assert_eq!(cell_aspect_from(&ws(100, 50, 1000, 1000)), 0.5);
     assert_eq!(cell_aspect_from(&ws(100, 50, 900, 1000)), 0.45);
     // Unreported pixels (zeroes) and out-of-band ratios fall back.

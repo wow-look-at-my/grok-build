@@ -1,4 +1,15 @@
 //! Config file loading for Grok.
+//!
+//! Merge order (lowest to highest priority):
+//! 1. `/etc/grok/managed_config.toml`
+//! 2. `$GROK_HOME/managed_config.toml`
+//! 3. `$GROK_HOME/config.toml`
+//! 4. `$GROK_HOME/requirements.toml` (cloud cache; Ed25519-signed at rest once a key is embedded, see [`signed_policy`])
+//! 5. `/etc/grok/requirements.toml`
+//! 6. macOS MDM managed preferences (`ai.x.grok`, admin-forced), macOS only
+//!
+//! Each layer applies its own [`[[version_overrides]]`](version_overrides) before merge.
+//! Requirements layers (#4 through #6) may opt into fail-closed startup; see [`validate_requirements`].
 
 #![deny(clippy::indexing_slicing)]
 
@@ -20,8 +31,8 @@ pub mod signed_policy;
 mod validation;
 pub mod version_overrides;
 
-// Only the campaign items other crates need are re-exported at the root The
-// rest stays reachable via the `pub mod` paths.
+// Only the campaign items other crates need are re-exported at the root
+// The rest stays reachable via the `pub mod` paths, keeping the root API narrow
 pub use campaigns::{
     CampaignEntry, CampaignOverrides, filter_active_campaigns, ids_touching_paths,
 };

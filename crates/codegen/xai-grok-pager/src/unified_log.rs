@@ -1,4 +1,7 @@
 //! Unified log forwarding for the pager.
+//!
+//! Buffers log entries in memory and flushes them to the shell via `x.ai/log` ACP notifications.
+//! Call [`init`] once at startup with the ACP sender, then use [`info`], [`warn`], [`error`], [`debug`] from anywhere.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -48,9 +51,9 @@ fn make_entry(
     }
 }
 
-/// Write an info entry straight to `unified.jsonl`, bypassing the ACP
-/// forwarder. The forwarder only gets a sender after a successful connect,
-/// and a flush during a failed startup destroys buffered entries.
+/// Write an info entry straight to `unified.jsonl`, bypassing the ACP forwarder. The forwarder only gets a sender
+/// after a successful connect, and a flush during a failed startup destroys buffered entries. Entries logged before
+/// the connect that must survive a failed startup go through here.
 pub fn write_direct_info(msg: &str, ctx: Option<serde_json::Value>) {
     xai_grok_telemetry::unified_log::ingest_client_entries(
         LogSource::GrokPager,

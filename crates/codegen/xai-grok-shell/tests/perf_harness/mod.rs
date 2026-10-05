@@ -1,4 +1,5 @@
 //! The agent runs on its OWN thread so client-side timestamping never competes with the parent session's `LocalSet`.
+//! Each perf test binary includes this module via `#[path]`; items unused in one binary are dead code there.
 #![allow(dead_code)]
 
 use std::cell::RefCell;

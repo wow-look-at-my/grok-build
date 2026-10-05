@@ -1,4 +1,20 @@
-//! The bearer for a call that goes straight to an xAI host outside a model turn.
+//! The bearer for a call that goes straight to an xAI host outside a model turn: the Imagine
+//! tools and pager voice dictation.
+//!
+//! An xAI host accepts two credential kinds and nothing else: an xAI API key, or an xAI OAuth2
+//! access token (JWT header `typ` `at+jwt`, issuer `auth.x.ai`). The login this manager holds may
+//! have been issued by a foreign authority, and such a login is never a side-call bearer. The
+//! model turn already refuses it for chat (`WireValidBearerResolver`); this module is the single
+//! place that refuses it for everything else, so no tool client and no voice client reads the
+//! manager's key on its own.
+//!
+//! Invariants:
+//! - A session whose issuer is a foreign login authority is never returned.
+//! - A missing bearer is an error, never a cue to fall back to a different credential.
+//! - A configured static key (`XAI_API_KEY`, the process model key, or `xai::api_key` on disk)
+//!   still applies, under the same kill-switch and `preferred_method` rules as chat.
+//! - Every other credential goes to the server as before, and the server decides, as it does
+//!   today for enterprise IdP sessions and bare external-provider tokens.
 
 use std::sync::Arc;
 
@@ -62,10 +78,11 @@ impl AuthManager {
     }
 }
 
-/// Whether the credential may be sent to an xAI host as this account's own
-/// credential. An API key always may. A session may unless a foreign login
-/// authority issued it. Anything else is sent, as chat sends it, and the
-/// server decides.
+/// Whether the credential may be sent to an xAI host as this account's own credential.
+///
+/// An API key always may. A session may unless a foreign login authority issued it. Anything else
+/// is sent, as chat sends it, and the server decides. The issuer is checked here rather than
+/// through the active backend so that an injected foreign credential is refused on every build.
 pub(crate) fn is_xai_side_call_principal(auth: &GrokAuth) -> bool {
     match auth.auth_mode {
         AuthMode::ApiKey => true,

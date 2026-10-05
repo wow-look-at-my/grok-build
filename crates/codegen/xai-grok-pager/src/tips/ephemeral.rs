@@ -4,10 +4,13 @@ use std::collections::HashMap;
 
 use ratatui::text::Line;
 
+/// Default tip lifetime in animation ticks (~3 s: 90 ticks at the default 30 fps animation cadence).
+/// Expiry takes N+1 ticks: [`EphemeralTipState::tick`] checks `== 0` *before* decrementing.
+/// A tip shown with `ticks_remaining = N` therefore survives N ticks and is cleared on the (N+1)th.
 pub const DEFAULT_TIP_TICKS: u16 = 90;
 
-/// The show gate, the banner-height reservation, and the paint share this
-/// predicate, so those can never drift.
+/// The show gate, the banner-height reservation, and the paint share this one predicate, so the three can never drift.
+/// It shares the layout's short-terminal threshold, so the tip row appears exactly when the optional rows above the prompt do.
 pub fn tip_row_renderable(occluded: bool, area_height: u16) -> bool {
     !occluded && area_height > crate::views::agent::SHORT_TERMINAL_ROWS
 }
@@ -21,9 +24,12 @@ pub struct EphemeralTip {
     pub line: Line<'static>,
     /// Remaining animation ticks before the tip expires.
     pub ticks_remaining: u16,
-    /// `Some((key, cap))` stops showing the tip once this session's count for `key` reaches `cap`.
+    /// `Some((key, cap))` stops showing the tip once this session's count for `key` reaches `cap`; `None` means the tip is never gated.
+    /// The count lives only in `AppView::tip_seen_counts` (per session, never on disk).
     pub session_seen: Option<(&'static str, u32)>,
-    /// An ambient hint is not about the draft being edited.
+    /// An ambient hint is not about the draft being edited, so submission ([`EphemeralTipState::clear_on_submit`]) does not retire it.
+    /// Its TTL burns only while the tip row can paint; occlusion pauses it instead of expiring it off-screen (`AgentView::ephemeral_tip_needs_tick`).
+    /// The default `false` keeps the usual behavior: submit retires the tip and the TTL burns while occluded.
     pub ambient: bool,
 }
 
@@ -53,6 +59,7 @@ impl EphemeralTip {
 }
 
 /// Single-slot ephemeral tip state.
+/// Seen counts are not stored here; gating runs against the app-level map passed into [`Self::show`], so there is exactly one copy of that state.
 #[derive(Debug, Default)]
 pub struct EphemeralTipState {
     slot: Option<EphemeralTip>,
@@ -67,8 +74,7 @@ impl EphemeralTipState {
         tip: EphemeralTip,
         seen_counts: &mut HashMap<&'static str, u32>,
     ) -> bool {
-        // Refresh before gating so a visible tip never goes dark mid-TTL
-        // because its first show already reached the cap
+        // Refresh before gating so a visible tip never goes dark mid-TTL just because its first show already reached the cap
         if self.slot.as_ref().is_some_and(|cur| cur.key == tip.key) {
             self.slot = Some(tip);
             return false;
@@ -150,6 +156,8 @@ impl EphemeralTipState {
     }
 
     /// Submission retire: clear the tip unless it is ambient.
+    /// An ambient tip is not about the draft that was just submitted, so it lives out its TTL across the submit.
+    /// Returns true when a tip was removed.
     pub fn clear_on_submit(&mut self) -> bool {
         if self.slot.as_ref().is_some_and(|t| t.ambient) {
             return false;
@@ -204,9 +212,9 @@ mod tests {
         let mut state = EphemeralTipState::default();
         assert!(state.show(tip("a", 2), &mut HashMap::new()));
         assert!(state.is_active());
-        assert!(!state.tick());
-        assert!(!state.tick());
-        assert!(state.tick());
+        assert!(!state.tick()); // ticks 2 down to 1
+        assert!(!state.tick()); // ticks 1 down to 0
+        assert!(state.tick()); // at 0: expired, needs redraw
         assert!(!state.is_active());
         assert!(state.line().is_none());
         assert!(!state.tick(), "empty slot ticks are no-ops");
@@ -229,8 +237,8 @@ mod tests {
         let mut state = EphemeralTipState::default();
         let mut counts = HashMap::new();
         let _ = state.show(tip("a", 3), &mut counts);
-        assert!(!state.tick());
-        let _ = state.show(tip("a", 3), &mut counts);
+        assert!(!state.tick()); // 3 -> 2
+        let _ = state.show(tip("a", 3), &mut counts); // refresh back to 3
         for _ in 0..3 {
             assert!(!state.tick());
         }

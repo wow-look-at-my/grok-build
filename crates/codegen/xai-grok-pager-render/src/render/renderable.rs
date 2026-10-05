@@ -11,11 +11,14 @@ pub trait Renderable {
     fn render(&self, area: Rect, buf: &mut Buffer);
 
     /// Height needed at this width in lines.
+    ///
+    /// This should be efficient (ideally O(1)) as it may be called frequently during scroll position calculations.
     fn desired_height(&self, width: u16) -> u16;
 }
 
 // ============================================================================
-// Standard Implementations.
+// Standard Implementations
+// ============================================================================
 
 impl Renderable for () {
     fn render(&self, _area: Rect, _buf: &mut Buffer) {}

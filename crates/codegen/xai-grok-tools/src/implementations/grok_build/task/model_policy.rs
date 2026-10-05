@@ -22,7 +22,8 @@ pub enum TaskModelSelection {
 pub struct TaskParams {
     #[serde(default)]
     pub model_selection: TaskModelSelection,
-    /// Fresh spawns that omit a type use this when general-purpose is not spawnable.
+    /// Fresh spawns that omit a type use this when general-purpose is not spawnable
+    /// and the parent allowlist names exactly one other type. Not a model argument.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub implicit_subagent_type: Option<String>,
 }

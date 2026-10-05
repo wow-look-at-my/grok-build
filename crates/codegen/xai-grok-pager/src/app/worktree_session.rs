@@ -1,4 +1,5 @@
-//! Worktree create and resume RPCs shared by the interactive `Effect::CreateWorktreeSession` and headless `-w` startup.
+//! Worktree create and resume RPCs shared by the interactive `Effect::CreateWorktreeSession`
+//! and headless `-w` startup, so the request shape, response unwrap, and failure text live once.
 
 use std::path::{Path, PathBuf};
 

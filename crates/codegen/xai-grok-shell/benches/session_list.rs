@@ -1,4 +1,20 @@
 //! Repeated warm-process benchmark for shell session listing.
+//!
+//! The shell-core case measures `build_unified_list` from just after request parsing through local row construction.
+//! It excludes response serialization, ACP transport, and pager parsing, filtering, and rendering.
+//! Storage cases are diagnostics.
+//!
+//! The fixture has 3,000 encoded workspaces and 9,864 summaries.
+//! Its 32 same-repo CWDs are the main checkout, 15 DB/filesystem overlaps, one dead DB-only worktree, and 15 filesystem-only worktrees.
+//! All have current labels and interleaved activity.
+//! Another 2,968 unrelated CWDs provide scale.
+//!
+//! Setup and exact assertions are outside timing.
+//! Samples reuse the tree and process, so filesystem and JSON work uses a warm OS page cache.
+//! Fixed year-2100 timestamps pass the pager cutoff, though pager stages are excluded.
+//!
+//! Run: `cargo bench -p xai-grok-shell --bench session_list`
+//! Allow roughly 4-8 minutes after compilation for the configured samples.
 
 use std::collections::HashSet;
 use std::fs;

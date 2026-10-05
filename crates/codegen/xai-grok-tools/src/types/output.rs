@@ -16,12 +16,15 @@ pub fn line_diff(old: &str, new: &str) -> (i64, i64) {
     }
     (added, removed)
 }
-/// Wrapper for [`ToolOutput::Text`] so it can round-trip through `#[serde(tag
-/// = "type")]`.
+/// Wrapper for [`ToolOutput::Text`] so it can round-trip through
+/// `#[serde(tag = "type")]` (internally-tagged enums require struct/map
+/// payloads, not bare primitives).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextOutput {
     pub text: String,
-    /// Background-task id for auto-wake suppression when set (see [`crate::reminders::task_completion::consumed_completion_ids`]).
+    /// Background-task id for auto-wake suppression when set (see
+    /// [`crate::reminders::task_completion::consumed_completion_ids`]);
+    /// omitted from prompts and from JSON when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consumed_completion_task_id: Option<String>,
 }
@@ -42,7 +45,8 @@ impl From<&str> for TextOutput {
     }
 }
 /// Wrapper for [`ToolOutput::Dynamic`] so it can round-trip through
-/// `#[serde(tag = "type")]`.
+/// `#[serde(tag = "type")]` (internally-tagged enums require struct/map
+/// payloads, not bare primitives).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DynamicOutput {
     pub value: serde_json::Value,
@@ -52,9 +56,9 @@ impl From<serde_json::Value> for DynamicOutput {
         Self { value }
     }
 }
-/// Typed saved path for the media tools (`image_gen` / `video_gen` /
-/// `image_edit`), so consumers read it directly instead of scraping the
-/// prose.
+/// Typed saved path for the media tools (`image_gen` / `video_gen` / `image_edit`), so consumers
+/// read it directly instead of scraping the prose. A struct (not a bare `PathBuf`) is required:
+/// `ToolOutput` is internally tagged and only accepts map payloads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaGenOutput {
     /// Absolute path to the saved media file. Empty for [`Self::uploaded`].
@@ -65,7 +69,8 @@ pub struct MediaGenOutput {
     /// Session-relative media directory name (for example, `images` or `videos`).
     #[serde(default)]
     pub session_folder: String,
-    /// Set when the media was uploaded to a remote presigned URL (ZDR video output) and is not available locally.
+    /// Set when the media was uploaded to a remote presigned URL (ZDR video
+    /// output) and is not available locally; omitted otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uploaded_url: Option<String>,
 }
@@ -122,15 +127,20 @@ impl MediaGenOutput {
 use crate::implementations::grok_build::todo::{TodoItem, TodoState};
 use crate::implementations::skills::skill::SkillOutput;
 use crate::util::truncate::{DEFAULT_SOFT_WRAP_WIDTH, soft_wrap_lines};
-/// Result of running a tool through the ToolRunner pipeline. This is the
-/// **single return type** from `ToolRunner::run()`.
+/// Result of running a tool through the ToolRunner pipeline. This is the **single return type**
+/// from `ToolRunner::run()`. Clean `output` — never mutated by layers; for JSON serialization,
+/// protocol translation. `prompt_text` — rendered with system reminders appended; for model prompt.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolRunResult {
     /// Clean tool output — never mutated by layers.
+    /// Consumers use this for: JSON serialization, protocol translation, hunk tracking.
     pub output: ToolOutput,
     /// Prompt-ready text — layers can append system reminders, etc.
+    /// Consumers use this for: model prompt (ConversationItem::tool_result).
     pub prompt_text: String,
-    /// When a meta-tool dispatches to a different underlying tool (for example `use_tool` → `linear__save_issue`).
+    /// When a meta-tool dispatches to a different underlying tool (for example
+    /// `use_tool` → `linear__save_issue`), this carries the effective tool name.
+    /// `None` means the requested tool and executed tool are the same.
     pub effective_tool_name: Option<String>,
 }
 impl ToolRunResult {
@@ -176,9 +186,11 @@ pub enum ListDirOutput {
 pub use xai_tool_types::{GrepFileMatch, GrepLineMatch, GrepSearchOutput};
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FileContent {
-    /// content here is the model friendly output which will always be present since even on failures we want to present the model.
+    /// content here is the model friendly output which will always be present since even
+    /// on failures we want to present the model with some information
     pub content: String,
-    /// Concise version of content (arrow separator, no padding) for models that use the concise output format
+    /// Concise version of content (arrow separator, no padding) for models
+    /// that use the concise output format
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_concise: Option<String>,
     pub absolute_path: PathBuf,
@@ -188,10 +200,13 @@ pub struct FileContent {
     pub limit: Option<usize>,
     /// Contains the raw output from the tool invocation without any formatting
     pub raw_output: String,
-    /// Total number of lines in the file. Used by system reminders to detect offset-past-end vs genuinely-empty files.
+    /// Total number of lines in the file. Used by system reminders to detect
+    /// offset-past-end vs genuinely-empty files.
     #[serde(default)]
     pub total_lines: usize,
-    /// Pre-truncation image captures for session harvest.
+    /// Pre-truncation image captures for session harvest. Must survive
+    /// ToolDyn hub `to_value`/`from_value`; session drains before PostToolUse
+    /// and ACP wire serialize.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(skip)]
     pub extracted_images: Vec<crate::util::base64_images::ExtractedImage>,
@@ -255,14 +270,16 @@ pub struct SearchReplaceEditsApplied {
     pub old_string: String,
     pub new_string: String,
     pub tool_output_for_prompt: String,
-    /// Concise version of tool_output_for_prompt (shorter, no snippet) for models that use the concise output format
+    /// Concise version of tool_output_for_prompt (shorter, no snippet) for
+    /// models that use the concise output format
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_output_for_prompt_concise: Option<String>,
     pub absolute_path: PathBuf,
     pub edits: SearchReplaceEditContextInformation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch: Option<String>,
-    /// `true` when the match used Unicode confusable normalization.
+    /// `true` when the match used Unicode confusable normalization
+    /// (exact byte match failed, but normalized match succeeded).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unicode_normalized: bool,
 }
@@ -285,7 +302,9 @@ pub struct SearchReplaceEditDetail {
     pub context_before: String,
     /// The context after the match
     pub context_after: String,
-    /// Leading text on the first line before the matched `old_string` begins.
+    /// Leading text on the first line before the matched `old_string` begins. When the match starts mid-line (e.g., after
+    /// indentation), this captures the prefix so the diff renderer can display proper alignment. Empty when the match
+    /// starts at the beginning of a line or when unknown.
     #[serde(default)]
     pub line_prefix: String,
 }
@@ -297,7 +316,9 @@ pub struct NoMatchesFoundError {
     pub message: String,
     /// Canonical absolute path of the file that was searched.
     pub file_path: std::path::PathBuf,
-    /// Full file text from the same read the edit used when reporting no match.
+    /// Full file text from the same read the edit used when reporting no match. In-process only: never serialized on the
+    /// wire (avoids leaking fresher or broader file content than the read/edit path already loaded). Used for `StrReplace`
+    /// fuzzy hints without a second `read_file`.
     #[serde(default, skip_serializing)]
     #[schemars(skip)]
     pub file_snapshot_at_edit: Option<String>,
@@ -309,6 +330,8 @@ pub enum SearchReplaceOutput {
     EditsApplied(SearchReplaceEditsApplied),
     MultipleMatchesFound(String),
     /// The `old_string` was not found in the file.
+    /// Carries the canonical absolute path so reminders and outcome trackers
+    /// can do per-file accounting without needing extra context.
     NoMatchesFound(NoMatchesFoundError),
     InvalidInput(String),
     /// Target file does not exist
@@ -320,6 +343,7 @@ pub enum SearchReplaceOutput {
 pub struct BashOutput {
     pub output: Vec<u8>,
     /// ANSI-stripped and soft-wrapped output for model prompt.
+    /// Pre-baked at construction time so `to_prompt_format` is a simple read.
     #[serde(default)]
     pub output_for_prompt: String,
     pub exit_code: i32,
@@ -331,14 +355,19 @@ pub struct BashOutput {
     pub description: Option<String>,
     /// the current working directory after the command completes
     pub current_dir: String,
-    /// Path to the output file where full output is stored. Use read_file tool to retrieve full output when truncated.
+    /// Path to the output file where full output is stored.
+    /// Use read_file tool to retrieve full output when truncated.
     pub output_file: String,
     /// Total bytes of output (before truncation).
     pub total_bytes: usize,
-    /// Incremental output delta (new bytes since last notification).
+    /// Incremental output delta (new bytes since last notification). When present, consumers should append to their
+    /// accumulated buffer instead of replacing with `output`. When `Some(vec![])`, consumers should clear their accumulated
+    /// buffer (reset signal). When `None`, the consumer should use `output` as the full buffer.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub output_delta: Option<Vec<u8>>,
-    /// Set by the grok_build `run_terminal_cmd` implementation when the command was detected as a bare `echo "<msg>"`.
+    /// Set by the grok_build `run_terminal_cmd` implementation when the command was detected as a bare `echo "<msg>"` (or close variant: echo -n,
+    /// echo -e, simple printf for literal output, etc.). Telemetry / statistics on this pattern for the grok_build backend. Potential doom-loop /
+    /// stagnation signals (repeated trivial echoes are a common "no progress" signal). Model hints (see BareEchoHintState in the bash tool).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub was_bare_echo: bool,
 }
@@ -366,12 +395,17 @@ pub struct BackgroundTaskStarted {
     /// Human-readable summary
     pub summary: String,
     /// Pre-resolved hint text telling the model how to retrieve output.
+    /// Built by the tool's run() using resolved tool/param names.
     #[serde(default)]
     pub retrieval_hint: String,
-    /// Optional pre-formatted prompt body.
+    /// Optional pre-formatted prompt body. When set, `to_prompt_format` uses this string verbatim instead of the default
+    /// `<task-id>...</task-id>` XML envelope. Used by namespace-specific adapters that need to emit a different
+    /// model-visible shape without disturbing the structured fields above (which other consumers still parse).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pre_formatted: Option<String>,
-    /// PID of the spawned shell process, when available.
+    /// PID of the spawned shell process, when available. Surfaced by
+    /// adapters in their background-start template; left as `None` when the
+    /// underlying backend cannot report a PID (e.g. ACP/remote terminals).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
 }
@@ -469,7 +503,9 @@ impl WebFetchOutput {
 }
 use xai_tool_types::KillTaskOutput;
 use xai_tool_types::TaskOutputOutput;
-/// Output schema for the bash tool.
+/// Output schema for the bash tool. The bash tool can either complete synchronously (`Bash`) or be
+/// started in the background (`BackgroundTaskStarted`). This enum exists to provide a precise JSON
+/// Schema via the `Tool::Output` associated type.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type")]
 pub enum BashToolOutput {
@@ -522,7 +558,9 @@ pub enum ToolOutput {
     SendMessage(crate::implementations::grok_build::send_message::SendMessageOutput),
     /// Dynamic output for runtime-registered tools (MCP, test tools, etc.)
     Dynamic(DynamicOutput),
-    /// Generic text output for tools that produce simple formatted text (e.g., memory_search, memory_get).
+    /// Generic text output for tools that produce simple formatted text
+    /// (e.g., memory_search, memory_get). The string is the pre-formatted
+    /// prompt text — no additional rendering is needed.
     Text(TextOutput),
     #[from(skip)]
     ImageGen(MediaGenOutput),
@@ -870,7 +908,9 @@ pub struct TodoWriteSuccess {
     #[schemars(skip)]
     pub state: TodoState,
 }
-/// Output from the TodoWrite tool.
+/// Output from the TodoWrite tool. Follows the error-as-output-variant pattern (like
+/// `ReadFileOutput`, `SearchReplaceOutput`) so consumers (Python side, ACP layer) can distinguish
+/// tool-logic errors from infrastructure errors.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum TodoWriteOutput {
     /// Successfully updated todo state.
@@ -878,6 +918,8 @@ pub enum TodoWriteOutput {
     /// Duplicate todo ID found in the input.
     DuplicateId(String),
     /// Argument validation failed (model-facing message is returned verbatim).
+    /// Used so missing-field errors surface as the terse `Invalid argument: …`
+    /// line, instead of the framework's wrapper around a `ToolError`.
     InvalidArgument(String),
 }
 /// Why the session plan file is not a ready (empty/non-empty) file.
@@ -896,7 +938,9 @@ pub enum PlanFileSeedFailure {
     /// No `FileSystem` resource or no absolute path was available to seed.
     Unavailable,
 }
-/// Result of probing / seeding the session plan file on `enter_plan_mode`.
+/// Result of probing / seeding the session plan file on `enter_plan_mode`. Defaults to
+/// `Missing(NotCreated)` when the field is absent on older payloads (fail-closed in
+/// `to_prompt_format`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanFileSeedStatus {
@@ -912,17 +956,22 @@ impl Default for PlanFileSeedStatus {
         Self::Missing(PlanFileSeedFailure::NotCreated)
     }
 }
-/// Output from the `EnterPlanMode` tool. Confirms plan mode entry and reports
-/// session plan-file seed status.
+/// Output from the `EnterPlanMode` tool. Confirms plan mode entry and reports session plan-file
+/// seed status. The tool may create an empty session plan file (never truncating non-empty
+/// content); broader read-only enforcement is handled by orchestration.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum EnterPlanModeOutput {
     /// Successfully signaled plan mode entry.
     Entered {
-        /// Confirmation message for the model, nudging it into exploration/planning behavior.
+        /// Confirmation message for the model, nudging it into
+        /// exploration/planning behavior.
         message: String,
-        /// Absolute or display path to the plan file so the model knows where to write its plan immediately.
+        /// Absolute or display path to the plan file so the model knows
+        /// where to write its plan immediately.
         plan_file_path: String,
-        /// Pre-resolved tool name hints for `to_prompt_format()`.
+        /// Pre-resolved tool name hints for `to_prompt_format()`. Resolved at runtime via
+        /// `TemplateRenderer` so no tool names are hardcoded. Falls back to canonical names when
+        /// the renderer is unavailable.
         #[serde(default)]
         tool_hints: EnterPlanModeToolHints,
         /// Probe / seed outcome; defaults to `Missing` when absent.
@@ -941,7 +990,8 @@ pub struct EnterPlanModeToolHints {
     /// Client-facing name for `exit_plan_mode` (ToolKind::ExitPlan).
     #[serde(default = "EnterPlanModeToolHints::default_exit_plan")]
     pub exit_plan: String,
-    /// Client-facing name for the subagent `task` tool (ToolKind::Task). Empty when the task tool is not registered.
+    /// Client-facing name for the subagent `task` tool (ToolKind::Task).
+    /// Empty when the task tool is not registered.
     #[serde(default)]
     pub task: String,
 }
@@ -962,25 +1012,31 @@ impl EnterPlanModeToolHints {
         "exit_plan_mode".to_owned()
     }
 }
-/// Output from the `AskUserQuestion` tool.
+/// Output from the `AskUserQuestion` tool. This is a thin signal — the tool sends the questions to the client via a notification and returns a
+/// confirmation. The actual answers come back from the client as the tool result (handled by the orchestration layer). Because the answers are
+/// provided by the client asynchronously (the user interacts with a UI), the tool output here just confirms the questions were dispatched.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum AskUserQuestionOutput {
     /// Questions were successfully dispatched to the client for user input.
+    /// Used during migration fallback when `UserQuestionSender` is not yet
+    /// injected by the shell.
     QuestionsSent {
         /// Confirmation message for the model.
         message: String,
         /// Number of questions sent.
         question_count: usize,
     },
-    /// The user has responded (or cancelled). The `message` is the
-    /// fully-formatted tool result string produced by the format module.
+    /// The user has responded (or cancelled). The `message` is the fully-formatted tool result
+    /// string produced by the format module. All four user paths (accepted, chat about this, skip
+    /// interview, cancel) return this variant with `ToolCall` status `Completed`.
     UserAnswered {
         /// Pre-formatted tool result string for the model.
         message: String,
     },
 }
-/// Output from the `ExitPlanMode` tool. The tool reads the plan file from
-/// disk and surfaces its content.
+/// Output from the `ExitPlanMode` tool. The tool reads the plan file from disk and surfaces its
+/// content. The orchestration layer / client is responsible for presenting the plan to the user for
+/// approval and determining the exit outcome.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ExitPlanModeOutput {
     /// Plan file had content — surfaced for approval.
@@ -1018,7 +1074,9 @@ pub struct MCPOutput {
     pub is_timeout: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_error: bool,
-    /// Pre-truncation image captures for session harvest (same contract as [`FileContent::extracted_images`]).
+    /// Pre-truncation image captures for session harvest (same contract as
+    /// [`FileContent::extracted_images`]). Must survive ToolDyn hub
+    /// `to_value`/`from_value`; session drains before PostToolUse and ACP.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extracted_images: Vec<crate::util::base64_images::ExtractedImage>,
 }

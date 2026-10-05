@@ -1,4 +1,5 @@
 //! The managed-config fetch/response contract: its errors, response parsing, and envelope picking.
+//! Also holds fetched-envelope verification and the apply outcome the sync orchestration consumes.
 
 use serde::{Deserialize, Serialize};
 use xai_grok_config::signed_policy::now_unix;
@@ -64,10 +65,10 @@ pub(super) struct ManagedConfigResponse {
     pub(super) team_id: Option<String>,
     pub(super) managed_config: Option<String>,
     pub(super) requirements: Option<String>,
-    /// The signed envelopes (additive; absent from old servers), primary first: a rollover server dual-signs, each payload signed.
+    /// The signed envelopes (additive; absent from old servers), primary first: a rollover server dual-signs, each payload signed by its own key.
     #[serde(default)]
     pub(super) signatures: Option<Vec<xai_grok_config::signed_policy::SignatureEnvelope>>,
-    /// The is-managed claim envelopes (additive.
+    /// The is-managed claim envelopes (additive; absent from old servers), same rotation shape as `signatures`, persisted as their own sidecar.
     #[serde(default)]
     pub(super) managed_identity_signatures:
         Option<Vec<xai_grok_config::signed_policy::SignatureEnvelope>>,
@@ -78,9 +79,9 @@ impl ManagedConfigResponse {
         self.deployment_id.is_some() || self.team_id.is_some()
     }
 
-    /// The signed envelope to verify, when the server included any. Picks the
-    /// first `signatures` entry whose key_id is in the embedded trusted set,
-    /// else the first entry.
+    /// The signed envelope to verify, when the server included any.
+    /// Picks the first `signatures` entry whose key_id is in the embedded trusted set, else the first entry.
+    /// The outer key_id only picks; verification re-selects the key from the signed bytes.
     pub(super) fn signature_sidecar(
         &self,
     ) -> Option<xai_grok_config::signed_policy::SignatureEnvelope> {

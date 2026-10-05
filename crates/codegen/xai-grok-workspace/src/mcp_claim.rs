@@ -1,4 +1,27 @@
 //! Which tool ids a session's MCP servers may advertise.
+//!
+//! Pure planning, kept apart from the bridge lifecycle in `mcp.rs` so the
+//! rules are testable without a hub or live transports. Invariants:
+//!
+//! - a native tool id is never claimed by any MCP server;
+//! - a first-party server (an endpoint the bind config designated with
+//!   [`BindMcpConfig::with_first_party_servers`]) outranks every third-party
+//!   server for an id, exactly as natives outrank MCP — a user-configured
+//!   server can therefore never remove an app-defined tool by offering the
+//!   same name;
+//! - within one tier an id offered by two servers is ambiguous and nobody
+//!   claims it, rather than letting start order decide;
+//! - the per-session cap is spent first-party first, so a third-party
+//!   server's tool count can never starve the app's tools.
+//!
+//! The first-party rule is the one way an id can change owner while staying
+//! claimed: a first-party server that starts after a third-party sibling
+//! already advertised the id takes it over. The hub reconciler
+//! (`mcp::reconcile_session_tools`) therefore diffs owners, not just the
+//! owned set, because the hub's same-life re-register is a no-op that would
+//! otherwise keep the sibling's handler.
+//!
+//! [`BindMcpConfig::with_first_party_servers`]: crate::config::BindMcpConfig::with_first_party_servers
 
 use std::collections::{HashMap, HashSet};
 
@@ -8,7 +31,9 @@ use xai_tool_protocol::ToolId;
 /// first and wins collisions with a higher one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum McpServerTier {
-    /// A local app endpoint named in the bind config's first-party set.
+    /// A local app endpoint named in the bind config's first-party set. Set
+    /// only from that config, never inferred from the server's own
+    /// behaviour, so a user-configured server cannot promote itself.
     FirstParty,
     /// Every other server, including every user-configured one.
     ThirdParty,
@@ -23,12 +48,13 @@ pub(crate) struct ClaimOffer {
     pub(crate) tool_ids: Vec<ToolId>,
 }
 
-/// Ids each server may advertise, first-party first then name order, plus the
-/// counts the caller logs.
+/// Ids each server may advertise, first-party first then name order, plus the counts the caller logs.
+/// Every offered server appears in `claims`, empty if it kept nothing, so a caller can reset each server's recorded ownership.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ClaimPlan {
     pub(crate) claims: Vec<(String, Vec<ToolId>)>,
-    /// Ids refused for a collision.
+    /// Ids refused for a collision (native, or ambiguous within the tier, or
+    /// a third-party id a first-party server also offers).
     pub(crate) rejected: usize,
     /// Ids refused only because the session's cap was already spent.
     pub(crate) over_cap: usize,

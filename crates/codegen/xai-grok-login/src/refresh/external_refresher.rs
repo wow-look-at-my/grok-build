@@ -15,13 +15,17 @@ use super::RefreshOutcome;
 use super::TokenRefresher;
 
 /// Escalate non-timeout `PreRequest` run failures to `PermanentFailure` after this many consecutive strikes.
+/// A permanent verdict blocks unattended retry for `PERMANENT_FAILURE_TTL`, which on a headless box is a multi-minute window of turns sent with no credential at all.
+/// A one-off provider blip (a briefly unreachable token authority, a spawn hiccup) must therefore stay transient and be retried. For an interactive-only provider that is exactly the wrong message, so those stay single-strike permanent and the client routes straight into the provider's login flow.
 const MAX_CONSECUTIVE_RUN_FAILURES: u32 = 5;
 
 /// Spacing between runs once no sendable token is left.
+/// Every call is then a genuine attempt to get one, so the ladder's cooldown does not apply; this only folds a burst of concurrent pre-flights (startup makes several within a millisecond) into a single run.
 const TOKENLESS_RUN_SPACING: Duration = Duration::from_secs(1);
 
-/// How long after the `n`th consecutive failed run the binary is left alone
-/// while a sendable token is cached.
+/// How long after the `n`th consecutive failed run the binary is left alone while a sendable token is cached.
+/// Every `auth()` in the early-invalidation window enters `refresh_chain` (each turn's pre-flight, every tool bearer lookup, the proactive loop), so without this the strike budget is spent at call rate, not wall-clock rate: a busy turn burns five strikes in seconds.
+/// The cooldown makes the ladder time-based regardless of how often callers ask. It is the jitter-free [`refresh_failure_backoff`] schedule, so the proactive loop's wake (the same schedule plus jitter) always lands at or after the cooldown and gets a real run.
 fn run_cooldown(strikes: u32) -> Duration {
     refresh_failure_backoff(strikes)
 }
@@ -30,6 +34,7 @@ fn run_cooldown(strikes: u32) -> Duration {
 #[derive(Default)]
 struct StrikeLadder {
     /// Issuance the strikes belong to (`None` when nothing is cached).
+    /// A different issuance (login, hot-swap, sibling adoption — including a re-issue of the same opaque bearer with renewed metadata) starts a fresh ladder, so it neither inherits strikes nor sits out a cooldown it did not earn.
     generation: Option<CredentialGeneration>,
     strikes: u32,
     last_failure: Option<Instant>,
@@ -67,8 +72,8 @@ impl StrikeLadder {
     }
 }
 
-/// Refreshes by re-running the operator's external auth binary via the async
-/// external-command runner.
+/// Refreshes by re-running the operator's external auth binary via the async external-command runner.
+/// Returns data only; mutation lives in `refresh_chain` (honors the [`TokenRefresher`] no-mutation contract).
 pub struct ExternalBinaryRefresher {
     runner: Arc<dyn ExternalCommandRunner>,
     snapshot: Arc<dyn AuthSnapshot>,
@@ -153,8 +158,8 @@ impl ExternalBinaryRefresher {
 impl TokenRefresher for ExternalBinaryRefresher {
     async fn refresh(&self, reason: RefreshReason) -> RefreshOutcome {
         tracing::debug!(?reason, "auth: external binary refresh starting");
-        // See MAX_CONSECUTIVE_RUN_FAILURES: only unattended pre-request
-        // renewals get the transient ladder.
+        // See MAX_CONSECUTIVE_RUN_FAILURES: only unattended pre-request renewals get the transient ladder.
+        // A new reason must pick a side here rather than inherit one.
         let ladder_applies = match reason {
             RefreshReason::PreRequest => true,
             RefreshReason::ServerRejected => false,
@@ -187,9 +192,7 @@ impl TokenRefresher for ExternalBinaryRefresher {
                 *self.ladder.lock() = StrikeLadder::default();
                 RefreshOutcome::success(auth)
             }
-            // A timeout is the contract's interactive-required signal
-            // (conforming providers decline a headless `GROK_AUTH_EXPIRED=1`
-            // run fast.
+            // A timeout is the contract's interactive-required signal (conforming providers decline a headless `GROK_AUTH_EXPIRED=1` run fast; only one waiting on a human outlives the budget), so it stays a single-strike permanent verdict whatever the ladder says.
             Err(ExternalRefreshError::TimedOut) => {
                 xai_grok_telemetry::unified_log::warn(
                     "auth: external binary refresh timed out",
@@ -329,6 +332,7 @@ mod tests {
         assert_eq!(runner.calls(), 1, "the single run gets the whole 7s budget");
     }
 
+    /// A `ServerRejected` refresh means a user-facing 401 is already in hand.
     /// A failed run must stay single-strike permanent so the turn surfaces the provider-login remedy instead of self-healing "wait it out" advice.
     #[tokio::test]
     async fn external_binary_server_rejected_failure_is_single_strike_permanent() {
@@ -349,6 +353,7 @@ mod tests {
         assert_eq!(runner.calls(), 1);
     }
 
+    /// A `ServerRejected` run ignores the ladder's cooldown: the 401 recovery needs a real verdict now, not a "still cooling down" transient.
     #[tokio::test(start_paused = true)]
     async fn server_rejected_run_bypasses_the_cooldown() {
         let runner = Arc::new(FakeRunner::new(vec![]));
@@ -394,6 +399,7 @@ mod tests {
             refresher.refresh(RefreshReason::PreRequest).await,
             RefreshOutcome::TransientFailure { .. }
         ));
+        // A burst of pre-flights well past the strike budget, all inside strike 1's cooldown.
         for _ in 0..(MAX_CONSECUTIVE_RUN_FAILURES * 4) {
             match refresher.refresh(RefreshReason::PreRequest).await {
                 RefreshOutcome::TransientFailure { message } => {
@@ -409,6 +415,7 @@ mod tests {
         );
         assert_eq!(refresher.ladder.lock().strikes, 1);
 
+        // Once the cooldown passes the next call runs again and lands strike 2.
         wait_out_cooldown(1).await;
         assert!(matches!(
             refresher.refresh(RefreshReason::PreRequest).await,
@@ -425,6 +432,7 @@ mod tests {
         let runner = Arc::new(FakeRunner::new(vec![]));
         let snapshot = FakeSnapshot::sendable("k");
         let refresher = refresher(&runner, &snapshot);
+        // Strikes 1..3 while the token is sendable: the cooldown climbs to 20 s.
         for strike in 1..=3 {
             assert!(matches!(
                 refresher.refresh(RefreshReason::PreRequest).await,
@@ -435,6 +443,7 @@ mod tests {
             }
         }
         assert_eq!(runner.calls(), 3);
+        // 2 s into strike 3's 20 s cooldown the token crosses the send horizon.
         tokio::time::advance(Duration::from_secs(2)).await;
         snapshot.set_sendable(false);
         assert!(matches!(
@@ -467,6 +476,7 @@ mod tests {
         let runner = Arc::new(FakeRunner::new(vec![]));
         let snapshot = FakeSnapshot::sendable("old");
         let refresher = refresher(&runner, &snapshot);
+        // Four strikes against "old": one more would escalate, and its cooldown is 40 s.
         for strike in 1..MAX_CONSECUTIVE_RUN_FAILURES {
             assert!(matches!(
                 refresher.refresh(RefreshReason::PreRequest).await,
@@ -639,6 +649,7 @@ mod tests {
         assert_eq!(run_cooldown(1), Duration::from_secs(5));
         assert_eq!(run_cooldown(2), Duration::from_secs(10));
         assert_eq!(run_cooldown(4), Duration::from_secs(40));
+        // Time from strike 1 to the escalating strike: the sum of the intervening cooldowns.
         let span: Duration = (1..MAX_CONSECUTIVE_RUN_FAILURES).map(run_cooldown).sum();
         assert_eq!(span, Duration::from_secs(75));
         assert_eq!(
@@ -701,6 +712,7 @@ mod tests {
             refresher.refresh(RefreshReason::PreRequest).await,
             RefreshOutcome::Success(_)
         ));
+        // Two more failures are strikes 1 and 2 of a fresh ladder, not 3 and 4 of the old one.
         for strike in 1..=2 {
             match refresher.refresh(RefreshReason::PreRequest).await {
                 RefreshOutcome::TransientFailure { .. } => {}

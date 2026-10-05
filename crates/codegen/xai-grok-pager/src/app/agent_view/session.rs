@@ -22,8 +22,8 @@ use ratatui::layout::Rect;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 use xai_grok_telemetry::events::{CancellationCompleted, CancellationScope};
-/// Approve/build after EndTurn is only for backends that implement
-/// ExecutePlan.
+/// Approve/build after EndTurn is only for backends that implement ExecutePlan.
+/// Default off; `AppView` / `test_agent_view` turn it on for those backends and tests.
 fn post_turn_plan_review_default() -> bool {
     false
 }
@@ -34,8 +34,8 @@ impl AgentView {
         self.last_turn_summary_gen = self.last_turn_summary_gen.wrapping_add(1);
     }
     /// Bind this view to a root session id; when the id actually changes, reset the reconnect cursor and both dedup highwaters (ACP and xAI).
-    /// All of them are meaningless against another session's event-id history. A stale cursor relies on exact-match failure for safety; a
-    /// stale highwater could dedup-drop the new session's events outright.
+    /// All three are meaningless against another session's event-id history.
+    /// A stale cursor relies on exact-match failure for safety; a stale highwater could dedup-drop the new session's events outright.
     pub(crate) fn bind_session_id(&mut self, session_id: agent_client_protocol::SessionId) {
         if self.session.session_id.as_ref() != Some(&session_id) {
             self.session_binding_epoch = self.session_binding_epoch.wrapping_add(1);
@@ -133,8 +133,8 @@ impl AgentView {
     pub(crate) fn superseded_mode_request(&self, mode_id: &str) -> Option<&ModeRequest> {
         superseded_mode_request(&self.mode_requests, mode_id)
     }
-    /// Forget the outstanding mode-change requests: the shell has reported
-    /// the mode this session is in, so nothing is left to attribute.
+    /// Forget the outstanding mode-change requests: the shell has reported the
+    /// mode this session is actually in, so nothing is left to attribute.
     pub(crate) fn clear_mode_requests(&mut self) {
         self.mode_requests.clear();
     }
@@ -515,8 +515,8 @@ impl AgentView {
             xai_grok_telemetry::session_ctx::log_event(event);
         }
     }
-    /// Start the acknowledgment watch for a prompt this client drained and
-    /// sent.
+    /// Start the acknowledgment watch for a prompt this client just drained and sent.
+    /// Chat sessions never arm: the gateway bridge has no queue broadcast, so their first signal is the first delta.
     pub(crate) fn arm_prompt_ack(&mut self, prompt_id: &str, now: Instant) {
         if self.chat_kind {
             return;
@@ -593,11 +593,14 @@ impl AgentView {
             wall_since_ms(qv.opened_at_wall_ms, chrono::Utc::now().timestamp_millis());
     }
     /// How long leftover `isReplay` updates stay accepted after `loading_replay` clears.
+    /// Long enough for the FIFO to drain another session's ACP events from its head after the Unrelated firehose timeout releases the load barrier.
     pub(crate) const LATE_REPLAY_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
     pub(crate) fn arm_late_replay_grace(&mut self) {
         self.late_replay_until = Some(std::time::Instant::now() + Self::LATE_REPLAY_GRACE);
     }
     /// Whether a replayed (`isReplay`) update should be applied right now.
+    /// True while a `session/load` replay window is open, or while the post-load grace for a late replay tail runs (see `late_replay_until`).
+    /// Anything else is a misrouted replay against a live transcript.
     pub(crate) fn accepts_replayed_update(&self) -> bool {
         self.session.loading_replay
             || self
@@ -781,8 +784,8 @@ impl AgentView {
         self.flush_pending_follow_ups(&prompt_id);
     }
     /// Finalize any open reload window as FAILED, regardless of generation.
-    /// An open window would corrupt the incoming load's batch/replay
-    /// bookkeeping and defer its results.
+    /// An open window would corrupt the incoming load's batch/replay bookkeeping and defer its results.
+    /// The window's pending re-init completion later no-ops (generation gone).
     pub(crate) fn abort_session_reload(&mut self) {
         if let Some(reload) = self.session_reload.take()
             && self.apply_reload_outcome(reload, false)
@@ -813,8 +816,9 @@ impl AgentView {
             None => false,
         }
     }
-    /// Whether a running prompt reported on a `session/load` (resume / reconnect) is adoptable by THIS agent. Requires the synthetic-turn guard ([`acp_handler::should_adopt_running_prompt`]) and that the turn did not
-    /// already end in this load's replay.
+    /// Whether a running prompt reported on a `session/load` (resume / reconnect) is adoptable by THIS agent.
+    /// Requires the synthetic-turn guard ([`acp_handler::should_adopt_running_prompt`]) and that the turn did not already end in this load's replay.
+    /// Adopting it would re-strand the viewer on "Waiting…".
     pub(crate) fn should_adopt_running_prompt(&self, prompt_id: &str) -> bool {
         crate::app::acp_handler::should_adopt_running_prompt(prompt_id)
             && !self.replayed_terminal_prompts.contains(prompt_id)
@@ -940,9 +944,9 @@ impl AgentView {
         }
         finalized
     }
-    /// Resolve a closed window per those [`SessionReload`] outcomes. The success-with-cursor branch *reuses* the stash and moves the tail
-    /// entries into it: nothing multi-MB drops, so callers must NOT purge. (A full-arena purge there would madvise away warm pages on the most
-    /// common reconnect outcome, once per open tab.)
+    /// Resolve a closed window per the three [`SessionReload`] outcomes.
+    /// The success-with-cursor branch *reuses* the stash and moves the tail entries into it: nothing multi-MB drops, so callers must NOT purge.
+    /// (A full-arena purge there would madvise away warm pages on the most common reconnect outcome, once per open tab.)
     #[must_use = "purge retained memory iff a heavy transient dropped"]
     fn apply_reload_outcome(&mut self, reload: SessionReload, success: bool) -> bool {
         if let Some(pid) = self.loading_placeholder_id.take() {
@@ -1074,9 +1078,8 @@ impl AgentView {
             now_ms,
         }))
     }
-    /// Turn activity for the status spinner: an implicit "no activity" gap
-    /// during a running inference turn resolves to an explicit
-    /// [`WaitingReason`].
+    /// Turn activity for the status spinner: an implicit "no activity" gap during a running inference turn resolves to an explicit [`WaitingReason`].
+    /// `TaskOutput` / `Subagent` waits also get a display subject from live bg-task or subagent state so the spinner can read `{description}…`.
     pub(crate) fn resolve_turn_activity(&self) -> Option<crate::acp::tracker::TurnActivity> {
         self.resolve_turn_activity_unenriched()
             .map(|activity| self.enrich_waiting_activity(activity))
@@ -1215,8 +1218,8 @@ impl AgentView {
                 }
             })
     }
-    /// Whether a foreground subagent (`task`/`spawn_subagent`, not
-    /// `run_in_background`) is running.
+    /// Whether a foreground subagent (`task`/`spawn_subagent`, not `run_in_background`) is currently running.
+    /// The parent turn is blocked on it, so the spinner should read as a subagent wait.
     fn has_running_foreground_subagent(&self) -> bool {
         self.running_foreground_subagents().next().is_some()
     }
@@ -1275,6 +1278,8 @@ impl AgentView {
         }
     }
     /// Update context state with a full snapshot from live callers.
+    ///
+    /// No-op for gateway/chat-kind sessions: local GetSessionInfo / sampler breakdowns must not populate the context bar (remote owns context).
     pub fn apply_full_context_info(&mut self, next: xai_grok_shell::session::ContextInfo) {
         if self.chat_kind {
             self.context_state = None;
@@ -1371,8 +1376,9 @@ impl AgentView {
             textarea_changed: delta.textarea_changed,
         });
     }
-    /// Set the sharing-enabled flag on this view and propagate it to the
-    /// slash-command registry.
+    /// Set the sharing-enabled flag on this view and propagate it to the slash-command registry.
+    /// The `/share` entry then stays hidden or visible in step with `AgentView::sharing_enabled`.
+    /// Use this instead of mutating `sharing_enabled` directly on agent creation or session load, so the field and registry can't drift.
     pub fn set_sharing_enabled(&mut self, enabled: bool) {
         self.sharing_enabled = enabled;
         self.prompt
@@ -1380,7 +1386,7 @@ impl AgentView {
             .registry_mut()
             .set_share_visible(enabled);
     }
-    /// Set [`Self::billing_surface_visible`] (see the field doc) and mirror it into this agent's slash controller, so both can't drift.
+    /// Set [`Self::billing_surface_visible`] (see the field doc) and mirror it into this agent's slash controller, so the two can't drift.
     pub fn set_billing_surface_visible(&mut self, visible: bool) {
         self.billing_surface_visible = visible;
         self.prompt
@@ -1393,12 +1399,13 @@ impl AgentView {
             .slash_controller
             .set_usage_command_visible(visible);
     }
-    /// Replace the restricted slash-command deny list in this agent's
-    /// registry (e.g. `/usage` denied on the free / X Basic tiers).
+    /// Replace the restricted slash-command deny list in this agent's registry (e.g. `/usage` denied on the free / X Basic tiers).
+    /// Deny wins over every `set_*_visible` gate.
     pub fn set_restricted_commands(&mut self, names: &[String]) {
         self.prompt.set_restricted_commands(names);
     }
     /// Show or hide the `/dashboard` slash command in this agent's registry.
+    /// Driven by the dashboard feature flag (`crate::views::dashboard::dashboard_enabled()`) at agent-creation time, independent of leader mode.
     pub fn set_dashboard_visible(&mut self, visible: bool) {
         self.prompt
             .slash_controller
@@ -1453,7 +1460,8 @@ impl AgentView {
 struct TurnElapsedParams<'a> {
     instant_elapsed: std::time::Duration,
     instant_paused: std::time::Duration,
-    /// `turnStartMs` wire anchor (UTC ms) and the prompt id it was stamped for; the anchor counts only.
+    /// `turnStartMs` wire anchor (UTC ms) and the prompt id it was stamped for; the anchor counts only when that id matches the running prompt.
+    /// (Interleaved deltas can re-stamp it with another prompt's anchor.)
     wall_anchor_ms: Option<i64>,
     wall_paused: std::time::Duration,
     anchor_prompt: Option<&'a str>,
@@ -1760,7 +1768,7 @@ mod resolve_turn_activity_tests {
         assert_eq!(reason.label(), "Subagent (abcdefghijklmnopqr…): Running:…");
     }
     /// Long description and long activity: the description gets first claim on the budget (inner ellipsis when cut).
-    /// The activity keeps at least its first chars.
+    /// The activity keeps at least its first 8 chars.
     #[test]
     fn subagent_wait_long_desc_and_activity_gives_description_priority() {
         let mut view = running_view();

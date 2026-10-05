@@ -11,7 +11,7 @@ pub use crate::grove_api::{
     GroveHardFail, NfsAdopted, NfsCreateDecision, NfsStatusView, NfsWorktreeOpts, SalvageReply,
     daemon_capability_class, grove_hard_fail,
 };
-#[allow(unused_imports)]
+#[allow(unused_imports)] // re-exported for discovery / execute when those modules are on
 pub(crate) use crate::grove_api::{default_grove_creation_mode, nfs_error_blocks_fallback};
 
 pub const WORKTREE_BACKING_DIR: &str = "worktree-backing";

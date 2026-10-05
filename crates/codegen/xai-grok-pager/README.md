@@ -1,6 +1,8 @@
 # xai-grok-pager
 
-Terminal UI (TUI) for Grok Build. Provides the interactive full-screen interface including the scrollback view, prompt input, session management, and all modal dialogs.
+Terminal UI (TUI) for Grok Build. Provides the interactive full-screen interface
+including the scrollback view, prompt input, session management, and all modal
+dialogs.
 
 ## Architecture
 
@@ -29,7 +31,7 @@ src/
 ## Key Concepts
 
 - **AppView** — owns the welcome screen, agent sessions, and global config
-- **AgentView** — one per session. Owns the prompt, scrollback, tool panes, and modals
+- **AgentView** — one per session; owns the prompt, scrollback, tool panes, and modals
 - **PromptWidget** — text editor component with file search (`@`), slash commands (`/`), history search, and paste elements
 - **Action/Effect** — Elm-style architecture: input → Action → dispatch → Effect → state update
 

@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 pub enum ConfigSource {
     /// Built-in / bundled with the binary.
     Builtin,
-    /// Bundled skill shipped with the binary (extracted to ~/.grok/skills/ or injected via bundled skill dirs).
+    /// Bundled skill shipped with the binary (extracted to ~/.grok/skills/
+    /// or injected via bundled skill dirs).
     Bundled { path: PathBuf },
     /// Server-synced (e.g. ~/.grok/server-skills from the skill store).
     Server { path: PathBuf },
@@ -18,7 +19,9 @@ pub enum ConfigSource {
     User { path: PathBuf },
     /// Plugin-provided component.
     Plugin { plugin_name: String, path: PathBuf },
-    /// config.toml `[mcp_servers.*]`, `[skills]`, etc. `path` is domain-specific: the declaring config.toml for MCP servers.
+    /// config.toml `[mcp_servers.*]`, `[skills]`, etc. `path` is
+    /// domain-specific: the declaring config.toml for MCP servers, the
+    /// skill's own SKILL.md for `[skills].paths` skills.
     ConfigToml { path: PathBuf },
     /// `~/.claude.json` MCP servers.
     ClaudeJson { path: PathBuf },

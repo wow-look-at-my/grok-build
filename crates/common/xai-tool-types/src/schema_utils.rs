@@ -2,13 +2,54 @@ use crate::types::{ArgumentType, SchemaType, ToolArgument};
 use serde_json::Value;
 use std::collections::HashSet;
 
-/// Parse a JSON Schema "parameters" object into a list of [`ToolArgument`]s. This function extracts flat, top-level properties from an "object"-typed schema. It is intentionally a minimal subset of JSON Schema — enough for render tools to work as they don't speak JSON schema. # Supported keywords | Keyword | Scope | Notes | |---|---|---| | `properties` | top-level | Each key becomes a [`ToolArgument`] | | `required` | top-level | Marks arguments as required | | `$defs` | top-level | Resolved when referenced by `$ref` | | `type` | per-property | String (`"string"`) or array (`["string", "null"]`) via [`SchemaType::from_value`] | | `description` | per-property | Mapped to [`ToolArgument::description`] | | `default` | per-property | Mapped to [`ToolArgument::default`] | | `enum` | per-property | Mapped to [`ToolArgument::allowed_values`] | | `minimum` / `maximum` | per-property | Inclusive numeric bounds | | `exclusiveMinimum` / `exclusiveMaximum` | per-property | Exclusive numeric bounds | | `$ref` | per-property | Resolved against `$defs` for enum types | | `anyOf` | per-property | Resolved: `$ref` branches follow `$defs`, type-only branches infer [`SchemaType`] | | `oneOf` | in `$defs` | `const` values extracted as enum variants | For composite types (`array`, `object`), the entire property schema is stored in [`ToolArgument::schema`] so downstream consumers can inspect nested structure. # Not supported (ignored) The following JSON Schema features are **not** extracted and will be silently dropped. Callers that need them should either pre-process the schema or use the raw `schema` field on composite arguments. - Composition: `allOf` - Conditionals: `if` / `then` / `else`, `dependentRequired`,
+/// Parse a JSON Schema "parameters" object into a list of [`ToolArgument`]s.
+///
+/// This function extracts flat, top-level properties from an
+/// "object"-typed schema. It is intentionally a minimal subset of
+/// JSON Schema — just enough for render tools to work as they don't speak JSON schema.
+///
+/// # Supported keywords
+///
+/// | Keyword | Scope | Notes |
+/// |---|---|---|
+/// | `properties` | top-level | Each key becomes a [`ToolArgument`] |
+/// | `required` | top-level | Marks arguments as required |
+/// | `$defs` | top-level | Resolved when referenced by `$ref` |
+/// | `type` | per-property | String (`"string"`) or array (`["string", "null"]`) via [`SchemaType::from_value`] |
+/// | `description` | per-property | Mapped to [`ToolArgument::description`] |
+/// | `default` | per-property | Mapped to [`ToolArgument::default`] |
+/// | `enum` | per-property | Mapped to [`ToolArgument::allowed_values`] |
+/// | `minimum` / `maximum` | per-property | Inclusive numeric bounds |
+/// | `exclusiveMinimum` / `exclusiveMaximum` | per-property | Exclusive numeric bounds |
+/// | `$ref` | per-property | Resolved against `$defs` for enum types |
+/// | `anyOf` | per-property | Resolved: `$ref` branches follow `$defs`, type-only branches infer [`SchemaType`] |
+/// | `oneOf` | in `$defs` | `const` values extracted as enum variants |
+///
+/// For composite types (`array`, `object`), the entire property schema
+/// is stored in [`ToolArgument::schema`] so downstream consumers can
+/// inspect nested structure.
+///
+/// # Not supported (ignored)
+///
+/// The following JSON Schema features are **not** extracted and will be
+/// silently dropped. Callers that need them should either pre-process
+/// the schema or use the raw `schema` field on composite arguments.
+///
+/// - Composition: `allOf`
+/// - Conditionals: `if` / `then` / `else`, `dependentRequired`,
 ///   `dependentSchemas`
 /// - Object keywords: `patternProperties`, `additionalProperties`,
 ///   `propertyNames`, `minProperties`, `maxProperties`
-/// - String keywords: `pattern`, `minLength`, `maxLength`, `format` - Array keywords: `items`, `prefixItems`, `minItems`, `maxItems`,
+/// - String keywords: `pattern`, `minLength`, `maxLength`, `format`
+/// - Array keywords: `items`, `prefixItems`, `minItems`, `maxItems`,
 ///   `uniqueItems`
-/// # Returns An empty `Vec` when `schema` has no `"properties"` key (or it is not an object). JSON Schema spec: <https://json-schema.org/understanding-json-schema>
+///
+/// # Returns
+///
+/// An empty `Vec` when `schema` has no `"properties"` key (or it is
+/// not an object).
+///
+/// JSON Schema spec: <https://json-schema.org/understanding-json-schema>
 pub fn parse_arguments_from_schema_lossy(schema: &serde_json::Value) -> Vec<ToolArgument> {
     let properties = match schema.get("properties").and_then(|p| p.as_object()) {
         Some(p) => p,
@@ -125,6 +166,8 @@ fn resolve_ref_type(
         None => return (None, None, None, None),
     };
 
+    // Pattern 1: `anyOf` — schemars uses this for `Option<Enum>` and
+    // union types.
     if let Some(any_of) = prop.get("anyOf").and_then(|v| v.as_array()) {
         // Check if any branch is a `$ref` to a `$defs` enum.
         for item in any_of {
@@ -161,6 +204,8 @@ fn resolve_ref_type(
         }
     }
 
+    // Pattern 2: direct `$ref` (no `anyOf` wrapper) — schemars uses
+    // this for non-optional enum fields.
     if let Some(ref_path) = prop.get("$ref").and_then(|v| v.as_str())
         && let Some(enum_name) = ref_path.strip_prefix("#/$defs/")
         && let Some(enum_def) = defs.and_then(|d| d.get(enum_name))
@@ -174,9 +219,9 @@ fn resolve_ref_type(
 
 /// Extract enum info from a `$defs` entry.
 ///
-/// Handles schemars patterns: - Compact: `{ "type": "string",
-/// "enum": ["a", "b"] }` - oneOf: `{ "oneOf": [{ "const": "a" },
-/// { "const": "b" }] }`
+/// Handles two schemars patterns:
+/// - Compact: `{ "type": "string", "enum": ["a", "b"] }`
+/// - oneOf:   `{ "oneOf": [{ "const": "a" }, { "const": "b" }] }`
 fn extract_enum_from_def(
     enum_def: &Value,
 ) -> (Option<ArgumentType>, Option<Vec<Value>>, Option<Value>) {

@@ -1,4 +1,14 @@
 //! The invariant suite: predicates over grouped `GROK_SCROLL_LOG` streams.
+//!
+//! Stall-safety: every timing predicate reads the RECORDER's clock (`ts_ms`, `ms_since_prev_flush`, `avg_interval_ms`), never the test process's.
+//! CI load can stretch host-side gesture delays but can only ever *widen* the producer-measured spacings.
+//! So no invariant here can false-fail on a loaded machine.
+//!
+//! Two invariants are declared here but checked by the matrix runner, not this module.
+//! [`InvariantId::Screen`] (the viewport visibly moved/clamped) needs `PtyHarness` marker positions.
+//! [`InvariantId::Quiet`] (no repaint churn after finalize) needs the harness frame watermark.
+//! They exist in the id enum so cells can declare them and the runner can route by [`InvariantId::is_log_side`].
+//! [`check_log_invariant`] panics if asked to evaluate them.
 
 use super::cells::ExpectedProfile;
 use super::gestures::{
@@ -21,30 +31,39 @@ pub enum InvariantId {
     /// I-DROP-EQ: finalize carries `dropped == backlog_after` (the producer constructs it that way; a mismatch is producer drift).
     #[strum(serialize = "I-DROP-EQ")]
     DropEq,
-    /// Skips promotion (immediate by design) and finalize (ignores the cadence gate).
+    /// Intra-stream flush spacing ≥ cadence−1. Skips promotion (immediate by design) and finalize (ignores the cadence gate).
     #[strum(serialize = "I-CADENCE")]
     Cadence,
+    /// I-CONS-W: forced-wheel totals are exact, `|applied+dropped| == trunc(events × wheel_lpt/ept × speed)` ±1.
+    /// The `MIN_LINES_PER_WHEEL_STREAM` substitution applies when the raw pricing truncates to zero.
+    /// Wheel pricing never includes carry.
     #[strum(serialize = "I-CONS-W")]
     ConsW,
-    /// Auto/trackpad totals stay in the accel-free to accel-max band.
+    /// Auto/trackpad totals stay in the accel-free to accel-max band. Effective accel tops at 2.5, so the 3.0 ceiling is loose but sound.
     #[strum(serialize = "I-CONS-A")]
     ConsA,
-    /// The G5 clause.
+    /// I-ACCEL: `1.0 ≤ accel ≤ 3.0` on every record, and `avg_interval_ms`, when present, is ≥ `ACCEL_MIN_INTERVAL_MS` (6).
+    /// The G5 clause: even ghostty-style 4ms duplicate reports must never drag the average under 6.
+    /// The producer excludes sub-6ms intervals from the window, so a lower value means that artifact guard regressed.
     #[strum(serialize = "I-ACCEL")]
     Accel,
-    /// `|carry| < 1.0`.
+    /// `|carry| < 1.0`. Wheel finalize zeroes carry, so the next start must echo 0 for either successor direction.
     #[strum(serialize = "I-CARRY")]
     Carry,
-    /// I-CFG: the `stream_start` config echo matches the cell's expected profile.
+    /// I-CFG: the `stream_start` config echo matches the cell's expected profile (mode/ept/wheel_lpt/trackpad_lpt/invert/speed).
+    /// It proves the cell's env actually selected the profile.
     #[strum(serialize = "I-CFG")]
     Cfg,
     /// Remuxed ept=1 prices at most one line per event. Attach only to accel-free gestures over 20ms; exactly 20ms still accel-bands.
     #[strum(serialize = "I-MUX-NO-OVER")]
     MuxNoOver,
-    /// I-SMOOTH-COAST: per stream, `Σ|flushed|` over flush-bearing records.
+    /// I-SMOOTH-COAST: per stream, `Σ|flushed|` over flush-bearing records with `events_since_flush == 0` stays ≤ cap.
+    /// Motion delivered after input stopped is at most one capped catch-up.
+    /// The jerk's coast-drain plus finalize re-price burst exceeds it (xfail until the finalize-decel fix).
     #[strum(serialize = "I-SMOOTH-COAST")]
     SmoothCoast,
     /// I-NO-DROP: every finalize has `dropped == 0`.
+    /// Attach to gestures the cap can keep up with; floods legitimately drop.
     #[strum(serialize = "I-NO-DROP")]
     NoDrop,
     /// I-SCREEN (harness-side): the viewport marker delta matches the gesture, moved on scroll and clamped at the bottom pin (G7).
@@ -56,8 +75,8 @@ pub enum InvariantId {
 }
 
 impl InvariantId {
-    /// Whether [`check_log_invariant`] can evaluate this id from the log
-    /// alone.
+    /// Whether [`check_log_invariant`] can evaluate this id from the log alone.
+    /// `false` means harness-side (screen/frame state), owned by the matrix runner.
     pub fn is_log_side(self) -> bool {
         !matches!(self, InvariantId::Screen | InvariantId::Quiet)
     }
@@ -168,7 +187,8 @@ fn check_drop_eq(groups: &[StreamGroup<'_>]) -> InvariantResult {
 }
 
 fn check_cadence(groups: &[StreamGroup<'_>]) -> InvariantResult {
-    // A stream's first flush-bearing record is skipped: its spacing is global.
+    // A stream's first flush-bearing record is skipped: its spacing is global, measured from the previous stream
+    // See `intra_stream_flush_spacings_ms`
     let floor = (REDRAW_CADENCE_MS - 1) as f64;
     for group in groups {
         for rec in group.flush_bearing().skip(1) {
@@ -397,9 +417,8 @@ mod tests {
     use super::super::log::{group_streams, parse_jsonl_str};
     use super::*;
 
-    // ── JSONL fixture builders
-    // ─────────────────────────────────────────
-    // Raw strings through parse_jsonl_str.
+    // ── JSONL fixture builders ─────────────────────────────────────────
+    // Raw strings through parse_jsonl_str so every fixture also exercises the wire schema (same stance as log.rs's producer-shaped constants)
 
     const C1: ExpectedProfile = ExpectedProfile {
         mode: "auto",
@@ -485,6 +504,7 @@ mod tests {
     }
 
     /// The real G4 signature: coast drain plus a finalize re-price burst with a drop.
+    /// Mid-stream it prices as unknown (~1 line/event), re-prices ×2.5 at the trackpad finalize, and discards the backlog beyond one capped flush.
     #[rustfmt::skip]
     fn jerk() -> Vec<String> {
         vec![
@@ -560,7 +580,7 @@ mod tests {
                 r#""ms_since_prev_flush":16.0"#,
                 r#""ms_since_prev_flush":8.0"#,
             );
-        // Flip-style finalize 8ms after the flush: also skipped.
+        // Flip-style finalize 8ms after the previous flush: also skipped.
         skipped[3] = skipped[3].replace(
             r#""ms_since_prev_flush":88.0"#,
             r#""ms_since_prev_flush":8.0"#,
@@ -568,9 +588,10 @@ mod tests {
         assert!(check(InvariantId::Cadence, &C1, &skipped).is_pass());
     }
 
-    /// Under-travel: a forced-wheel stream delivering a couple of lines short.
+    /// Under-travel: a forced-wheel stream delivering two lines short.
     #[test]
     fn cons_w_exact_totals_with_min_lines_substitution() {
+        // 6 events × (3/3) × 1.0 = 6 lines, delivered exactly; a second 1-event stream prices to 1.0, still at the MIN_LINES floor
         #[rustfmt::skip]
         let pass = vec![
             start(0.0, 0.0, "wheel", 1.0),
@@ -595,6 +616,7 @@ mod tests {
 
     #[test]
     fn cons_a_bounds_auto_totals() {
+        // 3 events on the C1 profile can never desire 100 lines (hi = 3 × max(1, 3×1) × 1 + 1 = 10)
         let mut fixture = canonical();
         fixture[6] = fixture[6].replace(r#""desired":3.0"#, r#""desired":100.0"#);
         assert_violated(check(InvariantId::ConsA, &C1, &fixture), "outside");
@@ -623,6 +645,7 @@ mod tests {
         fixture[4] = start(500.0, 1.4, "auto", 1.0);
         assert_violated(check(InvariantId::Carry, &C1, &fixture), "≥ 1.0");
 
+        // Wheel finalize (stream 2) must zero the carry into stream 3.
         let mut leak = canonical();
         leak[7] = start(700.0, 0.4, "auto", 1.0);
         assert_violated(check(InvariantId::Carry, &C1, &leak), "wheel finalize");
@@ -632,7 +655,7 @@ mod tests {
     fn cfg_rejects_echo_profile_mismatch() {
         assert!(check(InvariantId::Cfg, &C1, &canonical()).is_pass());
         let mut fixture = canonical();
-        fixture[0] = start(0.0, 0.0, "auto", 6.0);
+        fixture[0] = start(0.0, 0.0, "auto", 6.0); // speed echo differs from the expected 1.0
         assert_violated(check(InvariantId::Cfg, &C1, &fixture), "speed");
         let expected_wheel = ExpectedProfile {
             mode: "wheel",
@@ -644,6 +667,7 @@ mod tests {
         );
     }
 
+    /// Over-scroll on the conservative remuxed profile: more delivered lines than events at speed 1.0.
     #[test]
     fn mux_no_over_rejects_over_delivery() {
         let mut fixture = canonical();
@@ -652,7 +676,7 @@ mod tests {
         assert_violated(check(InvariantId::MuxNoOver, &C1, &fixture), "over-scroll");
     }
 
-    /// The jerk fixture violates exactly both xfail invariants of `c1_auto_g4_jerk_xfail`.
+    /// The jerk fixture violates exactly the two xfail invariants of `c1_auto_g4_jerk_xfail`.
     /// Nothing else in the core suite fails, which confines the expected failure to those rows.
     #[test]
     fn jerk_shape_violates_smooth_coast_and_no_drop_only() {

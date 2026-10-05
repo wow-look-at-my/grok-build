@@ -314,7 +314,9 @@ fn cancel_turn_in_finished_subagent_view_falls_through_to_root() {
 
 #[test]
 fn cancel_turn_forwards_trigger_hint_to_effect() {
-    // The key/mouse producer sets `cancel_trigger_hint` (here the dashboard stop).
+    // The key/mouse producer sets `cancel_trigger_hint` (here the dashboard stop) before dispatching CancelTurn
+    // `do_cancel_turn` must forward it onto `Effect::CancelTurn.trigger` (which becomes `_meta.cancelTrigger`) and consume it
+    // The Ctrl+C end-to-end test exercises the same path; only the `CancelTrigger` value differs across producers (ctrl_c/mouse/dashboard_stop)
     use crate::app::actions::CancelTrigger;
     let mut app = test_app_with_agent();
     let id = AgentId(0);
@@ -816,7 +818,9 @@ fn stop_click_cancels_running_wake_turn() {
 #[test]
 fn cancel_turn_leaves_shared_queue_for_agent_to_drain() {
     use crate::app::prompt_queue::QueueEntryWire;
-    // Prompts typed while a turn runs live on the server-authoritative shared queue (broadcast to all attached clients) The agent owns the drain.
+    // Prompts typed while a turn runs live on the server-authoritative shared queue (broadcast to all attached clients)
+    // The agent owns the drain: on cancel the FRONT queued prompt runs next (promoted server-side)
+    // So the pager must NOT pull it back into the input or mutate the queue locally; the `x.ai/queue/changed` rebroadcast is the source of truth
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     {
@@ -863,8 +867,8 @@ fn cancel_turn_leaves_shared_queue_for_agent_to_drain() {
     );
     assert_eq!(nth(q, 0).id, "q1");
     assert_eq!(nth(q, 1).id, "q2");
-    // A plain CancelTurn is emitted (no queued-prompt id threaded, no
-    // separate QueueRemove) The agent tears down the running turn.
+    // A plain CancelTurn is emitted (no queued-prompt id threaded, no separate QueueRemove)
+    // The agent tears down the running turn and promotes q1 as the next turn
     assert!(
         effects
             .iter()
@@ -1463,7 +1467,8 @@ fn cancel_turn_without_overlay_while_idle_is_noop_even_with_running_child() {
 
 #[test]
 fn cancel_turn_when_already_cancelling_resends_cancel() {
-    // A cancel that was sent but never resolved (lost notification or lost turn-end response) used to make every further Esc a silent no-op.
+    // A cancel that was sent but never resolved (lost notification or lost turn-end response) used to make every further Esc a silent no-op
+    // That permanently stranded the pane on "Cancelling…". Cancelling again must RE-SEND the (idempotent) cancel instead.
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents.get_mut(&id).unwrap().session.state = AgentState::TurnCancelling;
@@ -1749,7 +1754,8 @@ fn reconcile_suppresses_expected_send_now_cancel_without_wire_trigger() {
 
 #[test]
 fn reconcile_waits_for_grace_window() {
-    // A freshly-armed marker means the RPC response may still be in flight (healthy path: it lands milliseconds after the broadcast).
+    // A freshly-armed marker means the RPC response may still be in flight (healthy path: it lands milliseconds after the broadcast)
+    // Do not touch the turn yet
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     {
@@ -1778,7 +1784,8 @@ fn reconcile_waits_for_grace_window() {
 
 #[test]
 fn reconcile_drops_stale_marker_when_turn_already_resolved() {
-    // The normal path won the race (PromptResponse finished the turn, or a new turn was adopted) The marker is stale.
+    // The normal path won the race (PromptResponse finished the turn, or a new turn was adopted)
+    // The marker is stale and must be dropped without touching state or pushing a marker
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     let scrollback_before = get_agent(&app, id).scrollback.len();
@@ -1801,7 +1808,8 @@ fn reconcile_drops_stale_marker_when_turn_already_resolved() {
 
 #[test]
 fn reconcile_applies_stashed_running_adoption() {
-    // The failing sequence: a queued prompt was promoted server-side.
+    // The failing sequence: a queued prompt was promoted server-side while the cancelled turn's response was lost
+    // The reconcile must hand the pane to the promoted prompt (turn-start shim), not strand it Idle
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     {
@@ -2286,6 +2294,7 @@ fn prompt_history_loaded_sanitizes_skill_xml() {
 #[test]
 fn bg_task_killed_already_exited_clears_pending_kill_on_inactive_agent() {
     let mut app = two_agent_app_with_bg_task();
+    // Agent 1 has task-B-1 with pending_kill=true, active view is agent 0
 
     dispatch(
         Action::TaskComplete(TaskResult::BgTaskKilled {

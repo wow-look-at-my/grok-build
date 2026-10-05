@@ -1,4 +1,10 @@
 //! Hermetic git helpers for tests.
+//!
+//! When running under `bazel test`, the `GIT_BIN_PATH` environment variable
+//! points to a statically-linked git binary provided by Bazel.  The helpers
+//! in this module prepend that binary's directory to `PATH` so that
+//! `Command::new("git")` resolves to it instead of relying on a
+//! system-installed git.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Once, OnceLock};
@@ -66,7 +72,10 @@ pub fn ensure_hermetic_git_on_path() {
                     std::env::set_var("PATH", format!("{}:{}", bin_dir.display(), current_path));
                     // git-minimal spawns subcommands (`git stash` → `git
                     // update-index`) through its exec path, which is baked to
-                    // a build-machine prefix.
+                    // a build-machine prefix. Helpers live next to the binary,
+                    // so point the exec path there. Skip the host-fallback
+                    // wrapper (`git-host-fallback.sh`): host git must keep its
+                    // own exec path.
                     if git_path.file_name().is_some_and(|name| name == "git") {
                         std::env::set_var("GIT_EXEC_PATH", bin_dir);
                     }
@@ -76,8 +85,16 @@ pub fn ensure_hermetic_git_on_path() {
     });
 }
 
-/// Ensure the hermetic git binary is on `PATH` before running tests that need
-/// git.
+/// Ensure the hermetic git binary is on `PATH` before running tests that
+/// need git.  Call at the top of any `#[test]` that spawns `git` commands.
+///
+/// ```ignore
+/// #[test]
+/// fn my_git_test() {
+///     xai_test_utils::require_git!();
+///     // ... git commands work here ...
+/// }
+/// ```
 #[macro_export]
 macro_rules! require_git {
     () => {
@@ -131,7 +148,8 @@ fn git_command_with_identity(dir: &Path, args: &[&str]) -> std::process::Command
         .env("GIT_CONFIG_GLOBAL", empty_config_file())
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
-        // Callers assert on git's own wording, so pin the language the same way the configuration is pinned.
+        // Callers assert on git's own wording, so pin the language the same way
+        // the configuration is pinned.
         .env("LC_ALL", "C");
     cmd
 }
@@ -213,7 +231,9 @@ pub fn reflog_only_commit(worktree: &Path, when: Option<&str>) -> String {
     discarded
 }
 
-/// No git operations — callers stage/commit as needed.
+/// Write a grouped fan-out tree of ~`files` files (`files_per_dir` per
+/// directory, directories bucketed 100 per group) under `dir`. No git
+/// operations — callers stage/commit as needed.
 pub fn write_fanout_tree(dir: &Path, files: usize, files_per_dir: usize) {
     for d in 0..files.div_ceil(files_per_dir) {
         let sub = dir.join(format!("g{}", d / 100)).join(format!("d{d}"));

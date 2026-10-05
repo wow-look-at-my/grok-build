@@ -1,10 +1,17 @@
 //! Out-of-band per-turn capture of the model's streamed reasoning and text.
+//!
+//! Lives apart from `chat_state`: the model never sees this.
+//! It exists purely for trace export (`{session_id}/turn_N/streaming_partial.json`).
+//! The export happens when the canonical assistant turn never reached `record_assistant_response`.
+//! That covers a user cancel mid-stream, a sampler terminal error (e.g. `MaxTokensTruncation`), or a doomloop.
+//! In a doomloop every generation returns reasoning-only and the turn errors `reasoning_only`.
 
 use std::fmt::Write;
 
 use crate::session::acp_session::CapturePhase;
 
-/// Hard cap on total bytes (reasoning and text) accumulated across all of a turn's stream segments.
+/// Hard cap on total bytes (reasoning and text) accumulated across all of a turn's stream segments in a single `StreamingTurnCapture`.
+/// Past this we mark `truncated = true` and stop appending so a runaway extended-thinking turn (or a long doomloop) cannot blow memory.
 pub(crate) const STREAMING_CAPTURE_MAX_BYTES: usize = 8_000_000;
 
 /// Doom-loop recovery stamp on one generation: what the server reported and what the recovery did about it.
@@ -63,26 +70,35 @@ pub(crate) struct StreamingTurnCapture {
     /// Stream-start timestamp (ms epoch); the first retained generation's after finalize.
     pub(crate) started_at_ms: Option<i64>,
     /// Reasoning channel text.
+    /// The in-progress generation's during streaming; the retained generations' joined view after finalize.
     pub(crate) reasoning_text: String,
     /// Text channel content.
+    /// The in-progress generation's during streaming; the retained generations' joined view after finalize.
     pub(crate) response_text: String,
     /// Count of reasoning chunks (summed across retained generations after finalize).
     pub(crate) reasoning_chunks: u32,
     /// Count of text chunks (summed across retained generations after finalize).
     pub(crate) text_chunks: u32,
-    /// `true` if the retained reasoning was clipped at `STREAMING_CAPTURE_MAX_BYTES`.
+    /// `true` if the retained reasoning was clipped at `STREAMING_CAPTURE_MAX_BYTES` (recomputed at finalize from the retained segments).
+    /// Committed generations are cleared on `Completed` and never counted, so a clip inside one is not carried.
     pub(crate) truncated: bool,
     /// Why the capture was taken; set when the consumer takes it.
+    /// e.g. `"user_cancel"`, `"sampler_error:max_tokens_truncation"`.
     pub(crate) reason: Option<String>,
     /// Which streaming phase the model was last in (the last retained generation's after finalize).
     pub(crate) phase: CapturePhase,
     /// Finalized prior generations of this turn (one per inference call).
+    /// The in-progress generation lives in the flat fields above until `start_stream` or `finalize_for_upload` folds it in here.
+    /// A doomloop turn ends with several reasoning-only segments; a normal turn keeps none.
     #[serde(default)]
     pub(crate) segments: Vec<StreamSegment>,
     /// Number of model generations (inference calls) observed for this turn, one per `StreamStarted`.
+    /// Counted independently of how many segments are retained for upload, so a byte-capped doomloop still reports its true attempt count.
+    /// A large value is the doomloop signature.
     #[serde(default)]
     pub(crate) attempt_count: u32,
-    /// Reasoning-token count the sampler reported for the TERMINAL empty response (the last attempt).
+    /// Reasoning-token count the sampler reported for the TERMINAL empty response (the last attempt), not the doomloop sum.
+    /// Recorded even when the reasoning text hit the byte cap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reasoning_tokens: Option<u32>,
     /// Completion-token count from the terminal empty response.
@@ -114,6 +130,8 @@ impl StreamingTurnCapture {
     }
 
     /// Reset the capture in-place and stamp the new turn's identifiers.
+    /// Called from `StreamStarted` only when the prompt id changes (or from the first chunk if `StreamStarted` was dropped).
+    /// A same-turn restart (a doomloop's next reasoning-only generation) thus never wipes the segments already accumulated for this turn.
     pub(crate) fn begin_turn(&mut self, prompt_id: Option<String>, turn_number: u64) {
         *self = Self {
             prompt_id,
@@ -123,6 +141,8 @@ impl StreamingTurnCapture {
     }
 
     /// Open a fresh in-progress generation within the current turn.
+    /// Fold the previous in-progress slot into `segments` (if it streamed anything), stamp the new generation's start time, and count the attempt.
+    /// Same-turn restarts call this without `begin_turn`, so each generation is retained and counted separately.
     #[cfg(test)]
     pub(crate) fn start_stream(&mut self, started_at_ms: i64) {
         self.start_request_stream("test-request", started_at_ms);
@@ -216,6 +236,7 @@ impl StreamingTurnCapture {
     }
 
     /// Stamp the in-progress generation with a doom-loop recovery action.
+    /// Telemetry only; the stamp is carried into this generation's [`StreamSegment`] when the slot is folded.
     pub(crate) fn stamp_doom_loop(&mut self, stamp: DoomLoopSegmentStamp) {
         self.doom_loop = Some(stamp);
     }
@@ -247,7 +268,8 @@ impl StreamingTurnCapture {
         self.reasoning_chunks = 0;
         self.text_chunks = 0;
         self.phase = CapturePhase::default();
-        // Recompute `truncated` from what remains.
+        // Recompute `truncated` from what remains: dropping the slot's bytes may bring the turn back under the cap
+        // `append`'s sticky early-return must not suppress later uncommitted generations because a discarded committed generation tripped the cap
         self.truncated = self.total_bytes() >= STREAMING_CAPTURE_MAX_BYTES;
     }
 
@@ -263,8 +285,8 @@ impl StreamingTurnCapture {
 
     /// Append text to the in-progress generation, respecting the total byte cap across all of the turn's segments; clipped portions set `truncated`.
     pub(crate) fn append(&mut self, channel_is_reasoning: bool, text: &str) {
-        // Record the phase before the cap check so it stays accurate even
-        // when the bytes themselves are clipped The model is still.
+        // Record the phase before the cap check so it stays accurate even when the bytes themselves are clipped
+        // The model is still in this phase regardless of whether we retained the text
         self.phase = if channel_is_reasoning {
             CapturePhase::Reasoning
         } else {
@@ -301,15 +323,15 @@ impl StreamingTurnCapture {
     }
 
     /// In-progress assistant text only (reasoning excluded).
+    /// Retained `segments` are discarded same-turn attempts (doomloop resample / restart) and must not enter the customer OTEL `assistant_response`.
+    /// Empty after `clear_current_segment`; production emit then uses committed chat-state text for finished bubbles, plus this slot for uncommitted mid-stream text.
     pub(crate) fn assembled_response_text(&self) -> String {
         self.response_text.clone()
     }
 
-    /// Completed turns trust chat-state: the slot can still hold the last
-    /// bubble after a stream-drain timeout (`clear_request_segment` runs on
-    /// the sampling-event rail and is skipped when the 5s barrier fails
-    /// open). Interrupt / error paths keep the slot so a cancel after a prior
-    /// tool round still exports the in-progress bubble.
+    /// Completed turns trust chat-state: the slot can still hold the last bubble after a stream-drain timeout (`clear_request_segment` runs on the sampling-event rail and is skipped when the 5s barrier fails open).
+    /// Interrupt / error paths keep the slot so a cancel after a prior tool round still exports the in-progress bubble.
+    /// When both sides are non-empty, skip the join if `committed` already ends with `captured` so a stale slot cannot duplicate the last bubble.
     pub(crate) fn merge_assistant_response_for_otel(
         committed: String,
         captured: &str,
@@ -331,7 +353,8 @@ impl StreamingTurnCapture {
     /// Every retained generation (a doomloop retry, a cancel or error mid-stream) is therefore uploaded.
     pub(crate) fn finalize_for_upload(&mut self) {
         self.push_current_segment();
-        // `truncated` reflects only the retained reasoning.
+        // `truncated` reflects only the retained reasoning: committed generations were cleared on `Completed` (never counted)
+        // The in-progress slot was just folded in, so `total_bytes()` is exactly the kept bytes
         self.truncated = self.total_bytes() >= STREAMING_CAPTURE_MAX_BYTES;
         let mut reasoning = String::new();
         let mut response = String::new();
@@ -455,6 +478,8 @@ mod streaming_turn_capture_tests {
 
     #[test]
     fn same_turn_stream_starts_accumulate_segments() {
+        // Two `StreamStarted`s for the SAME prompt (a doomloop's two reasoning-only generations) must accumulate as two segments
+        // They must not wipe each other; the original bug left only the last generation
         let mut cap = StreamingTurnCapture::default();
         cap.begin_turn(Some("p1".to_owned()), 1);
         cap.start_stream(10);
@@ -477,7 +502,8 @@ mod streaming_turn_capture_tests {
 
     #[test]
     fn finalize_keeps_only_uncommitted_generations() {
-        // A committed generation (Completed clears the slot) never enters segments Every uncommitted generation is kept regardless of content.
+        // A committed generation (Completed clears the slot) never enters segments
+        // Every uncommitted generation is kept regardless of content: reasoning (doomloop), response text (cancel/error mid-answer), or a tool call
         let mut cap = StreamingTurnCapture::default();
         cap.begin_turn(Some("p1".to_owned()), 1);
         cap.start_stream(1);
@@ -522,7 +548,8 @@ mod streaming_turn_capture_tests {
 
     #[test]
     fn token_metadata_capture_is_not_empty() {
-        // A terminal reasoning-only empty response stamps the token magnitude even when no reasoning text reached the shell.
+        // A terminal reasoning-only empty response stamps the token magnitude even when no reasoning text reached the shell
+        // That capture must still upload, so the take gate's `is_empty` check must not discard it
         let mut cap = StreamingTurnCapture::default();
         cap.begin_turn(Some("p1".to_owned()), 1);
         cap.empty_reason = Some("reasoning_only".to_owned());
@@ -555,7 +582,9 @@ mod streaming_turn_capture_tests {
 
     #[test]
     fn clear_on_commit_resets_cap_so_later_generation_appends() {
-        // A committed generation that trips the cap is discarded on the commit path Clearing it must reset `truncated` so a following uncommitted.
+        // A committed generation that trips the cap is discarded on the commit path
+        // Clearing it must reset `truncated` so a following uncommitted (doomloop) generation's reasoning is still retained
+        // Otherwise the sticky early-return in `append` would suppress it
         let mut cap = StreamingTurnCapture::default();
         cap.begin_turn(Some("p1".to_owned()), 1);
         cap.start_stream(1);

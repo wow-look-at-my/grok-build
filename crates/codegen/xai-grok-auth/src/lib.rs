@@ -1,4 +1,5 @@
 //! Auth traits shared between `xai-file-utils` (the holder) and `xai-grok-shell` (the implementer).
+//! Keeps shell types out of data-collector's import graph while still letting refresh-aware token resolution drive HTTP requests.
 
 #![deny(clippy::indexing_slicing)]
 

@@ -62,7 +62,8 @@ async fn word_select_tip_shows_and_ctrl_y_accepts() {
     let (row, col) = locate_screen_text(&screen, BODY_SENTINEL).unwrap_or_else(|| {
         panic!("locate body for double-click; screen:\n{screen}");
     });
-    // Click mid-word so the hit lands on selectable text columns The first double-click gesture is treated as intentional folding.
+    // Click mid-word so the hit lands on selectable text columns
+    // The first double-click gesture is treated as intentional folding, so no tip
     double_click_at(&mut harness, row, col + 2);
     harness.update(Duration::from_millis(600));
     assert!(
@@ -172,7 +173,7 @@ async fn word_select_tip_skipped_when_mode_is_word_select() {
     let (row, col) = locate_screen_text(&screen, BODY_SENTINEL).unwrap_or_else(|| {
         panic!("locate body for double-click; screen:\n{screen}");
     });
-    // Separate gestures: the repeat gate would pass, so absence here proves the word_select-mode gate, not the repeat gate
+    // Two separate gestures: the repeat gate would pass, so absence here proves the word_select-mode gate, not the repeat gate
     double_click_at(&mut harness, row, col + 2);
     harness.update(Duration::from_millis(600));
     double_click_at(&mut harness, row, col + 2);
@@ -199,7 +200,8 @@ async fn word_select_tip_skipped_when_mode_is_word_select() {
 #[cfg(unix)]
 async fn word_select_tip_skipped_when_contextual_hint_disabled() {
     let content = ContentController::start().await.expect("start content");
-    // Flash mode with the tip explicitly disabled GROK_CONTEXTUAL_HINTS stays unset here.
+    // Flash mode with the tip explicitly disabled
+    // GROK_CONTEXTUAL_HINTS stays unset here; that master switch would force all tips on and defeat the config opt-out
     let grok_home = content.home().join(".grok");
     std::fs::create_dir_all(&grok_home).expect("create .grok");
     std::fs::write(
@@ -215,6 +217,7 @@ async fn word_select_tip_skipped_when_contextual_hint_disabled() {
     ));
 
     let binary = pager_binary().expect("resolve pager binary");
+    // Pin GROK_CONTEXTUAL_HINTS to empty (parsed as unset) so a value inherited from the runner's shell can't force tips on
     let overrides: Vec<(String, String)> = vec![("GROK_CONTEXTUAL_HINTS".into(), String::new())];
     let env_refs: Vec<(&str, &str)> = overrides
         .iter()
@@ -250,7 +253,7 @@ async fn word_select_tip_skipped_when_contextual_hint_disabled() {
     let (row, col) = locate_screen_text(&screen, BODY_SENTINEL).unwrap_or_else(|| {
         panic!("locate body for double-click; screen:\n{screen}");
     });
-    // Separate gestures: the repeat gate would pass, so absence here proves the per-tip config opt-out, not the repeat gate
+    // Two separate gestures: the repeat gate would pass, so absence here proves the per-tip config opt-out, not the repeat gate
     double_click_at(&mut harness, row, col + 2);
     harness.update(Duration::from_millis(600));
     double_click_at(&mut harness, row, col + 2);

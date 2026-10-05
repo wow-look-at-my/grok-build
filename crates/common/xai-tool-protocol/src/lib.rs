@@ -1,4 +1,10 @@
 //! xAI Computer Hub — wire-protocol types.
+//!
+//! Identifier newtypes, registration payloads, capabilities, hook events,
+//! handshake messages, the JSON-RPC 2.0 envelope and method catalog, the
+//! `ToolErrorWire` / `ToolOutputWire` / `WireToolNotification` wire enums,
+//! every method's `params` / `result` payload struct, the numeric ↔
+//! string error-code mapping, and the bot-relay frame types.
 
 #![forbid(unsafe_code)]
 

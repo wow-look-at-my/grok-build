@@ -43,6 +43,8 @@ fn append_expand_hint(line: Line<'static>, ctx: &BlockContext) -> Line<'static> 
 }
 
 /// Attributes only, no foreground: minimal's terminal-native palette makes color-based de-emphasis a no-op.
+/// Terminals that merely *ignore* SGR 3 (tmux without `sitm`) are not gated: there is no reliable probe, and they
+/// keep the other two cues.
 fn body_emphasis_patch(ctx: &BlockContext) -> Option<Style> {
     if !ctx.appearance.scrollback.blocks.thinking.body_dim_italic {
         return None;
@@ -54,11 +56,16 @@ fn body_emphasis_patch(ctx: &BlockContext) -> Option<Style> {
     Some(Style::new().add_modifier(modifiers))
 }
 
-/// Columns spent by the `┃ ` body prefix when the rail renders under the header's bullet.
+/// Columns spent by the `┃ ` body prefix when the rail renders under the
+/// header's bullet ([`crate::appearance::ThinkingConfig::rail_under_bullet`]).
 const BODY_RAIL_WIDTH: usize = 2;
 
-/// Whether the reasoning rail renders inside the body rows (directly below
-/// the header's bullet) instead of as the reserved accent column.
+/// Whether the reasoning rail renders inside the body rows (directly below the header's bullet) instead of as the reserved accent column.
+/// Minimal-only: there every other block starts flush at column 0 with its own `◆`.
+/// An accent column would indent the header's diamond out of line and read as a second, different gutter treatment.
+///
+/// Gated on `accent_enabled` like the accent-column rail it replaces (`rail_style`):
+/// a pager.toml `accent_enabled = false` turns off the reasoning rail wherever it is drawn.
 fn rail_under_bullet(ctx: &BlockContext) -> bool {
     let cfg = &ctx.appearance.scrollback.blocks.thinking;
     cfg.rail_under_bullet && cfg.accent_enabled
@@ -73,11 +80,14 @@ fn body_rail_span(ctx: &BlockContext) -> Span<'static> {
     )
 }
 
-/// Prefix every body row with [`body_rail_span`] so the rail runs from under
-/// the header's bullet down the whole body. The prefix span is excluded from
-/// selection (same mechanism as `prepend_bullet`). Markdown leaves code-block
-/// fill on the line *style*, which `Buffer::set_line` patches under every
-/// span — the rail prefix included.
+/// Prefix every body row with [`body_rail_span`] so the rail runs from under the header's bullet down the whole body.
+/// The prefix span is excluded from selection (same mechanism as `prepend_bullet`).
+///
+/// Markdown leaves code-block fill on the line *style*, which `Buffer::set_line`
+/// patches under every span — the rail prefix included. Hoist it onto the
+/// per-line [`BlockLine::background`] starting after the rail (the same
+/// line-style → background split as `MarkdownContent::output`), so the fill
+/// spans the row's content but the rail cell stays unshaded.
 fn apply_body_rail(output: &mut BlockOutput, ctx: &BlockContext) {
     if !rail_under_bullet(ctx) {
         return;
@@ -92,8 +102,8 @@ fn apply_body_rail(output: &mut BlockOutput, ctx: &BlockContext) {
     }
 }
 
-/// Body wrap width: the in-body rail prefix spends [`BODY_RAIL_WIDTH`] of the
-/// content columns.
+/// Body wrap width: the in-body rail prefix spends [`BODY_RAIL_WIDTH`] of the content columns.
+/// The markdown must wrap that much narrower to keep `desired_height` and the painted rows in agreement.
 fn body_wrap_width(ctx: &BlockContext) -> usize {
     let width = ctx.width as usize;
     if rail_under_bullet(ctx) {
@@ -104,11 +114,17 @@ fn body_wrap_width(ctx: &BlockContext) -> usize {
 }
 
 /// Block displaying agent thinking content with markdown rendering.
+///
+/// Uses [`MarkdownContent`] for incremental markdown rendering with cached word-wrapping, plus special display modes:
+/// - **Collapsed**: Shows "Thought" or "Thought for Xs" if time is set
+/// - **Truncated** (default): Shows "…" then the last N lines
+/// - **Expanded**: Full content
 #[derive(Debug, Clone)]
 pub struct ThinkingBlock {
     content: MarkdownContent,
 
-    /// Optional elapsed time in milliseconds (from server). When set, collapsed view shows "Thought for Xs".
+    /// Optional elapsed time in milliseconds (from server).
+    /// When set, collapsed view shows "Thought for Xs".
     elapsed_time_ms: Option<i64>,
     /// When the thinking block started (local timestamp for live elapsed).
     started_at: Option<std::time::Instant>,
@@ -136,7 +152,8 @@ impl ThinkingBlock {
         }
     }
 
-    /// Create an empty streaming block for historical replay.
+    /// Create an empty streaming block for historical replay. A local wall-clock timer would then freeze to ~0ms in
+    /// [`finish`] and render a bogus "Thought for 0.0s".
     pub fn streaming_replay() -> Self {
         Self {
             content: MarkdownContent::streaming(),
@@ -156,11 +173,13 @@ impl ThinkingBlock {
         self.content.push_chunk_deferred(chunk);
     }
 
-    /// Finish streaming and do a full re-render for safety. Freezes the local
-    /// elapsed time from `started_at`.
+    /// Finish streaming and do a full re-render for safety.
+    /// Freezes the local elapsed time from `started_at`.
+    /// The collapsed view then shows the actual wall-clock duration the user experienced, not the server-reported delta.
     pub fn finish(&mut self) {
         self.content.finish();
         // Freeze local elapsed if no server time has been set.
+        // The local timer (started_at to now) captures the full duration from block creation to finish, which is what the user perceives
         if self.elapsed_time_ms.is_none()
             && let Some(start) = self.started_at
         {
@@ -218,8 +237,9 @@ impl ThinkingBlock {
         &mut self.content
     }
 
-    /// Get copyable text for this block. When `raw` is true, returns the raw
-    /// markdown source.
+    /// Get copyable text for this block.
+    /// When `raw` is true, returns the raw markdown source.
+    /// When `raw` is false, returns the rendered text (styles stripped).
     pub fn copy_text(&self, raw: bool) -> String {
         if raw {
             self.content.text()
@@ -303,7 +323,11 @@ impl ThinkingBlock {
         for (i, row) in rows.iter().enumerate() {
             let mut line = if i == 0 {
                 let mut first = header.clone();
-                // The guard above proved the pad fits the width.
+                // The guard above proved the pad fits the width, so textwrap
+                // left this row's first `header_w + 1` bytes as the pad's ASCII
+                // spaces. `header_w` is inside that run, so it is a char
+                // boundary, and the slice keeps the pad's last space as the
+                // gap after the header.
                 #[allow(clippy::string_slice)] // inside the ASCII-space initial indent
                 let tail = row[header_w..].to_string();
                 first.spans.push(Span::styled(tail, style));
@@ -500,8 +524,8 @@ impl ThinkingBlock {
         if !cfg.accent_enabled {
             return None;
         }
-        // No accent when collapsed; accent is only for expanded/truncated
-        // content TODO.
+        // No accent when collapsed; accent is only for expanded/truncated content
+        // TODO: revisit if we want accent in collapsed state with header enabled.
         if ctx.mode == DisplayMode::Collapsed {
             return None;
         }
@@ -530,11 +554,13 @@ impl BlockContent for ThinkingBlock {
         self.rail_style(ctx)
     }
 
-    /// Thinking bullet: default (None) when not running, animated when
-    /// running.
+    /// Thinking bullet: default (None) when not running, animated when running.
+    /// This means collapsed thinking shows gray bullet, running thinking syncs with accent.
     fn bullet(&self, ctx: &BlockContext) -> Option<AccentStyle> {
         if ctx.is_running {
-            // Sync bullet with the rail animation when running — via `rail_style`, not `accent`.
+            // Sync bullet with the rail animation when running — via
+            // `rail_style`, not `accent`, so the in-body rail mode keeps the
+            // animated bullet.
             self.rail_style(ctx)
         } else {
             None // default gray/primary

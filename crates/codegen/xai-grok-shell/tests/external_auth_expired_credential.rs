@@ -1,4 +1,14 @@
-//! Regression: an expired `auth_provider_command` credential must route the user into the provider's sign-in flow.
+//! Regression: an expired `auth_provider_command` credential must route the user into the provider's sign-in flow, not into a silent 401 loop.
+//!
+//! The deployment under test: an operator binary mints the session credential.
+//! It cannot mint from the headless refresh because it needs the user to complete an SSO flow.
+//! Before the fix a *stale* credential was treated better than no credential.
+//! The client skipped login, the dead bearer was accepted, and the first turn 401'd under "no need to run /login".
+//!
+//! The mirror of phase 3 (a provider that blocks until it is killed, leaving no verdict behind) is a unit test (`auth::manager::remedy`).
+//! Driving it here would buy the same assertions for two more timeout budgets of wall clock.
+//!
+//! One `#[test]`: the phases share one process-global `GROK_HOME` and env, so nothing else may run concurrently.
 #![cfg(unix)]
 
 use std::path::Path;
@@ -231,8 +241,9 @@ fn advertised(init: &acp::InitializeResponse) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// Environment entries an unattended mint could take a service endpoint from,
-/// matched by shape rather than by name.
+/// Environment entries an unattended mint could take a service endpoint from, matched by shape rather than by name.
+/// The test needs "no endpoint anywhere", and a build wired to a different recovery backend must not silently regain one.
+/// Collected before removal: the caller mutates the environment it reads.
 fn ambient_mint_endpoints() -> Vec<String> {
     std::env::vars()
         .map(|(name, _)| name)
@@ -276,6 +287,9 @@ fn expired_external_credential_routes_to_the_provider_login_flow() {
         // An API key would be advertised first and mask the session-auth path.
         std::env::remove_var("XAI_API_KEY");
         std::env::remove_var("GROK_CODE_XAI_API_KEY");
+        // Last-resort 401 recovery can mint a credential from an endpoint named in the ambient environment
+        // On a container-hosted runner that would rescue the session behind the test's back
+        // Leave it nothing to mint from: the deployment under test is one where only the operator's binary can produce a credential
         for name in ambient_mint_endpoints() {
             std::env::remove_var(&name);
         }
@@ -290,6 +304,7 @@ fn expired_external_credential_routes_to_the_provider_login_flow() {
         .expect("agent runtime");
     let local = tokio::task::LocalSet::new();
     agent_rt.block_on(local.run_until(async move {
+        // Phase 1: startup with the expired credential
         let (_conn, init) = connect("external-auth-expired", Capture::default()).await;
         let methods = advertised(&init);
         assert_eq!(
@@ -307,7 +322,7 @@ fn expired_external_credential_routes_to_the_provider_login_flow() {
             !methods.iter().any(|(id, _)| id == "cached_token"),
             "the dead bearer must not be offered at all; got {methods:?}"
         );
-        // Startup makes several `auth()` calls in quick succession.
+        // Startup makes several `auth()` calls in quick succession (the silent refresh, the login-method advertisement). Only the first runs the binary: a non-timeout failure is transient and the refresher's strike ladder puts every call inside the following cooldown on a no-run transient, so the budget is spent on the clock, not on the call rate.
         let startup_runs = provider_runs(grok_home.path());
         assert_eq!(
             startup_runs, 1,
@@ -315,6 +330,7 @@ fn expired_external_credential_routes_to_the_provider_login_flow() {
              follow inside the cooldown must not re-run it"
         );
 
+        // Phase 2: parity with a launch that has no credential at all
         std::fs::remove_file(grok_home.path().join("auth.json")).expect("remove auth.json");
         let (_conn, init) = connect("external-auth-cold", Capture::default()).await;
         assert_eq!(
@@ -329,6 +345,7 @@ fn expired_external_credential_routes_to_the_provider_login_flow() {
              binary runs when the client starts the login flow"
         );
 
+        // Phase 3: mid-session, a credential that has not locally expired but that the backend rejects
         seed_credential(
             grok_home.path(),
             chrono::Utc::now() + chrono::Duration::hours(1),
@@ -374,7 +391,8 @@ fn expired_external_credential_routes_to_the_provider_login_flow() {
         .await
         .expect("prompt timed out");
         let error = outcome.expect_err("the mock 401s every inference request");
-        // `error_data_with_status` carries a bare string when the sampler had no HTTP status to attach.
+        // `error_data_with_status` carries a bare string when the sampler had no HTTP status to attach, and an object when it did
+        // A 401 that classifies as `SamplingErrorKind::Auth` is routinely the former
         let data = error.data.as_ref().expect("a failed turn explains itself");
         let message = data
             .get("message")

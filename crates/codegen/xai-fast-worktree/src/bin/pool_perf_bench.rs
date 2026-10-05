@@ -1,4 +1,18 @@
 //! Pool performance benchmark — emulates the A/B worktree pool lifecycle.
+//!
+//! Exercises the exact same primitives the production pool uses:
+//!   1. Create worktree (GitCheckout mode, like the pool fill task)
+//!   2. Warm git caches (git status, like the pool does before marking ready)
+//!   3. Sync (git reset --hard + git clean + dirty state copy, like acquire())
+//!   4. Simulate use (git status in the synced worktree)
+//!   5. Release (git reset --hard + git clean, like release())
+//!   6. Cleanup (git worktree remove, like shutdown/schedule_cleanup)
+//!
+//! Runs against a REAL repo (defaults to the current directory).
+//! Designed to be run from a large repo root to get realistic timings.
+//!
+//! Usage:
+//!   cargo run --release --bin pool-perf-bench -- [--source /path/to/repo] [--iterations 3]
 
 #![deny(clippy::indexing_slicing)]
 
@@ -27,6 +41,7 @@ struct Cli {
     #[arg(long, default_value = "3")]
     iterations: usize,
 
+    /// Number of parallel checkout workers (0 = auto)
     #[arg(long, default_value = "0")]
     parallelism: usize,
 
@@ -38,7 +53,7 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Run in A/B mode: create multiple worktrees concurrently, sync both, release both
+    /// Run in A/B mode: create 2 worktrees concurrently, sync both, release both
     #[arg(long)]
     ab: bool,
 
@@ -48,7 +63,8 @@ struct Cli {
 }
 
 // ============================================================================
-// Timing structs.
+// Timing structs
+// ============================================================================
 
 #[derive(Debug, Clone)]
 struct PhaseTiming {
@@ -87,6 +103,7 @@ struct BenchmarkSummary {
 // Phase runners
 // ============================================================================
 
+/// Phase 1: Create a linked worktree via GitCheckout mode (what the pool fill task does)
 fn phase_create(source: &Path, dest: &Path, parallelism: usize) -> Result<PhaseTiming> {
     let start = Instant::now();
 
@@ -104,6 +121,7 @@ fn phase_create(source: &Path, dest: &Path, parallelism: usize) -> Result<PhaseT
     })
 }
 
+/// Phase 2: Warm git caches (git status --porcelain) — populates fsmonitor, untracked cache
 fn phase_warm_caches(worktree: &Path) -> Result<PhaseTiming> {
     let start = Instant::now();
 
@@ -152,6 +170,7 @@ fn phase_warm_caches_2nd(worktree: &Path) -> Result<PhaseTiming> {
     })
 }
 
+/// Phase 3: Sync — reset to source HEAD + clean + copy dirty state
 fn phase_sync(
     source: &Path,
     worktree: &Path,
@@ -207,6 +226,7 @@ fn phase_post_sync_status(worktree: &Path) -> Result<PhaseTiming> {
     })
 }
 
+/// Phase 4: Simulate use — run git diff --stat (what an agent would do)
 fn phase_simulate_use(worktree: &Path) -> Result<PhaseTiming> {
     let start = Instant::now();
 
@@ -226,6 +246,7 @@ fn phase_simulate_use(worktree: &Path) -> Result<PhaseTiming> {
     })
 }
 
+/// Phase 5: Release — git reset --hard + git clean -fdx (what pool.release() does)
 fn phase_release(worktree: &Path) -> Result<PhaseTiming> {
     let start = Instant::now();
 
@@ -273,6 +294,7 @@ fn phase_post_release_warm(worktree: &Path) -> Result<PhaseTiming> {
     })
 }
 
+/// Phase 6: Cleanup — rm -rf + deregister (fast) instead of git worktree remove (slow)
 fn phase_cleanup(_source: &Path, worktree: &Path) -> Result<PhaseTiming> {
     let start = Instant::now();
 
@@ -287,7 +309,7 @@ fn phase_cleanup(_source: &Path, worktree: &Path) -> Result<PhaseTiming> {
 }
 
 // ============================================================================
-// A/B mode: worktrees concurrently
+// A/B mode: two worktrees concurrently
 // ============================================================================
 
 fn run_ab_iteration(
@@ -303,6 +325,7 @@ fn run_ab_iteration(
     let wt_a = base_dir.join(format!("bench_wt_a_{iteration}"));
     let wt_b = base_dir.join(format!("bench_wt_b_{iteration}"));
 
+    // Phase 1: Create both worktrees (sequentially, like the fill task does)
     eprintln!("  [A/B] Creating worktree A...");
     {
         let mut p = phase_create(source, &wt_a, parallelism)?;
@@ -317,6 +340,7 @@ fn run_ab_iteration(
         phases.push(p);
     }
 
+    // Phase 2: Warm caches on both
     eprintln!("  [A/B] Warming caches A...");
     {
         let mut p = phase_warm_caches(&wt_a)?;
@@ -342,6 +366,7 @@ fn run_ab_iteration(
         phases.push(p);
     }
 
+    // Phase 3: Sync both (this is what acquire() does after claim)
     eprintln!("  [A/B] Syncing A...");
     {
         let mut p = phase_sync(source, &wt_a, copy_dirty, /* skip_clean */ true)?;
@@ -367,6 +392,7 @@ fn run_ab_iteration(
         phases.push(p);
     }
 
+    // Phase 4: Simulate use
     {
         let mut p = phase_simulate_use(&wt_a)?;
         p.name = "use A (git diff)".into();
@@ -378,6 +404,7 @@ fn run_ab_iteration(
         phases.push(p);
     }
 
+    // Phase 5: Release both
     eprintln!("  [A/B] Releasing A...");
     {
         let mut p = phase_release(&wt_a)?;
@@ -403,6 +430,7 @@ fn run_ab_iteration(
         phases.push(p);
     }
 
+    // Phase 6: Cleanup both
     eprintln!("  [A/B] Cleaning up A...");
     {
         let mut p = phase_cleanup(source, &wt_a)?;
@@ -474,7 +502,8 @@ fn run_single_iteration(
 }
 
 // ============================================================================
-// Helpers.
+// Helpers
+// ============================================================================
 
 fn count_tracked_files(source: &Path) -> Result<usize> {
     xai_fast_worktree::count_tracked_files(source)

@@ -1,4 +1,15 @@
 //! Microphone capture on macOS via a short-lived self-exec helper process.
+//!
+//! Opening CoreAudio in-process permanently dirties the pager's memory footprint.
+//! The HAL costs several MB plus device capture buffers (tens of MB with some input routes), none of it returned to the OS after the stream drops.
+//! Capture therefore runs out of process, like the Linux recorder backend: the pager spawns `current_exe __mic-capture --rate N`.
+//! The child streams raw PCM16 mono LE to stdout behind a one-line `READY`/`ERR` header (see [`super::capture::run_capture_child_cli`]).
+//! All audio-stack memory is freed when the child exits with the utterance.
+//! The helper is the same executable, so the terminal's mic permission grant applies unchanged.
+//!
+//! In-process capture ([`super::capture`]) remains the fallback when the helper cannot run.
+//! That covers self-exec being unavailable and a spawned binary that doesn't speak the helper protocol (e.g. replaced by an update mid run).
+//! `GROK_VOICE_CAPTURE=inprocess` forces the fallback.
 
 use std::io::Read;
 use std::process::{Child, ChildStdout, Command, Stdio};
@@ -13,10 +24,12 @@ use super::pipe::{self, ChildCaptureHandle};
 use super::protocol;
 use crate::error::VoiceError;
 
-/// Env escape hatch: `GROK_VOICE_CAPTURE=inprocess` forces the in-process cpal backend.
+/// Env escape hatch: `GROK_VOICE_CAPTURE=inprocess` forces the legacy in-process cpal backend (accepting its permanent footprint cost).
 const CAPTURE_BACKEND_ENV: &str = "GROK_VOICE_CAPTURE";
 
 /// How long to wait for the helper's status header.
+/// Device open takes hundreds of ms; exec of the (usually page-cached) binary adds tens more.
+/// It matches the in-process backend's 5 s open handshake.
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Stop handle for a capture session: the helper child, or the in-process fallback stream.
@@ -44,8 +57,10 @@ fn force_inprocess() -> bool {
 #[derive(Debug)]
 enum HandshakeFailure {
     /// The helper ran and reported `ERR` (a real device/permission error), or timed out opening the device.
+    /// The error is passed through as-is; an in-process retry would fail identically.
     Reported(VoiceError),
     /// The helper could not run or doesn't speak the protocol (spawn failure, EOF, garbage, or an oversized header).
+    /// One cause is the binary being replaced by an update mid-run. The caller falls back to in-process capture.
     Broken(VoiceError),
 }
 
@@ -117,6 +132,7 @@ fn read_header(stdout: &mut impl Read) -> Result<String, HandshakeFailure> {
 }
 
 /// Kill and reap a handshake-failed child, then join its reader.
+/// The kill closes stdout, so a blocked header read returns EOF and the join completes.
 fn teardown(mut child: Child, reader: JoinHandle<()>) {
     let _ = child.kill();
     let _ = child.wait();
@@ -138,8 +154,8 @@ fn handshake(
         let _ = tx.send((outcome, stdout));
     });
 
-    // A result that lands as the timeout fires must not be discarded as a
-    // timeout The deadline arm re-checks the channel once before tearing down
+    // A result that lands just as the timeout fires must not be discarded as a timeout
+    // The deadline arm re-checks the channel once before tearing down
     let outcome = rx
         .recv_timeout(READY_TIMEOUT)
         .or_else(|_| rx.try_recv())
@@ -221,6 +237,7 @@ pub fn input_device_info() -> Result<crate::probe::InputDeviceInfo, VoiceError> 
     let payload = match handshaken {
         Ok((mut child, payload, _stdout)) => {
             // Info mode: the child prints its one line and exits on its own.
+            // Kill defensively before reaping (a no-op when already exited) so a confused child that streams PCM can never wedge the `wait`
             let _ = child.kill();
             let _ = child.wait();
             payload

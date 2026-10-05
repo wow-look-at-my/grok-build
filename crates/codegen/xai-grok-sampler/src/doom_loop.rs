@@ -1,4 +1,9 @@
 //! Per-request transport for server-reported doom-loop signals.
+//!
+//! The wire shapes and tolerant parsers live in [`xai_grok_sampling_types::doom_loop`].
+//! This module only moves the parsed signals across the layer boundary.
+//! The Layer-1 SSE decoder in [`crate::client`] records them as raw payloads arrive.
+//! The Layer-2 transform in [`crate::stream::responses`] drains them into the final `ConversationResponse`.
 
 use std::sync::{Arc, Mutex};
 
@@ -10,8 +15,8 @@ use xai_grok_sampling_types::doom_loop::{
 pub(crate) const MAX_COLLECTED_DOOM_LOOP_SIGNALS: usize = 64;
 pub(crate) const MAX_DOOM_LOOP_SIGNAL_BYTES: usize = 256;
 
-/// Cheap-to-clone accumulator shared between the SSE decode closure and the
-/// stream transform of one request attempt.
+/// Cheap-to-clone accumulator shared between the SSE decode closure and the stream transform of one request attempt.
+/// Created fresh per attempt so signals from a failed attempt can never leak into the next one.
 #[derive(Clone, Debug, Default)]
 pub struct DoomLoopSignalCollector {
     inner: Arc<Mutex<CollectorState>>,
@@ -28,6 +33,12 @@ struct CollectorState {
 
 impl DoomLoopSignalCollector {
     /// The accumulated state, whatever a prior holder was doing when it died.
+    ///
+    /// The signals are what the stream transform acts on and the policy is what
+    /// it judges them by, so either one going missing silently turns a reported
+    /// doom loop into a response read as clean. The state is a `Vec` and two
+    /// flags, which a panicked write leaves at least as usable as the empty
+    /// state a poison would report in its place.
     #[allow(clippy::disallowed_methods)] // takes the state back as the doc above says
     fn state(&self) -> std::sync::MutexGuard<'_, CollectorState> {
         self.inner
@@ -83,7 +94,8 @@ impl DoomLoopSignalCollector {
 
     /// Drain the recorded signals; empty when nothing was reported.
     pub(crate) fn take(&self) -> Vec<DoomLoopSignal> {
-        // The lock is taken through [`Self::state`], so a signal the decoder recorded is never dropped for having been held.
+        // The lock is taken through [`Self::state`], so a signal the decoder
+        // recorded is never dropped for having been held when something panicked.
         std::mem::take(&mut self.state().signals)
     }
 

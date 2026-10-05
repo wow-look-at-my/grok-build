@@ -68,6 +68,7 @@ fn brackets_of_the_other_kind_in_the_prose_do_not_hide_the_json() {
     );
 }
 
+/// Spec >= 2026-07-28 scalars: a string payload is carried as itself, so it is never sent twice.
 #[test]
 fn scalar_payload_as_the_whole_block_is_inlined() {
     let body = "# Report\n\nFolders [product] and {custom}: 9 in total.";

@@ -1,5 +1,4 @@
-//! Scrollback text/block selection: click counting, word/paragraph select,
-//! drag latches, drag autoscroll ticks.
+//! Scrollback text/block selection: click counting, word/paragraph select, drag latches, drag autoscroll ticks, and selection-highlight timers.
 
 use super::{
     AgentPane, AgentView, DEFAULT_SELECTION_HIGHLIGHT_DURATION_MS, MULTI_CLICK_TIMEOUT_MS,
@@ -21,7 +20,9 @@ use crossterm::event::MouseEvent;
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 
-/// Fold/nav double-clicks on assistant text within this window count as a repeated selection attempt.
+/// Two fold/nav double-clicks on assistant text within this window count as a repeated selection attempt and fire the word-select tip.
+/// Must be well over [`MULTI_CLICK_TIMEOUT_MS`] so it measures separate gestures.
+/// It is also short enough that the second gesture plausibly continues the first intent.
 const WORD_SELECT_REPEAT_WINDOW: Duration = Duration::from_secs(10);
 
 fn prewrap_line_index(
@@ -439,9 +440,9 @@ impl AgentView {
         }
     }
 
-    /// Update [`Self::plan_prompt_mouse_drag`] for a left-button mouse event during plan feedback. Reports whether the
-    /// event should be forwarded to the feedback prompt (for cursor placement / text selection). Shared by both
-    /// plan-feedback mouse paths (line-viewer-open and empty-plan) so both route drags the same way.
+    /// Update [`Self::plan_prompt_mouse_drag`] for a left-button mouse event during plan feedback.
+    /// Reports whether the event should be forwarded to the feedback prompt (for cursor placement / text selection).
+    /// Shared by both plan-feedback mouse paths (line-viewer-open and empty-plan) so the two route drags the same way.
     pub(super) fn route_plan_prompt_mouse_drag(
         &mut self,
         mouse: &crossterm::event::MouseEvent,
@@ -493,7 +494,8 @@ impl AgentView {
         let Some(hit) = hit else {
             return false;
         };
-        // Snapshot the anchor block's render width now (the btw model carries its own geometry) Copy must survive the block scrolling fully out.
+        // Snapshot the anchor block's render width now (the btw model carries its own geometry)
+        // Copy must survive the block scrolling fully out of `visible_blocks` before mouse-up
         let anchor_content_width = model.visible_block_content_width(hit.entry_idx);
         self.pending_text_drag = Some(PendingTextDrag {
             anchor: hit,
@@ -583,7 +585,8 @@ impl AgentView {
             kind,
             anchor_content_width,
         });
-        // Store the pointer at arming too, or an arm-then-hold-still drag would stay invisible to the post-render reclamp Content can scroll.
+        // Store the pointer at arming too, or an arm-then-hold-still drag would stay invisible to the post-render reclamp
+        // Content can scroll or stream underneath a held pointer
         self.last_drag_mouse = Some((mouse.column, mouse.row));
     }
 
@@ -660,8 +663,8 @@ impl AgentView {
                 InputOutcome::Unchanged
             };
         }
-        // Anchor-less press: convert to a text drag the moment the pointer
-        // enters selectable text A miss falls through.
+        // Anchor-less press: convert to a text drag the moment the pointer enters selectable text
+        // A miss falls through to the block-drag branches unchanged
         if self.convert_deferred_text_press(mouse) {
             return InputOutcome::Changed;
         }
@@ -686,8 +689,9 @@ impl AgentView {
                 InputOutcome::Unchanged
             };
         }
-        // An armed anchor-less press owns the rest of the gesture Strip
-        // presses deliberately keep focus where it was.
+        // An armed anchor-less press owns the rest of the gesture
+        // Strip presses deliberately keep focus where it was, so a conversion miss must not leak motion into the todo/viewer/prompt handlers below
+        // (A prompt-focused strip drag would otherwise edit the prompt.)
         if self.deferred_text_press.is_some() {
             return InputOutcome::Unchanged;
         }
@@ -724,9 +728,8 @@ impl AgentView {
                     drag.anchor_content_width,
                     geom,
                     |src, meta| {
-                        // Geometry was frozen at promote; a streaming re-wrap
-                        // since then shifts every block_line_idx Re-detect
-                        // and require an exact match.
+                        // Geometry was frozen at promote; a streaming re-wrap since then shifts every block_line_idx
+                        // Re-detect and require an exact match before slicing
                         if TableGeometry::detect(src, drag.anchor.block_line_idx).as_ref()
                             != Some(geom)
                         {
@@ -763,9 +766,9 @@ impl AgentView {
         };
         let visible_start = scrollback.visible_entry_range().start;
         let abs_idx = drag.anchor.entry_idx + visible_start;
-        // Width must come from the same VisibleBlockGeometry the drag's
-        // block_line_idx values were captured against The pane-wide width
-        // re-wraps timestamp-reserving blocks.
+        // Width must come from the same VisibleBlockGeometry the drag's block_line_idx values were captured against
+        // The pane-wide width re-wraps timestamp-reserving blocks and shifts every index
+        // Prefer the drag-start snapshot: by mouse-up the anchor block may have autoscrolled fully out of `visible_blocks`
         let entry_content_width = drag.anchor_content_width.or_else(|| {
             self.last_scrollback_selection_model
                 .visible_block_content_width(drag.anchor.entry_idx)
@@ -874,7 +877,8 @@ impl AgentView {
         if let Some((text, kind)) = copied
             && !text.is_empty()
         {
-            // Capture drag geometry as a persistent selection only when the clipboard copy succeeds Setting it unconditionally would leave a highlight.
+            // Capture drag geometry as a persistent selection only when the clipboard copy succeeds
+            // Setting it unconditionally would leave a highlight with nothing in the clipboard if reconstruction fails
             if let Some(d) = drag {
                 self.persist_drag_selection(&d, kind);
             }
@@ -961,8 +965,9 @@ impl AgentView {
         let content = self.last_scrollback_selection_model.content_area;
         let pane_bottom = pane.y.saturating_add(pane.height);
 
-        // Header-only viewport: the pane publishes a zero-height content rect
-        // at the header's end Everything is chrome.
+        // Header-only viewport: the pane publishes a zero-height content rect at the header's end
+        // Everything is chrome; there is nothing to scroll toward
+        // An unset rect (no frame yet) falls back to the pane-wide zone instead
         if content.height == 0 {
             let header_only = content.y > pane.y && content.y < pane_bottom;
             return if header_only {
@@ -1096,8 +1101,9 @@ impl AgentView {
         let is_workflow = entry_block
             .is_some_and(|b| matches!(b, crate::scrollback::block::RenderBlock::Workflow(_)));
 
-        // Word-select tip probe (see WORD_SELECT_REPEAT_WINDOW): assistant
-        // messages only.
+        // Word-select tip probe (see WORD_SELECT_REPEAT_WINDOW): assistant messages only
+        // On headers / prompts / tool rows double-click is the designed fold-nav gesture
+        // Bg-task / subagent double-clicks open a viewer that owns input
         let word_select_probe = click_count == 2
             && entry_block.is_some_and(|b| b.is_agent_message())
             && !super::is_text_selection_on_double_click();
@@ -1111,6 +1117,9 @@ impl AgentView {
 
         self.scrollback.set_selected(Some(idx));
 
+        // Expanded verb-group slot, header row (`header_row_click`): the slot acts as member 0 everywhere else, so the group affordance lives here
+        // Double-click on the header row collapses the group; a single click just selects
+        // Member rows fall through to the normal foldable path below
         if header_row_click {
             if click_count == 2 {
                 self.scrollback.collapse_group_if_expanded();
@@ -1121,7 +1130,8 @@ impl AgentView {
             }
         }
 
-        // Double-click on a group header expands or collapses the group Both expand ("N more") and collapse ("▾ N tool calls").
+        // Double-click on a group header expands or collapses the group
+        // Both expand ("N more") and collapse ("▾ N tool calls") headers are standalone entries with their own index
         let is_group_header = self.scrollback.is_selected_group_header();
         if is_group_header {
             if click_count == 2 {
@@ -1337,9 +1347,9 @@ impl AgentView {
                 return;
             };
 
-            // `b` is a soft-wrap continuation of `a` (same logical line):
-            // both are adjacent and `b` carries a joiner Reads go through
-            // `.get()`.
+            // `b` is a soft-wrap continuation of `a` (same logical line): the two are adjacent and `b` carries a joiner
+            // Reads go through `.get()`, so an out-of-range neighbor just ends the walk instead of panicking
+            // `click_pos` is valid and start/end only move inward-to-outward from it
             let continues = |a: usize, b: usize| match (range.lines.get(a), range.lines.get(b)) {
                 (Some(a), Some(b)) => {
                     a.block_line_idx + 1 == b.block_line_idx && b.joiner_to_previous.is_some()
@@ -1635,6 +1645,8 @@ mod tests {
     /// It stops at the next logical line.
     #[test]
     fn select_paragraph_at_selects_soft_wrapped_logical_line() {
+        // One paragraph wrapped across rows 0,1,2 (row 0 starts it; 1 and 2 are soft-wrap continuations)
+        // Row 3 starts the next paragraph
         let mut agent = agent_with_range_lines(&[
             (0, "alpha one", None),
             (1, "alpha two", Some(" ")),
@@ -2069,7 +2081,7 @@ mod tests {
         assert!(agent.table_selection_geometry.is_some());
     }
 
-    /// Run one double-click gesture (clicks 100ms apart) at `t` on `idx`, threading `last_click` the way the mouse caller does.
+    /// Run one double-click gesture (two clicks 100ms apart) at `t` on `idx`, threading `last_click` the way the mouse caller does.
     /// Returns the tip flag of the second click.
     fn double_click_gesture(agent: &mut AgentView, t: Instant, idx: usize) -> bool {
         let (last, tip1) = agent.handle_scrollback_click(t, idx, false);
@@ -2226,6 +2238,7 @@ mod tests {
         model
     }
 
+    /// Down, Drag, Drag through `handle_input` on `stacked_lines_model(0, 5, 3)` so the drag is genuinely promoted and `last_drag_mouse` is (10, 7).
     fn latch_drag_with_mouse_held(agent: &mut AgentView, reg: &ActionRegistry) {
         agent.pane_areas.scrollback = Rect::new(0, 0, 80, 24);
         agent.active_pane = AgentPane::Scrollback;
@@ -2246,6 +2259,7 @@ mod tests {
         let reg = ActionRegistry::defaults();
         latch_drag_with_mouse_held(&mut agent, &reg);
 
+        // Scrolled down by two rows: lines 2..=6 now occupy rows 5..=9.
         agent.last_scrollback_selection_model = stacked_lines_model(2, 5, 5);
         agent.reclamp_drag_head_post_render(false);
 
@@ -2572,6 +2586,7 @@ mod tests {
     }
 
     /// The btw copy prefers the drag-start width snapshot; the current panel-area fallback only applies without one.
+    /// Here the default area makes the fallback width 0, so only the snapshot path can produce the text.
     #[test]
     fn btw_copy_prefers_width_snapshot_over_panel_fallback() {
         let mut agent = make_agent();
@@ -2801,7 +2816,9 @@ mod tests {
         }
     }
 
-    /// Message entries with chrome rows and a dead gap between them.
+    /// Two message entries with chrome rows and a dead gap between them.
+    /// Entry 0 area: rows 4-6 (row 4 chrome, text on rows 5-6, width 46).
+    /// Rows 7-8: dead gap.
     fn agent_with_chrome_and_gap() -> AgentView {
         let mut agent = make_agent();
         agent.pane_areas.scrollback = Rect::new(0, 0, 80, 24);
@@ -3038,6 +3055,8 @@ mod tests {
         );
     }
 
+    /// The chrome-and-gap agent with the panes shrunk so rows 16-19 form the passive strip band.
+    /// The band sits between the scrollback pane (rows 0-15) and the prompt box (rows 20-22): turn status / banner / gap-row territory.
     fn agent_with_above_prompt_strip() -> AgentView {
         let mut agent = agent_with_chrome_and_gap();
         agent.pane_areas.scrollback = Rect::new(0, 0, 80, 16);
@@ -3236,6 +3255,9 @@ mod tests {
     fn recap_block_press_converts_on_text_entry_and_clicks_as_before() {
         let mut agent = agent_with_chrome_and_gap();
         let reg = ActionRegistry::defaults();
+        // Real entries so the click cascade has something to resolve
+        // The recap's rows 12-14 register no selectable lines here, modeling a press on its non-selectable header chrome
+        // (The summary body IS selection-registered in production.)
         for _ in 0..2 {
             agent
                 .scrollback
@@ -3278,7 +3300,8 @@ mod tests {
         assert!(agent.pending_block_drag.is_none(), "block drag cancelled");
         assert!(agent.block_drag_selection.is_none());
 
-        // Motionless press and release on the recap, against the REAL layout (prepare_layout populates entry_index_at_screen_row).
+        // Motionless press and release on the recap, against the REAL layout (prepare_layout populates entry_index_at_screen_row)
+        // The click cascade still selects the recap entry; the latch must not eat it
         let mut agent2 = make_agent();
         agent2.pane_areas.scrollback = Rect::new(0, 0, 80, 24);
         agent2.active_pane = AgentPane::Scrollback;
@@ -3316,6 +3339,7 @@ mod tests {
     }
 
     /// Agent over real scrollback content taller than its viewport, so `tick_drag_autoscroll` moves real offsets against real clamps.
+    /// 30 one-line messages through the real layout; pane rows 0-9, prompt at rows 14-16, so rows 10-13 are the strip band.
     fn agent_with_tall_scrollback() -> AgentView {
         let mut agent = make_agent();
         agent.pane_areas.scrollback = Rect::new(0, 0, 80, 10);
@@ -3341,6 +3365,7 @@ mod tests {
         let (_, viewport, total) = agent.scrollback.scroll_info();
         let max_offset = total - viewport as usize;
 
+        // Row 9 is the pane bottom edge zone; row 12 is the strip band below it
         for row in [9u16, 12] {
             agent.scrollback.scroll_up(10_000);
             agent.drag_autoscroll = compute_autoscroll(row, agent.pane_areas.scrollback);
@@ -3366,6 +3391,7 @@ mod tests {
             assert!(clamped_ticks >= 100, "held flat at the clamp, no wobble");
         }
 
+        // Above the top edge: the mirror run scrolls monotonically up and holds at offset 0
         agent.scrollback.scroll_down(10_000);
         agent.drag_autoscroll = compute_autoscroll(0, agent.pane_areas.scrollback);
         assert_eq!(
@@ -3387,6 +3413,7 @@ mod tests {
     #[test]
     fn autoscroll_zone_starts_below_the_sticky_header() {
         let mut agent = agent_with_tall_scrollback();
+        // A 4-row sticky header: content starts at pane row 4.
         agent.last_scrollback_selection_model.content_area = Rect::new(0, 4, 80, 6);
 
         // Header rows are inert.
@@ -3453,7 +3480,7 @@ mod tests {
         let mut agent = agent_with_tall_scrollback();
         let reg = ActionRegistry::defaults();
 
-        // Content at-bottom; bottom viewport rows carry text.
+        // Content at-bottom; bottom two viewport rows carry text.
         agent.scrollback.scroll_down(10_000);
         let clamped = agent.scrollback.scroll_info().0;
         agent.last_scrollback_selection_model = stacked_lines_model(0, 8, 2);
@@ -3486,7 +3513,8 @@ mod tests {
             );
         }
 
-        // With room to scroll: rebuild the model each tick the way render does (content shifted up under the held pointer) Require both offset and head.
+        // With room to scroll: rebuild the model each tick the way render does (content shifted up under the held pointer)
+        // Require both offset and head to advance monotonically
         agent.scrollback.scroll_up(10_000);
         let mut prev_offset = agent.scrollback.scroll_info().0;
         let mut prev_head = 0usize;
@@ -3499,6 +3527,7 @@ mod tests {
             let offset = agent.scrollback.scroll_info().0;
             assert!(offset >= prev_offset, "offset regressed mid-autoscroll");
             prev_offset = offset;
+            // The frame under a held pointer: rows 0-9 now show block lines offset..offset+10
             agent.last_scrollback_selection_model = stacked_lines_model(offset, 0, 10);
             agent.reclamp_drag_head_post_render(false);
             let head = agent.drag_selection.unwrap().head.block_line_idx;

@@ -1,4 +1,5 @@
 //! Per-session resources and the registry that owns them.
+//! Distinct from `agent::session_registry_client`, which talks to the remote registry.
 use super::*;
 use xai_grok_tools::registry::types::FinalizedToolset;
 /// The map stays private so every caller goes through a named operation.
@@ -15,7 +16,9 @@ pub(super) enum IdentityStamp {
     Durable,
     Failed,
 }
-/// The actor an attach installed.
+/// The actor an attach installed. The id is monotonic, so a stamp outcome lands on this incarnation
+/// and never on a newer actor under the same session id; adopting attaches subscribe to `stamp`.
+/// `bound_toolset` is the workspace binding the installer took for it, so a rollback releases exactly that.
 pub(super) struct InstalledIncarnation {
     install_id: u64,
     stamp: tokio::sync::watch::Sender<IdentityStamp>,
@@ -45,8 +48,9 @@ pub(super) enum StampResolution {
 }
 /// An install the registry refused, for the caller to shut down.
 pub(super) type StaleInstall = Box<WithdrawnInstall>;
-/// Turn activity of a resident actor. Split from [`SessionLiveState`] so a
-/// reader cannot observe `Working` without a resident actor.
+/// Turn activity of a resident actor.
+/// Split from [`SessionLiveState`] so a reader cannot observe `Working` without a resident actor.
+/// That combination was representable when liveness was a parallel field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Activity {
     Idle,
@@ -62,7 +66,8 @@ pub(super) enum SessionPresence {
         thread: Option<SessionThread>,
         activity: Activity,
         root_identity: Option<super::agent_directory::PendingRootIdentity>,
-        /// The hosted actor's outstanding stamp; an attach that settled ahead of it has no guard left.
+        /// The hosted actor's outstanding stamp; an attach that settled ahead of it has no guard
+        /// left, so the outcome lands on this record.
         incarnation: Option<InstalledIncarnation>,
     },
     /// A load or resume is building the actor.
@@ -74,6 +79,7 @@ pub(super) enum SessionPresence {
         handle: Option<SessionHandle>,
         thread: Option<SessionThread>,
         /// Activity a mid-attach `set_live` asked to apply once the attach settles.
+        /// Independent liveness writes must not retire this variant.
         settled_activity: Option<Activity>,
         root_identity: Option<super::agent_directory::PendingRootIdentity>,
         /// The installed actor whose identity stamp is still outstanding.
@@ -280,8 +286,9 @@ impl SessionPresence {
         matches!(self, Self::Evicted { thread: None })
     }
 }
-/// The per-session state this registry owns: retained, resident resources, presence (thread and liveness), unavailable model, and bridge. Load guards, rewind snapshots, local workspaces, and the
-/// handle map are owned elsewhere.
+/// The per-session state this registry owns: retained, resident resources, presence (thread and liveness), unavailable model, and bridge.
+/// Load guards, rewind snapshots, local workspaces, and the handle map are owned elsewhere.
+/// A new field belongs here only if `release` should drop it with the rest.
 #[derive(Default)]
 struct SessionResources {
     retained: Option<RetainedResources>,
@@ -294,7 +301,8 @@ struct SessionResources {
 }
 #[derive(Default)]
 pub(super) struct SessionCounts {
-    /// Tracked ids. The per-field counts below cannot see an entry that leaks with only a field they do not name.
+    /// Tracked ids.
+    /// The per-field counts below cannot see an entry that leaks with only a field they do not name.
     pub(super) entries: usize,
     pub(super) retained_resources: usize,
     pub(super) resident_resources: usize,
@@ -731,8 +739,8 @@ impl SessionRegistry {
             _ => StampResolution::Superseded,
         }
     }
-    /// Drop what a load that produced nothing left behind: its directory row
-    /// and the whole entry.
+    /// Drop what a load that produced nothing left behind: its directory row and the whole entry,
+    /// retained state included (a lone `presence = None` would leave the turn counter behind).
     fn release_failed_load(&self, id: &acp::SessionId) {
         self.agent_directory
             .borrow_mut()

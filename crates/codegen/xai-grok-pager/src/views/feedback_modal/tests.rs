@@ -257,7 +257,7 @@ fn render_wide(modal: &mut FeedbackModalState) -> FeedbackModalRender {
 
 #[test]
 fn supplied_metadata_renders_labels_but_never_the_draft_id() {
-    // Many columns could not fit the labels side by side; stacked rows each fit in full.
+    // 50 columns could not fit the three labels side by side; stacked rows each fit in full.
     let area = Rect::new(0, 0, 50, 30);
     let mut buf = Buffer::empty(area);
     let mut modal = open_with_all_metadata("labeled report");
@@ -296,7 +296,8 @@ fn absent_metadata_renders_a_neutral_write_step() {
 
 #[test]
 fn tight_height_drops_the_label_rows_before_the_composer() {
-    // v_margin(14) + borders(2) + tabs/divider(2) + footer(2) leaves a 2-row content area.
+    // v_margin(14) + borders(2) + tabs/divider(2) + footer(2) leaves a 2-row content area: below
+    // the three label rows plus the composer's two-row reserve.
     let area = Rect::new(0, 0, 100, 22);
     let mut buf = Buffer::empty(area);
     let mut modal = open_with_all_metadata("tight");
@@ -415,7 +416,7 @@ fn left_right_cycle_the_focused_rows_value_with_wrap() {
     let type_row = row_of(&rendered, "Type: Idea");
     assert_eq!(row_of(&rendered, "Task: Debug"), type_row + 1);
     assert_eq!(row_of(&rendered, "Failure: Code quality"), type_row + 2);
-    // Left steps back to the variant.
+    // Left steps back to the previous variant.
     modal.handle_key(&key(KeyCode::Left, KeyModifiers::NONE));
     assert_eq!(modal.metadata().r#type, Some(FeedbackType::Bug));
     // Left off the first variant wraps to the last...
@@ -515,7 +516,7 @@ fn up_from_the_composer_top_focuses_the_bottom_label_row() {
 
 #[test]
 fn up_below_the_top_visual_row_moves_the_caret_before_the_labels() {
-    // The caret opens at the end of the draft, below the top visual row. Only those-line case
+    // The caret opens at the end of the draft, below the top visual row. Only the two-line case
     // has an exact hop count; the wrapped one depends on the composer width.
     for (label, text, expected_hops) in [
         ("two lines", "first\nsecond".to_owned(), 1..=1),
@@ -563,7 +564,8 @@ fn up_below_the_top_visual_row_moves_the_caret_before_the_labels() {
 
 #[test]
 fn tab_and_up_never_focus_rows_a_tight_render_dropped() {
-    // Same 2-row content area as the tight-height render test: the label rows are dropped.
+    // Same 2-row content area as the tight-height render test: the label rows are dropped,
+    // so keyboard entry must not park focus (and hide the caret) on an invisible row.
     let area = Rect::new(0, 0, 100, 22);
     let mut buf = Buffer::empty(area);
     let mut modal = open_with_all_metadata("tight");
@@ -724,7 +726,7 @@ fn enter_on_a_focused_chip_opens_the_picker_and_commits_a_later_variant() {
     );
     assert!(modal.enum_picker_open());
 
-    // The picker opens highlighting the current value (Bug); Downs land on a later variant.
+    // The picker opens highlighting the current value (Bug); two Downs land on a later variant.
     modal.handle_key(&key(KeyCode::Down, KeyModifiers::NONE));
     modal.handle_key(&key(KeyCode::Down, KeyModifiers::NONE));
     assert_eq!(

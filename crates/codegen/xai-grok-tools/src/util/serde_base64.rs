@@ -1,4 +1,13 @@
-//! Encodes a byte payload as a base64 string instead of a JSON integer array (~4x smaller), for bash output streamed over the hub WebSocket.
+//! Encodes a byte payload as a base64 string instead of a JSON integer array
+//! (~4x smaller), for bash output streamed over the hub WebSocket via
+//! `BashNotificationBase.output`.
+//!
+//! The deserializer accepts both the base64 string and the legacy integer-array
+//! form, so a new consumer can read an old producer; the serializer always emits
+//! base64. The CHANGELOG (2026-05-29) covers the consumer-before-producer deploy
+//! ordering this implies. Requires a self-describing format (JSON): the dual-form
+//! detection and the `#[serde(flatten)]` on the notification structs both force
+//! `deserialize_any`.
 
 use std::fmt;
 
@@ -147,7 +156,8 @@ mod tests {
         }
         assert!(data.contains(&0x00) && data.contains(&0xff));
 
-        // A bare `Vec<u8>` serializes as the integer array — the baseline the base64 form must beat.
+        // A bare `Vec<u8>` serializes as the legacy integer array — the baseline
+        // the base64 form must beat. Measure it before moving `data`.
         let int_array_len = serde_json::to_string(&data).unwrap().len();
 
         let w = Wrapper { output: data };

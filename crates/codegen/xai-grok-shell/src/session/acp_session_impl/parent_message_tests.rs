@@ -98,7 +98,7 @@ async fn admit_steer(
     admit(actor, message(id), ActiveAgentMessageOperation::Steer).await
 }
 
-/// Starts `prompt_id` as the running turn with a fresh epoch, so turns are distinguishable.
+/// Starts `prompt_id` as the running turn with a fresh epoch, so two turns are distinguishable.
 pub(super) async fn start_turn(actor: &SessionActor, prompt_id: &str) -> TurnEpoch {
     let epoch = actor.turn_report.start_next_turn();
     let handle = tokio::task::spawn_local(std::future::pending::<()>()).abort_handle();
@@ -962,8 +962,7 @@ async fn safe_point_slots_reject_past_named_cap() {
             ActiveAgentMessageOperation::Steer,
             ActiveAgentMessageOperation::Interject,
         ];
-        // One bound for both lanes: they fill it together and either
-        // overflows it
+        // One bound for both lanes: they fill it together and either one overflows it
         for (i, lane) in lanes
             .iter()
             .cycle()

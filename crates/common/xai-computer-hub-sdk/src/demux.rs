@@ -1,4 +1,29 @@
 //! Inbound frame demultiplexer.
+//!
+//! Frames inbound from the WebSocket fall into four buckets:
+//!
+//! 1. JSON-RPC **responses** correlated to a previously-issued request
+//!    by `id`. Routed through the crate-internal response-waiter map.
+//! 2. **`tool_call_progress` notifications** correlated to a per-call
+//!    `tool_call_id` carried in `params`. Routed through the
+//!    crate-internal progress-waiter map registered via
+//!    `Demux::try_register_progress_waiter` (crate-internal).
+//! 3. JSON-RPC **requests / notifications** carrying a `session_id` —
+//!    routed to the per-session inbox registered via
+//!    [`Demux::register_session_inbox`].
+//! 4. Connection-level frames (handshake, ping/pong) that the
+//!    connection actor handles directly without going through the demux.
+//!
+//! The demux owns the session inbox map, the in-flight response
+//! waiters, and the per-call progress waiters; the connection actor
+//! parses each text frame, classifies it,
+//! and pushes it through this module.
+//!
+//! Routing inbound frames is non-blocking: a full session inbox or a
+//! dropped receiver returns a typed [`RouteOutcome`] variant rather
+//! than awaiting the inbox. Blocking on a slow consumer would back up
+//! the entire connection actor and starve every other session sharing
+//! the socket.
 
 use std::sync::Arc;
 
@@ -19,9 +44,12 @@ pub(crate) type HookHandlerSlot = Arc<parking_lot::Mutex<Option<HookRequestHandl
 /// Frame routed to a session inbox.
 #[derive(Debug, Clone)]
 pub enum InboundFrame {
-    /// A request the inbox owner must answer (any session frame carrying an `id`): a `tool_call_request`.
+    /// A request the inbox owner must answer (any session frame carrying
+    /// an `id`): a `tool_call_request`, or a reverse-direction `hook`
+    /// answered via `ToolHarness::send_hook_reply`. Carries raw JSON.
     Request(Value),
-    /// Server-issued notification (e.g. `tool.notification`) — fire-and- forget, no reply expected.
+    /// Server-issued notification (e.g. `tool.notification`) — fire-and-
+    /// forget, no reply expected.
     Notification(Value),
 }
 
@@ -32,23 +60,34 @@ pub enum RouteOutcome {
     Response,
     /// Forwarded to a session inbox.
     Session,
-    /// Matched a progress waiter; the progress frame was forwarded to the per-call progress channel.
+    /// Matched a progress waiter; the progress frame was forwarded to
+    /// the per-call progress channel.
     Progress,
     /// No inbox is bound for the targeted session.
     UnknownSession,
-    /// No progress waiter is parked for the targeted `tool_call_id`.
+    /// No progress waiter is parked for the targeted `tool_call_id`. The
+    /// caller's stream is no longer subscribed (typical post-terminal),
+    /// so the frame is dropped.
     UnknownProgress,
     /// Connection-level notification broadcast to subscribers.
     Notification,
-    /// No waiter is parked for the targeted request id, OR the frame was unaddressable.
+    /// No waiter is parked for the targeted request id, OR the frame
+    /// was unaddressable.
     Unrouted,
-    /// The session inbox sender was full; the frame was dropped to avoid blocking the connection actor.
+    /// The session inbox sender was full; the frame was dropped to
+    /// avoid blocking the connection actor.
     InboxFull,
-    /// The session inbox receiver.g. the consumer's run loop exited).
+    /// The session inbox receiver was dropped (e.g. the consumer's
+    /// run loop exited); the binding is now stale and the frame was
+    /// dropped.
     SessionDropped,
-    /// The progress channel was full; the frame was dropped to avoid blocking the connection actor.
+    /// The progress channel was full; the frame was dropped to avoid
+    /// blocking the connection actor. The caller's stream consumer
+    /// fell behind on draining progress.
     ProgressFull,
-    /// The progress receiver.g. the caller's stream.
+    /// The progress receiver was dropped (e.g. the caller's stream was
+    /// dropped); the waiter binding is now stale and the frame was
+    /// dropped.
     ProgressDropped,
 }
 
@@ -74,12 +113,19 @@ impl std::fmt::Debug for SessionInbox {
 pub struct Demux {
     sessions: DashMap<SessionId, Vec<SessionInbox>>,
     waiters: DashMap<RequestId, oneshot::Sender<Result<JsonRpcResponse, ClientError>>>,
-    /// Session index for `tool.call` response waiters only.
+    /// Session index for `tool.call` response waiters only. Lets the SDK
+    /// in-flight short-circuit fail every parked call for a session on a
+    /// workspace Disconnected notification without waiting for the server.
+    /// Turn-hook / session-RPC waiters are NOT indexed here, so the
+    /// short-circuit never touches them.
     call_sessions: DashMap<RequestId, SessionId>,
     progress: DashMap<ToolCallId, tokio::sync::mpsc::Sender<ToolCallProgressFrame>>,
     /// Broadcast channel for connection-level notifications (no session_id).
     notifications: tokio::sync::broadcast::Sender<Value>,
-    /// Clone of the connection's outbound sender.
+    /// Clone of the connection's outbound sender. Used to synthesize the
+    /// overloaded (-32016) response when a session inbox is full so a
+    /// Request is rejected with an error rather than silently dropped.
+    /// `None` in unit tests that construct a bare demux.
     outbound: Option<tokio::sync::mpsc::Sender<String>>,
 }
 
@@ -102,6 +148,8 @@ impl Demux {
         Self::default()
     }
 
+    /// Construct a demux wired to the connection's outbound sender so the
+    /// inbox-full Request path can ship an overloaded (-32016) response.
     pub fn with_outbound(outbound: tokio::sync::mpsc::Sender<String>) -> Self {
         Self {
             outbound: Some(outbound),
@@ -204,7 +252,7 @@ impl Demux {
     }
 
     /// Pop the waiter for `request_id`, if any. Also drops the session index
-    /// entry so both maps stay consistent. Crate-internal.
+    /// entry so the two maps stay consistent. Crate-internal.
     pub(crate) fn take_response_waiter(
         &self,
         request_id: &RequestId,
@@ -213,8 +261,14 @@ impl Demux {
         self.waiters.remove(request_id).map(|(_, waiter)| waiter)
     }
 
-    /// Fail every in-flight `tool.call` waiter bound to `session_id`, completing each with `result_factory`. Returns the number resolved. Drives the SDK in-flight short-circuit: on a workspace `ToolServerStatusChanged(Disconnected)` notification the harness fails its parked calls for that session promptly instead of parking until `rpc_ttl_ms`. Idempotent with the server-side cancel — each waiter is taken
-    /// at most once, so a call already resolved by the server is skipped.
+    /// Fail every in-flight `tool.call` waiter bound to `session_id`,
+    /// completing each with `result_factory`. Returns the number resolved.
+    ///
+    /// Drives the SDK in-flight short-circuit: on a workspace
+    /// `ToolServerStatusChanged(Disconnected)` notification the harness fails
+    /// its parked calls for that session promptly instead of parking until
+    /// `rpc_ttl_ms`. Idempotent with the server-side cancel — each waiter is
+    /// taken at most once, so a call already resolved by the server is skipped.
     pub(crate) fn fail_calls_for_session<F>(
         &self,
         session_id: &SessionId,
@@ -242,12 +296,16 @@ impl Demux {
         resolved
     }
 
-    /// Park a per-call progress sender keyed by `tool_call_id`. Returns
-    /// `Err(progress)` (handing the not-yet-inserted sender back) when
-    /// another in-flight call already owns the id, leaving the prior waiter
-    /// intact. The caller drops the matching receiver to terminate the
-    /// subscription — subsequent inbound progress for the same id is
-    /// silently dropped via [`RouteOutcome::ProgressDropped`].
+    /// Park a per-call progress sender keyed by `tool_call_id`.
+    /// Returns `Err(progress)` (handing the not-yet-inserted sender
+    /// back) when another in-flight call already owns the id, leaving
+    /// the prior waiter intact. The caller drops the matching
+    /// receiver to terminate the subscription — subsequent inbound
+    /// progress for the same id is silently dropped via
+    /// [`RouteOutcome::ProgressDropped`].
+    ///
+    /// Atomic check-then-insert under a single shard lock so a
+    /// concurrent caller cannot observe a transient empty slot.
     pub(crate) fn try_register_progress_waiter(
         &self,
         tool_call_id: ToolCallId,
@@ -280,7 +338,8 @@ impl Demux {
     where
         F: Fn() -> ClientError,
     {
-        // Snapshot keys, then remove individually so we never hold a DashMap shard lock across the oneshot send.
+        // Snapshot keys, then remove individually so we never hold
+        // a DashMap shard lock across the oneshot send.
         let keys: Vec<RequestId> = self.waiters.iter().map(|kv| kv.key().clone()).collect();
         for key in keys {
             if let Some((_, waiter)) = self.waiters.remove(&key) {
@@ -290,7 +349,11 @@ impl Demux {
         }
     }
 
-    /// Drop every parked progress sender.
+    /// Drop every parked progress sender. Used by the reconnect path
+    /// after [`Self::drain_waiters_with`]: the response waiter resolves
+    /// with `NetworkError` and the matching progress channel closes,
+    /// so any in-flight harness call stream terminates promptly
+    /// instead of stalling on a half-empty progress channel.
     pub(crate) fn drain_progress(&self) {
         let keys: Vec<ToolCallId> = self.progress.iter().map(|kv| kv.key().clone()).collect();
         for key in keys {
@@ -298,11 +361,21 @@ impl Demux {
         }
     }
 
-    /// Route a parsed JSON value. Classification rules: - presence of `result`/`error` → response, routed to waiter; - method == `tool_call_progress` notification → progress waiter
+    /// Route a parsed JSON value. Classification rules:
+    ///
+    /// - presence of `result`/`error` → response, routed to waiter;
+    /// - method == `tool_call_progress` notification → progress waiter
     ///   keyed by `params.tool_call_id`;
     /// - presence of `session_id` → session inbox, request vs.
     ///   notification distinguished by the presence of `id`;
-    /// - otherwise → [`RouteOutcome::Unrouted`]. Routing to a session inbox or progress channel uses non-blocking `try_send`. A full inbox or progress channel returns the matching `*Full` variant; a dropped receiver returns the matching `*Dropped` variant.
+    /// - otherwise → [`RouteOutcome::Unrouted`].
+    ///
+    /// Routing to a session inbox or progress channel uses non-blocking
+    /// `try_send`. A full inbox or progress channel returns the matching
+    /// `*Full` variant; a dropped receiver returns the matching
+    /// `*Dropped` variant. Either way the frame is dropped without
+    /// awaiting the consumer, so a slow handler never starves other
+    /// sessions or calls multiplexed onto the same connection.
     pub fn route(&self, frame: Value) -> RouteOutcome {
         crate::metrics::demux_inbox_depth_set(self.sessions.len() as i64);
         if frame.get("result").is_some() || frame.get("error").is_some() {
@@ -444,7 +517,9 @@ impl Demux {
         inboxes: &[SessionInbox],
     ) -> RouteOutcome {
         // Newest inbox with a live hook handler first, so an owner harness
-        // answers ahead of a consumer that subscribed later.
+        // answers ahead of a consumer that subscribed later. Handler-less
+        // inboxes stay reachable as fallback so a genuinely unanswered hook
+        // still surfaces the harness-side "no handler registered" warn.
         let has_handler: Vec<bool> = inboxes
             .iter()
             .map(|inbox| {
@@ -481,8 +556,11 @@ impl Demux {
 
     /// Handle a full session inbox without blocking the reader.
     ///
-    /// A Notification (no `id`) stays fire-and-forget and is metered
-    /// (`inbox_full_notification_dropped`).
+    /// A Request (has an `id`) is rejected with the shared overloaded
+    /// (-32016 "tool_busy") response on a best-effort `try_send`; if the
+    /// outbound is *also* full the rejection itself is dropped and metered
+    /// (`inbox_full_reject_send_failed`). A Notification (no `id`) stays
+    /// fire-and-forget and is metered (`inbox_full_notification_dropped`).
     fn reject_inbox_full(&self, session_id: &SessionId, frame: InboundFrame) {
         let InboundFrame::Request(value) = frame else {
             crate::metrics::inbox_full_notification_dropped();
@@ -493,7 +571,11 @@ impl Demux {
         let Some(out) = &self.outbound else {
             return;
         };
-        // A `Request` always carries an `id` (that is how `route_session` classifies it).
+        // A `Request` always carries an `id` (that is how `route_session`
+        // classifies it). A well-formed id deserializes into a `JsonRpcId`;
+        // a malformed id (object/array/bool/null) cannot, but the request
+        // must STILL get an overloaded response rather than be silently
+        // dropped, so we fall back to echoing the raw id JSON as a string.
         let raw_id = value.get("id");
         let id = raw_id
             .and_then(|v| serde_json::from_value::<JsonRpcId>(v.clone()).ok())
@@ -534,7 +616,8 @@ mod tests {
 
     #[tokio::test]
     async fn fail_calls_for_session_resolves_only_matching_call_waiters() {
-        // Fails exactly the session's `tool.call` waiters.
+        // Fails exactly the session's `tool.call` waiters; other sessions'
+        // calls and non-call (turn-hook) waiters stay parked.
         let demux = Demux::new();
         let s1 = SessionId::new("s1").expect("valid");
         let s2 = SessionId::new("s2").expect("valid");
@@ -542,7 +625,7 @@ mod tests {
         let (tx_a, rx_a) = oneshot::channel();
         let (tx_b, rx_b) = oneshot::channel();
         let (tx_other, rx_other) = oneshot::channel();
-        // Calls on s1, one on s2.
+        // Two calls on s1, one on s2.
         demux.register_call_response_waiter(RequestId::new("a").unwrap(), s1.clone(), tx_a);
         demux.register_call_response_waiter(RequestId::new("b").unwrap(), s1.clone(), tx_b);
         demux.register_call_response_waiter(RequestId::new("c").unwrap(), s2.clone(), tx_other);
@@ -574,7 +657,8 @@ mod tests {
 
     #[tokio::test]
     async fn fail_calls_for_session_is_idempotent_after_resolution() {
-        // A call already resolved (waiter taken) must not be double-counted by the short-circuit.
+        // A call already resolved (waiter taken) must not be double-counted by
+        // the short-circuit.
         let demux = Demux::new();
         let s1 = SessionId::new("s1").expect("valid");
         let (tx_a, rx_a) = oneshot::channel();
@@ -591,7 +675,8 @@ mod tests {
 
     #[tokio::test]
     async fn short_circuit_then_late_response_is_unrouted() {
-        // A short-circuit that resolves first leaves no waiter.
+        // A short-circuit that resolves first leaves no waiter, so a late server
+        // response for the same id is dropped (no double-resolve).
         let demux = Demux::new();
         let s1 = SessionId::new("s1").expect("valid");
         let (tx_a, rx_a) = oneshot::channel();
@@ -632,7 +717,8 @@ mod tests {
 
     #[tokio::test]
     async fn reverse_hook_request_routes_to_inbox_as_request() {
-        // A reverse hook request carries an `id`.
+        // A reverse hook request carries an `id`, so it must route to the
+        // inbox as `Request` (not `Notification`) for the harness to answer.
         let demux = Demux::new();
         let session = SessionId::new("s1").expect("valid");
         let (tx, mut rx) = mpsc::channel(4);
@@ -868,12 +954,14 @@ mod tests {
             "params": {},
         });
         assert_eq!(demux.route(frame), RouteOutcome::SessionDropped);
-        // Stale binding should.
+        // Stale binding should have been removed.
         assert!(demux.sessions.get(&session).is_none());
     }
 
     #[tokio::test]
     async fn inbox_full_request_synthesizes_overloaded_response_onto_outbound() {
+        // A full session inbox for a Request must produce the shared
+        // -32016 "tool_busy" response on outbound, not a silent drop.
         let (out_tx, mut out_rx) = mpsc::channel::<String>(4);
         let demux = Demux::with_outbound(out_tx);
         let session = SessionId::new("busy").expect("valid");
@@ -888,6 +976,7 @@ mod tests {
                 "params": {},
             })
         };
+        // First fills capacity (cap 1); second overflows → InboxFull.
         assert_eq!(demux.route(frame("a")), RouteOutcome::Session);
         assert_eq!(demux.route(frame("b")), RouteOutcome::InboxFull);
 
@@ -906,7 +995,10 @@ mod tests {
 
     #[tokio::test]
     async fn inbox_full_request_with_malformed_id_still_emits_overloaded_response() {
-        // A Request whose `id` is present but not a valid JsonRpcId (object/array/null) must NOT be silently dropped on a full inbox.
+        // A Request whose `id` is present but not a valid JsonRpcId
+        // (object/array/null) must NOT be silently dropped on a full
+        // inbox: it still gets the shared -32016 response, with the raw
+        // id echoed back as a string.
         let (out_tx, mut out_rx) = mpsc::channel::<String>(4);
         let demux = Demux::with_outbound(out_tx);
         let session = SessionId::new("bad_id").expect("valid");
@@ -921,6 +1013,7 @@ mod tests {
                 "params": {},
             })
         };
+        // First fills capacity (cap 1); the malformed-id second overflows.
         assert_eq!(demux.route(frame(json!("a"))), RouteOutcome::Session);
         assert_eq!(
             demux.route(frame(json!({ "nested": 1 }))),
@@ -939,7 +1032,8 @@ mod tests {
 
     #[tokio::test]
     async fn inbox_full_notification_is_dropped_without_outbound_response() {
-        // A Notification (no id) on a full inbox stays fire-and-forget: no synthesized response is emitted.
+        // A Notification (no id) on a full inbox stays fire-and-forget:
+        // no synthesized response is emitted.
         let (out_tx, mut out_rx) = mpsc::channel::<String>(4);
         let demux = Demux::with_outbound(out_tx);
         let session = SessionId::new("notif_busy").expect("valid");
@@ -1052,7 +1146,8 @@ mod tests {
         let returned = demux
             .try_register_progress_waiter(call_id.clone(), tx_second)
             .expect_err("collision returns the rejected sender");
-        // Returned sender is independent of the live one: dropping it must not close the receiver.
+        // Returned sender is independent of the live one: dropping
+        // it must not close the original receiver.
         drop(returned);
         let frame = json!({
             "jsonrpc": "2.0",

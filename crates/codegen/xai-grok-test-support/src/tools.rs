@@ -1,11 +1,15 @@
-//! The name GrokBuild offers for every tool a script can call, and the GrokBuild shape of its arguments.
+//! The name GrokBuild offers for every tool a script can call, and the GrokBuild shape of its
+//! arguments. A case writes arguments once, and [`Tool::pick`] fills required fields a case omits,
+//! reshapes a call written in another tool's vocabulary, and resolves it against the names offered.
 use crate::inference_request::{HistoryToolCall, OfferedTools};
 use serde_json::{Map, Value, json};
 use std::fmt;
 const MCP_NAME_SEPARATOR: &str = "__";
-/// The meta tool the shell offers for MCP dispatch when tool search is on.
+/// The meta tool the shell offers for MCP dispatch when tool search is on; the model names
+/// the target in its `tool_name`/`tool_input` arguments rather than calling `server__tool` directly.
 const USE_TOOL_NAME: &str = "use_tool";
-/// The subagent spawn tool's name in each toolset: GrokBuild spells it `spawn_subagent`.
+/// The subagent spawn tool's name in each toolset: GrokBuild spells it `spawn_subagent`, the
+/// daemon worker spells it `Task`. Single-sourced so the two spellings cannot drift.
 pub const GROK_BUILD_SPAWN_TOOL: &str = "spawn_subagent";
 pub const DAEMON_SPAWN_TOOL: &str = "Task";
 /// The task id a task call gets when the case names none.
@@ -106,7 +110,8 @@ struct FieldFill {
 /// A reshaping of a call's arguments a table of renames cannot express.
 type Shape = fn(Map<String, Value>) -> Map<String, Value>;
 struct GrokBuildRow {
-    /// `None` for the MCP resource kinds, and for an MCP call, whose name is built from the server and tool.
+    /// `None` for the MCP resource kinds, and for an MCP call, whose name is built from
+    /// the server and tool.
     name: Option<&'static str>,
     fills: &'static [FieldFill],
     shape: Option<Shape>,

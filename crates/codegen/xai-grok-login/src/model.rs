@@ -6,7 +6,7 @@ use xai_grok_auth::bearer_suffix;
 use super::is_xai_oauth2_issuer;
 
 pub const TOKEN_TTL: Duration = Duration::days(30);
-const DEFAULT_EARLY_INVALIDATION_SECS: u64 = 300; // A few
+const DEFAULT_EARLY_INVALIDATION_SECS: u64 = 300; // 5 minutes
 
 /// Legacy auth.json scope key. Fallback for old devbox auth files.
 pub(super) const LEGACY_SCOPE: &str = "https://accounts.x.ai/sign-in";
@@ -17,8 +17,8 @@ pub(super) const API_KEY_SCOPE: &str = "xai::api_key";
 const BLOCKED_REASON_NO_LOGS: &str = "BLOCKED_REASON_NO_LOGS";
 const BLOCKED_REASON_NO_LOGS_MODERATED: &str = "BLOCKED_REASON_NO_LOGS_MODERATED";
 
-/// Fresh-credential / missing-field default: opted out until the user or
-/// server enrichment opts in.
+/// Fresh-credential / missing-field default: opted out until the user or server enrichment opts in.
+/// Single source for `GrokAuth`, `AuthMeta`, and every login-path constructor so the sides cannot drift.
 pub fn default_coding_data_retention_opt_out() -> bool {
     true
 }
@@ -40,6 +40,7 @@ pub enum AuthMode {
 }
 
 /// Wire value of `principal_type` for team OAuth principals (capitalized by the auth service).
+/// Single source for every comparison site.
 pub const TEAM_PRINCIPAL_TYPE: &str = "Team";
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -91,10 +92,13 @@ pub struct GrokAuth {
     pub refresh_token: Option<String>,
 
     /// Server-provided expiration (from OIDC `expires_in`).
+    /// When present, takes precedence over the hardcoded `TOKEN_TTL`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<DateTime<Utc>>,
 
     /// Issuer URL that issued this token.
+    /// For OIDC credentials it drives refresh via discovery; for external-provider credentials it is the provider's `issuer` claim.
+    /// In both modes an x.ai issuer marks the credential first-party (`is_xai_auth`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oidc_issuer: Option<String>,
 
@@ -119,6 +123,8 @@ impl std::fmt::Debug for GrokAuth {
 }
 
 /// Identifies one issuance of a credential.
+/// The bearer alone is not enough: an authority may re-issue the same opaque token with a later `expires_at`, and every mint stamps a fresh `create_time`.
+/// Two credentials with equal generations are the same issuance; anything else counts as progress (proactive loop) or a new scope for failure budgets (refreshers).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CredentialGeneration {
     key: String,
@@ -136,15 +142,16 @@ impl GrokAuth {
     }
 
     /// Seconds since this credential was minted.
+    /// Negative when the clock stepped back past `create_time` (NTP correction, VM restore, or a sibling machine's clock via an adopted auth.json).
+    /// `create_time` is always stamped from the minting machine's local clock.
     pub fn mint_age_seconds(&self) -> i64 {
         Utc::now()
             .signed_duration_since(self.create_time)
             .num_seconds()
     }
 
-    /// `true` when the token comes from a first-party xAI account. That is
-    /// either an OIDC login against https://auth.x.ai (or the local-dev
-    /// equivalent), or an external auth provider declaring an xAI issuer.
+    /// `true` when the token comes from a first-party xAI account. That is either an OIDC login against https://auth.x.ai (or the local-dev equivalent), or an external auth provider declaring an xAI issuer.
+    /// The issuer is a client-side hint, not a trust assertion. Everything it unlocks still authenticates the actual token server-side, and it never influences endpoints.
     pub fn is_xai_auth(&self) -> bool {
         match self.auth_mode {
             AuthMode::Oidc | AuthMode::External => self
@@ -160,9 +167,8 @@ impl GrokAuth {
         self.is_xai_auth() || self.auth_mode == AuthMode::WebLogin
     }
 
-    /// Whether this credential can access `supported_in_api: false` models.
-    /// Session logins (WebLogin, OIDC, including enterprise issuers) always
-    /// qualify.
+    /// Whether this credential can access `supported_in_api: false` models. Session logins (WebLogin, OIDC, including enterprise issuers) always qualify.
+    /// External-provider credentials qualify only when first-party (`is_xai_auth`). Plain API keys never do.
     pub fn is_session_auth(&self) -> bool {
         match self.auth_mode {
             AuthMode::WebLogin | AuthMode::Oidc => true,
@@ -182,8 +188,9 @@ impl GrokAuth {
             .any(|r| r == BLOCKED_REASON_NO_LOGS || r == BLOCKED_REASON_NO_LOGS_MODERATED)
     }
 
-    /// `true` when the team has ZDR or the user opted out of coding data
-    /// retention. Use this for trace-upload and research-data gates.
+    /// `true` when the team has ZDR or the user opted out of coding data retention.
+    /// Use this for trace-upload and research-data gates.
+    /// Product analytics (`telemetry_enabled`) and user-facing sync features should use `is_zdr_team()` directly.
     pub fn is_data_collection_disabled(&self) -> bool {
         self.is_zdr_team() || self.coding_data_retention_opt_out
     }
@@ -242,6 +249,7 @@ impl Default for GrokAuth {
 #[cfg(any(test, feature = "test-support"))]
 impl GrokAuth {
     /// Returns a `GrokAuth` with sensible defaults for tests.
+    /// Override fields with struct update syntax: `GrokAuth { key: "...".into(), ..GrokAuth::test_default() }`.
     pub fn test_default() -> Self {
         Self {
             key: "test-key".into(),
@@ -322,8 +330,8 @@ fn inherited_lookup(map: &AuthStore, scope: &str) -> Option<GrokAuth> {
         .find_map(|inherited| map.get(*inherited).cloned())
 }
 
-/// Early-invalidation buffer. Override with `GROK_AUTH_EARLY_INVALIDATION_SECS` for testing (e.g. `=5` to
-/// shrink the buffer to a few seconds).
+/// Early-invalidation buffer.
+/// Override with `GROK_AUTH_EARLY_INVALIDATION_SECS` for testing (e.g. `=5` to shrink the buffer to 5 seconds).
 pub(super) fn early_invalidation() -> Duration {
     std::env::var("GROK_AUTH_EARLY_INVALIDATION_SECS")
         .ok()

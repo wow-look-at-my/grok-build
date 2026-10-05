@@ -1,4 +1,5 @@
-//! Plan-nudge trigger: detects planning keywords typed into the prompt so the pager can hint that Shift+Tab cycles.
+//! Plan-nudge trigger: detects planning keywords typed into the prompt so the
+//! pager can hint that Shift+Tab cycles into plan mode first.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -9,14 +10,15 @@ use crate::theme::Theme;
 /// Ephemeral-tip dedup key for the plan-mode nudge.
 pub(crate) const PLAN_NUDGE_KEY: &str = "plan_nudge";
 
-/// Key into the per-session in-memory seen-count map (`AppView::tip_seen_counts`) for the plan nudge.
+/// Key into the per-session in-memory seen-count map
+/// (`AppView::tip_seen_counts`) for the plan nudge. Not persisted to disk.
 pub(crate) const PLAN_NUDGE_SEEN_KEY: &str = "plan_nudge_shown_count";
 
 /// The tip stops showing after this many shows within a single session.
 const PLAN_NUDGE_SEEN_CAP: u32 = 3;
 
-/// Allowlist of planning intents (ASCII lowercase), kept tight to avoid false
-/// positives.
+/// Allowlist of planning intents (ASCII lowercase), kept tight to avoid false positives.
+/// Matched as whole words (see [`prompt_mentions_planning`]) so "explain"/"explanation"/"planet" never trip the "plan" entry.
 const PLANNING_KEYWORDS: &[&str] = &[
     "plan",
     "planning",
@@ -29,8 +31,9 @@ const PLANNING_KEYWORDS: &[&str] = &[
     "strategy",
 ];
 
-/// Plan-mode chord for the tip copy: always `shift+tab`. Derived from the
-/// real `CycleMode` binding (not a literal), so it can't drift.
+/// Plan-mode chord for the tip copy: always `shift+tab`.
+/// Derived from the real `CycleMode` binding (not a literal), so it can't drift.
+/// `shift_tab_keys()[0]` is one of the encodings [`crate::input::key::is_shift_tab`] accepts.
 fn plan_chord_label() -> String {
     crate::input::key::shift_tab_keys()[0]
         .display()
@@ -55,8 +58,9 @@ pub fn plan_nudge_tip() -> EphemeralTip {
     .with_session_seen_cap(PLAN_NUDGE_SEEN_KEY, PLAN_NUDGE_SEEN_CAP)
 }
 
-/// Whether `text` mentions a planning intent from the tight
-/// [`PLANNING_KEYWORDS`] allowlist.
+/// Whether `text` mentions a planning intent from the tight [`PLANNING_KEYWORDS`] allowlist.
+/// Case-insensitive and matched on whole-word boundaries so near neighbours ("explain", "explanation", "planet", "redesign") never match.
+/// Non-allocating; it runs on every prompt edit.
 pub fn prompt_mentions_planning(text: &str) -> bool {
     PLANNING_KEYWORDS
         .iter()

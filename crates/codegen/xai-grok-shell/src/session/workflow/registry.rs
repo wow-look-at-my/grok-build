@@ -126,6 +126,7 @@ impl WorkflowRegistry {
         let mut duplicate_names = BTreeMap::new();
 
         // Bundled first so a GCS-shipped `deep-research.rhai` shadows include_str!.
+        // Project/user still cannot override a compiled-in name
         let mut bundled_entries = scan_directory(&bundled_workflow_dir(), "bundled");
         reject_same_scope_duplicates(&mut bundled_entries, "bundled", &mut duplicate_names);
         merge_scope(&mut entries, bundled_entries);

@@ -1,4 +1,17 @@
 //! Measures the wall time of finding a child session's `updates.jsonl`, the lookup a live `SubagentSpawned` update triggers.
+//!
+//! After a hinted miss, `Relocation` walks every cwd bucket and `lstat`s each `summary.json`.
+//! `HintedOnly` returns on that miss.
+//!
+//! Default fixture: 180 encoded cwds × 20 sessions = 3,600 summaries (same
+//! order as a fat local `~/.grok/sessions`). Override with env:
+//!
+//! ```text
+//! cargo bench -p xai-grok-shell --bench child_replay_lookup
+//! CHILD_REPLAY_LOOKUP_CWDS=3000 CHILD_REPLAY_LOOKUP_PER_CWD=3 cargo bench ...
+//! # read-only against a real store (no writes):
+//! CHILD_REPLAY_LOOKUP_HOME=$HOME/.grok cargo bench -p xai-grok-shell --bench child_replay_lookup
+//! ```
 
 use std::fs;
 use std::hint::black_box;

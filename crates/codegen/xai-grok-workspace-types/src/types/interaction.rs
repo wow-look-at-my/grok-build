@@ -1,4 +1,13 @@
 //! User-interaction shapes referenced from [`ToolChunk::NeedUserAnswer`](crate::chunks::ToolChunk::NeedUserAnswer).
+//! They also appear in [`ToolResponse::UserAnswer`](crate::chunks::ToolResponse::UserAnswer).
+//!
+//! Used by the `ask_user_question` tool flow.
+//! The workspace yields a `NeedUserAnswer` chunk carrying a `Vec<UserQuestion>`.
+//! The sampler prompts the user and replies with a matching `Vec<UserAnswer>` on the tool's bidi response sender.
+//!
+//! TODO(workspace): align with the canonical question/answer types in
+//! `xai-grok-tools` once the `ask_user_question` tool is extracted
+//! into the workspace crate.
 
 use serde::{Deserialize, Serialize};
 

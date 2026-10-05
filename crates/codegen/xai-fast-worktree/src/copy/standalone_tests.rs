@@ -673,7 +673,8 @@ fn orphan_head_keeps_shallow_when_graft_parent_is_missing() {
         &["update-ref", "refs/remotes/origin/main", &main_tip],
     );
     run_git(&shallow_src, &["checkout", "--orphan", "pages"]);
-    // Clone does not inherit user.identity.
+    // Clone does not inherit user.identity; git_commit_all would then fail
+    // silently on an unborn orphan branch (rev-parse HEAD → "unknown revision").
     std::fs::write(shallow_src.join("pages.txt"), "pages").unwrap();
     run_git(&shallow_src, &["add", "."]);
     run_git(&shallow_src, &["commit", "-m", "pages"]);

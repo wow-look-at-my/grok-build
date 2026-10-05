@@ -1,5 +1,6 @@
 use super::*;
 
+// Self-signed PEMs for unit tests only (CN=test-extra-ca-1 / -2).
 const VALID_CERT_1: &str = "-----BEGIN CERTIFICATE-----\n\
 MIIDFTCCAf2gAwIBAgIUT2czXTuxSAjDjEh92UMB1OVahZYwDQYJKoZIhvcNAQEL\n\
 BQAwGjEYMBYGA1UEAwwPdGVzdC1leHRyYS1jYS0xMB4XDTI2MDcyOTE4MzUwNFoX\n\
@@ -189,8 +190,8 @@ fn select_bundle_precedence() {
 
 #[test]
 fn load_fails_open_on_read_errors() {
-    // Both read_bundle_capped failures (missing file, over the size cap)
-    // yield zero roots rather than propagating That keeps the size cap.
+    // Both read_bundle_capped failures (missing file, over the size cap) yield zero roots rather than propagating
+    // That keeps the size cap on the load path
     assert!(
         load_extra_root_ders(
             ENV_GROK_EXTRA_CA_BUNDLE,

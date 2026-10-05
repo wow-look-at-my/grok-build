@@ -118,8 +118,8 @@ fn ffmpeg_hint_banner_rows() -> u16 {
     if ffmpeg_install_cmd().is_some() { 2 } else { 1 }
 }
 
-/// `(image_area, total)` rows for an inline-media preview. Shared by the code that reserves entry height and
-/// the code that places the block, so both cannot drift.
+/// `(image_area, total)` rows for an inline-media preview.
+/// Shared by the code that reserves entry height and the code that places the block, so the two cannot drift.
 pub fn inline_media_reserved_rows(info: &InlineMediaInfo, content_width: u16) -> (u16, u16) {
     use crate::terminal::image::fit_image_to_cells;
 

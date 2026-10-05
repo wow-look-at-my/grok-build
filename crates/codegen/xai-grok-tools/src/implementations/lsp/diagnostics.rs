@@ -1,4 +1,22 @@
 //! The per-server diagnostics store.
+//!
+//! Diagnostics reach us two ways — pushed by the server via
+//! `textDocument/publishDiagnostics`, or pulled by us via
+//! `textDocument/diagnostic` — and both land here, so the rest of the code has
+//! one place to read from.
+//!
+//! Every answer says which document version it describes. That is what makes
+//! "has the server given a verdict on the edit I just sent?" a comparison
+//! rather than a guess. Without it, the presence of an entry means only "the
+//! server said something about this file at some point", which cannot tell a
+//! file that is genuinely clean now from one that was clean before the edit
+//! that broke it.
+//!
+//! The version comes from the protocol wherever the protocol provides one: a
+//! pull knows which revision it asked about, and a pushed report may carry the
+//! version it was computed for. Only a push that omits it falls back to
+//! arrival order — it is credited with the newest version we had sent when it
+//! arrived.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,14 +26,16 @@ use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use async_lsp::lsp_types::Diagnostic;
 
-/// The server's latest word on one document. The items and the `result_id`
-/// that names them are one value on purpose.
+/// The server's latest word on one document. The items and the `result_id` that names them are one value on purpose. An id is a promise that
+/// what it names is what a reader would find, and a promise kept by remembering to update two containers together is a promise that eventually
+/// gets broken. Here there is nothing to keep in step: an answer the store turns away takes its id with it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Answer {
     pub items: Vec<Diagnostic>,
     /// The document version this verdict describes.
     pub covers: i32,
-    /// Result id from a pull, valid only for the `items` beside it.
+    /// Result id from a pull, valid only for the `items` beside it. Sending it
+    /// back lets the server reply "unchanged" instead of recomputing.
     pub result_id: Option<String>,
 }
 
@@ -29,10 +49,14 @@ impl Answer {
     }
 }
 
-/// The version of a document the server cannot have a verdict on, because we have never told it about one.
+/// The version of a document the server cannot have a verdict on, because we
+/// have never told it about one. Real documents start at
+/// [`super::documents::FIRST_VERSION`].
 pub const NO_VERSION: i32 = 0;
 
-/// Diagnostics for every document one server has reported on.
+/// Diagnostics for every document one server has reported on. Cheap to clone (shared handle) so the pull tasks, the router and the manager can
+/// each hold one. Lock poisoning is recovered from in one place rather than being spelled differently at each call site: a panicking writer
+/// leaves the map structurally intact, and stale diagnostics beat no diagnostics.
 #[derive(Debug, Clone, Default)]
 pub struct DiagnosticsStore {
     inner: Arc<Inner>,
@@ -49,23 +73,22 @@ impl DiagnosticsStore {
         Self::default()
     }
 
-    /// Whether this server publishes diagnostics of its own accord. Set by
-    /// the first `publishDiagnostics` to arrive and never cleared.
+    /// Whether this server publishes diagnostics of its own accord. Set by the first
+    /// `publishDiagnostics` to arrive and never cleared. Take the pull answer as the whole picture
+    /// and every clippy and type error in the crate disappears.
     pub fn server_publishes(&self) -> bool {
         self.inner.publishes.load(Ordering::Acquire)
     }
 
-    /// Write `answer` down unless what we hold is newer. Returns whether it
-    /// landed.
+    /// Write `answer` down unless what we hold is newer. Returns whether it landed. This is the
+    /// only rule in the store, and every write goes through it.
     pub fn install(&self, uri: &str, answer: Answer) -> bool {
         self.install_if(uri, answer, || true)
     }
 
-    /// The same, for a writer whose answer may have been overtaken by
-    /// something the store cannot see — a refresh, or the server revealing
-    /// that it publishes. `still_wanted` is evaluated under the same lock
-    /// that installs, so nothing can slip between deciding to write and
-    /// writing.
+    /// The same, for a writer whose answer may have been overtaken by something the store cannot see — a refresh, or the server revealing that it
+    /// publishes. `still_wanted` is evaluated under the same lock that installs, so nothing can slip between deciding to write and writing. It must
+    /// not touch the store, or it will deadlock; the flags it reads are atomics for that reason.
     pub fn install_if(
         &self,
         uri: &str,
@@ -97,10 +120,13 @@ impl DiagnosticsStore {
     ) -> bool {
         self.inner.publishes.store(true, Ordering::Release);
         let covers = match (reported, latest_sent) {
-            // Never above what we sent.
+            // Never above what we sent. A server naming a version we never gave it — its own
+            // numbering, or a counter left over from a previous connection — would otherwise set a
+            // bar no later answer could clear, freezing that file's diagnostics for the session.
             (Some(reported), Some(sent)) => reported.min(sent),
             (None, Some(sent)) => sent,
-            // We have told this server nothing about the document, so nothing it says can be a verdict on text of ours.
+            // We have told this server nothing about the document, so nothing
+            // it says can be a verdict on text of ours.
             (_, None) => NO_VERSION,
         };
         // A push replaces the whole set for the document, and carries no id.
@@ -133,8 +159,9 @@ impl DiagnosticsStore {
         self.read().get(uri).map(|answer| answer.covers)
     }
 
-    /// Whether the server has given a verdict on `uri` at `version` or later.
-    /// "No problems" is a verdict like any other.
+    /// Whether the server has given a verdict on `uri` at `version` or later. "No problems" is a
+    /// verdict like any other. Conflating it with silence is what makes a clean file wait forever
+    /// for an answer it has already had.
     pub fn answered_for(&self, uri: &str, version: i32) -> bool {
         self.covers(uri).is_some_and(|covers| covers >= version)
     }
@@ -145,7 +172,8 @@ impl DiagnosticsStore {
     }
 
     /// The latest diagnostics for `uri`; empty both when the server has
-    /// answered "clean" and when it has not answered at all.
+    /// answered "clean" and when it has not answered at all. Callers that need
+    /// to tell those apart use [`Self::answered_for`].
     pub fn items(&self, uri: &str) -> Vec<Diagnostic> {
         self.read()
             .get(uri)
@@ -301,6 +329,7 @@ mod tests {
     #[test]
     fn a_push_naming_its_version_is_taken_at_its_word() {
         let store = DiagnosticsStore::new();
+        // The server is one revision behind: we are at 4, it analyzed 3.
         store.record_push(A, vec![diagnostic("boom")], Some(3), Some(4));
 
         assert!(store.answered_for(A, 3));

@@ -88,10 +88,9 @@ impl UseToolCallBlock {
         out
     }
 
-    /// Split `tool_name` on `MCP_TOOL_NAME_DELIMITER` (validated to be
-    /// unambiguous) and title-case each segment. Returns `(server_title,
-    /// action_title)` for qualified names, or `("", titleized_tool_name)` for
-    /// unqualified ones.
+    /// Split `tool_name` on `MCP_TOOL_NAME_DELIMITER` (validated to be unambiguous) and title-case each segment.
+    /// Returns `(server_title, action_title)` for qualified names, or `("", titleized_tool_name)` for unqualified ones.
+    /// Unqualified names fall through to a single-span render in `header_line`.
     fn split_name(&self) -> (String, String) {
         match self.tool_name.split_once(MCP_TOOL_NAME_DELIMITER) {
             Some((server, action)) => (mcp_titleize_segment(server), mcp_titleize_segment(action)),

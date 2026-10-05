@@ -47,6 +47,7 @@ steps:
     text: "summarize the trusted repo"
   - action: keys
     keys: "<Enter>"
+  # 5. The mock assistant response renders ⇒ the session actually started and
   #    repo-local loading proceeded ungated.
   - action: wait_for_text
     text: FOLDER_TRUST_SESSION_OK

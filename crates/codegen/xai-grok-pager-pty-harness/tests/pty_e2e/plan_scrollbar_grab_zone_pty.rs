@@ -32,8 +32,8 @@ async fn plan_scrollbar_grab_zone_pty() {
     harness
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(40))
         .expect("first turn streams");
-    // Submitting `exit_plan_mode` before the first turn is idle can consume
-    // the scripted tool call.
+    // Submitting `exit_plan_mode` before the first turn is idle can consume the scripted tool call while the session is still finalizing
+    // Plan Exit then hangs without parking approval chrome
     harness
         .wait_for_turn_idle(Duration::from_secs(20))
         .expect("first turn idle");

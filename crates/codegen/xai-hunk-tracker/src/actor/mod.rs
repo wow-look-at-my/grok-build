@@ -1,4 +1,13 @@
 //! HunkTrackerActor - runs in a dedicated tokio task and owns all state.
+//!
+//! This module is organized into submodules by responsibility:
+//! - `state`: Internal state types (GitRepoState, FileHunkState)
+//! - `git`: Git operations (refresh_git_dirty_cache, read_baseline)
+//! - `mutations`: File change handlers (record_agent_write, handle_file_change, etc.)
+//! - `actions`: Hunk actions (apply_hunk_action, apply_file_action, etc.)
+//! - `queries`: Read-only queries (get_all_hunks, get_hunks_for_path, etc.)
+//! - `hunks`: Hunk recomputation and diff events
+//! - `file_utils`: Safe file reading with binary/UTF-8 detection
 
 mod actions;
 mod file_utils;
@@ -100,16 +109,22 @@ pub struct HunkTrackerActor {
     /// Working directory (repo root)
     working_dir: PathBuf,
 
-    /// Unified map for all tracked files. Key: absolute path Value: file state including is_agent_file flag
+    /// Unified map for all tracked files.
+    /// Key: absolute path
+    /// Value: file state including is_agent_file flag
     file_states: HashMap<PathBuf, FileHunkState>,
 
-    /// Secondary index: prompt_index -> set of hunk IDs for that turn. Enables O(1) lookup for `get_hunks_for_turn`.
+    /// Secondary index: prompt_index -> set of hunk IDs for that turn.
+    /// Enables O(1) lookup for `get_hunks_for_turn`.
     turn_index: HashMap<usize, HashSet<HunkId>>,
 
     /// Cached set of git dirty file paths (refreshed periodically).
+    /// Repo-wide in AllDirty; in AgentOnly the refresh scan is scoped to
+    /// tracked paths, so only their state is cached.
     git_dirty_cache: HashSet<PathBuf>,
 
-    /// Cached set of git staged file paths.
+    /// Cached set of git staged file paths (HEAD→index changes, refreshed
+    /// with — and scoped like — the dirty cache).
     git_staged_cache: HashSet<PathBuf>,
 
     /// Cached git repository discovery state
@@ -127,7 +142,8 @@ pub struct HunkTrackerActor {
     /// Current tracking mode
     mode: TrackingMode,
 
-    /// Session-level stats for accepted/rejected hunks. Reset when all baselines are reset (e.g., after commit).
+    /// Session-level stats for accepted/rejected hunks.
+    /// Reset when all baselines are reset (e.g., after commit).
     session_stats: SessionStats,
 
     // Cancellation token which can cancel the ongoing loop
@@ -530,7 +546,8 @@ impl HunkTrackerActor {
                 .collect();
             state
         };
-        // Insert already-guest keys first so a collision.
+        // Insert already-guest keys first so a collision with a rewritten
+        // `/workspace/foo` keeps the `/workspace/<conv>/foo` baseline.
         let pairs: Vec<_> = self.file_states.drain().collect();
         let (already, rewritten): (Vec<_>, Vec<_>) = pairs
             .into_iter()
@@ -637,8 +654,9 @@ impl HunkTrackerActor {
         self.turn_index = snapshot.turn_index;
         self.session_stats = snapshot.session_stats;
 
-        // TODO: Re-emit HunkEvent::FileAdded / HunkEvent::HunkAdded for all
-        // restored files and hunks so that connected clients.
+        // TODO: Re-emit HunkEvent::FileAdded / HunkEvent::HunkAdded for all restored files and hunks so that connected clients
+        // (TUI, VSCode extension) see the restored state without requiring a manual refresh. Alternative: emit a single
+        // HunkEvent::StateRestored { file_count } that clients use as a signal to do a full refresh.
 
         debug!(
             files = self.file_states.len(),

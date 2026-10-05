@@ -7,10 +7,11 @@ pub use ext_fs::{
     FsReadFileReq, FsWriteFileReq,
 };
 
-// Client-facing read-only fs ops (`workspace.client_fs_*`) Not re-exported.
+// Client-facing read-only fs ops (`workspace.client_fs_*`)
+// Not re-exported: the `ClientFs*` types live in `xai_grok_workspace_types::rpc::fs` and would collide with the shell-facing `ext_fs` names above
 pub(crate) mod client_fs;
 
-// Shared filesystem core: paginated listing and binary-safe ranged reads, used by `client_fs`, `ext_fs`.
+// Shared filesystem core: paginated listing and binary-safe ranged reads, used by `client_fs`, `ext_fs`, and the shell-local `session::file_system`
 mod walk;
 pub use walk::{
     ChunkPayload, ListOptions, ListPage, ListedEntry, MAX_LIST_COLLECT, MAX_READ_BYTES,
@@ -121,8 +122,8 @@ pub struct FuzzySearchData {
     pub generation: usize,
 }
 
-/// Result of one fuzzy-search poll tick (see
-/// [`WorkspaceHandle::fuzzy_poll`]).
+/// Result of one fuzzy-search poll tick (see [`WorkspaceHandle::fuzzy_poll`]).
+/// Consumed in-process, so it carries non-`Deserialize` match results directly rather than over RPC.
 #[derive(Debug, Clone)]
 pub enum FuzzyPollOutcome {
     /// The query was superseded by a newer change; stop polling.

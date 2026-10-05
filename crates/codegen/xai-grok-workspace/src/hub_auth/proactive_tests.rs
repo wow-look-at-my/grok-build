@@ -112,6 +112,7 @@ fn clipped_jitter_reports_effective_displacement() {
     assert_eq!(secs_between(now, at0), 60);
     assert_eq!(at0, at1);
     assert_eq!(at0, atn);
+    // Nominal is exp − 0.4·ttl = now+18 and the floor is now+60, so the reported jitter is +42s
     assert!((j0 - 42.0).abs() < 0.1);
     assert!((j0 - j1).abs() < 0.001);
     assert!((j0 - jn).abs() < 0.001);
@@ -496,8 +497,7 @@ async fn background_refresh_updates_snapshot_against_mock_idp() {
     let new_leads = lead_sample_count() - lead_before;
     assert_eq!(new_leads, 1);
     let lead = (lead_sample_sum() - lead_sum_before) / new_leads as f64;
-    // The lead is the token's remaining lifetime after a ~3s wait on a 5s
-    // token, not the new expires_in=5
+    // The lead is the old token's remaining lifetime after a ~3s wait on a 5s token, not the new expires_in=5
     assert!(
         (0.0..4.5).contains(&lead),
         "lead={lead} looks like the new TTL rather than old remaining"

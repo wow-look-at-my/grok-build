@@ -13,6 +13,7 @@ pub const GROK_CONFIG_ENV: &str = "GROK_CONFIG";
 pub const GROK_CONFIG_PATH_ENV: &str = "GROK_CONFIG_PATH";
 
 /// Hard cap on a `GROK_CONFIG_PATH` overlay read.
+/// A huge file, or a special node like `/dev/zero`, must never stall or OOM the agent, so the read is bounded.
 const MAX_OVERLAY_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug)]
@@ -83,8 +84,9 @@ fn resolve_overlay_detailed(
     inline: Option<&str>,
     path: Option<&Path>,
 ) -> Option<(toml::Value, OverlaySource, Vec<String>)> {
-    // Inline (`GROK_CONFIG`) wins only when it fully succeeds When it is
-    // absent, empty.
+    // Inline (`GROK_CONFIG`) wins only when it fully succeeds
+    // When it is absent, empty, or rejected at any stage (parse, `$VAR` expand, version_overrides, normalize), fall through to the path candidate
+    // That way a valid file is never skipped because of a bad inline value
     if let Some(inline) = inline
         && let Some(resolved) = resolve_inline_overlay(inline)
     {
@@ -150,6 +152,8 @@ fn read_capped_overlay_file(path: &Path) -> Option<String> {
             return None;
         }
     }
+    // Bounded read: cap + 1 so an exactly-at-cap file still parses while an over-cap file is detected and refused
+    // `take` also guards a regular file that grows between the metadata check and the read
     let mut raw = String::new();
     if let Err(e) = file.take(MAX_OVERLAY_BYTES + 1).read_to_string(&mut raw) {
         tracing::warn!(path = %path.display(), error = %e, "GROK_CONFIG_PATH is unreadable; ignoring the overlay");

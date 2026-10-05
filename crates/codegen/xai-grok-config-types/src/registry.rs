@@ -1,4 +1,7 @@
 //! The registry of boolean `[features]` keys.
+//!
+//! One row per feature spells it on every surface that can set it, and [`Feature::resolve`] is the only place precedence lives.
+//! A key needing different precedence keeps its own resolver, as `remote_fetch` does.
 
 use crate::{
     RemoteSettings,
@@ -36,11 +39,17 @@ pub enum Feature {
     TwoPassCompaction,
     /// Server-side execution of `web_search` and `x_search`.
     BackendTools,
+    /// Continue the conversation as soon as a background task or subagent finishes.
     AutoWake,
+    /// Save a finished subagent's working copy into the repo as a git ref, restored on resume.
     SubagentWorktreeSnapshot,
+    /// Hide the subagent `model` argument when every eligible catalog entry is an xAI model.
     SubagentModelInheritance,
+    /// Send model-authored follow-ups to an owned active descendant.
     ActiveAgentMessages,
+    /// Consolidated panel dock above the prompt (Subagents / Tasks / Watchers / Queued).
     Dock,
+    /// The terminal-native `terminal` color theme (staged rollout).
     TerminalTheme,
 }
 
@@ -54,6 +63,7 @@ pub struct FeatureSpec {
     pub default_enabled: bool,
     /// `None` where the key has no remote tier, so adding one is a deliberate edit.
     pub remote: Option<fn(&RemoteSettings) -> Option<bool>>,
+    // No managed tier: `config` is the loader's merge, where a user's config.toml already beats managed_config.toml
 }
 
 /// What each tier had to say about one feature.
@@ -76,8 +86,8 @@ impl FeatureSources {
     }
 }
 
-/// A layer of the config tier other than the user `config.toml`, lowest
-/// first.
+/// A layer of the config tier other than the user `config.toml`, lowest first; the user file sits between `Managed`
+/// and `Campaign` in the effective merge, and the overlay is re-applied over campaign patches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureConfigLayer {
     SystemManaged,
@@ -105,8 +115,8 @@ pub struct FeatureLayerValue {
     pub value: bool,
 }
 
-/// The config tier of one feature split around the user `config.toml`, the
-/// layer a settings surface can write.
+/// The config tier of one feature split around the user `config.toml`, the one layer a settings surface can write.
+/// `merged` is what `Config` latches; the split tells a writer whether its key would decide anything.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FeatureConfigLayers {
     /// The requirements pin (MDM, then system, then user), read from the same layers. It is the pin tier, not part of `merged`.
@@ -342,6 +352,7 @@ impl Feature {
             // The tier is the merged document, but only a file can be opened.
             ConfigSource::Config
             // Not reachable from `resolve`, which reports the tier as `Config`.
+            // They answer rather than panic for a caller that resolves otherwise.
             | ConfigSource::UserConfig
             | ConfigSource::ManagedConfig
             | ConfigSource::SystemManagedConfig

@@ -150,8 +150,8 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
         if agent.session.state.is_compact_running() {
             resolved_pref.or(Some(true))
         } else if agent.running_wake_turn.is_some() {
-            // Keyed on the wake marker, not on an idle pane: a local send
-            // during a wake start_turn's the pane.
+            // Keyed on the wake marker, not on an idle pane: a local send during a wake start_turn's the pane while the shell's front turn is still the wake
+            // Cancel that wake; the queued user prompt must survive
             let Some(session_id) = agent.session.session_id.clone() else {
                 return vec![];
             };
@@ -169,7 +169,9 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
         } else if let Some(stop) = resolved_pref {
             Some(stop)
         } else {
-            // Check all running subagents, not those from the current turn.
+            // Check all running subagents, not just those from the current turn.
+            // This is broader than the old TUI (which filtered by parent_prompt_id), but intentional
+            // Subagents kept alive from a previous cancel should still prompt the user on the next cancel
             let running_count = agent
                 .subagent_sessions
                 .values()
@@ -184,7 +186,9 @@ pub(super) fn dispatch_cancel_turn(app: &mut AppView) -> Vec<Effect> {
                     active_idx: 0,
                     running_count,
                 });
-                // Default focus to the picker so keyboard up/down navigates options immediately With the scrollback pane focused (e.g. browsing history).
+                // Default focus to the picker so keyboard up/down navigates options immediately
+                // With the scrollback pane focused (e.g. browsing history) the modal would open but keys would still go to scrollback.
+                // The picker was then only reachable via mouse hover/click
                 if agent.active_pane == ActivePane::Scrollback {
                     agent.active_pane = ActivePane::Prompt;
                 }
@@ -304,7 +308,10 @@ fn cancel_agent_turn(
     if !agent.session.state.is_turn_running() {
         return vec![];
     }
-    // The UI then looks like the user never hit Send The rewind REPLACES the composer.
+    // The UI then looks like the user never hit Send
+    // The rewind REPLACES the composer with the stashed in-flight prompt.
+    // Esc (and the mouse stop / palette cancel) fire with the draft intact, unlike keyboard Ctrl+C, which only cancels on an empty prompt
+    // A non-empty composer thus holds a NEWER draft the rewind would clobber
     let composer_has_draft = !agent.prompt.text().is_empty() || !agent.prompt.images.is_empty();
     // Captured before `finish_turn` clears it; no id means the standard cancel
     let rewind_prompt_id = agent.session.current_prompt_id.clone();
@@ -338,8 +345,9 @@ fn cancel_agent_turn(
     // Explicit user cancel supersedes any pending send-now expectation (its marker renders).
     agent.clear_send_now_expectation();
 
-    // On an interactive cancel we only tear down the running turn and let the
-    // agent promote the FRONT queued prompt as the next turn.
+    // On an interactive cancel we only tear down the running turn and let the agent promote the FRONT queued prompt as the next turn
+    // We do NOT pull any queued prompt back into the input or predict the new queue order client-side
+    // `rewinding` mirrors the local rewind on the wire so the shell trims its stored copy too
     vec![emit_cancel_turn(
         agent,
         session_id,
@@ -441,8 +449,8 @@ pub(super) fn emit_cancel_turn(
         .cancel_trigger_hint
         .take()
         .or_else(|| agent.pending_cancel_resend.as_ref().map(|p| p.trigger));
-    // A local send during a wake adopts the user prompt while the shell's
-    // front turn is still the wake Auto-resend has no prompt id.
+    // A local send during a wake adopts the user prompt while the shell's front turn is still the wake
+    // Auto-resend has no prompt id on the wire, so arming it here would cancel the promoted user turn after the grace
     let desynced_from_wake = agent.running_wake_turn.as_ref().is_some_and(|wake| {
         agent
             .session
@@ -456,7 +464,8 @@ pub(super) fn emit_cancel_turn(
         && !rewind_if_no_output
         && !desynced_from_wake
     {
-        // Keep `confirmed` across a manual retry: `[stop]` stays clickable.
+        // Keep `confirmed` across a manual retry: `[stop]` stays clickable while cancelling
+        // Resetting the flag would re-arm auto-resend against a queued prompt the shell may already have promoted
         let existing = agent
             .pending_cancel_resend
             .as_ref()
@@ -511,7 +520,8 @@ fn overdue_cancel_for_agent(agent: &mut AgentView) -> Option<Effect> {
         return None;
     }
     let session_id = agent.session.session_id.clone()?;
-    // A received `prompt_complete` broadcast proves the cancel landed.
+    // A received `prompt_complete` broadcast proves the cancel landed; the turn-end reconcile owns the exit from here
+    // Resending would race it and could cancel a queued prompt the shell has already promoted
     if agent.pending_turn_end_reconcile.is_some() {
         if let Some(pending) = agent.pending_cancel_resend.as_mut() {
             pending.confirmed = true;
@@ -543,7 +553,9 @@ fn overdue_cancel_for_agent(agent: &mut AgentView) -> Option<Effect> {
     })
 }
 
-/// Grace window between a driver-side `x.ai/session/prompt_complete` broadcast and that turn's `session/prompt` RPC response. Past it.
+/// Grace window between a driver-side `x.ai/session/prompt_complete` broadcast and that turn's `session/prompt` RPC response.
+/// Past it, [`reconcile_overdue_turn_ends`] finishes the turn from the broadcast.
+/// The healthy-path gap is milliseconds (the shell emits the broadcast just before writing the RPC response).
 pub(crate) const TURN_END_RECONCILE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Finish turns whose end was announced by `x.ai/session/prompt_complete` but whose `session/prompt` RPC response never arrived.
@@ -581,8 +593,8 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
             agent.session.current_prompt_id.as_deref() == Some(pending.prompt_id.as_str());
         let busy = agent.session.state.is_turn_running() || agent.session.state.is_cancelling();
         if !still_ours || !busy {
-            // The turn already resolved through the normal path (or a new
-            // turn was adopted).
+            // The turn already resolved through the normal path (or a new turn was adopted); the marker is stale
+            // Restore the adoption for the path that owns it
             if let Some(p) = pending_adoption {
                 app.pending_running_adoptions.insert(id, p);
             }
@@ -592,7 +604,8 @@ pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effec
         fired = true;
         let was_cancelling = agent.session.state.is_cancelling()
             || pending.stop_reason.as_deref() == Some("cancelled");
-        // Send-now cancel: suppress the marker (wire `cancelTrigger` wins, else the armed expectation) Consumed every reconcile.
+        // Send-now cancel: suppress the marker (wire `cancelTrigger` wins, else the armed expectation)
+        // Consumed every reconcile (no stale flag)
         let expected_send_now = agent.expect_send_now_cancel.take();
         let send_now_cancel = was_cancelling
             && match pending.cancel_trigger.as_deref() {

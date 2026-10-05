@@ -1,4 +1,22 @@
 //! Kill-handle for a session's child-process trees (`Send + Sync`).
+//!
+//! If a session's worker thread wedges, its `Drop`s never run and child
+//! processes leak. A `ProcessScope` lives outside the worker so a supervisor
+//! can `kill_all()` one session's children without restarting the host.
+//!
+//! # Weak-keyed registry (PID-reuse safety)
+//!
+//! Each child enrolls as a [`ProcessGroup`]. The scope holds only `Weak`
+//! references; the spawn-site owner holds the strong `Arc`. On `kill_all`,
+//! only groups whose owner is still alive (i.e. un-reaped children) upgrade
+//! successfully — reaped children upgrade to `None` and are skipped. This
+//! prevents `killpg` from hitting a reused PID.
+//!
+//! # Residual
+//!
+//! `kill_all` SIGKILLs but doesn't `wait` (would race the live owner).
+//! A wedged owner's killed leader stays as a zombie until the host exits —
+//! bounded by wedge events, not sessions.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,16 +25,21 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use crate::{HANGUP_GRACE, ProcessGroup, new_process_group};
 
 /// A `Send + Sync` kill-handle for one unit's child-process trees. Cheap to
-/// clone (shares one inner via `Arc`).
+/// clone (shares one inner via `Arc`). See the [module docs](self) for the
+/// ownership model and PID-reuse safety argument.
 #[derive(Clone)]
 pub struct ProcessScope {
     inner: Arc<ScopeInner>,
 }
 
 struct ScopeInner {
-    /// One `Weak` per enrolled child tree.
+    /// One `Weak` per enrolled child tree. The strong `Arc` lives at the spawn
+    /// site for as long as that child is alive/owned; a dead `Weak` means the
+    /// owner already reaped+dropped it, so killing it is neither needed nor safe.
     groups: Mutex<Vec<Weak<ProcessGroup>>>,
-    /// Latched once [`kill_all`](ProcessScope::kill_all) has run.
+    /// Latched once [`kill_all`](ProcessScope::kill_all) has run. Nothing calls `kill_all` twice (the supervisor drops its
+    /// handle after), so a child enrolled *after* close — a spawn that won the close/spawn race on a wedged actor — would
+    /// otherwise never be reaped.
     closed: AtomicBool,
 }
 
@@ -32,26 +55,28 @@ impl ProcessScope {
         }
     }
 
-    /// Enrollment sites use this to re-check after work done between a
-    /// successful [`register`] and publishing the child.
+    /// Enrollment sites use this to re-check after work done between a successful [`register`] and publishing the child (e.g.
+    /// installing a client): a `kill_all` in that window has already SIGKILLed the enrolled child, so publishing it would
+    /// advertise a dead server.
     pub fn is_closed(&self) -> bool {
         self.inner.closed.load(Ordering::Relaxed)
     }
 
-    /// Configure `cmd` so its spawned child becomes the leader of a new
-    /// process group / job.
+    /// Configure `cmd` so its spawned child becomes the leader of a new process group / job. Call this before `cmd.spawn()`,
+    /// then [`enroll`] the resulting child (or build the group yourself and [`register`] it).
     pub fn prepare(&self, cmd: &mut tokio::process::Command) {
         new_process_group(cmd);
     }
 
-    /// The scope keeps only a [`Weak`]; the caller MUST keep the `Arc` alive
-    /// for as long as the child is its responsibility. Returns `true` if the
-    /// group was enrolled.
+    /// The scope keeps only a [`Weak`]; the caller MUST keep the `Arc` alive for as long as the child is its responsibility.
+    /// Returns `true` if the group was enrolled. A group is killed here unless it wants a hangup first, which needs a grace
+    /// this lock cannot afford; [`enroll_terminal_pid`] is the only way to mark one and reaps it itself.
     pub fn register(&self, group: &Arc<ProcessGroup>) -> bool {
         let mut groups = self.lock();
         if self.inner.closed.load(Ordering::Relaxed) {
-            // The scope was already reclaimed (`kill_all` ran) and won't run
-            // again.
+            // The scope was already reclaimed (`kill_all` ran) and won't run again, so reap this just-spawned child now rather than
+            // enroll a `Weak` that would leak. Closes the close/spawn race where a (possibly wedged) actor's spawn lands after
+            // teardown. `killpg` is non-blocking, so killing under the lock is fine and serializes with a concurrent `kill_all`.
             if !group.wants_hangup() {
                 let _ = group.kill();
             }
@@ -71,9 +96,9 @@ impl ProcessScope {
         self.register_owned(group)
     }
 
-    /// The child must be (or lead) its own group/job — spawn via
-    /// [`crate::detach_std_command`] (Unix `setsid`) first, otherwise later
-    /// `kill` signals a group that is not this child's.
+    /// The child must be (or lead) its own group/job — spawn via [`crate::detach_std_command`] (Unix `setsid`) first,
+    /// otherwise later `kill` signals a group that is not this child's. The scope holds only a `Weak` registration. If the
+    /// scope is closed, the group is killed but the caller must still reap the child.
     #[must_use = "the returned Arc<ProcessGroup> must be kept alive until the child is reaped"]
     pub fn enroll_std(&self, child: &std::process::Child) -> io::Result<Arc<ProcessGroup>> {
         let mut group = ProcessGroup::new()?;
@@ -125,9 +150,10 @@ impl ProcessScope {
         Ok((child, group))
     }
 
-    /// [`spawn`] for synchronous `std::process::Command`. Detaches the child
-    /// into its own group, then enrolls it. `cmd` must not already be
-    /// detached or assigned a process group.
+    /// [`spawn`] for synchronous `std::process::Command`. Detaches the child into its own group, then enrolls it.
+    ///
+    /// `cmd` must not already be detached or assigned a process group. On Unix this adds a `setsid` hook, and a second
+    /// `setsid` (or the `setpgid` fallback) returns `EPERM` once the child is a session leader.
     #[must_use = "the returned Arc<ProcessGroup> must be kept alive or the scope cannot reap the child"]
     pub fn spawn_std(
         &self,
@@ -141,14 +167,16 @@ impl ProcessScope {
         Ok((child, group))
     }
 
-    /// Idempotently kill every still-owned process tree (`killpg(SIGKILL)` /
-    /// `TerminateJobObject`). Safe to call multiple times and from any
-    /// thread.
+    /// Idempotently kill every still-owned process tree (`killpg(SIGKILL)` / `TerminateJobObject`). Safe to call multiple
+    /// times and from any thread. Groups whose owner already reaped+dropped them upgrade to `None` and are skipped — so this
+    /// never `killpg`s a reused PID.
     pub fn kill_all(&self) {
         let enrolled = {
             let mut groups = self.lock();
             let enrolled = std::mem::take(&mut *groups);
-            // Latch closed under the lock: a concurrent `register` either already pushed (its group is in `enrolled` and dies below) or now sees `closed`.
+            // Latch closed under the lock: a concurrent `register` either already
+            // pushed (its group is in `enrolled` and dies below) or now sees
+            // `closed` and kills its own child — nothing slips past teardown.
             self.inner.closed.store(true, Ordering::Relaxed);
             enrolled
         };
@@ -156,7 +184,12 @@ impl ProcessScope {
     }
 
     /// Lock the group set, tolerating a poisoned mutex: the critical sections
-    /// here are panic-free.
+    /// here are panic-free, and a best-effort reaper must still run even if some
+    /// unrelated thread panicked while holding the lock.
+    ///
+    /// `parking_lot::Mutex` would make the tolerance structural rather than
+    /// per-call-site; it is not a dependency of this crate, and adding one is
+    /// outside this change.
     #[allow(clippy::disallowed_methods)]
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Weak<ProcessGroup>>> {
         self.inner
@@ -165,8 +198,9 @@ impl ProcessScope {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Number of still-live enrolled groups: weaks whose owning `Arc` has not
-    /// yet been dropped.
+    /// Number of still-live enrolled groups: weaks whose owning `Arc` has not yet been dropped. This is exactly the set
+    /// `kill_all` would `killpg`, so a spawn-site owner that has reaped its child (and dropped its `Arc`) is no longer
+    /// counted — letting callers assert PID-reuse safety.
     pub fn live_count(&self) -> usize {
         self.lock().iter().filter(|w| w.strong_count() > 0).count()
     }
@@ -178,7 +212,9 @@ impl Default for ProcessScope {
     }
 }
 
-/// Spawn sites (e.g. the local terminal backend) enroll their children here.
+/// Spawn sites (e.g. the local terminal backend) enroll their children here, and the TUI exit paths call
+/// [`ProcessScope::kill_all`] on it so a `setsid`-detached background command cannot outlive the process that started it.
+/// `kill_all` latches the scope closed, so call it only when the process is genuinely exiting.
 pub fn global_process_scope() -> &'static ProcessScope {
     static GLOBAL: OnceLock<ProcessScope> = OnceLock::new();
     GLOBAL.get_or_init(ProcessScope::new)
@@ -186,7 +222,15 @@ pub fn global_process_scope() -> &'static ProcessScope {
 
 impl Drop for ScopeInner {
     fn drop(&mut self) {
-        // RAII backstop: if the last scope handle drops without an explicit `kill_all`, still reap any group whose owner is alive (a wedged unit).
+        // RAII backstop: if the last scope handle drops without an explicit
+        // `kill_all`, still reap any group whose owner is alive (a wedged unit),
+        // in the same order.
+        //
+        // `reap_groups` signals every enrolled group, so this guard is held
+        // across code that can panic, and a panic in `Drop` during a unwind is
+        // an abort. The poison is swallowed for the same reason the helper above
+        // does: a reaper that stops reaping leaks children. `parking_lot::Mutex`
+        // is the structural fix and is not a dependency of this crate.
         #[allow(clippy::disallowed_methods)]
         let groups = self.groups.lock().unwrap_or_else(PoisonError::into_inner);
         reap_groups(&groups);
@@ -206,7 +250,9 @@ fn reap_groups(enrolled: &[Weak<ProcessGroup>]) {
     if hung_up {
         std::thread::sleep(HANGUP_GRACE);
     }
-    // Upgrade again rather than holding the `Arc`s across the grace.
+    // Upgrade again rather than holding the `Arc`s across the grace: an owner
+    // that reaped its child meanwhile has dropped its group, and its pgid may
+    // already belong to someone else.
     for group in enrolled.iter().filter_map(Weak::upgrade) {
         let _ = group.kill();
     }
@@ -223,8 +269,8 @@ mod tests {
         c
     }
 
-    /// `wait()` completing == the process died (and is reaped). If the kill
-    /// failed, the `sleep 1000` would run on and `wait()` would time out.
+    /// `wait()` completing == the process actually died (and is reaped). If the
+    /// kill failed, the `sleep 1000` would run on and `wait()` would time out.
     async fn died(child: &mut tokio::process::Child) -> bool {
         tokio::time::timeout(Duration::from_secs(3), child.wait())
             .await
@@ -234,7 +280,8 @@ mod tests {
     #[tokio::test]
     async fn kill_all_reaps_every_enrolled_child() {
         let scope = ProcessScope::new();
-        // The owner (here, the test) keeps the Arcs alive — as a live spawn site would for as long.
+        // The owner (here, the test) keeps the Arcs alive — as a live spawn site
+        // would for as long as the child is running.
         let (mut c1, _g1) = scope.spawn(sleeper()).unwrap();
         let (mut c2, _g2) = scope.spawn(sleeper()).unwrap();
         assert_eq!(scope.live_count(), 2);
@@ -271,7 +318,8 @@ mod tests {
         );
 
         scope.kill_all(); // must be a no-op for the now-unowned group
-        // The child was never killed by the scope; clean it up so the test doesn't leak a real `sleep` process.
+        // The child was never killed by the scope; clean it up so the test
+        // doesn't leak a real `sleep` process.
         let _ = c.start_kill();
         let _ = c.wait().await;
     }
@@ -279,7 +327,8 @@ mod tests {
     #[tokio::test]
     async fn drop_reaps_children_while_owner_alive() {
         let scope = ProcessScope::new();
-        // Owner Arc is held by the test, so the scope's weak is live.
+        // Owner Arc is held by the test, so the scope's weak is live; dropping
+        // the scope's last handle must SIGKILL the still-owned group.
         let (mut c, _g) = scope.spawn(sleeper()).unwrap();
         drop(scope);
         assert!(

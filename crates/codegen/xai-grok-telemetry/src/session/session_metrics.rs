@@ -1,8 +1,11 @@
 //! Session lifecycle event structs.
+//!
+//! Fires in both `Enabled` and `SessionMetrics` telemetry modes via `log_session_event`.
 
 use serde::Serialize;
 
 /// The ACP method the client called.
+/// It stays separate from the warm/cold mechanism (`SessionStarted::restored_from_disk`) so intent and mechanism can be queried independently.
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionStartKind {
@@ -163,6 +166,7 @@ pub struct TraceUploadFailed {
 }
 
 /// Why trace uploads are enabled or disabled for a given prompt.
+/// Recorded on the `agent.prompt` span as `upload_reason` for analytics queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::AsRefStr, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum TraceUploadReason {

@@ -12,8 +12,9 @@ use crate::session::{
     SessionCommand, SessionInfoData, SessionInfoResponse, SessionListRequest, SessionListResponse,
 };
 
-/// Copies `display_title()` (`generated_title`, else `session_summary`) into
-/// `session_summary`.
+/// Copies `display_title()` (`generated_title`, else `session_summary`) into `session_summary`.
+/// Clients that only read that field then show the same title, even after a `/rename` that updated only `generated_title`.
+/// This mutates the response copy only; nothing is written back to disk.
 fn backfill_session_summary(summary: &mut Summary) {
     let display = summary.display_title().to_owned();
     if !display.is_empty() && display != summary.session_summary {
@@ -153,8 +154,7 @@ async fn handle_session_close(
         "x.ai/session/close"
     );
 
-    // `success` stays for existing callers; `outcome` says what the close did
-    // (`closed`, `notResident`, `superseded`)
+    // `success` stays for existing callers; `outcome` says what the close actually did (`closed`, `notResident`, `superseded`)
     ExtMethodResult::success(serde_json::json!({
         "success": true,
         "outcome": outcome.wire_str(),
@@ -310,8 +310,8 @@ pub(crate) async fn handle_list_sessions(
     .await;
 
     let meta = unified_list::acp_response_meta(&result);
-    // `CwdScope::Only` already dropped rows the schema cannot represent This
-    // conversion therefore discards nothing.
+    // `CwdScope::Only` already dropped rows the schema cannot represent
+    // This conversion therefore discards nothing and the page keeps the size it was given
     let sessions: Vec<acp::SessionInfo> = result
         .rows
         .into_iter()

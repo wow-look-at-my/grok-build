@@ -1,6 +1,10 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
 
-//! Shared API definitions for Grok tools: protobuf types, config validation, and canonical slash-command wording.
+//! Shared API definitions for Grok tools: protobuf types, config validation,
+//! and canonical slash-command wording.
+//!
+//! Used by both the tools library and the gRPC server, and by host services
+//! that must not depend on the tools implementation crate.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![deny(clippy::indexing_slicing)]
@@ -98,7 +102,9 @@ pub use pb::{
     WholeReadPolicy,
 };
 
-/// Default client-facing tool name derived from a namespaced tool id.
+/// Default client-facing tool name derived from a namespaced tool id. Tool ids are colon-separated `Namespace:tool`
+/// (e.g. `GrokBuild:grep`); the default name is the segment after the FIRST colon, so an id with embedded colons
+/// (`ns:a:b`) resolves to `a`. Ids without a colon are returned as-is.
 pub fn default_client_name(id: &str) -> &str {
     id.split(':').nth(1).unwrap_or(id)
 }

@@ -3,8 +3,8 @@
 use crate::enums::PrCreationSource;
 use serde::Serialize;
 
-/// PR created via the session (bash `gh pr create` or MCP
-/// create_pull_request).
+/// PR created via the session (bash `gh pr create` or MCP create_pull_request).
+/// Counts only: PR url/number stay in the turn_result.json signals.
 #[derive(Serialize)]
 pub struct PrCreated {
     pub source: PrCreationSource,

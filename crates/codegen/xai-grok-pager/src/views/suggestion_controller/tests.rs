@@ -143,7 +143,7 @@ fn progressive_match_multi_char_append_clears() {
     sc.set_ghost("ls -la".into(), SuggestionSource::History);
     sc.set_last_request_text("");
 
-    // Chars appended at once do not count as a progressive match
+    // Two chars appended at once do not count as a progressive match
     assert!(!sc.try_progressive_match("ls"));
     assert!(!sc.has_ghost());
 }
@@ -676,7 +676,7 @@ fn parse_completion_token_text() {
     assert_eq!(item.token_text.as_deref(), Some("grep"));
     assert_eq!(item.span_replacement(), "grep");
 
-    // Range without a token (history/AI whole-line rows).
+    // Range without a token (history/AI whole-line rows): the range drops and the whole-line accept (the identical outcome) takes over
     let whole_line = parse_single_completion(serde_json::json!({
         "display": "git status",
         "insertText": "git status",
@@ -836,6 +836,7 @@ fn validated_range_out_of_bounds_falls_back() {
 /// A wire range landing mid-character in a multibyte draft is rejected (never a panic, never a mid-char splice).
 #[test]
 fn validated_range_mid_char_boundary_rejects() {
+    // "cat café": the é spans bytes 7..9, so offset 8 is mid-char.
     let sc = anchored_controller("cat caf\u{e9}");
     assert_eq!(
         sc.validated_replace_range(4..8, "caf\u{e9}.txt", "cat caf\u{e9}"),
@@ -945,7 +946,7 @@ fn common_prefix_fill_none_on_stale_generation() {
     assert!(sc.common_prefix_fill("cat al").is_none());
 }
 
-/// Multibyte candidates whose byte-level LCP lands mid-character: the boundary trim keeps the fill valid UTF-8.
+/// Two multibyte candidates whose byte-level LCP lands mid-character: the boundary trim keeps the fill valid UTF-8.
 /// Here it collapses to the typed token, so no fill.
 #[test]
 fn common_prefix_fill_multibyte_boundary_trim() {

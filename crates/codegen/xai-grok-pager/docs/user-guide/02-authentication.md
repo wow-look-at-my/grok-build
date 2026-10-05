@@ -12,7 +12,7 @@ On first launch, Grok opens your browser to authenticate with grok.com:
 grok
 ```
 
-Grok stores credentials in `~/.grok/auth.json` and reuses them across sessions. Grok refreshes access tokens automatically in the background. When a token cannot be refreshed, Grok prompts you to sign in again. Credentials without a server-provided expiry fall back to a 30-day lifetime.
+Grok stores credentials in `~/.grok/auth.json` and reuses them across sessions. Grok refreshes access tokens automatically in the background. When a token can't be refreshed, Grok prompts you to sign in again. Credentials without a server-provided expiry fall back to a 30-day lifetime.
 
 ### Credential storage
 
@@ -103,7 +103,7 @@ The CLI discovers endpoints via `{issuer}/.well-known/openid-configuration`, ope
 
 ## External Auth Provider
 
-When browser-based login is not possible -- for example, on sandboxed VMs. CI runners, or air-gapped networks -- delegate authentication to an external binary or script.
+When browser-based login isn't possible -- for example, on sandboxed VMs, CI runners, or air-gapped networks -- delegate authentication to an external binary or script.
 
 ### How It Works
 
@@ -119,9 +119,9 @@ When browser-based login is not possible -- for example, on sandboxed VMs. CI ru
 
 1. Grok runs your command via `sh -c "<command>"`
 2. Your binary runs whatever auth flow it needs (SSO, device code, certificate exchange)
-3. **stderr** carries human-readable output, such as login URLs and status messages. Grok reads stderr and surfaces it to the user. In the TUI, it turns the first `https://` URL into a clickable sign-in link.
+3. **stderr** carries human-readable output, such as login URLs and status messages. Grok reads stderr and surfaces it to the user; in the TUI, it turns the first `https://` URL into a clickable sign-in link.
 4. **stdout** is captured by Grok and saved as the access token
-5. Exit 0 = success. Exit non-zero = Grok falls back to interactive login
+5. Exit 0 = success; exit non-zero = Grok falls back to interactive login
 
 ### The stdout / stderr Contract
 
@@ -134,7 +134,7 @@ When browser-based login is not possible -- for example, on sandboxed VMs. CI ru
 
 ### stdout Token Format
 
-**Bare string** -- the raw token:
+**Bare string** -- just the raw token:
 
 ```
 eyJhbGciOiJSUzI1NiIs...
@@ -179,10 +179,19 @@ export GROK_AUTH_TOKEN_TTL=3600
 
 ### Token Refresh
 
-Grok runs your binary on multiple different contracts, and `GROK_AUTH_EXPIRED` is how it tells them apart. Each run fully replaces the stored credential, so emit the same JSON fields (such as `issuer`) on every invocation, including refreshes.
+Grok runs your binary on two different contracts, and `GROK_AUTH_EXPIRED` is how
+it tells them apart. Each run fully replaces the stored credential, so emit the
+same JSON fields (such as `issuer`) on every invocation, including refreshes.
 
-- **`GROK_AUTH_EXPIRED=1` — a headless refresh.** Grok is re-minting over a credential it already holds: a near-expiry rotation, or a token the server rejected. Nobody is watching. stdin is closed, your stderr is swallowed, and the binary is given a few seconds before it is killed. Mint silently or exit non-zero — never block.
-- **Unset — a sign-in.** `grok login`, the sign-in screen, or the escalation Grok performs when a headless run cannot mint. A user is waiting, your stderr reaches them, and you have many seconds — enough for a browser round trip or a device code.
+- **`GROK_AUTH_EXPIRED=1` — a headless refresh.** Grok is re-minting over a
+  credential it already holds: a near-expiry rotation, or a token the server
+  rejected. Nobody is watching. stdin is closed, your stderr is swallowed, and
+  the binary is given a few seconds before it is killed. Mint silently or exit
+  non-zero — never block.
+- **Unset — a sign-in.** `grok login`, the sign-in screen, or the escalation
+  Grok performs when a headless run couldn't mint. A user is waiting, your
+  stderr reaches them, and you have 300 seconds — enough for a browser round
+  trip or a device code.
 
 ```bash
 #!/bin/sh
@@ -204,9 +213,22 @@ fi
 echo "{\"access_token\": \"$TOKEN\", \"expires_in\": 3600}"
 ```
 
-When the headless run cannot produce a token, Grok stops treating the stored credential as usable and starts the sign-in flow instead. This is the same one you get on a machine that has never signed in, with your binary's stderr shown. As a result, this is a device-code URL or a browser prompt reaches you. Exiting promptly on `GROK_AUTH_EXPIRED=1` is what makes that handover fast. A binary that blocks instead makes you wait out the refresh timeout on every start. Mid-session, the turn fails with a re-auth prompt and `/login` re-runs the binary interactively.
+When the headless run can't produce a token, Grok stops treating the stored
+credential as usable and starts the sign-in flow instead — the same one you get
+on a machine that has never signed in, with your binary's stderr shown, so a
+device-code URL or a browser prompt reaches you. Exiting promptly on
+`GROK_AUTH_EXPIRED=1` is what makes that handover fast; a binary that blocks
+instead makes you wait out the refresh timeout on every start. Mid-session, the
+turn fails with a re-auth prompt and `/login` re-runs the binary interactively.
 
-One case stays ambiguous, and only in **leader mode** (`--leader`, or `[cli] use_leader = true`. Off by default): with no credential at all, the leader makes one extra attempt in the background just after startup. That run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it, the sign-in screen is already up. That run's stderr goes to `~/.grok/leader.log` rather than to you.
+One case stays ambiguous, and only in **leader mode** (`--leader`, or
+`[cli] use_leader = true`; off by default): with no credential at all, the
+leader makes one extra attempt in the background just after startup, and that
+run has the variable unset, like a sign-in. A binary that mints without help
+(service account, keytab, mounted token) succeeds there and the session heals
+itself. One that must prompt just sits, up to the 300s sign-in ceiling —
+nothing waits on it, the sign-in screen is already up, and that run's stderr
+goes to `~/.grok/leader.log` rather than to you.
 
 ### Environment Variables
 
@@ -281,13 +303,14 @@ During a session, the active method handles all mid-session refreshes.
 ## Grove Git credentials (not this page's `grok login`)
 
 
-**`~/.grok/auth.json` is never read for Git.** `grok login` does not create a Git credential and `grok logout` does not revoke one. The daemon builds its own credential cell from `auth_mode` in Grove config. Those credentials are managed with `grove status` and `grove reload-credentials` -- see [grok clone](27-grok-clone.md#authentication) for the failure classes and their next steps.
+**`~/.grok/auth.json` is never read for Git.** `grok login` does not create a Git credential and `grok logout` does not revoke one; the daemon builds its own credential cell from `auth_mode` in Grove config. Those credentials are managed with `grove status` and `grove reload-credentials` -- see [grok clone](27-grok-clone.md#authentication) for the failure classes and their next steps.
 
 ---
 
 ## Related settings
 
-Coding-data sharing — **Coding data, retention, and training** in Settings, which `/privacy` opens — does not change these config knobs:
+Coding-data sharing — **Coding data, retention, and training** in Settings,
+which `/privacy` opens — does not change these config knobs:
 
 | Setting | How to set it |
 |---------|---------------|
@@ -295,7 +318,12 @@ Coding-data sharing — **Coding data, retention, and training** in Settings, wh
 | `[telemetry] trace_upload` | `config.toml` or `GROK_TELEMETRY_TRACE_UPLOAD` |
 | External OpenTelemetry | `GROK_EXTERNAL_OTEL` / `[telemetry] otel_*`. See [Monitoring Usage](24-monitoring-usage.md). |
 
-On team accounts, only a team admin can change coding-data sharing. Team admins can also enable or disable Zero Data Retention (ZDR) for their team. See [How to enable ZDR](https://docs.x.ai/developers/faq/security#how-to-enable-zdr). When ZDR is on, coding-data sharing cannot be changed at all — the settings row shows `ZDR` in place of the value. ZDR does not turn off external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
+On team accounts, only a team admin can change coding-data sharing.
+Team admins can also enable or disable Zero Data Retention (ZDR) for their team.
+See [How to enable ZDR](https://docs.x.ai/developers/faq/security#how-to-enable-zdr).
+When ZDR is on, coding-data sharing cannot be changed at all — the settings
+row shows `ZDR` in place of the value. ZDR does not turn off external OTEL
+or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
 
 See [Monitoring Usage](24-monitoring-usage.md#related-settings) and [Configuration](05-configuration.md#telemetry).
 
@@ -305,7 +333,7 @@ See [Monitoring Usage](24-monitoring-usage.md#related-settings) and [Configurati
 
 ### Debug logging
 
-Set `RUST_LOG` to control the verbosity of the file log and headless stderr output. (The TUI's on-screen tracing pane uses a fixed filter and ignores `RUST_LOG`.) In the TUI, file logging defaults to `DEBUG`. In headless mode (`-p`), `RUST_LOG` defaults to `off` so only the answer is printed — set `RUST_LOG=error` (or broader) to see logs on stderr.
+Set `RUST_LOG` to control the verbosity of the file log and headless stderr output. (The TUI's on-screen tracing pane uses a fixed filter and ignores `RUST_LOG`.) In the TUI, file logging defaults to `DEBUG`; in headless mode (`-p`), `RUST_LOG` defaults to `off` so only the answer is printed — set `RUST_LOG=error` (or broader) to see logs on stderr.
 
 In the TUI, set `GROK_LOG_FILE` to an absolute path to write logs to that file:
 

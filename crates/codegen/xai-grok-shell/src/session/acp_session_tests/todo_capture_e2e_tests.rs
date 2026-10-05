@@ -1,4 +1,15 @@
 //! `/todo` capture end to end against a scripted model.
+//!
+//! The unit tests around the capture gate prove the sanitizer in isolation.
+//! This drives the real loop — model call, tool dispatch, todo-list write —
+//! against a mock inference server, because the one guarantee `/todo` makes is
+//! about the state the session is left in, and nothing short of running the
+//! loop can show that.
+//!
+//! The scripted response is deliberately adversarial: reasoning followed by a
+//! `todo_write` that asks for `merge: false` (a replace), targets an id the
+//! main agent is using, and flips it to `completed`. Every one of those is one
+//! JSON field away from destroying the main agent's list.
 
 use super::support::*;
 use super::*;
@@ -7,7 +18,8 @@ use std::time::Duration;
 use xai_grok_test_support::sse::responses_api_reasoning_then_tool_call_events;
 use xai_grok_test_support::{MockInferenceServer, ScriptedResponse};
 
-/// What the capture agent asks for: a replace, over the main agent's own item, marking it completed — plus the item it was asked to add.
+/// What the capture agent asks for: a replace, over the main agent's own item,
+/// marking it completed — plus the item it was actually asked to add.
 const ADVERSARIAL_TODO_ARGS: &str = r#"{"merge":false,"todos":[{"id":"t1","content":"ship the release","status":"completed"},{"id":"t2","content":"Add a second remote to ci/push.sh","status":"in_progress"}]}"#;
 
 /// The main agent's in-flight item, seeded through the real tool before the
@@ -270,7 +282,8 @@ async fn a_capture_leaves_the_parent_conversation_alone() {
                 !notice.contains("Add a second remote to ci/push.sh"),
                 "a /todo notice must not name the items: {notice}"
             );
-            // The capture agent's own turns — its reasoning, its tool call.
+            // The capture agent's own turns — its reasoning, its tool call,
+            // the tool result — stay in its own conversation.
             assert!(!notice.contains("call_capture_1"), "{notice}");
         })
         .await;
@@ -426,7 +439,8 @@ async fn a_task_list_tool_without_item_ids_is_refused() {
                 matches!(err, TodoCaptureError::UnsupportedTodoTool(_)),
                 "got {err:?}"
             );
-            // No model was configured, so reaching one would have failed differently — the refusal has to come first.
+            // No model was configured, so reaching one would have failed
+            // differently — the refusal has to come first.
             let msg = err.to_string();
             assert!(
                 msg.contains("items carry ids") && msg.contains("todowrite"),

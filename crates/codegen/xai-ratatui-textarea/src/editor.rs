@@ -48,8 +48,9 @@ pub(crate) enum HorizontalEdge {
     End,
 }
 
-/// A cursor movement: one vocabulary behind plain move, Shift-extend, and
-/// collapse.
+/// A cursor movement: one vocabulary behind plain move, Shift-extend, and collapse.
+/// `Command` carries its collapse edge from construction, so every movement is
+/// directional by type (no fallible extraction later).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Movement {
     Command(EditCommand, HorizontalEdge),

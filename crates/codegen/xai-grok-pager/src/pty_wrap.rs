@@ -1,4 +1,13 @@
 //! Local PTY wrapper: the engine behind `grok wrap` (see [`crate::wrap_cmd`]).
+//!
+//! Spawns a command inside a local pseudo-terminal and pipes its output through `crate::wrap_filter::Osc52Filter`.
+//! The filter intercepts OSC 52 clipboard sequences, making "copy" work for programs that cannot reach the user's clipboard (containers, SSH).
+//! Copy works even under terminals without OSC 52 support.
+//! The filter also answers the private host clipboard image request OSC (see [`crate::wrap_clipboard_image`]).
+//! It reports DEC private mode changes to `crate::wrap_restore::ModeTracker`.
+//!
+//! This module owns the PTY setup, the writer/stdin/resize threads, and the exit paths.
+//! The exit paths (drop guard, termination-signal thread) restore the outer terminal when the child dies with modes still latched.
 
 use anyhow::Result;
 use std::io::Write;
@@ -8,6 +17,7 @@ use crate::theme::system_appearance::SystemAppearance;
 use crate::wrap_filter::Osc52Filter;
 use crate::wrap_restore::ModeTracker;
 
+/// Sets the OSC 52 sink markers and, when known, the local appearance (`LC_*` survives SSH).
 fn apply_wrap_child_env(
     cmd: &mut portable_pty::CommandBuilder,
     appearance: Option<SystemAppearance>,
@@ -21,8 +31,9 @@ fn apply_wrap_child_env(
     }
 }
 
-/// This is the engine behind `grok wrap`: it spawns `program` (with `args`) attached to a local pseudo-terminal.
-/// Size changes of the outer terminal are forwarded to the child. All other output passes through unchanged.
+/// Run an arbitrary command inside a local PTY with OSC 52 output filtering. This is the engine behind `grok wrap`:
+/// it spawns `program` (with `args`) attached to a local pseudo-terminal. Size changes of the outer terminal are
+/// forwarded to the child. All other output passes through unchanged.
 pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32> {
     use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use std::io::Read;
@@ -50,12 +61,16 @@ pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32>
     // Drop the slave so we get EOF when child exits.
     drop(pair.slave);
 
-    // Obtain reader from the master PTY.
+    // Obtain reader from the master PTY. Confining `write_all` to a single owner thread avoids that Handles are
+    // intentionally detached: `grok wrap` is short-lived and exits with the child.
     let mut pty_reader = pair.master.try_clone_reader()?;
 
-    // We deliberately do NOT block SIGWINCH here The resize handler (`sigwinch_loop`) installs a real signal handler via `signal-hook`.
+    // We deliberately do NOT block SIGWINCH here
+    // The resize handler (`sigwinch_loop`) installs a real signal handler via `signal-hook`, which must be free to run when the signal is delivered
+    // Blocking it and waiting via `sigwait` looks correct but silently fails on macOS (see `sigwinch_loop`)
 
-    // Tracks the DEC private modes / kitty pushes flowing through the output filter.
+    // Tracks the DEC private modes / kitty pushes flowing through the output filter, so every exit path can reset exactly what the child left latched
+    // (A connection drop kills the child before its reset bytes arrive.)
     let tracker = Arc::new(ModeTracker::new());
 
     // Switch to raw mode so keystrokes pass through unchanged.
@@ -64,7 +79,9 @@ pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32>
         tracker: Arc::clone(&tracker),
     };
 
-    // Terminating signals (external kill, terminal-close HUP) bypass Drop, so handle them explicitly: forward to the child, restore.
+    // Terminating signals (external kill, terminal-close HUP) bypass Drop, so handle them explicitly: forward to the
+    // child, restore, exit 128+N. Handlers are installed here on the main thread so no signal can slip through before
+    // the loop thread gets scheduled.
     #[cfg(unix)]
     let child_reaped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(unix)]
@@ -88,8 +105,8 @@ pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32>
         let mut writer = pair.master.take_writer()?;
         std::thread::spawn(move || {
             while let Ok(bytes) = write_rx.recv() {
-                // `write_all` runs only on this thread, so libc never interleaves chunks from writers EIO here
-                // almost always means the slave has closed.
+                // `write_all` runs only on this thread, so libc never interleaves chunks from two writers
+                // EIO here almost always means the slave has closed (child exited); stop
                 if writer
                     .write_all(&bytes)
                     .and_then(|_| writer.flush())
@@ -120,7 +137,9 @@ pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32>
         }
     });
 
-    // Unix only: there is no SIGWINCH on Windows.
+    // Unix only: there is no SIGWINCH on Windows. On Windows `pair.master` is kept alive inside `pair` until this
+    // function returns (after `child.wait`), so the ConPTY stays open for the read loop. The OSC 52 clipboard bridge
+    // works identically there; only live resize is unavailable.
     #[cfg(unix)]
     {
         let master = pair.master;
@@ -129,8 +148,9 @@ pub(crate) fn run_wrapped_command(program: &str, args: &[String]) -> Result<i32>
         });
     }
 
-    // The worker then enqueues the bracketed-paste frame on the writer thread, plus a newline so ICANON slaves
-    // deliver it without another key.
+    // Output forwarding with OSC 52 filtering: the PTY reader feeds the filter, which feeds stdout. The worker then
+    // enqueues the bracketed-paste frame on the writer thread, plus a newline so ICANON slaves deliver it without
+    // another key.
     {
         let mut stdout = std::io::stdout().lock();
         let mut filter = Osc52Filter::new()
@@ -200,7 +220,8 @@ fn sigwinch_loop(master: Box<dyn portable_pty::MasterPty + Send>) {
     }
 }
 
-/// Guard that restores terminal state when dropped (including on panic).
+/// Guard that restores terminal state when dropped (including on panic). The tracker's run-once claim is shared
+/// with the termination-signal thread so the restore never runs twice.
 struct TerminalRestoreGuard {
     tracker: Arc<ModeTracker>,
 }
@@ -251,6 +272,7 @@ fn wait_restore_done(tracker: &ModeTracker, timeout: std::time::Duration) -> boo
 fn write_stdout_unlocked(bytes: &[u8]) {
     let mut written = 0;
     while written < bytes.len() {
+        // SAFETY: plain write(2) on fd 1 with an in-bounds slice.
         let rc = unsafe {
             libc::write(
                 1,
@@ -273,8 +295,8 @@ fn write_stdout_unlocked(bytes: &[u8]) {
     }
 }
 
-/// Without a signal path (no Unix signals), the restore only runs on the
-/// main-thread drop path after the read loop released the lock.
+/// Without a signal path (no Unix signals), the restore only runs on the main-thread drop path after the read loop released the lock.
+/// The ordinary locked stdout is therefore safe here.
 #[cfg(not(unix))]
 fn write_stdout_unlocked(bytes: &[u8]) {
     let mut stdout = std::io::stdout().lock();
@@ -293,11 +315,15 @@ fn terminate_signal_loop(
     child_reaped: Arc<std::sync::atomic::AtomicBool>,
 ) {
     if let Some(signal) = signals.forever().next() {
-        // Skip the forward once the child is reaped: its pid is recyclable.
+        // Skip the forward once the child is reaped: its pid is recyclable and the kill could hit a bystander
+        // The check narrows the reuse window but cannot close it (a reap can land between it and the kill)
+        // Every signal-forwarding wrapper accepts that residual window
         if let Some(pid) = child_pid
             && !child_reaped.load(std::sync::atomic::Ordering::SeqCst)
         {
-            // Forward first so the child can run its own teardown while we restore Its late output goes to a PTY we are abandoning SAFETY.
+            // Forward first so the child can run its own teardown while we restore
+            // Its late output goes to a PTY we are abandoning
+            // SAFETY: kill(2) has no memory-safety preconditions; pid is positive (never the 0/-1 broadcast forms)
             unsafe { libc::kill(pid as libc::pid_t, signal) };
         }
         restore_terminal(&tracker);

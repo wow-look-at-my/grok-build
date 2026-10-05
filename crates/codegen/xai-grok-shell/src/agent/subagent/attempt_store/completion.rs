@@ -14,6 +14,7 @@ const PROGRESS_ROWS_PER_GENERATION: u64 = CompletionEffectV1::COUNT as u64;
 const PRODUCT_CLAIMS_PER_GENERATION: u64 = ProductClaimSlotV1::COUNT as u64;
 const COMPLETE_ROWS_PER_GENERATION: u64 = 1;
 const ONE_DIGIT_GENERATION_COUNT: u64 = 9;
+/// The exact Progress size in `COMPLETION_ROW_BYTES` was measured with a two-digit `i`; effects `0..=9` encode one byte shorter.
 const FIRST_TWO_DIGIT_EFFECT: u8 = 10;
 const ONE_DIGIT_EFFECT_COUNT: u64 = FIRST_TWO_DIGIT_EFFECT as u64;
 const TWO_DIGIT_EFFECT_COUNT: u64 = CompletionEffectV1::COUNT as u64 - ONE_DIGIT_EFFECT_COUNT;
@@ -239,6 +240,7 @@ pub(super) fn account_completion(segments: u64) -> Result<CompletionAccounting> 
     };
     let rows_per_generation =
         PROGRESS_ROWS_PER_GENERATION + PRODUCT_CLAIMS_PER_GENERATION + COMPLETE_ROWS_PER_GENERATION;
+    // Exact Progress bytes for one generation: effects 0..=9 encode a one-digit `i`, one byte shorter per row
     let progress_two_digit_generation_bytes = ONE_DIGIT_EFFECT_COUNT
         * (COMPLETION_ROW_BYTES[0].0 as u64 - 1)
         + TWO_DIGIT_EFFECT_COUNT * COMPLETION_ROW_BYTES[0].0 as u64;

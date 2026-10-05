@@ -1,4 +1,6 @@
-//! `LocalTransport` end-to-end coverage.
+//! `LocalTransport` end-to-end coverage. Verifies that the transport
+//! resolves through the bound resolver, drives both blocking and
+//! streaming tools, and surfaces missing tools as `Terminal(NotFound)`.
 
 use std::sync::Arc;
 

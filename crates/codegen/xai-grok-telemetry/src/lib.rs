@@ -1,9 +1,13 @@
-#![allow(clippy::cast_lossless)] // Hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::cast_lossless)] // 4 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 13 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 9 hits predate the gate
 //! Telemetry engine for Grok Build sessions.
+//! Covers product events, Mixpanel emission, Sentry error reporting, OpenTelemetry tracing, and the structured unified log.
+//!
+//! Extracted from `xai-file-utils` so telemetry has its own ownership boundary (see CODEOWNERS).
+//! Consumers that only want event tracking and inference metrics no longer pull in Mixpanel/HTTP/identity dependencies.
 
 #![deny(clippy::indexing_slicing)]
 

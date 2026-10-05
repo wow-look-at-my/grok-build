@@ -186,6 +186,8 @@ async fn response_without_usage_keeps_model_output_as_estimated_growth() {
                     .any(|item| matches!(item, ConversationItem::Reasoning(_))),
                 "reasoning must still be persisted",
             );
+            // The encrypted-only reasoning estimates at 4000*3/4/4 = 750 after the base64 correction
+            // The assistant text estimates at 4000/4 = 1000
             assert_eq!(
                 actor.chat_state_handle.get_estimated_total_tokens().await,
                 101_750,
@@ -267,8 +269,9 @@ async fn build_session_info_used_reflects_recorded_response() {
             let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
 
-            // Push a small non-system fixture (user, assistant, and tool
-            // result).
+            // Push a small non-system fixture (user, assistant, and tool result).
+            // Without non-system items `message_tokens` would be 0 and the regression guard below would pass vacuously.
+            // Bytes/4 of these strings is small but above zero.
             actor
                 .chat_state_handle
                 .push_assistant_response(ConversationItem::assistant("hi there hi there hi there"));
@@ -290,9 +293,10 @@ async fn build_session_info_used_reflects_recorded_response() {
             assert_eq!(info.context.total, 256_000);
             // Server-computed: the renderer no longer derives these
             assert_eq!(info.context.free_tokens, 256_000 - 120_000);
+            // 120_000 / 256_000 = 0.46875, which rounds to 47
             assert_eq!(info.context.usage_pct, 47);
-            // Regression guard: bytes/4 of the non-system items must be above
-            // zero Subtraction-based formulas saturated this to zero.
+            // Regression guard: bytes/4 of the non-system items must be above zero
+            // Subtraction-based formulas saturated this to zero; the direct sum returns the real estimate
             assert!(
                 info.context.message_tokens > 0,
                 "message_tokens should reflect non-system items, got {}",
@@ -321,9 +325,8 @@ async fn build_session_info_sources_show_model_fingerprint_from_catalog() {
             let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
 
-            // The catalog KEY ("custom-catalog-id") differs from the
-            // session's routing SLUG ("test", the harness sampling model) The
-            // flag starts off.
+            // The catalog KEY ("custom-catalog-id") differs from the session's routing SLUG ("test", the harness sampling model)
+            // The flag starts off, so the lookup must yield false
             let mut entry = ModelEntry {
                 info: ModelInfo::fallback("test"),
                 mtls_cert_dir: None,
@@ -341,7 +344,8 @@ async fn build_session_info_sources_show_model_fingerprint_from_catalog() {
                 "non-coding slug without the catalog flag must yield false",
             );
 
-            // The same entry with the flag ON must yield true.
+            // The same entry with the flag ON must yield true, exercising slug-to-catalog-key resolution end-to-end
+            // A direct slug `.get("test")` would miss the entry keyed "custom-catalog-id" and regress to false
             entry.info.show_model_fingerprint = true;
             actor
                 .models_manager
@@ -375,6 +379,7 @@ async fn stashes_per_turn_usage_in_chat_state() {
                     .is_none()
             );
 
+            // The fixture splits total 200_000 into prompt 199_950 and completion 50
             actor.record_response_token_usage(&response_with_usage(200_000), None);
 
             let stashed = actor

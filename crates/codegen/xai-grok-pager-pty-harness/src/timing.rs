@@ -1,4 +1,7 @@
 //! Layer 2b: Frame timing via VTE parser.
+//!
+//! Detects frame boundaries from synchronized-update markers (`CSI ? 2026 h/l`) and records wall-clock timing for each frame.
+//! Crossterm emits the markers via `BeginSynchronizedUpdate`/`EndSynchronizedUpdate`.
 
 use std::time::{Duration, Instant};
 
@@ -80,7 +83,7 @@ impl vte::Perform for FrameTimingHandler {
         _ignore: bool,
         action: char,
     ) {
-        // Only interested in CSI? <param> h/l (private mode set/reset).
+        // Only interested in CSI ? <param> h/l (private mode set/reset).
         if intermediates != b"?" {
             return;
         }

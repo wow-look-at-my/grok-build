@@ -1,10 +1,14 @@
-//! Pure conversation-shape helpers, kept crate-neutral so both the session layer (`xai-grok-shell`).
+//! Pure conversation-shape helpers, kept crate-neutral so both the session
+//! layer (`xai-grok-shell`) and the `ChatStateActor` can share one definition
+//! of "align the leading System message with a prompt".
 
 use std::sync::Arc;
 
 use xai_grok_sampling_types::conversation::ConversationItem;
 
 /// Equal after trimming trailing `\n`/`\r` from both sides.
+/// Attach idempotency: a stored head that differs only by a trailing newline is already matching.
+/// Interior and leading whitespace are significant.
 pub fn canonical_system_prompt_eq(a: &str, b: &str) -> bool {
     a.trim_end_matches(['\n', '\r']) == b.trim_end_matches(['\n', '\r'])
 }

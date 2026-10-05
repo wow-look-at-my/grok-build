@@ -1,4 +1,8 @@
 //! PTY scroll correctness via the harness (screen state from **ptyctl** / alacritty_terminal).
+//!
+//! After a large mock response settles, follow mode pins the viewport to the bottom.
+//! Scroll **up** then **down** and assert the visible markers move.
+//! That path exercises the optimized AllTurns paint window in production.
 
 use std::time::{Duration, Instant};
 
@@ -51,7 +55,8 @@ async fn scroll_up_from_follow_bottom_then_back_down() -> Result<()> {
         .context("welcome")?;
 
     harness.inject_keys(b"scroll test\r")?;
-    // Follow mode pins the viewport to the bottom.
+    // Follow mode pins the viewport to the bottom, so the top marker only flashes on-screen before scrolling above the viewport
+    // Polling for it races a fast stream; wait for the bottom marker, which stays visible in follow mode once the response reaches it
     harness
         .wait_for_text("MARKER_BOTTOM_OF_RESPONSE", Duration::from_secs(30))
         .context("response reached bottom while following")?;
@@ -94,7 +99,7 @@ async fn scroll_up_from_follow_bottom_then_back_down() -> Result<()> {
         }
     }
     // Wheel over mid-screen scrollback (1-indexed SGR coords).
-    harness.inject_keys(&sgr_scroll(64, 15, 40, 50))?;
+    harness.inject_keys(&sgr_scroll(64, 15, 40, 50))?; // Button 64 is wheel up
     harness.update(Duration::from_millis(200));
     harness.update(Duration::from_millis(300));
     let mid = harness.screen_contents();
@@ -108,7 +113,7 @@ async fn scroll_up_from_follow_bottom_then_back_down() -> Result<()> {
         !mid.contains("MARKER_BOTTOM_OF_RESPONSE"),
         "bottom marker should leave viewport after scroll-up; screen:\n{mid}"
     );
-    // Mid/early markers become visible; not only the last many lines.
+    // Mid/early markers become visible; not only the last 50 lines.
     assert!(
         any_marker(&mid, 0..340),
         "expected earlier scroll-markers after scroll-up; screen:\n{mid}"
@@ -122,7 +127,7 @@ async fn scroll_up_from_follow_bottom_then_back_down() -> Result<()> {
             bail!("pager exited while PageDown scrolling");
         }
     }
-    harness.inject_keys(&sgr_scroll(65, 15, 40, 50))?;
+    harness.inject_keys(&sgr_scroll(65, 15, 40, 50))?; // Button 65 is wheel down
     harness.update(Duration::from_millis(200));
     harness.update(Duration::from_millis(400));
     let back_bottom = harness.screen_contents();

@@ -1,4 +1,11 @@
-//! Single home for everything that decides which row the approval menu highlights when the agent asks for permission.
+//! Single home for everything that decides which row the approval menu highlights when the agent asks for permission:
+//!
+//! - [`DefaultSelectedPermission`], the value type (maps to and from config strings and ACP kinds),
+//! - the process-wide caches (the configured value and the sticky last-used kind),
+//! - [`resolve_initial_cursor`], the one function the ACP handler calls when queueing a prompt.
+//!
+//! This is deliberately not in `views::permission_view` (a renderer) or `appearance::cache` (generic bool/u8 setting caches).
+//! The type and its state live together here, and the cache module (hot in the render path) does not depend upward on the view layer.
 
 use std::cell::Cell;
 
@@ -9,9 +16,11 @@ use xai_grok_workspace::permission::is_enable_always_approve_option;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefaultSelectedPermission {
     /// The global "Always allow on all sessions" (enable-always-approve) row.
+    /// It is also the fallback for an unset / unrecognised config value, so it is the effective default.
     AlwaysAllowAllSessions,
     AllowOnce,
-    /// The prompt-scoped always-allow row ("Always allow this command" / tool / domain / edit-session).
+    /// The prompt-scoped always-allow row ("Always allow this command" /
+    /// tool / domain / edit-session).
     AllowCommandAlways,
     Reject,
 }
@@ -29,8 +38,8 @@ impl DefaultSelectedPermission {
     }
 
     /// Display label for the settings picker and the change toast.
-    /// `AllowCommandAlways` preselects the prompt-specific always-allow row
-    /// (per-command / per-tool / per-domain / per-edit-session).
+    /// `AllowCommandAlways` preselects the prompt-specific always-allow row (per-command / per-tool / per-domain / per-edit-session).
+    /// The global allow-everything row belongs to `AlwaysAllowAllSessions`.
     pub const fn display(self) -> &'static str {
         match self {
             Self::AlwaysAllowAllSessions => "Always allow on all sessions",
@@ -40,10 +49,9 @@ impl DefaultSelectedPermission {
         }
     }
 
-    /// Parse a config.toml / registry value (trimmed, case-insensitive, no
-    /// aliases). Both `always_allow_all_sessions` and any unrecognised or
-    /// empty value resolve to
-    /// [`AlwaysAllowAllSessions`](Self::AlwaysAllowAllSessions).
+    /// Parse a config.toml / registry value (trimmed, case-insensitive, no aliases).
+    /// Both `always_allow_all_sessions` and any unrecognised or empty value resolve to [`AlwaysAllowAllSessions`](Self::AlwaysAllowAllSessions).
+    /// No `Option` has to be threaded through callers.
     pub fn from_config_value(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
             "allow_once" => Self::AllowOnce,
@@ -78,7 +86,8 @@ impl DefaultSelectedPermission {
             acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways => {
                 Self::Reject
             }
-            // TODO(acp-0.10): `PermissionOptionKind` is #[non_exhaustive].
+            // TODO(acp-0.10): `PermissionOptionKind` is #[non_exhaustive];
+            // treat unknown kinds as reject (never auto-allow).
             _ => Self::Reject,
         }
     }
@@ -126,8 +135,8 @@ pub fn prime() {
     let _ = load_default_selected_permission();
 }
 
-// Ephemeral last-confirmed kind; after the first prompt it beats the
-// configured value. `AlwaysAllowAllSessions` means nothing confirmed yet.
+// Ephemeral last-confirmed kind; after the first prompt it beats the configured value.
+// `AlwaysAllowAllSessions` means nothing confirmed yet. Single-threaded TUI, so a thread-local Cell is enough.
 
 thread_local! {
     static LAST_USED: Cell<DefaultSelectedPermission> =
@@ -135,18 +144,21 @@ thread_local! {
 }
 
 /// The kind the user last confirmed this session.
+/// Falls back to the [`AlwaysAllowAllSessions`](DefaultSelectedPermission::AlwaysAllowAllSessions) sentinel if none yet.
 pub fn last_used_permission() -> DefaultSelectedPermission {
     LAST_USED.with(Cell::get)
 }
 
-/// Record the kind the user confirmed. Callers must skip the special
-/// enable-always-approve (YOLO) and allow-edits-session options.
+/// Record the kind the user just confirmed.
+/// Callers must skip the special enable-always-approve (YOLO) and allow-edits-session options.
+/// Neither represents a per-prompt choice that should steer a later prompt's cursor.
 pub fn set_last_used_permission(kind: DefaultSelectedPermission) {
     LAST_USED.with(|c| c.set(kind));
 }
 
 // ── Resolution ──────────────────────────────────────────────────────────────
 
+/// Sticky last-used, then configured default, then the YOLO row by identity, else index 0.
 /// A concrete target skips YOLO. A missing target kind degrades to one-shot allow, never to global always-approve.
 pub fn resolve_initial_cursor(options: &[acp::PermissionOption]) -> usize {
     let target = match last_used_permission() {
@@ -225,7 +237,7 @@ mod tests {
 
     #[test]
     fn canonical_round_trips() {
-        // The enum is the source of truth for the strings
+        // The enum is the single source of truth for the strings
         for variant in [
             DefaultSelectedPermission::AlwaysAllowAllSessions,
             DefaultSelectedPermission::AllowOnce,
@@ -314,6 +326,8 @@ mod tests {
                 ),
                 opt("reject-once", acp::PermissionOptionKind::RejectOnce),
             ];
+            // With no sticky kind and the default config, the cursor lands on the enable-always-approve row
+            // It is matched by identity (index 1), not the first AllowOnce (index 0)
             assert_eq!(resolve_initial_cursor(&options), 1);
         })
         .join()
@@ -333,6 +347,7 @@ mod tests {
                 opt("allow-once", acp::PermissionOptionKind::AllowOnce),
                 opt("reject-once", acp::PermissionOptionKind::RejectOnce),
             ];
+            // Sticky AllowOnce must skip the YOLO row (also AllowOnce kind) and land on the plain allow-once row (index 1)
             assert_eq!(resolve_initial_cursor(&options), 1);
         })
         .join()
@@ -352,6 +367,7 @@ mod tests {
                 opt("allow-once", acp::PermissionOptionKind::AllowOnce),
                 opt("reject-always", acp::PermissionOptionKind::RejectAlways),
             ];
+            // The prompt offers only `RejectAlways`; a sticky reject must still find it (index 2) rather than falling back to the YOLO row
             assert_eq!(resolve_initial_cursor(&options), 2);
         })
         .join()
@@ -366,6 +382,7 @@ mod tests {
                 opt("allow-once", acp::PermissionOptionKind::AllowOnce),
                 opt("reject-once", acp::PermissionOptionKind::RejectOnce),
             ];
+            // No sticky kind, default config, no YOLO row (non-TUI client), so the cursor falls back to index 0
             assert_eq!(resolve_initial_cursor(&options), 0);
         })
         .join()

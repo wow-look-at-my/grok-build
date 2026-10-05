@@ -1,4 +1,5 @@
-//! `sessions_active` is counted at the spawn point shared by every way the agent hosts a session.
+//! `sessions_active` is counted at the one spawn point shared by every way the agent hosts a session.
+//! This is the sole test in its binary, so the process-global gauge sees no other session traffic and the counts can be exact.
 
 #[allow(dead_code)]
 mod acp_harness;

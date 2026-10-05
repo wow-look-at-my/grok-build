@@ -1,4 +1,8 @@
 //! `web_search` tool — new architecture (`Tool` trait).
+//!
+//! Calls the Responses API with web search capability. Reads the
+//! pre-constructed `WebSearchClient` from Resources (inserted by
+//! `with_backend()` when the config is `Enabled`).
 
 use crate::implementations::web_search::client::WebSearchClient;
 use crate::types::output::WebSearchOutput;
@@ -17,7 +21,9 @@ pub struct WebSearchInput {
     pub allowed_domains: Option<Vec<String>>,
 }
 
-// ─────────────────────────────────────────────────────────────────────────── Tool implementation.
+// ───────────────────────────────────────────────────────────────────────────
+// Tool implementation
+// ───────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
 pub struct WebSearchTool;

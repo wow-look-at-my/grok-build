@@ -106,7 +106,8 @@ fn diff_index_dirty(worktree_path: &Path, cached: bool) -> Result<bool> {
     match status.code() {
         Some(0) => Ok(false),
         Some(1) => Ok(true),
-        // Unborn HEAD or other error: treat as "changes" so the caller still runs the reset.
+        // Unborn HEAD or other error: treat as "changes" so the caller still
+        // runs the reset (correctness over the optimization).
         _ => Ok(true),
     }
 }
@@ -119,6 +120,8 @@ pub(crate) fn worktree_has_tracked_changes(worktree_path: &Path) -> Result<bool>
 }
 
 /// Whether the index has staged changes vs `HEAD` (`diff-index --cached`).
+/// Unlike [`worktree_has_tracked_changes`], `--cached` skips the working-tree
+/// stat walk (cheap over FUSE). Over-reports on error. Blocking.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn has_staged_changes(worktree_path: &Path) -> Result<bool> {
     diff_index_dirty(worktree_path, true)
@@ -147,10 +150,14 @@ pub(crate) fn worktree_at_ref(worktree_path: &Path, git_ref: &str) -> Result<boo
     )
 }
 
-/// Hang bound for every [`git_capture_in`] call, not a slow-tree budget.
+/// Hang bound for every [`git_capture_in`] call, not a slow-tree budget. A
+/// large `git add -A` is minutes of honest work; a filter that never returns
+/// would otherwise run forever.
 const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Hook path so nothing a repo ships runs unwatched.
+/// Hook path so nothing a repo ships runs unwatched. A missing directory is
+/// wrong: git-lfs `install` creates it with hooks. A device file cannot be
+/// created and cannot hold a hook.
 #[cfg(not(windows))]
 pub(crate) const NO_HOOKS: &str = "/dev/null";
 #[cfg(windows)]
@@ -169,7 +176,9 @@ fn git_capture_in<S: AsRef<OsStr>>(
     cmd.current_dir(worktree_path)
         .args(["-c", &format!("core.hooksPath={NO_HOOKS}")])
         .args(args);
-    // Before the caller's own, which is what carries the scratch index.
+    // Before the caller's own, which is what carries the scratch index: the
+    // snapshot has to read the configuration the gate's probes read, or the
+    // two halves judge different repositories.
     super::probe::forget_inherited_git_environment(&mut cmd);
     for &(key, val) in envs {
         cmd.env(key, val);
@@ -235,7 +244,8 @@ fn snapshot_git<S: AsRef<OsStr>>(
     git_capture_in(worktree_path, &full, envs)
 }
 
-/// Removes a throwaway git index file (and its `.lock` sibling) on drop.
+/// Removes a throwaway git index file (and its `.lock` sibling) on drop, so the
+/// scratch index never leaks even if a snapshot step fails partway through.
 struct ScratchIndexGuard {
     path: PathBuf,
 }
@@ -321,9 +331,13 @@ fn snapshot_worktree_to_ref_inner(
 
 /// Where the scratch index starts before `add -A` layers the working tree on.
 enum IndexSeed {
-    /// `HEAD`'s tree, so a file that is tracked but also matches a `.gitignore` rule survives.
+    /// `HEAD`'s tree, so a file that is tracked but also matches a `.gitignore`
+    /// rule survives: `add -A` never re-ignores what is already tracked. It
+    /// carries no stat cache, so every tracked file is hashed.
     Head,
-    /// A copy of the worktree's own index, whose stat cache means `add -A` hashes only what changed.
+    /// A copy of the worktree's own index, whose stat cache means `add -A`
+    /// hashes only what changed: ten seconds on a monorepo checkout rather
+    /// than two minutes.
     WorktreeIndex,
 }
 
@@ -391,6 +405,7 @@ fn transfer_snapshot_to_repo_inner(
     ref_name: &str,
 ) -> Result<()> {
     // Force (`+`) matches unconditional overwrite of `snapshot_worktree_to_ref`.
+    // `--no-tags` avoids pulling unrelated tag refs.
     let refspec = format!("+{ref_name}:{ref_name}");
     snapshot_git(
         source_repo,
@@ -403,7 +418,8 @@ fn transfer_snapshot_to_repo_inner(
         &[],
     )?;
 
-    // Belt-and-suspenders: only succeed once the durable ref resolves in source.
+    // Belt-and-suspenders: only succeed once the durable ref resolves in source,
+    // so a caller never deletes the worktree without a recoverable snapshot.
     let commitish = format!("{ref_name}^{{commit}}");
     snapshot_git(source_repo, &["rev-parse", "--verify", &commitish], &[])?;
 
@@ -459,7 +475,9 @@ fn rehydrate_worktree_from_ref_inner(
     snapshot_commit: &str,
     session_id: Option<&str>,
 ) -> Result<WorktreeReport> {
-    // The snapshot's first parent is the base.
+    // The snapshot's first parent is the original base. Resolve it, then confirm
+    // the object is actually present — a parent-repo `git reset --hard` + gc can
+    // leave the parent pointer dangling, which `rev-parse` alone would not catch.
     let parent = format!("{snapshot_commit}^");
     let base = snapshot_git(
         source_repo,
@@ -483,15 +501,16 @@ fn rehydrate_worktree_from_ref_inner(
             snapshot_commit
         }
     };
-    // A prior rehydrate may have failed after `worktree add` and left a
-    // partial dir.
+    // A prior rehydrate may have failed after `worktree add` and left a partial dir; remove it so this attempt starts clean (worktree add fails on an existing path).
     if dest.exists() {
         let _ = crate::remove_worktree(dest);
         if dest.exists() {
             dispose_fallback_rm(dest);
         }
     }
-    // `git worktree add` refuses a path another registration still claims.
+    // `git worktree add` refuses a path another registration still claims,
+    // so scrub `dest`'s stale registration (previously-disposed worktree, or
+    // the raw `remove_dir_all` fallback above) before adding.
     crate::git::remove_stale_worktree_registration(source_repo, dest);
     snapshot_git(
         source_repo,
@@ -516,14 +535,16 @@ fn rehydrate_worktree_from_ref_inner(
     let commit = match populate() {
         Ok(commit) => commit,
         Err(e) => {
-            // Best-effort cleanup; preserve the error.
+            // Best-effort cleanup; preserve the original error.
             let _ = crate::remove_worktree(dest);
             crate::git::remove_stale_worktree_registration(source_repo, dest);
             return Err(e);
         }
     };
 
-    // Mirror `WorktreeBuilder::create()` registration so the rehydrated worktree is tracked again.
+    // Mirror `WorktreeBuilder::create()` registration so the rehydrated worktree
+    // is tracked again after its directory was disposed of. `session_id` is only
+    // consumed here, so silence it when the metadata DB is compiled out.
     #[cfg(not(feature = "metadata"))]
     let _ = session_id;
     #[cfg(feature = "metadata")]
@@ -640,7 +661,8 @@ mod tests {
             .unwrap();
         assert!(has_staged_changes(temp.path()).unwrap());
 
-        // A staged deletion (no other path copied up) is also detected.
+        // A staged deletion (no other path copied up) is also detected — the
+        // case the pristine-upper fast path must not skip.
         git_reset_hard_command(temp.path(), None).unwrap();
         assert!(!has_staged_changes(temp.path()).unwrap());
         git_command()
@@ -665,7 +687,7 @@ mod tests {
             git_capture_in(temp.path(), &["rev-parse", "--abbrev-ref", "HEAD"], &[]).unwrap();
         assert!(worktree_at_ref(temp.path(), &branch).unwrap());
 
-        // A second commit: the branch tip moves, so the commit is no longer HEAD.
+        // A second commit: the branch tip moves, so the old commit is no longer HEAD.
         let first = git_capture_in(temp.path(), &["rev-parse", "HEAD"], &[]).unwrap();
         std::fs::write(temp.path().join("file.txt"), "v2").unwrap();
         git_commit_all(temp.path(), "second");
@@ -794,8 +816,8 @@ mod tests {
         let ref_name = "refs/grok/snapshots/tracked-ignored";
         let snap = snapshot_worktree_to_ref(&wt, ref_name, "tracked-then-ignored").unwrap();
 
-        // A file tracked in HEAD must survive even though it matches
-        // .gitignore.
+        // A file tracked in HEAD must survive even though it matches .gitignore,
+        // with the working-tree edit captured (regression: empty index dropped it).
         let listing =
             git_capture_in(&wt, &["ls-tree", "-r", "--name-only", ref_name], &[]).unwrap();
         assert!(
@@ -935,7 +957,8 @@ mod tests {
         let snap = snapshot_worktree_to_ref(&wt, ref_name, "crlf").unwrap();
 
         // The snapshot blob must keep the raw CRLF bytes: our `-c
-        // core.autocrlf=false` overrode the local `core.autocrlf=true`.
+        // core.autocrlf=false` overrode the local `core.autocrlf=true`, which
+        // would otherwise have stripped the `\r`. Read raw bytes (no trimming).
         let out = git_command()
             .current_dir(&wt)
             .args(["cat-file", "-p", &format!("{snap}:tracked.txt")])
@@ -955,14 +978,16 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let (_repo, wt) = repo_with_worktree(&temp);
 
-        // A path with a space and a non-ASCII char.
+        // A path with a space and a non-ASCII char (no Unicode decomposition,
+        // so it is stable across macOS/Linux filesystems).
         let name = "λ space.txt";
         std::fs::write(wt.join(name), "x").unwrap();
 
         let ref_name = "refs/grok/snapshots/unicode";
         snapshot_worktree_to_ref(&wt, ref_name, "unicode path").unwrap();
 
-        // Read the tree with the same hardening (`core.quotepath=false`) so the path comes back as raw UTF-8.
+        // Read the tree with the same hardening (`core.quotepath=false`) so the
+        // path comes back as raw UTF-8 rather than octal-escaped/quoted.
         let listing = snapshot_git(&wt, &["ls-tree", "-r", "--name-only", ref_name], &[]).unwrap();
         assert!(
             listing.lines().any(|l| l == name),
@@ -975,7 +1000,8 @@ mod tests {
         xai_test_utils::require_git!();
         let temp = TempDir::new().unwrap();
 
-        // Base repo with several committed files so the round trip exercises unchanged, edited.
+        // Base repo with several committed files so the round trip exercises
+        // unchanged, edited, and deleted tracked paths.
         let repo_path = temp.path().join("repo");
         std::fs::create_dir(&repo_path).unwrap();
         init_git_repo(&repo_path);
@@ -984,7 +1010,9 @@ mod tests {
         std::fs::write(repo_path.join("deleted.txt"), "doomed").unwrap();
         git_commit_all(&repo_path, "initial");
 
-        // A shared-repo setting that would rewrite line endings on a naive checkout; the rehydrated worktree inherits it.
+        // A shared-repo setting that would rewrite line endings on a naive
+        // checkout; the rehydrated worktree inherits it, so restore must apply
+        // the same `core.autocrlf=false` hardening that capture used.
         git_capture_in(&repo_path, &["config", "core.autocrlf", "true"], &[]).unwrap();
 
         let wt = temp.path().join("wt");
@@ -992,7 +1020,8 @@ mod tests {
             .create()
             .unwrap();
 
-        // Edit a tracked file, delete a tracked file, leave one untouched, and add untracked CRLF + LF files.
+        // Edit a tracked file, delete a tracked file, leave one untouched, and
+        // add untracked CRLF + LF files.
         std::fs::write(wt.join("tracked.txt"), "edited").unwrap();
         std::fs::remove_file(wt.join("deleted.txt")).unwrap();
         std::fs::write(wt.join("untracked.txt"), "brand new").unwrap();
@@ -1016,7 +1045,9 @@ mod tests {
             std::fs::read_to_string(wt.join("tracked.txt")).unwrap(),
             "edited"
         );
-        // Unchanged-from-base file is repopulated with its original content.
+        // Unchanged-from-base file is repopulated with its original content,
+        // proving `read-tree --reset -u` refills the post `--no-checkout` empty
+        // working tree (not just the dirty paths).
         assert_eq!(
             std::fs::read_to_string(wt.join("unchanged.txt")).unwrap(),
             "stable"
@@ -1036,10 +1067,13 @@ mod tests {
             std::fs::read(wt.join("crlf.txt")).unwrap(),
             b"line1\r\nline2\r\n"
         );
-        // LF preserved byte-for-byte: the restore-side `core.autocrlf=false` overrode the inherited `autocrlf=true`.
+        // LF preserved byte-for-byte: the restore-side `core.autocrlf=false`
+        // overrode the inherited `autocrlf=true`, which would otherwise smudge
+        // LF→CRLF on checkout. This fails if restore drops SNAPSHOT_GIT_CONFIG.
         assert_eq!(std::fs::read(wt.join("lf.txt")).unwrap(), b"a\nb\n");
 
-        // HEAD rests at the real base so future commits build on (and sign against) it; restored content shows as changes.
+        // HEAD rests at the real base so future commits build on (and sign
+        // against) it; restored content shows as changes, not a new base.
         let head = git_capture_in(&wt, &["rev-parse", "HEAD"], &[]).unwrap();
         assert_eq!(head, base, "HEAD should rest at the original base");
         assert_eq!(report.commit, base);
@@ -1054,7 +1088,9 @@ mod tests {
         std::fs::write(wt.join("tracked.txt"), "edited").unwrap();
         std::fs::write(wt.join("untracked.txt"), "brand new").unwrap();
 
-        // Build a PARENTLESS commit holding the same working state.
+        // Build a PARENTLESS commit holding the same working state, so its `^`
+        // never resolves — exercising the base-unreachable fallback without
+        // depending on gc to prune a real base.
         let snap = snapshot_worktree_to_ref(&wt, "refs/grok/snapshots/orphan-src", "src").unwrap();
         let tree = git_capture_in(&wt, &["rev-parse", &format!("{snap}^{{tree}}")], &[]).unwrap();
         let ident = [
@@ -1108,7 +1144,8 @@ mod tests {
         rehydrate_worktree_from_ref(&wt, &repo_path, &snap, None).unwrap();
         assert!(wt.exists());
 
-        // Re-rehydrating at the SAME dest (a leftover dir, as a failed prior attempt would leave) must self-heal and succeed.
+        // Re-rehydrating at the SAME dest (a leftover dir, as a failed prior
+        // attempt would leave) must self-heal and succeed rather than erroring.
         let report = rehydrate_worktree_from_ref(&wt, &repo_path, &snap, None).unwrap();
         assert_eq!(report.worktree_path, wt);
         assert_eq!(
@@ -1173,7 +1210,8 @@ mod tests {
         std::fs::write(repo_path.join("tracked.txt"), "original").unwrap();
         git_commit_all(&repo_path, "initial");
 
-        // Standalone worktree: its own `.git` (independent object store + refs), matching the production default.
+        // Standalone worktree: its own `.git` (independent object store + refs),
+        // matching the production default that the live E2E exercised.
         let wt = temp.path().join("standalone-wt");
         crate::WorktreeBuilder::new(&repo_path, &wt)
             .standalone(true)
@@ -1204,7 +1242,8 @@ mod tests {
             "source repo ref must resolve to the snapshot commit after transfer"
         );
 
-        // Deleting the standalone worktree (its `.git` too) must NOT lose the snapshot — the bug this fix addresses.
+        // Deleting the standalone worktree (its `.git` too) must NOT lose the
+        // snapshot — the bug this fix addresses.
         crate::remove_worktree(&wt).unwrap();
         assert_eq!(
             git_capture_in(&repo_path, &["rev-parse", ref_name], &[]).unwrap(),
@@ -1239,12 +1278,16 @@ mod tests {
         let snap = snapshot_worktree_to_ref(&wt, "refs/grok/snapshots/db", "db test").unwrap();
         crate::remove_worktree(&wt).unwrap();
 
-        // Rehydrate into a UNIQUE-basename dest so its DB id can't collide with the `wt` id other concurrent rehydrate tests write to this.
+        // Rehydrate into a UNIQUE-basename dest so its DB id can't collide with
+        // the `wt` id other concurrent rehydrate tests write to this (process-
+        // global GROK_HOME) DB and INSERT-OR-REPLACE our row.
         let dest = temp.path().join("subagent-db-rehydrate");
         let report =
             rehydrate_worktree_from_ref(&dest, &repo_path, &snap, Some("subagent-42")).unwrap();
 
-        // Filter to OUR record by path: concurrent open_default writers may add other subagent rows.
+        // Filter to OUR record by path: concurrent open_default writers may add
+        // other subagent rows since GROK_HOME is process-global. Match the
+        // canonical path register_worktree stores (/var → /private/var on macOS).
         let dest_canon = dunce::canonicalize(&dest).unwrap_or_else(|_| dest.clone());
         let db = crate::db::WorktreeDb::open(&fx.home).unwrap();
         let mine: Vec<_> = db

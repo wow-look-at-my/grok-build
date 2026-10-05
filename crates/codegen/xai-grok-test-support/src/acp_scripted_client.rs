@@ -1,4 +1,5 @@
-//! The connection side of `GrokStdioClient` and `LeaderStdioClient`: the `agent_client_protocol::Client` handler.
+//! The connection side of `GrokStdioClient` and `LeaderStdioClient`: the `agent_client_protocol::Client`
+//! handler that answers each request from the agent by a [`ClientPolicy`] and records every message.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -21,6 +22,8 @@ const FOLDER_TRUST_REQUEST_METHOD: &str = "x.ai/folder_trust/request";
 /// The reverse method an MCP server's `elicitation/create` reaches the client through.
 const MCP_ELICIT_METHOD: &str = "x.ai/mcp/elicit";
 
+/// A policy for one kind of request plus the count of arrivals so far, numbered from 1 to match
+/// `RequestPolicy::with_nth`.
 struct NumberedPolicy<D> {
     policy: RequestPolicy<D>,
     arrivals: AtomicUsize,
@@ -79,7 +82,8 @@ impl ScriptedClient {
         &self.state.holds
     }
 
-    /// Whether this client advertises `x.ai/folderTrust.interactive`.
+    /// Whether this client advertises `x.ai/folderTrust.interactive`, the capability the agent
+    /// requires before it sends a folder-trust prompt.
     pub(crate) fn advertises_interactive_trust(&self) -> bool {
         self.state.trust.is_some()
     }

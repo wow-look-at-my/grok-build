@@ -1,4 +1,5 @@
 //! XTVERSION DCS reply filter for the input event channel (parser-integrated model as in helix and similar TUIs).
+//! See [`XtversionFilter`].
 
 use std::time::{Duration, Instant};
 
@@ -18,11 +19,13 @@ pub(super) const XT_MAX_HOLD: Duration = Duration::from_secs(1);
 /// Payload size cap; real replies are short (`kitty 0.35.2`).
 const XT_MAX_PAYLOAD: usize = 64;
 
-/// Recognizes and swallows the XTVERSION DCS reply arriving through the input
-/// event channel. crossterm surfaces `ESC P` as Alt+Shift+P.
+/// Recognizes and swallows the XTVERSION DCS reply arriving through the input event channel.
+/// crossterm surfaces `ESC P` as Alt+Shift+P, the payload as plain Char presses, ST as Alt+\ and BEL as Ctrl+G.
+/// Events behind a partial prefix are staged so surviving input retains FIFO order and timestamps.
 pub(super) struct XtversionFilter {
     armed: bool,
     /// Set on the first `filter()` call, not at construction.
+    /// A loaded startup can take seconds before the loop processes its first batch, and that time must not burn the arm window.
     deadline: Option<Instant>,
     state: XtState,
     staged: Vec<StagedEvent>,
@@ -118,8 +121,8 @@ impl XtversionFilter {
 
     /// Remove a complete DCS reply from the batch; pass everything else.
     fn filter(&mut self, events: Vec<TimedInputEvent>) -> Vec<TimedInputEvent> {
-        // Don't expire mid-hold once the intro is confirmed The in-flight
-        // reply must resolve (Complete or dead-hold drop).
+        // Don't expire mid-hold once the intro is confirmed
+        // The in-flight reply must resolve (Complete or dead-hold drop), or its tail would pass through as typed text
         let deadline = *self
             .deadline
             .get_or_insert_with(|| Instant::now() + XT_ARM_WINDOW);
@@ -197,9 +200,8 @@ impl XtversionFilter {
             (EscHeld, 'P') => self.state = AwaitGt,
             (AwaitGt, '>') => self.state = AwaitPipe,
             (AwaitPipe, '|') => self.state = Payload,
-            // Strict alphabet so the first typed char outside a real `name
-            // version` payload breaks the hold instead of being eaten
-            // Example.
+            // Strict alphabet so the first typed char outside a real `name version` payload breaks the hold instead of being eaten
+            // Example: a `/slash` command typed after an unterminated reply
             (Payload, c) if is_xt_payload_char(c) && self.payload.len() < XT_MAX_PAYLOAD => {
                 self.payload.push(c)
             }

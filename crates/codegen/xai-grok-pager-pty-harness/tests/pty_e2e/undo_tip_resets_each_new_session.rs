@@ -2,15 +2,21 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Per-session count reset.
+/// Per-session count reset. Run 1 drives the count to its cap (3 TTL-spaced shows) and confirms a
+/// 4th wipe is then gated. Run 2 reuses the SAME `$HOME` and does ONE wipe: the tip MUST appear,
+/// which only holds if the count reset to 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn undo_tip_resets_each_new_session() {
     let content = ContentController::start().await.expect("start content");
     let binary = pager_binary().expect("resolve pager binary");
-    // Both spawns share the env and the same $HOME TempDir Contextual hints ship disabled by default.
+    // Both spawns share the env and the same $HOME TempDir
+    // Contextual hints ship disabled by default, so opt in explicitly or the undo tip never shows
     let env_refs = CONTEXTUAL_HINTS_ENV;
 
+    // Run 1: drive the in-memory seen count to its cap (3 TTL-spaced shows), so the count is exhausted before quitting
+    // Each new show needs the previous banner to expire via its ~3s TTL first
+    // Re-wiping while it is still visible only refreshes the TTL without incrementing the count
     {
         let mut harness = PtyHarness::spawn_with_content_env(
             &binary,
@@ -48,7 +54,7 @@ async fn undo_tip_resets_each_new_session() {
         harness.quit().expect("quit run 1");
     }
 
-    // A persisted cap would suppress the tip here; per-session in-memory state means it shows again.
+    // Run 2: SAME $HOME. A persisted cap would suppress the tip here; per-session in-memory state means it shows again.
     {
         let mut harness = PtyHarness::spawn_with_content_env(
             &binary,

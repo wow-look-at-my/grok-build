@@ -1,9 +1,16 @@
-//! A *recap* is a short "where was I" summary of the session so far.
+//! A *recap* is a short "where was I" summary of the session so far, modelled on common coding-agent `/recap` and automatic session-recap features.
+//! Unlike compaction, a recap never mutates the conversation: it is generated from a read-only snapshot and sent to the client for display only.
+//!
+//! Generation reuses the parent session's conversation prefix verbatim, so the provider prompt cache stays warm.
+//! It appends a single instruction turn that asks for the recap.
+//! The pure helpers here build that request and tidy the model's output; the actual model call lives on the `SessionActor` (`handle_recap`).
 
 use crate::sampling::ConversationItem;
 use crate::session::helpers::chat::floor_char_boundary;
 use xai_chat_state::{compaction_utils, estimate_conversation_tokens, estimate_item_tokens};
 
+/// Generous headroom: the recap instruction targets about 25-40 words (roughly 240 chars at the top end).
+/// This only guards against runaway model output and never cuts a normal recap.
 const RECAP_MAX_CHARS: usize = 1200;
 
 /// All recap directions live in this single user message (wrapped in a `<system-reminder>`) rather than a separate system prompt.
@@ -60,16 +67,21 @@ pub(crate) fn build_instruction_items(
 }
 
 /// This is the verified `max_prompt_length` for current `grok-build` / `grok-4.5` product backends (`500000`).
+/// Applied via `min(window, CAP)`, so a smaller real window still wins (e.g. a 256k legacy model or a debug override).
 const RECAP_CONTEXT_WINDOW_CAP: u64 = 500_000;
 
 /// Fraction of the (conservative) window a recap may occupy: the DEFAULT auto-compact threshold.
+/// It is fixed rather than the remote-settings-resolved value (which can exceed 85), so recap stays at least as conservative as the turn path.
 const RECAP_BUDGET_THRESHOLD_PERCENT: u64 = 85;
 
 /// Estimator/serialization slack (mirrors memory-flush's soft-threshold pad).
+/// The appended instruction is reserved SEPARATELY via `snapshot_budget`, so it is not double-counted here.
+/// (`max_prompt_length` is input-length, so output doesn't count.)
 const RECAP_BUDGET_HEADROOM_TOKENS: u64 = 4_000;
 
-/// The budget uses the same bytes/4 estimator that compaction triggers on, preventing `ic_400_prompt_too_long` on long sessions. Over budget: strips reasoning (the prefix cache is lost once we trim) and normalizes the trailing
-/// boundary ([`pop_trailing_tool_run`]).
+/// The budget uses the same bytes/4 estimator that compaction triggers on, preventing `ic_400_prompt_too_long` on long sessions.
+/// Over budget: strips reasoning (the prefix cache is lost once we trim) and normalizes the trailing boundary ([`pop_trailing_tool_run`]).
+/// `context_window` MUST be the window of the model the recap is actually sent to (today the session model).
 pub(crate) fn budget_recap_items(
     conversation: Vec<ConversationItem>,
     tag: &str,
@@ -144,6 +156,7 @@ pub(crate) fn pop_trailing_tool_run(items: &mut Vec<ConversationItem>) {
 pub(crate) const MIN_TURNS_FOR_AUTO_RECAP: usize = 3;
 
 /// Durable auto-recap watermark under `{session_dir}/`.
+/// It is written only when a recap commits (success, or an over-long auto recap suppressed from display), never on failure/cancel.
 pub(crate) const RECAP_WATERMARK_FILE: &str = "last_recap_main_turn";
 
 /// Counts real user prompts (`synthetic_reason.is_human()`), not assistant/tool items.
@@ -564,8 +577,7 @@ mod tests {
 
     #[test]
     fn budget_fast_path_matches_build_instruction_items() {
-        // Include a reasoning block so `strip_reasoning=true` exercises
-        // stripping on the fits path (not a no-op)
+        // Include a reasoning block so `strip_reasoning=true` actually exercises stripping on the fits path (not just a no-op)
         let conv = vec![
             ConversationItem::system("sys"),
             ConversationItem::user("hello"),
@@ -700,7 +712,8 @@ mod tests {
             ConversationItem::assistant("did stuff"),
             ConversationItem::user("z".repeat(40_000)),
         ];
-        // The grok backend passes strip_reasoning=false, but the over-budget branch must strip reasoning anyway The prefix cache is already lost.
+        // The grok backend passes strip_reasoning=false, but the over-budget branch must strip reasoning anyway
+        // The prefix cache is already lost once trimmed
         let out = budget_recap_items(conv, "system-reminder", false, 8_000);
         assert!(
             !out.iter()
@@ -716,7 +729,8 @@ mod tests {
             ConversationItem::assistant("did stuff"),
             ConversationItem::user("small"),
         ];
-        // The snapshot fits under a large window on grok (strip_reasoning=false), so it is returned verbatim Reasoning is kept.
+        // The snapshot fits under a large window on grok (strip_reasoning=false), so it is returned verbatim
+        // Reasoning is kept so the prefix KV cache stays warm
         let out = budget_recap_items(conv, "system-reminder", false, 256_000);
         assert!(
             out.iter()
@@ -727,8 +741,8 @@ mod tests {
 
     #[test]
     fn budget_1m_clamps_to_floor_and_256k_shrinks() {
-        // One giant user turn larger than any window's budget: fit truncates
-        // it in place to exactly snapshot_budget.
+        // One giant user turn larger than any window's budget: fit truncates it in place to exactly snapshot_budget
+        // The output size is then a direct readout of the budget the helper used
         let giant = || {
             vec![
                 ConversationItem::system("sys"),
@@ -783,7 +797,8 @@ mod tests {
 
     #[test]
     fn budget_threshold_boundary_selects_fast_vs_over_budget() {
-        // Lock the `<=` fits-vs-over-budget comparison The reasoning item's presence shows which branch ran
+        // Lock the `<=` fits-vs-over-budget comparison
+        // The reasoning item's presence shows which branch ran
         let tag = "system-reminder";
         let instruction_tokens =
             estimate_item_tokens(&ConversationItem::user(recap_instruction(tag)));
@@ -824,6 +839,9 @@ mod tests {
 
     #[test]
     fn budget_degenerate_tiny_window_stays_valid_and_nonempty() {
+        // A window below the headroom makes prompt_budget saturate to 0.
+        // The instruction is still appended, so the output necessarily exceeds the computed 0 budget.
+        // It stays tiny and structurally valid (cannot cause a 400).
         let conv = vec![
             ConversationItem::system("sys"),
             ConversationItem::user("w".repeat(40_000)),

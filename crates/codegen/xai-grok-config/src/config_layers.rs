@@ -1,4 +1,5 @@
 //! The layer *files* are read by [`crate::loader`].
+//! This module owns how those layers combine into the effective config: layer precedence, the `GROK_CONFIG` overlay, and campaign resolution.
 
 use crate::loader::{
     deep_merge_toml, load_from_disk, load_managed_config, load_system_managed_config,
@@ -20,6 +21,8 @@ pub struct ConfigLayers {
     pub managed: toml::Value,
     pub user: toml::Value,
     /// `GROK_CONFIG` / `GROK_CONFIG_PATH` overlay, above user but below requirements.
+    /// Soft settings only; this doc is the canonical source of truth for what the overlay can and cannot reach.
+    /// This is fail-closed: every code-exec, auth, egress, trust, or discovery table is absent from the allowlist and dropped by default.
     pub env_overlay: Option<toml::Value>,
     pub user_requirements: Option<toml::Value>,
     pub system_requirements: Option<toml::Value>,
@@ -62,7 +65,8 @@ impl ConfigLayers {
         let mut system_requirements = load_system_requirements();
         let mut mdm_requirements = crate::validation::mdm_requirements_value();
 
-        // Highest-authority tier first: `merge_campaign_entries` is first-id-wins.
+        // Highest-authority tier first: `merge_campaign_entries` is first-id-wins, so a duplicate campaign id must resolve mdm > system > user
+        // That matches the layer precedence in `effective_config_base`, where mdm is merged last/highest
         let mut requirements_campaigns = Vec::new();
         if let Some(ref mut req) = mdm_requirements {
             requirements_campaigns.extend(take_campaign_entries(req, "requirements"));
@@ -74,7 +78,9 @@ impl ConfigLayers {
             requirements_campaigns.extend(take_campaign_entries(req, "requirements"));
         }
 
-        // Normalize each layer before any merge, so `[toolset.web_search]`'s `allowed_domains` / `excluded_domains` travel together A layer.
+        // Normalize each layer before any merge, so `[toolset.web_search]`'s `allowed_domains` / `excluded_domains` travel together
+        // A layer that sets one clears the other to `[]`
+        // That makes `deep_merge_toml` replace the whole policy from the winning layer instead of mixing keys across layers
         normalize_config_layer(&mut system_managed);
         normalize_config_layer(&mut managed);
         normalize_config_layer(&mut user);
@@ -108,6 +114,7 @@ impl ConfigLayers {
 
     /// Layer merge (no campaigns), including the `GROK_CONFIG` overlay.
     /// Overlay-inclusive: security gates must not read this.
+    /// Use [`Self::effective_config_base_without_overlay`] for any gate (the overlay-free set is enumerated on [`Self::env_overlay`]).
     pub fn effective_config_base(&self) -> toml::Value {
         self.merge(OverlayInclusion::Include)
     }
@@ -182,8 +189,8 @@ impl ConfigLayers {
         crate::campaigns::filter_active_campaigns(merged, dismissed_ids)
     }
 
-    /// Re-merge the requirements layers so an admin's `requirements.toml`
-    /// always wins over a campaign overlay.
+    /// Re-merge the requirements layers so an admin's `requirements.toml` always wins over a campaign overlay, whatever the campaign's source layer.
+    /// Campaigns are full-power (any field), so this is the structural guarantee that a lower-trust campaign can't override an admin-set field.
     fn reapply_requirements(&self, merged: &mut toml::Value) {
         for req in self.requirements_in_order() {
             deep_merge_toml(merged, req);
@@ -216,8 +223,8 @@ impl ConfigLayers {
         merged
     }
 
-    /// Disk campaigns and on-disk dismiss (`campaigns_state.json`); **no
-    /// remote, no env override**.
+    /// Disk campaigns and on-disk dismiss (`campaigns_state.json`); **no remote, no env override**.
+    /// The name makes the divergence from the shell's remote-aware `load_effective_config` explicit at every call site.
     pub fn effective_config_disk_only(&self) -> toml::Value {
         self.effective_config_with_campaigns(&[], &load_dismissed_ids_from_home())
     }
@@ -258,11 +265,15 @@ pub(crate) fn lock_grok_campaigns_env() -> std::sync::MutexGuard<'static, ()> {
 }
 
 /// Disk layers only (no remote, no env override).
+/// Prefer `xai_grok_shell::util::config::load_effective_config` when remote campaigns or `GROK_CAMPAIGNS_OVERRIDE` must be honored.
+/// The name mirrors [`ConfigLayers::effective_config_disk_only`] so the divergence from the remote-aware loader is explicit at every call site.
 pub fn load_effective_config_disk_only() -> std::io::Result<toml::Value> {
     Ok(ConfigLayers::load()?.effective_config_disk_only())
 }
 
-/// On-disk campaign dismiss state. This is the source of truth for the file's name, location, and JSON shape.
+/// On-disk campaign dismiss state.
+/// This is the single source of truth for the file's name, location, and JSON shape.
+/// The shell's writer reuses these so the read and write sides can't drift.
 pub const CAMPAIGNS_STATE_FILE: &str = "campaigns_state.json";
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -319,7 +330,8 @@ mod tests {
         let prior = std::env::var_os("GROK_CAMPAIGNS");
         let empty = toml::Value::Table(Default::default());
 
-        // SAFETY: `lock_grok_campaigns_env` serializes this against every test that mutates or reads GROK_CAMPAIGNS.
+        // SAFETY: `lock_grok_campaigns_env` serializes this against every test that
+        // mutates or reads GROK_CAMPAIGNS.
         unsafe { std::env::set_var("GROK_CAMPAIGNS", "0") };
         assert!(campaigns_application_disabled(&empty));
 

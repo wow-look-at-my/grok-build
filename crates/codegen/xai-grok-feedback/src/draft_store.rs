@@ -77,7 +77,8 @@ const SCHEMA_VERSION: u32 = 1;
 const MAX_DOCUMENT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_DRAFTS: usize = 1_000;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
-// Every holder does one read, write+fsync, unlock (ms-scale).
+// Every holder does one read, write+fsync, unlock (ms-scale), so a retry bounded at <= 40 ms total
+// (5 attempts, 4 sleeps) clears the common race; past that the caller still sees `Busy`.
 const LOCK_RETRY_ATTEMPTS: usize = 5;
 const LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
 #[cfg(windows)]
@@ -733,6 +734,8 @@ fn validate_document(document: &FeedbackDraftDocument) -> Result<()> {
 }
 
 /// Validates a draft body without persisting it.
+/// Returns a title, details, or area validation error when the input violates the same limits
+/// enforced by [`FeedbackDraftStore::append`].
 pub(crate) fn validate_feedback_draft_input(input: &FeedbackDraftInput) -> Result<()> {
     validate_feedback_draft_send(input, false)
 }

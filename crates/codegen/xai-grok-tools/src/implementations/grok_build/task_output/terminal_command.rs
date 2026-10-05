@@ -6,7 +6,9 @@ use crate::types::resources::{Params, ResourceType};
 use crate::types::tool::{ToolKind, ToolNamespace};
 use xai_tool_types::{TaskOutputOutput, TaskOutputToolInput};
 
-/// Session config for `get_terminal_command_output`.
+/// Session config for `get_terminal_command_output`. `output_byte_limit` is the
+/// builtin dump cap, the same role as bash `BashParams::output_byte_limit`.
+/// `None` keeps the shared `get_command_or_subagent_output` truncation lookup.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TerminalCommandOutputParams {
     #[serde(default)]

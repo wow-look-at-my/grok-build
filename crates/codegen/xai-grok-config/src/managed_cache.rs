@@ -1,10 +1,15 @@
 //! The managed-config cloud-cache subsystem: the sync marker, serving identity, and staleness (timer and hard).
+//! It also holds the fail-closed enforcement gate that combines the signed-cache verdict with the best-effort marker.
+//!
+//! The marker is **unsigned** and user-writable: a refresh hint, not a tamper control.
+//! Real tamper resistance is [`crate::signed_policy`] plus the OS-protected layers (root-owned `/etc/grok`, MDM).
 
 use std::path::Path;
 
 use crate::paths::user_grok_home;
 
 /// Sync marker; staleness keys on this, not mtimes.
+/// Public so removal code can name it apart from the policy artifacts (removed last).
 pub const MANAGED_CONFIG_CACHE_FILE: &str = "managed_config_cache.json";
 
 /// The on-disk marker: unsigned, detects only deletion or identity change, not in-place edits (see the module doc).
@@ -23,6 +28,8 @@ struct ManagedConfigCache {
     #[serde(default)]
     fail_closed: bool,
     /// Local-clock high-water mark.
+    /// At-rest signed checks use `max(now, floor)` so a rolled-back clock cannot un-expire a policy.
+    /// As forgeable as the rest of the marker: defeats a passive clock change, not a file edit.
     #[serde(default)]
     rollback_floor: u64,
     /// Keys this binary does not model, such as a retired `key_fingerprint`.
@@ -37,14 +44,15 @@ pub enum ServingIdentity {
     None,
 }
 
-/// Whether to refetch for `identity`: no marker, past the timer, different
-/// identity, or a served artifact now missing.
+/// Whether to refetch for `identity`: no marker, past the timer, different identity, or a served artifact now missing.
+/// Best-effort: callers continue without managed config on failure.
 pub fn is_managed_config_stale_for(identity: &ServingIdentity) -> bool {
     managed_config_stale_at(user_grok_home().as_deref(), identity)
 }
 
-/// Fields a successful sync records. A struct (destructured without `..`) so
-/// a new field is a compile error at every writer.
+/// Fields a successful sync records.
+/// A struct (destructured without `..`) so a new field is a compile error at every writer.
+/// Three adjacent positional bools would silently transpose.
 pub struct SyncMarker<'a> {
     pub principal: Option<&'a str>,
     pub had_managed_config: bool,
@@ -79,7 +87,9 @@ pub fn mark_managed_config_synced_at(home: &Path, marker: SyncMarker<'_>) {
         had_managed_config,
         had_requirements,
         fail_closed,
-        // Reset (not max): reconnect must clear an inflated floor Residual risk.
+        // Reset (not max): reconnect must clear an inflated floor
+        // Residual risk: fetch verify is unclamped and managed_config_url is user-writable
+        // A rolled-back clock plus a still-valid replayed envelope can reinstate a superseded policy and reset the floor
         rollback_floor: synced_at.unwrap_or(0),
         extra: Default::default(),
     };
@@ -89,8 +99,8 @@ pub fn mark_managed_config_synced_at(home: &Path, marker: SyncMarker<'_>) {
     }
 }
 
-/// Raise an existing marker's floor to the wall clock; in a dark build this
-/// is a no-op.
+/// Raise an existing marker's floor to the wall clock; in a dark build this is a no-op.
+/// Caller holds the managed-config lock so this serializes with the fetch-path floor reset.
 pub fn bump_rollback_floor(home: &Path) {
     bump_rollback_floor_with_now(home, crate::signed_policy::now_unix());
 }
@@ -190,8 +200,8 @@ fn known(value: Option<&str>) -> Option<&str> {
     value.filter(|v| !v.trim().is_empty())
 }
 
-/// [`known`] then trim: the normalization for storing or deriving an identity
-/// (whitespace is not identity).
+/// [`known`] then trim: the one normalization for storing or deriving an identity (whitespace is not identity).
+/// Shared with the shell's identity derivation.
 pub fn normalize_identity(value: Option<&str>) -> Option<String> {
     known(value).map(|v| v.trim().to_owned())
 }
@@ -251,8 +261,9 @@ fn serving_team_id(identity: &ServingIdentity) -> Option<&str> {
     }
 }
 
-/// Tamper signals for the current identity, split ways:
-/// [`Self::needs_refetch`] (staleness) fires on ANY signal.
+/// Tamper signals for the current identity, split ways: [`Self::needs_refetch`] (staleness) fires on ANY signal.
+/// [`Self::compromised_for_gate`] (gate) fires only on artifact-missing.
+/// A pure identity mismatch never compromises the gate: a foreign marker is rebound by the online refetch.
 #[derive(Clone, Copy)]
 struct TamperSignals {
     artifact_missing: bool,
@@ -276,8 +287,8 @@ impl TamperSignals {
     }
 }
 
-/// Cache unusable now: different identity, a served artifact missing, or no
-/// marker.
+/// Cache unusable now: different identity, a served artifact missing, or no marker.
+/// The session-start refresh blocks (bounded) on this but not timer-staleness, so a present same-identity cache never delays startup offline.
 pub fn is_managed_config_hard_stale_for(identity: &ServingIdentity) -> bool {
     match user_grok_home() {
         Some(home) => is_managed_config_hard_stale_for_at(&home, identity),
@@ -285,14 +296,14 @@ pub fn is_managed_config_hard_stale_for(identity: &ServingIdentity) -> bool {
     }
 }
 
-/// Whether the cache can't be used for `identity`: a served artifact missing
-/// or a different identity.
+/// Whether the cache can't be used for `identity`: a served artifact missing or a different identity.
+/// Shared by the staleness and session-start paths so the siblings can't drift.
 fn cache_unusable_for(cache: &ManagedConfigCache, home: &Path, identity: &ServingIdentity) -> bool {
     TamperSignals::evaluate(cache, home, identity).needs_refetch()
 }
 
-/// The principal the SIGNED cache must be bound to: the live team id, else
-/// the marker principal.
+/// The principal the SIGNED cache must be bound to: the live team id, else the marker principal.
+/// One derivation shared by the gate and both staleness checks, so a foreign-but-authentic cache reads foreign on every sibling path.
 fn expected_signed_principal<'a>(
     cache: Option<&'a ManagedConfigCache>,
     identity: &'a ServingIdentity,
@@ -301,6 +312,7 @@ fn expected_signed_principal<'a>(
 }
 
 /// At-rest signed checks: `max(wall clock, floor)`.
+/// Fetch-time verify stays unclamped so a fresh envelope can reset an inflated floor (see shell `verify_signed_envelope`).
 fn effective_now(cache: Option<&ManagedConfigCache>) -> u64 {
     crate::signed_policy::now_unix().max(cache.map_or(0, |c| c.rollback_floor))
 }
@@ -335,8 +347,9 @@ fn is_managed_config_hard_stale_for_at(home: &Path, identity: &ServingIdentity) 
         || signed_cache_needs_refetch(home, cache.as_ref(), identity)
 }
 
-/// No-network fail-closed predicate: true only on a `fail_closed` policy with
-/// tamper for the current identity.
+/// No-network fail-closed predicate: true only on a `fail_closed` policy with tamper for the current identity.
+/// With a key compiled in, the SIGNED verdict leads: the opt-in is non-forgeable and catches edits the marker can't.
+/// A fail-closed marker then REQUIRES an authentic sidecar.
 pub fn managed_policy_compromised_for(identity: &ServingIdentity) -> bool {
     user_grok_home().is_some_and(|home| managed_policy_compromised_for_at(&home, identity))
 }
@@ -436,14 +449,16 @@ fn managed_config_stale_at(home: Option<&Path>, identity: &ServingIdentity) -> b
     if cache_unusable_for(&cache, home, identity) {
         return true;
     }
-    // Same signed check as the session-start hard-stale sibling The
-    // background tick must also refetch a tampered or foreign-signed cache.
+    // Same signed check as the session-start hard-stale sibling
+    // The background tick must also refetch a tampered or foreign-signed cache, not leave it until startup
     if signed_cache_needs_refetch(home, Some(&cache), identity) {
         return true;
     }
     match cache.synced_at {
         Some(secs) => {
-            // Age is measured against `effective_now` (max of wall clock and floor) Repeated small rollbacks or a halted clock cannot keep age.
+            // Age is measured against `effective_now` (max of wall clock and floor)
+            // Repeated small rollbacks or a halted clock cannot keep age under the threshold forever
+            // u64 seconds avoid SystemTime overflow panics for out-of-range timestamps.
             let now = effective_now(Some(&cache));
             let age = now.saturating_sub(secs);
             let skew = secs.saturating_sub(now);

@@ -1,6 +1,8 @@
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 3 hits predate the gate
 
 //! Benchmark for comparing git CLI vs git2 file listing.
+//!
+//! Usage: cargo run --bin bench_file_listing --release -- [path] [cli|git2|git2-index|both]
 
 #![deny(clippy::indexing_slicing)]
 
@@ -47,7 +49,7 @@ fn main() {
             println!("git2 (index only): {} files in {:?}", files.len(), elapsed);
         }
         _ => {
-            // Run all methods multiple times for comparison
+            // Run all three methods multiple times for comparison
             println!("Benchmarking file listing for: {}", root_path.display());
             println!();
 

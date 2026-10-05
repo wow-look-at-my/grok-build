@@ -1,4 +1,5 @@
 //! One-shot primary-display refresh probe (OnceLock-cached).
+//! Fail-closed: it never panics into callers, does no TTY IO, and never mutates the display mode.
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -177,6 +178,8 @@ unsafe fn macos_main_display_refresh_hz() -> Result<u32, &'static str> {
     }
     let rate = unsafe { CGDisplayModeGetRefreshRate(mode) };
     unsafe { CGDisplayModeRelease(mode) };
+    // 0.0 is documented indeterminate for some LCD/VRR panels, so it maps to a skip, not an error
+    // Future primary-display fallback must be thread-safe; no AppKit/NSScreen here.
     if !rate.is_finite() || rate < 0.0 {
         return Err("error");
     }
@@ -239,6 +242,7 @@ unsafe fn windows_primary_display_refresh_hz() -> Result<u32, &'static str> {
             return Err("error");
         }
         let hz = devmode.dmDisplayFrequency;
+        // 0/1 often mean "default hardware rate", so fail closed
         if hz < 2 {
             return Err("error");
         }

@@ -1,4 +1,7 @@
 //! `x.ai/auth/*` and legacy `x.ai/{get,set}ApiKey` extension handlers.
+//!
+//! These methods let the client read/write the API key via the agent and drive the OAuth login flow.
+//! The agent is the single source of truth for `auth.json`.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -72,8 +75,8 @@ fn handle_cancel(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 }
 
 async fn handle_get_bearer_token(agent: &MvpAgent) -> ExtResult {
-    // Fail closed for session tokens: desktop resume treats non-null as
-    // success.
+    // Fail closed for session tokens: desktop resume treats non-null as success. Never return a hard-expired access token
+    // Still return wire-valid session tokens and static user-supplied keys (process model key, env, or disk api_key) That keeps non-session sessions working when AuthManager has no OIDC entry
     let token = match agent.auth_manager.get_valid_token().await {
         Ok(token) => Some(token),
         Err(_) => agent

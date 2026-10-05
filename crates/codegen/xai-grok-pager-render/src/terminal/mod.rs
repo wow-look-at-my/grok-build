@@ -1,4 +1,5 @@
 //! Detects terminal emulator, multiplexer, and Byobu from environment variables.
+//! Pure env-map helpers (`detect_*_from_env`) enable full matrix testing.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -80,9 +81,12 @@ pub enum TerminalName {
     Alacritty,
     Rio,
     /// foot terminal emulator (Wayland-native, Linux-only), detected via TERM.
+    /// It has full native Kitty keyboard protocol support.
     #[strum(to_string = "foot")]
     Foot,
     /// JetBrains IDE integrated terminal (JediTerm: IntelliJ, PhpStorm, etc.).
+    /// No runtime capability probing is possible (no TERM_FEATURES, no XTVERSION, DA1 is bare VT102).
+    /// The Classic and Reworked 2025 engines are indistinguishable, and all capabilities are conservative/Unknown.
     #[strum(to_string = "JetBrains")]
     JetBrains,
     /// Grok Desktop (Electron app).
@@ -92,7 +96,9 @@ pub enum TerminalName {
     #[strum(to_string = "VTE")]
     Vte,
     /// Terminator terminal emulator (Python/GTK, VTE-based).
+    /// It is detected via the `TERMINATOR_UUID` env var it exports on every child process, or `TERM_PROGRAM=terminator`.
     Terminator,
+    /// Windows Terminal (wt, the default terminal on Windows 11+).
     #[strum(to_string = "Windows Terminal")]
     WindowsTerminal,
     /// Otty (otty.sh). Wraps macOS IME commits in bracketed paste.
@@ -115,8 +121,8 @@ impl TerminalName {
         )
     }
 
-    /// Terminals that embed xterm.js (Zed's terminal is alacritty-based and
-    /// is NOT one).
+    /// Terminals that embed xterm.js (Zed's terminal is alacritty-based and is NOT one).
+    /// This is the boundary for xterm.js-specific quirks, e.g. the wedged button tracker that eats mouse releases.
     pub fn is_xtermjs_embed(self) -> bool {
         matches!(
             self,
@@ -125,11 +131,12 @@ impl TerminalName {
     }
 
     /// Brands whose capabilities are not positively classified.
+    /// They share [`Self::Unknown`]'s fail-closed posture (no KKP probe, conservative hyperlinks/notifications/focus, etc.).
     pub fn is_capability_unclassified(self) -> bool {
         matches!(self, Self::Unknown | Self::Otty)
     }
 
-    /// Host applies OSC multiple writes to the system pasteboard (fail closed).
+    /// Host applies OSC 52 writes to the system pasteboard (fail closed).
     pub fn supports_osc52_clipboard(self) -> bool {
         matches!(
             self,
@@ -205,8 +212,8 @@ pub enum MultiplexerKind {
 }
 
 impl MultiplexerKind {
-    /// Whether this multiplexer intercepts CSI queries (e.g. XTVERSION)
-    /// instead of passing them through to the outer terminal.
+    /// Whether this multiplexer intercepts CSI queries (e.g. XTVERSION) instead of passing them through to the outer terminal.
+    /// See [`Self::Herdr`] for the version signal herdr gives up by being here.
     pub fn intercepts_csi_queries(self) -> bool {
         matches!(self, Self::Tmux | Self::Screen | Self::Zellij | Self::Herdr)
     }
@@ -226,8 +233,8 @@ pub enum ByobuBackend {
     Screen,
 }
 
-/// Fields are gathered at startup from environment variables; no live
-/// subprocess calls are made here.
+/// Fields are gathered at startup from environment variables; no live subprocess calls are made here.
+/// Live tmux-option queries remain in [`crate::diagnostics`].
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TmuxClientMeta {
     /// The raw `TMUX` variable value (e.g. `/tmp/tmux-501/default,12345,0`).
@@ -240,8 +247,11 @@ pub struct TmuxClientMeta {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TerminalContext {
     /// The effective terminal emulator brand for capability and display decisions.
+    /// On native Windows an `Unknown` env detection is resolved to [`TerminalName::WindowsTerminal`] (see `refine_unknown_brand_for_host`).
     pub brand: TerminalName,
-    /// The raw brand from environment detection, before the native-Windows `Unknown -> WindowsTerminal` fallback applied.
+    /// The raw brand from environment detection, before the native-Windows `Unknown -> WindowsTerminal` fallback applied to `brand`.
+    /// Consult this (not `brand`) for conservative, default-deny decisions that must not trust the assumed brand.
+    /// Examples: the legacy-Windows glyph fallback and the unidentified-terminal `Shift+Enter` gate.
     pub env_brand: TerminalName,
     /// The detected multiplexer wrapping the session.
     pub multiplexer: MultiplexerKind,
@@ -258,15 +268,22 @@ pub struct TerminalContext {
     /// The raw `TERM` environment variable (e.g. `xterm-256color`, `screen`).
     pub term_var: Option<String>,
     /// The tmux server version (e.g. `"tmux 3.4"`), populated only when `multiplexer == Tmux`.
+    /// It is detected via a `tmux -V` subprocess at startup.
     pub tmux_version: Option<String>,
+    /// The VTE version (e.g. `"7402"` for VTE 0.74.2).
     /// `None` when not running inside a VTE terminal.
     pub vte_version: Option<String>,
     /// Value of tmux's `extended-keys` global option (`"on"`, `"off"`, `"always"`); populated only when `multiplexer == Tmux`.
     pub tmux_extended_keys: Option<String>,
-    /// The `TERM_PROGRAM_VERSION` environment variable, falling back to `LC_TERMINAL_VERSION`.
+    /// The `TERM_PROGRAM_VERSION` environment variable, falling back to `LC_TERMINAL_VERSION` (e.g. `"3.5.6"` for iTerm2, `"1.1.3"` for Ghostty).
+    /// Raw and **ungated**: inside tmux this is tmux's own version.
+    /// For a brand-corroborated value use [`Self::env_term_version`].
     pub term_program_version: Option<String>,
     /// The `TERM_FEATURES` capability string (iTerm2 feature reporting, <https://iterm2.com/feature-reporting/>).
+    /// It is not an `LC_*` variable, so it never crosses SSH.
     pub term_features: Option<String>,
+    /// The brand-corroborated counterpart to `term_program_version` (see [`term_version`]).
+    /// It is resolved once in [`build_terminal_context_from_env`], so it does not re-derive if `brand` or `vte_version` change afterwards.
     pub env_term_version: Option<TermVersion>,
 }
 
@@ -281,6 +298,7 @@ impl TerminalContext {
         keyboard_capabilities(self.brand)
     }
 
+    /// Per-terminal hyperlink (OSC 8) capabilities for this brand.
     pub fn hyperlink_capabilities(&self) -> HyperlinkCapabilities {
         hyperlink_capabilities(self.brand)
     }
@@ -290,8 +308,9 @@ impl TerminalContext {
         self.byobu.is_some()
     }
 
-    /// Whether an outer layer (embedded-editor :terminal or multiplexer) can
-    /// repaint our pane out of band, stranding rows until a full clear.
+    /// Whether an outer layer (embedded-editor :terminal or multiplexer) can repaint our pane out of band, stranding rows until a full clear.
+    /// A heal keyed off this only fires when a FocusGained actually reaches grok.
+    /// That needs focus reporting enabled upstream (e.g. tmux `focus-events on`, off by default).
     pub fn repaints_pane_out_of_band(&self) -> bool {
         self.embedded_editor.is_some() || self.multiplexer != MultiplexerKind::Undetected
     }
@@ -358,8 +377,8 @@ impl TerminalContext {
         if let Some(reason) = self.kitty_multiplexer_skip_reason() {
             return Some(reason);
         }
-        // No positive evidence of KKP support, so skip: xterm.js mis-encodes
-        // shifted keys (https://github.com/xtermjs/xterm.js/issues/5823).
+        // No positive evidence of KKP support, so skip: xterm.js mis-encodes shifted keys (https://github.com/xtermjs/xterm.js/issues/5823)
+        // Probing an unresponsive terminal blocks startup.
         if self.brand.is_capability_unclassified()
             && self.multiplexer == MultiplexerKind::Undetected
         {
@@ -397,8 +416,7 @@ impl TerminalContext {
         None
     }
 
-    /// JediTerm on Windows emits VT mouse bytes crossterm does not decode, so
-    /// they land as key presses and corrupt the prompt.
+    /// JediTerm on Windows emits VT mouse bytes crossterm does not decode, so they land as key presses and corrupt the prompt. Windows-only; those sessions default to minimal mode.
     pub fn mouse_reporting_leaks_as_raw_text(&self) -> bool {
         mouse_reporting_leaks(self.brand, HostOs::current())
     }
@@ -440,8 +458,9 @@ impl TerminalContext {
         false
     }
 
-    /// Broader than [`Self::shift_enter_unavailable`]: SSH and multiplexers
-    /// that drop extended Enter (old tmux, `extended-keys off`, GNU screen).
+    /// Broader than [`Self::shift_enter_unavailable`]: SSH and multiplexers that drop
+    /// extended Enter (old tmux, `extended-keys off`, GNU screen) collapse Shift+Enter
+    /// even when the brand-first [`Self::kitty_skip_reason`] reports a terminal reason.
     pub fn prefer_alt_enter_newline(&self) -> bool {
         self.shift_enter_unavailable()
             || self.is_ssh
@@ -453,6 +472,7 @@ impl TerminalContext {
         self.kitty_skip_reason().is_some()
     }
 
+    /// Returns the reason to skip hyperlink (OSC 8) emission, or `None` if the environment is compatible.
     ///
     /// Terminal-emulator reasons take precedence over multiplexer reasons so the user is pointed at the deeper cause.
     pub fn hyperlink_skip_reason(&self) -> Option<&'static str> {
@@ -464,6 +484,9 @@ impl TerminalContext {
         if caps.osc8 == Osc8Support::Unsupported {
             return Some("unsupported_terminal");
         }
+        // VTE < 0.50.4 (version int < 5004) does not handle OSC 8 cleanly.
+        // This check runs before the multiplexer check
+        // That way a user on old VTE inside old tmux is pointed at the VTE upgrade rather than chasing tmux config
         if let Some(ref vte_ver) = self.vte_version
             && let Ok(ver_int) = vte_ver.parse::<u32>()
             && ver_int < 5004
@@ -509,6 +532,8 @@ impl TerminalContext {
     }
 
     /// The best available terminal version and the source that reported it.
+    ///
+    /// Not pure: the DA2 arm reads process-global probe state, so env-precedence tests hold only while no reply has been recorded in the process.
     pub fn term_version(&self) -> (String, TermVersionSource) {
         term_version::best_term_version(da2::detected(), self.env_term_version.as_ref())
     }
@@ -585,6 +610,8 @@ pub fn terminal_context() -> &'static TerminalContext {
 }
 
 /// Detect terminal environment facts without any live tmux subprocesses.
+///
+/// Standalone diagnostics use this so an unhealthy tmux server cannot block before the diagnostic runner can report unavailable evidence.
 pub fn standalone_terminal_context() -> TerminalContext {
     standalone_terminal_context_from_env(&collect_process_env(), HostOs::current())
 }
@@ -717,8 +744,8 @@ pub fn detect_terminal_brand_from_env(env: &HashMap<String, String>) -> Terminal
         return TerminalName::Foot;
     }
 
-    // Terminator (Python/GTK, VTE-based) exports TERMINATOR_UUID on every
-    // child process Check before the generic VTE_VERSION fallback.
+    // Terminator (Python/GTK, VTE-based) exports TERMINATOR_UUID on every child process
+    // Check before the generic VTE_VERSION fallback so it is identified specifically rather than as a generic VTE terminal (it sets both)
     if env_get(env, "TERMINATOR_UUID").is_some() {
         return TerminalName::Terminator;
     }
@@ -746,6 +773,7 @@ fn refine_unknown_brand_for_host(brand: TerminalName, host: HostOs) -> TerminalN
 }
 
 /// The core of [`TerminalContext::mouse_reporting_leaks_as_raw_text`].
+/// It is split out so tests can drive the brand/host matrix without the real host.
 fn mouse_reporting_leaks(brand: TerminalName, host: HostOs) -> bool {
     brand == TerminalName::JetBrains && host == HostOs::Windows
 }
@@ -800,7 +828,7 @@ pub fn detect_multiplexer_from_env(env: &HashMap<String, String>) -> Multiplexer
         }
     }
 
-    // Nested real muxes win.
+    // Nested real muxes win. A herdr daemon started from tmux freezes TMUX into every pane; classifying that as herdr wraps OSC 52 in DCS that herdr prints as text.
     if env_get(env, "TMUX").is_some() {
         return MultiplexerKind::Tmux;
     }
@@ -810,8 +838,8 @@ pub fn detect_multiplexer_from_env(env: &HashMap<String, String>) -> Multiplexer
     if env_get(env, "STY").is_some() {
         return MultiplexerKind::Screen;
     }
-    // herdr sets HERDR_ENV=1 in every pane, overrides TERM to xterm-256color
-    // and never sets TERM_PROGRAM This marker is its only documented.
+    // herdr sets HERDR_ENV=1 in every pane, overrides TERM to xterm-256color and never sets TERM_PROGRAM
+    // This marker is its only documented, stable signal
     if env_get(env, "HERDR_ENV").is_some() {
         return MultiplexerKind::Herdr;
     }

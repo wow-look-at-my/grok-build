@@ -1,12 +1,23 @@
 //! Conversation-to-branch binding for git-backed app workspaces.
+//!
+//! Pure data and resolution logic shared by the control plane.
+//! The two product invariants this encodes:
+//!
+//! - **One branch per conversation.** Every conversation forks its own `conv/<conversation_id>` branch off a chosen base.
+//!   It never writes the base directly; [`conv_branch_name`] is the single source of that naming.
+//! - **Repo(s) on the project, chosen per conversation.** A project configures remotes; a conversation binds a *set* of `(remote, branch)`.
+//!   [`resolve_repo_sources`] turns `(remotes, bindings)` into the repo set the sandbox provisioner consumes.
+//!   The binding, not free-form client input, is the source of the repos.
+//!
+//! This crate is pure data (no async, no I/O); the git mutations happen in the workspace server via WorkspaceOps and the sandbox provisioner.
 
 use serde::{Deserialize, Serialize};
 
 /// Branch-name prefix for the per-conversation fork. `conv/<conversation_id>`.
 pub const CONV_BRANCH_PREFIX: &str = "conv/";
 
-/// The single-writer conversation branch for `conversation_id`
-/// (`conv/<conversation_id>`).
+/// The single-writer conversation branch for `conversation_id` (`conv/<conversation_id>`).
+/// The mapping is 1:1 with the conversation (or its v5 session id, the same identity), so there are no free-form agent branches.
 pub fn conv_branch_name(conversation_id: &str) -> String {
     format!("{CONV_BRANCH_PREFIX}{conversation_id}")
 }
@@ -40,18 +51,20 @@ pub enum RemoteHost {
 pub const DEFAULT_WORKSPACE_ROOT: &str = "/workspace";
 
 /// Relative product slug for a remote (`apps/<name>`).
+/// Callers that need a mount path the provisioner accepts must join this under the workspace root via [`absolute_mount_path`].
 pub fn mount_slug(remote_name: &str) -> String {
     format!("apps/{remote_name}")
 }
 
-/// Absolute mount path the provisioner accepts (`validate_mount_path`
-/// requires a leading `/`).
+/// Absolute mount path the provisioner accepts (`validate_mount_path` requires a leading `/`).
+/// Single-repo stays at the workspace root (`None`); multi-repo uses `{workspace_root}/apps/<name>`.
 pub fn absolute_mount_path(workspace_root: &str, remote_name: &str) -> String {
     let root = workspace_root.trim_end_matches('/');
     format!("{root}/{}", mount_slug(remote_name))
 }
 
 /// A remote configured on a project.
+/// `name` is the stable per-project slug the binding references (and the `apps/<name>/` mount slug for multi-repo).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectRemote {
     pub name: String,
@@ -80,12 +93,14 @@ pub struct RepoBinding {
     pub remote_name: String,
     pub base: BindingBase,
     /// Explicit merge-back target branch.
+    /// `None` defaults to the base branch (for a `Branch` base) or the remote default branch.
+    /// A conversation forked off `feature/x` merges back into `feature/x`, not `main`.
     #[serde(default)]
     pub merge_target: Option<String>,
 }
 
-/// A resolved repo source: plan input for start/provision (bindings, then
-/// env/picker).
+/// A resolved repo source: plan input for start/provision (bindings, then env/picker).
+/// Not a proto `GitSource` (that type has no mount) and not a sandbox `RepoSpec` until a caller joins [`absolute_mount_path`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedRepoSource {
     /// Per-project remote slug (stable identity for logs/mounts).
@@ -94,21 +109,24 @@ pub struct ResolvedRepoSource {
     pub url: String,
     pub host: RemoteHost,
     /// The conversation branch to check out and commit onto (`conv/<id>`).
+    /// The provisioner forks it off `base_ref` if it does not yet exist on the remote, and never writes `base_ref` directly.
     pub session_branch: String,
     /// The ref to fork `session_branch` from: the remote default branch for a `Main` base, else the bound branch name / commit SHA.
     pub base_ref: String,
     /// The branch publish merges `session_branch` back into (never a commit).
     pub merge_target: String,
     /// Mount path the provisioner accepts; callers must pass this through.
+    /// `None` means the workspace root (single repo); multi-repo uses `Some("/workspace/apps/<name>")`, absolute as `validate_mount_path` requires.
     pub mount_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BindingResolveError {
     /// A binding referenced a remote name not configured on the project.
+    /// The binding is authoritative (not free-form client input), so an unknown remote is a hard error rather than a silent skip.
     #[error("binding references unknown remote '{0}'")]
     UnknownRemote(String),
-    /// Bindings referenced the same remote (a binding is a *set*).
+    /// Two bindings referenced the same remote (a binding is a *set*).
     #[error("duplicate binding for remote '{0}'")]
     DuplicateRemote(String),
 }
@@ -340,7 +358,7 @@ mod tests {
         // The `lib` base resolves to *its* default branch, not app's.
         assert_eq!("trunk", lib.base_ref);
         assert_eq!("trunk", lib.merge_target);
-        // Both forks share the conversation branch.
+        // Both forks share the one conversation branch.
         assert!(sources.iter().all(|s| s.session_branch == "conv/c9"));
     }
 

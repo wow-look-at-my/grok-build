@@ -1,4 +1,9 @@
-//! Dragging a terminal edge sends a stream of `Event::Resize`.
+//! Dragging a terminal edge sends a stream of `Event::Resize`, and the reported symptom is that the drag gets laggier the longer a session runs.
+//!
+//! Regressions these guard against, each of which was measured on a real session and removed:
+//! - re-deriving an entry's source text per width instead of reusing its cached line-width profile (makes the estimate pass O(conversation bytes)),
+//! - building or cloning an `AppearanceConfig` per entry,
+//! - running `warm_measure_pages_above` on every resize instead of once the width settles.
 
 use std::time::Duration;
 
@@ -10,6 +15,7 @@ use xai_grok_pager::scrollback::{RenderBlock, ScrollbackState};
 const VIEWPORT_WIDTH: u16 = 120;
 const VIEWPORT_HEIGHT: u16 = 50;
 
+/// ~3,200 entries / ~5 MB of text, the scale of a multi-hour session.
 const TURNS: usize = 400;
 
 fn agent_markdown(i: usize) -> String {

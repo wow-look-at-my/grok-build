@@ -1275,7 +1275,7 @@
         with_replay_disk_home(|home| {
             let child_sid = "child-open-resume-finish";
 
-            // A resumed child spawns live.
+            // A resumed child spawns live; its inherited transcript has not flushed to disk yet
             let mut app = make_app_with_agent("sess-parent");
             let mut spawned = test_subagent_spawned("sess-parent", child_sid);
             let XaiSessionUpdate::SubagentSpawned { resumed_from, .. } = &mut spawned else {
@@ -1769,7 +1769,8 @@
 
         #[test]
         fn a_nonemitting_rebuild_of_an_evicted_view_retries_until_disk_lands() {
-            // An evicted view holds nothing to restore.
+            // An evicted view holds nothing to restore, so a non-emitting read stays NeedsReplay and retries once real content lands
+            // A read error applies no footer; an Empty read (flush not landed yet) still stamps the finished footer on the bare view
             enum Outcome {
                 ReadError,
                 Empty,
@@ -1858,8 +1859,8 @@
 
         #[test]
         fn a_nonemitting_rebuild_restores_the_populated_view() {
-            // Content the replay never read back is restored when the rebuild
-            // reads nothing A read error stays retriable.
+            // Content the replay never read back is restored when the rebuild reads nothing
+            // A read error stays retriable; an Empty read pins the only copy MemoryOnly
             enum Outcome {
                 ReadError,
                 Empty,
@@ -1915,7 +1916,7 @@
 
         #[test]
         fn finish_keeps_the_only_copy_when_disk_cannot_rebuild_it() {
-            // Ways disk cannot rebuild: nothing persisted, or a non-emitting file.
+            // Two ways disk cannot rebuild: nothing persisted, or a non-emitting file.
             for (child_sid, updates) in [
                 ("child-no-disk-copy", None),
                 (
@@ -2304,7 +2305,8 @@
 
     #[test]
     fn a_notification_reaches_its_target_agent_even_when_another_is_active() {
-        // AutoCompactCompleted on the xAI ext path resets the context bar numerator via refresh_context_used That side effect must run.
+        // AutoCompactCompleted on the xAI ext path resets the context bar numerator via refresh_context_used
+        // That side effect must run on the matched agent regardless of which view is currently active
         let mut app = make_app_with_agent("sess-A");
         insert_agent(&mut app, AgentId(1), Some("sess-B"));
         // Seed A with a stale context-used reading so we can prove the notification reset it

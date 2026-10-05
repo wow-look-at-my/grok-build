@@ -1,6 +1,8 @@
 //! Helper schema types for JSON Schema generation.
 use serde::Deserialize;
-/// Schema helper for integers - produces clean integer schema without extra fields.
+/// Schema helper for integers - produces clean integer schema without extra fields. By default
+/// schemars adds "format": "uint" and "minimum": 0.0 which we don't want. Use with `#[schemars(with
+/// = "GrokIntegerSchema")]` on `Option<usize>` fields.
 pub struct GrokIntegerSchema;
 impl schemars::JsonSchema for GrokIntegerSchema {
     fn schema_name() -> std::borrow::Cow<'static, str> {
@@ -10,6 +12,8 @@ impl schemars::JsonSchema for GrokIntegerSchema {
         schemars::json_schema!({ "type": "integer" })
     }
 }
+/// Largest whole value exactly representable as `f64` (2^53). JSON floats above this
+/// cannot be converted to integers without rounding ambiguity.
 const F64_EXACT_INTEGER_LIMIT: f64 = 9_007_199_254_740_992.0;
 /// Parse a string as `f64`, producing a uniform error message on failure.
 fn parse_string_to_f64(s: &str) -> Result<f64, String> {
@@ -172,7 +176,8 @@ where
 }
 /// Grep's number schemas and `u32` deserializer moved to `xai-tool-types` with the grep types
 pub use xai_tool_types::{LenientNumberSchema, LenientNumberSchemaMin0, deserialize_lenient_u32};
-/// Lenient boolean deserializers (shared via `xai-tool-types`).
+/// Lenient boolean deserializers (shared via `xai-tool-types`), re-exported so
+/// fields reference them under the same `crate::types::schema::` path as above.
 pub use xai_tool_types::{deserialize_lenient_bool, deserialize_lenient_option_bool};
 #[cfg(test)]
 mod tests {

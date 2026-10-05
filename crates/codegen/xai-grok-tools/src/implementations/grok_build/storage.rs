@@ -1,4 +1,9 @@
 //! Session-scoped file storage with crash-safe atomic writes and budgets.
+//!
+//! Each [`SessionFileWriter`] manages a single subdirectory and file
+//! extension, producing files named `1.jpg`, `2.mp4`, `3.pdf`, etc.
+//! The counter is lazily initialised from existing files on disk so
+//! resumed sessions don't overwrite previous output.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -6,9 +11,9 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use anyhow::Context;
 
-const IMAGE_MAX_BYTES: u64 = 1024 * 1024 * 1024;
-const VIDEO_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-const DEFAULT_MAX_BYTES: u64 = 1024 * 1024 * 1024;
+const IMAGE_MAX_BYTES: u64 = 1024 * 1024 * 1024; // 1 GB
+const VIDEO_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GB
+const DEFAULT_MAX_BYTES: u64 = 1024 * 1024 * 1024; // 1 GB
 
 fn budget_for(dir_name: &str) -> u64 {
     match dir_name {
@@ -18,7 +23,9 @@ fn budget_for(dir_name: &str) -> u64 {
     }
 }
 
-/// Persists numbered files to `<session_folder>/<dir_name>/<N>.<ext>`.
+/// Persists numbered files to `<session_folder>/<dir_name>/<N>.<ext>`. Writes are crash-safe: data
+/// is written to a temp file, fsynced, then atomically renamed into place via
+/// `tempfile::NamedTempFile::persist`.
 #[derive(Clone, Debug)]
 pub(crate) struct SessionFileWriter {
     dir_name: &'static str,
@@ -91,7 +98,8 @@ impl SessionFileWriter {
         let ext = ext_override.unwrap_or(self.ext);
         let path = dir.join(format!("{n}.{ext}"));
 
-        // Atomic write: tempfile -> sync_all -> persist.
+        // Atomic write: tempfile -> sync_all -> persist, all in one
+        // spawn_blocking call to avoid blocking the async executor.
         let dest = path.clone();
         let target_dir = dir;
         let data = bytes.to_vec();

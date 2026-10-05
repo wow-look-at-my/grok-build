@@ -1,4 +1,10 @@
 //! Product E2E: ACP `create_from_worktree_sync` through grove.
+//!
+//! Success cells either start the daemon out of band or rely on
+//! `UnixArm::on_unreachable` to spawn it. `install_env` isolates
+//! so an auto-started daemon cannot share the host grove data dir.
+//! `run_agent_test` isolates `GROK_HOME`. Drop reaps whoever still holds
+//! the unix socket (`lsof`/`fuser`); `ensure_daemon` argv has no sock path.
 
 #![cfg(unix)]
 

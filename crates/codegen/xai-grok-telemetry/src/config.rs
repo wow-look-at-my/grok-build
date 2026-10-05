@@ -1,8 +1,11 @@
-//! These types live here so the data-collector engine can construct a [`TelemetryClient`](crate::client::TelemetryClient).
+//! These types live here so the data-collector engine can construct a [`TelemetryClient`](crate::client::TelemetryClient) without depending on shell.
+//!
+//! Shell still re-exports these types from their original paths so existing call sites (and `Config` derive impls) compile unchanged.
 use serde::{Deserialize, Serialize};
 use xai_grok_env::env_bool;
-/// Telemetry mode: `true`/`false` (legacy bool) or `"session_metrics"`
-/// (string).
+/// Telemetry mode: `true`/`false` (legacy bool) or `"session_metrics"` (string). `Disabled`: nothing sent (enterprise
+/// default); `SessionMetrics`: metadata-only lifecycle events, no content; `Enabled`: full product telemetry (events and
+/// Mixpanel).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TelemetryMode {
     #[default]
@@ -137,7 +140,9 @@ pub struct TelemetryConfig {
     pub otel_logs_exporter: Option<String>,
     /// External OTLP base endpoint (`/v1/logs`, `/v1/metrics` appended for HTTP).
     pub otel_endpoint: Option<String>,
-    /// External OTLP transport: `http/protobuf` | `grpc`.
+    /// External OTLP transport: `http/protobuf` | `grpc`. Read under both
+    /// spellings through [`TelemetryConfig::OTEL_PROTOCOL_KEYS`]; written under
+    /// this one.
     pub otel_protocol: Option<String>,
     pub otel_certificate: Option<String>,
     pub otel_client_certificate: Option<String>,
@@ -170,7 +175,9 @@ pub struct TelemetryConfig {
 }
 
 impl TelemetryConfig {
-    /// The keys [`otel_protocol`](Self::otel_protocol) is read under.
+    /// The keys [`otel_protocol`](Self::otel_protocol) is read under. The
+    /// transport's own name is the canonical one; `otel_transport` is the
+    /// earlier spelling still present in deployed config.
     pub const OTEL_PROTOCOL_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("otel_protocol", &["otel_transport"]);
 }
@@ -460,8 +467,10 @@ mod wire_alias_tests {
         serde_json::from_str(&format!("{{{table}}}"))
     }
 
-    /// A `[telemetry]` table naming the transport under both spellings is one setting stated twice. This table can arrive from a remote campaign patch, which merges into the same value the whole `Config` is read from, so a duplicate-field
-    /// rejection here would fail the entire config parse.
+    /// A `[telemetry]` table naming the transport under both spellings is one
+    /// setting stated twice. This table can arrive from a remote campaign patch,
+    /// which merges into the same value the whole `Config` is read from, so a
+    /// duplicate-field rejection here would fail the entire config parse.
     #[test]
     fn a_table_naming_the_transport_under_both_keys_under_one_value_parses_once() {
         let cfg = parse(r#""otel_protocol":"grpc","otel_transport":"grpc""#)
@@ -478,8 +487,8 @@ mod wire_alias_tests {
         assert_eq!(legacy.otel_protocol.as_deref(), Some("grpc"));
     }
 
-    /// Different transports is a genuine conflict about where OTLP goes, so it
-    /// fails and names the field rather than exporting to one of them.
+    /// Two different transports is a genuine conflict about where OTLP goes, so
+    /// it fails and names the field rather than exporting to one of them.
     #[test]
     fn a_table_whose_transport_spellings_disagree_is_an_error_naming_the_field() {
         let err = parse(r#""otel_protocol":"grpc","otel_transport":"http/protobuf""#)

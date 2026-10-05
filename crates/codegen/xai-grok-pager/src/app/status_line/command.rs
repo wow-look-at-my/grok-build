@@ -80,6 +80,8 @@ impl std::fmt::Display for RunError {
 }
 
 /// Kills the run's process group unless the group is already empty.
+/// A group with a surviving member cannot have its id recycled, so signalling one is safe.
+/// An empty group is disarmed instead, which is the discipline `enroll` asks for to keep a reaped leader's id from being signalled later.
 struct GroupGuard(Option<std::sync::Arc<xai_tty_utils::ProcessGroup>>);
 
 impl GroupGuard {
@@ -140,6 +142,8 @@ async fn pump(
                 None => Ok(0),
             }
         };
+        // First 64 KiB logged, rest dropped: the pipe stays open and empty while the script runs
+        // Closing it at the cap is `SIGPIPE`; leaving it full blocks
         let drain_err = async {
             let Some(mut stderr) = stderr.take() else {
                 return;
@@ -169,7 +173,8 @@ async fn pump(
                 written = &mut write_in, if writing => {
                     writing = false;
                     if let Err(error) = written {
-                        // Logged, not returned: the script may already have printed a row Same rule as a read error.
+                        // Logged, not returned: the script may already have printed a row
+                        // Same rule as a read error and a non-zero exit
                         tracing::debug!(%error, "status_line: sending the payload failed");
                     }
                 }
@@ -177,7 +182,7 @@ async fn pump(
                 read = &mut read_out, if reading => {
                     reading = false;
                     match read {
-                        // The cap ends the run: a script still writing will never exit.
+                        // The cap ends the run: a script still writing will never exit, so there is no status coming to wait for
                         Ok(read) if read as u64 > MAX_COMMAND_OUTPUT_BYTES => break None,
                         Ok(_) => {}
                         Err(error) => {
@@ -234,7 +239,8 @@ async fn run_command(
         None => command.to_string(),
     };
 
-    // This is `tokio::fs` because `Path::is_dir` stats on the runtime thread A deleted directory fails here.
+    // This is `tokio::fs` because `Path::is_dir` stats on the runtime thread
+    // A deleted directory fails here, and so does one whose name is not UTF-8, because the payload carries the lossy form JSON can hold
     let repo_root = ctx.workspace.repo_root.clone().unwrap_or_default();
     let mut local_cwd = None;
     for dir in [ctx.cwd.as_str(), repo_root.as_str()] {
@@ -257,7 +263,8 @@ async fn run_command(
             .env("LINES", lines.to_string())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            // Piped, not inherited, or a script's stderr scribbles over the alternate screen Logged rather than painted.
+            // Piped, not inherited, or a script's stderr scribbles over the alternate screen
+            // Logged rather than painted, so `--debug` is where an author sees it
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         if let Some(cwd) = local_cwd.as_deref() {
@@ -273,7 +280,7 @@ async fn run_command(
     let mut child = match direct.spawn() {
         Ok(child) => child,
         // A shell line rather than a path, or a file `sh` may still read
-        // Every other failure is returned.
+        // Every other failure is returned: a permission error under `sh` reports a bogus `exit 126`
         Err(error) if error.kind() != std::io::ErrorKind::NotFound && !is_shell_script(&error) => {
             return Err(RunError::Spawn(error));
         }
@@ -285,9 +292,8 @@ async fn run_command(
                 c.args(["-c", expanded.as_str()]);
                 c
             };
-            // Which shell to use is `shell_command_argv`'s decision; the env
-            // it sets is table-tested there over every Windows variant What
-            // is left here is the spawn.
+            // Which shell to use is `shell_command_argv`'s decision; the env it sets is table-tested there over every Windows variant
+            // What is left here is the spawn, which no test on this platform reaches
             #[cfg(not(unix))]
             let mut shell = {
                 let inv = xai_grok_config::shell::shell_command_argv(&expanded);
@@ -313,8 +319,8 @@ async fn run_command(
         Ok(pumped) => pumped?,
         Err(_) => return Err(RunError::TimedOut),
     };
-    // An empty group is disarmed One the script left populated is killed by
-    // the guard's drop.
+    // An empty group is disarmed
+    // One the script left populated is killed by the guard's drop, so a row that runs three times a second cannot leak a process tree per run
     if status.is_some() && !guard.holds_survivors() {
         guard.disarm();
     }
@@ -326,6 +332,7 @@ async fn run_command(
         return Err(RunError::Exit(status.code()));
     }
 
+    // Only the first few lines are painted, so a runaway script must not carry 64 KiB of unused lines into the row's state
     let text = String::from_utf8_lossy(&out);
     let kept: Vec<&str> = text
         .trim_end_matches('\n')

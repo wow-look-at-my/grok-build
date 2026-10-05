@@ -1,9 +1,11 @@
 //! Mid-turn interjection handling for `SessionActor`: buffer type, formatting, broadcast, and drain.
+//! Also hosts `inject_synthetic_user_message`, the shared synthetic-user-message injector the permission-panel followup path reuses.
 
 use super::*;
 
-// Buffer, entry type, and formatting live in the shared xai-interjection-core
-// crate so the server-side agent loop can adopt the same behaviour.
+// Buffer, entry type, and formatting live in the shared xai-interjection-core crate so the server-side agent loop can adopt the same behaviour.
+// The shell keeps arrival (ACP ext methods), persistence, and pager echo.
+// Re-exported for `acp_session.rs`, which does `pub(crate) use interjection::*;`.
 #[allow(unused_imports)]
 pub(crate) use xai_interjection_core::{
     INTERRUPT_NOTE, InterjectionBuffer, drain_formatted, format_interjection, frame_user_turn,
@@ -13,6 +15,8 @@ pub(crate) use xai_interjection_core::{
 pub(crate) type PendingInterjection = xai_interjection_core::PendingInterjection<acp::ImageContent>;
 
 /// Prompt-id prefix for interjections that missed their turn and were converted into standalone prompt turns.
+/// The prefix keeps the turn's user echo persist-only.
+/// Every pane already rendered the text from the `x.ai/session/interjection` broadcast, so a live echo would duplicate it.
 pub(crate) const INTERJECT_FALLBACK_PROMPT_PREFIX: &str = "interject-fallback-";
 
 pub(crate) fn is_interject_fallback(prompt_id: &str) -> bool {
@@ -78,7 +82,28 @@ impl SessionActor {
         tracing::info!("Converted stranded interjection into a queued prompt turn");
     }
 
-    /// Move eligible queued follow-ups into the interjection buffer so the running turn picks them up at its next safe point. Without this a follow-up typed mid-turn sits in `pending_inputs` until the whole turn ends, so a message aimed at work in flight arrives after that work is finished. The turn loop calls this immediately before `drain_pending_interjections`, which is immediately before each model request — the earliest point the model can see the text without cancelling anything. Rows listed in [`SessionActor::queued_at_turn_start`] were next in line before this turn existed — each is its own task, not a note about this turn's work — so the turn loop's own harvest (`include_queued_at_turn_start = false`) leaves them to run as their own turns. The explicit "deliver the queue now" gesture passes `true`:. Returns whether anything moved. A harvested row never runs as its own turn: its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the same completion an explicit dequeue produces, and the drain injects its text as a standalone user message.
+    /// Move eligible queued follow-ups into the interjection buffer so the
+    /// running turn picks them up at its next safe point.
+    ///
+    /// Without this a follow-up typed mid-turn sits in `pending_inputs` until
+    /// the whole turn ends, so a message aimed at work in flight arrives after
+    /// that work is finished. The turn loop calls this immediately before
+    /// `drain_pending_interjections`, which is immediately before each model
+    /// request — the earliest point the model can see the text without
+    /// cancelling anything.
+    ///
+    /// Rows listed in [`SessionActor::queued_at_turn_start`] were next in line
+    /// before this turn existed — each is its own task, not a note about this
+    /// turn's work — so the turn loop's own harvest
+    /// (`include_queued_at_turn_start = false`) leaves them to run as their own
+    /// turns. The explicit "deliver the queue now" gesture passes `true`: the
+    /// user asked for everything they can see, and waiting for a row's own turn
+    /// is exactly what they are cutting short.
+    ///
+    /// Returns whether anything moved. A harvested row never runs as its own
+    /// turn: its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the
+    /// same completion an explicit dequeue produces, and the drain injects its
+    /// text as a standalone user message.
     pub(super) async fn harvest_queued_prompts_into_interjections(
         &self,
         include_queued_at_turn_start: bool,
@@ -87,7 +112,8 @@ impl SessionActor {
             let mut state = self.state.lock().await;
             let queued_at_turn_start = self.queued_at_turn_start.borrow();
             // `sweep_pending_inputs` exempts the running slot only when
-            // `running_task` is armed.
+            // `running_task` is armed; with no turn running every row is
+            // eligible and the front would be stolen from the promoter.
             let Some(running) = state.running_prompt_id().map(str::to_string) else {
                 return false;
             };
@@ -156,7 +182,9 @@ impl SessionActor {
                     image_count: entry.attachments.len() as u32,
                     redirect_kind: crate::session::events::RedirectKind::Interjection,
                 });
-            // Every attached pane renders the user block from this broadcast: the submitting client painted only a queue row.
+            // Every attached pane renders the user block from this broadcast:
+            // the submitting client painted only a queue row, which the
+            // rebroadcast above just removed.
             self.broadcast_interjection(&entry.text, None);
             self.pending_interjections.push(entry);
         }
@@ -192,7 +220,9 @@ impl SessionActor {
             return false;
         }
         // A bash row's command is executed from its block meta, never sent to
-        // the model.
+        // the model; a verbatim row is defined by skipping the envelope this
+        // path adds; the rest bind a turn (schema, tool overrides, trace
+        // export) or hand a caller a turn-scoped channel.
         let Some(meta) = &item.queue_meta else {
             return false;
         };
@@ -211,7 +241,12 @@ impl SessionActor {
             return false;
         }
         // A slash invocation is a command, not a note: `resolve` runs it when
-        // the prompt's OWN turn starts.
+        // the prompt's OWN turn starts, while this path's drain expands skills
+        // alone — folding it in would hand the model the literal `/cmd args`
+        // (and `/plan <description>` would swallow the prompt of the turn the
+        // mode switch was requested for). It stays queued and runs as its own
+        // turn instead. Same rule the pager consults:
+        // `xai_prompt_queue::is_slash_invocation`.
         if Self::row_text_is_command(&meta.text) {
             return false;
         }
@@ -230,6 +265,7 @@ impl SessionActor {
     pub(super) async fn flush_stranded_interjections(&self) -> usize {
         let stranded = self.pending_interjections.drain_all();
         let count = stranded.len();
+        // Reversed push_fronts keep entry 0 front-most.
         for entry in stranded.into_iter().rev() {
             self.queue_interjection_fallback_prompt(entry.text, entry.attachments, true)
                 .await;
@@ -398,8 +434,8 @@ impl SessionActor {
     /// Interjections bypass turn-start slash resolution (`slash_commands::resolve`).
     /// Without this, a queued `/skill` row force-sent mid-turn, or a typed `/skill` interjection, reaches the model as a bare, unexpanded slash command.
     async fn interjection_skill_information(&self, text: &str) -> Option<String> {
-        // Mirror turn-start gating (`parse_slash_prefix`): only a leading
-        // slash invokes skills "don't run /commit yet" is steering text.
+        // Mirror turn-start gating (`parse_slash_prefix`): only a leading slash invokes skills
+        // "don't run /commit yet" is steering text, not an invocation
         if !text.trim_start().starts_with('/') {
             return None;
         }
@@ -472,8 +508,9 @@ impl SessionActor {
     }
 
     pub(super) async fn drain_pending_interjections(&self) -> bool {
-        // Manual drain (not `drain_formatted`): skill parsing needs the raw
-        // text.
+        // Manual drain (not `drain_formatted`): skill parsing needs the raw text.
+        // Parsed after wrapping, the envelope's closing `</user_query>` tag would pollute the trailing skill's args.
+        // The guard owns the drained entries until the batch is submitted: every await below is a.
         let guard = RestoreOnCancel {
             buffer: self.pending_interjections.clone(),
             entries: self.pending_interjections.drain_all(),
@@ -484,22 +521,21 @@ impl SessionActor {
 
         let mut prepared = Vec::with_capacity(guard.entries.len());
         for PendingInterjection { text, attachments } in &guard.entries {
-            // The sanitizer rewrites `[Image #N: <path>]` to `[Image #N]`
-            // before the text reaches the model It covers legacy-client raw
-            // text.
+            // The sanitizer rewrites `[Image #N: <path>]` to `[Image #N]` before the text reaches the model
+            // It covers legacy-client raw text AND text harvested from queued rows sent as interjections
+            // Wrapping and truncation stay in the shared crate (`format_interjection`)
             let sanitized = crate::session::placeholder_images::strip_paths_from_image_placeholders(
                 text.clone(),
             );
             let skill_information = self.interjection_skill_information(&sanitized).await;
             let mut wrapped = format_interjection(sanitized.clone());
-            // The pipeline consumes a clone; the guard keeps the attachments
-            // restorable
+            // The pipeline consumes a clone; the guard keeps the original attachments restorable
             let images = self
                 .prepare_interjection_images(&mut wrapped, attachments.clone())
                 .await;
-            // Model-visible text: <skill_information> follows the wrapped
-            // <user_query>, the same order as turn-start prompt assembly It
-            // is appended after the image pipeline.
+            // Model-visible text: <skill_information> follows the wrapped <user_query>, the same order as turn-start prompt assembly
+            // It is appended after the image pipeline so the template-specific transcription rewrite cannot mangle the envelope
+            // The persisted user chunk stays envelope-only (no SKILL.md body); the typed text rides in `displayText` for replay
             let model_text = match &skill_information {
                 Some(skill_information) => {
                     tracing::info!("expanded skill references in mid-turn interjection");
@@ -513,7 +549,8 @@ impl SessionActor {
             }
             prepared.push((wrapped, sanitized, images, item));
         }
-        // Last await before the submit.
+        // Last await before the submit; from here persistence is deliberately synchronous so no
+        // cancellation point can separate the submitted batch from its persisted user chunks
         let model_id = self.current_model_id().await;
         let (persist_parts, chat_items): (Vec<_>, Vec<_>) = prepared
             .into_iter()
@@ -531,8 +568,9 @@ impl SessionActor {
             );
             return false;
         }
-        // Persist only after the submit succeeded: on the failure/cancel
-        // paths the entries go back to the buffer.
+        // Persist only after the submit succeeded: on the failure/cancel paths the entries go back
+        // to the buffer and the fallback-prompt turn persists them, so persisting here too would
+        // duplicate the user chunks in updates.jsonl
         for (wrapped, typed, images) in persist_parts {
             self.persist_synthetic_user_message_with_model(
                 &wrapped,
@@ -543,13 +581,15 @@ impl SessionActor {
         }
         guard.defuse();
         tracing::info!("Injected mid-turn interjections as standalone synthetic user messages");
-        // An interjection never cancels the turn, so it leaves no marker on the next user turn (that field is reserved for fatal aborts).
+        // An interjection never cancels the turn, so it leaves no marker on the next user turn (that field is reserved for fatal aborts)
+        // The interjection itself is recorded at enqueue time via `Event::Interjected` (carrying the shared `redirect_kind`)
         true
     }
 }
 
-/// Cancel-safety guard for `drain_pending_interjections`: a turn abort drops
-/// the drain future at one of its awaits.
+/// Cancel-safety guard for `drain_pending_interjections`: a turn abort drops the drain future at one of its awaits (skill resolution, image pipeline, model-id fetch).
+/// Entries already drained but not yet submitted to chat state would vanish — `flush_stranded_interjections` would find an empty buffer with nothing to convert into fallback prompts.
+/// On drop, unsubmitted entries go back to the front of the buffer, ahead of anything pushed since, keeping arrival order.
 #[must_use]
 struct RestoreOnCancel {
     buffer: InterjectionBuffer<acp::ImageContent>,

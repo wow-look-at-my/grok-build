@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime};
 /// Title prefix for a session that has no name / generated title / prompt yet.
+/// [`RowTitle::render_wide`](crate::views::dashboard::row_title::RowTitle::render_wide) paints the trailing ` #<id>` suffix dimly.
 pub(crate) const NEW_SESSION_LABEL: &str = "New session";
 /// A single row in the dashboard. Built per-frame from `app.agents`.
 #[derive(Debug, Clone)]
@@ -21,18 +22,22 @@ pub struct DashboardRow {
     /// Display label (e.g. `"implementer · fix login bug"`).
     pub label: String,
     /// Right-of-label subtitle painted after a ` · ` separator in dim text (e.g. `"xai my-branch-2 worktree"`).
+    /// `None` when the row has no repo / branch context worth showing.
     pub subtitle: Option<String>,
     /// Coarse state used for grouping.
     pub state: RowState,
     /// Activity summary (e.g. `"Running: cargo test"`). `None` when idle or finished.
     pub activity: Option<String>,
     /// Secondary dim line painted directly below the title row.
+    /// Holds the last tool call, the last assistant message, or (for `NeedsInput`) a "Pending: …" preview of the front-most permission request.
+    /// `None` collapses the row to a single line (e.g. very recently created with no activity yet).
     pub secondary_line: Option<String>,
     /// Working directory display string (already compacted to `~/...`).
     pub cwd_display: String,
     /// Raw cwd for downstream filter / grouping consumers.
     pub cwd: PathBuf,
-    /// Wall-clock moment of the row's last change.
+    /// Wall-clock moment of the row's last change. A wall-clock [`SystemTime`]: roster timestamps can
+    /// predate this process, even the machine's boot, which an [`Instant`] cannot represent.
     pub last_change_at: SystemTime,
     /// True when this row is pinned (always floats above non-pinned).
     pub pinned: bool,
@@ -67,8 +72,9 @@ impl RowBadge {
         }
     }
 }
-/// Process-wide fallback anchor for the age column when an agent lacks both
-/// `turn_started_at` and `last_active_at`.
+/// Process-wide fallback anchor for the age column when an agent lacks both `turn_started_at` and `last_active_at`.
+/// Rare: `AgentView::new` always stamps the latter, but a future caller could omit it.
+/// Initialised lazily on first call so the fallback stays frozen instead of re-anchoring every frame.
 fn fallback_epoch() -> Instant {
     static FALLBACK: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
     *FALLBACK.get_or_init(Instant::now)
@@ -386,8 +392,8 @@ pub fn has_background_work(agent: &AgentView) -> bool {
         .any(|t| t.status == crate::app::agent::BgTaskStatus::Running)
         || !agent.session.scheduled_tasks.is_empty()
 }
-/// Sanitise every string derived from backend / model-controlled content
-/// before returning.
+/// Sanitise every string derived from backend / model-controlled content before returning.
+/// The dashboard's renderer paints raw via `set_string`, which preserves embedded escape sequences in the ratatui buffer.
 pub(crate) fn sanitize(s: &str) -> String {
     crate::views::session_title::sanitize_display_text(s).into_owned()
 }
@@ -554,6 +560,8 @@ fn top_level_subtitle(agent: &AgentView) -> Option<String> {
     Some(parts.join(" "))
 }
 /// Apply a filter to the list in place.
+///
+/// Needle is lowercased once outside `retain` instead of per-row, so a 100-row list doesn't allocate 100 fresh lowercase Strings per keystroke.
 pub fn apply_filter(rows: &mut Vec<DashboardRow>, filter: &Filter, _home: Option<&str>) {
     if matches!(filter, Filter::None) {
         return;
@@ -644,7 +652,8 @@ struct RowKey {
     last_change_at: SystemTime,
     reorder_idx: Option<usize>,
     session_id: Option<String>,
-    /// Final tiebreak: when every other field is equal.
+    /// Final tiebreak: when every other field is equal, fall back to the row id so the order is deterministic across rebuilds.
+    /// This avoids relying on `sort_by`'s stable-on-equal pass-through.
     id: DashboardRowId,
 }
 /// `state_before_reorder` restricts manual ordering of unpinned rows to the same state.
@@ -1067,6 +1076,7 @@ mod tests {
         assert_eq!(nth(&rows, 0).state, RowState::Idle);
     }
     /// Sort: explicit reorderings (Shift+↑/↓) float a row to its declared position WITHIN its state group.
+    /// Two Working rows: the older one (id2) is reordered above the more-recent one (id1).
     #[test]
     fn sort_reorder_floats_within_state_group() {
         let id1 = DashboardRowId::TopLevel(AgentId(1));

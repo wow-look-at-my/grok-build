@@ -1,4 +1,9 @@
-//! Managed MCP + plugin + marketplace + hooks policy engine.
+//! Managed MCP + plugin + marketplace + hooks policy engine: `managed-settings.json`
+//! plus every `managed_config.toml` / `requirements.toml` layer, resolved
+//! strictest-wins into MCP/marketplace allowlists and tighten-only pins.
+//!
+//! Extracted move-only from `permission::resolution`, which re-exports the
+//! public surface so existing `resolution::` paths keep working.
 
 mod layer;
 mod marketplace;
@@ -38,10 +43,12 @@ pub struct ManagedSettings {
     pub features: ManagedSettingsFeatures,
     pub permissions: Vec<Sourced<PermissionRule>>,
     /// Parsed `permissions.defaultMode` (highest mode precedence over user files).
+    /// Read and populated by the resolution side ([`parse_managed_settings_base`]).
     pub(in crate::permission) default_mode: Option<DefaultPermissionMode>,
     pub mcp_allowlist: McpServerPolicy,
     pub marketplace_allowlist: MarketplacePolicy,
-    /// `enableAllProjectMcpServers = false`.
+    /// `enableAllProjectMcpServers = false`: drop project MCP unless an
+    /// allow entry whose ownership satisfies the pin's grants it.
     pub project_mcp: PolicyPin,
     /// `plugin_auto_update = false`: no session-start plugin auto-update.
     pub plugin_auto_update: PolicyPin,
@@ -51,7 +58,8 @@ pub struct ManagedSettings {
     pub extra_marketplaces: Vec<ManagedMarketplace>,
 }
 
-/// The tighten-only boolean pins.
+/// The tighten-only boolean pins. One row per pin: every policy layer reads it under both key spellings,
+/// an invalid value fails closed to the engaging one, and an unreadable layer engages all of them.
 #[derive(Debug, Clone, Copy)]
 enum BoolPin {
     ProjectMcp,
@@ -78,6 +86,7 @@ impl BoolPin {
         }
     }
 
+    /// The value that engages the pin (`false` switches the first two off; `true` switches the lockdown on).
     fn engages_on(self) -> bool {
         match self {
             Self::ProjectMcp | Self::PluginAutoUpdate => false,
@@ -187,14 +196,15 @@ fn resolve_managed_settings(
         }
     }
     if let Some((json, path)) = &claude {
-        // Already JSON, applied unfiltered; Vendor sorts last, so the apply order matches the sorted loop.
+        // Already JSON, applied unfiltered; Vendor sorts last, so the apply
+        // order matches the sorted loop.
         apply_policy_source(&mut ms, json, path, PolicyLayerTier::Vendor);
     }
     ms
 }
 
-/// [`parse_managed_settings_base`] plus the file's advisory policy — the
-/// Claude-only parse used by tests.
+/// [`parse_managed_settings_base`] plus the file's advisory policy — the Claude-only parse used by tests.
+/// The layered runtime path is [`resolve_managed_settings`], which applies advisory policy after every native TOML layer.
 #[cfg(test)]
 fn parse_managed_settings_json(json: &serde_json::Value, path: &Path) -> ManagedSettings {
     let mut ms = parse_managed_settings_base(json, path);
@@ -266,8 +276,7 @@ fn apply_policy_source(
     // Full lockdown (see the lockdown field docs); an explicit empty deny list stays harmless.
     let lockdown = mcp_allow_entries.locks_down() || mcp_deny_entries.is_malformed();
     if lockdown {
-        // The key-level warnings above say what is wrong; this names the
-        // file.
+        // The key-level warnings above say what is wrong; this one names the file.
         warn!(
             path = %path.display(),
             "MCP lockdown: the allow list has no usable entries or the deny list is unenforceable; every MCP server this source binds is blocked"

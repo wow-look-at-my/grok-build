@@ -1,4 +1,6 @@
 //! `/timestamps`: toggle timestamp display on messages.
+//!
+//! This command computes the new value itself and dispatches the typed `Action::SetTimestamps(bool)`.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand, slash_meta};

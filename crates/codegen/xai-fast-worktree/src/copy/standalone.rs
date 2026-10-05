@@ -1,4 +1,8 @@
-//! Post-copy sanitization of a standalone `.git/` so a later `git fetch` cannot recreate the public-base hang.
+//! Post-copy sanitization of a standalone `.git/` so a later `git fetch` cannot
+//! recreate the public-base hang (wildcard `origin.fetch` + tens of thousands of
+//! remote-tracking refs + a `.git/shallow` graft that is not on HEAD).
+//!
+//! Prevention only: local filesystem edits, no network.
 
 use std::collections::HashSet;
 use std::io::ErrorKind;
@@ -7,6 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 /// First-parent walk cap when deciding whether HEAD itself is shallow.
+/// Hitting the cap is treated as uncertain (keep), not as a drop.
 const SHALLOW_FIRST_PARENT_CAP: usize = 100_000;
 
 const KEEP_ORIGIN_REFS: &[&str] = &["HEAD", "main", "master"];
@@ -43,7 +48,8 @@ impl StandaloneCopyFilter {
 }
 
 /// Narrow `remote.origin.fetch`, drop a HEAD-inconsistent `.git/shallow`, and
-/// prune extra `refs/remotes/origin/*`.
+/// prune extra `refs/remotes/origin/*`. No-ops if `git_dir` is not a directory
+/// (linked worktree).
 #[cfg(test)]
 pub(crate) fn sanitize_standalone_git_dir(git_dir: &Path) -> Result<()> {
     sanitize_standalone_git_dir_keeping(git_dir, &HashSet::new())
@@ -348,7 +354,7 @@ fn is_heads_refspec(spec: &str) -> bool {
 }
 
 /// Any wildcard (`+refs/*`, `+refs/heads/*`, pull/tag stars) or heads refspec
-/// will let `git fetch` pull remote heads.
+/// would let `git fetch` pull remote heads; replace with the narrow spec.
 fn should_rewrite_fetch_spec(spec: &str) -> bool {
     spec.contains('*') || is_heads_refspec(spec)
 }

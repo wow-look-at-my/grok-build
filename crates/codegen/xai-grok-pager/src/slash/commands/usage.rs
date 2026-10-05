@@ -1,4 +1,7 @@
 //! `/usage` shows session token and cost totals; consumer accounts can also manage billing.
+//!
+//! External-auth deployments (`auth_provider_command`) never reach grok.com billing.
+//! [`AppCtx::usage_command_visible`] hides and refuses the command there.
 
 use crate::app::actions::Action;
 use crate::slash::command::{

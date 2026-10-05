@@ -1,4 +1,9 @@
 //! Context usage bar: shows token usage in the status bar.
+//!
+//! Default builds a `Line<'static>` of styled spans: `8.5K / 1.0M` (actual tokens, colored by usage percentage).
+//! On hover, replaces the tokens with a progress bar and percentage, e.g. `█████ 42.0%`.
+//! The bar width is derived from the default string length so the hover line is the same total width; no layout shift on hover.
+//! The default is right-padded to a minimum of 6 columns so the width invariant holds even for degenerate inputs like `0 / 9`.
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -6,8 +11,8 @@ use ratatui::text::{Line, Span};
 use super::progress_bar::progress_bar_spans;
 use crate::theme::Theme;
 
-/// Format a percentage as a fixed-width 5-char string. `< 10`: `"X.XX%"`
-/// (e.g. `"0.00%"`, `"5.12%"`).
+/// Format a percentage as a fixed-width 5-char string. `< 10`: `"X.XX%"` (e.g. `"0.00%"`,
+/// `"5.12%"`). `10–99`: `"XX.X%"` (e.g. `"20.1%"`, `"99.9%"`).
 pub fn fmt_pct5(pct: f64) -> String {
     if pct >= 100.0 {
         "MAX %".to_string()
@@ -18,8 +23,9 @@ pub fn fmt_pct5(pct: f64) -> String {
     }
 }
 
-/// Format a token count as a compact string (≤chars). `0–999`: `"0"`, `"12"`, `"999"`. `1K–9.9K`:
-/// `"1.2K"` (chars). `1M–9.9M`: `"1.2M"` (chars).
+/// Format a token count as a compact string (≤4 chars). `0–999`: `"0"`, `"12"`, `"999"`. `1K–9.9K`:
+/// `"1.2K"` (4 chars). `10K–999K`: `"12K"`, `"999K"` (≤4 chars). `1M–9.9M`: `"1.2M"` (4 chars).
+/// `10M+`: `"12M"`, `"123M"` (≤4 chars).
 pub fn fmt_tokens(n: u64) -> String {
     if n < 1_000 {
         n.to_string()
@@ -93,7 +99,7 @@ pub fn blend_color(pct: f64, breakpoints: &[ColorBreakpoint]) -> Color {
     breakpoints.last().map(|b| b.color).unwrap_or(Color::Reset)
 }
 
-/// Linear interpolation between colors.
+/// Linear interpolation between two colors.
 fn lerp_color(a: Color, b: Color, t: f32) -> Color {
     let interpolable = |c: Color| matches!(c, Color::Rgb(..) | Color::Indexed(_));
     if !interpolable(a) || !interpolable(b) {
@@ -113,21 +119,25 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
-/// RGB for any color variant, using a neutral fallback for `Reset`.
+/// RGB for any color variant, using a neutral fallback for `Reset`. Needed for gradients that lerp
+/// across named breakpoints after the theme quantized to ANSI on lower-color terminals. Those still
+/// produce meaningful intermediate colors instead of collapsing all inputs onto one fallback.
 fn color_to_rgb(c: Color) -> (u8, u8, u8) {
+    // (198, 198, 198) matches the FG-equivalent used elsewhere when the terminal owns the actual default fg color
     crate::render::color::resolve_to_rgb(c).unwrap_or((198, 198, 198))
 }
 
 /// The separator character between status bar items.
 pub const SEPARATOR: &str = "│";
 
-/// Width of the percentage field on hover (`fmt_pct5` always returns chars).
+/// Width of the percentage field on hover (`fmt_pct5` always returns 5 chars).
 const PCT_WIDTH: u16 = 5;
 /// Width of the gap between the progress bar and the percentage on hover.
 const BAR_PCT_GAP: u16 = 1;
 
-/// The default is right-padded to a minimum of several columns
-/// (`BAR_PCT_GAP + PCT_WIDTH`) so the invariant holds for every input.
+/// The default is right-padded to a minimum of 6 columns (`BAR_PCT_GAP + PCT_WIDTH`) so the
+/// invariant holds for every input. Without the pad, degenerate cases like `0 / 9` (5 chars) would
+/// mismatch the hovered line, which rounds up to 6 (zero-width bar, gap, percentage).
 pub fn context_bar_line(
     used_tokens: Option<u64>,
     total_tokens: Option<u64>,
@@ -166,7 +176,8 @@ pub fn context_bar_line_for_session(
     let color = crate::theme::quantize(blend_color(pct, &breakpoints));
 
     if hovered {
-        // Bar fills the space the default tokens would occupy, minus the gap and the percentage `total_width >= min_width` by construction.
+        // Bar fills the space the default tokens would occupy, minus the gap and the percentage
+        // `total_width >= min_width` by construction, so this subtraction is safe
         let bar_width = total_width - min_width;
         let mut spans =
             progress_bar_spans(bar_width, pct as f32 / 100.0, color, theme.bg_highlight);
@@ -326,6 +337,7 @@ mod tests {
             (123_456, 1_000_000),
             (999_999, 999_999),
             (12_000_000, 12_000_000),
+            // Degenerate sub-min-width case: default natural width is 5 ("0 / 9"), padded to 6 so the hover line still matches
             (0, 9),
         ] {
             let default_line = context_bar_line(Some(used), Some(total), false, &theme)
@@ -345,6 +357,9 @@ mod tests {
 
     #[test]
     fn test_context_bar_hover_bar_grows_with_token_string() {
+        // The bar scales with the default string length
+        // `500 / 1.0M` (10 chars) gives bar = 10 - 6 = 4 chars
+        // `8.5K / 1.0M` (11 chars) gives bar = 11 - 6 = 5 chars
         let theme = Theme::default();
         let short = context_bar_line(Some(500), Some(1_000_000), true, &theme).unwrap();
         let long = context_bar_line(Some(8_500), Some(1_000_000), true, &theme).unwrap();

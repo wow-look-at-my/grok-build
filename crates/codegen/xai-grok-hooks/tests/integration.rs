@@ -1,4 +1,5 @@
 //! Hooks use inline shell command strings routed via `sh -c` rather than standalone scripts.
+//! That avoids `noexec` tmpdir issues in hermetic CI sandboxes, where `chmod +x` may not work.
 
 use std::path::Path;
 
@@ -542,7 +543,8 @@ async fn runner_injected_vars_override_extra_env_at_spawn() {
 async fn direct_exec_command_with_env_var_resolves_at_load_time() {
     let dir = tempfile::tempdir().unwrap();
 
-    // Build an inline shell script via the env map: the resolved command path will be `<tmpdir>/check.sh` We use the per-hook `env` map.
+    // Build an inline shell script via the env map: the resolved command path will be `<tmpdir>/check.sh`
+    // We use the per-hook `env` map (rather than the process env) so this test doesn't need to mutate global state
     let tmpdir_str = dir.path().to_string_lossy().into_owned();
 
     let script = dir.path().join("check.sh");
@@ -566,7 +568,9 @@ async fn direct_exec_command_with_env_var_resolves_at_load_time() {
                     "hooks": [
                         {
                             "type": "command",
-                            // The command has no shell metachars apart from `${...}` The load-time pass resolves `${ROOT}` to the tmpdir path.
+                            // The command has no shell metachars apart from `${...}`
+                            // The load-time pass resolves `${ROOT}` to the tmpdir path, leaving "/tmp.../check.sh" with no `$`
+                            // The runner then picks the direct-exec branch
                             "command": "${ROOT}/check.sh",
                             "env": { "ROOT": tmpdir_str }
                         }
@@ -627,7 +631,8 @@ async fn http_hook_url_env_expansion_end_to_end() {
                     "hooks": [
                         {
                             "type": "http",
-                            // `${INTERNAL}` is in the per-hook env map and resolves to a private RFC1918 IP The HTTP runner expands the URL.
+                            // `${INTERNAL}` is in the per-hook env map and resolves to a private RFC1918 IP
+                            // The HTTP runner expands the URL, then SSRF validation rejects 10.0.0.1
                             "url": "https://${INTERNAL}/check",
                             "env": { "INTERNAL": "10.0.0.1" }
                         }

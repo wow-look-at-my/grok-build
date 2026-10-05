@@ -1,4 +1,7 @@
 //! Cross-transport product worktree lifecycle benchmark.
+//!
+//! Uses `WorktreeBuilder` and `remove_worktree` for native standalone, native
+//! linked, and Grove-projected worktrees. Latencies are samples, not CI gates.
 
 #![deny(clippy::indexing_slicing)]
 
@@ -35,6 +38,7 @@ struct Cli {
     #[arg(long, default_value = ".")]
     source: PathBuf,
 
+    /// Warm lifecycle iterations after the first uncontrolled-cache sample (minimum 5).
     #[arg(long, default_value_t = MIN_WARM_ITERATIONS)]
     warm_iterations: usize,
 
@@ -1301,6 +1305,7 @@ fn cleanup_cancelled_grove_identity_after_cancel(
         match phase.as_deref() {
             Some("committed") => {
                 // Dest/backing can go away while the cancel tombstone remains.
+                // Keep polling so cancelled/unknown can acknowledge the ID.
                 remove_committed()?;
             }
             Some("aborted") => return cleanup_grove_identity(target),
@@ -1750,6 +1755,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
     bytes_to_hex(sha2::Sha256::digest(bytes))
 }
 
+// sha2 0.10 digests are `GenericArray` (impls `LowerHex`), sha2 0.11 digests are
+// `hybrid_array::Array` (no `LowerHex`); Bazel's `@crates//:sha2` is 0.11 while
+// Cargo pins 0.10, so encode via `AsRef<[u8]>` which both implement.
 fn bytes_to_hex(bytes: impl AsRef<[u8]>) -> String {
     bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }

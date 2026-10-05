@@ -27,7 +27,9 @@ impl Reminder for LspDiagnosticsReminder {
 
         lsp.ensure_started_background();
 
-        // Structured mutations we ourselves made. bash/git have no file list.
+        // Structured mutations we ourselves made. bash/git have no file list;
+        // watching the workspace for those is the OS-watcher leak this path
+        // exists to avoid.
         for (path, content, kind) in disk_events(tool_output) {
             lsp.notify_file_event(&path, content.as_deref(), kind).await;
         }

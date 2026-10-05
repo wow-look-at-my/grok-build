@@ -13,7 +13,7 @@ When plan mode is active, the agent:
 3. May use `ask_user_question` to clarify specific questions
 4. Calls `exit_plan_mode` to present the plan for your approval
 
-Plan mode is read-only except for the plan file. Plan-file edits (`plan.md` in the session directory) are auto-approved, and edits to any other file are rejected outright. The tool call fails with a short message naming the plan file as the only editable path. This holds in every permission mode, including always-approve. Separating planning from implementation lets you review and correct the approach before any code is written.
+Plan mode is read-only except for the plan file: plan-file edits (`plan.md` in the session directory) are auto-approved, and edits to any other file are rejected outright — the tool call fails with a short message naming the plan file as the only editable path. This holds in every permission mode, including always-approve. Separating planning from implementation lets you review and correct the approach before any code is written.
 
 ---
 
@@ -39,7 +39,7 @@ The agent enters plan mode when it determines a task has genuine ambiguity. It c
 
 ### User-Initiated Entry
 
-You can enter plan mode yourself in multiple ways:
+You can enter plan mode yourself in two ways:
 
 - **`/plan`** -- Enter plan mode. Plan mode activates when you send your next prompt. Run `/plan <description>` to enter plan mode and start a turn with that description in one step.
 - **Shift+Tab** -- Cycle the session mode: Normal, then Plan, then Always-approve, then back to Normal. From Normal, a single press lands on Plan.
@@ -57,15 +57,16 @@ Plan mode is the interactive version of the `/goal` planner, and the plan uses t
 - `# Plan:` with a single sentence
 - **Acceptance criteria**: the outcomes the work must reach
 - **Verification plan**: the commands to run, and what their output must show
-- **Non-goals**, **Assumed scope**, **Implementation approach** and numbered **Task steps** (the steps you check off live on the todo list, not in the plan file)
+- **Non-goals**, **Assumed scope**, **Implementation approach** and numbered **Task steps**
+  (the steps you check off live on the todo list, not in the plan file)
 
 ---
 
 ## Plan Approval
 
-When the agent finishes planning, it calls the `exit_plan_mode` tool. The tool reads the plan file from disk. The TUI opens a scrollable preview of the plan with an action bar along the bottom.
+When the agent finishes planning, it calls the `exit_plan_mode` tool. The tool reads the plan file from disk, and the TUI opens a scrollable preview of the plan with an action bar along the bottom.
 
-If the agent exits without writing a plan (empty or missing `plan.md`), the same approval surface still opens with a clear empty-state message so you can approve. Start implementing, request changes (send the agent back to planning), or quit.
+If the agent exits without writing a plan (empty or missing `plan.md`), the same approval surface still opens with a clear empty-state message so you can approve and start implementing, request changes (send the agent back to planning), or quit.
 
 ### Reviewing the Plan
 
@@ -91,13 +92,13 @@ A goal that is already active stays in place: approving a plan does not replace 
 
 ### Providing Feedback
 
-The approval view has focus states:
+The approval view has three focus states:
 
 - **Preview**: Scroll the plan and select lines to comment on.
 - **Commenting**: Add an inline comment to the selected line range (press `c`, or `Enter` on a line).
 - **Prompt**: Type freeform revision notes.
 
-Press `Tab` to switch between the preview and the prompt. When you send feedback -- inline comments, freeform notes, or both -- the agent receives it and revises the plan. Plan mode stays active so you can iterate. A complete pager command typed in the prompt (for example `/feedback <text>` or `/compact`) runs as a command instead of being sent as notes. The review stays open. Pressing `a` while such a command sits in the prompt is refused until you run it with Enter or delete it.
+Press `Tab` to switch between the preview and the prompt. When you send feedback -- inline comments, freeform notes, or both -- the agent receives it and revises the plan. Plan mode stays active so you can iterate. A complete pager command typed in the prompt (for example `/feedback <text>` or `/compact`) runs as a command instead of being sent as notes; the review stays open. Pressing `a` while such a command sits in the prompt is refused until you run it with Enter or delete it.
 
 ### Leaving the Approval View
 
@@ -107,7 +108,7 @@ Press `Esc` to return focus from the prompt to the plan preview. To dismiss the 
 
 ## Plan Mode Lifecycle
 
-The plan mode state machine has states:
+The plan mode state machine has four states:
 
 | State          | Description                                                    |
 | -------------- | -------------------------------------------------------------- |
@@ -139,7 +140,7 @@ This enforcement is independent of the permission mode:
 
 - **Always-approve (yolo) stays armed underneath plan mode.** Non-edit tools (bash commands, reads, MCP tools) still auto-run, but file edits are blocked until you approve exiting plan mode. Once the plan is approved, always-approve resumes for implementation.
 - Bash commands are not inspected for file writes — plan mode blocks the edit tools, not shell redirection.
-- Subagents are not covered by the parent session's plan-mode edit gate. Each subagent starts with a fresh plan-mode tracker (`Inactive`), so a `general-purpose` (or other write-capable) subagent can edit files while the parent is still. This is in plan mode. It inherits the parent's permission mode (including always-approve). Read-only types such as `explore` remain limited by their own toolset.
+- Subagents are not covered by the parent session's plan-mode edit gate. Each subagent starts with a fresh plan-mode tracker (`Inactive`), so a `general-purpose` (or other write-capable) subagent can edit files while the parent is still in plan mode — and it inherits the parent's permission mode (including always-approve). Read-only types such as `explore` remain limited by their own toolset.
 
 The status flag shows `plan` while plan mode is active. If always-approve is enabled underneath, its flag reappears when plan mode exits.
 

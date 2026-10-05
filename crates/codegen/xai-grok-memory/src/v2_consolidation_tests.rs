@@ -388,6 +388,7 @@ fn repeated_failed_claims_do_not_duplicate_pending_observations() {
         .fail_retryable(&second, 24, "planner failed again")
         .unwrap();
 
+    // P now has claim rows in two failed operations; it must be listed once.
     let third = fixture
         .dream
         .claim(&DreamClaimRequest {
@@ -429,7 +430,8 @@ fn empty_plan_preserves_claimed_observations() {
         .fail_retryable(&lease, 21, "empty model plan")
         .unwrap();
 
-    // The rejected empty plan must not have reached the durable boundary.
+    // The rejected empty plan must not have reached the durable boundary,
+    // otherwise the reclaim would replay it and fail forever.
     let retry = fixture.claim("dream", 22, 60);
     assert_eq!(retry.operation_id, lease.operation_id);
     assert!(fixture.dream.resume_planned(&retry, 23).unwrap().is_none());
@@ -499,7 +501,8 @@ fn failed_durable_plan_is_reclaimed_after_new_captures_arrive() {
     let q = fixture.add_observation("two", 2, "Later Q", 23);
     drop_reject_archive_trigger(&fixture);
 
-    // The pending set is now {P, Q}, so a deterministic id will differ.
+    // The pending set is now {P, Q}, so a deterministic id would differ; the
+    // durable plan for {P} must be re-leased instead of orphaned.
     let resumed = fixture.claim("dream", 24, 60);
     assert_eq!(resumed.operation_id, first.operation_id);
     assert_eq!(
@@ -565,7 +568,8 @@ fn durable_plan_with_changed_observation_is_abandoned_not_replayed() {
     drop_reject_archive_trigger(&fixture);
     std::fs::write(fixture.workspace.join(&p), "edited after the plan").unwrap();
 
-    // The archive step can never succeed for a changed observation.
+    // The archive step can never succeed for a changed observation, so the
+    // plan must be abandoned instead of bricking every later claim.
     let next = fixture.claim("dream", 24, 60);
     assert_ne!(next.operation_id, first.operation_id);
     assert!(fixture.dream.resume_planned(&next, 25).unwrap().is_none());

@@ -1,12 +1,23 @@
 //! Maximal Marginal Relevance (MMR) diversity re-ranking.
+//!
+//! Without MMR, multiple memory chunks about the same topic make the top results nearly identical.
+//! MMR penalizes redundancy by greedily selecting results that balance relevance with diversity.
+//!
+//! **Formula:**
+//! ```text
+//! MMR(d) = λ × relevance(d) - (1-λ) × max_similarity(d, selected)
+//! ```
+//!
+//! Similarity is Jaccard on tokenized snippets, so no embeddings are needed.
+//! Re-ranking is O(n²), but n is tiny (typically 6 to 18 candidates after hybrid scoring).
 
 use std::collections::HashSet;
 
 use super::search::SearchResult;
 use xai_grok_config_types::MmrConfig;
 
-/// Tokenize text for Jaccard comparison. Callers must lowercase snippets
-/// before calling this.
+/// Tokenize text for Jaccard comparison. Callers must lowercase snippets before calling this.
+/// Splits the same way as `query_expansion` but keeps stop words, since similarity needs full token overlap.
 fn tokenize(text: &str) -> HashSet<&str> {
     text.split(|c: char| !c.is_alphanumeric() && c != '_')
         .filter(|w| !w.is_empty())
@@ -31,6 +42,7 @@ fn jaccard_similarity(a: &HashSet<&str>, b: &HashSet<&str>) -> f64 {
 }
 
 /// Re-rank results using Maximal Marginal Relevance.
+/// It is passed separately because the clamped `SearchResult.score` saturates top chunks to 1.0 and loses the access-frequency boost tiebreak.
 pub fn mmr_rerank(results: &mut Vec<SearchResult>, relevance: &[f64], config: &MmrConfig) {
     if !config.enabled || results.len() <= 1 {
         return;
@@ -105,6 +117,7 @@ pub fn mmr_rerank(results: &mut Vec<SearchResult>, relevance: &[f64], config: &M
         })
         .collect();
     *results = reordered;
+    // `results` is now reordered, so the caller's `relevance` slice is stale and must not be read again
 }
 
 /// Placeholder to enable moving results out of the vec without Clone.
@@ -210,8 +223,8 @@ mod tests {
 
     #[test]
     fn test_diverse_results_promoted() {
-        // Results: similar (rust async), one different (python web) With MMR,
-        // the diverse result should be promoted over the redundant one
+        // Three results: two very similar (rust async), one different (python web)
+        // With MMR, the diverse result should be promoted over the redundant one
         let mut results = vec![
             make_result("a", "rust async programming patterns", 1.0),
             make_result("b", "rust async programming tutorial", 0.95),
@@ -249,6 +262,8 @@ mod tests {
 
     #[test]
     fn test_case_insensitive_similarity() {
+        // Snippets are lowercased before tokenization
+        // Without lowercasing, "Rust Async Programming" and "rust async programming" would only have 0.5 Jaccard similarity
         let mut results = vec![
             make_result("a", "Rust Async Programming", 1.0),
             make_result("b", "rust async programming", 0.95),
@@ -313,6 +328,7 @@ mod tests {
     fn test_jaccard_partial_overlap() {
         let a: HashSet<&str> = ["rust", "async", "programming"].into();
         let b: HashSet<&str> = ["rust", "web", "programming"].into();
+        // The intersection is {rust, programming} and the union has four tokens, so similarity is 0.5
         assert!((jaccard_similarity(&a, &b) - 0.5).abs() < f64::EPSILON);
     }
 

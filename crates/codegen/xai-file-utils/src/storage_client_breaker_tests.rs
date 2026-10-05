@@ -16,6 +16,8 @@ fn storage_breaker_min_samples() -> u32 {
     storage_breaker_config().min_samples as u32
 }
 
+// 200 ms margin between cool-down and sleep keeps the timing
+// tests stable on contended CI.
 const TEST_OPEN_DURATION: Duration = Duration::from_millis(50);
 const SLEEP_PAST_OPEN_DURATION: Duration = Duration::from_millis(250);
 
@@ -103,6 +105,7 @@ async fn breaker_opens_after_threshold_401s() {
     );
 }
 
+/// Sliding-window sanity: a 200/401 mix below the failure-rate threshold must not trip.
 /// Successes lead so the partial rate never crosses the threshold once `min_samples` is reached.
 #[tokio::test]
 async fn sliding_window_below_threshold_does_not_trip() {
@@ -140,6 +143,7 @@ async fn sliding_window_below_threshold_does_not_trip() {
 
 #[tokio::test]
 async fn breaker_half_open_after_cool_down_success() {
+    // Server: first N requests 401 (trip), rest 200 (probe).
     let hits = Arc::new(AtomicU32::new(0));
     let hits_handler = hits.clone();
     let router = Router::new().route(
@@ -218,6 +222,9 @@ async fn breaker_half_open_after_cool_down_failure_reopens() {
     assert_eq!(hits.load(Ordering::Relaxed), after_probe);
 }
 
+/// Breaker-open short-circuits surface `HttpUploadError { status_code: 503, .. }`
+/// so they classify as retryable (retry with backoff) rather than as an auth
+/// 401, keeping them distinct from the wire-401 path.
 #[tokio::test]
 async fn breaker_short_circuit_returns_http_upload_error_503() {
     let hits = Arc::new(AtomicU32::new(0));
@@ -293,6 +300,8 @@ async fn breaker_half_open_serialises_concurrent_probes() {
     const N: usize = 16;
     let barrier = Arc::new(tokio::sync::Barrier::new(N));
     // `laggers_done` fires once, when the N-1 non-probe callers have short-circuited.
+    // The probe is still parked, so it has not been counted yet.
+    // Replaces a wall-clock sleep that flaked when a slow lagger raced the probe-gate release.
     let laggers_done = Arc::new(tokio::sync::Notify::new());
     let laggers_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut tasks = Vec::with_capacity(N);
@@ -313,6 +322,7 @@ async fn breaker_half_open_serialises_concurrent_probes() {
     }
 
     // Hold the probe until it has reached the server and all N-1 laggers have short-circuited.
+    // Only then release the gate so the probe can return 200 and close the breaker.
     probe_started.notified().await;
     laggers_done.notified().await;
     probe_gate.notify_one();
@@ -376,6 +386,7 @@ async fn breaker_emits_exactly_one_warn_on_open_and_one_info_on_close() {
     let client = StorageClient::new(&format!("http://{addr}/v1"), "test-token")
         .with_breaker_for_testing(TEST_OPEN_DURATION, observer.clone());
 
+    // 10 attempts: 5 wire 401s open the breaker, 5 short-circuit.
     // Only ONE Closed→Open transition must fire.
     for _ in 0..10 {
         let _ = client.upload("p", b"d", "text/plain").await;

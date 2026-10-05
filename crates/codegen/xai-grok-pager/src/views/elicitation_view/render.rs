@@ -1,4 +1,5 @@
-//! Rendering for the MCP elicitation card: header, a scrollable body viewport (form fields or the full URL), and action rows pinned.
+//! Rendering for the MCP elicitation card: header, a scrollable body viewport (form fields or the full URL), and action rows pinned at the bottom.
+//! Pinning keeps Accept/Decline reachable however long the body is.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -166,7 +167,8 @@ pub fn elicitation_view_height(
     let actions_h = actions(state).len() as u16;
     let chrome = 1 + title_h + 1 + msg_h + banner_h + 1 + 1 + actions_h + 1;
     let raw = chrome + body_total;
-    // Preferred cap is a third of the screen, but never so small that the pinned action rows squeeze the body out entirely A clipped body keeps.
+    // Preferred cap is a third of the screen, but never so small that the pinned action rows squeeze the body out entirely
+    // A clipped body keeps at least three visible rows (the viewport scrolls the rest)
     let min_viable = chrome + body_total.min(3);
     let soft_cap = (screen_h as u32 * 33 / 100).max(8) as u16;
     let hard_cap = (screen_h as u32 * 80 / 100) as u16;

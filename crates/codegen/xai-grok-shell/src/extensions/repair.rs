@@ -1,4 +1,12 @@
 //! `x.ai/session/repair`: out-of-band recovery for sessions whose corrupted tool-call history 400s every request.
+//!
+//! A `ToolResult` whose owning `tool_call` is missing makes every request 400 with "unexpected `tool_use_id` found in `tool_result` blocks".
+//! The usual cause is a torn or merged `chat_history.jsonl` line skipped on load.
+//! No in-band path can recover (compaction's sanitizer needs a model call that itself 400s), so the client invokes this method against the session.
+//!
+//! Repairs via [`xai_chat_state::compaction_utils::repair_history`].
+//! Resident sessions go through `SessionCommand::RepairHistory` (serialized with session activity, rejected mid-turn).
+//! Non-resident sessions are repaired on disk via the atomic `replace_chat_history`.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -222,7 +230,7 @@ mod tests {
             ConversationItem::ToolResult(tr) if tr.tool_call_id == "call_LOST"
         )));
 
-        // A second repair is a no-op: the corruption is gone.
+        // A second repair is a no-op: the corruption is really gone.
         let v2 = parse(
             &repair_on_disk(tmp.path(), SESSION_ID, false)
                 .await

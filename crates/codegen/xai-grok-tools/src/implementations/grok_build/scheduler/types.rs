@@ -218,7 +218,9 @@ pub struct ScheduledTask {
     pub last_subagent_id: Option<String>,
     #[serde(default)]
     pub iterations_since_fresh: u32,
-    /// Set when the prompt is patched: the next fire starts a fresh transcript instead of resuming the task's.
+    /// Set when the prompt is patched: the next fire starts a fresh transcript instead of resuming
+    /// the old task's. The anchor itself is kept until then so the in-flight guard can still see a
+    /// running iteration.
     #[serde(default)]
     pub chain_reset_pending: bool,
 }
@@ -227,7 +229,9 @@ pub const LOOP_FRESH_CHAIN_EVERY: u32 = 10;
 
 pub const LOOP_COMPLETION_OUTPUT_CAP: usize = 4_000;
 
-/// How long a recurring scheduled task lives before auto-expiry.
+/// How long a recurring scheduled task lives before auto-expiry. Single source of truth for the
+/// TTL: task construction stamps `expires_at = now + days(this)`, and user-facing copy (pager
+/// notice, tool descriptions) must read the same constant so the number cannot drift.
 pub const RECURRING_TASK_TTL_DAYS: i64 = 7;
 
 const MAX_SCHEDULER_TRANSITIONS: usize = 50;
@@ -236,8 +240,11 @@ fn default_recurring() -> bool {
     true
 }
 
-/// The cadence as the duration a fire time is computed with. `None` when the
-/// seconds have no `i64` second count, or no `chrono` duration.
+/// The cadence as the duration a fire time is computed with.
+///
+/// `None` when the seconds have no `i64` second count, or no `chrono` duration.
+/// A cadence above `i64::MAX` seconds has no answer here, where a narrowing
+/// cast would hand back a negative duration and a schedule in the past.
 pub(crate) fn interval_duration(interval_secs: u64) -> Option<chrono::Duration> {
     chrono::Duration::try_seconds(i64::try_from(interval_secs).ok()?)
 }
@@ -274,10 +281,12 @@ impl ScheduledTask {
     ) -> Self {
         let now = Utc::now();
         // An interval is validated where a task is created, where the create
-        // tool parses one, and where state loads.
+        // tool parses one, and where state loads, each of which refuses a value
+        // with no duration.
         let cadence = interval_duration(interval_secs)
             .unwrap_or_else(|| panic!("scheduled interval {interval_secs} s has no duration"));
-        // When fire_immediately is true, anchor created_at in the past so that next_fire_at() = created_at + interval = now.
+        // When fire_immediately is true, anchor created_at in the past so that
+        // next_fire_at() = created_at + interval = now, firing on the first tick.
         let created_at = if fire_immediately { now - cadence } else { now };
         Self {
             id: uuid::Uuid::now_v7().to_string(),
@@ -310,8 +319,9 @@ impl ScheduledTask {
             })
     }
 
-    /// Next moment the actor must wake for this task: the sooner of the next
-    /// fire and the auto-expiry deadline.
+    /// Next moment the actor must wake for this task: the sooner of the next fire and the auto-expiry deadline. Sleeping
+    /// purely on `next_fire_at` would let a task whose interval stretches past `expires_at` outlive the TTL (an 8-day
+    /// interval must still expire at day 7, not when its first fire comes due).
     pub fn next_wake_at(&self) -> DateTime<Utc> {
         match self.expires_at {
             Some(expires_at) => self.next_fire_at().min(expires_at),
@@ -356,7 +366,8 @@ pub struct SchedulerSnapshot {
     pub tasks: Vec<ScheduledTask>,
 }
 
-/// Handle for tools to communicate with the SchedulerActor. Ephemeral -- not serialized, not persisted.
+/// Handle for tools to communicate with the SchedulerActor.
+/// Ephemeral -- not serialized, not persisted. Inserted via `resources.insert()`.
 #[derive(Clone)]
 pub struct SchedulerHandle(pub mpsc::UnboundedSender<SchedulerCommand>);
 

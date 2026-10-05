@@ -1,4 +1,9 @@
-//! Subagent lifecycle soak: churn spawn/run/completion/eviction and assert threads, open files.
+//! Subagent lifecycle soak: churn spawn/run/completion/eviction and assert
+//! threads, open files, and heap/RSS reach steady state. A stub `ChildRunner` drives
+//! the real coordinator/transport.
+//!
+//!   SUBAGENT_SOAK_CYCLES=20000 cargo test -p xai-grok-tools \
+//!     [--features dhat-heap] --test test_subagent_soak -- --ignored --nocapture
 
 #![cfg(unix)]
 
@@ -77,7 +82,9 @@ impl Metric {
         }
     }
 
-    /// Where a metric must be present and within budget.
+    /// Where a metric must be present and within budget. RSS everywhere; threads and open files
+    /// only on Linux — macOS now samples threads too, but the budgets are tuned against Linux
+    /// nightlies, so a macOS sample lands in the summary without being enforced.
     fn budgeted_on_this_platform(self) -> bool {
         match self {
             Metric::Rss => true,
@@ -156,7 +163,8 @@ struct HeapMetrics {
 
 impl HeapMetrics {
     fn new(before: HeapSample, after: HeapSample, cycles: u64) -> Self {
-        // `SUBAGENT_SOAK_CYCLES=0` would otherwise divide by zero and feed NaN/inf into the leak gates.
+        // `SUBAGENT_SOAK_CYCLES=0` would otherwise divide by zero and feed
+        // NaN/inf into the leak gates.
         let cycles = cycles.max(1) as f64;
         Self {
             before,
@@ -184,7 +192,9 @@ struct Bounds {
 impl Bounds {
     fn from_env() -> Self {
         Self {
-            // Default warmup to the completed-entry cap so the ring is saturated and the measured window observes steady-state eviction.
+            // Default warmup to the completed-entry cap so the ring is saturated
+            // and the measured window observes steady-state eviction rather than
+            // one-time cache fill.
             warmup: env_parse("SUBAGENT_SOAK_WARMUP", MAX_COMPLETED_ENTRIES as u64),
             measure: env_parse("SUBAGENT_SOAK_CYCLES", 512u64),
             concurrency: env_parse("SUBAGENT_SOAK_CONCURRENCY", 16u64),
@@ -498,12 +508,13 @@ async fn measure(
     let heap_before = heap_capture();
     let before = ResourceSnapshot::capture();
 
-    // Continue ids past the warmup window so measured cycles use fresh
-    // entries and keep exercising eviction instead of colliding.
+    // Continue ids past the warmup window so measured cycles use fresh entries
+    // and keep exercising eviction instead of colliding with warmup ids.
     for i in bounds.warmup..(bounds.warmup + bounds.measure) {
         run_cycle(backend, i).await;
     }
-    // A baseline that never drained already poisons `before`.
+    // A baseline that never drained already poisons `before`, so skip the
+    // measured-window drain and report the window as not quiesced.
     let quiesced = baseline_quiesced && quiesce(backend).await;
 
     let heap_after = heap_capture();
@@ -552,8 +563,9 @@ fn metric_failure(
 }
 
 fn check_bounds(bounds: &Bounds, m: &Measurement) -> Vec<String> {
-    // Drain first: a non-quiesced window has nonzero counts and noisy growth,
-    // so report the quiesce failure alone.
+    // Drain first: a non-quiesced window has nonzero counts and noisy growth, so
+    // report the quiesce failure alone; the gates below only mean anything once
+    // drained.
     if !m.quiesced {
         return vec![
             "quiesce budget expired before the measured window drained; soak result is unreliable"
@@ -657,7 +669,8 @@ async fn subagent_lifecycle_soak_bounds_threads_open_files_and_heap() {
             let backend = ChannelBackend::from_coordinator(command_tx);
 
             let warmup_quiesced = warmup(&backend, bounds.warmup).await;
-            // Drain the concurrent phase into the baseline; a failed drain marks the window unreliable.
+            // Drain the concurrent phase into the baseline; a failed drain marks
+            // the window unreliable.
             concurrent_phase(&backend, &gate, bounds.concurrency).await;
             let baseline_quiesced = warmup_quiesced && quiesce(&backend).await;
             let measurement = measure(&backend, &bounds, baseline_quiesced).await;
@@ -826,7 +839,8 @@ mod tests {
     fn metric_failure_covers_unbudgeted_missing_and_budget_arms() {
         let b = generous_bounds();
         assert!(metric_failure(Metric::Threads, None, false, &b).is_none());
-        // An unbudgeted metric with a present, over-budget value stays informational.
+        // An unbudgeted metric with a present, over-budget value stays
+        // informational (macOS thread counts against Linux-tuned bounds).
         assert!(metric_failure(Metric::Threads, Some(usize::MAX), false, &b).is_none());
         assert!(
             metric_failure(Metric::Rss, None, true, &b)

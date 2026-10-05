@@ -74,6 +74,7 @@ pub fn abbreviate_path(path: &str) -> Cow<'_, str> {
     Cow::Borrowed(path)
 }
 
+/// Location-chrome path: [`abbreviate_path`] then last-two-component shortening.
 /// Clipboard and other callers keep [`abbreviate_path`].
 pub fn display_location_path(path: impl AsRef<Path>) -> String {
     let lossy = path.as_ref().to_string_lossy();
@@ -142,8 +143,9 @@ pub fn system_time_from_unix_ms(unix_ms: i64) -> SystemTime {
         .unwrap_or_else(SystemTime::now)
 }
 
-/// Project a monotonic [`Instant`] onto the wall clock, so live local anchors
-/// and on-disk timestamps compare in one space.
+/// Project a monotonic [`Instant`] onto the wall clock, so live local anchors and on-disk timestamps compare in one space.
+/// On-disk timestamps can predate boot, and so have no `Instant`.
+/// The skew between the two `now()` samples is below [`format_time_ago`]'s minute granularity.
 pub fn system_time_from_instant(instant: Instant) -> SystemTime {
     SystemTime::now()
         .checked_sub(instant.elapsed())
@@ -198,6 +200,7 @@ pub fn format_age(created_at: i64, now: i64) -> String {
     }
 }
 
+/// Truncate to at most `max_width` display columns (CJK counts 2), ending with `…` when cut; a zero budget yields an empty string.
 pub fn truncate_to_width(s: &str, max_width: usize) -> Cow<'_, str> {
     if byte_offset_at_width(s, max_width) == s.len() {
         return Cow::Borrowed(s);
@@ -314,6 +317,7 @@ mod tests {
             (86_400, "1d"),
             (2_592_000 - 1, "29d"),
             (2_592_000, "1mo"),
+            // 359d is still 11mo (359/30 = 11); 360d would be 12mo.
             (359 * 86_400, "11mo"),
             (31_536_000, "1y"),
         ];

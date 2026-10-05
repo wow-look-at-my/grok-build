@@ -17,7 +17,8 @@ use crate::copy::types::{
 };
 use crate::copy::worker::{WorkerCtx, run_worker};
 
-/// Cap workers to avoid FD exhaustion.
+/// Cap workers to avoid FD exhaustion. macOS default ulimit is 256; 8 workers
+/// plus 8 walker threads, each with ~10 FDs on deep trees, still leave headroom.
 #[cfg(target_os = "macos")]
 const MAX_PARALLEL_WORKERS: usize = 8;
 
@@ -85,6 +86,8 @@ pub(crate) fn copy_parallel(
     // Collect senders for the walker.
     let senders: Vec<Sender<CopyEntry>> = channels.iter().map(|(tx, _)| tx.clone()).collect();
 
+    // Cap walker threads to num_workers: default num_cpus walkers plus copy
+    // workers exceed macOS's 256 FD limit on deep trees.
     let mut builder = WalkBuilder::new(source);
     builder
         .hidden(false) // Include hidden files.
@@ -92,14 +95,21 @@ pub(crate) fn copy_parallel(
         .git_global(false) // Never use global gitignore (~/.config/git/ignore) —
         // it contains personal preferences irrelevant to worktree creation.
         .git_exclude(false) // Never use .git/info/exclude — external tooling
-        // can append broad patterns (*.min.js, *.zip) that skip git-tracked files.
+        // can append broad patterns (*.min.js, *.zip) that skip git-tracked
+        // files. `ignore` does not check tracking status, so those files
+        // would be silently dropped.
         .threads(num_workers) // Limit walker parallelism to avoid FD exhaustion
         .filter_entry(|entry| {
             // Always skip .git directory.
             if entry.file_name() == ".git" {
                 return false;
             }
-            // Skip the directory holding this repository's grok-managed checkouts.
+            // Skip the directory holding this repository's grok-managed
+            // checkouts. A new worktree is created inside the source tree, so
+            // walking it would copy sibling worktrees, and the destination
+            // itself, into every new checkout. `.git/info/exclude` would say
+            // the same thing but is deliberately not consulted (above), so the
+            // skip has to live here.
             !crate::managed_root::is_repo_worktrees_root(&entry.path())
         });
 
@@ -195,9 +205,9 @@ pub(crate) fn copy_parallel(
         let _ = worker.join();
     }
 
-    // Collect issues. A poisoned accumulator is read anyway: the run reports
-    // what it recorded rather than losing the list to a panic at the summary
-    // line.
+    // Collect issues. A poisoned accumulator is read anyway: the run reports what
+    // it recorded rather than losing the list to a panic at the summary line.
+    // `parking_lot::Mutex` is the structural fix and is not a dependency here.
     #[allow(clippy::disallowed_methods)]
     let issues = match Arc::try_unwrap(issues) {
         Ok(mutex) => mutex.into_inner().unwrap_or_default(),
@@ -269,7 +279,7 @@ mod tests {
         assert!(dest.path().join("file1.txt").exists());
         assert!(dest.path().join("file2.txt").exists());
         assert!(dest.path().join("subdir/file3.txt").exists());
-        assert_eq!(result.copied_paths.len(), 4);
+        assert_eq!(result.copied_paths.len(), 4); // 3 files + 1 dir
     }
 
     #[test]
@@ -364,7 +374,9 @@ mod tests {
             ..Default::default()
         };
 
-        // Pass the PRE-CANCELLED token (not a fresh one): the walker checks cancellation first thing in every callback and quits.
+        // Pass the PRE-CANCELLED token (not a fresh one): the walker checks
+        // cancellation first thing in every callback and quits, so nothing is
+        // ever queued to the workers.
         let result = copy_parallel(src.path(), dest.path(), config, token).unwrap();
 
         assert_eq!(
@@ -403,7 +415,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_copy_parallel_replicates_symlink() {
-        // Exercises the worker's CopyEntryKind::Symlink arm: a symlink in the source tree must be replicated AS a symlink.
+        // Exercises the worker's CopyEntryKind::Symlink arm: a symlink in the
+        // source tree must be replicated AS a symlink (not dereferenced).
         let src = TempDir::new().unwrap();
         let dest = TempDir::new().unwrap();
 

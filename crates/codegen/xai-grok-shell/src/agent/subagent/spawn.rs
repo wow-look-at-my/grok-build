@@ -1,4 +1,15 @@
 //! Parent/subagent boundary: every parent-side lifecycle call site, in order.
+//!
+//! 1. `MvpAgent::start_subagent_coordinator` (parent thread, in `mvp_agent`) hands the event receiver and concurrency limit here.
+//!    `spawn_subagent_coordinator` drives the coordinator (living in `xai-grok-tools`).
+//! 2. `ShellChildRunner::run` (parent thread) gathers what a child needs from the parent via `MvpAgent::try_build_subagent_spawn_context`.
+//!    That is the parent-to-child snapshot, built by the owner in `mvp_agent`.
+//!    It then runs the spawn work on the worker pool (`worker_runtime()`, built on first use).
+//! 3. `run_shell_child` (worker pool, in `handle_request.rs`) prepares the child (toolset, optional worktree, context).
+//!    It starts the child on its own thread via `spawn_session_on_thread`.
+//! 4. `on_completed` then `present_child_completion` (worker pool): reports the child finished, persists the result, and may wake the parent.
+//!
+//! Stage timings are recorded in `subagent_spawn::SubagentSpawnPhase`.
 use super::ShellCompletionData;
 use crate::agent::mvp_agent::{LocalRef, MvpAgent};
 use crate::extensions::notification::{SessionNotification, SessionUpdate};
@@ -13,7 +24,7 @@ use xai_grok_tools::implementations::grok_build::task::types::{
 };
 /// Floor keeps the pool responsive when `available_parallelism` is tiny.
 const MIN_WORKER_THREADS: usize = 2;
-/// Suffice for multiple children (each runs on its own OS thread); `GROK_SUBAGENT_WORKER_THREADS` overrides.
+/// Four suffice for 32 children (each runs on its own OS thread); `GROK_SUBAGENT_WORKER_THREADS` overrides.
 const MAX_WORKER_THREADS: usize = 4;
 /// Pool for the per-child pipeline: a dedicated multi-thread runtime so concurrent subagents run in parallel.
 /// It sits off the user-facing session's `LocalSet`.
@@ -454,8 +465,8 @@ impl AutoWakeInputs {
         }
     }
 }
-/// Auto-wake gate. `parent_channel_open` folds the inject's no-channel bail into the decision, so a stamped `will_wake` never promises a wake the inject won't do. `cancelled` never wakes: the Ctrl+C race can background a foreground child
-/// moments before its cancel lands.
+/// Auto-wake gate. `parent_channel_open` folds the inject's no-channel bail into the decision, so a stamped `will_wake` never promises a wake the inject won't do.
+/// `cancelled` never wakes: the Ctrl+C race can background a foreground child moments before its cancel lands. Waking would prompt the model right after the user stopped everything.
 pub(crate) fn should_auto_wake_subagent(inputs: AutoWakeInputs) -> bool {
     inputs.run_in_background
         && !inputs.cancelled

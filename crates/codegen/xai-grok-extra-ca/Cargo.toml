@@ -7,6 +7,7 @@ description = "TLS policy for the grok CLI: rustls backend pin, process crypto p
 
 [dependencies]
 base64 = { workspace = true }
+# Not reqwest 0.13: blocking TLS overflows on Windows arm64 (#237643).
 # native-roots + webpki-roots must ship with this crate or a broken OS store fails client build.
 reqwest = { workspace = true, features = ["blocking", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 # Both providers stay explicit: ensure_default_crypto_provider picks one per target and unification would mask either's absence.

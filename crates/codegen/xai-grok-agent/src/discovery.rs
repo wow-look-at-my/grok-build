@@ -1,4 +1,6 @@
-//! Searches `.grok/agents/` and `.claude/agents/` from cwd to repo root, then `~/.grok/agents/`.
+//! Searches `.grok/agents/` and `.claude/agents/` from cwd to repo root,
+//! then `~/.grok/agents/`, then `~/.claude/agents/`. Name-based dedup keeps
+//! highest priority.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,8 +26,8 @@ pub fn project_agent_dirs(cwd: Option<&Path>) -> (Vec<PathBuf>, Option<PathBuf>)
     (project_agent_dirs_in(&chain.dirs), chain.git_root)
 }
 
-/// Existing project agent dirs under each dir of a cwd-to-git-root chain. The
-/// only place that walks `PROJECT_AGENT_SUBDIRS`.
+/// Existing project agent dirs under each dir of a cwd-to-git-root chain.
+/// The only place that walks `PROJECT_AGENT_SUBDIRS`. The folder-trust detector reuses it so detection cannot drift from discovery.
 pub fn project_agent_dirs_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
     crate::repo::existing_subdirs_along(chain_dirs, PROJECT_AGENT_SUBDIRS)
 }
@@ -45,6 +47,7 @@ pub struct SubagentEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubagentSource {
+    /// One of the 3 built-in subagent types, not shadowed by a user agent.
     Builtin(BuiltinAgentName),
     /// User-defined agent from project, user, or bundled discovery.
     UserDefined { scope: AgentScope },
@@ -52,8 +55,8 @@ pub enum SubagentSource {
 
 // ── all_subagents ────────────────────────────────────────────────────
 
-/// Build the complete list of enabled subagents: built-ins, then discovered
-/// user agents, minus toggles. Project-level agents shadow built-ins.
+/// Build the complete list of enabled subagents: built-ins, then discovered user agents, minus toggles.
+/// Project-level agents shadow built-ins. User-level and bundled agents with built-in names are skipped, keeping `visible == callable`.
 pub fn all_subagents(cwd: &Path, toggle: &HashMap<String, bool>) -> Vec<SubagentEntry> {
     let grok = xai_grok_config::user_grok_home();
     all_subagents_with_home(
@@ -117,7 +120,8 @@ fn merge_subagents(
             .filter(|b| BuiltinAgentName::subagent_variants().contains(b));
 
         if is_builtin_name.is_some() && def.scope != AgentScope::Project {
-            // This user-level agent has the same name as a built-in subagent, so skip it It cannot shadow the built-in at runtime.
+            // This user-level agent has the same name as a built-in subagent, so skip it
+            // It cannot shadow the built-in at runtime, so don't let it shadow in the visible list
             continue;
         }
 
@@ -169,7 +173,8 @@ pub(crate) fn user_agent_dirs(
     grok_home: Option<&Path>,
 ) -> Vec<(std::path::PathBuf, AgentScope)> {
     // Legacy literal ~/.grok, included only when it differs from grok_home
-    // (i.e. GROK_HOME points elsewhere) so agents left.
+    // (i.e. GROK_HOME points elsewhere) so agents left in the old location are
+    // still discovered and stay consistent with scope_from_path classification.
     let legacy_grok = home
         .map(|h| h.join(".grok"))
         .filter(|legacy| grok_home != Some(legacy.as_path()));
@@ -268,8 +273,8 @@ fn by_name_in_cwd_with_home(
     by_name_with_home(name, home, grok_home)
 }
 
-/// These are the pre-defined agent profiles (`general-purpose`, `explore`,
-/// `plan`) that the Task tool can launch.
+/// These are the pre-defined agent profiles (`general-purpose`, `explore`, `plan`) that the Task tool can launch.
+/// User/project-level agent files can shadow these by name.
 pub fn builtin_subagents() -> Vec<AgentDefinition> {
     BuiltinAgentName::subagent_variants()
         .iter()
@@ -277,8 +282,9 @@ pub fn builtin_subagents() -> Vec<AgentDefinition> {
         .collect()
 }
 
-/// Return every built-in agent definition (all `BuiltinAgentName` variants,
-/// not the subagent-launchable subset in [`builtin_subagents`]).
+/// Return every built-in agent definition (all `BuiltinAgentName` variants, not just the subagent-launchable subset in [`builtin_subagents`]).
+///
+/// For cross-crate coverage and manifest checks: those crates pin a different `strum`, so they cannot call `BuiltinAgentName::iter()` themselves.
 pub fn all_builtin_agent_definitions() -> Vec<AgentDefinition> {
     use strum::IntoEnumIterator;
     BuiltinAgentName::iter()
@@ -517,7 +523,8 @@ fn load_plugin_agent_definition(
 
 /// Expand `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_DATA}` (and the Grok aliases) in a plugin agent's body so the model receives absolute paths.
 fn substitute_plugin_vars(def: &mut AgentDefinition, plugin: &crate::plugins::LoadedPlugin) {
-    // Untrusted plugins are loaded frontmatter-only (body is None).
+    // Untrusted plugins are loaded frontmatter-only (body is None), and most agents use a built-in system prompt
+    // Skip computing root/data paths when there is nothing to expand
     let has_custom_prompt = matches!(def.system_prompt, TemplateOverride::Custom(_));
     if def.prompt_body.is_none() && !has_custom_prompt {
         return;
@@ -832,7 +839,7 @@ mod tests {
     fn test_discover_dedup_by_name() {
         let tmp = tempfile::tempdir().unwrap();
 
-        // Create directories with same-named agents at different levels
+        // Create two directories with same-named agents at different levels
         let inner_dir = tmp.path().join("subdir");
         fs::create_dir_all(&inner_dir).unwrap();
 
@@ -1216,6 +1223,7 @@ mod tests {
     #[test]
     fn test_merge_invalid_user_agent_preserves_builtin() {
         // Simulate: discover() skips invalid files (returns empty for that file).
+        // So if a user's explore.md is invalid, discover() won't include it, and the built-in explore remains
         let discovered = vec![]; // no valid user agents discovered
         let entries = merge_subagents(discovered, &HashMap::new());
         assert_eq!(entries.len(), 3);
@@ -1485,7 +1493,8 @@ mod tests {
 
     #[test]
     fn test_substitute_plugin_vars_resolves_custom_system_prompt() {
-        // `system_prompt` is internal (not frontmatter-driven) Construct the definition directly.
+        // `system_prompt` is internal (not frontmatter-driven)
+        // Construct the definition directly to exercise the `TemplateOverride::Custom` branch
         let registry = make_plugin_registry("plugin-one", PluginScope::User, vec![]);
         let plugin = registry.get("plugin-one").unwrap();
 

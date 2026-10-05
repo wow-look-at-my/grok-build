@@ -175,7 +175,7 @@ fn measure_boot(
     }
     let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
 
-    // Wall-clock twin of `spawn`, joined with the child record's `ts`; both monotonic clocks share no origin.
+    // Wall-clock twin of `spawn`, joined with the child record's `ts`; the two monotonic clocks share no origin.
     let spawn_at_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)

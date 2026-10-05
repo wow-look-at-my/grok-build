@@ -46,7 +46,7 @@ fn render_with(
     (buf, result)
 }
 
-/// Wide graphemes occupy cells and ratatui blanks the second, so the buffer reads back padded.
+/// Wide graphemes occupy two cells and ratatui blanks the second, so the buffer reads back padded.
 fn unpadded(row: &str) -> String {
     row.chars().filter(|c| *c != ' ').collect()
 }
@@ -300,6 +300,7 @@ fn the_largest_allowed_body_paints_at_every_height_it_promises() {
         ..notice()
     };
 
+    // 21 content rows is an 80x24 terminal, the smallest we support.
     for content_height in 21..=34 {
         let (buf, result) = render_with(80, content_height, &tallest, None, None);
         let screen = screen(&buf);

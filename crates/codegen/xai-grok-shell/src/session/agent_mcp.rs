@@ -1,4 +1,8 @@
 //! Materialize `AgentDefinition.mcp_servers` and overlay them onto a disk/client merge.
+//!
+//! Agent.md servers win over the disk/client merge by name. Rebuild keeps live names
+//! that were not part of the previous overlay; hot-reload and `UpdateMcpServers` replace
+//! wholesale from merge plus overlay.
 
 use std::collections::HashSet;
 use std::path::Path;

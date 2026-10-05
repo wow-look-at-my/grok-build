@@ -21,8 +21,10 @@ const AUTO_PATH_RETRY_LIMIT: u32 = 32;
 #[serde(rename_all = "snake_case")]
 pub enum ProfileArtifactFormat {
     /// Legacy: kept so new clients can still decode the format list an old leader advertises.
+    /// New binaries no longer produce SVG (that required inferno, CDDL-1.0).
     Svg,
     /// Folded stacks (`thread;frame;… count` per line).
+    /// Not advertised yet; `platform::profile_formats()` explains when advertising starts.
     Folded,
 }
 
@@ -179,6 +181,7 @@ pub struct CpuProfileManager {
     stop_completion_tx: watch::Sender<bool>,
     _stop_completion_guard: watch::Receiver<bool>,
     /// When true, every capability query reports unsupported regardless of the actual platform.
+    /// Tests set this to hit the unsupported-build path deterministically on any host.
     force_unsupported: bool,
 }
 
@@ -421,9 +424,9 @@ fn resolve_svg_path(
 }
 
 fn derive_output_path(output: &Path, started_at: &str) -> Result<PathBuf, ControlError> {
-    // Honor explicit artifact paths (`.folded`/`.txt`) An explicit `.svg`
-    // path (old client invocations, muscle memory) keeps its location but is
-    // redirected.
+    // Honor explicit artifact paths (`.folded`/`.txt`)
+    // An explicit `.svg` path (old client invocations, muscle memory) keeps its location but is redirected to `.folded`
+    // The artifact is folded stacks now; text written into an `.svg`-named file would corrupt it
     if output
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("folded") || ext.eq_ignore_ascii_case("txt"))
@@ -556,6 +559,7 @@ mod platform {
     struct PprofProfilerEngine {
         guard: pprof::ProfilerGuard<'static>,
         // Named `svg_path` historically; now points at a `.folded` artifact.
+        // The wire protocol keeps the `svg_path` field name for compat.
         svg_path: PathBuf,
     }
 
@@ -642,7 +646,8 @@ mod platform {
     }
 
     pub(super) fn profile_formats() -> &'static [ProfileArtifactFormat] {
-        // Advertise nothing: old clients deserialize this enum strictly inside the Registered handshake A new variant (e.g. `folded`).
+        // Advertise nothing for now: old clients deserialize this enum strictly inside the Registered handshake A new variant (e.g. `folded`) would break their connect entirely.
+        // Start advertising `Folded` once the whole fleet knows the variant The artifact itself is already folded stacks
         &[]
     }
 

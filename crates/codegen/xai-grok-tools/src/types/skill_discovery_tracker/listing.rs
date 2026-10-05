@@ -1,20 +1,33 @@
 //! Budget-capped skill listing formatter.
+//!
+//! Converts a slice of `SkillInfo` into a `<system-reminder>` string that fits
+//! within a character budget derived from the model's context window.
 
 use std::collections::HashSet;
 
 use crate::implementations::skills::types::{SkillInfo, SkillScope};
 use crate::util::truncate_str_with_marker;
 
+/// Default fraction of the context window allocated to the skill listing (50%).
 pub(super) const SKILL_BUDGET_CONTEXT_PERCENT: f64 = 0.5;
 /// Default character budget when context window is unknown.
+/// Derived from percentage to prevent drift: (200k tokens * 4 bytes/token * 50%).
 pub(super) const DEFAULT_CHAR_BUDGET: usize =
     (200_000.0 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
 
+/// First whole `f64` above the largest `usize` any supported target has: 2^64,
+/// one past `usize::MAX` on the 64-bit targets this builds for.
 const USIZE_CEILING: f64 = 18_446_744_073_709_551_616.0;
 
-/// Character budget for a listing of a context window of `tokens`, taking `percent` of it at chars per token. `None` when the window states no char count a `usize` can hold. A window read from config or a model catalog is not bounded by anything this crate checks, and a
-/// saturated budget would truncate nothing at all.
+/// Character budget for a listing of a context window of `tokens`, taking
+/// `percent` of it at four chars per token.
+///
+/// `None` when the window states no char count a `usize` can hold. A window
+/// read from config or a model catalog is not bounded by anything this crate
+/// checks, and a saturated budget would truncate nothing at all.
 pub(super) fn listing_budget_chars(tokens: u64, percent: f64) -> Option<usize> {
+    // A context window is counted at f64 precision, which is exact below
+    // 2^53 tokens; every real window is far under that.
     #[allow(clippy::cast_precision_loss)]
     let chars = (tokens as f64) * 4.0 * percent;
     if !chars.is_finite() || chars >= USIZE_CEILING {
@@ -25,7 +38,9 @@ pub(super) fn listing_budget_chars(tokens: u64, percent: f64) -> Option<usize> {
     let budget = chars as usize;
     Some(budget)
 }
-/// Per-entry cap on description + when_to_use combined.
+/// Per-entry cap on description + when_to_use combined. Discovery only — the
+/// full skill body is loaded on invocation, so the listing stays terse. Split
+/// proportionally between the two fields (see `proportional_budgets`).
 const MAX_LISTING_COMBINED_BYTES: usize = 400;
 /// Minimum description length before falling back to names-only.
 const MIN_DESC_LENGTH: usize = 20;
@@ -45,14 +60,18 @@ const TRIGGER_PREFIXES: &[&str] = &[
     "must be invoked when",
 ];
 
-/// Default client-facing name for the skill tool when TemplateRenderer has not resolved one.
+/// Default client-facing name for the skill tool when TemplateRenderer
+/// has not resolved one. Single source of truth — used by both
+/// `format_announcement` callers and test helpers.
 pub(super) const DEFAULT_SKILL_TOOL_NAME: &str = "Skill";
 
 fn listing_header(_tool_name: &str) -> String {
     "The following skills are available for use:\n\n".to_string()
 }
 
-/// Whether a skill belongs in the model-facing listing.
+/// Whether a skill belongs in the model-facing listing. Native, bundled, and
+/// repo/user skills always qualify (they carry a body-derived description);
+/// plugin skills must have an authored `description` or `when_to_use`.
 pub(super) fn is_listable(s: &SkillInfo) -> bool {
     let is_plugin = s.plugin_name.is_some() || s.scope == SkillScope::Plugin;
     !is_plugin || s.has_user_specified_description || s.when_to_use.is_some()
@@ -67,8 +86,9 @@ struct SkillEntry<'a> {
 }
 
 impl<'a> SkillEntry<'a> {
-    /// Return the functional description (trigger suffix stripped when
-    /// `when_to_use` is set).
+    /// Return the functional description (trigger suffix stripped when `when_to_use` is set). When `when_to_use` is present and the description
+    /// contains a recognized trigger prefix, returns the portion before the prefix. Otherwise returns the full description. Call once and pass the
+    /// result to `format()` and `proportional_budgets()` to avoid redundant `extract_trigger_suffix` allocations.
     fn func_desc(&self) -> &str {
         if self.when_to_use.is_some() {
             extract_trigger_suffix(self.description).map_or(self.description, |(before, _)| before)
@@ -223,6 +243,7 @@ impl<'a> SkillListing<'a> {
         let header = listing_header(skill_tool_name);
         let header_len = header.len();
 
+        // Tier 1: full descriptions.
         let full_listing = self
             .0
             .iter()
@@ -237,6 +258,7 @@ impl<'a> SkillListing<'a> {
             return Some(format!("{header}{full_listing}"));
         }
 
+        // Tier 2: shortened descriptions with proportional allocation.
         let total_overhead: usize = self.0.iter().map(|e| e.overhead()).sum();
         let available = budget.saturating_sub(header_len + total_overhead);
         let budget_per_entry = available / self.0.len().max(1);
@@ -255,6 +277,7 @@ impl<'a> SkillListing<'a> {
             return Some(format!("{header}{listing}"));
         }
 
+        // Tier 3: names-only, drop entries that exceed remaining budget.
         Some(format!(
             "{header}{}",
             self.names_only(budget.saturating_sub(header_len))
@@ -270,6 +293,7 @@ impl<'a> SkillListing<'a> {
             return None;
         }
 
+        // Tier 1: full descriptions.
         let full_listing: String = self
             .0
             .iter()
@@ -285,6 +309,7 @@ impl<'a> SkillListing<'a> {
             return Some(full_listing);
         }
 
+        // Tier 2: shortened descriptions with proportional allocation.
         let total_overhead: usize = self
             .0
             .iter()
@@ -309,6 +334,7 @@ impl<'a> SkillListing<'a> {
             return Some(listing);
         }
 
+        // Tier 3: names-only, drop entries that exceed remaining budget.
         Some(self.names_only_xml(budget, overflow_indicator))
     }
 
@@ -448,7 +474,8 @@ fn strip_leading_trigger_prefix(wtu: &str) -> &str {
             if rest.starts_with(|c: char| c.is_alphanumeric()) {
                 continue;
             }
-            // ASCII lowercasing preserves byte length, so the offset computed on the lowercased copy is valid.
+            // ASCII lowercasing preserves byte length, so the offset computed on
+            // the lowercased copy is valid on the original `trimmed` slice.
             let off = trimmed.len() - rest.len();
             let out = trimmed
                 .get(off..)
@@ -462,8 +489,9 @@ fn strip_leading_trigger_prefix(wtu: &str) -> &str {
     trimmed
 }
 
-/// XML-escape a string for use in attribute values. Replaces those XML
+/// XML-escape a string for use in attribute values. Replaces the five XML
 /// metacharacters (`<`, `>`, `&`, `"`, `'`) with their named entities.
+/// Used by the budgeted (grok build) XML rendering path.
 fn xml_attr_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -480,8 +508,9 @@ fn xml_text_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Escape a string for use in XML attribute values, matching the behavior of
-/// the alternate XML format: only `"` is replaced with `&quot;`.
+/// Escape a string for use in XML attribute values, matching the behavior of the alternate XML format: only `"` is
+/// replaced with `&quot;`. This intentionally does NOT escape `<`, `>`, `&`, or `'` to maintain compatibility with the
+/// alternate rendering path. Used by the vendor-compat XML rendering path.
 fn jsx_attr_escape(s: &str) -> String {
     s.replace('"', "&quot;")
 }
@@ -516,12 +545,16 @@ fn build_skill_entry<'a>(
 /// Rendering mode for [`format_announcement_xml`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XmlRenderMode {
-    /// Verbatim rendering: every skill with its full description; no budget cap, minimal escaping.
+    /// Verbatim rendering: every skill with its full description; no
+    /// budget cap, minimal escaping.
     Verbatim,
+    /// Grok build harness: budget-capped three-tier rendering with full
+    /// XML entity escaping.
     Budgeted {
         /// Character budget for the listing; `None` uses the default.
         budget_chars: Option<usize>,
-        /// Append a "more skills available" line when the budget clips entries.
+        /// Append a "more skills available" line when the budget clips
+        /// entries.
         overflow_indicator: bool,
     },
 }
@@ -543,7 +576,8 @@ pub fn format_announcement_xml(
             .filter(|s| {
                 s.enabled
                     && !s.disable_model_invocation
-                    // Compat mode renders all skills verbatim.
+                    // Compat mode renders all skills verbatim; only the grok
+                    // build path drops description-less plugin skills.
                     && (verbatim || is_listable(s))
                     && announced.insert(s.dedup_key())
             })
@@ -589,7 +623,9 @@ pub(super) fn format_announcement(
     listing.render(budget, skill_tool_name)
 }
 
-/// Render the standard skill listing for the post-compaction system-reminder.
+/// Render the standard skill listing for the post-compaction system-reminder. Reuses [`format_announcement`] so the post-compaction listing
+/// matches the startup `<system-reminder>` byte-for-byte (standard header, `Use when:` triggers, `Absolute path:`) instead of a hand-rolled
+/// divergent format. Lists every enabled, model-invocable skill with no carried-over dedup state.
 pub fn format_compaction_skill_listing(skills: &[SkillInfo]) -> Option<String> {
     let mut announced = HashSet::new();
     format_announcement(
@@ -642,6 +678,8 @@ mod tests {
     #[test]
     fn a_window_outside_the_char_range_states_no_budget() {
         assert_eq!(listing_budget_chars(128_000, 0.5), Some(256_000));
+        // 2^53 tokens: the largest count an f64 holds exactly, and its char
+        // count is exactly representable too.
         assert_eq!(
             listing_budget_chars(9_007_199_254_740_992, 0.5),
             Some(18_014_398_509_481_984)
@@ -725,7 +763,8 @@ mod tests {
 
     #[test]
     fn native_skill_without_authored_description_shown() {
-        // Native/repo/bundled skills are always advertised (they carry a body-derived description).
+        // Native/repo/bundled skills are always advertised (they carry a
+        // body-derived description); only plugin skills are gated.
         let text = announce(&[skill("local", "derived from body")], 8_000).unwrap();
         assert!(text.contains("local"));
     }
@@ -870,7 +909,8 @@ mod tests {
         // No structural markdown reaches the listing.
         assert!(!text.contains("| Col"), "table leaked:\n{text}");
         assert!(!text.contains("**Authors:**"), "list leaked:\n{text}");
-        // Clean derived descriptions: first prose paragraph wins, else heading, else name; authored shown.
+        // Clean derived descriptions: first prose paragraph wins, else heading,
+        // else name; authored shown.
         assert!(text.contains("Reference Guide")); // heading-table: no prose -> heading
         assert!(text.contains("Summary prose here.")); // heading-list: prose beats the H1 title
         assert!(
@@ -1023,7 +1063,7 @@ mod tests {
 
     // ── budgeted mode: grok build harness (budgeted XML) ───────────
 
-    /// Skills must fit within the default budget.
+    /// 200 skills must fit within the default budget.
     #[test]
     fn xml_budgeted_two_hundred_skills_fit_within_default_budget() {
         let skills: Vec<SkillInfo> = (0..200)
@@ -1108,6 +1148,7 @@ mod tests {
         );
     }
 
+    /// Budgeted XML tier 2: descriptions shortened to fit budget.
     #[test]
     fn xml_budgeted_tier2_shortens_descriptions() {
         let skills: Vec<SkillInfo> = (0..20)
@@ -1131,6 +1172,7 @@ mod tests {
         assert!(text.len() <= budget + 50);
     }
 
+    /// Budgeted XML tier 3: name-only under extreme budget.
     #[test]
     fn xml_budgeted_tier3_names_only() {
         let skills: Vec<SkillInfo> = (0..50)
@@ -1182,6 +1224,7 @@ mod tests {
         assert!(text.len() <= DEFAULT_CHAR_BUDGET + 50); // allow small slack for overflow line
     }
 
+    // ── Tier 1: full descriptions ────────────────────────────────
 
     #[test]
     fn tier1_full_descriptions_when_within_budget() {
@@ -1194,18 +1237,20 @@ mod tests {
 
     #[test]
     fn tier1_caps_individual_desc_at_max_listing_chars() {
+        // Descriptions longer than MAX_LISTING_COMBINED_BYTES are capped even in tier 1.
         let desc = "B".repeat(MAX_LISTING_COMBINED_BYTES + 200);
         let skills = [skill("s", &desc)];
         let text = announce(&skills, 8_000).unwrap();
         let visible_run = "B".repeat(MAX_LISTING_COMBINED_BYTES - "…".len());
         assert!(text.contains(&format!("{visible_run}…")));
-        // The run length must not appear (would mean no truncation marker).
+        // The original run length must not appear (would mean no truncation marker).
         assert!(!text.contains(&"B".repeat(MAX_LISTING_COMBINED_BYTES - "…".len() + 1)));
     }
 
     #[test]
     fn tier1_no_marker_when_description_fits_under_cap() {
-        // Description shorter than MAX_LISTING_COMBINED_BYTES -> no truncation, no marker.
+        // Description shorter than MAX_LISTING_COMBINED_BYTES -> no truncation,
+        // no marker.
         let desc = "A".repeat(100);
         let skills = [skill("s", &desc)];
         let text = announce(&skills, 8_000).unwrap();
@@ -1224,10 +1269,11 @@ mod tests {
         );
     }
 
+    // ── Tier 2: shortened descriptions ──────────────────────────
 
     #[test]
     fn tier2_shortens_descriptions_to_fit_budget() {
-        // Skills with 200-char descriptions.
+        // 20 skills with 200-char descriptions. Budget tight enough to force tier 2.
         let skills: Vec<SkillInfo> = (0..20)
             .map(|i| skill(&format!("s{i}"), &"X".repeat(200)))
             .collect();
@@ -1243,9 +1289,8 @@ mod tests {
 
     #[test]
     fn tier2_marker_appended_when_description_shortened() {
-        // Same setup as tier2_shortens_descriptions_to_fit_budget;
-        // descriptions are budget-cut, so each ends with the truncation
-        // marker.
+        // Same setup as tier2_shortens_descriptions_to_fit_budget; descriptions
+        // are budget-cut, so each one ends with the truncation marker.
         let skills: Vec<SkillInfo> = (0..20)
             .map(|i| skill(&format!("s{i}"), &"X".repeat(200)))
             .collect();
@@ -1255,6 +1300,7 @@ mod tests {
         assert!(text.len() <= budget + 50);
     }
 
+    // ── Tier 3: names-only ───────────────────────────────────────
 
     #[test]
     fn tier3_names_only_under_extreme_budget() {
@@ -1265,7 +1311,7 @@ mod tests {
         // No descriptions or paths -- names only.
         assert!(!text.contains(": Y"));
         assert!(!text.contains("Absolute path:"));
-        assert!(text.len() <= 500);
+        assert!(text.len() <= 500); // 400 + slack for overflow line
     }
 
     #[test]
@@ -1285,7 +1331,8 @@ mod tests {
     #[test]
     fn tier3_no_overflow_indicator_when_all_names_fit() {
         let skills = [skill("a", "desc"), skill("b", "desc")];
-        // Budget: header + name-only lines ("- a\n- b") -- use a tight budget that fits names.
+        // Budget: header + two name-only lines ("- a\n- b") -- use a tight budget
+        // that fits names but not full descriptions + paths.
         let text = announce(&skills, 80).unwrap();
         assert!(!text.contains("... and"));
         assert!(text.contains("- a"));

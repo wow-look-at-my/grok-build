@@ -1,4 +1,4 @@
-//! `x.ai/btw` extension handler: dispatch a side question to the active session via `SessionCommand::SideQuestion`.
+//! `x.ai/btw` extension handler: dispatch a side question to the active session via `SessionCommand::SideQuestion` and return the answer.
 
 use agent_client_protocol as acp;
 use tokio::sync::oneshot;
@@ -83,14 +83,14 @@ pub(super) async fn handle_btw(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtR
         Ok(answer) => super::to_ext_response(Ok(serde_json::json!({
             "answer": answer,
         }))),
-        // Model errors take the canonical mapping: overload gets its short
-        // display copy there Rate limits keep the typed code and upgrade
-        // copy.
+        // Model errors take the canonical mapping: overload gets its short display copy there
+        // Rate limits keep the typed code and upgrade copy, and auth failures map to auth_required
         Err(SideQuestionError::Sampling(e)) => {
             Err(crate::sampling::error::map_sampling_err_to_acp(e))
         }
-        // Non-model failures are already readable sentences. Set `message`
-        // and leave `data` unset.
+        // Non-model failures are already readable sentences. Set `message` and leave `data` unset.
+        // `Display` appends JSON-encoded `data`, so `internal_error().data(e)` rendered as `Internal error: "…"`
+        // That made capacity failures look like client bugs in the TUI
         Err(e) => Err(acp::Error::new(
             acp::ErrorCode::InternalError.into(),
             e.to_string(),

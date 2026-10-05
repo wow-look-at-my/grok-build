@@ -1,4 +1,10 @@
-//! Pure rendering of a compacted segment into self-contained markdown, aligned with the Python compaction implementation.
+//! Pure rendering of a compacted segment into self-contained markdown, aligned
+//! with the Python compaction implementation (`render_segment_to_markdown` /
+//! `compute_turn_stats`; INDEX built incrementally via [`INDEX_HEADER`] +
+//! [`render_index_row`]). No I/O.
+//! Not byte-identical — the data models differ (Python `Turn`/channels vs our
+//! [`ConversationItem`]) — but headers, sections, detail levels, and INDEX
+//! columns match.
 
 #![deny(clippy::indexing_slicing)]
 #![allow(clippy::unwrap_used)]
@@ -8,12 +14,14 @@ use std::sync::OnceLock;
 use regex::Regex;
 use xai_grok_sampling_types::ConversationItem;
 
-/// Layout of the per-session segment store — single source of the path convention.
+/// Layout of the per-session segment store — single source of the path
+/// convention (writer, index parser, and transcript-hint builder all use these).
 pub const COMPACTION_DIR: &str = "compaction";
 pub const INDEX_FILE: &str = "INDEX.md";
 const SEGMENT_PREFIX: &str = "segment_";
 
-/// Segment verbatim-section cap, kept at grep's file-size ceiling.
+/// Segment verbatim-section cap, kept at grep's file-size ceiling in
+/// crates/codegen/xai-grok-tools/src/implementations/grok_build/grep/mod.rs.
 const SEGMENT_MAX_BYTES: usize = 5 * 1024 * 1024;
 const TRUNCATION_NOTICE: &str =
     "\n\n[... TRUNCATED at {limit} bytes, {omitted} turns omitted ...]\n";
@@ -114,7 +122,8 @@ impl CompactionArtifact {
 /// Anchors on the `compaction/` component, not the session dir, so relative
 /// reads still match (a same-named file elsewhere is acceptable noise).
 pub fn classify_compaction_path(path: &str) -> Option<CompactionArtifact> {
-    // Allocation-free: match the `compaction` component directly.
+    // Allocation-free: match the `compaction` component directly rather than
+    // building `"compaction/"` / `"/compaction"` patterns each call.
     let trimmed = path.trim_end_matches('/');
     if trimmed == COMPACTION_DIR
         || trimmed
@@ -559,9 +568,13 @@ const KEYWORD_STOPWORDS: [&str; 28] = [
     "convention",
 ];
 
-/// Heuristic only — feeds the INDEX table.
+/// Best-effort INDEX keywords: identifier-shaped tokens from the summary's
+/// "8. Current Work" section (falling back to the whole summary), minus
+/// stopwords, deduped, capped at 8. Heuristic only — feeds the INDEX table.
 pub fn extract_keywords(summary: &str) -> Vec<String> {
+    // Rust's regex has no look-ahead, so scope section 8 with two anchored matches.
     // Header, then the next `N. Capital` header (or end of text).
+    // `#{0,6}` tolerates markdown headers as well as the bare Python form.
     let start_re =
         SECTION8_START_RE.get_or_init(|| Regex::new(r"(?m)^#{0,6}\s*8\.\s+Current Work").unwrap());
     let header_re =
@@ -658,13 +671,14 @@ mod tests {
     /// is exceeded, with a notice naming how many turns were omitted.
     #[test]
     fn verbatim_turns_truncate_at_turn_boundary() {
+        // Each turn renders ~2 MiB, so the 3rd turn blows the 5 MiB budget.
         let big = "x".repeat(2 * 1024 * 1024);
         let items = [user(&big), user(&big), user(&big), user(&big)];
         let md = render_segment_md(&items, "s", 0, CompactionDetail::Verbose, "t");
         assert!(md.contains("### Turn 0 (Human)"));
         assert!(md.contains(&format!("TRUNCATED at {SEGMENT_MAX_BYTES} bytes")));
         assert!(md.contains("turns omitted"));
-        // A whole turn.
+        // A whole turn was dropped (4 items, not all rendered).
         assert!(md.matches("### Turn ").count() < items.len());
     }
 
@@ -727,6 +741,7 @@ mod tests {
              handler.py and updated RedisCache integration.\n9. Next Step: ...\n",
         );
         assert!(kw.iter().any(|k| k == "AuthMiddleware") && kw.iter().any(|k| k == "RedisCache"));
+        // No section 8 ⇒ fall back to the whole summary.
         let kw = extract_keywords("Worked on PostgresAdapter and JwtRefresh.");
         assert!(kw.iter().any(|k| k == "PostgresAdapter") && kw.iter().any(|k| k == "JwtRefresh"));
         // All-stopword section ⇒ empty; duplicates collapse to one.
@@ -735,6 +750,7 @@ mod tests {
         );
         let kw = extract_keywords("8. Current Work: SameName SameName Other.\n");
         assert_eq!(kw.iter().filter(|k| *k == "SameName").count(), 1);
+        // Our `## N.` markdown headers: scope to section 8, exclude outside words.
         let kw = extract_keywords(
             "## 1. Intro\nGenericWord\n\n## 8. Current Work\nEditing CompactionMode here.\n\n\
              ## 9. Next\nUnrelatedThing",

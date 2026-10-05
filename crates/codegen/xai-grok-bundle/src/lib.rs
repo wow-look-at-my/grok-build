@@ -1,4 +1,8 @@
-//! On-disk cache for the subagent bundle xAI publishes.
+//! On-disk cache for the subagent bundle xAI publishes: personas, roles, agents, skills, and workflows written under `<grok home>/bundled`.
+//!
+//! `manifest.json` records a checksum for every file this crate writes, so a file the user edited by hand is never overwritten and never pruned.
+//! Archive extraction is bounded (entry count, per-entry size, total decompressed size).
+//! Every path is sanitized before it is joined onto the cache root.
 
 #![deny(clippy::indexing_slicing)]
 #![allow(clippy::cast_possible_truncation)]
@@ -929,6 +933,7 @@ mod tests {
     fn sanitize_rejects_invalid_skill_paths() {
         // Wrong top-level directory.
         assert_eq!(sanitize_relative_path("personas/commit/SKILL.md"), None);
+        // Two-component skill path (must be at least 3).
         assert_eq!(sanitize_relative_path("skills/commit.md"), None);
         // Empty skill name.
         assert_eq!(sanitize_relative_path("skills//SKILL.md"), None);
@@ -1464,6 +1469,8 @@ mod tests {
             .append_data(&mut h, "bundle.json", v.as_bytes())
             .unwrap();
 
+        // 51 entries of 1 MB each total 51 MB, just over the 50 MB limit
+        // Each entry is exactly at the per-entry limit, so only the aggregate check fires
         let big = vec![0u8; ARCHIVE_MAX_ENTRY_SIZE as usize];
         for i in 0..51 {
             let path = format!("subagents/personas/p{i}.toml");
@@ -1486,9 +1493,8 @@ mod tests {
 
     #[test]
     fn sanitize_accepts_shared_data_under_skills() {
-        // Directories under skills/ that are not skills (e.g.,
-        // shared/personas/) are valid archive entries They carry data files
-        // that skills read.
+        // Directories under skills/ that are not skills (e.g., shared/personas/) are valid archive entries
+        // They carry data files that skills read at runtime
         assert_eq!(
             sanitize_relative_path("skills/shared/personas/reviewer.md"),
             Some("skills/shared/personas/reviewer.md".to_string())

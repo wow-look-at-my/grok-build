@@ -1,4 +1,18 @@
 //! All-shortcuts cheatsheet modal (Ctrl+. / Ctrl+X).
+//!
+//! Registry-driven: `build_entries(registry)` pulls every `ActionDef` from `ActionRegistry` and groups them by `Category`.
+//! The order is onboarding-friendly (Essentials, Panes, Scrollback Navigation, View, Prompt, Agent), with alt-key bindings inline.
+//! Search filters against key display, description, and label.
+//!
+//! Two ways to read a binding's help: pattern A expands an inline help line under the selected hint (e/Space/l/h/arrows).
+//! Pattern B opens an in-modal man-style detail page on Enter; Esc (or h/Left/Backspace) returns to the browse list.
+//! Section headers collapse/expand; close via Esc in browse or Ctrl+./Ctrl+X.
+//! Rendered via `ModalWindow` chrome (same appearance as the command palette).
+//!
+//! Entry points from `AgentView`:
+//! - `build_entries(registry)` and `build_initial_picker_state` feed `ActiveModal::ShortcutsHelp`
+//! - `handle_input` / `handle_mouse` for key/mouse dispatch
+//! - Rendering is done inline in `AgentView` via `render_modal_window` and `render_picker_in_modal`.
 
 use std::borrow::Cow;
 
@@ -8,6 +22,8 @@ use crate::views::picker::{PickerConfig, PickerOutcome, PickerState, handle_pick
 use crate::views::shortcuts_bar::HintItem;
 
 /// Key for pattern-A inline expand state (`expanded_ids`).
+///
+/// Registry rows use [`ExpandKey::Action`]; display-only rows that ship `long_help` (e.g. paste) use [`ExpandKey::Pseudo`] with a stable label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExpandKey {
     Action(ActionId),
@@ -116,9 +132,9 @@ pub fn build_entries(
 ) -> Vec<ShortcutsHelpEntry> {
     let mut entries: Vec<ShortcutsHelpEntry> = Vec::new();
 
-    // Keys the dashboard session-overlay claims while it is up The overlay
-    // intercept consults `When::DashboardOverlay` before forwarding a key to
-    // the agent A lit row.
+    // Keys the dashboard session-overlay claims while it is up
+    // The overlay intercept consults `When::DashboardOverlay` before forwarding a key to the agent
+    // A lit row from another context advertising one of these keys would be lying (e.g. the cheatsheet's Ctrl+X alt is shadowed by the overlay stop).
     let overlay_claimed: std::collections::HashSet<KeyShortcut> =
         if active_contexts.contains(&When::DashboardOverlay) {
             registry
@@ -132,8 +148,9 @@ pub fn build_entries(
         };
 
     for (cat_idx, &(cat, label)) in CATEGORY_ORDER.iter().enumerate() {
-        // Dedup per category on the default key, preferring the def whose
-        // `When` context is active `DashboardStop` (list).
+        // Dedup per category on the default key, preferring the def whose `When` context is active
+        // `DashboardStop` (list) and `DashboardOverlayStop` (overlay) share Ctrl+X and category
+        // Whichever matches the active context must win regardless of registration order
         let mut seen_in_cat: std::collections::HashMap<KeyShortcut, usize> =
             std::collections::HashMap::new();
         let defs: Vec<&ActionDef> = registry
@@ -155,8 +172,9 @@ pub fn build_entries(
             if def.default_key == crate::key!(Null) && def.alt_keys.is_empty() {
                 continue;
             }
-            // The gate goes off via the remote kill switch or
-            // `GROK_VOICE_MODE=0`.
+            // The gate goes off via the remote kill switch or `GROK_VOICE_MODE=0`; don't advertise keys that
+            // do nothing `Ctrl+Space` decodes the same with or without the Kitty keyboard protocol (it just
+            // toggles instead of hold-to-talk). It is therefore shown on every terminal once the gates are on.
             if def.id == crate::actions::ActionId::VoiceToggle
                 && (!crate::app::voice_mode_enabled() || !crate::app::voice_keybind_enabled())
             {
@@ -165,13 +183,19 @@ pub fn build_entries(
             let mut item = def.hint();
             if !def.alt_keys.is_empty() {
                 item.keys.extend_from_slice(&def.alt_keys);
-                // Alt keys can be terminal-encoding variants of the SAME physical chord Shift+Tab arrives as `BackTab`, `BackTab`+SHIFT.
+                // Alt keys can be terminal-encoding variants of the SAME physical chord
+                // Shift+Tab arrives as `BackTab`, `BackTab`+SHIFT, or `Tab`+SHIFT depending on the terminal
+                // Collapse keys that render identically so the row doesn't read "Shift+Tab / Shift+Tab / Shift+Tab"
                 let mut seen_displays = std::collections::HashSet::new();
                 item.keys
                     .retain(|k| seen_displays.insert(k.display_pretty()));
                 item.custom_display = None;
             }
-            // In non-vim mode, suppress bare-letter / Shift+letter keys from any scrollback-context binding If the row has at least one non-vim key left.
+            // In non-vim mode, suppress bare-letter / Shift+letter keys from any scrollback-context binding
+            // If the row has at least one non-vim key left (e.g. an arrow alt), show only those; they still work, so don't dim.
+            // If every key was a vim key, hide the row entirely (the binding is genuinely inert when vim mode is off)
+            // When we strip the default_key but keep an alt, the custom_display string (e.g. "Shift+l/h") no longer matches what's shown.
+            // Drop it so the keys render verbatim
             let dimmed = !active_contexts.contains(&def.context);
             // Strip overlay-claimed keys from lit rows of other contexts (the overlay intercept shadows them)
             // Dimmed rows already say "not applicable here", so they keep their keys for discoverability
@@ -200,9 +224,8 @@ pub fn build_entries(
                     entries.push(hint);
                 }
                 std::collections::hash_map::Entry::Occupied(slot) => {
-                    // Same key already rendered in this category Replace it
-                    // only when the earlier row is dimmed and this is lit
-                    // (active context wins)
+                    // Same key already rendered in this category
+                    // Replace it only when the earlier row is dimmed and this one is lit (active context wins)
                     let Some(prior) = entries.get_mut(*slot.get()) else {
                         continue;
                     };
@@ -218,7 +241,8 @@ pub fn build_entries(
             let mut item = HintItem::new(crate::key!(Null), "search");
             item.custom_display = Some("/find");
             item.description = Some("Search scrollback".into());
-            // `/find` is a slash command typed at the prompt (not a scrollback keystroke like the vim `/` above) It is available when the prompt is focused.
+            // `/find` is a slash command typed at the prompt (not a scrollback keystroke like the vim `/` above)
+            // It is available when the prompt is focused, so dim on `!PromptFocused`, not scrollback
             let dimmed = !active_contexts.contains(&When::PromptFocused);
             entries.push(ShortcutsHelpEntry::Hint {
                 item,
@@ -259,7 +283,9 @@ pub fn build_entries(
             redo.keys.push(crate::key!('z', ALT));
             push_pseudo(&mut entries, redo, Some(REDO_LONG_HELP));
 
-            // Prompt history (Up / /history) It is not part of the shared paste/undo/redo `dimmed`.
+            // Prompt history (Up / /history)
+            // It is not part of the shared paste/undo/redo `dimmed`: that also lights on DashboardFocused
+            // Up-history is prompt-only, so give it its own dim scoped to PromptFocused
             let mut history = HintItem::new(crate::key!(Up), "history");
             history.description = Some("Prompt history".into());
             let history_dimmed = !active_contexts.contains(&When::PromptFocused);
@@ -272,7 +298,8 @@ pub fn build_entries(
         }
         let count = entries.len() - header_idx - 1;
         if count == 0 {
-            // Every action in this category got filtered out. Drop the empty header rather than render a dead section
+            // Every action in this category got filtered out.
+            // Drop the empty header rather than render a dead section
             entries.pop();
         } else if let Some(ShortcutsHelpEntry::SectionHeader { entry_count, .. }) =
             entries.get_mut(header_idx)
@@ -374,9 +401,9 @@ fn hint_key_display(h: &HintItem) -> String {
     }
 }
 
-/// Pretty key display for the cheatsheet modal. Uses `custom_display` when
-/// set (for special representations like "Esc. EscEsc" that can't be derived
-/// from the key list).
+/// Pretty key display for the cheatsheet modal. Uses `custom_display` when set (for special
+/// representations like "Esc. EscEsc" that can't be derived from the key list). Otherwise renders the
+/// actual keys with pretty formatting (e.g. "Ctrl+Q", "Tab / i / Space").
 fn hint_key_pretty(h: &HintItem) -> String {
     if let Some(d) = h.custom_display {
         return d.to_string();
@@ -451,6 +478,8 @@ fn picker_config(non_sel: &[bool]) -> PickerConfig<'_> {
 }
 
 /// Outcome of an input event delivered to the cheatsheet modal.
+///
+/// The caller is responsible for mutating `AgentView` state: closing the modal, re-dispatching a synthesized key into `handle_input`, etc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutsHelpOutcome {
     /// User asked to close the modal (Esc in browse, Ctrl+./Ctrl+X, [x] click).
@@ -717,8 +746,8 @@ pub fn hint_expand_action_id(entry: &ShortcutsHelpEntry) -> Option<crate::action
     }
 }
 
-/// Flip `value`'s membership in `set`: insert when absent, remove when
-/// present.
+/// Flip `value`'s membership in `set`: insert when absent, remove when present.
+/// Shared by both modal hosts for the section-collapse and inline-expand toggles.
 pub fn toggle_membership<T: Eq + std::hash::Hash>(
     set: &mut std::collections::HashSet<T>,
     value: T,
@@ -749,8 +778,8 @@ pub fn handle_input(
     }
 
     if mode.is_detail() {
-        // Back-to-browse keys handled before borrowing `scroll` so we can
-        // replace `mode`.
+        // Back-to-browse keys handled before borrowing `scroll` so we can replace `mode`.
+        // Vim keys (h/j/k/g) are intentionally NOT bound here; vim modal bindings are owned separately
         if matches!(key.code, KeyCode::Esc | KeyCode::Left | KeyCode::Backspace) {
             *mode = ShortcutsHelpMode::Browse;
             return ShortcutsHelpOutcome::Changed;
@@ -1012,8 +1041,7 @@ pub fn modal_sizing(compact: bool) -> crate::views::modal_window::ModalSizing {
     .with_compact(compact)
 }
 
-/// Per-row kind captured during [`CheatsheetRows::build`] so the borrowed
-/// picker rows need only the owned buffers.
+/// Per-row kind captured during [`CheatsheetRows::build`] so the borrowed picker rows need only the owned buffers, not the source `entries`.
 enum CheatsheetRowKind {
     Header {
         is_collapsed: bool,
@@ -1025,10 +1053,12 @@ enum CheatsheetRowKind {
     Other,
 }
 
-/// Owned per-frame buffers backing the cheatsheet picker rows.
+/// Owned per-frame buffers backing the cheatsheet picker rows, shared by both modal hosts (agent inline render and dashboard [`render_modal`]).
+/// The [`crate::views::picker::PickerEntry`] list from [`Self::picker_entries`] borrows these buffers, so this value must outlive the render call.
 pub struct CheatsheetRows {
     row_strs: Vec<(String, String)>,
-    // Inline-help per row, newlines collapsed to spaces so the collapsible view renders one wrap-flowed block Empty string.
+    // Inline-help per row, newlines collapsed to spaces so the collapsible view renders one wrap-flowed block
+    // Empty string when the row has no help; owned (it's a transform of the source)
     help_text: Vec<String>,
     kinds: Vec<CheatsheetRowKind>,
 }
@@ -1090,6 +1120,7 @@ impl CheatsheetRows {
     }
 
     /// Borrowed views of the per-row inline help, in row order.
+    /// The caller holds these so the picker's description slices can borrow them across the render.
     pub fn help_refs(&self) -> Vec<&str> {
         self.help_text.iter().map(String::as_str).collect()
     }

@@ -21,6 +21,7 @@ pub struct ClaudeSettings {
     pub permissions: Option<ParsedPermissions>,
 
     /// Raw `defaultMode` string when present (canonical under `permissions`, or grok-only root legacy).
+    /// Recognized values: `acceptEdits`, `bypassPermissions`, `default`, `plan`, `dontAsk`, `auto`.
     #[serde(default)]
     pub default_mode: Option<String>,
 
@@ -29,6 +30,7 @@ pub struct ClaudeSettings {
     pub additional_directories: Option<Vec<String>>,
 
     /// Environment variables applied to every session.
+    /// Keys and values are strings; non-string values are coerced or skipped.
     #[serde(default)]
     pub env: Option<HashMap<String, String>>,
 }
@@ -300,12 +302,13 @@ impl JsonTypeName for serde_json::Value {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Discovery.
+// Discovery
+// ═════════════════════════════════════════════════════════════════════════════
 
 // TODO: settings discovery is local to this module; extract a shared helper if more than permissions consume it.
 
-/// Discover `.claude/settings.json` and `.claude/settings.local.json`,
-/// most-specific first: project cwd down to repo root.
+/// Discover `.claude/settings.json` and `.claude/settings.local.json`, most-specific first: project cwd down to repo root, then `~/.claude`.
+/// Within a directory, `settings.local.json` precedes `settings.json`.
 pub fn has_claude_compat(cwd: &Path) -> bool {
     find_claude_settings_paths(cwd).iter().any(|p| p.exists())
 }
@@ -334,8 +337,8 @@ fn global_claude_settings_paths() -> Vec<PathBuf> {
     paths
 }
 
-/// Settings files under the folder-trust gate: full tree when trusted,
-/// user-tier `~/.claude` only when not.
+/// Settings files under the folder-trust gate: full tree when trusted, user-tier `~/.claude` only when not.
+/// Env injection and permission resolution both go through here so they cannot drift on what an untrusted clone may contribute.
 pub(crate) fn claude_settings_paths_for_trust(cwd: &Path, project_trusted: bool) -> Vec<PathBuf> {
     if project_trusted {
         find_claude_settings_paths(cwd)
@@ -344,8 +347,10 @@ pub(crate) fn claude_settings_paths_for_trust(cwd: &Path, project_trusted: bool)
     }
 }
 
-/// Whether a project-tree `.claude/settings.json` / `settings.local.json`
-/// exists anywhere on the walk from `cwd` up to the repo root.
+/// Whether a project-tree `.claude/settings.json` / `settings.local.json` exists anywhere on the walk from `cwd` up to the repo root.
+/// The folder-trust detector shares that walk ([`collect_project_claude_paths`]) with the env/permission loaders, so detection can never drift.
+/// A settings file in a SUBDIR, whose `env` is injected into every spawned subprocess, must flip the folder untrusted, not just one at the git root.
+/// Presence is type-agnostic to match the hook loader: a directory at the settings path must gate too.
 pub fn project_claude_settings_present(cwd: &Path) -> bool {
     collect_project_claude_paths(cwd)
         .iter()
@@ -355,8 +360,8 @@ pub fn project_claude_settings_present(cwd: &Path) -> bool {
 /// Collect `.claude` settings from cwd up to repo root.
 /// Root is `.git` existence, not `git2` validity, so a bare or empty `.git` still bounds the walk; loader and trust detector share this so they cannot drift.
 fn collect_project_claude_paths(cwd: &Path) -> Vec<PathBuf> {
-    // When `$HOME` is itself a git repo, drop that root so `~/.claude` is not
-    // treated as project-tier for every cwd under home Fall.
+    // When `$HOME` is itself a git repo, drop that root so `~/.claude` is not treated as project-tier for every cwd under home
+    // Fall back to cwd; this is the shared choke point for `project_claude_settings_present` and `find_claude_settings_paths`
     let repo_root = find_repo_root(cwd)
         .filter(|root| !crate::trust::is_home_dir(root))
         .unwrap_or_else(|| cwd.to_path_buf());
@@ -400,6 +405,7 @@ fn find_repo_root(start: &Path) -> Option<PathBuf> {
 /// Merge Claude settings `env`, later keys overriding earlier (cwd highest, `settings.local.json` over `settings.json`).
 /// Repo-tree `env` is injected into every spawned subprocess, so it is dropped unless `project_trusted`; user `~/.claude` env is always loaded.
 pub fn load_claude_env_with_project(cwd: &Path, project_trusted: bool) -> HashMap<String, String> {
+    // Phase 2 cutoff: if the user has imported, skip reading .claude/ at runtime.
     if is_claude_import_marked_with_log("load_claude_env_with_project") {
         return HashMap::new();
     }
@@ -426,12 +432,13 @@ pub fn load_claude_env_with_project(cwd: &Path, project_trusted: bool) -> HashMa
     merged
 }
 
-// Reader is local because gate consumers cannot depend on shell (cycle); caching omitted until this is a hotspot.
+// Phase 2 cutoff marker. Reader is local because gate consumers cannot depend on shell (cycle); caching omitted until this is a hotspot.
 
 /// True when the user marked Claude settings imported (`[claude_compat].imported` in config.toml, or the test override).
 /// Public so callers that mirror this gate elsewhere use the same check.
 pub fn is_claude_import_marked() -> bool {
-    // Test escape hatch: shell tests call `refresh_marker_cache(true)`.
+    // Test escape hatch: shell tests call `refresh_marker_cache(true)`, which lives in xai-grok-shell (inaccessible from here at runtime)
+    // They also set this env var so the gate in this crate honours the override without a cross-crate dependency
     if std::env::var("_GROK_CLAUDE_MARKER_OVERRIDE").as_deref() == Ok("1") {
         return true;
     }

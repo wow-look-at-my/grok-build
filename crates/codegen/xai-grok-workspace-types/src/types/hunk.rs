@@ -1,4 +1,9 @@
 //! Minimal serializable hunk shapes.
+//!
+//! TODO: align with `xai_hunk_tracker::Hunk` and
+//! `xai_hunk_tracker::HunkAction` when the hunk tracker's wire surface
+//! is extracted into this crate. The fields below are a strict subset
+//! sufficient for the API surface to compile.
 
 use serde::{Deserialize, Serialize};
 
@@ -28,8 +33,8 @@ pub struct Hunk {
     pub summary: String,
 }
 
-/// Action applied to a hunk by `WorkspaceOpsRequest::ActOnHunk`. TODO: align
-/// with `xai_hunk_tracker::types::HunkAction`.
+/// Action applied to a hunk by `WorkspaceOpsRequest::ActOnHunk`.
+/// TODO: align with `xai_hunk_tracker::types::HunkAction`. Adjacent tagging matches every other wire enum.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum HunkAction {

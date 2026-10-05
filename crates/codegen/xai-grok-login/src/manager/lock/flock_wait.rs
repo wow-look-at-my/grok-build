@@ -1,4 +1,7 @@
-//! Process-local single-flight for the blocking flock wait: at most one OS thread parks in the kernel per lock file.
+//! Process-local single-flight for the blocking flock wait: at most one OS thread parks in the kernel per lock file, shared by all callers.
+//! Without the dedupe, every timed-out caller leaves its own thread parked against tokio's bounded blocking pool.
+//! Liveness is ownership: the parked thread's deposit guard and the tickets hold the only strong references.
+//! An unclaimed deposit is freed when the last one drops, and the registry's `Weak` entries can neither outlive nor poison a wait.
 
 #[cfg(all(feature = "loom", not(test)))]
 compile_error!("the `loom` feature is test-only: it swaps this module's mutexes for loom models");
@@ -22,8 +25,8 @@ use loom::sync::{Mutex, MutexGuard};
 #[cfg(not(feature = "loom"))]
 use std::sync::{Mutex, MutexGuard};
 
-// Process-global: every `AuthManager` in the process must share one wait per
-// lock path.
+// Process-global: every `AuthManager` in the process must share one wait per lock path.
+// Lock order: WAITS before round; every other site takes round only
 static WAITS: LazyLock<Mutex<HashMap<PathBuf, Weak<Wait>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 

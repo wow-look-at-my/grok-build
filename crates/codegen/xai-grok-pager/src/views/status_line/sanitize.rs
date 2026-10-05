@@ -1,4 +1,6 @@
 //! Turning a script's bytes into the lines the frame paints.
+//! Separate from `xai-grok-pager-render`'s `vte::Perform`, which discards OSC and quantizes colour.
+//! This row needs OSC 8 spans in absolute screen columns.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -10,8 +12,8 @@ use super::painted_width;
 
 pub const MAX_STATUS_LINE_LINES: u16 = 5;
 
-/// Sanitized on arrival rather than per frame: tabs expanded, escapes
-/// dropped, targets checked, lines cut.
+/// Sanitized on arrival rather than per frame: tabs expanded, escapes dropped, targets checked, lines cut.
+/// The frame still applies theme and width.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SanitizedText {
     pub(super) lines: Vec<Line<'static>>,
@@ -19,6 +21,7 @@ pub struct SanitizedText {
 }
 
 /// Bounds the scan, not the paint: each link is measured from its line start, so many links cost quadratic time.
+/// The cap counts characters, escapes included, never columns.
 const MAX_SANITIZED_CHARS: usize = 1024;
 
 impl SanitizedText {
@@ -75,6 +78,7 @@ pub(super) struct CommandLink {
     pub(super) url: Arc<str>,
 }
 
+/// An open OSC 8 link.
 /// The offset is into the visible text, so its columns come from painted glyphs.
 struct OpenLink {
     line: u16,
@@ -85,7 +89,8 @@ struct OpenLink {
 fn extract_osc8_links(text: &str) -> (String, Vec<CommandLink>) {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
-    // `out` keeps the styling escapes for `ansi_to_tui` A CSI is not glyphs, so only `visible` is measured
+    // `out` keeps the styling escapes for `ansi_to_tui`
+    // A CSI is not glyphs, so only `visible` is measured
     let mut visible = String::with_capacity(text.len());
     let mut links: Vec<CommandLink> = Vec::new();
     let mut open: Option<OpenLink> = None;
@@ -163,7 +168,9 @@ fn extract_osc8_links(text: &str) -> (String, Vec<CommandLink>) {
                     i = j;
                 }
                 // DCS, SOS, PM and APC address the terminal, not the screen.
+                // Passing one through paints its payload across the row.
                 Some('P' | 'X' | '^' | '_') => i = string_sequence(&chars, i + 2).1,
+                // Charset selection and two-character escapes: `tput sgr0` emits `ESC ( B ESC [ m`; an `ESC (` left here paints `(B`
                 _ => {
                     let mut j = i + 1;
                     while chars

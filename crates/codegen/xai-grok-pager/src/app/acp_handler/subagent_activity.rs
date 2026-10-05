@@ -18,9 +18,9 @@ pub(super) fn sync_activity_label(
     }
 }
 
-/// Fan a subagent's computed activity label out to both places that show it, so both can't drift. Those are the collapsed scrollback block and
-/// the [`SubagentInfo`] backing the tasks pane and dashboard rows. Once `finished` is set, only a clear (`None`) lands: buffered updates from
-/// the child race `SubagentFinished` and must not re-stamp the label.
+/// Fan a subagent's computed activity label out to both places that show it, so the two can't drift.
+/// Those are the collapsed scrollback block and the [`SubagentInfo`] backing the tasks pane and dashboard rows.
+/// Once `finished` is set, only a clear (`None`) lands: buffered updates from the child race `SubagentFinished` and must not re-stamp the label.
 pub(super) fn sync_subagent_activity(
     parent: &mut AgentView,
     child_key: &str,

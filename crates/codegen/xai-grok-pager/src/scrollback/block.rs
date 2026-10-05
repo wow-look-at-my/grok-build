@@ -21,12 +21,14 @@ use super::types::{
     Selectable, SelectionBoundaries, derive_selection_text,
 };
 
-/// The trailing inline image anchored within a block's rendered output.
+/// The trailing inline image anchored within a block's rendered output. Mermaid diagrams do not use this path; they
+/// render as a code block plus a text affordance row instead.
 #[derive(Debug, Clone)]
 pub struct AnchoredMedia {
     /// Media metadata (path, raster dimensions, type).
     pub info: InlineMediaInfo,
     /// Post-wrap row offset, from the block's first content row, where the image's top edge is anchored.
+    /// (Tool-media blocks have no top vpad, so this is measured from the entry top.)
     pub row_offset: u16,
     /// Height of the image area in rows (the crop region).
     pub rows: u16,
@@ -39,10 +41,13 @@ pub trait BlockContent {
     /// Produce renderable content for the given context.
     fn output(&self, ctx: &BlockContext) -> BlockOutput;
 
-    /// Accent line style (color, animation). Returns `None` for blocks without an accent line.
+    /// Accent line style (color, animation).
+    /// Returns `None` for blocks without an accent line.
+    /// Returns `Some(AccentStyle)` with color and animation info.
     fn accent(&self, ctx: &BlockContext) -> Option<AccentStyle>;
 
-    /// Bullet/icon color style.
+    /// Bullet/icon color style. Default: delegates to `accent()`, so the bullet matches the accent color. a failed Read
+    /// has no accent but a red bullet.
     fn bullet(&self, ctx: &BlockContext) -> Option<AccentStyle> {
         self.accent(ctx)
     }
@@ -58,6 +63,8 @@ pub trait BlockContent {
     }
 
     /// Vertical padding (blank line with accent top/bottom).
+    ///
+    /// Borrows the appearance rather than taking a [`BlockContext`] so the O(history) height passes do not build one per entry.
     fn has_vpad_for(&self, _appearance: &AppearanceConfig) -> bool {
         true
     }
@@ -87,7 +94,8 @@ pub trait BlockContent {
     }
 
     /// Get the display mode to use when explicitly collapsing (left/h key).
-    /// Default: Collapsed.
+    /// Default: Collapsed. Blocks can override to use a different minimum mode when running.
+    /// Execute blocks use Truncated while running to keep showing the streaming output preview.
     fn collapse_mode(&self, is_running: bool) -> DisplayMode {
         let _ = is_running;
         DisplayMode::Collapsed
@@ -100,8 +108,9 @@ pub trait BlockContent {
         DisplayMode::Expanded
     }
 
-    /// Display mode to adopt when the entry finishes running. Called by
-    /// `finish_running()`.
+    /// Display mode to adopt when the entry finishes running. Called by `finish_running()`. Returns `Some(mode)` to
+    /// override the current display mode, or `None` to keep it as-is. Default: `None` (no change). Blocks that
+    /// auto-collapse on finish (thinking, execute) or on error (edit) should override this.
     fn finished_display_mode(&self) -> Option<DisplayMode> {
         None
     }
@@ -112,8 +121,9 @@ pub trait BlockContent {
         true
     }
 
-    /// Whether this block should display a bullet/icon prefix. Default:
-    /// `false`.
+    /// Whether this block should display a bullet/icon prefix.
+    /// Default: `false`. Override to opt in (e.g., ToolCallBlock when the bullet is configured, ThinkingBlock when collapsed).
+    /// The bullet character and color are determined by the appearance config and accent style.
     fn has_bullet(&self, _ctx: &BlockContext) -> bool {
         false
     }
@@ -123,7 +133,9 @@ pub trait BlockContent {
         None
     }
 
-    /// Whether this block participates in dense group rendering.
+    /// Whether this block participates in dense group rendering. Groupable blocks that are adjacent form a "group":
+    /// they render without gap rows between them when collapsed. Non-groupable blocks always have gap rows around them
+    /// and break any adjacent group.
     fn is_groupable(&self) -> bool {
         false
     }
@@ -138,19 +150,22 @@ pub trait BlockContent {
         &[]
     }
 
-    /// Inline media metadata for blocks that should display media inline in
-    /// the scrollback.
+    /// Inline media metadata for blocks that should display media inline in the scrollback.
+    /// The renderer uses this to reserve height and the draw loop uses it to emit terminal image escape sequences. Default: none.
     fn inline_media(&self) -> Option<InlineMediaInfo> {
         None
     }
 
     /// Blocks without `inline_media()` return empty. Every non-media block (all agent messages, all non-media tool
-    /// calls) returns here without building `output()`.
+    /// calls) returns here without building `output()`. The `output()` rebuild below runs only for a media block (today
+    /// only `OtherToolCallBlock`), whose `output()` is a cheap 2 or 3 line build.
     fn inline_media_placements(&self, ctx: &BlockContext) -> Vec<AnchoredMedia> {
         let Some(info) = self.inline_media() else {
             return Vec::new();
         };
-        // Trailing geometry: the image starts one row below the block's text (`content_lines + 1`) It is fitted.
+        // Trailing geometry: the image starts one row below the block's text (`content_lines + 1`)
+        // It is fitted to the same cell budget `EntryRenderer::inline_media_rows` reserves
+        // The line count needs the laid-out output; the generic wrapper can't know it otherwise
         let content_lines = self.output(ctx).lines.len() as u16;
         let (rows, _total_rows) = inline_media_reserved_rows(&info, ctx.width);
         vec![AnchoredMedia {
@@ -160,20 +175,22 @@ pub trait BlockContent {
         }]
     }
 
-    /// Clickable affordance rows for the diagrams in this block's `output()`
-    /// (the `auto`/`on` Mermaid display).
+    /// Clickable affordance rows for the diagrams in this block's `output()` (the `auto`/`on` Mermaid display).
+    /// Default: none (only agent messages with diagrams override this).
     fn diagram_affordances(&self, _ctx: &BlockContext) -> Vec<DiagramAffordance> {
         Vec::new()
     }
 
-    /// Rows this block inserts into `output()` that the source-text height
-    /// *estimate* cannot see.
+    /// Rows this block inserts into `output()` that the source-text height *estimate* cannot see.
+    /// The off-screen estimate adds them so it never under-reserves.
+    /// The only such rows today are Mermaid treatment rows (one affordance row or fallback caption per detected diagram). Default: `0`.
     fn estimate_extra_rows(&self) -> u16 {
         0
     }
 
-    /// For media blocks on terminals without inline-graphics support, returns
-    /// `(path, is_video)`.
+    /// For media blocks on terminals without inline-graphics support, returns `(path, is_video)`.
+    /// The block uses it to render a clickable text `[Open]` line.
+    /// `None` on graphics terminals (the overlay hosts its own buttons).
     fn inline_open_button(&self) -> Option<(std::path::PathBuf, bool)> {
         None
     }
@@ -215,9 +232,12 @@ pub fn prepend_bullet(output: &mut BlockOutput, ctx: &BlockContext, bullet: Opti
 pub struct StubBlock {
     pub text: String,
     pub accent_color: ratatui::style::Color,
-    /// Whether this stub participates in dense group rendering. Default: `true`.
+    /// Whether this stub participates in dense group rendering.
+    /// Default: `true`. Set to `false` for stubs that simulate non-groupable blocks (e.g., agent messages) in tests.
     pub groupable: bool,
     /// Per-line background applied to every output line, plus its panel flag ([`BlockLine::background_is_panel`]).
+    /// Lets renderer tests exercise line-background handling with a FIXED injected color.
+    /// It stays independent of `Theme::current()`, whose process-global kind and color-level state is not stable across a parallel test run.
     pub line_bg: Option<(ratatui::style::Color, bool)>,
 }
 
@@ -351,8 +371,9 @@ fn plain_text_from_output(
     wrote_any.then_some(result)
 }
 
-/// Join source-text parts for full-text search, dropping `None` and empty
-/// strings so absent fields never inject blank lines or false matches.
+/// Join source-text parts for full-text search, dropping `None` and empty strings so absent fields never inject blank lines or false matches.
+///
+/// Returns `None` when nothing remains: a block with no source text is left out of the index rather than indexed as an empty string.
 pub(crate) fn join_searchable(parts: impl IntoIterator<Item = Option<String>>) -> Option<String> {
     let joined = parts
         .into_iter()
@@ -534,6 +555,8 @@ impl RenderBlock {
     }
 
     /// Create an empty streaming agent message block.
+    ///
+    /// Use `as_agent_message_mut()` to get the block and call `push_chunk()` to append streaming content.
     pub fn agent_message_streaming() -> Self {
         RenderBlock::AgentMessage(AgentMessageBlock::streaming())
     }
@@ -637,11 +660,15 @@ impl RenderBlock {
     }
 
     /// Create an empty streaming thinking block.
+    ///
+    /// Use `as_thinking_mut()` to get the block and call `push_chunk()` to append streaming content.
     pub fn thinking_streaming() -> Self {
         RenderBlock::Thinking(ThinkingBlock::streaming())
     }
 
     /// Create an empty streaming thinking block for historical replay.
+    /// Does not start a local elapsed timer; the collapsed "Thought for Xs" duration comes from the server-reported elapsed instead.
+    /// See [`ThinkingBlock::streaming_replay`].
     pub fn thinking_streaming_replay() -> Self {
         RenderBlock::Thinking(ThinkingBlock::streaming_replay())
     }
@@ -650,9 +677,9 @@ impl RenderBlock {
         RenderBlock::System(SystemMessageBlock::new(text))
     }
 
-    /// Create a `/context` snapshot block. The block stores the raw
-    /// `ContextInfo` snapshot and model name and rebuilds its styled output
-    /// on every redraw.
+    /// Create a `/context` snapshot block.
+    /// The block stores the raw `ContextInfo` snapshot and model name and rebuilds its styled output on every redraw.
+    /// Theme switches thus take effect without re-running `/context`.
     pub fn context_info(
         snapshot: xai_grok_shell::session::ContextInfo,
         model: impl Into<String>,
@@ -714,8 +741,8 @@ impl RenderBlock {
         }
     }
 
-    /// The read-only counterpart of
-    /// [`as_agent_message_mut`](Self::as_agent_message_mut).
+    /// The read-only counterpart of [`as_agent_message_mut`](Self::as_agent_message_mut).
+    /// Use it to inspect a message's content (e.g. its detected diagrams) without mutating it.
     pub fn as_agent_message(&self) -> Option<&AgentMessageBlock> {
         match self {
             RenderBlock::AgentMessage(b) => Some(b),
@@ -734,8 +761,8 @@ impl RenderBlock {
         matches!(self, RenderBlock::UserPrompt(_))
     }
 
-    /// Used by the entry cache to decide whether selection state should
-    /// invalidate the cached output.
+    /// Used by the entry cache to decide whether selection state should invalidate the cached output.
+    /// Tool call variants undim their collapsed header text when selected.
     pub fn is_tool_call(&self) -> bool {
         matches!(self, RenderBlock::ToolCall(_))
     }
@@ -784,8 +811,8 @@ impl RenderBlock {
         )
     }
 
-    /// Absolute path of the media (image/video) this block references, if it
-    /// is a media-generation tool result.
+    /// Absolute path of the media (image/video) this block references, if it is a media-generation tool result.
+    /// Used to resolve the short relative paths the model prints in prose (`images/1.jpg`) to a clickable link.
     pub(crate) fn media_ref_path(&self) -> Option<std::path::PathBuf> {
         match self {
             RenderBlock::ToolCall(ToolCallBlock::Other(b)) => b.media_ref_path(),
@@ -793,8 +820,9 @@ impl RenderBlock {
         }
     }
 
-    /// Drop rebuildable render caches held inside the block. the markdown word-wrap cache on markdown-backed blocks (agent messages, thinking, /btw). The source text and pre-wrap render stay. the next `output()` call
-    /// rebuilds the wrap transparently.
+    /// Drop rebuildable render caches held inside the block. Currently the markdown word-wrap cache on markdown-backed
+    /// blocks (agent messages, thinking, /btw). The source text and pre-wrap render stay. the next `output()` call
+    /// rebuilds the wrap transparently. Called by `ScrollbackState::evict_offscreen_render_caches`.
     pub fn evict_render_caches(&self) {
         match self {
             RenderBlock::AgentMessage(b) => b.content().evict_wrap_cache(),
@@ -1055,8 +1083,9 @@ impl RenderBlock {
         }
     }
 
-    /// Set the raw mode for blocks that support it. This should be called
-    /// before `output()` when the raw mode might have changed.
+    /// Set the raw mode for blocks that support it.
+    /// This should be called before `output()` when the raw mode might have changed.
+    /// Only affects AgentMessage and Thinking blocks; other blocks ignore this.
     pub fn set_raw_mode(&mut self, raw: bool) {
         match self {
             RenderBlock::AgentMessage(block) => block.set_raw_mode(raw),
@@ -1089,6 +1118,7 @@ mod tests {
     }
 
     /// A block with N text lines and one trailing inline image.
+    /// Exercises the default `inline_media_placements` wrapper that preserves tool media.
     struct TrailingMediaBlock {
         lines: usize,
     }
@@ -1117,7 +1147,8 @@ mod tests {
 
     #[test]
     fn default_inline_media_placements_wrap_trailing_media() {
-        // The default wrapper turns a single `inline_media()` into one trailing placement The image anchors one row below the text.
+        // The default wrapper turns a single `inline_media()` into one trailing placement
+        // The image anchors one row below the text, with the filepath line exposed, preserving the historical tool-media geometry
         let block = TrailingMediaBlock { lines: 2 };
         let c = ctx(DisplayMode::Expanded, false);
         let placements = block.inline_media_placements(&c);
@@ -1390,7 +1421,8 @@ mod searchable_text_tests {
         let block = RenderBlock::Btw(BtwBlock::new("what is rust", "a **systems** language"));
         let text = block.searchable_text().expect("btw text");
         assert!(text.contains("what is rust"), "got: {text:?}");
-        // Rendered plain text is indexed (markers stripped) A query that spans the emphasis, "a systems language".
+        // Rendered plain text is indexed (markers stripped)
+        // A query that spans the emphasis, "a systems language", matches the index just as it matches the on-screen highlight
         assert!(text.contains("a systems language"), "got: {text:?}");
         assert!(!text.contains("**"), "markers should be stripped: {text:?}");
     }

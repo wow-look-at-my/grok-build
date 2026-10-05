@@ -1,4 +1,20 @@
 //! `edit` tool — OpenCode namespace.
+//!
+//! Performs exact string replacements in files with support for:
+//! - Exact string replacement (find/replace)
+//! - New file creation (when `old_string` is empty)
+//! - Replace-all mode (`replace_all: true`)
+//!
+//! Reuses `SearchReplaceOutput` from the output types so that the rest of
+//! the crate (prompt rendering, notification routing, etc.) can treat edits
+//! from any namespace uniformly.
+//!
+//! ## Resources
+//!
+//! - `Cwd` — working directory for path resolution (required)
+//! - `FileSystem` — read/write file content (required)
+//! - `NotificationHandle` — emit `FileWritten` notifications (required)
+//! - `ToolCallId` — notification correlation (required)
 
 use std::sync::Arc;
 
@@ -101,7 +117,9 @@ impl From<EditInput> for crate::types::tool_io::ToolInput {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────── Tool.
+// ───────────────────────────────────────────────────────────────────────────
+// Tool
+// ───────────────────────────────────────────────────────────────────────────
 
 /// OpenCode `edit` tool — performs exact string replacements in files.
 #[derive(Debug, Default)]
@@ -941,6 +959,7 @@ mod tests {
         let tool = EditTool;
         let resources = test_resources(tmp.path());
 
+        // Replace 1 line with 3 lines.
         let input = make_input(
             "test.txt",
             "old_line\n",
@@ -1021,7 +1040,7 @@ mod tests {
         }
     }
 
-    // ── Replace-all with occurrences ────────────────────────
+    // ── Replace-all with three occurrences ────────────────────────
 
     #[tokio::test]
     async fn replace_all_three_occurrences() {
@@ -1153,5 +1172,8 @@ mod tests {
         }
     }
 
+    // ── Notification sent ───────────────────────────────────────
 
+    // Notification verification requires a capturing handle not available
+    // in unit tests. Covered at integration layer.
 }

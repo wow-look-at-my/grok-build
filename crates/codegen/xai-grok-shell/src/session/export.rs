@@ -1,4 +1,6 @@
 //! Session export for sharing via the remote session-sharing backend.
+//!
+//! Uses `updates.jsonl` (ACP SessionNotifications) as the source of truth, not `chat_history.jsonl` which is only for LLM API calls.
 
 use crate::session::info::Info;
 use crate::session::persistence::Summary;
@@ -86,7 +88,8 @@ pub struct ExportedMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
 
-    // --- Subagent-specific fields (all optional for backward compatibility) --- Session kind: "parent", "subagent".
+    // --- Subagent-specific fields (all optional for backward compatibility) ---
+    /// Session kind: "parent", "subagent", or "subagent_fork".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_kind: Option<String>,
     /// Subagent type (e.g., "general-purpose", "explore", "plan").
@@ -102,6 +105,7 @@ pub struct ExportedMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent_depth: Option<u32>,
     /// Whether `title` was set by a manual rename; omitted when `None`.
+    /// `ClearTitle` writes `Some(false)` so a merge-style backend drops a prior pin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_is_manual: Option<bool>,
 }

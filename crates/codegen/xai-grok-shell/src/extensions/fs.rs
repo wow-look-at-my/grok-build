@@ -1,4 +1,5 @@
 //! Routing: absolute paths work directly; relative paths require sessionId for lookup.
+//! Business logic is delegated to `session::file_system::*` pure functions.
 use super::{Empty, ExtResult, parse_params, to_ext_response};
 use crate::agent::MvpAgent;
 use crate::session::ExtMethodResult;
@@ -42,6 +43,7 @@ pub(crate) struct FsListRequest {
     pub include_hidden: bool,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    /// Pagination offset applied after the dirs-first sort (default 0).
     #[serde(default)]
     pub offset: u64,
     #[serde(default = "default_follow_symlinks")]
@@ -86,9 +88,12 @@ pub(crate) struct FsReadFileRequest {
     #[serde(default)]
     pub max_lines: Option<usize>,
     /// Byte offset for a binary-safe ranged read.
+    /// When `offset`/`length` is set (or `encoding` is `base64`) the read returns the chunk `[offset, offset + length)`.
+    /// Otherwise the whole file is read (legacy behavior).
     #[serde(default)]
     pub offset: Option<u64>,
-    /// Bytes to read for a ranged read.
+    /// Bytes to read for a ranged read. Absent means "to EOF", but the effective read is always capped at `max_bytes` (default 1 MiB) and the server's hard limit. An unset `length` therefore still yields at most `max_bytes`.
+    /// Detect "more data" by comparing the returned bytes (from `offset`) against the response `size`.
     #[serde(default)]
     pub length: Option<u64>,
     /// Transfer encoding for ranged reads (default `utf8`; non-UTF-8 ranges fall back to base64 regardless).

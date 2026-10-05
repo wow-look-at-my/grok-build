@@ -1,4 +1,23 @@
 //! Shared size-bounding for MCP/text tool output.
+//!
+//! Large payloads (e.g. Sentry attachment base64 resources) must not land
+//! fully in chat state: they inflate the token estimate and trigger premature
+//! auto-compact.
+//!
+//! # Configurable limit
+//!
+//! Default [`MCP_MAX_OUTPUT_BYTES`] (20_000). Effective limit (highest first):
+//!
+//! 1. [`TruncationCfg`](crate::types::resources::TruncationCfg) per-tool /
+//!    MCP-specific (`mcp_max_output_bytes` — e.g. a winning repo-level
+//!    `[mcp] max_output_bytes`, seeded per session by the shell) / default,
+//!    when present in resources
+//! 2. Host-seeded effective limit via [`set_mcp_max_output_bytes`] (host
+//!    resolves requirements > env > config > remote config > default once at
+//!    bootstrap / remote-config refresh and stores the result)
+//! 3. When host has not seeded (`0`): env
+//!    [`ENV_GROK_MAX_MCP_OUTPUT_BYTES`] / [`ENV_MAX_MCP_OUTPUT_BYTES`]
+//! 4. Built-in default
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -15,15 +34,21 @@ use crate::util::truncate::format_bytes;
 pub const MCP_MAX_OUTPUT_BYTES: usize = 20_000;
 
 /// Env override for the MCP inline output cap (bytes).
+/// Some agents use `MAX_MCP_OUTPUT_TOKENS`; we bound by **bytes** because
+/// truncation is byte-oriented (`truncate_str`).
 pub const ENV_MAX_MCP_OUTPUT_BYTES: &str = "MAX_MCP_OUTPUT_BYTES";
 
 /// Grok-native env override for the MCP inline output cap (bytes).
 pub const ENV_GROK_MAX_MCP_OUTPUT_BYTES: &str = "GROK_MAX_MCP_OUTPUT_BYTES";
 
-/// Process-wide effective limit. `0` = host has not seeded; fall through to env / default.
+/// Process-wide effective limit. `0` = host has not seeded; fall through to
+/// env / default. The shell writes the *fully resolved* stack here so free-
+/// function tool dispatch (no live `Config`) sees the same value.
 static EFFECTIVE_MCP_MAX_OUTPUT_BYTES: AtomicUsize = AtomicUsize::new(0);
 
-/// Host (shell) sets the fully-resolved MCP output cap in bytes.
+/// Host (shell) sets the fully-resolved MCP output cap in bytes. Pass the already-resolved limit
+/// (requirements > env > config > remote config > default). Pass `0` only in tests to clear and
+/// fall through to env / default.
 pub fn set_mcp_max_output_bytes(bytes: usize) {
     EFFECTIVE_MCP_MAX_OUTPUT_BYTES.store(bytes, Ordering::Relaxed);
 }
@@ -35,8 +60,9 @@ fn parse_positive_bytes_env(name: &str) -> Option<usize> {
     usize::try_from(n).ok().filter(|n| *n > 0)
 }
 
-/// Env tier: `GROK_MAX_MCP_OUTPUT_BYTES` then `MAX_MCP_OUTPUT_BYTES`.
-/// Grok-native wins when both are set. Positive integers only.
+/// Env tier: `GROK_MAX_MCP_OUTPUT_BYTES` then `MAX_MCP_OUTPUT_BYTES`. Grok-native wins when both
+/// are set. Positive integers only. Used by the shell resolver and as the standalone fallback when
+/// the host has not called [`set_mcp_max_output_bytes`].
 pub fn mcp_max_output_bytes_from_env() -> Option<usize> {
     parse_positive_bytes_env(ENV_GROK_MAX_MCP_OUTPUT_BYTES)
         .or_else(|| parse_positive_bytes_env(ENV_MAX_MCP_OUTPUT_BYTES))

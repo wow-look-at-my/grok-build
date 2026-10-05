@@ -1,4 +1,12 @@
 //! [`BreakerConfig`] — tuning knobs for [`crate::CircuitBreaker`].
+//!
+//! Two named presets:
+//! - [`BreakerConfig::server`] — defaults suited to a shared server-side
+//!   breaker (stricter trip threshold, short cool-down).
+//! - [`BreakerConfig::client`] — defaults suited to client-side breakers
+//!   keyed per endpoint or tenant (fewer samples, longer cool-down).
+//!
+//! [`BreakerConfig::from_env`] reads `CB_*` env vars.
 
 use std::collections::HashSet;
 use std::time::Duration;

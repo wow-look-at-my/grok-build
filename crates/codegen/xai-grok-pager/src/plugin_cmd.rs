@@ -1,4 +1,10 @@
 //! `grok plugin` CLI subcommand: manage plugins and marketplace sources.
+//!
+//! Follows the `memory_cmd.rs`, `sessions_cmd.rs`, and `worktree_cmd` pattern: clap args and handler logic co-located in a dedicated module.
+//! The pager's `main.rs` dispatches here with a one-liner.
+//!
+//! Business logic lives in `xai_grok_shell::plugin` and lower crates (`xai-grok-agent`, `xai-grok-plugin-marketplace`).
+//! This module is a thin CLI wrapper: parse args, call ops, format output, emit telemetry.
 
 use std::path::{Path, PathBuf};
 
@@ -88,6 +94,7 @@ pub enum PluginCommand {
     /// Install a plugin from a git URL or local path
     Install {
         /// Git URL, GitHub shorthand (user/repo), or local path.
+        /// Supports @ref suffix (e.g. user/repo@v1.0) and #subdir.
         source: String,
         /// Trust the plugin immediately (skip confirmation prompt).
         #[arg(long)]
@@ -871,7 +878,8 @@ fn marketplace_add(url: &str, force: bool) -> Result<()> {
         bail!("Marketplace source blocked: {reason}");
     }
 
-    // Dedupe against the FULL unfiltered source list by canonical git-URL identity, mirroring the shell modal twin.
+    // Dedupe against the FULL unfiltered source list by canonical git-URL identity, mirroring the
+    // shell modal twin; the locked add core below re-checks under the flock.
     let existing = xai_grok_shell::plugin::load_marketplace_sources();
     let already_configured = match &input {
         MarketplaceAddInput::GitUrl(git_url) => {
@@ -910,7 +918,8 @@ fn marketplace_add(url: &str, force: bool) -> Result<()> {
         }
     };
 
-    // Shared locked add core (same as the shell modal): init flock across the read-modify-write, idempotent normalized dedup.
+    // Shared locked add core (same as the shell modal): init flock across the
+    // read-modify-write, idempotent normalized dedup, atomic replace.
     let grok_home = xai_grok_config::grok_home();
     let _flock = xai_grok_shell::util::config::acquire_init_lock(&grok_home)?;
     plugin::add_marketplace_source(
@@ -947,7 +956,8 @@ fn find_removal_source<'a>(
     }
 
     let expanded = plugin::expand_github_shorthand(input);
-    // Full git-URL normalization (`.git`, host case, scp-vs-https spelling).
+    // Full git-URL normalization (`.git`, host case, scp-vs-https spelling),
+    // same matching `marketplace add` dedupes with.
     use xai_grok_workspace::permission::resolution::normalize_git_url;
     let norm = normalize_git_url(input);
     let exp_norm = normalize_git_url(&expanded);
@@ -995,14 +1005,16 @@ fn marketplace_remove(
 
     let identity = source.identity();
 
-    // Uninstall + config rewrite under the init flock with atomic replace, mirroring the shell modal twin (`remove_source_locked`).
+    // Uninstall + config rewrite under the init flock with atomic replace, mirroring the shell
+    // modal twin (`remove_source_locked`); an unlocked remove is the lost-update race.
     let grok_home = xai_grok_config::grok_home();
     let _flock = xai_grok_shell::util::config::acquire_init_lock(&grok_home)?;
 
     let uninstalled = plugin::uninstall_marketplace_source_plugins(&identity)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    // Shared remove-write core (same as the shell modal): config.toml with the official flag folded in, JSON stores.
+    // Shared remove-write core (same as the shell modal): config.toml with the
+    // official flag folded in, JSON stores as fallback.
     let config_path = grok_home.join(xai_grok_config::USER_CONFIG_FILENAME);
     if plugin::remove_marketplace_source_from_stores(&config_path, &identity)?
         == plugin::MarketplaceSourceRemoval::NotFound

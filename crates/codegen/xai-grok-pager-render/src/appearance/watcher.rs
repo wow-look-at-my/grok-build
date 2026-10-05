@@ -1,4 +1,5 @@
 //! In dev mode, watches ~/.grok/pager.toml for changes and hot-reloads.
+//! In prod mode, returns static defaults (no file operations).
 use super::config::AppearanceConfig;
 use std::io;
 use std::path::PathBuf;

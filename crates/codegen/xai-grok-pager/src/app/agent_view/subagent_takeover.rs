@@ -1,4 +1,10 @@
-//! Fullscreen subagent takeover for [`AgentView`]: opening and closing the child view, drawing its framed transcript, routing input to it.
+//! Fullscreen subagent takeover for [`AgentView`]: opening and closing the child view, drawing its framed transcript,
+//! routing input to it, and fetching a child for a live update (which hydrates a resumed child's transcript first).
+//!
+//! Invariants: `active_subagent` is the sole "takeover open" signal, and every close routes through
+//! `close_subagent_fullscreen` so `evict_finished_child_view` runs exactly once. While open, the intercept runs as
+//! step 0 of `handle_input_inner`, before any parent routing, and the child's `pending_effects` are hoisted because
+//! `AppView` drains only the top-level view's queue. Ctrl+Q is never consumed here; it always bubbles to the global quit.
 use crate::actions::ActionRegistry;
 use crate::app::agent_view::child_action_filter::filter_child_outcome;
 use crate::app::agent_view::viewer::IdleEnterQuote;
@@ -15,8 +21,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Span;
-/// What a subagent's fullscreen takeover inherits from a parent that sits in
-/// the dashboard overlay.
+/// What a subagent's fullscreen takeover inherits from a parent that sits in the dashboard overlay. The header and footer
+/// keep describing the parent, so its title, switcher, and `Ctrl+X` action come from it (its pending confirmation already
+/// arrives as `pending_hint`).
 #[derive(Clone, Copy)]
 pub(super) struct InheritedOverlay<'a> {
     pub(super) header: OverlayHeader<'a>,
@@ -63,19 +70,17 @@ impl AgentView {
         self.open_subagent_fullscreen(child_sid);
         true
     }
-    /// Close the fullscreen subagent takeover (if any), evicting the closed
-    /// child when finished. See
-    /// [`crate::app::subagent::evict_finished_child_view`] for rationale and
-    /// guards.
+    /// Close the fullscreen subagent takeover (if any), evicting the closed child when finished.
+    /// See [`crate::app::subagent::evict_finished_child_view`] for rationale and guards.
+    /// All close sites route through here.
     pub(crate) fn close_subagent_fullscreen(&mut self) {
         if let Some(child_sid) = self.active_subagent.take() {
             let _ = crate::app::subagent::evict_finished_child_view(self, &child_sid);
         }
     }
-    /// Fetch a child view for applying a live update, hydrating a resumed
-    /// child's inherited transcript first. The incoming block then never
-    /// closes the replay window (see
-    /// [`crate::app::subagent::replay_resumed_child_before_live_block`]).
+    /// Fetch a child view for applying a live update, hydrating a resumed child's inherited transcript first.
+    /// The incoming block then never closes the replay window (see [`crate::app::subagent::replay_resumed_child_before_live_block`]).
+    /// The funnel for every apply that can be a resumed child's *first* live block: the ACP and xAI child ingresses and the finish-path finalize.
     pub(crate) fn child_view_for_live_update_mut(
         &mut self,
         child_sid: &str,

@@ -1,7 +1,10 @@
 //! Embedding provider abstraction for memory vector search.
+//!
+//! The sqlite-vec `chunks_vec` virtual table is the embedding cache; there is no separate cache.
 
 use async_trait::async_trait;
 
+/// Maximum retry attempts for transient API errors (429, 5xx).
 const MAX_RETRIES: usize = 3;
 /// Initial backoff delay in milliseconds (doubles on each retry: 1s, 2s, 4s).
 const INITIAL_BACKOFF_MS: u64 = 1000;
@@ -113,6 +116,7 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                 "dimensions": self.dimensions,
             });
 
+            // Transient errors (429, 5xx) are retried with exponential backoff
             let mut last_err = String::new();
             let mut success = false;
             for attempt in 0..MAX_RETRIES {
@@ -168,6 +172,7 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                     break;
                 }
 
+                // Retry on 429 (rate limit) or 5xx (server error)
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
                     last_err = format!(
                         "HTTP {status}: {}",

@@ -19,7 +19,8 @@ pub enum OpsChunk {
     GitDiff(GitDiff),
     /// Response to `WorkspaceOpsRequest::GitBranchInfo`.
     GitBranchInfo(GitBranchInfo),
-    /// Response to `WorkspaceOpsRequest::GitMetadata`. None if the workspace is not a git repo.
+    /// Response to `WorkspaceOpsRequest::GitMetadata`.
+    /// None if the workspace is not a git repo.
     GitMetadata(Option<GitMetadata>),
 
     /// Response to `WorkspaceOpsRequest::ListHunks`.
@@ -33,6 +34,7 @@ pub enum OpsChunk {
     /// Response to `WorkspaceOpsRequest::LoadPermissions`.
     Permissions(PermissionPolicy),
     /// Response to `WorkspaceOpsRequest::LoadEnvrc`.
+    /// `BTreeMap` so JSON key order is deterministic; the on-wire shape is still a JSON object.
     Envrc(BTreeMap<String, String>),
     /// Response to `WorkspaceOpsRequest::ResolveFileRefs`.
     ResolvedFiles(Vec<ResolvedFile>),

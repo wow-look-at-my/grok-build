@@ -1,4 +1,7 @@
 //! Shared prompt-area list overlay: accent bar, bold title, and a scrollable single-line row list with a cursor.
+//!
+//! `/rewind`'s picker phase and `/jump` each used to keep this row geometry in sync by hand across their render, hit-test, and height functions.
+//! Row content stays with the caller (a closure); this module owns the accent bar, title, cursor styling, and the scroll window.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -11,6 +14,7 @@ use crate::theme::Theme;
 const MAX_ROWS: usize = 15;
 
 /// List geometry: row count and cursor position.
+/// Construct per call; every method derives the same scroll window from these two fields, so the render, hit-test, and height paths cannot drift.
 pub struct ListOverlay {
     pub len: usize,
     pub selected: usize,
@@ -26,6 +30,7 @@ pub struct RowCtx {
 }
 
 impl ListOverlay {
+    /// Overlay height: title plus rows (at most [`MAX_ROWS`]), capped at 60% of the screen, plus one padding row.
     pub fn height(&self, screen_h: u16) -> u16 {
         let rows = self.len.min(MAX_ROWS) as u16;
         let h = 2 + rows;
@@ -170,6 +175,7 @@ mod tests {
             len: 3,
             selected: 0,
         };
+        // Title at y+1; rows start at y+2.
         assert_eq!(list.row_at(area(), 5, 1), None);
         assert_eq!(list.row_at(area(), 5, 2), Some(0));
         assert_eq!(list.row_at(area(), 5, 4), Some(2));
@@ -181,6 +187,7 @@ mod tests {
 
     #[test]
     fn row_at_respects_scroll_window() {
+        // 20 rows, 7 visible (height 10 - 3), cursor at the end: the window starts at 13 so the cursor stays visible
         let list = ListOverlay {
             len: 20,
             selected: 19,
@@ -210,6 +217,7 @@ mod tests {
                     Style::default().fg(theme.text_primary).bg(ctx.row_bg),
                 ))
             });
+            // Rows start at y+2; content at x+3.
             let Some(cursor) = buf.cell((3, 3)) else {
                 panic!("cursor cell");
             };
@@ -243,12 +251,12 @@ mod tests {
             len: 2,
             selected: 0,
         };
-        assert_eq!(two.height(40), 5); // title + a couple of rows
+        assert_eq!(two.height(40), 5); // title + 2 rows + padding
         let many = ListOverlay {
             len: 30,
             selected: 0,
         };
         assert_eq!(many.height(40), 18); // 15-row cap
-        assert_eq!(many.height(12), 8);
+        assert_eq!(many.height(12), 8); // 60% screen cap
     }
 }

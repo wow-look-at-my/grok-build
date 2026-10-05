@@ -48,7 +48,8 @@ fn openat_component(directory: &File, name: &OsStr, flags: i32) -> Option<File> 
     use std::os::unix::ffi::OsStrExt as _;
 
     let name = std::ffi::CString::new(name.as_bytes()).ok()?;
-    // SAFETY: the directory fd and NUL-terminated child name are valid.
+    // SAFETY: the directory fd and NUL-terminated child name are valid; no
+    // creation mode argument is required because the flags never create.
     let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
     // SAFETY: a nonnegative `openat` result transfers one owned fd.
     (fd >= 0).then(|| unsafe { File::from_raw_fd(fd) })
@@ -109,7 +110,7 @@ impl DirectoryStream {
 
     fn close(mut self) -> bool {
         let stream = std::mem::replace(&mut self.0, std::ptr::null_mut());
-        // SAFETY: this is the explicit close for the owned DIR stream.
+        // SAFETY: this is the one explicit close for the owned DIR stream.
         unsafe { libc::closedir(stream) == 0 }
     }
 }

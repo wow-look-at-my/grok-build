@@ -1,17 +1,36 @@
 //! Compacted-history assembly (grok-build's rebuild structure, generic).
+//!
+//! Moved from `xai-chat-state::compaction_utils::build_compacted_history` and
+//! made generic over a write-side item factory so any harness can assemble
+//! the canonical post-compaction history:
+//!
+//! ```text
+//! [SP, UP', AGENTS_MD?, UQ_last?, recent…, summary, reminder?]
+//! ```
+//!
+//! grok-build is the canonical harness. The summary carrier text is built by
+//! [`super::summary::format_compact_summary_content`].
 
 use crate::item::CompactionItemFactory;
 
 use super::summary::{format_compact_summary_content, wrap_user_query};
 
-/// Input data for building a compacted conversation history. All fields are
-/// plain data — no I/O, no network, no shell dependencies.
+/// Input data for building a compacted conversation history.
+///
+/// All fields are plain data — no I/O, no network, no shell dependencies.
+/// The caller is responsible for:
+/// - Generating the `compaction_summary` via the LLM.
+/// - Rendering the optional `system_reminder` (which may depend on
+///   harness-specific backends such as memory search).
+/// - Providing the `user_message_prefix` (e.g. `<user_info>` block).
+/// - Extracting `last_user_query` / `recent_messages` from its own state.
 pub struct CompactedHistoryParts<T> {
     /// The original system message from the conversation.
     pub system_message: T,
     /// The user-info / project-layout prefix (not wrapped in `<user_query>`).
     pub user_message_prefix: String,
-    /// Pre-rendered AGENTS.md `<system-reminder>` block to re-inject after the user prefix.
+    /// Pre-rendered AGENTS.md `<system-reminder>` block to re-inject after the
+    /// user prefix. `None` means no project instructions to re-inject.
     pub agents_md_reminder: Option<String>,
     /// The last real user query text (raw, unwrapped).
     pub last_user_query: Option<String>,
@@ -19,7 +38,8 @@ pub struct CompactedHistoryParts<T> {
     pub recent_messages: Vec<T>,
     /// The LLM-generated compaction summary text.
     pub compaction_summary: String,
-    /// An optional pre-rendered `<system-reminder>` block to append after the summary.
+    /// An optional pre-rendered `<system-reminder>` block to append after the
+    /// summary. `None` means no state reminder is appended.
     pub system_reminder: Option<String>,
     /// Pre-built transcript hint appended to the summary (`None` to omit).
     pub transcript_hint: Option<String>,
@@ -27,13 +47,13 @@ pub struct CompactedHistoryParts<T> {
 
 /// Build the compacted conversation history from pure data inputs.
 ///
-/// The returned `Vec<T>` is structured as.
+/// The returned `Vec<T>` is structured as:
 ///
-/// **System message** -- the original system prompt. **User message prefix** --
-/// e.g. `<user_info>` block (no `<user_query>` tags). **AGENTS.md reminder** (if
-/// any) -- project instructions re-injected verbatim. **Last user query** (if any)
-/// -- wrapped in `<user_query>` tags. **Recent messages** (if any) -- retained
-/// verbatim from after the last
+/// 1. **System message** -- the original system prompt.
+/// 2. **User message prefix** -- e.g. `<user_info>` block (no `<user_query>` tags).
+/// 3. **AGENTS.md reminder** (if any) -- project instructions re-injected verbatim.
+/// 4. **Last user query** (if any) -- wrapped in `<user_query>` tags.
+/// 5. **Recent messages** (if any) -- retained verbatim from after the last
 ///    real user turn.
 /// 6. **Compaction summary** -- with the optional `<system-reminder>`
 ///    appended as a separate message.
@@ -48,7 +68,9 @@ pub fn assemble_compacted_history<T: CompactionItemFactory>(
     ];
 
     // Re-inject AGENTS.md as a user message so project instructions survive
-    // compaction verbatim (not dependent on the summarizer).
+    // compaction verbatim (not dependent on the summarizer). The
+    // `ProjectInstructions` tag is what the spawn-time idempotence guard
+    // recognizes on resume, so post-compaction sessions stay duplicate-free.
     if let Some(ref reminder) = parts.agents_md_reminder {
         compacted.push(T::new_project_instructions(reminder.clone()));
     }
@@ -58,7 +80,8 @@ pub fn assemble_compacted_history<T: CompactionItemFactory>(
         compacted.push(T::new_user(wrap_user_query(last_query.as_str())));
     }
 
-    // grok-build keeps the legacy `<user_query>`-wrapped continuation text and appends the transcript hint.
+    // grok-build keeps the legacy `<user_query>`-wrapped continuation text and
+    // appends the transcript hint after the continuation summary.
     let mut formatted_summary = format_compact_summary_content(&parts.compaction_summary);
     if let Some(ref hint) = parts.transcript_hint {
         formatted_summary.push_str(hint);

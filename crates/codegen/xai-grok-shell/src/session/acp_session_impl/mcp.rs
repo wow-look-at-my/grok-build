@@ -1,8 +1,13 @@
 //! MCP on the session actor: starting an init pass, the full init wait, config changes, the auth and retry paths.
+//! The pass itself is `mcp_init.rs`; snapshot refreshes and the prompt-side gates are `mcp_snapshot.rs`.
 use super::mcp_failed_reminder::{classify_failed_servers, render_failed_section};
 use super::*;
 
-/// Margin added to one init pass's own budget before [`SessionActor::wait_for_mcp_initialized`] gives up.
+/// Margin added to one init pass's own budget before
+/// [`SessionActor::wait_for_mcp_initialized`] gives up. Covers the scheduling
+/// slack between a pass finishing and the state settling, and nothing more:
+/// the point of the deadline is that a session never waits on a server that is
+/// not coming back.
 const MCP_INIT_WAIT_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
 use crate::session::mcp_servers::{McpOauthDiscovery, SharedMcpState, Superseded};
 use xai_grok_telemetry::instrument_task;
@@ -854,9 +859,9 @@ impl SessionActor {
         }
         announcements_changed
     }
-    /// Clears the announced episodes and marks the reminder dirty so the next
-    /// injection re-announces servers that are still down. Persists the
-    /// cleared tracking so a resume starts from it.
+    /// Clears the announced episodes and marks the reminder dirty so the next injection re-announces servers that are still down.
+    /// Persists the cleared tracking so a resume starts from it.
+    /// A rewind's kept prefix usually retains the initial listing, so clearing would inject a duplicate.
     pub(crate) async fn rearm_failed_server_announcements(&self) {
         self.mcp_announcements.lock().rearm_failed();
         self.mcp_reminder_dirty
@@ -1205,8 +1210,8 @@ impl SessionActor {
         self.init_publication().reset();
         mcp_state.restart_init()
     }
-    /// Starts init if nothing owns it and waits for the pass to reach
-    /// `finish_init`.
+    /// Starts init if nothing owns it and waits for the pass to reach `finish_init`. Returns `false` once the run
+    /// loop has ended and nothing can start init.
     pub(super) async fn ensure_mcp_tools_initialized(&self) -> bool {
         self.run_startup(|actor| Box::pin(actor.start_mcp_init()))
             .await
@@ -1423,7 +1428,9 @@ impl SessionActor {
                     if e.is_auth_rejection() && sname != "unknown" {
                         spawn_auth_failures.push(sname.clone());
                     } else if sname != "unknown" {
-                        // A spawn that never produced a client leaves nothing for `build_mcp_status` to report.
+                        // A spawn that never produced a client leaves nothing
+                        // for `build_mcp_status` to report, so the reason is
+                        // kept here or the server shows as merely absent.
                         spawn_failures.push((sname.clone(), e.to_string()));
                     }
                     let cfg = claim

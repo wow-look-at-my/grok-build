@@ -1005,7 +1005,8 @@ fn stale_plan_is_rejected_and_apply_verifies_postcondition() {
 
 #[test]
 fn ssh_wrap_outcome_verifies_with_planned_shell_not_process_shell() {
-    // Post-apply verification must use the shell stored on the outcome Even if `$SHELL` is missing or points at a different shell family.
+    // Post-apply verification must use the shell stored on the outcome
+    // Even if `$SHELL` is missing or points at a different shell family, a successful apply against bash must still report the alias configured
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join(".bashrc");
     let plan = plan_fix(request(temp.path(), "/bin/bash"), &report(), &terminal()).unwrap();
@@ -1014,7 +1015,8 @@ fn ssh_wrap_outcome_verifies_with_planned_shell_not_process_shell() {
     assert_eq!(outcome.changed_path(), path);
     assert!(outcome.managed_alias_is_configured());
 
-    // Fish uses a different alias syntax.
+    // Fish uses a different alias syntax; checking the bash-written path with fish must not count as configured
+    // The outcome keeps bash regardless
     assert!(!managed_alias_configured(&path, ShellKind::Fish));
     assert!(
         outcome.managed_alias_is_configured(),

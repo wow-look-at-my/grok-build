@@ -2,18 +2,20 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-// Small-screen tip must survive a submit into a slow turn.
+// Small-screen tip must survive a submit into a slow turn. The scripted scenarios miss this
+// because the mock replies instantly.
 
 /// Exact tip copy (also asserted char-for-char in the unit tests).
 const TIP_TEXT: &str = "Tight on space? Try /compact-mode";
 
+/// 24 rows sits in the 21..=28 tip band, above the 20-row auto-compact threshold.
 const BAND_ROWS: u16 = 24;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn small_screen_tip_survives_slow_turn() {
     let content = ContentController::start().await.expect("start content");
-    // Several words at 400ms per SSE chunk holds the turn open ~5s, comfortably past the tip's ~3s TTL, like a real inference turn
+    // ~12 words at 400ms per SSE chunk holds the turn open ~5s, comfortably past the tip's ~3s TTL, like a real inference turn
     content.set_response(format!(
         "{MOCK_RESPONSE_SENTINEL} one two three four five six seven eight nine ten"
     ));

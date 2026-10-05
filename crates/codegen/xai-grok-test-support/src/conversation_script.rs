@@ -1,4 +1,6 @@
-//! What a test scripts for the model, one [`Conversation`] at a time.
+//! What a test scripts for the model, one [`Conversation`] at a time: each turn's tool calls in order,
+//! then its reply, with the failures that answer in their place while their counts last. Call ids carry
+//! the conversation and call number ([`mock_call_id`]) so inherited history does not advance a child's script.
 
 use std::fmt;
 use std::time::Duration;
@@ -12,6 +14,7 @@ use crate::tools::Tool;
 
 const MOCK_CALL_ID_PREFIX: &str = "call_mock_";
 
+/// `call_mock_<conversation>_<call_number>`, both counted from 1.
 #[must_use]
 pub fn mock_call_id(conversation: usize, call_number: usize) -> String {
     format!("{MOCK_CALL_ID_PREFIX}{conversation}_{call_number}")
@@ -217,8 +220,8 @@ impl PendingTurn {
     }
 }
 
-/// `.reply` closes the turn being built: `.calls` after it starts the next
-/// turn, a second `.reply` in a row is a turn with no calls.
+/// `.reply` closes the turn being built: `.calls` after it starts the next turn, a second `.reply`
+/// in a row is a turn with no calls, and every conversation ends with a `.reply`.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct Conversation {
@@ -228,6 +231,7 @@ pub struct Conversation {
 }
 
 impl Conversation {
+    /// Conversations are numbered from 1 in the order the mock opens them.
     pub fn nth(number: usize) -> Self {
         Conversation::new(ScriptTarget::Conversation(ConversationId::nth(number)))
     }
@@ -251,8 +255,8 @@ impl Conversation {
         self
     }
 
-    /// Serve this turn at the `nth` request of the conversation rather than
-    /// in list order; the unpinned turns keep their order around it.
+    /// Serve this turn at the `nth` request of the conversation rather than in list order; the
+    /// unpinned turns keep their order around it. Two turns pinned to one request panic.
     pub fn at_request(mut self, nth: usize) -> Self {
         assert!(nth >= 1, "requests are counted from 1");
         self.pending.at_request = Some(nth);
@@ -294,8 +298,9 @@ impl Conversation {
         self
     }
 
-    /// Answer the next `count` requests with this turn's first tool call
-    /// again.
+    /// Answer the next `count` requests with this turn's first tool call again, each under a fresh
+    /// call id the way a looping model issues them, or with [`crate::LOOPING_REPLY`] when the turn
+    /// has no tool calls.
     pub fn doom_loop(mut self, count: usize) -> Self {
         self.pending.failures.push(Failure::DoomLoop { count });
         self

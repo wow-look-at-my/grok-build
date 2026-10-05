@@ -1,4 +1,6 @@
-//! PTY child spawn: the Unix fork/exec session spawn (setsid, controlling TTY, pdeathsig) and child-environment assembly.
+//! PTY child spawn: the Unix fork/exec session spawn (setsid, controlling
+//! TTY, pdeathsig) and child-environment assembly; Windows keeps
+//! portable-pty's spawn and shares the environment hygiene via [`EnvSink`].
 
 use std::ffi::OsStr;
 #[cfg(unix)]
@@ -26,7 +28,8 @@ const APPEARANCE_ENV_VARS: &[&str] = &[
     "COLORFGBG",
 ];
 
-/// Markers the pager's brand/mux/editor detection reads. Keep in sync with that detection source.
+/// Markers the pager's brand/mux/editor detection reads. A leak reclassifies the child (tmux, Cursor before TERM_PROGRAM, nvim OSC 52).
+/// Keep in sync with that detection source.
 const HOST_TERMINAL_ENV_VARS: &[&str] = &[
     // Brand chain (detect_terminal_brand_from_env), in detection order.
     "CURSOR_TRACE_ID",
@@ -45,7 +48,8 @@ const HOST_TERMINAL_ENV_VARS: &[&str] = &[
     "TERMINATOR_UUID",
     "VTE_VERSION",
     "WT_SESSION",
-    // Multiplexer / Byobu markers (detect_multiplexer_from_env, detect_byobu_from_env, detect_tmux_meta_from_env).
+    // Multiplexer / Byobu markers (detect_multiplexer_from_env,
+    // detect_byobu_from_env, detect_tmux_meta_from_env).
     "TMUX",
     "TMUX_PANE",
     "ZELLIJ",
@@ -66,7 +70,8 @@ const HOST_TERMINAL_ENV_VARS: &[&str] = &[
 ];
 
 /// Child-environment destination for [`apply_child_env`]: Windows'
-/// `CommandBuilder` keeps its registry-merged base environment.
+/// `CommandBuilder` keeps its registry-merged base environment, Unix
+/// assembles a plain map — one hygiene list, two containers.
 pub(crate) trait EnvSink {
     fn set_var(&mut self, key: &OsStr, value: &OsStr);
     fn remove_var(&mut self, key: &OsStr);
@@ -127,7 +132,8 @@ pub(crate) fn resolve_child_cwd(
             return Ok(home);
         }
     }
-    // The harness always provides a sandbox HOME or inherits the host's, so this fallback is effectively unreachable.
+    // The harness always provides a sandbox HOME or inherits the host's, so
+    // this fallback is effectively unreachable.
     std::env::current_dir().context("failed to resolve a working directory for the PTY child")
 }
 
@@ -143,8 +149,9 @@ pub(crate) fn apply_child_env<S: EnvSink>(cmd: &mut S, env: &[EnvOp<'_>]) {
     for ssh_var in ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "SSH_AUTH_SOCK"] {
         cmd.remove_var(OsStr::new(ssh_var));
     }
-    // A harness launched under `grok wrap` must not silently confirm
-    // clipboard delivery for no-sink scenarios.
+    // A harness launched under `grok wrap` must not silently confirm clipboard
+    // delivery for no-sink scenarios. Explicit sink tests re-inject a marker
+    // through `env` after this hygiene pass.
     for sink_var in CLIPBOARD_SINK_ENV_VARS {
         cmd.remove_var(OsStr::new(sink_var));
     }
@@ -180,6 +187,7 @@ pub(crate) fn spawn_pty_session_child(
         .context("PTY slave tty name contains a NUL byte")?;
 
     // First post-fork action, so the unprotected window is minimal. SIGKILL reaps a child that cannot service TERM.
+    // Survives exec only for non-setuid fixtures; the kernel clears PDEATHSIG across a privileged exec.
     #[cfg(target_os = "linux")]
     xai_tty_utils::kill_on_parent_death_std_with(&mut cmd, libc::SIGKILL);
 
@@ -191,7 +199,9 @@ pub(crate) fn spawn_pty_session_child(
     unsafe {
         cmd.pre_exec(move || pty_session_pre_exec(&tty));
     }
-    // The child is enrolled post-spawn in a TestProcessTree (group kill on teardown) and pdeathsig-guarded on Linux.
+    // The child is enrolled post-spawn in a TestProcessTree (group kill on
+    // teardown) and pdeathsig-guarded on Linux, which is exactly the enrollment
+    // this lint asks for; ProcessScope is a production-pager concept.
     #[allow(clippy::disallowed_methods)]
     cmd.spawn().context("failed to spawn PTY child")
 }
@@ -224,7 +234,8 @@ fn pty_session_pre_exec(tty: &std::ffi::CStr) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
 
-        // …attach the PTY slave as the controlling terminal on stdio (required for SIGWINCH delivery on resize)…
+        // …attach the PTY slave as the controlling terminal on stdio (required
+        // for SIGWINCH delivery on resize)…
         let fd = libc::open(tty.as_ptr(), libc::O_RDWR);
         if fd < 0 {
             return Err(io::Error::last_os_error());
@@ -274,7 +285,8 @@ mod tests {
         for appearance_var in APPEARANCE_ENV_VARS {
             cmd.env(appearance_var, "polluted");
         }
-        // Sandboxed launches remove unrelated inherited variables before re-applying the baseline.
+        // Sandboxed launches remove unrelated inherited variables before
+        // re-applying the baseline and explicit overrides.
         cmd.env("GROK_SCROLL_LOG", "/tmp/scroll.jsonl");
         let sandbox = TestSandbox::new();
         cmd.env_clear();

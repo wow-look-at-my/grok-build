@@ -32,7 +32,8 @@ async fn undo_tip_seen_count_never_persisted() {
     harness.update(Duration::from_millis(500));
     harness.quit().expect("quit");
 
-    // The code wrote `[hints] undo_tip_shown_count` here; the count now lives only in memory.
+    // The old code wrote `[hints] undo_tip_shown_count` here; the count now lives only in memory, so nothing is written
+    // A missing config.toml (read_to_string returns "") also proves nothing was persisted, since the old code would have created it
     let config = content.home().join(".grok").join("config.toml");
     let body = std::fs::read_to_string(&config).unwrap_or_default();
     assert!(

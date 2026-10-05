@@ -1,4 +1,9 @@
-//! Test-only tracing capture: count events whose `message` starts with a known prefix.
+//! Test-only tracing capture: count events whose `message` starts with a
+//! known prefix.
+//!
+//! Producers should export the exact log-line prefixes as `pub const`s next
+//! to the `tracing::debug!` call sites (e.g. `xai_hunk_tracker`'s
+//! `REFRESH_SCAN_LOG_PREFIX`) so tests never duplicate the strings.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

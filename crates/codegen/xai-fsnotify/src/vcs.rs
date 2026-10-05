@@ -1,4 +1,5 @@
-//! Finds the repository governing a workspace and decides which of its metadata files the watcher acts upon.
+//! Finds the repository governing a workspace and decides which of its
+//! metadata files the watcher acts upon.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,19 +21,23 @@ pub(crate) fn is_git_path_for_watcher(path: &Path) -> bool {
         || s.contains(".git/gc.pid")
 }
 
-/// Sapling analogue of [`is_git_path_for_watcher`]: lets only `.sl/wlock`
-/// through.
+/// Sapling analogue of [`is_git_path_for_watcher`]: lets only `.sl/wlock` through.
+/// `.sl/dirstate` is not watched — a read-only `sl status` rewrites it without moving the parent.
+/// Watching it would turn every status into a refresh storm.
 pub(crate) fn is_sl_path_for_watcher(path: &Path) -> bool {
     path.to_string_lossy().contains(".sl/wlock")
 }
 
-/// True if `p`'s final component is exactly `name` (`.git`/`.sl`).
+/// True if `p`'s final component is exactly `name` (`.git`/`.sl`). Uses
+/// `file_name` rather than `Path::ends_with` to dodge clippy's
+/// `path_ends_with_ext` false positive on `.sl`.
 pub(crate) fn dir_named(p: &Path, name: &str) -> bool {
     p.file_name().is_some_and(|n| n == name)
 }
 
-/// Whether Sapling (`.sl`) support is enabled (default on;
-/// `GROK_FSNOTIFY_SAPLING=0` or `false` disables it).
+/// Whether Sapling (`.sl`) support is enabled (default on; `GROK_FSNOTIFY_SAPLING=0`
+/// or `false` disables it). Resolved once per watcher in `FsEventSource::start_on`
+/// and threaded down, so discovery, watching, and filtering can't disagree.
 pub(crate) fn sapling_enabled() -> bool {
     !matches!(
         std::env::var("GROK_FSNOTIFY_SAPLING").ok().as_deref(),
@@ -75,7 +80,8 @@ impl GitignoreCache {
                     return true;
                 }
                 if m.is_whitelist() {
-                    // A negation rule in this (deeper) .gitignore explicitly un-ignores the path.
+                    // A negation rule in this (deeper) .gitignore explicitly
+                    // un-ignores the path. Shallower .gitignore files must not override.
                     return false;
                 }
             }
@@ -135,7 +141,8 @@ pub(crate) fn find_sl_dir(watch_path: &Path) -> Option<PathBuf> {
 }
 
 /// Whether a discovered VCS metadata dir (`.git`/`.sl`) needs its own watch:
-/// always when the root is non-recursive.
+/// always when the root is non-recursive; under a recursive root only for an
+/// *external* (ancestor) dir — an internal one is already covered.
 pub(crate) fn should_watch_separate_vcs_dir(
     root_non_recursive: bool,
     vcs_dir: &Path,

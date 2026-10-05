@@ -1,10 +1,17 @@
 //! Cross-platform IPC transport between the leader and its clients.
+//!
+//! - **Unix:** [`LeaderStream`] and [`LeaderListener`] are type aliases for `tokio::net::UnixStream` and `UnixListener`; no wrapper, no unsafe.
+//! - **Windows:** wraps `tokio::net::windows::named_pipe::*` (tokio doesn't expose AF_UNIX on Windows).
+//!   The leader's filesystem path is hashed into `\\.\pipe\grok-leader-<hash>` so callers keep their path-based API.
+//!
 #[cfg(unix)]
 pub(super) use tokio::net::UnixListener as LeaderListener;
 #[cfg(unix)]
 pub(super) use tokio::net::UnixStream as LeaderStream;
 
-/// Has a leader bound a listener at `path`? Unix: stats the socket file.
+/// Has a leader bound a listener at `path`?
+/// Unix: stats the socket file.
+/// Windows: probes the named pipe (Named Pipes don't appear in the filesystem, so `path.exists()` doesn't work).
 pub fn listener_is_ready(path: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
@@ -46,7 +53,8 @@ mod windows_impl {
         pub(crate) async fn connect<P: AsRef<Path>>(path: P) -> io::Result<Self> {
             use tokio::net::windows::named_pipe::ClientOptions;
 
-            // ClientOptions::open returns ERROR_PIPE_BUSY if all pipe instances are in use The caller's CONNECT_TIMEOUT loop already retries.
+            // ClientOptions::open returns ERROR_PIPE_BUSY if all pipe instances are in use
+            // The caller's CONNECT_TIMEOUT loop already retries, so return the error and let it handle the retry
             let pipe_name = path_to_pipe_name(path.as_ref());
             let inner = ClientOptions::new().open(pipe_name)?;
             Ok(Self {
@@ -99,9 +107,12 @@ mod windows_impl {
     }
 
     /// Listener for incoming leader IPC connections.
+    /// Holds the pipe name plus the next pre-created server instance (Windows named pipes require pre-creating an instance per pending connection).
     pub(crate) struct LeaderListener {
         pipe_name: std::ffi::OsString,
         /// Next pre-created server instance, ready for `connect().await`; accept() rotates it.
+        /// The first instance is created in `bind()` with `first_pipe_instance(true)` to lock out other processes from squatting the pipe name.
+        /// tokio::sync::Mutex (not parking_lot) because accept() holds the lock across `server.connect().await`.
         next_server: tokio::sync::Mutex<Option<tokio::net::windows::named_pipe::NamedPipeServer>>,
     }
 
@@ -125,7 +136,9 @@ mod windows_impl {
         pub(crate) async fn accept(&self) -> io::Result<(LeaderStream, ())> {
             use tokio::net::windows::named_pipe::ServerOptions;
 
-            // Take the pending instance (or create one), await a client, then pre-create the next On connect() error.
+            // Take the pending instance (or create one), await a client, then pre-create the next
+            // On connect() error, drop the instance and retry with a fresh one; returning early would leave the slot empty and the listener unusable
+            // Bounded with a backoff so a persistently failing connect() can't busy-spin
             const MAX_ACCEPT_ATTEMPTS: usize = 10;
             const RETRY_BACKOFF: Duration = Duration::from_millis(20);
 
@@ -173,6 +186,7 @@ mod windows_impl {
         use windows::Win32::System::Pipes::WaitNamedPipeW;
         use windows::core::PCWSTR;
 
+        // 1 ms is a real timeout; 0 would mean "use the server default"
         const PROBE_TIMEOUT_MS: u32 = 1;
 
         let pipe_name = path_to_pipe_name(path);
@@ -198,6 +212,8 @@ mod windows_impl {
     }
 
     /// Deterministic leaf name (`grok-leader-<hash>`) for a filesystem path.
+    ///
+    /// Uses SipHash-1-3 with fixed keys so the hash is stable across Rust versions (unlike `DefaultHasher`, whose algorithm is unspecified).
     fn pipe_leaf_name(path: &Path) -> std::ffi::OsString {
         use siphasher::sip::SipHasher13;
         use std::hash::{Hash, Hasher};
@@ -239,6 +255,7 @@ mod windows_impl {
         fn pipe_name_is_bounded() {
             let long_path = "/".to_owned() + &"a".repeat(500);
             let name = path_to_pipe_name(Path::new(&long_path));
+            // \\.\pipe\grok-leader- (20 chars) + 16 hex chars = 36 total
             assert!(name.len() <= 256, "pipe name too long: {}", name.len());
         }
 

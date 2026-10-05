@@ -257,7 +257,7 @@ fn hook_denied_finalize_requeues_blocked_prompt_and_opens_card() {
     let mut agent = running_viewer("p1");
     agent.session.enqueue_prompt("queued follower".into());
     stash_in_flight(&mut agent);
-    // dispatch_send_prompt sets this at send.
+    // dispatch_send_prompt sets this at send; the test mirrors that
     agent.session.tracker.expect_user_echo();
     let bubbles_before = agent.scrollback.len();
     let _ = finalize_turn_from_terminal(&mut agent, "s1", hook_denied_signal(Some(&context)));
@@ -481,7 +481,8 @@ fn blocked_prompt_card_refuses_skip() {
         "Esc must not dismiss the blocked-prompt card"
     );
 
-    // `y` (option copy) is disabled on this card.
+    // `y` (option copy) is disabled on this card: copying "Edit / Fix your prompt" is noise
+    // A real copy always toasts, so no toast means no copy happened
     agent.toast = None;
     let yank = crossterm::event::KeyEvent::new(
         crossterm::event::KeyCode::Char('y'),

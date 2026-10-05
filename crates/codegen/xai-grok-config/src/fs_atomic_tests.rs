@@ -206,8 +206,8 @@ fn resolve_follows_chain_at_platform_hop_limit() {
     assert_eq!("after", std::fs::read_to_string(&leaf).expect("leaf"));
 }
 
-/// A 33-link chain is past `open`/`read` (`ELOOP`); refuse so tmp+rename cannot
-/// publish onto a referent the kernel cannot read.
+/// Darwin `MAXSYMLINKS` is 32. A 33-link chain is past `open`/`read` (`ELOOP`);
+/// refuse so tmp+rename cannot publish onto a referent the kernel cannot read.
 #[cfg(all(unix, not(target_os = "linux")))]
 #[test]
 fn resolve_refuses_chain_past_darwin_maxsymlinks() {
@@ -402,6 +402,7 @@ fn resolve_parent_through_execute_only_directory() {
     let _ = std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o755));
 }
 
+/// `lstat(blocked)` succeeds on mode 000; kernel `blocked/../victim` is EACCES.
 #[cfg(unix)]
 #[test]
 fn resolve_refuses_parent_through_unsearchable_directory() {
@@ -447,6 +448,7 @@ fn resolve_refuses_parent_through_unsearchable_directory() {
                 assert_eq!("keep", contents);
             }
             (None, None) => {
+                // uid 0 with DAC: kernel allows the walk; pin that we match rather than skip.
                 assert_eq!("clobber", contents);
             }
             other => panic!("resolve/write disagree on unsearchable dir: {other:?}"),
@@ -454,6 +456,8 @@ fn resolve_refuses_parent_through_unsearchable_directory() {
     }
 }
 
+/// Drop `CAP_DAC_OVERRIDE` / `CAP_DAC_READ_SEARCH` on this thread so mode-000
+/// directories deny search even as uid 0.
 #[cfg(target_os = "linux")]
 fn drop_dac_override_and_search<T>(f: impl FnOnce() -> T) -> T {
     const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
@@ -931,7 +935,7 @@ fn resolve_refuses_protected_symlink_in_sticky_dir() {
     // SAFETY: geteuid has no preconditions.
     let euid = unsafe { geteuid() };
     if euid != 0 {
-        // Same-uid sticky symlink is allowed; pin we do not false-deny.
+        // Same-uid sticky symlink is allowed; just pin we do not false-deny.
         follow_write(&link, "owner").expect("owner may follow own symlink");
         assert_eq!("owner", std::fs::read_to_string(&victim).expect("victim"));
         return;
@@ -1249,6 +1253,8 @@ fn resolve_refuses_dangling_windows_directory_symlink() {
     );
 }
 
+/// Any fully-qualified hop tightens the remaining budget to 31, independent
+/// of whether the FQ hop is first or last.
 #[test]
 fn mixed_windows_reparse_budget_is_order_independent() {
     fn walk(kinds: &[bool]) -> Result<u8, ()> {
@@ -1431,7 +1437,8 @@ fn resolve_verbatim_missing_dotdot_is_not_found() {
     let verbatim = {
         let abs = base.display().to_string();
         let stripped = abs.strip_prefix(r"\\?\").unwrap_or(&abs);
-        // One string: `PathBuf::join` lexically collapses `missing\..` even on verbatim prefixes.
+        // One string: `PathBuf::join` lexically collapses `missing\..` even
+        // on verbatim prefixes, which hid the ENOENT this test wants.
         std::path::PathBuf::from(format!(r"\\?\{stripped}\missing\..\victim"))
     };
     let err = resolve_atomic_destination(&verbatim).expect_err("strict ..");

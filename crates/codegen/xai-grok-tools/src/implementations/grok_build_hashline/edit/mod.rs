@@ -1,4 +1,9 @@
 //! `hashline_edit` — anchor-based file editing.
+//!
+//! Supports `replace`, `insert_after`, and `write` operations. Anchors are
+//! validated against the pre-edit file snapshot; edits are applied bottom-up
+//! to avoid line-shift interference. Returns fresh-anchor snippets on success
+//! and structured error context on validation failures.
 
 pub mod apply;
 pub mod range_policy;
@@ -116,7 +121,7 @@ fn to_search_replace(
                         let ctx_count = 3;
                         let old_idx = d.old_line.saturating_sub(1); // 0-based
 
-                        // Lines before the edit in the file.
+                        // Lines before the edit in the old file.
                         let before_start = old_idx.saturating_sub(ctx_count);
                         let context_before = if before_start < old_idx {
                             match old_lines.get(before_start..old_idx) {
@@ -131,7 +136,7 @@ fn to_search_replace(
                             String::new()
                         };
 
-                        // Lines after the edit in the file.
+                        // Lines after the edit in the old file.
                         let old_text_line_count = if d.old_text.is_empty() {
                             0
                         } else {
@@ -323,13 +328,15 @@ impl xai_tool_runtime::Tool for HashlineEditTool {
 
         let display_dcwd = display_cwd_or_cwd(&cwd, display_cwd.as_deref());
         let joined_path = resolve_model_path(&cwd, display_cwd.as_deref(), &input.file_path);
-        // Memory v2 classifies the logical path (as search_replace does), not the canonicalized one.
+        // Memory v2 classifies the logical path (as search_replace does), not
+        // the canonicalized one, so aliases resolve inside the policy.
         let policy_path = joined_path.clone();
         // Error-preserving variant: the Err arm drives new-file creation.
         let path = match crate::util::fs::try_canonicalize(&joined_path).await {
             Ok(p) => p,
             Err(_) => {
-                // Try unicode-confusable resolution before giving up. Used in search_replace.
+                // Try unicode-confusable resolution before giving up.
+                // Used in search_replace.
                 let resolved = crate::util::try_resolve_unicode_filename(&joined_path).await;
                 if let Some(m) = resolved {
                     m.resolved_path
@@ -831,7 +838,7 @@ mod tests {
             file_path: "test.txt".to_string(),
             edits: vec![
                 HashlineOp::InsertAfter {
-                    anchor: nth(&anchors, 0),
+                    anchor: nth(&anchors, 0), // after line 1
                     content: "first_insert".to_owned(),
                 },
                 HashlineOp::InsertAfter {
@@ -980,7 +987,7 @@ mod tests {
 
         match sr {
             crate::types::output::SearchReplaceOutput::EditsApplied(applied) => {
-                // Should have details (one per edit).
+                // Should have exactly 2 details (one per edit).
                 assert_eq!(
                     applied.edits.details.len(),
                     2,
@@ -988,19 +995,21 @@ mod tests {
                     applied.edits.details.len()
                 );
 
+                // Detail 0: insertion (empty old, "INSERTED_LINE" new)
                 assert_eq!(nth_ref(&applied.edits.details, 0).old_string, "");
                 assert_eq!(
                     nth_ref(&applied.edits.details, 0).new_string,
                     "INSERTED_LINE"
                 );
 
+                // Detail 1: replacement
                 assert_eq!(nth_ref(&applied.edits.details, 1).old_string, "line_90");
                 assert_eq!(
                     nth_ref(&applied.edits.details, 1).new_string,
                     "REPLACED_LINE"
                 );
 
-                // Total detail size should be small — NOT the entire file.
+                // Total detail size should be very small — NOT the entire file.
                 let total_detail_bytes: usize = applied
                     .edits
                     .details
@@ -1107,8 +1116,8 @@ mod tests {
                     .iter()
                     .map(|d| d.old_string.len() + d.new_string.len())
                     .sum();
-                // With old code, this would be thousands of bytes due to
-                // positional diff. With new code, it's the affected lines.
+                // With old code, this would be thousands of bytes due to positional diff.
+                // With new code, it's just the affected lines.
                 assert!(
                     total_detail_bytes < 200,
                     "Details should be compact for scattered edits, got {total_detail_bytes} bytes"
@@ -1132,10 +1141,12 @@ mod tests {
         let anchors = anchors_for(content);
 
         let ops = vec![
+            // Insert after line 1 — adds a line, shifting everything below by 1.
             HashlineOp::InsertAfter {
                 anchor: nth(&anchors, 0),
                 content: "inserted".to_owned(),
             },
+            // Replace line 4 — in the new file, this is at line 5 due to the insertion.
             HashlineOp::Replace {
                 anchor: nth(&anchors, 3),
                 end_anchor: None,
@@ -1159,15 +1170,17 @@ mod tests {
             crate::types::output::SearchReplaceOutput::EditsApplied(applied) => {
                 assert_eq!(applied.edits.details.len(), 2);
 
+                // First edit: insert after line 1
                 let d0 = &nth_ref(&applied.edits.details, 0);
                 assert_eq!(d0.old_string, ""); // insertion has no old content
                 assert_eq!(d0.new_string, "inserted");
 
+                // Second edit: replace line 4
                 let d1 = &nth_ref(&applied.edits.details, 1);
-                assert_eq!(d1.old_line, 4);
+                assert_eq!(d1.old_line, 4); // line 4 in old file
                 assert_eq!(d1.old_string, "line4");
                 assert_eq!(d1.new_string, "replaced");
-                assert_eq!(d1.new_line, 5);
+                assert_eq!(d1.new_line, 5); // shifted to line 5 in new file
             }
             _ => panic!("Expected EditsApplied"),
         }
@@ -1242,6 +1255,7 @@ mod tests {
     #[test]
     fn context_lines_for_single_replace() {
         let anchors = anchors_for(RENDER_SAMPLE);
+        // Replace line 5: println!("sum = {z}");
         let applied = apply_and_convert(
             RENDER_SAMPLE,
             vec![HashlineOp::Replace {
@@ -1255,6 +1269,7 @@ mod tests {
         assert_eq!(d.old_string, "    println!(\"sum = {z}\");");
         assert_eq!(d.new_string, "    println!(\"total = {z}\");");
 
+        // 3 context lines before (lines 2-4).
         assert!(
             d.context_before.contains("let y = 2;"),
             "context_before should have line 3: {}",
@@ -1266,6 +1281,7 @@ mod tests {
             d.context_before
         );
 
+        // 3 context lines after (lines 6-8).
         assert!(
             d.context_after.contains("if z > 2"),
             "context_after should have line 6: {}",
@@ -1281,6 +1297,7 @@ mod tests {
     #[test]
     fn context_lines_for_insert_after() {
         let anchors = anchors_for(RENDER_SAMPLE);
+        // Insert after line 3: let y = 2;
         let applied = apply_and_convert(
             RENDER_SAMPLE,
             vec![HashlineOp::InsertAfter {
@@ -1316,6 +1333,7 @@ mod tests {
     #[test]
     fn context_lines_for_delete() {
         let anchors = anchors_for(RENDER_SAMPLE);
+        // Delete line 5: println!("sum = {z}");
         let applied = apply_and_convert(
             RENDER_SAMPLE,
             vec![HashlineOp::Replace {
@@ -1348,6 +1366,7 @@ mod tests {
     #[test]
     fn context_lines_for_multi_range_edit() {
         let anchors = anchors_for(RENDER_SAMPLE);
+        // Replace line 2 (let x = 1) AND line 10 (println!("double = {w}"))
         let applied = apply_and_convert(
             RENDER_SAMPLE,
             vec![
@@ -1366,6 +1385,7 @@ mod tests {
 
         assert_eq!(applied.edits.details.len(), 2);
 
+        // First edit (line 2): context_before has only line 1 (fn main).
         let d0 = &nth_ref(&applied.edits.details, 0);
         assert_eq!(d0.old_string, "    let x = 1;");
         assert!(
@@ -1379,6 +1399,7 @@ mod tests {
             d0.context_after
         );
 
+        // Second edit (line 10): context_before has lines 7-9, context_after has line 11.
         let d1 = &nth_ref(&applied.edits.details, 1);
         assert_eq!(d1.old_string, "    println!(\"double = {w}\");");
         assert!(
@@ -1395,7 +1416,7 @@ mod tests {
 
     #[test]
     fn context_at_file_boundaries() {
-        // Edit the first and last lines — context should not panic.
+        // Edit the very first and very last lines — context should not panic.
         let content = "first\nsecond\nthird\n";
         let anchors = anchors_for(content);
 

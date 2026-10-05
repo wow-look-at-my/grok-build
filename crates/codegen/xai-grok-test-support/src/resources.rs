@@ -14,8 +14,9 @@ pub struct ResourceSnapshot {
     pub open_files: Option<usize>,
 }
 
-/// Saturating per-field growth of one [`ResourceSnapshot`] over an earlier
-/// baseline.
+/// Saturating per-field growth of one [`ResourceSnapshot`] over an earlier baseline.
+/// A distinct type from a snapshot so a delta can't be mistaken for an absolute sample.
+/// `None` marks a field either side couldn't report.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ResourceGrowth {
     pub rss: Option<usize>,
@@ -34,8 +35,8 @@ impl ResourceSnapshot {
         }
     }
 
-    /// RSS from the cheap sampler, skipping the Linux descriptor scan (the
-    /// thread gauge comes with that sample either way and is dropped here).
+    /// RSS from the cheap sampler, skipping the Linux descriptor scan (the thread gauge comes with that sample either way and is dropped here).
+    /// Use this in sampling loops that read just `rss`.
     pub fn capture_rss() -> Option<usize> {
         xai_tty_utils::sample_process_memory()
             .rss_bytes

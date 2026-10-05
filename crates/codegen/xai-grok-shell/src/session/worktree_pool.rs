@@ -1,4 +1,14 @@
 //! Startup cleanup of stale pooled worktrees.
+//!
+//! A pre-warmed worktree pool (background fill, acquire/claim/release,
+//! orphan adoption) once lived here but was never wired into production and
+//! has been deleted. This cleanup path remains so `~/.grok/worktree_pool/`
+//! directories left behind by dead agent instances are still reclaimed.
+//!
+//! Layout: each pool instance owned
+//! `~/.grok/worktree_pool/<instance_id>/<pool_id>/` with a `.pid` liveness
+//! file in the instance directory.
+//! Cleanup only touches directories whose owning process is dead.
 
 use std::path::{Path, PathBuf};
 
@@ -97,9 +107,8 @@ fn cleanup_stale_pool_worktrees_inner() {
             "CLEANUP_DEAD: found dead instance pool directory"
         );
 
-        // Deregister and delete every worktree subdirectory (The pool adopted
-        // structurally valid worktrees here; with the pool gone they are
-        // reclaimed like any other stale directory.)
+        // Deregister and delete every worktree subdirectory
+        // (The old pool adopted structurally valid worktrees here; with the pool gone they are reclaimed like any other stale directory.)
         if let Ok(entries) = std::fs::read_dir(&instance_path) {
             for wt_entry in entries.flatten() {
                 let wt_path = wt_entry.path();

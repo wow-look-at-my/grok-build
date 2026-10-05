@@ -38,9 +38,9 @@ async fn test_last_api_request_at_idle_detection() {
         })
         .await;
 }
-/// End-to-end test for `maybe_refresh_model_metadata_on_resume`. Simulates a session idle for several minutes, then verifies
-/// the function fetches `/models-v2` and parses the response. The refresh must update `context_window` and
-/// `max_completion_tokens` in the sampling config.
+/// End-to-end test for `maybe_refresh_model_metadata_on_resume`.
+/// Simulates a session idle for more than 10 minutes, then verifies the function fetches `/models-v2` and parses the response.
+/// The refresh must update `context_window` and `max_completion_tokens` in the sampling config.
 #[tokio::test(flavor = "current_thread")]
 async fn test_e2e_idle_resume_refreshes_model_metadata() {
     use axum::routing::get;
@@ -409,7 +409,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
         })
         .await;
 }
-/// Verify `maybe_refresh_model_metadata_on_resume` is a no-op when idle is a bounded number of minutes.
+/// Verify `maybe_refresh_model_metadata_on_resume` is a no-op when idle is under 10 minutes.
 #[tokio::test(flavor = "current_thread")]
 async fn test_idle_resume_noop_when_not_idle_enough() {
     let local = tokio::task::LocalSet::new();

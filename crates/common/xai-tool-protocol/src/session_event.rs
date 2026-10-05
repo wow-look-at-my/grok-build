@@ -1,4 +1,8 @@
-//! Session lifecycle events designed to ride inside `ToolNotificationFrame` as `Custom` notifications.
+//! Session lifecycle events designed to ride inside
+//! `ToolNotificationFrame` as `Custom` notifications with
+//! `kind = "session_event"`. They will provide a unified view of
+//! turn/tool activity across both samplers once the emitting side
+//! is wired up.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,13 +15,14 @@ use crate::turn_hook::TurnHookOutcome;
 ///
 /// The `Unknown` variant acts as a forward-compatibility catch-all:
 /// older consumers that encounter a new `event_type` value deserialize
-/// it as `Unknown` instead of failing. Consumers MUST silently ignore
+/// it as `Unknown` instead of failing.  Consumers MUST silently ignore
 /// `Unknown` events.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event_type", rename_all = "snake_case")]
 pub enum SessionEvent {
     /// Fields mirror [`crate::turn_hook::BeforeTurnPayload`] but are
-    /// structurally independent — this is a notification event.
+    /// structurally independent — this is a notification event, not a
+    /// hook payload.
     TurnStarted {
         turn_number: u64,
         model_id: String,
@@ -25,7 +30,8 @@ pub enum SessionEvent {
         yolo_mode: bool,
     },
     /// Fields mirror [`crate::turn_hook::AfterTurnPayload`] but are
-    /// structurally independent — this is a notification event.
+    /// structurally independent — this is a notification event, not a
+    /// hook payload.
     TurnEnded {
         turn_number: u64,
         outcome: TurnHookOutcome,
@@ -47,12 +53,21 @@ pub enum SessionEvent {
     PhaseChanged {
         phase: SessionPhase,
     },
-    /// Forward-compatibility catch-all.
+    /// Forward-compatibility catch-all. Older consumers that encounter
+    /// a new `event_type` value deserialize it as `Unknown` instead of
+    /// failing.  Consumers MUST silently ignore `Unknown` events.
+    ///
+    /// The original `event_type` value is not preserved; consumers that
+    /// need to log unrecognized types should inspect the raw JSON before
+    /// deserializing into `SessionEvent`.
     #[serde(other)]
     Unknown,
 }
 
 /// Outcome of a completed tool call within a session event.
+///
+/// The `Unknown` variant is a forward-compatibility catch-all for
+/// variants added in newer protocol versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallOutcome {
@@ -64,6 +79,9 @@ pub enum ToolCallOutcome {
 }
 
 /// Current phase of the session lifecycle.
+///
+/// The `Unknown` variant is a forward-compatibility catch-all for
+/// phases added in newer protocol versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionPhase {
@@ -340,6 +358,7 @@ mod tests {
             "duration_ms": 100,
             "tool_call_count": 0,
             "model_id": "grok-3",
+            // missing "outcome"
         });
         assert!(serde_json::from_value::<SessionEvent>(v).is_err());
     }
