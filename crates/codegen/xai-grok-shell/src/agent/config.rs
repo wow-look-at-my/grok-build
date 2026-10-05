@@ -325,8 +325,8 @@ mod endpoints_wire_alias_tests {
 
     /// A `[endpoints]` table naming the list URL under both keys is one URL
     /// stated twice. The table can arrive from a managed-config or campaign
-    /// layer, not only from the user's own file, and a duplicate-field
-    /// rejection here would take the whole config down with it.
+    /// layer, not only from the user's own file. A duplicate-field rejection
+    /// here will take the whole config down with it.
     #[test]
     fn a_table_naming_the_list_url_under_both_keys_under_one_value_parses_once() {
         let cfg = parse(

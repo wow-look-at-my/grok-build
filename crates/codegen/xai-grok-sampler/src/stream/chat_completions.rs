@@ -544,7 +544,7 @@ mod tests {
 
     /// End-to-end Chat Completions reasoning round-trip on the real path.
     /// Thinking deltas streamed by a provider during turn N must survive
-    /// steps. (a) is `stream_chat_completions`' synthesis into a
+    /// these steps. (a) is `stream_chat_completions`' synthesis into a
     /// `[Reasoning, Assistant]` sibling pair. (b) is the shell turn-loop commit
     /// (the sibling rides `push_tool_result`, the assistant rides
     /// `push_assistant_response`). (c) is the real

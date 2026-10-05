@@ -231,7 +231,7 @@ async fn thinking_block_emits_reasoning_channel_and_preserved_in_response() {
 /// End-to-end reasoning round-trip on the REAL Messages path. Thinking deltas
 /// streamed by a provider have NO encrypted signature here. This is the
 /// Anthropic-compatible third-party case, for example Kimi. The deltas must
-/// survive steps. (a) is the stream's synthesis into a
+/// survive these steps. (a) is the stream's synthesis into a
 /// `ConversationItem::Reasoning` sibling. (b) is the shell turn-loop commit
 /// order (the sibling rides the `push_tool_result` arm and lands in history as
 /// `[Reasoning, Assistant]`). (c) is the real `build_messages_request` wire
