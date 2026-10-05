@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::coordinator::ActiveChildGeneration;
 use super::coordinator::active_message::ActiveMessageLifecycle;
+use super::resource_lock::ResourceLockConfig;
 use super::types::{
     ActiveAgentMessageDelivery, ActiveSubagentSummary, AgentAddress, SubagentCompletionSummary,
     SubagentDescribeOutcome, SubagentInspection, SubagentRequest, SubagentResult,
@@ -208,6 +209,9 @@ pub trait ChildRunner: 'static {
 
     fn running_count_changed(&self, _running: usize) {}
 
+    /// Release a worktree the resource-conflict policy created for a child, at the child's completion.
+    fn release_temporary_worktree(&self, _worktree_path: &str) {}
+
     fn persisted_output_ref(&self, _completion_data: &Self::CompletionData) -> Option<String> {
         None
     }
@@ -263,6 +267,8 @@ pub struct CoordinatorConfig {
     /// Buffered entries pin the child's output `Arc` until drained; hosts whose reminder rendering never inlines the output
     /// (a polling tool exists, e.g. the callback tools-server) should bound it.
     pub buffered_completion_output_cap: Option<usize>,
+    /// Inter-agent resource lock: whether it is enforced, whether a collision may be resolved with a temporary worktree.
+    pub resource_lock: ResourceLockConfig,
 }
 
 impl Default for CoordinatorConfig {
@@ -273,6 +279,7 @@ impl Default for CoordinatorConfig {
             limit_sink: None,
             buffer_completions: false,
             buffered_completion_output_cap: None,
+            resource_lock: ResourceLockConfig::default(),
         }
     }
 }
@@ -288,6 +295,7 @@ impl std::fmt::Debug for CoordinatorConfig {
                 "buffered_completion_output_cap",
                 &self.buffered_completion_output_cap,
             )
+            .field("resource_lock", &self.resource_lock)
             .finish()
     }
 }

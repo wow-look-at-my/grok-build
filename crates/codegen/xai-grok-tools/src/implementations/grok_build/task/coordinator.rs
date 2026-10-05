@@ -26,7 +26,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
-use xai_tool_types::HandedOffSubagentState;
+use xai_tool_types::{HandedOffSubagentState, SubagentIsolationMode};
 
 use super::active_message::ActiveMessageIngress;
 use super::admission::Admission;
@@ -37,6 +37,10 @@ use super::coordinator_state::{
     ProgressFuture, ProgressTarget, ReplyFuture, TaggedFuture, active_summary,
     background_at_deadline, background_if_caller_gone, completed_snapshot, hand_off_to_background,
     sleep_until, workflow_outstanding,
+};
+use super::resource_lock::{
+    ConflictDecision, LockOutcome, LockWaitQueue, LockWaiter, ResourceLockRegistry,
+    decide_conflict, resource_key_for,
 };
 use super::types::{
     ActiveAgentMessageOutcome, AgentAddress, HandedOffForegroundSubagent, SpawnedSubagentRef,
@@ -91,6 +95,10 @@ pub struct SubagentCoordinator<R: ChildRunner> {
     pending_wakes: HashMap<String, Vec<PendingWake>>,
     next_completion_age: u64,
     graph: SpawnGraph,
+    /// Inter-agent resource lock: which live child holds which resource key.
+    resource_locks: ResourceLockRegistry,
+    /// Spawns parked because their declared resource is held by another child.
+    lock_waiters: LockWaitQueue,
     waiters: HashMap<String, Vec<BlockingWaiter>>,
     drain_waiters: HashMap<PromptScope, Vec<oneshot::Sender<SubagentOutstandingReply>>>,
     workflow_cancel_waiters: HashMap<String, Vec<oneshot::Sender<SubagentCancelOutcome>>>,
@@ -291,6 +299,8 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             pending_wakes: HashMap::new(),
             next_completion_age: 0,
             graph: SpawnGraph::default(),
+            resource_locks: ResourceLockRegistry::default(),
+            lock_waiters: LockWaitQueue::default(),
             waiters: HashMap::new(),
             drain_waiters: HashMap::new(),
             workflow_cancel_waiters: HashMap::new(),
@@ -328,6 +338,8 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 && self.terminal_outputs.is_empty()
                 && self.progress.is_empty()
             {
+                // No run is live, so a parked lock waiter can never proceed.
+                self.fail_all_lock_waiters();
                 debug_assert!(
                     self.queued.is_empty(),
                     "actor exiting with spawns still queued"
@@ -972,7 +984,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
 
     fn start_child(
         &mut self,
-        request: SubagentRequest,
+        mut request: SubagentRequest,
         spawn_reply: Option<oneshot::Sender<SubagentResult>>,
         registered_tx: Option<oneshot::Sender<()>>,
         origin: StartOrigin,
@@ -982,15 +994,6 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         wake_of: Option<DisplacedCompletedChild>,
     ) {
         let id = request.id.clone();
-        let cancellation = request.cancel_token.clone();
-        // `spawn_reply: None`: the caller was auto-backgrounded while queued.
-        let handle_only = request.run_in_background || spawn_reply.is_none();
-        let agent_address = agent_address.or_else(|| {
-            xai_message_delivery_core::mint_child_address(
-                request.owner.is_workflow(),
-                uuid::Uuid::new_v4().as_u128(),
-            )
-        });
         let (queued_for, foreground_deadline) = match origin {
             StartOrigin::Direct => (
                 None,
@@ -1004,6 +1007,55 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 deadline,
             } => (Some(queued_for), deadline),
         };
+        // Inter-agent resource lock. A spawn whose declared resource is held by
+        // a live child either moves into its own temporary worktree or parks
+        // until that child releases.
+        if self.config.resource_lock.enabled
+            && let Some(key) = resource_key_for(&request)
+        {
+            match self.resource_locks.acquire(key.clone(), &id) {
+                LockOutcome::Acquired => {}
+                LockOutcome::Conflict { holder } => {
+                    match decide_conflict(&request, &self.config.resource_lock) {
+                        ConflictDecision::Isolate => {
+                            request.runtime_overrides.isolation =
+                                Some(SubagentIsolationMode::Worktree);
+                            self.resource_locks.mark_temporary_worktree(&id);
+                            tracing::info!(
+                                subagent_id = %id,
+                                holder = %holder,
+                                resource = key.as_str(),
+                                "subagent resource conflict: isolated into a temporary worktree",
+                            );
+                        }
+                        ConflictDecision::Wait => {
+                            self.park_lock_waiter(
+                                request,
+                                spawn_reply,
+                                registered_tx,
+                                queued_for,
+                                agent_address,
+                                spawner_session_id,
+                                wake_origin,
+                                wake_of,
+                                key,
+                                holder,
+                            );
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        let cancellation = request.cancel_token.clone();
+        // `spawn_reply: None`: the caller was auto-backgrounded while queued.
+        let handle_only = request.run_in_background || spawn_reply.is_none();
+        let agent_address = agent_address.or_else(|| {
+            xai_message_delivery_core::mint_child_address(
+                request.owner.is_workflow(),
+                uuid::Uuid::new_v4().as_u128(),
+            )
+        });
         // Wake passes the completed record's spawner; a fresh spawn takes the
         // graph advertise target (main's lineage source of truth).
         let spawner_session_id =
@@ -1065,6 +1117,238 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 .catch_unwind(),
             ),
         });
+    }
+
+    /// Park a spawn whose declared resource is held by another child. The
+    /// caller's registration signal fires now, because the spawn is recorded in
+    /// the wait queue rather than forgotten.
+    #[allow(clippy::too_many_arguments)]
+    fn park_lock_waiter(
+        &mut self,
+        request: SubagentRequest,
+        spawn_reply: Option<oneshot::Sender<SubagentResult>>,
+        registered_tx: Option<oneshot::Sender<()>>,
+        queued_for: Option<std::time::Duration>,
+        agent_address: Option<AgentAddress>,
+        spawner_session_id: Option<String>,
+        wake_origin: Option<WakeOrigin>,
+        wake_of: Option<DisplacedCompletedChild>,
+        key: xai_tool_types::ResourceKey,
+        holder: String,
+    ) {
+        let id = request.id.clone();
+        let now = tokio::time::Instant::now();
+        let deadline = now + self.config.resource_lock.wait_budget;
+        tracing::info!(
+            subagent_id = %id,
+            holder = %holder,
+            resource = key.as_str(),
+            budget_ms = self.config.resource_lock.wait_budget.as_millis() as u64,
+            "subagent resource conflict: waiting for the holder to release",
+        );
+        // Preserve the caller's foreground deadline even though the clock has
+        // not started: it is handed back to the child when the wait ends.
+        let foreground_deadline = (spawn_reply.is_some() && request.awaits_in_foreground())
+            .then(|| now + request.foreground_wait_budget(self.config.foreground_budget));
+        self.lock_waiters.push_back(LockWaiter {
+            request: Box::new(request),
+            spawn_reply,
+            agent_address,
+            spawner_session_id,
+            wake_origin,
+            wake: wake_of,
+            queued_for,
+            foreground_deadline,
+            deadline,
+            key,
+            holder,
+        });
+        if let Some(tx) = registered_tx {
+            let _ = tx.send(());
+        }
+    }
+
+    /// Start every parked waiter whose resource has freed.
+    fn drain_lock_waiters(&mut self) {
+        if self.lock_waiters.is_empty() {
+            return;
+        }
+        let mut ready = Vec::new();
+        let mut kept = VecDeque::new();
+        for waiter in self.lock_waiters.take() {
+            if waiter.request.cancel_token.is_cancelled()
+                || self.resource_locks.is_free(&waiter.key)
+            {
+                ready.push(waiter);
+            } else {
+                kept.push_back(waiter);
+            }
+        }
+        self.lock_waiters = LockWaitQueue::from_entries(kept);
+        for waiter in ready {
+            if waiter.request.cancel_token.is_cancelled() {
+                self.finish_cancelled_lock_waiter(waiter);
+                continue;
+            }
+            // Another waiter ahead of this may have taken the key.
+            if !self.resource_locks.is_free(&waiter.key) {
+                self.lock_waiters.push_back(waiter);
+                continue;
+            }
+            let LockWaiter {
+                request,
+                spawn_reply,
+                agent_address,
+                spawner_session_id,
+                wake_origin,
+                wake,
+                queued_for,
+                foreground_deadline,
+                ..
+            } = waiter;
+            self.start_child(
+                *request,
+                spawn_reply,
+                None,
+                StartOrigin::Dequeued {
+                    queued_for: queued_for.unwrap_or_default(),
+                    deadline: foreground_deadline,
+                },
+                agent_address,
+                spawner_session_id,
+                wake_origin,
+                wake,
+            );
+        }
+    }
+
+    /// Fail every parked waiter whose bounded wait elapsed.
+    fn expire_lock_waiters(&mut self, now: tokio::time::Instant) {
+        if self.lock_waiters.is_empty() {
+            return;
+        }
+        let mut kept = VecDeque::new();
+        let mut expired = Vec::new();
+        for waiter in self.lock_waiters.take() {
+            if waiter.deadline <= now {
+                expired.push(waiter);
+            } else {
+                kept.push_back(waiter);
+            }
+        }
+        self.lock_waiters = LockWaitQueue::from_entries(kept);
+        for waiter in expired {
+            let id = waiter.request.id.clone();
+            let holder = waiter.holder.clone();
+            let key = waiter.key.as_str().to_owned();
+            let budget_ms = self.config.resource_lock.wait_budget.as_millis() as u64;
+            tracing::warn!(
+                subagent_id = %id,
+                holder = %holder,
+                resource = %key,
+                budget_ms,
+                "subagent resource lock wait elapsed; failing the spawn",
+            );
+            if let Some(mut wake) = waiter.wake {
+                wake.completed.wake_eligible = false;
+                self.restore_displaced_completion(wake);
+                continue;
+            }
+            waiter.request.cancel_token.cancel();
+            let result = SubagentResult::failed(
+                id.clone(),
+                id,
+                format!(
+                    "timed out after {}s waiting for resource \"{key}\" held by subagent {holder}",
+                    self.config.resource_lock.wait_budget.as_secs()
+                ),
+            );
+            self.finish_never_started(
+                *waiter.request,
+                waiter.spawn_reply,
+                result,
+                std::time::Instant::now(),
+            );
+        }
+    }
+
+    /// Remove parked waiters matching `matches`, resolving each as cancelled.
+    fn remove_lock_waiters(&mut self, mut matches: impl FnMut(&SubagentRequest) -> bool) -> usize {
+        let (removed, kept): (Vec<_>, Vec<_>) = self
+            .lock_waiters
+            .take()
+            .into_iter()
+            .partition(|waiter| matches(&waiter.request));
+        self.lock_waiters = LockWaitQueue::from_entries(kept.into());
+        let count = removed.len();
+        for waiter in removed {
+            let id = waiter.request.id.clone();
+            self.reject_spawn_ready_ids(&[id]);
+            self.finish_cancelled_lock_waiter(waiter);
+        }
+        count
+    }
+
+    /// Resolve one abandoned waiter. A wake promotion restores its displaced
+    /// record; a plain spawn is finalized as cancelled.
+    fn finish_cancelled_lock_waiter(&mut self, waiter: LockWaiter) {
+        if let Some(mut wake) = waiter.wake {
+            wake.completed.wake_eligible = false;
+            self.restore_displaced_completion(wake);
+            return;
+        }
+        waiter.request.cancel_token.cancel();
+        let result = SubagentResult::cancelled(
+            waiter.request.id.clone(),
+            waiter.request.id.clone(),
+            "cancelled while waiting for a subagent resource lock",
+        );
+        self.finish_never_started(
+            *waiter.request,
+            waiter.spawn_reply,
+            result,
+            std::time::Instant::now(),
+        );
+    }
+
+    /// No run is live, so no holder can release: fail every parked waiter.
+    fn fail_all_lock_waiters(&mut self) {
+        for waiter in self.lock_waiters.take() {
+            let id = waiter.request.id.clone();
+            let holder = waiter.holder.clone();
+            let key = waiter.key.as_str().to_owned();
+            if let Some(mut wake) = waiter.wake {
+                wake.completed.wake_eligible = false;
+                self.restore_displaced_completion(wake);
+                continue;
+            }
+            waiter.request.cancel_token.cancel();
+            let result = SubagentResult::failed(
+                id.clone(),
+                id,
+                format!("resource \"{key}\" was never released; subagent {holder} did not finish"),
+            );
+            self.finish_never_started(
+                *waiter.request,
+                waiter.spawn_reply,
+                result,
+                std::time::Instant::now(),
+            );
+        }
+    }
+
+    /// Destructor drain: resolve parked callers without host callbacks.
+    fn resolve_lock_waiters_at_drop(&mut self) {
+        for waiter in self.lock_waiters.take() {
+            waiter.request.cancel_token.cancel();
+            if let Some(result_tx) = waiter.spawn_reply {
+                let _ = result_tx.send(SubagentResult::cancelled(
+                    waiter.request.id.clone(),
+                    waiter.request.id.clone(),
+                    "cancelled while waiting for a subagent resource lock",
+                ));
+            }
+        }
     }
 
     /// Workflow agents draw from their run's own pool, not session slots.
@@ -1251,6 +1535,18 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             );
         }
 
+        // Release the resource lock this child held.
+        let had_temporary_worktree = self.resource_locks.release_all(id);
+        if had_temporary_worktree {
+            let worktree = match &record {
+                ChildRecord::Active(child) => child.worktree_path.clone(),
+                ChildRecord::Pending(_) => output.result.worktree_path.clone(),
+            };
+            if let Some(path) = worktree.as_deref() {
+                self.runner.release_temporary_worktree(path);
+            }
+        }
+
         let explicitly_killed = record.explicitly_killed();
         let (was_cancelled, disposition) = match &record {
             ChildRecord::Pending(child) => (child.cancellation.is_cancelled(), child.disposition),
@@ -1270,6 +1566,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             self.running_count_changed();
             self.resolve_teardown_drain_waiters(&parent_session_id);
             self.start_queued_within_capacity();
+            self.drain_lock_waiters();
             return;
         }
 
@@ -1424,6 +1721,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         }
         self.resolve_teardown_drain_waiters(&parent_session_id);
         self.start_queued_within_capacity();
+        self.drain_lock_waiters();
     }
 
     fn cancel_one(
@@ -1450,6 +1748,9 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             return SubagentCancelOutcome::Cancelled;
         }
         if self.remove_queued(|request| request.id == id) > 0 {
+            return SubagentCancelOutcome::Cancelled;
+        }
+        if self.remove_lock_waiters(|request| request.id == id) > 0 {
             return SubagentCancelOutcome::Cancelled;
         }
         if let Some(child) = self.completed.get(id) {
@@ -1482,6 +1783,10 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         }
         self.reject_spawn_ready_ids(&doomed);
         self.remove_queued(|request| {
+            request.parent_prompt_id.as_deref() == Some(parent_prompt_id)
+                && belongs_to_session(request, parent_session_id)
+        });
+        self.remove_lock_waiters(|request| {
             request.parent_prompt_id.as_deref() == Some(parent_prompt_id)
                 && belongs_to_session(request, parent_session_id)
         });
@@ -1572,6 +1877,8 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             }
         }
         cancelled += self.remove_queued(|request| request.parent_session_id == parent_session_id);
+        cancelled +=
+            self.remove_lock_waiters(|request| request.parent_session_id == parent_session_id);
         if cancelled > 0 {
             tracing::info!(
                 parent_session_id,
@@ -1590,6 +1897,11 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             .map(|child| &child.request)
             .chain(self.pending.values().map(|child| &child.request))
             .chain(self.queued.iter().map(|queued| queued.request.as_ref()))
+            .chain(
+                self.lock_waiters
+                    .iter()
+                    .map(|waiter| waiter.request.as_ref()),
+            )
             .any(|request| request.parent_session_id == parent_session_id)
             || self.pending_wakes.keys().any(|subagent_id| {
                 self.completed.get(subagent_id).is_some_and(|completed| {
@@ -1669,6 +1981,9 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         self.remove_queued(|request| {
             request.parent_session_id == parent_session_id && !request.owner.is_workflow()
         });
+        self.remove_lock_waiters(|request| {
+            request.parent_session_id == parent_session_id && !request.owner.is_workflow()
+        });
         self.reject_pending_wakes_for_session(parent_session_id);
         SubagentCancelOutcome::Cancelled
     }
@@ -1733,6 +2048,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                     .map(|waiter| waiter.deadline),
             )
             .chain(self.teardown_drains.values().map(|drain| drain.deadline))
+            .chain(self.lock_waiters.iter().map(|waiter| waiter.deadline))
             .chain(self.spawn_ready.deadlines())
             .min()
     }
@@ -1754,12 +2070,22 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             }
         }
         self.remove_queued(|request| request.cancel_token.is_cancelled());
+        // The lock-wait leg of the same sweep: an abandoned caller stops waiting.
+        let mut kept = VecDeque::new();
+        for mut waiter in self.lock_waiters.take() {
+            if waiter.spawn_reply.as_ref().is_some_and(|tx| tx.is_closed()) {
+                waiter.spawn_reply = None;
+            }
+            kept.push_back(waiter);
+        }
+        self.lock_waiters = LockWaitQueue::from_entries(kept);
     }
 
     fn process_deadlines(&mut self) {
         self.reap_abandoned_callers();
         let now = tokio::time::Instant::now();
         self.expire_spawn_ready_messages(now);
+        self.expire_lock_waiters(now);
         // Backstop: a delete-path hold whose drain deadline elapsed force-clears
         // so a child that never finishes cannot block spawns forever.
         let stale: Vec<String> = self
@@ -1841,6 +2167,9 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         for child in self.pending.values() {
             child.cancellation.cancel();
         }
+        for waiter in self.lock_waiters.iter() {
+            waiter.request.cancel_token.cancel();
+        }
     }
 
     /// `None` (an unbound backend) matches every child.
@@ -1920,6 +2249,7 @@ impl<R: ChildRunner> Drop for SubagentCoordinator<R> {
         // host completion callbacks — off-limits from a destructor (the
         // host's storage may already be tearing down).
         self.resolve_queued_at_drop();
+        self.resolve_lock_waiters_at_drop();
         for pending in self.pending_wakes.drain().flat_map(|(_, pending)| pending) {
             let _ = pending
                 .ingress

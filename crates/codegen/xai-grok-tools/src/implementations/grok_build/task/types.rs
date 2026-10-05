@@ -247,6 +247,8 @@ pub struct SubagentRuntimeOverrides {
     pub foreground_wait_budget_ms: Option<u64>,
     pub output_schema: Option<serde_json::Value>,
     pub loop_task_id: Option<String>,
+    /// The resource this child will touch, used to derive its inter-agent lock key.
+    pub resource: Option<xai_tool_types::SubagentResource>,
 }
 
 /// Re-export of [`xai_tool_types::is_not_sentinel`] for existing call sites.
