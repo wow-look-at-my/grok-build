@@ -2975,8 +2975,8 @@ async fn ensure_on_branch(git_root: &Path, expected: Option<&str>) -> Result<()>
     );
     Ok(())
 }
-/// Files currently deleted vs HEAD that were added in the HEAD commit.
-/// Amending those deletions would drop the files from history entirely.
+/// Files deleted vs HEAD that were added in the HEAD commit. Amending those
+/// deletions would drop the files from history entirely.
 async fn files_amend_would_drop(git_root: &Path) -> Result<Vec<String>> {
     // `git diff` exits 1 when differences exist; use raw so we still read names.
     let (_ok, deleted) = git_cli_raw(

@@ -1,20 +1,4 @@
 //! One policy for replayed thinking, shared by every wire builder.
-//!
-//! A reasoning item carries up to two things: words (`summary` or `content`)
-//! and a model-bound blob (`encrypted_content`: a Messages signature or a
-//! Responses encrypted body). The blob is verified against the model that
-//! minted it. The words are not verified by anyone. This module decides, for
-//! one item and one target model, which of the two goes on the wire.
-//!
-//! The rules, item on the left and target on the right. Same model, or a
-//! model nobody recorded: `Native`. A blob with words, other model: `Text`.
-//! A blob alone, other model: `Drop`. Words alone, other model that does not
-//! sign: `Native`. Words alone, other model that signs: `Drop`.
-//!
-//! Two models that both sign cannot read each other's blob, so the static
-//! answer for that pair is `Text`. A blob that a same-model check misjudges
-//! still reaches the server. The server's rejection then steps
-//! [`ThinkingReplay`] down: `Native`, then `TextOnly`, then `Scrubbed`.
 
 use super::*;
 
@@ -128,7 +112,7 @@ pub fn reasoning_origin_model(items: &[ConversationItem], reasoning_idx: usize) 
 
 /// Whether `target` signs its thinking, judged by what it already put in this
 /// conversation. Nothing in the request declares which models sign, so a
-/// block this model signed earlier is the one piece of evidence there is.
+/// block this model signed earlier is the piece of evidence there is.
 pub fn target_signs_thinking(items: &[ConversationItem], target: &str) -> bool {
     items.iter().enumerate().any(|(idx, item)| {
         matches!(item, ConversationItem::Reasoning(r) if is_signed(r))
@@ -253,8 +237,7 @@ pub fn apply_thinking_replay(
 
 /// Whether a provider's rejection names replayed thinking it could not take:
 /// a Messages signature it cannot verify, or a Responses `encrypted_content`
-/// it cannot decrypt. Either one is answered by stepping the replay level
-/// down, on every path that sends history.
+/// it cannot decrypt.
 pub fn names_replayed_thinking(message: &str) -> bool {
     if message.contains("encrypted_content") {
         return true;
@@ -265,7 +248,7 @@ pub fn names_replayed_thinking(message: &str) -> bool {
 
 impl ConversationRequest {
     /// Step the replay level down one fallback. Answers `false` when the
-    /// request carries no reasoning, or is already at the last level, so the
+    /// request carries no reasoning. It is already at the last level, so the
     /// caller reports the rejection instead of resending the same body.
     pub fn degrade_thinking_replay(&mut self) -> bool {
         if !self

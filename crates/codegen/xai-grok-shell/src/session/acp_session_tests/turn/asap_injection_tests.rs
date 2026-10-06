@@ -1,12 +1,4 @@
-//! ASAP interjection: a mid-turn user message buffered while a tool is
-//! running reaches the model on the *next* request in the same turn — between
-//! AI messages, after the tool call — without waiting for stream idle and
-//! without being deferred to its own turn.
-//!
-//! Drives the real turn loop (`handle_prompt`) against a scripted model with
-//! a flag-gated blocking tool call, so the interjection is buffered in the
-//! window between the tool's request and its completion — the exact path the
-//! pager's "queued follow-up delivered mid-turn" feature relies on.
+//! ASAP interjection.
 
 use super::support::*;
 use super::*;
@@ -17,8 +9,7 @@ use xai_grok_test_support::sse::{
 };
 use xai_grok_test_support::{MockInferenceServer, ScriptedResponse};
 
-/// Distinctive text the user "sends" mid-turn; the test asserts it reaches
-/// the model on the second request, inside the interjection envelope.
+/// Distinctive text the user "sends" mid-turn.
 const INTERJECTION_NEEDLE: &str = "ASAP_STEER_PROBE";
 
 fn drain_gateway(mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>) {
@@ -53,7 +44,7 @@ fn user_message_blobs(body: &serde_json::Value) -> Vec<String> {
 }
 
 /// Build an actor wired to the mock server with the `run_terminal_command`
-/// (bash) tool registered, so the scripted model can call a flag-gated
+/// (bash) tool registered. The scripted model can call a flag-gated
 /// command that blocks until the test releases it.
 async fn actor_with_mock_sampler(
     server: &MockInferenceServer,
@@ -139,9 +130,10 @@ async fn actor_with_mock_sampler(
     actor
 }
 
-/// A mid-turn interjection buffered while a tool call is in flight reaches
-/// the model on the turn's *next* request — between AI messages, after the
-/// tool result — rather than waiting for the turn to end.
+/// Consider a mid-turn interjection buffered while a tool call. That
+/// interjection is in flight reaches the model on the turn's *next* request
+/// — between AI messages, after the tool result. Rather than waiting for
+/// the turn to end.
 #[tokio::test]
 async fn interjection_buffered_during_tool_call_reaches_next_request() {
     let local = tokio::task::LocalSet::new();
@@ -149,9 +141,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
         .run_until(async {
             let server = MockInferenceServer::start().await.expect("mock inference server");
 
-            // A flag-gated foreground command: blocks until the test writes the
-            // release flag, giving us the mid-turn window to buffer the
-            // interjection after the first model request but before the second.
+            // A flag-gated foreground command.
             let tmp = std::env::temp_dir().join(format!(
                 "asap-inject-{}",
                 uuid::Uuid::now_v7().simple()
@@ -168,7 +158,6 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
             })
             .to_string();
 
-            // Request 1: model calls the flag-gated command (blocks).
             server.enqueue_response(
                 "/v1/responses",
                 ScriptedResponse::sse(responses_api_reasoning_then_tool_call_events(
@@ -179,7 +168,6 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                     "test",
                 )),
             );
-            // Request 2: model finishes with a text answer.
             server.enqueue_response(
                 "/v1/responses",
                 ScriptedResponse::sse(responses_api_script_exact("done after steer", "test")),
@@ -194,8 +182,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
 
             let actor = actor_with_mock_sampler(&server, persistence_tx, gateway_tx).await;
 
-            // Drive the turn on a background local task so we can buffer the
-            // interjection while the flag-gated tool is still running.
+            // Drive the turn on a background local task.
             let turn_actor = actor.clone();
             let turn_task = tokio::task::spawn_local(async move {
                 let prompt_blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(
@@ -222,9 +209,9 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                 .expect("turn must finish within timeout")
             });
 
-            // Wait until the first model request (the tool call) has been sent,
-            // so we know the turn is inside the tool and the interjection
-            // buffer will be drained on the *next* loop iteration, not this one.
+            // Wait until the first model request (the tool call) has been
+            // sent, so we know the turn is inside the tool. The interjection
+            // buffer will be drained on the *next* loop iteration, not this.
             let waited = tokio::time::timeout(Duration::from_secs(30), async {
                 loop {
                     if !server.request_bodies().is_empty() {
@@ -240,7 +227,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                 "first model request (tool call) must be sent within timeout"
             );
 
-            // Give the tool a beat to actually start running the gated command.
+            // Give the tool a beat to start running the gated command.
             tokio::time::sleep(Duration::from_millis(200)).await;
             assert_eq!(
                 server.request_bodies().len(),
@@ -255,8 +242,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                 attachments: vec![],
             });
 
-            // Release the flag so the tool completes and the turn loop iterates
-            // (draining the interjection before the second model request).
+            // Release the flag so the tool completes and the turn loop iterates.
             std::fs::write(&release_flag, b"released").unwrap();
 
             let outcome = turn_task.await.expect("turn task panicked");
@@ -269,8 +255,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                 bodies.len()
             );
 
-            // The interjection must reach the model on the SECOND request, as a
-            // user message carrying the steering text.
+            // The interjection must reach the model on the SECOND request.
             let second = &bodies[1];
             let user_blobs = user_message_blobs(second);
             assert!(
@@ -281,8 +266,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                  user blobs: {user_blobs:?}"
             );
 
-            // And it must NOT have been on the first request (it was buffered
-            // after the tool started).
+            // And it must NOT have been on the first request (it was buffered after the tool started).
             let first = &bodies[0];
             let first_user = user_message_blobs(first);
             assert!(
@@ -290,8 +274,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                 "interjection must not appear on the first request; user blobs: {first_user:?}"
             );
 
-            // The conversation must contain the interjection as a standalone
-            // synthetic user message tagged Interjection.
+            // The conversation must contain the interjection as a standalone.
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
@@ -309,15 +292,14 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
         .await;
 }
 
-/// An interjection buffered while the model is *streaming* (no tool call in
-/// flight — the turn loop is blocked on `submit_and_collect`) must still reach
-/// the model on the next request in the same turn, not wait for a separate
-/// prompt turn or get silently dropped.
-///
-/// This is the "don't wait for stream idle" case: the stream holds open at its
-/// terminal event via `expect_response_blocked`, the interjection is buffered
-/// mid-stream, then the stream is released. The turn loop iterates, drains the
-/// interjection, and the second request carries it.
+/// Consider an interjection buffered while the model. That interjection is
+/// *streaming* (no tool call in flight — the turn loop is blocked on
+/// `submit_and_collect`) must still reach the model on the next request in
+/// the same turn, not wait for a separate prompt turn. It get silently
+/// dropped. This is the "don't wait for stream idle" case: the stream holds
+/// open at its terminal event via `expect_response_blocked`. The interjection
+/// is buffered mid-stream. Then the stream is released. The turn loop
+/// iterates, drains the interjection, and the second request carries it.
 #[tokio::test]
 async fn interjection_buffered_during_stream_reaches_next_request() {
     let local = tokio::task::LocalSet::new();
@@ -328,8 +310,6 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
 
             let server = MockInferenceServer::start().await.expect("mock inference server");
 
-            // Request 1: a pure-text stream that holds open at its terminal
-            // event so we can buffer the interjection mid-stream.
             let mut first =
                 server.expect_response_blocked(
                     "first-stream",
@@ -339,8 +319,6 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                         "test",
                     )),
                 );
-            // Request 2: the turn's follow-up request after the interjection is
-            // drained — a short text completion.
             server.enqueue_response(
                 "/v1/responses",
                 ScriptedResponse::sse(responses_api_script_exact("done after steer", "test")),
@@ -382,8 +360,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                 .expect("turn must finish within timeout")
             });
 
-            // Wait until the first stream is actively streaming and parked at
-            // its terminal-event barrier — the model is mid-generation.
+            // Wait until the first stream is actively streaming.
             first.wait_blocked().await;
 
             // Buffer the interjection mid-stream — the user "sends" a message
@@ -393,8 +370,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                 attachments: vec![],
             });
 
-            // Release the stream so it completes; the turn loop then iterates,
-            // drains the interjection, and fires the second request.
+            // Release the stream so it completes.
             first.release();
 
             let outcome = turn_task.await.expect("turn task panicked");
@@ -418,8 +394,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                  user blobs: {user_blobs:?}"
             );
 
-            // And it must NOT have been on the first request (it was buffered
-            // mid-stream, after the first request was already sent).
+            // And it must NOT have been on the first request.
             let first_req = &bodies[0];
             let first_user = user_message_blobs(first_req);
             assert!(
@@ -427,8 +402,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                 "interjection must not appear on the first request; user blobs: {first_user:?}"
             );
 
-            // The conversation must contain the interjection as a standalone
-            // synthetic user message tagged Interjection.
+            // The conversation must contain the interjection as a standalone.
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
@@ -444,16 +418,15 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
 }
 
 /// A follow-up *queued* mid-turn (the prompt-queue path, not a direct
-/// interjection) is harvested into the running turn and reaches the model on
+/// interjection) is harvested into the running turn. It reaches the model on
 /// the next request — the "claude code style" asap delivery the harvest
 /// feature (commit `2c973e5`) provides. The follow-up must NOT wait for the
-/// whole turn to end and run as its own turn.
-///
-/// This drives the REAL turn-promotion path (`maybe_start_running_task`), which
-/// sets `running_task` and `queued_at_turn_start` — the state the harvest
+/// whole turn to end and run as its own turn. This drives the REAL
+/// turn-promotion path (`maybe_start_running_task`), which sets
+/// `running_task` and `queued_at_turn_start` — the state the harvest
 /// consults. Direct `handle_prompt` calls bypass the promoter and leave that
-/// state empty, so the harvest would no-op; this test goes through the promoter
-/// so it exercises the exact path production takes.
+/// state empty, so the harvest would no-op. This test goes through the
+/// promoter so it exercises the exact path production takes.
 #[tokio::test]
 async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
     let local = tokio::task::LocalSet::new();
@@ -477,7 +450,6 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
             })
             .to_string();
 
-            // Request 1: model calls the flag-gated command (blocks).
             server.enqueue_response(
                 "/v1/responses",
                 ScriptedResponse::sse(responses_api_reasoning_then_tool_call_events(
@@ -488,7 +460,6 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
                     "test",
                 )),
             );
-            // Request 2: model finishes with a text answer.
             server.enqueue_response(
                 "/v1/responses",
                 ScriptedResponse::sse(responses_api_script_exact("done after harvest", "test")),
@@ -505,8 +476,7 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
 
             const HARVEST_NEEDLE: &str = "HARVEST_STEER_PROBE";
 
-            // Queue the initial prompt — the real path promotes this and spawns
-            // the turn (setting running_task + queued_at_turn_start).
+            // Queue the initial prompt — the real path promotes this and spawns the turn.
             let initial = user_item("asap-harvest", "test-owner");
             {
                 let mut state = actor.state.lock().await;
@@ -533,10 +503,7 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
             // Give the tool a beat to start running.
             tokio::time::sleep(Duration::from_millis(200)).await;
 
-            // Queue a follow-up mid-turn — the prompt-queue path. The harvest
-            // (called at the top of the next loop iteration, loop_index > 1)
-            // must pick this up and deliver it as an interjection on the next
-            // model request.
+            // Queue a follow-up mid-turn — the prompt-queue path.
             let mut followup = user_item("harvest-followup", "test-owner");
             if let Some(meta) = followup.queue_meta.as_mut() {
                 meta.text = HARVEST_NEEDLE.to_string();
@@ -566,8 +533,7 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
                 bodies.len()
             );
 
-            // The harvested follow-up must reach the model on the SECOND
-            // request, as a user message carrying the steering text.
+            // The harvested follow-up must reach the model on the SECOND request.
             let second = &bodies[1];
             let user_blobs = user_message_blobs(second);
             assert!(
@@ -584,8 +550,7 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
                 "harvested follow-up must not appear on the first request; user blobs: {first_user:?}"
             );
 
-            // The conversation must contain it as a synthetic user message
-            // tagged Interjection.
+            // The conversation must contain it as a synthetic user message tagged Interjection.
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
@@ -602,18 +567,17 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
         .await;
 }
 
-/// ASAP injection during a model stream: when an interjection arrives while
-/// the model is actively streaming (the turn loop is blocked on
-/// `submit_and_collect`), the in-flight stream is CANCELLED so the turn loop
-/// iterates immediately, drains the interjection, and resubmits — instead of
-/// waiting for the (potentially many-minutes-long) stream to finish. The
-/// partial text the model had already streamed is preserved as an assistant
-/// message so the resubmitted request sees `partial + interjection`.
-///
-/// This is the "don't wait for stream idle" path: it mirrors what the
-/// `SessionCommand::Interject` handler does (buffer + cancel the in-flight
-/// request), driven here directly so the test does not need the full
-/// `run_session` actor loop.
+/// ASAP injection during a model stream. The in-flight stream is CANCELLED
+/// so the turn loop iterates immediately, drains the interjection, and
+/// resubmits. Instead of waiting for the (potentially many-minutes-long)
+/// stream to finish. This holds when an interjection arrives while the model
+/// is actively streaming (the turn loop is blocked on `submit_and_collect`).
+/// The partial text the model had already streamed is preserved as an
+/// assistant message so the resubmitted request sees `partial +
+/// interjection`. This is the "don't wait for stream idle" path. It mirrors
+/// what the `SessionCommand::Interject` handler does (buffer + cancel the
+/// in-flight request), driven here directly so the test does not need the
+/// full `run_session` actor loop.
 #[tokio::test]
 async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved() {
     let local = tokio::task::LocalSet::new();
@@ -624,8 +588,6 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
 
             let server = MockInferenceServer::start().await.expect("mock inference server");
 
-            // Request 1: a stream that emits some text then holds open at its
-            // terminal event — the model is mid-generation with partial text.
             let mut first =
                 server.expect_response_blocked(
                     "first-stream",
@@ -635,7 +597,6 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
                         "test",
                     )),
                 );
-            // Request 2: the resubmitted request after the cancel+drain.
             server.enqueue_response(
                 "/v1/responses",
                 ScriptedResponse::sse(responses_api_script_exact("final answer", "test")),
@@ -650,8 +611,7 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
 
             let actor = actor_with_mock_sampler(&server, persistence_tx, gateway_tx).await;
 
-            // Queue the initial prompt and promote it (the real path that sets
-            // running_task + in_flight_sampler_request_id).
+            // Queue the initial prompt.
             let initial = user_item("asap-cancel", "test-owner");
             {
                 let mut state = actor.state.lock().await;
@@ -661,19 +621,15 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
                 tokio::sync::mpsc::unbounded_channel::<TurnCompletionMsg>();
             actor.clone().maybe_start_running_task(completion_tx).await;
 
-            // Wait until the first stream is parked at its terminal-event
-            // barrier — the model is mid-stream with partial text streamed.
+            // Wait until the first stream is parked.
             first.wait_blocked().await;
 
-            // Give the sampler-event drainer task a beat to process the text
-            // deltas that arrived before the terminal barrier (they update
-            // `streaming_turn_capture`, which the cancel path preserves).
+            // Give the sampler-event drainer task a beat to process the text deltas that arrived before the terminal barrier.
             tokio::time::sleep(Duration::from_millis(200)).await;
 
             // Simulate the `SessionCommand::Interject` handler: buffer the
             // interjection, set the cancel flag, and cancel the in-flight
-            // request id. (In production this is one `SessionCommand::Interject`
-            // dispatch; here we reproduce its effect directly.)
+            // request id.
             actor.pending_interjections.push(PendingInterjection {
                 text: INTERJECTION_NEEDLE.to_string(),
                 attachments: vec![],
@@ -702,8 +658,7 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
                 bodies.len()
             );
 
-            // The interjection must reach the model on the SECOND (resubmit)
-            // request, as a user message.
+            // The interjection must reach the model on the SECOND (resubmit) request, as a user message.
             let second = &bodies[1];
             let user_blobs = user_message_blobs(second);
             assert!(
@@ -712,10 +667,7 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
                  user blobs: {user_blobs:?}"
             );
 
-            // The partial assistant text must be preserved in the conversation
-            // as an assistant message (committed before the resubmit), so the
-            // model sees `partial + interjection` and the streamed text is not
-            // silently lost.
+            // The partial assistant text must be preserved in the conversation as an assistant message (committed before the resubmit).
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_partial = conv.iter().any(|item| {
                 matches!(item, ConversationItem::Assistant(a) if a.content.as_ref() == "partial answer so far")

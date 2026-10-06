@@ -2061,10 +2061,10 @@ async fn debounce_session_search_echoes_query_and_seq() {
         other => panic!("expected SessionSearchDebounceExpired, got {other:?}"),
     }
 }
-/// Two Shift+Tab presses in a row must reach the shell in press order, so the
-/// mode it applies last is the mode the user pressed last. Each mode change is
-/// its own spawned task, so the second request must wait for the first one's
-/// answer instead of racing it onto the wire.
+/// Shift+Tab presses in a row must reach the shell in press order. The mode it
+/// applies last is the mode the user pressed last. Each mode change is its own
+/// spawned task. The second request must wait for the first one's answer
+/// instead of racing it onto the wire.
 #[tokio::test]
 async fn consecutive_mode_changes_reach_the_shell_in_press_order() {
     use xai_acp_lib::AcpAgentMessage;
@@ -2080,7 +2080,7 @@ async fn consecutive_mode_changes_reach_the_shell_in_press_order() {
             };
             seen.push(args.request.mode_id.0.to_string());
             if seen.len() == 1 {
-                // Give a second request every chance to arrive behind this one
+                // Give a second request every chance to arrive behind this
                 // before the first has been answered.
                 for _ in 0..16 {
                     tokio::task::yield_now().await;
@@ -2111,8 +2111,7 @@ async fn consecutive_mode_changes_reach_the_shell_in_press_order() {
             &flags,
             &progress_tx,
         );
-        // The event loop returns to the terminal for the next keypress between
-        // the two dispatches.
+        // The event loop returns to the terminal for the next keypress between both dispatches.
         tokio::task::yield_now().await;
     }
     while let Some(joined) = tasks.join_next().await {

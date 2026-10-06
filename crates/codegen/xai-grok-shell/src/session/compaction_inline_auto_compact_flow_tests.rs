@@ -2147,9 +2147,9 @@ async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
         })
         .await;
 }
-/// The server's tokenizer is the one that counts. When it says the context
-/// length is the problem, our own estimate saying the prompt fits is not a
-/// reason to hand the turn back to the user.
+/// The server's tokenizer is the one that counts. Our own estimate saying
+/// the prompt fits is not a reason to hand the turn back to the user. This
+/// applies when it says the context length is the problem.
 #[tokio::test(flavor = "current_thread")]
 async fn a_context_length_rejection_compacts_even_when_our_own_count_fits() {
     let local = tokio::task::LocalSet::new();

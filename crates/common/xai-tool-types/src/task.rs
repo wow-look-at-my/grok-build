@@ -5,23 +5,15 @@ use crate::Aliases;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// ───────────────────────────────────────────────────────────────────────────
 // Agent usage frequency — how strongly system-prompt/tool wording nudges the
 // model toward spawning subagents
-// ───────────────────────────────────────────────────────────────────────────
 
 /// How strongly system-prompt and tool-description wording nudges the model
 /// toward using the `task` tool to spawn subagents.
-///
-/// This never gates the tool itself — that is `subagents_enabled` (see the
-/// host's own subagents config). It only varies the surrounding wording, from
-/// telling the model to leave delegation to explicit user request, up to
-/// telling it to default to delegating independent work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentUsageFrequency {
-    /// Never spawn a subagent unless the user explicitly asks for an agent,
-    /// subagent, or the task tool in the current conversation.
+    /// Never spawn a subagent unless the user explicitly asks for an agent, subagent.
     ExplicitOnly,
     VeryRare,
     Rare,
@@ -45,13 +37,12 @@ impl AgentUsageFrequency {
         }
     }
 
-    /// Parse a config/env string into a level.
-    ///
-    /// Accepts the canonical kebab-case form plus common variants (`snake_case`,
-    /// spaces, mixed case) so a hand-typed `config.toml` value or env var isn't
-    /// rejected over punctuation. Returns `None` on no match; the caller decides
-    /// how to report an invalid value (config resolution warns and falls back
-    /// to the default — see `SubagentsConfig::resolve_usage_frequency`).
+    /// Parse a config/env string into a level. Accepts the canonical
+    /// kebab-case form plus common variants (`snake_case`, spaces, mixed
+    /// case) so a hand-typed `config.toml` value or env var isn't rejected
+    /// over punctuation. Returns `None` on no match; the caller decides how
+    /// to report an invalid value (config resolution warns and falls back to
+    /// the default — see `SubagentsConfig::resolve_usage_frequency`).
     pub fn parse(raw: &str) -> Option<Self> {
         let normalized = raw.trim().to_ascii_lowercase().replace(['_', ' '], "-");
         Some(match normalized.as_str() {
@@ -864,12 +855,11 @@ pub struct TaskOutputToolInput {
     /// Lenient on the wire (invisible to the advertised schema — schemars
     /// ignores serde aliases and custom deserializers): also accepts the
     /// singular `task_id` key and a bare string/number instead of an array.
-    /// Models frequently mirror `kill_task`'s singular `task_id` here (in
-    /// soak rollouts 3 of 4 organic calls did) and previously hard-failed
-    /// with "Provide a non-empty task_ids list", after which they abandoned
-    /// the background-task workflow for shell polling. A call naming both
-    /// keys folds them through [`TaskOutputToolInput::TASK_IDS_KEYS`], so the
-    /// frequent case of one list spelled twice parses.
+    /// Hard-failed with "Provide a non-empty task_ids list", after which they
+    /// abandoned the background-task workflow for shell polling. A call
+    /// naming both keys folds them through
+    /// [`TaskOutputToolInput::TASK_IDS_KEYS`], so the frequent case of one
+    /// list spelled twice parses.
     #[schemars(
         description = "Task IDs to get output from. Pass one or more; for a single task use a one-element array. With a positive timeout_ms, multiple ids wait until all complete. Omit timeout_ms or pass 0 for a non-blocking snapshot."
     )]
@@ -888,15 +878,14 @@ pub struct TaskOutputToolInput {
 }
 
 impl TaskOutputToolInput {
-    /// The keys [`task_ids`](Self::task_ids) is read under. The first is what
-    /// this type writes; `task_id` is accepted on input only.
+    /// The keys [`task_ids`](Self::task_ids) is read under.
     pub const TASK_IDS_KEYS: Aliases = Aliases::new("task_ids", &["task_id"]);
 }
 
 /// `TaskOutputToolInput` as a model writes it, with each task-id key spelling
 /// its own field. It exists so a call naming both folds them under
 /// [`TaskOutputToolInput::TASK_IDS_KEYS`] rather than tripping serde's
-/// duplicate-field check, which rejects a second key whatever its value.
+/// duplicate-field check. This rejects a second key whatever its value.
 #[derive(Debug, Default, Deserialize)]
 struct TaskOutputToolInputWire {
     #[serde(
@@ -928,11 +917,6 @@ impl TryFrom<TaskOutputToolInputWire> for TaskOutputToolInput {
 }
 
 /// Forwards through [`TaskOutputToolInputWire`] and the fold.
-///
-/// This is the body `#[serde(try_from = "TaskOutputToolInputWire")]` would
-/// generate, written out because schemars 1.0 reads that attribute to build the
-/// advertised schema — it would publish the shadow's shape, and so name
-/// `task_id` to the model, which the whole leniency exists to avoid.
 impl<'de> Deserialize<'de> for TaskOutputToolInput {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -2067,7 +2051,7 @@ mod tests {
         assert_eq!(input.resolved_task_ids(), vec!["a"]);
     }
 
-    /// Two different id lists in one call is a contradiction about which task to
+    /// Different id lists in one call is a contradiction about which task to
     /// read; the tool may not pick a side in silence.
     #[test]
     fn task_output_input_whose_key_spellings_disagree_is_an_error_naming_the_field() {

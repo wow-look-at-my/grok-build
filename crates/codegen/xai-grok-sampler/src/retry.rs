@@ -1,86 +1,20 @@
 //! Retry classification, backoff, and decision-making.
-//!
-//! Pure logic only: no I/O, no notifications, no logging side-effects.
-//! The actor (M4) wraps this with the actual retry loop.
-//!
-//! # Retry behavior summary
-//!
-//! **Retried** (up to 14 times — attempt [`DEFAULT_MAX_RETRIES`] = 15 is
-//! fatal — ≈5.5 min: every wait, including a server `Retry-After`, is
-//! capped at [`MAX_RETRY_BACKOFF`] and jittered):
-//! - 429 and any 5xx except 525/526 — covers the Cloudflare edge pages
-//!   (520–524 origin unreachable/timed out, 530 edge 1xxx) and upstream
-//!   overload (529). The rule is `RetryPolicy::edge_client`.
-//! - Connection errors (timeout, refused, reset)
-//! - `StreamError` (a server-sent mid-stream error)
-//! - `EmptyResponse` (model returned no content/tool calls)
-//!
-//! **Retried on their own budget** (the transport budget above is untouched):
-//! - A stream that died mid-body — `EventStreamError`, or a reqwest decode
-//!   failure ("error decoding response body"):
-//!   [`STREAM_INTERRUPT_MAX_RETRIES`] = 10, same exponential backoff.
-//!
-//! **Retried with lower cap** ([`RATE_LIMIT_RETRY_THRESHOLD`] = 5):
-//! - 429 (rate limited) — waits the server's `Retry-After`, clamped per
-//!   attempt to [`MAX_RETRY_BACKOFF`]; the attempt count bounds the total
-//!
-//! **Special handling** (not counted against retry budget):
-//! - 413 / image processing errors → strip images and retry once
-//! - model-takes-no-image-input errors (any of 400/404/415/422/500,
-//!   provider-worded) → strip images and retry once
-//! - 400 on a `thinking` block's `signature` → drop replayed reasoning and
-//!   retry once
-//! - 400 "Reasoning is mandatory for this endpoint and cannot be disabled."
-//!   → mark the target reasoning-mandatory, remap a disabled/omitted
-//!   requested effort to the lowest non-disabled tier, and retry once
-//!
-//! **Not retried** (Fatal immediately):
-//! - 400, 401, 403, 404, 408, 422 (client errors)
-//! - Cloudflare 525/526 (origin TLS handshake / invalid cert) — a broken
-//!   origin certificate never clears on its own
-//! - `Auth` / `InvalidConfiguration` (credential/config issues)
-//! - `IdleTimeout` (model stuck, retry would stall again)
-//! - `Serialization` (response parsing failure)
-//! - `MaxTokensTruncation` (by design)
-//!
-//! **Server hint** (`x-should-retry` header from CCP):
-//! - `false` → Fatal immediately, regardless of status code
-//! - `true` / absent → falls through to status-code logic above
-//!
-//! CCP's header is 429 + any 5xx (`RetryPolicy::server`). Cloudflare's own
-//! 52x pages never carry it, so the client policy above is what applies at
-//! the edge, and 525/526 stay Fatal even if a future header said retry.
 
 use std::time::Duration;
 
 use xai_grok_sampling_types::{SamplingError, is_retryable_api_status};
 
-/// After this many rate-limit (429) retries, escalate to the caller
-/// instead of waiting again. Each wait is capped at [`MAX_RETRY_BACKOFF`],
-/// so the budget bounds the total 429 wait at the 120s the header parser
-/// admits (`extract_retry_after`) rather than at one attempt.
 pub const RATE_LIMIT_RETRY_THRESHOLD: u32 = 5;
 
 pub const RATE_LIMIT_RETRY_DISABLED: u32 = 1;
 
 pub const DEFAULT_MAX_RETRIES: u32 = 15;
 
-/// Retries granted to a stream that died mid-body
-/// ([`SamplingError::is_stream_interrupted`]): 10, each after the same
-/// exponential backoff the transport path uses. It is a budget of its own,
-/// like the doom-loop and output-rate ones: a dropped connection is not a
-/// server fault, and spending the transport budget on it leaves nothing for
-/// the 5xx that follows. It is also a guarantee — a model configured with a
-/// smaller `max_retries` still gets these 10, so one network blip can no
-/// longer end a turn with "error decoding response body".
 pub const STREAM_INTERRUPT_MAX_RETRIES: u32 = 10;
 
 /// The budget [`classify_error`] must be given for a stream interruption, so
 /// that exactly [`STREAM_INTERRUPT_MAX_RETRIES`] retries happen (the attempt
 /// reaching the budget is fatal, hence the `+ 1`).
-///
-/// `transport_budget` of 0 is observe-only, or a caller that cannot take
-/// duplicate output; both keep their zero.
 pub fn stream_interrupt_budget(transport_budget: u32) -> u32 {
     if transport_budget == 0 {
         0
@@ -89,14 +23,7 @@ pub fn stream_interrupt_budget(transport_budget: u32) -> u32 {
     }
 }
 
-/// Longest single wait on the generic retry path — the exponential-backoff
-/// ceiling, and the clamp for a server `Retry-After` on every path. Cloudflare
-/// answers 52x with `Retry-After: 60`–`120`; honoring that verbatim across 14
-/// retries would stall a turn ~28 min instead of the ~5.5 min budget above. A
-/// 429 is clamped to the same ceiling and retried up to
-/// [`RATE_LIMIT_RETRY_THRESHOLD`] times, so a header asking for longer is
-/// still waited out across attempts — one of which may find the limit already
-/// clear.
+/// Longest single wait on the generic retry path.
 pub const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 
 pub const TRANSPORT_REBUILD_BACKOFF: Duration = Duration::from_millis(200);
@@ -128,15 +55,11 @@ pub fn doom_loop_backoff(retry_count: u32) -> Duration {
     Duration::from_millis(hasher.finish() % 251)
 }
 
-/// Backoff for an output-rate resample. Waiting is the thing the gate exists
-/// to stop doing, so it is the same near-immediate jitter a doom-loop resample
-/// takes.
+/// Backoff for an output-rate resample.
 pub fn output_rate_backoff(retry_count: u32) -> Duration {
     doom_loop_backoff(retry_count)
 }
 
-/// Exponential backoff (2s, 4s, 8s, ..., capped at [`MAX_RETRY_BACKOFF`])
-/// with +/-20% jitter to prevent thundering-herd retry storms.
 pub fn retry_backoff_with_jitter(retry_count: u32) -> Duration {
     let shift = retry_count.saturating_sub(1);
     let base_ms = 2000u64
@@ -181,24 +104,16 @@ pub enum RetryDecision {
 
     RetryWithImageStrip,
 
-    /// Retry with the request's thinking replay stepped down one level (a
-    /// thinking block whose signature, or `encrypted_content`, this model
-    /// cannot take).
+    /// Retry with the request's thinking replay stepped down one level.
     RetryWithReasoningStrip,
 
     /// Retry with the tool schemas in their fallback form.
     RetryWithToolSchemaFallback,
 
-    /// Retry after marking the target reasoning-mandatory and remapping a
-    /// disabled/omitted requested effort to the lowest non-disabled tier (the
-    /// provider answered our disabling body with its "reasoning is mandatory"
-    /// 400). The wire builders then emit a supported non-disabled effort.
+    /// Retry after marking the target reasoning-mandatory and remapping.
     RetryWithReasoningEffortRemap,
 
-    /// Retry after dropping the message-level properties a strict-schema
-    /// provider rejected (`wrong_api_format ... is unsupported`). Narrowing
-    /// the request's [`ChatMessageProfile`] makes the wire conversion omit
-    /// them, so the retry body carries only properties the target defines.
+    /// Retry after dropping the message-level properties.
     RetryWithMessagePropertyStrip,
 
     /// Retry after rebuilding the HTTP client with HTTP/1.1 (transport
@@ -225,12 +140,7 @@ pub fn classify_error(
         return RetryDecision::Fatal(clone_error(err));
     }
 
-    // A blob another model minted, on either backend. It has to come before
-    // the status-code arms below, which would call this 400 fatal: the blocks
-    // are in conversation history, so every following turn on the same
-    // history fails the same way. The replay level steps down and the
-    // request goes again. The session's own flatten-and-resubmit covers what
-    // is left once the level is spent.
+    // A blob another model minted, on either backend.
     if err.is_encrypted_content_error() || err.is_thinking_signature_error() {
         return RetryDecision::RetryWithReasoningStrip;
     }
@@ -250,50 +160,26 @@ pub fn classify_error(
         return RetryDecision::RetryWithImageStrip;
     }
 
-    // The routed model takes no image input (e.g. OpenRouter's 404 "No
-    // endpoints found that support image input"). Same strip recovery, and it
-    // has to come before the status-code arms below, which would call a 404
-    // fatal: the images are in conversation history, so a fatal here fails
-    // every following turn on the same history with no way out but a new
-    // session.
     if err.is_image_input_unsupported_error() {
         return RetryDecision::RetryWithImageStrip;
     }
 
     // The provider mandates reasoning and we sent a disabling/omitting body
     // ("Reasoning is mandatory for this endpoint and cannot be disabled.").
-    // Remap the requested effort to the lowest non-disabled tier and retry —
-    // the same disabling body would fail again, so this has to beat the
-    // status-code arms below, which would otherwise call this 400 fatal.
     if err.is_reasoning_mandatory_error() {
         return RetryDecision::RetryWithReasoningEffortRemap;
     }
 
     // The provider's schema rejected a message-level property it does not
     // define (`wrong_api_format ... is unsupported`, e.g. Cerebras rejecting
-    // `model_id`/`reasoning_content` on replayed assistant messages). The
-    // offending property lives in conversation *history*, so re-sending the
-    // same body fails identically on every turn and every retry — without
-    // this arm, a 400 here would be Fatal and permanently brick the session.
-    // Recovery is to omit the named properties from the serialized body and
-    // retry once.
+    // `model_id`/`reasoning_content` on replayed assistant messages).
     if err.is_unsupported_message_property_error() {
         return RetryDecision::RetryWithMessagePropertyStrip;
     }
 
     // Shared retry vetoes (`SamplingError::is_retry_vetoed`, also used by
-    // one-shot callers like /btw):
-    // - x-should-retry: false — trust the server, it knows if the error is
-    //   request-content-caused (e.g. malformed tool call in history) vs
-    //   transient. x-should-retry: true is intentionally NOT handled — the
-    //   header only suppresses retries; forcing them on non-retryable
-    //   statuses could amplify failures.
-    // - Context-window / size overflow — deterministic, re-sending the same
-    //   (or larger) payload always fails, whatever status the backend used.
-    //
-    // Checked AFTER image-strip guards: image stripping changes the
-    // request payload, so a server "don't retry" on the original
-    // request doesn't apply to the stripped request.
+    // one-shot callers like /btw): - x-must-retry: false — trust the
+    // server.
     if err.is_retry_vetoed() {
         return RetryDecision::Fatal(clone_error(err));
     }
@@ -305,10 +191,7 @@ pub fn classify_error(
     }
 
     // Output-rate collapses and first-token timeouts: same shape as the
-    // doom-loop arm above. The rate
-    // gate intercepts these before classification and runs its own budget;
-    // this arm keeps classification total so one arriving by any other path
-    // can never be Fatal.
+    // doom-loop arm above.
     if matches!(
         err,
         SamplingError::OutputRateCollapsed { .. } | SamplingError::FirstTokenTimeout { .. }
@@ -318,12 +201,11 @@ pub fn classify_error(
         };
     }
 
-    // Rate-limited (429): cap retries at the rate-limit threshold to
-    // avoid burning long waits. A server `Retry-After` is clamped to
-    // [`MAX_RETRY_BACKOFF`] like every other wait — a provider that answers a
-    // per-minute bucket with `Retry-After: 60` makes one attempt sit idle for
-    // the whole minute, and the limit often clears before the header says.
-    // The budget above is what covers the rest of the server's wait.
+    // A server `Retry-After` is clamped to [`MAX_RETRY_BACKOFF`] like every
+    // other wait. A provider that answers a per-minute bucket with
+    // `Retry-After: 60` makes one attempt sit idle for the whole minute. The
+    // limit often clears before the header says. The budget above is what
+    // covers the rest of the server's wait.
     if err.is_rate_limited() {
         let next_attempt = retry_count + 1;
         if next_attempt >= max_retries.min(rate_limit_threshold) {
@@ -518,14 +400,11 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
         SamplingError::EndpointNotAllowed(msg) => SamplingError::EndpointNotAllowed(msg.clone()),
         SamplingError::MtlsConfiguration(msg) => SamplingError::MtlsConfiguration(msg.clone()),
         SamplingError::Http(e) => {
-            // reqwest::Error is not Clone; preserve the rendered message
-            // as an EventStreamError (the closest retryable transport
-            // variant) so callers see an equivalent description.
+            // reqwest::Error is not Clone; preserve the rendered message as an EventStreamError (the closest retryable transport variant).
             SamplingError::EventStreamError(xai_grok_sampling_types::error::error_chain(e))
         }
         SamplingError::Serialization(e) => {
-            // serde_json::Error is not Clone; its Display already carries the
-            // original line/column exactly once.
+            // serde_json::Error is not Clone; its Display already carries the line/column exactly once.
             SamplingError::serialization_message(e)
         }
         SamplingError::Api {
@@ -694,9 +573,8 @@ mod tests {
         ));
     }
 
-    /// A rejected thinking signature is a 400, which every other rule calls
-    /// fatal. It has to strip instead: the blocks sit in conversation history,
-    /// so a fatal here fails every later turn on the same history too.
+    /// It has to strip instead: the blocks sit in conversation history, so a
+    /// fatal here fails every later turn on the same history too.
     #[test]
     fn classify_thinking_signature_strips_reasoning() {
         let err = api_err(
@@ -729,9 +607,9 @@ mod tests {
     }
 
     /// OpenRouter's "reasoning is mandatory" is a bad-request status, which every other rule
-    /// calls fatal. It has to remap instead: re-sending the same disabling
-    /// body always fails, and nothing about the target is fixed by stripping
-    /// history — the effort has to come back enabled.
+    /// calls fatal. It has to remap instead: re-sending the same disabling body always
+    /// fails, and nothing about the target is fixed by stripping history. The effort has to
+    /// come back enabled.
     #[test]
     fn classify_reasoning_mandatory_400_remaps_effort() {
         let err = api_err(
@@ -744,8 +622,8 @@ mod tests {
         ));
     }
 
-    /// The server's "don't retry" hint is about the request it saw; remapping
-    /// to a non-disabled effort makes a different request, so the remap must
+    /// The server's "don't retry" hint is about the request it saw. Remapping
+    /// to a non-disabled effort makes a different request. The remap must
     /// outrank the veto.
     #[test]
     fn classify_reasoning_mandatory_outranks_should_retry_veto() {
@@ -778,10 +656,6 @@ mod tests {
         );
     }
 
-    /// The server's "don't retry" hint is about the request it saw; dropping
-    /// the offending properties makes a different request, so the strip must
-    /// outrank the veto — otherwise a strict-schema provider's 400 with
-    /// `x-should-retry: false` would dead-end a recoverable session.
     #[test]
     fn classify_unsupported_message_property_outranks_should_retry_veto() {
         let err = SamplingError::Api {
@@ -801,7 +675,7 @@ mod tests {
     }
 
     /// The Cerebras shape must take the strip arm rather than the generic
-    /// fatal path — this is the arm that un-bricks a session whose stored
+    /// fatal path. This is the arm that un-bricks a session whose stored
     /// history predates the fix.
     #[test]
     fn classify_unsupported_message_property_400_strips() {
@@ -818,9 +692,6 @@ mod tests {
         ));
     }
 
-    /// A bare 400 that names nothing unsupported must stay fatal: stripping
-    /// fields cannot fix an unrelated malformed request, and silently
-    /// rewriting the body would hide the real bug.
     #[test]
     fn classify_plain_400_stays_fatal() {
         let err = api_err(StatusCode::BAD_REQUEST, "malformed tool call in history");
@@ -830,7 +701,7 @@ mod tests {
         ));
     }
 
-    /// Like the other content-recovery arms, this one must not fire on a 5xx
+    /// Like the other content-recovery arms, this must not fire on a 5xx
     /// whose text happens to match.
     #[test]
     fn classify_unsupported_message_property_requires_a_400() {
@@ -875,9 +746,8 @@ mod tests {
         ));
     }
 
-    /// A vision-less model is a 404, which every other rule calls fatal. It has
-    /// to strip instead: the images sit in conversation history, so a fatal
-    /// here fails every later turn on the same history too.
+    /// It has to strip instead: the images sit in conversation history, so a
+    /// fatal here fails every later turn on the same history too.
     #[test]
     fn classify_image_input_unsupported_404_strips_images() {
         let err = api_err(
@@ -1087,8 +957,8 @@ mod tests {
     }
 
     /// A per-minute bucket answers `Retry-After: 60`. One attempt must not sit
-    /// idle for the whole minute, and the budget must still cover the wait the
-    /// server asked for, so the turn is never failed earlier than before.
+    /// idle for the whole minute. The budget must still cover the wait the
+    /// server asked for. The turn is never failed earlier than before.
     #[test]
     fn a_long_rate_limit_wait_is_split_across_attempts() {
         let err = api_err_with_retry_after(StatusCode::TOO_MANY_REQUESTS, 60);
@@ -1222,9 +1092,6 @@ mod tests {
 
     #[test]
     fn classify_clamps_retry_after_on_every_path_and_jitters_the_generic_one() {
-        // Cloudflare answers 52x with Retry-After: 60-120. Honoring that
-        // verbatim across 14 retries would stall the turn ~28 min, and an
-        // unjittered wait would re-hit the recovering origin in lockstep.
         let edge = api_err_with_retry_after(StatusCode::from_u16(522).unwrap(), 120);
         match classify_error(&edge, 1, 15, RATE_LIMIT_RETRY_THRESHOLD) {
             RetryDecision::Retry { backoff } => {
@@ -1234,8 +1101,6 @@ mod tests {
             other => panic!("expected Retry for 522, got {other:?}"),
         }
 
-        // The 429 path takes the same clamp, unjittered: the server named a
-        // deadline, so a wait under it is the one thing that cannot help.
         let rate_limited = api_err_with_retry_after(StatusCode::TOO_MANY_REQUESTS, 120);
         match classify_error(&rate_limited, 0, 15, RATE_LIMIT_RETRY_THRESHOLD) {
             RetryDecision::RetryWithBackoff { backoff, .. } => {
@@ -1275,8 +1140,8 @@ mod tests {
     }
 
     /// The guarantee the budget exists for: a stream that dies mid-body is
-    /// retried exactly 10 times, on backoff that grows, whatever the model's
-    /// own `max_retries` says.
+    /// retried several times. That guarantee is on backoff that grows,
+    /// whatever the model's own `max_retries` says.
     #[test]
     fn a_stream_interruption_is_retried_ten_times_with_growing_backoff() {
         let err = SamplingError::EventStreamError("error decoding response body".into());

@@ -664,11 +664,7 @@ pub struct PagerArgs {
         value_parser = clap::value_parser!(u64).range(1..)
     )]
     pub background_wait_timeout_secs: u64,
-    /// Sandbox profile for filesystem and network access. `pathbox` selects the
-    /// re-exec jail (bwrap on Linux, Seatbelt on macOS) that binds only
-    /// `~/.grok`, a dedicated tmpfs, a read-only system base, and whatever
-    /// `--ro`/`--rw`/`--rn` name; any other value is a built-in or custom
-    /// grok-build sandbox profile. A `--sandbox` with NO value is invalid.
+    /// Sandbox profile for filesystem and network access.
     #[arg(
         long,
         env = "GROK_SANDBOX",
@@ -677,17 +673,13 @@ pub struct PagerArgs {
         default_missing_value = ""
     )]
     pub sandbox: Option<String>,
-    /// Bind PATH into the pathbox jail read-only. Repeatable. A later
-    /// `--ro`/`--rw` overrides an earlier one for the same path or for a path
-    /// inside it. Implies `--sandbox=pathbox`.
+    /// Bind PATH into the pathbox jail read-only. Repeatable.
     #[arg(long = "ro", value_name = "PATH")]
     pub sandbox_ro: Vec<PathBuf>,
     /// Bind PATH into the pathbox jail read-write. See `--ro` for precedence.
     #[arg(long = "rw", value_name = "PATH")]
     pub sandbox_rw: Vec<PathBuf>,
-    /// Hide PATH from the pathbox jail (acts as an active deny even when the
-    /// path sits under a visible `--ro`/`--rw` mount or the working directory).
-    /// Repeatable. Implies `--sandbox=pathbox`.
+    /// Hide PATH from the pathbox jail (acts as an active deny even when the path sits under a visible `--ro`/`--rw` mount or the working directory).
     #[arg(long = "rn", value_name = "PATH")]
     pub sandbox_rn: Vec<PathBuf>,
     /// Session storage mode: local or writeback.
@@ -997,13 +989,13 @@ impl PagerArgs {
             (None, saved) => SandboxStartup::Apply(saved),
         }
     }
-    /// Enforce the pathbox CLI contract (independent of the raw-argv jail pass,
-    /// which stays authoritative for the re-exec):
-    ///  - a `--sandbox` with no value is invalid everywhere;
-    ///  - a non-pathbox `--sandbox <profile>` cannot be combined with
-    ///    `--ro`/`--rw`/`--rn` path flags;
-    ///  - `--sandbox=pathbox` and path flags alone are valid (the pathbox jail).
-    /// Returns `Ok(())` for a valid request or a user-facing error otherwise.
+    /// Enforce the pathbox CLI contract (independent of the raw-argv jail
+    /// pass, which stays authoritative for the re-exec): - a `--sandbox` with
+    /// no value is invalid everywhere. This also covers - a non-pathbox
+    /// `--sandbox <profile>` cannot be combined with `--ro`/`--rw`/`--rn`
+    /// path flags. This also covers - `--sandbox=pathbox` and path flags
+    /// alone are valid (the pathbox jail). Returns `Ok(())` for a valid
+    /// request or a user-facing error otherwise.
     pub fn validate_sandbox(&self) -> Result<(), String> {
         let has_path_flags = !(self.sandbox_ro.is_empty()
             && self.sandbox_rw.is_empty()
@@ -1268,7 +1260,7 @@ mod tests {
         );
     }
     /// A bare `--sandbox` (no value) still *parses* at the clap layer (clap turns
-    /// it into an empty string) but is now an invalid request: it must be
+    /// it into an empty string) but is now an invalid request. It must be
     /// rejected by `validate_sandbox`, never silently treated as a jail.
     #[test]
     fn bare_sandbox_parses_but_is_rejected_by_validation() {

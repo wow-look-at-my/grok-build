@@ -5,8 +5,8 @@
 //! IDs, so an item is matched by its position.
 //!
 //! The list it writes to is the user's, shared with the grok_build todo
-//! infrastructure, so a write here is a merge by position and never deletes.
-//! A call carrying fewer items than the list holds leaves the tail alone.
+//! infrastructure. A write here is a merge by position and never deletes. A
+//! call carrying fewer items than the list holds leaves the tail alone.
 
 use std::fmt::Write;
 
@@ -349,7 +349,7 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             //
             // Position is NOT identity here. Keying on it lets a reordered or
             // shorter list write one row's text over another's, which loses
-            // the user's work just as thoroughly as deleting it.
+            // the user's work as thoroughly as deleting it.
             for item in &input.todos {
                 let status = parse_status(&item.status);
                 let priority = parse_priority(&item.priority);
@@ -479,8 +479,7 @@ mod tests {
     }
 
     /// Position is not identity. A list that drops its first entry must not
-    /// slide every later task up a row, writing each one's text over the task
-    /// that used to hold that slot.
+    /// slide every later task up a row, writing each's text over the task.
     #[tokio::test]
     async fn a_reordered_list_does_not_overwrite_rows() {
         let tool = TodoWriteTool;
@@ -777,8 +776,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Call 3 adds three more. Every call accumulates: none of the six
-        // items has been completed or cancelled, so none of them may vanish.
+        // Every call accumulates: none of the items has been completed or
+        // cancelled, so none of them may vanish.
         let input3 = TodoWriteInput {
             todos: vec![
                 make_item("Final X", "completed", "high"),
