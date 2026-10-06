@@ -692,6 +692,7 @@ mod tests {
         let output = ToolOutput::Ci(CiOutput {
             state: "failing".to_string(),
             branch: "fix/darwin-version-stamp".to_string(),
+            task_id: None,
             settled: true,
             runs: vec![CiRunSummary {
                 workflow: "CI".to_string(),
