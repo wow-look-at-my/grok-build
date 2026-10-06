@@ -4,7 +4,7 @@ Type `/` in the prompt to open the command menu. It fuzzy-matches as you type, a
 
 Commands come from two places: **shell builtins**, handled by the agent backend (xai-grok-shell), and **pager builtins**, handled by the pager frontend (xai-grok-pager). Both show up in the same menu, and any enabled skill with `user-invocable: true` appears there too. If a skill reuses a built-in name such as `login`, the built-in keeps `/login` and the skill stays available as `/plugin-name:login` — the menu badges both so the collision is visible.
 
-Every command below lists its aliases where it has them. A few commands only appear when a feature or session state enables them; those cases are called out inline.
+Every command below lists its aliases where it has them. A few commands only appear when a feature or session state enables them. Those cases are called out inline.
 
 ---
 
@@ -299,7 +299,7 @@ Type `/workflow` and a space to autocomplete saved workflow names (built-in, pro
 /workflow save review-changes
 ```
 
-`/workflow runs` opens the live **Workflow Runs** dashboard in the fullscreen TUI — active and retained runs, not a catalog of saved definitions. Each row shows the run's display name, phase, agent roster, progress, and result. Inside a run's detail view, `p` pauses, `r` resumes an ordinary pause, and `x` stops. Budget-limited runs can't bare-resume: `r` returns the shell's rejection (raise the cap with a model/tool resume that passes a higher `agent_budget`), while `x` still stops. `s` saves the run's script, but it's hidden for known built-ins and numbered duplicate handles — for those, choose a new unique `meta.name` and save the edited script explicitly. In non-TUI clients, `/workflow runs` prints the same text overview as bare `/workflow`.
+`/workflow runs` opens the live **Workflow Runs** dashboard in the fullscreen TUI — active and retained runs, not a catalog of saved definitions. Each row shows the run's display name, phase, agent roster, progress, and result. Inside a run's detail view, `p` pauses, `r` resumes an ordinary pause, and `x` stops. Budget-limited runs cannot bare-resume: `r` returns the shell's rejection (raise the cap with a model/tool resume that passes a higher `agent_budget`), while `x` still stops. `s` saves the run's script. However, it is hidden for known built-ins and numbered duplicate handles — for those, choose a new unique `meta.name` and save the edited script explicitly. In non-TUI clients, `/workflow runs` prints the same text overview as bare `/workflow`.
 
 Project workflows live in `.grok/workflows/*.rhai`; user workflows live in `~/.grok/workflows/*.rhai`. A same-process pause/resume continues the original immutable script, args, and `agent_budget` cap from committed host-call results — to iterate, edit the returned script copy and launch it as a new run.
 
@@ -319,7 +319,7 @@ Switch the color theme. Alias: `/t`.
 
 ### `/feedback [message]`
 
-Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you — and `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately; if the send fails, the message is saved to Drafts.
+Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you. `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately. If the send fails, the message is saved to Drafts.
 
 ```
 /feedback
@@ -328,7 +328,7 @@ Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its 
 
 ### `/btw`
 
-Send an aside to the agent without interrupting the current task. The side question and its answer aren't part of the main turn.
+Send an aside to the agent without interrupting the current task. The side question and its answer are not part of the main turn.
 
 `/btw` can also appear mid-message: the whole message (minus the token) becomes the side question and nothing goes to the main turn. Only `/btw` works this way; other commands must start the message. For a multi-line side question, use `Alt+Enter` (over SSH) or `Shift+Enter`, a trailing `\`, or `/ml`. Do not rely on `Cmd+Enter`: Apple Terminal inserts a newline locally via CoreGraphics; a delivered `SUPER+Enter` (Kitty) also inserts a newline rather than sending; over SSH Cmd never arrives and the chord sends.
 
@@ -339,13 +339,13 @@ fix the retry loop first. /btw what does WBC stand for?
 
 ### `/todo <what to add>`
 
-Put something on the agent's todo list without interrupting what it is doing. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item should say, and appends it. It shares the session's context but is a different instance, so the running turn is untouched.
+Put something on the agent's todo list without interrupting what it is doing. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item must say, and appends it. It shares the session's context but is a different instance. The running turn is untouched.
 
 ```
 /todo add a way to push changes to 2 git repos
 ```
 
-Appending is the only change it can make. Edits, shell commands, and subagents are refused before they run, and its write appends: it cannot complete, reword, reorder, or drop items the agent is already working through. Captured items appear on the list prefixed `capture-`, and the agent picks them up like any other todo. The command is hidden for agents without a `todo_write` tool.
+Appending is the only change it can make. Edits, shell commands, and subagents are refused before they run, and its write appends. It cannot complete, reword, reorder, or drop items the agent is already working through. Captured items appear on the list prefixed `capture-`, and the agent picks them up like any other todo. The command is hidden for agents without a `todo_write` tool.
 
 ### `/mcps`
 
@@ -357,7 +357,7 @@ Check the current session for terminal, clipboard, color, input, notification, a
 
 ### `/debug [what is wrong]`
 
-Turn Grok on itself. The question goes to the model along with this session's execution context: the binary that is running and whether it is still the installed one, version and commit, the config directory and every config layer, the debug-log path for this session and whether logging is on, the working directory, the current model with the context window and reasoning effort it actually resolved, and the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
+Turn Grok on itself. The question goes to the model along with this session's execution context. The binary that is running and whether it is still the installed one, version and commit, the config directory and every config layer. The debug-log path for this session and whether logging is on, the working directory, the current model with the context window. It reasoning effort it actually resolved, and the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
 
 ```
 /debug why was the context size defaulted to 256k? this model is supposed to be 1m context

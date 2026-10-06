@@ -73,9 +73,7 @@ pub struct ArgItem {
     pub insert_text: String,
     /// Description shown alongside the item.
     pub description: String,
-    /// Whether the model this row names is resident in VRAM. `None` on every
-    /// row that is not a local model, which is what keeps the dot off the
-    /// cloud models in the same list.
+    /// Whether the model this row names is resident in VRAM.
     pub loaded_in_vram: Option<bool>,
 }
 
@@ -258,14 +256,8 @@ pub trait SlashCommand: Send + Sync {
         None
     }
 
-    /// Every row the modal picker may search, which can be wider than the rows
-    /// it opens on.
-    ///
-    /// The modal picker asks one time and filters its own copy as the user
-    /// types, so a command that opens on a subset (`/model` opens on the
-    /// favorites) has to hand over the whole set here. Otherwise the rows it
-    /// left out are unreachable from that picker. The inline dropdown asks
-    /// again on every keystroke and does not use this.
+    /// Every row the modal picker may search, which can be wider than the
+    /// rows it opens on.
     fn search_args(&self, ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
         self.suggest_args(ctx, args_query)
     }
@@ -358,11 +350,8 @@ pub trait SlashCommand: Send + Sync {
     /// For async work, return `CommandResult::Action(action)` and let the dispatch layer handle the effect pipeline.
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult;
 
-    /// Execute, with the name the user actually typed.
-    ///
-    /// Resolution is case-insensitive, so `token` is the only place the typed
-    /// case survives. Override this when the case is part of the request
-    /// (`/TODO` versus `/todo`); everything else wants [`Self::run`].
+    /// Execute, with the name the user typed. Resolution is case-insensitive,
+    /// so `token` is the only place the typed case survives.
     fn run_with_token(&self, ctx: &mut CommandExecCtx, _token: &str, args: &str) -> CommandResult {
         self.run(ctx, args)
     }

@@ -212,8 +212,8 @@ mod tests {
         );
     }
 
-    /// A repository's managed root is a descendant of the tree being copied,
-    /// so a second worktree must not receive a copy of the first one's tree,
+    /// A repository's managed root is a descendant of the tree being copied.
+    /// A second worktree must not receive a copy of the first one's tree,
     /// nor of the destination it is being written into.
     #[test]
     fn test_second_worktree_copies_no_sibling() {

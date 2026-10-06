@@ -20,8 +20,7 @@ enum State {
 }
 
 pub(crate) struct SummaryConfig {
-    /// `None` when no title model can be reached. The title then comes from
-    /// the user's own text.
+    /// `None` when no title model can be reached. The title then comes from the user's own text.
     pub(crate) sampling_client: Option<OaiCompatClient>,
     pub(crate) model: String,
     /// Channel back to the persistence actor for sequential storage writes.
@@ -82,10 +81,7 @@ impl SummaryGenerator {
                             );
                         }
 
-                        // Route the result through the persistence channel. The
-                        // actor persists it (only if the session has no title yet)
-                        // and notifies the client there, so a title rejected for
-                        // racing a manual `/rename` never reaches the client.
+                        // Route the result through the persistence channel.
                         match persistence_tx.upgrade() {
                             Some(tx) => {
                                 let _ = tx.send(PersistenceMsg::GeneratedTitle(title));

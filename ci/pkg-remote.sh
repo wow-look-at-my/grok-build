@@ -1,19 +1,5 @@
 #!/bin/bash
 # The remote half of the per-package cache: one cache entry per package.
-#
-# A runner is a fresh VM, so a store under RUNNER_TEMP is cold on every run. This puts each
-# package's artifacts in the Actions cache service under that package's own key, which is what
-# makes a later run warm.
-#
-# One entry per package is the point. Holding each object separately measured 2915 fetches and
-# about 607 s of latency for this workspace. Holding the whole store as one entry does not work
-# either: a cache entry is immutable, so a key that names only the lockfile is written one time
-# and frozen while the store keeps growing.
-#
-#   pkg-remote.sh get <key> <destdir>   restores into destdir, exit 0 only when it restored
-#   pkg-remote.sh put <key> <srcdir>    stores srcdir, exit 0 when stored
-#
-# Outside Actions there is no cache service, so both answer non-zero and the caller compiles.
 set -uo pipefail
 
 op="${1:-}"
@@ -26,9 +12,7 @@ TOKEN="${ACTIONS_RUNTIME_TOKEN:-}"
 # Only the transfers need the service. Printing a manifest does not, which is what lets a test
 # check the packing rules off a runner.
 if [ "$op" != manifest ]; then
-	# This client speaks the v2 twirp API, which lives at ACTIONS_RESULTS_URL. A runner offering
-	# only the v1 URL is a different protocol, not a missing one, and says so rather than reading
-	# as an absent service.
+	# This client speaks the v2 twirp API, which lives at ACTIONS_RESULTS_URL.
 	[ -n "$TOKEN" ] || exit 3
 	[ -n "$BASE" ] || [ -n "${ACTIONS_CACHE_URL:-}" ] || exit 3
 fi
@@ -37,11 +21,7 @@ fi
 ORIGIN="$(printf '%s' "$BASE" | cut -d/ -f1-3)"
 API="$ORIGIN/twirp/github.actions.results.api.v1.CacheService"
 
-# ACTIONS_CACHE_SERVICE_V2 is unset on this runner, which by the toolkit's own rule means v1. It is
-# not what the service offers: every v1 reserve came back as an Azure Edge "services aren't
-# available" page, with and without the separating slash, so that host answers no request at all.
-# The results URL is what works, so v2 is taken whenever the runner offers one and v1 is the
-# fallback for a runner that offers only the older URL.
+# ACTIONS_CACHE_SERVICE_V2 is unset on this runner, which by the toolkit's own rule means v1.
 V1_BASE="${ACTIONS_CACHE_URL:-}"
 [ -n "$V1_BASE" ] && V1_BASE="${V1_BASE%/}/"
 if [ -z "$BASE" ] && [ -n "$V1_BASE" ]; then
@@ -72,7 +52,6 @@ v1_put() {
 		-d "$(printf '{"size":%s}' "$3")" >/dev/null 2>&1 || return 4
 }
 
-# v1 lookup answers with the archive location, or 204 and an empty body when nothing matches.
 v1_get_url() {
 	curl -sS --max-time 60 -G "${V1_BASE}_apis/artifactcache/cache" \
 		-H "Authorization: Bearer $TOKEN" -H "Accept: application/json;api-version=6.0-preview.1" \
@@ -80,14 +59,13 @@ v1_get_url() {
 		jq -r '.archiveLocation // empty'
 }
 
-# binpazer, not tar: it carries a Block Index, so a reader seeks to one artifact instead of
-# decompressing the whole member to reach it, and each block carries its own CRC and codec.
+# binpazer, not tar: it carries a Block Index.
 BINPAZER="${BINPAZER:-binpazer}"
 TYPE_ARTIFACT=1
 TYPE_NAMES=2
 
-# The names block. binpazer stores payloads and does not model a file name or a permission, so both
-# travel as their own critical block, in the order the artifact blocks were written.
+# The names block. binpazer stores payloads. Binpazer does not model a file name or a permission,
+# so both travel. As their own critical block, in the order the artifact blocks were written.
 #
 # The mode rides with the name because a package's artifact set includes the build script's own
 # binary. Restored without its execute bit, cargo answers "could not execute process ... (never
@@ -116,19 +94,11 @@ write_manifest() {
 	printf '],"index":true}'
 }
 
-# The version field scopes a key to the archive format that wrote it. Changing the format must miss
-# rather than restore a container this script cannot read.
-#
-# PKG_CACHE_SALT scopes it further. A measurement sets it per run, so the cold leg meets an empty
-# keyspace and the warm leg behind it meets what that cold leg wrote. Without it a cold leg is cold
-# exactly once, and every later one is served by an earlier run while still calling itself cold.
+# The version field scopes a key to the archive format that wrote it.
 VERSION="$(printf 'pkg-cache-binpazer-v2%s' "${PKG_CACHE_SALT:-}" | sha256sum | cut -d' ' -f1)"
 
-# A 429 is reported, never folded into the miss path: a throttled fetch reads as a slow compile, and
-# that is the one failure a timing run must not absorb quietly.
 THROTTLED=9
-# The service already holds this key. Entries are immutable, so this is the normal answer whenever
-# two legs compile the same unit.
+# The service already holds this key.
 EXISTS=5
 THROTTLE_WAIT="${PKG_THROTTLE_WAIT:-2}"
 rpc() {
@@ -151,16 +121,15 @@ rpc() {
 }
 
 case "$op" in
-# Prints the manifest for a directory and stops. The packing rules are then checkable without a
-# cache service, which is the only way a test can reach them.
+# Prints the manifest for a directory and stops.
 manifest)
 	write_manifest "$dir"
 	exit $?
 	;;
 get)
-	# Same reason as the put below: a throttled fetch is a compile the warm leg was not supposed to
-	# do, and a leg that recompiles is measuring different work from the one it is compared against.
-	# This one DOES hold a cargo job slot, so the cadence is what the compile waits on.
+	# Same reason as the put below: a throttled fetch is a compile the warm leg
+	# was not supposed to do. A leg that recompiles is measuring different work
+	# from the one it is compared against.
 	while :; do
 		"$0" get_once "$key" "$dir"
 		rc=$?
@@ -185,8 +154,7 @@ get_once)
 	blob="$(mktemp)" || exit 1
 	trap 'rm -f "$blob"' EXIT
 	curl -fsS --max-time 300 "$url" -o "$blob" 2>/dev/null || exit 1
-	# The names ride in their own block: binpazer stores payloads, and a file name is the caller's
-	# business, not the format's.
+	# The names ride in their own block: binpazer stores payloads, and a file name is the caller's business.
 	namefile="$blob.names"
 	"$BINPAZER" extract "$blob" --type "$TYPE_NAMES" -o "$namefile" 2>/dev/null || exit 1
 	i=0
@@ -204,12 +172,6 @@ get_once)
 	[ "$i" -gt 0 ] || exit 1
 	;;
 put)
-	# A 429 is backpressure, not a verdict. The service throttled a large share of one cold pass, and
-	# every throttled entry was simply lost: the next run recompiled it. The upload is detached from
-	# the compile, so waiting here costs no compile time, only the drain at the end of the job.
-	#
-	# The cadence is fixed and it does not give up. A growing delay and an attempt cap both end the
-	# same way, with an entry the cache never got and nothing saying so.
 	throttles=0
 	while :; do
 		"$0" put_once "$key" "$dir"
@@ -223,8 +185,7 @@ put)
 	;;
 put_once)
 	tmp="$(mktemp)" || exit 1
-	# binpazer resolves a manifest's file paths against the manifest's own directory, so the
-	# manifest lives beside the artifacts and names them bare.
+	# binpazer resolves a manifest's file paths against the manifest's own directory.
 	man="$dir/.pkg-manifest.json"
 	trap 'rm -f "$tmp" "$man"' EXIT
 	write_manifest "$dir" > "$man" || exit 1
@@ -241,18 +202,14 @@ put_once)
 	rc=$?
 	[ "$rc" = "$THROTTLED" ] && exit "$THROTTLED"
 	url="$(printf '%s' "$answer" | jq -r 'select(.ok == true) | .signed_upload_url // .signedUploadUrl // empty')"
-	# A key another job already wrote answers not-ok. That is a hit, not a failure, so it gets its
-	# own code: folded into the failures it made a leg report thousands of broken uploads, and a
-	# real upload failure had nowhere to show.
+	# A key another job already wrote answers not-ok.
 	if [ -z "$url" ]; then
 		[ -n "${PKG_REMOTE_DEBUG:-}" ] && echo "pkg-remote: CreateCacheEntry gave no url: $answer" >&2
 		exit "$EXISTS"
 	fi
 
-	# One Put Blob, not a block list. An entry is a few MB, far under the 256 MB single-shot limit,
-	# and the block/blocklist pair was two chances to get a commit wrong for no gain.
-	# PKG_REMOTE_DEBUG puts the transfer's own errors on the log, because a failed upload is
-	# otherwise indistinguishable from a service nobody wired up.
+	# One Put Blob, not a block list. PKG_REMOTE_DEBUG puts the transfer's own errors on the log,
+	# because a failed upload is otherwise indistinguishable from a service nobody wired up.
 	if [ -n "${PKG_REMOTE_DEBUG:-}" ]; then
 		curl -fsS --max-time 300 -X PUT "$url" -H "x-ms-blob-type: BlockBlob" \
 			--data-binary "@$tmp" >/dev/null || { echo "pkg-remote: upload failed for $key" >&2; exit 1; }

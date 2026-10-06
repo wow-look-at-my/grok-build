@@ -1,12 +1,4 @@
-//! Integration tests: jemalloc heap-profile monitor against mock
-//! `/v1/settings` + `/v1/storage` (xai-grok-test-support).
-//!
-//! Fake hooks inject controllable `stats.resident` crossings. Real
-//! `gcs::upload_file` proxy uploads hit the mock storage endpoint.
-//!
-//! ```bash
-//! cargo test -p xai-grok-shell --test test_heap_profile_monitor
-//! ```
+//! Integration tests: jemalloc heap-profile monitor against mock `/v1/settings` + `/v1/storage`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -387,10 +379,8 @@ async fn multi_threshold_latches_one_at_a_time() {
     assert_no_storage_egress(&h);
 }
 
-/// The object paths the dumps would have been stored under, checked directly
-/// rather than through uploads that no longer happen. They stay live because
-/// they name the local dump files, and two crossings in the same session must
-/// not collide.
+/// They stay live because they name the local dump files, and crossings in
+/// the same session must not collide.
 #[tokio::test]
 #[serial_test::serial(heap_profile_integration)]
 async fn object_paths_are_well_formed_and_unique_per_crossing() {

@@ -38,8 +38,7 @@ impl AuthStatus {
         ) && let Some(name) = models
             .iter()
             .find_map(|(name, entry)| entry.has_own_credentials().then(|| name.clone()))
-            // A provider whose models have not been autodetected yet is still
-            // a credential of the user's own; name the provider itself.
+            // A provider whose models have not been autodetected yet is still a credential of the user's own.
             .or_else(|| {
                 crate::agent::config::first_provider_with_own_credentials(agent_config)
                     .map(|id| format!("model_provider:{id}"))

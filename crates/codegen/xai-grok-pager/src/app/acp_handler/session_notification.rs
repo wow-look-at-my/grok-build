@@ -321,10 +321,10 @@ pub(super) fn handle_session_notification_with_origin(
             ref title,
         } => {
             // A replayed transcript already carries the finished `ToolCall`
-            // for every one of these, so replaying the chunks would build a
+            // for every one of these. Replaying the chunks would build a
             // preview of a call that is already on screen. A delta carries no
             // prompt id, so while a wake turn runs it cannot be told apart
-            // from the wake turn's own output and is dropped whole.
+            // from the wake turn's own output. It is dropped whole.
             if meta.is_replay || agent.session.loading_replay || agent.running_wake_turn.is_some() {
                 false
             } else {
@@ -358,28 +358,17 @@ pub(super) fn handle_session_notification_with_origin(
             ..
         } => {
             let error_kind = crate::app::error_display::wire_error_kind(error_kind.as_deref());
-            // The ACP text chunk rail never carries cost; the durable
-            // `TurnCompleted` notification carries the per-turn usage (incl.
-            // exact `cost_usd_ticks`, already scrubbed when partial/incomplete)
-            // alongside the terminal outcome. Attribute that reported cost to
-            // the agent-message block this turn rendered — unless
-            // `ResponseCompleted` already priced this turn's messages one by
-            // one, which `set_last_turn_cost` checks for.
+            // The ACP text chunk rail never carries cost.
             let reported_cost = usage.as_ref().and_then(|u| u.totals.cost_usd_ticks);
             // Terminal refresh of the session total: a subagent fold can land
-            // after this turn's last model call, so this is the last chance to
-            // be exact before the session goes idle. Skipped on replay — that
-            // total belongs to the run that wrote it, and the agent's ledger
-            // starts fresh on reload.
+            // after this turn's last model call.
             if !meta.is_replay {
                 agent
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
             }
-            // Snapshot the run currently in flight *before* any turn-finish
-            // path clears it, so cost attribution can decide whether this
-            // `TurnCompleted` (keyed by `prompt_id`) belongs to the live block.
+            // Snapshot the run in flight *before* any turn-finish path clears it, so cost attribution can decide whether this `TurnCompleted`.
             let running_prompt_id = agent.session.current_prompt_id.clone();
             let result: bool = if agent.session.loading_replay {
                 let first = agent.replayed_terminal_prompts.insert(prompt_id.clone());
@@ -555,12 +544,6 @@ pub(super) fn handle_session_notification_with_origin(
             let persona_display = persona.clone();
             let role_display = role.clone();
             // The `model` field carries the subagent's *model id* string.
-            // Resolve it to its friendly display name through the parent
-            // session's model catalog (`ModelId -> ModelInfo.name`) so every
-            // downstream surface (scrollback subagent block, subagent title
-            // bar, tasks pane) shows the same friendly name the dashboard
-            // peek resolves. Models unknown to the catalog fall back to the
-            // raw id via `display_name_for`.
             let model_display = model.as_deref().map(|m| {
                 agent
                     .session
@@ -1158,9 +1141,7 @@ pub(super) fn handle_session_notification_with_origin(
                     task.append_stdout(&text);
                     true
                 }
-                // A capture whose row is already gone (finished, or replaced
-                // by a newer one) has nowhere to put this. The run's own
-                // `todo-captures/*.jsonl` is still the durable copy.
+                // A capture whose row is already gone (finished, or replaced by a newer one) has nowhere to put this.
                 None => false,
             }
         }
@@ -1396,11 +1377,7 @@ pub(super) fn handle_session_notification_with_origin(
             session_cost_usd_ticks,
             ..
         } => {
-            // One model call just closed. It rides the buffered chunk rail, so
-            // it arrives after that call's own agent-message chunks and before
-            // the next call's — which is exactly the block its cost belongs to.
-            // On replay the same ordering holds against the replayed chunks, so
-            // a reloaded transcript keeps its per-message costs.
+            // One model call closed.
             let running_prompt_id = agent.session.current_prompt_id.clone();
             let priced = agent.session.tracker.set_response_cost(
                 &mut agent.scrollback,
@@ -1417,21 +1394,13 @@ pub(super) fn handle_session_notification_with_origin(
                     .session
                     .tracker
                     .note_cache_usage(usage.as_ref(), std::time::Instant::now());
-            // A REPLAYED total belongs to the run that wrote it. The agent's
-            // ledger is in-memory and starts fresh on reload, so adopting the
-            // old run's total would make the indicator jump BACKWARD at the
-            // first live call. The indicator counts this run's spend; a
-            // replayed message still shows what it cost when it ran.
+            // A REPLAYED total belongs to the run that wrote it.
             let total_changed = !meta.is_replay
                 && agent
                     .session
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
-            // The call that was streaming is over. Whatever it last measured is
-            // not a rate anything is producing now, and carrying it into the
-            // gap before the next call (a client tool, a retry backoff, the
-            // pre-first-token wait) puts a stale number under a row that says
-            // it is waiting.
+            // The call that was streaming is over.
             let rate_cleared = agent.session.tracker.clear_output_rate();
             priced || cache_hit_set || cache_invalidated || total_changed || rate_cleared
         }
@@ -1513,11 +1482,7 @@ pub(super) fn handle_session_notification_with_origin(
             stream_start_ms,
             summary,
         } => {
-            // Written by a side call that starts when its model call ends, so
-            // this arrives after the thinking block it describes has stopped
-            // running, and on a reload it is replayed right behind that block's
-            // own persisted chunks. It finds its block by the call's stream
-            // start, which is why it is not attached to whatever is current.
+            // Written by a side call that starts when its model call ends.
             agent.session.tracker.set_thinking_summary(
                 &mut agent.scrollback,
                 stream_start_ms,
@@ -2079,9 +2044,7 @@ pub(super) fn apply_retry_state(
     scrollback: &mut crate::scrollback::state::ScrollbackState,
     is_api_key_auth: bool,
 ) {
-    // Every retry state means the attempt that was streaming has ended, so the
-    // reading it last reported describes a stream nothing is producing. The
-    // backoff that follows is a wait, not a slow response.
+    // Every retry state means the attempt that was streaming has ended.
     session.tracker.clear_output_rate();
     session.tracker.clear_request_queued();
     let mut is_credit_limit = false;
@@ -2226,9 +2189,7 @@ pub(crate) fn detect_plan_mode_change_replayed(
     };
     let mode_id = cmu.current_mode_id.0.as_ref();
     // A press is applied optimistically, so its own confirmation is already
-    // reflected on screen. A confirmation belonging to an EARLIER press is
-    // only arriving now, and applying it would step the mode back to where
-    // the ring stood before the newer press.
+    // reflected on screen.
     if let Some(superseded) = agent.superseded_mode_request(mode_id) {
         tracing::info!(
             mode_id,
@@ -2237,8 +2198,7 @@ pub(crate) fn detect_plan_mode_change_replayed(
         );
         return Some(PlanModeTransition::Unchanged);
     }
-    // The shell is reporting where it actually stands, so nothing outstanding
-    // is left to attribute.
+    // The shell is reporting where it stands, so nothing outstanding is left to attribute.
     agent.clear_mode_requests();
     let mode = SessionMode::from_id(mode_id);
     let was_active = agent.plan_mode_active;

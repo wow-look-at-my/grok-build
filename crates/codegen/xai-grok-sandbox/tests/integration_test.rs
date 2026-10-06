@@ -31,12 +31,12 @@ fn test_profile_capability_set_construction() {
 //
 // The unsandboxed `gh` CI-status worker is the only code that must run on the
 // host side of a `--sandbox` session. This suite drives the shipped worker
-// entry (`run_ci_host_worker`) as a REAL child process re-entering this same
+// entry (`run_ci_host_worker`) as a REAL child process. Re-entering this same
 // binary in worker mode, with its stdin/stdout pointed at a socketpair the
-// parent then queries with the shipped `query_ci_host_stream` client — the
+// parent then queries with the shipped `query_ci_host_stream` client. The
 // exact fd handoff `spawn_ci_host` performs before the jail exec.
 
-/// Run by the parent: spawn the current binary as the worker child and prove a
+/// Run by the parent: spawn the current binary as the worker child. Prove a
 /// request round-trips through the real shipped worker loop to a real client.
 #[test]
 fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
@@ -45,10 +45,6 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
 
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     // The worker's end rides a fd of its own rather than stdin/stdout.
-    // Production hands the worker fd 0 and fd 1, but this child is the TEST
-    // BINARY: its harness prints progress lines to stdout, and each one would
-    // reach the client as a fake answer and put every later answer a request
-    // behind. The protocol is what this test covers, so it gets a clean fd.
     let theirs_fd = theirs.into_raw_fd();
     const WORKER_FD: std::os::unix::io::RawFd = 3;
 
@@ -64,8 +60,7 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
         .stderr(std::process::Stdio::null());
     unsafe {
         // SAFETY: the closure runs between fork and exec and calls only the
-        // async-signal-safe `dup2`. `dup2` also clears CLOEXEC on the new fd,
-        // which is what carries the socket across the exec.
+        // async-signal-safe `dup2`.
         std::os::unix::process::CommandExt::pre_exec(&mut child, move || {
             if libc::dup2(theirs_fd, WORKER_FD) < 0 {
                 return Err(std::io::Error::last_os_error());
@@ -81,8 +76,7 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
     }
 
     // Ask the worker for a branch, then run an allowlisted `gh` over the same
-    // connection. Whatever `gh` does (present or not), each request must get a
-    // framed one-line answer and never hang.
+    // connection.
     let our_fd = {
         use std::os::unix::io::AsRawFd as _;
         ours.as_raw_fd()
@@ -107,8 +101,7 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     // The worker always answers one framed line: the nothing-usable sentinel
-    // (→ None, when `gh` is absent or has no runs) or a real JSON array. Both
-    // prove the shipped client/worker framing; either is a valid session.
+    // (→ None, when `gh` is absent or has no runs) or a real JSON array.
     match got {
         None => {} // sentinel / no runs → the dot reads "off"
         Some(body) => {
@@ -117,7 +110,7 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
         }
     }
     // `gh auth status` exits non-zero when nobody is logged in, so only the
-    // framing is asserted: an answer arrived, decoded, and named an exit code.
+    // framing is asserted.
     if let Some(response) = gh {
         assert!(
             response.stdout.len() + response.stderr.len() < 1 << 21,
@@ -142,8 +135,7 @@ fn ci_host_worker_self_entry() {
     else {
         return;
     };
-    // SAFETY: the parent dup2'd its socketpair end onto this fd before exec,
-    // and nothing else in this process owns it.
+    // SAFETY: the parent dup2'd its socketpair end onto this fd before exec, and nothing else in this process owns it.
     let stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
     xai_grok_sandbox::ci_host::run_ci_host_worker_on(stream);
 }
