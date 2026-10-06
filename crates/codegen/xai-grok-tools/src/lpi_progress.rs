@@ -247,7 +247,7 @@ mod tests {
             let argv = read_argv(key, Path::new("/logs/1.log"), None);
             assert_eq!(
                 argv,
-                vec!["lpi", "watch", "--key", key, "--json-stream", "/logs/1.log"],
+                vec!["lpi", "analyze", "--key", key, "--json", "/logs/1.log"],
                 "{key:?} must stay one argument"
             );
         }

@@ -1299,6 +1299,60 @@ mod tests {
         );
     }
 
+    /// Drives the shipped reading path, not the pure helpers: a fake `lpi` on
+    /// `PATH` prints its own notice and a snapshot. The reading surfaces the
+    /// last snapshot line.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn lpi_reading_surfaces_the_snapshot_from_a_task_log() {
+        use std::io::Write;
+
+        const SNAPSHOT: &str = r#"{"progress":0.6012861728668213,"units_done":2,"units_total":3,"units_pct":66.66666666666666,"has_times":true,"elapsed_seconds":0.00018,"elapsed_known":true,"eta_kind":"none","pace":0,"match_rate":1,"confidence":"high","current_lines":2,"matched_lines":2,"novel_lines":0,"overflow_lines":0}"#;
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("lpi");
+        let mut file = std::fs::File::create(&bin).unwrap();
+        write!(
+            file,
+            "#!/bin/sh\nprintf '%s\\n' 'no model for key x yet'\nprintf '%s\\n' '{SNAPSHOT}'\n"
+        )
+        .unwrap();
+        drop(file);
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // PATH is process-global, so one lock serializes the readers here.
+        static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("PATH");
+        let mut entries = vec![dir.path().to_path_buf()];
+        if let Some(saved) = &saved {
+            entries.extend(std::env::split_paths(saved));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(entries).unwrap()) };
+
+        let log = dir.path().join("task.log");
+        std::fs::write(&log, "compiling a\ncompiling b\n").unwrap();
+        let mut snapshot = make_snapshot("task-lpi", false, None);
+        snapshot.output_file = log;
+
+        let reading = TaskOutputTool::lpi_reading(&snapshot).await;
+
+        unsafe {
+            match saved {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
+        assert_eq!(
+            reading.as_deref(),
+            Some("progress 60% (2/3 units), confidence high")
+        );
+    }
+
     #[test]
     fn tool_name_and_description() {
         let tool = TaskOutputTool;
