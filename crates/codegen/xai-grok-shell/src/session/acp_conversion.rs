@@ -701,6 +701,7 @@ mod tests {
             }],
             text: Some("FAIL step: run tests".to_string()),
             truncated: false,
+            task_id: None,
             summary: "failing: CI is red on fix/darwin-version-stamp".to_string(),
         });
         let update = acp_tool_update(&output, "call-ci", None, None)

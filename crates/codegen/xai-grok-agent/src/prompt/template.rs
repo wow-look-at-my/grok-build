@@ -54,41 +54,7 @@ mod tests {
     use xai_grok_tools::types::template_renderer::TemplateRenderer;
     use xai_grok_tools::types::tool::ToolKind;
 
-<<<<<<< HEAD
-    /// The text of `prompt_encrypted.rs` for the given template sources, as the
-    /// encrypt script writes it.
-    fn encrypted_source(base: &[u8], subagent: &[u8]) -> String {
-        let mut out = String::from(
-            "// Auto-generated -- do not edit.\n\
-             // Regenerate: python3 scripts/encrypt_templates.py\n\
-             // XOR-encrypted prompt templates (key = position-dependent seed).\n\n",
-        );
-        for (name, raw, seed) in [
-            ("BASE_PROMPT_ENC", base, PROMPT_SEEDS[0]),
-            ("SUBAGENT_PROMPT_ENC", subagent, PROMPT_SEEDS[1]),
-        ] {
-            let bytes: Vec<String> = raw
-                .iter()
-                .enumerate()
-                .map(|(i, &b)| (b ^ seed.wrapping_add(i as u8)).to_string())
-                .collect();
-            out.push_str(&format!(
-                "#[rustfmt::skip]\npub(crate) const {name}: &[u8] = &[{}];\n\n",
-                bytes.join(", ")
-            ));
-        }
-        out.push_str(&format!(
-            "pub(crate) const PROMPT_SEEDS: [u8; 2] = [0x{:02X}, 0x{:02X}];\n",
-            PROMPT_SEEDS[0], PROMPT_SEEDS[1]
-        ));
-        out
-    }
-
-    /// Verify the pre-generated encrypted file matches the current template sources.
-    /// If this fails, run: `python3 scripts/encrypt_templates.py`
-=======
     /// The bytes `build.rs` generates decrypt to the current template sources.
->>>>>>> origin/master
     #[test]
     fn test_encrypted_templates_not_stale() {
         fn xor_encrypt(data: &[u8], seed: u8) -> Vec<u8> {
@@ -99,12 +65,6 @@ mod tests {
         }
         let base_raw = include_bytes!("../../templates/prompt.md");
         let subagent_raw = include_bytes!("../../templates/subagent_prompt.md");
-        if std::env::var_os("UPDATE_PROMPT_ENCRYPTED").is_some() {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("src/prompt/prompt_encrypted.rs");
-            std::fs::write(path, encrypted_source(base_raw, subagent_raw)).unwrap();
-            return;
-        }
 
         assert_eq!(
             BASE_PROMPT_ENC,
