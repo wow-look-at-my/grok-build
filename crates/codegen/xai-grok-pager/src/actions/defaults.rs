@@ -13,6 +13,7 @@ pub fn ctrl_dot_unreliable() -> bool {
     terminal_context().ctrl_dot_unreliable() || cfg!(target_os = "windows") || crate::host::is_wsl()
 }
 
+<<<<<<< HEAD
 /// Ctrl+D half-page-down. VS Code family terminals bind Ctrl+D to quit, so [`default_actions`] omits it there.
 pub(super) fn half_page_down() -> ActionDef {
     ActionDef {
@@ -31,6 +32,9 @@ pub(super) fn half_page_down() -> ActionDef {
 }
 
 /// Build the default action definitions.
+=======
+/// Build the default action definitions. `mouse_reporting_toggle_enabled`
+>>>>>>> origin/master
 ///
 /// `mouse_reporting_toggle_enabled` gates the opt-in `ToggleMouseCapture` shortcut (see below); pass `false` for the standard set.
 pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<ActionDef> {

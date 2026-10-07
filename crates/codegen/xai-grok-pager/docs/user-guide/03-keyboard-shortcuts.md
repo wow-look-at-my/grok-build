@@ -246,9 +246,15 @@ Over SSH, the remote Grok process usually cannot access the terminal's local X11
 
 While the agent is generating:
 
+<<<<<<< HEAD
 - **Plain `Enter`** (with text in the composer) **queues** a follow-up. The running turn takes it at its next model request — nothing is stopped. You do not wait for the turn to end — so the note arrives while the work it steers is still in flight. Rows that own a turn are not folded in this way and run after the current turn instead: `!bash` rows, a row you are editing. This is a row promoted with **send now**. Queued follow-ups also deliberately **hold** while the agent is blocked waiting on background tasks or a subagent (a hint explains the hold and how to send one now).
 - **`Enter` again on the emptied composer** (double-Enter) **interrupts**: the model is cut off mid-response. The model handed everything you have queued at once, instead of finishing what it was saying. Rows that own a turn (`!bash`, a row you are editing) stay queued and run after the current turn. While the agent is **blocked waiting** there is no response to cut off, so the same key sends the **top** queued row now. This ends the wait.
 - The **send now** chord is **cancel-and-send**: it stops the current turn (background tasks, subagents, and the rest of the queue keep running). It sends your message as the next turn, so it always appears at the bottom of the transcript:
+=======
+- **Plain `Enter`** (with text in the composer) **queues** a follow-up. The running turn takes it at its next model request — nothing is stopped and you do not wait for the turn to end. So the note arrives while the work it steers is still in flight. Rows that own a turn are not folded in this way and run after the current turn instead: `!bash` rows. This also covers a row you are editing, and a row promoted with **send now**. Queued follow-ups also deliberately **hold** while the agent is blocked waiting on background tasks or a subagent (a hint explains the hold and how to send one now).
+- **`Enter` again on the emptied composer** (double-Enter) **interrupts**. The model is cut off mid-response and handed everything you have queued at once, instead of finishing what it was saying. Rows that own a turn (`!bash`, a row you are editing) stay queued and run after the current turn. So the same key sends the **top** queued row now, which ends the wait. This happens while the agent is **blocked waiting** there is no response to cut off.
+- The **send now** chord is **cancel-and-send**: it stops the current turn (background tasks, subagents, and the rest of the queue keep running) and sends your message as the next turn, so it always appears at the bottom of the transcript:
+>>>>>>> origin/master
   - **Non-empty composer** → cancel and send that text now.
   - **Empty composer** + a queued follow-up → same as bare `Enter`: interrupt the response and hand over the whole queue (no need to focus the queue pane). On the queue pane, the same chord (or the **[Send now]** button) is still cancel-and-send for the **selected** row.
   - **Idle**, or **empty composer with nothing queued** → no-op for that key.
@@ -260,9 +266,15 @@ While the agent is generating:
 | Apple Terminal | `Ctrl+O` | `Ctrl+Enter`, `Ctrl+I` | Send now |
 | VS Code family (VS Code, Cursor, Windsurf, Zed) | **`Ctrl+L`** | *(none)* | Send now (`Ctrl+I` not used — Tab / host chat; plugins via `/plugins`) |
 
+<<<<<<< HEAD
 In `/multiline` mode, `Shift+Enter` (or `Alt+Enter`) sends while plain `Enter` inserts a newline — except on an **empty** composer mid-turn with a queued follow-up. This is where plain `Enter` still interrupts with the queue (same as normal mode). (`Ctrl+Enter` is send-now mid-turn when bound on non–VS Code family. It does not submit a new idle turn.)
 
 Send-now is intentionally interruptive — it reads as "stop what you are doing and take this". To hand the agent a note **without** stopping it, queue with plain `Enter`. It reaches the model on the running turn's next request.
+=======
+In `/multiline` mode, `Shift+Enter` (or `Alt+Enter`) sends while plain `Enter` inserts a newline — except on an **empty** composer mid-turn with a queued follow-up. This happens where plain `Enter` still interrupts with the queue (same as normal mode). (`Ctrl+Enter` is send-now mid-turn when bound on non–VS Code family. It does not submit a new idle turn.)
+
+Send-now is intentionally interruptive — it reads as "stop what you're doing and take this". To hand the agent a note **without** stopping it, queue with plain `Enter`. It reaches the model on the running turn's next request.
+>>>>>>> origin/master
 
 > **WezTerm**: These modified Enter keys need `enable_kitty_keyboard = true` in your WezTerm config. Full steps and a one-line workaround are in the [terminal support guide](21-terminal-support.md#problem-ctrlenter-doesnt-interject-in-wezterm).
 
