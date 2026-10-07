@@ -816,37 +816,9 @@ pub fn default_settings() -> Vec<SettingMeta> {
             },
             restart_required: false,
         },
-<<<<<<< HEAD
             // Persisted key stays `simple_mode`; the user-facing label
             // distinguishes the PROMPT vim-mode (this setting) from the
             // scrollback `vim_mode` keybindings below.
-=======
-        SettingMeta {
-            // Persisted key stays `simple_mode`.
-            key: "simple_mode",
-            category: SettingCategory::Appearance,
-            owner: SettingOwner::Shared,
-            label: "Disable vim input mode",
-            description: "Use plain readline-style input instead of vim keys in the prompt. Experimental.",
-            keywords: &[
-                "simple",
-                "ascii",
-                "minimal",
-                "plain",
-                "vim",
-                "readline",
-                "experimental",
-                "editor",
-                "input",
-                "prompt",
-            ],
-            kind: SettingKind::Bool {
-                // `Option<bool>`: `None` is treated as `true`
-                default: ui_default.simple_mode.unwrap_or(true),
-            },
-            restart_required: false,
-        },
->>>>>>> origin/master
         // SHELL-owned, persisted to `[ui].vim_mode` in config.toml.
         // Defaults to the same value main's `appearance::persist::VIM_MODE_DEFAULT` shipped with
         // Bundled next to `simple_mode` because they pair up: simple_mode controls the input editor's vim behaviour, vim_mode controls the scrollback's

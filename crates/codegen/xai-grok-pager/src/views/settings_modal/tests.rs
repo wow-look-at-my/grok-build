@@ -736,14 +736,8 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "dashboard_preview",
         // PAGER-owned page_flip_on_send (Appearance).
         "page_flip_on_send",
-<<<<<<< HEAD
         // PAGER-owned vim_mode (Appearance,
         // paired with simple_mode).
-=======
-        "simple_mode",
-        // PAGER-owned vim_mode (Appearance, paired with simple_mode).
-        "vim_mode",
->>>>>>> origin/master
         // Theme enums.
         "theme",
         "auto_dark_theme",

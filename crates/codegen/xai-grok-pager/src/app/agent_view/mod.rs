@@ -1050,10 +1050,7 @@ pub struct AgentView {
     pub(crate) session_mode_pending: Option<xai_grok_tools::types::SessionMode>,
     /// Session mode to apply once this agent's ACP session exists.
     pub(crate) deferred_session_mode: Option<xai_grok_tools::types::SessionMode>,
-<<<<<<< HEAD
-=======
     /// Session-mode changes this pager has requested for this session, oldest first.
->>>>>>> origin/master
     pub(crate) mode_requests: VecDeque<ModeRequest>,
     pub(crate) next_mode_request_seq: u64,
     /// `PersistPermissionMode` with no session id cannot notify the shell.
@@ -1129,11 +1126,7 @@ pub struct AgentView {
     pub(crate) timeline_hover_preview: Option<(usize, String)>,
     /// Running agent definition for this session (`x.ai/session/info` `agentName`).
     pub session_agent_name: Option<String>,
-<<<<<<< HEAD
-    /// Index into `BuiltinAgentName::shift_tab_variants()` for the Shift+Tab ring's current agent-identity stop; `None`.
-=======
     /// Index into `BuiltinAgentName::shift_tab_variants()` for the Shift+Tab.
->>>>>>> origin/master
     pub shift_tab_ring_agent_index: Option<u8>,
     /// The agent name to restore when the ring wraps back past the last agent-identity stop to Plan.
     pub shift_tab_base_agent: Option<String>,
@@ -1166,15 +1159,9 @@ pub struct AgentView {
     /// handler so the placeholder doesn't linger on screen when the loaded session has no replay content.
     pub(crate) loading_placeholder_id: Option<EntryId>,
     pub(crate) pending_recap_entry: Option<EntryId>,
-<<<<<<< HEAD
-    /// tool, same chrome as other in-flight work).
-    pub(crate) pending_todo_entry: Option<EntryId>,
-    /// Inserted when `/todo` is dispatched so the capture shows at the top of the agent view with other running tasks.
-=======
     /// Entry ID of the in-flight `/todo`.
     pub(crate) pending_todo_entry: Option<EntryId>,
     /// Tasks-pane row for the in-flight `/todo` capture (`todo-capture:` prefix).
->>>>>>> origin/master
     pub(crate) pending_todo_task_id: Option<String>,
     /// `generated_session_title` below.
     pub display_name: Option<String>,
@@ -1206,11 +1193,7 @@ pub struct AgentView {
     pub(crate) optimistic_queue_ids: std::collections::HashSet<String>,
     /// A queue-row send-now the user fired while the row was still an optimistic echo.
     pub(crate) send_now_awaiting_confirm: Option<String>,
-<<<<<<< HEAD
-    /// An interrupt-with-the-queue (bare Enter on an empty composer) the user fired.
-=======
     /// An interrupt-with-the-queue (bare Enter on an empty composer) the user fired while a row was still an optimistic echo.
->>>>>>> origin/master
     pub(crate) deliver_now_awaiting_confirm: bool,
     /// User blocks painted at send-now dispatch, keyed by prompt id; the
     /// turn-start adoption consumes an entry to reuse its block.
