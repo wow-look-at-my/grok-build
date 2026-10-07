@@ -9,22 +9,27 @@ const TEMPLATES: &[(&str, &str, u8)] = &[
     ("SUBAGENT_PROMPT_ENC", "subagent_prompt.md", 0x3D),
 ];
 
+/// XORs each byte with the seed plus its position, which wraps at a set value.
 fn xor_encrypt(data: &[u8], seed: u8) -> Vec<u8> {
+    let mut key = seed;
     data.iter()
-        .enumerate()
-        .map(|(i, &b)| b ^ seed.wrapping_add(i as u8))
+        .map(|&b| {
+            let enc = b ^ key;
+            key = key.wrapping_add(1);
+            enc
+        })
         .collect()
 }
 
-fn main() {
-    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
-    let out_dir = std::env::var("OUT_DIR").expect("cargo sets OUT_DIR");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR")?;
+    let out_dir = std::env::var("OUT_DIR")?;
     let mut out = String::new();
     for (name, file, seed) in TEMPLATES {
         let path = Path::new(&manifest).join("templates").join(file);
         println!("cargo:rerun-if-changed={}", path.display());
         let data =
-            std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let bytes: Vec<String> = xor_encrypt(&data, *seed)
             .iter()
             .map(u8::to_string)
@@ -33,8 +38,7 @@ fn main() {
             out,
             "pub(crate) const {name}: &[u8] = &[{}];",
             bytes.join(", ")
-        )
-        .expect("write to a String");
+        )?;
     }
     let seeds: Vec<String> = TEMPLATES
         .iter()
@@ -45,8 +49,8 @@ fn main() {
         "pub(crate) const PROMPT_SEEDS: [u8; {}] = [{}];",
         TEMPLATES.len(),
         seeds.join(", ")
-    )
-    .expect("write to a String");
+    )?;
     let dest = Path::new(&out_dir).join("prompt_encrypted.rs");
-    std::fs::write(&dest, out).unwrap_or_else(|e| panic!("cannot write {}: {e}", dest.display()));
+    std::fs::write(&dest, out).map_err(|e| format!("cannot write {}: {e}", dest.display()))?;
+    Ok(())
 }
