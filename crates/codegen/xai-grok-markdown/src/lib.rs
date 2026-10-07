@@ -1,10 +1,10 @@
-#![allow(clippy::cast_lossless)] // 5 hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 14 hits predate the gate
-#![allow(clippy::cast_sign_loss)] // 5 hits predate the gate
-#![allow(clippy::expect_used)] // 3 hits predate the gate
-#![allow(clippy::unwrap_used)] // 1 hit predates the gate
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
+#![allow(clippy::cast_sign_loss)] // Hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::unwrap_used)]
 
 //! Streaming markdown renderer for terminal UIs.
 //!

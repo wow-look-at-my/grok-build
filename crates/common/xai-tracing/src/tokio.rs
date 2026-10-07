@@ -19,9 +19,6 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    // This is the instrumenting wrapper itself: it returns the `JoinHandle` to
-    // its caller rather than dropping it, so the task's failure is the caller's
-    // to await. Banning the call here would only hide the one spawn every
-    // traced task in the workspace goes through.
+    // This is the instrumenting wrapper itself: it returns the `JoinHandle` to its caller rather than dropping it.
     tokio::spawn(future.instrument(Span::current()))
 }

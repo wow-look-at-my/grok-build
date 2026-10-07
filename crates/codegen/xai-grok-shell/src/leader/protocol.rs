@@ -133,7 +133,6 @@ pub struct ClientCapabilities {
     pub default_model: Option<String>,
 
     /// Client binary version (e.g., "0.1.150").
-    /// The leader logs a warning when this differs from its own version, which happens after a client upgrade.
     #[serde(default)]
     pub client_version: Option<String>,
 
@@ -422,7 +421,6 @@ pub enum ClientMessage {
 }
 
 /// Reason for a planned leader shutdown, sent with [`ServerMessage::ShuttingDown`].
-/// ## Runtime status | Variant | Emitted today? | Notes | |---------|---------------|-------| | `Manual` | **Yes** — default for SIGTERM, test cancellation, all other paths | | | `IdleTimeout` | **No** — reserved for a future idle-timeout feature | |
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShutdownReason {
