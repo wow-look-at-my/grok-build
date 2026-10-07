@@ -67,10 +67,7 @@ impl TaskOutputTokenBudget {
         (state.spent, state.incomplete)
     }
 }
-/// Depth counter for a subagent's foreground wait. Its guard releases the
-/// counter in `Drop`, so the lock must be one that a panic elsewhere cannot
-/// turn into a permanent failure: a poisoned lock would make every later
-/// `Drop` of an in-flight guard panic as well.
+/// Depth counter for a subagent's foreground wait.
 pub struct BlockingWaitState(parking_lot::Mutex<BlockingWaitInner>);
 #[derive(Default)]
 struct BlockingWaitInner {
@@ -195,9 +192,7 @@ pub struct ToolContext {
             xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
         >,
     >,
-    /// Route from this session to the one that spawned it, read by
-    /// `send_message`. Set on a child's context at spawn; `None` for a
-    /// top-level session, which has no parent to message.
+    /// Route from this session to the one that spawned it, read by `send_message`.
     pub parent_messenger: Option<xai_grok_tools::implementations::grok_build::ParentMessenger>,
     /// The main session's directory, set on a `/goal` verifier child, whose tool
     /// calls must never read that session's record. `None` for every other
@@ -453,7 +448,7 @@ mod tests {
     }
 }
 /// The depth counter is released from a `Drop`, where a panic has nowhere to
-/// go, so what the lock does after somebody else panicked while holding it is
+/// go. What the lock does after somebody else panicked while holding it is
 /// load-bearing rather than academic.
 #[cfg(test)]
 mod blocking_wait_lock_tests {

@@ -460,13 +460,6 @@ pub(crate) fn sanitize_user_error(raw: &str) -> String {
     result
 }
 /// Per-session gates that serialize mode-change requests.
-///
-/// Every mode change is its own spawned task, so two rapid Shift+Tab presses
-/// put two `session/set_mode` requests on the wire at once, and the shell is
-/// free to apply them in either order, which is how a burst can settle on the
-/// mode one press back. Holding the session's gate across a request's round
-/// trip keeps consecutive requests in press order: the next one goes out only
-/// after the previous one has been answered.
 static MODE_REQUEST_GATES: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
 > = std::sync::OnceLock::new();

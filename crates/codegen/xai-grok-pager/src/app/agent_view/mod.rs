@@ -741,17 +741,10 @@ pub(crate) struct ModeRequest {
     /// The mode id the pager asked for.
     pub(crate) mode_id: String,
 }
-/// How many mode-change requests a session remembers. Rapid presses are the
-/// only source of a multi-entry log, and they resolve within one round trip.
+/// How many mode-change requests a session remembers.
 pub(crate) const MODE_REQUEST_LOG_CAP: usize = 8;
 /// Whether a mode confirmation naming `incoming` belongs to a press the ring
 /// has already moved past, and which request that was.
-///
-/// `requests` is the ordered log of session-mode changes this pager emitted,
-/// so the newest entry naming the confirmed mode is the press that confirmation
-/// reports on. An older entry is a confirmation that arrived after a later
-/// press already advanced the ring, and applying it would step the displayed
-/// mode backwards.
 pub(crate) fn superseded_mode_request<'a>(
     requests: &'a VecDeque<ModeRequest>,
     incoming: &str,
@@ -1308,11 +1301,7 @@ pub struct AgentView {
     /// Session mode to apply once this agent's ACP session exists. Set when the agent is spawned from the dashboard with `/plan` active (the session does not exist yet, so the mode can't be sent immediately).
     /// Consumed in the `SessionCreated` / `WorktreeSessionCreated` handlers, mirroring `AgentSession.deferred_model_switch`.
     pub(crate) deferred_session_mode: Option<xai_grok_tools::types::SessionMode>,
-    /// Session-mode changes this pager has requested for this session, oldest
-    /// first. A `CurrentModeUpdate` names only a mode, so this log is what
-    /// attributes one to the press that caused it: an entry that is not the
-    /// newest is an earlier press reporting in late, and applying it would
-    /// step the displayed mode backwards.
+    /// Session-mode changes this pager has requested for this session, oldest first.
     pub(crate) mode_requests: VecDeque<ModeRequest>,
     /// Sequence for the next entry appended to [`Self::mode_requests`].
     pub(crate) next_mode_request_seq: u64,
@@ -1417,15 +1406,9 @@ pub struct AgentView {
     pub(crate) timeline_hover_preview: Option<(usize, String)>,
     /// Running agent definition for this session (`x.ai/session/info` `agentName`).
     pub session_agent_name: Option<String>,
-    /// Index into `BuiltinAgentName::shift_tab_variants()` for the Shift+Tab
-    /// ring's current agent-identity stop; `None` when the ring is outside
-    /// that part (Normal/Plan/Auto/Always-Approve). Optimistic, set
-    /// immediately on dispatch — mirrors `plan_mode_pending` vs
-    /// `plan_mode_active`.
+    /// Index into `BuiltinAgentName::shift_tab_variants()` for the Shift+Tab.
     pub shift_tab_ring_agent_index: Option<u8>,
-    /// The agent name to restore when the ring wraps back past the last
-    /// agent-identity stop to Plan. Captured once on entering the ring
-    /// (`Always-Approve → <first agent-identity stop>`), cleared on exit.
+    /// The agent name to restore when the ring wraps back past the last agent-identity stop to Plan.
     pub shift_tab_base_agent: Option<String>,
     /// Map of child session IDs to subagent metadata. Populated on `SubagentSpawned` notifications, used for permission routing (which agent owns a session) and provenance display.
     /// `SubagentSpawned` notifications, used for permission routing
@@ -1475,17 +1458,9 @@ pub struct AgentView {
     pub(crate) loading_placeholder_id: Option<EntryId>,
     /// Entry ID of the in-flight manual `/recap` loading block (rendered with the animated "running" sidebar). Set when `/recap` is dispatched and taken by the `SessionRecap` handler, which fills the block with the summary and stops the animation. `None` when no manual recap is pending (auto recaps never show a loading block).
     pub(crate) pending_recap_entry: Option<EntryId>,
-    /// Entry ID of the in-flight `/todo` capture block (rendered as a running
-    /// tool, same chrome as other in-flight work). Taken by the `TodoCaptured`
-    /// handler, which removes it and pushes what the capture agent appended.
-    /// Cleared on reload alongside `pending_recap_entry` — the capture runs in
-    /// the shell, so a spinner left behind by a reload would never stop on its
-    /// own.
+    /// Entry ID of the in-flight `/todo`.
     pub(crate) pending_todo_entry: Option<EntryId>,
     /// Tasks-pane row for the in-flight `/todo` capture (`todo-capture:` prefix).
-    /// Inserted when `/todo` is dispatched so the capture shows at the top of
-    /// the agent view with other running tasks; removed when the result lands
-    /// or the session reloads.
     pub(crate) pending_todo_task_id: Option<String>,
     /// The manually-chosen session title (`/rename` or the dashboard rename flow), as distinct from the auto-generated
     /// `generated_session_title` below. Set optimistically at dispatch, persisted by the shell as `Summary.title_is_manual`, and restored from disk on resume (`TaskResult::SessionMetaFromDisk`). Drives the prompt-border inline title and wins precedence for the dashboard modal label and the OSC terminal title. The on-disk write is best-effort (failure surfaces a system block through the existing
@@ -1540,12 +1515,7 @@ pub struct AgentView {
     /// (a rapid double-Enter on a queued bash command could "disappear": the interject overtook the row, the no-op dropped the send-now, and the armed cancel expectation hid the still-queued row).
     /// Parked here and fired from the confirming `x.ai/queue/changed`
     pub(crate) send_now_awaiting_confirm: Option<String>,
-    /// An interrupt-with-the-queue (bare Enter on an empty composer) the user
-    /// fired while a row was still an optimistic echo. `x.ai/queue/deliver_now`
-    /// sent then could overtake the row's own in-flight `session/prompt` and
-    /// harvest nothing — a fast double-Enter would silently not interrupt.
-    /// Parked here and re-fired from the confirming `x.ai/queue/changed`
-    /// broadcast, which proves the shell holds the rows.
+    /// An interrupt-with-the-queue (bare Enter on an empty composer) the user fired while a row was still an optimistic echo.
     pub(crate) deliver_now_awaiting_confirm: bool,
     /// User blocks painted at send-now dispatch, keyed by prompt id; the turn-start adoption consumes an entry to reuse its block. The flag marks an edit-interject override (fresher than the mirror text the adoption captures). Cleared on session reload.
     pub(crate) send_now_painted_blocks:

@@ -57,9 +57,7 @@ pub fn estimate_tool_specs_tokens(tools: &[ToolSpec]) -> u64 {
 /// Images count at [`xai_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
 /// Shared so the per-variant arithmetic stays in one place.
 pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
-    // The arithmetic lives next to the item type, so the request builder that
-    // fits the output budget into the window counts the prompt the same way
-    // this actor's running total does.
+    // The arithmetic lives next to the item type.
     xai_grok_sampling_types::estimate_item_tokens(item)
 }
 

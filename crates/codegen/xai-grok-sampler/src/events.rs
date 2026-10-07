@@ -83,14 +83,7 @@ pub enum SamplingEvent {
     },
 
     /// The model's current output rate, measured over the trailing window of
-    /// the same meter the rate floor judges. Emitted while a response streams,
-    /// throttled to a few per second, so a client can render it live without
-    /// running a second meter that disagrees with the gate.
-    ///
-    /// `floor_tokens_per_sec` is the configured floor, absent when the session
-    /// set none; a client colors the rate against it. `slow_for_ms` is how
-    /// long the rate has been under that floor, so the indicator can say how
-    /// long the slowdown has run rather than only that one is happening.
+    /// the same meter the rate floor judges.
     OutputRate {
         request_id: RequestId,
         tokens_per_sec: f64,
@@ -130,10 +123,7 @@ pub enum SamplingEvent {
         /// Typed retry class so consumers never have to sniff `reason` (e.g. the shell's doom-loop recovery counter).
         kind: SamplingErrorKind,
         reason: String,
-        /// How long the actor sleeps before the retry goes out. `None` when
-        /// the retry is immediate (an image or reasoning strip). A consumer
-        /// shows it so a wait the server asked for reads as a wait rather
-        /// than as a hang.
+        /// How long the actor sleeps before the retry goes out.
         retry_in_ms: Option<u64>,
         /// Recovery-action payload when `kind == DoomLoopDetected`.
         /// The confident trigger labels plus the chunk index the mid-stream abort fired at (`None` for terminal-response detections).
@@ -244,10 +234,7 @@ pub struct SamplingErrorInfo {
     /// Telemetry only; `None` for terminal-response detections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doom_loop_aborted_at_chunk: Option<u64>,
-    /// Present only when `kind == OutputRateCollapsed`: what the meter
-    /// measured against what it was told to require. Carried rather than
-    /// re-parsed out of `message` so a round trip through this struct keeps
-    /// real numbers.
+    /// Present only when `kind == OutputRateCollapsed`: what the meter measured against what it was told to require.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate: Option<OutputRateCollapse>,
     /// Meaningful only when `kind == Auth`: whether the rejected request actually carried a credential on the wire.
@@ -286,11 +273,10 @@ pub enum SamplingErrorKind {
 }
 
 impl SamplingErrorKind {
-    /// Stable, lowercase string form suitable for telemetry tags
-    /// (e.g., analytics `error_type` columns and signals histograms).
-    /// Mirrors the strings used in the shell's
-    /// `stream_conversation_with_retries` error classifier so tags stay
-    /// consistent across surfaces.
+    /// Stable, lowercase string form suitable for telemetry tags (e.g.,
+    /// analytics `error_type` columns and signals histograms). Mirrors the
+    /// strings used in the shell's `stream_conversation_with_retries` error
+    /// classifier so tags stay consistent across surfaces.
     pub fn as_str(self) -> &'static str {
         match self {
             SamplingErrorKind::Auth => "auth",
