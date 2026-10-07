@@ -1,16 +1,4 @@
 //! Fitting a request's output budget into the model's context window.
-//!
-//! A provider counts the requested output against the same window as the
-//! prompt. So the output budget is not a free parameter of the request: it is
-//! whatever the window has left. This module answers that question for the
-//! request shape every backend converter reads, so no path can serialize a
-//! body that is arithmetically impossible.
-//!
-//! The per-item estimate lives here too, because this is where the
-//! `ConversationItem` type lives. `xai-chat-state` re-exports it, and its
-//! exact tracked count (server usage plus the delta since) is the better
-//! number where a caller has one — pass that to [`ConversationRequest::fit_output_budget`]
-//! instead of the estimate.
 
 use xai_token_estimation::BYTES_PER_TOKEN;
 
@@ -29,9 +17,8 @@ pub struct OutputBudgetClamp {
     pub context_window: u64,
 }
 
-/// Bytes/4 estimate for one [`ConversationItem`].
-///
-/// Images count at [`xai_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
+/// Bytes/4 estimate for one [`ConversationItem`]. Images count at
+/// [`xai_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
 pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
     match item {
         ConversationItem::System(s) => xai_token_estimation::estimate_tokens(&s.content),
@@ -76,11 +63,8 @@ pub fn estimate_tool_spec_tokens(spec: &ToolSpec) -> u64 {
 
 impl ConversationRequest {
     /// Bytes/4 estimate of everything this request puts in the prompt: the
-    /// conversation items and the tool definitions that ride with them.
-    ///
-    /// This is an estimate, not a count. A caller that tracks the provider's
-    /// own reported usage should pass that number to
-    /// [`Self::fit_output_budget`] instead.
+    /// conversation items and the tool definitions that ride with them. This
+    /// is an estimate, not a count.
     pub fn estimate_prompt_tokens(&self) -> u64 {
         let items: u64 = self.items.iter().map(estimate_item_tokens).sum();
         let tools: u64 = self.tools.iter().map(estimate_tool_spec_tokens).sum();
@@ -88,15 +72,13 @@ impl ConversationRequest {
     }
 
     /// Cut `max_output_tokens` down to what `context_window` has left after
-    /// `prompt_tokens`, and report the cut.
-    ///
-    /// Returns `None` when the request already fits, when the window is
-    /// unknown (`0`), or when the request names no output budget — the
-    /// sampler's own default is applied before this runs, so `None` there
-    /// means nothing bounds the output at all. A fitted budget outside the
-    /// `u32` the request field carries is logged and left unapplied: the
-    /// request keeps what it asked for rather than a count this arithmetic did
-    /// not produce.
+    /// `prompt_tokens`, and report the cut. Returns `None` when the request
+    /// already fits, when the window is unknown (`0`). Otherwise, when the
+    /// request names no output budget — the sampler's own default is
+    /// applied before this runs. `None` there means nothing bounds the output
+    /// at all. A fitted budget outside the `u32` the request field carries is
+    /// logged and left unapplied. The request keeps what it asked for rather
+    /// than a count this arithmetic did not produce.
     pub fn fit_output_budget(
         &mut self,
         prompt_tokens: u64,
@@ -142,7 +124,6 @@ mod tests {
         }
     }
 
-    /// The reported failure: 737_857 + 262_144 is one token over a 1M window.
     /// The request that goes out has to be the one that fits.
     #[test]
     fn an_output_budget_the_window_cannot_hold_is_cut_to_fit() {

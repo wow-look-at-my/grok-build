@@ -1919,9 +1919,10 @@ mod tests {
     }
 
     /// The canonical tree-sitter splitter fails closed (None) for constructs
-    /// that can smuggle commands: background `&`, ANSI-C quoting, command/process
-    /// substitution, expansions, parens/subshells, and control flow. This is what
-    /// the Bash arm relies on instead of the old hand-rolled string parser.
+    /// that can smuggle commands. Background `&`, ANSI-C quoting,
+    /// command/process substitution, expansions, parens/subshells, and
+    /// control flow. This is what the Bash arm relies on instead of the
+    /// hand-rolled string parser.
     #[test]
     fn splitter_rejects_dangerous_constructs() {
         let rejects = |cmd: &str| match try_parse_shell(cmd) {

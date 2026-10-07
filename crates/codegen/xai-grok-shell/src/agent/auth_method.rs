@@ -22,35 +22,10 @@ pub use xai_grok_login::auth_method::{
     LEGACY_XAI_API_KEY_ENV_VAR, XAI_API_KEY_ENV_VAR, has_xai_api_key_env, read_xai_api_key_env,
 };
 
-/// Whether `xai.api_key` should be advertised (and pushed FIRST) when building
-/// the `auth_methods` list at `initialize()` time.
-///
-/// Regression: `xai.api_key` must stay first when only per-model credentials
-/// exist (no global `XAI_API_KEY`). Deferring it made BYOK users hit the login
-/// screen because the pager uses `auth_methods.first()` for startup metadata.
-///
-/// [`build_auth_methods`] consumes this predicate and pins the ordering;
-/// its tests catch call-site and predicate regressions.
-///
-/// Probes `std::env` at call time and consults each `ModelEntry` for a
-/// resolvable api_key/env_key -- both inputs can change between calls, so the
-/// result is not cached.
-///
-/// `disable_api_key_auth` (`[grok_com_config] disable_api_key_auth` /
-/// `GROK_DISABLE_API_KEY_AUTH`) is the admin kill switch: when true the
-/// method is never advertised, regardless of available credentials, so
-/// `XAI_API_KEY` can't bypass a deployment's forced IdP login.
-///
-/// Presence-only for the first-party env key (treats it as usable). Login
-/// paths that have run the validity probe should call
-/// [`should_advertise_xai_api_key_with_env_ok`] with the probe result instead.
-///
-/// `has_provider_credentials` is the same question asked of the
-/// `[model_providers.<id>]` blocks
-/// (`config::any_provider_has_own_credentials`). A declared provider is enough
-/// on its own: its models are autodetected off the startup path, so at
-/// `initialize` time the catalog does not carry them yet, and signing in to
-/// grok.com is not what a session pointed at another endpoint needs.
+/// Whether `xai.api_key` should be advertised (and pushed FIRST) when
+/// building the `auth_methods` list at `initialize()` time. Regression:
+/// `xai.api_key` must stay first when only per-model credentials exist (no
+/// global `XAI_API_KEY`).
 pub(crate) fn should_advertise_xai_api_key<'a, I>(
     disable_api_key_auth: bool,
     models: I,
@@ -431,7 +406,7 @@ mod tests {
     use serial_test::serial;
 
     /// A configured `[model_providers.<id>]` is BYOK on its own: with no model
-    /// of its own in the catalog and the first-party env key ruled out, the
+    /// of its own in the catalog and the first-party env key ruled out. The
     /// api-key method is still advertised, which is what keeps the grok.com
     /// sign-in optional. The kill switch stays above it.
     #[test]
@@ -478,10 +453,6 @@ mod tests {
 
     /// When API-key credentials are advertiseable, fall through from a dead
     /// `cached_token` to non-interactive `xai.api_key` (not browser OAuth).
-    /// Covers the both-advertised case (`has_cached_token` true at initialize
-    /// but session later missing/expired/legacy): advertise order still puts
-    /// `xai.api_key` first, while `default_auth_method_id` prefers session;
-    /// after session fails, this helper must still pick `xai.api_key`.
     #[test]
     fn after_cached_token_unavailable_prefers_api_key_when_advertiseable() {
         assert_eq!(

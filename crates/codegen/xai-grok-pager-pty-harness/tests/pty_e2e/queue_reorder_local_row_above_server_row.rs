@@ -4,7 +4,7 @@ use super::common::*;
 
 /// A slash command is a client row and the pane draws every shell row first,
 /// because the drain runs them first. Moving one up would have to cross that
-/// boundary, which the queue cannot honor — so the row holds its place and the
+/// boundary, which the queue cannot honor — so the row holds its place. The
 /// pane says why instead of silently ignoring the key.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]

@@ -1,4 +1,4 @@
-#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_wrap)]
 
 //! Unified MCP adapter for the xAI Computer Hub.
 //!

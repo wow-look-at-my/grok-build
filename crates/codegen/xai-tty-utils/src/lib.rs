@@ -1,5 +1,5 @@
-#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
-#![allow(clippy::cast_possible_wrap)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 
 //! Lightweight process-spawning utilities for TTY safety.
 //!
@@ -77,8 +77,7 @@ pub use process_resources::{
 mod process_scope;
 pub use process_scope::{ProcessScope, global_process_scope};
 
-/// How long a shell gets to exit on its own after a hangup, before it is
-/// killed.
+/// How long a shell gets to exit on its own after a hangup, before it is killed.
 pub const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 
 pub mod runtime;
@@ -350,13 +349,7 @@ fn bind_to_parent_death(
         return Err(io::Error::last_os_error());
     }
     // Parent already gone (pdeathsig can no longer fire): exit instead of
-    // orphaning. A reparented child sees a ppid different from the pid the
-    // spawn site captured.
-    //
-    // Compared in the signed domain the kernel uses: `getppid` answers a
-    // `pid_t`, and a parent pid that does not fit one is not this process's
-    // parent, so it exits exactly as a value that failed to compare did.
-    // SAFETY: getppid/_exit are async-signal-safe and take no pointers.
+    // orphaning.
     let parent_matches =
         i32::try_from(parent_pid).is_ok_and(|parent| unsafe { libc::getppid() } == parent);
     if !parent_matches {
@@ -754,17 +747,15 @@ impl ProcessGroup {
 
     /// Whether any member of this group is still *running*, as opposed to a
     /// zombie that has already died and is only waiting to be reaped.
-    ///
     /// [`Self::has_live_members`] counts zombies, which is what you want when
-    /// deciding whether to send another signal — signalling a zombie is
-    /// harmless, and skipping a kill because one looked dead is not. It is the
-    /// wrong question when *reporting* that a teardown left something behind:
-    /// an orphaned zombie means the kill worked and the reaper has not run
-    /// yet, so reporting it as a leak is a false alarm, and a check that cries
-    /// wolf gets ignored on the run where the number is real.
-    ///
-    /// Linux reads the state straight out of `/proc`. Elsewhere there is no
-    /// cheap way to enumerate a group, so this falls back to
+    /// deciding whether to send another signal. Signalling a zombie is
+    /// harmless, and skipping a kill because one looked dead is not. It is
+    /// the wrong question when *reporting* that a teardown left something
+    /// behind. An orphaned zombie means the kill worked and the reaper has
+    /// not run yet. Reporting it as a leak is a false alarm, and a check that
+    /// cries wolf gets ignored on the run where the number is real. Linux
+    /// reads the state straight out of `/proc`. Elsewhere there is no cheap
+    /// way to enumerate a group. This falls back to
     /// [`Self::has_live_members`] and keeps its over-reporting rather than
     /// claiming a certainty it does not have.
     pub fn has_running_members(&self) -> Option<bool> {
@@ -813,9 +804,9 @@ impl ProcessGroup {
     }
 
     /// Ask an interactive shell to hang up. Its job-control children each live
-    /// in their own process group, which no `killpg` here reaches; a shell is
-    /// supposed to forward the hangup to them on its way out, but it is not
-    /// reliable enough to be the only path — pair this with
+    /// in their own process group, which no `killpg` here reaches. A shell is
+    /// supposed to forward the hangup to them on its way out. However, it is
+    /// not reliable enough to be the only path — pair this with
     /// [`Self::hangup_session_jobs`].
     pub fn hangup(&self) -> io::Result<()> {
         #[cfg(unix)]
@@ -831,21 +822,19 @@ impl ProcessGroup {
     }
 
     /// Deliver the hangup to the shell's job-control children directly, in
-    /// every process group of the shell's session but its own.
-    ///
-    /// A shell that answers [`Self::hangup`] forwards it to its jobs itself and
-    /// this is unnecessary. It exists for the escalation path: a shell still
-    /// running at the end of [`HANGUP_GRACE`] gets killed, and killing it
-    /// destroys the only process that can reach jobs sitting in groups of their
-    /// own. Delivering the hangup here first keeps the policy identical to the
-    /// shell's — a job that ignores SIGHUP still survives, which is the point of
-    /// `nohup` — where the alternative is leaking every job whenever the shell
-    /// is late.
-    ///
-    /// Only the leader's own session is touched, so a group whose leader never
-    /// called `setsid` (anything but a terminal shell) finds nothing to signal.
-    /// Linux reads the session out of `/proc`; elsewhere there is no cheap way
-    /// to enumerate one, and the shell's own forwarding is all there is.
+    /// every process group of the shell's session but its own. A shell that
+    /// answers [`Self::hangup`] forwards it to its jobs itself and this is
+    /// unnecessary. It exists for the escalation path: a shell still running
+    /// at the end of [`HANGUP_GRACE`] gets killed. Killing it destroys the
+    /// only process that can reach jobs sitting in groups of their own.
+    /// Delivering the hangup here first keeps the policy identical to the
+    /// shell's — a job that ignores SIGHUP still survives, which is the
+    /// point of `nohup`. This happens where the alternative is leaking every
+    /// job whenever the shell is late. Only the leader's own session is
+    /// touched, so a group whose leader never called `setsid` (anything but a
+    /// terminal shell) finds nothing to signal. Linux reads the session out
+    /// of `/proc`; elsewhere there is no cheap way to enumerate one, and the
+    /// shell's own forwarding is all there is.
     pub fn hangup_session_jobs(&self) -> io::Result<()> {
         #[cfg(target_os = "linux")]
         {
@@ -902,8 +891,7 @@ impl ProcessGroup {
                     nix::sys::signal::Signal::SIGCONT,
                 ] {
                     match nix::sys::signal::killpg(target, signal) {
-                        // Exiting between the scan and the signal is not a
-                        // failure; it is the outcome being asked for.
+                        // Exiting between the scan and the signal is not a failure; it is the outcome being asked for.
                         Ok(()) | Err(nix::errno::Errno::ESRCH) => {}
                         Err(e) => return Err(io::Error::from_raw_os_error(e as i32)),
                     }
@@ -1578,13 +1566,12 @@ mod tests {
         assert_eq!(group.has_live_members(), Some(false));
     }
 
-    /// The two questions a killed group gets asked, and why they differ: a
+    /// Both questions a killed group gets asked, and why they differ. A
     /// zombie is a process for `has_live_members` (so another kill is still
     /// worth sending) and NOT a leak for `has_running_members` (so a teardown
-    /// that worked does not report that it failed).
-    ///
-    /// Deterministic, with no waiting on a kill to land: the zombie here is
-    /// this test's own child, and it stays a zombie until this test reaps it.
+    /// that worked does not report that it failed). Deterministic, with no
+    /// waiting on a kill to land: the zombie here is this test's own child.
+    /// It stays a zombie until this test reaps it.
     #[cfg(target_os = "linux")]
     #[test]
     fn has_running_members_ignores_a_zombie_that_has_already_died() {
@@ -1607,9 +1594,7 @@ mod tests {
         );
 
         group.kill().expect("kill group");
-        // `wait` returns once the child is dead, so from here it is a reaped
-        // process, not a zombie — take the zombie reading from a child we
-        // deliberately have not waited on yet.
+        // `wait` returns once the child is dead, so from here it is a reaped process.
         let mut zombie_cmd = std::process::Command::new("true");
         zombie_cmd
             .stdin(std::process::Stdio::null())
@@ -1644,12 +1629,12 @@ mod tests {
         zombie.wait().expect("reap zombie");
     }
 
-    /// The escalation path's guarantee: a job parked in a process group of its
-    /// own, where the shell's `killpg` cannot reach it, still gets the hangup
+    /// The escalation path's guarantee. A job parked in a process group of its
+    /// own, where the shell's `killpg` cannot reach. It, still gets the hangup
     /// when the shell is killed before it can forward one. A sleeper outside
     /// the session holds the scan to the session rather than the machine, and
-    /// the shell itself is left running because its group is the caller's to
-    /// kill.
+    /// the shell itself is left running. This is because its group is the
+    /// caller's to kill.
     #[cfg(target_os = "linux")]
     #[test]
     fn hangup_session_jobs_reaches_a_job_in_its_own_group_but_nothing_outside_the_session() {
@@ -1676,8 +1661,7 @@ mod tests {
         let mut outsider = sleeper();
         let outsider_group = group_for(outsider.id());
 
-        // `set -m` is what puts the job in a group of its own; without it the
-        // job shares the shell's group and the caller's `killpg` would cover it.
+        // `set -m` is what puts the job in a group of its own.
         let mut cmd = std::process::Command::new("bash");
         cmd.arg("-c")
             .arg("set -m; sleep 1000 & echo $!; sleep 1000")
@@ -1735,8 +1719,8 @@ mod tests {
 
     /// Debug builds enforce the top-of-doc caveat that arming and spawning
     /// happen on the same (long-lived) thread — pdeathsig binds to the
-    /// spawning thread's lifetime, so a cross-thread arm+spawn must fail
-    /// the spawn with `InvalidInput` (`EINVAL` from the pre_exec guard)
+    /// spawning thread's lifetime. A cross-thread arm+spawn must fail the
+    /// spawn with `InvalidInput` (`EINVAL` from the pre_exec guard)
     /// instead of silently binding to the wrong thread. The same-thread
     /// happy path is covered by `armed_child_survives_while_parent_lives`.
     #[cfg(all(target_os = "linux", debug_assertions))]

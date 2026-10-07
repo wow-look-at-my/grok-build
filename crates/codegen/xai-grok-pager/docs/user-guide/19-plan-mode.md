@@ -57,8 +57,7 @@ Plan mode is the interactive version of the `/goal` planner, and the plan uses t
 - `# Plan:` with a single sentence
 - **Acceptance criteria**: the outcomes the work must reach
 - **Verification plan**: the commands to run, and what their output must show
-- **Non-goals**, **Assumed scope**, **Implementation approach** and numbered **Task steps**
-  (the steps you check off live on the todo list, not in the plan file)
+- **Non-goals**, **Assumed scope**, **Implementation approach** and numbered **Task steps** (the steps you check off live on the todo list, not in the plan file)
 
 ---
 
@@ -66,7 +65,7 @@ Plan mode is the interactive version of the `/goal` planner, and the plan uses t
 
 When the agent finishes planning, it calls the `exit_plan_mode` tool. The tool reads the plan file from disk, and the TUI opens a scrollable preview of the plan with an action bar along the bottom.
 
-If the agent exits without writing a plan (empty or missing `plan.md`), the same approval surface still opens with a clear empty-state message so you can approve and start implementing, request changes (send the agent back to planning), or quit.
+The same approval surface still opens with a clear empty-state message so you can approve and start implementing, request changes (send the agent back to planning), or quit. This happens if the agent exits without writing a plan (empty or missing `plan.md`).
 
 ### Reviewing the Plan
 

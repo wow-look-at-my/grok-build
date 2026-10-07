@@ -86,9 +86,8 @@ impl<E> EventQueue<E> {
         self.lock().clear();
     }
 
-    /// Every section below is a `Vec` take, push or clear, so a poison can only
-    /// come from elsewhere; recovering the inner value keeps a queue that is
-    /// still structurally sound from ending the interjection path forever.
+    /// Every section below is a `Vec` take, push or clear, so a poison can
+    /// only come from elsewhere.
     #[allow(clippy::disallowed_methods)]
     fn lock(&self) -> MutexGuard<'_, Vec<E>> {
         self.events.lock().unwrap_or_else(|e| e.into_inner())

@@ -1,7 +1,7 @@
-#![allow(clippy::cast_lossless)] // 2 hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
-#![allow(clippy::cast_precision_loss)] // 2 hits predate the gate
-#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
+#![allow(clippy::cast_sign_loss)]
 
 //! Pure shared token-estimation primitives.
 //!
@@ -104,26 +104,13 @@ pub fn exceeds_threshold_with_headroom(
 }
 
 /// Smallest output budget a request may carry.
-///
-/// A provider rejects `max_tokens: 0`, and an answer shorter than this is
-/// not an answer. A prompt that leaves less room than this is over the
-/// window: the request goes out at this floor and the provider's own
-/// overflow error is the honest report of it.
 pub const MIN_OUTPUT_TOKENS: u64 = 1024;
 
 /// Share of the window held back when the prompt size is an estimate.
-///
-/// Every prompt count in this process is bytes/4, or the provider's own count
-/// for the last response plus a bytes/4 delta. Either can read low, and one
-/// token low is a rejected request. 1% of the window is slack the output
-/// budget will not miss.
 pub const PROMPT_ESTIMATE_SLACK_PERCENT: u64 = 1;
 
 /// The window to fit an output budget into when the prompt count is an
 /// estimate: [`PROMPT_ESTIMATE_SLACK_PERCENT`] held back.
-///
-/// Returns 0 for an unknown (`0`) window, which [`fit_output_tokens`] reads as
-/// "make no claim".
 #[inline]
 pub fn window_less_estimate_slack(context_window: u64) -> u64 {
     context_window.saturating_sub(
@@ -134,8 +121,6 @@ pub fn window_less_estimate_slack(context_window: u64) -> u64 {
 }
 
 /// Room left in `context_window` for the response once the prompt is in it.
-///
-/// Returns 0 when the prompt alone fills the window.
 #[inline]
 pub fn output_room(context_window: u64, prompt_tokens: u64) -> u64 {
     context_window.saturating_sub(prompt_tokens)
@@ -143,15 +128,6 @@ pub fn output_room(context_window: u64, prompt_tokens: u64) -> u64 {
 
 /// The output budget a request may ask for so that prompt plus output stays
 /// inside `context_window`.
-///
-/// A provider counts the requested output against the same window as the
-/// prompt, so `requested` is not a free parameter: a 737_857-token prompt and
-/// a 262_144-token output budget is 1_000_001 tokens against a 1_000_000-token
-/// window, and the server rejects the request rather than the answer.
-///
-/// `context_window == 0` means the window is unknown, so the caller's value
-/// passes through unchanged. The result never drops below
-/// [`MIN_OUTPUT_TOKENS`] — see that constant for why.
 #[inline]
 pub fn fit_output_tokens(requested: u64, prompt_tokens: u64, context_window: u64) -> u64 {
     if context_window == 0 {
@@ -172,7 +148,6 @@ mod tests {
     #[test]
     fn a_request_that_fits_is_left_alone() {
         assert_eq!(fit_output_tokens(262_144, 100_000, 1_000_000), 262_144);
-        // Exactly full is still legal: 737_856 + 262_144 == 1_000_000.
         assert_eq!(fit_output_tokens(262_144, 737_856, 1_000_000), 262_144);
     }
 
@@ -209,8 +184,6 @@ mod tests {
     fn the_slack_is_one_percent_and_zero_stays_zero() {
         assert_eq!(window_less_estimate_slack(1_000_000), 990_000);
         assert_eq!(window_less_estimate_slack(0), 0);
-        // The reported prompt then leaves 252_143 for the answer instead of
-        // landing exactly on the wall.
         assert_eq!(
             fit_output_tokens(262_144, 737_857, window_less_estimate_slack(1_000_000)),
             252_143
