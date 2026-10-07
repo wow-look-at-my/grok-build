@@ -1,9 +1,9 @@
-#![allow(clippy::cast_possible_truncation)] // 13 hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // 3 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
-#![allow(clippy::cast_sign_loss)] // 2 hits predate the gate
-#![allow(clippy::expect_used)] // 45 hits predate the gate
-#![allow(clippy::unwrap_used)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_sign_loss)] // Hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::unwrap_used)]
 
 //! Tool-server and harness SDK.
 //!

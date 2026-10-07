@@ -10,8 +10,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, Header
 enum SearchBackend {
     /// A model synthesizes an answer over the Responses API (`/responses`).
     Responses,
-    /// Kagi's own ranked results (`/search`). No model is involved: Kagi
-    /// returns them already filtered, ranked, and snippet-ed.
+    /// Kagi's own ranked results (`/search`).
     Kagi,
 }
 
@@ -398,10 +397,9 @@ impl WebSearchClient {
 
     // ── Kagi backend ────────────────────────────────────────────────────
 
-    /// Fetch Kagi's ranked results and render them as `(content, (title, url))`.
-    ///
-    /// Nothing is synthesized: Kagi returns these already ranked, filtered, and
-    /// snippet-ed, so the payload is the results themselves.
+    /// Fetch Kagi's ranked results and render them as `(content, (title,
+    /// url))`. Nothing is synthesized: Kagi returns these already ranked,
+    /// filtered, and snippet-ed, so the payload is the results themselves.
     async fn kagi_results(
         &self,
         query: &str,
@@ -474,10 +472,6 @@ const KAGI_RESULT: i64 = 0;
 const KAGI_RELATED: i64 = 1;
 
 /// One Kagi Search API response body.
-///
-/// Kagi types each `data` entry with an integer `t`, so the fields are modelled
-/// flat and matched on `t` rather than as a serde-tagged enum (serde's internal
-/// tagging wants a string tag).
 #[derive(Debug, serde::Deserialize)]
 struct KagiSearchBody {
     #[serde(default)]
@@ -497,11 +491,10 @@ struct KagiItem {
     list: Vec<String>,
 }
 
-/// Render Kagi's results as the text the model reads, plus the citation pairs.
-///
-/// Each result becomes its title, URL, and snippet, so the model sees what Kagi
-/// returned without a synthesis pass. Related searches carry no URL, so they
-/// ride the text and never a citation.
+/// Render Kagi's results as the text the model reads, plus the citation
+/// pairs. Each result becomes its title, URL, and snippet, so the model sees
+/// what Kagi returned without a synthesis pass. Related searches carry no
+/// URL, so they ride the text and never a citation.
 fn format_kagi_results(results: &[&KagiItem], related: &[&str]) -> (String, Vec<(String, String)>) {
     let mut blocks = Vec::with_capacity(results.len() + 1);
     let mut pairs = Vec::with_capacity(results.len());
@@ -530,11 +523,10 @@ fn format_kagi_results(results: &[&KagiItem], related: &[&str]) -> (String, Vec<
 }
 
 /// Whether `url`'s host falls under any of the caller's `allowed_domains`.
-///
 /// Kagi's Search API takes no per-request domain filter, so the tool's
 /// `allowed_domains` argument is applied here rather than silently dropped.
-/// `None` (or an empty list) is unrestricted; a subdomain of an allowed domain
-/// matches, as the Responses-API filter does.
+/// `None` (or an empty list) is unrestricted; a subdomain of an allowed
+/// domain matches, as the Responses-API filter does.
 fn kagi_domain_allowed(url: &str, allowed: Option<&[String]>) -> bool {
     let Some(allowed) = allowed.filter(|list| !list.is_empty()) else {
         return true;

@@ -228,13 +228,13 @@ async fn thinking_block_emits_reasoning_channel_and_preserved_in_response() {
     }
 }
 
-/// End-to-end reasoning round-trip on the REAL Messages path: thinking deltas
+/// End-to-end reasoning round-trip on the REAL Messages path. Thinking deltas
 /// (with NO encrypted signature — the Anthropic-compatible third-party case,
-/// e.g. Kimi) streamed by a provider must survive (a) the stream's synthesis
-/// into a `ConversationItem::Reasoning` sibling, (b) the shell turn-loop commit
+/// e.g. Kimi) streamed by a provider must survive (a) the stream's synthesis.
+/// Into a `ConversationItem::Reasoning` sibling, (b) the shell turn-loop commit
 /// order (the sibling rides the `push_tool_result` arm and lands in history as
 /// `[Reasoning, Assistant]`), and (c) the real `build_messages_request` wire
-/// conversion for the NEXT turn, where it must appear as a `Thinking` content
+/// conversion for the NEXT. Turn, where it must appear as a `Thinking` content
 /// block on the following assistant message. This is the regression the goal
 /// guards: real thinking text must be resent, not dropped.
 #[tokio::test]
@@ -287,15 +287,8 @@ async fn reasoning_roundtrip_without_signature_survives_to_next_messages_request
         items
     );
 
-    // (b) Shell turn-loop commit: the Reasoning sibling rides the
-    // `push_tool_result` arm and is appended to history verbatim; the
-    // Assistant rides `push_assistant_response`. Both end up in the flat
-    // history list that becomes the next ConversationRequest.
-    // (The real `push_message` appends + persists without dropping Reasoning;
-    // we reproduce the resulting ordered item list here.)
+    // (b) Shell turn-loop commit: the Reasoning sibling rides the `push_tool_result` arm and is appended to history verbatim.
 
-    // Turn N+1: the user asks a follow-up; the previous turn's items are the
-    // prefix of the next request.
     items.push(ConversationItem::user("continue"));
 
     let req = ConversationRequest::from_items(items);
@@ -947,9 +940,9 @@ async fn priced_response(events: Vec<MessageStreamEvent>) -> Option<i64> {
     }
 }
 
-/// The whole point: a gateway that prices the call gets that price onto the
-/// response, instead of the shell falling back to an estimate off the model's
-/// configured pricing.
+/// The whole point. A gateway that prices the call gets that price onto the
+/// response, instead of the shell falling back to an estimate. Off the
+/// model's configured pricing.
 #[tokio::test]
 async fn a_gateway_reported_price_reaches_the_completed_response() {
     for (ticks, cost, expected, what) in [
@@ -978,8 +971,8 @@ async fn a_gateway_reported_price_reaches_the_completed_response() {
 }
 
 /// `message_start` can carry the price too. A later event that omits it is
-/// silent about the price, not a correction to zero — losing it here would
-/// bill the turn at an estimate while the real number was already on the wire.
+/// silent about the price, not a correction to zero. Losing it here would bill
+/// the turn at an estimate while the real number was already on the wire.
 #[tokio::test]
 async fn a_price_from_message_start_survives_a_silent_delta() {
     let mut start = message_start();

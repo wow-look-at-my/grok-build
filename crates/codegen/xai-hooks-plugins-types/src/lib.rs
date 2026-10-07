@@ -1,4 +1,4 @@
-#![allow(clippy::string_slice)] // 1 hit predates the gate
+#![allow(clippy::string_slice)]
 
 //! Shared DTO types for hooks/plugins ACP extensions.
 //!

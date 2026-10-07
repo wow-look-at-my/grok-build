@@ -133,8 +133,7 @@ impl XSearchOptions {
         // Destructure so a new field forces a compile error rather than a dropped wire field.
         let XSearchOptions { date_bound } = self;
         let bound = date_bound.as_ref();
-        // The object is built directly rather than through `to_value`, so this
-        // has no failure to hide behind an expect.
+        // The object is built directly rather than through `to_value`, so this has no failure to hide behind an expect.
         let mut entry = serde_json::Map::new();
         entry.insert(
             "type".to_owned(),

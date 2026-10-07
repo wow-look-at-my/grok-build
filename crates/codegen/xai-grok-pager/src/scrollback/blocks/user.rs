@@ -54,7 +54,7 @@ fn token_styled_line(
             continue;
         }
         // `start`/`end` are match-range edges clamped to this line's own edges,
-        // so each is a char boundary of the block text; subtracting `line_start`
+        // so each is a char boundary of the block text. Subtracting `line_start`
         // re-bases it onto `line_text`, whose start is that same boundary.
         if start > pos {
             let Some(body) = pos.checked_sub(line_start).and_then(|a| {

@@ -1,10 +1,10 @@
-#![allow(clippy::cast_lossless)] // 5 hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // 66 hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // 3 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
-#![allow(clippy::expect_used)] // 14 hits predate the gate
-#![allow(clippy::string_slice)] // 40 hits predate the gate
-#![allow(clippy::unwrap_used)] // 39 hits predate the gate
+#![allow(clippy::cast_lossless)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::string_slice)] // Hits predate the gate
+#![allow(clippy::unwrap_used)] // Hits predate the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -155,7 +155,6 @@ impl LockedTestEnv {
         self
     }
     /// Unset `key` under the held lock, restoring the prior value on drop.
-    ///
     /// Same distinct-key caveat as [`set`](Self::set).
     pub(crate) fn unset(mut self, key: &'static str) -> Self {
         self._env.push(TestEnvGuard::unset(key));

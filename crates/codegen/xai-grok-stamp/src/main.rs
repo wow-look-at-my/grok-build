@@ -1,9 +1,4 @@
-//! `xai-grok-stamp <binary> <version>` — writes the release number into a
-//! linked binary, then reads it back.
-//!
-//! Exit code 1 on anything that would leave the binary reporting a version the
-//! release does not carry. A publish whose binary and site disagree about the
-//! number is the failure this guards.
+//! `xai-grok-stamp <binary> <version>` — writes the release number into a linked binary, then reads it back.
 
 use std::process::ExitCode;
 
