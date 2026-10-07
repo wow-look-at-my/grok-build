@@ -558,8 +558,8 @@ mod tests {
             "/h/.grok/config.toml",   // the config to read
             "262144",                 // the number the user is asking about
             "grok-4.5",
-            "GROK_DEBUG_LOG=1",       // how this process was launched
-            "0.2.7",                  // what is running
+            "GROK_DEBUG_LOG=1", // how this process was launched
+            "0.2.7",            // what is running
         ] {
             assert!(text.contains(expected), "missing {expected:?} in: {text}");
         }
