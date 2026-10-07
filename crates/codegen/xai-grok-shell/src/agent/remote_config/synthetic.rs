@@ -1,24 +1,4 @@
 //! Synthetic-provider `/v1/models` listing normalization.
-//!
-//! Synthetic's OpenAI-compatible listing uses non-standard key names for three
-//! fields that the generic cross-provider [`crate::remote::parse_remote_model_value`]
-//! already resolves from the usual OpenAI/Anthropic keys:
-//!
-//! * `context_length` → the model's input context window (e.g. `524288` for
-//!   `syn:large:text`), where other providers use `contextWindow` /
-//!   `context_window` / `max_input_tokens`;
-//! * `max_output_length` → the max completion-token budget (e.g. `65536`),
-//!   where other providers use `maxCompletionTokens` / `max_completion_tokens`;
-//! * `reasoning_parameters.efforts` → the reasoning-effort menu (an array of
-//!   canonical strings like `["none","high","max"]`), where other providers use
-//!   `reasoningEfforts` / `reasoning_efforts`.
-//!
-//! These are deliberately NOT folded into the generic parser (so its fallback
-//! chains stay provider-agnostic). Instead this module scopes the Synthetic
-//! keys to Synthetic-shaped entries: it starts from the generic parse and then
-//! applies only the Synthetic-specific fields that are present. All functions
-//! here are pure and side-effect free so the mapping is unit-testable with one
-//! entry as input.
 
 use crate::agent::config::ModelEntryConfig;
 use crate::remote::client::parse_remote_model_value;
@@ -28,14 +8,12 @@ fn get_u64(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Optio
 }
 
 /// True when a `/v1/models` entry is shaped by Synthetic's schema.
-///
 /// An entry is considered Synthetic when it carries any of the Synthetic-only
 /// markers:
 /// * a `provider` of `synthetic`,
 /// * a `reasoning_parameters` object with an `efforts` array,
 /// * a `context_length` field,
 /// * a `syn:`-prefixed routing slug (e.g. `syn:large:text`).
-///
 /// This is intentionally narrow (none of these appear on standard xAI/OpenAI
 /// or Anthropic-style listings), so a Synthetic entry is routed through
 /// [`parse_synthetic_model_entry`] while ordinary entries are left to the
@@ -67,11 +45,6 @@ pub(crate) fn is_synthetic_listing(value: &serde_json::Value) -> bool {
 }
 
 /// Parse a Synthetic-shaped `/v1/models` entry into a [`ModelEntryConfig`].
-///
-/// Starts from the generic cross-provider parse (provider-agnostic keys only)
-/// and then applies the Synthetic-specific fields — `context_length` as the
-/// context window, `max_output_length` as the max completion-token budget, and
-/// `reasoning_parameters.efforts` as the reasoning-effort menu — when present.
 pub(crate) fn parse_synthetic_model_entry(
     value: &serde_json::Value,
     default_base_url: &str,
@@ -80,11 +53,10 @@ pub(crate) fn parse_synthetic_model_entry(
     Some(apply_synthetic_schema(value, parsed))
 }
 
-/// Apply Synthetic's non-standard `/v1/models` keys onto a parsed entry.
-///
-/// Pure and idempotent: only the fields Synthetic actually provides are
-/// overridden, so passing a non-Synthetic entry (or one missing these keys)
-/// is a no-op that leaves the generic parse intact.
+/// Apply Synthetic's non-standard `/v1/models` keys onto a parsed entry. Pure
+/// and idempotent. Only the fields Synthetic provides are overridden, so
+/// passing a non-Synthetic entry (or one missing these keys) is a no-op that
+/// leaves the generic parse intact.
 pub(crate) fn apply_synthetic_schema(
     value: &serde_json::Value,
     mut parsed: ModelEntryConfig,
@@ -180,8 +152,8 @@ mod tests {
     #[test]
     fn synthetic_listing_missing_extended_fields_falls_back_to_generic() {
         // A Synthetic entry without the Synthetic-only keys must still parse
-        // (not be dropped) and keep the generic parser's DEFAULT_CONTEXT_WINDOW
-        // fallback — the schema application is a no-op for missing fields.
+        // (not be dropped) and keep the generic parser's
+        // DEFAULT_CONTEXT_WINDOW fallback.
         let value = serde_json::json!({
             "id": "syn:minimal",
             "name": "syn:minimal",

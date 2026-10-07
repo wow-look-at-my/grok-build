@@ -4316,8 +4316,7 @@ fn from_remote_gated_ignores_server_advertised_writeback() {
         StorageMode::from_remote_gated(None, true),
         StorageMode::Local
     );
-    // Reuse the guard: it holds a process-wide env lock that a second guard
-    // for the same variable would deadlock on.
+    // Reuse the guard: it holds a process-wide env lock that a second guard for the same variable would deadlock on.
     _env.set_value("writeback");
     assert_eq!(
         StorageMode::resolve(None, None),

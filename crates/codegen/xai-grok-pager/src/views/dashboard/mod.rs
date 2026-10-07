@@ -92,12 +92,7 @@ pub fn dashboard_enabled() -> bool {
     state::load_persisted_enabled().unwrap_or(true)
 }
 
-/// Command to name in the "use /X to switch between sessions" session
-/// banners (the `/new` session-created banner and the fork marker).
-///
-/// `/dashboard` when the feature is enabled; `None` when it is off — the tip
-/// would point at a refused command, so callers fall back to a plain
-/// session-id banner.
+/// The command the session-switch banners name, or `None` when the dashboard is off.
 pub(crate) fn session_switch_hint_command() -> Option<&'static str> {
     dashboard_enabled().then_some("/dashboard")
 }
@@ -108,7 +103,7 @@ mod tests {
 
     /// The hint mirrors the dashboard flag: `None` when the env override
     /// disables it (the tip would name a refused command), otherwise whatever
-    /// `dashboard_enabled()` says — asserted as consistency, not a fixed
+    /// `dashboard_enabled()` says. It is asserted as consistency, not a fixed
     /// value, so the test doesn't depend on the machine's persisted
     /// `[dashboard].enabled`.
     #[serial_test::serial(GROK_AGENT_DASHBOARD)]

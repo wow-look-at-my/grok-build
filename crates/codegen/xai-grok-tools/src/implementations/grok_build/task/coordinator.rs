@@ -105,8 +105,6 @@ pub struct SubagentCoordinator<R: ChildRunner> {
     usage_not_applied_prompts: HashSet<PromptScope>,
     pending_completions: Vec<BufferedCompletion>,
     /// Interjections addressed to a child that is queued or pending, in order.
-    /// Delivered when the child reports started. Dropped, with a warning,
-    /// when the child finishes without ever starting.
     held_interjections: HashMap<String, Vec<String>>,
     runs: FuturesUnordered<
         TaggedFuture<futures::future::CatchUnwind<std::panic::AssertUnwindSafe<R::RunFuture>>>,
@@ -668,9 +666,8 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
 
     /// Deliver a model-sent message to one child of `parent_session_id`
     /// (`SubagentEvent::MessageChild`) and answer with what became of it.
-    ///
     /// Scoping is the difference from `handle_interject`: a child of another
-    /// session is refused rather than steered, and every path answers, so the
+    /// session is refused rather than steered, and every path answers. The
     /// calling tool reports a real outcome instead of a silent success.
     fn handle_message_child(&mut self, request: SubagentMessageChildRequest) {
         let SubagentMessageChildRequest {

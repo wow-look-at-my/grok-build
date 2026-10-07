@@ -19,8 +19,7 @@ use crate::views::modal::{self, ActiveModal};
 
 impl AgentView {
     /// `suggest_args` falls back to the model list when `query` opens no
-    /// sub-phase. That list always holds the row that produced `query`, and a
-    /// sub-phase (routes or effort levels) never does.
+    /// sub-phase.
     fn arg_items_are_a_sub_phase(items: &[crate::slash::command::ArgItem], query: &str) -> bool {
         !items.is_empty() && items.iter().all(|item| item.insert_text != query)
     }

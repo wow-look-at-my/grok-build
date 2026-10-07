@@ -65,7 +65,7 @@ impl LspBackendAdapter {
         tokio::spawn(async move {
             // Guarded, because the state below is what a waiter is waiting on:
             // `ensure_ready` parks on `notify` for as long as the state reads
-            // `Starting`, so a bootstrap that dies mid-flight has to move the
+            // `Starting`. So a bootstrap that dies mid-flight has to move the
             // state anyway and say why.
             let result = match crate::util::detached::guarded(
                 "lsp bootstrap",
@@ -131,8 +131,7 @@ async fn bootstrap_lsp(
         // language-server children) alive past the owning session.
         let mgr_weak = Arc::downgrade(&lsp_manager);
         // Nothing polls this monitor: a server that dies with no monitor left
-        // simply stops being diagnosed, so the round runs where a panic is
-        // named rather than where it would end the task quietly.
+        // stops being diagnosed.
         #[allow(clippy::disallowed_methods)]
         tokio::spawn(crate::util::detached::fire_and_forget(
             "lsp restart monitor",
@@ -159,18 +158,14 @@ impl super::LspBackend for LspBackendAdapter {
     fn ensure_started_background(&self) {
         let lsp_manager = self.lsp_manager.clone();
         let startup = self.startup.clone();
-        // A warm-up needs a runtime to run on. `Drop` above already treats the
-        // absence of one as normal; a synchronous caller outside a runtime gets
-        // no warm-up and `ensure_ready` starts the servers on first use instead.
+        // A warm-up needs a runtime to run on.
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             tracing::debug!("no tokio runtime: skipping the LSP startup warm-up");
             return;
         };
         handle.spawn(async move {
             // Guarded, because this is the round that leaves the state
-            // `Starting` for the bootstrap to replace: a `Starting` nobody
-            // moves is the one state `ensure_ready` parks on forever, so the
-            // failure has to move it too.
+            // `Starting` for the bootstrap to replace.
             let started = crate::util::detached::guarded(
                 "lsp start",
                 LspBackendAdapter::ensure_started_with_state(lsp_manager, startup.clone()),
@@ -633,7 +628,7 @@ mod tests {
     }
 
     /// A configured server keeps the adapter out of the "nothing to do" shape
-    /// without any process being spawned: the fix under test decides whether the
+    /// without any process being spawned. The fix under test decides whether the
     /// bootstrap task is created at all.
     fn adapter_with_one_configured_server() -> LspBackendAdapter {
         adapter(std::collections::BTreeMap::from([(
@@ -643,12 +638,11 @@ mod tests {
     }
 
     /// A bootstrap that ends in failure still answers whoever is waiting.
-    ///
     /// `ensure_ready` parks on the coordinator's `notify` for as long as the
-    /// state reads `Starting`, so a bootstrap that stopped without moving the
+    /// state reads `Starting`. So a bootstrap that stopped without moving the
     /// state leaves every later LSP tool call waiting on a task that already
-    /// ended. A manager with no servers configured is that ending, with nothing
-    /// injected.
+    /// ended. A manager with no servers configured is that ending, with
+    /// nothing injected.
     #[tokio::test]
     async fn a_failed_bootstrap_answers_the_waiter_instead_of_stranding_it() {
         let manager = Arc::new(TokioMutex::new(LspManager::default()));
@@ -668,7 +662,7 @@ mod tests {
     /// `ensure_started_background` is a warm-up, so a caller with no runtime to
     /// run it on loses the warm-up and nothing else. Spawning unconditionally
     /// made every synchronous `WorkspaceHandle` construction panic the moment
-    /// the caller had any LSP server in `~/.grok/lsp.json`, which is a plain
+    /// the caller had any LSP server in `~/.grok/lsp.json`. Which is a plain
     /// test with no Tokio runtime and a machine-dependent one besides.
     #[test]
     fn ensure_started_background_without_a_runtime_skips_the_warmup() {

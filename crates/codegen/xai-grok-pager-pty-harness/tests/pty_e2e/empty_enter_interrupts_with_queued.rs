@@ -2,10 +2,10 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Mid-turn: queue a follow-up with Enter, then bare Enter on the empty
-/// composer interrupts — the in-flight model stream is cancelled and the row is
-/// handed to the SAME turn as an interjection (the wire carries the mid-turn
-/// preamble), rather than waiting for the turn or running as its own.
+/// Mid-turn: queue a follow-up with Enter, then bare Enter on the empty composer
+/// interrupts — the in-flight model stream is cancelled. The row is handed to
+/// the SAME turn as an interjection (the wire carries the mid-turn preamble),
+/// rather than waiting for the turn or running as its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn empty_enter_interrupts_with_queued() {
@@ -44,14 +44,10 @@ async fn empty_enter_interrupts_with_queued() {
         .wait_for_text("please also check the logs", Duration::from_secs(10))
         .expect("queued text visible");
 
-    // Composer is empty after queue; bare Enter interrupts. The shell cancels
-    // the in-flight stream, drains the row as an interjection, and resubmits.
+    // Composer is empty after queue; bare Enter interrupts.
     harness.inject_keys(b"\r").expect("empty Enter interrupt");
     // The delivered row renders as a "❯ " user block (interjections use the
-    // standard prompt chrome), replacing the prefix-less queue row. Wait for it
-    // BEFORE releasing the completion barrier: the shell harvests into a
-    // RUNNING turn, so releasing first would race the interrupt against turn
-    // end and let the row drain as its own turn instead.
+    // standard prompt chrome), replacing the prefix-less queue row.
     harness
         .wait_for_text(
             "\u{276F} please also check the logs",

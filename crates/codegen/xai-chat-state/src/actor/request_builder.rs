@@ -107,13 +107,7 @@ impl ChatStateActor {
             length_policy: xai_grok_sampling_types::LengthPolicy::CompleteToolCalls,
         };
 
-        // The output budget shares the context window with the prompt, so a
-        // conversation that is under the window on its own can still put the
-        // REQUEST over it: the provider adds `max_output_tokens` to the input
-        // and rejects the sum. The prompt size here is the tracked total — the
-        // provider's own reported usage for the last response plus the
-        // estimated delta since — which is the closest number this process
-        // has to what the server will count.
+        // The output budget shares the context window with the prompt.
         let prompt_tokens = self.state.total_tokens + self.state.estimated_tokens_since_model;
         let usable_window = xai_token_estimation::window_less_estimate_slack(
             self.state.sampling_config.context_window.get(),
