@@ -1,15 +1,22 @@
 //! Model autodetection for `[model_providers.<id>]`.
+//!
+//! A provider declares a base URL. Its models are what that base lists at
+//! `/models`. Asking for them is the default, so a provider needs no
+//! `[model.<id>]` block per model. `models_autodetect = false` turns it off for
+//! a provider whose listing is too large to pick from.
 
 use indexmap::IndexMap;
 
 use crate::agent::config::{self, ConfigModelOverride, ModelEntry};
 use crate::agent::model_providers::{ContextWindowSource, ModelProviderConfig, ModelsListDialect};
 
-/// Deadline for one provider's listing.
+/// Deadline for one provider's listing. Discovery is additive and runs off the
+/// startup path, but an unreachable provider must not hold a thread forever.
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// Catalog key for a discovered model: the provider id, then the routing
-/// slug.
+/// Catalog key for a discovered model: the provider id, then the routing slug.
+/// The provider qualifies the key so two providers that list the same slug stay
+/// two entries, and so a user's own `[model.<slug>]` block is never shadowed.
 pub(crate) fn discovered_model_key(provider_id: &str, slug: &str) -> String {
     format!("{provider_id}/{slug}")
 }
@@ -38,10 +45,15 @@ pub(crate) fn pick_by_model_id<'a>(
 }
 
 /// One model a provider's listing named, before any config is merged into it.
+///
+/// The entry is built at catalog rebuild time from the CURRENT config
+/// (`resolve_discovered_models`). So an edit to a `[model.<id>]` block that
+/// claims this model takes effect on reload, with no second listing request.
 #[derive(Clone, Debug)]
 pub(crate) struct DiscoveredModel {
     pub(crate) provider_id: String,
-    /// What the listing says, with the provider's own window.
+    /// What the listing says, with the provider's own window, backend and
+    /// price switch already placed above the listing's values.
     pub(crate) listed: ConfigModelOverride,
     /// Runtime state, not config. The residency poll writes it here.
     pub(crate) loaded_in_vram: Option<bool>,
@@ -304,13 +316,17 @@ async fn discover_one_provider(
     provider: &ModelProviderConfig,
     url: &str,
 ) -> IndexMap<String, DiscoveredModel> {
-    // The credential comes from the provider's own fields.
+    // The credential comes from the provider's own fields, resolved through the
+    // same merge an inheriting `[model.<id>]` gets. A provider that mints its
+    // token with a helper needs that helper run first: the cache is cold at
+    // startup, and a cold cache reads as no credential.
     let probe = config::provider_probe_entry(cfg, provider_id, provider);
     let api_key = match probe.own_credential() {
         Some(key) => Some(key),
         None => match probe.effective_auth_provider() {
             Some(auth) => {
-                // The mint writes the token into the provider's own slot.
+                // The mint writes the token into the provider's own slot. The
+                // outcome describes a wire key this caller does not hold.
                 let _ = auth.ensure_fresh_token(None).await;
                 auth.cached_token()
             }
@@ -338,7 +354,8 @@ async fn discover_one_provider(
     let listing = match listing {
         Ok(models) => models,
         Err(error) => {
-            // Name the URL.
+            // Name the URL. A 404 here usually means the base serves inference
+            // and no listing, which is a different fix from a bad key.
             tracing::warn!(
                 provider = %provider_id,
                 url = %url,
@@ -361,7 +378,10 @@ async fn discover_one_provider(
             model: Some(listed.model.clone()),
             name: listed.name.clone(),
             description: listed.description.clone(),
-            // A value the user wrote on the provider is the value.
+            // A value the user wrote on the provider is the value. Listing
+            // fields are the fallback, and a listing that named no window
+            // carries the client default, which is a guess about a provider
+            // whose own block states the answer.
             api_backend: provider
                 .api_backend
                 .clone()
@@ -376,7 +396,7 @@ async fn discover_one_provider(
             supports_reasoning_effort: listed.supports_reasoning_effort.then_some(true),
             // A local runtime charges nothing and its model names are in no
             // catalog, so the price lookup there is a request that can only
-            // fail.
+            // fail. The provider's own value wins where it wrote one.
             pricing_lookup_enabled: provider
                 .pricing_lookup_enabled
                 .or_else(|| dialect.is_local_runtime().then_some(false)),
@@ -392,6 +412,10 @@ async fn discover_one_provider(
         );
     }
     if dialect.is_local_runtime() {
+        // A local model charges nothing and is in no catalog, so the price
+        // lookup can only 404. `resolve_configured_pricing` rebuilds the
+        // catalog from config alone and never sees a DISCOVERED model, so the
+        // suppression has to be registered here.
         crate::agent::model_pricing::suppress_lookup_for(
             entries.values().map(|m| m.slug().to_owned()),
         );
@@ -405,7 +429,10 @@ async fn discover_one_provider(
     entries
 }
 
-/// How long a residency answer is good for.
+/// How long a residency answer is good for. A model loads on its first
+/// request and LM Studio's idle TTL unloads it again, so the dot is stale
+/// within minutes of a catalog build. One localhost request per provider per
+/// tick is cheap; the poll is what makes the dot mean "right now".
 pub(crate) const RESIDENCY_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Whether any configured provider can report residency at all. Nothing polls
@@ -692,7 +719,8 @@ mod tests {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
         let loaded = Arc::new(AtomicBool::new(false));
-        // `/api/show` is the expensive call — one per model — and the poll must never make it.
+        // `/api/show` is the expensive call — one per model — and the poll
+        // must never make it: only residency changes while the runtime is up.
         let show_calls = Arc::new(AtomicUsize::new(0));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -1118,7 +1118,8 @@ pub(super) fn xai_turn_completed_notif_with_cost(
                 num_turns: 1,
                 usage_is_incomplete: false,
             }),
-            // No agent-reported session total: exercises the turn-level attribution an agent.
+            // No agent-reported session total: exercises the turn-level
+            // attribution an agent that only prices whole turns produces.
             session_cost_usd_ticks: None,
             elapsed_ms: None,
         },
@@ -1131,7 +1132,7 @@ pub(super) fn xai_turn_completed_notif_with_cost(
 }
 /// A `ResponseCompleted` closing one model call, carrying that call's own cost
 /// and the agent's session-cumulative total. Built through the typed
-/// `SessionNotification` so both cost fields the handler reads cannot drift
+/// `SessionNotification` so the two cost fields the handler reads cannot drift
 /// from the wire shape the shell emits.
 pub(super) fn xai_response_completed_notif_with_cost(
     session_id: &str,

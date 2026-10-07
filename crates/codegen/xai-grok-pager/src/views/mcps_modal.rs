@@ -234,7 +234,9 @@ pub struct McpServerInfo {
     /// Plugin name parsed from `source_label` (`"plugin: …"`).
     pub plugin_name: Option<String>,
     pub is_managed_gateway: bool,
-    /// Why the server is unavailable.
+    /// Why the server is unavailable. Shown on the row, because "unavailable"
+    /// on its own leaves an operator guessing at what a `command` that is not
+    /// installed did.
     pub error: Option<String>,
 }
 

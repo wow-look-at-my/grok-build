@@ -134,6 +134,13 @@ pub(crate) fn deserialize_response_event(data: &str) -> Result<rs::ResponseStrea
 
 /// Keys the wire schemas type as a list, so `null` there is a producer bug
 /// rather than a value we would lose by rewriting it.
+///
+/// Every entry is a slice field Bifrost declares without `omitempty` (Go
+/// marshals an unset slice as `null`), across its chat-completions, Responses
+/// and Anthropic surfaces. The list must stay keys-that-are-lists only: the
+/// same payloads carry plenty of legitimately-null pointer fields (`error`,
+/// `instructions`, `reasoning`, …) that a blanket null-to-`[]` rewrite would
+/// corrupt into a parse failure of its own.
 const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
     "annotations",
     "bytes",
@@ -154,11 +161,18 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
     "vector_store_ids",
 ];
 
-/// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
-/// Reports whether anything changed, so a caller can skip a retry that cannot
-/// differ. A gateway written in Go marshals an unset slice as `null`, so
-/// `response.created` -- whose output list is empty by definition -- arrives
-/// as `"output": null` and fails the parse.
+/// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively. Reports
+/// whether anything changed, so a caller can skip a retry that cannot differ.
+///
+/// A gateway written in Go marshals an unset slice as `null`, so
+/// `response.created` -- whose output list is empty by definition -- arrives as
+/// `"output": null` and fails the parse. Because serde buffers the internally
+/// tagged event, that failure carries no line or column AND no field path: it
+/// reads as a bare "invalid type: null, expected a sequence" and takes the whole
+/// turn with it.
+///
+/// Only reached after the strict parse already failed, so a well-formed server
+/// never meets this.
 fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(map) => {
@@ -215,15 +229,19 @@ fn null_key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>
     }
 }
 
-/// Deserialize an SSE payload, naming the field that failed. serde_json alone
-/// renders a rejected payload as "invalid type: null, expected a sequence"
-/// — and for a buffered (internally tagged) event it carries no line/column
-/// either, so the message names neither the field nor the offset. That is the
-/// whole error a user gets, and there is nothing in it to act on.
+/// Deserialize an SSE payload, naming the field that failed.
+///
+/// serde_json alone renders a rejected payload as "invalid type: null, expected
+/// a sequence" — and for a buffered (internally tagged) event it carries no
+/// line/column either, so the message names neither the field nor the offset.
+/// That is the whole error a user gets, and there is nothing in it to act on.
+///
 /// `serde_path_to_error` supplies the field path on a derived struct
-/// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]`
-/// event, because serde buffers the content before the variant is known and
-/// the tracker never sees those keys — measured, not assumed.
+/// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]` event,
+/// because serde buffers the content before the variant is known and the
+/// tracker never sees those keys — measured, not assumed. That is exactly the
+/// shape gateways break, so for an empty path the message falls back to listing
+/// where the payload's nulls are.
 fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
     let deserializer = &mut serde_json::Deserializer::from_str(data);
     serde_path_to_error::deserialize(deserializer).map_err(|err| {
@@ -278,7 +296,7 @@ fn apply_terminal_event_overrides(event: &mut rs::ResponseStreamEvent, data: &st
     let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
         return;
     };
-    // Stash cost ticks in metadata for stream_responses. Wire forms are
+    // Stash cost ticks in metadata for stream_responses. Two wire forms are
     // supported: xAI `cost_in_usd_ticks` (integer, authoritative) and the
     // standard `usage.cost` USD float (OpenRouter, etc.) converted to ticks.
     // The `usage.cost` value may be a bare float or a Bifrost cost object
@@ -360,7 +378,12 @@ fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 
     // A token bucket answers a breach with the WHOLE window ("Retry-After:
     // 60" on a per-minute limit), while its own reset header says when this
-    // caller's tokens come back. Take whichever is sooner.
+    // caller's tokens actually come back. Take whichever is sooner. A
+    // provider runs SEVERAL token buckets (total and uncached, per minute,
+    // hour and day) and spells each reset differently, so the match is the
+    // reset prefix plus the word that names the resource. A request bucket
+    // is left out: it is not what a token breach waits on. A wait that turns
+    // out to be short earns another 429, which the budget covers.
     let bucket_reset = headers
         .iter()
         .filter(|(name, _)| {
@@ -378,7 +401,8 @@ fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 }
 
 /// Seconds from a rate-limit reset header, which is written as a bare number
-/// or with a unit (`1.5`, `1.5s`, `30s`).
+/// or with a unit (`1.5`, `1.5s`, `30s`). A fractional value rounds UP: a
+/// wait shorter than the reset earns the same 429 back.
 ///
 /// A value with no `u64` second count is `None`: the same unusable answer the
 /// parser already gives for a non-finite or negative one, so the caller uses
@@ -391,6 +415,8 @@ fn parse_reset_seconds(raw: &str) -> Option<u64> {
         return None;
     }
     let whole = secs.ceil();
+    // 2^64 is the first whole `f64` above `u64::MAX`; below it the value is a
+    // whole number the `u64` holds exactly.
     const U64_SECONDS_BOUND: f64 = 18_446_744_073_709_551_616.0;
     if whole >= U64_SECONDS_BOUND {
         tracing::error!(
@@ -521,7 +547,8 @@ pub struct SamplingClient {
     http: reqwest::Client,
     default_headers: HeaderMap,
     base_url: String,
-    /// Extra top-level body fields merged into every request this client sends; see [`SamplerConfig::extra_body`].
+    /// Extra top-level body fields merged into every request this client
+    /// sends; see [`SamplerConfig::extra_body`].
     extra_body: serde_json::Map<String, serde_json::Value>,
     defaults: ClientDefaults,
     /// Optional 401-attribution hook.
@@ -557,7 +584,8 @@ struct ClientDefaults {
     max_completion_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
-    /// The window `max_completion_tokens` shares with the prompt. `0` means unknown, which claims nothing about either.
+    /// The window `max_completion_tokens` shares with the prompt. `0` means
+    /// unknown, which claims nothing about either.
     context_window: u64,
     api_backend: ApiBackend,
     auth_scheme: AuthScheme,
@@ -566,7 +594,8 @@ struct ClientDefaults {
     reasoning_summary: Option<xai_grok_sampling_types::ReasoningSummary>,
     extra_response_includes: Vec<String>,
     doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
-    /// Per-model message-schema profile, applied to every conversation request this client sends.
+    /// Per-model message-schema profile, applied to every conversation request
+    /// this client sends (see [`Self::apply_conversation_defaults`]).
     chat_message_profile: xai_grok_sampling_types::ChatMessageProfile,
 }
 
@@ -728,6 +757,8 @@ fn auth_rejected(message: String, sent_bearer: Option<&str>) -> SamplingError {
 
 impl SamplingClient {
     /// The same client on the shared HTTP/1.1 transport, which never pools.
+    /// A caller uses it after a transport failure, because a bad HTTP/2
+    /// connection fails every request that the pool sends on it.
     pub fn with_http1(&self) -> Result<Self> {
         let mut client = self.clone();
         client.http = crate::shared_http::client_http1().map_err(SamplingError::Http)?;
@@ -894,8 +925,10 @@ impl SamplingClient {
             chat_message_profile: config.chat_message_profile,
         };
 
-        // Ollama's native paths are siblings of the OpenAI-compatible
-        // endpoint at the host root, not children of it.
+        // Ollama's native paths are siblings of the OpenAI-compatible endpoint
+        // at the host root, not children of it. A provider block names one
+        // base URL for both, so `http://host:11434/v1` has to resolve
+        // `api/chat` at `http://host:11434/api/chat`.
         let endpoint_base = if defaults.api_backend == ApiBackend::Ollama {
             native_host_root(&config.base_url)
         } else {
@@ -1003,6 +1036,8 @@ impl SamplingClient {
                 .get(AUTHORIZATION)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.strip_prefix("Bearer ")),
+            // No credential is attached under this scheme, so there is
+            // nothing to attribute a 401 to.
             AuthScheme::None => None,
         };
         raw.map(|s| bearer_suffix(s).to_string())
@@ -2256,13 +2291,23 @@ impl SamplingClient {
         }
 
         // The per-model config is authoritative for the message schema, and
-        // narrows (never widens) whatever the caller asked for.
+        // narrows (never widens) whatever the caller asked for. A request
+        // carrying an already-narrowed profile — e.g. set by the strict-schema
+        // recovery after a 400 — therefore keeps it, while a model configured
+        // strict strips the properties even when the caller left the
+        // permissive default in place.
         request.chat_message_profile = request
             .chat_message_profile
             .narrowed_by(self.defaults.chat_message_profile);
 
         // The provider counts the requested output against the same window as
-        // the prompt, so the default applied above is not free.
+        // the prompt, so the default applied just above is not free: on a large
+        // conversation it is what carries the request past the window. Every
+        // backend converter reads `max_output_tokens` from here, so this is the
+        // last point that can hold the sum inside the window. The estimate is
+        // the only prompt size this layer has; a caller that tracks the
+        // provider's reported usage fits the budget with that number first, and
+        // this only ever cuts further.
         let usable_window =
             xai_token_estimation::window_less_estimate_slack(self.defaults.context_window);
         if let Some(clamp) =
@@ -2436,7 +2481,7 @@ impl SamplingClient {
     ///
     /// The response is NDJSON: one whole JSON object per line, no SSE framing
     /// and no `[DONE]` sentinel. Lines are reassembled here because a chunk
-    /// boundary lands at an arbitrary byte, so a line can straddle some of
+    /// boundary lands at an arbitrary byte, so a line can straddle two of
     /// them.
     pub async fn conversation_stream_ollama(
         &self,
@@ -2455,7 +2500,10 @@ impl SamplingClient {
         let slot = crate::request_slots::acquire_unless_held().await;
 
         let mut body = serde_json::to_value(&chat_request).map_err(SamplingError::Serialization)?;
-        // `keep_alive`, `truncate` and `options.num_ctx` reach the wire from here and nowhere else.
+        // `keep_alive`, `truncate` and `options.num_ctx` reach the wire from
+        // here and nowhere else: they are per-deployment settings with no
+        // cross-provider meaning, so they live in config rather than in the
+        // typed request.
         xai_grok_sampling_types::merge_extra_body(&mut body, &self.extra_body);
 
         let endpoint = self.endpoint("api/chat");
@@ -2649,9 +2697,9 @@ fn sse_error_text(error: &eventsource_stream::EventStreamError<reqwest::Error>) 
 /// Parse an NDJSON byte stream into a single object for each line.
 ///
 /// A transport chunk boundary lands at an arbitrary byte, so a line can
-/// straddle some of them and the tail has to be carried across. The final
-/// line often arrives without a trailing newline, so what is left in the
-/// buffer at end of stream is a line too.
+/// straddle two of them and the tail has to be carried across. The final line
+/// often arrives without a trailing newline, so what is left in the buffer at
+/// end of stream is a line too.
 fn ndjson_chunk_stream<S, B, T>(byte_stream: S) -> impl Stream<Item = Result<T>> + Send
 where
     S: Stream<Item = std::result::Result<B, reqwest::Error>> + Send + 'static,
@@ -2667,7 +2715,10 @@ where
             let bytes = match next {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    // A body that stopped arriving mid-read is transient, and the sampler's stream-interrupt budget is what answers it.
+                    // A body that stopped arriving mid-read is transient, and
+                    // the sampler's stream-interrupt budget is what answers
+                    // it; reporting it as a finished response would hand the
+                    // turn a truncated answer.
                     failed = true;
                     yield Err(SamplingError::EventStreamError(error_chain(&error)));
                     break;
@@ -2736,8 +2787,8 @@ async fn read_body(
     })
 }
 
-/// Rebuild `Api` from stream-collected info, preserving status, `Retry-After`, and
-/// `x-should-retry` (kind is lost on this path). Applies the request's
+/// Rebuild `Api` from stream-collected info, preserving status,
+/// `Retry-After`, and `x-should-retry` (kind is lost on this path).
 /// Applies the request's [`xai_grok_sampling_types::LengthPolicy`] to a collected response.
 /// Fails a `Length` stop the policy rejects, logs the salvage breadcrumb otherwise.
 /// The single gate shared by `drive_l2` and the direct-collect path so the two cannot drift.
@@ -2860,6 +2911,7 @@ mod tests {
         cfg.max_completion_tokens = Some(262_144);
         let client = SamplingClient::new(cfg).expect("client should build");
 
+        // ~737_857 estimated prompt tokens, the size the server reported.
         let mut request =
             ConversationRequest::from_items(vec![xai_grok_sampling_types::ConversationItem::user(
                 "x".repeat(737_857 * 4),
@@ -2914,7 +2966,7 @@ mod tests {
         );
 
         // An internally tagged event gets no path from serde, so the message
-        // falls back to where the payload's nulls are — the thing that
+        // falls back to where the payload's nulls are — the one thing that
         // makes a bare "expected a sequence" actionable.
         let event = from_sse_payload::<rs::ResponseStreamEvent>(
             r#"{"type":"response.created","sequence_number":0,
@@ -4223,6 +4275,7 @@ mod tests {
         let rs::ResponseStreamEvent::ResponseCompleted(e) = event else {
             panic!("expected ResponseCompleted");
         };
+        // round(0.0000416 * 1e10) = 416_000
         assert_eq!(
             e.response
                 .metadata

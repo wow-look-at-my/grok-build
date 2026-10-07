@@ -189,7 +189,8 @@ fn classify_sampling_error(err: SamplingError) -> CompactFailure {
         | SamplingError::StreamError { .. }
         | SamplingError::EmptyResponse { .. }
         | SamplingError::DoomLoopDetected { .. }
-        // An engine that collapsed is transient by definition: the next request is the whole remedy.
+        // An engine that collapsed is transient by definition: the next
+        // request is the whole remedy.
         | SamplingError::OutputRateCollapsed { .. }
         | SamplingError::FirstTokenTimeout { .. } => false,
     };
@@ -470,8 +471,9 @@ pub(crate) async fn generate_session_compact(
 
     let output = match sampling_config.api_backend {
         ApiBackend::ChatCompletions => {
-            // Honor the model's message-schema profile: compaction replays
-            // the same assistant items.
+            // Honor the model's message-schema profile: compaction replays the
+            // same assistant items, so a strict-schema target would reject
+            // `model_id`/`reasoning_content` here exactly as on a normal turn.
             let chat_messages: Vec<ChatRequestMessage> = conversation_to_chat_messages_with_profile(
                 chat_history,
                 sampling_config.chat_message_profile,

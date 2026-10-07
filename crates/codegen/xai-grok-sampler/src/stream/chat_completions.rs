@@ -63,7 +63,10 @@ pub fn stream_chat_completions<'a>(
 
         let mut content_acc = String::new();
         let mut reasoning_acc = String::new();
-        // Tool call deltas keyed by positional index.
+        // Tool call deltas keyed by positional index. Each entry is
+        // (id, name, arguments_buffer, vendor fields); the first chunk for an
+        // index carries id+name and starts the arguments buffer, subsequent
+        // chunks append to arguments only.
         let mut tool_call_acc: BTreeMap<
             u32,
             (String, String, String, BTreeMap<String, serde_json::Value>),
@@ -118,6 +121,10 @@ pub fn stream_chat_completions<'a>(
 
             if let Some(u) = chunk.usage.clone() {
                 // Wire cost is cumulative for the response, so last-write-wins.
+                // Never clobber a known cost with missing/unreported. Two wire
+                // forms are supported: xAI `cost_in_usd_ticks` (integer ticks)
+                // and the standard `usage.cost` USD float (OpenRouter, etc.).
+                // `cost_in_usd_ticks` is authoritative when present.
                 let chunk_cost = xai_grok_sampling_types::reported_cost_ticks(u.cost_in_usd_ticks)
                     .or_else(|| {
                         xai_grok_sampling_types::usd_float_to_ticks(
@@ -203,7 +210,9 @@ pub fn stream_chat_completions<'a>(
                             (String::new(), String::new(), String::new(), BTreeMap::new())
                         });
 
-                    // Gemini's thought signature rides the chunk that opens the call.
+                    // Gemini's thought signature rides the chunk that opens the
+                    // call, and replaying the call without it is a 400 on every
+                    // turn after it.
                     entry.3.extend(tool_call_vendor_fields(&tc_delta.vendor));
 
                     let mut id_for_event: Option<String> = None;
@@ -595,11 +604,14 @@ mod tests {
             response.items
         );
 
-        // (b) shell turn-loop commit order — Reasoning rides the push_tool_result arm, Assistant rides push_assistant_response.
+        // (b) shell turn-loop commit order — Reasoning rides the push_tool_result
+        // arm, Assistant rides push_assistant_response; both land in flat history.
         let mut items = response.items.clone();
 
+        // Turn N+1: user follows up; previous turn's items are the request prefix.
         items.push(ConversationItem::user("continue"));
 
+        // (c) real wire conversion for turn N+1.
         let req = ConversationRequest::from_items(items);
         let msgs = conversation_to_chat_messages(req.items.clone());
 
@@ -686,7 +698,9 @@ mod tests {
             "delta.reasoning must be captured into a Reasoning sibling; got: {reasoning_text:?}"
         );
 
-        // b) Round-trip: shell commit order + real wire conversion for turn N+1 places it on the follower assistant's reasoning_content (the shape.
+        // (b) Round-trip: shell commit order + real wire conversion for turn N+1
+        // places it on the follower assistant's reasoning_content (the shape
+        // synthetic.new accepts and feeds back, verified live).
         let mut items = response.items.clone();
         items.push(ConversationItem::user("continue"));
         let req = ConversationRequest::from_items(items);
@@ -1089,6 +1103,7 @@ mod tests {
         .await;
         match events.last().unwrap() {
             SamplingEvent::Completed { response, .. } => {
+                // round(0.0000416 * 1e10) = 416_000
                 assert_eq!(response.cost_usd_ticks, Some(416_000));
             }
             other => panic!("expected Completed, got {other:?}"),

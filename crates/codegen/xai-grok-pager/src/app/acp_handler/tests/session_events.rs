@@ -1199,7 +1199,7 @@
     }
 
     /// The active agent's status row, rendered from what its tracker holds,
-    /// the same fields `agent_view/render.rs` hands the renderer.
+    /// the same two fields `agent_view/render.rs` hands the renderer.
     fn active_row_text(app: &AppView) -> String {
         let agent = &app.agents[&AgentId(0)];
         let activity = agent.resolve_turn_activity();

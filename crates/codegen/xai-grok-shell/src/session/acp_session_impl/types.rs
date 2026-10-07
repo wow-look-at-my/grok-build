@@ -43,7 +43,13 @@ pub(crate) enum SamplerFailureRecovery {
     /// Compaction ran.
     /// The turn loop should rebuild the request from the compacted conversation and resubmit.
     CompactAndResubmit,
-    /// A context-overflow error hit again immediately after a compaction (`ContextOverflowRecovery::Compacted`).
+    /// A context-overflow error hit again immediately after a compaction
+    /// (`ContextOverflowRecovery::Compacted`), so compaction alone did not
+    /// fit the conversation. Rather than compact a second time in a row —
+    /// which cannot help when a single item alone accounts for the overflow
+    /// — the conversation was deterministically shrunk (oldest turns
+    /// dropped, the newest truncated in place) via
+    /// `fit_conversation_to_budget`. The turn loop should resubmit.
     ReduceAndResubmit,
     /// Resubmit through the auth-retry schedule: recovery succeeded, or the parked
     /// credential-less case. `credential` is the rejected request's wire provenance;
@@ -52,7 +58,10 @@ pub(crate) enum SamplerFailureRecovery {
         credential: xai_grok_sampling_types::SentCredential,
         store: RecoveredStore,
     },
-    /// The model refused the history as provider-bound state it cannot read.
+    /// The model refused the history as provider-bound state it cannot read
+    /// (an `encrypted_content` blob, a thinking signature it did not mint).
+    /// `flatten_conversation` rewrote the history to plain text, so the turn
+    /// loop should resubmit it.
     FlattenAndResubmit,
     /// Transient failure: back off and resubmit instead of killing the turn.
     /// Retries are bounded.
@@ -72,7 +81,10 @@ pub(crate) enum SamplerTurnOutcome {
         Box<xai_grok_sampler::InferenceLatencyStats>,
     ),
     CompactAndResubmit,
-    /// Mirrors [`SamplerFailureRecovery::ReduceAndResubmit`]: the conversation was deterministically shrunk (not re-compacted).
+    /// Mirrors [`SamplerFailureRecovery::ReduceAndResubmit`]: the
+    /// conversation was deterministically shrunk (not re-compacted) because
+    /// a compaction already ran for this overflow and did not fit. The turn
+    /// loop resubmits the same as `CompactAndResubmit`.
     ReduceAndResubmit,
     /// Retry through the auth-retry schedule. Mirrors
     /// [`SamplerFailureRecovery::RefreshAuthAndResubmit`].
@@ -80,15 +92,28 @@ pub(crate) enum SamplerTurnOutcome {
         credential: xai_grok_sampling_types::SentCredential,
         store: RecoveredStore,
     },
-    /// Mirrors [`SamplerFailureRecovery::FlattenAndResubmit`]: the history was rewritten to plain text.
+    /// Mirrors [`SamplerFailureRecovery::FlattenAndResubmit`]: the history was
+    /// rewritten to plain text because the model refused the provider state in
+    /// it. The turn loop resubmits, the same as `CompactAndResubmit`.
     FlattenAndResubmit,
     /// The in-flight model request was cancelled because a user interjection
-    /// arrived mid-stream — the "asap injection" path.
+    /// arrived mid-stream — the "asap injection" path. The turn loop drains
+    /// the interjection and resubmits immediately rather than waiting for the
+    /// (potentially long) stream to finish. `partial` is the text the model
+    /// had already streamed, preserved as a committed assistant message so the
+    /// resubmitted request sees `partial assistant turn + user interjection`
+    /// (Claude-Code-style mid-stream steering). `None` when nothing was
+    /// streamed yet (clean resubmit, nothing to preserve).
     CancelledForInterjection {
         partial: Option<ConversationItem>,
     },
     /// The provider cut the response off at its output-token cap
-    /// (`StopReason::Length`).
+    /// (`StopReason::Length`). The sampler treats this as fatal and
+    /// non-retryable at the transport layer (resending the identical
+    /// request would truncate again), so the turn loop resubmits with a
+    /// reminder to continue instead. `partial` is the text streamed before
+    /// the cutoff, preserved the same way as `CancelledForInterjection`;
+    /// `None` when nothing was streamed yet.
     MaxTokensTruncated {
         partial: Option<ConversationItem>,
     },

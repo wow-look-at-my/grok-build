@@ -1,8 +1,8 @@
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_precision_loss)] // Hits predate the gate
-#![allow(clippy::cast_sign_loss)]
-#![allow(clippy::expect_used)]
-#![allow(clippy::unwrap_used)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 3 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 3 hits predate the gate
 
 //! xai-chat-state — Actor-based chat state management for xAI agents.
 //!

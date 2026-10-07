@@ -44,6 +44,9 @@ pub fn is_unsafe_display_char(c: char) -> bool {
 }
 
 /// Largest byte index `<= index` that is a char boundary in `s`.
+///
+/// Re-exported from `xai_grok_tools::util` so the whole workspace shares one
+/// implementation of the boundary math.
 pub use xai_grok_tools::util::floor_char_boundary;
 
 /// Like [`crate::util::truncate_to_width`] but returns an owned `String`.

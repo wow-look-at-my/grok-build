@@ -1,10 +1,26 @@
 //! A field its sender may name more than one way.
+//!
+//! `#[serde(alias = "x")]` accepts a second key for one field, and the derived
+//! deserializer treats that key as a type error the moment BOTH arrive: a delta
+//! carrying `"reasoning":"We"` and `"reasoning_content":"We"` fails with
+//! `duplicate field`, although the two values are one string. Providers that put
+//! reasoning on both spellings in every chunk therefore lose the whole response
+//! to a duplicate the sender never meant as a second value.
+//!
+//! A wire struct instead names each spelling its own field on a private shadow
+//! (`#[serde(try_from = "Shadow")]`) and folds them through [`Aliases::fold`].
+//! A sender that repeats itself then parses, and a sender that contradicts
+//! itself is an error naming both keys. The serialized shape never changes:
+//! `Serialize` stays derived on the real struct, so the outgoing key cannot
+//! drift from the canonical one.
 
 use std::error::Error;
 use std::fmt;
 
-/// The keys one field is read from: the canonical one first, then every
-/// alias.
+/// The keys one field is read from: the canonical one first, then every alias.
+///
+/// Declare one as a `const` on the type that owns the field, and call
+/// [`fold`](Self::fold) from its `TryFrom` for the wire shadow.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Aliases {
     /// The key this type writes, and the one the rest of the code names.
@@ -68,7 +84,7 @@ impl Aliases {
 /// What went wrong folding one field's key spellings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AliasConflict {
-    /// Keys carried different values, so the input disagrees with itself.
+    /// Two keys carried different values, so the input disagrees with itself.
     DifferingValues {
         canonical: &'static str,
         first_key: &'static str,
@@ -76,8 +92,9 @@ pub enum AliasConflict {
         second_key: &'static str,
         second_value: String,
     },
-    /// The shadow struct named a different number of keys than the
-    /// [`Aliases`] lists.
+    /// The shadow struct named a different number of keys than the [`Aliases`]
+    /// lists. A bug in this program, reported rather than panic-ed because the
+    /// fold sits on a deserialization path.
     ShapeMismatch {
         canonical: &'static str,
         keys: usize,
@@ -140,7 +157,8 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["reasoning"],
     },
     WireAlias {
-        // A campaign patch is merged into the same TOML value `Config` is read from and names any field.
+        // A campaign patch is merged into the same TOML value `Config` is read
+        // from and names any field, so this table is not only the user's file.
         file: "crates/codegen/xai-grok-telemetry/src/config.rs",
         ty: "TelemetryConfig",
         canonical: "otel_protocol",
@@ -394,7 +412,13 @@ pub const WIRED: &[WireAlias] = &[
 ];
 
 /// A field that reads more than one key spelling and stays on a bare
-/// `#[serde(alias)]`, because every byte it reads came out of a file.
+/// `#[serde(alias)]`, because every byte it reads came out of a file this
+/// program or the user wrote.
+///
+/// The duplicate-field failure needs two spellings of one field in one object.
+/// A file this program writes names its field once, so only a human typing both
+/// --- or a merge of two editors' config --- can produce the pair, and the file's
+/// owner sees the error and the file side by side.
 #[derive(Debug, Clone, Copy)]
 pub struct LocalAlias {
     /// Crate-relative path of the file that declares the alias.
@@ -521,6 +545,11 @@ pub const LOCAL: &[LocalAlias] = &[
 ];
 
 /// A `#[serde(alias)]` on an enum variant.
+///
+/// An enum's serialized value is one string - the variant's name - so two
+/// spellings of one variant can never arrive side by side in one object. The
+/// duplicate-field error is a struct-map phenomenon and cannot reach these; they
+/// stay as written.
 #[derive(Debug, Clone, Copy)]
 pub struct EnumVariantAlias {
     /// Crate-relative path of the file that declares the enum.
@@ -529,7 +558,7 @@ pub struct EnumVariantAlias {
     pub ty: &'static str,
     /// Every alias string the enum accepts on its variants.
     pub aliases: &'static [&'static str],
-    /// Why no single object can carry some of these spellings.
+    /// Why no single object can carry two of these spellings.
     pub why: &'static str,
 }
 
@@ -760,7 +789,8 @@ mod tests {
         }
     }
 
-    /// A new wire-facing field is the case this exists to catch; a `LOCAL` or
+    /// Case two: an alias in the tree that no table classifies. A new
+    /// wire-facing field is the case this exists to catch; a `LOCAL` or
     /// `ENUM_VARIANTS` entry whose file dropped the alias is the same failure
     /// wearing the opposite sign.
     #[test]
@@ -868,7 +898,7 @@ mod tests {
         }
     }
 
-    /// The tables describe one partition of the same set, so a field
+    /// The three tables describe one partition of the same set, so a field
     /// cannot be both a folded wire key and a tolerated config alias.
     #[test]
     fn the_alias_tables_never_claim_one_field_twice() {
@@ -883,9 +913,9 @@ mod tests {
                     wired.canonical
                 );
             }
-            // Entries naming the same keys in one file on one type are one
+            // Two entries naming the same keys in one file on one type are one
             // entry's worth of information; the duplicate hides a table that
-            // drifted. Types in one file may fold the same key pair.
+            // drifted. Two types in one file may fold the same key pair.
             for other in WIRED {
                 if std::ptr::eq(wired, other) || wired.file != other.file || wired.ty != other.ty {
                     continue;
@@ -1009,7 +1039,7 @@ pub struct Late {
     }
 
     /// A `#[cfg(test)]` and its `mod` on one line introduces a module just as
-    /// surely as those-line spelling, and skipping it depends on finding the
+    /// surely as the two-line spelling, and skipping it depends on finding the
     /// braces from the attribute's own line.
     #[test]
     fn the_scan_skips_a_test_module_opened_on_the_attribute_line() {
@@ -1162,8 +1192,13 @@ pub struct Late {
             return out;
         }
         for (index, line) in source.lines().enumerate() {
-            // An attribute counts only when `#[serde(` opens its line, which
-            // is how rustfmt writes every real one of them.
+            // An attribute counts only when `#[serde(` opens its line, which is
+            // how rustfmt writes every real one of them. That keeps an alias
+            // quoted inside prose or inside a `let needle = "#[serde(alias = \
+            // ...")]";` from reading as a declaration, because such a line opens
+            // with the statement, not the attribute. It does not reach an
+            // attribute indented inside a raw string, which is why the caller
+            // hands it only the part of the file before `#[cfg(test)]`.
             if !line.trim_start().starts_with("#[serde(") {
                 continue;
             }
@@ -1259,11 +1294,11 @@ pub struct Late {
 
     /// The `[model.<id>]` table resolves a both-keys config in
     /// `config_model_override_parse::dedupe_aliases` before serde sees it, so
-    /// that function's `ALIASES` list and this module's tables describe one set
-    /// of keys twice. Lists that can be edited apart is the failure that file's
-    /// own comment warns about, so this asserts they name the same pairs: every
-    /// pair in `ALIASES` appears here against `ConfigModelOverride`, and every
-    /// pair this module claims for that type appears there.
+    /// that function's `ALIASES` list and this module's tables describe one
+    /// set of keys twice. Two lists that can be edited apart is the failure
+    /// that file's own comment warns about, so this asserts they name the same
+    /// pairs: every pair in `ALIASES` appears here against `ConfigModelOverride`,
+    /// and every pair this module claims for that type appears there.
     #[test]
     fn the_override_dedupe_list_and_these_tables_name_the_same_pairs() {
         let root = workspace_root();
@@ -1329,6 +1364,8 @@ pub struct Late {
         out
     }
 
+    /// The string literals inside an array of `("a", "b")` tuples, taken two at
+    /// a time in the order they appear.
     fn quoted_pairs(body: &str) -> Vec<(String, String)> {
         let words: Vec<String> = body
             .split('"')

@@ -130,7 +130,18 @@ fn profile_confines(name: &str) -> bool {
 }
 
 /// Whether this process is confined by a profile that restricts **writes** to
-/// the workspace.
+/// the workspace, `$GROK_HOME` and the temp dirs (`workspace`, `read-only`,
+/// `strict`, the `pathbox` jail, or a custom profile that extends one of them).
+///
+/// The child-process spawn paths read this to decide whether a package runner
+/// (`uvx`, `npx`, …) needs its default cache locations redirected somewhere the
+/// profile can write: those tools default into `$HOME` (e.g. `~/.cache/uv`,
+/// `~/.npm`), which no built-in profile grants, so the runner dies at startup
+/// with EPERM and the MCP server never completes its handshake.
+///
+/// This is deliberately the *write* question, not "is a sandbox active". The
+/// `devbox` profile grants writes nearly everywhere (including `$HOME`), so its
+/// runners need no redirection and get none.
 pub fn confines_home_writes() -> bool {
     if is_jailed() {
         return true;
@@ -139,11 +150,18 @@ pub fn confines_home_writes() -> bool {
 }
 
 /// Whether a profile name restricts writes away from un-remapped `$HOME`.
+///
+/// `devbox` grants writes to every top-level directory including `$HOME`, so it
+/// is the one confining-style profile that does not need cache redirection.
+/// `off`/`none` confine nothing. Anything unrecognized is treated as confining
+/// (fail closed): a custom profile inherits the write set of the built-in base
+/// it extends, and the built-in bases other than `devbox` all exclude `$HOME`.
 fn profile_confines_home_writes(name: &str) -> bool {
     match name.parse::<ProfileName>() {
         Ok(ProfileName::Off) | Ok(ProfileName::Devbox) => false,
         Ok(_) => true,
-        // An unknown name is a custom profile: it extends a built-in base and therefore inherits that base's write set.
+        // An unknown name is a custom profile: it extends a built-in base and
+        // therefore inherits that base's write set.
         Err(_) => true,
     }
 }
@@ -675,6 +693,13 @@ fn bwrap_reexec_plan(profile: &ProfileName, workspace: &Path) -> Option<BwrapDen
 
 /// Whether a bwrap re-exec follows for this profile, without building the
 /// command for it.
+///
+/// A caller has to know this BEFORE it hands anything to the image the exec
+/// produces, and building the command first is not an option: the command
+/// snapshots this process's environment the moment it sets its own marker, so
+/// anything the new image reads from the environment must already be there.
+/// That is why this shares [`bwrap_reexec_plan`] with the builder rather than
+/// repeating its conditions, which would drift apart.
 #[cfg(target_os = "linux")]
 pub fn bwrap_reexec_planned(profile: &ProfileName, workspace: &Path) -> bool {
     bwrap_reexec_plan(profile, workspace).is_some()
@@ -684,8 +709,15 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
-    /// The predicate and the builder must never disagree about whether an exec follows. `apply_sandbox` asks the predicate BEFORE it starts the CI host worker, and the answer decides whether the worker's fd is made exec-surviving. A predicate that says yes where the builder then produces no command leaves an inheritable fd, and its number in the environment, in a session that went on to confine
-    /// itself in place. Every child of that session can then reach an unconfined `gh`.
+    /// The predicate and the builder must never disagree about whether an exec
+    /// follows.
+    ///
+    /// `apply_sandbox` asks the predicate BEFORE it starts the CI host worker,
+    /// and the answer decides whether the worker's fd is made exec-surviving.
+    /// A predicate that says yes where the builder then produces no command
+    /// leaves an inheritable fd, and its number in the environment, in a
+    /// session that went on to confine itself in place. Every child of that
+    /// session can then reach an unconfined `gh`.
     #[test]
     #[cfg(target_os = "linux")]
     fn the_reexec_predicate_agrees_with_the_builder() {
@@ -1051,8 +1083,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn pathbox_needs_no_nono_hook_protection_but_is_confining() {
-        // The pathbox jail is the re-exec jail; it must not trip the nono
-        // hook write-deny manager.
+        // The pathbox jail is the re-exec jail; it must not trip the nono hook
+        // write-deny manager, and it must report as a confining profile (fork-B:
+        // leader/workspace gates treat it like any real sandbox).
         let ws = std::env::temp_dir().join(format!(
             "grok-pathbox-hw-{}",
             std::time::SystemTime::now()

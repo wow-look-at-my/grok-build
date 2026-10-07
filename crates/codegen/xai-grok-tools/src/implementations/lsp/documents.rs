@@ -77,12 +77,14 @@ impl Documents {
         }
     }
 
-    /// A notification's revision is written down here, before the
-    /// notification reaches the wire. The replaced value comes back, so
-    /// [`Self::restore`] can undo a send that failed. A push that names no
-    /// version is credited with the newest version we have sent, and the
-    /// server can answer on another thread before the sending thread gets
-    /// this far.
+    /// A notification's revision is written down here, before the notification
+    /// reaches the wire. The replaced value comes back, so [`Self::restore`]
+    /// can undo a send that failed.
+    ///
+    /// A push that names no version is credited with the newest version we
+    /// have sent, and the server can answer on another thread before the
+    /// sending thread gets this far. A report read against the older record
+    /// settles nothing, so the reader never sees it.
     pub fn commit(
         &self,
         uri: &str,

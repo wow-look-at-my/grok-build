@@ -133,8 +133,8 @@ impl AgentView {
     pub(crate) fn superseded_mode_request(&self, mode_id: &str) -> Option<&ModeRequest> {
         superseded_mode_request(&self.mode_requests, mode_id)
     }
-    /// Forget the outstanding mode-change requests: the shell has reported
-    /// the mode this session is in, so nothing is left to attribute.
+    /// Forget the outstanding mode-change requests: the shell has reported the
+    /// mode this session is actually in, so nothing is left to attribute.
     pub(crate) fn clear_mode_requests(&mut self) {
         self.mode_requests.clear();
     }

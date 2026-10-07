@@ -33,6 +33,12 @@ struct CollectorState {
 
 impl DoomLoopSignalCollector {
     /// The accumulated state, whatever a prior holder was doing when it died.
+    ///
+    /// The signals are what the stream transform acts on and the policy is what
+    /// it judges them by, so either one going missing silently turns a reported
+    /// doom loop into a response read as clean. The state is a `Vec` and two
+    /// flags, which a panicked write leaves at least as usable as the empty
+    /// state a poison would report in its place.
     #[allow(clippy::disallowed_methods)] // takes the state back as the doc above says
     fn state(&self) -> std::sync::MutexGuard<'_, CollectorState> {
         self.inner
@@ -88,7 +94,8 @@ impl DoomLoopSignalCollector {
 
     /// Drain the recorded signals; empty when nothing was reported.
     pub(crate) fn take(&self) -> Vec<DoomLoopSignal> {
-        // The lock is taken through [`Self::state`], so a signal the decoder recorded is never dropped for having been held.
+        // The lock is taken through [`Self::state`], so a signal the decoder
+        // recorded is never dropped for having been held when something panicked.
         std::mem::take(&mut self.state().signals)
     }
 

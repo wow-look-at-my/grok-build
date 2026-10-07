@@ -1,6 +1,6 @@
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)]
-#![allow(clippy::expect_used)]
+#![allow(clippy::cast_possible_truncation)] // 14 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 1 hit predates the gate
 
 //! # xai-grok-hooks
 //!

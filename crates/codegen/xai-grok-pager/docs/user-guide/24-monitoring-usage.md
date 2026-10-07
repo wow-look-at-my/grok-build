@@ -214,7 +214,12 @@ resolved its configuration, and whether it is exporting or suppressed.
 | `terminal.type` | terminal emulator brand |
 | `grok_code.schema.version` | `v1` |
 
-Identity attributes (`user.id`, and `organization.id` / `team.id` when known) are attached per metric data point and per event once authentication completes. `user.email` is attached on logs **and** metrics whenever the session is signed in with OAuth or a gateway account that has a non-empty address. It is identity, not a content gate, and is never taken from git or an API key. `prompt.id` (per-prompt UUID) appears on events only, not metrics.
+Identity attributes (`user.id`, and `organization.id` / `team.id` when known)
+are attached per metric data point and per event once authentication completes.
+`user.email` is attached on logs **and** metrics whenever the session is signed
+in with OAuth or a gateway account that has a non-empty address — it is
+identity, not a content gate, and is never taken from git or an API key. `prompt.id` (per-prompt UUID) appears on
+events only, never metrics.
 
 ## Metrics (meter scope `ai.xai.grok_code`)
 
@@ -233,7 +238,23 @@ Identity attributes (`user.id`, and `organization.id` / `team.id` when known) ar
 | `grok_code.startup.phase_duration` | `ms` | `phase`, `outcome`, `auth_mode` |
 | `grok_code.startup.timeout` | `{timeout}` | `stuck_in`, `auth_mode` |
 
-`startup.total` measures process start to a usable session, recorded once per process. `outcome` = `timeout` or `error` means startup ended without one. `startup.interactive` records process start to the first frame the live loop confirmed written, once per process. `phase_duration` breaks the connect attempt down by step (`config_load`, `managed_policy`, `bootstrap`, `model_catalog`, `worker_spawn`, `leader_connect`, `acp_initialize`, `eager_auth`). Filter on its `outcome` (`ok` | `timeout` | `cancelled` | `error`) so truncated samples do not skew `ok` percentiles. The later `app_init` and `session_create` phases appear in the log timeline and the summary strings, not in this metric. `stuck_in` on a timeout names the step that had not finished. That is often not the step that took the longest, because a step that runs without pausing finishes before the timeout is recorded. The error message Grok prints names the longest step instead. As a result, the two can name different steps for the same timeout. Use `phase_duration` to compare them. `auth_mode` is `personal`, `team`, or `unknown`: startup cost differs by kind, so split by it before comparing.
+`startup.total` measures process start to a usable session, recorded once per
+process; `outcome` = `timeout` or `error` means startup ended without one.
+`startup.interactive` records process start to the first frame the live loop
+confirmed written, once per process.
+`phase_duration` breaks the connect attempt down by step (`config_load`,
+`managed_policy`, `bootstrap`, `model_catalog`, `worker_spawn`,
+`leader_connect`, `acp_initialize`, `eager_auth`); filter on its `outcome`
+(`ok` | `timeout` | `cancelled` | `error`) so truncated samples do not skew
+`ok` percentiles. The later `app_init`
+and `session_create` phases appear in the log timeline and the summary
+strings, not in this metric. `stuck_in` on a timeout names the step that had
+not finished. That is often not the step that took the longest, because a step
+that runs without pausing finishes before the timeout is recorded. The error
+message Grok prints names the longest step instead, so the two can name
+different steps for the same timeout. Use `phase_duration` to compare them.
+`auth_mode` is `personal`, `team`, or `unknown`:
+startup cost differs by kind, so split by it before comparing.
 
 `turn.ttft` is the time from turn start to the first token of any channel
 (reasoning, text, or a tool call) and `turn.ttfm` the time from turn start to the

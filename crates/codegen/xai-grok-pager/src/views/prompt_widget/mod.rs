@@ -640,7 +640,8 @@ pub struct PromptWidget {
     pub(crate) slash_state: crate::slash::SlashState,
     /// Mouse-hovered slash dropdown item index (`None` = no hover).
     pub(crate) slash_hovered: Option<usize>,
-    /// The user closed the dropdown with Esc. A command resync must not open it again.
+    /// The user closed the dropdown with Esc. A command resync must not open it
+    /// again. The next `refresh_slash` clears this.
     slash_dismissed: bool,
     /// Last input delta for the flight recorder (read by AgentView after handle_key).
     pub(crate) last_input_delta: crate::input_log::LastInputDelta,

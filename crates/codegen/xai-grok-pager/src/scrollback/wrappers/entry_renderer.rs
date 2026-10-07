@@ -316,7 +316,10 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// The per-message cost indicator shares the timestamp's message-block
-    /// gating — it decorates the same message blocks.
+    /// gating — it decorates the same message blocks, never thinking/tool/
+    /// system rows. Unlike the timestamp it is deliberately NOT coupled to the
+    /// `show_timestamps` appearance toggle: a reported cost must render even
+    /// when timestamps are hidden, so the indicator never silently vanishes.
     fn should_show_cost(&self) -> bool {
         self.should_show_timestamp() && self.entry.cost_usd_ticks.is_some_and(|t| t > 0)
     }
@@ -330,7 +333,8 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// Width reserved on the right for the per-message cost indicator, when
-    /// this message block reports a cost.
+    /// this message block reports a cost. Independent of the `show_timestamps`
+    /// toggle so a reported cost always has a gutter to render into.
     fn cost_reserved(&self) -> u16 {
         if self.should_show_cost() {
             cost_ticks_display_width(self.entry.cost_usd_ticks)
@@ -340,13 +344,15 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// The per-message cache-hit-percent indicator shares the cost/timestamp
-    /// gating (message blocks only).
+    /// gating (message blocks only): it decorates the same blocks and never
+    /// thinking/tool/system rows.
     fn should_show_cache_hit(&self) -> bool {
         self.should_show_timestamp() && self.entry.cache_hit_percent.is_some()
     }
 
     /// The cache-hit string (if one is present), painted on its own row below
-    /// the content rather than sharing the first line's gutter.
+    /// the content rather than sharing the first line's gutter — see
+    /// `cache_hit_reserved_rows`.
     fn cache_hit_display(&self) -> Option<String> {
         if !self.should_show_cache_hit() {
             return None;
@@ -355,7 +361,12 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// Extra row reserved below the content for the cache-hit-percent line,
-    /// when this message block reports one.
+    /// when this message block reports one. Unlike the cost indicator this
+    /// does NOT widen `timestamp_reserved()` (the content-wrap gutter): the
+    /// gutter already narrows every content line for the cost/timestamp
+    /// overlay, and a second label there would narrow it further. Reserving
+    /// a row instead — mirroring `inline_media_rows`'s additive reservation
+    /// in `assemble_height` — keeps content width untouched.
     fn cache_hit_reserved_rows(&self) -> u16 {
         if self.should_show_cache_hit() { 1 } else { 0 }
     }
@@ -369,15 +380,17 @@ impl<'a> EntryRenderer<'a> {
         let cost = self.cost_reserved();
         if self.appearance().show_timestamps && self.should_show_timestamp() {
             let ts: u16 = 10; // max short format: "  12:30 PM"
-            // The cost token (when present) sits left of the timestamp with
-            // one space between.
+            // The cost token (when present) sits left of the timestamp with one
+            // space between. When no cost is reported there is no extra
+            // reservation — keep the historical 10-col timestamp gutter intact.
             if cost > 0 {
                 ts.saturating_add(cost.saturating_add(1))
             } else {
                 ts
             }
         } else {
-            // When the timestamp is hidden, a reported cost still reserves its own right-aligned gutter so it does not collide.
+            // When the timestamp is hidden, a reported cost still reserves its
+            // own right-aligned gutter so it does not collide with content.
             cost
         }
     }
@@ -573,20 +586,28 @@ impl<'a> EntryRenderer<'a> {
 }
 
 /// Convert an API-reported server cost (in USD ticks, 1e10 per USD) to a
-/// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees -
-/// A missing (`None`) or non-positive cost returns `None`, so a caller never
+/// readable display string such as `$0.12` or `$3.42`.
+///
+/// # Honesty guarantees
+///
+/// - A missing (`None`) or non-positive cost returns `None`, so a caller never
 ///   renders a fabricated `$0.00` when the API reported no cost.
-/// - Arithmetic is exact **integer** math (no floats).
+/// - Arithmetic is exact **integer** math (no floats), so a reported cost is
 ///   never mis-rounded into `$0` the way a `f64` at 4 decimals could.
+/// - Up to 6 significant fractional digits are shown (trailing zeros trimmed),
+///   so even a tiny-but-real reported cost renders as non-zero.
+///
+/// Pure — no terminal/theme/IO deps — so it is exactly assertable in unit
+/// tests.
 pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<String> {
     let ticks = cost_usd_ticks?;
     if ticks <= 0 {
         return None;
     }
-    const PER_USD: i64 = 10_000_000_000;
-    const FRAC_SCALE: i64 = 10_000;
+    const PER_USD: i64 = 10_000_000_000; // 1 USD = 1e10 ticks
+    const FRAC_SCALE: i64 = 10_000; // PER_USD / 10^6 → 6 fractional digits
     let whole = ticks / PER_USD;
-    let frac = (ticks % PER_USD) / FRAC_SCALE;
+    let frac = (ticks % PER_USD) / FRAC_SCALE; // 0..=999_999 (6 digits)
     let frac_text = format!("{frac:06}");
     let trimmed = frac_text.trim_end_matches('0');
     if trimmed.is_empty() {
@@ -596,6 +617,8 @@ pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<Strin
     }
 }
 
+/// Display width of a cost string (0 when the cost is not present / renders to
+/// nothing), so the gutter reservation and the overlay share one source of truth.
 pub(crate) fn cost_ticks_display_width(cost_usd_ticks: Option<i64>) -> u16 {
     cost_ticks_to_display(cost_usd_ticks)
         .map(|s| unicode_width::UnicodeWidthStr::width(s.as_str()) as u16)
@@ -608,8 +631,10 @@ pub(crate) fn cache_hit_to_display(cache_hit_percent: Option<u8>) -> Option<Stri
     cache_hit_percent.map(|p| format!("cache {p}%"))
 }
 
-/// Diamond chrome prefix every group header draws before its text —
-/// verb-run labels, truncation labels, and plain counts alike.
+/// Diamond chrome prefix every group header draws before its text — verb-run
+/// labels, truncation labels, and plain counts alike, in both fold states.
+/// Selection geometry for labeled headers derives from this same string (see
+/// [`group_header_chrome_prefix_width`]) so render and hitbox can't drift.
 pub(crate) fn group_header_chrome_prefix() -> String {
     format!("{} ", crate::glyphs::diamond_dotted())
 }
@@ -917,7 +942,7 @@ impl Renderable for EntryRenderer<'_> {
             if self.appearance().show_timestamps
                 && let Some(ts) = self.entry.created_at
             {
-                // Check if mouse is hovering the timestamp zone (rightmost
+                // Check if mouse is hovering the timestamp zone (rightmost 10
                 // cols of the first content row).
                 let ts_hovered = self.mouse_pos.is_some_and(|(mx, my)| {
                     my == first_content_y
@@ -941,7 +966,8 @@ impl Renderable for EntryRenderer<'_> {
                     let ts_style = Style::default().fg(self.theme.gray);
                     buf.set_string_safe(ts_x, first_content_y, &ts_str, ts_style);
                     if let Some(cost) = cost {
-                        // Cost sits immediately left of the timestamp, separated by one space.
+                        // Cost sits immediately left of the timestamp, separated
+                        // by one space. Subtle, honest chrome: dim but legible.
                         let cost_x = ts_x.saturating_sub(cost_width.saturating_add(1));
                         let cost_style = Style::default().fg(self.theme.gray_dim);
                         buf.set_string_safe(cost_x, first_content_y, &cost, cost_style);
@@ -1550,11 +1576,12 @@ mod tests {
     // no terminal deps, so the strings are asserted exactly.
     #[test]
     fn cost_ticks_to_display_formats_representative_inputs() {
-        // Small fractional USD: 1e10 ticks = $1.
+        // Small fractional USD: 1e10 ticks = $1. 1_234_500_000 → $0.12345.
         assert_eq!(
             cost_ticks_to_display(Some(1_234_500_000)).as_deref(),
             Some("$0.12345")
         );
+        // Cents exactly: 100_000_000 ticks → $0.01.
         assert_eq!(
             cost_ticks_to_display(Some(100_000_000)).as_deref(),
             Some("$0.01")
@@ -1564,6 +1591,7 @@ mod tests {
             cost_ticks_to_display(Some(5_000_000_000_000)).as_deref(),
             Some("$500")
         );
+        // Mixed whole + fraction: 342_000_000_000 ticks → $34.2 → "34.2".
         assert_eq!(
             cost_ticks_to_display(Some(342_000_000_000)).as_deref(),
             Some("$34.2")
@@ -1579,13 +1607,15 @@ mod tests {
     fn cost_ticks_to_display_missing_and_non_positive_are_none() {
         // Unreported → None (never a fabricated `$0.00`).
         assert_eq!(cost_ticks_to_display(None), None);
+        // Wire backfilled 0 / negative → unreported, not "free".
         assert_eq!(cost_ticks_to_display(Some(0)), None);
         assert_eq!(cost_ticks_to_display(Some(-5)), None);
     }
 
     #[test]
     fn cost_indicator_renders_next_to_timestamp_for_reported_cost() {
-        // A message with a reported cost draws the cost token immediately to the LEFT of the timestamp.
+        // A message with a reported cost draws the cost token immediately to
+        // the LEFT of the timestamp on the first content line.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
             .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12345
@@ -1597,6 +1627,9 @@ mod tests {
         let mut buf = Buffer::empty(area);
         renderer.render(area, &mut buf);
 
+        // AgentMessage has no vpad → first content row is y=0. Scan the whole
+        // row: the cost token must sit immediately (one space) left of the
+        // visible timestamp, and both must be in the reserved right gutter.
         let row = collect_row_symbols(&buf, 0, 0, width);
         let cost_str = "$0.12345";
         let cost_pos = row.find(cost_str).expect("cost token must render");
@@ -1616,7 +1649,11 @@ mod tests {
 
     #[test]
     fn cost_indicator_renders_when_timestamps_off() {
-        // A reported per-message cost must NOT silently vanish when the timestamp display is toggled off.
+        // A reported per-message cost must NOT silently vanish when the
+        // timestamp display is toggled off: criterion 1 requires the indicator
+        // whenever the API reports a cost, independent of unrelated appearance
+        // gates. With `show_timestamps=false` the cost token still renders,
+        // right-aligned in the reserved gutter, with no timestamp beside it.
         let theme = Theme::current();
         let appearance = AppearanceConfig {
             show_timestamps: false,
@@ -1659,7 +1696,8 @@ mod tests {
 
     #[test]
     fn cost_indicator_absent_when_cost_not_reported() {
-        // A message with no reported cost must render the timestamp but NO cost token — and never a fabricated `$0`.
+        // A message with no reported cost must render the timestamp but NO cost
+        // token — and never a fabricated `$0`.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"));
         let renderer = EntryRenderer::new(&entry, &theme);
@@ -1680,7 +1718,8 @@ mod tests {
 
     #[test]
     fn cost_indicator_not_shown_on_non_message_blocks() {
-        // Thinking/tool rows do not carry timestamps.
+        // Thinking/tool rows don't carry timestamps, so they must not carry a
+        // cost marker either, even if a cost value were attached.
         crate::appearance::cache::set_show_thinking_blocks(true);
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::thinking("think"))
@@ -1702,7 +1741,10 @@ mod tests {
 
     #[test]
     fn cache_hit_indicator_renders_on_the_row_below_cost_and_timestamp() {
-        // A one-line agent message has no vpad.
+        // A one-line agent message has no vpad, so the cost/timestamp overlay
+        // sits on row 0 and the cache-hit line must land on the reserved row
+        // directly below it (row 1), right-aligned in the same gutter — not
+        // sharing row 0's already-narrowed width.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
             .with_cost_usd_ticks(Some(1_234_500_000)) // $0.12345
@@ -1762,7 +1804,8 @@ mod tests {
 
     #[test]
     fn cache_hit_indicator_not_shown_on_non_message_blocks() {
-        // Thinking/tool rows do not carry timestamps.
+        // Thinking/tool rows don't carry timestamps, so they must not carry a
+        // cache-hit marker either, even if a value were attached.
         crate::appearance::cache::set_show_thinking_blocks(true);
         let theme = Theme::current();
         let entry =

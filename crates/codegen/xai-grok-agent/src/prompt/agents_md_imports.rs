@@ -1,9 +1,16 @@
 //! `@path` imports inside project-instruction files.
+//!
+//! A CLAUDE.md that says `@AGENTS.md` is asking for that file's content, the
+//! way Claude Code reads it. Before this module the line was delivered as
+//! literal text and the referenced file was never read, so a repo that keeps
+//! its rules in one file and points every vendor's entry point at it shipped
+//! the pointer and none of the rules.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-/// How many hops an import chain may take.
+/// How many hops an import chain may take. A imports B imports C is depth 3.
+/// Claude Code stops at 5 and so does this.
 pub const MAX_IMPORT_DEPTH: usize = 5;
 
 /// A resolved import: the file an `@ref` named, and the text it holds.
@@ -14,6 +21,7 @@ pub struct ImportedFile {
 }
 
 /// Trailing punctuation that belongs to the sentence, not to the path.
+/// `.` is absent on purpose: it is how every file extension starts.
 const TRAILING_PUNCTUATION: &[char] = &[',', ';', ':', '!', '?', ')', ']', '}', '"', '\'', '>'];
 
 /// Whether a line opens or closes a fenced code block.
@@ -48,6 +56,8 @@ fn imports_in_line(line: &str) -> Vec<String> {
     let bytes = line.as_bytes();
     let mut index = 0;
     loop {
+        // `index` is 0 or an `@` offset plus 1 plus a whitespace-search offset,
+        // and `@` is ASCII, so it is always a char boundary.
         #[allow(clippy::string_slice)]
         let tail = &line[index..];
         let Some(offset) = tail.find('@') else {
@@ -63,7 +73,8 @@ fn imports_in_line(line: &str) -> Vec<String> {
                 continue;
             }
         }
-        // `at` is an ASCII `@` offset, so `at + 1` is a boundary, and `end` comes from searching for a `char`.
+        // `at` is an ASCII `@` offset, so `at + 1` is a boundary, and `end`
+        // comes from searching for a `char`, so it is one too.
         #[allow(clippy::string_slice)]
         let rest = &line[at + 1..];
         let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
@@ -274,6 +285,7 @@ mod tests {
             .iter()
             .map(|file| file.content.lines().next().unwrap())
             .collect();
+        // Depth 1 is the importer itself, so four more hops are taken.
         assert_eq!(bodies, vec!["body-2", "body-3", "body-4", "body-5"]);
     }
 

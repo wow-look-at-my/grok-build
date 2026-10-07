@@ -916,12 +916,15 @@ pub(crate) fn extract_final_response(items: &[ConversationItem]) -> Option<Strin
 const FIRST_FINAL_RESPONSE_MAX_CHARS: usize = 4096;
 
 /// Heads the round-1 anchor on a re-verification round. The verifier
-/// prompt names this header, so both must change together.
+/// prompt names this header, so the two must change together.
 pub(crate) const EARLIER_SUMMARY_HEADER: &str = "## Earlier summary (round 1, superseded)\n\
      This is the agent's first-round text, kept to show the full scope. \
      The message above replaces it wherever the two disagree.\n";
 
-/// Output of [`compose_verifier_final_response`].
+/// Output of [`compose_verifier_final_response`]. `to_send` is the
+/// `FINAL_RESPONSE` for this round's panel; `to_persist` is `Some` only
+/// on the first round, carrying the (capped) value to freeze as the
+/// goal's breadth anchor.
 pub(crate) struct ComposedFinalResponse {
     pub to_send: String,
     pub to_persist: Option<String>,
@@ -957,7 +960,8 @@ pub(crate) fn compose_verifier_final_response(
             }
         }
         Some(anchor) => {
-            // A blank current message, or one that repeats the anchor.
+            // A blank current message, or one that repeats the anchor, has
+            // nothing to supersede it with: send the anchor alone.
             let latest = current.trim();
             let to_send = if latest.is_empty() || latest == anchor.trim() {
                 anchor.to_string()
@@ -1355,7 +1359,9 @@ mod tests {
 
     #[test]
     fn compose_verifier_final_response_reverify_leads_with_latest_message() {
-        // The implementer cannot edit the anchor.
+        // The implementer cannot edit the anchor. So the latest message
+        // must come first, and the anchor must follow under a header that
+        // marks it superseded.
         let composed = compose_verifier_final_response(
             Some("round 1: no correction needed"),
             "corrected: nine hits, two wgets".to_string(),

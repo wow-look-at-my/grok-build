@@ -166,7 +166,8 @@ async fn sandboxed_package_runner_gets_tmp_cache_env() {
             dir.starts_with(&scratch),
             "{name} must be mapped onto the injected scratch root, got {value}"
         );
-        // The whole point of the redirect: never back into the session's own state directory.
+        // The whole point of the redirect: never back into the session's own
+        // state directory (nor the home tree a confining profile refuses).
         let grok_home = xai_grok_tools::util::grok_home();
         assert!(
             !dir.starts_with(&grok_home),
@@ -227,6 +228,9 @@ async fn runner_cache_env_skips_unconfined_non_runners_and_explicit_config() {
     );
 
     // A variable explicitly REMOVED from the child must still be redirected.
+    // `get_envs` reports a removed variable as present-with-`None`; reading
+    // that as "already configured" silently skips the redirect and leaves
+    // the runner failing on the unwritable `$HOME` cache it was removed from.
     let mut cmd = Command::new("uvx");
     cmd.env_remove("UV_CACHE_DIR");
     apply_runner_cache_env(&mut cmd, "uvx", true, &scratch);
@@ -314,7 +318,9 @@ async fn shipped_runner_env_lets_a_real_runner_start_without_a_writable_home() {
         String::from_utf8_lossy(&baseline.stderr)
     );
 
-    // Now build the child exactly as the spawn site does: start from the baseline environment.
+    // Now build the child exactly as the spawn site does: start from the
+    // baseline environment, then let the shipped function install its
+    // redirects.
     let mut cmd = Command::new(&uv);
     cmd.arg("tool").arg("list").env("HOME", &readonly_home);
     for unset in [

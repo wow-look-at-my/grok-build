@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used)] // 1 hit predates the gate
 #![allow(
     unused_imports,
     unused_variables,

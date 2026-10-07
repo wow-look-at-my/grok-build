@@ -49,7 +49,7 @@ Nothing else is bound. Your home directory, other checkouts, and `/data` are abs
 
 macOS confines writes only. The Seatbelt profile allows reads and denies every write. It then gives back the `--rw` paths, `~/.grok` and a dedicated temp directory. `--ro` means "not writable" there. Linux confines both reads and writes. A `--rn` path is hidden on both.
 
-A bare `--sandbox` with no value is **invalid** — use `--sandbox=pathbox` (or a path flag) for the jail, or `--sandbox <profile>` for a profile. Nor can you mix the two on one command line: `--sandbox <profile>` plus any `--ro`/`--rw`/`--rn` is rejected. One spelling to still avoid: the profile form `--sandbox <profile>` takes the next word as its value when that word is not a flag. As a result, `grok --sandbox "fix the bug"` reads the prompt as a profile name. Put another flag after it, or put the prompt first.
+A bare `--sandbox` with no value is **invalid** — use `--sandbox=pathbox` (or a path flag) for the jail, or `--sandbox <profile>` for a profile. Nor can you mix the two on one command line: `--sandbox <profile>` plus any `--ro`/`--rw`/`--rn` is rejected. One spelling to still avoid: the profile form `--sandbox <profile>` takes the next word as its value when that word is not a flag, so `grok --sandbox "fix the bug"` reads the prompt as a profile name. Put another flag after it, or put the prompt first.
 
 The pathbox jail and the profiles below are separate features. `--sandbox <profile>` selects a profile and builds no jail. Pass a profile name to get the `deny` lists and the child-network rules.
 

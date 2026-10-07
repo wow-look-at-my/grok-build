@@ -105,6 +105,8 @@ pub struct SubagentCoordinator<R: ChildRunner> {
     usage_not_applied_prompts: HashSet<PromptScope>,
     pending_completions: Vec<BufferedCompletion>,
     /// Interjections addressed to a child that is queued or pending, in order.
+    /// Delivered when the child reports started. Dropped, with a warning,
+    /// when the child finishes without ever starting.
     held_interjections: HashMap<String, Vec<String>>,
     runs: FuturesUnordered<
         TaggedFuture<futures::future::CatchUnwind<std::panic::AssertUnwindSafe<R::RunFuture>>>,

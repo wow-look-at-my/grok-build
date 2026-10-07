@@ -2106,7 +2106,10 @@ pub(crate) async fn run_shell_child(
     result.tool_calls = tool_calls;
     result.turns = turns;
     result.duration_ms = start.elapsed().as_millis() as u64;
-    // The child's OWN todo list, read while its session (and so its live `State<TodoState>`) is still bound here.
+    // The child's OWN todo list, read while its session (and so its live
+    // `State<TodoState>`) is still bound here — the last moment the parent can
+    // see it. A `/goal` planner builds that list with `todo_write` as it works;
+    // this carries it back so the spawning session can merge it into its own.
     result.todos = session_todo_contents(&ctx.workspace_ops, child_session_id.0.as_ref()).await;
     if let Some(trace_gcs_config) = gcs_upload_ctx.upload_method.as_ref().map(|method| {
         crate::session::repo_changes::TraceExportConfig {

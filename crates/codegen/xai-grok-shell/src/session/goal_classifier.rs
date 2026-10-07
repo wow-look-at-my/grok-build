@@ -59,11 +59,18 @@ pub(crate) const GOAL_CLASSIFIER_CHANGES_PATH_TEMPLATE: &str =
     "goal-classifier-{verifier_id}-{attempt}.patch";
 
 /// Template for the per-attempt run-log FILE NAME (rooted like
-/// [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]).
+/// [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]). The harness writes the
+/// implementer's tool-call ledger here and each skeptic reads it as
+/// `RUN_LOG`.
 pub(crate) const GOAL_CLASSIFIER_RUN_LOG_PATH_TEMPLATE: &str =
     "goal-classifier-{verifier_id}-{attempt}.runlog.md";
 
-/// Wall-clock budget for the best-effort `git rev-parse HEAD` capture during goal creation.
+/// Wall-clock budget for the best-effort `git rev-parse HEAD` capture
+/// during goal creation. The call must NEVER block goal creation; if
+/// the workspace isn't a git repo or HEAD takes longer than this
+/// (network filesystem, etc.) we drop the baseline and surface
+/// `(unavailable)` to each skeptic — matching the verifier prompt's
+/// rule 5.
 const GIT_BASELINE_CAPTURE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Subagent type used for each verifier-skeptic spawn.
@@ -89,7 +96,11 @@ pub(crate) const GOAL_VERIFIER_SKEPTIC_MAX: u32 = 5;
 
 /// Assign the skeptic `pool` to `n` skeptics round-robin: index `i` gets
 /// `pool[i % pool.len()]`. An empty pool gives an empty assignment, and every
-/// skeptic inherits the session model.
+/// skeptic inherits the session model. `n` is the CLAMPED skeptic count used
+/// at the fan-out site, so the assignment matches the spawned indices.
+///
+/// Each verification reads the CURRENT pool. A goal never keeps a model the
+/// user has since moved away from.
 pub(crate) fn assign_skeptic_models(
     pool: &[crate::util::config::GoalRoleModel],
     n: usize,
@@ -102,7 +113,10 @@ pub(crate) fn assign_skeptic_models(
         .collect()
 }
 
-/// Whether skeptic runs on another model than it did last round.
+/// Whether skeptic 0 runs on another model than it did last round. Skeptic 0
+/// continues its previous run (`resume_from`), and a run cannot continue on a
+/// model that did not write its history, so a change means a fresh start.
+/// An empty assignment means the session model on both sides.
 pub(crate) fn skeptic0_model_changed(
     previous: &[crate::util::config::GoalRoleModel],
     current: &[crate::util::config::GoalRoleModel],
@@ -1539,7 +1553,8 @@ async fn run_one_skeptic(
 /// [`run_one_skeptic`], run a second time on a fresh cold spawn when the
 /// first run gave no verdict. Without the retry, a skeptic that ran out of
 /// budget reaches the implementer as a gap it cannot fix. A second failure
-/// still counts as a refute.
+/// still counts as a refute. Returns the result and the spawn id that
+/// produced it, so skeptic 0's resume chain follows the live session.
 async fn run_skeptic_retrying_no_verdict(
     spawner: &Arc<dyn GoalClassifierSpawner>,
     skeptic_idx: u32,
@@ -1636,9 +1651,15 @@ pub(crate) struct VerificationStageInputs<'a> {
     /// The stage diffs the CURRENT `plan_file` against it so the skeptics see mid-run plan edits.
     /// `None` when no baseline was captured (planner-off goals or a snapshot failure).
     pub plan_baseline_file: Option<&'a Path>,
-    /// Rendered run log ([`run_log::build_run_log`]) — the harness's own record of the implementer's tool calls.
+    /// Rendered run log ([`run_log::build_run_log`]) — the harness's own
+    /// record of the implementer's tool calls and their results. The stage
+    /// writes it beside the patch and names the path as `RUN_LOG`. `None`
+    /// when the caller has no conversation to build it from.
     pub run_log: Option<&'a str>,
-    /// The goal-wide implementer scratch dir ([`super::goal_tracker::implementer_scratch_dir`]).
+    /// The goal-wide implementer scratch dir
+    /// ([`super::goal_tracker::implementer_scratch_dir`]). Threaded into
+    /// every skeptic prompt so the panel knows where the implementer's
+    /// temp files are; it is not evidence by itself.
     pub implementer_scratch_dir: &'a Path,
     /// Whether that implementer dir was actually created (from the goal orchestration), so the verifier prompt only claims it exists when true.
     pub scratch_dir_ready: bool,
@@ -1809,6 +1830,8 @@ pub(crate) async fn run_verification_stage(
     };
 
     // The run log is written once and every skeptic reads the same file.
+    // A write failure renders `RUN_LOG: (unavailable)`; the skeptic then
+    // runs the plan's steps itself (verifier prompt rule 7).
     let run_log_raw = format_run_log_path(inputs.verifier_id, inputs.attempt);
     let run_log_path = PathBuf::from(&run_log_raw);
     let run_log_ref: Option<&str> = match inputs.run_log {
@@ -1836,7 +1859,8 @@ pub(crate) async fn run_verification_stage(
     };
 
     // Compute the plan baseline→current diff ONCE; every skeptic shares the
-    // same borrowed `&str` (no per-skeptic clone).
+    // same borrowed `&str` (no per-skeptic clone). The plan is agent-authored
+    // text, so sanitize it for control tokens exactly like FINAL_RESPONSE.
     let plan_changes_raw = match (inputs.plan_baseline_file, inputs.plan_file) {
         (Some(baseline), Some(current)) => evidence::capture_plan_changes(baseline, current).await,
         _ => None,

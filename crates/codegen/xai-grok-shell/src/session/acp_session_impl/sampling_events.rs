@@ -146,7 +146,8 @@ impl SessionActor {
                 request_id,
                 timestamp_ms,
             } => {
-                // A retry reuses the tool indexes of the attempt it replaces.
+                // A retry reuses the tool indexes of the attempt it replaces,
+                // so the abandoned attempt's bytes would name this one's calls.
                 self.streaming_tool_titles.lock().clear();
                 // Begin a fresh per-generation segment A new turn (the prompt id changed) resets the whole accumulator, so a capture from an earlier turn cannot leak into this trace A same-turn restart, a doomloop's next.
                 // That way every generation survives instead of only the last `current_prompt_id` / `current_turn_number` are set by the prompt handler before any sampler events arrive.
@@ -316,7 +317,9 @@ impl SessionActor {
                 response,
                 metrics: _,
             } => {
-                // The calls are whole now and the real `ToolCall` names each.
+                // The calls are whole now and the real `ToolCall` names each
+                // one. Holding their arguments past here only feeds the next
+                // stream a stale head.
                 self.streaming_tool_titles.lock().clear();
                 let request_updates_turn = request_owned;
 

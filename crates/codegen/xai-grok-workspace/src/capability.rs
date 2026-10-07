@@ -134,7 +134,8 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
             matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
         }
 
-        // Inspect class.
+        // Inspect class. `Ci` reads GitHub state and mutates nothing, so it
+        // belongs with the other read-only inspections.
         Lsp | ListDir | List | Ci => matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute),
 
         // Edit class.

@@ -29,7 +29,10 @@ enum PresetVisibility {
 static TOOLSET_PRESETS: OnceLock<Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>>> =
     OnceLock::new();
 /// Every caller of this registry recovers the map from a poison rather than
-/// panicking on one: the sections here are `HashMap` insert / get / iter.
+/// panicking on one: the sections here are `HashMap` insert / get / iter, so a
+/// poison can only arrive from unrelated code, and panicking on one would turn
+/// that into a process that can no longer resolve any toolset preset.
+/// `parking_lot::Mutex` is the structural fix and is not a dependency here.
 fn toolset_preset_registry()
 -> &'static Mutex<HashMap<String, (ToolsetPresetBuilder, PresetVisibility)>> {
     TOOLSET_PRESETS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -356,11 +359,17 @@ pub fn grok_build_hashline_toolset(
         behavior_preset: None,
     }
 }
-/// Read-only toolset for the **explore** subagent. Genuinely read-only over
-/// the workspace: `read_file` (Read), `list_dir` (Glob), `grep` (Grep).
-/// `run_terminal_command` (Bash) is intentionally omitted so exploration
-/// cannot mutate the workspace — the read-only guarantee is enforced by the
-/// toolset, not merely by the prompt.
+/// Read-only toolset for the **explore** subagent.
+///
+/// Genuinely read-only over the workspace: `read_file` (Read), `list_dir`
+/// (Glob), `grep` (Grep).
+/// `run_terminal_command` (Bash) is intentionally omitted so exploration cannot
+/// mutate the workspace — the read-only guarantee is enforced by the toolset,
+/// not merely by the prompt.
+/// `send_message` mutates nothing here, and without it an explorer cannot
+/// answer the session that spawned it until its whole run ends.
+/// The subagent tools are here so explore mode can fan a search out.
+/// [`EXPLORE_SUBAGENT_TYPES`] keeps every child read-only.
 fn explore_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
@@ -390,6 +399,7 @@ fn plan_toolset() -> ToolServerConfig {
             // (&grok_build::SkillTool).into(),
             (&grok_build::TodoWriteTool).into(),
             (&grok_build::SendMessageTool).into(),
+            // search_replace + run_terminal_command intentionally omitted (read-only)
         ],
         behavior_preset: None,
     }
@@ -663,10 +673,15 @@ where
     }
     Ok(opt)
 }
-/// All built-in agent names as a typed enum. Eliminates string matching in
-/// discovery and ensures built-in names are defined in exactly one place. The
-/// enum covers all built-in agents for centralized name management and
-/// `by_name()` dispatch.
+/// All built-in agent names as a typed enum.
+///
+/// Eliminates string matching in discovery and ensures built-in names
+/// are defined in exactly one place. The enum covers all built-in
+/// agents for centralized name management and `by_name()` dispatch.
+///
+/// `subagent_variants()` returns the subset exposed to the LLM via the
+/// `TaskTool` description. Every other variant is a top-level agent
+/// profile, resolvable by name but not advertised as a subagent type.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumString, EnumIter, AsRefStr, IntoStaticStr,
 )]
@@ -714,8 +729,10 @@ impl BuiltinAgentName {
     pub fn subagent_variants() -> &'static [Self] {
         &[Self::GeneralPurpose, Self::Explore, Self::Plan]
     }
-    /// Built-in agent identities the pager's Shift+Tab ring can cycle through
-    /// live, in ring order.
+    /// Built-in agent identities the pager's Shift+Tab ring can cycle
+    /// through live, in ring order. Selecting one triggers a full agent
+    /// rebuild (tool registry + prompt), not just a prompt swap — see
+    /// `SessionActor::handle_session_mode`.
     pub fn shift_tab_variants() -> &'static [Self] {
         &[Self::GrokBuildOrchestrator, Self::Explore]
     }

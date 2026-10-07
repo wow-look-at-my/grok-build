@@ -1,5 +1,5 @@
-#![allow(clippy::expect_used)] // Hits predate the gate
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)] // 2 hits predate the gate
+#![allow(clippy::unwrap_used)] // 1 hit predates the gate
 
 //! CLI tool for code graph navigation.
 //!

@@ -1837,7 +1837,11 @@ async fn build_request_uses_sampling_config() {
     assert_eq!(request.top_p, Some(0.9));
 }
 
-/// The budget that goes out has to be the one the window has room for.
+/// The provider charges the requested output against the same window as the
+/// prompt, so a conversation that fits on its own can still make the REQUEST
+/// too big: 737_857 input tokens plus a 262_144 output budget is 1_000_001
+/// against a 1_000_000 window, and the server rejects it. The budget that goes
+/// out has to be the one the window has room for.
 #[tokio::test]
 async fn build_request_fits_the_output_budget_into_the_context_window() {
     let config = SamplingConfig {
@@ -4911,7 +4915,9 @@ async fn reasoning_roundtrip_through_actor_reaches_next_messages_wire() {
 
     let thinking_text = "Let me weigh the token budget in between turns.";
 
-    // Turn N: the Messages stream synthesized `[Reasoning, Assistant]`.
+    // Turn N: the Messages stream synthesized `[Reasoning, Assistant]`; the
+    // shell turn loop commits the Reasoning via `push_tool_result` and the
+    // Assistant via `push_assistant_response`.
     let h = TestHarness::with_conversation(vec![
         ConversationItem::system("You are a coding assistant."),
         ConversationItem::user("q1"),
@@ -4928,10 +4934,11 @@ async fn reasoning_roundtrip_through_actor_reaches_next_messages_wire() {
         }));
     h.handle
         .push_assistant_response(ConversationItem::assistant("The answer."));
+    // Turn N+1: user asks a follow-up.
     h.handle.push_user_message(ConversationItem::user("q2"));
 
-    // `build_request` runs `ensure_conversation_integrity`
-    // (dangling-tool-call repair) then the prune/memory pass.
+    // `build_request` runs `ensure_conversation_integrity` (dangling-tool-call
+    // repair) then the prune/memory pass, then returns the request.
     let request = h
         .handle
         .build_request(vec![], None, false, None, "c".into(), "r".into())
@@ -5768,7 +5775,8 @@ async fn a_panicking_command_leaves_the_actor_serving_later_commands() {
         tokio_util::sync::CancellationToken::new(),
     );
 
-    // The first push unwinds inside the actor's command round.
+    // The first push unwinds inside the actor's command round. Its own ack is
+    // the dropped half of a oneshot, so the caller sees the round fail.
     handle.push_user_message(ConversationItem::user("first"));
 
     // Commands after it are served, which is the whole point of the guard: a

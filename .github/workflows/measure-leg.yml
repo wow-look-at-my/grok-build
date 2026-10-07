@@ -35,11 +35,11 @@ jobs:
 
       - name: Install protoc (pinned v29.3)
         run: |
-          curl -fsSL -o "${{ runner.temp }}/protoc.zip" \
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" \
             https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
-          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  ${{ runner.temp }}/protoc.zip" | sha256sum -c -
-          unzip -q -o "${{ runner.temp }}/protoc.zip" -d "${{ runner.temp }}/protoc"
-          echo "PROTOC=${{ runner.temp }}/protoc/bin/protoc" >> "$GITHUB_ENV"
+          echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -51,10 +51,10 @@ jobs:
       - name: Install binpazer
         run: |
           curl -fSsL --location-trusted \
-            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "${{ runner.temp }}/binpazer"
-          chmod +x "${{ runner.temp }}/binpazer"
-          echo "BINPAZER=${{ runner.temp }}/binpazer" >> "$GITHUB_ENV"
-          "${{ runner.temp }}/binpazer" --version
+            "https://dl.pazer.build/bin-file-fmt/binpazer?os=linux&arch=amd64" -o "$RUNNER_TEMP/binpazer"
+          chmod +x "$RUNNER_TEMP/binpazer"
+          echo "BINPAZER=$RUNNER_TEMP/binpazer" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/binpazer" --version
 
       # The runner gives the cache service env to action processes only, never to a run step.
       - name: Export the cache service env for the shell steps

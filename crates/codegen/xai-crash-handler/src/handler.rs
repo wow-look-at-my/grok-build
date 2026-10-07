@@ -337,7 +337,11 @@ mod imp {
                 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
                 let si_addr: u64 = 0;
 
-                // `getpid` never fails on the platforms this handler runs on.
+                // `getpid` never fails on the platforms this handler runs on, so
+                // the value is a positive `pid_t` and widening it to the u32 the
+                // record carries cannot lose anything. Kept as a cast rather than
+                // `try_from` because a signal handler may not branch on a
+                // conversion that has no failure case to serve.
                 #[allow(clippy::cast_sign_loss)] // getpid cannot return a negative pid
                 let pid = libc::getpid() as u32;
                 let timestamp = libc::time(std::ptr::null_mut()) as u64;

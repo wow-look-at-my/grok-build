@@ -383,7 +383,7 @@ auth_provider = "litellm"
 
 **Interaction with other credentials:** a literal `api_key`/`env_key` on the model wins over its `auth_provider`. Provider-backed models are BYOK: your xAI session token is never sent to their endpoints, and a failing provider command fails the request rather than falling back to the session token.
 
-**Security:** provider commands execute code. As a result, they are honored only from trusted config layers (`~/.grok/config.toml`, managed config, requirements). A project's `.grok/config.toml` can never define one. Whatever layer sets a model's `base_url` decides where that model's minted token is sent, and `base_url` (unlike the provider table) is not stripped from remote or campaign patches. This is the same as for a static `env_key`. Keep provider tables and the model `base_url` in layers you trust. The command inherits Grok's environment (so it sees `PATH`, `HOME`, and any other secrets there), but Grok's own first-party credentials (`XAI_API_KEY` and related keys) are removed so a BYOK helper never receives them. Write helpers that read only what they need, and prefer the `GROK_AUTH_PROVIDER_*` handback for the prior credential.
+**Security:** provider commands execute code, so they are honored only from trusted config layers (`~/.grok/config.toml`, managed config, requirements). A project's `.grok/config.toml` can never define one. Whatever layer sets a model's `base_url` decides where that model's minted token is sent, and `base_url` (unlike the provider table) is not stripped from remote or campaign patches, the same as for a static `env_key`. Keep provider tables and the model `base_url` in layers you trust. The command inherits Grok's environment (so it sees `PATH`, `HOME`, and any other secrets there), but Grok's own first-party credentials (`XAI_API_KEY` and related keys) are removed so a BYOK helper never receives them; write helpers that read only what they need, and prefer the `GROK_AUTH_PROVIDER_*` handback for the prior credential.
 
 ### Using auth.json for API Access
 
@@ -1688,7 +1688,7 @@ enabled = false
 
 ### Usage Frequency
 
-`usage_frequency` does not gate the tool. It tunes how strongly the system prompt and tool wording nudge the model toward spawning subagents: `explicit-only`, `very-rare`, `rare`, `default` (no added nudge, the default), `often`, or `very-often`.
+`usage_frequency` doesn't gate the tool — it tunes how strongly the system prompt and tool wording nudge the model toward spawning subagents: `explicit-only`, `very-rare`, `rare`, `default` (no added nudge, the default), `often`, or `very-often`.
 
 ```toml
 [subagents]
@@ -1908,7 +1908,12 @@ temperature = 0.8
 [model_providers.ollama]
 ```
 
-The provider id fills in the endpoint, the listing dialect and the pricing switch, so every model the runtime serves appears in `/model`. This is with its real context window and a dot showing whether it is loaded in VRAM. Use `[model_providers.lmstudio]` for LM Studio. To pin Ollama's window or keep a model resident, add `api_backend = "ollama"` and an `extra_body` table — see the user guide's Custom Models chapter.
+The provider id fills in the endpoint, the listing dialect and the pricing
+switch, so every model the runtime serves appears in `/model` with its real
+context window and a dot showing whether it is loaded in VRAM. Use
+`[model_providers.lmstudio]` for LM Studio. To pin Ollama's window or keep a
+model resident, add `api_backend = "ollama"` and an `extra_body` table — see
+the user guide's Custom Models chapter.
 
 **Together AI:**
 

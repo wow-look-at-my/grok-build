@@ -1775,7 +1775,8 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     {
-                        // Ordering covers the mode request only: the prompt below runs a whole turn.
+                        // Ordering covers the mode request only: the prompt below
+                        // runs a whole turn and must not hold the gate.
                         let _ordered = gate.lock().await;
                         let mode_req = acp::SetSessionModeRequest::new(
                             session_id.clone(),

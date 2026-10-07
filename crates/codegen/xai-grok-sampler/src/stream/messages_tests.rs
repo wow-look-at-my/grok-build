@@ -287,8 +287,15 @@ async fn reasoning_roundtrip_without_signature_survives_to_next_messages_request
         items
     );
 
-    // (b) Shell turn-loop commit: the Reasoning sibling rides the `push_tool_result` arm and is appended to history verbatim.
+    // (b) Shell turn-loop commit: the Reasoning sibling rides the
+    // `push_tool_result` arm and is appended to history verbatim; the
+    // Assistant rides `push_assistant_response`. Both end up in the flat
+    // history list that becomes the next ConversationRequest.
+    // (The real `push_message` appends + persists without dropping Reasoning;
+    // we reproduce the resulting ordered item list here.)
 
+    // Turn N+1: the user asks a follow-up; the previous turn's items are the
+    // prefix of the next request.
     items.push(ConversationItem::user("continue"));
 
     let req = ConversationRequest::from_items(items);

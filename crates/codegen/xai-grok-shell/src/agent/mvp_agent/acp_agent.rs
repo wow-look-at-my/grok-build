@@ -321,7 +321,10 @@ impl acp::Agent for MvpAgent {
             );
         }
         {
-            // Every `[model_providers.<id>]` that autodetects answers with its own models.
+            // Every `[model_providers.<id>]` that autodetects answers with its
+            // own models. This runs off the startup path: a provider that
+            // answers slowly must not hold `initialize` open, and the catalog
+            // reaches the client on its own through the models-updated push.
             let cfg = self.cfg.borrow().clone();
             let models_manager = self.models_manager.clone();
             // Set before the spawn: a session that starts first waits for it.
@@ -336,7 +339,11 @@ impl acp::Agent for MvpAgent {
                 }
                 drop(discovery_guard);
                 // A local runtime loads a model on its first request and
-                // unloads it on an idle TTL.
+                // unloads it on an idle TTL, so residency painted once at
+                // startup is wrong within minutes. Only the residency is
+                // re-read: the window and the capabilities do not move while
+                // the runtime is up, and re-reading those costs one
+                // `/api/show` per model.
                 if !discovery::has_local_runtime(&cfg) {
                     return;
                 }
@@ -372,7 +379,8 @@ impl acp::Agent for MvpAgent {
         let preferred_method_early = self.cfg.borrow().grok_com_config.preferred_method;
         let xai_api_base_url = self.cfg.borrow().endpoints.xai_api_base_url.clone();
         // A declared provider counts even before its models are discovered:
-        // autodetection runs off this path.
+        // autodetection runs off this path, so the catalog is still without
+        // them here.
         let has_provider_credentials =
             crate::agent::config::any_provider_has_own_credentials(&self.cfg.borrow());
         let has_byok = has_provider_credentials

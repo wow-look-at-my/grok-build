@@ -65,7 +65,15 @@ pub struct SubagentsConfig {
     pub limit_behavior: Option<String>,
     #[serde(default)]
     pub workflow_max_concurrent: Option<i64>,
-    /// How strongly system-prompt/tool wording nudges the model toward spawning subagents.
+    /// How strongly system-prompt/tool wording nudges the model toward
+    /// spawning subagents. One of: `"explicit-only"`, `"very-rare"`,
+    /// `"rare"`, `"default"`, `"often"`, `"very-often"`. Purely a wording
+    /// knob — never gates the tool itself (see `enabled`).
+    ///
+    /// ```toml
+    /// [subagents]
+    /// usage_frequency = "often"
+    /// ```
     #[serde(default)]
     pub usage_frequency: Option<String>,
     /// Per-subagent model ID overrides.
@@ -877,7 +885,11 @@ impl StorageMode {
             Ok("local") => return Self::Local,
             _ => {}
         }
-        // `remote.writeback_enabled` is deliberately not consulted: Writeback flushes every turn of the conversation to grok-code-backend.
+        // `remote.writeback_enabled` is deliberately not consulted: Writeback
+        // flushes every turn of the conversation to grok-code-backend, and
+        // upstream lets the server turn that on for a client that asked for
+        // nothing. Writeback stays reachable through --storage-mode and
+        // GROK_STORAGE_MODE, which are the operator's own choices.
         let _ = remote;
         Self::Local
     }
@@ -1506,7 +1518,8 @@ pub fn apply_sandbox(
         });
     xai_grok_sandbox::set_configured_profile(&resolved.value);
     // The pathbox jail is the re-exec jail (jail.rs), applied before this
-    // function runs.
+    // function runs. It is reported as a confining profile (so leader/workspace
+    // gates treat it as confined) but never drives a nono `SandboxManager`.
     if sandbox_profile == xai_grok_sandbox::ProfileName::Pathbox {
         return;
     }
@@ -1514,13 +1527,24 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    // Whether a bwrap re-exec follows decides how the worker's fd is handed over, so it is settled.
+    // Whether a bwrap re-exec follows decides how the worker's fd is handed
+    // over, so it is settled before the worker starts. Only an exec-surviving
+    // fd reaches the new image, and only an exec takes the fd out of reach of
+    // this process's other children: clearing close-on-exec without an exec
+    // hands every child of the session a live socket to an UNCONFINED `gh`.
+    // The re-exec command cannot be built first to answer this. It snapshots
+    // this process's environment when it sets its own marker, and the fd's
+    // name has to be in that snapshot.
     #[cfg(target_os = "linux")]
     let reexec_follows = xai_grok_sandbox::bwrap_reexec_planned(&sandbox_profile, &workspace);
     #[cfg(not(target_os = "linux"))]
     let reexec_follows = false;
     // Start the unsandboxed `gh` worker before the confinement below is
-    // installed.
+    // installed. `gh` keeps its OAuth token in the login keychain, and the
+    // profile's macOS rules deny the keychain mach services, so a `gh` spawned
+    // under this sandbox sends no Authorization header and every CI query
+    // answers 401. The worker forked here stays unconfined, and answers those
+    // queries from the host instead.
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
         let _ = xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
     }
@@ -1608,7 +1632,10 @@ pub fn apply_sandbox(
             BwrapStartup::Continue => {}
         }
         // Still running, so the exec the worker's fd was prepared for never
-        // happened.
+        // happened: the command would not build, or `exec` itself failed and
+        // this process fell back to Landlock. Either way the session is
+        // confined in place, and an inheritable fd with its number in the
+        // environment would hand every child a socket to an unconfined `gh`.
         if reexec_follows && let Some(fd) = xai_grok_sandbox::ci_host::ci_host_fd() {
             xai_grok_sandbox::ci_host::reclaim_from_failed_exec(fd);
         }

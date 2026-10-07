@@ -572,7 +572,8 @@ pub fn current_value_for(
             Some(SettingValue::Bool(ui.stop_gate_unfinished_todos_enabled()))
         }
         "stop_gate_ci_failing" => Some(SettingValue::Bool(ui.stop_gate_ci_failing_enabled())),
-        // Resolved once per session in the shell.
+        // Resolved once per session in the shell; the pager keeps the `[ui]`
+        // mirror so the row reads back what the next session will do.
         "thinking_summaries" => Some(SettingValue::Bool(ui.thinking_summaries_enabled())),
         "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints: `None` (inherit) reads as the default ON
@@ -1295,7 +1296,10 @@ mod tests {
                          None, mapped to the `always_allow_all_sessions` canonical)",
                     );
                 }
-                // A harness model slot has no UiConfig field of its own: it lives in `[models]` and reaches the modal through the `harness_models` projection.
+                // A harness model slot has no UiConfig field of its own: it
+                // lives in `[models]` and reaches the modal through the
+                // `harness_models` projection, which starts empty. Its
+                // registry default is the empty inherit sentinel.
                 (key, SettingKind::DynamicEnum { default, .. })
                     if xai_grok_models::slot_for_setting_key(key).is_some() =>
                 {

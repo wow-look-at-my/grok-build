@@ -115,6 +115,10 @@ pub fn folder_trust_inert() -> bool {
 }
 
 /// Whether this binary carries no release stamp — i.e. a local/dev build.
+///
+/// The stamp is written into the binary after it links, so this is a read of the
+/// binary's own bytes rather than of a compile-time environment variable.
+/// Cross-crate callers use [`folder_trust_inert`].
 fn is_local_build() -> bool {
     // Runtime escape hatch: a pinned GROK_TEST_VERSION simulates a release build
     // Tests/CI run unstamped, so they look like local builds; this lets them exercise the gate
@@ -1231,7 +1235,9 @@ mod tests {
             let _sim = EnvVarGuard::set(xai_grok_version::TEST_VERSION_ENV, Path::new("0.0.0-sim"));
             assert!(!is_local_build());
         }
-        // With it unset this is a local build, unconditionally: the stamper writes the release number into the shipped binary only.
+        // With it unset this is a local build, unconditionally: the stamper writes
+        // the release number into the shipped binary only, so a test binary carries
+        // no stamp on any runner.
         let _unset = EnvVarGuard::unset(xai_grok_version::TEST_VERSION_ENV);
         assert!(!xai_grok_version::is_release_stamped());
         assert!(is_local_build());
@@ -1239,7 +1245,11 @@ mod tests {
 
     #[test]
     fn store_io_is_noop_on_local_build() {
-        // On a local/dev build the whole feature is inert.
+        // On a local/dev build the whole feature is inert. Both halves pin a guard
+        // via a UNIQUE per-repo key (never store-file existence) so they hold under
+        // single-process `cargo test` too. GROK_HOME-isolated and ENV_LOCK-serialized
+        // so toggling GROK_TEST_VERSION is race-safe. A test binary is never
+        // stamped, so both halves assert unconditionally.
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         let _home = EnvVarGuard::set("GROK_HOME", home.path());

@@ -1,4 +1,16 @@
 //! Model listings for a LOCAL runtime: Ollama and LM Studio.
+//!
+//! Both also serve an OpenAI-compatible `/v1/models`, and both answer it with
+//! an id and nothing else — no window, no capabilities, no residency. A model
+//! discovered that way lands on [`DEFAULT_CONTEXT_WINDOW`], which for Ollama
+//! is 256k against a runner the server loaded at whatever its VRAM allowed
+//! (`OLLAMA_CONTEXT_LENGTH` documents the default as "4k/32k/256k based on
+//! VRAM"). The harness then never compacts, and Ollama drops the head of the
+//! conversation in silence. Reading each runtime's own listing is what makes
+//! the catalog's number true.
+//!
+//! Residency is the other thing only these listings carry, and it is what the
+//! picker's green dot reads.
 
 use xai_grok_sampling_types::ollama::{OllamaPsResponse, OllamaShowResponse, OllamaTagsResponse};
 
@@ -28,10 +40,11 @@ pub(crate) struct LocalModel {
 }
 
 impl LocalModel {
-    /// The window this entry contributes to the catalog. `Loaded` prefers the
-    /// running instance's window because that is the inference enforces. An
-    /// unloaded model has none, so it falls back to the maximum rather than
-    /// to the client's 256k guess.
+    /// The window this entry contributes to the catalog.
+    ///
+    /// `Loaded` prefers the running instance's window because that is the one
+    /// inference actually enforces. An unloaded model has none, so it falls
+    /// back to the maximum rather than to the client's 256k guess.
     fn context_window(&self, source: ContextWindowSource) -> Option<u64> {
         match source {
             ContextWindowSource::Loaded => self.loaded_context.or(self.max_context),
@@ -40,10 +53,12 @@ impl LocalModel {
     }
 }
 
-/// The host root a native API lives under, given an inference base URL. A
-/// provider's `base_url` points at the OpenAI-compatible endpoint
+/// The host root a native API lives under, given an inference base URL.
+///
+/// A provider's `base_url` points at the OpenAI-compatible endpoint
 /// (`http://localhost:11434/v1`), and every native path is a sibling of it at
-/// the host root.
+/// the host root. Stripping the known suffixes is what lets one provider block
+/// serve both.
 pub(crate) fn host_root(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
     for suffix in ["/api/v1", "/api/v0", "/v1", "/api"] {
@@ -113,7 +128,8 @@ pub(crate) fn fetch_residency_blocking(
                 residency.insert(model.slug, model.loaded_in_vram);
             }
         }
-        // A remote provider reports no residency, so there is nothing to poll and nothing draws a dot.
+        // A remote provider reports no residency, so there is nothing to poll
+        // and nothing draws a dot.
         ModelsListDialect::Openai => {}
     }
     Ok(residency)
@@ -140,7 +156,8 @@ fn to_entry(
         name: model.display_name.or(Some(model.slug)),
         description,
         context_window,
-        // A local runtime that reports thinking support gets the gate opened; `/effort` reads exactly this.
+        // A local runtime that reports thinking support gets the gate opened;
+        // `/effort` reads exactly this.
         supports_reasoning_effort: model.supports_thinking,
         reasoning_efforts,
         loaded_in_vram: Some(model.loaded_in_vram),
@@ -162,7 +179,11 @@ fn describe(model: &LocalModel) -> Option<String> {
     if !model.supports_tools {
         parts.push("not trained for tool use".to_owned());
     }
-    // The whole point of reading this listing is a true window.
+    // The whole point of reading this listing is a true window. When the
+    // runtime would not say — an `/api/show` that failed, and nothing loaded
+    // to ask instead — the entry falls back to the client default, which is
+    // the guess that lets the harness overrun the real window in silence. Say
+    // so on the row rather than let the number pass for an answer.
     if model.max_context.is_none() && model.loaded_context.is_none() {
         parts.push("context window unknown".to_owned());
     }
@@ -268,7 +289,8 @@ fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalMod
                 .as_ref()
                 .and_then(OllamaShowResponse::max_context_length),
             loaded_context: resident.and_then(|r| r.context_length).filter(|&c| c > 0),
-            // `/api/ps` lists CPU-resident runners too, and a dot that claims VRAM for one is wrong.
+            // `/api/ps` lists CPU-resident runners too, and a dot that claims
+            // VRAM for one is wrong. `size_vram` is what separates them.
             loaded_in_vram: resident.is_some_and(|r| r.size_vram.unwrap_or(0) > 0),
             supports_tools: show.as_ref().is_some_and(|s| s.has_capability("tools")),
             supports_thinking: show.as_ref().is_some_and(|s| s.has_capability("thinking")),
@@ -290,6 +312,7 @@ fn fetch_ollama_models(host: &str, api_key: Option<&str>) -> Result<Vec<LocalMod
 
 // ── LM Studio ───────────────────────────────────────────────────────────
 
+/// `/api/v1/models` (LM Studio 0.4.0+), falling back to `/api/v0/models`.
 ///
 /// Both carry the window, the quantization and the load state in one answer,
 /// so neither needs a per-model call. Only v1 reports capabilities and the
@@ -383,7 +406,8 @@ pub(crate) fn parse_lmstudio_v0(body: &serde_json::Value) -> Vec<LocalModel> {
                 max_context: m.get("max_context_length").and_then(|c| c.as_u64()),
                 loaded_context: None,
                 loaded_in_vram: m.get("state").and_then(|s| s.as_str()) == Some("loaded"),
-                // v0 reports no capabilities at all.
+                // v0 reports no capabilities at all. Claiming either way is a
+                // guess; the config's own keys are the place to state it.
                 supports_tools: false,
                 supports_thinking: false,
                 reasoning_levels: Vec::new(),

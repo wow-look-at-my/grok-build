@@ -114,6 +114,8 @@ impl HashlineSchemeParams {
     /// Returns `(anchor, read_line1, read_line2, grep_match, grep_context)`.
     pub fn example_anchors(&self) -> ExampleAnchors {
         let len = self.hash_len.clamp(1, 4);
+        // `"abcd"` and `"rstu"` are ASCII literals and `len` is clamped to
+        // 1..=4, so every byte offset up to `len` is a char boundary.
         #[allow(clippy::string_slice)]
         let hash = &"abcd"[..len];
         #[allow(clippy::string_slice)]

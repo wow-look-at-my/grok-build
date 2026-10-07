@@ -6,14 +6,22 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ───────────────────────────────────────────────────────────────────────────
-// Agent usage frequency.
+// Agent usage frequency — how strongly system-prompt/tool wording nudges the
+// model toward spawning subagents
+// ───────────────────────────────────────────────────────────────────────────
 
 /// How strongly system-prompt and tool-description wording nudges the model
 /// toward using the `task` tool to spawn subagents.
+///
+/// This never gates the tool itself — that is `subagents_enabled` (see the
+/// host's own subagents config). It only varies the surrounding wording, from
+/// telling the model to leave delegation to explicit user request, up to
+/// telling it to default to delegating independent work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentUsageFrequency {
-    /// Never spawn a subagent unless the user explicitly asks for an agent, subagent.
+    /// Never spawn a subagent unless the user explicitly asks for an agent,
+    /// subagent, or the task tool in the current conversation.
     ExplicitOnly,
     VeryRare,
     Rare,
@@ -880,7 +888,8 @@ pub struct TaskOutputToolInput {
 }
 
 impl TaskOutputToolInput {
-    /// The keys [`task_ids`](Self::task_ids) is read under.
+    /// The keys [`task_ids`](Self::task_ids) is read under. The first is what
+    /// this type writes; `task_id` is accepted on input only.
     pub const TASK_IDS_KEYS: Aliases = Aliases::new("task_ids", &["task_id"]);
 }
 
@@ -919,6 +928,11 @@ impl TryFrom<TaskOutputToolInputWire> for TaskOutputToolInput {
 }
 
 /// Forwards through [`TaskOutputToolInputWire`] and the fold.
+///
+/// This is the body `#[serde(try_from = "TaskOutputToolInputWire")]` would
+/// generate, written out because schemars 1.0 reads that attribute to build the
+/// advertised schema — it would publish the shadow's shape, and so name
+/// `task_id` to the model, which the whole leniency exists to avoid.
 impl<'de> Deserialize<'de> for TaskOutputToolInput {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -2053,7 +2067,7 @@ mod tests {
         assert_eq!(input.resolved_task_ids(), vec!["a"]);
     }
 
-    /// Different id lists in one call is a contradiction about which task to
+    /// Two different id lists in one call is a contradiction about which task to
     /// read; the tool may not pick a side in silence.
     #[test]
     fn task_output_input_whose_key_spellings_disagree_is_an_error_naming_the_field() {

@@ -32,7 +32,9 @@ pub(crate) fn completion_identity(actor: &SessionActor) -> std::rc::Rc<()> {
 pub(crate) fn test_auth_method_id(id: &str) -> crate::agent::auth_method::SharedAuthMethodId {
     crate::agent::auth_method::new_shared_auth_method_id(Some(acp::AuthMethodId::new(id)))
 }
-/// The manual seed-todos instruction (`goal_plan_block.md`), now GONE.
+/// The manual seed-todos instruction (`goal_plan_block.md`), now GONE: the
+/// plan-aware rally must state that the harness already seeded the list rather
+/// than telling the main session to transcribe the plan itself.
 pub(crate) const PLAN_SEED_TODOS_PHRASE: &str =
     "Seed todos from the plan's acceptance criteria via";
 /// The replacement instruction: the plan's steps are already on the list.
@@ -169,8 +171,9 @@ async fn test_agent_from_config(
         subagent: None,
         parent_scheduler_handle: None,
         skills: vec![],
-        // Per-actor directory: the bridge persists `resources_state.json`
-        // next to this path after every tool run.
+        // Per-actor directory: the bridge persists `resources_state.json` next
+        // to this path after every tool run and loads it on the next build, so
+        // a shared parent leaks one test's state into another process.
         state_path: tempfile::tempdir()
             .expect("temp dir for tool state")
             .keep()

@@ -28,8 +28,9 @@ fn plan_path_from_prompt(prompt: &str) -> Option<String> {
 enum SpawnBehaviour {
     /// Parse `{PLAN_FILE}` out of the prompt, write `body` there, then respond `Done`.
     WritePlanThenDone { body: &'static [u8] },
-    /// Like [`Self::WritePlanThenDone`], but the planner child also reports
-    /// the todo list it built for ITSELF with `todo_write`.
+    /// Like [`Self::WritePlanThenDone`], but the planner child also reports the
+    /// todo list it built for ITSELF with `todo_write` while planning — the
+    /// items a real child would have left on its own `State<TodoState>`.
     WritePlanThenDoneWithTodos {
         body: &'static [u8],
         todos: &'static [&'static str],
@@ -56,7 +57,10 @@ enum SpawnBehaviour {
     /// Reply with subagent runtime failure.
     Runtime { message: String, cancelled: bool },
     /// Mimic the real coordinator after a user Stop with `cancel_subagents`:
-    /// every Task spawn is rejected as cancelled.
+    /// every Task spawn is rejected as cancelled — `"parent session is
+    /// stopped"` — until an `OpenSpawnAdmission` arrives, and accept=True
+    /// afterwards (writes `body` to the plan file). Records whether admission
+    /// was ever opened, so a test can prove the planner asked to reopen it.
     AdmissionGatedThenWrite {
         opened: StdArc<std::sync::atomic::AtomicBool>,
         body: &'static [u8],
@@ -74,7 +78,8 @@ struct PlannerSpawnCapture {
     fork_context: StdArc<std::sync::Mutex<Vec<bool>>>,
     surface_completion: StdArc<std::sync::Mutex<Vec<bool>>>,
     model: StdArc<std::sync::Mutex<Vec<Option<String>>>>,
-    /// Every prompt the coordinator was asked to spawn a planner with.
+    /// Every prompt the coordinator was asked to spawn a planner with, so a
+    /// test can assert what the planner's run was actually told to do.
     prompt: StdArc<std::sync::Mutex<Vec<String>>>,
 }
 
@@ -150,7 +155,8 @@ fn spawn_planner_coordinator_capturing(
                     .push(req.runtime_overrides.model.clone());
                 let plan_path = plan_path_from_prompt(&req.prompt);
                 if let SpawnBehaviour::WaitForContextThenWrite { objectives, .. } = &behaviour {
-                    // Record what the planner was spawned with.
+                    // Record what the planner was actually spawned with, so the
+                    // test can prove the objective carries no folded-in steering.
                     objectives.lock().unwrap().push(req.prompt.clone());
                 }
                 if let SpawnBehaviour::WaitForContextThenWrite { notify, body, .. } = &behaviour {
@@ -442,7 +448,7 @@ async fn write_existing_todo(actor: &SessionActor, id: &str, content: &str) {
         .expect("an existing todo must be writable");
 }
 
-/// The work items the scripted planner puts on its OWN todo list with
+/// The three work items the scripted planner puts on its OWN todo list with
 /// `todo_write` while it plans — the source of the session's seeded list.
 const PLANNER_TODOS: &[&str] = &[
     "add the plan parser",
@@ -450,7 +456,7 @@ const PLANNER_TODOS: &[&str] = &[
     "cover it with an end-to-end test",
 ];
 
-/// A plan whose `## Task steps` names those same steps, the way the
+/// A plan whose `## Task steps` names those same three steps, the way the
 /// planner prompt asks a real planner to write it.
 const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-change\n\n\
 ## Task steps\n\
@@ -459,7 +465,8 @@ const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-
 3. cover it with an end-to-end test\n";
 
 /// The scripted planner the seeding tests drive: it writes [`CHECKLIST_PLAN`]
-/// and reports the same steps on ITS OWN list with `todo_write`.
+/// and reports the same steps on ITS OWN list with `todo_write`, which is what
+/// the planner prompt asks a real planner to do.
 fn scripted_planner_with_todos() -> SpawnBehaviour {
     SpawnBehaviour::WritePlanThenDoneWithTodos {
         body: CHECKLIST_PLAN,
@@ -669,9 +676,9 @@ async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
         .await;
 }
 
-/// The gate for the objective's first criteria: one `setup_goal` call — with no
-/// model turn of its own — leaves the session's LIVE todo list carrying the
-/// planner's items, each a fresh pending harness-minted item.
+/// The gate for the objective's first two criteria: one `setup_goal` call —
+/// with no model turn of its own — leaves the session's LIVE todo list carrying
+/// the planner's items, each a fresh pending harness-minted item.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
     let local = tokio::task::LocalSet::new();
@@ -857,7 +864,9 @@ async fn goal_seeding_is_append_only_and_idempotent() {
                  {seeded_ids:?}",
             );
 
-            // A resume/retry reaches the planner through this entry point.
+            // A resume/retry reaches the planner through this entry point. The
+            // plan is already published, so it is a no-op — and even a direct
+            // re-run of the seed must be too.
             actor.maybe_run_goal_planner("ship the exporter").await;
             let items: Vec<String> = PLANNER_TODOS.iter().map(|s| (*s).to_string()).collect();
             actor.apply_planner_todos("g-test", &items).await;
@@ -985,7 +994,8 @@ async fn send_now_queues_planner_context_without_restart() {
                 ));
             }
 
-            // Both Send Nows reach the planner while it is still running.
+            // Both Send Nows reach the planner while it is still running; it is
+            // released only after they have been delivered.
             let mut delivered = Vec::new();
             for _ in 0..2 {
                 delivered.push(
@@ -2169,7 +2179,9 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
             else {
                 panic!("a published plan must flow through to inference");
             };
-            // Printed so `cargo test -- --nocapture` captures the exact reminder text for review: the assertions below are the gate.
+            // Printed so `cargo test -- --nocapture` captures the exact reminder
+            // text for review: the assertions below are the gate, this is the
+            // artifact a reader (or the goal's verification) reads.
             println!("=== plan-aware setup_goal reminder ===\n{reminder}\n=== end ===\n");
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();

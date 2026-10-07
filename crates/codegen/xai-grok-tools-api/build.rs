@@ -45,7 +45,8 @@ fn main() {
         )
         .compile_protos(&["proto/grok-tools.proto"], &["proto/"]);
     // A build script has no caller to hand an error to, so the failure is
-    // printed and the script exits non-zero.
+    // printed and the script exits non-zero. That is the report; a panic would
+    // say the same thing with a backtrace attached.
     if let Err(err) = generated {
         eprintln!("grok-tools.proto codegen failed: {err}");
         std::process::exit(1);

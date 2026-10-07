@@ -1,4 +1,12 @@
-//! A response that hits the output token cap (`finish_reason: "length"` / `stop_reason: "max_tokens"`) is a turn cut off mid-thought.
+//! A response that hits the output token cap (`finish_reason: "length"` /
+//! `stop_reason: "max_tokens"`) is a turn cut off mid-thought, not a
+//! finished one. The turn loop must resubmit immediately instead of
+//! reporting `TurnOutcome::Completed` on the truncated text.
+//!
+//! Drives the real turn loop against a scripted Chat Completions mock so a
+//! regression that treats `StopReason::Length` as an ordinary stop is
+//! caught here, not just in the model layer's own stop-reason mapping
+//! tests.
 
 use super::support::*;
 use super::*;
@@ -138,7 +146,7 @@ fn completions_request_count(server: &MockInferenceServer) -> usize {
         .count()
 }
 
-/// Length-truncated chunks followed by a normal stop: the turn must
+/// Two length-truncated chunks followed by a normal stop: the turn must
 /// resubmit twice on its own and converge to `EndTurn`/`Completed`, proving
 /// a truncated response is never mistaken for a finished turn.
 #[tokio::test(flavor = "current_thread")]

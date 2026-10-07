@@ -1168,7 +1168,9 @@ mod tests {
     /// Under allexport every assignment is exported, which caught both the dump
     /// function's own locals (env_vars is a copy of the environment) and the
     /// snapshot's grok_snap_* carriers (FUNCTIONS_B64 is every function in the
-    /// shell).
+    /// shell). Either one leaves the environment big enough that the next exec
+    /// fails with E2BIG, which the shell reports as an unexplained 126 -- from a
+    /// command that has nothing wrong with it.
     ///
     /// Runs several commands after `set -a`, since the environment grew with
     /// each snapshot round-trip rather than all at once.
@@ -1197,7 +1199,7 @@ mod tests {
             assert!(stdout.contains("OK"), "round {round}: got {stdout:?}");
         }
 
-        // allexport must survive the round-trips it stopped breaking.
+        // allexport must survive the round-trips it just stopped breaking.
         let (code, stdout) = run_command(
             &mut state,
             "case $- in *a*) echo SET;; *) echo UNSET;; esac",

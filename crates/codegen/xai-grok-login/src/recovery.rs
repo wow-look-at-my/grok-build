@@ -597,7 +597,8 @@ mod tests {
     #[tokio::test]
     async fn fresh_mint_guard_never_returns_policy_hidden_token() {
         ensure_crypto_provider();
-        // Wrong-team fresh token: `current()` hides it (vet_cached).
+        // Wrong-team fresh token: `current()` hides it (vet_cached), so the
+        // guard must fall through to a normal refresh — fail closed.
         let dir = tempfile::tempdir().unwrap();
         let cfg = GrokComConfig {
             force_login_team_uuid: Some(crate::config::ForceLoginTeam::Single("team-good".into())),

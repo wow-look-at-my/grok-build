@@ -19,13 +19,18 @@ pub(super) fn session_mode_id_from_prompt_mode(prompt_mode: PromptMode) -> acp::
     };
     acp::SessionModeId::new(mode.as_id())
 }
-/// The agent-identity half of the session mode. A session mode is either a
-/// permission mode (`default`, `plan`, `ask`) or an agent name.
+/// The agent-identity half of the session mode.
+///
+/// A session mode is either a permission mode (`default`, `plan`, `ask`) or an
+/// agent name. An agent name swaps the whole agent, and with it the system
+/// prompt and the tool registry.
 #[derive(Debug, Default)]
 pub(crate) struct ModeAgentState {
     /// The agent that ran before a Shift+Tab ring identity replaced it.
     ring_base: Option<String>,
-    /// A swap that arrived while a turn ran. The run loop applies it at turn end.
+    /// A swap that arrived while a turn ran. The run loop applies it at turn
+    /// end. It is never dropped, because a dropped swap leaves the model under
+    /// the prompt of a mode the user already left.
     pending: Option<AgentDefinition>,
 }
 fn is_shift_tab_ring_agent(name: &str) -> bool {

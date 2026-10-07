@@ -1425,7 +1425,10 @@ pub(crate) async fn run(
     const GATE_POLL_INTERVAL: Duration = Duration::from_secs(30);
     let mut gate_poll_at: Option<Instant> = None;
 
-    // CI-status dot: the render path refreshes it only on frames it draws, and a session watching its own CI draws none.
+    // CI-status dot: the render path refreshes it only on frames it draws, and
+    // a session watching its own CI draws none, so this timer is what keeps
+    // polling. The channel is the other half — an off-thread poll that lands
+    // on a different color asks for the one repaint that shows it.
     let mut ci_poll_at: Option<Instant> = Some(Instant::now() + crate::ci_status::CI_POLL_INTERVAL);
     let (ci_change_tx, mut ci_change_rx) = tokio::sync::mpsc::unbounded_channel();
     crate::ci_status::set_change_notifier(ci_change_tx);
@@ -2202,7 +2205,10 @@ pub(crate) async fn run(
                 }
             }
 
-            // Keep the branch's CI dot polling with no frames in flight.
+            // Keep the branch's CI dot polling with no frames in flight. The
+            // poll itself is throttled and off-thread; this arm draws nothing,
+            // because a result that matches what is already on screen must not
+            // wake an idle terminal. The repaint comes from `ci_change` below.
             _ = ci_poll => {
                 ci_poll_at = Some(Instant::now() + crate::ci_status::CI_POLL_INTERVAL);
                 if let Some((cwd, branch)) = ci_dot_target(&app) {
@@ -2212,7 +2218,8 @@ pub(crate) async fn run(
 
             Some(()) = ci_change_rx.recv() => {
                 presenter.request(false);
-                // A run that started pulses.
+                // A run that just started pulses; `tick_demand` reports that
+                // from the freshly-stored color, so re-arm the tick here.
                 schedule_tick(&mut animation_tick_at, &app, tick_interval);
             }
 
@@ -3862,7 +3869,8 @@ mod tests {
             Some((cwd.clone(), "feature/x".to_string()))
         );
 
-        // Detached HEAD renders as `detached` with no dot, so there is nothing to poll for.
+        // Detached HEAD renders as `detached` with no dot, so there is nothing
+        // to poll for.
         app.agents.get_mut(&id).expect("agent").current_branch = Some(String::new());
         assert_eq!(ci_dot_target(&app), None);
 

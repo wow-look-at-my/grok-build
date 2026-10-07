@@ -1647,7 +1647,8 @@ fn locate_prompt_drop_point(harness: &PtyHarness) -> Result<MousePoint> {
         let Some(marker_byte) = line.find('❯') else {
             continue;
         };
-        // Both offsets bound the `❯` character itself: its start, and one past its `len_utf8()`.
+        // Both offsets bound the `❯` character itself: its start, and one past
+        // its `len_utf8()`.
         #[allow(clippy::string_slice)] // one past a matched character
         let after_marker = &line[marker_byte + '❯'.len_utf8()..];
         let content_cols = after_marker.trim_end().chars().count();
@@ -1716,6 +1717,8 @@ fn locate_text_impl(
     let mut seen = 0usize;
     for (row, line) in output.lines.iter().enumerate() {
         let mut start_byte = 0usize;
+        // `start_byte` is either 0 or one past a previous match of `text`, and
+        // `byte` is the offset `find(text)` matched at; each is a char boundary.
         #[allow(clippy::string_slice)] // offset of a matched needle
         while let Some(rel_byte) = line[start_byte..].find(text) {
             let byte = start_byte + rel_byte;
@@ -1767,7 +1770,9 @@ fn decode_osc52_payloads(bytes: &[u8]) -> Result<Vec<String>> {
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(encoded)
             .with_context(|| "decode OSC 52 base64 payload")?;
-        // The payload is whatever the program put on the terminal, and the assertion under here is on clipboard text.
+        // The payload is whatever the program put on the terminal, and the
+        // assertion under here is on clipboard text: an undecodable byte should
+        // mark itself in the text, not discard a payload the pane did print.
         let text = String::from_utf8_lossy(&decoded).into_owned();
         payloads.push(text);
     }

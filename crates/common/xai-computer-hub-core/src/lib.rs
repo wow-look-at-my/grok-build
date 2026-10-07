@@ -1,4 +1,4 @@
-#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
 
 //! xAI Computer Hub — transport + registry + resolver core.
 //!

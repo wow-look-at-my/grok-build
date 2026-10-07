@@ -85,7 +85,9 @@ pub(crate) struct ChannelSpawner {
     pub(crate) trace_sink: Option<(xai_chat_state::ChatStateHandle, String)>,
     /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
     pub(crate) fallback: RoleFallbackReporter,
-    /// Model from the `[models] goal_summarizer` slot. `None` inherits the session model.
+    /// Model from the `[models] goal_summarizer` slot. `None` inherits the
+    /// session model. The toolset is always the parent's, so this carries
+    /// no agent type.
     pub(crate) model_override: Option<String>,
 }
 
@@ -97,7 +99,9 @@ impl GoalSummarizerSpawner for ChannelSpawner {
         prompt: RoleRenderedPrompt,
     ) -> Result<String, SpawnError> {
         let trace_prompt = self.trace_sink.as_ref().map(|_| prompt.primary.clone());
-        // The summarizer keeps the parent toolset whatever its model is.
+        // The summarizer keeps the parent toolset whatever its model is, so
+        // the override carries no agent type and the wrapper's retry only
+        // ever has the model to drop.
         let override_ = RoleSpawnOverride {
             model: self.model_override.clone(),
             agent_type: None,
