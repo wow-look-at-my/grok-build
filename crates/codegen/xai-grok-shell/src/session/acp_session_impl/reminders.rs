@@ -80,18 +80,11 @@ impl CollectedTodoGateInput {
         }
     }
 }
-/// One actionable todo as `(id, content)`. The gate reminder tells the model
-/// to cancel items by id, so it must print the id.
+/// One actionable todo as `(id, content)`.
 pub(super) type GateTodo<'a> = (&'a str, &'a str);
 
-/// Inputs to `evaluate_todo_gate`. All fields are deliberately owned
-/// borrows from the gate's call-site so the helper is a pure function.
-///
-/// The struct itself is `pub` (with `#[doc(hidden)]`) only so the
-/// replay-trace integration test in `tests/trace_replay.rs` can name
-/// the type as `&TodoGateInput<'_>` when calling `evaluate_todo_gate`.
-/// Fields stay crate-private — the test never constructs the struct
-/// directly; it obtains an instance via `CollectedTodoGateInput::as_input()`.
+/// Inputs to `evaluate_todo_gate`. All fields are deliberately owned borrows
+/// from the gate's call-site so the helper is a pure function.
 #[doc(hidden)]
 pub struct TodoGateInput<'a> {
     pub(super) pending: Vec<GateTodo<'a>>,
@@ -504,13 +497,8 @@ fn format_workflow_completion_reminder(
     }
     buf
 }
-/// Whether a todo gate fits THIS agent and goal state, independent of any
-/// enable switch: the prompt must carry `<task_completion_discipline>`
-/// (`{DISCIPLINE_BLOCK}`), and the goal loop must not be active — the
-/// continuation directive drives the loop there.
-///
-/// Applicability is kept separate from [`todo_stop_gate_enabled`] so the
-/// enable switch can change without touching what the gate applies to.
+/// Whether a todo gate fits THIS agent and goal state, independent of any enable switch: the prompt must carry `<task_completion_discipline>` (`{DISCIPLINE_BLOCK}`). The goal loop must not be active — the continuation directive drives the loop there. Applicability is kept separate from [`todo_stop_gate_enabled`] so the enable switch can
+/// change without touching what the gate applies to.
 pub(super) fn todo_gate_applicable(
     audience: xai_grok_agent::prompt::context::PromptAudience,
     definition: &AgentDefinition,
@@ -522,12 +510,8 @@ pub(super) fn todo_gate_applicable(
     }
     definition.carries_task_completion_discipline(audience)
 }
-/// The enable half of the built-in todo-stop gate.
-///
-/// The switch is the persisted `[ui].stop_gate_unfinished_todos` toggle, which
-/// ships ON. The `todo_gate` opt-in (remote `todo_gate_enabled`, or the
-/// `--todo-gate` CLI force-enable) is an OR on top, not an AND: ANDing the two
-/// leaves the shipped default unable to fire at all.
+/// The enable half of the built-in todo-stop gate. The switch is the
+/// persisted `[ui].stop_gate_unfinished_todos` toggle, which ships ON.
 pub(super) fn todo_stop_gate_enabled(
     policy: &xai_grok_agent::system_reminder::ReminderPolicy,
 ) -> bool {
@@ -1007,14 +991,13 @@ impl SessionActor {
                 self.reminder_wrapper_tag(),
             ));
     }
-    /// Whether the built-in todo-stop gate runs for this session.
-    ///
-    /// The switch is the persisted `[ui].stop_gate_unfinished_todos` toggle,
-    /// which ships ON — so the gate must NOT be ANDed with the opt-in
-    /// `todo_gate.enabled` flag, or the shipped default never fires. That flag
-    /// (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable)
-    /// stays an opt-in ON TOP: it turns the gate back on for a session whose
-    /// persisted toggle is off.
+    /// Whether the built-in todo-stop gate runs for this session. The switch
+    /// is the persisted `[ui].stop_gate_unfinished_todos` toggle, which ships
+    /// ON — so the gate must NOT be ANDed with the opt-in
+    /// `todo_gate.enabled` flag, or the shipped default never fires. That
+    /// flag (remote `todo_gate_enabled`, or the `--todo-gate` CLI
+    /// force-enable) stays an opt-in ON TOP: it turns the gate back on for a
+    /// session whose persisted toggle is off.
     pub(super) fn todo_stop_gate_active(&self) -> bool {
         let goal_status = self.goal_tracker.lock().status();
         let agent = self.agent.borrow();

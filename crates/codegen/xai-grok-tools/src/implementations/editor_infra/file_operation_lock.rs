@@ -15,12 +15,6 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 
 /// Shared file operation lock manager stored in tool shared resources.
-///
-/// The state sits behind a `parking_lot` mutex rather than an async one so that
-/// releasing a lock is a plain function call: `Drop` cannot await, and a release
-/// handed to the scheduler would leave the next acquirer waiting on a task
-/// instead of on the lock. The critical sections are bookkeeping only: no
-/// acquire, release, or handoff holds this lock across an await point.
 #[derive(Clone)]
 pub struct FileOperationLockManager {
     inner: Arc<parking_lot::Mutex<LockInner>>,
@@ -134,14 +128,7 @@ pub struct FileOperationLockGuard {
 impl Drop for FileOperationLockGuard {
     fn drop(&mut self) {
         let kind = std::mem::replace(&mut self.kind, LockKind::Exclusive);
-        // The release runs here rather than in a task of its own: whoever is
-        // queued behind this guard learns the lock is free from this call
-        // returning, and there is no detached failure for them to outlive.
-        //
-        // The unwind is still caught, because a guard dropped while another
-        // panic is unwinding would otherwise take the process with it. A failed
-        // release is the one state a waiter cannot recover from on its own, so
-        // it is withdrawn again and, if that fails too, said out loud.
+        // The release runs here rather than in a task of its own.
         let released = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.manager.release(&kind);
         }));
@@ -165,11 +152,6 @@ impl Drop for FileOperationLockGuard {
 
 impl FileOperationLockManager {
     /// Withdraw this guard's grant and hand the lock to whoever is next.
-    ///
-    /// Withdrawing is idempotent (removing a path nobody holds and clearing a
-    /// flag that is already down are both no-ops) and
-    /// [`LockInner::process_queue`] pops a waiter before granting to it, so
-    /// making the call twice cannot hand one lock to two holders.
     fn release(&self, kind: &LockKind) {
         let mut inner = self.inner.lock();
         match kind {
@@ -299,13 +281,12 @@ mod tests {
         assert!(*acquired.lock().await);
     }
 
-    /// Two writers on one path: the second is parked on what the first's `drop`
-    /// promises, so the handoff has to be part of `drop` itself.
-    ///
-    /// The state is read with `try_lock` and no await in between, because a
+    /// Writers on one path: the second is parked on what the first's `drop`
+    /// promises, so the handoff has to be part of `drop` itself. The state is
+    /// read with `try_lock` and no await in between. This is because a
     /// release that runs in a spawned task is only visible once the scheduler
-    /// has found time for it; whoever is waiting has nothing to do but wait for
-    /// that, and nothing keeps it from being lost.
+    /// has found time for it. Whoever is waiting has nothing to do but wait
+    /// for that, and nothing keeps it from being lost.
     #[tokio::test(flavor = "current_thread")]
     async fn a_release_needs_no_scheduled_task_to_be_visible() {
         let mgr = FileOperationLockManager::new();

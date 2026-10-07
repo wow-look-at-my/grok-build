@@ -1,5 +1,5 @@
-#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)] // Hits predate the gate
 
 //! Shared circuit breaker.
 //!

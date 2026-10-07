@@ -85,11 +85,10 @@ pub(super) fn send_ack(
 
 pub(super) const GOAL_CLASSIFIER_PENDING_QUEUE_CAP: usize = 4;
 
-/// Contents of a session's live todo list, in order.
-///
-/// A missing `TodoState` resource reads as an empty list: seeding appends onto
-/// whatever is there, and "nothing tracked yet" is the state a fresh goal
-/// starts in (and the state a session with no todo tool stays in).
+/// Contents of a session's live todo list, in order. A missing `TodoState`
+/// resource reads as an empty list. The missing `TodoState` resource seeding
+/// appends onto whatever is there, and "nothing tracked yet" is the state a
+/// fresh goal starts in (and the state a session with no todo tool stays in).
 async fn live_todo_contents(bridge: &xai_grok_tools::bridge::ToolBridge) -> Vec<String> {
     use crate::tools::todo::TodoState;
     use xai_grok_tools::types::resources::State;
@@ -201,14 +200,13 @@ pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
     GOAL_TASK_DISCIPLINE_TEMPLATE.replace("{TODO_TOOL}", &names.todo)
 }
 
-/// Render the plan-aware reminder block. `Plan: <abs path>` renders
-/// on its own column-0 line — a single line-delimited pointer the
-/// model and any downstream consumer (debug log scraper, support
-/// tooling) can extract reliably, so keep the format stable.
-///
-/// The todo list is the only checklist; the plan file carries no boxes.
-/// `plan_todos_seeded` says whether the planner's steps are already on it, or
-/// whether the implementer must put them there.
+/// Render the plan-aware reminder block. `Plan: <abs path>` renders on its
+/// own column-0 line. A single line-delimited pointer the model and any
+/// downstream consumer (debug log scraper, support tooling) can extract
+/// reliably, so keep the format stable. The todo list is the only checklist;
+/// the plan file carries no boxes. `plan_todos_seeded` says whether the
+/// planner's steps are already on it, or whether the implementer must put
+/// them there.
 pub(super) fn render_goal_plan_block(
     plan_path: &std::path::Path,
     names: &GoalToolNames,
@@ -642,18 +640,15 @@ pub(super) fn render_verifier_gaps_block_legacy(gaps: &str, goal_tool: &str) -> 
 }
 
 /// `char` cap on the model-authored todo text inlined as the next step.
-/// Applied BEFORE tag neutralization, which may add a zero-width break per
-/// broken tag (plus the `…` cap suffix).
 pub(super) const GOAL_NEXT_STEP_MAX_CHARS: usize = 400;
 
 /// The next step for the continuation nudge. The todo list is the only
 /// checklist, so the nudge reads it: the first `in_progress` item, else the
 /// first `pending` one. It names the id, so the model can update the item
-/// without a read first.
-///
-/// The item text is capped and its reminder-frame tags are broken, so it
-/// cannot close the `<system-reminder>` it is inlined into. Verifier gaps are
-/// NOT consulted here: [`render_verifier_gaps_block`] carries them.
+/// without a read first. The item text is capped and its reminder-frame tags
+/// are broken, so it cannot close the `<system-reminder>` it is inlined into.
+/// Verifier gaps are NOT consulted here: [`render_verifier_gaps_block`]
+/// carries them.
 pub(super) fn next_step_from_todos<'a>(
     todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
     todo_tool: &str,
@@ -1061,8 +1056,7 @@ pub(crate) struct GoalRoleModelConfig {
     /// Ordered skeptic pool; `pool[0]` is skeptic-0's model, the rest are assigned round-robin by index.
     /// Empty means all skeptics inherit.
     pub(crate) skeptic_pool: Vec<crate::util::config::GoalRoleModel>,
-    /// Summary role choice. It has no pair form: `[models] goal_summarizer`
-    /// is the only way to move it off the session model.
+    /// Summary role choice.
     pub(crate) summarizer: crate::agent::config::GoalRoleModelChoice,
 }
 
@@ -1077,11 +1071,7 @@ pub(crate) fn planner_failure_pause_message() -> String {
     format!("No plan was produced. {GOAL_RESUME_HINT}")
 }
 
-/// The pause for a planner the USER stopped. Kept apart from
-/// [`planner_failure_pause_message`] because the two ask for different things:
-/// a failure invites a retry, a cancel was the retry being declined. Reading
-/// "Planning failed" after clicking stop sends the reader looking for a broken
-/// planner that is working exactly as asked.
+/// The pause for a planner the USER stopped.
 pub(crate) fn planner_cancelled_pause_message() -> String {
     "Planning cancelled; resume with /goal to plan again.".to_string()
 }
@@ -1238,8 +1228,8 @@ impl SessionActor {
             tracker: &self.goal_tracker,
         };
         // One planner attempt per call. Send Now steers the live planner rather
-        // than starting a second one, and a cancel is terminal, so nothing here
-        // loops; the block is a label so every early exit still reaches the
+        // than starting a second one. A cancel is terminal, so nothing here
+        // loops. The block is a label so every early exit still reaches the
         // catch-all latch reset below.
         'planner_attempt: {
             let attempt = 1u32;
@@ -1277,14 +1267,7 @@ impl SessionActor {
                     if !can_publish {
                         break 'planner_attempt;
                     }
-                    // The subagent produced a plan and we are committing to
-                    // publish it. `run_goal_planner_attempt` already took the
-                    // planner run, so a late Send Now finds no live planner to
-                    // address and is correctly delivered only as a turn
-                    // interjection. Turn the "planning…" badge off NOW, before
-                    // the plan/baseline I/O below, instead of only at the very
-                    // end, so the UI never advertises "planning" for a planner
-                    // that is already done.
+                    // The subagent produced a plan and we are committing to publish it.
                     self.clear_goal_planning_latch(run_goal_id.as_deref()).await;
                     if attempt_file.persist(&plan_file).is_err() {
                         let still_same_goal =
@@ -1318,10 +1301,7 @@ impl SessionActor {
                         goal.plan_file = Some(plan_file);
                         need_baseline.then_some((src, dst))
                     };
-                    // The plan is published. Put the planner's own todo items on
-                    // the session's list HERE, before the goal-start reminder is
-                    // rendered, so the implementing turn opens with them already
-                    // there instead of re-reading the plan to transcribe them.
+                    // The plan is published.
                     self.apply_planner_todos(&goal_id, &planner_todos).await;
                     if let Some((src, dst)) = baseline_target {
                         let tmp = dst
@@ -1363,7 +1343,7 @@ impl SessionActor {
                 }
                 // A cancel is terminal. Spawning another planner does the
                 // opposite of what the Stop requested, onto a session whose
-                // spawns that same Stop just latched shut.
+                // spawns that same Stop latched shut.
                 crate::session::goal_planner::GoalPlannerOutcome::Interrupted => {
                     let _ = self
                         .auto_pause_goal_if_matches_with_message(
@@ -1378,8 +1358,8 @@ impl SessionActor {
                     user_stopped,
                     ..
                 } => {
-                    // A planner a person stopped is a pause the user asked for, and says so.
-                    // A harness cancel (max turns, rewind, dequeue) is a planner failure.
+                    // A planner a person stopped is a pause. A harness cancel
+                    // (max turns, rewind, dequeue) is a planner failure.
                     let aborted = user_stopped
                         && reason == crate::session::events::GoalPlannerFailClosedReason::Aborted;
                     // History reads "Planning failed" + "Paused: planner", not a bare pause.
@@ -1413,12 +1393,7 @@ impl SessionActor {
             break 'planner_attempt;
         }
 
-        // Catch-all latch reset for every exit path that did NOT already clear
-        // it at the commit-to-publish point (Stop / cap-exhausted / fail-closed /
-        // cancel, or a publish that broke out before committing). The
-        // conditional emit inside the helper keeps the success path's earlier
-        // clear from being re-emitted as a duplicate `planning=None`; a no-op if
-        // the orchestration has since vanished or the goal was replaced.
+        // Catch-all latch reset for every exit path that did NOT already clear it at the commit-to-publish point.
         self.clear_goal_planning_latch(run_goal_id.as_deref()).await;
     }
 
@@ -1458,29 +1433,19 @@ impl SessionActor {
     }
 
     /// Put the goal planner child's OWN todo list on the session's todo list.
-    ///
-    /// The planner is told to add the plan's work items to its own list with the
-    /// session's todo tool as it plans. A child session keeps its own
+    /// The planner is told to add the plan's work items to its own list with
+    /// the session's todo tool as it plans. A child session keeps its own
     /// `State<TodoState>`, so `run_shell_child` reads that list back into
-    /// `SubagentResult.todos` and it arrives here: these are the items the
-    /// planner itself wrote, which is what makes the session's list the result
-    /// of the planner's own `todo_write` rather than the harness reading the
-    /// plan.
-    ///
-    /// A planner that named nothing seeds nothing. The plan prose is never
-    /// mined for items, so an unfollowed instruction degrades to "the main
-    /// agent keeps its own list" instead of the harness inventing work.
-    ///
-    /// Runs once per goal. `plan_todos_seeded` is claimed under the tracker lock
-    /// before any I/O, and the append is additionally deduped by content, so a
-    /// retry, a resume, or a re-entry cannot add a second copy of an item.
-    /// Existing items are never touched: this appends, it does not replace.
-    ///
-    /// Best-effort by design. A session with no append-capable todo tool, or a
-    /// failed append, logs and returns 0 — seeding must never fail the goal.
-    ///
-    /// `pub(super)` so the goal e2e suite can drive it a second time directly;
-    /// the publish path itself calls it exactly once.
+    /// `SubagentResult.todos` and it arrives here. These are the items the
+    /// planner itself wrote, which is what makes the session's list. The
+    /// result of the planner's own `todo_write` rather than the harness
+    /// reading the plan. A planner that named nothing seeds nothing. The plan
+    /// prose is never mined for items, so an unfollowed instruction degrades
+    /// to "the main agent keeps its own list" instead of the harness
+    /// inventing work. Runs once per goal. `plan_todos_seeded` is claimed
+    /// under the tracker lock before any I/O. The append is additionally
+    /// deduped by content, so a retry, a resume, or a re-entry cannot add a
+    /// second copy of an item.
     pub(super) async fn apply_planner_todos(
         &self,
         goal_id: &str,
@@ -1491,8 +1456,7 @@ impl SessionActor {
             return 0;
         }
 
-        // Claim the seed before the I/O. One lock covers the check and the set,
-        // so two racing publishes cannot both append.
+        // Claim the seed before the I/O.
         let claimed = {
             let mut tracker = self.goal_tracker.lock();
             tracker
@@ -1523,9 +1487,7 @@ impl SessionActor {
             }
         };
 
-        // Dedupe against what is already on the list: an item the user or the
-        // main agent already wrote is the same item, and a planner that repeats
-        // one is still one piece of work.
+        // Dedupe against what is already on the list: an item the user or the main agent already wrote is the same item.
         let mut seen = live_todo_contents(&bridge).await;
         let fresh: Vec<String> = planner_todos
             .iter()
@@ -1591,9 +1553,7 @@ impl SessionActor {
             tracing::debug!("goal planner: no subagent coordinator channel; skipping");
             return PlannerAttemptStep::Stop;
         };
-        // A user Stop latches this session's Task spawns closed until a turn
-        // reopens them. The planner can run outside a turn, so it reopens them
-        // itself. Without that, every planner spawn after a Stop is rejected.
+        // A user Stop latches this session's Task spawns closed until a turn reopens them.
         self.open_subagent_spawn_admission();
         let (goal_id, plan_file, attempt_plan_file) = {
             let tracker = self.goal_tracker.lock();
@@ -1706,8 +1666,7 @@ impl SessionActor {
         // The planner is represented by its own turn. No-op when the spawn recorded nothing.
         self.chat_state_handle.flush_harness_trace_turn();
 
-        // Drop the run (and with it the planner's coordinator id): a Send Now
-        // arriving after this point has no live planner to address.
+        // Drop the run (and with it the planner's coordinator id).
         let _ = self.goal_tracker.lock().take_planner_run();
 
         PlannerAttemptStep::Ran {
@@ -1873,8 +1832,7 @@ impl SessionActor {
             .lock()
             .expect("current_prompt_id mutex poisoned")
             .clone();
-        // The summarizer keeps the parent toolset whatever model it runs on,
-        // so its §7 prompt names the parent toolset's tools either way.
+        // The summarizer keeps the parent toolset whatever model it runs on.
         let tool_names = self.resolve_inherit_role_tool_names().await;
         let summarizer_model = match &self.goal_role_models.summarizer {
             crate::agent::config::GoalRoleModelChoice::ModelOnly(m) => {
@@ -2022,20 +1980,8 @@ impl SessionActor {
     }
 
     /// Push the tool-layer `GoalLoopActive` flag so per-tool-call SUBAGENT
-    /// completion reminders suppress themselves while the goal loop drives the
-    /// turn (the loop consumes its own subagent results). Background bash/monitor
-    /// completions are NOT gated here — they surface at the next tool-call
-    /// boundary regardless, since a reminder riding a tool result interrupts
-    /// nothing; only the notification bridge's auto-wake prompt (which does
-    /// interrupt) stays goal-gated. Mirrors the `CurrentPromptIdResource` push.
-    ///
-    /// Also mirrors the value into `tool_context.goal_loop_active_gate`, the
-    /// shared `Arc<AtomicBool>` the notification bridge (bash auto-wake) and
-    /// subagent spawn contexts (subagent auto-wake) read to suppress synthetic
-    /// completion prompts mid-goal. Writing both from this one chokepoint keeps
-    /// the gate from *persistently* drifting from the resource; the two writes
-    /// are sequential (gate store, then async `update_resource`), so a transient
-    /// window exists — benign, since those consumers read only the gate.
+    /// completion reminders suppress themselves while the goal loop drives
+    /// the turn (the loop consumes its own subagent results).
     pub(super) async fn set_goal_loop_active_resource(&self, active: bool) {
         self.tool_context
             .goal_loop_active_gate
